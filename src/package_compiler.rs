@@ -39,6 +39,27 @@ impl PackageInput {
     pub fn manifest_hash(&self) -> ContentHash {
         self.manifest.hash()
     }
+
+    /// Return the content identity of the complete compiler input.
+    ///
+    /// A manifest hash alone is not sufficient for an incremental package
+    /// query: the typed modules are supplied separately from the manifest and
+    /// changing one must invalidate the package compilation.  Module order is
+    /// intentionally ignored here for the same reason it is ignored by
+    /// [`compile`].
+    pub fn input_hash(&self) -> ContentHash {
+        let mut modules = self.modules.iter().collect::<Vec<_>>();
+        modules.sort_by(|left, right| module_order(left, right));
+        let mut bytes = Vec::new();
+        put_text(&mut bytes, "package-input");
+        bytes.extend_from_slice(self.manifest.hash().as_bytes());
+        put_u64(&mut bytes, modules.len());
+        for module in modules {
+            put_text(&mut bytes, &module.path.canonical());
+            bytes.extend_from_slice(&module.recomputed_content_id().bytes());
+        }
+        ContentHash::domain_separated("axiom/package-input/v1", &bytes)
+    }
 }
 
 /// A module included in a compiled artifact.
@@ -98,6 +119,15 @@ impl CompiledArtifact {
     }
     pub fn artifact_hash(&self) -> ContentHash {
         self.artifact_hash
+    }
+
+    /// Return the canonical bytes used to derive [`Self::artifact_hash`].
+    ///
+    /// Workspace and persistent backends use this as an opaque, stable query
+    /// value.  It deliberately contains no source text or insertion-order
+    /// state, so equivalent package inputs produce byte-identical values.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        artifact_bytes(self.lockfile_hash, &self.packages, &self.exports)
     }
 
     /// Recompute the artifact hash from the public artifact contents.
@@ -294,7 +324,7 @@ where
 
             compiled_modules.push(CompiledModule {
                 path: module.path.clone(),
-                content_id: module.content_id(),
+                content_id: module.recomputed_content_id(),
             });
 
             let mut declarations = module.declarations.clone();
@@ -451,17 +481,17 @@ fn package_input_order(left: &PackageInput, right: &PackageInput) -> std::cmp::O
 fn sorted_module_keys(modules: &[Module]) -> Vec<(String, crate::hir::ContentId)> {
     let mut keys = modules
         .iter()
-        .map(|module| (module.path.canonical(), module.content_id()))
+        .map(|module| (module.path.canonical(), module.recomputed_content_id()))
         .collect::<Vec<_>>();
     keys.sort();
     keys
 }
 
 fn module_order(left: &Module, right: &Module) -> std::cmp::Ordering {
-    left.path
-        .canonical()
-        .cmp(&right.path.canonical())
-        .then(left.content_id().cmp(&right.content_id()))
+    left.path.canonical().cmp(&right.path.canonical()).then(
+        left.recomputed_content_id()
+            .cmp(&right.recomputed_content_id()),
+    )
 }
 
 fn declaration_order(left: &Declaration, right: &Declaration) -> std::cmp::Ordering {
@@ -509,6 +539,17 @@ fn artifact_hash(
     packages: &[CompiledPackage],
     exports: &[CompiledExport],
 ) -> ContentHash {
+    ContentHash::domain_separated(
+        ARTIFACT_DOMAIN,
+        &artifact_bytes(lockfile_hash, packages, exports),
+    )
+}
+
+fn artifact_bytes(
+    lockfile_hash: ContentHash,
+    packages: &[CompiledPackage],
+    exports: &[CompiledExport],
+) -> Vec<u8> {
     let mut bytes = Vec::new();
     put_text(&mut bytes, "artifact");
     bytes.extend_from_slice(lockfile_hash.as_bytes());
@@ -552,7 +593,7 @@ fn artifact_hash(
         bytes.extend_from_slice(&declaration_kind_bytes(&export.kind));
     }
 
-    ContentHash::domain_separated(ARTIFACT_DOMAIN, &bytes)
+    bytes
 }
 
 fn declaration_kind_bytes(kind: &DeclarationKind) -> Vec<u8> {

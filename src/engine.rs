@@ -17,7 +17,7 @@ use crate::proof::{
     Operation, PositionObservationCertificate, PositionReconciliationCertificate, Proof, ProofId,
     QuoteObservationCertificate, SatisfactionAllocationCertificate,
     SatisfactionObservationCertificate, SettlementBalanceCertificate, SettlementHistoryCertificate,
-    SettlementObservationCertificate, SettlementTransition,
+    SettlementObservationCertificate, SettlementReconciliationCertificate, SettlementTransition,
 };
 
 pub use crate::model::Quantity;
@@ -347,6 +347,7 @@ impl AnalysisCheckError {
             | Self::Proof(crate::proof::CheckError::InvalidQuoteObservation { id })
             | Self::Proof(crate::proof::CheckError::InvalidPositionObservation { id })
             | Self::Proof(crate::proof::CheckError::InvalidCashSettlementObservation { id })
+            | Self::Proof(crate::proof::CheckError::InvalidSettlementReconciliation { id })
             | Self::Proof(crate::proof::CheckError::InvalidLotAllocation { id })
             | Self::Proof(crate::proof::CheckError::InvalidInventoryConservation { id })
             | Self::Proof(crate::proof::CheckError::InvalidRecognition { id })
@@ -508,6 +509,19 @@ impl Analysis {
         });
 
         for sale in sales {
+            if sale.quantity.number.is_negative()
+                || sale.quantity.number.is_zero()
+                || sale.quantity.unit.is_none()
+                || sale.proceeds.number.is_negative()
+                || sale.proceeds.number.is_zero()
+                || sale.proceeds.unit.is_none()
+            {
+                return Err(AnalysisCheckError::InvalidRecognition {
+                    sale: sale.id.clone(),
+                    proof: sale.proof,
+                    reason: "sale quantities and proceeds must be positive and unit-bearing".into(),
+                });
+            }
             check_conditional_gains(
                 self,
                 sale,
@@ -2329,17 +2343,14 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
         let Some(sale) = sales.iter().find(|sale| sale.id == settlement.reference) else {
             continue;
         };
-        if sale.proceeds == settlement.quantity {
-            settlement.status = ObservationStatus::Reconciled;
-            settlement.proof = proof.insert(Node::new(
-                format!("settlement reconciliation {}", settlement.reference),
-                Operation::Derive {
-                    rule: "reconcile-settlement".into(),
-                },
-                vec![settlement.proof, sale.proof],
-                metadata_for(&settlement.reference, "settlement-reconciliation", None),
-            ));
-        } else {
+        // Reconciliation is only meaningful for an accepted sale.  A
+        // blocked sale is not an independently established proceeds fact, so
+        // its cash observation remains an observed source rather than being
+        // promoted by a generic derivation.
+        if !sale.status.is_complete() {
+            continue;
+        }
+        if sale.proceeds.unit != settlement.quantity.unit {
             settlement.status = ObservationStatus::Conflict;
             issues.push(Issue {
                 code: IssueCode::SettlementConflict,
@@ -2351,6 +2362,56 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 ),
                 sale: Some(settlement.reference.clone()),
                 proof: Some(settlement.proof),
+            });
+            continue;
+        }
+        let status = if sale.proceeds == settlement.quantity {
+            ObservationStatus::Reconciled
+        } else {
+            ObservationStatus::Conflict
+        };
+        let status_text = match status {
+            ObservationStatus::Reconciled => "reconciled",
+            ObservationStatus::Conflict => "conflict",
+            ObservationStatus::Observed => continue,
+        };
+        let source_proof = settlement.proof;
+        let unit = settlement
+            .quantity
+            .unit
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        let certificate = SettlementReconciliationCertificate {
+            settlement: settlement.reference.clone(),
+            source_proof,
+            sale: sale.id.clone(),
+            sale_proof: sale.proof,
+            observed: settlement.quantity.number.clone(),
+            expected: sale.proceeds.number.clone(),
+            unit,
+            status: status_text.into(),
+        };
+        let is_conflict = status == ObservationStatus::Conflict;
+        let reconciliation_proof = proof.insert(Node::new(
+            format!("settlement reconciliation {}", settlement.reference),
+            Operation::SettlementReconciliation(certificate),
+            vec![source_proof, sale.proof],
+            metadata_for(&settlement.reference, "settlement-reconciliation", None),
+        ));
+        settlement.status = status;
+        settlement.proof = reconciliation_proof;
+        if is_conflict {
+            issues.push(Issue {
+                code: IssueCode::SettlementConflict,
+                message: format!(
+                    "observed settlement `{}` is {}, but sale proceeds are {}",
+                    settlement.reference,
+                    settlement.quantity.canonical(),
+                    sale.proceeds.canonical()
+                ),
+                sale: Some(settlement.reference.clone()),
+                proof: Some(reconciliation_proof),
             });
         }
     }
@@ -2819,27 +2880,44 @@ fn aggregate_allocations(allocations: &[LotAllocation], proof: ProofId) -> Optio
 }
 
 fn check_public_answers(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
+    let expected_sales = analysis
+        .proof
+        .nodes
+        .values()
+        .filter_map(|node| match &node.operation {
+            Operation::SaleObservation { sale, .. } => Some(sale.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    require_complete_views(
+        "sale",
+        expected_sales.iter().map(String::as_str).collect(),
+        analysis.sales.iter().map(|sale| sale.id.as_str()),
+    )?;
+
     for quote in &analysis.quotes {
-        let valid = analysis.proof.node(quote.proof).is_some_and(|node| {
-            matches!(
-                &node.operation,
-                Operation::QuoteObservation(certificate)
-                    if certificate.quote == quote.id
-                        && certificate.date == quote.date.to_string()
-                        && certificate.base == quote.base.number
-                        && quote
-                            .base
-                            .unit
-                            .as_ref()
-                            .is_some_and(|unit| unit.to_string() == certificate.base_unit)
-                        && certificate.quote_amount == quote.quote.number
-                        && quote
-                            .quote
-                            .unit
-                            .as_ref()
-                            .is_some_and(|unit| unit.to_string() == certificate.quote_unit)
-            )
-        });
+        require_goal_proof(analysis, &format!("quote:{}", quote.id), quote.proof)?;
+        let valid = analysis.proof.roots.contains(&quote.proof)
+            && analysis.proof.node(quote.proof).is_some_and(|node| {
+                matches!(
+                    &node.operation,
+                    Operation::QuoteObservation(certificate)
+                        if certificate.quote == quote.id
+                            && certificate.date == quote.date.to_string()
+                            && certificate.base == quote.base.number
+                            && quote
+                                .base
+                                .unit
+                                .as_ref()
+                                .is_some_and(|unit| unit.to_string() == certificate.base_unit)
+                            && certificate.quote_amount == quote.quote.number
+                            && quote
+                                .quote
+                                .unit
+                                .as_ref()
+                                .is_some_and(|unit| unit.to_string() == certificate.quote_unit)
+                )
+            });
         if !valid {
             return Err(AnalysisCheckError::InvalidQuoteResult {
                 quote: quote.id.clone(),
@@ -2850,6 +2928,11 @@ fn check_public_answers(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
     }
 
     for position in &analysis.positions {
+        require_goal_proof(
+            analysis,
+            &format!("position:{}", position.account),
+            position.proof,
+        )?;
         let Some(node) = analysis.proof.node(position.proof) else {
             return Err(AnalysisCheckError::InvalidPositionResult {
                 account: position.account.clone(),
@@ -2865,10 +2948,12 @@ fn check_public_answers(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
             .unwrap_or_default();
         match &node.operation {
             Operation::PositionObservation(certificate) => {
-                if !matches!(
-                    position.status,
-                    ObservationStatus::Observed | ObservationStatus::Conflict
-                ) || certificate.account != position.account
+                if !analysis.proof.roots.contains(&position.proof)
+                    || !matches!(
+                        position.status,
+                        ObservationStatus::Observed | ObservationStatus::Conflict
+                    )
+                    || certificate.account != position.account
                     || certificate.quantity != position.quantity.number
                     || certificate.unit != unit
                 {
@@ -2880,7 +2965,8 @@ fn check_public_answers(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
                 }
             }
             Operation::PositionReconciliation(certificate) => {
-                if certificate.account != position.account
+                if !analysis.proof.roots.contains(&position.proof)
+                    || certificate.account != position.account
                     || certificate.observed != position.quantity.number
                     || certificate.result != position.quantity.number
                     || certificate.unit != unit
@@ -2933,11 +3019,16 @@ fn check_public_answers(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
     }
 
     for settlement in &analysis.settlements {
-        let Some(certificate) = cash_settlement_source(&analysis.proof, settlement.proof) else {
+        require_goal_proof(
+            analysis,
+            &format!("settlement:{}", settlement.reference),
+            settlement.proof,
+        )?;
+        let Some(node) = analysis.proof.node(settlement.proof) else {
             return Err(AnalysisCheckError::InvalidSettlementResult {
                 settlement: settlement.reference.clone(),
                 proof: settlement.proof,
-                reason: "settlement proof does not reach a typed cash observation".into(),
+                reason: "settlement proof is missing".into(),
             });
         };
         let unit = settlement
@@ -2958,56 +3049,143 @@ fn check_public_answers(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
             .iter()
             .find(|sale| sale.id == settlement.reference)
         {
-            if sale.proceeds == settlement.quantity {
+            if sale.status.is_complete() && sale.proceeds == settlement.quantity {
                 ObservationStatus::Reconciled
-            } else {
+            } else if sale.status.is_complete() {
                 ObservationStatus::Conflict
+            } else {
+                ObservationStatus::Observed
             }
         } else {
             ObservationStatus::Observed
         };
-        if certificate.reference != settlement.reference
-            || certificate.amount != settlement.quantity.number
-            || certificate.unit != unit
-            || certificate.into != settlement.into
-            || settlement.status != expected_status
+        if !analysis.proof.roots.contains(&settlement.proof) || settlement.status != expected_status
         {
             return Err(AnalysisCheckError::InvalidSettlementResult {
                 settlement: settlement.reference.clone(),
                 proof: settlement.proof,
-                reason: "result fields do not match the typed cash observation".into(),
+                reason: "settlement result is not a rooted certificate for its expected status"
+                    .into(),
             });
+        }
+        match &node.operation {
+            Operation::CashSettlementObservation(certificate) => {
+                if expected_status != ObservationStatus::Observed
+                    && expected_status != ObservationStatus::Conflict
+                {
+                    return Err(AnalysisCheckError::InvalidSettlementResult {
+                        settlement: settlement.reference.clone(),
+                        proof: settlement.proof,
+                        reason: "reconciled settlement lacks a reconciliation certificate".into(),
+                    });
+                }
+                if certificate.reference != settlement.reference
+                    || certificate.amount != settlement.quantity.number
+                    || certificate.unit != unit
+                    || certificate.into != settlement.into
+                {
+                    return Err(AnalysisCheckError::InvalidSettlementResult {
+                        settlement: settlement.reference.clone(),
+                        proof: settlement.proof,
+                        reason: "result fields do not match the typed cash observation".into(),
+                    });
+                }
+            }
+            Operation::SettlementReconciliation(certificate) => {
+                let source = analysis.proof.node(certificate.source_proof);
+                let valid_source = source.is_some_and(|node| {
+                    matches!(
+                        &node.operation,
+                        Operation::CashSettlementObservation(source)
+                            if source.reference == settlement.reference
+                                && source.amount == settlement.quantity.number
+                                && source.unit == unit
+                                && source.into == settlement.into
+                    )
+                });
+                let valid_sale = analysis
+                    .proof
+                    .node(certificate.sale_proof)
+                    .is_some_and(|node| {
+                        matches!(
+                            &node.operation,
+                            Operation::Recognition {
+                                sale,
+                                proceeds,
+                                value_unit,
+                                ..
+                            } if sale == &settlement.reference
+                                && proceeds == &certificate.expected
+                                && value_unit == &unit
+                        )
+                    });
+                if !valid_source
+                    || !valid_sale
+                    || certificate.settlement != settlement.reference
+                    || certificate.sale != settlement.reference
+                    || certificate.observed != settlement.quantity.number
+                    || certificate.expected
+                        != analysis
+                            .sales
+                            .iter()
+                            .find(|sale| sale.id == settlement.reference)
+                            .map(|sale| sale.proceeds.number.clone())
+                            .unwrap_or_else(|| Exact::from(0_i64))
+                    || certificate.unit != unit
+                    || certificate.status
+                        != match expected_status {
+                            ObservationStatus::Reconciled => "reconciled",
+                            ObservationStatus::Conflict => "conflict",
+                            ObservationStatus::Observed => "",
+                        }
+                {
+                    return Err(AnalysisCheckError::InvalidSettlementResult {
+                        settlement: settlement.reference.clone(),
+                        proof: settlement.proof,
+                        reason: "settlement reconciliation is not bound to its source and sale"
+                            .into(),
+                    });
+                }
+            }
+            _ => {
+                return Err(AnalysisCheckError::InvalidSettlementResult {
+                    settlement: settlement.reference.clone(),
+                    proof: settlement.proof,
+                    reason: "settlement proof is not a typed source or reconciliation".into(),
+                });
+            }
         }
     }
 
     for entry in &analysis.journal {
-        let valid = analysis.proof.node(entry.proof).is_some_and(|node| {
-            let Operation::JournalEntry(certificate) = &node.operation else {
-                return false;
-            };
-            if certificate.sale != entry.sale || certificate.lines.len() != entry.lines.len() {
-                return false;
-            }
-            entry
-                .lines
-                .iter()
-                .zip(&certificate.lines)
-                .all(|(line, expected)| {
-                    let side = match line.side {
-                        Side::Debit => "debit",
-                        Side::Credit => "credit",
-                    };
-                    side == expected.side
-                        && line.account == expected.account
-                        && line.quantity.number == expected.amount
-                        && line
-                            .quantity
-                            .unit
-                            .as_ref()
-                            .is_some_and(|unit| unit.to_string() == expected.unit)
-                })
-                && entry.balanced()
-        });
+        let valid = analysis.proof.roots.contains(&entry.proof)
+            && analysis.proof.node(entry.proof).is_some_and(|node| {
+                let Operation::JournalEntry(certificate) = &node.operation else {
+                    return false;
+                };
+                if certificate.sale != entry.sale || certificate.lines.len() != entry.lines.len() {
+                    return false;
+                }
+                entry
+                    .lines
+                    .iter()
+                    .zip(&certificate.lines)
+                    .all(|(line, expected)| {
+                        let side = match line.side {
+                            Side::Debit => "debit",
+                            Side::Credit => "credit",
+                        };
+                        side == expected.side
+                            && line.account == expected.account
+                            && line.quantity.number == expected.amount
+                            && line
+                                .quantity
+                                .unit
+                                .as_ref()
+                                .is_some_and(|unit| unit.to_string() == expected.unit)
+                    })
+                    && entry.balanced()
+            });
         if !valid {
             return Err(AnalysisCheckError::InvalidJournalResult {
                 sale: entry.sale.clone(),
@@ -3017,25 +3195,6 @@ fn check_public_answers(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
         }
     }
     Ok(())
-}
-
-fn cash_settlement_source(
-    proof: &Proof,
-    root: ProofId,
-) -> Option<&CashSettlementObservationCertificate> {
-    let mut pending = vec![root];
-    let mut seen = BTreeSet::new();
-    while let Some(id) = pending.pop() {
-        if !seen.insert(id) {
-            continue;
-        }
-        let node = proof.node(id)?;
-        if let Operation::CashSettlementObservation(certificate) = &node.operation {
-            return Some(certificate);
-        }
-        pending.extend(node.inputs.iter().copied());
-    }
-    None
 }
 
 fn check_conditional_gains(
@@ -5189,6 +5348,24 @@ observe settlement sell 500 USD into cash
     }
 
     #[test]
+    fn settlement_in_another_unit_is_a_checked_conflict() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+observe settlement sell 500 EUR into cash
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        assert!(result.sale("sell").unwrap().status.is_complete());
+        assert_eq!(result.settlements[0].status, ObservationStatus::Conflict);
+        assert!(result.check_proof().is_ok());
+    }
+
+    #[test]
     fn multiple_quotes_are_reported_without_blocking_direct_gain() {
         let source = r#"book tax-us
 buy buy/one on 2026-01-04
@@ -5854,6 +6031,10 @@ use lots/fifo for tax-us
             Err(AnalysisCheckError::InvalidAllocation { .. })
         ));
 
+        let mut forged = analysis.clone();
+        forged.sales.clear();
+        assert!(forged.check_semantics().is_err());
+
         let mut forged = analysis;
         forged.sales[0].recognized.as_mut().unwrap().gain.number = Exact::from(99i64);
         assert!(matches!(
@@ -5879,6 +6060,12 @@ sell sale/a on 2026-02-01
             .unwrap(),
         );
         ambiguous.check_semantics().unwrap();
+        let mut forged = ambiguous.clone();
+        forged.sales[0].quantity.number = Exact::from(-1i64);
+        assert!(matches!(
+            forged.check_semantics(),
+            Err(AnalysisCheckError::InvalidRecognition { .. })
+        ));
         let mut forged = ambiguous;
         forged.sales[0].conditional_gains[0].gain.number = Exact::from(999i64);
         assert!(matches!(

@@ -33,6 +33,8 @@ use crate::incremental::{
 };
 use crate::model::{ContentHash, Identity, Ledger, SourceId};
 use crate::package::{PolicyPackage as ExecutablePolicyPackage, PolicyRegistry};
+use crate::package_compiler::{self, CompiledArtifact, PackageCompileError, PackageInput};
+use crate::package_lock::Lockfile;
 use crate::parser::{self, ParseError};
 use crate::proof::{Node, Operation, Proof};
 use crate::store::{
@@ -55,9 +57,9 @@ pub struct SourceLedger {
     pub commit: CommitId,
     /// The original observation.  Its payload is exactly the bytes supplied
     /// to [`Workspace::load_source`] or [`Workspace::correct_source`].
-    pub evidence: RawEvidence,
+    evidence: RawEvidence,
     /// The tolerant, lossless authoring surface parsed from the UTF-8 bytes.
-    pub surface: SurfaceFile,
+    surface: SurfaceFile,
 }
 
 impl SourceLedger {
@@ -75,6 +77,14 @@ impl SourceLedger {
 
     pub fn content(&self) -> ContentHash {
         self.evidence.content()
+    }
+
+    pub fn evidence(&self) -> &RawEvidence {
+        &self.evidence
+    }
+
+    pub fn surface(&self) -> &SurfaceFile {
+        &self.surface
     }
 
     pub fn bytes(&self) -> &[u8] {
@@ -232,6 +242,7 @@ pub enum WorkspaceError {
     Store(StoreError),
     Parse(ParseError),
     Incremental(crate::incremental::DatabaseError),
+    PackageCompile(PackageCompileError),
     InvalidUtf8,
     EmptySource,
     NotSourceCommit {
@@ -260,6 +271,9 @@ impl fmt::Display for WorkspaceError {
             Self::Store(error) => write!(formatter, "workspace store error: {error}"),
             Self::Parse(error) => write!(formatter, "source parse error: {error}"),
             Self::Incremental(error) => write!(formatter, "workspace incremental error: {error}"),
+            Self::PackageCompile(error) => {
+                write!(formatter, "workspace package compile error: {error}")
+            }
             Self::InvalidUtf8 => formatter.write_str("source bytes are not valid UTF-8"),
             Self::EmptySource => formatter.write_str("source identifier cannot be empty"),
             Self::NotSourceCommit { commit, reason } => {
@@ -303,6 +317,12 @@ impl From<ParseError> for WorkspaceError {
 impl From<crate::incremental::DatabaseError> for WorkspaceError {
     fn from(value: crate::incremental::DatabaseError) -> Self {
         Self::Incremental(value)
+    }
+}
+
+impl From<PackageCompileError> for WorkspaceError {
+    fn from(value: PackageCompileError) -> Self {
+        Self::PackageCompile(value)
     }
 }
 
@@ -377,6 +397,111 @@ impl Workspace {
         Ok(self
             .store
             .put_package(package.into_stored_policy_package()?)?)
+    }
+
+    /// Compile a deterministic typed package set through the workspace's
+    /// canonical incremental database.
+    ///
+    /// Package inputs are content-addressed independently from the aggregate
+    /// query.  A manifest or module change therefore invalidates this query,
+    /// while an equivalent reordering remains a cache hit.  The compiler
+    /// artifact itself remains immutable and independently verifiable; the
+    /// workspace owns only its typed memo and dependency edges.
+    pub fn compile_packages<I>(
+        &mut self,
+        packages: I,
+        lockfile: &Lockfile,
+    ) -> Result<CompiledArtifact, WorkspaceError>
+    where
+        I: IntoIterator<Item = PackageInput>,
+    {
+        let packages = packages.into_iter().collect::<Vec<_>>();
+        let lockfile = lockfile.clone();
+        let mut package_hashes = packages
+            .iter()
+            .map(PackageInput::input_hash)
+            .collect::<Vec<_>>();
+        package_hashes.sort();
+
+        for package in &packages {
+            self.incremental.upsert_input(
+                package_input_key(package),
+                "package-hir",
+                package.input_hash().as_bytes().to_vec(),
+            )?;
+        }
+        self.incremental.upsert_input(
+            package_lockfile_key(),
+            "package-lockfile",
+            lockfile.canonical_bytes(),
+        )?;
+        self.incremental.upsert_input(
+            package_set_key(),
+            "package-set",
+            package_set_bytes(lockfile.hash(), &package_hashes),
+        )?;
+
+        let query_key =
+            QueryKey::new("workspace/package-compile").map_err(WorkspaceError::Incremental)?;
+        let cached = self.incremental.is_valid(&query_key);
+        let compiled = if cached {
+            None
+        } else {
+            Some(package_compiler::compile(packages.clone(), &lockfile)?)
+        };
+        let packages_for_query = packages.clone();
+        let lockfile_for_query = lockfile.clone();
+        let value = self
+            .incremental
+            .evaluate_typed(query_key, move |context| {
+                let Some(set) = context.input(&package_set_key()) else {
+                    return Err(MemoOutcome::incomplete("package set input is missing"));
+                };
+                let Some(lock) = context.input(&package_lockfile_key()) else {
+                    return Err(MemoOutcome::incomplete("package lockfile input is missing"));
+                };
+                if set.content() != package_set_bytes(lockfile_for_query.hash(), &package_hashes)
+                    || lock.content() != lockfile_for_query.canonical_bytes()
+                {
+                    return Err(MemoOutcome::error(QueryError::explicit(
+                        "package-input-mismatch",
+                        "package compiler inputs changed during evaluation",
+                    )));
+                }
+                for package in &packages_for_query {
+                    if context.input(&package_input_key(package)).is_none() {
+                        return Err(MemoOutcome::incomplete("package HIR input is missing"));
+                    }
+                }
+                let artifact = match compiled {
+                    Some(ref artifact) => artifact.clone(),
+                    None => {
+                        // A valid typed memo normally makes this branch
+                        // unreachable.  Keeping the fallback explicit avoids
+                        // turning a cache/value mismatch into a panic.
+                        package_compiler::compile(packages_for_query.clone(), &lockfile_for_query)
+                            .map_err(|error| {
+                            MemoOutcome::error(QueryError::explicit("compile", error.to_string()))
+                        })?
+                    }
+                };
+                let bytes = artifact.canonical_bytes();
+                Ok((artifact, bytes))
+            })
+            .map_err(|outcome| match outcome {
+                MemoOutcome::Error(error) => WorkspaceError::Store(StoreError::InvalidObject(
+                    format!("incremental package compilation failed: {error}"),
+                )),
+                MemoOutcome::Incomplete { reason } => {
+                    WorkspaceError::Store(StoreError::InvalidObject(format!(
+                        "incremental package compilation incomplete: {reason}"
+                    )))
+                }
+                MemoOutcome::Value(_) => WorkspaceError::Store(StoreError::InvalidObject(
+                    "incremental package compilation returned an invalid state".to_string(),
+                )),
+            })?;
+        Ok(value)
     }
 
     /// The canonical incremental database used by all workspace analysis.
@@ -1195,6 +1320,33 @@ fn source_partitions(bytes: &[u8]) -> (Vec<u8>, Vec<u8>) {
 
 fn package_input_name(source: &SourceId, name: &str) -> String {
     format!("workspace/package/{source}/{name}")
+}
+
+fn package_input_key(package: &PackageInput) -> SourceKey {
+    SourceKey::new(format!(
+        "workspace/package-hir/{}/{}",
+        package.manifest.name, package.manifest.version
+    ))
+    .expect("package compiler input keys are never empty")
+}
+
+fn package_lockfile_key() -> SourceKey {
+    SourceKey::new("workspace/package-lockfile")
+        .expect("package compiler lockfile key is never empty")
+}
+
+fn package_set_key() -> SourceKey {
+    SourceKey::new("workspace/package-set").expect("package compiler set key is never empty")
+}
+
+fn package_set_bytes(lockfile: ContentHash, package_hashes: &[ContentHash]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(lockfile.as_bytes());
+    bytes.extend_from_slice(&(package_hashes.len() as u64).to_be_bytes());
+    for hash in package_hashes {
+        bytes.extend_from_slice(hash.as_bytes());
+    }
+    bytes
 }
 
 fn source_package_names(bytes: &[u8]) -> BTreeSet<String> {

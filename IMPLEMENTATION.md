@@ -40,9 +40,9 @@ experiments, but it is not part of this contract.
 - [ ] At least 75 independently executable edge-case fixtures spanning
   sections XIV A–I. The corpus names 134 cases and now has exactly 75
   registry-linked case-specific tests plus 12 grouped smoke suites. The count
-  threshold is met, but review still classifies several cases as foundation
-  boundary tests rather than complete domain semantics, so Gate 0 remains
-  open.
+  threshold is met. D18, F06, F10, H11, and I02 now exercise their named
+  valuation, retroactivity, open-interval, scenario, and bounded-rule
+  semantics directly; review of the remaining corpus still keeps Gate 0 open.
 
 ### Gate 1 — executable reference semantics
 
@@ -65,9 +65,10 @@ experiments, but it is not part of this contract.
   Lot allocation, inventory conservation, and recognized gain now use typed,
   independently recomputed certificates. Direct obligations, settlement
   histories, satisfaction allocations, and both remaining-balance families
-  now do as well. Quote, position/reconciliation, cash-settlement, and journal
-  answers now carry typed certificates whose values are recomputed by the
-  checker; source-commit binding and the remaining answer families still need
+  now do as well. Quote, position/reconciliation, cash-settlement,
+  settlement/reconciliation, and journal answers now carry typed certificates
+  whose values and typed source edges are recomputed by the checker;
+  source-commit binding and the remaining answer families still need
   equivalent end-to-end treatment.
 - [x] Source-order property tests.
 - [x] Actual/scenario isolation test.
@@ -120,11 +121,15 @@ experiments, but it is not part of this contract.
   independently verified content-addressed lockfile foundation now exist. A
   deterministic HIR compiler rejects diagnostic-bearing modules, checks
   exported-name coherence, and emits independently verifiable artifacts;
-  persistence and Workspace integration remain open.
+  Workspace now compiles those artifacts through its typed incremental graph
+  with exact lockfile, package-set, and module-content dependencies.
+  Persistent package-object integration remains open.
 - [ ] LSP diagnostics, completion, and proof navigation foundation. A typed-HIR
   document index and checked proof-DAG navigator now provide the three core
-  operations; transport, incremental document updates, and Workspace wiring
-  remain open.
+  operations. A checked authoring surface retains exact source commits, checks
+  HIR spans and declaration spellings against them, and combines surface/HIR
+  diagnostics with optional verified Workspace analysis proofs; complete
+  surface lowering, transport, and incremental document updates remain open.
 
 ### Gate 5 — immutable store and reconciliation
 
@@ -184,7 +189,8 @@ experiments, but it is not part of this contract.
 
 - [ ] Signed packages and decisions, access labels, and redacted proofs. Typed
   verified attestations, principal labels, and hidden-node proof commitments
-  exist as a foundation; store/workspace enforcement remains open.
+  exist as a foundation; persisted labels and store/workspace enforcement
+  remain open.
 - [ ] Capability-limited component adapters that can emit observations only.
   The public collaboration adapter boundary currently exposes only immutable
   observation batches; a runtime capability sandbox remains open.
@@ -208,8 +214,11 @@ experiments, but it is not part of this contract.
   metrics, independent clean-recomputation equality, and isolated per-workload
   child-process peak RSS are
   measured. Serial/concurrent independent-workspace equivalence is measured
-  separately and does not claim shared-engine parallelism. Several domain
-  workloads and shared-engine parallel measurement remain open.
+  separately and does not claim shared-engine parallelism. Currency exchange,
+  corporate action, ownership-role, and recursive-logic workloads now report
+  separately timed public-domain-API probes alongside honest source-projection
+  scope labels. Remaining domain workloads and shared-engine parallel
+  measurement remain open.
 - [ ] Property, differential, incremental/full, and parallel/single-threaded
   equivalence suites.
 - [ ] Parser, canonicalization, unification, cycles, proof, packages, time,
@@ -221,17 +230,18 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 337 library tests, 4 CLI tests, 8 independent reference/production
+- 338 library tests, 4 CLI tests, 8 independent reference/production
   differential tests, and 5 structured-reference outcome tests;
 - 134 named constitutional cases with exactly 75 registry-linked independent
   case-specific tests and 12 grouped smoke suites; semantic review, not the
   raw count, keeps Gate 0 open;
-- 14 deterministic heavy-ledger integration tests and two explicit 10,000-row
-  release stress tests, including a full
-  obligation/settlement/satisfaction network;
+- 14 deterministic heavy-ledger integration tests, 2 heavy economic-system
+  workflows, 7 adversarial property tests, and two explicit 10,000-row release
+  stress tests, including a full obligation/settlement/satisfaction network;
 - an 11-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
-  clean-recomputation equivalence plus process peak RSS; concurrent
+  clean-recomputation equivalence, four public-domain-API semantic probes, and
+  process peak RSS; concurrent
   independent-worker equivalence is labelled distinctly from shared-engine
   parallelism;
 - strict all-target Clippy and exact source-to-commit-to-analysis proof checks.

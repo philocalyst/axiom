@@ -163,27 +163,42 @@ fn invoice_graph_uses_supported_semantic_forms() {
 }
 
 #[test]
-fn unsupported_domain_shapes_stay_explicitly_shape_only() {
-    for workload in [
-        "multi-currency",
-        "corporate-actions",
-        "ownership-network",
-        "adversarial-recursion",
+fn domain_api_workloads_report_real_semantic_probes() {
+    for (workload, api) in [
+        ("multi-currency", "ontology.exchange_unit_validation"),
+        ("corporate-actions", "contracts.corporate_action_validation"),
+        ("ownership-network", "ontology.role_assignment_validation"),
+        (
+            "adversarial-recursion",
+            "logic.positive_fixed_point_validation",
+        ),
     ] {
         let line = measurement(workload);
-        assert!(line.contains("\"status\":\"shape_only\""), "{line}");
-        assert!(line.contains("\"semantic_supported\":false"), "{line}");
-        assert!(!line.contains("\"unsupported_reason\":null"), "{line}");
+        assert!(line.contains("\"status\":\"measured\""), "{line}");
+        assert!(line.contains("\"semantic_supported\":true"), "{line}");
+        assert!(line.contains("\"unsupported_reason\":null"), "{line}");
         assert!(
-            line.contains("shape-only")
-                && line.contains(
-                    "shape_only: parsed metrics describe only the accepted V0 evidence projection"
-                ),
-            "unsupported workload is not labelled as a projection-only measurement: {line}"
+            line.contains("\"semantic_probe_ns\":") && !line.contains("\"semantic_probe_ns\":null"),
+            "semantic probe timing is missing for {workload}: {line}"
         );
         assert!(
-            line.contains("\"explanation_bytes\":null"),
-            "unsupported domain shape must not emit a domain explanation: {line}"
+            line.contains(&format!("\"semantic_probe_api\":\"{api}\"")),
+            "semantic probe API is missing for {workload}: {line}"
+        );
+        assert!(
+            !line.contains("shape-only") && !line.contains("shape_only"),
+            "domain workload still carries a projection-only label: {line}"
+        );
+        assert!(
+            field_value(&line, "semantic_probe_items")
+                .parse::<u64>()
+                .expect("semantic_probe_items is numeric")
+                > 0
+                && field_value(&line, "semantic_probe_results")
+                    .parse::<u64>()
+                    .expect("semantic_probe_results is numeric")
+                    > 0,
+            "semantic probe did not produce validated results: {line}"
         );
     }
 }
@@ -251,18 +266,24 @@ fn peak_rss_is_isolated_per_workload_and_schema_stays_stable() {
     let first = measurement("invoice-payment-graph");
     let second = measurement("invoice-payment-graph");
     for line in [&first, &second] {
-        assert!(
-            line.contains("\"resource_profile\":\"per-workload child-process peak RSS"),
-            "RSS provenance is missing: {line}"
-        );
-        assert!(
-            line.contains("\"peak_memory_bytes\":") && !line.contains("\"peak_memory_bytes\":null"),
-            "isolated RSS was not measured: {line}"
-        );
-        assert!(
-            line.contains("isolated workload child-process peak RSS"),
-            "RSS note does not identify the measurement boundary: {line}"
-        );
+        if cfg!(any(target_os = "linux", target_os = "macos")) {
+            assert!(
+                line.contains("\"resource_profile\":\"per-workload child-process peak RSS"),
+                "RSS provenance is missing: {line}"
+            );
+            assert!(
+                line.contains("\"peak_memory_bytes\":")
+                    && !line.contains("\"peak_memory_bytes\":null"),
+                "isolated RSS was not measured: {line}"
+            );
+            assert!(
+                line.contains("isolated workload child-process peak RSS"),
+                "RSS note does not identify the measurement boundary: {line}"
+            );
+        } else {
+            assert!(line.contains("\"peak_memory_bytes\":null"));
+            assert!(line.contains("peak RSS unavailable"));
+        }
     }
     // Generation is deterministic even though timings and RSS are naturally
     // observations and may differ between invocations.

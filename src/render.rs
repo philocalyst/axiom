@@ -857,7 +857,7 @@ satisfy allocation/a
         let analysis = analyze(&parse_ledger(AMBIGUOUS).unwrap());
         let output = render_check(&analysis);
         assert!(output.contains("brokerage  10 ABC  observed (conflict)"));
-        assert!(output.contains("sell  500 USD  reconciled"));
+        assert!(output.contains("sell  500 USD  observed"));
         assert!(!output.contains("proven"));
         assert!(
             render_why(&analysis, "position:brokerage")

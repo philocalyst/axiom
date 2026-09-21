@@ -116,6 +116,24 @@ pub struct CashSettlementObservationCertificate {
     pub into: Option<String>,
 }
 
+/// Independent comparison of one cash-settlement observation with the
+/// proceeds of its authored sale.  A reconciliation is deliberately a
+/// concrete certificate rather than a generic `Derive`: both source leaves,
+/// both exact amounts, and the resulting status are checked by the proof
+/// reader without consulting the engine.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SettlementReconciliationCertificate {
+    pub settlement: String,
+    pub source_proof: ProofId,
+    pub sale: String,
+    pub sale_proof: ProofId,
+    pub observed: Exact,
+    pub expected: Exact,
+    pub unit: String,
+    /// `reconciled` when observed == expected, otherwise `conflict`.
+    pub status: String,
+}
+
 /// One exact journal line.  Journal lines are deliberately represented in
 /// the proof layer rather than reconstructed from display metadata.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -266,6 +284,9 @@ pub enum Operation {
     PositionObservation(PositionObservationCertificate),
     /// Typed source observation for an observed cash settlement.
     CashSettlementObservation(CashSettlementObservationCertificate),
+    /// Exact comparison between a cash-settlement observation and sale
+    /// proceeds, with both typed source proofs retained in the payload.
+    SettlementReconciliation(SettlementReconciliationCertificate),
     /// Source observation for one named acquisition lot.
     LotObservation {
         lot: String,
@@ -365,6 +386,7 @@ impl Operation {
             Self::QuoteObservation(..) => b"quote-observation",
             Self::PositionObservation(..) => b"position-observation",
             Self::CashSettlementObservation(..) => b"cash-settlement-observation",
+            Self::SettlementReconciliation(..) => b"settlement-reconciliation",
             Self::LotObservation { .. } => b"lot-observation",
             Self::SaleObservation { .. } => b"sale-observation",
             Self::ObligationObservation(..) => b"obligation-observation",
@@ -409,6 +431,16 @@ impl Operation {
                 put_string(out, &certificate.amount.canonical_string());
                 put_string(out, &certificate.unit);
                 put_optional_string(out, certificate.into.as_deref());
+            }
+            Self::SettlementReconciliation(certificate) => {
+                put_string(out, &certificate.settlement);
+                put_proof_id(out, &certificate.source_proof);
+                put_string(out, &certificate.sale);
+                put_proof_id(out, &certificate.sale_proof);
+                put_string(out, &certificate.observed.canonical_string());
+                put_string(out, &certificate.expected.canonical_string());
+                put_string(out, &certificate.unit);
+                put_string(out, &certificate.status);
             }
             Self::LotObservation {
                 lot,
@@ -763,6 +795,11 @@ impl Proof {
                 {
                     return Err(CheckError::InvalidCashSettlementObservation { id: *id });
                 }
+                Operation::SettlementReconciliation(certificate)
+                    if !valid_settlement_reconciliation(certificate) =>
+                {
+                    return Err(CheckError::InvalidSettlementReconciliation { id: *id });
+                }
                 Operation::ObligationObservation(certificate)
                     if !valid_obligation_observation(certificate) =>
                 {
@@ -896,6 +933,7 @@ impl Proof {
                 Operation::QuoteObservation(..)
                 | Operation::PositionObservation(..)
                 | Operation::CashSettlementObservation(..) => false,
+                Operation::SettlementReconciliation(..) => false,
                 Operation::LotObservation {
                     lot,
                     source,
@@ -996,6 +1034,14 @@ impl Proof {
         let effective_allocations = effective_allocation_index(self);
         for (id, node) in &self.nodes {
             match &node.operation {
+                Operation::SettlementReconciliation(certificate) => {
+                    if !node.inputs.contains(&certificate.source_proof)
+                        || !node.inputs.contains(&certificate.sale_proof)
+                        || !settlement_reconciliation_matches_sources(self, certificate)
+                    {
+                        return Err(CheckError::InvalidSettlementReconciliation { id: *id });
+                    }
+                }
                 Operation::PositionReconciliation(certificate) => {
                     if !node.inputs.contains(&certificate.source_proof)
                         || !position_observation_matches(
@@ -1211,7 +1257,9 @@ impl Proof {
                     let mut total_gain = Exact::from(0i64);
                     let mut saw_allocation = false;
                     for input in &node.inputs {
-                        let input_node = self.nodes.get(input).expect("inputs checked above");
+                        let Some(input_node) = self.nodes.get(input) else {
+                            return Err(CheckError::InvalidRecognition { id: *id });
+                        };
                         let Operation::LotAllocation(certificate) = &input_node.operation else {
                             continue;
                         };
@@ -1250,14 +1298,10 @@ impl Proof {
         let mut pending = self.roots.clone();
         while let Some(id) = pending.pop() {
             if reachable.insert(id) {
-                pending.extend(
-                    self.nodes
-                        .get(&id)
-                        .expect("roots and inputs were checked")
-                        .inputs
-                        .iter()
-                        .copied(),
-                );
+                let Some(node) = self.nodes.get(&id) else {
+                    return Err(CheckError::MissingRoot { root: id });
+                };
+                pending.extend(node.inputs.iter().copied());
             }
         }
         for (id, node) in &self.nodes {
@@ -1266,6 +1310,7 @@ impl Proof {
                 Operation::LotAllocation(..)
                     | Operation::InventoryConservation { .. }
                     | Operation::Recognition { .. }
+                    | Operation::SettlementReconciliation(..)
                     | Operation::SettlementHistory(..)
                     | Operation::SatisfactionAllocation(..)
                     | Operation::ObligationBalance(..)
@@ -1298,7 +1343,12 @@ impl Proof {
             visited += 1;
             if let Some(dependants) = reverse.get(&id) {
                 for dependant in dependants {
-                    let count = remaining.get_mut(dependant).expect("reverse edge exists");
+                    let Some(count) = remaining.get_mut(dependant) else {
+                        return Err(CheckError::MissingInput {
+                            node: *dependant,
+                            input: id,
+                        });
+                    };
                     *count -= 1;
                     if *count == 0 {
                         ready.insert(*dependant);
@@ -1372,6 +1422,7 @@ pub enum CheckError {
     InvalidQuoteObservation { id: ProofId },
     InvalidPositionObservation { id: ProofId },
     InvalidCashSettlementObservation { id: ProofId },
+    InvalidSettlementReconciliation { id: ProofId },
     InvalidObligationObservation { id: ProofId },
     InvalidSettlementObservation { id: ProofId },
     InvalidSatisfactionObservation { id: ProofId },
@@ -1427,6 +1478,12 @@ impl fmt::Display for CheckError {
                 write!(
                     f,
                     "proof node {id} contains an invalid cash settlement observation"
+                )
+            }
+            Self::InvalidSettlementReconciliation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid settlement reconciliation"
                 )
             }
             Self::InvalidObligationObservation { id } => {
@@ -1556,6 +1613,19 @@ fn valid_cash_settlement_observation(certificate: &CashSettlementObservationCert
             .into
             .as_deref()
             .is_none_or(|account| !account.trim().is_empty())
+}
+
+fn valid_settlement_reconciliation(certificate: &SettlementReconciliationCertificate) -> bool {
+    !certificate.settlement.trim().is_empty()
+        && certificate.source_proof != ProofId::ZERO
+        && !certificate.sale.trim().is_empty()
+        && certificate.sale_proof != ProofId::ZERO
+        && !certificate.unit.trim().is_empty()
+        && !certificate.observed.is_negative()
+        && !certificate.expected.is_negative()
+        && matches!(certificate.status.trim(), "reconciled" | "conflict")
+        && ((certificate.status == "reconciled" && certificate.observed == certificate.expected)
+            || (certificate.status == "conflict" && certificate.observed != certificate.expected))
 }
 
 fn valid_position_reconciliation(certificate: &PositionReconciliationCertificate) -> bool {
@@ -1949,6 +2019,39 @@ fn journal_entry_matches_sources(proof: &Proof, certificate: &JournalEntryCertif
     certificate.lines == expected
 }
 
+fn settlement_reconciliation_matches_sources(
+    proof: &Proof,
+    certificate: &SettlementReconciliationCertificate,
+) -> bool {
+    let Some(Node {
+        operation: Operation::CashSettlementObservation(source),
+        ..
+    }) = proof.nodes.get(&certificate.source_proof)
+    else {
+        return false;
+    };
+    let Some(Node {
+        operation:
+            Operation::Recognition {
+                sale,
+                proceeds,
+                value_unit,
+                ..
+            },
+        ..
+    }) = proof.nodes.get(&certificate.sale_proof)
+    else {
+        return false;
+    };
+    source.reference == certificate.settlement
+        && source.reference == certificate.sale
+        && source.amount == certificate.observed
+        && source.unit == certificate.unit
+        && sale == &certificate.sale
+        && proceeds == &certificate.expected
+        && value_unit == &certificate.unit
+}
+
 fn find_cash_settlement_source(
     proof: &Proof,
     root: ProofId,
@@ -1971,6 +2074,9 @@ fn find_cash_settlement_source(
                 ));
             }
             Operation::Derive { .. } => pending.extend(node.inputs.iter().copied()),
+            Operation::SettlementReconciliation(certificate) => {
+                pending.push(certificate.source_proof)
+            }
             _ => {}
         }
     }

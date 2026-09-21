@@ -535,7 +535,7 @@ const FIXTURES: &[Fixture] = &[
     Fixture {
         id: "D18",
         section: Section::Instruments,
-        name: "negative_quote_is_exact_when_allowed",
+        name: "negative_quote_is_unavailable",
         disposition: Disposition::Executed,
     },
     Fixture {
@@ -4605,10 +4605,48 @@ fn independent_f03_month_precision_is_coarse() {
 fn independent_d18_negative_quote_is_unavailable() {
     let abc = unit("ABC-d18", "ABC-d18");
     let usd = unit("USD-d18", "USD-d18");
+
+    // A negative exchange rate is not a meaningful conversion edge.  Check
+    // the public constructor at the boundary, then exercise valuation with a
+    // valid quote so a negative *quantity* cannot become a negative value by
+    // accident either.
     assert!(matches!(
-        Ratio::try_new(abc, usd, ExactNumber::integer(-2)),
+        Ratio::try_new(abc.clone(), usd.clone(), ExactNumber::integer(-2)),
         Err(UnitError::NonPositiveRatio)
     ));
+
+    let quote = Quote::new(
+        "positive-d18",
+        Ratio::new(abc.clone(), usd.clone(), ExactNumber::integer(2)),
+        QuoteKind::Mid,
+        Instant::EPOCH,
+        Instant::EPOCH,
+        "venue-d18",
+        "source-d18",
+        InstantInterval::new(Bound::Closed(Instant::EPOCH), Bound::Unbounded).unwrap(),
+    );
+    let positive = value(
+        &uq("3", abc.clone()),
+        &usd,
+        Instant::from_unix_seconds(1),
+        std::slice::from_ref(&quote),
+        ValuationPolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(positive.status, ValuationStatus::Unique);
+    assert_eq!(positive.quantity.unwrap().amount().canonical_string(), "6");
+
+    let negative = value(
+        &uq("-3", abc),
+        &usd,
+        Instant::from_unix_seconds(1),
+        &[quote],
+        ValuationPolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(negative.status, ValuationStatus::Unavailable);
+    assert!(negative.quantity.is_none());
+    assert!(negative.paths.is_empty());
 }
 
 #[test]
@@ -4706,14 +4744,35 @@ fn independent_f06_retroactive_effective_date_is_allowed() {
     )
     .unwrap();
     let world = accepted_world(hash(154), [fact]);
-    let policy = BookPolicy::new("tax-f06", date("2026-01-01"), None);
+    // The policy starts before the accepted event, so it may interpret that
+    // historical occurrence.  Recognition still points at the original
+    // occurrence and evidence rather than rewriting the source fact.
+    let policy = BookPolicy::new("tax-f06", date("2026-01-01"), None)
+        .with_classification("retroactive-sale");
     let recognized = recognize(&world, &policy).unwrap();
+    let recognized_fact = recognized
+        .fact(&OccurrenceId::new("retroactive-f06"))
+        .unwrap();
+    assert_eq!(recognized_fact.date, date("2026-09-21"));
     assert_eq!(
-        recognized
-            .fact(&OccurrenceId::new("retroactive-f06"))
-            .unwrap()
-            .date,
-        date("2026-09-21")
+        recognized_fact.classification.as_deref(),
+        Some("retroactive-sale")
+    );
+    assert_eq!(
+        recognized_fact.proof.source_fact,
+        OccurrenceId::new("retroactive-f06")
+    );
+
+    // A policy that starts after the occurrence cannot silently omit or
+    // reinterpret it; the recognition boundary reports the exact mismatch.
+    let not_yet_effective = BookPolicy::new("tax-f06-future", date("2026-09-22"), None);
+    assert_eq!(
+        recognize(&world, &not_yet_effective),
+        Err(RecognitionError::PolicyNotEffective {
+            book: "tax-f06-future".into(),
+            fact: "retroactive-f06".into(),
+            date: date("2026-09-21"),
+        })
     );
 }
 
@@ -4765,6 +4824,43 @@ fn independent_f10_open_ended_interval_has_unbounded_end() {
     assert!(!interval.contains(&Instant::from_unix_seconds(99)));
     assert!(interval.contains(&lower));
     assert!(interval.contains(&Instant::from_unix_seconds(i64::MAX)));
+
+    // Carry the interval into valuation: an observation is not effective
+    // before its lower bound, but remains usable at an arbitrarily distant
+    // instant because the upper bound is genuinely open-ended.
+    let abc = unit("ABC-f10", "ABC-f10");
+    let usd = unit("USD-f10", "USD-f10");
+    let quote = Quote::new(
+        "open-ended-f10",
+        Ratio::new(abc.clone(), usd.clone(), ExactNumber::integer(2)),
+        QuoteKind::Mid,
+        lower,
+        lower,
+        "venue-f10",
+        "source-f10",
+        interval,
+    );
+    let before = value(
+        &uq("1", abc.clone()),
+        &usd,
+        Instant::from_unix_seconds(99),
+        std::slice::from_ref(&quote),
+        ValuationPolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(before.status, ValuationStatus::NotYetEffective);
+    assert!(before.quantity.is_none());
+
+    let after = value(
+        &uq("1", abc),
+        &usd,
+        Instant::from_unix_seconds(i64::MAX),
+        &[quote],
+        ValuationPolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(after.status, ValuationStatus::Unique);
+    assert_eq!(after.quantity.unwrap().amount().canonical_string(), "2");
 }
 
 #[test]
@@ -5076,39 +5172,62 @@ fn independent_h08_approximate_plan_has_exact_verifier() {
 
 #[test]
 fn independent_h11_scenario_override_is_scoped_assumption() {
-    let mut base = Scenario::new("base-h11", hash(167)).unwrap();
+    let root = hash(167);
+    let mut base = Scenario::new("base-h11", root).unwrap();
     base.assume(Assumption::boolean("hiring-h11", true).unwrap())
         .unwrap();
-    let mut override_scenario = base.clone();
+    // A scenario override is a sibling projection over the same accepted
+    // root, not an in-place mutation of the base scenario.
+    let mut override_scenario = Scenario::new("override-h11", root).unwrap();
     override_scenario
         .assume(Assumption::boolean("hiring-h11", false).unwrap())
-        .unwrap_err();
-    override_scenario
-        .assume(Assumption::boolean("bonus-h11", true).unwrap())
         .unwrap();
     let diff = base.diff(&override_scenario);
     assert!(!diff.actual_root_changed);
-    assert_eq!(
-        diff.added_assumptions
-            .iter()
-            .map(|assumption| assumption.id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["bonus-h11"]
-    );
-    assert!(base.assumption("bonus-h11").is_none());
+    assert!(diff.added_assumptions.is_empty());
+    assert!(diff.removed_assumptions.is_empty());
+    assert_eq!(diff.changed_assumptions.len(), 1);
+    let changed = &diff.changed_assumptions[0];
+    assert_eq!(changed.id, "hiring-h11");
+    assert!(matches!(
+        &changed.left.value,
+        axiom_ledger::scenario::AssumptionValue::Boolean(true)
+    ));
+    assert!(matches!(
+        &changed.right.value,
+        axiom_ledger::scenario::AssumptionValue::Boolean(false)
+    ));
+    assert!(matches!(
+        base.assumption("hiring-h11")
+            .map(|assumption| &assumption.value),
+        Some(axiom_ledger::scenario::AssumptionValue::Boolean(true))
+    ));
 }
 
 #[test]
 fn independent_i02_resource_profile_bounds_rule_package() {
     let mut program = Program::new();
-    program.add_fact(text_fact("bounded-i02", "yes")).unwrap();
-    let goal = Goal::atom(text_fact("bounded-i02", "yes"));
+    let source = text_fact("source-i02", "yes");
+    let derived = text_fact("derived-i02", "yes");
+    program.add_fact(source.clone()).unwrap();
+    program.add_clause(Clause::new(derived.clone(), Goal::atom(source)));
+    let goal = Goal::atom(derived);
+
+    let complete = Solver::new().solve(&program, &goal, &SemanticContext::default());
+    assert_eq!(complete.truth(), LogicTruth::TrueOnly);
+    assert_eq!(complete.completion(), LogicCompletion::Complete);
+    complete.check_proofs().unwrap();
+    assert!(!complete.positive_proofs().is_empty());
+
+    // Keep enough steps to inspect the source fact, but cap relation terms at
+    // one.  The derived rule cannot be admitted, so the answer is incomplete
+    // rather than a false proof of the absence of the derived fact.
     let result = Solver::new().solve(
         &program,
         &goal,
         &SemanticContext::default().with_resources(ResourceProfile {
-            max_steps: 0,
-            max_iterations: 1,
+            max_steps: 100,
+            max_iterations: 10,
             max_answers: 1,
             max_terms: 1,
         }),
@@ -5116,6 +5235,10 @@ fn independent_i02_resource_profile_bounds_rule_package() {
     assert_eq!(result.completion(), LogicCompletion::ResourceLimited);
     assert!(result.is_incomplete());
     assert_ne!(result.truth(), LogicTruth::FalseOnly);
+    assert!(result.positive_proofs().is_empty());
+    assert!(result.trace().iter().any(|event| {
+        matches!(event, TraceEvent::ResourceLimit { resource } if resource == "relation terms")
+    }));
 }
 
 #[test]

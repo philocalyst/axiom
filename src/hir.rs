@@ -286,6 +286,12 @@ impl Module {
     pub fn content_id(&self) -> ContentId {
         self.content_id
     }
+    /// Recompute identity from the module's current canonical contents.
+    /// Compiler boundaries use this instead of trusting the cached lowering
+    /// identity because editor clients can still mutate public HIR fields.
+    pub fn recomputed_content_id(&self) -> ContentId {
+        module_content_id(self)
+    }
     pub fn has_errors(&self) -> bool {
         self.diagnostics
             .iter()
@@ -530,11 +536,15 @@ pub fn lower(ast: AstModule) -> Module {
         diagnostics,
         content_id: ContentId([0; 32]),
     };
+    module.content_id = module_content_id(&module);
+    module
+}
+
+fn module_content_id(module: &Module) -> ContentId {
     let mut hasher = Hasher::new();
     hasher.update(b"axiom/hir/module/v1\0");
-    hasher.update(&canonical_module(&module));
-    module.content_id = ContentId(*hasher.finalize().as_bytes());
-    module
+    hasher.update(&canonical_module(module));
+    ContentId(*hasher.finalize().as_bytes())
 }
 
 fn lower_expression(

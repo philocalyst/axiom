@@ -1969,7 +1969,7 @@ fn parse_observe(tokens: &[(String, usize)], line: usize) -> Result<Statement, P
                 }
             };
             validate_observation_quantity(&quantity, "settlement")?;
-            validate_non_negative_quantity(&quantity, "settlement amount")?;
+            validate_positive_quantity(&quantity, "settlement amount")?;
             Ok(Statement::Observe(Observation::Settlement {
                 reference,
                 quantity,
@@ -2264,6 +2264,7 @@ buy one on 2026-01-01
         for source in [
             "book tax-us\nobserve position checking 0\n",
             "book tax-us\nobserve position checking 0.0\n",
+            "book tax-us\nobserve settlement sale 0 USD\n",
             "book tax-us\nobserve settlement sale -1 USD\n",
             "book tax-us\nquote q on 2026-01-01\n  0 ABC = 1 USD\n",
         ] {
