@@ -3,10 +3,12 @@
 //! The source ledger is canonical. Parsing, resolution, recognition, journal
 //! projection, and explanations are pure views over it.
 
+pub mod accounts;
 pub mod engine;
 pub mod evidence;
 pub mod exact;
 pub mod explain;
+pub mod hir;
 pub mod incremental;
 pub mod ir;
 pub mod liquidity;
@@ -14,6 +16,7 @@ pub mod logic;
 pub mod model;
 pub mod ontology;
 pub mod package;
+pub mod package_lock;
 pub mod parser;
 pub mod proof;
 pub mod recognize;

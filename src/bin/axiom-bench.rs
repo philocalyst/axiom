@@ -8,6 +8,7 @@
 use std::env;
 use std::fmt::Write as _;
 use std::hint::black_box;
+use std::process::Command;
 use std::thread;
 use std::time::Instant;
 
@@ -232,6 +233,7 @@ struct Options {
     workload: Option<Workload>,
     self_test: bool,
     help: bool,
+    rss_probe: bool,
 }
 
 fn main() {
@@ -245,6 +247,21 @@ fn run() -> Result<(), String> {
     let options = Options::parse(env::args().skip(1))?;
     if options.help {
         print_help();
+        return Ok(());
+    }
+    if options.rss_probe {
+        let workload = options
+            .workload
+            .ok_or_else(|| "--rss-probe requires --workload".to_string())?;
+        // One representative run keeps RSS a workload measurement rather
+        // than the peak of a timing suite.
+        let _ = measure_workload(workload, options.quick, options.scale, 1, false)?;
+        let peak = process_peak_memory_bytes();
+        println!(
+            "{{\"schema\":\"{SCHEMA}\",\"kind\":\"rss_probe\",\"workload\":\"{}\",\"peak_memory_bytes\":{}}}",
+            workload.name(),
+            option_number(peak.map(|value| value as u128))
+        );
         return Ok(());
     }
     if options.self_test {
@@ -269,7 +286,7 @@ fn run() -> Result<(), String> {
 
     let mut records = Vec::with_capacity(workloads.len());
     for workload in workloads {
-        let record = measure_workload(workload, options.quick, options.scale, samples)?;
+        let record = measure_workload(workload, options.quick, options.scale, samples, true)?;
         print_json_line(&record);
         records.push(record);
     }
@@ -285,6 +302,7 @@ impl Options {
             workload: None,
             self_test: false,
             help: false,
+            rss_probe: false,
         };
         let args: Vec<String> = args.collect();
         let mut index = 0;
@@ -292,6 +310,7 @@ impl Options {
             match args[index].as_str() {
                 "--quick" => options.quick = true,
                 "--self-test" => options.self_test = true,
+                "--rss-probe" => options.rss_probe = true,
                 "-h" | "--help" => options.help = true,
                 "--scale" => {
                     index += 1;
@@ -366,6 +385,7 @@ fn measure_workload(
     quick: bool,
     scale: u64,
     samples: usize,
+    isolate_peak_memory: bool,
 ) -> Result<ResultRecord, String> {
     let generated = generate(workload, quick, scale)?;
     let source_hash = stable_hash(generated.source.as_bytes());
@@ -396,14 +416,14 @@ fn measure_workload(
             "release"
         }),
         resource_profile: Some(if process_peak_memory_bytes().is_some() {
-            "concurrent independent workers; process peak RSS via getrusage"
+            "per-workload child-process peak RSS via getrusage"
         } else {
-            "concurrent independent workers; process peak RSS unavailable"
+            "per-workload child-process peak RSS unavailable"
         }),
         note: Some(if process_peak_memory_bytes().is_some() {
-            "peak_memory_bytes is process-lifetime peak RSS; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+            "peak_memory_bytes is the isolated workload child-process peak RSS; changed_incremental_solve_ns times warm revision commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
         } else {
-            "peak RSS is unavailable on this platform; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+            "peak RSS is unavailable on this platform; changed_incremental_solve_ns times warm revision commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
         }),
         ..Metrics::default()
     };
@@ -558,7 +578,11 @@ fn measure_workload(
         metrics.cache_hits = Some(replay_metrics.cache_hits);
         metrics.cache_misses = Some(replay_metrics.cache_misses);
     }
-    metrics.peak_memory_bytes = process_peak_memory_bytes();
+    metrics.peak_memory_bytes = if isolate_peak_memory {
+        isolated_peak_memory_bytes(workload, quick, scale)?
+    } else {
+        None
+    };
 
     Ok(ResultRecord {
         workload,
@@ -857,6 +881,64 @@ fn median_explanation(
 fn median(mut values: Vec<u128>) -> u128 {
     values.sort_unstable();
     values[values.len() / 2]
+}
+
+/// Measure one workload in a fresh process so unrelated earlier workloads
+/// cannot inflate its `ru_maxrss`. The child emits one bounded protocol line;
+/// using `output()` keeps stdout/stderr collection joined and deadlock-free.
+fn isolated_peak_memory_bytes(
+    workload: Workload,
+    quick: bool,
+    scale: u64,
+) -> Result<Option<usize>, String> {
+    let executable = env::current_exe()
+        .map_err(|error| format!("cannot locate benchmark executable for RSS probe: {error}"))?;
+    let mut command = Command::new(executable);
+    command
+        .arg("--rss-probe")
+        .arg("--workload")
+        .arg(workload.name());
+    if quick {
+        command.arg("--quick");
+    }
+    command.arg("--scale").arg(scale.to_string());
+    let output = command
+        .output()
+        .map_err(|error| format!("RSS probe failed to start: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "RSS probe failed for {} ({}): {}",
+            workload.name(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|_| "RSS probe emitted non-UTF-8 stdout".to_string())?;
+    let lines = stdout.lines().collect::<Vec<_>>();
+    if lines.len() != 1 {
+        return Err(format!(
+            "RSS probe emitted {} protocol lines for {}",
+            lines.len(),
+            workload.name()
+        ));
+    }
+    let line = lines[0];
+    let prefix = format!(
+        "{{\"schema\":\"{SCHEMA}\",\"kind\":\"rss_probe\",\"workload\":\"{}\",\"peak_memory_bytes\":",
+        workload.name()
+    );
+    let value = line
+        .strip_prefix(&prefix)
+        .and_then(|value| value.strip_suffix('}'))
+        .ok_or_else(|| format!("RSS probe returned malformed JSON: {line}"))?;
+    if value == "null" {
+        return Ok(None);
+    }
+    value
+        .parse::<usize>()
+        .map(Some)
+        .map_err(|_| format!("RSS probe returned invalid peak bytes: {line}"))
 }
 
 /// Return this process's peak resident set size when the target exposes a

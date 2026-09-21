@@ -502,16 +502,19 @@ impl Workspace {
         let source_ledger = self.source_ledger(source)?;
         let source_value = self.store.commit(source)?.clone();
         let packages: Vec<_> = packages.into_iter().collect();
-        let commit = self.store.put_commit(Commit::new(
-            [source],
-            source_value.evidence,
-            [],
-            [],
-            [],
-            packages.clone(),
-            [],
-            SOURCE_AUTHOR,
-        ))?;
+        let commit = self.store.put_commit(
+            Commit::new(
+                [source],
+                source_value.evidence,
+                [],
+                source_value.decisions,
+                [],
+                packages.clone(),
+                [],
+                SOURCE_AUTHOR,
+            )
+            .with_conflicts(source_value.conflicts),
+        )?;
         self.sync_package_inputs(source_ledger.source(), source_ledger.bytes(), &packages)?;
         self.heads
             .insert(source_ledger.evidence.source().clone(), commit);
@@ -820,13 +823,25 @@ impl Workspace {
         at: CommitId,
     ) -> Result<Option<SourceLedger>, WorkspaceError> {
         let expected = SourceId::try_new(source.into()).map_err(|_| WorkspaceError::EmptySource)?;
+        let visible = self.store.evidence_as_known_at(expected.as_str(), at)?;
+        if visible.len() > 1 {
+            return Err(WorkspaceError::NotSourceCommit {
+                commit: at,
+                reason: format!(
+                    "source {expected} has {} unresolved evidence alternatives",
+                    visible.len()
+                ),
+            });
+        }
+        let Some(visible) = visible.first().copied() else {
+            return Ok(None);
+        };
         for commit in self.history(at)? {
             let value = self.store.commit(commit)?;
             if value.evidence.len() != 1 {
                 continue;
             }
-            let evidence = self.store.evidence(value.evidence[0])?;
-            if evidence.source == expected.to_string() {
+            if value.evidence[0] == visible {
                 return Ok(Some(self.materialize_source_commit(commit)?));
             }
         }
@@ -862,10 +877,11 @@ impl Workspace {
             parents: vec![source_commit],
             evidence: Vec::new(),
             statements: Vec::new(),
-            decisions: Vec::new(),
+            decisions: source_commit_value.decisions,
             completeness: Vec::new(),
             packages: source_commit_value.packages,
             proofs: vec![proof_id],
+            conflicts: source_commit_value.conflicts,
             schema_version: source_commit_value.schema_version,
             author: ANALYSIS_AUTHOR.to_string(),
             signatures: Vec::new(),
@@ -1008,16 +1024,19 @@ impl Workspace {
             corrected = corrected.with_external(external);
         }
         let corrected_id = self.store.put_evidence(corrected)?;
-        let commit = self.store.put_commit(Commit::new(
-            [prior],
-            [corrected_id],
-            [],
-            [],
-            [],
-            prior_value.packages,
-            [],
-            SOURCE_AUTHOR,
-        ))?;
+        let commit = self.store.put_commit(
+            Commit::new(
+                [prior],
+                [corrected_id],
+                [],
+                prior_value.decisions,
+                [],
+                prior_value.packages,
+                [],
+                SOURCE_AUTHOR,
+            )
+            .with_conflicts(prior_value.conflicts),
+        )?;
         self.heads.insert(source, commit);
         self.materialize_source_commit(commit)
     }
@@ -1067,8 +1086,27 @@ impl Workspace {
                 reason: "source commits cannot be merge commits".to_string(),
             });
         }
+        let mut resolution_decisions = BTreeSet::new();
+        let mut has_unresolved_conflict = false;
+        for id in &value.conflicts {
+            let conflict = self.store.conflict(*id)?;
+            if let Some(decision) = conflict.resolution {
+                resolution_decisions.insert(decision);
+            } else {
+                has_unresolved_conflict = true;
+            }
+        }
+        if has_unresolved_conflict {
+            return Err(WorkspaceError::NotSourceCommit {
+                commit,
+                reason: "source contains unresolved semantic conflicts".to_string(),
+            });
+        }
         if !value.statements.is_empty()
-            || !value.decisions.is_empty()
+            || value
+                .decisions
+                .iter()
+                .any(|decision| !resolution_decisions.contains(decision))
             || !value.completeness.is_empty()
             || !value.proofs.is_empty()
         {

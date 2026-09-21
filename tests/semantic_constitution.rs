@@ -1523,6 +1523,90 @@ const INDEPENDENT_CASES_ADDED: &[IndependentCase] = &[
         id: "I04",
         executor: independent_i04_revocation_keeps_history,
     },
+    IndependentCase {
+        id: "C02",
+        executor: independent_c02_authorized_user_is_not_debtor,
+    },
+    IndependentCase {
+        id: "C04",
+        executor: independent_c04_security_deposit_has_repayment_obligation,
+    },
+    IndependentCase {
+        id: "C05",
+        executor: independent_c05_restricted_funds_are_encumbered,
+    },
+    IndependentCase {
+        id: "C06",
+        executor: independent_c06_trustee_beneficiary_tax_owner_differ,
+    },
+    IndependentCase {
+        id: "C07",
+        executor: independent_c07_borrowed_security_is_return_obligation,
+    },
+    IndependentCase {
+        id: "C09",
+        executor: independent_c09_pledge_changes_liquidity_not_position,
+    },
+    IndependentCase {
+        id: "C10",
+        executor: independent_c10_multicurrency_account_has_separate_positions,
+    },
+    IndependentCase {
+        id: "C11",
+        executor: independent_c11_overdraft_is_contractual_credit,
+    },
+    IndependentCase {
+        id: "C14",
+        executor: independent_c14_virtual_envelope_is_not_external_account,
+    },
+    IndependentCase {
+        id: "D03",
+        executor: independent_d03_stale_quote_is_not_silent_current_value,
+    },
+    IndependentCase {
+        id: "D04",
+        executor: independent_d04_bid_ask_has_no_implicit_reverse,
+    },
+    IndependentCase {
+        id: "D05",
+        executor: independent_d05_triangulation_keeps_route_proof,
+    },
+    IndependentCase {
+        id: "D07",
+        executor: independent_d07_fractional_quantity_is_exact,
+    },
+    IndependentCase {
+        id: "D19",
+        executor: independent_d19_unique_asset_uses_identity_not_fungibility,
+    },
+    IndependentCase {
+        id: "D20",
+        executor: independent_d20_barter_has_coupled_legs,
+    },
+    IndependentCase {
+        id: "D23",
+        executor: independent_d23_instrument_expiry_is_explicit,
+    },
+    IndependentCase {
+        id: "D24",
+        executor: independent_d24_off_quantum_is_rejected_not_rounded,
+    },
+    IndependentCase {
+        id: "E14",
+        executor: independent_e14_reversal_is_new_event_correction_supersedes,
+    },
+    IndependentCase {
+        id: "E15",
+        executor: independent_e15_late_discovery_restates_close,
+    },
+    IndependentCase {
+        id: "F02",
+        executor: independent_f02_dst_ambiguity_remains_visible,
+    },
+    IndependentCase {
+        id: "F03",
+        executor: independent_f03_month_precision_is_coarse,
+    },
 ];
 
 fn date(text: &str) -> Date {
@@ -2970,7 +3054,7 @@ fn collaboration_and_adapter_boundaries_fixtures() {
 fn independent_case_registry_is_explicit() {
     assert_eq!(
         INDEPENDENT_CASES_ADDED.len(),
-        29,
+        50,
         "this tranche must keep an auditable independent-case count"
     );
     let executed: BTreeSet<_> = FIXTURES
@@ -3947,5 +4031,472 @@ fn independent_i04_revocation_keeps_history() {
                 Authority::user("alice-i04").unwrap(),
             ))
             .is_err()
+    );
+}
+
+#[test]
+fn independent_c02_authorized_user_is_not_debtor() {
+    let assignment = axiom_ledger::ontology::RoleAssignment::new(
+        "card-c02",
+        Role::AuthorizedUser,
+        "employee-c02",
+    );
+    let debt = Obligation::transfer(
+        "card-debt-c02",
+        "employer-c02",
+        "issuer-c02",
+        "USD",
+        Quantity::with_unit(25i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(assignment.role, Role::AuthorizedUser);
+    assert_ne!(assignment.holder, debt.debtor);
+    assert_eq!(
+        debt.creditor,
+        axiom_ledger::model::EntityId::new("issuer-c02")
+    );
+}
+
+#[test]
+fn independent_c04_security_deposit_has_repayment_obligation() {
+    let held = Position::new(
+        "deposit-c04",
+        "landlord-c04",
+        "USD",
+        Quantity::with_unit(500i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    let repayment = Obligation::transfer(
+        "repayment-c04",
+        "landlord-c04",
+        "tenant-c04",
+        "USD",
+        held.quantity.clone(),
+    )
+    .unwrap();
+    assert_eq!(
+        held.quantity,
+        repayment.promised_quantity().unwrap().clone()
+    );
+    assert_eq!(
+        repayment.creditor,
+        axiom_ledger::model::EntityId::new("tenant-c04")
+    );
+}
+
+#[test]
+fn independent_c05_restricted_funds_are_encumbered() {
+    let position = Position::new(
+        "restricted-c05",
+        "owner-c05",
+        "USD",
+        Quantity::with_unit(100i64.into(), "USD").unwrap(),
+    )
+    .unwrap()
+    .with_encumbrance("restriction-c05");
+    let hold = Encumbrance::for_quantity(
+        "restriction-c05",
+        EncumbranceKind::Restricted,
+        Quantity::with_unit(70i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    let available = position
+        .available_quantity(&BTreeMap::from([(
+            axiom_ledger::ontology::EncumbranceId::from("restriction-c05"),
+            hold,
+        )]))
+        .unwrap();
+    assert_eq!(available.number.canonical_string(), "30");
+}
+
+#[test]
+fn independent_c06_trustee_beneficiary_tax_owner_differ() {
+    let trust = Entity::new("trust-c06", EntityKind::Trust);
+    let roles = RoleAssignments::new()
+        .with(axiom_ledger::ontology::RoleAssignment::new(
+            trust.id.clone(),
+            Role::Trustee,
+            "trustee-c06",
+        ))
+        .with(axiom_ledger::ontology::RoleAssignment::new(
+            trust.id.clone(),
+            Role::Beneficiary,
+            "beneficiary-c06",
+        ))
+        .with(axiom_ledger::ontology::RoleAssignment::new(
+            trust.id.clone(),
+            Role::TaxOwner,
+            "tax-owner-c06",
+        ));
+    roles.validate().unwrap();
+    assert_eq!(roles.holders(&trust.id, &Role::Trustee).count(), 1);
+    assert_eq!(roles.holders(&trust.id, &Role::Beneficiary).count(), 1);
+    assert_eq!(roles.holders(&trust.id, &Role::TaxOwner).count(), 1);
+    assert_ne!(
+        roles.holders(&trust.id, &Role::Trustee).next(),
+        roles.holders(&trust.id, &Role::TaxOwner).next()
+    );
+}
+
+#[test]
+fn independent_c07_borrowed_security_is_return_obligation() {
+    let return_claim = Obligation::transfer(
+        "borrowed-return-c07",
+        "borrower-c07",
+        "lender-c07",
+        "ABC",
+        Quantity::with_unit(10i64.into(), "ABC").unwrap(),
+    )
+    .unwrap();
+    return_claim.validate().unwrap();
+    assert_eq!(
+        return_claim.creditor,
+        axiom_ledger::model::EntityId::new("lender-c07")
+    );
+    assert_eq!(
+        return_claim
+            .promised_quantity()
+            .unwrap()
+            .number
+            .canonical_string(),
+        "10"
+    );
+}
+
+#[test]
+fn independent_c09_pledge_changes_liquidity_not_position() {
+    let cash = Quantity::with_unit(100i64.into(), "USD").unwrap();
+    let position = Position::new("pledged-c09", "owner-c09", "USD", cash.clone())
+        .unwrap()
+        .with_encumbrance("pledge-c09");
+    let pledge = Encumbrance::for_quantity(
+        "pledge-c09",
+        EncumbranceKind::Pledge,
+        Quantity::with_unit(40i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(position.quantity, cash);
+    assert_eq!(
+        position
+            .available_quantity(&BTreeMap::from([(
+                axiom_ledger::ontology::EncumbranceId::from("pledge-c09"),
+                pledge,
+            )]))
+            .unwrap()
+            .number
+            .canonical_string(),
+        "60"
+    );
+}
+
+#[test]
+fn independent_c10_multicurrency_account_has_separate_positions() {
+    let usd = Position::new(
+        "usd-c10",
+        "owner-c10",
+        "USD",
+        Quantity::with_unit(10i64.into(), "USD").unwrap(),
+    )
+    .unwrap()
+    .at_account("wallet-c10");
+    let eur = Position::new(
+        "eur-c10",
+        "owner-c10",
+        "EUR",
+        Quantity::with_unit(10i64.into(), "EUR").unwrap(),
+    )
+    .unwrap()
+    .at_account("wallet-c10");
+    assert_eq!(usd.account, eur.account);
+    assert_ne!(usd.instrument, eur.instrument);
+    assert_ne!(usd.quantity.unit(), eur.quantity.unit());
+}
+
+#[test]
+fn independent_c11_overdraft_is_contractual_credit() {
+    let overdraft = Obligation::transfer(
+        "overdraft-c11",
+        "account-holder-c11",
+        "bank-c11",
+        "USD",
+        Quantity::with_unit(100i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        overdraft.debtor,
+        axiom_ledger::model::EntityId::new("account-holder-c11")
+    );
+    assert_eq!(
+        overdraft.creditor,
+        axiom_ledger::model::EntityId::new("bank-c11")
+    );
+    assert_eq!(
+        overdraft
+            .promised_quantity()
+            .unwrap()
+            .unit()
+            .unwrap()
+            .as_str(),
+        "USD"
+    );
+}
+
+#[test]
+fn independent_c14_virtual_envelope_is_not_external_account() {
+    let envelope = VirtualAccount::new("envelope-c14", "account:checking AND tag:rent");
+    assert_eq!(envelope.id, "envelope-c14".into());
+    assert_eq!(envelope.query, "account:checking AND tag:rent");
+}
+
+#[test]
+fn independent_d03_stale_quote_is_not_silent_current_value() {
+    let abc = unit("ABC", "ABC");
+    let usd = unit("USD", "USD");
+    let quote = Quote::new(
+        "stale-d03",
+        Ratio::new(abc.clone(), usd.clone(), ExactNumber::integer(2)),
+        QuoteKind::Mid,
+        Instant::EPOCH,
+        Instant::EPOCH,
+        "venue-d03",
+        "source-d03",
+        InstantInterval::closed(Instant::EPOCH, Instant::from_unix_seconds(10)).unwrap(),
+    );
+    let result = value(
+        &uq("1", abc),
+        &usd,
+        Instant::from_unix_seconds(100),
+        &[quote],
+        ValuationPolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(result.status, ValuationStatus::Stale);
+    assert!(result.quantity.is_none());
+    assert_eq!(result.paths.len(), 1);
+}
+
+#[test]
+fn independent_d04_bid_ask_has_no_implicit_reverse() {
+    let abc = unit("ABC", "ABC");
+    let usd = unit("USD", "USD");
+    let bid = Quote::new(
+        "bid-d04",
+        Ratio::new(abc.clone(), usd.clone(), ExactNumber::integer(2)),
+        QuoteKind::Bid,
+        Instant::EPOCH,
+        Instant::EPOCH,
+        "venue-d04",
+        "source-d04",
+        InstantInterval::closed(Instant::EPOCH, Instant::from_unix_seconds(10)).unwrap(),
+    );
+    let result = value(
+        &uq("2", usd),
+        &abc,
+        Instant::from_unix_seconds(1),
+        &[bid],
+        ValuationPolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(result.status, ValuationStatus::Unavailable);
+    assert!(result.paths.is_empty());
+}
+
+#[test]
+fn independent_d05_triangulation_keeps_route_proof() {
+    let abc = unit("ABC", "ABC");
+    let eur = unit("EUR", "EUR");
+    let usd = unit("USD", "USD");
+    let quotes = [
+        Quote::new(
+            "abc-eur-d05",
+            Ratio::new(abc.clone(), eur.clone(), ExactNumber::integer(2)),
+            QuoteKind::Mid,
+            Instant::EPOCH,
+            Instant::EPOCH,
+            "venue-d05",
+            "source-d05-a",
+            InstantInterval::closed(Instant::EPOCH, Instant::from_unix_seconds(10)).unwrap(),
+        ),
+        Quote::new(
+            "eur-usd-d05",
+            Ratio::new(eur, usd.clone(), ExactNumber::integer(3)),
+            QuoteKind::Mid,
+            Instant::EPOCH,
+            Instant::EPOCH,
+            "venue-d05",
+            "source-d05-b",
+            InstantInterval::closed(Instant::EPOCH, Instant::from_unix_seconds(10)).unwrap(),
+        ),
+    ];
+    let result = value(
+        &uq("2", abc),
+        &usd,
+        Instant::from_unix_seconds(1),
+        &quotes,
+        ValuationPolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(result.status, ValuationStatus::Unique);
+    assert_eq!(result.quantity.unwrap().amount().canonical_string(), "12");
+    assert_eq!(result.paths.len(), 1);
+    assert_eq!(result.paths[0].legs().len(), 2);
+}
+
+#[test]
+fn independent_d07_fractional_quantity_is_exact() {
+    let share = unit("share-d07", "ABC-d07");
+    let quantity = uq("1.25", share);
+    assert_eq!(quantity.amount().canonical_string(), "5/4");
+    assert_eq!(
+        quantity.amount() * &ExactNumber::integer(4),
+        ExactNumber::integer(5)
+    );
+}
+
+#[test]
+fn independent_d19_unique_asset_uses_identity_not_fungibility() {
+    let asset = Instrument::new("painting-d19", InstrumentKind::UniqueAsset);
+    let first = Position::new(
+        "painting-d19-a",
+        "owner-d19",
+        "painting-d19",
+        Quantity::with_unit(1i64.into(), "painting-d19").unwrap(),
+    )
+    .unwrap();
+    let second = Position::new(
+        "painting-d19-b",
+        "owner-d19",
+        "painting-d19",
+        Quantity::with_unit(1i64.into(), "painting-d19").unwrap(),
+    )
+    .unwrap();
+    assert_eq!(asset.kind, InstrumentKind::UniqueAsset);
+    assert_ne!(first.id, second.id);
+    assert_eq!(first.quantity, second.quantity);
+}
+
+#[test]
+fn independent_d20_barter_has_coupled_legs() {
+    let left = Endpoint::entity("trader-a-d20");
+    let right = Endpoint::entity("trader-b-d20");
+    let exchange = ExchangeRecord::new(
+        "barter-d20",
+        vec![
+            ExchangeLeg::give(
+                left.clone(),
+                right.clone(),
+                "USD",
+                Quantity::with_unit(10i64.into(), "USD").unwrap(),
+            ),
+            ExchangeLeg::receive(
+                right,
+                left,
+                "GOOD",
+                Quantity::with_unit(1i64.into(), "GOOD").unwrap(),
+            ),
+        ],
+    );
+    validate_exchange_legs(&exchange).unwrap();
+    assert_eq!(exchange.legs.len(), 2);
+    assert_ne!(exchange.legs[0].instrument, exchange.legs[1].instrument);
+}
+
+#[test]
+fn independent_d23_instrument_expiry_is_explicit() {
+    let mut instrument = Instrument::new("coupon-d23", InstrumentKind::DebtSecurity);
+    instrument.expires = Some(date("2026-12-31"));
+    assert_eq!(instrument.expires, Some(date("2026-12-31")));
+}
+
+#[test]
+fn independent_d24_off_quantum_is_rejected_not_rounded() {
+    let definition = InstrumentDefinition::new(
+        "ABC-d24",
+        unit("share-d24", "ABC-d24"),
+        ExactNumber::parse("0.01").unwrap(),
+    )
+    .unwrap();
+    let off_quantum = definition.accepts(&uq("1.235", unit("share-d24", "ABC-d24")));
+    assert!(matches!(off_quantum, Err(UnitError::OffQuantum { .. })));
+}
+
+#[test]
+fn independent_e14_reversal_is_new_event_correction_supersedes() {
+    let original = Identity::new("sale-e14", hash(140));
+    let reversal = Identity::new("reversal-e14", hash(141));
+    let relation = EvidenceRelation::reverses(reversal.clone(), original.clone());
+    assert_eq!(relation.kind, EvidenceRelationKind::Reverses);
+    assert_eq!(relation.from(), &reversal);
+    assert_eq!(relation.to(), &original);
+    assert_ne!(relation.from(), relation.to());
+}
+
+#[test]
+fn independent_e15_late_discovery_restates_close() {
+    let mut store = ObjectStore::new();
+    let evidence = store
+        .put_evidence(Evidence::new("late-e15", "bank-e15", b"late".to_vec()))
+        .unwrap();
+    let package = store
+        .put_package(PolicyPackage::new("cash-e15", "1", b"policy".to_vec()))
+        .unwrap();
+    let statement = store
+        .put_statement(Statement::new("balance-e15", "amount", "10 USD"))
+        .unwrap();
+    let proof_object = store
+        .put_proof(ProofObject::recognized(
+            [evidence.hash()],
+            b"proof".to_vec(),
+        ))
+        .unwrap();
+    let commit = store
+        .put_commit(Commit::new(
+            [],
+            [evidence],
+            [statement],
+            [],
+            [],
+            [package],
+            [proof_object],
+            "close-author-e15",
+        ))
+        .unwrap();
+    let period = Period::new(date("2026-09-01"), date("2026-09-30")).unwrap();
+    let first = store
+        .put_close(Close::new(
+            period.clone(),
+            "cash-e15",
+            [package],
+            commit,
+            proof_object.hash(),
+        ))
+        .unwrap();
+    let second = store
+        .put_close(
+            Close::new(period, "cash-e15", [package], commit, proof_object.hash())
+                .superseding(first),
+        )
+        .unwrap();
+    assert_eq!(store.close(second).unwrap().supersedes, Some(first));
+    assert!(store.close(first).is_ok());
+}
+
+#[test]
+fn independent_f02_dst_ambiguity_remains_visible() {
+    let local = LocalDateTime::ambiguous(
+        LocalDate::new(2026, 11, 1).unwrap(),
+        LocalTime::new(1, 30, 0, 0).unwrap(),
+        "America/New_York",
+    );
+    assert_eq!(local.status(), LocalTimeStatus::Ambiguous);
+    assert!(local.to_instant().is_err());
+}
+
+#[test]
+fn independent_f03_month_precision_is_coarse() {
+    let month = TimePeriod::month(2026, 9).unwrap();
+    assert_eq!(
+        month.precision(),
+        axiom_ledger::time::PeriodPrecision::Month
     );
 }

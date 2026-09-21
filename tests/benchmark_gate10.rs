@@ -102,5 +102,42 @@ fn revision_workloads_report_incremental_timing_and_invalidation() {
                 && !line.contains("\"invalidated_queries\":0"),
             "revision invalidation is missing for {workload}: {line}"
         );
+        assert!(
+            line.contains("changed_incremental_solve_ns times warm revision commit plus analysis")
+                && line.contains("changed_full_solve_ns times clean recomputation"),
+            "revision timing semantics are not documented in the measurement: {line}"
+        );
     }
+}
+
+#[test]
+fn peak_rss_is_isolated_per_workload_and_schema_stays_stable() {
+    let first = measurement("invoice-payment-graph");
+    let second = measurement("invoice-payment-graph");
+    for line in [&first, &second] {
+        assert!(
+            line.contains("\"resource_profile\":\"per-workload child-process peak RSS"),
+            "RSS provenance is missing: {line}"
+        );
+        assert!(
+            line.contains("\"peak_memory_bytes\":") && !line.contains("\"peak_memory_bytes\":null"),
+            "isolated RSS was not measured: {line}"
+        );
+        assert!(
+            line.contains("isolated workload child-process peak RSS"),
+            "RSS note does not identify the measurement boundary: {line}"
+        );
+    }
+    // Generation is deterministic even though timings and RSS are naturally
+    // observations and may differ between invocations.
+    let hash = |line: &str| {
+        line.split("\"source_hash\":\"")
+            .nth(1)
+            .and_then(|tail| tail.split('"').next())
+            .expect("source hash")
+            .to_owned()
+    };
+    assert_eq!(hash(&first), hash(&second));
+    assert_eq!(first.matches("\"schema\":").count(), 1);
+    assert_eq!(second.matches("\"schema\":").count(), 1);
 }

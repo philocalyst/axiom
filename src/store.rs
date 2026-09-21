@@ -20,7 +20,7 @@ use crate::proof::{
     Node as CanonicalNode, Operation as CanonicalOperation, Proof as CanonicalProof,
 };
 
-const SCHEMA_VERSION: &str = "axiom/store/v2";
+const SCHEMA_VERSION: &str = "axiom/store/v3";
 const EVIDENCE_CONTENT_DOMAIN: &str = "axiom/store/evidence-content/v1";
 
 /// The object families that may be addressed by this store.
@@ -32,6 +32,7 @@ pub enum ObjectKind {
     Completeness,
     Package,
     Proof,
+    Conflict,
     Commit,
     Close,
 }
@@ -45,6 +46,7 @@ impl ObjectKind {
             Self::Completeness => "completeness",
             Self::Package => "package",
             Self::Proof => "proof",
+            Self::Conflict => "conflict",
             Self::Commit => "commit",
             Self::Close => "close",
         }
@@ -79,6 +81,7 @@ kind_marker!(DecisionKind, Decision);
 kind_marker!(CompletenessKind, Completeness);
 kind_marker!(PackageKind, Package);
 kind_marker!(ProofKind, Proof);
+kind_marker!(ConflictKind, Conflict);
 kind_marker!(CommitKind, Commit);
 kind_marker!(CloseKind, Close);
 
@@ -130,6 +133,7 @@ pub type PackageId = ObjectId<PackageKind>;
 /// is addressed by the store's typed object hash, while all semantic edges
 /// continue to use the canonical proof ID.
 pub type ProofObjectId = ObjectId<ProofKind>;
+pub type ConflictId = ObjectId<ConflictKind>;
 pub type CommitId = ObjectId<CommitKind>;
 pub type CloseId = ObjectId<CloseKind>;
 
@@ -732,6 +736,9 @@ pub struct Commit {
     pub completeness: Vec<CompletenessId>,
     pub packages: Vec<PackageId>,
     pub proofs: Vec<ProofObjectId>,
+    /// Durable semantic conflicts. A later snapshot may replace an unresolved
+    /// conflict only with a [`ConflictRecord`] that explicitly resolves it.
+    pub conflicts: Vec<ConflictId>,
     pub schema_version: String,
     pub author: String,
     pub signatures: Vec<Signature>,
@@ -757,6 +764,7 @@ impl Commit {
             completeness: canonical_set(completeness),
             packages: canonical_set(packages),
             proofs: canonical_set(proofs),
+            conflicts: Vec::new(),
             schema_version: SCHEMA_VERSION.to_string(),
             author: author.into(),
             signatures: Vec::new(),
@@ -774,6 +782,11 @@ impl Commit {
         self
     }
 
+    pub fn with_conflicts(mut self, conflicts: impl IntoIterator<Item = ConflictId>) -> Self {
+        self.conflicts = canonical_set(conflicts);
+        self
+    }
+
     pub fn canonicalize(&mut self) {
         canonicalize_vec(&mut self.parents);
         canonicalize_vec(&mut self.evidence);
@@ -782,6 +795,7 @@ impl Commit {
         canonicalize_vec(&mut self.completeness);
         canonicalize_vec(&mut self.packages);
         canonicalize_vec(&mut self.proofs);
+        canonicalize_vec(&mut self.conflicts);
         self.signatures.sort();
         self.signatures.dedup();
     }
@@ -894,6 +908,7 @@ pub enum StoredObject {
     Completeness(Completeness),
     Package(PolicyPackage),
     Proof(ProofObject),
+    Conflict(ConflictRecord),
     Commit(Commit),
     Close(Close),
 }
@@ -907,6 +922,7 @@ impl StoredObject {
             Self::Completeness(_) => ObjectKind::Completeness,
             Self::Package(_) => ObjectKind::Package,
             Self::Proof(_) => ObjectKind::Proof,
+            Self::Conflict(_) => ObjectKind::Conflict,
             Self::Commit(_) => ObjectKind::Commit,
             Self::Close(_) => ObjectKind::Close,
         }
@@ -924,6 +940,7 @@ impl StoredObject {
             Self::Completeness(value) => encode_completeness(&mut out, value),
             Self::Package(value) => encode_package(&mut out, value),
             Self::Proof(value) => encode_proof(&mut out, value),
+            Self::Conflict(value) => encode_conflict_record(&mut out, value),
             Self::Commit(value) => encode_commit(&mut out, value),
             Self::Close(value) => encode_close(&mut out, value),
         }
@@ -931,7 +948,7 @@ impl StoredObject {
     }
 
     pub fn content_hash(&self) -> ContentHash {
-        ContentHash::domain_separated("axiom/store/object/v2", &self.canonical_bytes())
+        ContentHash::domain_separated("axiom/store/object/v3", &self.canonical_bytes())
     }
 }
 
@@ -983,6 +1000,52 @@ pub enum MergeConflict {
     },
 }
 
+/// Immutable lifecycle record for a collaboration conflict.
+///
+/// Resolution never mutates or deletes the original record. It creates a new
+/// record that names both the unresolved object and the decision authorizing
+/// its resolution.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ConflictRecord {
+    pub conflict: MergeConflict,
+    pub supersedes: Option<ConflictId>,
+    pub resolution: Option<DecisionId>,
+    pub rationale: Option<String>,
+}
+
+impl ConflictRecord {
+    pub fn resolution_subject(conflict: ConflictId) -> String {
+        format!("conflict/{conflict}")
+    }
+
+    pub fn unresolved(conflict: MergeConflict) -> Self {
+        Self {
+            conflict,
+            supersedes: None,
+            resolution: None,
+            rationale: None,
+        }
+    }
+
+    pub fn resolved(
+        conflict: MergeConflict,
+        supersedes: ConflictId,
+        resolution: DecisionId,
+        rationale: impl Into<String>,
+    ) -> Self {
+        Self {
+            conflict,
+            supersedes: Some(supersedes),
+            resolution: Some(resolution),
+            rationale: Some(rationale.into()),
+        }
+    }
+
+    pub const fn is_resolved(&self) -> bool {
+        self.resolution.is_some()
+    }
+}
+
 /// The interval portion of a completeness claim retained in a merge
 /// diagnostic.  Keeping it next to the object IDs prevents a conflict report
 /// from collapsing two claims merely because their relation keys match.
@@ -997,11 +1060,13 @@ pub struct CompletenessBounds {
 pub struct MergeResult {
     pub commit: CommitId,
     pub conflicts: Vec<MergeConflict>,
+    pub conflict_objects: Vec<ConflictId>,
+    pub unresolved_conflicts: Vec<ConflictId>,
 }
 
 impl MergeResult {
     pub fn is_clean(&self) -> bool {
-        self.conflicts.is_empty()
+        self.conflicts.is_empty() && self.unresolved_conflicts.is_empty()
     }
 }
 
@@ -1256,6 +1321,176 @@ impl ObjectStore {
         Ok(ProofObjectId::new(self.insert(StoredObject::Proof(value))?))
     }
 
+    pub fn put_conflict(&mut self, mut value: ConflictRecord) -> Result<ConflictId, StoreError> {
+        if let MergeConflict::Completeness {
+            left,
+            right,
+            left_bounds,
+            right_bounds,
+            ..
+        } = &value.conflict
+            && (left.len() != left_bounds.len() || right.len() != right_bounds.len())
+        {
+            return Err(StoreError::InvalidObject(
+                "completeness conflict bounds must match their referenced claims".into(),
+            ));
+        }
+        canonicalize_merge_conflict(&mut value.conflict);
+        self.validate_merge_conflict(&value.conflict)?;
+        match (value.supersedes, value.resolution) {
+            (None, None) => {
+                if value.rationale.is_some() {
+                    return Err(StoreError::InvalidObject(
+                        "unresolved conflict cannot carry a resolution rationale".into(),
+                    ));
+                }
+            }
+            (Some(prior), Some(decision)) => {
+                let prior_value = self.conflict(prior)?;
+                if prior_value.is_resolved() || prior_value.conflict != value.conflict {
+                    return Err(StoreError::InvalidObject(
+                        "conflict resolution must supersede the same unresolved conflict".into(),
+                    ));
+                }
+                self.require_kind(decision.hash(), ObjectKind::Decision)?;
+                if self.decision(decision)?.subject != ConflictRecord::resolution_subject(prior) {
+                    return Err(StoreError::InvalidObject(
+                        "conflict resolution decision must explicitly name the conflict".into(),
+                    ));
+                }
+                if value
+                    .rationale
+                    .as_deref()
+                    .is_none_or(|rationale| rationale.trim().is_empty())
+                {
+                    return Err(StoreError::InvalidObject(
+                        "conflict resolution requires a rationale".into(),
+                    ));
+                }
+            }
+            _ => {
+                return Err(StoreError::InvalidObject(
+                    "conflict resolution requires both prior conflict and decision".into(),
+                ));
+            }
+        }
+        Ok(ConflictId::new(self.insert(StoredObject::Conflict(value))?))
+    }
+
+    fn validate_merge_conflict(&self, conflict: &MergeConflict) -> Result<(), StoreError> {
+        let invalid = || {
+            StoreError::InvalidObject(
+                "conflict payload does not match its referenced semantic objects".into(),
+            )
+        };
+        match conflict {
+            MergeConflict::Evidence {
+                supersedes,
+                left,
+                right,
+            } => {
+                self.require_kind(supersedes.hash(), ObjectKind::Evidence)?;
+                for id in left.iter().chain(right) {
+                    self.require_kind(id.hash(), ObjectKind::Evidence)?;
+                    if self.evidence(*id)?.state.supersedes() != Some(*supersedes) {
+                        return Err(invalid());
+                    }
+                }
+            }
+            MergeConflict::EvidenceIdentity {
+                source,
+                identity,
+                alternatives,
+            } => {
+                for id in alternatives {
+                    self.require_kind(id.hash(), ObjectKind::Evidence)?;
+                    let evidence = self.evidence(*id)?;
+                    let actual_identity = evidence.external.as_ref().map_or_else(
+                        || format!("occurrence:{}", evidence.occurrence),
+                        |external| format!("external:{}", external.as_str()),
+                    );
+                    if evidence.source != *source
+                        || actual_identity != *identity
+                        || !matches!(evidence.state, EvidenceState::Present)
+                    {
+                        return Err(invalid());
+                    }
+                }
+            }
+            MergeConflict::Statements {
+                subject,
+                predicate,
+                value,
+                left,
+                right,
+            } => {
+                for id in left.iter().chain(right) {
+                    self.require_kind(id.hash(), ObjectKind::Statement)?;
+                    let statement = self.statement(*id)?;
+                    if statement.subject != *subject
+                        || statement.predicate != *predicate
+                        || statement.value != *value
+                    {
+                        return Err(invalid());
+                    }
+                }
+            }
+            MergeConflict::Decisions {
+                subject,
+                scope,
+                left,
+                right,
+            } => {
+                for id in left.iter().chain(right) {
+                    self.require_kind(id.hash(), ObjectKind::Decision)?;
+                    let decision = self.decision(*id)?;
+                    if decision.subject != *subject || decision.scope != *scope {
+                        return Err(invalid());
+                    }
+                }
+            }
+            MergeConflict::Policies { name, left, right } => {
+                for id in left.iter().chain(right) {
+                    self.require_kind(id.hash(), ObjectKind::Package)?;
+                    if self.package(*id)?.name != *name {
+                        return Err(invalid());
+                    }
+                }
+            }
+            MergeConflict::Completeness {
+                relation,
+                source,
+                scope,
+                left,
+                right,
+                left_bounds,
+                right_bounds,
+            } => {
+                if left.len() != left_bounds.len() || right.len() != right_bounds.len() {
+                    return Err(invalid());
+                }
+                for (id, bounds) in left
+                    .iter()
+                    .zip(left_bounds)
+                    .chain(right.iter().zip(right_bounds))
+                {
+                    self.require_kind(id.hash(), ObjectKind::Completeness)?;
+                    let claim = self.completeness(*id)?;
+                    if claim.relation != *relation
+                        || claim.source != *source
+                        || claim.scope != *scope
+                        || claim.from != bounds.from
+                        || claim.until != bounds.until
+                        || claim.complete != bounds.complete
+                    {
+                        return Err(invalid());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub fn put_commit(&mut self, value: Commit) -> Result<CommitId, StoreError> {
         if !value.signatures.is_empty() {
             return Err(StoreError::InvalidObject(
@@ -1362,6 +1597,28 @@ impl ObjectStore {
         }
         self.require_kind(value.source.hash(), ObjectKind::Commit)?;
         let source_commit = self.commit(value.source)?.clone();
+        let mut unresolved = Vec::new();
+        let mut resolutions = BTreeMap::<ConflictId, DecisionId>::new();
+        for id in &source_commit.conflicts {
+            let conflict = self.conflict(*id)?;
+            if !conflict.is_resolved() {
+                unresolved.push(*id);
+            } else if let (Some(prior), Some(decision)) = (conflict.supersedes, conflict.resolution)
+                && resolutions
+                    .insert(prior, decision)
+                    .is_some_and(|existing| existing != decision)
+            {
+                return Err(StoreError::InvalidObject(
+                    "close source contains conflicting semantic conflict resolutions".into(),
+                ));
+            }
+        }
+        if !unresolved.is_empty() {
+            return Err(StoreError::InvalidObject(format!(
+                "close source contains {} unresolved semantic conflict(s)",
+                unresolved.len()
+            )));
+        }
         for package in &value.policies {
             self.require_kind(package.hash(), ObjectKind::Package)?;
         }
@@ -1483,6 +1740,17 @@ impl ObjectStore {
             object => Err(StoreError::WrongKind {
                 hash: id.hash(),
                 expected: ObjectKind::Proof,
+                actual: object.kind(),
+            }),
+        }
+    }
+
+    pub fn conflict(&self, id: ConflictId) -> Result<&ConflictRecord, StoreError> {
+        match self.get(id.hash())? {
+            StoredObject::Conflict(value) => Ok(value),
+            object => Err(StoreError::WrongKind {
+                hash: id.hash(),
+                expected: ObjectKind::Conflict,
                 actual: object.kind(),
             }),
         }
@@ -1643,7 +1911,19 @@ impl ObjectStore {
         conflicts.extend(completeness_conflicts);
         conflicts.sort();
         conflicts.dedup();
-        conflicts.dedup();
+
+        let mut conflict_objects = base_value.conflicts.clone();
+        conflict_objects.extend(left_value.conflicts.iter().copied());
+        conflict_objects.extend(right_value.conflicts.iter().copied());
+        for conflict in &conflicts {
+            conflict_objects.push(self.put_conflict(ConflictRecord::unresolved(conflict.clone()))?);
+        }
+        canonicalize_vec(&mut conflict_objects);
+        let superseded = conflict_objects
+            .iter()
+            .filter_map(|id| self.conflict(*id).ok()?.supersedes)
+            .collect::<BTreeSet<_>>();
+        conflict_objects.retain(|id| !superseded.contains(id));
 
         let merged = Commit::new(
             [left, right],
@@ -1654,9 +1934,21 @@ impl ObjectStore {
             packages,
             proofs,
             author,
-        );
+        )
+        .with_conflicts(conflict_objects.clone());
         let commit = self.put_commit(merged)?;
-        Ok(MergeResult { commit, conflicts })
+        let mut unresolved_conflicts = Vec::new();
+        for id in &conflict_objects {
+            if !self.conflict(*id)?.is_resolved() {
+                unresolved_conflicts.push(*id);
+            }
+        }
+        Ok(MergeResult {
+            commit,
+            conflicts,
+            conflict_objects,
+            unresolved_conflicts,
+        })
     }
 
     pub fn merge(
@@ -1670,6 +1962,12 @@ impl ObjectStore {
     }
 
     fn validate_commit(&self, value: &Commit) -> Result<(), StoreError> {
+        if value.schema_version != SCHEMA_VERSION {
+            return Err(StoreError::InvalidObject(format!(
+                "unsupported commit schema version {}",
+                value.schema_version
+            )));
+        }
         for parent in &value.parents {
             self.require_kind(parent.hash(), ObjectKind::Commit)?;
         }
@@ -1690,6 +1988,30 @@ impl ObjectStore {
         }
         for id in &value.proofs {
             self.require_kind(id.hash(), ObjectKind::Proof)?;
+        }
+        for id in &value.conflicts {
+            self.require_kind(id.hash(), ObjectKind::Conflict)?;
+            if let Some(decision) = self.conflict(*id)?.resolution
+                && !value.decisions.contains(&decision)
+            {
+                return Err(StoreError::InvalidObject(
+                    "conflict resolution decision must be pinned by the same commit".into(),
+                ));
+            }
+        }
+        let resolutions = value
+            .conflicts
+            .iter()
+            .filter_map(|id| self.conflict(*id).ok()?.supersedes)
+            .collect::<BTreeSet<_>>();
+        for parent in &value.parents {
+            for inherited in &self.commit(*parent)?.conflicts {
+                if !value.conflicts.contains(inherited) && !resolutions.contains(inherited) {
+                    return Err(StoreError::InvalidObject(format!(
+                        "commit drops unresolved conflict {inherited} without a resolution"
+                    )));
+                }
+            }
         }
         Ok(())
     }
@@ -2137,6 +2459,48 @@ fn canonical_set<T: Ord>(values: impl IntoIterator<Item = T>) -> Vec<T> {
     values
 }
 
+fn canonicalize_merge_conflict(conflict: &mut MergeConflict) {
+    match conflict {
+        MergeConflict::Evidence { left, right, .. } => {
+            canonicalize_vec(left);
+            canonicalize_vec(right);
+        }
+        MergeConflict::EvidenceIdentity { alternatives, .. } => {
+            canonicalize_vec(alternatives);
+        }
+        MergeConflict::Decisions { left, right, .. } => {
+            canonicalize_vec(left);
+            canonicalize_vec(right);
+        }
+        MergeConflict::Statements { left, right, .. } => {
+            canonicalize_vec(left);
+            canonicalize_vec(right);
+        }
+        MergeConflict::Policies { left, right, .. } => {
+            canonicalize_vec(left);
+            canonicalize_vec(right);
+        }
+        MergeConflict::Completeness {
+            left,
+            right,
+            left_bounds,
+            right_bounds,
+            ..
+        } => {
+            let canonicalize =
+                |ids: &mut Vec<CompletenessId>, bounds: &mut Vec<CompletenessBounds>| {
+                    let mut pairs = ids.drain(..).zip(bounds.drain(..)).collect::<Vec<_>>();
+                    pairs.sort();
+                    pairs.dedup();
+                    ids.extend(pairs.iter().map(|(id, _)| *id));
+                    bounds.extend(pairs.into_iter().map(|(_, bounds)| bounds));
+                };
+            canonicalize(left, left_bounds);
+            canonicalize(right, right_bounds);
+        }
+    }
+}
+
 fn canonicalize_vec<T: Ord>(values: &mut Vec<T>) {
     values.sort();
     values.dedup();
@@ -2355,6 +2719,97 @@ fn encode_proof(out: &mut Vec<u8>, value: &ProofObject) {
     }
 }
 
+fn encode_conflict_record(out: &mut Vec<u8>, value: &ConflictRecord) {
+    encode_merge_conflict(out, &value.conflict);
+    put_optional_hash(out, value.supersedes.map(ObjectId::hash));
+    put_optional_hash(out, value.resolution.map(ObjectId::hash));
+    put_optional_string(out, value.rationale.as_deref());
+}
+
+fn encode_merge_conflict(out: &mut Vec<u8>, value: &MergeConflict) {
+    match value {
+        MergeConflict::Evidence {
+            supersedes,
+            left,
+            right,
+        } => {
+            out.push(0);
+            put_hash(out, supersedes.hash());
+            put_ids(out, left);
+            put_ids(out, right);
+        }
+        MergeConflict::EvidenceIdentity {
+            source,
+            identity,
+            alternatives,
+        } => {
+            out.push(1);
+            put_string(out, source);
+            put_string(out, identity);
+            put_ids(out, alternatives);
+        }
+        MergeConflict::Statements {
+            subject,
+            predicate,
+            value,
+            left,
+            right,
+        } => {
+            out.push(2);
+            put_string(out, subject);
+            put_string(out, predicate);
+            put_string(out, value);
+            put_ids(out, left);
+            put_ids(out, right);
+        }
+        MergeConflict::Decisions {
+            subject,
+            scope,
+            left,
+            right,
+        } => {
+            out.push(3);
+            put_string(out, subject);
+            put_string(out, scope);
+            put_ids(out, left);
+            put_ids(out, right);
+        }
+        MergeConflict::Policies { name, left, right } => {
+            out.push(4);
+            put_string(out, name);
+            put_ids(out, left);
+            put_ids(out, right);
+        }
+        MergeConflict::Completeness {
+            relation,
+            source,
+            scope,
+            left,
+            right,
+            left_bounds,
+            right_bounds,
+        } => {
+            out.push(5);
+            put_string(out, relation);
+            put_string(out, source);
+            put_string(out, scope);
+            put_ids(out, left);
+            put_ids(out, right);
+            encode_completeness_bounds(out, left_bounds);
+            encode_completeness_bounds(out, right_bounds);
+        }
+    }
+}
+
+fn encode_completeness_bounds(out: &mut Vec<u8>, values: &[CompletenessBounds]) {
+    put_u64(out, values.len() as u64);
+    for value in values {
+        put_optional_date(out, value.from);
+        put_optional_date(out, value.until);
+        out.push(u8::from(value.complete));
+    }
+}
+
 /// Encode the complete canonical proof graph, rather than only its root IDs.
 /// Node IDs are content addresses, but retaining the fields here makes a
 /// persisted proof independently reloadable and lets the store detect any
@@ -2371,6 +2826,7 @@ fn encode_commit(out: &mut Vec<u8>, value: &Commit) {
     put_ids(out, &value.completeness);
     put_ids(out, &value.packages);
     put_ids(out, &value.proofs);
+    put_ids(out, &value.conflicts);
     put_string(out, &value.schema_version);
     put_string(out, &value.author);
     put_signatures(out, &value.signatures);
@@ -2574,13 +3030,17 @@ mod tests {
                 "correction",
             ))
             .unwrap();
+        let mut expected_latest = vec![corrected, unrelated];
+        expected_latest.sort();
         assert_eq!(
             store.evidence_as_known_at("bank", latest).unwrap(),
-            vec![corrected, unrelated]
+            expected_latest
         );
+        let mut expected_base = vec![original, unrelated];
+        expected_base.sort();
         assert_eq!(
             store.evidence_as_known_at("bank", base).unwrap(),
-            vec![original, unrelated]
+            expected_base
         );
 
         let reverted = store
@@ -2597,7 +3057,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             store.evidence_as_known_at("bank", reverted).unwrap(),
-            vec![original, unrelated]
+            expected_base
         );
     }
 
@@ -2858,6 +3318,180 @@ mod tests {
         assert!(merged_commit.decisions.contains(&left_decision));
         assert!(merged_commit.decisions.contains(&right_decision));
         assert!(!merged_commit.decisions.contains(&base_decision));
+        assert_eq!(merged.conflict_objects, merged_commit.conflicts);
+        assert_eq!(merged.conflict_objects.len(), 1);
+        assert!(
+            !store
+                .conflict(merged.conflict_objects[0])
+                .unwrap()
+                .is_resolved()
+        );
+    }
+
+    #[test]
+    fn unresolved_merge_conflict_blocks_close_until_explicit_resolution() {
+        let mut store = ObjectStore::new();
+        let proof = store
+            .put_proof(ProofObject::recognized([], b"recognized"))
+            .unwrap();
+        let base_decision = store
+            .put_decision(Decision::new("sale/1", "lot/a"))
+            .unwrap();
+        let left_decision = store
+            .put_decision(Decision::new("sale/1", "lot/b"))
+            .unwrap();
+        let right_decision = store
+            .put_decision(Decision::new("sale/1", "lot/c"))
+            .unwrap();
+        let base = store
+            .put_commit(Commit::new(
+                [],
+                [],
+                [],
+                [base_decision],
+                [],
+                [],
+                [proof],
+                "base",
+            ))
+            .unwrap();
+        let left = store
+            .put_commit(Commit::new(
+                [base],
+                [],
+                [],
+                [left_decision],
+                [],
+                [],
+                [proof],
+                "left",
+            ))
+            .unwrap();
+        let right = store
+            .put_commit(Commit::new(
+                [base],
+                [],
+                [],
+                [right_decision],
+                [],
+                [],
+                [proof],
+                "right",
+            ))
+            .unwrap();
+        let merged = store.merge(base, left, right, "merge").unwrap();
+        let period = Period::new(date("2026-01-01"), date("2026-12-31")).unwrap();
+        assert!(matches!(
+            store.put_close(Close::new(
+                period.clone(),
+                "tax",
+                [],
+                merged.commit,
+                proof.hash(),
+            )),
+            Err(StoreError::InvalidObject(reason)) if reason.contains("unresolved semantic conflict")
+        ));
+        let merged_snapshot = store.commit(merged.commit).unwrap().clone();
+        let descendant = |author: &str| {
+            Commit::new(
+                [merged.commit],
+                merged_snapshot.evidence.clone(),
+                merged_snapshot.statements.clone(),
+                merged_snapshot.decisions.clone(),
+                merged_snapshot.completeness.clone(),
+                merged_snapshot.packages.clone(),
+                merged_snapshot.proofs.clone(),
+                author,
+            )
+            .with_conflicts(merged_snapshot.conflicts.clone())
+        };
+        let descendant_left = store.put_commit(descendant("left descendant")).unwrap();
+        let descendant_right = store.put_commit(descendant("right descendant")).unwrap();
+        let inherited = store
+            .merge(merged.commit, descendant_left, descendant_right, "inherit")
+            .unwrap();
+        assert!(!inherited.is_clean());
+        assert!(!inherited.unresolved_conflicts.is_empty());
+        assert!(matches!(
+            store.put_conflict(ConflictRecord::unresolved(MergeConflict::Decisions {
+                subject: "wrong-subject".into(),
+                scope: String::new(),
+                left: vec![left_decision],
+                right: vec![right_decision],
+            })),
+            Err(StoreError::InvalidObject(reason))
+                if reason.contains("does not match")
+        ));
+
+        let conflict_id = merged.conflict_objects[0];
+        let conflict = store.conflict(conflict_id).unwrap().conflict.clone();
+        let unrelated = store
+            .put_decision(Decision::new("unrelated/question", "yes"))
+            .unwrap();
+        assert!(matches!(
+            store.put_conflict(ConflictRecord::resolved(
+                conflict.clone(),
+                conflict_id,
+                unrelated,
+                "not actually related",
+            )),
+            Err(StoreError::InvalidObject(reason))
+                if reason.contains("explicitly name the conflict")
+        ));
+        let resolution_decision = store
+            .put_decision(Decision::new(
+                ConflictRecord::resolution_subject(conflict_id),
+                "left branch",
+            ))
+            .unwrap();
+        let resolved_id = store
+            .put_conflict(ConflictRecord::resolved(
+                conflict,
+                conflict_id,
+                resolution_decision,
+                "review selected the left branch",
+            ))
+            .unwrap();
+        let merged_value = store.commit(merged.commit).unwrap().clone();
+        let unpinned_resolution = Commit::new(
+            [merged.commit],
+            merged_value.evidence.clone(),
+            merged_value.statements.clone(),
+            merged_value.decisions.clone(),
+            merged_value.completeness.clone(),
+            merged_value.packages.clone(),
+            merged_value.proofs.clone(),
+            "resolver",
+        )
+        .with_conflicts([resolved_id]);
+        assert!(matches!(
+            store.put_commit(unpinned_resolution),
+            Err(StoreError::InvalidObject(reason))
+                if reason.contains("must be pinned by the same commit")
+        ));
+        let resolved_commit = store
+            .put_commit(
+                Commit::new(
+                    [merged.commit],
+                    merged_value.evidence,
+                    merged_value.statements,
+                    merged_value
+                        .decisions
+                        .into_iter()
+                        .chain([resolution_decision]),
+                    merged_value.completeness,
+                    merged_value.packages,
+                    merged_value.proofs,
+                    "resolver",
+                )
+                .with_conflicts([resolved_id]),
+            )
+            .unwrap();
+        assert!(
+            store
+                .put_close(Close::new(period, "tax", [], resolved_commit, proof.hash(),))
+                .is_ok()
+        );
     }
 
     #[test]

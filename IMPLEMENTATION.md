@@ -21,7 +21,7 @@ experiments, but it is not part of this contract.
 | Quantity, cost, quote, value, basis, and proceeds differ | V0 distinguishes most fields; valuation is absent | Partial |
 | Every nonzero quantity has a unit; zero is polymorphic | Enforced by exact/model/parser layers | Covered |
 | Time roles remain distinct | Named time roles, intervals, uncertainty, recurrences, and calendars exist; source grammar is still narrow | Partial |
-| Account categories are book interpretations | Documented, not modeled | Missing |
+| Account categories are book interpretations | Nominal material, virtual-view, and book-account types now have a validated registry; parser/engine integration remains open | Partial |
 | Actual and scenario worlds cannot leak | Named scenarios, accepted-root-bound realization tokens, and isolation tests exist | Covered in foundation |
 | Every derived result is explainable | Canonical `Resolution` projects why/why-not/missing/conflicts/impact/inert repairs; CLI still exposes a V0 subset | Partial |
 | One accepted event set feeds multiple books | Recognition projects one content-derived accepted world into multiple book policies | Covered in foundation |
@@ -38,7 +38,7 @@ experiments, but it is not part of this contract.
 - [x] Four-valued support and `Truth × Multiplicity × Completion` results.
 - [x] Scoped completeness claims and decisions.
 - [ ] At least 75 independently executable edge-case fixtures spanning
-  sections XIV A–I. The corpus names 134 cases and currently has 29
+  sections XIV A–I. The corpus names 134 cases and currently has 50
   case-specific tests plus 12 grouped smoke suites; a shared suite is not
   counted as proof of every mapped case.
 
@@ -90,15 +90,19 @@ experiments, but it is not part of this contract.
   main solver. Allocation, inventory-conservation, and recognition
   certificates are now checked without the solver, including their typed
   source edges and aggregate arithmetic. Logic count/sum currently emits a
-  structurally checked trace, not an independently checked aggregate
-  certificate.
+  structurally checked trace; an attempted generic arithmetic certificate was
+  rejected in review because it could not bind supplied row values and
+  completeness claims back to source-ledger semantics.
 
 ### Gate 4 — language and incremental compiler
 
 - [x] Lossless CST, formatter, spans, stable semantic identity, and round-trip
   properties.
 - [ ] Typed HIR, modules, names, rows, refinements, annotations, and rule
-  classes.
+  classes. A deterministic HIR foundation now covers validated names/modules,
+  open and closed rows, refinements, phases, declarations, diagnostics, and
+  typed-hole constraints; annotations, surface lowering, and compiler
+  integration remain open.
 - [ ] Generic typed holes survive parsing through query results.
 - [ ] Incremental semantic database with precise dependency invalidation.
   Production elaboration and analysis are memoized through the database with
@@ -107,7 +111,9 @@ experiments, but it is not part of this contract.
 - [ ] Versioned package compiler, coherence checks, and lockfile.
   The executable/store/workspace package boundary now has one lossless UTF-8
   conversion, canonical body/dependency identity, and rejects unrepresentable
-  manifest metadata; compilation and lockfile resolution remain open.
+  manifest metadata. A deterministic exact/caret/tilde package resolver and
+  independently verified content-addressed lockfile foundation now exist;
+  compilation, coherence, persistence, and Workspace integration remain open.
 - [ ] LSP diagnostics, completion, and proof navigation foundation.
 
 ### Gate 5 — immutable store and reconciliation
@@ -119,7 +125,10 @@ experiments, but it is not part of this contract.
   primitives; production workspace/analysis integration remains open.
 - [ ] Semantic branch/merge with unresolved conflicts preserved. Store merges
   retain divergent decisions, statement polarities, and evidence corrections;
-  durable first-class collaboration conflict objects remain open.
+  they now persist content-addressed conflict lifecycle records into commits,
+  reject silent conflict drops, and block closes until an explicit resolution
+  record is committed. Production analysis/collaboration integration remains
+  open.
 - [x] Raw import bytes, versioned adapter provenance, idempotent re-import,
   retained derivation history, split/merge links, and decision inbox.
 - [ ] Signed, reproducible close objects pin the complete semantic context.
@@ -131,6 +140,9 @@ experiments, but it is not part of this contract.
 
 - [x] Entities, roles, instruments, positions, rights, and encumbrances.
 - [ ] Material accounts, virtual views, and book accounts remain distinct.
+  A nominally typed registry validates their separate identities, contracts,
+  queries, recognizer mappings, and book scoping; source-language and engine
+  integration remain open.
 - [x] Directional transfers, exchanges, issue/retire, and conservation checks.
 - [x] Obligations and many-to-many payment satisfaction.
 - [ ] Check/card/ACH state histories, reversals, refunds, and chargebacks.
@@ -175,10 +187,11 @@ experiments, but it is not part of this contract.
 - [ ] Benchmark corpus and performance/invalidation metrics from section XVII.
   The runner covers all named shapes and reports unsupported semantics honestly;
   production Workspace cache/invalidation, normalization, and dependency-graph
-  metrics, independent clean-recomputation equality, and process peak RSS are
+  metrics, independent clean-recomputation equality, and isolated per-workload
+  child-process peak RSS are
   measured. Serial/concurrent independent-workspace equivalence is measured
   separately and does not claim shared-engine parallelism. Several domain
-  workloads and per-workload peak memory remain open.
+  workloads and shared-engine parallel measurement remain open.
 - [ ] Property, differential, incremental/full, and parallel/single-threaded
   equivalence suites.
 - [ ] Parser, canonicalization, unification, cycles, proof, packages, time,
@@ -190,9 +203,9 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 295 library tests, 4 CLI tests, 8 independent reference/production
+- 315 library tests, 4 CLI tests, 8 independent reference/production
   differential tests, and 5 structured-reference outcome tests;
-- 134 named constitutional cases with 29 independent case-specific tests and
+- 134 named constitutional cases with 50 independent case-specific tests and
   12 grouped smoke suites; the remaining mappings still need independent
   assertions before Gate 0 can close;
 - 14 deterministic heavy-ledger integration tests and two explicit 10,000-row
@@ -206,7 +219,7 @@ The current foundation checkpoint is exercised by:
 
 These numbers are evidence, not a completion claim. In particular, several
 benchmark shapes are currently parsed evidence workloads rather than full
-domain semantics, and production-scale memory/parallel metrics remain open.
+domain semantics, and shared-engine production parallelism remains open.
 
 ## Completion rule
 
