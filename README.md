@@ -57,12 +57,32 @@ Output is stable and intended for both a person at a terminal and a checked-in
 review. The same source and package set produce the same result on repeated
 analysis. Where order has economic meaning, a policy must state it explicitly.
 
+The CLI loads the exact source bytes into an immutable content-addressed
+commit before elaboration. Analysis proofs are bound to that source commit, so
+changing even source trivia creates a new auditable source identity without
+silently rewriting prior history.
+
+## Assurance workloads
+
+```text
+cargo test --locked --offline --all-targets
+cargo test --locked --offline --test heavy_ledgers \
+  stress_ten_thousand_evidence_rows -- --ignored
+cargo run --release --locked --offline --bin axiom-bench -- --self-test
+cargo run --release --locked --offline --bin axiom-bench
+```
+
+The benchmark emits JSON Lines on stdout and a human summary on stderr.
+Unsupported domain shapes are marked `shape_only`; unavailable production
+incremental, memory, and parallel metrics are `null`, never synthetic values.
+
 ## Design
 
 The semantic pipeline is:
 
 ```text
-source ledger -> observations -> resolution -> recognition -> journal/proof
+exact source bytes -> immutable commit -> observations -> resolution
+                   -> recognition -> journal/proof bound to the commit
 ```
 
 The journal is a compact authoring and interoperability surface, not the

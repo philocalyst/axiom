@@ -149,7 +149,7 @@ pub struct Node {
 }
 
 impl Node {
-    pub(crate) fn new(
+    pub fn new(
         statement: impl Into<String>,
         operation: Operation,
         mut inputs: Vec<ProofId>,
@@ -224,6 +224,14 @@ impl Proof {
         self.nodes.get(&id)
     }
 
+    /// Validate the complete bundle and require a particular node to be
+    /// present.  Callers at semantic boundaries use this instead of treating
+    /// a non-zero hash as proof merely because it has the right width.
+    pub fn check_member(&self, id: ProofId) -> Result<&Node, CheckError> {
+        self.check()?;
+        self.node(id).ok_or(CheckError::MissingNode { id })
+    }
+
     /// Run the independent structural checker.  No engine code is called.
     pub fn check(&self) -> Result<(), CheckError> {
         let mut roots = self.roots.clone();
@@ -252,6 +260,31 @@ impl Proof {
                 && (unit.is_empty() || minuend.checked_sub(subtrahend) != *result)
             {
                 return Err(CheckError::InvalidArithmetic { id: *id });
+            }
+            let invalid_operation = match &node.operation {
+                Operation::Observation { source } => source.trim().is_empty(),
+                Operation::Derive { rule } => rule.trim().is_empty(),
+                Operation::Arithmetic { rule, unit, .. } => {
+                    rule.trim().is_empty() || unit.trim().is_empty()
+                }
+                Operation::Decision { subject, answer } => {
+                    subject.trim().is_empty() || answer.trim().is_empty()
+                }
+                Operation::Policy {
+                    subject,
+                    policy,
+                    answer,
+                } => {
+                    subject.trim().is_empty()
+                        || policy.trim().is_empty()
+                        || answer.trim().is_empty()
+                }
+                Operation::Conflict { subject, reason } => {
+                    subject.trim().is_empty() || reason.trim().is_empty()
+                }
+            };
+            if invalid_operation {
+                return Err(CheckError::InvalidOperation { id: *id });
             }
             for input in &node.inputs {
                 if !self.nodes.contains_key(input) {
@@ -318,6 +351,36 @@ impl Proof {
         }
         ProofId(*blake3::hash(&bytes).as_bytes())
     }
+
+    /// Deterministic bytes for persistence and content-addressed envelopes.
+    /// Unlike [`Self::content_hash`], which is intentionally a compact root
+    /// index, this representation carries every node field so a store can
+    /// reload and independently check the complete DAG.
+    pub fn canonical_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        put_bytes(&mut out, b"axiom/canonical-proof/v1");
+        put_u64(&mut out, self.roots.len() as u64);
+        for root in &self.roots {
+            out.extend_from_slice(&root.0);
+        }
+        put_u64(&mut out, self.nodes.len() as u64);
+        for (id, node) in &self.nodes {
+            out.extend_from_slice(&id.0);
+            out.extend_from_slice(&node.id.0);
+            put_string(&mut out, node.statement.as_str());
+            node.operation.encode_into(&mut out);
+            put_u64(&mut out, node.inputs.len() as u64);
+            for input in &node.inputs {
+                out.extend_from_slice(&input.0);
+            }
+            put_u64(&mut out, node.metadata.len() as u64);
+            for (key, value) in &node.metadata {
+                put_string(&mut out, key);
+                put_string(&mut out, value);
+            }
+        }
+        out
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -327,7 +390,9 @@ pub enum CheckError {
     TamperedNode { id: ProofId },
     MissingInput { node: ProofId, input: ProofId },
     MissingRoot { root: ProofId },
+    MissingNode { id: ProofId },
     InvalidArithmetic { id: ProofId },
+    InvalidOperation { id: ProofId },
     Cycle,
 }
 
@@ -346,11 +411,15 @@ impl fmt::Display for CheckError {
                 write!(f, "proof node {node} refers to missing input {input}")
             }
             Self::MissingRoot { root } => write!(f, "proof root {root} is missing"),
+            Self::MissingNode { id } => write!(f, "proof bundle does not contain proof node {id}"),
             Self::InvalidArithmetic { id } => {
                 write!(
                     f,
                     "proof node {id} contains an invalid arithmetic certificate"
                 )
+            }
+            Self::InvalidOperation { id } => {
+                write!(f, "proof node {id} contains an invalid operation")
             }
             Self::Cycle => f.write_str("proof graph contains a cycle"),
         }

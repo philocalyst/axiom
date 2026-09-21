@@ -12,7 +12,7 @@ use crate::engine::{
     Analysis, Issue, IssueCode, JournalEntry, JournalLine, ObservationStatus, QuoteStatus,
     RecognitionStatus, Side,
 };
-use crate::package::builtin_policies;
+use crate::package::PolicyRegistry;
 use crate::proof::Operation;
 
 /// A rendering failure is a user-facing query error, not a semantic result.
@@ -182,12 +182,12 @@ pub fn render_journal(analysis: &Analysis) -> String {
     let journal_balanced = !analysis.journal.is_empty()
         && missing_settlements.is_empty()
         && analysis.journal.iter().all(JournalEntry::balanced);
-    let status = if journal_balanced {
-        "balanced"
-    } else if !missing_settlements.is_empty() {
+    let status = if !missing_settlements.is_empty() {
         "partial (blocked)"
     } else if has_blocking_state(analysis) {
         "blocked"
+    } else if journal_balanced {
+        "balanced"
     } else if analysis.journal.is_empty() {
         "empty"
     } else {
@@ -319,6 +319,18 @@ pub fn render_why(analysis: &Analysis, goal: &str) -> Result<String, RenderError
 /// Package hashes make a review reproducible without exposing internal
 /// implementation details in ordinary diagnostics.
 pub fn render_packages(book: &str, policy: Option<&str>) -> String {
+    render_packages_with_registry(book, policy, &PolicyRegistry::builtins())
+}
+
+/// Render the package set actually used for an analysis.  The legacy
+/// [`render_packages`] entry point remains the builtin-only view for callers
+/// that do not have a committed package context; workspace-bound callers
+/// should pass the registry returned with [`crate::workspace::CommitAnalysis`].
+pub fn render_packages_with_registry(
+    book: &str,
+    policy: Option<&str>,
+    registry: &PolicyRegistry,
+) -> String {
     let mut out = String::new();
     out.push_str("packages\n");
     let _ = writeln!(out, "book: {book}");
@@ -326,7 +338,7 @@ pub fn render_packages(book: &str, policy: Option<&str>) -> String {
     out.push_str("  buy, sell, quote, observe, use, decide\n");
     out.push_str("  V0 keeps this vocabulary fixed.\n");
     out.push_str("\npolicies\n");
-    let packages = builtin_policies();
+    let packages = registry.packages().collect::<Vec<_>>();
     for package in &packages {
         let active = policy == Some(package.name.as_str());
         let marker = if active { "  [active]" } else { "" };
@@ -516,7 +528,7 @@ fn side(line: &JournalLine) -> &'static str {
 }
 
 fn quantity(quantity: &crate::engine::Quantity) -> String {
-    format!("{} {}", quantity.amount.canonical_string(), quantity.unit)
+    quantity.canonical()
 }
 
 fn quote_label(group: &str) -> String {
@@ -530,7 +542,8 @@ fn quote_label(group: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{analyze, parse_ledger};
+    use crate::engine::analyze;
+    use crate::parser::parse_ledger;
 
     const AMBIGUOUS: &str = r#"book tax-us
 buy buy/one on 2026-01-04
@@ -586,16 +599,16 @@ observe settlement sell 500 USD
     }
 
     #[test]
-    fn matching_observations_are_reconciled_without_being_overstated() {
+    fn blocked_sale_does_not_overstate_position_reconciliation() {
         let analysis = analyze(&parse_ledger(AMBIGUOUS).unwrap());
         let output = render_check(&analysis);
-        assert!(output.contains("brokerage  10 ABC  reconciled"));
+        assert!(output.contains("brokerage  10 ABC  observed (conflict)"));
         assert!(output.contains("sell  500 USD  reconciled"));
         assert!(!output.contains("proven"));
         assert!(
             render_why(&analysis, "position:brokerage")
                 .unwrap()
-                .contains("status: reconciled")
+                .contains("status: observed (conflict)")
         );
     }
 

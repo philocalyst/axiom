@@ -1,0 +1,63 @@
+# Journal-subset fixture for the multi-year personal and small-business load.
+# Rich evidence links, invoices, ownership, and settlement histories are
+# intentionally constructed through semantic APIs in heavy_ledgers.rs: the V0
+# surface has no syntax for those relations yet.
+book management-2020-2025
+
+buy equipment-2020 on 2020-01-15
+  1 EQUIPMENT into business-checking
+  for 1200 USD
+
+buy inventory-2020 on 2020-03-10
+  100 ABC into business-checking
+  for 500 USD
+
+sell inventory-sale-2020 on 2020-04-10
+  20 ABC from business-checking
+  for 140 USD
+  lot ?lot-2020
+
+buy equipment-2021 on 2021-06-20
+  1 EQUIPMENT into business-checking
+  for 1500 USD
+
+sell inventory-sale-2021 on 2021-08-12
+  40 ABC from business-checking
+  for 320 USD
+  lot ?lot-2021
+
+buy equipment-2022 on 2022-02-02
+  1 EQUIPMENT into business-checking
+  for 1700 USD
+
+sell inventory-sale-2022 on 2022-09-01
+  40 ABC from business-checking
+  for 360 USD
+  lot ?lot-2022
+
+buy equipment-2023 on 2023-05-05
+  1 EQUIPMENT into business-checking
+  for 1900 USD
+
+sell inventory-sale-2023 on 2023-10-15
+  20 ABC from business-checking
+  for 210 USD
+  lot ?lot-2023
+
+buy equipment-2024 on 2024-01-12
+  1 EQUIPMENT into business-checking
+  for 2100 USD
+
+sell inventory-sale-2024 on 2024-11-20
+  20 ABC from business-checking
+  for 240 USD
+  lot ?lot-2024
+
+buy equipment-2025 on 2025-03-03
+  1 EQUIPMENT into business-checking
+  for 2300 USD
+
+sell inventory-sale-2025 on 2025-12-01
+  20 ABC from business-checking
+  for 280 USD
+  lot ?lot-2025

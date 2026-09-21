@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use crate::surface::{SurfaceFile, Token, TokenKind};
+
 /// A one-based source location.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Location {
@@ -345,9 +347,6 @@ pub struct ParsedLedger {
     pub statements: Vec<Statement>,
 }
 
-/// Short compatibility name for consumers of the parser module.
-pub type Ledger = ParsedLedger;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Book {
     pub name: Symbol,
@@ -457,32 +456,50 @@ enum Pending {
 
 /// Parse one complete source ledger into the parser-facing representation.
 pub fn parse_source(source: &str) -> Result<ParsedLedger, ParseError> {
+    let surface = SurfaceFile::parse(source);
+    parse_surface_file(&surface)
+}
+
+/// Parse a lossless authoring surface into the strict parser representation.
+///
+/// `SurfaceFile` is the one lexical boundary for the project.  This function
+/// deliberately consumes its token stream instead of re-scanning source text,
+/// while retaining the parser's existing line-oriented grammar and diagnostic
+/// wording.  The tolerant surface can therefore be used by editors and the
+/// strict result by the semantic elaborator without introducing another AST.
+pub fn parse_surface_file(surface: &SurfaceFile) -> Result<ParsedLedger, ParseError> {
     let mut book: Option<Book> = None;
     let mut statements = Vec::new();
     let mut pending: Option<Pending> = None;
     let mut form_ids: HashMap<String, (String, Location)> = HashMap::new();
 
-    for (zero_line, raw_line) in source.lines().enumerate() {
-        let line = zero_line + 1;
-        let trimmed = raw_line.trim();
-        if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('#') {
+    for (line, line_tokens) in surface_lines(surface) {
+        let tokens = surface_words(&line_tokens);
+        if tokens.is_empty() {
             continue;
         }
-        let indentation = raw_line.len() - raw_line.trim_start_matches([' ', '\t']).len();
+        // A comment in the first non-trivia position is a source comment,
+        // matching the old line parser's `trim().starts_with(...)` rule.  An
+        // inline comment remains words below, preserving its historical
+        // strict-grammar behavior and diagnostics.
+        if first_meaningful(&line_tokens)
+            .is_some_and(|token| matches!(token.kind, TokenKind::Comment))
+        {
+            continue;
+        }
+        let indentation = tokens
+            .first()
+            .map_or(0, |(_, column)| column.saturating_sub(1));
         if indentation != 0 {
             let pending_ref = pending.as_mut().ok_or_else(|| {
                 ParseError::new(line, indentation + 1, "indented line has no form header")
             })?;
-            parse_continuation(pending_ref, trimmed, line, indentation + 1)?;
+            parse_continuation(pending_ref, &tokens, line, indentation + 1)?;
             continue;
         }
 
         if let Some(form) = pending.take() {
             statements.push(finish_pending(form, line.saturating_sub(1))?);
-        }
-        let tokens = words(trimmed);
-        if tokens.is_empty() {
-            continue;
         }
         let keyword = tokens[0].0.as_str();
         if keyword != "book" && book.is_none() {
@@ -541,7 +558,7 @@ pub fn parse_source(source: &str) -> Result<ParsedLedger, ParseError> {
         }
     }
     if let Some(form) = pending.take() {
-        statements.push(finish_pending(form, source.lines().count().max(1))?);
+        statements.push(finish_pending(form, source_line_count(surface).max(1))?);
     }
     let book = book
         .ok_or_else(|| ParseError::new(1, 1, "ledger must begin with a `book NAME` declaration"))?;
@@ -549,12 +566,78 @@ pub fn parse_source(source: &str) -> Result<ParsedLedger, ParseError> {
 }
 
 /// Parse and lower a source ledger into the shared domain model used by the
-/// resolver and renderer.  The parser-facing form remains available through
+/// resolver and renderer. The parser-facing form remains available through
 /// [`parse_source`], which is the right boundary for tools that need to keep
-/// unresolved typed holes and source locations.
+/// unresolved typed holes and source locations. Production analysis should
+/// use [`crate::workspace::Workspace::analyze_commit`] so source bytes are
+/// committed before this lowering is evaluated.
 pub fn parse_ledger(source: &str) -> Result<crate::model::Ledger, ParseError> {
-    let parsed = parse_source(source)?;
+    let surface = SurfaceFile::parse(source);
+    parse_surface_ledger(&surface)
+}
+
+/// Strictly parse and elaborate an already-tokenized authoring surface into
+/// the shared domain ledger.  Keeping this separate from [`parse_ledger`]
+/// makes the single source-to-model path explicit for editor and formatter
+/// integrations while preserving the historical string API.
+pub fn parse_surface_ledger(surface: &SurfaceFile) -> Result<crate::model::Ledger, ParseError> {
+    let parsed = parse_surface_file(surface)?;
     lower_to_model(parsed)
+}
+
+/// Build logical source lines from the surface token stream.  Newline tokens
+/// are structural, so CRLF and LF share the same strict parser behavior while
+/// the original bytes remain available through `SurfaceFile::source()`.
+fn surface_lines(surface: &SurfaceFile) -> Vec<(usize, Vec<Token>)> {
+    let mut lines = Vec::new();
+    let mut current_line = 1;
+    let mut current = Vec::new();
+    for token in surface.tokens() {
+        if token.kind == TokenKind::Newline {
+            lines.push((current_line, std::mem::take(&mut current)));
+            current_line += 1;
+        } else {
+            current.push(token.clone());
+        }
+    }
+    // `str::lines` (used by the former parser) does not yield an additional
+    // empty line after a trailing newline, so only emit an unterminated final
+    // line when there are bytes after the last newline.
+    if !current.is_empty() || surface.source().is_empty() {
+        lines.push((current_line, current));
+    }
+    lines
+}
+
+fn source_line_count(surface: &SurfaceFile) -> usize {
+    surface.tokens().last().map_or(1, |token| token.span.line)
+}
+
+fn first_meaningful(tokens: &[Token]) -> Option<&Token> {
+    // Comments are trivia to the CST, but they are still the first lexical
+    // item needed to recognize a comment-only source line here.
+    tokens
+        .iter()
+        .find(|token| !matches!(token.kind, TokenKind::Whitespace | TokenKind::Newline))
+}
+
+/// Convert one surface line into the parser's historical `(word, column)`
+/// representation.  Comments are deliberately split into words here because
+/// the strict parser historically treated an inline `#`/`;` as ordinary input;
+/// comment-only lines are filtered before this helper is called.
+fn surface_words(tokens: &[Token]) -> Vec<(String, usize)> {
+    let mut words = Vec::new();
+    for token in tokens {
+        if matches!(token.kind, TokenKind::Whitespace | TokenKind::Newline) {
+            continue;
+        }
+        if token.kind == TokenKind::Comment {
+            words.extend(words_at(&token.lexeme, token.span.column));
+            continue;
+        }
+        words.push((token.lexeme.clone(), token.span.column));
+    }
+    words
 }
 
 fn lower_to_model(parsed: ParsedLedger) -> Result<crate::model::Ledger, ParseError> {
@@ -574,7 +657,7 @@ fn lower_to_model(parsed: ParsedLedger) -> Result<crate::model::Ledger, ParseErr
                 fee,
             }) => {
                 let account = known_symbol(&holding.account, location, "account")?.to_owned();
-                domain::LedgerForm::Buy(domain::Buy::new(
+                domain::Buy::new(
                     id,
                     lower_date(date, location)?,
                     lower_positive_quantity(holding.quantity, "buy quantity")?,
@@ -582,7 +665,11 @@ fn lower_to_model(parsed: ParsedLedger) -> Result<crate::model::Ledger, ParseErr
                     lower_non_negative_quantity(consideration, "buy cost")?,
                     fee.map(|fee| lower_non_negative_quantity(fee, "buy fee"))
                         .transpose()?,
-                ))
+                )
+                .map(domain::LedgerForm::Buy)
+                .map_err(|error| {
+                    ParseError::new(location.line, location.column, error.to_string())
+                })?
             }
             Statement::Sell(sell) => {
                 let Sell {
@@ -601,14 +688,18 @@ fn lower_to_model(parsed: ParsedLedger) -> Result<crate::model::Ledger, ParseErr
                     )
                 })?;
                 let account = known_symbol(&holding.account, location, "account")?.to_owned();
-                domain::LedgerForm::Sell(domain::Sell::new(
+                domain::Sell::new(
                     id,
                     lower_date(date, location)?,
                     lower_positive_quantity(holding.quantity, "sell quantity")?,
                     account,
                     lower_non_negative_quantity(proceeds, "sell proceeds")?,
                     domain::LotSelector::Hole(lower_hole(lot)?),
-                ))
+                )
+                .map(domain::LedgerForm::Sell)
+                .map_err(|error| {
+                    ParseError::new(location.line, location.column, error.to_string())
+                })?
             }
             Statement::Quote(quote) => domain::LedgerForm::Quote(domain::Quote::new(
                 quote.id,
@@ -621,6 +712,7 @@ fn lower_to_model(parsed: ParsedLedger) -> Result<crate::model::Ledger, ParseErr
                 quantity,
                 location,
             }) => domain::LedgerForm::ObservePosition(domain::PositionObservation {
+                occurrence: domain::OccurrenceId::new(format!("position/{}", location.line)),
                 account: known_symbol(&account, location, "account")?.into(),
                 quantity: lower_quantity(quantity)?,
             }),
@@ -630,6 +722,7 @@ fn lower_to_model(parsed: ParsedLedger) -> Result<crate::model::Ledger, ParseErr
                 into,
                 location,
             }) => domain::LedgerForm::ObserveSettlement(domain::SettlementObservation {
+                occurrence: domain::OccurrenceId::new(format!("settlement/{}", location.line)),
                 sale: domain::OccurrenceId::new(reference),
                 amount: lower_quantity(quantity)?,
                 into: into
@@ -794,6 +887,22 @@ fn validate_non_negative_quantity(quantity: &Quantity, label: &str) -> Result<()
     Ok(())
 }
 
+fn validate_observation_quantity(quantity: &Quantity, label: &str) -> Result<(), ParseError> {
+    if quantity.unit.is_none()
+        && matches!(&quantity.amount, QuantityAmount::Exact(value) if value
+            .as_str()
+            .chars()
+            .all(|character| matches!(character, '0' | '.' | '-')))
+    {
+        return Err(ParseError::new(
+            quantity.location.line,
+            quantity.location.column,
+            format!("{label} observations require an explicit unit, even for zero"),
+        ));
+    }
+    Ok(())
+}
+
 fn exact_quantity_number(
     quantity: &Quantity,
 ) -> Result<Option<crate::exact::ExactNumber>, ParseError> {
@@ -898,11 +1007,10 @@ fn parse_form_header(
 
 fn parse_continuation(
     pending: &mut Pending,
-    line_text: &str,
+    tokens: &[(String, usize)],
     line: usize,
     column: usize,
 ) -> Result<(), ParseError> {
-    let tokens = words_at(line_text, column);
     match pending {
         Pending::Buy {
             holding,
@@ -918,7 +1026,7 @@ fn parse_continuation(
                         "buy form has duplicate holding line",
                     ));
                 }
-                let quantity = parse_quantity_tokens(&tokens, 0, 1, line)?;
+                let quantity = parse_quantity_tokens(tokens, 0, 1, line)?;
                 validate_positive_quantity(&quantity, "buy quantity")?;
                 let account = parse_symbol(&tokens[3].0, HoleKind::Account, line, tokens[3].1)?;
                 *holding = Some(Holding { quantity, account });
@@ -937,7 +1045,7 @@ fn parse_continuation(
                         "buy form has duplicate `for` line",
                     ));
                 }
-                let value = parse_quantity_tokens(&tokens, 1, 2, line)?;
+                let value = parse_quantity_tokens(tokens, 1, 2, line)?;
                 validate_non_negative_quantity(&value, "buy cost")?;
                 *consideration = Some(value);
             } else if tokens.len() >= 2 && tokens[0].0 == "fee" {
@@ -955,7 +1063,7 @@ fn parse_continuation(
                         "buy form has duplicate `fee` line",
                     ));
                 }
-                let value = parse_quantity_tokens(&tokens, 1, 2, line)?;
+                let value = parse_quantity_tokens(tokens, 1, 2, line)?;
                 validate_non_negative_quantity(&value, "buy fee")?;
                 *fee = Some(value);
             } else {
@@ -980,7 +1088,7 @@ fn parse_continuation(
                         "sell form has duplicate holding line",
                     ));
                 }
-                let quantity = parse_quantity_tokens(&tokens, 0, 1, line)?;
+                let quantity = parse_quantity_tokens(tokens, 0, 1, line)?;
                 validate_positive_quantity(&quantity, "sell quantity")?;
                 let account = parse_symbol(&tokens[3].0, HoleKind::Account, line, tokens[3].1)?;
                 *holding = Some(Holding { quantity, account });
@@ -992,7 +1100,7 @@ fn parse_continuation(
                         "sell form has duplicate `for` line",
                     ));
                 }
-                let value = parse_quantity_tokens(&tokens, 1, 2, line)?;
+                let value = parse_quantity_tokens(tokens, 1, 2, line)?;
                 validate_non_negative_quantity(&value, "sell proceeds")?;
                 *proceeds = Some(value);
             } else if tokens.len() == 2 && tokens[0].0 == "lot" {
@@ -1036,8 +1144,12 @@ fn parse_continuation(
                     "quote form has duplicate rate line",
                 ));
             }
-            *base = Some(parse_quantity_tokens(&tokens, 0, 1, line)?);
-            *quote = Some(parse_quantity_tokens(&tokens, 3, 4, line)?);
+            let base_quantity = parse_quantity_tokens(tokens, 0, 1, line)?;
+            let quote_quantity = parse_quantity_tokens(tokens, 3, 4, line)?;
+            validate_positive_quantity(&base_quantity, "quote base quantity")?;
+            validate_positive_quantity(&quote_quantity, "quote counter quantity")?;
+            *base = Some(base_quantity);
+            *quote = Some(quote_quantity);
         }
     }
     Ok(())
@@ -1125,6 +1237,7 @@ fn parse_observe(tokens: &[(String, usize)], line: usize) -> Result<Statement, P
         "position" if tokens.len() == 4 || tokens.len() == 5 => {
             let account = parse_symbol(&tokens[2].0, HoleKind::Account, line, tokens[2].1)?;
             let quantity = parse_quantity_tokens(tokens, 3, 4, line)?;
+            validate_observation_quantity(&quantity, "position")?;
             Ok(Statement::Observe(Observation::Position {
                 account,
                 quantity,
@@ -1170,6 +1283,8 @@ fn parse_observe(tokens: &[(String, usize)], line: usize) -> Result<Statement, P
                     ));
                 }
             };
+            validate_observation_quantity(&quantity, "settlement")?;
+            validate_non_negative_quantity(&quantity, "settlement amount")?;
             Ok(Statement::Observe(Observation::Settlement {
                 reference,
                 quantity,
@@ -1271,10 +1386,6 @@ fn valid_name(value: &str) -> bool {
         && value.as_bytes()[0].is_ascii_alphanumeric()
 }
 
-fn words(line: &str) -> Vec<(String, usize)> {
-    words_at(line, 1)
-}
-
 fn words_at(line: &str, offset: usize) -> Vec<(String, usize)> {
     line.split_whitespace()
         .scan(offset, |column, word| {
@@ -1288,6 +1399,7 @@ fn words_at(line: &str, offset: usize) -> Vec<(String, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::surface::SurfaceFile;
 
     const BASE: &str = r#";
 book tax-us
@@ -1410,8 +1522,9 @@ buy one on 2026-01-02
 
     #[test]
     fn decisions_name_the_sale_they_constrain() {
-        let source = "book tax-us\n\
-decide sale/two lot buy/one\n";
+        let source = r#"book tax-us
+decide sale/two lot buy/one
+"#;
         let ledger = parse_source(source).expect("decision parses");
         let Statement::Decide(decision) = &ledger.statements[0] else {
             panic!("decision")
@@ -1440,5 +1553,39 @@ buy one on 2026-01-01
         let error = parse_ledger(source).expect_err("zero buy quantity");
         assert_eq!(error.location, Location::new(3, 3));
         assert_eq!(error.message, "buy quantity must be greater than zero");
+    }
+
+    #[test]
+    fn strict_parser_consumes_the_lossless_surface() {
+        let surface = SurfaceFile::parse(BASE);
+        let parsed = parse_surface_file(&surface).expect("surface parses strictly");
+        assert_eq!(parsed, parse_source(BASE).expect("source parses strictly"));
+        assert_eq!(surface.lossless(), BASE);
+        assert_eq!(parse_surface_ledger(&surface), parse_ledger(BASE));
+    }
+
+    #[test]
+    fn surface_recovery_does_not_replace_strict_diagnostics() {
+        let source = "book\nwat tax-us\n";
+        let surface = SurfaceFile::parse(source);
+        assert!(surface.nodes().iter().any(|node| node.is_error()));
+        let error = parse_surface_file(&surface).expect_err("unknown directive");
+        assert_eq!(error.location, Location::new(1, 1));
+        assert!(error.message.contains("book syntax"));
+    }
+
+    #[test]
+    fn observations_and_quotes_reject_ambiguous_or_negative_amounts() {
+        for source in [
+            "book tax-us\nobserve position checking 0\n",
+            "book tax-us\nobserve position checking 0.0\n",
+            "book tax-us\nobserve settlement sale -1 USD\n",
+            "book tax-us\nquote q on 2026-01-01\n  0 ABC = 1 USD\n",
+        ] {
+            assert!(
+                parse_ledger(source).is_err(),
+                "source should be rejected: {source}"
+            );
+        }
     }
 }

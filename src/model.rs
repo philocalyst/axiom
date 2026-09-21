@@ -79,8 +79,22 @@ macro_rules! typed_id {
         pub struct $name(String);
 
         impl $name {
+            /// Construct an ID, rejecting empty or whitespace-only values.
+            ///
+            /// The infallible form is kept for the many typed-ID call sites
+            /// that already receive a validated source token.  Callers that
+            /// handle external input should prefer [`Self::try_new`].
             pub fn new(value: impl Into<String>) -> Self {
-                Self(value.into())
+                Self::try_new(value).expect(concat!(stringify!($name), " must not be empty"))
+            }
+
+            pub fn try_new(value: impl Into<String>) -> Result<Self, ModelError> {
+                let value = value.into();
+                if value.trim().is_empty() {
+                    Err(ModelError::EmptyId(stringify!($name)))
+                } else {
+                    Ok(Self(value))
+                }
             }
 
             pub fn as_str(&self) -> &str {
@@ -92,7 +106,7 @@ macro_rules! typed_id {
             }
 
             pub fn is_empty(&self) -> bool {
-                self.0.is_empty()
+                self.0.trim().is_empty()
             }
         }
 
@@ -118,11 +132,7 @@ macro_rules! typed_id {
             type Err = ModelError;
 
             fn from_str(value: &str) -> Result<Self, Self::Err> {
-                if value.trim().is_empty() {
-                    Err(ModelError::EmptyId(stringify!($name)))
-                } else {
-                    Ok(Self::new(value))
-                }
+                Self::try_new(value)
             }
         }
     };
@@ -199,12 +209,72 @@ pub struct Date {
     pub day: u8,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum Weekday {
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+    Sunday,
+}
+
+impl Weekday {
+    pub fn is_weekend(self) -> bool {
+        matches!(self, Self::Saturday | Self::Sunday)
+    }
+
+    pub(crate) fn monday_index(self) -> u8 {
+        match self {
+            Self::Monday => 0,
+            Self::Tuesday => 1,
+            Self::Wednesday => 2,
+            Self::Thursday => 3,
+            Self::Friday => 4,
+            Self::Saturday => 5,
+            Self::Sunday => 6,
+        }
+    }
+}
+
 impl Date {
     pub fn new(year: i32, month: u8, day: u8) -> Result<Self, ModelError> {
         if !(1..=12).contains(&month) || day == 0 || day > days_in_month(year, month) {
             return Err(ModelError::InvalidDate { year, month, day });
         }
         Ok(Self { year, month, day })
+    }
+
+    pub const fn year(self) -> i32 {
+        self.year
+    }
+
+    pub const fn month(self) -> u8 {
+        self.month
+    }
+
+    pub const fn day(self) -> u8 {
+        self.day
+    }
+
+    pub fn checked_add_days(self, days: i64) -> Option<Self> {
+        let serial = date_days_from_civil(self.year, self.month, self.day);
+        let serial = serial.checked_add(days as i128)?;
+        let (year, month, day) = date_civil_from_days(serial);
+        Self::new(year, month, day).ok()
+    }
+
+    pub fn weekday(self) -> Weekday {
+        match (date_days_from_civil(self.year, self.month, self.day) + 4).rem_euclid(7) {
+            0 => Weekday::Sunday,
+            1 => Weekday::Monday,
+            2 => Weekday::Tuesday,
+            3 => Weekday::Wednesday,
+            4 => Weekday::Thursday,
+            5 => Weekday::Friday,
+            _ => Weekday::Saturday,
+        }
     }
 }
 
@@ -296,8 +366,6 @@ pub struct Quantity {
     pub unit: Option<Unit>,
 }
 
-pub type Amount = Quantity;
-
 impl Quantity {
     pub fn new(number: ExactNumber, unit: Option<Unit>) -> Result<Self, ModelError> {
         if !number.is_zero() && unit.is_none() {
@@ -308,6 +376,13 @@ impl Quantity {
 
     pub fn with_unit(number: ExactNumber, unit: impl Into<String>) -> Result<Self, ModelError> {
         Self::new(number, Some(Unit::new(unit)?))
+    }
+
+    pub fn typed(number: ExactNumber, unit: impl Into<Unit>) -> Self {
+        Self {
+            number,
+            unit: Some(unit.into()),
+        }
     }
 
     pub fn zero() -> Self {
@@ -321,8 +396,21 @@ impl Quantity {
         self.unit.as_ref()
     }
 
+    pub fn amount(&self) -> &ExactNumber {
+        &self.number
+    }
+
     pub fn is_zero(&self) -> bool {
         self.number.is_zero()
+    }
+
+    pub fn canonical(&self) -> String {
+        let unit = self
+            .unit
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "?".into());
+        format!("{} {unit}", self.number.canonical_string())
     }
 
     pub fn checked_add(&self, rhs: &Self) -> Result<Self, ModelError> {
@@ -402,6 +490,28 @@ impl LotSelector {
     }
 }
 
+fn require_positive_quantity(
+    quantity: Quantity,
+    field: &'static str,
+) -> Result<Quantity, ModelError> {
+    if quantity.number.is_zero() || quantity.number.is_negative() {
+        Err(ModelError::QuantityMustBePositive(field))
+    } else {
+        Ok(quantity)
+    }
+}
+
+fn require_non_negative_amount(
+    amount: Quantity,
+    field: &'static str,
+) -> Result<Quantity, ModelError> {
+    if amount.number.is_negative() {
+        Err(ModelError::AmountMustBeNonNegative(field))
+    } else {
+        Ok(amount)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Buy {
     pub occurrence: OccurrenceId,
@@ -421,17 +531,19 @@ impl Buy {
         into: impl Into<AccountId>,
         cost: Quantity,
         fee: Option<Quantity>,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
         let label = label.into();
-        Self {
-            occurrence: OccurrenceId::new(label.clone()),
+        Ok(Self {
+            occurrence: OccurrenceId::try_new(label.clone())?,
             label,
             date,
-            quantity,
+            quantity: require_positive_quantity(quantity, "buy quantity")?,
             into: into.into(),
-            cost,
-            fee,
-        }
+            cost: require_non_negative_amount(cost, "buy cost")?,
+            fee: fee
+                .map(|fee| require_non_negative_amount(fee, "buy fee"))
+                .transpose()?,
+        })
     }
 }
 
@@ -454,17 +566,17 @@ impl Sell {
         from: impl Into<AccountId>,
         proceeds: Quantity,
         lot: LotSelector,
-    ) -> Self {
+    ) -> Result<Self, ModelError> {
         let label = label.into();
-        Self {
-            occurrence: OccurrenceId::new(label.clone()),
+        Ok(Self {
+            occurrence: OccurrenceId::try_new(label.clone())?,
             label,
             date,
-            quantity,
+            quantity: require_positive_quantity(quantity, "sell quantity")?,
             from: from.into(),
-            proceeds,
+            proceeds: require_non_negative_amount(proceeds, "sell proceeds")?,
             lot,
-        }
+        })
     }
 }
 
@@ -492,12 +604,18 @@ impl Quote {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PositionObservation {
+    /// A source occurrence identity.  Equal account/quantity rows are still
+    /// distinct observations when they came from different source entries.
+    pub occurrence: OccurrenceId,
     pub account: AccountId,
     pub quantity: Quantity,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SettlementObservation {
+    /// A source occurrence identity, independent of the referenced sale and
+    /// normalized amount so duplicate settlement rows remain representable.
+    pub occurrence: OccurrenceId,
     pub sale: OccurrenceId,
     pub amount: Quantity,
     pub into: Option<AccountId>,
@@ -533,10 +651,9 @@ impl LedgerForm {
             Self::Buy(value) => Some(&value.occurrence),
             Self::Sell(value) => Some(&value.occurrence),
             Self::Quote(value) => Some(&value.occurrence),
-            Self::ObservePosition(_)
-            | Self::ObserveSettlement(_)
-            | Self::UsePolicy(_)
-            | Self::Decide(_) => None,
+            Self::ObservePosition(value) => Some(&value.occurrence),
+            Self::ObserveSettlement(value) => Some(&value.occurrence),
+            Self::UsePolicy(_) | Self::Decide(_) => None,
         }
     }
 }
@@ -615,6 +732,8 @@ pub enum ModelError {
     EmptyHole,
     UnitRequired,
     UnitMismatch { left: String, right: String },
+    QuantityMustBePositive(&'static str),
+    AmountMustBeNonNegative(&'static str),
     InvalidDate { year: i32, month: u8, day: u8 },
     InvalidDateText(String),
     InvalidHash(String),
@@ -630,6 +749,12 @@ impl fmt::Display for ModelError {
             Self::UnitRequired => formatter.write_str("a non-zero quantity requires a unit"),
             Self::UnitMismatch { left, right } => {
                 write!(formatter, "unit mismatch: {left} versus {right}")
+            }
+            Self::QuantityMustBePositive(field) => {
+                write!(formatter, "{field} must be greater than zero")
+            }
+            Self::AmountMustBeNonNegative(field) => {
+                write!(formatter, "{field} must be non-negative")
             }
             Self::InvalidDate { year, month, day } => {
                 write!(formatter, "invalid date {year:04}-{month:02}-{day:02}")
@@ -681,6 +806,33 @@ fn is_leap_year(year: i32) -> bool {
     (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
+fn date_days_from_civil(year: i32, month: u8, day: u8) -> i128 {
+    let year = i128::from(year) - if month <= 2 { 1 } else { 0 };
+    let era = (if year >= 0 { year } else { year - 399 }).div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month = i128::from(month);
+    let day_of_year =
+        (153 * (month + if month > 2 { -3 } else { 9 }) + 2).div_euclid(5) + i128::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+fn date_civil_from_days(days: i128) -> (i32, u8, u8) {
+    let days = days + 719_468;
+    let era = (if days >= 0 { days } else { days - 146_096 }).div_euclid(146_097);
+    let day_of_era = days - era * 146_097;
+    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524
+        - day_of_era / 146_096)
+        .div_euclid(365);
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2).div_euclid(153);
+    let day = day_of_year - (153 * month_prime + 2).div_euclid(5) + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    let year = year + if month <= 2 { 1 } else { 0 };
+    (year as i32, month as u8, day as u8)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -711,5 +863,71 @@ mod tests {
         let book = BookId::new("tax-us");
         assert_eq!(account.as_str(), "checking");
         assert_eq!(book.to_string(), "tax-us");
+        assert!(AccountId::try_new(" ").is_err());
+        assert!(std::panic::catch_unwind(|| AccountId::new(" ")).is_err());
+    }
+
+    #[test]
+    fn trade_builders_reject_invalid_economics() {
+        let date: Date = "2026-01-01".parse().unwrap();
+        let quantity = Quantity::with_unit("1".parse().unwrap(), "ABC").unwrap();
+        let cost = Quantity::with_unit("1".parse().unwrap(), "USD").unwrap();
+        let negative = Quantity::with_unit("-1".parse().unwrap(), "USD").unwrap();
+        let lot = LotSelector::Hole(Hole::Anonymous);
+
+        let error = Buy::new(
+            "buy/one",
+            date,
+            Quantity::zero(),
+            "checking",
+            cost.clone(),
+            None,
+        )
+        .expect_err("zero acquisition quantity");
+        assert_eq!(error, ModelError::QuantityMustBePositive("buy quantity"));
+
+        let error = Buy::new(
+            "buy/two",
+            date,
+            quantity.clone(),
+            "checking",
+            negative.clone(),
+            None,
+        )
+        .expect_err("negative cost");
+        assert_eq!(error, ModelError::AmountMustBeNonNegative("buy cost"));
+
+        let error =
+            Sell::new("sell/one", date, quantity, "checking", cost, lot).expect("valid sale");
+        assert_eq!(error.label, "sell/one");
+
+        let error = Sell::new(
+            "sell/two",
+            date,
+            Quantity::with_unit("1".parse().unwrap(), "ABC").unwrap(),
+            "checking",
+            negative,
+            LotSelector::Hole(Hole::Anonymous),
+        )
+        .expect_err("negative proceeds");
+        assert_eq!(error, ModelError::AmountMustBeNonNegative("sell proceeds"));
+    }
+
+    #[test]
+    fn observations_keep_equal_rows_distinct_by_occurrence() {
+        let quantity = Quantity::with_unit("1".parse().unwrap(), "USD").unwrap();
+        let first = PositionObservation {
+            occurrence: OccurrenceId::new("position/1"),
+            account: AccountId::new("checking"),
+            quantity: quantity.clone(),
+        };
+        let second = PositionObservation {
+            occurrence: OccurrenceId::new("position/2"),
+            account: AccountId::new("checking"),
+            quantity,
+        };
+        assert_ne!(first, second);
+        assert_eq!(first.account, second.account);
+        assert_eq!(first.quantity, second.quantity);
     }
 }

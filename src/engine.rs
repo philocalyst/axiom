@@ -10,20 +10,10 @@ use std::fmt;
 
 use crate::exact::Exact;
 use crate::model::{self, Date, Ledger, LedgerForm, LotSelector};
-use crate::package::builtin_policy_hash;
+use crate::package::{LotCandidate, PolicyRegistry, Selection, SelectionProgram};
 use crate::proof::{Node, Operation, Proof, ProofId};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Quantity {
-    pub amount: Exact,
-    pub unit: String,
-}
-
-impl Quantity {
-    fn canonical(&self) -> String {
-        format!("{} {}", self.amount.canonical_string(), self.unit)
-    }
-}
+pub use crate::model::Quantity;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Lot {
@@ -151,14 +141,20 @@ pub struct JournalEntry {
 
 impl JournalEntry {
     pub fn balanced(&self) -> bool {
-        let mut totals: BTreeMap<&str, Exact> = BTreeMap::new();
+        let mut totals: BTreeMap<model::Unit, Exact> = BTreeMap::new();
         for line in &self.lines {
+            let Some(unit) = line.quantity.unit.as_ref() else {
+                if !line.quantity.is_zero() {
+                    return false;
+                }
+                continue;
+            };
             let current = totals
-                .entry(line.quantity.unit.as_str())
+                .entry(unit.clone())
                 .or_insert_with(|| Exact::from(0i64));
             let amount = match line.side {
-                Side::Debit => line.quantity.amount.clone(),
-                Side::Credit => -line.quantity.amount.clone(),
+                Side::Debit => line.quantity.number.clone(),
+                Side::Credit => -line.quantity.number.clone(),
             };
             *current = current.checked_add(&amount);
         }
@@ -261,9 +257,21 @@ impl fmt::Display for RecognitionStatus {
     }
 }
 
-/// Analyze one parsed ledger.  All ordering is derived from source order and
-/// explicit policy; no map iteration or hash-map randomization affects it.
-pub fn analyze(ledger: &Ledger) -> Analysis {
+/// Analyze one parsed ledger inside the workspace boundary. All ordering is
+/// derived from source order and explicit policy; no map iteration or
+/// hash-map randomization affects it. External callers must use
+/// [`crate::workspace::Workspace::analyze_commit`] so the result is bound to
+/// an immutable source commit.
+#[cfg(test)]
+pub(crate) fn analyze(ledger: &Ledger) -> Analysis {
+    analyze_with_registry(ledger, &PolicyRegistry::builtins())
+}
+
+/// Analyze a ledger against an explicit package registry. The default
+/// [`analyze`] path uses the built-in registry; this entry point is the
+/// community-package boundary and makes malformed/unsupported packages
+/// testable without adding kernel branches.
+pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) -> Analysis {
     let book = ledger.book.as_str().to_owned();
     let mut proof = Proof::new();
     let mut lots = Vec::new();
@@ -273,6 +281,7 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
     let mut settlements = Vec::new();
     let mut policy = None;
     let mut policy_proof = None;
+    let mut policy_uses = Vec::new();
     let mut decisions = Vec::new();
     let mut decisions_by_sale: BTreeMap<String, Vec<(String, ProofId)>> = BTreeMap::new();
     let mut issues = Vec::new();
@@ -384,16 +393,46 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
                 }
             }
             LedgerForm::UsePolicy(use_policy) => {
-                if use_policy.book.as_str() == book {
-                    let policy_name = use_policy.policy.as_str().to_owned();
-                    let source = source_key(
-                        "policy",
-                        &format!("{}|{}", use_policy.book, use_policy.policy),
-                    );
-                    let mut metadata = metadata_for(&source, "policy", Some(index + 1));
-                    if let Some(hash) = builtin_policy_hash(&policy_name) {
-                        metadata.insert("policy-hash".into(), hash.to_string());
+                let policy_name = use_policy.policy.as_str().to_owned();
+                let source = source_key(
+                    "policy",
+                    &format!("{}|{}", use_policy.book, use_policy.policy),
+                );
+                let mut metadata = metadata_for(&source, "policy", Some(index + 1));
+                let package = registry.get(&policy_name);
+                if let Some(package) = package {
+                    metadata.insert("policy-hash".into(), package.hash().to_string());
+                    // This records the exact executable body next to its
+                    // content address. A proof reader can verify the hash and
+                    // independently re-run the typed evaluator.
+                    if let Ok(program) = package.compile() {
+                        metadata.insert("policy-program".into(), program.to_string());
                     }
+                }
+                if use_policy.book.as_str() != book {
+                    let current_proof = proof.insert(Node::new(
+                        format!(
+                            "policy {} for wrong book {}",
+                            use_policy.policy, use_policy.book
+                        ),
+                        Operation::Policy {
+                            subject: use_policy.book.as_str().to_owned(),
+                            policy: policy_name.clone(),
+                            answer: "ignored:wrong-book".into(),
+                        },
+                        Vec::new(),
+                        metadata,
+                    ));
+                    issues.push(Issue {
+                        code: IssueCode::UnknownPolicy,
+                        message: format!(
+                            "policy `{policy_name}` targets book `{}` but analysis is for `{book}`",
+                            use_policy.book
+                        ),
+                        sale: None,
+                        proof: Some(current_proof),
+                    });
+                } else {
                     let current_proof = proof.insert(Node::new(
                         format!("policy {}", use_policy.policy),
                         Operation::Policy {
@@ -404,21 +443,7 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
                         Vec::new(),
                         metadata,
                     ));
-                    if let Some(previous) = policy.as_ref() {
-                        if previous != &policy_name {
-                            issues.push(Issue {
-                                code: IssueCode::PolicyDecisionConflict,
-                                message: format!(
-                                    "policies `{previous}` and `{policy_name}` both apply to book `{book}`"
-                                ),
-                                sale: None,
-                                proof: Some(current_proof),
-                            });
-                        }
-                    } else {
-                        policy = Some(policy_name);
-                        policy_proof = Some(current_proof);
-                    }
+                    policy_uses.push((policy_name, current_proof));
                 }
             }
             LedgerForm::Decide(decision) => {
@@ -441,29 +466,145 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
                     // remains separately locatable through its source
                     // metadata but does not create a false conflict.
                 } else {
-                    if let Some((previous, previous_proof)) = choices.first() {
-                        let conflict_proof = proof.insert(Node::new(
-                            format!("decision conflict {sale_name}"),
-                            Operation::Conflict {
-                                subject: sale_name.clone(),
-                                reason: "multiple decisions select different lots".into(),
-                            },
-                            vec![*previous_proof, current_proof],
-                            metadata_for(&source, "decision-conflict", None),
-                        ));
-                        issues.push(Issue {
-                            code: IssueCode::PolicyDecisionConflict,
-                            message: format!(
-                                "decisions for sale `{sale_name}` select both `{previous}` and `{value}`"
-                            ),
-                            sale: Some(sale_name.clone()),
-                            proof: Some(conflict_proof),
-                        });
-                    }
                     choices.push((value, current_proof));
                 }
             }
         }
+    }
+
+    // Decisions are set-like evidence. Canonicalize answers before deriving
+    // conflicts so their result does not depend on source order, and make a
+    // decision for a nonexistent sale an explicit rooted issue rather than
+    // silently dropping it.
+    for choices in decisions_by_sale.values_mut() {
+        choices.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    }
+    let sale_names = sales_raw
+        .iter()
+        .map(|(_, sale)| sale.label.as_str())
+        .collect::<BTreeSet<_>>();
+    for (sale_name, choices) in &decisions_by_sale {
+        if choices.len() > 1 {
+            let conflict_proof = proof.insert(Node::new(
+                format!("decision conflict {sale_name}"),
+                Operation::Conflict {
+                    subject: sale_name.clone(),
+                    reason: "multiple decisions select different lots".into(),
+                },
+                choices.iter().map(|(_, proof_id)| *proof_id).collect(),
+                metadata_for(sale_name, "decision-conflict", None),
+            ));
+            issues.push(Issue {
+                code: IssueCode::PolicyDecisionConflict,
+                message: format!(
+                    "decisions for sale `{sale_name}` select {}",
+                    choices
+                        .iter()
+                        .map(|(lot, _)| format!("`{lot}`"))
+                        .collect::<Vec<_>>()
+                        .join(" and ")
+                ),
+                sale: Some(sale_name.clone()),
+                proof: Some(conflict_proof),
+            });
+        }
+        if !sale_names.contains(sale_name.as_str()) {
+            let target_proof = proof.insert(Node::new(
+                format!("unknown decision target {sale_name}"),
+                Operation::Conflict {
+                    subject: sale_name.clone(),
+                    reason: "decision names a sale that is not present".into(),
+                },
+                choices.iter().map(|(_, proof_id)| *proof_id).collect(),
+                metadata_for(sale_name, "unknown-decision-target", None),
+            ));
+            issues.push(Issue {
+                code: IssueCode::PolicyDecisionConflict,
+                message: format!("decision targets unknown sale `{sale_name}`"),
+                sale: Some(sale_name.clone()),
+                proof: Some(target_proof),
+            });
+        }
+    }
+
+    // Resolve package names through the registry only after collecting all
+    // uses. Sorting makes repeated policy declarations source-order
+    // invariant, and a conflict disables execution instead of letting the
+    // first source line choose a winner.
+    policy_uses.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    let mut policy_program: Option<SelectionProgram> = None;
+    let mut policy_invalid = false;
+    let policy_names = policy_uses
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect::<BTreeSet<_>>();
+    if let Some(name) = policy_names.iter().next() {
+        policy = Some(name.clone());
+        policy_proof = policy_uses
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .map(|(_, proof_id)| *proof_id);
+    }
+    if policy_names.len() > 1 {
+        policy_invalid = true;
+        let conflict_proof = proof.insert(Node::new(
+            format!("policy conflict for {book}"),
+            Operation::Conflict {
+                subject: book.clone(),
+                reason: "multiple policy packages apply".into(),
+            },
+            policy_uses.iter().map(|(_, proof_id)| *proof_id).collect(),
+            metadata_for(&book, "policy-conflict", None),
+        ));
+        issues.push(Issue {
+            code: IssueCode::PolicyDecisionConflict,
+            message: format!(
+                "policies {} both apply to book `{book}`",
+                policy_names
+                    .iter()
+                    .map(|name| format!("`{name}`"))
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            ),
+            sale: None,
+            proof: Some(conflict_proof),
+        });
+    }
+    for name in &policy_names {
+        let proof_id = policy_uses
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .map(|(_, proof_id)| *proof_id);
+        let Some(package) = registry.get(name) else {
+            policy_invalid = true;
+            issues.push(Issue {
+                code: IssueCode::UnknownPolicy,
+                message: format!("policy `{name}` has no registered package"),
+                sale: None,
+                proof: proof_id,
+            });
+            continue;
+        };
+        if let Err(error) = package.validate() {
+            policy_invalid = true;
+            issues.push(Issue {
+                code: IssueCode::UnknownPolicy,
+                message: format!(
+                    "policy package `{name}` ({}) is not executable: {error}",
+                    package.hash()
+                ),
+                sale: None,
+                proof: proof_id,
+            });
+        }
+    }
+    if !policy_invalid
+        && policy_names.len() == 1
+        && let Some(name) = policy_names.iter().next()
+    {
+        policy_program = registry
+            .get(name)
+            .and_then(|package| package.compile().ok());
     }
 
     // Quote statuses are independent from recognition.  A sale in USD does
@@ -489,8 +630,8 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
         // not depend on decimal scale.
         let rates_agree = group_quotes.first().is_none_or(|reference| {
             group_quotes.iter().all(|quote| {
-                quote.base.amount.checked_mul(&reference.quote.amount)
-                    == reference.base.amount.checked_mul(&quote.quote.amount)
+                quote.base.number.checked_mul(&reference.quote.number)
+                    == reference.base.number.checked_mul(&quote.quote.number)
             })
         });
         if !rates_agree {
@@ -520,18 +661,6 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
         }
     }
 
-    let fifo = policy.as_deref() == Some("lots/fifo");
-    if let Some(name) = policy.as_deref()
-        && name != "lots/fifo"
-    {
-        issues.push(Issue {
-            code: IssueCode::UnknownPolicy,
-            message: format!("policy `{name}` has no built-in resolver"),
-            sale: None,
-            proof: None,
-        });
-    }
-
     let mut sales = Vec::new();
     let mut journal = Vec::new();
     let mut dependencies: BTreeMap<String, Vec<ProofId>> = BTreeMap::new();
@@ -541,23 +670,31 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
     // Observations are evidence, not balances.  Preserve every source node,
     // but explicitly surface contradictory values and never let one
     // observation silently win by source order.
-    let mut position_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+    let mut position_groups: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
     for (index, position) in positions.iter().enumerate() {
         position_groups
-            .entry(position.account.clone())
+            .entry((
+                position.account.clone(),
+                position
+                    .quantity
+                    .unit
+                    .as_ref()
+                    .map(|unit| unit.as_str().to_owned())
+                    .unwrap_or_else(|| "?".into()),
+            ))
             .or_default()
             .push(index);
     }
-    for (account, indexes) in position_groups {
+    for ((account, asset), indexes) in position_groups {
         let distinct = indexes
             .iter()
             .map(|index| positions[*index].quantity.canonical())
             .collect::<BTreeSet<_>>();
         if distinct.len() > 1 {
             let conflict_proof = proof.insert(Node::new(
-                format!("position conflict {account}"),
+                format!("position conflict {account}:{asset}"),
                 Operation::Conflict {
-                    subject: account.clone(),
+                    subject: format!("{account}:{asset}"),
                     reason: "multiple observed positions disagree".into(),
                 },
                 indexes
@@ -571,17 +708,13 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
             }
             issues.push(Issue {
                 code: IssueCode::PolicyDecisionConflict,
-                message: format!("position observations for `{account}` conflict"),
+                message: format!("position observations for `{account}:{asset}` conflict"),
                 sale: None,
                 proof: Some(conflict_proof),
             });
         }
     }
 
-    let sale_names = sales_raw
-        .iter()
-        .map(|(_, sale)| sale.label.as_str())
-        .collect::<BTreeSet<_>>();
     let mut settlement_groups: BTreeMap<String, Vec<usize>> = BTreeMap::new();
     for (index, settlement) in settlements.iter().enumerate() {
         if !sale_names.contains(settlement.reference.as_str()) {
@@ -612,13 +745,18 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
                 )
             })
             .collect::<BTreeSet<_>>();
-        if distinct.len() > 1 {
+        if indexes.len() > 1 {
             settlement_conflicts.insert(reference.clone());
+            let reason = if distinct.len() > 1 {
+                "multiple observed settlements disagree"
+            } else {
+                "multiple settlement observations require explicit allocation"
+            };
             let conflict_proof = proof.insert(Node::new(
                 format!("settlement conflict {reference}"),
                 Operation::Conflict {
                     subject: reference.clone(),
-                    reason: "multiple observed settlements disagree".into(),
+                    reason: reason.into(),
                 },
                 indexes
                     .iter()
@@ -661,10 +799,7 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
                 date: sell.date,
                 account: sell.from.as_str().to_owned(),
                 asset: "?asset".into(),
-                quantity: Quantity {
-                    amount: Exact::from(0i64),
-                    unit: "?unit".into(),
-                },
+                quantity: Quantity::zero(),
                 proceeds: quantity_of(&sell.proceeds).unwrap_or_else(zero_quantity),
                 eligible_lots: Vec::new(),
                 conditional_gains: Vec::new(),
@@ -682,7 +817,7 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
                     && lot.account == account
                     && lot.asset == asset
                     && lot.quantity.unit == quantity.unit
-                    && lot.quantity.amount >= quantity.amount
+                    && lot.quantity.number >= quantity.number
             })
             .collect::<Vec<_>>();
         eligible.sort_by(|left, right| {
@@ -724,17 +859,46 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
         let requested_is_invalid = requested_lot
             .as_ref()
             .is_some_and(|lot| !eligible_ids.contains(lot));
-        let policy_lot = if fifo {
-            eligible.first().and_then(|first| {
-                let earliest = eligible
-                    .iter()
-                    .filter(|lot| lot.date == first.date)
-                    .collect::<Vec<_>>();
-                (earliest.len() == 1).then(|| first.id.clone())
-            })
-        } else {
-            None
-        };
+        let policy_selection = policy_program.map(|program| {
+            let candidates = eligible
+                .iter()
+                .map(|lot| LotCandidate::new(lot.id.clone(), lot.date))
+                .collect::<Vec<_>>();
+            (program, program.evaluate(&candidates))
+        });
+        let policy_lot = policy_selection
+            .as_ref()
+            .and_then(|(_, selection)| match selection {
+                Selection::Unique(lot) => Some(lot.clone()),
+                Selection::None | Selection::Ambiguous(_) => None,
+            });
+        let policy_application_proof = policy_selection.as_ref().map(|(program, selection)| {
+            let answer = match selection {
+                Selection::None => "none".to_owned(),
+                Selection::Unique(lot) => lot.clone(),
+                Selection::Ambiguous(lots) => format!("ambiguous:{}", lots.join(",")),
+            };
+            let mut metadata = metadata_for(&source, "policy-selection", None);
+            if let Some(name) = policy.as_deref()
+                && let Some(package) = registry.get(name)
+            {
+                metadata.insert("policy-hash".into(), package.hash().to_string());
+                metadata.insert("policy-program".into(), program.to_string());
+            }
+            proof.insert(Node::new(
+                format!("policy selection {}/{}", sell.label, source),
+                Operation::Policy {
+                    subject: sell.label.clone(),
+                    policy: policy.clone().unwrap_or_else(|| "unknown".into()),
+                    answer,
+                },
+                std::iter::once(policy_proof)
+                    .flatten()
+                    .chain(eligible.iter().map(|lot| lot.proof))
+                    .collect(),
+                metadata,
+            ))
+        });
         let (mut selected_lot, mut status) = if multi_sale_unsupported {
             issues.push(Issue {
                 code: IssueCode::MissingLot,
@@ -787,6 +951,11 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
                     decision_lot,
                 },
             )
+        } else if policy_invalid && !policy_names.is_empty() && requested_lot.is_none() {
+            // An invalid package cannot silently degrade to the unique-lot
+            // fallback. The package issue above is global and rooted at the
+            // policy declaration; this sale remains explicitly blocked.
+            (None, RecognitionStatus::MissingLot)
         } else {
             match (policy_lot.clone(), requested_lot.clone()) {
                 (Some(policy_lot), Some(decision_lot)) if policy_lot != decision_lot => {
@@ -803,7 +972,7 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
                             .collect(),
                         metadata_for(&source, "lot-conflict", None),
                     ));
-                    issues.push(Issue { code: IssueCode::PolicyDecisionConflict, message: format!("FIFO selects `{policy_lot}` but decision selects `{decision_lot}` for sale `{}`", sell.label), sale: Some(sell.label.clone()), proof: Some(proof_id) });
+                    issues.push(Issue { code: IssueCode::PolicyDecisionConflict, message: format!("policy selects `{policy_lot}` but decision selects `{decision_lot}` for sale `{}`", sell.label), sale: Some(sell.label.clone()), proof: Some(proof_id) });
                     (
                         None,
                         RecognitionStatus::Conflict {
@@ -909,6 +1078,9 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
             if let Some(policy_proof) = policy_proof {
                 inputs.push(policy_proof);
             }
+            if let Some(policy_application_proof) = policy_application_proof {
+                inputs.push(policy_application_proof);
+            }
             inputs.extend(decision_proofs.iter().copied());
             if let Some(settlement) = matching_settlement(&settlements, &sell.label, &proceeds) {
                 inputs.push(settlement.proof);
@@ -924,7 +1096,8 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
             // A journal is an accepted cash projection, not a guess.  The
             // receiving account must come from a matching settlement
             // observation; never invent `proceeds:<sale>`.
-            if let Some(settlement) = matching_settlement(&settlements, &sell.label, &proceeds)
+            if !policy_invalid
+                && let Some(settlement) = matching_settlement(&settlements, &sell.label, &proceeds)
                 && let Some(into) = settlement.into.as_deref()
             {
                 journal.push(make_journal(&sell.label, into, &account, &asset, gain, id));
@@ -938,6 +1111,9 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
             .collect::<Vec<_>>();
         if let Some(policy_proof) = policy_proof {
             goal_roots.push(policy_proof);
+        }
+        if let Some(policy_application_proof) = policy_application_proof {
+            goal_roots.push(policy_application_proof);
         }
         goal_roots.extend(decision_proofs.iter().copied());
         dependencies.insert(format!("gain:{}", sell.label), goal_roots);
@@ -969,21 +1145,38 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
         let mut calculated = Exact::from(0i64);
         let mut inputs = vec![position.proof];
         for lot in &lots {
-            if lot.account == position.account && lot.asset == position.quantity.unit {
-                calculated = calculated.checked_add(&lot.quantity.amount);
+            if lot.account == position.account
+                && position
+                    .quantity
+                    .unit
+                    .as_ref()
+                    .is_some_and(|unit| lot.asset == unit.as_str())
+            {
+                calculated = calculated.checked_add(&lot.quantity.number);
                 inputs.push(lot.proof);
             }
         }
         for sale in &sales {
-            if sale.account == position.account && sale.asset == position.quantity.unit {
-                calculated = calculated.checked_sub(&sale.quantity.amount);
+            // A sale that is still ambiguous, conflicted, or otherwise
+            // blocked is not an accepted disposal. Subtracting it here would
+            // make an observed position look reconciled by an unresolved
+            // choice, which is a materially false balance claim.
+            if sale.status.is_complete()
+                && sale.account == position.account
+                && position
+                    .quantity
+                    .unit
+                    .as_ref()
+                    .is_some_and(|unit| sale.asset == unit.as_str())
+            {
+                calculated = calculated.checked_sub(&sale.quantity.number);
                 inputs.push(sale.proof);
             }
         }
         if inputs.len() == 1 {
             continue;
         }
-        let operation = if calculated == position.quantity.amount {
+        let operation = if calculated == position.quantity.number {
             position.status = ObservationStatus::Reconciled;
             Operation::Derive {
                 rule: "reconcile-position".into(),
@@ -995,10 +1188,20 @@ pub fn analyze(ledger: &Ledger) -> Analysis {
                 message: format!(
                     "observed position `{}` is {} {}, but authored events imply {} {}",
                     position.account,
-                    position.quantity.amount,
-                    position.quantity.unit,
+                    position.quantity.number,
+                    position
+                        .quantity
+                        .unit
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| "?".into()),
                     calculated,
-                    position.quantity.unit
+                    position
+                        .quantity
+                        .unit
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| "?".into())
                 ),
                 sale: None,
                 proof: Some(position.proof),
@@ -1131,9 +1334,9 @@ fn make_lot(buy: &model::Buy, proof: ProofId, source_line: usize) -> Option<Lot>
     {
         return None;
     }
-    let basis_amount = consideration.amount.checked_add(
+    let basis_amount = consideration.number.checked_add(
         &fee.as_ref()
-            .map(|fee| fee.amount.clone())
+            .map(|fee| fee.number.clone())
             .unwrap_or_else(|| Exact::from(0i64)),
     );
     Some(Lot {
@@ -1144,10 +1347,7 @@ fn make_lot(buy: &model::Buy, proof: ProofId, source_line: usize) -> Option<Lot>
         quantity,
         consideration: consideration.clone(),
         fee,
-        basis: Quantity {
-            amount: basis_amount,
-            unit: consideration.unit,
-        },
+        basis: Quantity::new(basis_amount, consideration.unit).ok()?,
         source_line,
         proof,
     })
@@ -1170,23 +1370,25 @@ fn conditional_gain(
     proof: &mut Proof,
     sale_proof: ProofId,
 ) -> Option<ConditionalGain> {
-    if lot.quantity.unit != sold.unit || proceeds.unit.is_empty() || lot.basis.unit != proceeds.unit
+    if lot.quantity.unit != sold.unit || proceeds.unit.is_none() || lot.basis.unit != proceeds.unit
     {
         return None;
     }
-    let ratio = sold.amount.checked_div(&lot.quantity.amount).ok()?;
-    let allocated_basis = lot.basis.amount.checked_mul(&ratio);
-    let gain = proceeds.amount.checked_sub(&allocated_basis);
+    let ratio = sold.number.checked_div(&lot.quantity.number).ok()?;
+    let allocated_basis = lot.basis.number.checked_mul(&ratio);
+    let gain = proceeds.number.checked_sub(&allocated_basis);
+    let basis = Quantity::new(allocated_basis.clone(), lot.basis.unit.clone()).ok()?;
+    let gain = Quantity::new(gain.clone(), proceeds.unit.clone()).ok()?;
     let mut metadata = metadata_for(&lot.id, "conditional-gain", None);
     metadata.insert("lot".into(), lot.id.clone());
     let proof_id = proof.insert(Node::new(
         format!("conditional gain {} on {}", lot.id, sale_proof),
         Operation::Arithmetic {
             rule: "gain = proceeds - allocated basis".into(),
-            minuend: proceeds.amount.clone(),
+            minuend: proceeds.number.clone(),
             subtrahend: allocated_basis.clone(),
-            result: gain.clone(),
-            unit: proceeds.unit.clone(),
+            result: gain.number.clone(),
+            unit: proceeds.unit.as_ref()?.to_string(),
         },
         vec![lot.proof, sale_proof],
         metadata,
@@ -1194,14 +1396,8 @@ fn conditional_gain(
     Some(ConditionalGain {
         lot_id: lot.id.clone(),
         proceeds: proceeds.clone(),
-        basis: Quantity {
-            amount: allocated_basis,
-            unit: lot.basis.unit.clone(),
-        },
-        gain: Quantity {
-            amount: gain,
-            unit: proceeds.unit.clone(),
-        },
+        basis,
+        gain,
         proof: proof_id,
     })
 }
@@ -1242,7 +1438,7 @@ fn matching_settlement<'a>(
     sale: &str,
     proceeds: &Quantity,
 ) -> Option<&'a SettlementView> {
-    settlements.iter().find(|settlement| {
+    let mut matches = settlements.iter().filter(|settlement| {
         settlement.reference == sale
             && matches!(
                 settlement.status,
@@ -1250,7 +1446,9 @@ fn matching_settlement<'a>(
             )
             && settlement.into.is_some()
             && settlement.quantity == *proceeds
-    })
+    });
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }
 
 fn holding_of_model(sell: &model::Sell) -> Option<(String, String, Quantity)> {
@@ -1261,18 +1459,12 @@ fn holding_of_model(sell: &model::Sell) -> Option<(String, String, Quantity)> {
 }
 
 fn quantity_of(quantity: &model::Quantity) -> Option<Quantity> {
-    let unit = quantity.unit.as_ref()?.as_str().to_owned();
-    Some(Quantity {
-        amount: quantity.number.clone(),
-        unit,
-    })
+    quantity.unit.as_ref()?;
+    Some(quantity.clone())
 }
 
 fn zero_quantity() -> Quantity {
-    Quantity {
-        amount: Exact::from(0i64),
-        unit: "?unit".into(),
-    }
+    Quantity::zero()
 }
 
 /// Return the semantic identity of an observed form.  This intentionally does
@@ -1299,12 +1491,7 @@ fn metadata_for(source: &str, kind: &str, line: Option<usize>) -> BTreeMap<Strin
 }
 
 fn canonical_model_quantity(quantity: &model::Quantity) -> String {
-    let unit = quantity
-        .unit
-        .as_ref()
-        .map(|unit| unit.as_str())
-        .unwrap_or("?");
-    format!("{} {unit}", quantity.number.canonical_string())
+    quantity.canonical()
 }
 
 fn buy_material(buy: &model::Buy) -> String {
@@ -1344,7 +1531,22 @@ fn quote_material(quote: &model::Quote) -> String {
 }
 
 fn quote_group_key(quote: &QuoteView) -> String {
-    format!("{}:{}:{}", quote.date, quote.base.unit, quote.quote.unit)
+    format!(
+        "{}:{}:{}",
+        quote.date,
+        quote
+            .base
+            .unit
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "?".into()),
+        quote
+            .quote
+            .unit
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_else(|| "?".into())
+    )
 }
 
 #[cfg(test)]
@@ -1378,8 +1580,8 @@ decide sell lot buy/two
         let result = analyze(&ledger);
         let sale = result.sale("sell").unwrap();
         assert_eq!(sale.eligible_lots, vec!["buy/one", "buy/two"]);
-        assert_eq!(sale.conditional_gains[0].gain.amount.to_string(), "299");
-        assert_eq!(sale.conditional_gains[1].gain.amount.to_string(), "199");
+        assert_eq!(sale.conditional_gains[0].gain.number.to_string(), "299");
+        assert_eq!(sale.conditional_gains[1].gain.number.to_string(), "199");
         assert!(matches!(sale.status, RecognitionStatus::Conflict { .. }));
         assert!(result.journal.is_empty());
         assert!(
@@ -1440,7 +1642,7 @@ observe settlement sell 500 USD into cash
                 .recognized_gain("sell")
                 .unwrap()
                 .gain
-                .amount
+                .number
                 .to_string(),
             "299"
         );
@@ -1483,7 +1685,7 @@ sell sell on 2026-09-20
                 .recognized_gain("sell")
                 .unwrap()
                 .gain
-                .amount
+                .number
                 .to_string(),
             "300"
         );
@@ -1685,5 +1887,217 @@ sell sell on 2026-09-20
                 .iter()
                 .any(|issue| issue.code == IssueCode::IncompatibleUnit)
         );
+    }
+
+    #[test]
+    fn lifo_uses_the_same_compiled_evaluator_as_fifo() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+buy buy/two on 2026-02-04
+  10 ABC into brokerage
+  for 300 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+use lots/lifo for tax-us
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        let sale = result.sale("sell").unwrap();
+        assert_eq!(sale.selected_lot.as_deref(), Some("buy/two"));
+        assert!(sale.status.is_complete());
+        let policy = result
+            .proof
+            .nodes
+            .values()
+            .find(|node| matches!(node.operation, Operation::Policy { ref policy, .. } if policy == "lots/lifo"))
+            .expect("lifo policy proof");
+        let expected_hash = builtin_policy_hash_for_test("lots/lifo").to_string();
+        assert_eq!(policy.metadata.get("policy-hash"), Some(&expected_hash));
+        assert!(policy.metadata.contains_key("policy-program"));
+    }
+
+    #[test]
+    fn unknown_and_malformed_packages_do_not_fallback_or_emit_a_journal() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+observe settlement sell 500 USD into checking
+use lots/unknown for tax-us
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        assert!(result.sale("sell").unwrap().selected_lot.is_none());
+        assert!(result.journal.is_empty());
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.code == IssueCode::UnknownPolicy && issue.proof.is_some())
+        );
+
+        let mut registry = PolicyRegistry::builtins();
+        registry.insert(crate::package::PolicyPackage::new(
+            "lots/broken",
+            "0",
+            "selector=not_implemented\ntie=ambiguous",
+        ));
+        let broken = source.replace("lots/unknown", "lots/broken");
+        let result = analyze_with_registry(&parse_ledger(&broken).unwrap(), &registry);
+        assert!(result.sale("sell").unwrap().selected_lot.is_none());
+        assert!(result.journal.is_empty());
+        assert!(result.issues.iter().any(|issue| {
+            issue.code == IssueCode::UnknownPolicy
+                && issue.message.contains("not executable")
+                && issue.proof.is_some()
+        }));
+    }
+
+    #[test]
+    fn policy_conflicts_are_order_invariant_and_rooted() {
+        let body = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+buy buy/two on 2026-02-04
+  10 ABC into brokerage
+  for 300 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+"#;
+        let left = format!("{body}use lots/fifo for tax-us\nuse lots/lifo for tax-us\n");
+        let right = format!("{body}use lots/lifo for tax-us\nuse lots/fifo for tax-us\n");
+        let left = analyze(&parse_ledger(&left).unwrap());
+        let right = analyze(&parse_ledger(&right).unwrap());
+        assert_eq!(left.policy, right.policy);
+        assert_eq!(left.sale("sell").unwrap().selected_lot, None);
+        assert_eq!(right.sale("sell").unwrap().selected_lot, None);
+        assert!(
+            left.issues
+                .iter()
+                .any(|issue| { issue.message.contains("both apply") && issue.proof.is_some() })
+        );
+        assert!(
+            right
+                .issues
+                .iter()
+                .any(|issue| { issue.message.contains("both apply") && issue.proof.is_some() })
+        );
+    }
+
+    #[test]
+    fn wrong_book_policy_and_unknown_decision_targets_are_rooted_issues() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+use lots/fifo for other-book
+decide missing-sale lot buy/one
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        let mut messages = result.issues.iter().map(|issue| issue.message.as_str());
+        assert!(
+            messages
+                .clone()
+                .any(|message| message.contains("targets book"))
+        );
+        assert!(messages.any(|message| message.contains("unknown sale")));
+        assert!(
+            result
+                .issues
+                .iter()
+                .filter(|issue| {
+                    issue.message.contains("targets book") || issue.message.contains("unknown sale")
+                })
+                .all(|issue| issue.proof.is_some())
+        );
+    }
+
+    #[test]
+    fn blocked_sale_does_not_reconcile_a_post_disposal_position() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+buy buy/two on 2026-02-04
+  10 ABC into brokerage
+  for 300 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+observe position brokerage 10 ABC
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        assert!(matches!(
+            result.positions[0].status,
+            ObservationStatus::Conflict
+        ));
+    }
+
+    #[test]
+    fn position_conflicts_are_scoped_by_account_and_asset() {
+        let source = r#"book tax-us
+observe position brokerage 10 ABC
+observe position brokerage 500 USD
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        assert!(
+            result
+                .positions
+                .iter()
+                .all(|position| position.status == ObservationStatus::Observed)
+        );
+        assert!(
+            !result
+                .issues
+                .iter()
+                .any(|issue| issue.message.contains("position observations"))
+        );
+    }
+
+    #[test]
+    fn duplicate_settlements_never_choose_the_first_occurrence() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+observe settlement sell 500 USD into checking
+observe settlement sell 500 USD into checking
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        assert!(
+            result
+                .settlements
+                .iter()
+                .all(|settlement| settlement.status == ObservationStatus::Conflict)
+        );
+        assert!(result.journal.is_empty());
+        assert!(
+            result
+                .issues
+                .iter()
+                .any(|issue| issue.message.contains("settlement observations"))
+        );
+    }
+
+    fn builtin_policy_hash_for_test(name: &str) -> crate::model::ContentHash {
+        crate::package::builtin_policy_hash(name).expect("test builtin")
     }
 }

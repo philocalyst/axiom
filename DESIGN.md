@@ -4,7 +4,8 @@ This repository implements one complete semantic slice, not a miniature
 general-purpose theorem prover. The canonical text ledger flows through:
 
 ```text
-source ledger -> observed economic facts -> resolution -> recognition -> journal/proof
+exact source bytes -> immutable source commit -> observed economic facts
+                   -> resolution -> recognition -> journal/proof
 ```
 
 The source ledger is the final source of truth. Everything else is a pure,
@@ -50,13 +51,17 @@ source ledger. Every non-zero number has a unit.
 - `model.rs`: parsed economic facts and typed IDs. Keep occurrence identity
   separate from normalized content hashes.
 - `package.rs`: canonical, domain-separated hashes for policy definitions.
-  V0 does not expose a generic extension mechanism.
-- `parser.rs`: lossless-enough line parser with line-oriented diagnostics.
+  FIFO and LIFO use the same compiled selection-program evaluator; V0 does
+  not expose a generic extension mechanism.
+- `surface.rs`: the single lossless CST and formatter boundary.
+- `parser.rs`: strict semantic lowering with line-oriented diagnostics.
 - `proof.rs`: content-addressed proof DAG with independent integrity and exact
   arithmetic checks.
 - `engine.rs`: deterministic analysis. Never select among multiple candidates
   without a policy or decision. Policy/decision disagreement is a conflict.
 - `render.rs`: calm human output, derived journal, and source-level explanation.
+- `workspace.rs`: immutable exact-source commits, correction history,
+  strict elaboration, and commit-bound analysis proofs.
 
 The central result axes are independent:
 

@@ -3,12 +3,12 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 
 use axiom_ledger::render::{
-    has_blocking_state, journal_is_blocked, render_check, render_journal, render_packages,
-    render_why,
+    has_blocking_state, journal_is_blocked, render_check, render_journal,
+    render_packages_with_registry, render_why,
 };
-use axiom_ledger::{analyze, parse_ledger};
+use axiom_ledger::workspace::{Workspace, WorkspaceError};
 
-const USAGE: &str = "usage: axiom <check|journal|why|packages> FILE [GOAL]";
+const USAGE: &str = "usage: axiom <check|journal|packages> FILE\n       axiom why FILE GOAL";
 const HELP: &str = "Axiom — a small, local-first economic ledger\n\n\
 usage:\n  axiom check FILE\n  axiom journal FILE\n  axiom why FILE GOAL\n  axiom packages FILE\n\n\
 commands:\n  check      inspect source state and unresolved decisions\n  journal    show the derived journal, when it is complete\n  why        explain a goal in ordinary source and policy language\n  packages   list the fixed V0 vocabulary and policy packages\n\n\
@@ -56,7 +56,7 @@ where
         return 0;
     }
 
-    let source = match std::fs::read_to_string(&command.path) {
+    let source = match std::fs::read(&command.path) {
         Ok(source) => source,
         Err(error) => {
             let _ = writeln!(
@@ -67,9 +67,18 @@ where
             return 1;
         }
     };
-    let ledger = match parse_ledger(&source) {
-        Ok(ledger) => ledger,
+    let mut workspace = Workspace::new();
+    let source_name = command.path.to_string_lossy().into_owned();
+    let source_ledger = match workspace.load_source(source_name, &source) {
+        Ok(source) => source,
         Err(error) => {
+            let _ = writeln!(stderr, "error: {}: {error}", command.path.display());
+            return 1;
+        }
+    };
+    let committed = match workspace.analyze_commit(source_ledger.commit_id()) {
+        Ok(analysis) => analysis,
+        Err(WorkspaceError::Parse(error)) => {
             let _ = writeln!(
                 stderr,
                 "error: {}:{}:{}: {}",
@@ -80,27 +89,35 @@ where
             );
             return 1;
         }
+        Err(error) => {
+            let _ = writeln!(stderr, "error: {}: {error}", command.path.display());
+            return 1;
+        }
     };
-    let analysis = analyze(&ledger);
+    let analysis = &committed.analysis;
 
     let output = match &command.kind {
-        CommandKind::Check => render_check(&analysis),
-        CommandKind::Journal => render_journal(&analysis),
-        CommandKind::Why(goal) => match render_why(&analysis, goal) {
+        CommandKind::Check => render_check(analysis),
+        CommandKind::Journal => render_journal(analysis),
+        CommandKind::Why(goal) => match render_why(analysis, goal) {
             Ok(output) => output,
             Err(error) => {
                 let _ = writeln!(stderr, "error: {error}");
                 return 1;
             }
         },
-        CommandKind::Packages => render_packages(&analysis.book, analysis.policy.as_deref()),
+        CommandKind::Packages => render_packages_with_registry(
+            &analysis.book,
+            analysis.policy.as_deref(),
+            &committed.policy_registry,
+        ),
         CommandKind::Help => unreachable!("help returned before reading a ledger"),
     };
     let _ = write!(stdout, "{output}");
 
     match command.kind {
-        CommandKind::Check => i32::from(has_blocking_state(&analysis)),
-        CommandKind::Journal => i32::from(journal_is_blocked(&analysis)),
+        CommandKind::Check => i32::from(has_blocking_state(analysis)),
+        CommandKind::Journal => i32::from(journal_is_blocked(analysis)),
         CommandKind::Why(_) | CommandKind::Packages => 0,
         CommandKind::Help => 0,
     }
