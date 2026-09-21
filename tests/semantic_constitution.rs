@@ -1607,6 +1607,106 @@ const INDEPENDENT_CASES_ADDED: &[IndependentCase] = &[
         id: "F03",
         executor: independent_f03_month_precision_is_coarse,
     },
+    IndependentCase {
+        id: "D18",
+        executor: independent_d18_negative_quote_is_unavailable,
+    },
+    IndependentCase {
+        id: "E18",
+        executor: independent_e18_policy_changes_use_effective_intervals,
+    },
+    IndependentCase {
+        id: "E19",
+        executor: independent_e19_unknown_tax_keeps_alternatives,
+    },
+    IndependentCase {
+        id: "F04",
+        executor: independent_f04_span_interval_preserves_bounds,
+    },
+    IndependentCase {
+        id: "F05",
+        executor: independent_f05_occurrence_and_recording_roles_differ,
+    },
+    IndependentCase {
+        id: "F06",
+        executor: independent_f06_retroactive_effective_date_is_allowed,
+    },
+    IndependentCase {
+        id: "F07",
+        executor: independent_f07_late_settlement_is_independent_role,
+    },
+    IndependentCase {
+        id: "F09",
+        executor: independent_f09_business_day_adjustment_is_named,
+    },
+    IndependentCase {
+        id: "F10",
+        executor: independent_f10_open_ended_interval_has_unbounded_end,
+    },
+    IndependentCase {
+        id: "G02",
+        executor: independent_g02_cycle_without_base_has_no_proof,
+    },
+    IndependentCase {
+        id: "G07",
+        executor: independent_g07_candidate_substitutions_are_multiple,
+    },
+    IndependentCase {
+        id: "G08",
+        executor: independent_g08_resource_limit_is_incomplete_not_false,
+    },
+    IndependentCase {
+        id: "G12",
+        executor: independent_g12_package_update_changes_cache_key,
+    },
+    IndependentCase {
+        id: "G13",
+        executor: independent_g13_search_order_does_not_change_answer,
+    },
+    IndependentCase {
+        id: "G14",
+        executor: independent_g14_infinite_generation_requires_horizon,
+    },
+    IndependentCase {
+        id: "G16",
+        executor: independent_g16_completeness_is_a_cache_dimension,
+    },
+    IndependentCase {
+        id: "H02",
+        executor: independent_h02_actual_event_links_to_forecast_variance,
+    },
+    IndependentCase {
+        id: "H04",
+        executor: independent_h04_possible_dates_are_temporal_alternatives,
+    },
+    IndependentCase {
+        id: "H07",
+        executor: independent_h07_feasible_plans_have_pareto_frontier,
+    },
+    IndependentCase {
+        id: "H08",
+        executor: independent_h08_approximate_plan_has_exact_verifier,
+    },
+    IndependentCase {
+        id: "H11",
+        executor: independent_h11_scenario_override_is_scoped_assumption,
+    },
+    IndependentCase {
+        id: "I02",
+        executor: independent_i02_resource_profile_bounds_rule_package,
+    },
+    IndependentCase {
+        id: "I03",
+        executor: independent_i03_close_pins_package_hashes,
+    },
+    IndependentCase {
+        id: "I08",
+        executor: independent_i08_lost_key_is_unavailable_evidence,
+    },
+    IndependentCase {
+        id: "I10",
+        executor: independent_i10_agent_proposal_is_candidate_only,
+    },
 ];
 
 fn date(text: &str) -> Date {
@@ -3054,7 +3154,7 @@ fn collaboration_and_adapter_boundaries_fixtures() {
 fn independent_case_registry_is_explicit() {
     assert_eq!(
         INDEPENDENT_CASES_ADDED.len(),
-        50,
+        75,
         "this tranche must keep an auditable independent-case count"
     );
     let executed: BTreeSet<_> = FIXTURES
@@ -4499,4 +4599,626 @@ fn independent_f03_month_precision_is_coarse() {
         month.precision(),
         axiom_ledger::time::PeriodPrecision::Month
     );
+}
+
+#[test]
+fn independent_d18_negative_quote_is_unavailable() {
+    let abc = unit("ABC-d18", "ABC-d18");
+    let usd = unit("USD-d18", "USD-d18");
+    assert!(matches!(
+        Ratio::try_new(abc, usd, ExactNumber::integer(-2)),
+        Err(UnitError::NonPositiveRatio)
+    ));
+}
+
+#[test]
+fn independent_e18_policy_changes_use_effective_intervals() {
+    let policy = BookPolicy::new("tax-e18", date("2026-09-20"), Some(date("2026-09-21")));
+    assert!(!policy.is_effective_on(date("2026-09-19")));
+    assert!(policy.is_effective_on(date("2026-09-20")));
+    assert!(policy.is_effective_on(date("2026-09-21")));
+    assert!(!policy.is_effective_on(date("2026-09-22")));
+    assert_eq!(policy.effective_interval().start, date("2026-09-20"));
+}
+
+#[test]
+fn independent_e19_unknown_tax_keeps_alternatives() {
+    let positive = proof(150);
+    let proof_context = proof_bundle([positive]);
+    let resolution = Resolution::new_checked(
+        &proof_context,
+        vec![positive],
+        vec![],
+        Multiplicity::multiple(vec![
+            axiom_ledger::semantics::Conditional::new(
+                "taxable",
+                vec![axiom_ledger::semantics::Requirement::Theory(hash(151))],
+            ),
+            axiom_ledger::semantics::Conditional::new(
+                "exempt",
+                vec![axiom_ledger::semantics::Requirement::Theory(hash(152))],
+            ),
+        ])
+        .unwrap(),
+        SemanticCompletion::OpenWorld,
+        vec![axiom_ledger::semantics::Requirement::Theory(hash(151))],
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    assert!(resolution.is_ambiguous());
+    assert_eq!(resolution.completion(), SemanticCompletion::OpenWorld);
+    assert_eq!(resolution.answers().len(), 2);
+    assert!(!resolution.positive_proofs().is_empty());
+}
+
+#[test]
+fn independent_f04_span_interval_preserves_bounds() {
+    let start = Instant::from_unix_seconds(10);
+    let end = Instant::from_unix_seconds(20);
+    let span = Interval::new(Bound::Open(start), Bound::Closed(end)).unwrap();
+    assert!(!span.contains(&start));
+    assert!(span.contains(&end));
+    let clipped = Interval::closed(start, end).unwrap();
+    let intersection = span.intersection(&clipped).unwrap();
+    assert!(matches!(intersection.start(), Bound::Open(value) if *value == start));
+    assert!(matches!(intersection.end(), Bound::Closed(value) if *value == end));
+    assert!(matches!(
+        Interval::closed(end, start),
+        Err(axiom_ledger::time::TimeError::EmptyInterval)
+    ));
+}
+
+#[test]
+fn independent_f05_occurrence_and_recording_roles_differ() {
+    let occurred = TimeValue::LocalDate(date("2026-09-20"));
+    let recorded = TimeValue::Instant(Instant::from_unix_seconds(42));
+    let mut assignments = TimeAssignments::new();
+    assert!(
+        assignments
+            .set(TimeRole::Occurred, occurred.clone())
+            .is_none()
+    );
+    assert!(
+        assignments
+            .set(TimeRole::Recorded, recorded.clone())
+            .is_none()
+    );
+    assert_eq!(assignments.get(TimeRole::Occurred), Some(&occurred));
+    assert_eq!(assignments.get(TimeRole::Recorded), Some(&recorded));
+    assert_eq!(assignments.iter().count(), 2);
+    assert!(
+        assignments
+            .set(TimeRole::Occurred, TimeValue::LocalDate(date("2026-09-21")))
+            .is_some()
+    );
+    assert_eq!(assignments.get(TimeRole::Recorded), Some(&recorded));
+}
+
+#[test]
+fn independent_f06_retroactive_effective_date_is_allowed() {
+    let fact = RecognitionAcceptedFact::actual(
+        "retroactive-f06",
+        "sale",
+        date("2026-09-21"),
+        proof(153),
+        "authority-f06",
+    )
+    .unwrap();
+    let world = accepted_world(hash(154), [fact]);
+    let policy = BookPolicy::new("tax-f06", date("2026-01-01"), None);
+    let recognized = recognize(&world, &policy).unwrap();
+    assert_eq!(
+        recognized
+            .fact(&OccurrenceId::new("retroactive-f06"))
+            .unwrap()
+            .date,
+        date("2026-09-21")
+    );
+}
+
+#[test]
+fn independent_f07_late_settlement_is_independent_role() {
+    let fact = RecognitionAcceptedFact::actual(
+        "late-settlement-f07",
+        "payment",
+        date("2026-09-01"),
+        proof(155),
+        "authority-f07",
+    )
+    .unwrap()
+    .with_settlement_date(date("2026-10-01"));
+    let world = accepted_world(hash(156), [fact]);
+    let policy = BookPolicy::new("cash-f07", date("2026-10-01"), None)
+        .with_date_basis(axiom_ledger::recognize::DateBasis::Settlement);
+    let recognized = recognize(&world, &policy).unwrap();
+    assert_eq!(
+        recognized
+            .fact(&OccurrenceId::new("late-settlement-f07"))
+            .unwrap()
+            .date,
+        date("2026-10-01")
+    );
+}
+
+#[test]
+fn independent_f09_business_day_adjustment_is_named() {
+    let saturday = date("2026-09-19");
+    let adjusted = BusinessCalendar::default()
+        .adjust(saturday, BusinessDayPolicy::Following)
+        .unwrap();
+    assert_eq!(adjusted, date("2026-09-21"));
+    assert_ne!(adjusted, saturday);
+    assert_eq!(
+        BusinessCalendar::default()
+            .adjust(saturday, BusinessDayPolicy::Unchanged)
+            .unwrap(),
+        saturday
+    );
+}
+
+#[test]
+fn independent_f10_open_ended_interval_has_unbounded_end() {
+    let lower = Instant::from_unix_seconds(100);
+    let interval = Interval::<Instant>::new(Bound::Closed(lower), Bound::Unbounded).unwrap();
+    assert!(matches!(interval.end(), Bound::Unbounded));
+    assert!(!interval.contains(&Instant::from_unix_seconds(99)));
+    assert!(interval.contains(&lower));
+    assert!(interval.contains(&Instant::from_unix_seconds(i64::MAX)));
+}
+
+#[test]
+fn independent_g02_cycle_without_base_has_no_proof() {
+    let variable = Var::named(160, "x");
+    let cycle = Literal::positive(ir_atom("cycle-g02", vec![Term::var(variable.clone())]));
+    let mut program = Program::new();
+    program.add_clause(Clause::new(cycle.clone(), Goal::atom(cycle.clone())));
+    let result = Solver::new().solve(
+        &program,
+        &Goal::atom(Literal::positive(ir_atom(
+            "cycle-g02",
+            vec![Term::Text("a".into())],
+        ))),
+        &SemanticContext::default(),
+    );
+    assert_eq!(result.truth(), LogicTruth::Neither);
+    assert_eq!(result.completion(), LogicCompletion::Complete);
+    assert!(
+        result
+            .trace()
+            .iter()
+            .any(|event| { matches!(event, TraceEvent::CycleWithoutBase { .. }) })
+    );
+    assert!(result.positive_proofs().is_empty());
+}
+
+#[test]
+fn independent_g07_candidate_substitutions_are_multiple() {
+    let query_var = Var::named(161, "owner");
+    let mut program = Program::new();
+    program.add_fact(text_fact("owner-g07", "alice")).unwrap();
+    program.add_fact(text_fact("owner-g07", "bob")).unwrap();
+    let result = Solver::new().solve(
+        &program,
+        &Goal::atom(Literal::positive(ir_atom(
+            "owner-g07",
+            vec![Term::var(query_var.clone())],
+        ))),
+        &SemanticContext::default(),
+    );
+    assert_eq!(result.truth(), LogicTruth::TrueOnly);
+    assert!(result.is_ambiguous());
+    assert_eq!(result.candidates().len(), 2);
+    let values: BTreeSet<_> = result
+        .candidates()
+        .iter()
+        .filter_map(|candidate| candidate.substitution.resolved(&query_var))
+        .map(|term| format!("{term:?}"))
+        .collect();
+    assert_eq!(values.len(), 2);
+}
+
+#[test]
+fn independent_g08_resource_limit_is_incomplete_not_false() {
+    let edge = |left: Term, right: Term| Literal::positive(ir_atom("edge-g08", vec![left, right]));
+    let path = |left: Term, right: Term| Literal::positive(ir_atom("path-g08", vec![left, right]));
+    let x = Var::named(162, "x");
+    let y = Var::named(163, "y");
+    let z = Var::named(164, "z");
+    let mut program = Program::new();
+    program
+        .add_fact(edge(Term::Text("a".into()), Term::Text("b".into())))
+        .unwrap();
+    program
+        .add_fact(edge(Term::Text("b".into()), Term::Text("c".into())))
+        .unwrap();
+    program.add_clause(Clause::new(
+        path(Term::var(x.clone()), Term::var(y.clone())),
+        Goal::atom(edge(Term::var(x.clone()), Term::var(y.clone()))),
+    ));
+    program.add_clause(Clause::new(
+        path(Term::var(x.clone()), Term::var(z.clone())),
+        Goal::and([
+            Goal::atom(edge(Term::var(x.clone()), Term::var(y.clone()))),
+            Goal::atom(path(Term::var(y.clone()), Term::var(z.clone()))),
+        ]),
+    ));
+    let result = Solver::new().solve(
+        &program,
+        &Goal::atom(path(Term::Text("a".into()), Term::Text("c".into()))),
+        &SemanticContext::default().with_resources(ResourceProfile::bounded(0)),
+    );
+    assert_eq!(result.completion(), LogicCompletion::ResourceLimited);
+    assert!(result.is_incomplete());
+    assert_ne!(result.truth(), LogicTruth::FalseOnly);
+}
+
+#[test]
+fn independent_g12_package_update_changes_cache_key() {
+    let first = ExecutablePolicyPackage::new(
+        "lots/g12",
+        "1",
+        "selector=earliest_acquisition\ntie=ambiguous",
+    );
+    let second = ExecutablePolicyPackage::new(
+        "lots/g12",
+        "2",
+        "selector=latest_acquisition\ntie=ambiguous",
+    );
+    let mut program = Program::new();
+    program.add_fact(text_fact("cache-g12", "yes")).unwrap();
+    let goal = Goal::atom(text_fact("cache-g12", "yes"));
+    let mut solver = Solver::new();
+    let first_hash = *first.hash().as_bytes();
+    let second_hash = *second.hash().as_bytes();
+    solver.solve(
+        &program,
+        &goal,
+        &SemanticContext::default().with_packages([first_hash]),
+    );
+    solver.solve(
+        &program,
+        &goal,
+        &SemanticContext::default().with_packages([second_hash]),
+    );
+    assert_eq!(solver.cache_len(), 2);
+    let replay = solver.solve(
+        &program,
+        &goal,
+        &SemanticContext::default().with_packages([first_hash]),
+    );
+    assert!(replay.trace().contains(&TraceEvent::CacheHit));
+}
+
+#[test]
+fn independent_g13_search_order_does_not_change_answer() {
+    let earliest = ExecutablePolicyPackage::new(
+        "lots/g13",
+        "1",
+        "selector=earliest_acquisition\ntie=ambiguous",
+    )
+    .compile()
+    .unwrap();
+    let first = LotCandidate::new("lot-z", date("2026-01-02"));
+    let second = LotCandidate::new("lot-a", date("2026-01-01"));
+    assert_eq!(
+        earliest.evaluate([&first, &second]),
+        earliest.evaluate([&second, &first])
+    );
+    assert_eq!(
+        earliest.ordered([&first, &second]),
+        vec![second.clone(), first.clone()]
+    );
+}
+
+#[test]
+fn independent_g14_infinite_generation_requires_horizon() {
+    let start = date("2026-01-01");
+    let recurrence = Recurrence::new(start, Frequency::Daily { every: 1 }).unwrap();
+    assert!(recurrence.count().is_none());
+    let bounded = axiom_ledger::scenario::BoundedRecurrence::new(
+        recurrence,
+        Horizon::new(start, date("2026-01-31")).unwrap(),
+    )
+    .unwrap();
+    let mut scenario = Scenario::new("bounded-g14", hash(165)).unwrap();
+    scenario
+        .expect(ExpectedEvent::new("daily-g14").recurring(bounded))
+        .unwrap();
+    let occurrences = scenario
+        .materialize(Horizon::new(start, date("2026-01-03")).unwrap())
+        .unwrap();
+    assert_eq!(occurrences.len(), 3);
+    assert!(matches!(
+        Horizon::new(date("2026-01-03"), start),
+        Err(axiom_ledger::scenario::ScenarioError::InvalidHorizon)
+    ));
+}
+
+#[test]
+fn independent_g16_completeness_is_a_cache_dimension() {
+    let goal = Goal::default_not(Goal::atom(text_fact("missing-g16", "x")));
+    let mut solver = Solver::new();
+    let open = solver.solve(&Program::new(), &goal, &SemanticContext::default());
+    let complete = solver.solve(
+        &Program::new(),
+        &goal,
+        &SemanticContext::default().complete_relation("missing-g16", 1, LogicPolarity::Positive),
+    );
+    assert_eq!(open.completion(), LogicCompletion::OpenWorld);
+    assert_eq!(complete.completion(), LogicCompletion::Complete);
+    assert_eq!(complete.truth(), LogicTruth::TrueOnly);
+    assert_eq!(solver.cache_len(), 2);
+}
+
+#[test]
+fn independent_h02_actual_event_links_to_forecast_variance() {
+    let mut scenario = Scenario::new("variance-h02", hash(166)).unwrap();
+    scenario
+        .expect(
+            ExpectedEvent::dated("rent-h02", date("2026-10-01"))
+                .with_quantity(Quantity::with_unit(100i64.into(), "USD").unwrap()),
+        )
+        .unwrap();
+    let actual = RealizedEvent::new("rent-h02-actual", date("2026-10-03"))
+        .with_quantity(Quantity::with_unit(90i64.into(), "USD").unwrap());
+    scenario.register_actual_event(actual.clone()).unwrap();
+    let link = scenario.link_realized("rent-h02", actual).unwrap();
+    assert!(link.variance.date_changed());
+    assert!(link.variance.quantity_changed());
+    assert_eq!(
+        link.variance
+            .quantity_delta
+            .unwrap()
+            .number
+            .canonical_string(),
+        "-10"
+    );
+    assert_eq!(scenario.links().count(), 1);
+}
+
+#[test]
+fn independent_h04_possible_dates_are_temporal_alternatives() {
+    let earliest = Instant::from_unix_seconds(10);
+    let latest = Instant::from_unix_seconds(30);
+    let possible = UncertainInterval::new(earliest, latest).unwrap();
+    assert_eq!(possible.earliest(), &earliest);
+    assert_eq!(possible.latest(), &latest);
+    assert!(possible.contains(&Instant::from_unix_seconds(20)));
+    assert!(!possible.contains(&Instant::from_unix_seconds(9)));
+    let interval = possible.as_interval().unwrap();
+    assert!(interval.contains(&earliest));
+    assert!(interval.contains(&latest));
+}
+
+#[test]
+fn independent_h07_feasible_plans_have_pareto_frontier() {
+    let source = NodeId::position("source-h07");
+    let target = NodeId::instrument("USD-h07");
+    let amount = Quantity::with_unit(10i64.into(), "USD-h07").unwrap();
+    let mut graph = LiquidityGraph::new();
+    graph
+        .add_position(PositionNode::new("source-h07", "USD-h07", amount.clone()))
+        .unwrap();
+    graph
+        .add_instrument(InstrumentNode::new("USD-h07"))
+        .unwrap();
+    graph
+        .add_edge(
+            ActionEdge::new(
+                "slow-h07",
+                source.clone(),
+                target.clone(),
+                ActionKind::Transfer,
+            )
+            .with_time(3)
+            .with_capacity(amount.clone())
+            .with_fee(Quantity::with_unit(1i64.into(), "USD-h07").unwrap()),
+        )
+        .unwrap();
+    graph
+        .add_edge(
+            ActionEdge::new(
+                "fast-h07",
+                source.clone(),
+                target.clone(),
+                ActionKind::Transfer,
+            )
+            .with_time(1)
+            .with_capacity(amount.clone())
+            .with_fee(Quantity::with_unit(2i64.into(), "USD-h07").unwrap()),
+        )
+        .unwrap();
+    let result = graph.pareto_routes(&source, &target, &amount).unwrap();
+    assert!(result.is_complete());
+    assert_eq!(result.routes.len(), 2);
+    for route in &result.routes {
+        graph
+            .verify_route(route, &source, &target, &amount)
+            .unwrap();
+    }
+}
+
+#[test]
+fn independent_h08_approximate_plan_has_exact_verifier() {
+    let source = NodeId::position("source-h08");
+    let target = NodeId::instrument("USD-h08");
+    let amount = Quantity::with_unit(10i64.into(), "USD-h08").unwrap();
+    let mut graph = LiquidityGraph::new();
+    graph
+        .add_position(PositionNode::new("source-h08", "USD-h08", amount.clone()))
+        .unwrap();
+    graph
+        .add_instrument(InstrumentNode::new("USD-h08"))
+        .unwrap();
+    graph
+        .add_edge(
+            ActionEdge::new(
+                "route-h08",
+                source.clone(),
+                target.clone(),
+                ActionKind::Transfer,
+            )
+            .with_capacity(amount.clone()),
+        )
+        .unwrap();
+    let route = graph
+        .pareto_routes(&source, &target, &amount)
+        .unwrap()
+        .routes
+        .pop()
+        .unwrap();
+    let candidate = axiom_ledger::liquidity::ApproximateRouteCandidate::new(&route, -0.25);
+    let verified = graph.verify_approximate_candidate(&candidate).unwrap();
+    assert_eq!(verified.route.edge_ids(), &["route-h08".to_string()]);
+    assert_eq!(verified.route.amount, amount);
+}
+
+#[test]
+fn independent_h11_scenario_override_is_scoped_assumption() {
+    let mut base = Scenario::new("base-h11", hash(167)).unwrap();
+    base.assume(Assumption::boolean("hiring-h11", true).unwrap())
+        .unwrap();
+    let mut override_scenario = base.clone();
+    override_scenario
+        .assume(Assumption::boolean("hiring-h11", false).unwrap())
+        .unwrap_err();
+    override_scenario
+        .assume(Assumption::boolean("bonus-h11", true).unwrap())
+        .unwrap();
+    let diff = base.diff(&override_scenario);
+    assert!(!diff.actual_root_changed);
+    assert_eq!(
+        diff.added_assumptions
+            .iter()
+            .map(|assumption| assumption.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["bonus-h11"]
+    );
+    assert!(base.assumption("bonus-h11").is_none());
+}
+
+#[test]
+fn independent_i02_resource_profile_bounds_rule_package() {
+    let mut program = Program::new();
+    program.add_fact(text_fact("bounded-i02", "yes")).unwrap();
+    let goal = Goal::atom(text_fact("bounded-i02", "yes"));
+    let result = Solver::new().solve(
+        &program,
+        &goal,
+        &SemanticContext::default().with_resources(ResourceProfile {
+            max_steps: 0,
+            max_iterations: 1,
+            max_answers: 1,
+            max_terms: 1,
+        }),
+    );
+    assert_eq!(result.completion(), LogicCompletion::ResourceLimited);
+    assert!(result.is_incomplete());
+    assert_ne!(result.truth(), LogicTruth::FalseOnly);
+}
+
+#[test]
+fn independent_i03_close_pins_package_hashes() {
+    let mut store = ObjectStore::new();
+    let evidence = store
+        .put_evidence(Evidence::new(
+            "close-i03",
+            "ledger-i03",
+            b"book tax\n".to_vec(),
+        ))
+        .unwrap();
+    let package_id = store
+        .put_package(PolicyPackage::new(
+            "lots/i03",
+            "1",
+            b"selector=earliest_acquisition\ntie=ambiguous".to_vec(),
+        ))
+        .unwrap();
+    let other_package = store
+        .put_package(PolicyPackage::new(
+            "lots/other-i03",
+            "1",
+            b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+        ))
+        .unwrap();
+    let proof = store
+        .put_proof(ProofObject::recognized([], b"close-i03"))
+        .unwrap();
+    let source = store
+        .put_commit(Commit::new(
+            [],
+            [evidence],
+            [],
+            [],
+            [],
+            [package_id],
+            [proof],
+            "closer-i03",
+        ))
+        .unwrap();
+    let close = store
+        .put_close(Close::new(
+            Period::new(date("2026-01-01"), date("2026-12-31")).unwrap(),
+            "tax",
+            [package_id],
+            source,
+            proof.hash(),
+        ))
+        .unwrap();
+    assert_eq!(store.close(close).unwrap().policies, vec![package_id]);
+    assert!(
+        store
+            .put_close(Close::new(
+                Period::new(date("2026-01-01"), date("2026-12-31")).unwrap(),
+                "tax",
+                [other_package],
+                source,
+                proof.hash(),
+            ))
+            .is_err()
+    );
+}
+
+#[test]
+fn independent_i08_lost_key_is_unavailable_evidence() {
+    let mut store = ObjectStore::new();
+    let unavailable = store
+        .put_evidence(Evidence::unavailable(
+            "lost-i08",
+            "bank-i08",
+            "encryption key was destroyed",
+        ))
+        .unwrap();
+    let evidence = store.evidence(unavailable).unwrap();
+    assert!(matches!(
+        &evidence.state,
+        EvidenceState::Unavailable { reason } if reason == "encryption key was destroyed"
+    ));
+    assert!(evidence.content.is_empty());
+    store.verify().unwrap();
+}
+
+#[test]
+fn independent_i10_agent_proposal_is_candidate_only() {
+    let left = evidence_row("agent-i10", "left-i10", "left-i10", b"$10");
+    let right = evidence_row("bank-i10", "right-i10", "right-i10", b"$10");
+    let mut store = EvidenceStore::new();
+    store
+        .import_batch(ImportBatch::from_observations("agent-i10", [left.clone()]))
+        .unwrap();
+    store
+        .import_batch(ImportBatch::from_observations("bank-i10", [right.clone()]))
+        .unwrap();
+    store
+        .add_candidate_link(CandidateIdentityLink::new(
+            left.identity().clone(),
+            right.identity().clone(),
+            Confidence::from_percent(99),
+            axiom_ledger::evidence::Provenance::new("agent-matcher"),
+            EvidenceAuthority::user("agent-i10"),
+        ))
+        .unwrap();
+    assert_eq!(store.candidate_links().count(), 1);
+    assert_eq!(store.relations().count(), 0);
 }

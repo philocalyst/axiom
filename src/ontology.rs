@@ -17,6 +17,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use crate::exact::{ExactError, ExactNumber};
+pub use crate::model::SettlementKind;
 use crate::model::{
     AccountId, BookId, ContentHash, Date, EntityId, InstrumentId, LotId, ModelError, OccurrenceId,
     Quantity, Unit,
@@ -1380,6 +1381,88 @@ fn settlement_transition_is_legal(from: Option<&SettlementState>, to: &Settlemen
     )
 }
 
+/// The broad state machine above is retained for callers that only know that
+/// a value is a settlement.  Once a payment rail is known, callers should use
+/// this stricter machine.  In particular, a check return may be presented
+/// again, while a returned ACH is a failed attempt that needs a new
+/// settlement; a card chargeback can be represented, but a check cannot be
+/// charged back.
+fn settlement_transition_is_legal_for(
+    kind: SettlementKind,
+    from: Option<&SettlementState>,
+    to: &SettlementState,
+) -> bool {
+    use SettlementState::*;
+
+    match kind {
+        SettlementKind::Ach => matches!(
+            (from, to),
+            (None, Issued)
+                | (Some(Issued), Presented | Cancelled)
+                | (
+                    Some(Presented),
+                    Pending | Settled | Returned | Rejected | Cancelled
+                )
+                | (Some(Pending), Settled | Returned | Rejected | Cancelled)
+                | (Some(Settled), Returned | Reversed)
+        ),
+        SettlementKind::Card => matches!(
+            (from, to),
+            (None, Issued)
+                | (Some(Issued), Authorized | Presented | Rejected | Cancelled)
+                | (
+                    Some(Authorized),
+                    Presented | Rejected | Cancelled | Reversed
+                )
+                | (Some(Presented), Pending | Settled | Rejected | Cancelled)
+                | (Some(Pending), Settled | Rejected | Cancelled)
+                | (Some(Settled), Reversed | Refunded | Disputed | ChargedBack)
+                | (Some(Disputed), Resolved | ChargedBack)
+                | (Some(ChargedBack), Represented)
+                | (Some(Represented), Pending | Settled | Rejected)
+        ),
+        SettlementKind::Check => matches!(
+            (from, to),
+            (None, Issued)
+                | (Some(Issued), Presented | Cancelled)
+                | (Some(Presented), Pending | Settled | Returned | Rejected | Cancelled)
+                | (Some(Pending), Settled | Returned | Rejected | Cancelled)
+                | (Some(Settled), Returned)
+                // Re-presentation is a new attempt in the same check
+                // history. It is deliberately the only legal transition
+                // out of Returned other than cancellation.
+                | (Some(Returned), Presented | Cancelled)
+        ),
+    }
+}
+
+/// Validate a settlement history for a known payment rail.  The history is
+/// consumed in source order and is never sorted or repaired.
+pub fn validate_settlement_states_for(
+    kind: SettlementKind,
+    states: &[SettlementState],
+) -> Result<(), OntologyError> {
+    let mut previous: Option<&SettlementState> = None;
+    for state in states {
+        if !settlement_transition_is_legal_for(kind, previous, state) {
+            return Err(OntologyError::InvalidSettlementTransition {
+                from: previous.cloned(),
+                to: state.clone(),
+            });
+        }
+        previous = Some(state);
+    }
+    Ok(())
+}
+
+/// Descriptive alias for callers that prefer the explicit "kind" wording.
+pub fn validate_settlement_states_for_kind(
+    kind: SettlementKind,
+    states: &[SettlementState],
+) -> Result<(), OntologyError> {
+    validate_settlement_states_for(kind, states)
+}
+
 pub fn validate_settlement_states(states: &[SettlementState]) -> Result<(), OntologyError> {
     let mut previous: Option<&SettlementState> = None;
     for state in states {
@@ -1436,6 +1519,48 @@ pub fn validate_settlement_history(
     )
 }
 
+/// Validate an ordered history for an explicitly identified payment rail.
+pub fn validate_settlement_history_for(
+    settlement: &SettlementId,
+    kind: SettlementKind,
+    history: &[SettlementTransition],
+) -> Result<(), OntologyError> {
+    if history.is_empty() {
+        return Err(OntologyError::InvalidEvent {
+            kind: "settlement",
+            reason: "settlement history cannot be empty".to_string(),
+        });
+    }
+    let mut previous_at = None;
+    for transition in history {
+        if let (Some(previous), Some(current)) = (previous_at, transition.at)
+            && current < previous
+        {
+            return Err(OntologyError::NonChronologicalSettlement {
+                settlement: settlement.clone(),
+                previous,
+                current,
+            });
+        }
+        previous_at = transition.at.or(previous_at);
+    }
+    validate_settlement_states_for(
+        kind,
+        &history
+            .iter()
+            .map(|transition| transition.state.clone())
+            .collect::<Vec<_>>(),
+    )
+}
+
+pub fn validate_settlement_history_for_kind(
+    settlement: &SettlementId,
+    kind: SettlementKind,
+    history: &[SettlementTransition],
+) -> Result<(), OntologyError> {
+    validate_settlement_history_for(settlement, kind, history)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Endpoint {
     pub entity: EntityId,
@@ -1470,6 +1595,10 @@ pub struct Settlement {
     pub to: Endpoint,
     pub instrument: InstrumentId,
     pub amount: Quantity,
+    /// `None` keeps the original open-world settlement API.  A known rail is
+    /// opt-in through [`Settlement::new_with_kind`] or [`Settlement::with_kind`]
+    /// and enables the stricter instrument-specific state machine.
+    kind: Option<SettlementKind>,
     history: Vec<SettlementTransition>,
 }
 
@@ -1488,6 +1617,7 @@ impl Settlement {
             to,
             instrument: instrument.into(),
             amount,
+            kind: None,
             history: vec![SettlementTransition {
                 state: SettlementState::Issued,
                 at: None,
@@ -1510,10 +1640,77 @@ impl Settlement {
             to,
             instrument: instrument.into(),
             amount,
+            kind: None,
             history,
         };
         settlement.validate()?;
         Ok(settlement)
+    }
+
+    /// Construct a settlement whose rail is explicit.  No rail is inferred
+    /// from an instrument id, endpoint, or state history.
+    pub fn new_with_kind(
+        id: impl Into<SettlementId>,
+        kind: SettlementKind,
+        from: Endpoint,
+        to: Endpoint,
+        instrument: impl Into<InstrumentId>,
+        amount: Quantity,
+    ) -> Result<Self, OntologyError> {
+        Self::new(id, from, to, instrument, amount)?.with_kind(kind)
+    }
+
+    /// Descriptive constructor alias for callers that put the rail first.
+    pub fn for_kind(
+        kind: SettlementKind,
+        id: impl Into<SettlementId>,
+        from: Endpoint,
+        to: Endpoint,
+        instrument: impl Into<InstrumentId>,
+        amount: Quantity,
+    ) -> Result<Self, OntologyError> {
+        Self::new_with_kind(id, kind, from, to, instrument, amount)
+    }
+
+    /// Construct a typed settlement from an already observed append-only
+    /// history.
+    pub fn from_history_with_kind(
+        id: impl Into<SettlementId>,
+        kind: SettlementKind,
+        from: Endpoint,
+        to: Endpoint,
+        instrument: impl Into<InstrumentId>,
+        amount: Quantity,
+        history: Vec<SettlementTransition>,
+    ) -> Result<Self, OntologyError> {
+        let settlement = Self {
+            id: id.into(),
+            from,
+            to,
+            instrument: instrument.into(),
+            amount,
+            kind: Some(kind),
+            history,
+        };
+        settlement.validate()?;
+        Ok(settlement)
+    }
+
+    /// Add rail information to an existing open-world settlement.  This is a
+    /// consuming builder: the original value cannot be changed behind the
+    /// caller's back, and the observed history must already satisfy the rail.
+    pub fn with_kind(mut self, kind: SettlementKind) -> Result<Self, OntologyError> {
+        validate_settlement_history_for(&self.id, kind, &self.history)?;
+        self.kind = Some(kind);
+        Ok(self)
+    }
+
+    pub fn kind(&self) -> Option<SettlementKind> {
+        self.kind
+    }
+
+    pub fn settlement_kind(&self) -> Option<SettlementKind> {
+        self.kind()
     }
 
     pub fn transition(
@@ -1536,7 +1733,11 @@ impl Settlement {
                 current,
             });
         }
-        if !settlement_transition_is_legal(self.latest_state(), &state) {
+        let legal = match self.kind {
+            Some(kind) => settlement_transition_is_legal_for(kind, self.latest_state(), &state),
+            None => settlement_transition_is_legal(self.latest_state(), &state),
+        };
+        if !legal {
             return Err(OntologyError::InvalidSettlementTransition {
                 from: self.latest_state().cloned(),
                 to: state,
@@ -1577,7 +1778,10 @@ impl Settlement {
                     .unwrap_or_else(|| "<missing>".to_string()),
             });
         }
-        validate_settlement_history(&self.id, &self.history)
+        match self.kind {
+            Some(kind) => validate_settlement_history_for(&self.id, kind, &self.history),
+            None => validate_settlement_history(&self.id, &self.history),
+        }
     }
 
     pub fn validate_with_instrument(&self, instrument: &Instrument) -> Result<(), OntologyError> {
@@ -1593,8 +1797,368 @@ impl Settlement {
         self.transition(SettlementState::Returned, at, Some(reason.into()))
     }
 
+    /// Return a new settlement with one appended transition, leaving the
+    /// source settlement untouched.  This is the preferred form when a
+    /// correction, reversal, refund, or chargeback arrives as a later fact.
+    pub fn appended(
+        &self,
+        state: SettlementState,
+        at: Option<Date>,
+        reason: Option<String>,
+    ) -> Result<Self, OntologyError> {
+        let mut next = self.clone();
+        next.transition(state, at, reason)?;
+        Ok(next)
+    }
+
+    /// Alias emphasizing that a transition is an append-only observation.
+    pub fn append_transition(
+        &self,
+        state: SettlementState,
+        at: Option<Date>,
+        reason: Option<String>,
+    ) -> Result<Self, OntologyError> {
+        self.appended(state, at, reason)
+    }
+
     pub fn history(&self) -> impl Iterator<Item = &SettlementTransition> {
         self.history.iter()
+    }
+}
+
+/// A later economic consequence of a settlement is a separate fact.  It does
+/// not rewrite the settlement amount or remove an earlier state transition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum SettlementEffectKind {
+    ProvisionalCredit,
+    Fee,
+    Correction,
+    Reversal,
+    Refund,
+    Chargeback,
+}
+
+/// A typed alias for code that calls these records adjustments.
+pub type SettlementAdjustmentKind = SettlementEffectKind;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SettlementEffectRecord {
+    pub occurrence: OccurrenceId,
+    pub settlement: SettlementId,
+    pub kind: SettlementEffectKind,
+    pub amount: Quantity,
+    pub instrument: InstrumentId,
+    pub at: Option<Date>,
+    pub reason: Option<String>,
+    /// A correction may explicitly point at an earlier effect.  It never
+    /// replaces that record in place.
+    pub corrects: Option<OccurrenceId>,
+}
+
+impl SettlementEffectRecord {
+    pub fn new(
+        occurrence: impl Into<OccurrenceId>,
+        settlement: impl Into<SettlementId>,
+        kind: SettlementEffectKind,
+        amount: Quantity,
+        instrument: impl Into<InstrumentId>,
+    ) -> Self {
+        Self {
+            occurrence: occurrence.into(),
+            settlement: settlement.into(),
+            kind,
+            amount,
+            instrument: instrument.into(),
+            at: None,
+            reason: None,
+            corrects: None,
+        }
+    }
+
+    pub fn provisional_credit(
+        occurrence: impl Into<OccurrenceId>,
+        settlement: impl Into<SettlementId>,
+        amount: Quantity,
+        instrument: impl Into<InstrumentId>,
+    ) -> Self {
+        Self::new(
+            occurrence,
+            settlement,
+            SettlementEffectKind::ProvisionalCredit,
+            amount,
+            instrument,
+        )
+    }
+
+    pub fn fee(
+        occurrence: impl Into<OccurrenceId>,
+        settlement: impl Into<SettlementId>,
+        amount: Quantity,
+        instrument: impl Into<InstrumentId>,
+    ) -> Self {
+        Self::new(
+            occurrence,
+            settlement,
+            SettlementEffectKind::Fee,
+            amount,
+            instrument,
+        )
+    }
+
+    pub fn correction(
+        occurrence: impl Into<OccurrenceId>,
+        settlement: impl Into<SettlementId>,
+        amount: Quantity,
+        instrument: impl Into<InstrumentId>,
+    ) -> Self {
+        Self::new(
+            occurrence,
+            settlement,
+            SettlementEffectKind::Correction,
+            amount,
+            instrument,
+        )
+    }
+
+    pub fn reversal(
+        occurrence: impl Into<OccurrenceId>,
+        settlement: impl Into<SettlementId>,
+        amount: Quantity,
+        instrument: impl Into<InstrumentId>,
+    ) -> Self {
+        Self::new(
+            occurrence,
+            settlement,
+            SettlementEffectKind::Reversal,
+            amount,
+            instrument,
+        )
+    }
+
+    pub fn refund(
+        occurrence: impl Into<OccurrenceId>,
+        settlement: impl Into<SettlementId>,
+        amount: Quantity,
+        instrument: impl Into<InstrumentId>,
+    ) -> Self {
+        Self::new(
+            occurrence,
+            settlement,
+            SettlementEffectKind::Refund,
+            amount,
+            instrument,
+        )
+    }
+
+    pub fn chargeback(
+        occurrence: impl Into<OccurrenceId>,
+        settlement: impl Into<SettlementId>,
+        amount: Quantity,
+        instrument: impl Into<InstrumentId>,
+    ) -> Self {
+        Self::new(
+            occurrence,
+            settlement,
+            SettlementEffectKind::Chargeback,
+            amount,
+            instrument,
+        )
+    }
+
+    pub fn at(mut self, at: Date) -> Self {
+        self.at = Some(at);
+        self
+    }
+
+    pub fn reason(mut self, reason: impl Into<String>) -> Self {
+        self.reason = Some(reason.into());
+        self
+    }
+
+    pub fn corrects(mut self, occurrence: impl Into<OccurrenceId>) -> Self {
+        self.corrects = Some(occurrence.into());
+        self
+    }
+
+    pub fn validate(&self) -> Result<(), OntologyError> {
+        require_identifier(self.occurrence.as_str(), "settlement effect")?;
+        require_identifier(self.settlement.as_str(), "settlement")?;
+        require_identifier(self.instrument.as_str(), "instrument")?;
+        require_positive(&self.amount, "a settlement effect amount")?;
+        if self.amount.unit.as_ref().map(Unit::as_str) != Some(self.instrument.as_str()) {
+            return Err(OntologyError::UnitMismatch {
+                left: self.instrument.to_string(),
+                right: self
+                    .amount
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<missing>".to_string()),
+            });
+        }
+        if self.corrects.as_ref() == Some(&self.occurrence) {
+            return Err(OntologyError::InvalidEvent {
+                kind: "settlement effect",
+                reason: "an effect cannot correct itself".to_string(),
+            });
+        }
+        if self.kind == SettlementEffectKind::Correction {
+            if self
+                .reason
+                .as_deref()
+                .is_none_or(|reason| reason.trim().is_empty())
+            {
+                return Err(OntologyError::InvalidEvent {
+                    kind: "settlement effect",
+                    reason: "a correction effect needs a reason".to_string(),
+                });
+            }
+            if self.corrects.is_none() {
+                return Err(OntologyError::InvalidEvent {
+                    kind: "settlement effect",
+                    reason: "a correction effect needs an earlier effect".to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Short alias for callers that do not need the event-record suffix.
+pub type SettlementEffect = SettlementEffectRecord;
+
+/// Validate append-only effects against their referenced settlements.  Effects
+/// are additive facts: a provisional credit is not settlement, a fee is not a
+/// reduction of the gross amount, and a reversal/refund/chargeback is not an
+/// in-place amount edit.  The only aggregate bound is the exact original
+/// settlement amount for effects that undo value.
+pub fn validate_settlement_effects(
+    settlements: &[Settlement],
+    effects: &[SettlementEffectRecord],
+) -> Result<(), OntologyError> {
+    let mut settlements_by_id = BTreeMap::new();
+    for settlement in settlements {
+        settlement.validate()?;
+        if settlements_by_id
+            .insert(settlement.id.clone(), settlement)
+            .is_some()
+        {
+            return Err(OntologyError::DuplicateSettlement(settlement.id.clone()));
+        }
+    }
+
+    let mut occurrences = BTreeSet::new();
+    let mut effects_by_occurrence = BTreeMap::new();
+    for effect in effects {
+        effect.validate()?;
+        if !occurrences.insert(effect.occurrence.clone()) {
+            return Err(OntologyError::DuplicateEvent(effect.occurrence.clone()));
+        }
+        effects_by_occurrence.insert(effect.occurrence.clone(), effect);
+    }
+    let mut undo_totals: BTreeMap<SettlementId, Quantity> = BTreeMap::new();
+    for effect in effects {
+        let settlement = settlements_by_id
+            .get(&effect.settlement)
+            .ok_or_else(|| OntologyError::UnknownSettlement(effect.settlement.clone()))?;
+
+        if let Some(corrects) = &effect.corrects {
+            let prior = effects_by_occurrence
+                .get(corrects)
+                .ok_or_else(|| OntologyError::MissingEvent(corrects.clone()))?;
+            if prior.settlement != effect.settlement {
+                return Err(OntologyError::InvalidEvent {
+                    kind: "settlement effect",
+                    reason: "a correction must target an effect on the same settlement".to_string(),
+                });
+            }
+        }
+
+        if let Some(kind) = settlement.kind {
+            let allowed = match kind {
+                SettlementKind::Ach => matches!(
+                    effect.kind,
+                    SettlementEffectKind::ProvisionalCredit
+                        | SettlementEffectKind::Fee
+                        | SettlementEffectKind::Correction
+                        | SettlementEffectKind::Reversal
+                ),
+                SettlementKind::Card => true,
+                SettlementKind::Check => matches!(
+                    effect.kind,
+                    SettlementEffectKind::ProvisionalCredit
+                        | SettlementEffectKind::Fee
+                        | SettlementEffectKind::Correction
+                ),
+            };
+            if !allowed {
+                return Err(OntologyError::InvalidEvent {
+                    kind: "settlement effect",
+                    reason: format!(
+                        "{:?} is not a legal {:?} settlement effect",
+                        effect.kind, kind
+                    ),
+                });
+            }
+        }
+
+        let undoing = matches!(
+            effect.kind,
+            SettlementEffectKind::Reversal
+                | SettlementEffectKind::Refund
+                | SettlementEffectKind::Chargeback
+        );
+        if undoing {
+            let required_state = match effect.kind {
+                SettlementEffectKind::Reversal => SettlementState::Reversed,
+                SettlementEffectKind::Refund => SettlementState::Refunded,
+                SettlementEffectKind::Chargeback => SettlementState::ChargedBack,
+                _ => unreachable!("undoing effect kinds are matched above"),
+            };
+            if settlement.latest_state() != Some(&required_state)
+                || !settlement
+                    .history
+                    .iter()
+                    .any(|transition| transition.state == SettlementState::Settled)
+            {
+                return Err(OntologyError::InvalidEvent {
+                    kind: "settlement effect",
+                    reason: format!(
+                        "{:?} requires a previously settled instrument whose current state is {:?}",
+                        effect.kind, required_state
+                    ),
+                });
+            }
+            if effect.instrument != settlement.instrument
+                || effect.amount.unit != settlement.amount.unit
+            {
+                return Err(OntologyError::UnitMismatch {
+                    left: settlement.instrument.to_string(),
+                    right: effect.instrument.to_string(),
+                });
+            }
+            let total = undo_totals
+                .entry(settlement.id.clone())
+                .or_insert_with(Quantity::zero);
+            *total = total.checked_add(&effect.amount)?;
+            if total.number > settlement.amount.number {
+                return Err(OntologyError::SettlementOverallocated {
+                    settlement: settlement.id.clone(),
+                    amount: Box::new(settlement.amount.clone()),
+                    allocated: Box::new(total.clone()),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+impl Settlement {
+    pub fn validate_effects(
+        &self,
+        effects: &[SettlementEffectRecord],
+    ) -> Result<(), OntologyError> {
+        validate_settlement_effects(std::slice::from_ref(self), effects)
     }
 }
 
@@ -2566,6 +3130,9 @@ pub struct SettlementStateRecord {
     pub to: Endpoint,
     pub obligation: Option<ObligationId>,
     pub reason: Option<String>,
+    /// Optional payment-rail declaration. `None` preserves the original
+    /// generic state-record API; `Some` applies the explicit rail machine.
+    kind: Option<SettlementKind>,
 }
 
 impl SettlementStateRecord {
@@ -2589,7 +3156,17 @@ impl SettlementStateRecord {
             to,
             obligation: None,
             reason: None,
+            kind: None,
         }
+    }
+
+    pub fn with_kind(mut self, kind: SettlementKind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+
+    pub fn kind(&self) -> Option<SettlementKind> {
+        self.kind
     }
 
     pub fn validate(&self) -> Result<(), OntologyError> {
@@ -2618,6 +3195,7 @@ pub fn validate_settlement_state_records(
     }
     for (settlement, records) in history {
         let first = records[0];
+        let declared_kind = first.kind;
         let mut previous_at = None;
         for record in &records {
             if let (Some(previous), Some(current)) = (previous_at, record.at)
@@ -2634,6 +3212,7 @@ pub fn validate_settlement_state_records(
                 || record.instrument != first.instrument
                 || record.from != first.from
                 || record.to != first.to
+                || record.kind != declared_kind
             {
                 return Err(OntologyError::InvalidEvent {
                     kind: "settlement state",
@@ -2641,12 +3220,14 @@ pub fn validate_settlement_state_records(
                 });
             }
         }
-        validate_settlement_states(
-            &records
-                .iter()
-                .map(|record| record.state.clone())
-                .collect::<Vec<_>>(),
-        )?;
+        let states = records
+            .iter()
+            .map(|record| record.state.clone())
+            .collect::<Vec<_>>();
+        match declared_kind {
+            Some(kind) => validate_settlement_states_for(kind, &states)?,
+            None => validate_settlement_states(&states)?,
+        }
     }
     Ok(())
 }
@@ -2742,6 +3323,7 @@ event_record_impl!(ExchangeRecord, "exchange");
 event_record_impl!(AcquireRecord, "acquire");
 event_record_impl!(DisposeRecord, "dispose");
 event_record_impl!(SettlementStateRecord, "settlement-state");
+event_record_impl!(SettlementEffectRecord, "settlement-effect");
 event_record_impl!(CorrectionRecord, "correction");
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -2903,6 +3485,14 @@ impl EventGraph {
             .cloned()
             .collect();
         validate_settlement_state_records(&settlement_states)?;
+        // Effect records are validated independently here.  Their referenced
+        // settlement may be supplied by another source graph, so resolving or
+        // synthesizing a settlement in order to validate an effect would be a
+        // hidden guess.  Callers with concrete Settlement values can use
+        // `validate_settlement_effects` for cross-record amount bounds.
+        for effect in self.records_of::<SettlementEffectRecord>() {
+            effect.validate()?;
+        }
         Ok(())
     }
 
@@ -2949,6 +3539,10 @@ impl EventGraph {
         }
         for state in self.records_of::<SettlementStateRecord>() {
             state.validate_with_instrument(lookup(&state.instrument)?)?;
+        }
+        for effect in self.records_of::<SettlementEffectRecord>() {
+            let instrument = lookup(&effect.instrument)?;
+            instrument.validate_quantity(&effect.amount)?;
         }
         Ok(())
     }
@@ -3206,6 +3800,189 @@ mod tests {
             .transition(SettlementState::Settled, None, None)
             .unwrap();
         assert!(settlement.is_effective());
+    }
+
+    #[test]
+    fn typed_payment_rails_keep_their_distinct_lifecycles() {
+        let amount = quantity("10", "USD");
+        let mut check = Settlement::new_with_kind(
+            "typed-check",
+            SettlementKind::Check,
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            amount.clone(),
+        )
+        .unwrap();
+        check
+            .transition(SettlementState::Presented, None, None)
+            .unwrap();
+        check
+            .transition(SettlementState::Settled, None, None)
+            .unwrap();
+        check.returned(None, "insufficient funds").unwrap();
+        // A returned check can be presented again, but the old attempt is
+        // never erased.
+        check
+            .transition(SettlementState::Presented, None, None)
+            .unwrap();
+        assert_eq!(check.history().count(), 5);
+        assert!(
+            check
+                .transition(SettlementState::ChargedBack, None, None)
+                .is_err()
+        );
+
+        let mut ach = Settlement::new_with_kind(
+            "typed-ach",
+            SettlementKind::Ach,
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            amount.clone(),
+        )
+        .unwrap();
+        ach.transition(SettlementState::Presented, None, None)
+            .unwrap();
+        ach.transition(SettlementState::Pending, None, None)
+            .unwrap();
+        ach.transition(SettlementState::Returned, None, None)
+            .unwrap();
+        assert!(
+            ach.transition(SettlementState::Presented, None, None)
+                .is_err()
+        );
+
+        let mut card = Settlement::new_with_kind(
+            "typed-card",
+            SettlementKind::Card,
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            amount,
+        )
+        .unwrap();
+        card.transition(SettlementState::Authorized, None, None)
+            .unwrap();
+        card.transition(SettlementState::Presented, None, None)
+            .unwrap();
+        card.transition(SettlementState::Settled, None, None)
+            .unwrap();
+        card.transition(SettlementState::Disputed, None, None)
+            .unwrap();
+        card.transition(SettlementState::ChargedBack, None, None)
+            .unwrap();
+        card.transition(SettlementState::Represented, None, None)
+            .unwrap();
+        card.transition(SettlementState::Settled, None, None)
+            .unwrap();
+    }
+
+    #[test]
+    fn settlement_effects_are_explicit_append_only_and_bounded() {
+        let mut card = Settlement::new_with_kind(
+            "effect-card",
+            SettlementKind::Card,
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            quantity("100", "USD"),
+        )
+        .unwrap();
+        card.transition(SettlementState::Presented, None, None)
+            .unwrap();
+        card.transition(SettlementState::Settled, None, None)
+            .unwrap();
+
+        let original = card.clone();
+        let charged_back = card
+            .appended(
+                SettlementState::ChargedBack,
+                None,
+                Some("issuer dispute".into()),
+            )
+            .unwrap();
+        assert_eq!(original.latest_state(), Some(&SettlementState::Settled));
+        assert_eq!(
+            charged_back.latest_state(),
+            Some(&SettlementState::ChargedBack)
+        );
+
+        let effects = vec![
+            SettlementEffectRecord::provisional_credit(
+                "provisional",
+                "effect-card",
+                quantity("100", "USD"),
+                "USD",
+            ),
+            SettlementEffectRecord::fee("fee", "effect-card", quantity("2", "USD"), "USD"),
+            SettlementEffectRecord::chargeback(
+                "chargeback-partial",
+                "effect-card",
+                quantity("40", "USD"),
+                "USD",
+            ),
+            SettlementEffectRecord::chargeback(
+                "chargeback-rest",
+                "effect-card",
+                quantity("60", "USD"),
+                "USD",
+            ),
+        ];
+        validate_settlement_effects(std::slice::from_ref(&charged_back), &effects).unwrap();
+
+        let too_much = SettlementEffectRecord::chargeback(
+            "refund-too-much",
+            "effect-card",
+            quantity("101", "USD"),
+            "USD",
+        );
+        assert!(matches!(
+            validate_settlement_effects(std::slice::from_ref(&charged_back), &[too_much]),
+            Err(OntologyError::SettlementOverallocated { .. })
+        ));
+
+        let invalid_check = Settlement::new_with_kind(
+            "effect-check",
+            SettlementKind::Check,
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            quantity("10", "USD"),
+        )
+        .unwrap();
+        let chargeback = SettlementEffectRecord::chargeback(
+            "check-chargeback",
+            "effect-check",
+            quantity("1", "USD"),
+            "USD",
+        );
+        assert!(matches!(
+            validate_settlement_effects(&[invalid_check], &[chargeback]),
+            Err(OntologyError::InvalidEvent {
+                kind: "settlement effect",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn correction_effects_need_an_explicit_prior_effect() {
+        let correction = SettlementEffectRecord::correction(
+            "correction",
+            "payment",
+            quantity("1", "USD"),
+            "USD",
+        );
+        assert!(matches!(
+            correction.validate(),
+            Err(OntologyError::InvalidEvent {
+                kind: "settlement effect",
+                ..
+            })
+        ));
+        let correction = correction.corrects("fee").reason("bank fee correction");
+        correction.validate().unwrap();
     }
 
     #[test]

@@ -1622,6 +1622,12 @@ impl ObjectStore {
         for package in &value.policies {
             self.require_kind(package.hash(), ObjectKind::Package)?;
         }
+        if value.policies != source_commit.packages {
+            return Err(StoreError::InvalidObject(
+                "close policies must exactly match the package roots pinned by its source commit"
+                    .into(),
+            ));
+        }
         if value.recognized_root == ContentHash::ZERO {
             return Err(StoreError::InvalidObject(
                 "close must pin a recognized proof root".into(),
@@ -1909,6 +1915,9 @@ impl ObjectStore {
         conflicts.extend(decision_conflicts);
         conflicts.extend(package_conflicts);
         conflicts.extend(completeness_conflicts);
+        for conflict in &mut conflicts {
+            canonicalize_merge_conflict(conflict);
+        }
         conflicts.sort();
         conflicts.dedup();
 
@@ -2080,7 +2089,7 @@ impl ObjectStore {
                 });
                 chosen
             };
-            if self.decision_values_conflict(&chosen)? {
+            if self.decision_values_conflict(&chosen)? && (l != b || r != b) {
                 conflicts.push(MergeConflict::Decisions {
                     subject,
                     scope,
@@ -2311,7 +2320,7 @@ impl ObjectStore {
                 });
                 chosen
             };
-            if self.package_versions_conflict(&chosen)? {
+            if self.package_versions_conflict(&chosen)? && (l != b || r != b) {
                 conflicts.push(MergeConflict::Policies {
                     name,
                     left: l,
@@ -2464,6 +2473,9 @@ fn canonicalize_merge_conflict(conflict: &mut MergeConflict) {
         MergeConflict::Evidence { left, right, .. } => {
             canonicalize_vec(left);
             canonicalize_vec(right);
+            if right.as_slice() < left.as_slice() {
+                std::mem::swap(left, right);
+            }
         }
         MergeConflict::EvidenceIdentity { alternatives, .. } => {
             canonicalize_vec(alternatives);
@@ -2471,14 +2483,23 @@ fn canonicalize_merge_conflict(conflict: &mut MergeConflict) {
         MergeConflict::Decisions { left, right, .. } => {
             canonicalize_vec(left);
             canonicalize_vec(right);
+            if right.as_slice() < left.as_slice() {
+                std::mem::swap(left, right);
+            }
         }
         MergeConflict::Statements { left, right, .. } => {
             canonicalize_vec(left);
             canonicalize_vec(right);
+            if right.as_slice() < left.as_slice() {
+                std::mem::swap(left, right);
+            }
         }
         MergeConflict::Policies { left, right, .. } => {
             canonicalize_vec(left);
             canonicalize_vec(right);
+            if right.as_slice() < left.as_slice() {
+                std::mem::swap(left, right);
+            }
         }
         MergeConflict::Completeness {
             left,
@@ -2497,6 +2518,12 @@ fn canonicalize_merge_conflict(conflict: &mut MergeConflict) {
                 };
             canonicalize(left, left_bounds);
             canonicalize(right, right_bounds);
+            if (right.as_slice(), right_bounds.as_slice())
+                < (left.as_slice(), left_bounds.as_slice())
+            {
+                std::mem::swap(left, right);
+                std::mem::swap(left_bounds, right_bounds);
+            }
         }
     }
 }
@@ -3120,8 +3147,8 @@ mod tests {
                 left,
                 right
             } if *supersedes == original
-                && left == &vec![left_evidence]
-                && right == &vec![right_evidence]
+                && ((left == &vec![left_evidence] && right == &vec![right_evidence])
+                    || (left == &vec![right_evidence] && right == &vec![left_evidence]))
         )));
         let merged_value = store.commit(merged.commit).unwrap();
         assert!(merged_value.evidence.contains(&left_evidence));

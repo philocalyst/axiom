@@ -96,14 +96,18 @@ impl Workload {
         match self {
             Self::TenYearPersonalHistory => "ten years of monthly personal activity",
             Self::HighFrequencyLots => "many acquisitions competing for one sale",
-            Self::MultiCurrency => "business activity across several currencies",
-            Self::CorporateActions => "portfolio activity with split/dividend annotations",
+            Self::MultiCurrency => "shape-only business activity across several currencies",
+            Self::CorporateActions => {
+                "shape-only portfolio activity with split/dividend annotations"
+            }
             Self::InvoicePaymentGraph => "invoice and payment evidence graph",
-            Self::OwnershipNetwork => "recursive ownership evidence network",
+            Self::OwnershipNetwork => "shape-only recursive ownership evidence network",
             Self::ConflictingImports => "contradictory imported observations",
             Self::OneRowCloseChange => "single evidence row changed near close",
             Self::PackageUpgrade => "policy package input changed between revisions",
-            Self::AdversarialRecursion => "recursive rule shape with an explicit cycle probe",
+            Self::AdversarialRecursion => {
+                "shape-only recursive rule shape with an explicit cycle probe"
+            }
             Self::LargeProofExplanation => "large proof DAG and source explanation",
         }
     }
@@ -373,7 +377,7 @@ fn print_help() {
         "axiom-bench [--quick] [--scale N] [--workload NAME] [--self-test]\n\n\
 Generates the deterministic section XVII corpus. JSON Lines are written to stdout;\n\
 the human summary is written to stderr. Timings are measurements, not assertions.\n\
---quick          one timing sample and reduced row counts\n\
+--quick          one timing sample and workload-specific reduced row counts\n\
 --scale N        multiply deterministic row counts (default: 1)\n\
 --workload NAME  run one named workload (underscores are accepted)\n\
 --self-test      run deterministic corpus/parser/proof/incremental checks"
@@ -421,9 +425,17 @@ fn measure_workload(
             "per-workload child-process peak RSS unavailable"
         }),
         note: Some(if process_peak_memory_bytes().is_some() {
-            "peak_memory_bytes is the isolated workload child-process peak RSS; changed_incremental_solve_ns times warm revision commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+            if generated.semantic_supported {
+                "peak_memory_bytes is the isolated workload child-process peak RSS; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+            } else {
+                "shape_only: parsed metrics describe only the accepted V0 evidence projection, not the richer domain shape; peak_memory_bytes is the isolated workload child-process peak RSS; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+            }
         } else {
-            "peak RSS is unavailable on this platform; changed_incremental_solve_ns times warm revision commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+            if generated.semantic_supported {
+                "peak RSS is unavailable on this platform; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+            } else {
+                "shape_only: parsed metrics describe only the accepted V0 evidence projection, not the richer domain shape; peak RSS is unavailable on this platform; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+            }
         }),
         ..Metrics::default()
     };
@@ -706,6 +718,9 @@ fn median_incremental_solve(
             .analyze_commit(loaded.commit_id())
             .map_err(|error| error.to_string())?;
         workspace.clear_incremental_trace();
+        // Start before the revised input is committed/updated.  The reported
+        // incremental time therefore covers the warm input revision as well
+        // as analysis of the resulting commit.
         let start = Instant::now();
         let changed_commit = if workload == Workload::PackageUpgrade {
             let package = workspace
@@ -966,12 +981,15 @@ fn process_peak_memory_bytes() -> Option<usize> {
     None
 }
 
-fn self_test(quick: bool, scale: u64) -> Result<usize, String> {
+fn self_test(_quick: bool, scale: u64) -> Result<usize, String> {
+    // Self-test is an assurance check for the canonical corpus.  Keep the
+    // corpus full-sized even when the CLI's --quick flag is present; --quick
+    // is for timing runs, not a weaker correctness check.
     let test_scale = scale.min(2);
     let mut checks = 0usize;
     for workload in Workload::ALL {
-        let left = generate(workload, quick, test_scale)?;
-        let right = generate(workload, quick, test_scale)?;
+        let left = generate(workload, false, test_scale)?;
+        let right = generate(workload, false, test_scale)?;
         if left.source != right.source || left.changed_source != right.changed_source {
             return Err(format!(
                 "{}: generator is not deterministic",
@@ -1107,20 +1125,18 @@ fn self_test(quick: bool, scale: u64) -> Result<usize, String> {
         ));
     }
     checks += 1;
-    let worker_probe = generate(Workload::HighFrequencyLots, true, test_scale)?;
+    let worker_probe = generate(Workload::HighFrequencyLots, false, test_scale)?;
     let (_, workers_equivalent) =
         median_independent_worker_comparison(Workload::HighFrequencyLots, &worker_probe.source, 1)?;
     if !workers_equivalent {
         return Err("concurrent independent worker differs from the serial result".into());
     }
     checks += 1;
-    if !quick {
-        let one = generate(Workload::OneRowCloseChange, false, test_scale)?;
-        if one.changed_source == Some(one.source.clone()) {
-            return Err("one-row close change did not change source".into());
-        }
-        checks += 1;
+    let one = generate(Workload::OneRowCloseChange, false, test_scale)?;
+    if one.changed_source == Some(one.source.clone()) {
+        return Err("one-row close change did not change source".into());
     }
+    checks += 1;
     if checks < 7 {
         return Err("self-test did not execute its minimum checks".into());
     }
@@ -1296,7 +1312,7 @@ fn print_human_summary(records: &[ResultRecord]) {
         "replay is end-to-end Workspace analysis, including materialization and content-addressed proof persistence"
     );
     eprintln!(
-        "full and quick corpus sizes are deterministic; --scale multiplies their configured row counts"
+        "--quick uses workload-specific reduced row counts (not a uniform ratio); --scale multiplies the selected row counts"
     );
 }
 
@@ -1523,9 +1539,14 @@ fn high_frequency_lots(count: usize) -> Result<GeneratedWorkload, String> {
 fn multi_currency(count: usize) -> Result<GeneratedWorkload, String> {
     let mut source = header(
         "business-multi",
-        &["shape: USD, EUR, GBP, and BTC positions with dated quotes"],
+        &[
+            "shape-only: USD, EUR, GBP, and BTC positions with dated quotes",
+            "the V0 parser accepts only the ordinary evidence projection; it does not parse complete multi-currency valuation semantics",
+        ],
     );
     let assets = ["SERV", "MACH", "DATA"];
+    // Keep the crypto rail in the rotation even in the quick corpus; its
+    // twelve rows cover all four currencies three times.
     let currencies = ["USD", "EUR", "GBP", "BTC"];
     for index in 0..count {
         let asset = assets[index % assets.len()];
@@ -1568,10 +1589,10 @@ fn multi_currency(count: usize) -> Result<GeneratedWorkload, String> {
         source,
         changed_source: None,
         changed_kind: None,
-        explain_goal: Some("gain:fx/sale/close".into()),
+        explain_goal: None,
         semantic_supported: false,
         unsupported_reason: Some(
-            "V0 does not value a complete multi-currency book; quote observations remain independent",
+            "shape-only: V0 does not parse or value a complete multi-currency book; quote observations remain independent",
         ),
     })
 }
@@ -1580,8 +1601,8 @@ fn corporate_actions(count: usize) -> Result<GeneratedWorkload, String> {
     let mut source = header(
         "portfolio-actions",
         &[
-            "shape: split, dividend, merger, and spin-off rows are immutable evidence annotations",
-            "V0 representation: ordinary lots plus labelled observation rows",
+            "shape-only: split, dividend, merger, and spin-off rows are immutable evidence annotations",
+            "the V0 parser accepts ordinary lots and settlement observations only; it does not parse corporate-action semantics",
         ],
     );
     for index in 0..count {
@@ -1633,10 +1654,10 @@ fn corporate_actions(count: usize) -> Result<GeneratedWorkload, String> {
         source,
         changed_source: None,
         changed_kind: None,
-        explain_goal: Some("gain:actions/sale/close".into()),
+        explain_goal: None,
         semantic_supported: false,
         unsupported_reason: Some(
-            "corporate-action annotations are evidence comments until an action-aware ontology is available",
+            "shape-only: corporate-action syntax is not parsed; ordinary evidence rows are measured without an action-aware ontology",
         ),
     })
 }
@@ -1679,8 +1700,8 @@ fn ownership_network(count: usize) -> Result<GeneratedWorkload, String> {
     let mut source = header(
         "ownership-network",
         &[
-            "shape: ownership edges and beneficial-owner declarations",
-            "V0 representation: deterministic position observations with edge labels",
+            "shape-only: ownership edges and beneficial-owner declarations",
+            "the V0 parser accepts position observations only; ownership edges remain comments and are not parsed as closure relations",
         ],
     );
     for index in 0..count {
@@ -1694,7 +1715,10 @@ fn ownership_network(count: usize) -> Result<GeneratedWorkload, String> {
         let _ = writeln!(
             source,
             "observe position entity/{parent:03} {} SHARES",
-            1 + (index % 23)
+            // Keep repeated observations for an entity consistent in the
+            // accepted V0 projection; the ownership edge itself remains a
+            // comment and is not parsed as a closure relation.
+            1 + (parent % 23)
         );
     }
     Ok(GeneratedWorkload {
@@ -1704,7 +1728,7 @@ fn ownership_network(count: usize) -> Result<GeneratedWorkload, String> {
         explain_goal: None,
         semantic_supported: false,
         unsupported_reason: Some(
-            "ownership closure is not a V0 relation; observations are measured without claiming closure",
+            "shape-only: ownership closure is not a V0 relation; position observations are measured without parsing or claiming closure",
         ),
     })
 }
@@ -1799,11 +1823,21 @@ fn one_row_close_change(count: usize) -> Result<GeneratedWorkload, String> {
     source.push_str(
         "use lots/fifo for period-close\nobserve settlement close/sale 150 USD into checking\n",
     );
-    let changed = source.replacen(
-        "observe settlement close/sale 150 USD into checking",
-        "observe settlement close/sale 151 USD into checking",
-        1,
-    );
+    // Change the existing settlement row in place.  Keeping the row count
+    // and its stable identity fixed makes this an input revision rather than
+    // a synthetic append of a second close observation.
+    let old_row = "observe settlement close/sale 150 USD into checking";
+    let new_row = "observe settlement close/sale 151 USD into checking";
+    if source.matches(old_row).count() != 1 {
+        return Err("one-row close change source is missing its existing evidence row".into());
+    }
+    let changed = source.replacen(old_row, new_row, 1);
+    if changed.matches(old_row).next().is_some()
+        || changed.matches(new_row).count() != 1
+        || changed.lines().count() != source.lines().count()
+    {
+        return Err("one-row close change did not replace exactly one evidence row".into());
+    }
     Ok(GeneratedWorkload {
         source,
         changed_source: Some(changed),
@@ -1866,8 +1900,8 @@ fn adversarial_recursion(count: usize) -> Result<GeneratedWorkload, String> {
     let mut source = header(
         "recursive-rules",
         &[
-            "shape: p(X) :- p(X), plus mutually recursive aliases",
-            "the V0 parser has no rule syntax; the cycle is probed through IncrementalDb",
+            "shape-only: p(X) :- p(X), plus mutually recursive aliases",
+            "the V0 parser has no rule syntax; position observations are the only parsed projection and the cycle is probed through IncrementalDb",
         ],
     );
     for index in 0..count {
@@ -1884,7 +1918,7 @@ fn adversarial_recursion(count: usize) -> Result<GeneratedWorkload, String> {
         explain_goal: None,
         semantic_supported: false,
         unsupported_reason: Some(
-            "recursive rule solving is not exposed by the V0 source parser; only the explicit cycle probe is measured",
+            "shape-only: recursive rule syntax is not parsed by V0; only the explicit IncrementalDb cycle probe is measured",
         ),
     })
 }

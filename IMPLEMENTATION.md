@@ -38,9 +38,11 @@ experiments, but it is not part of this contract.
 - [x] Four-valued support and `Truth × Multiplicity × Completion` results.
 - [x] Scoped completeness claims and decisions.
 - [ ] At least 75 independently executable edge-case fixtures spanning
-  sections XIV A–I. The corpus names 134 cases and currently has 50
-  case-specific tests plus 12 grouped smoke suites; a shared suite is not
-  counted as proof of every mapped case.
+  sections XIV A–I. The corpus names 134 cases and now has exactly 75
+  registry-linked case-specific tests plus 12 grouped smoke suites. The count
+  threshold is met, but review still classifies several cases as foundation
+  boundary tests rather than complete domain semantics, so Gate 0 remains
+  open.
 
 ### Gate 1 — executable reference semantics
 
@@ -63,7 +65,10 @@ experiments, but it is not part of this contract.
   Lot allocation, inventory conservation, and recognized gain now use typed,
   independently recomputed certificates. Direct obligations, settlement
   histories, satisfaction allocations, and both remaining-balance families
-  now do as well; the remaining answer families still need equivalent types.
+  now do as well. Quote, position/reconciliation, cash-settlement, and journal
+  answers now carry typed certificates whose values are recomputed by the
+  checker; source-commit binding and the remaining answer families still need
+  equivalent end-to-end treatment.
 - [x] Source-order property tests.
 - [x] Actual/scenario isolation test.
 - [x] Reference/production differential tests cover generated FIFO/LIFO,
@@ -112,9 +117,14 @@ experiments, but it is not part of this contract.
   The executable/store/workspace package boundary now has one lossless UTF-8
   conversion, canonical body/dependency identity, and rejects unrepresentable
   manifest metadata. A deterministic exact/caret/tilde package resolver and
-  independently verified content-addressed lockfile foundation now exist;
-  compilation, coherence, persistence, and Workspace integration remain open.
-- [ ] LSP diagnostics, completion, and proof navigation foundation.
+  independently verified content-addressed lockfile foundation now exist. A
+  deterministic HIR compiler rejects diagnostic-bearing modules, checks
+  exported-name coherence, and emits independently verifiable artifacts;
+  persistence and Workspace integration remain open.
+- [ ] LSP diagnostics, completion, and proof navigation foundation. A typed-HIR
+  document index and checked proof-DAG navigator now provide the three core
+  operations; transport, incremental document updates, and Workspace wiring
+  remain open.
 
 ### Gate 5 — immutable store and reconciliation
 
@@ -146,10 +156,11 @@ experiments, but it is not part of this contract.
 - [x] Directional transfers, exchanges, issue/retire, and conservation checks.
 - [x] Obligations and many-to-many payment satisfaction.
 - [ ] Check/card/ACH state histories, reversals, refunds, and chargebacks.
-  V0 checks ordered built-in histories and conservatively treats returned,
-  reversed, refunded, disputed, charged-back, and merely resolved instruments
-  as ineffective. Package-defined lifecycles and append-only targeted
-  correction events remain open.
+  Rail-specific append-only transition validation now distinguishes ACH,
+  card, and check lifecycles, including check re-presentation, and validates
+  bounded targeted provisional credits, fees, corrections, reversals, refunds,
+  and chargebacks. Source-language, package-defined lifecycle, and engine
+  integration remain open.
 - [ ] Cash and accrual recognizers, invoices, monthly close, journal export.
 - [x] Budgets and forecasts remain isolated scenarios.
 
@@ -165,11 +176,18 @@ experiments, but it is not part of this contract.
 - [x] Quotes carry time, venue, side, source, confidence, and validity.
 - [x] Exact path-preserving multi-currency valuation.
 - [ ] Corporate actions, debt schedules, collateral, and policy packages.
+  Exact split/merge/spinoff/dividend, amortization, payment, and collateral
+  state foundations exist with conservation and quantum checks; they are not
+  yet ledger syntax, stored objects, or recognition inputs.
 
 ### Gate 8 — collaboration and adapters
 
-- [ ] Signed packages and decisions, access labels, and redacted proofs.
+- [ ] Signed packages and decisions, access labels, and redacted proofs. Typed
+  verified attestations, principal labels, and hidden-node proof commitments
+  exist as a foundation; store/workspace enforcement remains open.
 - [ ] Capability-limited component adapters that can emit observations only.
+  The public collaboration adapter boundary currently exposes only immutable
+  observation batches; a runtime capability sandbox remains open.
 - [ ] Reproducible adapters, shared books, semantic collaboration conflicts,
   and package migrations.
 
@@ -203,13 +221,14 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 315 library tests, 4 CLI tests, 8 independent reference/production
+- 337 library tests, 4 CLI tests, 8 independent reference/production
   differential tests, and 5 structured-reference outcome tests;
-- 134 named constitutional cases with 50 independent case-specific tests and
-  12 grouped smoke suites; the remaining mappings still need independent
-  assertions before Gate 0 can close;
+- 134 named constitutional cases with exactly 75 registry-linked independent
+  case-specific tests and 12 grouped smoke suites; semantic review, not the
+  raw count, keeps Gate 0 open;
 - 14 deterministic heavy-ledger integration tests and two explicit 10,000-row
-  stress tests, including a full obligation/settlement/satisfaction network;
+  release stress tests, including a full
+  obligation/settlement/satisfaction network;
 - an 11-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
   clean-recomputation equivalence plus process peak RSS; concurrent

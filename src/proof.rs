@@ -75,6 +75,68 @@ pub struct LotAllocationCertificate {
     pub value_unit: String,
 }
 
+/// Typed source observation for a quote answer.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct QuoteObservationCertificate {
+    pub quote: String,
+    pub date: String,
+    pub base: Exact,
+    pub base_unit: String,
+    pub quote_amount: Exact,
+    pub quote_unit: String,
+}
+
+/// Typed source observation for a position answer.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct PositionObservationCertificate {
+    pub account: String,
+    pub quantity: Exact,
+    pub unit: String,
+}
+
+/// One independently checked position reconciliation result.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct PositionReconciliationCertificate {
+    pub account: String,
+    pub source_proof: ProofId,
+    pub observed: Exact,
+    pub calculated: Exact,
+    pub result: Exact,
+    pub unit: String,
+    /// `reconciled` or `conflict`.
+    pub status: String,
+}
+
+/// Typed source observation for a cash settlement used by a journal.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct CashSettlementObservationCertificate {
+    pub reference: String,
+    pub amount: Exact,
+    pub unit: String,
+    pub into: Option<String>,
+}
+
+/// One exact journal line.  Journal lines are deliberately represented in
+/// the proof layer rather than reconstructed from display metadata.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct JournalLineCertificate {
+    pub side: String,
+    pub account: String,
+    pub amount: Exact,
+    pub unit: String,
+}
+
+/// A journal projection tied to one recognition and one cash settlement.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct JournalEntryCertificate {
+    pub sale: String,
+    pub recognition_proof: ProofId,
+    pub settlement_proof: ProofId,
+    pub inventory_account: String,
+    pub asset: String,
+    pub lines: Vec<JournalLineCertificate>,
+}
+
 /// One ordered state observation in a settlement history.
 ///
 /// This deliberately uses canonical text for the state and date.  The proof
@@ -198,10 +260,27 @@ pub type SettlementTransitionCertificate = SettlementTransition;
 pub enum Operation {
     /// A source ledger fact or other immutable observation.
     Observation { source: String },
+    /// Typed source observation for a quote.
+    QuoteObservation(QuoteObservationCertificate),
+    /// Typed source observation for an observed position.
+    PositionObservation(PositionObservationCertificate),
+    /// Typed source observation for an observed cash settlement.
+    CashSettlementObservation(CashSettlementObservationCertificate),
     /// Source observation for one named acquisition lot.
-    LotObservation { lot: String, source: String },
+    LotObservation {
+        lot: String,
+        source: String,
+        account: String,
+        asset: String,
+        quantity: Exact,
+    },
     /// Source observation for one named disposal.
-    SaleObservation { sale: String, source: String },
+    SaleObservation {
+        sale: String,
+        source: String,
+        account: String,
+        asset: String,
+    },
     /// Typed source observation for one obligation.
     ObligationObservation(ObligationObservationCertificate),
     /// Typed source observation for one settlement and its ordered history.
@@ -243,6 +322,8 @@ pub enum Operation {
     Recognition {
         sale: String,
         sale_proof: ProofId,
+        account: String,
+        asset: String,
         quantity: Exact,
         proceeds: Exact,
         basis: Exact,
@@ -259,6 +340,11 @@ pub enum Operation {
     ObligationBalance(Box<ObligationBalanceCertificate>),
     /// `amount = effective allocated + unused` for one settlement.
     SettlementBalance(Box<SettlementBalanceCertificate>),
+    /// Independently checked position result, including its exact observed
+    /// and calculated values.
+    PositionReconciliation(Box<PositionReconciliationCertificate>),
+    /// Independently checked journal projection and exact lines.
+    JournalEntry(Box<JournalEntryCertificate>),
     /// A selected answer to an explicitly named resolution question.
     Decision { subject: String, answer: String },
     /// A policy application.  Policy and decision results are intentionally
@@ -276,6 +362,9 @@ impl Operation {
     fn tag(&self) -> &'static [u8] {
         match self {
             Self::Observation { .. } => b"observation",
+            Self::QuoteObservation(..) => b"quote-observation",
+            Self::PositionObservation(..) => b"position-observation",
+            Self::CashSettlementObservation(..) => b"cash-settlement-observation",
             Self::LotObservation { .. } => b"lot-observation",
             Self::SaleObservation { .. } => b"sale-observation",
             Self::ObligationObservation(..) => b"obligation-observation",
@@ -290,6 +379,8 @@ impl Operation {
             Self::SatisfactionAllocation(..) => b"satisfaction-allocation",
             Self::ObligationBalance(..) => b"obligation-balance",
             Self::SettlementBalance(..) => b"settlement-balance",
+            Self::PositionReconciliation(..) => b"position-reconciliation",
+            Self::JournalEntry(..) => b"journal-entry",
             Self::Decision { .. } => b"decision",
             Self::Policy { .. } => b"policy",
             Self::Conflict { .. } => b"conflict",
@@ -300,13 +391,48 @@ impl Operation {
         put_bytes(out, self.tag());
         match self {
             Self::Observation { source } => put_string(out, source),
-            Self::LotObservation { lot, source } => {
+            Self::QuoteObservation(certificate) => {
+                put_string(out, &certificate.quote);
+                put_string(out, &certificate.date);
+                put_string(out, &certificate.base.canonical_string());
+                put_string(out, &certificate.base_unit);
+                put_string(out, &certificate.quote_amount.canonical_string());
+                put_string(out, &certificate.quote_unit);
+            }
+            Self::PositionObservation(certificate) => {
+                put_string(out, &certificate.account);
+                put_string(out, &certificate.quantity.canonical_string());
+                put_string(out, &certificate.unit);
+            }
+            Self::CashSettlementObservation(certificate) => {
+                put_string(out, &certificate.reference);
+                put_string(out, &certificate.amount.canonical_string());
+                put_string(out, &certificate.unit);
+                put_optional_string(out, certificate.into.as_deref());
+            }
+            Self::LotObservation {
+                lot,
+                source,
+                account,
+                asset,
+                quantity,
+            } => {
                 put_string(out, lot);
                 put_string(out, source);
+                put_string(out, account);
+                put_string(out, asset);
+                put_string(out, &quantity.canonical_string());
             }
-            Self::SaleObservation { sale, source } => {
+            Self::SaleObservation {
+                sale,
+                source,
+                account,
+                asset,
+            } => {
                 put_string(out, sale);
                 put_string(out, source);
+                put_string(out, account);
+                put_string(out, asset);
             }
             Self::ObligationObservation(certificate) => {
                 put_string(out, &certificate.obligation);
@@ -387,6 +513,8 @@ impl Operation {
             Self::Recognition {
                 sale,
                 sale_proof,
+                account,
+                asset,
                 quantity,
                 proceeds,
                 basis,
@@ -396,6 +524,8 @@ impl Operation {
             } => {
                 put_string(out, sale);
                 put_proof_id(out, sale_proof);
+                put_string(out, account);
+                put_string(out, asset);
                 put_string(out, &quantity.canonical_string());
                 put_string(out, &proceeds.canonical_string());
                 put_string(out, &basis.canonical_string());
@@ -444,6 +574,23 @@ impl Operation {
                 put_string(out, &certificate.unused.canonical_string());
                 put_string(out, &certificate.unit);
                 put_proof_ids(out, &certificate.allocations);
+            }
+            Self::PositionReconciliation(certificate) => {
+                put_string(out, &certificate.account);
+                put_proof_id(out, &certificate.source_proof);
+                put_string(out, &certificate.observed.canonical_string());
+                put_string(out, &certificate.calculated.canonical_string());
+                put_string(out, &certificate.result.canonical_string());
+                put_string(out, &certificate.unit);
+                put_string(out, &certificate.status);
+            }
+            Self::JournalEntry(certificate) => {
+                put_string(out, &certificate.sale);
+                put_proof_id(out, &certificate.recognition_proof);
+                put_proof_id(out, &certificate.settlement_proof);
+                put_string(out, &certificate.inventory_account);
+                put_string(out, &certificate.asset);
+                put_journal_lines(out, &certificate.lines);
             }
             Self::Decision { subject, answer } => {
                 put_string(out, subject);
@@ -601,6 +748,21 @@ impl Proof {
                 return Err(CheckError::InvalidArithmetic { id: *id });
             }
             match &node.operation {
+                Operation::QuoteObservation(certificate)
+                    if !valid_quote_observation(certificate) =>
+                {
+                    return Err(CheckError::InvalidQuoteObservation { id: *id });
+                }
+                Operation::PositionObservation(certificate)
+                    if !valid_position_observation(certificate) =>
+                {
+                    return Err(CheckError::InvalidPositionObservation { id: *id });
+                }
+                Operation::CashSettlementObservation(certificate)
+                    if !valid_cash_settlement_observation(certificate) =>
+                {
+                    return Err(CheckError::InvalidCashSettlementObservation { id: *id });
+                }
                 Operation::ObligationObservation(certificate)
                     if !valid_obligation_observation(certificate) =>
                 {
@@ -719,15 +881,45 @@ impl Proof {
                 {
                     return Err(CheckError::InvalidSettlementBalance { id: *id });
                 }
+                Operation::PositionReconciliation(certificate)
+                    if !valid_position_reconciliation(certificate) =>
+                {
+                    return Err(CheckError::InvalidPositionReconciliation { id: *id });
+                }
+                Operation::JournalEntry(certificate) if !valid_journal_entry(certificate) => {
+                    return Err(CheckError::InvalidJournalEntry { id: *id });
+                }
                 _ => {}
             }
             let invalid_operation = match &node.operation {
                 Operation::Observation { source } => source.trim().is_empty(),
-                Operation::LotObservation { lot, source } => {
-                    lot.trim().is_empty() || source.trim().is_empty()
+                Operation::QuoteObservation(..)
+                | Operation::PositionObservation(..)
+                | Operation::CashSettlementObservation(..) => false,
+                Operation::LotObservation {
+                    lot,
+                    source,
+                    account,
+                    asset,
+                    quantity,
+                } => {
+                    lot.trim().is_empty()
+                        || source.trim().is_empty()
+                        || account.trim().is_empty()
+                        || asset.trim().is_empty()
+                        || quantity.is_negative()
+                        || quantity.is_zero()
                 }
-                Operation::SaleObservation { sale, source } => {
-                    sale.trim().is_empty() || source.trim().is_empty()
+                Operation::SaleObservation {
+                    sale,
+                    source,
+                    account,
+                    asset,
+                } => {
+                    sale.trim().is_empty()
+                        || source.trim().is_empty()
+                        || account.trim().is_empty()
+                        || asset.trim().is_empty()
                 }
                 Operation::ObligationObservation(certificate) => {
                     certificate.obligation.trim().is_empty()
@@ -760,6 +952,7 @@ impl Proof {
                 | Operation::SatisfactionAllocation(..)
                 | Operation::ObligationBalance(..)
                 | Operation::SettlementBalance(..) => false,
+                Operation::PositionReconciliation(..) | Operation::JournalEntry(..) => false,
                 Operation::Decision { subject, answer } => {
                     subject.trim().is_empty() || answer.trim().is_empty()
                 }
@@ -803,6 +996,25 @@ impl Proof {
         let effective_allocations = effective_allocation_index(self);
         for (id, node) in &self.nodes {
             match &node.operation {
+                Operation::PositionReconciliation(certificate) => {
+                    if !node.inputs.contains(&certificate.source_proof)
+                        || !position_observation_matches(
+                            self.nodes.get(&certificate.source_proof),
+                            certificate,
+                        )
+                        || !position_reconciliation_matches(self, node, certificate)
+                    {
+                        return Err(CheckError::InvalidPositionReconciliation { id: *id });
+                    }
+                }
+                Operation::JournalEntry(certificate) => {
+                    if !node.inputs.contains(&certificate.recognition_proof)
+                        || !node.inputs.contains(&certificate.settlement_proof)
+                        || !journal_entry_matches_sources(self, certificate)
+                    {
+                        return Err(CheckError::InvalidJournalEntry { id: *id });
+                    }
+                }
                 Operation::ObligationObservation(certificate) => {
                     if obligation_sources
                         .insert(certificate.obligation.clone(), *id)
@@ -974,6 +1186,8 @@ impl Proof {
                 Operation::Recognition {
                     sale,
                     sale_proof,
+                    account,
+                    asset,
                     quantity,
                     proceeds,
                     basis,
@@ -982,7 +1196,12 @@ impl Proof {
                     value_unit,
                 } => {
                     if !node.inputs.contains(sale_proof)
-                        || !is_sale_observation(self.nodes.get(sale_proof), sale)
+                        || !sale_observation_matches(
+                            self.nodes.get(sale_proof),
+                            sale,
+                            account,
+                            asset,
+                        )
                     {
                         return Err(CheckError::InvalidRecognition { id: *id });
                     }
@@ -1051,6 +1270,8 @@ impl Proof {
                     | Operation::SatisfactionAllocation(..)
                     | Operation::ObligationBalance(..)
                     | Operation::SettlementBalance(..)
+                    | Operation::PositionReconciliation(..)
+                    | Operation::JournalEntry(..)
             ) && !reachable.contains(id)
             {
                 return Err(CheckError::UnreachableCertificate { id: *id });
@@ -1148,6 +1369,9 @@ pub enum CheckError {
     MissingRoot { root: ProofId },
     MissingNode { id: ProofId },
     InvalidArithmetic { id: ProofId },
+    InvalidQuoteObservation { id: ProofId },
+    InvalidPositionObservation { id: ProofId },
+    InvalidCashSettlementObservation { id: ProofId },
     InvalidObligationObservation { id: ProofId },
     InvalidSettlementObservation { id: ProofId },
     InvalidSatisfactionObservation { id: ProofId },
@@ -1158,6 +1382,8 @@ pub enum CheckError {
     InvalidSatisfactionAllocation { id: ProofId },
     InvalidObligationBalance { id: ProofId },
     InvalidSettlementBalance { id: ProofId },
+    InvalidPositionReconciliation { id: ProofId },
+    InvalidJournalEntry { id: ProofId },
     DuplicateObligationObservation { id: ProofId },
     DuplicateSettlementObservation { id: ProofId },
     DuplicateSatisfactionObservation { id: ProofId },
@@ -1186,6 +1412,21 @@ impl fmt::Display for CheckError {
                 write!(
                     f,
                     "proof node {id} contains an invalid arithmetic certificate"
+                )
+            }
+            Self::InvalidQuoteObservation { id } => {
+                write!(f, "proof node {id} contains an invalid quote observation")
+            }
+            Self::InvalidPositionObservation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid position observation"
+                )
+            }
+            Self::InvalidCashSettlementObservation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid cash settlement observation"
                 )
             }
             Self::InvalidObligationObservation { id } => {
@@ -1239,6 +1480,15 @@ impl fmt::Display for CheckError {
             Self::InvalidSettlementBalance { id } => {
                 write!(f, "proof node {id} contains an invalid settlement balance")
             }
+            Self::InvalidPositionReconciliation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid position reconciliation"
+                )
+            }
+            Self::InvalidJournalEntry { id } => {
+                write!(f, "proof node {id} contains an invalid journal entry")
+            }
             Self::DuplicateObligationObservation { id } => {
                 write!(
                     f,
@@ -1278,6 +1528,61 @@ fn valid_obligation_observation(certificate: &ObligationObservationCertificate) 
         && !certificate.promised.is_negative()
         && !certificate.promised.is_zero()
         && certificate.due.as_deref().is_none_or(valid_canonical_date)
+}
+
+fn valid_quote_observation(certificate: &QuoteObservationCertificate) -> bool {
+    !certificate.quote.trim().is_empty()
+        && valid_canonical_date(&certificate.date)
+        && !certificate.base_unit.trim().is_empty()
+        && !certificate.quote_unit.trim().is_empty()
+        && !certificate.base.is_negative()
+        && !certificate.base.is_zero()
+        && !certificate.quote_amount.is_negative()
+        && !certificate.quote_amount.is_zero()
+}
+
+fn valid_position_observation(certificate: &PositionObservationCertificate) -> bool {
+    !certificate.account.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && !certificate.quantity.is_negative()
+}
+
+fn valid_cash_settlement_observation(certificate: &CashSettlementObservationCertificate) -> bool {
+    !certificate.reference.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && !certificate.amount.is_negative()
+        && !certificate.amount.is_zero()
+        && certificate
+            .into
+            .as_deref()
+            .is_none_or(|account| !account.trim().is_empty())
+}
+
+fn valid_position_reconciliation(certificate: &PositionReconciliationCertificate) -> bool {
+    !certificate.account.trim().is_empty()
+        && certificate.source_proof != ProofId::ZERO
+        && !certificate.unit.trim().is_empty()
+        && matches!(certificate.status.trim(), "reconciled" | "conflict")
+        && certificate.observed == certificate.result
+        && ((certificate.status == "reconciled" && certificate.calculated == certificate.result)
+            || (certificate.status == "conflict" && certificate.calculated != certificate.result))
+}
+
+fn valid_journal_line(certificate: &JournalLineCertificate) -> bool {
+    matches!(certificate.side.trim(), "debit" | "credit")
+        && !certificate.account.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && !certificate.amount.is_negative()
+}
+
+fn valid_journal_entry(certificate: &JournalEntryCertificate) -> bool {
+    !certificate.sale.trim().is_empty()
+        && certificate.recognition_proof != ProofId::ZERO
+        && certificate.settlement_proof != ProofId::ZERO
+        && !certificate.inventory_account.trim().is_empty()
+        && !certificate.asset.trim().is_empty()
+        && certificate.lines.len() == 3
+        && certificate.lines.iter().all(valid_journal_line)
 }
 
 fn valid_settlement_observation(certificate: &SettlementObservationCertificate) -> bool {
@@ -1517,6 +1822,159 @@ fn settlement_history_matches_source(
                 certificate.current == current && certificate.effective == effective
             },
         )
+}
+
+fn position_observation_matches(
+    node: Option<&Node>,
+    certificate: &PositionReconciliationCertificate,
+) -> bool {
+    let Some(Node {
+        operation: Operation::PositionObservation(source),
+        ..
+    }) = node
+    else {
+        return false;
+    };
+    source.account == certificate.account
+        && source.quantity == certificate.observed
+        && source.unit == certificate.unit
+}
+
+fn position_reconciliation_matches(
+    proof: &Proof,
+    node: &Node,
+    certificate: &PositionReconciliationCertificate,
+) -> bool {
+    let mut calculated = Exact::from(0i64);
+    let mut saw_event = false;
+    for input in &node.inputs {
+        if *input == certificate.source_proof {
+            continue;
+        }
+        let Some(input_node) = proof.nodes.get(input) else {
+            return false;
+        };
+        match &input_node.operation {
+            Operation::LotObservation {
+                account,
+                asset,
+                quantity,
+                ..
+            } if account == &certificate.account && asset == &certificate.unit => {
+                calculated = calculated.checked_add(quantity);
+                saw_event = true;
+            }
+            Operation::Recognition {
+                account,
+                asset,
+                quantity,
+                quantity_unit,
+                ..
+            } if account == &certificate.account
+                && asset == &certificate.unit
+                && quantity_unit == &certificate.unit =>
+            {
+                calculated = calculated.checked_sub(quantity);
+                saw_event = true;
+            }
+            _ => return false,
+        }
+    }
+    saw_event && calculated == certificate.calculated
+}
+
+fn journal_entry_matches_sources(proof: &Proof, certificate: &JournalEntryCertificate) -> bool {
+    let Some(Node {
+        operation:
+            Operation::Recognition {
+                sale,
+                account,
+                asset,
+                proceeds,
+                basis,
+                gain,
+                value_unit,
+                ..
+            },
+        ..
+    }) = proof.nodes.get(&certificate.recognition_proof)
+    else {
+        return false;
+    };
+    let Some((reference, amount, unit, into)) =
+        find_cash_settlement_source(proof, certificate.settlement_proof)
+    else {
+        return false;
+    };
+    if sale != &certificate.sale
+        || account != &certificate.inventory_account
+        || asset != &certificate.asset
+        || reference != certificate.sale
+        || amount != *proceeds
+        || unit != *value_unit
+        || into.trim().is_empty()
+    {
+        return false;
+    }
+    let gain_line = if gain.is_negative() {
+        JournalLineCertificate {
+            side: "debit".into(),
+            account: "loss:recognized".into(),
+            amount: gain.abs(),
+            unit: value_unit.clone(),
+        }
+    } else {
+        JournalLineCertificate {
+            side: "credit".into(),
+            account: "gain:recognized".into(),
+            amount: gain.clone(),
+            unit: value_unit.clone(),
+        }
+    };
+    let expected = [
+        JournalLineCertificate {
+            side: "debit".into(),
+            account: into,
+            amount: proceeds.clone(),
+            unit: value_unit.clone(),
+        },
+        JournalLineCertificate {
+            side: "credit".into(),
+            account: format!("{account}:{asset}"),
+            amount: basis.clone(),
+            unit: value_unit.clone(),
+        },
+        gain_line,
+    ];
+    certificate.lines == expected
+}
+
+fn find_cash_settlement_source(
+    proof: &Proof,
+    root: ProofId,
+) -> Option<(String, Exact, String, String)> {
+    let mut pending = vec![root];
+    let mut seen = BTreeSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) {
+            continue;
+        }
+        let node = proof.nodes.get(&id)?;
+        match &node.operation {
+            Operation::CashSettlementObservation(source) => {
+                let into = source.into.clone()?;
+                return Some((
+                    source.reference.clone(),
+                    source.amount.clone(),
+                    source.unit.clone(),
+                    into,
+                ));
+            }
+            Operation::Derive { .. } => pending.extend(node.inputs.iter().copied()),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn satisfaction_allocation_matches_sources(
@@ -1804,6 +2262,18 @@ fn is_sale_observation(node: Option<&Node>, sale: &str) -> bool {
     )
 }
 
+fn sale_observation_matches(node: Option<&Node>, sale: &str, account: &str, asset: &str) -> bool {
+    matches!(
+        node.map(|node| &node.operation),
+        Some(Operation::SaleObservation {
+            sale: observed,
+            account: observed_account,
+            asset: observed_asset,
+            ..
+        }) if observed == sale && observed_account == account && observed_asset == asset
+    )
+}
+
 /// Metadata remains diagnostic and extensible, but fields that duplicate a
 /// proposition's typed payload must agree when present.  In particular this
 /// prevents a caller from re-hashing a node with a forged `lot` or amount in
@@ -1891,6 +2361,16 @@ fn put_transitions(out: &mut Vec<u8>, values: &[SettlementTransition]) {
             }
             None => out.push(0),
         }
+    }
+}
+
+fn put_journal_lines(out: &mut Vec<u8>, values: &[JournalLineCertificate]) {
+    put_u64(out, values.len() as u64);
+    for value in values {
+        put_string(out, &value.side);
+        put_string(out, &value.account);
+        put_string(out, &value.amount.canonical_string());
+        put_string(out, &value.unit);
     }
 }
 
@@ -2020,6 +2500,9 @@ mod tests {
             Operation::LotObservation {
                 lot: "lot/one".into(),
                 source: "buy lot/one".into(),
+                account: "brokerage".into(),
+                asset: "ABC".into(),
+                quantity: Exact::from(10i64),
             },
             vec![],
             BTreeMap::new(),
@@ -2029,6 +2512,8 @@ mod tests {
             Operation::SaleObservation {
                 sale: "sale/one".into(),
                 source: "sell sale/one".into(),
+                account: "brokerage".into(),
+                asset: "ABC".into(),
             },
             vec![],
             BTreeMap::new(),
@@ -2075,6 +2560,8 @@ mod tests {
             Operation::Recognition {
                 sale: "sale/one".into(),
                 sale_proof: sale.id,
+                account: "brokerage".into(),
+                asset: "ABC".into(),
                 quantity: Exact::from(3i64),
                 proceeds: Exact::from(30i64),
                 basis: Exact::from(12i64),

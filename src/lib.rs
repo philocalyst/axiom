@@ -4,6 +4,8 @@
 //! projection, and explanations are pure views over it.
 
 pub mod accounts;
+pub mod collaboration;
+pub mod contracts;
 pub mod engine;
 pub mod evidence;
 pub mod exact;
@@ -13,9 +15,11 @@ pub mod incremental;
 pub mod ir;
 pub mod liquidity;
 pub mod logic;
+pub mod lsp;
 pub mod model;
 pub mod ontology;
 pub mod package;
+pub mod package_compiler;
 pub mod package_lock;
 pub mod parser;
 pub mod proof;
