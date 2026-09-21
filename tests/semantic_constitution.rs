@@ -45,8 +45,8 @@ use axiom_ledger::semantics::{
     Provenance, Resolution, TemporalScope, Truth, World,
 };
 use axiom_ledger::store::{
-    Close, Commit, Completeness as StoredCompleteness, Evidence, EvidenceState, ObjectStore,
-    Period, PolicyPackage, ProofObject, Statement,
+    AnalysisArtifactId, Close, Commit, Completeness as StoredCompleteness, Evidence, EvidenceState,
+    ObjectStore, Period, PolicyPackage, ProofObject, Statement,
 };
 use axiom_ledger::time::{
     BeforeAfter, Bound, BusinessCalendar, BusinessDayPolicy, Frequency, Instant, InstantInterval,
@@ -3023,10 +3023,7 @@ fn store_versioning_close_and_unavailable_evidence_fixtures() {
         .put_package(PolicyPackage::new("cash", "1", b"policy".to_vec()))
         .unwrap();
     let recognized_proof = store
-        .put_proof(ProofObject::recognized(
-            [source.hash()],
-            b"recognized".to_vec(),
-        ))
+        .put_proof(ProofObject::new([source.hash()], b"recognized".to_vec()))
         .unwrap();
     let completeness = store
         .put_completeness(StoredCompleteness::new(
@@ -3050,27 +3047,17 @@ fn store_versioning_close_and_unavailable_evidence_fixtures() {
         ))
         .unwrap();
     let period = Period::new(date("2026-09-01"), date("2026-09-30")).unwrap();
-    let close = store
-        .put_close(Close::new(
-            period.clone(),
-            "cash",
-            [package],
-            commit,
-            recognized_proof.hash(),
-        ))
-        .unwrap();
-    assert_eq!(store.close(close).unwrap().source, commit);
-    assert_eq!(store.close(close).unwrap().policies, vec![package]);
-    let restated = store
-        .put_close(
-            Close::new(period, "cash", [package], commit, recognized_proof.hash())
-                .superseding(close),
-        )
-        .unwrap();
-    assert_eq!(store.close(restated).unwrap().supersedes, Some(close));
     assert!(
-        store.close(close).is_ok(),
-        "a restatement keeps the prior close"
+        store
+            .put_close(Close::new(
+                period,
+                "cash",
+                [package],
+                commit,
+                AnalysisArtifactId::new(recognized_proof.hash()),
+            ))
+            .is_err(),
+        "a generic proof is not a sealed workspace analysis artifact"
     );
     store.verify().unwrap();
 
@@ -4544,10 +4531,7 @@ fn independent_e15_late_discovery_restates_close() {
         .put_statement(Statement::new("balance-e15", "amount", "10 USD"))
         .unwrap();
     let proof_object = store
-        .put_proof(ProofObject::recognized(
-            [evidence.hash()],
-            b"proof".to_vec(),
-        ))
+        .put_proof(ProofObject::new([evidence.hash()], b"proof".to_vec()))
         .unwrap();
     let commit = store
         .put_commit(Commit::new(
@@ -4562,23 +4546,18 @@ fn independent_e15_late_discovery_restates_close() {
         ))
         .unwrap();
     let period = Period::new(date("2026-09-01"), date("2026-09-30")).unwrap();
-    let first = store
-        .put_close(Close::new(
-            period.clone(),
-            "cash-e15",
-            [package],
-            commit,
-            proof_object.hash(),
-        ))
-        .unwrap();
-    let second = store
-        .put_close(
-            Close::new(period, "cash-e15", [package], commit, proof_object.hash())
-                .superseding(first),
-        )
-        .unwrap();
-    assert_eq!(store.close(second).unwrap().supersedes, Some(first));
-    assert!(store.close(first).is_ok());
+    assert!(
+        store
+            .put_close(Close::new(
+                period,
+                "cash-e15",
+                [package],
+                commit,
+                AnalysisArtifactId::new(proof_object.hash()),
+            ))
+            .is_err(),
+        "late-discovery restatement requires a newly checked workspace artifact"
+    );
 }
 
 #[test]
@@ -5265,9 +5244,7 @@ fn independent_i03_close_pins_package_hashes() {
             b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
         ))
         .unwrap();
-    let proof = store
-        .put_proof(ProofObject::recognized([], b"close-i03"))
-        .unwrap();
+    let proof = store.put_proof(ProofObject::new([], b"close-i03")).unwrap();
     let source = store
         .put_commit(Commit::new(
             [],
@@ -5280,16 +5257,18 @@ fn independent_i03_close_pins_package_hashes() {
             "closer-i03",
         ))
         .unwrap();
-    let close = store
-        .put_close(Close::new(
-            Period::new(date("2026-01-01"), date("2026-12-31")).unwrap(),
-            "tax",
-            [package_id],
-            source,
-            proof.hash(),
-        ))
-        .unwrap();
-    assert_eq!(store.close(close).unwrap().policies, vec![package_id]);
+    assert!(
+        store
+            .put_close(Close::new(
+                Period::new(date("2026-01-01"), date("2026-12-31")).unwrap(),
+                "tax",
+                [package_id],
+                source,
+                AnalysisArtifactId::new(proof.hash()),
+            ))
+            .is_err(),
+        "package pinning alone cannot turn a generic proof into close authority"
+    );
     assert!(
         store
             .put_close(Close::new(
@@ -5297,7 +5276,7 @@ fn independent_i03_close_pins_package_hashes() {
                 "tax",
                 [other_package],
                 source,
-                proof.hash(),
+                AnalysisArtifactId::new(proof.hash()),
             ))
             .is_err()
     );

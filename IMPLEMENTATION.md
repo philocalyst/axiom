@@ -61,6 +61,14 @@ experiments, but it is not part of this contract.
 - [x] Policy/decision disagreement blocks recognition.
 - [x] Position and cash-settlement observations reconcile.
 - [x] Journal is a derived monetary projection.
+- [x] Persisted sale-ledger closes cite a sealed analysis artifact produced
+  only from a checked `CommitAnalysis`. The artifact binds the exact source
+  commit, deterministic analysis child, stored proof, policy roots, book,
+  typed period, and the complete recognized-sale/journal result set. Generic
+  proof envelopes, stale sources, field relabelling, blocked results, empty
+  books, and sales outside the requested period cannot authorize this path.
+  This deliberately narrow API does not yet claim general close semantics for
+  non-sale economic systems or mixed-period ledgers.
 - [ ] Every answer has a proposition-specific independently checked proof.
   Lot allocation, inventory conservation, and recognized gain now use typed,
   independently recomputed certificates. Direct obligations, settlement

@@ -7,12 +7,21 @@
 
 use axiom_ledger::model::Date;
 use axiom_ledger::store::{
-    Close, Commit, ConflictRecord, Decision, Evidence, MergeConflict, ObjectStore, PolicyPackage,
-    ProofObject, StoreError,
+    AnalysisArtifactId, Close, Commit, ConflictRecord, Decision, Evidence, MergeConflict,
+    ObjectStore, PolicyPackage, ProofObject, StoreError,
 };
 use axiom_ledger::workspace::{Workspace, WorkspaceError};
 
-const SOURCE: &[u8] = b"book tax\n";
+const SOURCE: &[u8] = br#"book tax
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+sell sell/one on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+observe settlement sell/one 500 USD into cash
+"#;
 const SOURCE_ID: &str = "book";
 const PACKAGE_NAME: &str = "lots/choice";
 const PACKAGE_BODY_LEFT: &[u8] = b"selector=earliest_acquisition\ntie=ambiguous";
@@ -33,7 +42,7 @@ fn package_conflict_fixture() -> PackageConflictFixture {
         .put_evidence(Evidence::new("source/ledger", SOURCE_ID, SOURCE.to_vec()))
         .expect("source evidence is valid");
     let proof = store
-        .put_proof(ProofObject::recognized([], b"recognized"))
+        .put_proof(ProofObject::new([], b"generic proof"))
         .expect("recognized proof is valid");
     let root = store
         .put_commit(Commit::new(
@@ -223,7 +232,7 @@ fn unresolved_conflicts_survive_descendants_and_block_analysis_and_close() {
             "tax",
             [],
             descendant,
-            fixture.proof.hash(),
+            AnalysisArtifactId::new(fixture.proof.hash()),
         )),
         Err(StoreError::InvalidObject(reason))
             if reason.contains("unresolved semantic conflict")
@@ -288,35 +297,9 @@ fn arbitrary_decisions_fail_but_explicit_conflict_scoped_resolution_unblocks() {
     analysis
         .check_proof()
         .expect("bound analysis proof is valid");
-    let mut analyzed_store = workspace.store().clone();
-    let resolved_snapshot = analyzed_store
-        .commit(resolved)
-        .expect("resolved commit exists")
-        .clone();
-    let close_source = analyzed_store
-        .put_commit(
-            Commit::new(
-                [resolved],
-                resolved_snapshot.evidence,
-                resolved_snapshot.statements,
-                resolved_snapshot.decisions,
-                resolved_snapshot.completeness,
-                resolved_snapshot.packages,
-                [fixture.proof],
-                "recognizer",
-            )
-            .with_conflicts(resolved_snapshot.conflicts),
-        )
-        .expect("recognized commit pins the typed proof");
-    analyzed_store
-        .put_close(Close::new(
-            period(),
-            "tax",
-            [fixture.left_package],
-            close_source,
-            fixture.proof.hash(),
-        ))
-        .expect("explicit conflict-scoped resolution unblocks close");
+    workspace
+        .close_sale_ledger(resolved, period())
+        .expect("explicit conflict-scoped resolution unblocks checked close");
 }
 
 #[test]
@@ -356,7 +339,7 @@ fn divergent_resolutions_remain_blocking() {
             "tax",
             [],
             merged.commit,
-            fixture.proof.hash(),
+            AnalysisArtifactId::new(fixture.proof.hash()),
         )),
         Err(StoreError::InvalidObject(reason))
             if reason.contains("conflicting semantic conflict resolutions")

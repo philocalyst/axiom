@@ -19,9 +19,11 @@ use crate::model::{BookId, ContentHash, Date, ExternalId};
 use crate::package_compiler::CompiledArtifact;
 use crate::proof::{
     Node as CanonicalNode, Operation as CanonicalOperation, Proof as CanonicalProof,
+    ProofId as CanonicalProofId,
 };
 
 const SCHEMA_VERSION: &str = "axiom/store/v3";
+pub(crate) const ANALYSIS_AUTHOR: &str = "workspace/analysis";
 const EVIDENCE_CONTENT_DOMAIN: &str = "axiom/store/evidence-content/v1";
 
 /// The object families that may be addressed by this store.
@@ -33,6 +35,7 @@ pub enum ObjectKind {
     Completeness,
     Package,
     CompiledArtifact,
+    AnalysisArtifact,
     Proof,
     Conflict,
     Commit,
@@ -48,6 +51,7 @@ impl ObjectKind {
             Self::Completeness => "completeness",
             Self::Package => "package",
             Self::CompiledArtifact => "compiled-artifact",
+            Self::AnalysisArtifact => "analysis-artifact",
             Self::Proof => "proof",
             Self::Conflict => "conflict",
             Self::Commit => "commit",
@@ -84,6 +88,7 @@ kind_marker!(DecisionKind, Decision);
 kind_marker!(CompletenessKind, Completeness);
 kind_marker!(PackageKind, Package);
 kind_marker!(CompiledArtifactKind, CompiledArtifact);
+kind_marker!(AnalysisArtifactKind, AnalysisArtifact);
 kind_marker!(ProofKind, Proof);
 kind_marker!(ConflictKind, Conflict);
 kind_marker!(CommitKind, Commit);
@@ -133,6 +138,10 @@ pub type CompletenessId = ObjectId<CompletenessKind>;
 pub type PackageId = ObjectId<PackageKind>;
 /// The store address of a deterministic compiled package artifact.
 pub type CompiledArtifactId = ObjectId<CompiledArtifactKind>;
+/// The store address of a sealed, workspace-produced analysis artifact.  The
+/// artifact is the only authority a close may cite; unlike a generic proof it
+/// carries the complete source/analysis/package/result binding.
+pub type AnalysisArtifactId = ObjectId<AnalysisArtifactKind>;
 /// The store address of a persisted proof object.  This is deliberately
 /// distinct from [`crate::proof::ProofId`], which is the identity of a proof
 /// node inside the canonical DAG.  A stored object may contain many nodes and
@@ -679,39 +688,6 @@ impl PartialOrd for ProofObject {
 
 impl ProofObject {
     pub fn new(roots: impl IntoIterator<Item = ContentHash>, body: impl Into<Vec<u8>>) -> Self {
-        Self::envelope(
-            roots,
-            body,
-            "generic",
-            CanonicalOperation::Observation {
-                source: "stored-proof".into(),
-            },
-        )
-    }
-
-    /// Construct the typed proof envelope required by a close's recognized
-    /// root. Generic proof objects remain valid store values, but cannot be
-    /// mistaken for recognition results by [`ObjectStore::put_close`].
-    pub fn recognized(
-        roots: impl IntoIterator<Item = ContentHash>,
-        body: impl Into<Vec<u8>>,
-    ) -> Self {
-        Self::envelope(
-            roots,
-            body,
-            "recognized",
-            CanonicalOperation::Derive {
-                rule: "book-recognition".into(),
-            },
-        )
-    }
-
-    fn envelope(
-        roots: impl IntoIterator<Item = ContentHash>,
-        body: impl Into<Vec<u8>>,
-        purpose: &str,
-        operation: CanonicalOperation,
-    ) -> Self {
         let mut roots: Vec<_> = roots.into_iter().collect();
         roots.sort();
         roots.dedup();
@@ -724,15 +700,14 @@ impl ProofObject {
         let mut proof = CanonicalProof::new();
         let node = CanonicalNode::new(
             "stored proof envelope",
-            operation,
+            CanonicalOperation::Observation {
+                source: "stored-proof".into(),
+            },
             Vec::new(),
-            BTreeMap::from([
-                ("proof-purpose".to_string(), purpose.to_string()),
-                (
-                    "payload-hash".to_string(),
-                    blake3::hash(&body).to_hex().to_string(),
-                ),
-            ]),
+            BTreeMap::from([(
+                "payload-hash".to_string(),
+                blake3::hash(&body).to_hex().to_string(),
+            )]),
         );
         let root = proof.insert(node);
         proof.root(root);
@@ -874,8 +849,9 @@ impl Commit {
 }
 
 /// A reporting close pins the source commit, selected policy package roots,
-/// recognized result root, exceptions, and signatures.  A reopening is a new
-/// close with `supersedes` set; no historical object is mutated.
+/// a sealed workspace analysis artifact, exceptions, and signatures.  A
+/// reopening is a new close with `supersedes` set; no historical object is
+/// mutated.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Period {
     pub from: Date,
@@ -893,13 +869,56 @@ impl Period {
     }
 }
 
+/// A sealed, content-addressed sale-ledger analysis result produced by
+/// [`crate::workspace::Workspace`].
+///
+/// This is deliberately not a general-purpose proof wrapper. Its private
+/// fields prevent callers from rebinding an analysis to a different book or
+/// reporting period. The analysis commit already content-addresses the exact
+/// proof and its complete terminal result set, so the artifact does not repeat
+/// either. The store checks that immutable commit/proof shape again when this
+/// object is inserted; the workspace is the only constructor because it is
+/// the only layer that has a checked engine [`crate::engine::Analysis`].
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct AnalysisArtifact {
+    analysis_commit: CommitId,
+    book: BookId,
+    period: Period,
+}
+
+impl AnalysisArtifact {
+    /// This constructor is crate-private on purpose.  External callers must
+    /// obtain an artifact through the workspace's checked close flow.
+    pub(crate) fn new(analysis_commit: CommitId, book: BookId, period: Period) -> Self {
+        Self {
+            analysis_commit,
+            book,
+            period,
+        }
+    }
+
+    pub fn analysis_commit(&self) -> CommitId {
+        self.analysis_commit
+    }
+
+    pub fn book(&self) -> &BookId {
+        &self.book
+    }
+
+    pub fn period(&self) -> &Period {
+        &self.period
+    }
+}
+
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Close {
     pub period: Period,
     pub book: BookId,
     pub policies: Vec<PackageId>,
     pub source: CommitId,
-    pub recognized_root: ContentHash,
+    /// Content address of the sealed workspace analysis artifact.  A generic
+    /// [`ProofObject`] is intentionally not accepted here.
+    pub analysis_artifact: AnalysisArtifactId,
     pub exceptions: Vec<String>,
     pub signatures: Vec<Signature>,
     pub supersedes: Option<CloseId>,
@@ -911,14 +930,14 @@ impl Close {
         book: impl Into<BookId>,
         policies: impl IntoIterator<Item = PackageId>,
         source: CommitId,
-        recognized_root: ContentHash,
+        analysis_artifact: AnalysisArtifactId,
     ) -> Self {
         Self {
             period,
             book: book.into(),
             policies: canonical_set(policies),
             source,
-            recognized_root,
+            analysis_artifact,
             exceptions: Vec::new(),
             signatures: Vec::new(),
             supersedes: None,
@@ -971,6 +990,7 @@ pub enum StoredObject {
     Completeness(Completeness),
     Package(PolicyPackage),
     CompiledArtifact(CompiledArtifactObject),
+    AnalysisArtifact(AnalysisArtifact),
     Proof(ProofObject),
     Conflict(ConflictRecord),
     Commit(Commit),
@@ -986,6 +1006,7 @@ impl StoredObject {
             Self::Completeness(_) => ObjectKind::Completeness,
             Self::Package(_) => ObjectKind::Package,
             Self::CompiledArtifact(_) => ObjectKind::CompiledArtifact,
+            Self::AnalysisArtifact(_) => ObjectKind::AnalysisArtifact,
             Self::Proof(_) => ObjectKind::Proof,
             Self::Conflict(_) => ObjectKind::Conflict,
             Self::Commit(_) => ObjectKind::Commit,
@@ -1005,6 +1026,7 @@ impl StoredObject {
             Self::Completeness(value) => encode_completeness(&mut out, value),
             Self::Package(value) => encode_package(&mut out, value),
             Self::CompiledArtifact(value) => encode_compiled_artifact(&mut out, value),
+            Self::AnalysisArtifact(value) => encode_analysis_artifact(&mut out, value),
             Self::Proof(value) => encode_proof(&mut out, value),
             Self::Conflict(value) => encode_conflict_record(&mut out, value),
             Self::Commit(value) => encode_commit(&mut out, value),
@@ -1226,6 +1248,8 @@ impl ObjectStore {
                 .map_err(|error| StoreError::InvalidObject(format!("invalid proof: {error}")))?;
         } else if let StoredObject::CompiledArtifact(value) = object {
             value.verify_integrity()?;
+        } else if let StoredObject::AnalysisArtifact(value) = object {
+            self.validate_analysis_artifact(value)?;
         }
         Ok(object)
     }
@@ -1250,6 +1274,8 @@ impl ObjectStore {
                 })?;
             } else if let StoredObject::CompiledArtifact(value) = object {
                 value.verify_integrity()?;
+            } else if let StoredObject::AnalysisArtifact(value) = object {
+                self.validate_analysis_artifact(value)?;
             }
         }
         Ok(())
@@ -1357,6 +1383,20 @@ impl ObjectStore {
         ))
     }
 
+    /// Persist the only close authority. This boundary is crate-private so
+    /// callers cannot manufacture authority around an unchecked analysis;
+    /// [`crate::workspace::Workspace`] creates it only after checking engine
+    /// output, and the store independently verifies its immutable bindings.
+    pub(crate) fn put_analysis_artifact(
+        &mut self,
+        value: AnalysisArtifact,
+    ) -> Result<AnalysisArtifactId, StoreError> {
+        self.validate_analysis_artifact(&value)?;
+        Ok(AnalysisArtifactId::new(
+            self.insert(StoredObject::AnalysisArtifact(value))?,
+        ))
+    }
+
     pub fn put_proof(&mut self, value: ProofObject) -> Result<ProofObjectId, StoreError> {
         value
             .proof
@@ -1402,6 +1442,105 @@ impl ObjectStore {
             }
         }
         Ok(ProofObjectId::new(self.insert(StoredObject::Proof(value))?))
+    }
+
+    fn validate_analysis_artifact(&self, value: &AnalysisArtifact) -> Result<(), StoreError> {
+        if value.period.from > value.period.until {
+            return Err(StoreError::InvalidObject(
+                "analysis artifact period starts after it ends".into(),
+            ));
+        }
+        let analysis = self.commit(value.analysis_commit)?;
+        let [source_id] = analysis.parents.as_slice() else {
+            return Err(StoreError::InvalidObject(
+                "analysis artifact must point to a direct analysis child".into(),
+            ));
+        };
+        let source = self.commit(*source_id)?.clone();
+        let [proof_id] = analysis.proofs.as_slice() else {
+            return Err(StoreError::InvalidObject(
+                "analysis artifact child must pin exactly one proof".into(),
+            ));
+        };
+        if !analysis.evidence.is_empty()
+            || !analysis.statements.is_empty()
+            || !analysis.completeness.is_empty()
+            || analysis.decisions != source.decisions
+            || analysis.packages != source.packages
+            || analysis.conflicts != source.conflicts
+            || analysis.schema_version != source.schema_version
+            || analysis.author != ANALYSIS_AUTHOR
+            || !analysis.signatures.is_empty()
+        {
+            return Err(StoreError::InvalidObject(
+                "analysis artifact does not point to the deterministic analysis child".into(),
+            ));
+        }
+        let proof = self.proof(*proof_id)?;
+        if proof.roots != vec![source_id.hash()] {
+            return Err(StoreError::InvalidObject(
+                "analysis artifact proof must bind exactly its source commit".into(),
+            ));
+        }
+        let bindings = proof
+            .proof
+            .nodes
+            .values()
+            .filter(|node| {
+                matches!(
+                    &node.operation,
+                    CanonicalOperation::Observation { source } if source.starts_with("commit:")
+                )
+            })
+            .collect::<Vec<_>>();
+        let Some(binding) = bindings.first() else {
+            return Err(StoreError::InvalidObject(
+                "analysis artifact proof has no exact source binding".into(),
+            ));
+        };
+        let expected = source_id.hash().to_string();
+        let valid_binding = matches!(
+            &binding.operation,
+            CanonicalOperation::Observation { source } if source == &format!("commit:{expected}")
+        );
+        let mut expected_inputs = proof.proof.roots.clone();
+        expected_inputs.retain(|root| *root != binding.id);
+        if bindings.len() != 1
+            || !proof.proof.roots.contains(&binding.id)
+            || !valid_binding
+            || binding.metadata.get("source-commit") != Some(&expected)
+            || binding.inputs != expected_inputs
+        {
+            return Err(StoreError::InvalidObject(
+                "analysis artifact proof source binding is not exact".into(),
+            ));
+        }
+        let expected_results = Self::sale_close_result_roots_from(proof);
+        if expected_results.is_empty() {
+            return Err(StoreError::InvalidObject(
+                "analysis artifact proof must expose at least one sale result root".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn sale_close_result_roots(
+        &self,
+        proof: ProofObjectId,
+    ) -> Result<Vec<CanonicalProofId>, StoreError> {
+        let proof = self.proof(proof)?;
+        Ok(Self::sale_close_result_roots_from(proof))
+    }
+
+    fn sale_close_result_roots_from(proof: &ProofObject) -> Vec<CanonicalProofId> {
+        canonical_proof_set(proof.proof.roots.iter().copied().filter(|root| {
+            proof.proof.node(*root).is_some_and(|node| {
+                matches!(
+                    node.operation,
+                    CanonicalOperation::Recognition { .. } | CanonicalOperation::JournalEntry(..)
+                )
+            })
+        }))
     }
 
     pub fn put_conflict(&mut self, mut value: ConflictRecord) -> Result<ConflictId, StoreError> {
@@ -1711,49 +1850,33 @@ impl ObjectStore {
                     .into(),
             ));
         }
-        if value.recognized_root == ContentHash::ZERO {
+        if value.analysis_artifact.hash() == ContentHash::ZERO {
             return Err(StoreError::InvalidObject(
-                "close must pin a recognized proof root".into(),
+                "close must pin a sealed analysis artifact".into(),
             ));
         }
-        match self.get(value.recognized_root)? {
-            StoredObject::Proof(proof) => {
-                proof.proof.check().map_err(|error| {
-                    StoreError::InvalidObject(format!("invalid recognized proof: {error}"))
-                })?;
-                let typed_root = proof.proof.roots.iter().any(|root| {
-                    proof.proof.nodes.get(root).is_some_and(|node| {
-                        matches!(
-                            node.operation,
-                            CanonicalOperation::Derive { ref rule }
-                                if rule == "book-recognition"
-                        ) && node
-                            .metadata
-                            .get("proof-purpose")
-                            .is_some_and(|purpose| purpose == "recognized")
-                    })
-                });
-                if !typed_root {
-                    return Err(StoreError::InvalidObject(
-                        "close recognized root is not a typed recognition proof".into(),
-                    ));
-                }
-            }
+        let artifact = match self.get(value.analysis_artifact.hash())? {
+            StoredObject::AnalysisArtifact(artifact) => artifact,
             object => {
                 return Err(StoreError::WrongKind {
-                    hash: value.recognized_root,
-                    expected: ObjectKind::Proof,
+                    hash: value.analysis_artifact.hash(),
+                    expected: ObjectKind::AnalysisArtifact,
                     actual: object.kind(),
                 });
             }
+        };
+        if artifact.book != value.book || artifact.period != value.period {
+            return Err(StoreError::InvalidObject(
+                "close fields must exactly match its sealed analysis artifact".into(),
+            ));
         }
-        if !source_commit
-            .proofs
-            .iter()
-            .any(|proof| proof.hash() == value.recognized_root)
+        let analysis_commit = self.commit(artifact.analysis_commit)?;
+        if analysis_commit.parents != vec![value.source]
+            || analysis_commit.packages != value.policies
+            || source_commit.packages != value.policies
         {
             return Err(StoreError::InvalidObject(
-                "recognized proof root is not pinned by the source commit".into(),
+                "close artifact is not a child of its exact source commit".into(),
             ));
         }
         if let Some(prior) = value.supersedes {
@@ -1764,6 +1887,13 @@ impl ObjectStore {
                     "close supersession must retain book and reporting period".to_string(),
                 ));
             }
+            self.require_ancestor(prior_value.source, value.source)
+                .map_err(|_| {
+                    StoreError::InvalidObject(
+                        "close supersession source must descend from the prior close source"
+                            .to_string(),
+                    )
+                })?;
         }
         Ok(CloseId::new(self.insert(StoredObject::Close(value))?))
     }
@@ -1832,6 +1962,20 @@ impl ObjectStore {
             object => Err(StoreError::WrongKind {
                 hash: id.hash(),
                 expected: ObjectKind::CompiledArtifact,
+                actual: object.kind(),
+            }),
+        }
+    }
+
+    pub fn analysis_artifact(
+        &self,
+        id: AnalysisArtifactId,
+    ) -> Result<&AnalysisArtifact, StoreError> {
+        match self.get(id.hash())? {
+            StoredObject::AnalysisArtifact(value) => Ok(value),
+            object => Err(StoreError::WrongKind {
+                hash: id.hash(),
+                expected: ObjectKind::AnalysisArtifact,
                 actual: object.kind(),
             }),
         }
@@ -2599,6 +2743,15 @@ fn canonical_set<T: Ord>(values: impl IntoIterator<Item = T>) -> Vec<T> {
     values
 }
 
+fn canonical_proof_set(
+    values: impl IntoIterator<Item = CanonicalProofId>,
+) -> Vec<CanonicalProofId> {
+    let mut values: Vec<_> = values.into_iter().collect();
+    values.sort();
+    values.dedup();
+    values
+}
+
 fn canonicalize_merge_conflict(conflict: &mut MergeConflict) {
     match conflict {
         MergeConflict::Evidence { left, right, .. } => {
@@ -3001,10 +3154,17 @@ fn encode_close(out: &mut Vec<u8>, value: &Close) {
     put_string(out, value.book.as_str());
     put_ids(out, &value.policies);
     put_hash(out, value.source.hash());
-    put_hash(out, value.recognized_root);
+    put_hash(out, value.analysis_artifact.hash());
     put_strings(out, &value.exceptions);
     put_signatures(out, &value.signatures);
     put_optional_hash(out, value.supersedes.map(ObjectId::hash));
+}
+
+fn encode_analysis_artifact(out: &mut Vec<u8>, value: &AnalysisArtifact) {
+    put_hash(out, value.analysis_commit.hash());
+    put_string(out, value.book.as_str());
+    put_date(out, value.period.from);
+    put_date(out, value.period.until);
 }
 
 #[cfg(test)]
@@ -3495,7 +3655,7 @@ mod tests {
     fn unresolved_merge_conflict_blocks_close_until_explicit_resolution() {
         let mut store = ObjectStore::new();
         let proof = store
-            .put_proof(ProofObject::recognized([], b"recognized"))
+            .put_proof(ProofObject::new([], b"generic proof"))
             .unwrap();
         let base_decision = store
             .put_decision(Decision::new("sale/1", "lot/a"))
@@ -3550,7 +3710,7 @@ mod tests {
                 "tax",
                 [],
                 merged.commit,
-                proof.hash(),
+                AnalysisArtifactId::new(proof.hash()),
             )),
             Err(StoreError::InvalidObject(reason)) if reason.contains("unresolved semantic conflict")
         ));
@@ -3650,11 +3810,20 @@ mod tests {
                 .with_conflicts([resolved_id]),
             )
             .unwrap();
-        assert!(
-            store
-                .put_close(Close::new(period, "tax", [], resolved_commit, proof.hash(),))
-                .is_ok()
-        );
+        assert!(matches!(
+            store.put_close(Close::new(
+                period,
+                "tax",
+                [],
+                resolved_commit,
+                AnalysisArtifactId::new(proof.hash()),
+            )),
+            Err(StoreError::WrongKind {
+                expected: ObjectKind::AnalysisArtifact,
+                actual: ObjectKind::Proof,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -3890,13 +4059,19 @@ mod tests {
         let source = root_commit(&mut store, Vec::new());
         let period = Period::new(date("2026-01-01"), date("2026-01-31")).unwrap();
         assert!(matches!(
-            store.put_close(Close::new(period, "tax", [], source, missing)),
+            store.put_close(Close::new(
+                period,
+                "tax",
+                [],
+                source,
+                AnalysisArtifactId::new(missing),
+            )),
             Err(StoreError::MissingObject(hash)) if hash == missing
         ));
     }
 
     #[test]
-    fn close_rejects_zero_and_wrong_kind_recognized_roots() {
+    fn close_rejects_zero_and_wrong_kind_analysis_artifacts() {
         let mut store = ObjectStore::new();
         let source = root_commit(&mut store, Vec::new());
         let period = Period::new(date("2026-01-01"), date("2026-01-31")).unwrap();
@@ -3906,7 +4081,7 @@ mod tests {
                 "tax",
                 [],
                 source,
-                ContentHash::ZERO,
+                AnalysisArtifactId::new(ContentHash::ZERO),
             )),
             Err(StoreError::InvalidObject(_))
         ));
@@ -3914,22 +4089,28 @@ mod tests {
             .put_statement(Statement::new("recognized", "root", "proof"))
             .expect("statement");
         assert!(matches!(
-            store.put_close(Close::new(period, "tax", [], source, statement.hash())),
+            store.put_close(Close::new(
+                period,
+                "tax",
+                [],
+                source,
+                AnalysisArtifactId::new(statement.hash()),
+            )),
             Err(StoreError::WrongKind {
-                expected: ObjectKind::Proof,
+                expected: ObjectKind::AnalysisArtifact,
                 ..
             })
         ));
     }
 
     #[test]
-    fn close_pins_source_policy_root_and_supersession() {
+    fn generic_proofs_and_signatures_cannot_bypass_analysis_artifacts() {
         let mut store = ObjectStore::new();
         let package = store
             .put_package(PolicyPackage::new("fifo", "1", b"rules".to_vec()))
             .unwrap();
         let proof = store
-            .put_proof(ProofObject::recognized([], b"recognized"))
+            .put_proof(ProofObject::new([], b"generic proof"))
             .unwrap();
         let generic_proof = store
             .put_proof(ProofObject::new([], b"not recognition"))
@@ -3953,33 +4134,20 @@ mod tests {
                 "tax",
                 [package],
                 source,
-                generic_proof.hash(),
+                AnalysisArtifactId::new(generic_proof.hash()),
             )),
-            Err(StoreError::InvalidObject(_))
+            Err(StoreError::WrongKind {
+                expected: ObjectKind::AnalysisArtifact,
+                actual: ObjectKind::Proof,
+                ..
+            })
         ));
-        let first = store
-            .put_close(Close::new(
-                period.clone(),
-                "tax",
-                [package],
-                source,
-                proof.hash(),
-            ))
-            .unwrap();
-        let second = store
-            .put_close(
-                Close::new(period, "tax", [package], source, proof.hash()).superseding(first),
-            )
-            .unwrap();
-        assert_ne!(first, second);
-        assert_eq!(store.close(second).unwrap().supersedes, Some(first));
-
         let unsigned = Close::new(
-            Period::new(date("2027-01-01"), date("2027-12-31")).unwrap(),
+            period,
             "tax",
             [package],
             source,
-            proof.hash(),
+            AnalysisArtifactId::new(proof.hash()),
         );
         let mut noncanonical = unsigned.clone();
         noncanonical.policies = vec![package, package];
@@ -3996,17 +4164,21 @@ mod tests {
             store.put_close(signed.clone()),
             Err(StoreError::InvalidObject(_))
         ));
-        let signed_id = store
-            .put_close_verified(signed, &EchoVerifier)
-            .expect("canonical payload signature verifies");
-        assert_eq!(store.close(signed_id).unwrap().signatures.len(), 1);
+        assert!(matches!(
+            store.put_close_verified(signed, &EchoVerifier),
+            Err(StoreError::WrongKind {
+                expected: ObjectKind::AnalysisArtifact,
+                actual: ObjectKind::Proof,
+                ..
+            })
+        ));
 
         let invalid = Close::new(
-            Period::new(date("2028-01-01"), date("2028-12-31")).unwrap(),
+            Period::new(date("2026-01-01"), date("2026-12-31")).unwrap(),
             "tax",
             [package],
             source,
-            proof.hash(),
+            AnalysisArtifactId::new(proof.hash()),
         )
         .with_signatures([Signature::new("alice", "test-only", b"forged".to_vec())]);
         assert!(matches!(

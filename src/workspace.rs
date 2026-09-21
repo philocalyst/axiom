@@ -31,22 +31,21 @@ use crate::evidence::{Authority, Provenance, RawEvidence};
 use crate::incremental::{
     IncrementalDb, MemoOutcome, QueryError, QueryKey, SourceKey, TraceEvent, TraceMetrics,
 };
-use crate::model::{ContentHash, Identity, Ledger, SourceId};
+use crate::model::{ContentHash, Identity, Ledger, LedgerForm, SourceId};
 use crate::package::{PolicyPackage as ExecutablePolicyPackage, PolicyRegistry};
 use crate::package_compiler::{self, CompiledArtifact, PackageCompileError, PackageInput};
 use crate::package_lock::Lockfile;
 use crate::parser::{self, ParseError};
 use crate::proof::{Node, Operation, Proof};
 use crate::store::{
-    Commit, CommitId, CompiledArtifactId, CompiledArtifactObject, Evidence, EvidenceId,
-    EvidenceState, ObjectStore, PackageId, PolicyPackage as StoredPolicyPackage, ProofObject,
-    ProofObjectId, StoreError,
+    ANALYSIS_AUTHOR, AnalysisArtifact, Close, CloseId, Commit, CommitId, CompiledArtifactId,
+    CompiledArtifactObject, Evidence, EvidenceId, EvidenceState, ObjectStore, PackageId, Period,
+    PolicyPackage as StoredPolicyPackage, ProofObject, ProofObjectId, StoreError,
 };
 use crate::surface::SurfaceFile;
 
 const SOURCE_OCCURRENCE_PREFIX: &str = "source/";
 const SOURCE_AUTHOR: &str = "workspace/source";
-const ANALYSIS_AUTHOR: &str = "workspace/analysis";
 const QUOTE_PARTITION: &str = "quotes";
 const UNRELATED_PARTITION: &str = "unrelated";
 
@@ -928,6 +927,85 @@ impl Workspace {
             })
             .map_err(|outcome| self.workspace_error_from_memo(commit, outcome))?;
         self.persist_prepared(prepared)
+    }
+
+    /// Close one checked sale-ledger analysis for a requested reporting
+    /// period.  The workspace derives every sale and journal result root from
+    /// the engine output; callers never provide a root list or construct the
+    /// sealed artifact themselves.
+    pub fn close_sale_ledger(
+        &mut self,
+        source_commit: CommitId,
+        period: Period,
+    ) -> Result<CloseId, WorkspaceError> {
+        let analysis = self.analyze_commit(source_commit)?;
+        analysis.check_proof().map_err(|error| {
+            WorkspaceError::Store(StoreError::InvalidObject(format!(
+                "cannot close unchecked analysis proof: {error}"
+            )))
+        })?;
+        let source_sales = analysis
+            .ledger
+            .forms
+            .iter()
+            .filter_map(|form| match form {
+                LedgerForm::Sell(sale) => Some(sale),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if source_sales.is_empty() {
+            return Err(WorkspaceError::Store(StoreError::InvalidObject(
+                "sale-ledger close requires at least one sale".into(),
+            )));
+        }
+        if analysis.blocked() {
+            return Err(WorkspaceError::Store(StoreError::InvalidObject(
+                "sale-ledger close requires an unblocked analysis".into(),
+            )));
+        }
+        if source_sales
+            .iter()
+            .any(|sale| sale.date < period.from || sale.date > period.until)
+        {
+            return Err(WorkspaceError::Store(StoreError::InvalidObject(
+                "sale-ledger close period does not contain every sale".into(),
+            )));
+        }
+        let source = self.store.commit(analysis.source_commit)?.clone();
+        if analysis.ledger.source_commit != analysis.source_commit
+            || analysis.analysis_commit == analysis.source_commit
+            || source.packages != self.store.commit(analysis.analysis_commit)?.packages
+        {
+            return Err(WorkspaceError::Store(StoreError::InvalidObject(
+                "analysis is not bound to its exact source and package roots".into(),
+            )));
+        }
+        let book = analysis.ledger.book.clone();
+        let result_roots = self.store.sale_close_result_roots(analysis.proof_id)?;
+        let recognized_sales = result_roots
+            .iter()
+            .filter(|root| {
+                analysis
+                    .proof()
+                    .node(**root)
+                    .is_some_and(|node| matches!(node.operation, Operation::Recognition { .. }))
+            })
+            .count();
+        if recognized_sales != source_sales.len() {
+            return Err(WorkspaceError::Store(StoreError::InvalidObject(
+                "sale-ledger close requires one recognized result for every authored sale".into(),
+            )));
+        }
+        let artifact =
+            AnalysisArtifact::new(analysis.analysis_commit, book.clone(), period.clone());
+        let artifact_id = self.store.put_analysis_artifact(artifact)?;
+        Ok(self.store.put_close(Close::new(
+            period,
+            book,
+            source.packages,
+            analysis.source_commit,
+            artifact_id,
+        ))?)
     }
 
     /// Return all commits reachable from `latest`, newest first.  This is a
