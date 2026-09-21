@@ -1,0 +1,20 @@
+[package]
+name = "axiom-ledger"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "A proof-producing, content-addressed economic ledger"
+
+[[bin]]
+name = "axiom"
+path = "src/main.rs"
+
+[dependencies]
+blake3 = "1.8"
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
