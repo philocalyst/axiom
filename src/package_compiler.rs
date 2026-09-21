@@ -16,6 +16,7 @@ use crate::model::ContentHash;
 use crate::package_lock::{Lockfile, PackageLockError, PackageManifest, PackageRegistry, Version};
 
 const ARTIFACT_DOMAIN: &str = "axiom/package-artifact/v1";
+const RECORD_SCHEMA_DOMAIN: &str = "axiom/package-record-schema/v1";
 
 /// The input to one package compilation unit.
 ///
@@ -175,6 +176,60 @@ impl CompiledArtifact {
         artifact_hash(self.lockfile_hash, &self.packages, &self.exports)
     }
 
+    /// Resolve one directly exported record declaration against the exact
+    /// package that owns it.
+    ///
+    /// Package roots are required deliberately: a qualified name is only a
+    /// declaration key inside a particular compiled package context.  The
+    /// returned value owns its small schema view, so it cannot observe a
+    /// mutable HIR value or an artifact constructed later.
+    pub fn resolve_record_schema(
+        &self,
+        package_root: ContentHash,
+        qualified_name: &QualifiedName,
+    ) -> Result<RecordSchema, RecordSchemaError> {
+        let package = self
+            .packages
+            .iter()
+            .find(|package| package.root_hash() == package_root)
+            .ok_or(RecordSchemaError::UnknownPackageRoot { package_root })?;
+
+        let export = self
+            .exports
+            .iter()
+            .find(|export| {
+                export.package == package.name && export.qualified_name == *qualified_name
+            })
+            .ok_or_else(|| RecordSchemaError::UnknownExport {
+                package_root,
+                package: package.name.clone(),
+                qualified_name: Box::new(qualified_name.clone()),
+            })?;
+
+        let DeclarationKind::Type {
+            ty: Type::Record(row),
+        } = &export.kind
+        else {
+            return Err(RecordSchemaError::NotRecord {
+                package_root,
+                package: package.name.clone(),
+                qualified_name: Box::new(qualified_name.clone()),
+            });
+        };
+
+        Ok(RecordSchema {
+            package_root,
+            qualified_name: qualified_name.clone(),
+            row: row.clone(),
+            schema_id: record_schema_id(
+                self.artifact_hash,
+                package_root,
+                qualified_name,
+                &export.kind,
+            ),
+        })
+    }
+
     /// Verify this artifact against fresh package and lockfile inputs.
     ///
     /// Verification checks both the artifact's internal hash and the complete
@@ -217,6 +272,91 @@ impl CompiledArtifact {
     }
 }
 
+/// The immutable schema view returned by [`CompiledArtifact::resolve_record_schema`].
+///
+/// The row is retained exactly as lowered: [`crate::hir::Row::Closed`] marks
+/// undeclared fields invalid during value checking, while
+/// [`crate::hir::Row::Open`] carries its explicit tail variable. The schema ID
+/// is content-addressed and includes the artifact, package root, qualified
+/// name, and complete record type.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RecordSchema {
+    package_root: ContentHash,
+    qualified_name: QualifiedName,
+    row: crate::hir::Row,
+    schema_id: ContentHash,
+}
+
+impl RecordSchema {
+    pub fn package_root(&self) -> ContentHash {
+        self.package_root
+    }
+
+    pub fn qualified_name(&self) -> &QualifiedName {
+        &self.qualified_name
+    }
+
+    pub fn row(&self) -> &crate::hir::Row {
+        &self.row
+    }
+
+    pub fn schema_id(&self) -> ContentHash {
+        self.schema_id
+    }
+}
+
+/// Failure to resolve a record schema without falling back to a name-only
+/// lookup.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RecordSchemaError {
+    UnknownPackageRoot {
+        package_root: ContentHash,
+    },
+    UnknownExport {
+        package_root: ContentHash,
+        package: String,
+        qualified_name: Box<QualifiedName>,
+    },
+    NotRecord {
+        package_root: ContentHash,
+        package: String,
+        qualified_name: Box<QualifiedName>,
+    },
+}
+
+impl fmt::Display for RecordSchemaError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownPackageRoot { package_root } => {
+                write!(
+                    formatter,
+                    "compiled package root `{package_root}` is unknown"
+                )
+            }
+            Self::UnknownExport {
+                package_root,
+                package,
+                qualified_name,
+            } => write!(
+                formatter,
+                "export `{}` is unknown in package `{package}` rooted at `{package_root}`",
+                qualified_name.canonical()
+            ),
+            Self::NotRecord {
+                package_root,
+                package,
+                qualified_name,
+            } => write!(
+                formatter,
+                "export `{}` in package `{package}` rooted at `{package_root}` is not a direct record type",
+                qualified_name.canonical()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RecordSchemaError {}
+
 /// Errors raised while validating package inputs or constructing coherence.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PackageCompileError {
@@ -238,17 +378,9 @@ pub enum PackageCompileError {
         package: String,
         module: String,
     },
-    DuplicateExportedName {
+    DuplicateExport {
+        package: String,
         qualified_name: String,
-        first_package: String,
-        second_package: String,
-    },
-    IncompatibleDeclaration {
-        qualified_name: String,
-        first_package: String,
-        second_package: String,
-        first_kind: Box<DeclarationKind>,
-        second_kind: Box<DeclarationKind>,
     },
     ArtifactHashMismatch {
         expected: ContentHash,
@@ -287,22 +419,12 @@ impl fmt::Display for PackageCompileError {
                 formatter,
                 "package `{package}` supplies module `{module}` more than once"
             ),
-            Self::DuplicateExportedName {
+            Self::DuplicateExport {
+                package,
                 qualified_name,
-                first_package,
-                second_package,
             } => write!(
                 formatter,
-                "export `{qualified_name}` is defined by both `{first_package}` and `{second_package}`"
-            ),
-            Self::IncompatibleDeclaration {
-                qualified_name,
-                first_package,
-                second_package,
-                ..
-            } => write!(
-                formatter,
-                "export `{qualified_name}` has incompatible declarations in `{first_package}` and `{second_package}`"
+                "package `{package}` exports `{qualified_name}` more than once"
             ),
             Self::ArtifactHashMismatch { expected, actual } => write!(
                 formatter,
@@ -338,7 +460,7 @@ where
     let lockfile_hash = lockfile.hash();
 
     let mut compiled_packages = Vec::with_capacity(packages.len());
-    let mut exports = BTreeMap::<String, CompiledExport>::new();
+    let mut exports = BTreeMap::<(String, String), CompiledExport>::new();
 
     for input in &packages {
         let mut modules = input.modules.clone();
@@ -374,29 +496,19 @@ where
                     module: module.path.clone(),
                     name: declaration.name.clone(),
                 };
-                let key = qualified_name.canonical();
+                let canonical_name = qualified_name.canonical();
+                let key = (input.manifest.name.clone(), canonical_name.clone());
                 let export = CompiledExport {
                     package: input.manifest.name.clone(),
                     qualified_name,
                     kind: declaration.kind.clone(),
                 };
-                if let Some(previous) = exports.get(&key) {
-                    if compatible_declaration_kinds(&previous.kind, &export.kind) {
-                        return Err(PackageCompileError::DuplicateExportedName {
-                            qualified_name: key,
-                            first_package: previous.package.clone(),
-                            second_package: export.package,
-                        });
-                    }
-                    return Err(PackageCompileError::IncompatibleDeclaration {
-                        qualified_name: key,
-                        first_package: previous.package.clone(),
-                        second_package: export.package,
-                        first_kind: Box::new(previous.kind.clone()),
-                        second_kind: Box::new(export.kind),
+                if exports.insert(key, export).is_some() {
+                    return Err(PackageCompileError::DuplicateExport {
+                        package: input.manifest.name.clone(),
+                        qualified_name: canonical_name,
                     });
                 }
-                exports.insert(key, export);
             }
         }
 
@@ -540,26 +652,6 @@ fn declaration_order(left: &Declaration, right: &Declaration) -> std::cmp::Order
         .then(declaration_kind_bytes(&left.kind).cmp(&declaration_kind_bytes(&right.kind)))
 }
 
-fn compatible_declaration_kinds(left: &DeclarationKind, right: &DeclarationKind) -> bool {
-    match (left, right) {
-        (DeclarationKind::Type { ty: left }, DeclarationKind::Type { ty: right }) => left == right,
-        (DeclarationKind::Value { ty: left, .. }, DeclarationKind::Value { ty: right, .. }) => {
-            left == right
-        }
-        (
-            DeclarationKind::Rule {
-                input: left_input,
-                output: left_output,
-            },
-            DeclarationKind::Rule {
-                input: right_input,
-                output: right_output,
-            },
-        ) => left_input == right_input && left_output == right_output,
-        _ => false,
-    }
-}
-
 fn canonical_lockfile_for_validation(lockfile: &Lockfile) -> Lockfile {
     let mut canonical = lockfile.clone();
     canonical.roots.sort();
@@ -583,6 +675,21 @@ fn artifact_hash(
         ARTIFACT_DOMAIN,
         &artifact_bytes(lockfile_hash, packages, exports),
     )
+}
+
+fn record_schema_id(
+    artifact_hash: ContentHash,
+    package_root: ContentHash,
+    qualified_name: &QualifiedName,
+    declaration: &DeclarationKind,
+) -> ContentHash {
+    let mut bytes = Vec::new();
+    put_text(&mut bytes, "record-schema");
+    bytes.extend_from_slice(artifact_hash.as_bytes());
+    bytes.extend_from_slice(package_root.as_bytes());
+    put_text(&mut bytes, &qualified_name.canonical());
+    bytes.extend_from_slice(&declaration_kind_bytes(declaration));
+    ContentHash::domain_separated(RECORD_SCHEMA_DOMAIN, &bytes)
 }
 
 fn artifact_bytes(
@@ -697,7 +804,9 @@ fn put_text(bytes: &mut Vec<u8>, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hir::{AstDeclaration, AstDeclarationKind, AstModule, AstType, Name, Span};
+    use crate::hir::{
+        AstDeclaration, AstDeclarationKind, AstModule, AstType, ModulePath, Name, Row, Span,
+    };
     use crate::package_lock::{Dependency, LockedPackage, VersionReq};
 
     fn manifest(name: &str) -> PackageManifest {
@@ -705,14 +814,44 @@ mod tests {
     }
 
     fn module(name: &str, kind: AstDeclarationKind) -> Module {
+        module_at("shared", name, kind)
+    }
+
+    fn module_at(path: &str, name: &str, kind: AstDeclarationKind) -> Module {
         crate::hir::lower(AstModule {
-            path: ModulePath::root(Name::new("shared").unwrap()),
+            path: ModulePath::root(Name::new(path).unwrap()),
             declarations: vec![AstDeclaration {
                 name: name.to_owned(),
                 kind,
                 span: Span::default(),
             }],
         })
+    }
+
+    fn record_module(
+        path: &str,
+        name: &str,
+        fields: &[(&str, AstType)],
+        open_tail: Option<u32>,
+    ) -> Module {
+        module_at(
+            path,
+            name,
+            AstDeclarationKind::Type(AstType::Record {
+                fields: fields
+                    .iter()
+                    .map(|(name, ty)| ((*name).to_owned(), ty.clone()))
+                    .collect(),
+                open_tail,
+            }),
+        )
+    }
+
+    fn qualified_name(path: &str, name: &str) -> QualifiedName {
+        QualifiedName {
+            module: ModulePath::root(Name::new(path).unwrap()),
+            name: Name::new(name).unwrap(),
+        }
     }
 
     fn lockfile(manifests: &[PackageManifest]) -> Lockfile {
@@ -790,51 +929,70 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_and_incompatible_exports_are_rejected() {
+    fn exports_are_scoped_by_package() {
         let first = manifest("first");
         let second = manifest("second");
         let lock = lockfile(&[first.clone(), second.clone()]);
-        let same = |kind: AstDeclarationKind| {
-            compile(
-                [
-                    PackageInput::new(first.clone(), [module("entry", kind.clone())]),
-                    PackageInput::new(second.clone(), [module("entry", kind)]),
-                ],
-                &lock,
-            )
-        };
-        assert!(matches!(
-            same(AstDeclarationKind::Type(AstType::Text)),
-            Err(PackageCompileError::DuplicateExportedName { .. })
-        ));
-
-        assert!(matches!(
-            same(AstDeclarationKind::Type(AstType::Bool)),
-            Err(PackageCompileError::DuplicateExportedName { .. })
-        ));
-
-        let incompatible = compile(
+        let artifact = compile(
             [
                 PackageInput::new(
                     first,
-                    [module("entry", AstDeclarationKind::Type(AstType::Text))],
+                    [record_module(
+                        "types",
+                        "Payment",
+                        &[("amount", AstType::Integer)],
+                        None,
+                    )],
                 ),
                 PackageInput::new(
                     second,
-                    [module(
-                        "entry",
-                        AstDeclarationKind::Value {
-                            ty: AstType::Text,
-                            expression: None,
-                        },
+                    [record_module(
+                        "types",
+                        "Payment",
+                        &[("amount", AstType::Text)],
+                        None,
                     )],
                 ),
             ],
             &lock,
+        )
+        .unwrap();
+        let name = qualified_name("types", "Payment");
+        let first_root = artifact
+            .packages()
+            .iter()
+            .find(|package| package.name == "first")
+            .unwrap()
+            .root_hash();
+        let second_root = artifact
+            .packages()
+            .iter()
+            .find(|package| package.name == "second")
+            .unwrap()
+            .root_hash();
+
+        let first_schema = artifact.resolve_record_schema(first_root, &name).unwrap();
+        let second_schema = artifact.resolve_record_schema(second_root, &name).unwrap();
+        assert_eq!(
+            first_schema.qualified_name(),
+            second_schema.qualified_name()
         );
+        assert_ne!(first_schema.schema_id(), second_schema.schema_id());
+        assert_ne!(first_schema.row(), second_schema.row());
+    }
+
+    #[test]
+    fn duplicate_export_within_a_package_is_rejected() {
+        let package = manifest("duplicate");
+        let lock = lockfile(std::slice::from_ref(&package));
+        let mut duplicate = module("entry", AstDeclarationKind::Type(AstType::Text));
+        duplicate
+            .declarations
+            .push(duplicate.declarations[0].clone());
+
         assert!(matches!(
-            incompatible,
-            Err(PackageCompileError::IncompatibleDeclaration { .. })
+            compile([PackageInput::new(package, [duplicate])], &lock),
+            Err(PackageCompileError::DuplicateExport { .. })
         ));
     }
 
@@ -869,5 +1027,171 @@ mod tests {
             }],
         };
         assert!(artifact.verify([input], &changed_lock).is_err());
+    }
+
+    #[test]
+    fn record_schema_resolution_is_root_qualified_and_supports_same_short_names() {
+        let first = manifest("first");
+        let second = manifest("second");
+        let lock = lockfile(&[first.clone(), second.clone()]);
+        let artifact = compile(
+            [
+                PackageInput::new(
+                    first,
+                    [record_module(
+                        "first_types",
+                        "Record",
+                        &[("amount", AstType::Integer)],
+                        None,
+                    )],
+                ),
+                PackageInput::new(
+                    second,
+                    [record_module(
+                        "second_types",
+                        "Record",
+                        &[("amount", AstType::Text)],
+                        None,
+                    )],
+                ),
+            ],
+            &lock,
+        )
+        .unwrap();
+
+        let first_root = artifact
+            .packages()
+            .iter()
+            .find(|package| package.name == "first")
+            .unwrap()
+            .root_hash();
+        let second_root = artifact
+            .packages()
+            .iter()
+            .find(|package| package.name == "second")
+            .unwrap()
+            .root_hash();
+        let first_name = qualified_name("first_types", "Record");
+        let second_name = qualified_name("second_types", "Record");
+        let first_schema = artifact
+            .resolve_record_schema(first_root, &first_name)
+            .unwrap();
+        let second_schema = artifact
+            .resolve_record_schema(second_root, &second_name)
+            .unwrap();
+
+        assert!(!first_schema.row().is_open());
+        assert!(!second_schema.row().is_open());
+        assert_ne!(first_schema.schema_id(), second_schema.schema_id());
+        assert!(matches!(
+            artifact.resolve_record_schema(second_root, &first_name),
+            Err(RecordSchemaError::UnknownExport { .. })
+        ));
+    }
+
+    #[test]
+    fn record_schema_rejects_unknown_root_export_and_non_record() {
+        let package = manifest("schemas");
+        let lock = lockfile(std::slice::from_ref(&package));
+        let artifact = compile(
+            [PackageInput::new(
+                package,
+                [
+                    record_module("types", "Record", &[("amount", AstType::Integer)], None),
+                    module("Scalar", AstDeclarationKind::Type(AstType::Text)),
+                ],
+            )],
+            &lock,
+        )
+        .unwrap();
+        let root = artifact.package_roots()[0];
+
+        assert!(matches!(
+            artifact.resolve_record_schema(
+                ContentHash::domain_separated("test/missing-root", b"missing"),
+                &qualified_name("types", "Record")
+            ),
+            Err(RecordSchemaError::UnknownPackageRoot { .. })
+        ));
+        assert!(matches!(
+            artifact.resolve_record_schema(root, &qualified_name("types", "Missing")),
+            Err(RecordSchemaError::UnknownExport { .. })
+        ));
+        assert!(matches!(
+            artifact.resolve_record_schema(root, &qualified_name("shared", "Scalar")),
+            Err(RecordSchemaError::NotRecord { .. })
+        ));
+    }
+
+    #[test]
+    fn record_schema_id_tracks_complete_type_context_and_rows() {
+        let make = |path: &str, fields: &[(&str, AstType)], open_tail| {
+            let package = manifest("schemas");
+            let lock = lockfile(std::slice::from_ref(&package));
+            let artifact = compile(
+                [PackageInput::new(
+                    package,
+                    [record_module(path, "Record", fields, open_tail)],
+                )],
+                &lock,
+            )
+            .unwrap();
+            let root = artifact.package_roots()[0];
+            let name = qualified_name(path, "Record");
+            let schema = artifact.resolve_record_schema(root, &name).unwrap();
+            (artifact, schema)
+        };
+
+        let (base_artifact, base) = make("types", &[("amount", AstType::Integer)], None);
+        let (_, changed_field) = make("types", &[("amount", AstType::Text)], None);
+        let (_, open) = make("types", &[("amount", AstType::Integer)], Some(7));
+        let (_, changed_module) = make("other_types", &[("amount", AstType::Integer)], None);
+        assert!(!base.row().is_open());
+        assert!(open.row().is_open());
+        assert_ne!(base.schema_id(), changed_field.schema_id());
+        assert_ne!(base.schema_id(), open.schema_id());
+        assert_ne!(base.schema_id(), changed_module.schema_id());
+        assert_ne!(base_artifact.artifact_hash(), changed_field.schema_id());
+    }
+
+    #[test]
+    fn record_schema_resolution_and_ids_are_order_invariant() {
+        let package = manifest("ordered");
+        let lock = lockfile(std::slice::from_ref(&package));
+        let first = compile(
+            [PackageInput::new(
+                package.clone(),
+                [
+                    record_module("a_types", "Record", &[("a", AstType::Integer)], None),
+                    module_at("b_types", "Other", AstDeclarationKind::Type(AstType::Bool)),
+                ],
+            )],
+            &lock,
+        )
+        .unwrap();
+        let second = compile(
+            [PackageInput::new(
+                package,
+                [
+                    module_at("b_types", "Other", AstDeclarationKind::Type(AstType::Bool)),
+                    record_module("a_types", "Record", &[("a", AstType::Integer)], None),
+                ],
+            )],
+            &lock,
+        )
+        .unwrap();
+        let name = qualified_name("a_types", "Record");
+        let first_schema = first
+            .resolve_record_schema(first.package_roots()[0], &name)
+            .unwrap();
+        let second_schema = second
+            .resolve_record_schema(second.package_roots()[0], &name)
+            .unwrap();
+        assert_eq!(first.artifact_hash(), second.artifact_hash());
+        assert_eq!(first_schema.schema_id(), second_schema.schema_id());
+        assert_eq!(
+            first_schema.row(),
+            &Row::Closed(first_schema.row().fields().to_vec())
+        );
     }
 }

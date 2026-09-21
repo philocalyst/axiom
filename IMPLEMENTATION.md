@@ -144,9 +144,13 @@ experiments, but it is not part of this contract.
   with exact lockfile, package-set, and module-content dependencies.
   Compiled artifacts can now be persisted as immutable store objects whose
   artifact hash and complete compiler-input roots are independently
-  recomputed on insertion and read. Equivalence to the separately represented
-  executable policy-package objects is deliberately not claimed; that
-  conversion proof remains open.
+  recomputed on insertion and read. Source commits can pin exactly one such
+  artifact, and package-scoped export coherence now permits independent
+  packages to reuse qualified names while rejecting duplicates within a
+  package. An immutable resolver binds direct record schemas to the exact
+  artifact, package root, qualified name, and complete row type. Equivalence
+  to the separately represented executable policy-package objects is
+  deliberately not claimed; that conversion proof remains open.
 - [ ] LSP diagnostics, completion, and proof navigation foundation. A typed-HIR
   document index and checked proof-DAG navigator now provide the three core
   operations. A checked authoring surface retains exact source commits, checks
