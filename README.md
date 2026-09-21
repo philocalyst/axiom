@@ -74,7 +74,9 @@ cargo run --release --locked --offline --bin axiom-bench
 
 The benchmark emits JSON Lines on stdout and a human summary on stderr.
 Unsupported domain shapes are marked `shape_only`; unavailable production
-incremental, memory, and parallel metrics are `null`, never synthetic values.
+incremental, platform resource, and parallel metrics are `null`, never
+synthetic values.  On Linux and macOS, peak resident memory is measured with
+`getrusage` and labelled as process-lifetime RSS.
 
 ## Design
 

@@ -20,7 +20,7 @@ use crate::proof::{
     Node as CanonicalNode, Operation as CanonicalOperation, Proof as CanonicalProof,
 };
 
-const SCHEMA_VERSION: &str = "axiom/store/v1";
+const SCHEMA_VERSION: &str = "axiom/store/v2";
 const EVIDENCE_CONTENT_DOMAIN: &str = "axiom/store/evidence-content/v1";
 
 /// The object families that may be addressed by this store.
@@ -428,14 +428,20 @@ impl Completeness {
     }
 }
 
-/// A versioned policy/rule package.  `manifest` is intentionally just
-/// canonical metadata in this layer; package semantics belong elsewhere.
+/// A versioned policy/rule package. `manifest` is storage metadata while the
+/// executable body and dependency set are retained losslessly for the policy
+/// layer. The store still accepts malformed bodies so callers can inspect and
+/// report them instead of having insertion fabricate executable semantics.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct PolicyPackage {
     pub name: String,
     pub version: String,
     pub manifest: Vec<(String, String)>,
     pub body: Vec<u8>,
+    /// Opaque content-addressed dependency roots. They are part of executable
+    /// identity but need not name objects in this local store; a future
+    /// lockfile/resolver owns that availability check.
+    pub dependencies: Vec<ContentHash>,
     pub supersedes: Option<PackageId>,
 }
 
@@ -450,6 +456,7 @@ impl PolicyPackage {
             version: version.into(),
             manifest: Vec::new(),
             body: body.into(),
+            dependencies: Vec::new(),
             supersedes: None,
         }
     }
@@ -467,9 +474,63 @@ impl PolicyPackage {
         self
     }
 
+    /// Add content-addressed package dependencies.  Dependencies are a
+    /// semantic set, so their order and repetition do not affect identity.
+    pub fn with_dependencies(
+        mut self,
+        dependencies: impl IntoIterator<Item = ContentHash>,
+    ) -> Self {
+        self.dependencies = dependencies.into_iter().collect();
+        self.dependencies.sort();
+        self.dependencies.dedup();
+        self
+    }
+
     pub fn superseding(mut self, prior: PackageId) -> Self {
         self.supersedes = Some(prior);
         self
+    }
+
+    /// Convert a stored package to the executable package without changing
+    /// its body, metadata, or dependency set.  Arbitrary manifest metadata is
+    /// rejected because the executable package has no field in which to
+    /// retain it; silently dropping it would make two stored packages execute
+    /// as if they were the same package.
+    pub fn to_executable(&self) -> Result<crate::package::PolicyPackage, StoreError> {
+        if !self.manifest.is_empty() {
+            return Err(StoreError::InvalidObject(format!(
+                "policy package `{}` has metadata that cannot be represented by the executable package",
+                self.name
+            )));
+        }
+        let body = String::from_utf8(self.body.clone()).map_err(|_| {
+            StoreError::InvalidObject(format!(
+                "policy package `{}` body is not valid UTF-8",
+                self.name
+            ))
+        })?;
+        let executable =
+            crate::package::PolicyPackage::new(self.name.clone(), self.version.clone(), body)
+                .with_dependencies(self.dependencies.iter().copied());
+        executable.validate_identity().map_err(|error| {
+            StoreError::InvalidObject(format!(
+                "policy package `{}` is not executable: {error}",
+                self.name
+            ))
+        })?;
+        Ok(executable)
+    }
+
+    /// Construct the canonical storage envelope for an executable package.
+    /// Raw archival envelopes may contain additional metadata and therefore
+    /// are intentionally not round-tripped through this narrowing view.
+    pub fn from_executable(value: &crate::package::PolicyPackage) -> Self {
+        Self::new(
+            value.name.clone(),
+            value.version.clone(),
+            value.canonical_body_text().into_bytes(),
+        )
+        .with_dependencies(value.dependencies.iter().copied())
     }
 }
 
@@ -824,7 +885,7 @@ impl StoredObject {
     }
 
     pub fn content_hash(&self) -> ContentHash {
-        ContentHash::domain_separated("axiom/store/object/v1", &self.canonical_bytes())
+        ContentHash::domain_separated("axiom/store/object/v2", &self.canonical_bytes())
     }
 }
 
@@ -1030,6 +1091,8 @@ impl ObjectStore {
     pub fn put_package(&mut self, mut value: PolicyPackage) -> Result<PackageId, StoreError> {
         value.manifest.sort();
         value.manifest.dedup();
+        value.dependencies.sort();
+        value.dependencies.dedup();
         if let Some(prior) = value.supersedes {
             self.require_kind(prior.hash(), ObjectKind::Package)?;
         }
@@ -1720,6 +1783,13 @@ fn put_hash(out: &mut Vec<u8>, value: ContentHash) {
     out.extend_from_slice(value.as_bytes());
 }
 
+fn put_hashes(out: &mut Vec<u8>, values: &[ContentHash]) {
+    put_u64(out, values.len() as u64);
+    for value in values {
+        put_hash(out, *value);
+    }
+}
+
 fn put_date(out: &mut Vec<u8>, value: Date) {
     put_i32(out, value.year);
     out.push(value.month);
@@ -1859,6 +1929,10 @@ fn encode_package(out: &mut Vec<u8>, value: &PolicyPackage) {
         put_string(out, item);
     }
     put_bytes(out, &value.body);
+    let mut dependencies = value.dependencies.clone();
+    dependencies.sort();
+    dependencies.dedup();
+    put_hashes(out, &dependencies);
     put_optional_hash(out, value.supersedes.map(ObjectId::hash));
 }
 
@@ -1946,6 +2020,38 @@ mod tests {
         assert_eq!(first, same);
         assert_ne!(first, second);
         assert_eq!(store.len(), 2);
+    }
+
+    #[test]
+    fn package_conversion_preserves_dependencies_and_rejects_lossy_fields() {
+        let first = ContentHash::domain_separated("test/package-dependency", b"first");
+        let second = ContentHash::domain_separated("test/package-dependency", b"second");
+        let stored = PolicyPackage::new(
+            "lots/x",
+            "1",
+            b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+        )
+        .with_dependencies([second, first, first]);
+        let executable = stored.to_executable().unwrap();
+        let mut expected = vec![first, second];
+        expected.sort();
+        assert_eq!(executable.dependencies, expected);
+        assert_eq!(
+            executable.body,
+            String::from_utf8(stored.body.clone()).unwrap()
+        );
+
+        let metadata = stored.clone().with_manifest([("scope", "tax")]);
+        assert!(matches!(
+            metadata.to_executable(),
+            Err(StoreError::InvalidObject(reason))
+                if reason.contains("cannot be represented")
+        ));
+        let malformed = PolicyPackage::new("lots/x", "1", vec![0xff]);
+        assert!(matches!(
+            malformed.to_executable(),
+            Err(StoreError::InvalidObject(reason)) if reason.contains("valid UTF-8")
+        ));
     }
 
     #[test]

@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use crate::model::{ContentHash, Date};
 
 pub const POLICY_DOMAIN: &str = "axiom/policy/v1";
-pub const PACKAGE_DOMAIN: &str = "axiom/package/v1";
+pub const PACKAGE_DOMAIN: &str = "axiom/package/v2";
 
 /// The only policy fragment currently executable by the V0 engine.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -172,9 +172,12 @@ pub struct PolicyPackage {
     pub dependencies: Vec<ContentHash>,
 }
 
-/// Accepted source forms for a package body. Bytes are decoded lossily only
-/// to keep malformed input inspectable; the replacement character then fails
-/// body validation instead of becoming executable policy.
+/// Accepted source forms for an executable package body.
+///
+/// Raw bytes deliberately are not accepted here.  A stored package may carry
+/// arbitrary bytes so that malformed input remains inspectable, but crossing
+/// into the executable representation must be lossless and therefore requires
+/// an explicit UTF-8 conversion in the store/workspace boundary.
 pub trait BodySource {
     fn into_body(self) -> String;
 }
@@ -188,18 +191,6 @@ impl BodySource for String {
 impl BodySource for &str {
     fn into_body(self) -> String {
         self.to_owned()
-    }
-}
-
-impl BodySource for Vec<u8> {
-    fn into_body(self) -> String {
-        String::from_utf8_lossy(&self).into_owned()
-    }
-}
-
-impl BodySource for &[u8] {
-    fn into_body(self) -> String {
-        String::from_utf8_lossy(self).into_owned()
     }
 }
 
@@ -229,6 +220,14 @@ impl PolicyPackage {
 
     /// Validate package metadata and body syntax without compiling it.
     pub fn validate(&self) -> Result<(), PackageError> {
+        self.validate_identity()?;
+        self.parse_body().map(|_| ())
+    }
+
+    /// Validate the stable package identity while leaving body diagnostics to
+    /// the compiler. This lets malformed community packages remain visible as
+    /// blocking ledger evidence instead of disappearing at the store edge.
+    pub fn validate_identity(&self) -> Result<(), PackageError> {
         if self.name.trim().is_empty() {
             return Err(PackageError::EmptyName);
         }
@@ -238,7 +237,7 @@ impl PolicyPackage {
         if self.name.chars().any(|character| character.is_whitespace()) {
             return Err(PackageError::InvalidName(self.name.clone()));
         }
-        self.parse_body().map(|_| ())
+        Ok(())
     }
 
     /// Compile the canonical body to the typed evaluator used by `engine`.
@@ -260,6 +259,14 @@ impl PolicyPackage {
         put_hashes(&mut bytes, &dependencies);
         put_text(&mut bytes, &canonical_body_text(&self.body));
         bytes
+    }
+
+    /// Return the stable textual body identity used by [`Self::canonical_bytes`].
+    /// Storage uses this only after a package has crossed the validated public
+    /// boundary; raw malformed package bodies remain untouched in the store so
+    /// they can still be diagnosed by internal tests.
+    pub(crate) fn canonical_body_text(&self) -> String {
+        canonical_body_text(&self.body)
     }
 
     pub fn hash(&self) -> ContentHash {

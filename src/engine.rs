@@ -11,7 +11,7 @@ use std::fmt;
 use crate::exact::Exact;
 use crate::model::{self, Date, Ledger, LedgerForm, LotSelector};
 use crate::package::{LotCandidate, PolicyRegistry, Selection, SelectionProgram};
-use crate::proof::{Node, Operation, Proof, ProofId};
+use crate::proof::{LotAllocationCertificate, Node, Operation, Proof, ProofId};
 
 pub use crate::model::Quantity;
 
@@ -53,6 +53,17 @@ pub struct LotAllocation {
     pub proceeds: Quantity,
     pub basis: Quantity,
     pub gain: Quantity,
+    /// The immutable lot observation used by this allocation certificate.
+    /// Keeping this edge beside the economic values lets the semantic checker
+    /// validate the certificate without interpreting string metadata.
+    pub lot_proof: ProofId,
+    /// The immutable sale observation used by this allocation certificate.
+    pub sale_proof: ProofId,
+    /// The typed allocation derivation node. `proof` below is the gain
+    /// arithmetic node, so both edges are retained explicitly.
+    pub allocation_proof: ProofId,
+    /// The inventory-conservation step that consumes this allocation.
+    pub conservation_proof: ProofId,
     pub proof: ProofId,
 }
 
@@ -211,6 +222,97 @@ pub enum IssueCode {
     InvalidAmount,
 }
 
+/// Failure from the finance-native semantic pass over an [`Analysis`].
+/// Structural proof failures remain represented by [`crate::proof::CheckError`]
+/// and are wrapped here only when callers ask for the combined `check_proof`
+/// entry point.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AnalysisCheckError {
+    Proof(crate::proof::CheckError),
+    BlockedSaleHasRecognition {
+        sale: String,
+        proof: ProofId,
+    },
+    MissingRecognition {
+        sale: String,
+        proof: ProofId,
+    },
+    UnknownLot {
+        sale: String,
+        lot: String,
+        proof: ProofId,
+    },
+    InvalidAllocation {
+        sale: String,
+        lot: String,
+        proof: ProofId,
+        reason: String,
+    },
+    InvalidRecognition {
+        sale: String,
+        proof: ProofId,
+        reason: String,
+    },
+}
+
+impl AnalysisCheckError {
+    fn proof_id(&self) -> Option<ProofId> {
+        match self {
+            Self::Proof(crate::proof::CheckError::MissingRoot { root }) => Some(*root),
+            Self::Proof(crate::proof::CheckError::MissingNode { id }) => Some(*id),
+            Self::Proof(crate::proof::CheckError::MapKeyMismatch { expected, .. }) => {
+                Some(*expected)
+            }
+            Self::Proof(crate::proof::CheckError::TamperedNode { id })
+            | Self::Proof(crate::proof::CheckError::InvalidArithmetic { id })
+            | Self::Proof(crate::proof::CheckError::InvalidLotAllocation { id })
+            | Self::Proof(crate::proof::CheckError::InvalidInventoryConservation { id })
+            | Self::Proof(crate::proof::CheckError::InvalidRecognition { id })
+            | Self::Proof(crate::proof::CheckError::UnreachableCertificate { id })
+            | Self::Proof(crate::proof::CheckError::InvalidOperation { id }) => Some(*id),
+            Self::Proof(_) => None,
+            Self::BlockedSaleHasRecognition { proof, .. }
+            | Self::MissingRecognition { proof, .. }
+            | Self::UnknownLot { proof, .. }
+            | Self::InvalidAllocation { proof, .. }
+            | Self::InvalidRecognition { proof, .. } => Some(*proof),
+        }
+    }
+}
+
+impl fmt::Display for AnalysisCheckError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Proof(error) => write!(formatter, "proof check failed: {error}"),
+            Self::BlockedSaleHasRecognition { sale, .. } => {
+                write!(formatter, "blocked sale `{sale}` carries recognition")
+            }
+            Self::MissingRecognition { sale, .. } => {
+                write!(formatter, "recognized sale `{sale}` has no aggregate")
+            }
+            Self::UnknownLot { sale, lot, .. } => {
+                write!(
+                    formatter,
+                    "sale `{sale}` allocation names unknown lot `{lot}`"
+                )
+            }
+            Self::InvalidAllocation {
+                sale, lot, reason, ..
+            } => {
+                write!(
+                    formatter,
+                    "invalid allocation `{lot}` for sale `{sale}`: {reason}"
+                )
+            }
+            Self::InvalidRecognition { sale, reason, .. } => {
+                write!(formatter, "invalid recognition for sale `{sale}`: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AnalysisCheckError {}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Analysis {
     pub book: String,
@@ -242,7 +344,329 @@ impl Analysis {
     }
 
     pub fn check_proof(&self) -> Result<(), crate::proof::CheckError> {
-        self.proof.check()
+        match self.check_semantics() {
+            Ok(()) => Ok(()),
+            Err(AnalysisCheckError::Proof(error)) => Err(error),
+            Err(error) => Err(crate::proof::CheckError::InvalidOperation {
+                id: error.proof_id().unwrap_or(ProofId::ZERO),
+            }),
+        }
+    }
+
+    /// Independently verify allocation and recognition propositions.
+    ///
+    /// `Proof::check` validates hashes, edges, cycles, and primitive
+    /// arithmetic.  This pass validates the finance-native proposition those
+    /// nodes claim: a slice is proportional to the remaining lot, inventory
+    /// is consumed once, and a recognized aggregate is exactly the sum of its
+    /// slices.  No solver or metadata convention is consulted.
+    pub fn check_semantics(&self) -> Result<(), AnalysisCheckError> {
+        self.proof.check().map_err(AnalysisCheckError::Proof)?;
+
+        let lots_by_id = self
+            .lots
+            .iter()
+            .map(|lot| (lot.id.as_str(), lot))
+            .collect::<BTreeMap<_, _>>();
+        let mut remaining_quantity = self
+            .lots
+            .iter()
+            .map(|lot| (lot.id.clone(), lot.quantity.number.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let mut remaining_basis = self
+            .lots
+            .iter()
+            .map(|lot| (lot.id.clone(), lot.basis.number.clone()))
+            .collect::<BTreeMap<_, _>>();
+        let mut previous_conservation = BTreeMap::<String, ProofId>::new();
+
+        let mut sales = self.sales.iter().collect::<Vec<_>>();
+        sales.sort_by(|left, right| {
+            left.date
+                .cmp(&right.date)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+
+        for sale in sales {
+            check_conditional_gains(
+                self,
+                sale,
+                &lots_by_id,
+                &remaining_quantity,
+                &remaining_basis,
+            )?;
+            if !sale.status.is_complete() {
+                if sale.recognized.is_some() || !sale.allocations.is_empty() {
+                    return Err(AnalysisCheckError::BlockedSaleHasRecognition {
+                        sale: sale.id.clone(),
+                        proof: sale.proof,
+                    });
+                }
+                continue;
+            }
+
+            if sale.allocations.is_empty() || sale.recognized.is_none() {
+                return Err(AnalysisCheckError::MissingRecognition {
+                    sale: sale.id.clone(),
+                    proof: sale.proof,
+                });
+            }
+            let selected_lots = sale
+                .allocations
+                .iter()
+                .map(|allocation| allocation.lot_id.clone())
+                .collect::<Vec<_>>();
+            let selected_lot = (selected_lots.len() == 1).then(|| selected_lots[0].clone());
+            if sale.selected_lots != selected_lots || sale.selected_lot != selected_lot {
+                return Err(AnalysisCheckError::InvalidRecognition {
+                    sale: sale.id.clone(),
+                    proof: sale.proof,
+                    reason: "selected lots do not match the recognized allocations".into(),
+                });
+            }
+            let mut total_quantity = Quantity::zero();
+            let mut total_proceeds = Quantity::zero();
+            let mut total_basis = Quantity::zero();
+            let mut total_gain = Quantity::zero();
+            let mut gain_proofs = Vec::with_capacity(sale.allocations.len());
+            let mut sale_observation = None;
+
+            for allocation in &sale.allocations {
+                let Some(lot) = lots_by_id.get(allocation.lot_id.as_str()) else {
+                    return Err(AnalysisCheckError::UnknownLot {
+                        sale: sale.id.clone(),
+                        lot: allocation.lot_id.clone(),
+                        proof: allocation.proof,
+                    });
+                };
+                if allocation.lot_proof != lot.proof
+                    || allocation.sale_proof == ProofId::ZERO
+                    || allocation.allocation_proof == ProofId::ZERO
+                {
+                    return Err(AnalysisCheckError::InvalidAllocation {
+                        sale: sale.id.clone(),
+                        lot: allocation.lot_id.clone(),
+                        proof: allocation.proof,
+                        reason: "certificate proof edges do not identify the source lot and sale"
+                            .into(),
+                    });
+                }
+                if let Some(previous) = sale_observation
+                    && previous != allocation.sale_proof
+                {
+                    return Err(AnalysisCheckError::InvalidAllocation {
+                        sale: sale.id.clone(),
+                        lot: allocation.lot_id.clone(),
+                        proof: allocation.proof,
+                        reason: "allocation slices use different sale observations".into(),
+                    });
+                }
+                sale_observation = Some(allocation.sale_proof);
+
+                let available_quantity = remaining_quantity
+                    .get(&allocation.lot_id)
+                    .cloned()
+                    .unwrap_or_else(|| Exact::from(0i64));
+                let available_basis = remaining_basis
+                    .get(&allocation.lot_id)
+                    .cloned()
+                    .unwrap_or_else(|| Exact::from(0i64));
+                if allocation.quantity.is_zero()
+                    || allocation.quantity.unit != lot.quantity.unit
+                    || allocation.quantity.number > available_quantity
+                {
+                    return Err(AnalysisCheckError::InvalidAllocation {
+                        sale: sale.id.clone(),
+                        lot: allocation.lot_id.clone(),
+                        proof: allocation.proof,
+                        reason: "allocated quantity exceeds remaining lot inventory".into(),
+                    });
+                }
+                if sale.quantity.number.is_zero()
+                    || sale.quantity.unit != allocation.quantity.unit
+                    || sale.proceeds.unit != lot.basis.unit
+                    || allocation.proceeds.unit != sale.proceeds.unit
+                    || allocation.basis.unit != lot.basis.unit
+                    || allocation.gain.unit != sale.proceeds.unit
+                {
+                    return Err(AnalysisCheckError::InvalidAllocation {
+                        sale: sale.id.clone(),
+                        lot: allocation.lot_id.clone(),
+                        proof: allocation.proof,
+                        reason: "allocation units are incompatible".into(),
+                    });
+                }
+
+                let expected_proceeds = sale.proceeds.number.checked_mul(
+                    &allocation
+                        .quantity
+                        .number
+                        .checked_div(&sale.quantity.number)
+                        .map_err(|_| AnalysisCheckError::InvalidAllocation {
+                            sale: sale.id.clone(),
+                            lot: allocation.lot_id.clone(),
+                            proof: allocation.proof,
+                            reason: "sale quantity cannot form an exact allocation ratio".into(),
+                        })?,
+                );
+                let expected_basis = available_basis.checked_mul(
+                    &allocation
+                        .quantity
+                        .number
+                        .checked_div(&available_quantity)
+                        .map_err(|_| AnalysisCheckError::InvalidAllocation {
+                            sale: sale.id.clone(),
+                            lot: allocation.lot_id.clone(),
+                            proof: allocation.proof,
+                            reason: "remaining lot quantity cannot form an exact basis ratio"
+                                .into(),
+                        })?,
+                );
+                let expected_gain = expected_proceeds.checked_sub(&expected_basis);
+                let expected_proceeds =
+                    Quantity::new(expected_proceeds, sale.proceeds.unit.clone()).map_err(|_| {
+                        AnalysisCheckError::InvalidAllocation {
+                            sale: sale.id.clone(),
+                            lot: allocation.lot_id.clone(),
+                            proof: allocation.proof,
+                            reason: "expected proceeds have no valid unit".into(),
+                        }
+                    })?;
+                let expected_basis = Quantity::new(expected_basis, lot.basis.unit.clone())
+                    .map_err(|_| AnalysisCheckError::InvalidAllocation {
+                        sale: sale.id.clone(),
+                        lot: allocation.lot_id.clone(),
+                        proof: allocation.proof,
+                        reason: "expected basis has no valid unit".into(),
+                    })?;
+                let expected_gain = Quantity::new(expected_gain, sale.proceeds.unit.clone())
+                    .map_err(|_| AnalysisCheckError::InvalidAllocation {
+                        sale: sale.id.clone(),
+                        lot: allocation.lot_id.clone(),
+                        proof: allocation.proof,
+                        reason: "expected gain has no valid unit".into(),
+                    })?;
+                if allocation.proceeds != expected_proceeds
+                    || allocation.basis != expected_basis
+                    || allocation.gain != expected_gain
+                {
+                    return Err(AnalysisCheckError::InvalidAllocation {
+                        sale: sale.id.clone(),
+                        lot: allocation.lot_id.clone(),
+                        proof: allocation.proof,
+                        reason: "allocation arithmetic does not reproduce the typed values".into(),
+                    });
+                }
+
+                check_allocation_nodes(
+                    self,
+                    sale,
+                    lot,
+                    allocation,
+                    &available_quantity,
+                    &available_basis,
+                    previous_conservation.get(&allocation.lot_id).copied(),
+                )?;
+                total_quantity =
+                    total_quantity
+                        .checked_add(&allocation.quantity)
+                        .map_err(|_| AnalysisCheckError::InvalidRecognition {
+                            sale: sale.id.clone(),
+                            proof: sale.proof,
+                            reason: "allocation quantities are not summable".into(),
+                        })?;
+                total_proceeds =
+                    total_proceeds
+                        .checked_add(&allocation.proceeds)
+                        .map_err(|_| AnalysisCheckError::InvalidRecognition {
+                            sale: sale.id.clone(),
+                            proof: sale.proof,
+                            reason: "allocation proceeds are not summable".into(),
+                        })?;
+                total_basis = total_basis.checked_add(&allocation.basis).map_err(|_| {
+                    AnalysisCheckError::InvalidRecognition {
+                        sale: sale.id.clone(),
+                        proof: sale.proof,
+                        reason: "allocation bases are not summable".into(),
+                    }
+                })?;
+                total_gain = total_gain.checked_add(&allocation.gain).map_err(|_| {
+                    AnalysisCheckError::InvalidRecognition {
+                        sale: sale.id.clone(),
+                        proof: sale.proof,
+                        reason: "allocation gains are not summable".into(),
+                    }
+                })?;
+                gain_proofs.push(allocation.proof);
+                previous_conservation
+                    .insert(allocation.lot_id.clone(), allocation.conservation_proof);
+
+                *remaining_quantity
+                    .get_mut(&allocation.lot_id)
+                    .expect("lot was present in the initial inventory") =
+                    available_quantity.checked_sub(&allocation.quantity.number);
+                *remaining_basis
+                    .get_mut(&allocation.lot_id)
+                    .expect("lot was present in the initial inventory") =
+                    available_basis.checked_sub(&allocation.basis.number);
+            }
+
+            let aggregate = sale.recognized.as_ref().expect("checked above");
+            let aggregate_lots = sale
+                .allocations
+                .iter()
+                .map(|allocation| allocation.lot_id.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            if aggregate.lot_id != aggregate_lots
+                || aggregate.quantity != total_quantity
+                || aggregate.proceeds != total_proceeds
+                || aggregate.basis != total_basis
+                || aggregate.gain != total_gain
+                || aggregate.quantity != sale.quantity
+                || aggregate.proceeds != sale.proceeds
+                || aggregate.proof != sale.proof
+            {
+                return Err(AnalysisCheckError::InvalidRecognition {
+                    sale: sale.id.clone(),
+                    proof: sale.proof,
+                    reason: "recognized aggregate is not the exact sum of allocations".into(),
+                });
+            }
+            if !self.proof.roots.contains(&sale.proof) {
+                return Err(AnalysisCheckError::InvalidRecognition {
+                    sale: sale.id.clone(),
+                    proof: sale.proof,
+                    reason: "recognition is not a proof root".into(),
+                });
+            }
+            let sale_observation =
+                sale_observation.ok_or_else(|| AnalysisCheckError::InvalidRecognition {
+                    sale: sale.id.clone(),
+                    proof: sale.proof,
+                    reason: "recognized sale has no sale observation edge".into(),
+                })?;
+            let allocation_proofs = sale
+                .allocations
+                .iter()
+                .map(|allocation| allocation.allocation_proof)
+                .collect::<Vec<_>>();
+            let conservation_proofs = sale
+                .allocations
+                .iter()
+                .map(|allocation| allocation.conservation_proof)
+                .collect::<Vec<_>>();
+            check_recognition_node(
+                self,
+                sale,
+                sale_observation,
+                &allocation_proofs,
+                &gain_proofs,
+                &conservation_proofs,
+            )?;
+        }
+
+        Ok(())
     }
 
     pub fn sale(&self, id: &str) -> Option<&SaleAnalysis> {
@@ -321,7 +745,8 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 metadata.insert("occurrence".into(), buy.occurrence.as_str().into());
                 let node = Node::new(
                     format!("lot {}/{}", buy.label, source),
-                    Operation::Observation {
+                    Operation::LotObservation {
+                        lot: buy.label.clone(),
                         source: source.clone(),
                     },
                     Vec::new(),
@@ -755,6 +1180,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
         .iter()
         .map(|lot| (lot.id.clone(), vec![lot.proof]))
         .collect();
+    let mut remaining_conservation: BTreeMap<String, ProofId> = BTreeMap::new();
 
     // Observations are evidence, not balances.  Preserve every source node,
     // but explicitly surface contradictory values and never let one
@@ -869,7 +1295,8 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
         let source = source_key("sell", &sell_material(&sell));
         let sale_proof = proof.insert(Node::new(
             format!("sale {}/{}", sell.label, source),
-            Operation::Observation {
+            Operation::SaleObservation {
+                sale: sell.label.clone(),
                 source: source.clone(),
             },
             Vec::new(),
@@ -1309,12 +1736,50 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                         proceeds: &proceeds,
                         proof: sale_proof,
                     },
+                    &sell.label,
                     &mut proof,
                 ) else {
                     valid = false;
                     break;
                 };
-                allocations.push(allocation);
+                let predecessor = remaining_conservation.get(lot_id).copied();
+                let quantity_unit = lot
+                    .quantity
+                    .unit
+                    .as_ref()
+                    .expect("validated lot quantity has a unit")
+                    .to_string();
+                let mut conservation_inputs = vec![lot.proof, allocation.allocation_proof];
+                if let Some(predecessor) = predecessor {
+                    conservation_inputs.push(predecessor);
+                }
+                let mut conservation_metadata =
+                    metadata_for(&lot.id, "inventory-conservation", None);
+                conservation_metadata.insert("lot".into(), lot.id.clone());
+                conservation_metadata
+                    .insert("before".into(), available_quantity.canonical_string());
+                conservation_metadata
+                    .insert("consumed".into(), allocated_quantity.canonical_string());
+                let after = available_quantity.checked_sub(allocated_quantity);
+                conservation_metadata.insert("after".into(), after.canonical_string());
+                conservation_metadata.insert("unit".into(), quantity_unit.clone());
+                let conservation = proof.insert(Node::new(
+                    format!("remaining {} in {}", after, lot.id),
+                    Operation::InventoryConservation {
+                        lot: lot.id.clone(),
+                        lot_proof: lot.proof,
+                        before: available_quantity.clone(),
+                        consumed: allocated_quantity.clone(),
+                        after,
+                        unit: quantity_unit,
+                        predecessor,
+                        allocation: Some(allocation.allocation_proof),
+                    },
+                    conservation_inputs,
+                    conservation_metadata,
+                ));
+                remaining_conservation.insert(lot_id.clone(), conservation);
+                allocations.push(allocation.finish(conservation));
             }
             if !valid {
                 issues.push(Issue {
@@ -1362,7 +1827,20 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
         }
         let sale_result_proof = if !allocations.is_empty() {
             let mut inputs = vec![sale_proof];
+            // The recognition certificate consumes typed allocation nodes
+            // directly.  Gain arithmetic nodes remain in the explanation
+            // branch, but are not trusted as the aggregate payload.
+            inputs.extend(
+                allocations
+                    .iter()
+                    .map(|allocation| allocation.allocation_proof),
+            );
             inputs.extend(allocations.iter().map(|allocation| allocation.proof));
+            inputs.extend(
+                allocations
+                    .iter()
+                    .map(|allocation| allocation.conservation_proof),
+            );
             if let Some(policy_proof) = policy_proof {
                 inputs.push(policy_proof);
             }
@@ -1375,8 +1853,31 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
             }
             let id = proof.insert(Node::new(
                 format!("gain {}/{}", sell.label, source),
-                Operation::Derive {
-                    rule: "recognize-sale".into(),
+                Operation::Recognition {
+                    sale: sell.label.clone(),
+                    sale_proof,
+                    quantity: quantity.number.clone(),
+                    proceeds: proceeds.number.clone(),
+                    basis: allocations
+                        .iter()
+                        .fold(Exact::from(0i64), |total, allocation| {
+                            total.checked_add(&allocation.basis.number)
+                        }),
+                    gain: allocations
+                        .iter()
+                        .fold(Exact::from(0i64), |total, allocation| {
+                            total.checked_add(&allocation.gain.number)
+                        }),
+                    quantity_unit: quantity
+                        .unit
+                        .as_ref()
+                        .expect("validated sale quantity has a unit")
+                        .to_string(),
+                    value_unit: proceeds
+                        .unit
+                        .as_ref()
+                        .expect("validated sale proceeds have a unit")
+                        .to_string(),
                 },
                 inputs,
                 metadata_for(&source, "recognition", None),
@@ -1403,6 +1904,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
         let mut goal_roots = std::iter::once(sale_result_proof)
             .chain(eligible.iter().map(|lot| lot.proof))
             .collect::<Vec<_>>();
+        goal_roots.extend(conditionals.iter().map(|conditional| conditional.proof));
         if let Some(policy_proof) = policy_proof {
             goal_roots.push(policy_proof);
         }
@@ -1810,12 +2312,42 @@ fn conditional_gain(
 /// Build one exact slice of a recognized sale.  Both the holding basis and
 /// the sale proceeds are allocated by the same rational quantity fraction;
 /// no decimal rounding is introduced at an allocation boundary.
+struct PendingLotAllocation {
+    lot_id: String,
+    quantity: Quantity,
+    proceeds: Quantity,
+    basis: Quantity,
+    gain: Quantity,
+    lot_proof: ProofId,
+    sale_proof: ProofId,
+    allocation_proof: ProofId,
+    proof: ProofId,
+}
+
+impl PendingLotAllocation {
+    fn finish(self, conservation_proof: ProofId) -> LotAllocation {
+        LotAllocation {
+            lot_id: self.lot_id,
+            quantity: self.quantity,
+            proceeds: self.proceeds,
+            basis: self.basis,
+            gain: self.gain,
+            lot_proof: self.lot_proof,
+            sale_proof: self.sale_proof,
+            allocation_proof: self.allocation_proof,
+            conservation_proof,
+            proof: self.proof,
+        }
+    }
+}
+
 fn lot_allocation(
     inventory: RemainingLot<'_>,
     allocated_quantity: &Exact,
     sale: SaleSlice<'_>,
+    sale_name: &str,
     proof: &mut Proof,
-) -> Option<LotAllocation> {
+) -> Option<PendingLotAllocation> {
     let RemainingLot {
         lot,
         quantity: available_quantity,
@@ -1835,11 +2367,13 @@ fn lot_allocation(
     {
         return None;
     }
+    let unit = lot.quantity.unit.as_ref()?.to_string();
     let quantity = Quantity::new(allocated_quantity.clone(), lot.quantity.unit.clone()).ok()?;
     let sale_ratio = allocated_quantity.checked_div(&sale_quantity.number).ok()?;
     let inventory_ratio = allocated_quantity.checked_div(available_quantity).ok()?;
     let allocated_basis_number = available_basis.checked_mul(&inventory_ratio);
     let allocated_proceeds_number = sale_proceeds.number.checked_mul(&sale_ratio);
+    let remaining_number = available_quantity.checked_sub(allocated_quantity);
     let basis = Quantity::new(allocated_basis_number.clone(), lot.basis.unit.clone()).ok()?;
     let proceeds = Quantity::new(
         allocated_proceeds_number.clone(),
@@ -1866,11 +2400,53 @@ fn lot_allocation(
         "allocated-basis".into(),
         allocated_basis_number.canonical_string(),
     );
+    allocation_metadata.insert("lot".into(), lot.id.clone());
+    allocation_metadata.insert("sale".into(), sale_name.into());
+    allocation_metadata.insert("available".into(), available_quantity.canonical_string());
+    allocation_metadata.insert("allocated".into(), allocated_quantity.canonical_string());
+    allocation_metadata.insert("remaining".into(), remaining_number.canonical_string());
+    allocation_metadata.insert(
+        "sale-quantity".into(),
+        sale_quantity.number.canonical_string(),
+    );
+    allocation_metadata.insert(
+        "sale-proceeds".into(),
+        sale_proceeds.number.canonical_string(),
+    );
+    allocation_metadata.insert("available-basis".into(), available_basis.canonical_string());
+    allocation_metadata.insert(
+        "allocated-proceeds".into(),
+        allocated_proceeds_number.canonical_string(),
+    );
+    allocation_metadata.insert(
+        "allocated-basis".into(),
+        allocated_basis_number.canonical_string(),
+    );
+    allocation_metadata.insert("gain".into(), gain_number.canonical_string());
+    allocation_metadata.insert("quantity-unit".into(), unit.clone());
+    allocation_metadata.insert(
+        "value-unit".into(),
+        sale_proceeds.unit.as_ref()?.to_string(),
+    );
     let allocation_proof = proof.insert(Node::new(
         format!("allocate {} from {}", allocated_quantity, lot.id),
-        Operation::Derive {
-            rule: "allocate-lot-proportionally".into(),
-        },
+        Operation::LotAllocation(Box::new(LotAllocationCertificate {
+            lot: lot.id.clone(),
+            sale: sale_name.into(),
+            lot_proof: lot.proof,
+            sale_proof,
+            available: available_quantity.clone(),
+            allocated: allocated_quantity.clone(),
+            remaining: remaining_number,
+            sale_quantity: sale_quantity.number.clone(),
+            sale_proceeds: sale_proceeds.number.clone(),
+            available_basis: available_basis.clone(),
+            allocated_proceeds: allocated_proceeds_number.clone(),
+            allocated_basis: allocated_basis_number.clone(),
+            gain: gain_number.clone(),
+            quantity_unit: unit,
+            value_unit: sale_proceeds.unit.as_ref()?.to_string(),
+        })),
         remaining_inputs
             .iter()
             .copied()
@@ -1893,12 +2469,15 @@ fn lot_allocation(
         vec![allocation_proof],
         gain_metadata,
     ));
-    Some(LotAllocation {
+    Some(PendingLotAllocation {
         lot_id: lot.id.clone(),
         quantity,
         proceeds,
         basis,
         gain,
+        lot_proof: lot.proof,
+        sale_proof,
+        allocation_proof,
         proof: gain_proof,
     })
 }
@@ -1927,6 +2506,253 @@ fn aggregate_allocations(allocations: &[LotAllocation], proof: ProofId) -> Optio
         gain,
         proof,
     })
+}
+
+fn check_conditional_gains(
+    analysis: &Analysis,
+    sale: &SaleAnalysis,
+    lots: &BTreeMap<&str, &Lot>,
+    remaining_quantity: &BTreeMap<String, Exact>,
+    remaining_basis: &BTreeMap<String, Exact>,
+) -> Result<(), AnalysisCheckError> {
+    for conditional in &sale.conditional_gains {
+        let Some(lot) = lots.get(conditional.lot_id.as_str()) else {
+            return Err(AnalysisCheckError::UnknownLot {
+                sale: sale.id.clone(),
+                lot: conditional.lot_id.clone(),
+                proof: conditional.proof,
+            });
+        };
+        let available = remaining_quantity
+            .get(&conditional.lot_id)
+            .expect("known lot has remaining quantity");
+        let available_basis = remaining_basis
+            .get(&conditional.lot_id)
+            .expect("known lot has remaining basis");
+        let expected_basis = sale
+            .quantity
+            .number
+            .checked_div(available)
+            .map(|ratio| available_basis.checked_mul(&ratio))
+            .map_err(|_| AnalysisCheckError::InvalidAllocation {
+                sale: sale.id.clone(),
+                lot: conditional.lot_id.clone(),
+                proof: conditional.proof,
+                reason: "conditional gain cannot form an exact lot ratio".into(),
+            })?;
+        let expected_gain = sale.proceeds.number.checked_sub(&expected_basis);
+        let valid_values = conditional.quantity == sale.quantity
+            && conditional.proceeds == sale.proceeds
+            && conditional.basis.number == expected_basis
+            && conditional.basis.unit == lot.basis.unit
+            && conditional.gain.number == expected_gain
+            && conditional.gain.unit == sale.proceeds.unit;
+        let valid_node = analysis.proof.node(conditional.proof).is_some_and(|node| {
+            matches!(
+                &node.operation,
+                Operation::Arithmetic {
+                    minuend,
+                    subtrahend,
+                    result,
+                    unit,
+                    ..
+                } if *minuend == sale.proceeds.number
+                    && *subtrahend == expected_basis
+                    && *result == expected_gain
+                    && sale.proceeds.unit.as_ref().is_some_and(|expected| unit == expected.as_str())
+            ) && node.inputs.contains(&lot.proof)
+                && node.inputs.iter().any(|input| {
+                    matches!(
+                        analysis.proof.node(*input).map(|node| &node.operation),
+                        Some(Operation::SaleObservation { sale: observed, .. })
+                            if observed == &sale.id
+                    )
+                })
+        });
+        if !valid_values || !valid_node || !analysis.proof.roots.contains(&conditional.proof) {
+            return Err(AnalysisCheckError::InvalidAllocation {
+                sale: sale.id.clone(),
+                lot: conditional.lot_id.clone(),
+                proof: conditional.proof,
+                reason: "conditional gain is not the checked lot alternative".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn check_allocation_nodes(
+    analysis: &Analysis,
+    sale: &SaleAnalysis,
+    lot: &Lot,
+    allocation: &LotAllocation,
+    available_quantity: &Exact,
+    available_basis: &Exact,
+    expected_predecessor: Option<ProofId>,
+) -> Result<(), AnalysisCheckError> {
+    let Some(allocation_node) = analysis.proof.node(allocation.allocation_proof) else {
+        return Err(AnalysisCheckError::InvalidAllocation {
+            sale: sale.id.clone(),
+            lot: allocation.lot_id.clone(),
+            proof: allocation.proof,
+            reason: "allocation derivation node is missing".into(),
+        });
+    };
+    let typed_allocation = matches!(
+        &allocation_node.operation,
+        Operation::LotAllocation(certificate) if certificate.lot == allocation.lot_id
+            && certificate.sale == sale.id
+            && certificate.lot_proof == lot.proof
+            && certificate.sale_proof == allocation.sale_proof
+            && certificate.allocated == allocation.quantity.number
+            && certificate.available == *available_quantity
+            && certificate.remaining == available_quantity.checked_sub(&allocation.quantity.number)
+            && certificate.sale_quantity == sale.quantity.number
+            && certificate.sale_proceeds == sale.proceeds.number
+            && certificate.available_basis == *available_basis
+            && certificate.allocated_proceeds == allocation.proceeds.number
+            && certificate.allocated_basis == allocation.basis.number
+            && certificate.gain == allocation.gain.number
+            && certificate.quantity_unit == lot.asset
+            && allocation.gain.unit.as_ref().is_some_and(|unit| certificate.value_unit == unit.as_str())
+    );
+    if !typed_allocation
+        || !allocation_node.inputs.contains(&lot.proof)
+        || !allocation_node.inputs.contains(&allocation.sale_proof)
+    {
+        return Err(AnalysisCheckError::InvalidAllocation {
+            sale: sale.id.clone(),
+            lot: allocation.lot_id.clone(),
+            proof: allocation.proof,
+            reason: "allocation node is not rooted in the typed lot and sale observations".into(),
+        });
+    }
+    let Some(gain_node) = analysis.proof.node(allocation.proof) else {
+        return Err(AnalysisCheckError::InvalidAllocation {
+            sale: sale.id.clone(),
+            lot: allocation.lot_id.clone(),
+            proof: allocation.proof,
+            reason: "allocation gain node is missing".into(),
+        });
+    };
+    let valid_gain = matches!(
+        &gain_node.operation,
+        Operation::Arithmetic {
+            minuend,
+            subtrahend,
+            result,
+            unit,
+            ..
+        } if *minuend == allocation.proceeds.number
+            && *subtrahend == allocation.basis.number
+            && *result == allocation.gain.number
+            && allocation.gain.unit.as_ref().is_some_and(|expected| unit == expected.as_str())
+    );
+    if !valid_gain || !gain_node.inputs.contains(&allocation.allocation_proof) {
+        return Err(AnalysisCheckError::InvalidAllocation {
+            sale: sale.id.clone(),
+            lot: allocation.lot_id.clone(),
+            proof: allocation.proof,
+            reason: "allocation gain arithmetic is not rooted in its allocation".into(),
+        });
+    }
+    let Some(conservation_node) = analysis.proof.node(allocation.conservation_proof) else {
+        return Err(AnalysisCheckError::InvalidAllocation {
+            sale: sale.id.clone(),
+            lot: allocation.lot_id.clone(),
+            proof: allocation.proof,
+            reason: "inventory-conservation node is missing".into(),
+        });
+    };
+    let valid_conservation = matches!(
+        &conservation_node.operation,
+        Operation::InventoryConservation {
+            lot: operation_lot,
+            lot_proof,
+            before,
+            consumed,
+            after,
+            unit,
+            predecessor,
+            allocation: Some(operation_allocation),
+            ..
+        } if operation_lot == &allocation.lot_id
+            && *lot_proof == lot.proof
+            && *before == *available_quantity
+            && *consumed == allocation.quantity.number
+            && *after == available_quantity.checked_sub(&allocation.quantity.number)
+            && allocation.quantity.unit.as_ref().is_some_and(|expected| unit == expected.as_str())
+            && *predecessor == expected_predecessor
+            && *operation_allocation == allocation.allocation_proof
+    );
+    if !valid_conservation
+        || !conservation_node.inputs.contains(&lot.proof)
+        || !conservation_node
+            .inputs
+            .contains(&allocation.allocation_proof)
+    {
+        return Err(AnalysisCheckError::InvalidAllocation {
+            sale: sale.id.clone(),
+            lot: allocation.lot_id.clone(),
+            proof: allocation.proof,
+            reason: "inventory conservation is not bound to the allocation".into(),
+        });
+    }
+    Ok(())
+}
+
+fn check_recognition_node(
+    analysis: &Analysis,
+    sale: &SaleAnalysis,
+    sale_observation: ProofId,
+    allocation_proofs: &[ProofId],
+    gain_proofs: &[ProofId],
+    conservation_proofs: &[ProofId],
+) -> Result<(), AnalysisCheckError> {
+    let Some(node) = analysis.proof.node(sale.proof) else {
+        return Err(AnalysisCheckError::InvalidRecognition {
+            sale: sale.id.clone(),
+            proof: sale.proof,
+            reason: "recognition node is missing".into(),
+        });
+    };
+    let valid_recognition = matches!(
+        &node.operation,
+        Operation::Recognition {
+            sale: operation_sale,
+            sale_proof: operation_sale_proof,
+            quantity,
+            proceeds,
+            basis,
+            gain,
+            quantity_unit,
+            value_unit,
+        } if operation_sale == &sale.id
+            && *operation_sale_proof == sale_observation
+            && *quantity == sale.quantity.number
+            && *proceeds == sale.proceeds.number
+            && *basis == sale.recognized.as_ref().map(|aggregate| aggregate.basis.number.clone()).unwrap_or_else(|| Exact::from(0i64))
+            && *gain == sale.recognized.as_ref().map(|aggregate| aggregate.gain.number.clone()).unwrap_or_else(|| Exact::from(0i64))
+            && sale.quantity.unit.as_ref().is_some_and(|unit| quantity_unit == unit.as_str())
+            && sale.proceeds.unit.as_ref().is_some_and(|unit| value_unit == unit.as_str())
+    );
+    if !valid_recognition
+        || !node.inputs.contains(&sale_observation)
+        || allocation_proofs
+            .iter()
+            .any(|proof| !node.inputs.contains(proof))
+        || gain_proofs.iter().any(|proof| !node.inputs.contains(proof))
+        || conservation_proofs
+            .iter()
+            .any(|proof| !node.inputs.contains(proof))
+    {
+        return Err(AnalysisCheckError::InvalidRecognition {
+            sale: sale.id.clone(),
+            proof: sale.proof,
+            reason: "recognition node does not include its sale and allocation proofs".into(),
+        });
+    }
+    Ok(())
 }
 
 fn make_journal(
@@ -2728,6 +3554,79 @@ use lots/fifo for tax-us
             RecognitionStatus::MissingLot
         ));
         result.check_proof().unwrap();
+    }
+
+    #[test]
+    fn semantic_checker_rejects_forged_public_results_and_proof_bindings() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  2 ABC into brokerage
+  for 10 USD
+buy buy/two on 2026-02-04
+  2 ABC into brokerage
+  for 20 USD
+sell sale/one on 2026-09-20
+  3 ABC from brokerage
+  for 18 USD
+  lot ?lot
+use lots/fifo for tax-us
+"#;
+        let analysis = analyze(&parse_ledger(source).unwrap());
+        analysis.check_semantics().unwrap();
+
+        let mut forged = analysis.clone();
+        forged.sales[0].allocations[0].basis.number = Exact::from(99i64);
+        assert!(matches!(
+            forged.check_semantics(),
+            Err(AnalysisCheckError::InvalidAllocation { .. })
+        ));
+
+        let mut forged = analysis.clone();
+        forged.sales[0].selected_lots.reverse();
+        assert!(matches!(
+            forged.check_semantics(),
+            Err(AnalysisCheckError::InvalidRecognition { .. })
+        ));
+
+        let mut forged = analysis.clone();
+        let allocation_proof = forged.sales[0].allocations[0].allocation_proof;
+        forged.sales[0].allocations[0].conservation_proof = allocation_proof;
+        assert!(matches!(
+            forged.check_semantics(),
+            Err(AnalysisCheckError::InvalidAllocation { .. })
+        ));
+
+        let mut forged = analysis;
+        forged.sales[0].recognized.as_mut().unwrap().gain.number = Exact::from(99i64);
+        assert!(matches!(
+            forged.check_semantics(),
+            Err(AnalysisCheckError::InvalidRecognition { .. })
+        ));
+
+        let ambiguous = analyze(
+            &parse_ledger(
+                r#"book tax-us
+buy buy/a on 2026-01-01
+  10 ABC into brokerage
+  for 100 USD
+buy buy/b on 2026-01-02
+  10 ABC into brokerage
+  for 120 USD
+sell sale/a on 2026-02-01
+  5 ABC from brokerage
+  for 80 USD
+  lot ?lot
+"#,
+            )
+            .unwrap(),
+        );
+        ambiguous.check_semantics().unwrap();
+        let mut forged = ambiguous;
+        forged.sales[0].conditional_gains[0].gain.number = Exact::from(999i64);
+        assert!(matches!(
+            forged.check_semantics(),
+            Err(AnalysisCheckError::InvalidAllocation { .. })
+        ));
     }
 
     #[test]

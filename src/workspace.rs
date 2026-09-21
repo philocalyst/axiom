@@ -32,12 +32,12 @@ use crate::incremental::{
     IncrementalDb, MemoOutcome, QueryError, QueryKey, SourceKey, TraceEvent, TraceMetrics,
 };
 use crate::model::{ContentHash, Identity, Ledger, SourceId};
-use crate::package::PolicyRegistry;
+use crate::package::{PolicyPackage as ExecutablePolicyPackage, PolicyRegistry};
 use crate::parser::{self, ParseError};
 use crate::proof::{Node, Operation, Proof};
 use crate::store::{
-    Commit, CommitId, Evidence, EvidenceId, EvidenceState, ObjectStore, PackageId, PolicyPackage,
-    ProofObject, ProofObjectId, StoreError,
+    Commit, CommitId, Evidence, EvidenceId, EvidenceState, ObjectStore, PackageId,
+    PolicyPackage as StoredPolicyPackage, ProofObject, ProofObjectId, StoreError,
 };
 use crate::surface::SurfaceFile;
 
@@ -271,6 +271,35 @@ pub struct Workspace {
     incremental: IncrementalDb,
 }
 
+/// A package accepted by the public workspace insertion boundary.
+///
+/// Both package representations cross this authoring boundary through one
+/// explicit normalization. Executable text is canonicalized before commit;
+/// callers that need byte-preserving archival envelopes use `ObjectStore`
+/// directly. A stored package with arbitrary manifest metadata or non-UTF-8
+/// bytes is rejected instead of being silently narrowed.
+pub trait WorkspacePolicyPackage {
+    fn into_stored_policy_package(self) -> Result<StoredPolicyPackage, WorkspaceError>;
+}
+
+impl WorkspacePolicyPackage for ExecutablePolicyPackage {
+    fn into_stored_policy_package(self) -> Result<StoredPolicyPackage, WorkspaceError> {
+        Ok(StoredPolicyPackage::from_executable(&self))
+    }
+}
+
+impl WorkspacePolicyPackage for StoredPolicyPackage {
+    fn into_stored_policy_package(self) -> Result<StoredPolicyPackage, WorkspaceError> {
+        // Validate through the same path used when resolving a committed
+        // root, then normalize executable text while retaining lineage.
+        let executable = self.to_executable().map_err(WorkspaceError::Store)?;
+        let mut stored = self;
+        stored.body = executable.canonical_body_text().into_bytes();
+        stored.dependencies = executable.dependencies;
+        Ok(stored)
+    }
+}
+
 impl Workspace {
     pub fn new() -> Self {
         Self::default()
@@ -295,11 +324,13 @@ impl Workspace {
 
     /// Add an immutable policy package without exposing mutation of the
     /// ledger's canonical object store.
-    pub fn put_policy_package(
-        &mut self,
-        package: PolicyPackage,
-    ) -> Result<PackageId, WorkspaceError> {
-        Ok(self.store.put_package(package)?)
+    pub fn put_policy_package<P>(&mut self, package: P) -> Result<PackageId, WorkspaceError>
+    where
+        P: WorkspacePolicyPackage,
+    {
+        Ok(self
+            .store
+            .put_package(package.into_stored_policy_package()?)?)
     }
 
     /// The canonical incremental database used by all workspace analysis.
@@ -752,6 +783,9 @@ impl Workspace {
                         content.extend_from_slice(value.as_bytes());
                         content.push(0xff);
                     }
+                    for dependency in &package.dependencies {
+                        content.extend_from_slice(dependency.as_bytes());
+                    }
                 }
                 content
             };
@@ -834,22 +868,20 @@ impl Workspace {
     fn policy_registry(&self, commit: CommitId) -> Result<PolicyRegistry, WorkspaceError> {
         let value = self.store.commit(commit)?;
         let mut registry = PolicyRegistry::builtins();
-        let mut names = BTreeMap::<String, PackageId>::new();
+        let mut names = BTreeMap::<String, ContentHash>::new();
         for id in &value.packages {
             let package = self.store.package(*id)?;
-            if let Some(previous) = names.insert(package.name.clone(), *id)
-                && previous != *id
+            let executable = package.to_executable().map_err(WorkspaceError::Store)?;
+            let executable_hash = executable.hash();
+            if let Some(previous) = names.insert(executable.name.clone(), executable_hash)
+                && previous != executable_hash
             {
                 return Err(WorkspaceError::PackageConflict {
                     commit,
-                    name: package.name.clone(),
+                    name: executable.name.clone(),
                 });
             }
-            registry.insert(crate::package::PolicyPackage::new(
-                package.name.clone(),
-                package.version.clone(),
-                package.body.clone(),
-            ));
+            registry.insert(executable);
         }
         Ok(registry)
     }
@@ -995,6 +1027,7 @@ fn raw_from_store_evidence(evidence: &Evidence) -> Result<RawEvidence, Workspace
 mod tests {
     use super::*;
     use crate::model::ContentHash;
+    use crate::package::PolicyPackage as ExecutablePolicyPackage;
     use crate::store::{Commit, Evidence as StoreEvidence, PolicyPackage as StorePolicyPackage};
 
     const SOURCE: &str =
@@ -1375,5 +1408,53 @@ use lots/fifo for tax-us
         assert!(metrics.cache_hits >= 1);
         assert_eq!(metrics.cache_misses, 0);
         assert_eq!(metrics.invalidated_queries, 0);
+    }
+
+    #[test]
+    fn public_package_boundary_canonicalizes_body_and_preserves_dependencies() {
+        let first = ContentHash::domain_separated("test/workspace-package", b"first");
+        let second = ContentHash::domain_separated("test/workspace-package", b"second");
+        let package = ExecutablePolicyPackage::new(
+            "lots/custom",
+            "1",
+            "tie=ambiguous\nselector=latest_acquisition",
+        )
+        .with_dependencies([second, first, first]);
+        let mut workspace = Workspace::new();
+        let id = workspace.put_policy_package(package.clone()).unwrap();
+        let stored = workspace.store().package(id).unwrap();
+        let mut expected = vec![first, second];
+        expected.sort();
+        assert_eq!(stored.dependencies, expected);
+        assert_eq!(
+            stored.body,
+            b"selector=latest_acquisition\ntie=ambiguous".to_vec()
+        );
+        assert_eq!(stored.to_executable().unwrap().hash(), package.hash());
+
+        let equivalent = StorePolicyPackage::new(
+            "lots/custom",
+            "1",
+            b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+        )
+        .with_dependencies([first, second]);
+        assert_eq!(workspace.put_policy_package(equivalent).unwrap(), id);
+        assert!(
+            workspace
+                .put_policy_package(StorePolicyPackage::new("lots/custom", "1", vec![0xff],))
+                .is_err()
+        );
+        assert!(
+            workspace
+                .put_policy_package(
+                    StorePolicyPackage::new(
+                        "lots/custom",
+                        "1",
+                        b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+                    )
+                    .with_manifest([("scope", "tax")]),
+                )
+                .is_err()
+        );
     }
 }

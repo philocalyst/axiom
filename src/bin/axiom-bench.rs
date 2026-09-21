@@ -164,6 +164,7 @@ struct Timing {
     normalization_ns: Option<u128>,
     parse_ns: Option<u128>,
     solve_cold_ns: Option<u128>,
+    independent_clean_solve_ns: Option<u128>,
     workspace_replay_ns: Option<u128>,
     proof_check_ns: Option<u128>,
     explanation_ns: Option<u128>,
@@ -193,6 +194,7 @@ struct Metrics {
     cycle_errors: Option<usize>,
     determinism_across_thread_counts: Option<bool>,
     same_process_cache_replay_equal: Option<bool>,
+    independent_clean_recompute_equal: Option<bool>,
     peak_memory_bytes: Option<usize>,
     thread_count_equivalence: Option<bool>,
     build_profile: Option<&'static str>,
@@ -389,10 +391,16 @@ fn measure_workload(
         } else {
             "release"
         }),
-        resource_profile: Some("unbounded-single-thread"),
-        note: Some(
-            "peak memory and thread-count equivalence are not measured by this portable harness; null is intentional",
-        ),
+        resource_profile: Some(if process_peak_memory_bytes().is_some() {
+            "single-threaded; process peak RSS via getrusage"
+        } else {
+            "single-threaded; process peak RSS unavailable"
+        }),
+        note: Some(if process_peak_memory_bytes().is_some() {
+            "peak_memory_bytes is process-lifetime peak RSS; parallel/thread-count metrics remain null because no parallel engine path exists"
+        } else {
+            "peak RSS is unavailable on this platform; parallel/thread-count metrics remain null because no parallel engine path exists"
+        }),
         ..Metrics::default()
     };
 
@@ -429,7 +437,7 @@ fn measure_workload(
     timing.normalization_ns = Some(median_normalization(&generated.source, samples)?);
     timing.parse_ns = Some(median_parse(&generated.source, samples)?);
     workspace.clear_incremental_trace();
-    timing.solve_cold_ns = Some(median_cold_solve(&generated.source, samples)?);
+    timing.solve_cold_ns = Some(median_cold_solve(workload, &generated.source, samples)?);
     timing.workspace_replay_ns = Some(median_workspace_replay(
         &mut workspace,
         source.commit_id(),
@@ -440,6 +448,17 @@ fn measure_workload(
         .analyze_commit(source.commit_id())
         .map_err(|error| format!("{}: deterministic replay failed: {error}", workload.name()))?;
     metrics.same_process_cache_replay_equal = Some(replay == analysis);
+    let independent = independent_clean_analysis(
+        workload,
+        format!("benchmark/{}", workload.name()),
+        &generated.source,
+    )?;
+    metrics.independent_clean_recompute_equal = Some(independent.analysis == *analysis);
+    timing.independent_clean_solve_ns = Some(median_independent_clean_solve(
+        workload,
+        &generated.source,
+        samples,
+    )?);
     timing.proof_check_ns = Some(median_proof_check(&analysis, samples));
     metrics.proof_nodes = Some(analysis.proof.nodes.len());
     metrics.proof_roots = Some(analysis.proof.roots.len());
@@ -516,7 +535,7 @@ fn measure_workload(
         timing.changed_full_solve_ns = Some(if workload == Workload::PackageUpgrade {
             median_package_upgrade_solve(&generated.source, samples)?
         } else {
-            median_cold_solve(changed, samples)?
+            median_cold_solve(workload, changed, samples)?
         });
     } else if workload == Workload::AdversarialRecursion {
         metrics.cycle_errors = Some(recursive_cycle_probe()?);
@@ -524,6 +543,7 @@ fn measure_workload(
         metrics.cache_hits = Some(replay_metrics.cache_hits);
         metrics.cache_misses = Some(replay_metrics.cache_misses);
     }
+    metrics.peak_memory_bytes = process_peak_memory_bytes();
 
     Ok(ResultRecord {
         workload,
@@ -619,17 +639,53 @@ fn median_package_upgrade_solve(source: &str, samples: usize) -> Result<u128, St
     Ok(median(values))
 }
 
-fn median_cold_solve(source: &str, samples: usize) -> Result<u128, String> {
+fn median_cold_solve(workload: Workload, source: &str, samples: usize) -> Result<u128, String> {
     let mut values = Vec::with_capacity(samples);
     for _ in 0..samples {
         let start = Instant::now();
-        let mut workspace = Workspace::new();
-        let loaded = workspace
-            .load_source("benchmark/cold", source.as_bytes())
+        let analysis = independent_clean_analysis(workload, "benchmark/cold", source)?;
+        black_box(analysis.proof.nodes.len());
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
+}
+
+fn independent_clean_analysis(
+    workload: Workload,
+    source_name: impl Into<String>,
+    source: &str,
+) -> Result<axiom_ledger::workspace::CommitAnalysis, String> {
+    let mut workspace = Workspace::new();
+    let mut loaded = workspace
+        .load_source(source_name, source.as_bytes())
+        .map_err(|error| error.to_string())?;
+    if workload == Workload::PackageUpgrade {
+        let package = workspace
+            .put_policy_package(StorePolicyPackage::new(
+                "lots/fifo",
+                "1.0.0",
+                b"selector=earliest_acquisition\ntie=ambiguous".to_vec(),
+            ))
             .map_err(|error| error.to_string())?;
-        let analysis = workspace
-            .analyze_commit(loaded.commit_id())
+        loaded = workspace
+            .commit_with_packages(loaded.commit_id(), [package])
             .map_err(|error| error.to_string())?;
+    }
+    workspace
+        .analyze_commit(loaded.commit_id())
+        .map_err(|error| error.to_string())
+}
+
+fn median_independent_clean_solve(
+    workload: Workload,
+    source: &str,
+    samples: usize,
+) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        let analysis =
+            independent_clean_analysis(workload, format!("benchmark/{}", workload.name()), source)?;
         black_box(analysis.proof.nodes.len());
         values.push(start.elapsed().as_nanos());
     }
@@ -684,6 +740,31 @@ fn median(mut values: Vec<u128>) -> u128 {
     values[values.len() / 2]
 }
 
+/// Return this process's peak resident set size when the target exposes a
+/// stable `getrusage` contract.  `ru_maxrss` is KiB on Linux and bytes on
+/// macOS.  Other targets intentionally report `None` instead of guessing at
+/// units or relying on a non-portable shell utility.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn process_peak_memory_bytes() -> Option<usize> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: `getrusage` initializes the supplied `rusage` structure when it
+    // returns zero, and the pointer is valid for the duration of the call.
+    let result = unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) };
+    if result != 0 {
+        return None;
+    }
+    // SAFETY: the successful call above initialized `usage`.
+    let usage = unsafe { usage.assume_init() };
+    let rss = u128::try_from(usage.ru_maxrss).ok()?;
+    let multiplier = if cfg!(target_os = "linux") { 1024 } else { 1 };
+    rss.checked_mul(multiplier)?.try_into().ok()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn process_peak_memory_bytes() -> Option<usize> {
+    None
+}
+
 fn self_test(quick: bool, scale: u64) -> Result<usize, String> {
     let test_scale = scale.min(2);
     let mut checks = 0usize;
@@ -731,6 +812,24 @@ fn self_test(quick: bool, scale: u64) -> Result<usize, String> {
         analysis
             .check_proof()
             .map_err(|error| format!("{}: self-test proof failed: {error}", workload.name()))?;
+        checks += 1;
+        let independent = independent_clean_analysis(
+            workload,
+            format!("benchmark/self-test/{}", workload.name()),
+            &left.source,
+        )
+        .map_err(|error| {
+            format!(
+                "{}: self-test independent recomputation failed: {error}",
+                workload.name()
+            )
+        })?;
+        if independent.analysis != *analysis {
+            return Err(format!(
+                "{}: self-test independent recomputation mismatch",
+                workload.name()
+            ));
+        }
         checks += 1;
         if workload == Workload::OneRowCloseChange || workload == Workload::PackageUpgrade {
             workspace.clear_incremental_trace();
@@ -858,11 +957,12 @@ fn print_json_line(record: &ResultRecord) {
     );
     let _ = write!(
         output,
-        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"solve_cold_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_full_solve_ns\":{}",
+        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_full_solve_ns\":{}",
         record.timing.generation_ns,
         option_number(record.timing.normalization_ns),
         option_number(record.timing.parse_ns),
         option_number(record.timing.solve_cold_ns),
+        option_number(record.timing.independent_clean_solve_ns),
         option_number(record.timing.workspace_replay_ns),
         option_number(record.timing.proof_check_ns),
         option_number(record.timing.explanation_ns),
@@ -892,7 +992,7 @@ fn print_json_line(record: &ResultRecord) {
     output.push_str("},\"metrics\":{");
     let _ = write!(
         output,
-        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"determinism_across_thread_counts\":{},\"same_process_cache_replay_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{}",
+        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"determinism_across_thread_counts\":{},\"same_process_cache_replay_equal\":{},\"independent_clean_recompute_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{}",
         option_number(record.metrics.cache_hits.map(|value| value as u128)),
         option_number(record.metrics.cache_misses.map(|value| value as u128)),
         option_number(
@@ -919,6 +1019,7 @@ fn print_json_line(record: &ResultRecord) {
         option_number(record.metrics.cycle_errors.map(|value| value as u128)),
         option_bool(record.metrics.determinism_across_thread_counts),
         option_bool(record.metrics.same_process_cache_replay_equal),
+        option_bool(record.metrics.independent_clean_recompute_equal),
         option_number(record.metrics.peak_memory_bytes.map(|value| value as u128)),
         option_bool(record.metrics.thread_count_equivalence),
         option_string(record.metrics.build_profile),

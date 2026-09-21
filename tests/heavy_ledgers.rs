@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 
+use axiom_ledger::engine::{IssueCode, ObservationStatus, RecognitionStatus};
 use axiom_ledger::evidence::{
     AdapterProvenance, Authority, Confidence, CorrectionScope, EvidenceLookup, EvidenceRelation,
     EvidenceStore, ImportBatch, RawEvidence, SourceSpan,
@@ -340,6 +341,280 @@ fn multi_year_fixture_parses_journal_subset() {
         .analysis
         .check_proof()
         .expect("fixture produces a valid proof graph");
+}
+
+/// A single source-ledger workload exercises the production path from strict
+/// parsing, through immutable source commits, to exact lot recognition.  The
+/// smaller differential corpus checks these rules independently; keeping this
+/// fixture here makes their interaction (and proof binding) auditable in one
+/// realistic ledger.
+#[test]
+fn heavy_ledger_allocates_lots_and_preserves_resolution_conflicts() {
+    const BASE: &str = r#"book tax-us
+
+buy lot/one on 2026-01-01
+  10 ABC into brokerage
+  for 200 USD
+
+buy lot/two on 2026-01-02
+  10 ABC into brokerage
+  for 300 USD
+
+buy lot/three on 2026-01-03
+  5 ABC into brokerage
+  for 125 USD
+
+sell sale/multi on 2026-02-01
+  15 ABC from brokerage
+  for 600 USD
+  lot ?lot
+
+sell sale/next on 2026-02-02
+  3 ABC from brokerage
+  for 150 USD
+  lot ?lot
+
+sell sale/over on 2026-02-03
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+
+use lots/fifo for tax-us
+observe position brokerage 7 ABC
+observe settlement sale/multi 600 USD into checking
+observe settlement sale/next 150 USD into checking
+"#;
+
+    let mut workspace = Workspace::new();
+    let loaded = workspace
+        .load_source("fixtures/heavy/complex-ledger", BASE)
+        .expect("heavy source enters immutable workspace");
+    let result = workspace
+        .analyze_commit(loaded.commit_id())
+        .expect("heavy source reaches proof-producing analysis");
+    let analysis = &result.analysis;
+
+    assert_eq!(analysis.lots.len(), 3);
+    assert_eq!(analysis.sales.len(), 3);
+    assert_eq!(
+        analysis.sale("sale/multi").unwrap().selected_lots,
+        ["lot/one", "lot/two"]
+    );
+    assert_eq!(analysis.sale("sale/multi").unwrap().allocations.len(), 2);
+    assert_eq!(
+        analysis
+            .sale("sale/multi")
+            .unwrap()
+            .allocations
+            .iter()
+            .map(|allocation| (
+                allocation.lot_id.as_str(),
+                allocation.quantity.canonical(),
+                allocation.basis.canonical(),
+                allocation.gain.canonical()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "lot/one",
+                "10 ABC".to_owned(),
+                "200 USD".to_owned(),
+                "200 USD".to_owned(),
+            ),
+            (
+                "lot/two",
+                "5 ABC".to_owned(),
+                "150 USD".to_owned(),
+                "50 USD".to_owned(),
+            ),
+        ]
+    );
+    assert_eq!(
+        analysis
+            .recognized_gain("sale/multi")
+            .unwrap()
+            .gain
+            .canonical(),
+        "250 USD"
+    );
+    assert_eq!(
+        analysis.sale("sale/next").unwrap().selected_lot.as_deref(),
+        Some("lot/two")
+    );
+    assert_eq!(
+        analysis.sale("sale/next").unwrap().allocations[0]
+            .quantity
+            .canonical(),
+        "3 ABC"
+    );
+    assert!(matches!(
+        analysis.sale("sale/over").unwrap().status,
+        RecognitionStatus::MissingLot
+    ));
+    assert!(analysis.issues.iter().any(|issue| {
+        issue.code == IssueCode::InsufficientInventory && issue.sale.as_deref() == Some("sale/over")
+    }));
+
+    // The observed position and both settlements are independently
+    // reproduced by the recognized events.  Only recognized sales reduce the
+    // position, so the over-consumption attempt does not forge a balance.
+    assert_eq!(analysis.positions.len(), 1);
+    assert_eq!(analysis.positions[0].status, ObservationStatus::Reconciled);
+    assert!(
+        analysis
+            .settlements
+            .iter()
+            .all(|settlement| settlement.status == ObservationStatus::Reconciled)
+    );
+    assert_eq!(analysis.journal.len(), 2);
+    assert!(analysis.journal.iter().all(|entry| entry.balanced()));
+    analysis
+        .check_proof()
+        .expect("untampered heavy proof checks");
+
+    // Two same-day sales compete for the same inventory.  The engine keeps
+    // both unresolved instead of allowing source ordering to choose a winner.
+    const SAME_DAY: &str = r#"book tax-us
+buy lot/alpha on 2026-01-01
+  5 ABC into brokerage
+  for 100 USD
+buy lot/beta on 2026-01-01
+  5 ABC into brokerage
+  for 120 USD
+sell same/a on 2026-02-01
+  5 ABC from brokerage
+  for 300 USD
+  lot ?lot
+sell same/b on 2026-02-01
+  5 ABC from brokerage
+  for 330 USD
+  lot ?lot
+"#;
+    let mut ambiguous_workspace = Workspace::new();
+    let ambiguous_source = ambiguous_workspace
+        .load_source("fixtures/heavy/same-day-ambiguous", SAME_DAY)
+        .expect("same-day source enters immutable workspace");
+    let ambiguous = ambiguous_workspace
+        .analyze_commit(ambiguous_source.commit_id())
+        .expect("same-day source reaches analysis");
+    assert_eq!(ambiguous.analysis.sales.len(), 2);
+    assert!(
+        ambiguous
+            .analysis
+            .sales
+            .iter()
+            .all(|sale| matches!(sale.status, RecognitionStatus::Ambiguous { .. }))
+    );
+    assert_eq!(
+        ambiguous
+            .analysis
+            .issues
+            .iter()
+            .filter(|issue| issue.code == IssueCode::AmbiguousLot)
+            .count(),
+        2
+    );
+
+    // Distinct user decisions make the same-day allocations independent.
+    let decided_source_text =
+        format!("{SAME_DAY}decide same/a lot lot/alpha\ndecide same/b lot lot/beta\n");
+    let mut decided_workspace = Workspace::new();
+    let decided_source = decided_workspace
+        .load_source("fixtures/heavy/same-day-decided", decided_source_text)
+        .expect("decided source enters immutable workspace");
+    let decided = decided_workspace
+        .analyze_commit(decided_source.commit_id())
+        .expect("decided source reaches analysis");
+    assert_eq!(decided.analysis.sales.len(), 2);
+    assert!(decided.analysis.sales.iter().all(|sale| {
+        matches!(sale.status, RecognitionStatus::Recognized) && sale.allocations.len() == 1
+    }));
+    assert_eq!(
+        decided.analysis.decisions,
+        vec!["lot/alpha".to_owned(), "lot/beta".to_owned()]
+    );
+    assert!(!decided.analysis.blocked());
+    decided
+        .analysis
+        .check_proof()
+        .expect("decisions are included in the proof graph");
+
+    // A contradictory position and a contradictory settlement remain visible
+    // as evidence conflicts; neither observation silently wins by row order.
+    let conflict_source_text = format!(
+        "{BASE}observe position brokerage 8 ABC\nobserve settlement sale/multi 599 USD into checking\n"
+    );
+    let mut conflict_workspace = Workspace::new();
+    let conflict_source = conflict_workspace
+        .load_source(
+            "fixtures/heavy/conflicting-observations",
+            conflict_source_text,
+        )
+        .expect("conflicting source enters immutable workspace");
+    let conflict = conflict_workspace
+        .analyze_commit(conflict_source.commit_id())
+        .expect("conflicting source reaches analysis");
+    assert_eq!(conflict.analysis.positions.len(), 2);
+    assert_eq!(
+        conflict
+            .analysis
+            .settlements
+            .iter()
+            .filter(|settlement| settlement.reference == "sale/multi")
+            .count(),
+        2
+    );
+    assert!(
+        conflict
+            .analysis
+            .positions
+            .iter()
+            .all(|position| { position.status == ObservationStatus::Conflict })
+    );
+    assert!(
+        conflict
+            .analysis
+            .settlements
+            .iter()
+            .filter(|settlement| settlement.reference == "sale/multi")
+            .all(|settlement| { settlement.status == ObservationStatus::Conflict })
+    );
+    assert!(
+        conflict
+            .analysis
+            .issues
+            .iter()
+            .any(|issue| { issue.code == IssueCode::PositionConflict })
+    );
+    assert!(
+        conflict
+            .analysis
+            .issues
+            .iter()
+            .any(|issue| { issue.code == IssueCode::SettlementConflict })
+    );
+    conflict
+        .analysis
+        .check_proof()
+        .expect("conflict explanations remain valid proof nodes");
+
+    // Proof nodes are content addressed.  Mutating a cloned result is
+    // rejected by the independent checker, demonstrating tamper detection
+    // without modifying the immutable workspace or source commit.
+    let mut tampered = decided.analysis.clone();
+    let root = *tampered
+        .proof
+        .roots
+        .first()
+        .expect("decided proof has a root");
+    tampered
+        .proof
+        .nodes
+        .get_mut(&root)
+        .expect("proof root has a node")
+        .metadata
+        .insert("tampered".into(), "yes".into());
+    assert!(tampered.check_proof().is_err());
 }
 
 #[test]

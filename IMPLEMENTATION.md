@@ -59,6 +59,9 @@ experiments, but it is not part of this contract.
 - [x] Position and cash-settlement observations reconcile.
 - [x] Journal is a derived monetary projection.
 - [ ] Every answer has a proposition-specific independently checked proof.
+  Lot allocation, inventory conservation, and recognized gain now use typed,
+  independently recomputed certificates; the remaining answer families still
+  need equivalent certificate types.
 - [x] Source-order property tests.
 - [x] Actual/scenario isolation test.
 - [x] Reference/production differential tests cover generated FIFO/LIFO,
@@ -76,7 +79,9 @@ experiments, but it is not part of this contract.
 - [ ] Theory boundaries for exact arithmetic, units, time, relations, and
   contract state.
 - [ ] Proof checker verifies every accepted certificate without invoking the
-  main solver.
+  main solver. Allocation, inventory-conservation, and recognition
+  certificates are now checked without the solver, including their typed
+  source edges and aggregate arithmetic.
 
 ### Gate 4 — language and incremental compiler
 
@@ -90,6 +95,9 @@ experiments, but it is not part of this contract.
   exact source/package edges and clean-run equivalence; invalidation within a
   source file is still stage-granular rather than proposition-granular.
 - [ ] Versioned package compiler, coherence checks, and lockfile.
+  The executable/store/workspace package boundary now has one lossless UTF-8
+  conversion, canonical body/dependency identity, and rejects unrepresentable
+  manifest metadata; compilation and lockfile resolution remain open.
 - [ ] LSP diagnostics, completion, and proof navigation foundation.
 
 ### Gate 5 — immutable store and reconciliation
@@ -122,7 +130,9 @@ experiments, but it is not part of this contract.
   per-book basis.
 - [x] Partial and multi-lot allocation without reuse, with exact proportional
   basis/proceeds, FIFO/LIFO package order, and allocation provenance nodes.
-  Proposition-specific independent checking remains open under Gate 2.
+  Typed allocation, conservation-chain, and recognition certificates are
+  independently recomputed and adversarially checked; other result families
+  remain open under Gate 2.
 - [x] Quotes carry time, venue, side, source, confidence, and validity.
 - [x] Exact path-preserving multi-currency valuation.
 - [ ] Corporate actions, debt schedules, collateral, and policy packages.
@@ -147,8 +157,8 @@ experiments, but it is not part of this contract.
 - [ ] Benchmark corpus and performance/invalidation metrics from section XVII.
   The runner covers all named shapes and reports unsupported semantics honestly;
   production Workspace cache/invalidation, normalization, and relation-size
-  metrics are measured; peak memory, parallel determinism, and several domain
-  workloads remain.
+  metrics, independent clean-recomputation equality, and process peak RSS are
+  measured; parallel determinism and several domain workloads remain.
 - [ ] Property, differential, incremental/full, and parallel/single-threaded
   equivalence suites.
 - [ ] Parser, canonicalization, unification, cycles, proof, packages, time,
@@ -160,16 +170,16 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 241 library tests, 4 CLI tests, and 3 independent reference/production
+- 246 library tests, 4 CLI tests, and 3 independent reference/production
   differential tests;
 - 134 named constitutional cases with 12 grouped smoke suites; 58 cases are
   explicit implementation inventory, and the remaining mappings still need
   independent case-specific assertions before Gate 0 can close;
-- 12 deterministic heavy-ledger integration tests and an explicit 10,000-row
+- 13 deterministic heavy-ledger integration tests and an explicit 10,000-row
   stress test;
 - an 11-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
-  clean-recomputation equivalence; unavailable peak-memory and parallel
+  clean-recomputation equivalence plus process peak RSS; unavailable parallel
   metrics remain explicitly `null` rather than simulated;
 - strict all-target Clippy and exact source-to-commit-to-analysis proof checks.
 

@@ -19,6 +19,7 @@ name = "axiom-ledger"
 version = "0.1.0"
 dependencies = [
  "blake3",
+ "libc",
  "num-bigint",
  "num-rational",
  "num-traits",

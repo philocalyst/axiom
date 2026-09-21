@@ -54,11 +54,36 @@ impl Statement {
     }
 }
 
+/// Exact, self-contained certificate for one lot slice. Kept behind one box
+/// in [`Operation`] so ordinary observation nodes stay compact.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct LotAllocationCertificate {
+    pub lot: String,
+    pub sale: String,
+    pub lot_proof: ProofId,
+    pub sale_proof: ProofId,
+    pub available: Exact,
+    pub allocated: Exact,
+    pub remaining: Exact,
+    pub sale_quantity: Exact,
+    pub sale_proceeds: Exact,
+    pub available_basis: Exact,
+    pub allocated_proceeds: Exact,
+    pub allocated_basis: Exact,
+    pub gain: Exact,
+    pub quantity_unit: String,
+    pub value_unit: String,
+}
+
 /// A deterministic derivation operation.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Operation {
     /// A source ledger fact or other immutable observation.
     Observation { source: String },
+    /// Source observation for one named acquisition lot.
+    LotObservation { lot: String, source: String },
+    /// Source observation for one named disposal.
+    SaleObservation { sale: String, source: String },
     /// A rule application.  The rule name is content-addressed by the
     /// package layer when one exists; the checker treats it as data.
     Derive { rule: String },
@@ -69,6 +94,37 @@ pub enum Operation {
         subtrahend: Exact,
         result: Exact,
         unit: String,
+    },
+    /// Exact allocation of part of a lot.  `available = allocated +
+    /// remaining` is checked independently of the engine.  Keeping the
+    /// quantities in the operation (rather than trusting metadata) makes the
+    /// proposition self-contained for a proof reader.
+    LotAllocation(Box<LotAllocationCertificate>),
+    /// One exact step of remaining-inventory conservation.  `predecessor`
+    /// points at the previous step, while `allocation` points at the one
+    /// typed lot slice consumed by this step.  Both references are also
+    /// required to occur in `inputs`; they are not metadata conventions.
+    InventoryConservation {
+        lot: String,
+        lot_proof: ProofId,
+        before: Exact,
+        consumed: Exact,
+        after: Exact,
+        unit: String,
+        predecessor: Option<ProofId>,
+        allocation: Option<ProofId>,
+    },
+    /// Exact recognized aggregate.  The checker recomputes every total from
+    /// direct [`LotAllocation`] inputs, so aggregate fields cannot be forged.
+    Recognition {
+        sale: String,
+        sale_proof: ProofId,
+        quantity: Exact,
+        proceeds: Exact,
+        basis: Exact,
+        gain: Exact,
+        quantity_unit: String,
+        value_unit: String,
     },
     /// A selected answer to an explicitly named resolution question.
     Decision { subject: String, answer: String },
@@ -87,8 +143,13 @@ impl Operation {
     fn tag(&self) -> &'static [u8] {
         match self {
             Self::Observation { .. } => b"observation",
+            Self::LotObservation { .. } => b"lot-observation",
+            Self::SaleObservation { .. } => b"sale-observation",
             Self::Derive { .. } => b"derive",
             Self::Arithmetic { .. } => b"arithmetic",
+            Self::LotAllocation(..) => b"lot-allocation",
+            Self::InventoryConservation { .. } => b"inventory-conservation",
+            Self::Recognition { .. } => b"recognition",
             Self::Decision { .. } => b"decision",
             Self::Policy { .. } => b"policy",
             Self::Conflict { .. } => b"conflict",
@@ -99,6 +160,14 @@ impl Operation {
         put_bytes(out, self.tag());
         match self {
             Self::Observation { source } => put_string(out, source),
+            Self::LotObservation { lot, source } => {
+                put_string(out, lot);
+                put_string(out, source);
+            }
+            Self::SaleObservation { sale, source } => {
+                put_string(out, sale);
+                put_string(out, source);
+            }
             Self::Derive { rule } => put_string(out, rule),
             Self::Arithmetic {
                 rule,
@@ -112,6 +181,61 @@ impl Operation {
                 put_string(out, &subtrahend.canonical_string());
                 put_string(out, &result.canonical_string());
                 put_string(out, unit);
+            }
+            Self::LotAllocation(certificate) => {
+                put_string(out, &certificate.lot);
+                put_string(out, &certificate.sale);
+                put_proof_id(out, &certificate.lot_proof);
+                put_proof_id(out, &certificate.sale_proof);
+                put_string(out, &certificate.available.canonical_string());
+                put_string(out, &certificate.allocated.canonical_string());
+                put_string(out, &certificate.remaining.canonical_string());
+                put_string(out, &certificate.sale_quantity.canonical_string());
+                put_string(out, &certificate.sale_proceeds.canonical_string());
+                put_string(out, &certificate.available_basis.canonical_string());
+                put_string(out, &certificate.allocated_proceeds.canonical_string());
+                put_string(out, &certificate.allocated_basis.canonical_string());
+                put_string(out, &certificate.gain.canonical_string());
+                put_string(out, &certificate.quantity_unit);
+                put_string(out, &certificate.value_unit);
+            }
+            Self::InventoryConservation {
+                lot,
+                lot_proof,
+                before,
+                consumed,
+                after,
+                unit,
+                predecessor,
+                allocation,
+            } => {
+                put_string(out, lot);
+                put_proof_id(out, lot_proof);
+                put_string(out, &before.canonical_string());
+                put_string(out, &consumed.canonical_string());
+                put_string(out, &after.canonical_string());
+                put_string(out, unit);
+                put_optional_proof_id(out, *predecessor);
+                put_optional_proof_id(out, *allocation);
+            }
+            Self::Recognition {
+                sale,
+                sale_proof,
+                quantity,
+                proceeds,
+                basis,
+                gain,
+                quantity_unit,
+                value_unit,
+            } => {
+                put_string(out, sale);
+                put_proof_id(out, sale_proof);
+                put_string(out, &quantity.canonical_string());
+                put_string(out, &proceeds.canonical_string());
+                put_string(out, &basis.canonical_string());
+                put_string(out, &gain.canonical_string());
+                put_string(out, quantity_unit);
+                put_string(out, value_unit);
             }
             Self::Decision { subject, answer } => {
                 put_string(out, subject);
@@ -261,12 +385,107 @@ impl Proof {
             {
                 return Err(CheckError::InvalidArithmetic { id: *id });
             }
+            match &node.operation {
+                Operation::LotAllocation(certificate) => {
+                    if !valid_lot_allocation(certificate)
+                        || !certificate_metadata_matches(
+                            &node.metadata,
+                            [
+                                ("lot", certificate.lot.clone()),
+                                ("sale", certificate.sale.clone()),
+                                ("available", certificate.available.canonical_string()),
+                                ("allocated", certificate.allocated.canonical_string()),
+                                ("remaining", certificate.remaining.canonical_string()),
+                                (
+                                    "sale-quantity",
+                                    certificate.sale_quantity.canonical_string(),
+                                ),
+                                (
+                                    "sale-proceeds",
+                                    certificate.sale_proceeds.canonical_string(),
+                                ),
+                                (
+                                    "available-basis",
+                                    certificate.available_basis.canonical_string(),
+                                ),
+                                (
+                                    "allocated-proceeds",
+                                    certificate.allocated_proceeds.canonical_string(),
+                                ),
+                                (
+                                    "allocated-basis",
+                                    certificate.allocated_basis.canonical_string(),
+                                ),
+                                ("gain", certificate.gain.canonical_string()),
+                                ("quantity-unit", certificate.quantity_unit.clone()),
+                                ("value-unit", certificate.value_unit.clone()),
+                            ],
+                        )
+                    {
+                        return Err(CheckError::InvalidLotAllocation { id: *id });
+                    }
+                }
+                Operation::InventoryConservation {
+                    lot,
+                    before,
+                    consumed,
+                    after,
+                    unit,
+                    ..
+                } => {
+                    if !valid_inventory_conservation(lot, before, consumed, after, unit)
+                        || !certificate_metadata_matches(
+                            &node.metadata,
+                            [
+                                ("lot", lot.clone()),
+                                ("before", before.canonical_string()),
+                                ("consumed", consumed.canonical_string()),
+                                ("after", after.canonical_string()),
+                                ("unit", unit.clone()),
+                            ],
+                        )
+                    {
+                        return Err(CheckError::InvalidInventoryConservation { id: *id });
+                    }
+                }
+                Operation::Recognition {
+                    sale,
+                    quantity,
+                    proceeds,
+                    basis,
+                    gain,
+                    quantity_unit,
+                    value_unit,
+                    ..
+                } if !valid_recognition(
+                    sale,
+                    quantity,
+                    proceeds,
+                    basis,
+                    gain,
+                    quantity_unit,
+                    value_unit,
+                ) =>
+                {
+                    return Err(CheckError::InvalidRecognition { id: *id });
+                }
+                _ => {}
+            }
             let invalid_operation = match &node.operation {
                 Operation::Observation { source } => source.trim().is_empty(),
+                Operation::LotObservation { lot, source } => {
+                    lot.trim().is_empty() || source.trim().is_empty()
+                }
+                Operation::SaleObservation { sale, source } => {
+                    sale.trim().is_empty() || source.trim().is_empty()
+                }
                 Operation::Derive { rule } => rule.trim().is_empty(),
                 Operation::Arithmetic { rule, unit, .. } => {
                     rule.trim().is_empty() || unit.trim().is_empty()
                 }
+                Operation::LotAllocation(..)
+                | Operation::InventoryConservation { .. }
+                | Operation::Recognition { .. } => false,
                 Operation::Decision { subject, answer } => {
                     subject.trim().is_empty() || answer.trim().is_empty()
                 }
@@ -295,9 +514,184 @@ impl Proof {
                 }
             }
         }
+        // Proposition-specific edges are checked after all nodes have passed
+        // their local payload checks.  The typed pointers below prevent a
+        // certificate from borrowing a same-shaped operation in another lot,
+        // and reject reusing one allocation in two inventory histories.
+        let mut allocation_uses: BTreeMap<ProofId, ProofId> = BTreeMap::new();
+        let mut predecessor_uses: BTreeMap<ProofId, ProofId> = BTreeMap::new();
+        for (id, node) in &self.nodes {
+            match &node.operation {
+                Operation::LotAllocation(certificate) => {
+                    if !node.inputs.contains(&certificate.lot_proof)
+                        || !node.inputs.contains(&certificate.sale_proof)
+                        || !is_lot_observation(
+                            self.nodes.get(&certificate.lot_proof),
+                            &certificate.lot,
+                        )
+                        || !is_sale_observation(
+                            self.nodes.get(&certificate.sale_proof),
+                            &certificate.sale,
+                        )
+                    {
+                        return Err(CheckError::InvalidLotAllocation { id: *id });
+                    }
+                }
+                Operation::InventoryConservation {
+                    lot,
+                    lot_proof,
+                    before,
+                    consumed,
+                    after,
+                    unit,
+                    predecessor,
+                    allocation,
+                } => {
+                    if !node.inputs.contains(lot_proof)
+                        || !is_lot_observation(self.nodes.get(lot_proof), lot)
+                    {
+                        return Err(CheckError::InvalidInventoryConservation { id: *id });
+                    }
+                    if let Some(previous_id) = predecessor {
+                        if !node.inputs.contains(previous_id)
+                            || predecessor_uses.insert(*previous_id, *id).is_some()
+                        {
+                            return Err(CheckError::InvalidInventoryConservation { id: *id });
+                        }
+                        let Some(previous_node) = self.nodes.get(previous_id) else {
+                            return Err(CheckError::InvalidInventoryConservation { id: *id });
+                        };
+                        let Operation::InventoryConservation {
+                            lot: previous_lot,
+                            lot_proof: previous_lot_proof,
+                            after: previous_after,
+                            unit: previous_unit,
+                            ..
+                        } = &previous_node.operation
+                        else {
+                            return Err(CheckError::InvalidInventoryConservation { id: *id });
+                        };
+                        if previous_lot != lot
+                            || previous_lot_proof != lot_proof
+                            || previous_unit != unit
+                            || previous_after != before
+                        {
+                            return Err(CheckError::InvalidInventoryConservation { id: *id });
+                        }
+                    } else if node.inputs.iter().any(|input| {
+                        matches!(
+                            self.nodes.get(input).map(|node| &node.operation),
+                            Some(Operation::InventoryConservation { .. })
+                        )
+                    }) {
+                        return Err(CheckError::InvalidInventoryConservation { id: *id });
+                    }
+
+                    if let Some(allocation_id) = allocation {
+                        if !node.inputs.contains(allocation_id)
+                            || allocation_uses.insert(*allocation_id, *id).is_some()
+                        {
+                            return Err(CheckError::InvalidInventoryConservation { id: *id });
+                        }
+                        let Some(allocation_node) = self.nodes.get(allocation_id) else {
+                            return Err(CheckError::InvalidInventoryConservation { id: *id });
+                        };
+                        let Operation::LotAllocation(certificate) = &allocation_node.operation
+                        else {
+                            return Err(CheckError::InvalidInventoryConservation { id: *id });
+                        };
+                        if &certificate.lot != lot
+                            || &certificate.lot_proof != lot_proof
+                            || &certificate.quantity_unit != unit
+                            || &certificate.available != before
+                            || &certificate.allocated != consumed
+                            || &certificate.remaining != after
+                        {
+                            return Err(CheckError::InvalidInventoryConservation { id: *id });
+                        }
+                    } else if !consumed.is_zero() {
+                        return Err(CheckError::InvalidInventoryConservation { id: *id });
+                    }
+                }
+                Operation::Recognition {
+                    sale,
+                    sale_proof,
+                    quantity,
+                    proceeds,
+                    basis,
+                    gain,
+                    quantity_unit,
+                    value_unit,
+                } => {
+                    if !node.inputs.contains(sale_proof)
+                        || !is_sale_observation(self.nodes.get(sale_proof), sale)
+                    {
+                        return Err(CheckError::InvalidRecognition { id: *id });
+                    }
+                    let mut total_quantity = Exact::from(0i64);
+                    let mut total_proceeds = Exact::from(0i64);
+                    let mut total_basis = Exact::from(0i64);
+                    let mut total_gain = Exact::from(0i64);
+                    let mut saw_allocation = false;
+                    for input in &node.inputs {
+                        let input_node = self.nodes.get(input).expect("inputs checked above");
+                        let Operation::LotAllocation(certificate) = &input_node.operation else {
+                            continue;
+                        };
+                        saw_allocation = true;
+                        if &certificate.sale != sale
+                            || &certificate.sale_proof != sale_proof
+                            || &certificate.quantity_unit != quantity_unit
+                            || &certificate.value_unit != value_unit
+                        {
+                            return Err(CheckError::InvalidRecognition { id: *id });
+                        }
+                        total_quantity = total_quantity.checked_add(&certificate.allocated);
+                        total_proceeds =
+                            total_proceeds.checked_add(&certificate.allocated_proceeds);
+                        total_basis = total_basis.checked_add(&certificate.allocated_basis);
+                        total_gain = total_gain.checked_add(&certificate.gain);
+                    }
+                    if !saw_allocation
+                        || total_quantity != *quantity
+                        || total_proceeds != *proceeds
+                        || total_basis != *basis
+                        || total_gain != *gain
+                    {
+                        return Err(CheckError::InvalidRecognition { id: *id });
+                    }
+                }
+                _ => {}
+            }
+        }
         for root in &self.roots {
             if !self.nodes.contains_key(root) {
                 return Err(CheckError::MissingRoot { root: *root });
+            }
+        }
+        let mut reachable = BTreeSet::new();
+        let mut pending = self.roots.clone();
+        while let Some(id) = pending.pop() {
+            if reachable.insert(id) {
+                pending.extend(
+                    self.nodes
+                        .get(&id)
+                        .expect("roots and inputs were checked")
+                        .inputs
+                        .iter()
+                        .copied(),
+                );
+            }
+        }
+        for (id, node) in &self.nodes {
+            if matches!(
+                node.operation,
+                Operation::LotAllocation(..)
+                    | Operation::InventoryConservation { .. }
+                    | Operation::Recognition { .. }
+            ) && !reachable.contains(id)
+            {
+                return Err(CheckError::UnreachableCertificate { id: *id });
             }
         }
         // Kahn's algorithm catches both self-dependencies and longer cycles.
@@ -392,6 +786,10 @@ pub enum CheckError {
     MissingRoot { root: ProofId },
     MissingNode { id: ProofId },
     InvalidArithmetic { id: ProofId },
+    InvalidLotAllocation { id: ProofId },
+    InvalidInventoryConservation { id: ProofId },
+    InvalidRecognition { id: ProofId },
+    UnreachableCertificate { id: ProofId },
     InvalidOperation { id: ProofId },
     Cycle,
 }
@@ -418,6 +816,27 @@ impl fmt::Display for CheckError {
                     "proof node {id} contains an invalid arithmetic certificate"
                 )
             }
+            Self::InvalidLotAllocation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid lot allocation certificate"
+                )
+            }
+            Self::InvalidInventoryConservation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid inventory conservation certificate"
+                )
+            }
+            Self::InvalidRecognition { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid recognition certificate"
+                )
+            }
+            Self::UnreachableCertificate { id } => {
+                write!(f, "proof certificate {id} is not reachable from any root")
+            }
             Self::InvalidOperation { id } => {
                 write!(f, "proof node {id} contains an invalid operation")
             }
@@ -427,6 +846,112 @@ impl fmt::Display for CheckError {
 }
 
 impl std::error::Error for CheckError {}
+
+fn valid_lot_allocation(certificate: &LotAllocationCertificate) -> bool {
+    let Some(sale_ratio) = certificate
+        .allocated
+        .checked_div(&certificate.sale_quantity)
+        .ok()
+    else {
+        return false;
+    };
+    let Some(inventory_ratio) = certificate
+        .allocated
+        .checked_div(&certificate.available)
+        .ok()
+    else {
+        return false;
+    };
+    !certificate.lot.trim().is_empty()
+        && !certificate.sale.trim().is_empty()
+        && !certificate.quantity_unit.trim().is_empty()
+        && !certificate.value_unit.trim().is_empty()
+        && !certificate.available.is_negative()
+        && !certificate.allocated.is_negative()
+        && !certificate.remaining.is_negative()
+        && !certificate.sale_quantity.is_negative()
+        && !certificate.sale_quantity.is_zero()
+        && !certificate.sale_proceeds.is_negative()
+        && !certificate.available_basis.is_negative()
+        && !certificate.allocated_proceeds.is_negative()
+        && !certificate.allocated_basis.is_negative()
+        // A zero-sized allocation is not an allocation.  This catches a
+        // common forged certificate in which no inventory was actually used.
+        && !certificate.allocated.is_zero()
+        && certificate.allocated <= certificate.available
+        && certificate.allocated <= certificate.sale_quantity
+        && certificate.available.checked_sub(&certificate.allocated) == certificate.remaining
+        && certificate.sale_proceeds.checked_mul(&sale_ratio) == certificate.allocated_proceeds
+        && certificate.available_basis.checked_mul(&inventory_ratio)
+            == certificate.allocated_basis
+        && certificate
+            .allocated_proceeds
+            .checked_sub(&certificate.allocated_basis)
+            == certificate.gain
+}
+
+fn valid_inventory_conservation(
+    lot: &str,
+    before: &Exact,
+    consumed: &Exact,
+    after: &Exact,
+    unit: &str,
+) -> bool {
+    !lot.trim().is_empty()
+        && !unit.trim().is_empty()
+        && !before.is_negative()
+        && !consumed.is_negative()
+        && !after.is_negative()
+        && before.checked_sub(consumed) == *after
+}
+
+fn valid_recognition(
+    sale: &str,
+    quantity: &Exact,
+    proceeds: &Exact,
+    basis: &Exact,
+    gain: &Exact,
+    quantity_unit: &str,
+    value_unit: &str,
+) -> bool {
+    !sale.trim().is_empty()
+        && !quantity_unit.trim().is_empty()
+        && !value_unit.trim().is_empty()
+        && !quantity.is_negative()
+        && !proceeds.is_negative()
+        && !basis.is_negative()
+        && proceeds.checked_sub(basis) == *gain
+}
+
+fn is_lot_observation(node: Option<&Node>, lot: &str) -> bool {
+    matches!(
+        node.map(|node| &node.operation),
+        Some(Operation::LotObservation { lot: observed, .. }) if observed == lot
+    )
+}
+
+fn is_sale_observation(node: Option<&Node>, sale: &str) -> bool {
+    matches!(
+        node.map(|node| &node.operation),
+        Some(Operation::SaleObservation { sale: observed, .. }) if observed == sale
+    )
+}
+
+/// Metadata remains diagnostic and extensible, but fields that duplicate a
+/// proposition's typed payload must agree when present.  In particular this
+/// prevents a caller from re-hashing a node with a forged `lot` or amount in
+/// metadata and presenting it as an explanation for a different proposition.
+fn certificate_metadata_matches<I>(metadata: &BTreeMap<String, String>, expected: I) -> bool
+where
+    I: IntoIterator<Item = (&'static str, String)>,
+{
+    expected.into_iter().all(|(key, value)| {
+        metadata
+            .get(key)
+            .map(|actual| actual == &value)
+            .unwrap_or(true)
+    })
+}
 
 fn hash_node(
     statement: &Statement,
@@ -465,6 +990,20 @@ fn put_u64(out: &mut Vec<u8>, value: u64) {
 fn put_bytes(out: &mut Vec<u8>, value: &[u8]) {
     put_u64(out, value.len() as u64);
     out.extend_from_slice(value);
+}
+
+fn put_proof_id(out: &mut Vec<u8>, value: &ProofId) {
+    out.extend_from_slice(&value.0);
+}
+
+fn put_optional_proof_id(out: &mut Vec<u8>, value: Option<ProofId>) {
+    match value {
+        Some(value) => {
+            out.push(1);
+            put_proof_id(out, &value);
+        }
+        None => out.push(0),
+    }
 }
 
 fn put_string(out: &mut Vec<u8>, value: &str) {
@@ -574,6 +1113,105 @@ mod tests {
         assert!(matches!(
             proof.check(),
             Err(CheckError::InvalidArithmetic { .. })
+        ));
+    }
+
+    fn allocation_fixture(allocation_remaining: i64, conservation_consumed: i64) -> Proof {
+        let lot = Node::new(
+            "lot/one",
+            Operation::LotObservation {
+                lot: "lot/one".into(),
+                source: "buy lot/one".into(),
+            },
+            vec![],
+            BTreeMap::new(),
+        );
+        let sale = Node::new(
+            "sale/one",
+            Operation::SaleObservation {
+                sale: "sale/one".into(),
+                source: "sell sale/one".into(),
+            },
+            vec![],
+            BTreeMap::new(),
+        );
+        let allocation = Node::new(
+            "allocate 3 ABC from lot/one",
+            Operation::LotAllocation(Box::new(LotAllocationCertificate {
+                lot: "lot/one".into(),
+                sale: "sale/one".into(),
+                lot_proof: lot.id,
+                sale_proof: sale.id,
+                available: Exact::from(10i64),
+                allocated: Exact::from(3i64),
+                remaining: Exact::from(allocation_remaining),
+                sale_quantity: Exact::from(5i64),
+                sale_proceeds: Exact::from(50i64),
+                available_basis: Exact::from(40i64),
+                allocated_proceeds: Exact::from(30i64),
+                allocated_basis: Exact::from(12i64),
+                gain: Exact::from(18i64),
+                quantity_unit: "ABC".into(),
+                value_unit: "USD".into(),
+            })),
+            vec![lot.id, sale.id],
+            BTreeMap::new(),
+        );
+        let conservation = Node::new(
+            "remaining ABC in lot/one",
+            Operation::InventoryConservation {
+                lot: "lot/one".into(),
+                lot_proof: lot.id,
+                before: Exact::from(10i64),
+                consumed: Exact::from(conservation_consumed),
+                after: Exact::from(10i64).checked_sub(&Exact::from(conservation_consumed)),
+                unit: "ABC".into(),
+                predecessor: None,
+                allocation: Some(allocation.id),
+            },
+            vec![lot.id, allocation.id],
+            BTreeMap::new(),
+        );
+        let recognition = Node::new(
+            "recognize sale/one",
+            Operation::Recognition {
+                sale: "sale/one".into(),
+                sale_proof: sale.id,
+                quantity: Exact::from(3i64),
+                proceeds: Exact::from(30i64),
+                basis: Exact::from(12i64),
+                gain: Exact::from(18i64),
+                quantity_unit: "ABC".into(),
+                value_unit: "USD".into(),
+            },
+            vec![sale.id, allocation.id],
+            BTreeMap::new(),
+        );
+        let mut proof = Proof::new();
+        proof.insert(lot);
+        proof.insert(sale);
+        proof.insert(allocation);
+        let conservation = proof.insert(conservation);
+        let recognition = proof.insert(recognition);
+        proof.root(conservation);
+        proof.root(recognition);
+        proof
+    }
+
+    #[test]
+    fn checker_verifies_typed_allocation_conservation_and_recognition() {
+        assert!(allocation_fixture(7, 3).check().is_ok());
+    }
+
+    #[test]
+    fn checker_rejects_rehashed_forged_certificates() {
+        assert!(matches!(
+            allocation_fixture(8, 3).check(),
+            Err(CheckError::InvalidLotAllocation { .. })
+        ));
+        assert!(matches!(
+            allocation_fixture(7, 4).check(),
+            Err(CheckError::InvalidInventoryConservation { .. })
         ));
     }
 
