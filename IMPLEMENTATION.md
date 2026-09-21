@@ -69,6 +69,10 @@ experiments, but it is not part of this contract.
   books, and sales outside the requested period cannot authorize this path.
   This deliberately narrow API does not yet claim general close semantics for
   non-sale economic systems or mixed-period ledgers.
+- [x] Analysis proofs bind their immutable source commit with a typed proof
+  operation rather than a `commit:<hash>` string convention. The checker
+  requires one rooted binding covering every other terminal root, and the
+  store requires its external address to name an actual commit.
 - [ ] Every answer has a proposition-specific independently checked proof.
   Lot allocation, inventory conservation, and recognized gain now use typed,
   independently recomputed certificates. Direct obligations, settlement

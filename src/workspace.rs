@@ -36,7 +36,7 @@ use crate::package::{PolicyPackage as ExecutablePolicyPackage, PolicyRegistry};
 use crate::package_compiler::{self, CompiledArtifact, PackageCompileError, PackageInput};
 use crate::package_lock::Lockfile;
 use crate::parser::{self, ParseError};
-use crate::proof::{Node, Operation, Proof};
+use crate::proof::{CommitBindingCertificate, Node, Operation, Proof};
 use crate::store::{
     ANALYSIS_AUTHOR, AnalysisArtifact, Close, CloseId, Commit, CommitId, CompiledArtifactId,
     CompiledArtifactObject, Evidence, EvidenceId, EvidenceState, ObjectStore, PackageId, Period,
@@ -184,32 +184,13 @@ impl CommitAnalysis {
 
     pub fn check_proof(&self) -> Result<(), crate::proof::CheckError> {
         self.analysis.check_proof()?;
-        let expected = self.source_commit.hash().to_string();
-        let mut bindings = self.analysis.proof.nodes.values().filter(|node| {
-            matches!(
-                &node.operation,
-                Operation::Observation { source } if source.starts_with("commit:")
-            )
-        });
-        let Some(binding) = bindings.next() else {
-            return Err(crate::proof::CheckError::InvalidOperation {
+        let expected = self.source_commit.hash();
+        if self.ledger.source_commit != self.source_commit
+            || self.analysis.proof.bound_commit()? != Some(expected)
+        {
+            return Err(crate::proof::CheckError::InvalidCommitBinding {
                 id: crate::proof::ProofId::ZERO,
             });
-        };
-        let valid_operation = matches!(
-            &binding.operation,
-            Operation::Observation { source } if source == &format!("commit:{expected}")
-        );
-        let mut expected_inputs = self.analysis.proof.roots.clone();
-        expected_inputs.retain(|root| *root != binding.id);
-        if bindings.next().is_some()
-            || self.ledger.source_commit != self.source_commit
-            || !valid_operation
-            || binding.metadata.get("source-commit") != Some(&expected)
-            || !self.analysis.proof.roots.contains(&binding.id)
-            || binding.inputs != expected_inputs
-        {
-            return Err(crate::proof::CheckError::InvalidOperation { id: binding.id });
         }
         Ok(())
     }
@@ -880,10 +861,6 @@ impl Workspace {
                 let mut analysis = report;
                 let mut metadata = BTreeMap::from([
                     (
-                        "source-commit".to_string(),
-                        source_for_query.commit.hash().to_string(),
-                    ),
-                    (
                         "source-evidence".to_string(),
                         source_for_query.evidence.content().to_string(),
                     ),
@@ -895,9 +872,9 @@ impl Workspace {
                 let original_roots = analysis.proof.roots.clone();
                 let binding = analysis.proof.insert(Node::new(
                     format!("source commit {}", source_for_query.commit.hash()),
-                    Operation::Observation {
-                        source: format!("commit:{}", source_for_query.commit.hash()),
-                    },
+                    Operation::CommitBinding(CommitBindingCertificate {
+                        commit: source_for_query.commit.hash(),
+                    }),
                     original_roots,
                     metadata.clone(),
                 ));
@@ -1563,8 +1540,17 @@ mod tests {
         assert_eq!(evaluated.source_commit, source.commit);
         assert_eq!(evaluated.ledger.source_commit, source.commit);
         assert_eq!(
-            evaluated.metadata.get("source-commit").map(String::as_str),
-            Some(source.commit.hash().to_string().as_str())
+            evaluated
+                .analysis
+                .proof
+                .nodes
+                .values()
+                .filter_map(|node| match &node.operation {
+                    Operation::CommitBinding(certificate) => Some(certificate.commit),
+                    _ => None,
+                })
+                .collect::<Vec<_>>(),
+            vec![source.commit.hash()]
         );
         evaluated.check_proof().unwrap();
         assert!(workspace.store().proof(evaluated.proof_id).is_ok());
@@ -1588,12 +1574,7 @@ mod tests {
             .proof
             .nodes
             .values()
-            .find(|node| {
-                matches!(
-                    &node.operation,
-                    Operation::Observation { source } if source.starts_with("commit:")
-                )
-            })
+            .find(|node| matches!(&node.operation, Operation::CommitBinding(..)))
             .unwrap()
             .id;
         missing_binding

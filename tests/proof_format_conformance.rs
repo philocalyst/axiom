@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 
 use axiom_ledger::exact::Exact;
+use axiom_ledger::model::ContentHash;
 use axiom_ledger::proof::{CheckError, Node, Operation, Proof, ProofId, Statement};
 
 fn put_u64(out: &mut Vec<u8>, value: u64) {
@@ -41,6 +42,10 @@ fn independent_operation(out: &mut Vec<u8>, operation: &Operation) {
         Operation::Observation { source } => {
             put_bytes(out, b"observation");
             put_string(out, source);
+        }
+        Operation::CommitBinding(certificate) => {
+            put_bytes(out, b"commit-binding");
+            out.extend_from_slice(certificate.commit.as_bytes());
         }
         Operation::Derive { rule } => {
             put_bytes(out, b"derive");
@@ -190,6 +195,29 @@ fn fixture(insert_reverse: bool) -> (Proof, ProofId, ProofId) {
     }
     proof.root(derived.id);
     (proof, leaf.id, derived.id)
+}
+
+#[test]
+fn commit_binding_encoding_matches_independent_encoder() {
+    let commit = ContentHash::domain_separated("test/commit", b"immutable-source");
+    let node = Node::new(
+        "source commit",
+        Operation::CommitBinding(axiom_ledger::proof::CommitBindingCertificate { commit }),
+        vec![],
+        metadata(&[("location", "line 1")]),
+    );
+    let mut proof = Proof::new();
+    let root = proof.insert(node);
+    proof.root(root);
+    assert!(proof.check().is_ok());
+    assert_eq!(
+        proof.canonical_bytes(),
+        independent_canonical_bytes(&proof, b"axiom/canonical-proof/v1")
+    );
+    assert_eq!(
+        proof.content_hash(),
+        independent_content_hash(&proof, b"axiom/proof/v1")
+    );
 }
 
 #[test]

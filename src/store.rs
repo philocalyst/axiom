@@ -714,15 +714,15 @@ impl ProofObject {
         Self { proof, roots }
     }
 
-    /// Persist canonical proof content in the store envelope.
-    pub fn from_proof(proof: CanonicalProof) -> Self {
-        let mut proof = proof;
+    /// Construct a checked store envelope from canonical proof content. A
+    /// commit binding supplies its own external commit root; invalid graphs
+    /// fail here instead of degrading into apparently unbound proofs.
+    pub fn from_proof(mut proof: CanonicalProof) -> Result<Self, crate::proof::CheckError> {
         proof.roots.sort();
         proof.roots.dedup();
-        Self {
-            proof,
-            roots: Vec::new(),
-        }
+        proof.check()?;
+        let roots = proof.bound_commit()?.into_iter().collect();
+        Ok(Self { proof, roots })
     }
 
     pub fn canonical_proof(&self) -> &CanonicalProof {
@@ -1402,39 +1402,17 @@ impl ObjectStore {
             .proof
             .check()
             .map_err(|error| StoreError::InvalidObject(format!("invalid proof: {error}")))?;
-        let commit_bindings = value
+        if let Some(commit) = value
             .proof
-            .nodes
-            .values()
-            .filter(|node| {
-                matches!(
-                    &node.operation,
-                    CanonicalOperation::Observation { source }
-                        if source.starts_with("commit:")
-                )
-            })
-            .collect::<Vec<_>>();
-        if !commit_bindings.is_empty() {
-            let binding = commit_bindings[0];
-            let expected = value.roots.first().map(ToString::to_string);
-            let source_matches = matches!(
-                &binding.operation,
-                CanonicalOperation::Observation { source }
-                    if Some(source.strip_prefix("commit:").unwrap_or_default())
-                        == expected.as_deref()
-            );
-            let mut expected_inputs = value.proof.roots.clone();
-            expected_inputs.retain(|root| *root != binding.id);
-            if commit_bindings.len() != 1
-                || value.roots.len() != 1
-                || !source_matches
-                || !value.proof.roots.contains(&binding.id)
-                || binding.inputs != expected_inputs
-            {
+            .bound_commit()
+            .map_err(|error| StoreError::InvalidObject(format!("invalid proof: {error}")))?
+        {
+            if value.roots != vec![commit] {
                 return Err(StoreError::InvalidObject(
                     "proof commit binding does not match its external root".into(),
                 ));
             }
+            self.require_kind(commit, ObjectKind::Commit)?;
         }
         for root in &value.roots {
             if *root != ContentHash::ZERO {
@@ -1482,34 +1460,9 @@ impl ObjectStore {
                 "analysis artifact proof must bind exactly its source commit".into(),
             ));
         }
-        let bindings = proof
-            .proof
-            .nodes
-            .values()
-            .filter(|node| {
-                matches!(
-                    &node.operation,
-                    CanonicalOperation::Observation { source } if source.starts_with("commit:")
-                )
-            })
-            .collect::<Vec<_>>();
-        let Some(binding) = bindings.first() else {
-            return Err(StoreError::InvalidObject(
-                "analysis artifact proof has no exact source binding".into(),
-            ));
-        };
-        let expected = source_id.hash().to_string();
-        let valid_binding = matches!(
-            &binding.operation,
-            CanonicalOperation::Observation { source } if source == &format!("commit:{expected}")
-        );
-        let mut expected_inputs = proof.proof.roots.clone();
-        expected_inputs.retain(|root| *root != binding.id);
-        if bindings.len() != 1
-            || !proof.proof.roots.contains(&binding.id)
-            || !valid_binding
-            || binding.metadata.get("source-commit") != Some(&expected)
-            || binding.inputs != expected_inputs
+        if proof.proof.bound_commit().map_err(|error| {
+            StoreError::InvalidObject(format!("invalid analysis artifact proof: {error}"))
+        })? != Some(source_id.hash())
         {
             return Err(StoreError::InvalidObject(
                 "analysis artifact proof source binding is not exact".into(),
@@ -4212,7 +4165,7 @@ mod tests {
 
         let mut store = ObjectStore::new();
         let address = store
-            .put_proof(ProofObject::from_proof(result.proof_graph().clone()))
+            .put_proof(ProofObject::from_proof(result.proof_graph().clone()).unwrap())
             .expect("canonical proof persists");
         let loaded = store.proof(address).expect("proof reloads");
         loaded
@@ -4223,5 +4176,33 @@ mod tests {
             loaded.canonical_proof().content_hash(),
             result.proof_graph().content_hash()
         );
+    }
+
+    #[test]
+    fn commit_binding_requires_a_commit_external_root() {
+        let mut store = ObjectStore::new();
+        let statement = store
+            .put_statement(Statement::new("subject", "predicate", "object"))
+            .unwrap();
+        let mut proof = CanonicalProof::new();
+        let binding = proof.insert(CanonicalNode::new(
+            "typed commit binding",
+            CanonicalOperation::CommitBinding(crate::proof::CommitBindingCertificate {
+                commit: statement.hash(),
+            }),
+            Vec::new(),
+            BTreeMap::new(),
+        ));
+        proof.root(binding);
+        let envelope = ProofObject::from_proof(proof).unwrap();
+        assert_eq!(envelope.roots, vec![statement.hash()]);
+        assert!(matches!(
+            store.put_proof(envelope),
+            Err(StoreError::WrongKind {
+                expected: ObjectKind::Commit,
+                actual: ObjectKind::Statement,
+                ..
+            })
+        ));
     }
 }

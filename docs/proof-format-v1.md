@@ -61,6 +61,7 @@ tag and payload order.  Names in parentheses are the public Rust fields.
 | operation | tag | payload |
 | --- | --- | --- |
 | `Observation { source }` | `observation` | `string(source)` |
+| `CommitBinding(CommitBindingCertificate { commit })` | `commit-binding` | exactly 32 raw bytes of `commit` |
 | `QuoteObservation` | `quote-observation` | `string(quote) || string(date) || string(base) || string(base_unit) || string(quote_amount) || string(quote_unit)` |
 | `PositionObservation` | `position-observation` | `string(account) || string(quantity) || string(unit)` |
 | `CashSettlementObservation` | `cash-settlement-observation` | `string(reference) || string(amount) || string(unit) || optional-string(into)` |
@@ -153,9 +154,16 @@ identity checks above:
 3. exact arithmetic for `Arithmetic` and the typed lot, inventory,
    recognition, obligation, settlement, position, journal, and satisfaction
    certificates;
-4. typed source validation, duplicate source-observation detection, endpoint
+4. typed source validation, exact immutable commit-binding validation,
+   duplicate source-observation detection, endpoint
    and proof-ID binding, conservation, and status/history rules defined by the
    corresponding certificate structs in `src/proof.rs`.
+
+When a stored proof carries `CommitBinding`, its sole external root must equal
+the certificate hash and resolve to a stored commit; another object kind at
+the same typed boundary is invalid. Generic `Observation` sources beginning
+with the reserved `commit:` prefix are rejected rather than treated as a
+second, stringly binding path.
 
 The checker does not execute the engine or treat statement text and arbitrary
 metadata as proof semantics.  `location` is diagnostic metadata.  A caller
@@ -164,7 +172,7 @@ must call `check()` (or `check_member()`) before trusting a non-zero ID.
 ## Conformance and limitations
 
 `tests/proof_format_conformance.rs` is a small executable reference encoder
-for `Observation` and `Derive`, plus fixed hash vectors.  It checks canonical
+for `Observation`, `CommitBinding`, and `Derive`, plus fixed hash vectors.  It checks canonical
 ordering, tamper rejection, version labels, and domain separation against the
 public producer/checker API.  It is intentionally not a second implementation
 of every semantic certificate rule.  The current test suite therefore proves

@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::exact::Exact;
+use crate::model::ContentHash;
 
 /// A 256 bit, content-addressed proof node identifier.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -114,6 +115,18 @@ pub struct CashSettlementObservationCertificate {
     pub amount: Exact,
     pub unit: String,
     pub into: Option<String>,
+}
+
+/// An immutable source-commit binding.
+///
+/// This is intentionally a typed proof operation rather than an
+/// `Observation { source: "commit:<hash>" }` convention.  A source commit is
+/// the ledger authority for a derived analysis, so its identity must survive
+/// independently of display text, statement wording, or metadata chosen by a
+/// producer.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct CommitBindingCertificate {
+    pub commit: ContentHash,
 }
 
 /// Proposition-specific public answer for a sale whose recognition is
@@ -297,6 +310,10 @@ pub type SettlementTransitionCertificate = SettlementTransition;
 pub enum Operation {
     /// A source ledger fact or other immutable observation.
     Observation { source: String },
+    /// The exact immutable source commit whose ledger facts a proof derives
+    /// from.  Unlike generic observations, this operation is semantically
+    /// checked by proof consumers and never inferred from metadata.
+    CommitBinding(CommitBindingCertificate),
     /// Typed source observation for a quote.
     QuoteObservation(QuoteObservationCertificate),
     /// Typed source observation for an observed position.
@@ -408,6 +425,7 @@ impl Operation {
     fn tag(&self) -> &'static [u8] {
         match self {
             Self::Observation { .. } => b"observation",
+            Self::CommitBinding(..) => b"commit-binding",
             Self::QuoteObservation(..) => b"quote-observation",
             Self::PositionObservation(..) => b"position-observation",
             Self::CashSettlementObservation(..) => b"cash-settlement-observation",
@@ -439,6 +457,9 @@ impl Operation {
         put_bytes(out, self.tag());
         match self {
             Self::Observation { source } => put_string(out, source),
+            Self::CommitBinding(certificate) => {
+                out.extend_from_slice(certificate.commit.as_bytes());
+            }
             Self::QuoteObservation(certificate) => {
                 put_string(out, &certificate.quote);
                 put_string(out, &certificate.date);
@@ -977,7 +998,10 @@ impl Proof {
                 _ => {}
             }
             let invalid_operation = match &node.operation {
-                Operation::Observation { source } => source.trim().is_empty(),
+                Operation::Observation { source } => {
+                    source.trim().is_empty() || source.starts_with("commit:")
+                }
+                Operation::CommitBinding(..) => false,
                 Operation::QuoteObservation(..)
                 | Operation::PositionObservation(..)
                 | Operation::CashSettlementObservation(..)
@@ -1073,6 +1097,7 @@ impl Proof {
                 }
             }
         }
+        self.bound_commit_shape()?;
         // Proposition-specific edges are checked after all nodes have passed
         // their local payload checks.  The typed pointers below prevent a
         // certificate from borrowing a same-shaped operation in another lot,
@@ -1427,6 +1452,41 @@ impl Proof {
         Ok(())
     }
 
+    /// Return the exact source commit bound by this checked graph.
+    ///
+    /// The whole proof is checked before exposing authority from its binding.
+    /// An optional binding must be unique, nonzero, rooted, and cover every
+    /// other proof root exactly once.
+    pub fn bound_commit(&self) -> Result<Option<ContentHash>, CheckError> {
+        self.check()?;
+        self.bound_commit_shape()
+    }
+
+    fn bound_commit_shape(&self) -> Result<Option<ContentHash>, CheckError> {
+        let mut bindings = self
+            .nodes
+            .values()
+            .filter_map(|node| match &node.operation {
+                Operation::CommitBinding(certificate) => Some((node, certificate)),
+                _ => None,
+            });
+        let Some((binding, certificate)) = bindings.next() else {
+            return Ok(None);
+        };
+        if certificate.commit == ContentHash::ZERO
+            || !self.roots.contains(&binding.id)
+            || bindings.next().is_some()
+        {
+            return Err(CheckError::InvalidCommitBinding { id: binding.id });
+        }
+        let mut expected_inputs = self.roots.clone();
+        expected_inputs.retain(|root| *root != binding.id);
+        if binding.inputs != expected_inputs {
+            return Err(CheckError::InvalidCommitBinding { id: binding.id });
+        }
+        Ok(Some(certificate.commit))
+    }
+
     /// Return the proof's stable content root.  This is useful as a cache key
     /// and deliberately includes roots as well as reachable node content.
     pub fn content_hash(&self) -> ProofId {
@@ -1524,6 +1584,7 @@ pub enum CheckError {
     DuplicateSatisfactionObservation { id: ProofId },
     UnreachableCertificate { id: ProofId },
     InvalidOperation { id: ProofId },
+    InvalidCommitBinding { id: ProofId },
     Cycle,
 }
 
@@ -1656,6 +1717,9 @@ impl fmt::Display for CheckError {
             }
             Self::InvalidOperation { id } => {
                 write!(f, "proof node {id} contains an invalid operation")
+            }
+            Self::InvalidCommitBinding { id } => {
+                write!(f, "proof node {id} contains an invalid commit binding")
             }
             Self::Cycle => f.write_str("proof graph contains a cycle"),
         }
