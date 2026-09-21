@@ -349,6 +349,504 @@ pub struct ReferenceIssue {
     pub sale: Option<String>,
 }
 
+/// Completion state used by the small, proof-free reference oracle.
+///
+/// This is deliberately separate from the production semantic kernel.  The
+/// reference evaluator does not mint proof ids or call the production engine;
+/// it only records the minimum evidence needed to state whether a relation is
+/// supported.  Most importantly, open-world absence is never turned into a
+/// refutation.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ReferenceCompletion {
+    /// The relevant relation is explicitly complete for this query.
+    Complete,
+    /// The source may contain unobserved rows, so absence is not meaningful.
+    #[default]
+    OpenWorld,
+    /// Evaluation stopped at a declared resource boundary.
+    ResourceLimited,
+}
+
+impl ReferenceCompletion {
+    pub fn complete() -> Self {
+        Self::Complete
+    }
+
+    pub fn open_world() -> Self {
+        Self::OpenWorld
+    }
+
+    pub fn resource_limited() -> Self {
+        Self::ResourceLimited
+    }
+
+    pub fn is_complete(self) -> bool {
+        matches!(self, Self::Complete)
+    }
+
+    pub fn is_resource_limited(self) -> bool {
+        matches!(self, Self::ResourceLimited)
+    }
+}
+
+/// Support on the positive and negative sides of a reference query.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ReferenceTruth {
+    Neither,
+    TrueOnly,
+    FalseOnly,
+    Both,
+}
+
+impl ReferenceTruth {
+    pub fn from_support(positive: bool, negative: bool) -> Self {
+        match (positive, negative) {
+            (false, false) => Self::Neither,
+            (true, false) => Self::TrueOnly,
+            (false, true) => Self::FalseOnly,
+            (true, true) => Self::Both,
+        }
+    }
+
+    pub fn has_positive(self) -> bool {
+        matches!(self, Self::TrueOnly | Self::Both)
+    }
+
+    pub fn has_negative(self) -> bool {
+        matches!(self, Self::FalseOnly | Self::Both)
+    }
+}
+
+/// A proof witness retained by the reference evaluator.
+///
+/// These are intentionally descriptive values rather than content-addressed
+/// production proof nodes.  `CompleteAbsence` is only constructed by the
+/// resolver when its completion argument is [`ReferenceCompletion::Complete`].
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ReferenceProof {
+    Fact {
+        relation: String,
+        subject: String,
+    },
+    CompleteAbsence {
+        relation: String,
+        subject: String,
+        scope: String,
+    },
+    Conflict {
+        relation: String,
+        subject: String,
+        reason: String,
+    },
+}
+
+impl ReferenceProof {
+    pub fn fact(relation: impl Into<String>, subject: impl Into<String>) -> Self {
+        Self::Fact {
+            relation: relation.into(),
+            subject: subject.into(),
+        }
+    }
+
+    pub fn complete_absence(
+        relation: impl Into<String>,
+        subject: impl Into<String>,
+        scope: impl Into<String>,
+    ) -> Self {
+        Self::CompleteAbsence {
+            relation: relation.into(),
+            subject: subject.into(),
+            scope: scope.into(),
+        }
+    }
+
+    pub fn conflict(
+        relation: impl Into<String>,
+        subject: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        Self::Conflict {
+            relation: relation.into(),
+            subject: subject.into(),
+            reason: reason.into(),
+        }
+    }
+
+    pub fn relation(&self) -> &str {
+        match self {
+            Self::Fact { relation, .. }
+            | Self::CompleteAbsence { relation, .. }
+            | Self::Conflict { relation, .. } => relation,
+        }
+    }
+
+    pub fn subject(&self) -> &str {
+        match self {
+            Self::Fact { subject, .. }
+            | Self::CompleteAbsence { subject, .. }
+            | Self::Conflict { subject, .. } => subject,
+        }
+    }
+
+    pub fn is_positive(&self) -> bool {
+        matches!(self, Self::Fact { .. })
+    }
+
+    pub fn is_negative(&self) -> bool {
+        matches!(self, Self::CompleteAbsence { .. } | Self::Conflict { .. })
+    }
+}
+
+/// A residual requirement that prevents a conditional reference answer from
+/// becoming an unconditional result.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ReferenceBlocker {
+    Decision { sale: String },
+    Completeness { relation: String, subject: String },
+    ResourceBoundary { relation: String, subject: String },
+    Conflict { subject: String },
+    MissingLot { sale: String },
+    Invalid { relation: String, subject: String },
+}
+
+/// A focused reference-level conflict.  It is data, not an instruction to
+/// pick one side; both support sets remain visible to callers.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ReferenceConflict {
+    pub subject: String,
+    pub positive: Vec<ReferenceProof>,
+    pub negative: Vec<ReferenceProof>,
+    pub message: String,
+}
+
+impl ReferenceConflict {
+    pub fn new(
+        subject: impl Into<String>,
+        positive: impl IntoIterator<Item = ReferenceProof>,
+        negative: impl IntoIterator<Item = ReferenceProof>,
+        message: impl Into<String>,
+    ) -> Self {
+        let mut positive = positive.into_iter().collect::<Vec<_>>();
+        let mut negative = negative.into_iter().collect::<Vec<_>>();
+        positive.sort();
+        positive.dedup();
+        negative.sort();
+        negative.dedup();
+        Self {
+            subject: subject.into(),
+            positive,
+            negative,
+            message: message.into(),
+        }
+    }
+
+    pub fn positive_proofs(&self) -> &[ReferenceProof] {
+        &self.positive
+    }
+
+    pub fn negative_proofs(&self) -> &[ReferenceProof] {
+        &self.negative
+    }
+}
+
+/// An inert suggestion for making unresolved reference state more specific.
+///
+/// There is intentionally no `apply` method.  A caller must author the
+/// suggested source change and evaluate a new ledger; constructing or viewing
+/// a proposal cannot mutate a [`ReferenceResult`].
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ReferenceRepair {
+    SelectLot { sale: String, lot: String },
+    DeclareCompleteness { relation: String, subject: String },
+    SupplyEvidence { relation: String, subject: String },
+    ResolveConflict { subject: String },
+}
+
+pub type RepairProposal = ReferenceRepair;
+pub type ReferenceRepairProposal = ReferenceRepair;
+
+/// Coarse status for consumers that do not need to inspect all three outcome
+/// axes.  The full support, completion, blocker, conflict, and repair data is
+/// retained on [`ReferenceOutcome`].
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ReferenceOutcomeStatus {
+    Proven,
+    Refuted,
+    Unknown,
+    Blocked,
+    Conflict,
+    Incomplete,
+}
+
+pub type ReferenceStatus = ReferenceOutcomeStatus;
+pub type ReferenceRequirement = ReferenceBlocker;
+
+/// A structured outcome for one reference relation.
+///
+/// This is deliberately generic and owns no production proof graph.  A
+/// positive answer is accompanied by one or more [`ReferenceProof::Fact`]
+/// witnesses.  Negative support can only be produced by the resolver under a
+/// complete relation.  Blockers and repairs remain separate from truth so an
+/// open-world unknown cannot be mistaken for a refutation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferenceOutcome<T> {
+    pub truth: ReferenceTruth,
+    pub answer: Option<T>,
+    pub alternatives: Vec<T>,
+    pub completion: ReferenceCompletion,
+    pub positive_proofs: Vec<ReferenceProof>,
+    pub negative_proofs: Vec<ReferenceProof>,
+    pub blockers: Vec<ReferenceBlocker>,
+    pub conflicts: Vec<ReferenceConflict>,
+    pub repairs: Vec<ReferenceRepair>,
+}
+
+pub type ReferenceResolution<T> = ReferenceOutcome<T>;
+
+impl<T> ReferenceOutcome<T> {
+    // These arguments are the eight explicit, orthogonal outcome axes. A
+    // positional constructor keeps their one-time assembly visible without
+    // introducing a second partially initialized outcome type.
+    #[allow(clippy::too_many_arguments)]
+    fn build(
+        answer: Option<T>,
+        alternatives: Vec<T>,
+        completion: ReferenceCompletion,
+        positive_proofs: Vec<ReferenceProof>,
+        negative_proofs: Vec<ReferenceProof>,
+        blockers: Vec<ReferenceBlocker>,
+        conflicts: Vec<ReferenceConflict>,
+        repairs: Vec<ReferenceRepair>,
+    ) -> Self {
+        let truth =
+            ReferenceTruth::from_support(!positive_proofs.is_empty(), !negative_proofs.is_empty());
+        Self {
+            truth,
+            answer,
+            alternatives,
+            completion,
+            positive_proofs,
+            negative_proofs,
+            blockers,
+            conflicts,
+            repairs,
+        }
+    }
+
+    pub fn answer(&self) -> Option<&T> {
+        self.answer.as_ref()
+    }
+
+    pub fn answers(&self) -> impl Iterator<Item = &T> {
+        self.answer.iter().chain(self.alternatives.iter())
+    }
+
+    pub fn alternatives(&self) -> &[T] {
+        &self.alternatives
+    }
+
+    pub fn positive_proofs(&self) -> &[ReferenceProof] {
+        &self.positive_proofs
+    }
+
+    pub fn negative_proofs(&self) -> &[ReferenceProof] {
+        &self.negative_proofs
+    }
+
+    pub fn blockers(&self) -> &[ReferenceBlocker] {
+        &self.blockers
+    }
+
+    pub fn conflicts(&self) -> &[ReferenceConflict] {
+        &self.conflicts
+    }
+
+    pub fn repairs(&self) -> &[ReferenceRepair] {
+        &self.repairs
+    }
+
+    pub fn truth(&self) -> ReferenceTruth {
+        self.truth
+    }
+
+    pub fn completion(&self) -> ReferenceCompletion {
+        self.completion
+    }
+
+    pub fn is_proven(&self) -> bool {
+        self.truth.has_positive() && self.truth != ReferenceTruth::Both
+    }
+
+    pub fn is_refuted(&self) -> bool {
+        self.truth == ReferenceTruth::FalseOnly
+    }
+
+    pub fn has_positive_proof(&self) -> bool {
+        !self.positive_proofs.is_empty()
+    }
+
+    pub fn has_negative_proof(&self) -> bool {
+        !self.negative_proofs.is_empty()
+    }
+
+    pub fn answer_count(&self) -> usize {
+        usize::from(self.answer.is_some()) + self.alternatives.len()
+    }
+
+    pub fn is_ambiguous(&self) -> bool {
+        self.answer_count() > 1
+    }
+
+    pub fn is_unknown(&self) -> bool {
+        self.truth == ReferenceTruth::Neither
+            && self.blockers.is_empty()
+            && self.conflicts.is_empty()
+            && !self.completion.is_resource_limited()
+    }
+
+    pub fn is_blocked(&self) -> bool {
+        !self.blockers.is_empty()
+    }
+
+    pub fn is_conflict(&self) -> bool {
+        self.truth == ReferenceTruth::Both || !self.conflicts.is_empty()
+    }
+
+    pub fn status(&self) -> ReferenceOutcomeStatus {
+        if self.is_conflict() {
+            ReferenceOutcomeStatus::Conflict
+        } else if self.is_proven() {
+            ReferenceOutcomeStatus::Proven
+        } else if self.is_refuted() {
+            ReferenceOutcomeStatus::Refuted
+        } else if self.completion.is_resource_limited() {
+            ReferenceOutcomeStatus::Incomplete
+        } else if self.is_blocked() {
+            ReferenceOutcomeStatus::Blocked
+        } else {
+            ReferenceOutcomeStatus::Unknown
+        }
+    }
+
+    fn map_answer<U>(self, mut map: impl FnMut(T) -> U) -> ReferenceOutcome<U> {
+        ReferenceOutcome {
+            truth: self.truth,
+            answer: self.answer.map(&mut map),
+            alternatives: self.alternatives.into_iter().map(map).collect(),
+            completion: self.completion,
+            positive_proofs: self.positive_proofs,
+            negative_proofs: self.negative_proofs,
+            blockers: self.blockers,
+            conflicts: self.conflicts,
+            repairs: self.repairs,
+        }
+    }
+}
+
+/// Relation queries understood by [`ReferenceResult::resolve`].
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ReferenceQuery {
+    Sale(String),
+    Recognition(String),
+    Gain(String),
+    SelectedLot(String),
+    Valuation(String),
+    Position { account: String, asset: String },
+    Obligation(String),
+    Settlement(String),
+    Satisfaction(String),
+}
+
+/// Heterogeneous answer type used by [`ReferenceResult::resolve`].  Typed
+/// convenience methods below are preferable when callers know the relation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ReferenceAnswer {
+    Sale(ReferenceSale),
+    Recognition(Recognized),
+    Gain(Gain),
+    SelectedLot(SelectedLot),
+    Valuation(Valuation),
+    Position(Position),
+    Obligation(ReferenceObligation),
+    Settlement(ReferenceSettlementHistory),
+    Satisfaction(ReferenceSatisfaction),
+}
+
+fn absence_outcome<T>(
+    relation: &str,
+    subject: &str,
+    completion: ReferenceCompletion,
+    mut blockers: Vec<ReferenceBlocker>,
+) -> ReferenceOutcome<T> {
+    // A caller-supplied blocker (for example, an invalid source component)
+    // is not an absence proof.  Completeness only licenses refutation when
+    // the relation was actually searched successfully and no blocker remains.
+    if completion.is_complete() && blockers.is_empty() {
+        return ReferenceOutcome::build(
+            None,
+            Vec::new(),
+            completion,
+            Vec::new(),
+            vec![ReferenceProof::complete_absence(
+                relation,
+                subject,
+                format!("{relation}:{subject}"),
+            )],
+            blockers,
+            Vec::new(),
+            Vec::new(),
+        );
+    }
+    if completion.is_complete() {
+        return ReferenceOutcome::build(
+            None,
+            Vec::new(),
+            completion,
+            Vec::new(),
+            Vec::new(),
+            blockers,
+            Vec::new(),
+            Vec::new(),
+        );
+    }
+    if completion.is_resource_limited() {
+        blockers.push(ReferenceBlocker::ResourceBoundary {
+            relation: relation.to_owned(),
+            subject: subject.to_owned(),
+        });
+        return ReferenceOutcome::build(
+            None,
+            Vec::new(),
+            completion,
+            Vec::new(),
+            Vec::new(),
+            blockers,
+            Vec::new(),
+            vec![ReferenceRepair::SupplyEvidence {
+                relation: relation.to_owned(),
+                subject: subject.to_owned(),
+            }],
+        );
+    }
+    blockers.push(ReferenceBlocker::Completeness {
+        relation: relation.to_owned(),
+        subject: subject.to_owned(),
+    });
+    ReferenceOutcome::build(
+        None,
+        Vec::new(),
+        completion,
+        Vec::new(),
+        Vec::new(),
+        blockers,
+        Vec::new(),
+        vec![ReferenceRepair::DeclareCompleteness {
+            relation: relation.to_owned(),
+            subject: subject.to_owned(),
+        }],
+    )
+}
+
 /// The complete deterministic result of [`evaluate`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ReferenceResult {
@@ -446,6 +944,476 @@ impl ReferenceResult {
         self.settlement_histories
             .iter()
             .find(|settlement| settlement.id == id)
+    }
+
+    /// Resolve one relation into a structured, proof-bearing reference
+    /// outcome.  This method only reads the already-computed reference
+    /// relations and never invokes the production engine.
+    pub fn resolve(
+        &self,
+        query: ReferenceQuery,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<ReferenceAnswer> {
+        match query {
+            ReferenceQuery::Sale(id) => self
+                .sale_outcome(&id, completion)
+                .map_answer(ReferenceAnswer::Sale),
+            ReferenceQuery::Recognition(id) => self
+                .recognition_outcome(&id, completion)
+                .map_answer(ReferenceAnswer::Recognition),
+            ReferenceQuery::Gain(id) => self
+                .gain_outcome(&id, completion)
+                .map_answer(ReferenceAnswer::Gain),
+            ReferenceQuery::SelectedLot(id) => self
+                .selected_outcome(&id, completion)
+                .map_answer(ReferenceAnswer::SelectedLot),
+            ReferenceQuery::Valuation(id) => self
+                .valuation_outcome(&id, completion)
+                .map_answer(ReferenceAnswer::Valuation),
+            ReferenceQuery::Position { account, asset } => self
+                .position_outcome(&account, &asset, completion)
+                .map_answer(ReferenceAnswer::Position),
+            ReferenceQuery::Obligation(id) => self
+                .obligation_outcome(&id, completion)
+                .map_answer(ReferenceAnswer::Obligation),
+            ReferenceQuery::Settlement(id) => self
+                .settlement_outcome(&id, completion)
+                .map_answer(ReferenceAnswer::Settlement),
+            ReferenceQuery::Satisfaction(id) => self
+                .satisfaction_outcome(&id, completion)
+                .map_answer(ReferenceAnswer::Satisfaction),
+        }
+    }
+
+    pub fn outcome(
+        &self,
+        query: ReferenceQuery,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<ReferenceAnswer> {
+        self.resolve(query, completion)
+    }
+
+    pub fn resolution(
+        &self,
+        query: ReferenceQuery,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<ReferenceAnswer> {
+        self.resolve(query, completion)
+    }
+
+    /// Resolve the authored sale relation itself.  A sale remains positive
+    /// evidence even when its recognition is blocked; use
+    /// [`Self::recognition_outcome`] for the derived recognition proposition.
+    pub fn sale_outcome(
+        &self,
+        id: &str,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<ReferenceSale> {
+        let relation = "sale";
+        if let Some(sale) = self.sale(id) {
+            return ReferenceOutcome::build(
+                Some(sale.clone()),
+                Vec::new(),
+                completion,
+                vec![ReferenceProof::fact(relation, id)],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        absence_outcome(relation, id, completion, Vec::new())
+    }
+
+    /// Resolve the derived `recognized` relation.  Conditional candidate
+    /// gains remain visible in the ordinary reference relations, but they do
+    /// not become a positive recognition proof until lot selection and exact
+    /// allocation are complete.
+    pub fn recognition_outcome(
+        &self,
+        id: &str,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<Recognized> {
+        let Some(sale) = self.sale(id) else {
+            return absence_outcome("recognized", id, completion, Vec::new());
+        };
+        let recognized = self.recognized.iter().find(|fact| fact.sale == id);
+        let Some(recognized) = recognized else {
+            return absence_outcome("recognized", id, completion, Vec::new());
+        };
+        if sale.status.is_complete() {
+            return ReferenceOutcome::build(
+                Some(recognized.clone()),
+                Vec::new(),
+                completion,
+                vec![ReferenceProof::fact("recognized", id)],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+
+        let mut blockers = Vec::new();
+        let mut repairs = Vec::new();
+        let mut conflicts = Vec::new();
+        let mut positive = Vec::new();
+        let mut negative = Vec::new();
+        match &sale.status {
+            SelectionStatus::Ambiguous { candidates } => {
+                blockers.push(ReferenceBlocker::Decision {
+                    sale: id.to_owned(),
+                });
+                repairs.extend(candidates.iter().map(|lot| ReferenceRepair::SelectLot {
+                    sale: id.to_owned(),
+                    lot: lot.clone(),
+                }));
+            }
+            SelectionStatus::PolicyConflict { .. } | SelectionStatus::Conflict { .. } => {
+                blockers.push(ReferenceBlocker::Conflict {
+                    subject: id.to_owned(),
+                });
+                let candidates = sale
+                    .conditional_gains
+                    .iter()
+                    .map(|gain| ReferenceProof::fact("candidate_gain", &gain.lot_id))
+                    .collect::<Vec<_>>();
+                let conflict_proof =
+                    ReferenceProof::conflict("recognized", id, "lot selection evidence disagrees");
+                positive.extend(candidates.clone());
+                negative.push(conflict_proof.clone());
+                conflicts.push(ReferenceConflict::new(
+                    id,
+                    candidates,
+                    [conflict_proof],
+                    "recognition has incompatible lot-selection evidence",
+                ));
+                repairs.push(ReferenceRepair::ResolveConflict {
+                    subject: id.to_owned(),
+                });
+            }
+            SelectionStatus::MissingLot => {
+                blockers.push(ReferenceBlocker::MissingLot {
+                    sale: id.to_owned(),
+                });
+                repairs.push(ReferenceRepair::SelectLot {
+                    sale: id.to_owned(),
+                    lot: "?lot".to_owned(),
+                });
+            }
+            SelectionStatus::InvalidAmount => {
+                blockers.push(ReferenceBlocker::Invalid {
+                    relation: "recognized".to_owned(),
+                    subject: id.to_owned(),
+                });
+            }
+            SelectionStatus::Recognized => unreachable!("complete selection handled above"),
+        }
+        ReferenceOutcome::build(
+            None,
+            if sale.conditional_gains.is_empty() {
+                Vec::new()
+            } else {
+                vec![recognized.clone()]
+            },
+            completion,
+            positive,
+            negative,
+            blockers,
+            conflicts,
+            repairs,
+        )
+    }
+
+    /// Resolve a recognized exact gain, retaining candidate gains as
+    /// conditional reference evidence when recognition is blocked.
+    pub fn gain_outcome(
+        &self,
+        id: &str,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<Gain> {
+        let Some(sale) = self.sale(id) else {
+            return absence_outcome("gain", id, completion, Vec::new());
+        };
+        if let Some(gain) = self.recognized_gain(id) {
+            return ReferenceOutcome::build(
+                Some(gain),
+                Vec::new(),
+                completion,
+                vec![ReferenceProof::fact("gain", id)],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        let recognition = self.recognition_outcome(id, completion);
+        let alternatives = sale.conditional_gains.clone();
+        ReferenceOutcome::build(
+            None,
+            alternatives,
+            recognition.completion,
+            recognition.positive_proofs,
+            recognition.negative_proofs,
+            recognition.blockers,
+            recognition.conflicts,
+            recognition.repairs,
+        )
+    }
+
+    /// Resolve the selected-lot relation.  An ambiguous or conflicted sale
+    /// has no selected-lot proof even when it has candidate lots.
+    pub fn selected_outcome(
+        &self,
+        id: &str,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<SelectedLot> {
+        let Some(selected) = self.selected(id) else {
+            return absence_outcome("selected_lot", id, completion, Vec::new());
+        };
+        if selected.status.is_complete() {
+            return ReferenceOutcome::build(
+                Some(selected.clone()),
+                Vec::new(),
+                completion,
+                vec![ReferenceProof::fact("selected_lot", id)],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        self.recognition_outcome(id, completion)
+            .map_answer(|_| selected.clone())
+    }
+
+    pub fn valuation_outcome(
+        &self,
+        id: &str,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<Valuation> {
+        let Some(valuation) = self.valuation_group(id) else {
+            return absence_outcome("valuation", id, completion, Vec::new());
+        };
+        match valuation.status {
+            ValuationStatus::Unique => ReferenceOutcome::build(
+                Some(valuation.clone()),
+                Vec::new(),
+                completion,
+                vec![ReferenceProof::fact("valuation", id)],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            ValuationStatus::Unavailable => absence_outcome(
+                "valuation",
+                id,
+                completion,
+                vec![ReferenceBlocker::Invalid {
+                    relation: "valuation".to_owned(),
+                    subject: id.to_owned(),
+                }],
+            ),
+            ValuationStatus::Conflict { .. } => {
+                let positive = valuation
+                    .quotes
+                    .iter()
+                    .map(|quote| ReferenceProof::fact("quote", &quote.id))
+                    .collect::<Vec<_>>();
+                let negative = vec![ReferenceProof::conflict(
+                    "valuation",
+                    id,
+                    "quotes disagree by exact cross multiplication",
+                )];
+                let conflict = ReferenceConflict::new(
+                    id,
+                    positive.clone(),
+                    negative.clone(),
+                    "valuation quotes disagree",
+                );
+                ReferenceOutcome::build(
+                    None,
+                    valuation
+                        .quotes
+                        .iter()
+                        .cloned()
+                        .map(|quote| Valuation {
+                            id: valuation.id.clone(),
+                            date: valuation.date,
+                            base_unit: valuation.base_unit.clone(),
+                            quote_unit: valuation.quote_unit.clone(),
+                            quotes: vec![quote.clone()],
+                            quote_ids: vec![quote.id.clone()],
+                            effective: Some(quote),
+                            status: ValuationStatus::Unique,
+                        })
+                        .collect(),
+                    completion,
+                    positive,
+                    negative,
+                    vec![ReferenceBlocker::Conflict {
+                        subject: id.to_owned(),
+                    }],
+                    vec![conflict],
+                    vec![ReferenceRepair::ResolveConflict {
+                        subject: id.to_owned(),
+                    }],
+                )
+            }
+        }
+    }
+
+    pub fn position_outcome(
+        &self,
+        account: &str,
+        asset: &str,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<Position> {
+        let subject = format!("{account}/{asset}");
+        let Some(position) = self
+            .positions
+            .iter()
+            .find(|position| position.account == account && position.asset == asset)
+        else {
+            return absence_outcome("position", &subject, completion, Vec::new());
+        };
+        if matches!(position.status, PositionStatus::Conflict) {
+            let positive = vec![ReferenceProof::fact("position", &subject)];
+            let negative = vec![ReferenceProof::conflict(
+                "position",
+                &subject,
+                "observed and calculated positions disagree",
+            )];
+            return ReferenceOutcome::build(
+                None,
+                Vec::new(),
+                completion,
+                positive.clone(),
+                negative.clone(),
+                vec![ReferenceBlocker::Conflict {
+                    subject: subject.clone(),
+                }],
+                vec![ReferenceConflict::new(
+                    subject.clone(),
+                    positive,
+                    negative,
+                    "position observations conflict",
+                )],
+                vec![ReferenceRepair::ResolveConflict { subject }],
+            );
+        }
+        ReferenceOutcome::build(
+            Some(position.clone()),
+            Vec::new(),
+            completion,
+            vec![ReferenceProof::fact("position", &subject)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    pub fn obligation_outcome(
+        &self,
+        id: &str,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<ReferenceObligation> {
+        let Some(obligation) = self.obligation(id) else {
+            return absence_outcome("obligation", id, completion, Vec::new());
+        };
+        if matches!(obligation.status, ObligationStatus::Invalid) {
+            return absence_outcome(
+                "obligation",
+                id,
+                completion,
+                vec![ReferenceBlocker::Invalid {
+                    relation: "obligation".to_owned(),
+                    subject: id.to_owned(),
+                }],
+            );
+        }
+        ReferenceOutcome::build(
+            Some(obligation.clone()),
+            Vec::new(),
+            completion,
+            vec![ReferenceProof::fact("obligation", id)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    pub fn settlement_outcome(
+        &self,
+        id: &str,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<ReferenceSettlementHistory> {
+        let Some(settlement) = self.settlement_history(id) else {
+            return absence_outcome("settlement", id, completion, Vec::new());
+        };
+        if !settlement.effective {
+            return ReferenceOutcome::build(
+                None,
+                Vec::new(),
+                completion,
+                Vec::new(),
+                Vec::new(),
+                vec![ReferenceBlocker::Invalid {
+                    relation: "settlement".to_owned(),
+                    subject: id.to_owned(),
+                }],
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        ReferenceOutcome::build(
+            Some(settlement.clone()),
+            Vec::new(),
+            completion,
+            vec![ReferenceProof::fact("settlement", id)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    pub fn satisfaction_outcome(
+        &self,
+        id: &str,
+        completion: ReferenceCompletion,
+    ) -> ReferenceOutcome<ReferenceSatisfaction> {
+        let Some(satisfaction) = self.satisfactions.iter().find(|fact| fact.id == id) else {
+            return absence_outcome("satisfaction", id, completion, Vec::new());
+        };
+        if !satisfaction.effective {
+            return ReferenceOutcome::build(
+                None,
+                Vec::new(),
+                completion,
+                Vec::new(),
+                Vec::new(),
+                vec![ReferenceBlocker::Invalid {
+                    relation: "satisfaction".to_owned(),
+                    subject: id.to_owned(),
+                }],
+                Vec::new(),
+                Vec::new(),
+            );
+        }
+        ReferenceOutcome::build(
+            Some(satisfaction.clone()),
+            Vec::new(),
+            completion,
+            vec![ReferenceProof::fact("satisfaction", id)],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        )
     }
 
     /// A stable, relation-only projection convenient for differential tests.
@@ -1804,6 +2772,10 @@ fn valid_source_settlement(source: &model::SourceSettlement) -> bool {
         && !source.to.is_empty()
         && !source.instrument.is_empty()
         && valid_positive_quantity(&source.amount)
+        && source
+            .amount
+            .unit()
+            .is_some_and(|unit| unit.as_str() == source.instrument.as_str())
         && !source.history.is_empty()
         && valid_settlement_history(&source.history)
 }
@@ -2579,5 +3551,36 @@ sell sell on 2026-09-20
         let result = evaluate(&parse_ledger(source).unwrap());
         assert_eq!(result.gain[0].basis.number.canonical_string(), "10/3");
         assert_eq!(result.gain[0].gain.number.canonical_string(), "5/3");
+    }
+
+    #[test]
+    fn malformed_settlement_instrument_unit_is_not_effective_reference_evidence() {
+        let mut ledger = Ledger::new("book");
+        ledger.push(LedgerForm::Settlement(model::SourceSettlement {
+            occurrence: "payment".into(),
+            kind: model::SettlementKind::Ach,
+            from: "payer".into(),
+            to: "payee".into(),
+            instrument: "USD".into(),
+            amount: Quantity::with_unit(Exact::integer(10), "EUR").unwrap(),
+            history: vec![
+                model::SourceSettlementState {
+                    state: model::SettlementStateKind::Issued,
+                    at: None,
+                },
+                model::SourceSettlementState {
+                    state: model::SettlementStateKind::Presented,
+                    at: None,
+                },
+                model::SourceSettlementState {
+                    state: model::SettlementStateKind::Settled,
+                    at: None,
+                },
+            ],
+        }));
+        let result = evaluate(&ledger);
+        let settlement = result.settlement_history("payment").unwrap();
+        assert!(!settlement.effective);
+        assert!(settlement.unused.is_none());
     }
 }

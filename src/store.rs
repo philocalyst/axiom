@@ -158,13 +158,33 @@ pub enum EvidenceState {
 }
 
 impl EvidenceState {
-    fn target(&self) -> Option<EvidenceId> {
+    /// Return the immutable object this state supersedes, when it is a
+    /// correction/tombstone.  The target is intentionally an object address,
+    /// not an occurrence string: a correction must remain auditable even when
+    /// another adapter emitted the same occurrence later.
+    pub fn supersedes(&self) -> Option<EvidenceId> {
         match self {
             Self::Correction { supersedes, .. } | Self::Tombstone { supersedes, .. } => {
                 Some(*supersedes)
             }
             Self::Present | Self::Unavailable { .. } | Self::Redacted { .. } => None,
         }
+    }
+
+    fn target(&self) -> Option<EvidenceId> {
+        self.supersedes()
+    }
+
+    pub const fn is_tombstone(&self) -> bool {
+        matches!(self, Self::Tombstone { .. })
+    }
+
+    pub const fn is_deleted(&self) -> bool {
+        self.is_tombstone()
+    }
+
+    pub const fn is_available(&self) -> bool {
+        matches!(self, Self::Present | Self::Correction { .. })
     }
 }
 
@@ -235,6 +255,32 @@ impl Evidence {
             occurrence: occurrence.into(),
             source: source.into(),
             normalized_content: ContentHash::ZERO,
+            external: None,
+            content: Vec::new(),
+            state: EvidenceState::Tombstone {
+                supersedes,
+                reason: reason.into(),
+                authority: authority.into(),
+            },
+        }
+    }
+
+    /// Construct a deletion tombstone while retaining the normalized content
+    /// address of the superseded observation.  [`Self::tombstone`] remains the
+    /// loss-minimizing constructor for callers that are not permitted to
+    /// retain the prior hash.
+    pub fn deleted(
+        occurrence: impl Into<String>,
+        source: impl Into<String>,
+        content: ContentHash,
+        supersedes: EvidenceId,
+        reason: impl Into<String>,
+        authority: impl Into<String>,
+    ) -> Self {
+        Self {
+            occurrence: occurrence.into(),
+            source: source.into(),
+            normalized_content: content,
             external: None,
             content: Vec::new(),
             state: EvidenceState::Tombstone {
@@ -894,6 +940,27 @@ impl StoredObject {
 /// two divergent choices were reconciled.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum MergeConflict {
+    /// Both branches changed the successor of one immutable evidence object
+    /// differently.  The merged commit retains every successor; this
+    /// diagnostic prevents a consumer from silently treating one as the
+    /// accepted correction.
+    Evidence {
+        supersedes: EvidenceId,
+        left: Vec<EvidenceId>,
+        right: Vec<EvidenceId>,
+    },
+    EvidenceIdentity {
+        source: String,
+        identity: String,
+        alternatives: Vec<EvidenceId>,
+    },
+    Statements {
+        subject: String,
+        predicate: String,
+        value: String,
+        left: Vec<StatementId>,
+        right: Vec<StatementId>,
+    },
     Decisions {
         subject: String,
         scope: String,
@@ -1058,8 +1125,33 @@ impl ObjectStore {
     }
 
     pub fn put_evidence(&mut self, value: Evidence) -> Result<EvidenceId, StoreError> {
+        if matches!(
+            &value.state,
+            EvidenceState::Tombstone { .. }
+                | EvidenceState::Unavailable { .. }
+                | EvidenceState::Redacted { .. }
+        ) && !value.content.is_empty()
+        {
+            return Err(StoreError::InvalidObject(
+                "evidence without an available payload cannot retain content bytes".to_string(),
+            ));
+        }
         if let Some(target) = value.state.target() {
             self.require_kind(target.hash(), ObjectKind::Evidence)?;
+            let prior = self.evidence(target)?;
+            if value.source != prior.source {
+                return Err(StoreError::InvalidObject(
+                    "evidence supersession must retain its source".to_string(),
+                ));
+            }
+            if value.state.is_tombstone()
+                && value.normalized_content != ContentHash::ZERO
+                && value.normalized_content != prior.normalized_content
+            {
+                return Err(StoreError::InvalidObject(
+                    "deletion tombstone content hash must match its target".to_string(),
+                ));
+            }
         }
         Ok(EvidenceId::new(self.insert(StoredObject::Evidence(value))?))
     }
@@ -1075,6 +1167,12 @@ impl ObjectStore {
         value.rejected.dedup();
         if let Some(prior) = value.supersedes {
             self.require_kind(prior.hash(), ObjectKind::Decision)?;
+            let prior_value = self.decision(prior)?;
+            if value.subject != prior_value.subject || value.scope != prior_value.scope {
+                return Err(StoreError::InvalidObject(
+                    "decision supersession must retain subject and scope".to_string(),
+                ));
+            }
         }
         Ok(DecisionId::new(self.insert(StoredObject::Decision(value))?))
     }
@@ -1082,6 +1180,12 @@ impl ObjectStore {
     pub fn put_completeness(&mut self, value: Completeness) -> Result<CompletenessId, StoreError> {
         if let Some(prior) = value.supersedes {
             self.require_kind(prior.hash(), ObjectKind::Completeness)?;
+            let prior_value = self.completeness(prior)?;
+            if value.semantic_key() != prior_value.semantic_key() {
+                return Err(StoreError::InvalidObject(
+                    "completeness supersession must retain relation, source, and scope".to_string(),
+                ));
+            }
         }
         Ok(CompletenessId::new(
             self.insert(StoredObject::Completeness(value))?,
@@ -1095,6 +1199,12 @@ impl ObjectStore {
         value.dependencies.dedup();
         if let Some(prior) = value.supersedes {
             self.require_kind(prior.hash(), ObjectKind::Package)?;
+            let prior_value = self.package(prior)?;
+            if value.name != prior_value.name {
+                return Err(StoreError::InvalidObject(
+                    "policy package supersession must retain package name".to_string(),
+                ));
+            }
         }
         Ok(PackageId::new(self.insert(StoredObject::Package(value))?))
     }
@@ -1302,6 +1412,12 @@ impl ObjectStore {
         }
         if let Some(prior) = value.supersedes {
             self.require_kind(prior.hash(), ObjectKind::Close)?;
+            let prior_value = self.close(prior)?;
+            if value.period != prior_value.period || value.book != prior_value.book {
+                return Err(StoreError::InvalidObject(
+                    "close supersession must retain book and reporting period".to_string(),
+                ));
+            }
         }
         Ok(CloseId::new(self.insert(StoredObject::Close(value))?))
     }
@@ -1412,6 +1528,65 @@ impl ObjectStore {
         Ok(history)
     }
 
+    /// Return all evidence from `source` that was known at `at`, with
+    /// superseded objects removed only when a current snapshot successor
+    /// supersedes them.  The result is a set because one source can legitimately contain
+    /// many occurrences.  If two branches corrected the same observation in
+    /// different ways, both successors are returned; callers must not infer a
+    /// winner from object ordering.
+    pub fn evidence_as_known_at(
+        &self,
+        source: impl AsRef<str>,
+        at: CommitId,
+    ) -> Result<Vec<EvidenceId>, StoreError> {
+        self.commit(at)?;
+        let source = source.as_ref();
+        let mut pending = vec![at];
+        let mut visited = BTreeSet::new();
+        let mut reachable = BTreeSet::new();
+        while let Some(commit_id) = pending.pop() {
+            if !visited.insert(commit_id) {
+                continue;
+            }
+            let commit = self.commit(commit_id)?;
+            let mut found_source = false;
+            for id in &commit.evidence {
+                let evidence = self.evidence(*id)?;
+                if evidence.source == source {
+                    reachable.insert(*id);
+                    found_source = true;
+                }
+            }
+            // Commits carry snapshots of their roots.  Once a commit on a
+            // path names this source, its parent roots are historical context
+            // rather than additional current evidence.  Empty analysis or
+            // metadata commits inherit the source snapshot from their parent.
+            if !found_source {
+                pending.extend(commit.parents.iter().copied());
+            }
+        }
+
+        let mut superseded = BTreeSet::new();
+        for id in &reachable {
+            if let Some(target) = self.evidence(*id)?.state.supersedes()
+                && reachable.contains(&target)
+            {
+                superseded.insert(target);
+            }
+        }
+        Ok(reachable.difference(&superseded).copied().collect())
+    }
+
+    /// Compatibility spelling for callers that phrase the query as
+    /// “as-known-at”.
+    pub fn as_known_at(
+        &self,
+        source: impl AsRef<str>,
+        at: CommitId,
+    ) -> Result<Vec<EvidenceId>, StoreError> {
+        self.evidence_as_known_at(source, at)
+    }
+
     /// Perform a semantic three-way merge.  Evidence is monotone set union;
     /// choices and claims are selected three-way, with divergent changes
     /// retained together and returned as explicit conflicts.
@@ -1444,25 +1619,30 @@ impl ObjectStore {
             &right_value.completeness,
         )?;
 
-        let mut evidence = base_value.evidence.clone();
-        evidence.extend(left_value.evidence.iter().copied());
-        evidence.extend(right_value.evidence.iter().copied());
-        canonicalize_vec(&mut evidence);
+        let (evidence, evidence_conflicts) = self.merge_evidence(
+            &base_value.evidence,
+            &left_value.evidence,
+            &right_value.evidence,
+        )?;
 
-        let mut statements = base_value.statements.clone();
-        statements.extend(left_value.statements.iter().copied());
-        statements.extend(right_value.statements.iter().copied());
-        canonicalize_vec(&mut statements);
+        let (statements, statement_conflicts) = self.merge_statements(
+            &base_value.statements,
+            &left_value.statements,
+            &right_value.statements,
+        )?;
 
         let mut proofs = base_value.proofs.clone();
         proofs.extend(left_value.proofs.iter().copied());
         proofs.extend(right_value.proofs.iter().copied());
         canonicalize_vec(&mut proofs);
 
-        let mut conflicts = decision_conflicts;
+        let mut conflicts = evidence_conflicts;
+        conflicts.extend(statement_conflicts);
+        conflicts.extend(decision_conflicts);
         conflicts.extend(package_conflicts);
         conflicts.extend(completeness_conflicts);
         conflicts.sort();
+        conflicts.dedup();
         conflicts.dedup();
 
         let merged = Commit::new(
@@ -1560,15 +1740,25 @@ impl ObjectStore {
             let b = base_groups.get(&key).cloned().unwrap_or_default();
             let l = left_groups.get(&key).cloned().unwrap_or_default();
             let r = right_groups.get(&key).cloned().unwrap_or_default();
-            if l == r {
-                selected.extend(l);
+            let chosen = if l == r {
+                l.clone()
             } else if l == b {
-                selected.extend(r);
+                r.clone()
             } else if r == b {
-                selected.extend(l);
+                l.clone()
             } else {
-                selected.extend(l.iter().copied());
-                selected.extend(r.iter().copied());
+                let mut chosen = l.clone();
+                chosen.extend(r.iter().copied());
+                canonicalize_vec(&mut chosen);
+                conflicts.push(MergeConflict::Decisions {
+                    subject: subject.clone(),
+                    scope: scope.clone(),
+                    left: l.clone(),
+                    right: r.clone(),
+                });
+                chosen
+            };
+            if self.decision_values_conflict(&chosen)? {
                 conflicts.push(MergeConflict::Decisions {
                     subject,
                     scope,
@@ -1576,9 +1766,173 @@ impl ObjectStore {
                     right: r,
                 });
             }
+            selected.extend(chosen);
         }
         canonicalize_vec(&mut selected);
         Ok((selected, conflicts))
+    }
+
+    fn merge_evidence(
+        &self,
+        base: &[EvidenceId],
+        left: &[EvidenceId],
+        right: &[EvidenceId],
+    ) -> Result<(Vec<EvidenceId>, Vec<MergeConflict>), StoreError> {
+        // Evidence is normally monotone set union.  Corrections and
+        // tombstones are the exception: two successors of the same target
+        // are unresolved semantic alternatives and must be surfaced as a
+        // conflict while still retaining both immutable objects.
+        let mut selected = base.to_vec();
+        selected.extend(left.iter().copied());
+        selected.extend(right.iter().copied());
+        canonicalize_vec(&mut selected);
+
+        let base_groups = self.evidence_supersession_groups(base)?;
+        let left_groups = self.evidence_supersession_groups(left)?;
+        let right_groups = self.evidence_supersession_groups(right)?;
+        let keys = union_keys(&base_groups, &left_groups, &right_groups);
+        let mut conflicts = Vec::new();
+        for supersedes in keys {
+            let b = base_groups.get(&supersedes).cloned().unwrap_or_default();
+            let l = left_groups.get(&supersedes).cloned().unwrap_or_default();
+            let r = right_groups.get(&supersedes).cloned().unwrap_or_default();
+            if l.len() > 1 || r.len() > 1 || (l != r && l != b && r != b) {
+                conflicts.push(MergeConflict::Evidence {
+                    supersedes,
+                    left: l,
+                    right: r,
+                });
+            }
+        }
+        let mut identities = BTreeMap::<(String, String), Vec<EvidenceId>>::new();
+        for id in &selected {
+            let evidence = self.evidence(*id)?;
+            if !matches!(evidence.state, EvidenceState::Present) {
+                continue;
+            }
+            let identity = evidence.external.as_ref().map_or_else(
+                || format!("occurrence:{}", evidence.occurrence),
+                |external| format!("external:{}", external.as_str()),
+            );
+            identities
+                .entry((evidence.source.clone(), identity))
+                .or_default()
+                .push(*id);
+        }
+        for ((source, identity), mut alternatives) in identities {
+            alternatives.sort();
+            alternatives.dedup();
+            let contents = alternatives
+                .iter()
+                .map(|id| self.evidence(*id).map(Evidence::content_hash))
+                .collect::<Result<BTreeSet<_>, _>>()?;
+            if contents.len() > 1 {
+                conflicts.push(MergeConflict::EvidenceIdentity {
+                    source,
+                    identity,
+                    alternatives,
+                });
+            }
+        }
+        Ok((selected, conflicts))
+    }
+
+    fn merge_statements(
+        &self,
+        base: &[StatementId],
+        left: &[StatementId],
+        right: &[StatementId],
+    ) -> Result<(Vec<StatementId>, Vec<MergeConflict>), StoreError> {
+        let base_groups = self.statement_groups(base)?;
+        let left_groups = self.statement_groups(left)?;
+        let right_groups = self.statement_groups(right)?;
+        let keys = union_keys(&base_groups, &left_groups, &right_groups);
+        let mut selected = Vec::new();
+        let mut conflicts = Vec::new();
+        for (subject, predicate, value) in keys {
+            let key = (subject.clone(), predicate.clone(), value.clone());
+            let mut chosen = base_groups.get(&key).cloned().unwrap_or_default();
+            if let Some(ids) = left_groups.get(&key) {
+                chosen.extend(ids.iter().copied());
+            }
+            if let Some(ids) = right_groups.get(&key) {
+                chosen.extend(ids.iter().copied());
+            }
+            canonicalize_vec(&mut chosen);
+            if self.statement_polarities_conflict(&chosen)? {
+                conflicts.push(MergeConflict::Statements {
+                    subject,
+                    predicate,
+                    value,
+                    left: left_groups.get(&key).cloned().unwrap_or_default(),
+                    right: right_groups.get(&key).cloned().unwrap_or_default(),
+                });
+            }
+            selected.extend(chosen);
+        }
+        canonicalize_vec(&mut selected);
+        Ok((selected, conflicts))
+    }
+
+    fn statement_groups(
+        &self,
+        ids: &[StatementId],
+    ) -> Result<BTreeMap<StatementKey, Vec<StatementId>>, StoreError> {
+        let mut groups: BTreeMap<StatementKey, Vec<StatementId>> = BTreeMap::new();
+        for id in ids {
+            let statement = self.statement(*id)?;
+            groups
+                .entry((
+                    statement.subject.clone(),
+                    statement.predicate.clone(),
+                    statement.value.clone(),
+                ))
+                .or_default()
+                .push(*id);
+        }
+        for group in groups.values_mut() {
+            group.sort();
+            group.dedup();
+        }
+        Ok(groups)
+    }
+
+    fn statement_polarities_conflict(&self, ids: &[StatementId]) -> Result<bool, StoreError> {
+        let mut positive = false;
+        let mut negative = false;
+        for id in ids {
+            if self.statement(*id)?.negative {
+                negative = true;
+            } else {
+                positive = true;
+            }
+        }
+        Ok(positive && negative)
+    }
+
+    fn evidence_supersession_groups(
+        &self,
+        ids: &[EvidenceId],
+    ) -> Result<BTreeMap<EvidenceId, Vec<EvidenceId>>, StoreError> {
+        let mut groups: BTreeMap<EvidenceId, Vec<EvidenceId>> = BTreeMap::new();
+        for id in ids {
+            if let Some(target) = self.evidence(*id)?.state.supersedes() {
+                groups.entry(target).or_default().push(*id);
+            }
+        }
+        for group in groups.values_mut() {
+            group.sort();
+            group.dedup();
+        }
+        Ok(groups)
+    }
+
+    fn decision_values_conflict(&self, ids: &[DecisionId]) -> Result<bool, StoreError> {
+        let mut selected = BTreeSet::new();
+        for id in ids {
+            selected.insert(self.decision(*id)?.selected.clone());
+        }
+        Ok(selected.len() > 1)
     }
 
     fn decision_groups(&self, ids: &[DecisionId]) -> Result<DecisionGroups, StoreError> {
@@ -1618,21 +1972,31 @@ impl ObjectStore {
             let b = base_groups.get(&name).cloned().unwrap_or_default();
             let l = left_groups.get(&name).cloned().unwrap_or_default();
             let r = right_groups.get(&name).cloned().unwrap_or_default();
-            if l == r {
-                selected.extend(l);
+            let chosen = if l == r {
+                l.clone()
             } else if l == b {
-                selected.extend(r);
+                r.clone()
             } else if r == b {
-                selected.extend(l);
+                l.clone()
             } else {
-                selected.extend(l.iter().copied());
-                selected.extend(r.iter().copied());
+                let mut chosen = l.clone();
+                chosen.extend(r.iter().copied());
+                canonicalize_vec(&mut chosen);
+                conflicts.push(MergeConflict::Policies {
+                    name: name.clone(),
+                    left: l.clone(),
+                    right: r.clone(),
+                });
+                chosen
+            };
+            if self.package_versions_conflict(&chosen)? {
                 conflicts.push(MergeConflict::Policies {
                     name,
                     left: l,
                     right: r,
                 });
             }
+            selected.extend(chosen);
         }
         canonicalize_vec(&mut selected);
         Ok((selected, conflicts))
@@ -1661,6 +2025,15 @@ impl ObjectStore {
         Ok(groups)
     }
 
+    fn package_versions_conflict(&self, ids: &[PackageId]) -> Result<bool, StoreError> {
+        for id in ids {
+            // Resolve every address before reporting a conflict, so a
+            // malformed commit still fails as a storage error.
+            self.package(*id)?;
+        }
+        Ok(ids.len() > 1)
+    }
+
     fn merge_completeness(
         &self,
         base: &[CompletenessId],
@@ -1677,27 +2050,30 @@ impl ObjectStore {
             let b = base_groups.get(&key).cloned().unwrap_or_default();
             let l = left_groups.get(&key).cloned().unwrap_or_default();
             let r = right_groups.get(&key).cloned().unwrap_or_default();
-            if l == r {
-                selected.extend(l);
+            let chosen = if l == r {
+                l.clone()
             } else if l == b {
-                selected.extend(r);
+                r.clone()
             } else if r == b {
-                selected.extend(l);
+                l.clone()
             } else {
-                selected.extend(l.iter().copied());
-                selected.extend(r.iter().copied());
-                if self.completeness_conflicts(&l, &r)? {
-                    conflicts.push(MergeConflict::Completeness {
-                        relation: key.0.clone(),
-                        source: key.1.clone(),
-                        scope: key.2.clone(),
-                        left_bounds: self.completeness_bounds(&l)?,
-                        right_bounds: self.completeness_bounds(&r)?,
-                        left: l,
-                        right: r,
-                    });
-                }
+                let mut chosen = l.clone();
+                chosen.extend(r.iter().copied());
+                canonicalize_vec(&mut chosen);
+                chosen
+            };
+            if self.completeness_conflicts(&chosen, &chosen)? {
+                conflicts.push(MergeConflict::Completeness {
+                    relation: key.0.clone(),
+                    source: key.1.clone(),
+                    scope: key.2.clone(),
+                    left_bounds: self.completeness_bounds(&l)?,
+                    right_bounds: self.completeness_bounds(&r)?,
+                    left: l,
+                    right: r,
+                });
             }
+            selected.extend(chosen);
         }
         canonicalize_vec(&mut selected);
         Ok((selected, conflicts))
@@ -1782,6 +2158,7 @@ fn intervals_overlap(left: &Completeness, right: &Completeness) -> bool {
 
 type DecisionKey = (String, String);
 type DecisionGroups = BTreeMap<DecisionKey, Vec<DecisionId>>;
+type StatementKey = (String, String, String);
 type CompletenessScopeKey = (String, String, String);
 type CompletenessGroups = BTreeMap<CompletenessScopeKey, Vec<CompletenessId>>;
 
@@ -2165,6 +2542,248 @@ mod tests {
     }
 
     #[test]
+    fn as_known_at_removes_only_reachable_superseded_evidence() {
+        let mut store = ObjectStore::new();
+        let original = store
+            .put_evidence(Evidence::new("source/row", "bank", b"old".to_vec()))
+            .unwrap();
+        let unrelated = store
+            .put_evidence(Evidence::new("source/other", "bank", b"other".to_vec()))
+            .unwrap();
+        let base = root_commit(&mut store, vec![original, unrelated]);
+        let corrected = store
+            .put_evidence(Evidence::correction(
+                "source/row",
+                "bank",
+                b"new".to_vec(),
+                original,
+                "whole",
+                "issuer correction",
+                "bank",
+            ))
+            .unwrap();
+        let latest = store
+            .put_commit(Commit::new(
+                [base],
+                [corrected, unrelated],
+                [],
+                [],
+                [],
+                [],
+                [],
+                "correction",
+            ))
+            .unwrap();
+        assert_eq!(
+            store.evidence_as_known_at("bank", latest).unwrap(),
+            vec![corrected, unrelated]
+        );
+        assert_eq!(
+            store.evidence_as_known_at("bank", base).unwrap(),
+            vec![original, unrelated]
+        );
+
+        let reverted = store
+            .put_commit(Commit::new(
+                [latest],
+                [original, unrelated],
+                [],
+                [],
+                [],
+                [],
+                [],
+                "revert",
+            ))
+            .unwrap();
+        assert_eq!(
+            store.evidence_as_known_at("bank", reverted).unwrap(),
+            vec![original, unrelated]
+        );
+    }
+
+    #[test]
+    fn divergent_evidence_corrections_are_conflicts_and_both_survive_merge() {
+        let mut store = ObjectStore::new();
+        let original = store
+            .put_evidence(Evidence::new("source/row", "bank", b"old".to_vec()))
+            .unwrap();
+        let base = root_commit(&mut store, vec![original]);
+        let left_evidence = store
+            .put_evidence(Evidence::correction(
+                "source/row",
+                "bank",
+                b"left".to_vec(),
+                original,
+                "amount",
+                "left correction",
+                "left",
+            ))
+            .unwrap();
+        let right_evidence = store
+            .put_evidence(Evidence::tombstone(
+                "source/row",
+                "bank",
+                original,
+                "right deletion",
+                "right",
+            ))
+            .unwrap();
+        let left = store
+            .put_commit(Commit::new(
+                [base],
+                [left_evidence],
+                [],
+                [],
+                [],
+                [],
+                [],
+                "left",
+            ))
+            .unwrap();
+        let right = store
+            .put_commit(Commit::new(
+                [base],
+                [right_evidence],
+                [],
+                [],
+                [],
+                [],
+                [],
+                "right",
+            ))
+            .unwrap();
+        let merged = store.merge(base, left, right, "merge").unwrap();
+        assert!(merged.conflicts.iter().any(|conflict| matches!(
+            conflict,
+            MergeConflict::Evidence {
+                supersedes,
+                left,
+                right
+            } if *supersedes == original
+                && left == &vec![left_evidence]
+                && right == &vec![right_evidence]
+        )));
+        let merged_value = store.commit(merged.commit).unwrap();
+        assert!(merged_value.evidence.contains(&left_evidence));
+        assert!(merged_value.evidence.contains(&right_evidence));
+    }
+
+    #[test]
+    fn divergent_present_rows_with_one_source_identity_are_merge_conflicts() {
+        let mut store = ObjectStore::new();
+        let base = root_commit(&mut store, Vec::new());
+        let left_evidence = store
+            .put_evidence(Evidence::new("row/1", "bank", b"left".to_vec()))
+            .unwrap();
+        let right_evidence = store
+            .put_evidence(Evidence::new("row/1", "bank", b"right".to_vec()))
+            .unwrap();
+        let left = store
+            .put_commit(Commit::new(
+                [base],
+                [left_evidence],
+                [],
+                [],
+                [],
+                [],
+                [],
+                "left",
+            ))
+            .unwrap();
+        let right = store
+            .put_commit(Commit::new(
+                [base],
+                [right_evidence],
+                [],
+                [],
+                [],
+                [],
+                [],
+                "right",
+            ))
+            .unwrap();
+        let merged = store.merge(base, left, right, "merge").unwrap();
+        assert!(merged.conflicts.iter().any(|conflict| matches!(
+            conflict,
+            MergeConflict::EvidenceIdentity {
+                source,
+                identity,
+                alternatives,
+            } if source == "bank"
+                && identity == "occurrence:row/1"
+                && alternatives.len() == 2
+                && alternatives.contains(&left_evidence)
+                && alternatives.contains(&right_evidence)
+        )));
+    }
+
+    #[test]
+    fn supersession_cannot_cross_semantic_scope() {
+        let mut store = ObjectStore::new();
+        let prior_decision = store
+            .put_decision(Decision::new("sale/1", "lot/a").with_scope("tax"))
+            .unwrap();
+        assert!(matches!(
+            store.put_decision(
+                Decision::new("sale/2", "lot/b")
+                    .with_scope("tax")
+                    .superseding(prior_decision)
+            ),
+            Err(StoreError::InvalidObject(reason)) if reason.contains("subject and scope")
+        ));
+    }
+
+    #[test]
+    fn unavailable_redacted_and_deleted_states_remain_distinct() {
+        let mut store = ObjectStore::new();
+        let unavailable = store
+            .put_evidence(Evidence::unavailable("unavailable", "bank", "offline"))
+            .unwrap();
+        let redacted = store
+            .put_evidence(Evidence::redacted("redacted", "bank", "privacy"))
+            .unwrap();
+        let prior = store
+            .put_evidence(Evidence::new("deleted", "bank", b"secret".to_vec()))
+            .unwrap();
+        let prior_hash = store.evidence(prior).unwrap().content_hash();
+        let deleted = store
+            .put_evidence(Evidence::deleted(
+                "deleted",
+                "bank",
+                prior_hash,
+                prior,
+                "privacy deletion",
+                "subject",
+            ))
+            .unwrap();
+        assert_ne!(unavailable, redacted);
+        assert_ne!(redacted, deleted);
+        assert!(matches!(
+            store.evidence(unavailable).unwrap().state,
+            EvidenceState::Unavailable { .. }
+        ));
+        assert!(matches!(
+            store.evidence(redacted).unwrap().state,
+            EvidenceState::Redacted { .. }
+        ));
+        assert!(store.evidence(deleted).unwrap().state.is_tombstone());
+        assert_eq!(store.evidence(deleted).unwrap().content_hash(), prior_hash);
+
+        let false_hash = ContentHash::domain_separated("test", b"not the prior content");
+        assert!(matches!(
+            store.put_evidence(Evidence::deleted(
+                "deleted",
+                "bank",
+                false_hash,
+                prior,
+                "bad deletion",
+                "subject",
+            )),
+            Err(StoreError::InvalidObject(reason)) if reason.contains("must match its target")
+        ));
+    }
+
+    #[test]
     fn evidence_keeps_occurrence_content_and_external_identity_separate() {
         let mut store = ObjectStore::new();
         let first = store
@@ -2239,6 +2858,72 @@ mod tests {
         assert!(merged_commit.decisions.contains(&left_decision));
         assert!(merged_commit.decisions.contains(&right_decision));
         assert!(!merged_commit.decisions.contains(&base_decision));
+    }
+
+    #[test]
+    fn preexisting_branch_decision_conflict_is_not_hidden_by_merge() {
+        let mut store = ObjectStore::new();
+        let base_decision = store
+            .put_decision(Decision::new("sale/1", "lot/a"))
+            .unwrap();
+        let branch_decision = store
+            .put_decision(Decision::new("sale/1", "lot/b"))
+            .unwrap();
+        let base = root_commit(&mut store, Vec::new());
+        let left = store
+            .put_commit(Commit::new(
+                [base],
+                [],
+                [],
+                [base_decision, branch_decision],
+                [],
+                [],
+                [],
+                "left",
+            ))
+            .unwrap();
+        let right = store
+            .put_commit(Commit::new(
+                [base],
+                [],
+                [],
+                [base_decision],
+                [],
+                [],
+                [],
+                "right",
+            ))
+            .unwrap();
+        let merged = store.merge(base, left, right, "merge").unwrap();
+        assert!(!merged.is_clean());
+        assert_eq!(store.commit(merged.commit).unwrap().decisions.len(), 2);
+    }
+
+    #[test]
+    fn contradictory_statement_polarities_are_preserved_as_merge_conflict() {
+        let mut store = ObjectStore::new();
+        let positive = store
+            .put_statement(Statement::new("account/1", "open", "true"))
+            .unwrap();
+        let negative = store
+            .put_statement(Statement::new("account/1", "open", "true").negative())
+            .unwrap();
+        let base = root_commit(&mut store, Vec::new());
+        let left = store
+            .put_commit(Commit::new([base], [], [positive], [], [], [], [], "left"))
+            .unwrap();
+        let right = store
+            .put_commit(Commit::new([base], [], [negative], [], [], [], [], "right"))
+            .unwrap();
+        let merged = store.merge(base, left, right, "merge").unwrap();
+        assert!(merged.conflicts.iter().any(|conflict| matches!(
+            conflict,
+            MergeConflict::Statements { subject, predicate, value, .. }
+                if subject == "account/1" && predicate == "open" && value == "true"
+        )));
+        let merged_value = store.commit(merged.commit).unwrap();
+        assert!(merged_value.statements.contains(&positive));
+        assert!(merged_value.statements.contains(&negative));
     }
 
     #[test]

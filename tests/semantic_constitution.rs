@@ -34,8 +34,8 @@ use axiom_ledger::ontology::{
 use axiom_ledger::package::{LotCandidate, PolicyPackage as ExecutablePolicyPackage, Selection};
 use axiom_ledger::proof::{Node, Operation, Proof, ProofId};
 use axiom_ledger::recognize::{
-    AcceptedWorld, BookPolicy, FactScope, RecognitionAcceptedFact, RecognitionError, recognize,
-    recognize_books,
+    AcceptedWorld, BookPolicy, CompletenessClaims, FactScope, RecognitionAcceptedFact,
+    RecognitionError, ReportingPeriod, recognize, recognize_books,
 };
 use axiom_ledger::scenario::{
     Assumption, Constraint, ConstraintExpression, ExpectedEvent, Horizon, RealizedEvent, Scenario,
@@ -1394,6 +1394,134 @@ const EXECUTION_COVERAGE: &[CaseCoverage] = &[
     CaseCoverage {
         id: "I10",
         executor: collaboration_and_adapter_boundaries_fixtures,
+    },
+];
+
+/// Case-specific executors added for Gate 0.  The grouped suites above retain
+/// the full inventory smoke pass, while every entry here has its own `#[test]`
+/// below.  Keeping this registry explicit prevents a new test from silently
+/// drifting away from the XIV A-I fixture name it proves.
+struct IndependentCase {
+    id: &'static str,
+    executor: fn(),
+}
+
+const INDEPENDENT_CASES_ADDED: &[IndependentCase] = &[
+    IndependentCase {
+        id: "A01",
+        executor: independent_a01_identical_source_rows_keep_occurrences,
+    },
+    IndependentCase {
+        id: "A02",
+        executor: independent_a02_receipt_and_bank_keep_both_leaves,
+    },
+    IndependentCase {
+        id: "A03",
+        executor: independent_a03_correction_supersedes_by_scope,
+    },
+    IndependentCase {
+        id: "A06",
+        executor: independent_a06_conflicting_balances_retain_both_proofs,
+    },
+    IndependentCase {
+        id: "A07",
+        executor: independent_a07_incomplete_period_does_not_prove_absence,
+    },
+    IndependentCase {
+        id: "A08",
+        executor: independent_a08_deleted_source_is_a_tombstone,
+    },
+    IndependentCase {
+        id: "A09",
+        executor: independent_a09_split_conserves_quantity,
+    },
+    IndependentCase {
+        id: "A10",
+        executor: independent_a10_merge_conserves_quantity,
+    },
+    IndependentCase {
+        id: "A11",
+        executor: independent_a11_fuzzy_match_is_ranked_candidate,
+    },
+    IndependentCase {
+        id: "A12",
+        executor: independent_a12_adapter_versions_keep_derivations,
+    },
+    IndependentCase {
+        id: "B06",
+        executor: independent_b06_bounced_check_leaves_obligation,
+    },
+    IndependentCase {
+        id: "B07",
+        executor: independent_b07_chargeback_reverses_settlement,
+    },
+    IndependentCase {
+        id: "B10",
+        executor: independent_b10_one_payment_satisfies_many_invoices,
+    },
+    IndependentCase {
+        id: "B11",
+        executor: independent_b11_many_payments_satisfy_one_invoice,
+    },
+    IndependentCase {
+        id: "B13",
+        executor: independent_b13_withheld_fee_is_separate_leg,
+    },
+    IndependentCase {
+        id: "C01",
+        executor: independent_c01_joint_roles_keep_holders_separate,
+    },
+    IndependentCase {
+        id: "C03",
+        executor: independent_c03_escrow_separates_custody_and_benefit,
+    },
+    IndependentCase {
+        id: "E01",
+        executor: independent_e01_cash_and_accrual_share_event_set,
+    },
+    IndependentCase {
+        id: "E03",
+        executor: independent_e03_deferred_revenue_retains_obligation,
+    },
+    IndependentCase {
+        id: "D01",
+        executor: independent_d01_missing_quote_is_unavailable,
+    },
+    IndependentCase {
+        id: "D02",
+        executor: independent_d02_conflicting_quotes_are_ambiguous,
+    },
+    IndependentCase {
+        id: "F01",
+        executor: independent_f01_fixed_offset_preserves_instant,
+    },
+    IndependentCase {
+        id: "F08",
+        executor: independent_f08_missing_recurrence_day_has_policy,
+    },
+    IndependentCase {
+        id: "G01",
+        executor: independent_g01_positive_recursion_reaches_fixed_point,
+    },
+    IndependentCase {
+        id: "G06",
+        executor: independent_g06_proof_and_refutation_are_conflict,
+    },
+    IndependentCase {
+        id: "H01",
+        executor: independent_h01_forecast_is_separate_from_actual,
+    },
+    IndependentCase {
+        id: "H03",
+        executor: independent_h03_amount_range_is_interval_constraint,
+    },
+    IndependentCase {
+        id: "I01",
+        executor: independent_i01_adapter_can_only_emit_observations,
+    },
+    IndependentCase {
+        id: "I04",
+        executor: independent_i04_revocation_keeps_history,
     },
 ];
 
@@ -2835,5 +2963,989 @@ fn collaboration_and_adapter_boundaries_fixtures() {
     assert_eq!(
         candidate.relation().kind,
         EvidenceRelationKind::PossiblySameAs
+    );
+}
+
+#[test]
+fn independent_case_registry_is_explicit() {
+    assert_eq!(
+        INDEPENDENT_CASES_ADDED.len(),
+        29,
+        "this tranche must keep an auditable independent-case count"
+    );
+    let executed: BTreeSet<_> = FIXTURES
+        .iter()
+        .filter_map(|fixture| match fixture.disposition {
+            Disposition::Executed => Some(fixture.id),
+            Disposition::Inventory { .. } => None,
+        })
+        .collect();
+    let mut ids = BTreeSet::new();
+    for case in INDEPENDENT_CASES_ADDED {
+        assert!(
+            executed.contains(case.id),
+            "{} must be an Executed fixture",
+            case.id
+        );
+        assert!(
+            ids.insert(case.id),
+            "duplicate independent fixture {}",
+            case.id
+        );
+        // Reading the function pointer here ensures every registry entry is
+        // tied to a real, separately runnable test function.  The test body
+        // itself is run by libtest under that function's own name.
+        let _executor = case.executor;
+    }
+}
+
+#[test]
+fn independent_a01_identical_source_rows_keep_occurrences() {
+    let first = evidence_row("bank", "occ-a01", "row-a01", b"2026-09-21,4.00");
+    let second = evidence_row("bank", "occ-a02", "row-a02", b"2026-09-21,4.00");
+    assert_eq!(first.content(), second.content());
+    assert_ne!(first.occurrence(), second.occurrence());
+
+    let mut store = EvidenceStore::new();
+    let report = store
+        .import_batch(ImportBatch::from_observations(
+            "bank",
+            [first.clone(), second.clone()],
+        ))
+        .unwrap();
+    assert_eq!(report.inserted_count(), 2);
+    assert_eq!(store.len(), 2);
+    assert!(store.contains(first.occurrence()));
+    assert!(store.contains(second.occurrence()));
+}
+
+#[test]
+fn independent_a02_receipt_and_bank_keep_both_leaves() {
+    let receipt = evidence_row("receipt", "receipt-a02", "receipt-a02", b"coffee 4.00");
+    let bank = evidence_row("bank", "bank-a02", "row-a02", b"CARD COFFEE 4.00");
+    let mut store = EvidenceStore::new();
+    store
+        .import_batch(ImportBatch::from_observations("receipt", [receipt.clone()]))
+        .unwrap();
+    store
+        .import_batch(ImportBatch::from_observations("bank", [bank.clone()]))
+        .unwrap();
+    assert!(
+        store
+            .propose_identity_link(
+                receipt.identity().clone(),
+                bank.identity().clone(),
+                Confidence::from_percent(90),
+                axiom_ledger::evidence::Provenance::new("matcher"),
+                EvidenceAuthority::user("reviewer"),
+            )
+            .unwrap()
+    );
+    assert_eq!(store.len(), 2, "candidate matching must retain both leaves");
+    assert_eq!(store.candidate_links().count(), 1);
+    assert_eq!(
+        store.relations().count(),
+        0,
+        "a candidate is not an accepted same-as"
+    );
+}
+
+#[test]
+fn independent_a03_correction_supersedes_by_scope() {
+    let old = evidence_row("bank", "occ-a03-old", "row-a03-old", b"amount=4.00");
+    let corrected = evidence_row("bank", "occ-a03-new", "row-a03-new", b"amount=5.00");
+    let relation = EvidenceRelation::corrects(
+        corrected.identity().clone(),
+        old.identity().clone(),
+        CorrectionScope::field("amount").with_rationale("issuer correction"),
+    );
+    assert_eq!(relation.kind, EvidenceRelationKind::Corrects);
+    assert_eq!(relation.from(), corrected.identity());
+    assert_eq!(relation.to(), old.identity());
+    assert_eq!(relation.scope.as_ref().unwrap().fields, vec!["amount"]);
+    assert_eq!(
+        relation.scope.as_ref().unwrap().rationale.as_deref(),
+        Some("issuer correction")
+    );
+}
+
+#[test]
+fn independent_a06_conflicting_balances_retain_both_proofs() {
+    let subject = axiom_ledger::semantics::GoalId::new(hash(106)).unwrap();
+    let positive = proof(107);
+    let negative = proof(108);
+    let conflict = Conflict::new(subject, vec![positive], vec![negative]).unwrap();
+    let proof_context = proof_bundle([positive, negative]);
+    let result = Resolution::<&str>::new_checked(
+        &proof_context,
+        vec![positive],
+        vec![negative],
+        Multiplicity::none(),
+        SemanticCompletion::Complete,
+        Vec::new(),
+        vec![conflict],
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(result.truth(), Truth::Both);
+    assert_eq!(result.positive_proofs(), &[positive]);
+    assert_eq!(result.negative_proofs(), &[negative]);
+    assert_eq!(result.conflicts().len(), 1);
+    assert_eq!(result.proof_context().nodes.len(), 2);
+}
+
+#[test]
+fn independent_a07_incomplete_period_does_not_prove_absence() {
+    let source = hash(109);
+    let period = ReportingPeriod::new(date("2026-09-01"), date("2026-09-30"));
+    let claims = CompletenessClaims::new()
+        .claim_scoped(
+            "bank-september",
+            false,
+            source,
+            "bank:checking",
+            period,
+            proof(110),
+            hash(111),
+        )
+        .with_evidence("bank-september", "statement ends 2026-09-15");
+    assert!(!claims.is_complete());
+    assert!(!claims.is_satisfied_for(source, "bank:checking", period));
+}
+
+#[test]
+fn independent_a08_deleted_source_is_a_tombstone() {
+    let tombstone = RawEvidence::deleted_tombstone(
+        "bank",
+        "occ-a08-deleted",
+        Some(ExternalId::new("row-a08")),
+        hash(112),
+    )
+    .unwrap();
+    assert_eq!(tombstone.availability(), Availability::Deleted);
+    assert!(tombstone.payload().is_none());
+    assert!(!tombstone.is_available());
+}
+
+#[test]
+fn independent_a09_split_conserves_quantity() {
+    let parent = Identity::new("parent-a09", hash(113));
+    let child_a = Identity::new("child-a09-a", hash(114));
+    let child_b = Identity::new("child-a09-b", hash(115));
+    let conservation = ConservationMetadata::new(
+        [ConservationLeg::new(parent.clone())
+            .with_quantity(ExactNumber::integer(10))
+            .with_unit("USD")],
+        [
+            ConservationLeg::new(child_a.clone())
+                .with_quantity(ExactNumber::integer(6))
+                .with_unit("USD"),
+            ConservationLeg::new(child_b.clone())
+                .with_quantity(ExactNumber::integer(4))
+                .with_unit("USD"),
+        ],
+    );
+    let relation = EvidenceRelation::splits(parent, [child_a, child_b], conservation).unwrap();
+    assert_eq!(relation.kind, EvidenceRelationKind::Splits);
+    assert_eq!(relation.targets().count(), 2);
+    assert_eq!(
+        relation.conservation.as_ref().unwrap().balances(),
+        Some(true)
+    );
+}
+
+#[test]
+fn independent_a10_merge_conserves_quantity() {
+    let input_a = Identity::new("input-a10-a", hash(116));
+    let input_b = Identity::new("input-a10-b", hash(117));
+    let output = Identity::new("output-a10", hash(118));
+    let conservation = ConservationMetadata::new(
+        [
+            ConservationLeg::new(input_a.clone())
+                .with_quantity(ExactNumber::integer(3))
+                .with_unit("USD"),
+            ConservationLeg::new(input_b.clone())
+                .with_quantity(ExactNumber::integer(7))
+                .with_unit("USD"),
+        ],
+        [ConservationLeg::new(output.clone())
+            .with_quantity(ExactNumber::integer(10))
+            .with_unit("USD")],
+    );
+    let relation = EvidenceRelation::merges([input_a, input_b], output, conservation).unwrap();
+    assert_eq!(relation.kind, EvidenceRelationKind::Merges);
+    assert_eq!(relation.sources().count(), 2);
+    assert_eq!(
+        relation.conservation.as_ref().unwrap().balances(),
+        Some(true)
+    );
+}
+
+#[test]
+fn independent_a11_fuzzy_match_is_ranked_candidate() {
+    let left = evidence_row("bank", "left-a11", "row-left-a11", b"merchant=ACME");
+    let right = evidence_row(
+        "receipt",
+        "right-a11",
+        "row-right-a11",
+        b"merchant=ACME INC",
+    );
+    let mut store = EvidenceStore::new();
+    store
+        .import_batch(ImportBatch::from_observations("bank", [left.clone()]))
+        .unwrap();
+    store
+        .import_batch(ImportBatch::from_observations("receipt", [right.clone()]))
+        .unwrap();
+    store
+        .add_candidate_link(
+            CandidateIdentityLink::new(
+                left.identity().clone(),
+                right.identity().clone(),
+                Confidence::from_percent(61),
+                axiom_ledger::evidence::Provenance::new("fuzzy-merchant"),
+                EvidenceAuthority::user("matcher"),
+            )
+            .with_rationale("normalized merchant name"),
+        )
+        .unwrap();
+    store
+        .add_candidate_link(CandidateIdentityLink::new(
+            left.identity().clone(),
+            right.identity().clone(),
+            Confidence::from_percent(92),
+            axiom_ledger::evidence::Provenance::new("fuzzy-merchant"),
+            EvidenceAuthority::user("matcher"),
+        ))
+        .unwrap();
+    let candidates: Vec<_> = store.candidate_links().collect();
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0].confidence.basis_points(), 9_200);
+    assert_eq!(candidates[1].confidence.basis_points(), 6_100);
+    assert_eq!(
+        store.relations().count(),
+        0,
+        "ranking does not silently accept a match"
+    );
+}
+
+#[test]
+fn independent_a12_adapter_versions_keep_derivations() {
+    let base = evidence_row("bank", "occ-a12", "row-a12", b"10 USD");
+    let v1 = base.clone().with_provenance(
+        axiom_ledger::evidence::Provenance::new("bank")
+            .with_adapter(AdapterProvenance::new("csv", "1")),
+    );
+    let v2 = base.with_provenance(
+        axiom_ledger::evidence::Provenance::new("bank")
+            .with_adapter(AdapterProvenance::new("csv", "2")),
+    );
+    let mut store = EvidenceStore::new();
+    store.insert(v1).unwrap();
+    store.insert(v2).unwrap();
+    assert_eq!(store.len(), 2);
+    assert!(store.get(&OccurrenceId::new("occ-a12")).is_multiple());
+    let adapters: BTreeSet<_> = store
+        .get(&OccurrenceId::new("occ-a12"))
+        .all()
+        .into_iter()
+        .filter_map(|evidence| {
+            evidence
+                .provenance()
+                .adapter
+                .as_ref()
+                .map(|adapter| adapter.version.as_str())
+        })
+        .collect();
+    assert_eq!(adapters, BTreeSet::from(["1", "2"]));
+}
+
+#[test]
+fn independent_b06_bounced_check_leaves_obligation() {
+    let obligation = Obligation::transfer(
+        "obligation-b06",
+        "payer",
+        "payee",
+        "USD",
+        Quantity::with_unit(25i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    let mut check = Settlement::new(
+        "check-b06",
+        Endpoint::entity("payer"),
+        Endpoint::entity("payee"),
+        "USD",
+        Quantity::with_unit(25i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    check
+        .transition(SettlementState::Presented, Some(date("2026-09-20")), None)
+        .unwrap();
+    check
+        .transition(
+            SettlementState::Returned,
+            Some(date("2026-09-21")),
+            Some("bounced".into()),
+        )
+        .unwrap();
+    let allocation = SatisfactionAllocation::new(
+        "allocation-b06",
+        obligation.id.clone(),
+        check.id.clone(),
+        Quantity::with_unit(25i64.into(), "USD").unwrap(),
+    )
+    .unwrap()
+    .applied();
+    assert!(!check.is_effective());
+    assert_eq!(
+        obligation
+            .remaining(&[allocation], &[check])
+            .unwrap()
+            .number
+            .canonical_string(),
+        "25"
+    );
+}
+
+#[test]
+fn independent_b07_chargeback_reverses_settlement() {
+    let obligation = Obligation::transfer(
+        "obligation-b07",
+        "payer",
+        "merchant",
+        "USD",
+        Quantity::with_unit(40i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    let mut card = Settlement::new(
+        "card-b07",
+        Endpoint::entity("payer"),
+        Endpoint::entity("merchant"),
+        "USD",
+        Quantity::with_unit(40i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    card.transition(SettlementState::Presented, Some(date("2026-09-20")), None)
+        .unwrap();
+    card.transition(SettlementState::Settled, Some(date("2026-09-20")), None)
+        .unwrap();
+    card.transition(SettlementState::ChargedBack, Some(date("2026-09-21")), None)
+        .unwrap();
+    let allocation = SatisfactionAllocation::new(
+        "allocation-b07",
+        obligation.id.clone(),
+        card.id.clone(),
+        Quantity::with_unit(40i64.into(), "USD").unwrap(),
+    )
+    .unwrap()
+    .applied();
+    let reversal = EvidenceRelation::reverses(
+        Identity::new("chargeback-b07", hash(119)),
+        Identity::new("sale-b07", hash(120)),
+    );
+    assert_eq!(card.latest_state(), Some(&SettlementState::ChargedBack));
+    assert!(!card.is_effective());
+    assert_eq!(
+        obligation
+            .remaining(&[allocation], &[card])
+            .unwrap()
+            .number
+            .canonical_string(),
+        "40"
+    );
+    assert_eq!(reversal.kind, EvidenceRelationKind::Reverses);
+}
+
+#[test]
+fn independent_b10_one_payment_satisfies_many_invoices() {
+    let first = Obligation::transfer(
+        "invoice-b10-1",
+        "payer",
+        "merchant",
+        "USD",
+        Quantity::with_unit(40i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    let second = Obligation::transfer(
+        "invoice-b10-2",
+        "payer",
+        "merchant",
+        "USD",
+        Quantity::with_unit(60i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    let mut payment = Settlement::new(
+        "payment-b10",
+        Endpoint::entity("payer"),
+        Endpoint::entity("merchant"),
+        "USD",
+        Quantity::with_unit(100i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    payment
+        .transition(SettlementState::Presented, Some(date("2026-09-21")), None)
+        .unwrap();
+    payment
+        .transition(SettlementState::Settled, Some(date("2026-09-21")), None)
+        .unwrap();
+    let allocations = vec![
+        SatisfactionAllocation::new(
+            "allocation-b10-1",
+            first.id.clone(),
+            payment.id.clone(),
+            Quantity::with_unit(40i64.into(), "USD").unwrap(),
+        )
+        .unwrap()
+        .applied(),
+        SatisfactionAllocation::new(
+            "allocation-b10-2",
+            second.id.clone(),
+            payment.id.clone(),
+            Quantity::with_unit(60i64.into(), "USD").unwrap(),
+        )
+        .unwrap()
+        .applied(),
+    ];
+    assert_eq!(
+        first
+            .remaining(&allocations, &[payment.clone()])
+            .unwrap()
+            .number
+            .canonical_string(),
+        "0"
+    );
+    assert_eq!(
+        second
+            .remaining(&allocations, &[payment])
+            .unwrap()
+            .number
+            .canonical_string(),
+        "0"
+    );
+}
+
+#[test]
+fn independent_b11_many_payments_satisfy_one_invoice() {
+    let invoice = Obligation::transfer(
+        "invoice-b11",
+        "payer",
+        "merchant",
+        "USD",
+        Quantity::with_unit(100i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    let mut first = Settlement::new(
+        "payment-b11-1",
+        Endpoint::entity("payer"),
+        Endpoint::entity("merchant"),
+        "USD",
+        Quantity::with_unit(40i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    first
+        .transition(SettlementState::Presented, Some(date("2026-09-20")), None)
+        .unwrap();
+    first
+        .transition(SettlementState::Settled, Some(date("2026-09-20")), None)
+        .unwrap();
+    let mut second = Settlement::new(
+        "payment-b11-2",
+        Endpoint::entity("payer"),
+        Endpoint::entity("merchant"),
+        "USD",
+        Quantity::with_unit(60i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    second
+        .transition(SettlementState::Presented, Some(date("2026-09-21")), None)
+        .unwrap();
+    second
+        .transition(SettlementState::Settled, Some(date("2026-09-21")), None)
+        .unwrap();
+    let allocations = vec![
+        SatisfactionAllocation::new(
+            "allocation-b11-1",
+            invoice.id.clone(),
+            first.id.clone(),
+            Quantity::with_unit(40i64.into(), "USD").unwrap(),
+        )
+        .unwrap()
+        .applied(),
+        SatisfactionAllocation::new(
+            "allocation-b11-2",
+            invoice.id.clone(),
+            second.id.clone(),
+            Quantity::with_unit(60i64.into(), "USD").unwrap(),
+        )
+        .unwrap()
+        .applied(),
+    ];
+    assert_eq!(
+        invoice
+            .remaining(&allocations, &[first, second])
+            .unwrap()
+            .number
+            .canonical_string(),
+        "0"
+    );
+}
+
+#[test]
+fn independent_b13_withheld_fee_is_separate_leg() {
+    let principal = TransferRecord::between(
+        "principal-b13",
+        Endpoint::entity("payer"),
+        Endpoint::entity("merchant"),
+        "USD",
+        Quantity::with_unit(98i64.into(), "USD").unwrap(),
+    );
+    let fee = TransferRecord::between(
+        "fee-b13",
+        Endpoint::entity("payer"),
+        Endpoint::entity("processor"),
+        "USD",
+        Quantity::with_unit(2i64.into(), "USD").unwrap(),
+    );
+    validate_transfer_conservation(&[principal.clone(), fee.clone()]).unwrap();
+    assert_ne!(
+        principal.destinations[0].endpoint,
+        fee.destinations[0].endpoint
+    );
+    assert_eq!(
+        principal.sources[0].quantity.number.canonical_string(),
+        "98"
+    );
+    assert_eq!(fee.sources[0].quantity.number.canonical_string(), "2");
+}
+
+#[test]
+fn independent_c01_joint_roles_keep_holders_separate() {
+    let roles = RoleAssignments::joint(
+        "joint-account-c01",
+        Role::LegalOwner,
+        ["alice".into(), "bob".into()],
+    )
+    .unwrap();
+    roles.validate().unwrap();
+    let holders: Vec<_> = roles
+        .holders(&"joint-account-c01".into(), &Role::LegalOwner)
+        .collect();
+    assert_eq!(holders.len(), 2);
+    assert_ne!(holders[0], holders[1]);
+    assert_eq!(
+        roles.assignments[0]
+            .share
+            .as_ref()
+            .unwrap()
+            .canonical_string(),
+        "1/2"
+    );
+    assert_eq!(
+        roles.assignments[1]
+            .share
+            .as_ref()
+            .unwrap()
+            .canonical_string(),
+        "1/2"
+    );
+}
+
+#[test]
+fn independent_c03_escrow_separates_custody_and_benefit() {
+    let roles = RoleAssignments::new()
+        .with(axiom_ledger::ontology::RoleAssignment::new(
+            "escrow-c03",
+            Role::Custodian,
+            "escrow-agent",
+        ))
+        .with(axiom_ledger::ontology::RoleAssignment::new(
+            "escrow-c03",
+            Role::Beneficiary,
+            "buyer",
+        ));
+    roles.validate().unwrap();
+    let custodian: Vec<_> = roles
+        .holders(&"escrow-c03".into(), &Role::Custodian)
+        .collect();
+    let beneficiary: Vec<_> = roles
+        .holders(&"escrow-c03".into(), &Role::Beneficiary)
+        .collect();
+    assert_eq!(custodian, [&"escrow-agent".into()]);
+    assert_eq!(beneficiary, [&"buyer".into()]);
+    assert_ne!(custodian[0], beneficiary[0]);
+}
+
+#[test]
+fn independent_e01_cash_and_accrual_share_event_set() {
+    let fact = RecognitionAcceptedFact::actual(
+        "shared-e01",
+        "payment",
+        date("2026-09-21"),
+        proof(121),
+        "authority",
+    )
+    .unwrap();
+    let world = accepted_world(hash(122), [fact]);
+    let books = recognize_books(
+        &world,
+        &[
+            BookPolicy::new("cash-e01", date("2026-01-01"), None),
+            BookPolicy::new("accrual-e01", date("2026-01-01"), None),
+        ],
+    )
+    .unwrap();
+    let cash = books.get(&"cash-e01".into()).unwrap();
+    let accrual = books.get(&"accrual-e01".into()).unwrap();
+    assert_eq!(
+        cash.fact(&OccurrenceId::new("shared-e01"))
+            .unwrap()
+            .source_fact,
+        "shared-e01".into()
+    );
+    assert_eq!(
+        accrual
+            .fact(&OccurrenceId::new("shared-e01"))
+            .unwrap()
+            .source_fact,
+        "shared-e01".into()
+    );
+    assert_eq!(cash.world_root, accrual.world_root);
+    assert_ne!(
+        cash.root(),
+        accrual.root(),
+        "book projections remain distinct"
+    );
+}
+
+#[test]
+fn independent_e03_deferred_revenue_retains_obligation() {
+    let cash = Position::new(
+        "cash-e03",
+        "seller",
+        "USD",
+        Quantity::with_unit(100i64.into(), "USD").unwrap(),
+    )
+    .unwrap();
+    let performance = Obligation::transfer(
+        "performance-e03",
+        "seller",
+        "buyer",
+        "SERVICE",
+        Quantity::with_unit(1i64.into(), "SERVICE").unwrap(),
+    )
+    .unwrap();
+    performance.validate().unwrap();
+    assert_eq!(cash.quantity.number.canonical_string(), "100");
+    assert_eq!(
+        performance.creditor,
+        axiom_ledger::model::EntityId::new("buyer")
+    );
+    assert_eq!(
+        performance
+            .promised_quantity()
+            .unwrap()
+            .number
+            .canonical_string(),
+        "1"
+    );
+}
+
+#[test]
+fn independent_d01_missing_quote_is_unavailable() {
+    let share = unit("share", "ABC");
+    let usd = unit("USD", "USD");
+    let result = value(
+        &uq("2", share),
+        &usd,
+        Instant::from_unix_seconds(1),
+        &[],
+        ValuationPolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(result.status, ValuationStatus::Unavailable);
+    assert!(result.quantity.is_none());
+    assert!(result.paths.is_empty());
+}
+
+#[test]
+fn independent_d02_conflicting_quotes_are_ambiguous() {
+    let abc = unit("ABC", "ABC");
+    let usd = unit("USD", "USD");
+    let first = Quote::new(
+        "quote-d02-a",
+        Ratio::new(abc.clone(), usd.clone(), ExactNumber::integer(2)),
+        QuoteKind::Mid,
+        Instant::EPOCH,
+        Instant::from_unix_seconds(1),
+        "venue-d02",
+        "source-d02-a",
+        InstantInterval::closed(Instant::EPOCH, Instant::from_unix_seconds(10)).unwrap(),
+    );
+    let second = Quote::new(
+        "quote-d02-b",
+        Ratio::new(abc.clone(), usd.clone(), ExactNumber::integer(3)),
+        QuoteKind::Mid,
+        Instant::EPOCH,
+        Instant::from_unix_seconds(1),
+        "venue-d02",
+        "source-d02-b",
+        InstantInterval::closed(Instant::EPOCH, Instant::from_unix_seconds(10)).unwrap(),
+    );
+    let result = value(
+        &uq("1", abc),
+        &usd,
+        Instant::from_unix_seconds(2),
+        &[first, second],
+        ValuationPolicy::default(),
+    )
+    .unwrap();
+    assert_eq!(result.status, ValuationStatus::Ambiguous);
+    assert!(result.quantity.is_none());
+    assert_eq!(result.paths.len(), 2);
+}
+
+#[test]
+fn independent_f01_fixed_offset_preserves_instant() {
+    let local = LocalDateTime::new(
+        LocalDate::new(2026, 9, 21).unwrap(),
+        LocalTime::new(12, 0, 0, 0).unwrap(),
+        TimeZone::FixedOffsetSeconds(3_600),
+    );
+    let instant = local.to_instant().unwrap();
+    let utc = LocalDateTime::new(
+        LocalDate::new(2026, 9, 21).unwrap(),
+        LocalTime::new(11, 0, 0, 0).unwrap(),
+        TimeZone::FixedOffsetSeconds(0),
+    )
+    .to_instant()
+    .unwrap();
+    assert_eq!(instant, utc);
+    assert_eq!(local.status(), LocalTimeStatus::Exact);
+}
+
+#[test]
+fn independent_f08_missing_recurrence_day_has_policy() {
+    let recurrence = Recurrence::new(
+        LocalDate::new(2026, 1, 31).unwrap(),
+        Frequency::Monthly { every: 1, day: 31 },
+    )
+    .unwrap()
+    .with_count(3)
+    .with_missing_day_policy(MissingDayPolicy::ClampToLastDay);
+    let dates = recurrence
+        .between(
+            LocalDate::new(2026, 1, 1).unwrap(),
+            LocalDate::new(2026, 3, 31).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        dates,
+        vec![
+            LocalDate::new(2026, 1, 31).unwrap(),
+            LocalDate::new(2026, 2, 28).unwrap(),
+            LocalDate::new(2026, 3, 31).unwrap(),
+        ]
+    );
+}
+
+#[test]
+fn independent_g01_positive_recursion_reaches_fixed_point() {
+    let edge = |left: Term, right: Term| Literal::positive(ir_atom("edge-g01", vec![left, right]));
+    let path = |left: Term, right: Term| Literal::positive(ir_atom("path-g01", vec![left, right]));
+    let x = Var::named(123, "x");
+    let y = Var::named(124, "y");
+    let z = Var::named(125, "z");
+    let mut program = Program::new();
+    program
+        .add_fact(edge(Term::Text("a".into()), Term::Text("b".into())))
+        .unwrap();
+    program
+        .add_fact(edge(Term::Text("b".into()), Term::Text("c".into())))
+        .unwrap();
+    program.add_clause(Clause::new(
+        path(Term::var(x.clone()), Term::var(y.clone())),
+        Goal::atom(edge(Term::var(x.clone()), Term::var(y.clone()))),
+    ));
+    program.add_clause(Clause::new(
+        path(Term::var(x.clone()), Term::var(z.clone())),
+        Goal::and([
+            Goal::atom(edge(Term::var(x.clone()), Term::var(y.clone()))),
+            Goal::atom(path(Term::var(y.clone()), Term::var(z.clone()))),
+        ]),
+    ));
+    let result = Solver::new().solve(
+        &program,
+        &Goal::atom(path(Term::Text("a".into()), Term::Text("c".into()))),
+        &SemanticContext::default(),
+    );
+    assert_eq!(result.truth(), LogicTruth::TrueOnly);
+    assert_eq!(result.completion(), LogicCompletion::Complete);
+    result.check_proofs().unwrap();
+    assert!(
+        result
+            .trace()
+            .iter()
+            .any(|event| matches!(event, TraceEvent::FixedPointIteration { .. }))
+    );
+}
+
+#[test]
+fn independent_g06_proof_and_refutation_are_conflict() {
+    let positive = proof(126);
+    let negative = proof(127);
+    let conflict = Conflict::new(
+        axiom_ledger::semantics::GoalId::new(hash(128)).unwrap(),
+        vec![positive],
+        vec![negative],
+    )
+    .unwrap();
+    let context = proof_bundle([positive, negative]);
+    let result = Resolution::<&str>::new_checked(
+        &context,
+        vec![positive],
+        vec![negative],
+        Multiplicity::none(),
+        SemanticCompletion::Complete,
+        Vec::new(),
+        vec![conflict],
+        Vec::new(),
+    )
+    .unwrap();
+    assert_eq!(result.truth(), Truth::Both);
+    assert_eq!(result.conflicts().len(), 1);
+    assert!(result.answers().is_empty());
+}
+
+#[test]
+fn independent_h01_forecast_is_separate_from_actual() {
+    let mut scenario = Scenario::new("forecast-h01", hash(129)).unwrap();
+    scenario
+        .expect(ExpectedEvent::dated("rent-h01", date("2026-10-01")))
+        .unwrap();
+    let forecast = scenario
+        .materialize(Horizon::new(date("2026-10-01"), date("2026-10-31")).unwrap())
+        .unwrap();
+    let actual = RealizedEvent::new("rent-h01-actual", date("2026-10-02"));
+    scenario.register_actual_event(actual.clone()).unwrap();
+    assert_eq!(forecast.len(), 1);
+    assert!(
+        scenario
+            .expected_event(&OccurrenceId::new("rent-h01"))
+            .is_some()
+    );
+    assert_eq!(
+        scenario
+            .realized_links(&OccurrenceId::new("rent-h01"))
+            .count(),
+        0
+    );
+    scenario.link_realized("rent-h01", actual).unwrap();
+    assert_eq!(
+        scenario
+            .realized_links(&OccurrenceId::new("rent-h01"))
+            .count(),
+        1
+    );
+    assert_eq!(scenario.expected_events().count(), 1);
+}
+
+#[test]
+fn independent_h03_amount_range_is_interval_constraint() {
+    let mut scenario = Scenario::new("range-h03", hash(130)).unwrap();
+    scenario
+        .constrain(
+            Constraint::new(
+                "minimum-h03",
+                ConstraintExpression::QuantityAtLeast {
+                    metric: "cash".to_string(),
+                    amount: Quantity::with_unit(90i64.into(), "USD").unwrap(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    scenario
+        .constrain(
+            Constraint::new(
+                "maximum-h03",
+                ConstraintExpression::QuantityAtMost {
+                    metric: "cash".to_string(),
+                    amount: Quantity::with_unit(110i64.into(), "USD").unwrap(),
+                },
+            )
+            .unwrap(),
+        )
+        .unwrap();
+    assert_eq!(scenario.constraints().count(), 2);
+    assert!(scenario.constraint("minimum-h03").is_some());
+    assert!(scenario.constraint("maximum-h03").is_some());
+}
+
+#[test]
+fn independent_i01_adapter_can_only_emit_observations() {
+    struct ObservationOnlyAdapter;
+    impl ObservationAdapter for ObservationOnlyAdapter {
+        type Error = &'static str;
+
+        fn observe(
+            &self,
+            source: &axiom_ledger::model::SourceId,
+            bytes: &[u8],
+        ) -> Result<ImportBatch, Self::Error> {
+            Ok(
+                ImportBatch::new(source.clone()).observe(RawEvidence::from_bytes(
+                    source.clone(),
+                    "adapter-i01",
+                    None,
+                    bytes,
+                )),
+            )
+        }
+    }
+    let batch = ObservationOnlyAdapter
+        .observe(&axiom_ledger::model::SourceId::new("bank-i01"), b"row")
+        .unwrap();
+    assert_eq!(batch.observations.len(), 1);
+    assert_eq!(
+        batch.observations[0].occurrence(),
+        &OccurrenceId::new("adapter-i01")
+    );
+    let mut store = EvidenceStore::new();
+    store.import_batch(batch).unwrap();
+    assert_eq!(store.len(), 1);
+}
+
+#[test]
+fn independent_i04_revocation_keeps_history() {
+    let claim_scope =
+        axiom_ledger::semantics::CompletenessScope::new("bank-balance-i04", World::actual())
+            .unwrap();
+    let claim = axiom_ledger::semantics::CompletenessClaim::new(
+        axiom_ledger::semantics::CompletenessId::new(hash(131)).unwrap(),
+        claim_scope,
+        TemporalScope::from(date("2026-01-01")),
+        vec!["bank-i04".into()],
+        Provenance::source_observation("bank-i04", hash(132)).unwrap(),
+    )
+    .unwrap();
+    let revoked = claim
+        .revoke(axiom_ledger::semantics::Revocation::new(
+            date("2026-10-01"),
+            Authority::user("alice-i04").unwrap(),
+        ))
+        .unwrap();
+    assert!(revoked.is_active_at(date("2026-09-30")));
+    assert!(!revoked.is_active_at(date("2026-10-01")));
+    assert_eq!(
+        revoked.id(),
+        axiom_ledger::semantics::CompletenessId::new(hash(131)).unwrap()
+    );
+    assert!(
+        revoked
+            .revoke(axiom_ledger::semantics::Revocation::new(
+                date("2026-09-01"),
+                Authority::user("alice-i04").unwrap(),
+            ))
+            .is_err()
     );
 }

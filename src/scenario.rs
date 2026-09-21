@@ -272,6 +272,56 @@ impl Scenario {
         self.add_constraint(constraint)
     }
 
+    /// Verify an exact plan against every scenario constraint.  A failed
+    /// candidate is returned with a deletion-minimal violation core; no
+    /// approximate objective is involved in this decision.
+    pub fn verify_plan(&self, plan: &PlanMetrics) -> Result<VerifiedPlan, PlanVerificationError> {
+        let mut failed = Vec::new();
+        for constraint in self.constraints.values() {
+            if matches!(constraint.expression, ConstraintExpression::Text(_)) {
+                return Err(PlanVerificationError::UnsupportedConstraint {
+                    id: constraint.id.clone(),
+                });
+            }
+            if !constraint.expression.satisfied_by(plan) {
+                failed.push(constraint.id.clone());
+            }
+        }
+        if failed.is_empty() {
+            return Ok(VerifiedPlan {
+                metrics: plan.clone(),
+            });
+        }
+        let core = ConstraintCore::new(failed.clone()).trimmed_by(|ids| {
+            // This predicate describes this concrete candidate: a subset
+            // remains infeasible exactly when at least one included
+            // constraint is violated.  Trimming therefore turns a noisy
+            // solver explanation into an exact minimal witness.
+            ids.iter().any(|id| {
+                self.constraints
+                    .get(id)
+                    .is_some_and(|constraint| !constraint.expression.satisfied_by(plan))
+            })
+        });
+        Err(PlanVerificationError::ConstraintViolation {
+            core: core.unwrap_or_else(|| ConstraintCore::new(failed.clone())),
+            violations: failed,
+        })
+    }
+
+    /// Exact verification boundary for a plan proposed by an approximate
+    /// optimizer.  The objective is accepted only as metadata; constraint
+    /// satisfaction is recomputed from exact plan values.
+    pub fn verify_approximate_plan(
+        &self,
+        candidate: &ApproximatePlanCandidate,
+    ) -> Result<VerifiedPlan, PlanVerificationError> {
+        if !candidate.objective.is_finite() {
+            return Err(PlanVerificationError::NonFiniteApproximation);
+        }
+        self.verify_plan(&candidate.metrics)
+    }
+
     /// Materialize all projected dates in an explicit bounded horizon.
     ///
     /// A recurrence with no intrinsic `count`/`until` remains safe because the
@@ -748,6 +798,210 @@ pub enum ConstraintExpression {
     QuantityAtMost { metric: String, amount: Quantity },
     ExactAtLeast { metric: String, amount: Exact },
     ExactAtMost { metric: String, amount: Exact },
+}
+
+impl ConstraintExpression {
+    fn satisfied_by(&self, plan: &PlanMetrics) -> bool {
+        match self {
+            Self::Text(_) => false,
+            Self::QuantityAtLeast { metric, amount } => plan
+                .quantity(metric)
+                .is_some_and(|value| quantity_at_least_exact(value, amount)),
+            Self::QuantityAtMost { metric, amount } => plan
+                .quantity(metric)
+                .is_some_and(|value| quantity_at_least_exact(amount, value)),
+            Self::ExactAtLeast { metric, amount } => {
+                plan.exact(metric).is_some_and(|value| value >= amount)
+            }
+            Self::ExactAtMost { metric, amount } => {
+                plan.exact(metric).is_some_and(|value| value <= amount)
+            }
+        }
+    }
+}
+
+/// Exact values supplied by a planner for constraint verification.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PlanValue {
+    Quantity(Quantity),
+    Exact(Exact),
+    Boolean(bool),
+    Text(String),
+}
+
+/// A concrete plan's exact metric values.  Approximate solver scores never
+/// enter this map.
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct PlanMetrics {
+    values: BTreeMap<String, PlanValue>,
+}
+
+impl PlanMetrics {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, metric: impl Into<String>, value: PlanValue) {
+        self.values.insert(metric.into(), value);
+    }
+
+    pub fn with_quantity(mut self, metric: impl Into<String>, value: Quantity) -> Self {
+        self.insert(metric, PlanValue::Quantity(value));
+        self
+    }
+
+    pub fn with_exact(mut self, metric: impl Into<String>, value: Exact) -> Self {
+        self.insert(metric, PlanValue::Exact(value));
+        self
+    }
+
+    pub fn quantity(&self, metric: &str) -> Option<&Quantity> {
+        match self.values.get(metric) {
+            Some(PlanValue::Quantity(value)) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn exact(&self, metric: &str) -> Option<&Exact> {
+        match self.values.get(metric) {
+            Some(PlanValue::Exact(value)) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn value(&self, metric: &str) -> Option<&PlanValue> {
+        self.values.get(metric)
+    }
+}
+
+pub type Plan = PlanMetrics;
+
+/// A candidate returned by an approximate optimizer.  Its objective is
+/// deliberately not part of exact acceptance.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ApproximatePlanCandidate {
+    pub metrics: PlanMetrics,
+    pub objective: f64,
+}
+
+impl ApproximatePlanCandidate {
+    pub fn new(metrics: PlanMetrics, objective: f64) -> Self {
+        Self { metrics, objective }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VerifiedPlan {
+    pub metrics: PlanMetrics,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConstraintCore {
+    ids: Vec<String>,
+}
+
+impl ConstraintCore {
+    pub fn new<I, S>(ids: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut unique = Vec::new();
+        for id in ids {
+            let id = id.into();
+            if !unique.contains(&id) {
+                unique.push(id);
+            }
+        }
+        Self { ids: unique }
+    }
+
+    pub fn ids(&self) -> &[String] {
+        &self.ids
+    }
+
+    pub fn len(&self) -> usize {
+        self.ids.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.ids.is_empty()
+    }
+
+    pub fn is_minimal<F>(&self, mut remains_infeasible: F) -> bool
+    where
+        F: FnMut(&[String]) -> bool,
+    {
+        if !remains_infeasible(&self.ids) {
+            return false;
+        }
+        (0..self.ids.len()).all(|index| {
+            let mut reduced = self.ids.clone();
+            reduced.remove(index);
+            !remains_infeasible(&reduced)
+        })
+    }
+
+    pub fn trimmed_by<F>(&self, mut remains_infeasible: F) -> Option<Self>
+    where
+        F: FnMut(&[String]) -> bool,
+    {
+        if !remains_infeasible(&self.ids) {
+            return None;
+        }
+        let mut reduced = self.ids.clone();
+        let mut index = 0;
+        while index < reduced.len() {
+            let mut candidate = reduced.clone();
+            candidate.remove(index);
+            if remains_infeasible(&candidate) {
+                reduced = candidate;
+            } else {
+                index += 1;
+            }
+        }
+        Some(Self::new(reduced))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PlanVerificationError {
+    ConstraintViolation {
+        core: ConstraintCore,
+        violations: Vec<String>,
+    },
+    UnsupportedConstraint {
+        id: String,
+    },
+    NonFiniteApproximation,
+}
+
+impl fmt::Display for PlanVerificationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ConstraintViolation { core, .. } => {
+                write!(f, "plan violates constraints: {:?}", core.ids())
+            }
+            Self::UnsupportedConstraint { id } => {
+                write!(
+                    f,
+                    "constraint {id} is opaque and cannot be verified exactly"
+                )
+            }
+            Self::NonFiniteApproximation => {
+                f.write_str("approximate optimizer objective is not finite")
+            }
+        }
+    }
+}
+
+impl std::error::Error for PlanVerificationError {}
+
+fn quantity_at_least_exact(left: &Quantity, right: &Quantity) -> bool {
+    if left.unit != right.unit && !left.is_zero() && !right.is_zero() {
+        return false;
+    }
+    left.number >= right.number
 }
 
 impl From<String> for ConstraintExpression {
@@ -1362,5 +1616,73 @@ mod tests {
             scenario.link_realized_occurrence(occurrence, second),
             Err(ScenarioError::IncompatibleAllocationUnit { .. })
         ));
+    }
+
+    #[test]
+    fn nonminimal_constraint_core_is_trimmed() {
+        let core = ConstraintCore::new(["necessary", "noise"]);
+        let trimmed = core
+            .trimmed_by(|ids| ids.iter().any(|id| id == "necessary"))
+            .expect("necessary constraint keeps the set infeasible");
+        assert_eq!(trimmed.ids(), &["necessary".to_string()]);
+        assert!(trimmed.is_minimal(|ids| ids.iter().any(|id| id == "necessary")));
+    }
+
+    #[test]
+    fn approximate_plan_is_verified_against_exact_constraints() {
+        let root = ContentHash::domain_separated("test", b"plan");
+        let mut scenario = Scenario::new("plan", root).unwrap();
+        scenario
+            .constrain(
+                Constraint::new(
+                    "cash-floor",
+                    ConstraintExpression::QuantityAtLeast {
+                        metric: "cash".into(),
+                        amount: Quantity::with_unit(Exact::integer(100), "USD").unwrap(),
+                    },
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let candidate = ApproximatePlanCandidate::new(
+            PlanMetrics::new().with_quantity(
+                "cash",
+                Quantity::with_unit(Exact::integer(99), "USD").unwrap(),
+            ),
+            -1000.0,
+        );
+        let Err(PlanVerificationError::ConstraintViolation { core, .. }) =
+            scenario.verify_approximate_plan(&candidate)
+        else {
+            panic!("infeasible approximate plan was accepted")
+        };
+        assert_eq!(core.ids(), &["cash-floor".to_string()]);
+        assert!(core.is_minimal(|ids| ids == ["cash-floor".to_string()]));
+    }
+
+    #[test]
+    fn nonfinite_approximate_objective_cannot_cross_boundary() {
+        let root = ContentHash::domain_separated("test", b"nonfinite");
+        let scenario = Scenario::new("plan", root).unwrap();
+        let candidate = ApproximatePlanCandidate::new(PlanMetrics::new(), f64::NAN);
+        assert_eq!(
+            scenario.verify_approximate_plan(&candidate),
+            Err(PlanVerificationError::NonFiniteApproximation)
+        );
+    }
+
+    #[test]
+    fn opaque_text_constraint_is_not_misreported_as_false() {
+        let root = ContentHash::domain_separated("test", b"opaque-constraint");
+        let mut scenario = Scenario::new("plan", root).unwrap();
+        scenario
+            .constrain(Constraint::text("manual", "cash stays comfortable").unwrap())
+            .unwrap();
+        assert_eq!(
+            scenario.verify_plan(&PlanMetrics::new()),
+            Err(PlanVerificationError::UnsupportedConstraint {
+                id: "manual".into()
+            })
+        );
     }
 }

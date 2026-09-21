@@ -451,7 +451,9 @@ impl LiquidityGraph {
             return Err(LiquidityError::UnknownNode);
         }
         if !self.start_feasible(from, amount)? {
-            return Ok(SearchResult::complete());
+            let mut result = SearchResult::complete();
+            result.infeasible_core = self.infeasible_core(from, to, amount, &limits);
+            return Ok(result);
         }
         let mut state = SearchState {
             result: SearchResult::complete(),
@@ -475,7 +477,226 @@ impl LiquidityGraph {
         if state.result.routes.len() > 1 {
             pareto_filter(&mut state.result.routes);
         }
+        if state.result.routes.is_empty() && state.result.is_complete() {
+            state.result.infeasible_core = self.infeasible_core(from, to, amount, &limits);
+        }
         Ok(state.result)
+    }
+
+    /// Diagnose a complete failed query by enumerating the same bounded,
+    /// simple paths used by search and computing an inclusion-minimal hitting
+    /// set of exact blockers.  A resource-limited query never calls this
+    /// method from [`Self::search`].
+    fn infeasible_core(
+        &self,
+        from: &NodeId,
+        to: &NodeId,
+        amount: &Quantity,
+        limits: &SearchLimits,
+    ) -> Option<InfeasibleCore> {
+        let start_constraints = self.start_constraints(from, amount);
+        if !start_constraints.is_empty() {
+            return InfeasibleCore::new(start_constraints)
+                .trimmed_by(|constraints| !constraints.is_empty());
+        }
+
+        let mut paths = Vec::<Vec<String>>::new();
+        let mut path = Vec::new();
+        let mut visited = BTreeSet::from([from.clone()]);
+        self.collect_paths(
+            from,
+            to,
+            limits.max_depth,
+            &mut path,
+            &mut visited,
+            &mut paths,
+        );
+        if paths.is_empty() {
+            return Some(InfeasibleCore::new([RouteConstraint::NoPath {
+                from: from.clone(),
+                to: to.clone(),
+            }]));
+        }
+
+        let mut blocker_sets = Vec::<Vec<RouteConstraint>>::new();
+        for path in paths {
+            let blockers = self.path_constraints(&path, amount);
+            // A complete search should not produce a feasible path here.  If
+            // one appears anyway, do not manufacture a false refutation.
+            if blockers.is_empty() {
+                return None;
+            }
+            blocker_sets.push(blockers);
+        }
+
+        // Pick one exact blocker from each path, then delete anything which
+        // is no longer needed to hit every path.  The result is
+        // inclusion-minimal (cardinality minimality is not required for a
+        // diagnostic and would be unnecessarily exponential).
+        let mut core = Vec::new();
+        for blockers in &blocker_sets {
+            if let Some(blocker) = blockers.first()
+                && !core.contains(blocker)
+            {
+                core.push(blocker.clone());
+            }
+        }
+        InfeasibleCore::new(core).trimmed_by(|candidate| {
+            blocker_sets
+                .iter()
+                .all(|blockers| blockers.iter().any(|blocker| candidate.contains(blocker)))
+        })
+    }
+
+    fn collect_paths(
+        &self,
+        current: &NodeId,
+        target: &NodeId,
+        max_depth: usize,
+        path: &mut Vec<String>,
+        visited: &mut BTreeSet<NodeId>,
+        paths: &mut Vec<Vec<String>>,
+    ) {
+        if current == target {
+            paths.push(path.clone());
+            return;
+        }
+        if path.len() >= max_depth {
+            return;
+        }
+        for edge_id in self.outgoing.get(current).cloned().unwrap_or_default() {
+            let Some(edge) = self.edges.get(&edge_id) else {
+                continue;
+            };
+            if visited.contains(&edge.to) {
+                continue;
+            }
+            path.push(edge_id);
+            visited.insert(edge.to.clone());
+            self.collect_paths(&edge.to, target, max_depth, path, visited, paths);
+            visited.remove(&edge.to);
+            path.pop();
+        }
+    }
+
+    fn start_constraints(&self, node: &NodeId, amount: &Quantity) -> Vec<RouteConstraint> {
+        let mut constraints = Vec::new();
+        if !self.quantity_matches_node(node, amount).unwrap_or(false) {
+            constraints.push(RouteConstraint::StartUnitMismatch {
+                node: node.clone(),
+                requested: amount.clone(),
+            });
+            return constraints;
+        }
+        if let Some(LiquidityNode::Position(position)) = self.nodes.get(node)
+            && !quantity_at_least(&position.quantity, amount).unwrap_or(false)
+        {
+            constraints.push(RouteConstraint::StartQuantityUnavailable {
+                node: node.clone(),
+                available: position.quantity.clone(),
+                requested: amount.clone(),
+            });
+        }
+        constraints
+    }
+
+    fn path_constraints(&self, path: &[String], amount: &Quantity) -> Vec<RouteConstraint> {
+        let mut blockers = Vec::new();
+        let mut current_amount = amount.clone();
+        for edge_id in path {
+            let Some(edge) = self.edges.get(edge_id) else {
+                continue;
+            };
+            let edge_blockers = self.edge_constraints(edge, &current_amount);
+            if !edge_blockers.is_empty() {
+                blockers.extend(edge_blockers);
+                // A conversion failure means there is no exact quantity with
+                // which to evaluate the suffix, but this edge already blocks
+                // the whole path.
+                break;
+            }
+            match self.output_quantity(edge, &current_amount) {
+                Ok(next) => current_amount = next,
+                Err(error) => {
+                    blockers.push(RouteConstraint::EdgeOutput {
+                        edge: edge.id.clone(),
+                        detail: error.to_string(),
+                    });
+                    break;
+                }
+            }
+        }
+        blockers
+    }
+
+    fn edge_constraints(&self, edge: &ActionEdge, amount: &Quantity) -> Vec<RouteConstraint> {
+        let mut blockers = Vec::new();
+        if !self
+            .quantity_matches_node(&edge.from, amount)
+            .unwrap_or(false)
+        {
+            blockers.push(RouteConstraint::EdgeUnitMismatch {
+                edge: edge.id.clone(),
+                from: edge.from.clone(),
+                to: edge.to.clone(),
+                requested: amount.clone(),
+            });
+            return blockers;
+        }
+        if let Some(LiquidityNode::Position(position)) = self.nodes.get(&edge.from) {
+            if !quantity_at_least(&position.quantity, amount).unwrap_or(false) {
+                blockers.push(RouteConstraint::EdgeQuantityUnavailable {
+                    edge: edge.id.clone(),
+                    node: edge.from.clone(),
+                    available: position.quantity.clone(),
+                    requested: amount.clone(),
+                });
+            }
+            if !edge.allow_encumbered
+                && position.is_encumbered()
+                && edge.action != ActionKind::ReleaseEncumbrance
+            {
+                blockers.push(RouteConstraint::EdgeEncumbered {
+                    edge: edge.id.clone(),
+                    node: edge.from.clone(),
+                    encumbrances: position.encumbrances.clone(),
+                });
+            }
+            for permission in &edge.required_permissions {
+                if !position.permissions.allows(permission) {
+                    blockers.push(RouteConstraint::EdgeMissingPermission {
+                        edge: edge.id.clone(),
+                        node: edge.from.clone(),
+                        permission: permission.clone(),
+                    });
+                }
+            }
+        }
+        if let Some(capacity) = &edge.capacity
+            && !quantity_at_least(capacity, amount).unwrap_or(false)
+        {
+            blockers.push(RouteConstraint::EdgeCapacity {
+                edge: edge.id.clone(),
+                capacity: capacity.clone(),
+                requested: amount.clone(),
+            });
+        }
+        if let Some(minimum) = &edge.minimum
+            && !quantity_at_least(amount, minimum).unwrap_or(false)
+        {
+            blockers.push(RouteConstraint::EdgeMinimum {
+                edge: edge.id.clone(),
+                minimum: minimum.clone(),
+                requested: amount.clone(),
+            });
+        }
+        if let Err(error) = self.output_quantity(edge, amount) {
+            blockers.push(RouteConstraint::EdgeOutput {
+                edge: edge.id.clone(),
+                detail: error.to_string(),
+            });
+        }
+        blockers
     }
 
     fn visit(
@@ -643,6 +864,9 @@ impl LiquidityGraph {
                 LiquidityError::NegativeQuantity,
             ));
         }
+        if !self.nodes.contains_key(from) || !self.nodes.contains_key(to) {
+            return Err(VerificationError::Liquidity(LiquidityError::UnknownNode));
+        }
         if route.from != *from || route.to != *to || route.amount != *amount {
             return Err(VerificationError::RouteIdentity);
         }
@@ -705,6 +929,172 @@ impl LiquidityGraph {
     ) -> Result<VerifiedRoute, VerificationError> {
         self.verify_route(route, from, to, amount)
     }
+
+    /// Return a minimal exact blocker for a route which is structurally valid
+    /// but not feasible.  Structural and metric tampering remains a regular
+    /// verification error; it is never disguised as a constraint core.
+    pub fn infeasible_core_for_route<N1: Borrow<NodeId>, N2: Borrow<NodeId>>(
+        &self,
+        route: &LiquidityRoute,
+        from: N1,
+        to: N2,
+        amount: &Quantity,
+    ) -> Result<Option<InfeasibleCore>, VerificationError> {
+        let from = from.borrow();
+        let to = to.borrow();
+        if amount.number.is_negative() {
+            return Err(VerificationError::Liquidity(
+                LiquidityError::NegativeQuantity,
+            ));
+        }
+        if !self.nodes.contains_key(from) || !self.nodes.contains_key(to) {
+            return Err(VerificationError::Liquidity(LiquidityError::UnknownNode));
+        }
+        if route.from != *from || route.to != *to || route.amount != *amount {
+            return Err(VerificationError::RouteIdentity);
+        }
+        if route.edges.is_empty() && from != to {
+            return Err(VerificationError::Disconnected);
+        }
+        // Validate the complete authored route before interpreting any
+        // economic blocker. An infeasible prefix must not hide a forged
+        // suffix or tampered aggregate metrics.
+        let mut current = from.clone();
+        let mut metrics = RouteMetrics::zero();
+        let mut seen = BTreeSet::from([current.clone()]);
+        for edge_id in &route.edges {
+            let edge = self
+                .edges
+                .get(edge_id)
+                .ok_or(VerificationError::UnknownEdge)?;
+            if edge.from != current {
+                return Err(VerificationError::Disconnected);
+            }
+            if !seen.insert(edge.to.clone()) {
+                return Err(VerificationError::Cycle);
+            }
+            metrics = metrics.add(edge).map_err(VerificationError::Liquidity)?;
+            current = edge.to.clone();
+        }
+        if current != *to {
+            return Err(VerificationError::Disconnected);
+        }
+        if metrics != route.metrics {
+            return Err(VerificationError::MetricMismatch);
+        }
+        let start = self.start_constraints(from, amount);
+        if !start.is_empty() {
+            return Ok(InfeasibleCore::new(start).trimmed_by(|constraints| !constraints.is_empty()));
+        }
+        let blockers = self.path_constraints(&route.edges, amount);
+        if !blockers.is_empty() {
+            return Ok(
+                InfeasibleCore::new(blockers).trimmed_by(|constraints| !constraints.is_empty())
+            );
+        }
+        Ok(None)
+    }
+
+    pub fn route_infeasible_core<N1: Borrow<NodeId>, N2: Borrow<NodeId>>(
+        &self,
+        route: &LiquidityRoute,
+        from: N1,
+        to: N2,
+        amount: &Quantity,
+    ) -> Result<Option<InfeasibleCore>, VerificationError> {
+        self.infeasible_core_for_route(route, from, to, amount)
+    }
+
+    /// Verify a route proposed by an approximate optimizer.  The optimizer's
+    /// score is advisory only; this method reconstructs the route metrics and
+    /// quantity flow from edge IDs and then runs the exact route verifier.
+    /// Consequently an infeasible approximate output cannot become accepted
+    /// merely because its floating-point score looks attractive.
+    pub fn verify_approximate_candidate(
+        &self,
+        candidate: &ApproximateRouteCandidate,
+    ) -> Result<VerifiedRoute, VerificationError> {
+        if !candidate.objective.is_finite() {
+            return Err(VerificationError::NonFiniteApproximation);
+        }
+        let route = self.canonical_route(
+            &candidate.from,
+            &candidate.to,
+            &candidate.amount,
+            &candidate.edges,
+        )?;
+        self.verify_route(&route, &candidate.from, &candidate.to, &candidate.amount)
+    }
+
+    pub fn verify_approximate_route(
+        &self,
+        candidate: &ApproximateRouteCandidate,
+    ) -> Result<VerifiedRoute, VerificationError> {
+        self.verify_approximate_candidate(candidate)
+    }
+
+    fn canonical_route(
+        &self,
+        from: &NodeId,
+        to: &NodeId,
+        amount: &Quantity,
+        edges: &[String],
+    ) -> Result<LiquidityRoute, VerificationError> {
+        if amount.number.is_negative() {
+            return Err(VerificationError::Liquidity(
+                LiquidityError::NegativeQuantity,
+            ));
+        }
+        if !self.nodes.contains_key(from) || !self.nodes.contains_key(to) {
+            return Err(VerificationError::Liquidity(LiquidityError::UnknownNode));
+        }
+        if !self
+            .start_feasible(from, amount)
+            .map_err(VerificationError::Liquidity)?
+        {
+            return Err(VerificationError::Infeasible);
+        }
+        if edges.is_empty() && from != to {
+            return Err(VerificationError::Disconnected);
+        }
+        let mut current = from.clone();
+        let mut current_amount = amount.clone();
+        let mut metrics = RouteMetrics::zero();
+        let mut seen = BTreeSet::from([current.clone()]);
+        for edge_id in edges {
+            let edge = self
+                .edges
+                .get(edge_id)
+                .ok_or(VerificationError::UnknownEdge)?;
+            if edge.from != current {
+                return Err(VerificationError::Disconnected);
+            }
+            if !seen.insert(edge.to.clone()) {
+                return Err(VerificationError::Cycle);
+            }
+            if !self
+                .edge_feasible(edge, &current_amount)
+                .map_err(VerificationError::Liquidity)?
+            {
+                return Err(VerificationError::Infeasible);
+            }
+            metrics = metrics.add(edge).map_err(VerificationError::Liquidity)?;
+            current_amount = self
+                .output_quantity(edge, &current_amount)
+                .map_err(VerificationError::Liquidity)?;
+            current = edge.to.clone();
+        }
+        if current != *to {
+            return Err(VerificationError::Disconnected);
+        }
+        Ok(LiquidityRoute {
+            from: from.clone(),
+            to: to.clone(),
+            edges: edges.to_vec(),
+            metrics,
+            amount: amount.clone(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -746,6 +1136,11 @@ pub struct SearchResult {
     pub routes: Vec<LiquidityRoute>,
     pub completion: SearchCompletion,
     expanded: usize,
+    /// When a complete search found no route, this is an exact, inclusion
+    /// minimal set of route constraints which blocks every simple candidate
+    /// path.  A resource-limited search deliberately leaves this unset: an
+    /// incomplete search is never allowed to masquerade as infeasibility.
+    infeasible_core: Option<InfeasibleCore>,
 }
 
 impl SearchResult {
@@ -754,6 +1149,7 @@ impl SearchResult {
             routes: Vec::new(),
             completion: SearchCompletion::Complete,
             expanded: 0,
+            infeasible_core: None,
         }
     }
     fn mark_incomplete(&mut self, expanded: usize, limit: usize) {
@@ -770,6 +1166,194 @@ impl SearchResult {
     }
     pub fn expanded(&self) -> usize {
         self.expanded
+    }
+
+    /// Return the exact diagnostic for a complete, route-less search.
+    ///
+    /// `None` has two intentional meanings: a route was found, or the search
+    /// was incomplete.  In particular, callers must not treat an incomplete
+    /// result as an unsatisfied plan.
+    pub fn infeasible_core(&self) -> Option<&InfeasibleCore> {
+        self.infeasible_core.as_ref()
+    }
+
+    pub fn has_infeasible_core(&self) -> bool {
+        self.infeasible_core.is_some()
+    }
+}
+
+/// An exact reason why one candidate route cannot be used.
+///
+/// These values intentionally retain the quantities and units involved in the
+/// failed comparison.  They are data, not a score: no floating point value is
+/// consulted when a core is built or checked.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RouteConstraint {
+    StartUnitMismatch {
+        node: NodeId,
+        requested: Quantity,
+    },
+    StartQuantityUnavailable {
+        node: NodeId,
+        available: Quantity,
+        requested: Quantity,
+    },
+    EdgeUnitMismatch {
+        edge: String,
+        from: NodeId,
+        to: NodeId,
+        requested: Quantity,
+    },
+    EdgeQuantityUnavailable {
+        edge: String,
+        node: NodeId,
+        available: Quantity,
+        requested: Quantity,
+    },
+    EdgeEncumbered {
+        edge: String,
+        node: NodeId,
+        encumbrances: BTreeSet<String>,
+    },
+    EdgeMissingPermission {
+        edge: String,
+        node: NodeId,
+        permission: String,
+    },
+    EdgeCapacity {
+        edge: String,
+        capacity: Quantity,
+        requested: Quantity,
+    },
+    EdgeMinimum {
+        edge: String,
+        minimum: Quantity,
+        requested: Quantity,
+    },
+    EdgeOutput {
+        edge: String,
+        detail: String,
+    },
+    NoPath {
+        from: NodeId,
+        to: NodeId,
+    },
+}
+
+impl RouteConstraint {
+    /// A stable human/machine label suitable for a repair UI.  The label is
+    /// deliberately independent of debug formatting and contains no rounded
+    /// numeric value.
+    pub fn id(&self) -> String {
+        match self {
+            Self::StartUnitMismatch { .. } => "start.unit".into(),
+            Self::StartQuantityUnavailable { .. } => "start.quantity".into(),
+            Self::EdgeUnitMismatch { edge, .. } => format!("edge.{edge}.unit"),
+            Self::EdgeQuantityUnavailable { edge, .. } => format!("edge.{edge}.quantity"),
+            Self::EdgeEncumbered { edge, .. } => format!("edge.{edge}.encumbrance"),
+            Self::EdgeMissingPermission {
+                edge, permission, ..
+            } => {
+                format!("edge.{edge}.permission.{permission}")
+            }
+            Self::EdgeCapacity { edge, .. } => format!("edge.{edge}.capacity"),
+            Self::EdgeMinimum { edge, .. } => format!("edge.{edge}.minimum"),
+            Self::EdgeOutput { edge, .. } => format!("edge.{edge}.output"),
+            Self::NoPath { .. } => "route.path".into(),
+        }
+    }
+
+    pub fn edge_id(&self) -> Option<&str> {
+        match self {
+            Self::EdgeUnitMismatch { edge, .. }
+            | Self::EdgeQuantityUnavailable { edge, .. }
+            | Self::EdgeEncumbered { edge, .. }
+            | Self::EdgeMissingPermission { edge, .. }
+            | Self::EdgeCapacity { edge, .. }
+            | Self::EdgeMinimum { edge, .. }
+            | Self::EdgeOutput { edge, .. } => Some(edge),
+            Self::StartUnitMismatch { .. }
+            | Self::StartQuantityUnavailable { .. }
+            | Self::NoPath { .. } => None,
+        }
+    }
+}
+
+/// A deterministic, inclusion-minimal infeasible core.
+///
+/// A core is not accepted merely because a producer labels it "minimal".
+/// Callers that receive externally-produced diagnostics can use
+/// [`InfeasibleCore::trimmed_by`] or [`InfeasibleCore::is_minimal`] with an
+/// exact feasibility predicate.  The routing engine itself constructs cores
+/// with the same deletion check.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InfeasibleCore {
+    constraints: Vec<RouteConstraint>,
+}
+
+impl InfeasibleCore {
+    pub fn new(constraints: impl IntoIterator<Item = RouteConstraint>) -> Self {
+        let mut unique = Vec::new();
+        for constraint in constraints {
+            if !unique.contains(&constraint) {
+                unique.push(constraint);
+            }
+        }
+        Self {
+            constraints: unique,
+        }
+    }
+
+    pub fn constraints(&self) -> &[RouteConstraint] {
+        &self.constraints
+    }
+
+    pub fn len(&self) -> usize {
+        self.constraints.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.constraints.is_empty()
+    }
+
+    /// Check inclusion minimality against an exact predicate.  The predicate
+    /// must return true when the supplied set remains infeasible.
+    pub fn is_minimal<F>(&self, mut remains_infeasible: F) -> bool
+    where
+        F: FnMut(&[RouteConstraint]) -> bool,
+    {
+        if !remains_infeasible(&self.constraints) {
+            return false;
+        }
+        (0..self.constraints.len()).all(|index| {
+            let mut reduced = self.constraints.clone();
+            reduced.remove(index);
+            !remains_infeasible(&reduced)
+        })
+    }
+
+    /// Deterministically delete every constraint which is not necessary for
+    /// infeasibility.  This rejects/repairs non-minimal cores without ever
+    /// using approximate arithmetic.
+    pub fn trimmed_by<F>(&self, mut remains_infeasible: F) -> Option<Self>
+    where
+        F: FnMut(&[RouteConstraint]) -> bool,
+    {
+        if !remains_infeasible(&self.constraints) {
+            return None;
+        }
+        let mut reduced = self.constraints.clone();
+        let mut index = 0;
+        while index < reduced.len() {
+            let mut candidate = reduced.clone();
+            candidate.remove(index);
+            if remains_infeasible(&candidate) {
+                reduced = candidate;
+            } else {
+                index += 1;
+            }
+        }
+        Some(Self::new(reduced))
     }
 }
 
@@ -864,6 +1448,64 @@ pub struct VerifiedRoute {
     pub metrics: RouteMetrics,
 }
 
+/// Candidate emitted by an approximate optimizer.  `objective` is purposely
+/// a non-authoritative value: it may be a floating-point score from an
+/// external optimizer, but the exact verifier never uses it for acceptance.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ApproximateRouteCandidate {
+    pub from: NodeId,
+    pub to: NodeId,
+    pub amount: Quantity,
+    pub edges: Vec<String>,
+    pub objective: f64,
+}
+
+impl ApproximateRouteCandidate {
+    pub fn new(route: &LiquidityRoute, objective: f64) -> Self {
+        Self {
+            from: route.from.clone(),
+            to: route.to.clone(),
+            amount: route.amount.clone(),
+            edges: route.edges.clone(),
+            objective,
+        }
+    }
+
+    pub fn from_edges<I, S>(
+        from: NodeId,
+        to: NodeId,
+        amount: Quantity,
+        edges: I,
+        objective: f64,
+    ) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        Self {
+            from,
+            to,
+            amount,
+            edges: edges.into_iter().map(Into::into).collect(),
+            objective,
+        }
+    }
+
+    pub fn edge_ids(&self) -> &[String] {
+        &self.edges
+    }
+
+    pub fn objective(&self) -> f64 {
+        self.objective
+    }
+}
+
+impl From<LiquidityRoute> for ApproximateRouteCandidate {
+    fn from(route: LiquidityRoute) -> Self {
+        Self::new(&route, 0.0)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LiquidityError {
     DuplicateNode,
@@ -921,6 +1563,7 @@ pub enum VerificationError {
     Disconnected,
     Cycle,
     Infeasible,
+    NonFiniteApproximation,
     MetricMismatch,
     Liquidity(LiquidityError),
 }
@@ -933,6 +1576,9 @@ impl fmt::Display for VerificationError {
             Self::Disconnected => f.write_str("route edges are not connected"),
             Self::Cycle => f.write_str("route contains a cycle"),
             Self::Infeasible => f.write_str("route is not exactly feasible"),
+            Self::NonFiniteApproximation => {
+                f.write_str("approximate optimizer objective is not finite")
+            }
             Self::MetricMismatch => f.write_str("route metrics are not canonical for its edges"),
             Self::Liquidity(error) => error.fmt(f),
         }
@@ -1092,6 +1738,22 @@ mod tests {
             graph.verify_route(&route, &source, &target, &amount("10")),
             Err(VerificationError::MetricMismatch)
         ));
+    }
+
+    #[test]
+    fn infeasible_core_does_not_hide_an_unknown_route_suffix() {
+        let (graph, source, target) = graph();
+        let mut route = graph
+            .pareto_routes(&source, &target, &amount("10"))
+            .unwrap()
+            .routes[0]
+            .clone();
+        route.amount = amount("1000");
+        route.edges.push("forged/missing".into());
+        assert_eq!(
+            graph.infeasible_core_for_route(&route, &source, &target, &amount("1000")),
+            Err(VerificationError::UnknownEdge)
+        );
     }
 
     #[test]
@@ -1256,5 +1918,111 @@ mod tests {
             )
             .unwrap();
         assert!(result.routes.is_empty());
+        let core = result.infeasible_core().expect("exact failure core");
+        assert!(!core.is_empty());
+        assert!(core.is_minimal(|constraints| !constraints.is_empty()));
+    }
+
+    #[test]
+    fn nonminimal_infeasible_core_is_trimmed_exactly() {
+        let source = NodeId::position("cash");
+        let excess = RouteConstraint::EdgeCapacity {
+            edge: "withdraw".into(),
+            capacity: amount("5"),
+            requested: amount("10"),
+        };
+        let necessary = RouteConstraint::EdgeEncumbered {
+            edge: "withdraw".into(),
+            node: source,
+            encumbrances: BTreeSet::from(["pledge".into()]),
+        };
+        let core = InfeasibleCore::new([necessary.clone(), excess]);
+        let trimmed = core
+            .trimmed_by(|constraints| constraints.contains(&necessary))
+            .expect("the supplied set remains infeasible");
+        assert_eq!(trimmed.constraints(), std::slice::from_ref(&necessary));
+        assert!(trimmed.is_minimal(|constraints| constraints.contains(&necessary)));
+    }
+
+    #[test]
+    fn approximate_infeasible_route_is_refused_by_exact_boundary() {
+        let source = NodeId::position("cash");
+        let target = NodeId::position("out");
+        let mut graph = LiquidityGraph::new();
+        graph
+            .add_position(PositionNode::new("cash", "USD", amount("10")))
+            .unwrap();
+        graph
+            .add_position(PositionNode::new("out", "USD", amount("0")))
+            .unwrap();
+        graph
+            .add_edge(
+                ActionEdge::new(
+                    "withdraw",
+                    source.clone(),
+                    target.clone(),
+                    ActionKind::Withdraw,
+                )
+                .with_capacity(amount("5")),
+            )
+            .unwrap();
+        let approximate = ApproximateRouteCandidate {
+            from: source,
+            to: target,
+            amount: amount("10"),
+            edges: vec!["withdraw".into()],
+            objective: -1.0,
+        };
+        assert_eq!(
+            graph.verify_approximate_candidate(&approximate),
+            Err(VerificationError::Infeasible)
+        );
+    }
+
+    #[test]
+    fn complete_failure_reports_core_but_incomplete_search_does_not() {
+        let source = NodeId::position("cash");
+        let target = NodeId::position("out");
+        let mut graph = LiquidityGraph::new();
+        graph
+            .add_position(PositionNode::new("cash", "USD", amount("10")))
+            .unwrap();
+        graph
+            .add_position(PositionNode::new("out", "USD", amount("0")))
+            .unwrap();
+        graph
+            .add_edge(
+                ActionEdge::new(
+                    "withdraw",
+                    source.clone(),
+                    target.clone(),
+                    ActionKind::Withdraw,
+                )
+                .with_capacity(amount("5")),
+            )
+            .unwrap();
+        let complete = graph
+            .pareto_routes(&source, &target, &amount("10"))
+            .unwrap();
+        assert!(complete.is_complete());
+        assert!(complete
+            .infeasible_core()
+            .is_some_and(|core| core.constraints().iter().any(|constraint| {
+                matches!(constraint, RouteConstraint::EdgeCapacity { edge, .. } if edge == "withdraw")
+            })));
+
+        let incomplete = graph
+            .search(
+                &source,
+                &target,
+                &amount("10"),
+                SearchLimits {
+                    max_expansions: 0,
+                    max_depth: 10,
+                },
+            )
+            .unwrap();
+        assert!(incomplete.is_incomplete());
+        assert!(incomplete.infeasible_core().is_none());
     }
 }

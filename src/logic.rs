@@ -12,14 +12,16 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 
 use blake3::Hasher;
+use num_bigint::BigInt;
+use num_rational::BigRational;
 
 use crate::ir::{self, Atom, CanonicalContext, Clause as IrClause, Goal as IrGoal, Term, Var};
 use crate::proof::{Node, Operation, Proof, ProofId};
 // Keep the solver's historical import path source-compatible while exposing
 // exactly the semantic kernel types; these are re-exports, not logic-owned
 // result enums.
+use crate::semantics::{CompletenessId, Conditional, Conflict, GoalId, Requirement};
 pub use crate::semantics::{Completion, Multiplicity, Resolution, Truth};
-use crate::semantics::{Conditional, Conflict, GoalId, Requirement};
 use crate::unify::Unifier;
 
 /// A signed relation atom.  Explicit negative facts are kept separate from
@@ -103,10 +105,55 @@ pub enum Goal {
     Atom(Literal),
     And(Vec<Goal>),
     Or(Vec<Goal>),
-    Exists { vars: Vec<Var>, body: Box<Goal> },
+    Exists {
+        vars: Vec<Var>,
+        body: Box<Goal>,
+    },
     Equal(Term, Term),
     NotEqual(Term, Term),
     DefaultNot(Box<Goal>),
+    /// Compute a finite aggregate over the solutions of `body`.
+    ///
+    /// Aggregates are intentionally a goal, rather than a second rule
+    /// language.  `result` is unified with the exact aggregate value in the
+    /// surrounding substitution.  A sum requires `value`; count ignores it.
+    Aggregate(AggregateGoal),
+}
+
+/// The finite aggregate operations understood by the logic kernel.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AggregateFunction {
+    Count,
+    Sum,
+}
+
+/// A finite, complete aggregation request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AggregateGoal {
+    pub function: AggregateFunction,
+    pub body: Box<Goal>,
+    pub value: Option<Term>,
+    pub result: Term,
+}
+
+impl AggregateGoal {
+    pub fn count(body: Goal, result: Term) -> Self {
+        Self {
+            function: AggregateFunction::Count,
+            body: Box::new(body),
+            value: None,
+            result,
+        }
+    }
+
+    pub fn sum(body: Goal, value: Term, result: Term) -> Self {
+        Self {
+            function: AggregateFunction::Sum,
+            body: Box::new(body),
+            value: Some(value),
+            result,
+        }
+    }
 }
 
 impl Goal {
@@ -143,6 +190,18 @@ impl Goal {
         Self::DefaultNot(Box::new(body))
     }
 
+    pub fn count(body: Self, result: Term) -> Self {
+        Self::Aggregate(AggregateGoal::count(body, result))
+    }
+
+    pub fn sum(body: Self, value: Term, result: Term) -> Self {
+        Self::Aggregate(AggregateGoal::sum(body, value, result))
+    }
+
+    pub fn aggregate(spec: AggregateGoal) -> Self {
+        Self::Aggregate(spec)
+    }
+
     pub fn from_ir(goal: IrGoal) -> Self {
         match goal {
             IrGoal::True => Self::True,
@@ -172,6 +231,13 @@ impl Goal {
                 term_variables(right, output);
             }
             Self::DefaultNot(body) => body.variables(output),
+            Self::Aggregate(aggregate) => {
+                aggregate.body.variables(output);
+                if let Some(value) = &aggregate.value {
+                    term_variables(value, output);
+                }
+                term_variables(&aggregate.result, output);
+            }
             Self::True | Self::False => {}
         }
     }
@@ -264,6 +330,20 @@ impl Program {
         self.clauses.iter()
     }
 
+    /// Check the program's rule dependency graph without evaluating it.
+    ///
+    /// Positive recursion is allowed.  A default-negative or aggregate edge
+    /// inside the same strongly connected component is rejected because no
+    /// least fixed point can assign it a stable stratum.
+    pub fn validate(&self) -> Result<(), LogicError> {
+        self.stratification().map(|_| ())
+    }
+
+    /// Return the finite stratum assignment used by the solver.
+    pub fn stratification(&self) -> Result<BTreeMap<String, usize>, LogicError> {
+        compute_stratification(self)
+    }
+
     fn digest(&self) -> [u8; 32] {
         let context = CanonicalContext::default();
         let mut values = Vec::new();
@@ -289,6 +369,142 @@ impl Program {
             hasher.update(&[0]);
         }
         *hasher.finalize().as_bytes()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DependencyKind {
+    Positive,
+    Negative,
+    Aggregate,
+}
+
+#[derive(Clone, Debug)]
+struct Dependency {
+    from: String,
+    to: String,
+    kind: DependencyKind,
+}
+
+fn compute_stratification(program: &Program) -> Result<BTreeMap<String, usize>, LogicError> {
+    let dependencies = program
+        .clauses
+        .iter()
+        .flat_map(|clause| {
+            let from = predicate_name(clause.head.atom());
+            let mut dependencies = Vec::new();
+            collect_dependencies(
+                &clause.body,
+                DependencyKind::Positive,
+                &from,
+                &mut dependencies,
+            );
+            dependencies
+        })
+        .collect::<Vec<_>>();
+    let mut graph = BTreeMap::<String, BTreeSet<String>>::new();
+    for clause in &program.clauses {
+        graph.entry(predicate_name(clause.head.atom())).or_default();
+    }
+    for dependency in &dependencies {
+        graph
+            .entry(dependency.from.clone())
+            .or_default()
+            .insert(dependency.to.clone());
+        graph.entry(dependency.to.clone()).or_default();
+    }
+    let components = strongly_connected_components(&graph);
+    for component in components {
+        let cyclic = component.len() > 1
+            || component.first().is_some_and(|predicate| {
+                graph
+                    .get(predicate)
+                    .is_some_and(|neighbors| neighbors.contains(predicate))
+            });
+        if !cyclic {
+            continue;
+        }
+        if dependencies.iter().any(|dependency| {
+            component.contains(&dependency.from)
+                && component.contains(&dependency.to)
+                && dependency.kind == DependencyKind::Negative
+        }) {
+            return Err(LogicError::UnstratifiedNegation {
+                predicates: component,
+            });
+        }
+        if dependencies.iter().any(|dependency| {
+            component.contains(&dependency.from)
+                && component.contains(&dependency.to)
+                && dependency.kind == DependencyKind::Aggregate
+        }) {
+            return Err(LogicError::UnstratifiedAggregation {
+                predicates: component,
+            });
+        }
+    }
+
+    let mut strata = graph
+        .keys()
+        .cloned()
+        .map(|predicate| (predicate, 0usize))
+        .collect::<BTreeMap<_, _>>();
+    // The SCC check above guarantees that every strict edge points out of a
+    // cycle.  A bounded relaxation therefore computes the unique minimal
+    // assignment without relying on rule insertion order.
+    for _ in 0..=strata.len() {
+        let mut changed = false;
+        for dependency in &dependencies {
+            let required = strata[&dependency.to]
+                + usize::from(matches!(
+                    dependency.kind,
+                    DependencyKind::Negative | DependencyKind::Aggregate
+                ));
+            let slot = strata
+                .get_mut(&dependency.from)
+                .expect("dependency source was inserted into graph");
+            if *slot < required {
+                *slot = required;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    Ok(strata)
+}
+
+fn collect_dependencies(
+    goal: &Goal,
+    kind: DependencyKind,
+    from: &str,
+    output: &mut Vec<Dependency>,
+) {
+    match goal {
+        Goal::Atom(literal) => output.push(Dependency {
+            from: from.to_owned(),
+            to: predicate_name(literal.atom()),
+            kind,
+        }),
+        Goal::And(goals) | Goal::Or(goals) => {
+            for goal in goals {
+                collect_dependencies(goal, kind, from, output);
+            }
+        }
+        Goal::Exists { body, .. } => collect_dependencies(body, kind, from, output),
+        Goal::DefaultNot(body) => {
+            collect_dependencies(body, DependencyKind::Negative, from, output)
+        }
+        Goal::Aggregate(aggregate) => {
+            let aggregate_kind = if kind == DependencyKind::Negative {
+                DependencyKind::Negative
+            } else {
+                DependencyKind::Aggregate
+            };
+            collect_dependencies(&aggregate.body, aggregate_kind, from, output);
+        }
+        Goal::True | Goal::False | Goal::Equal(_, _) | Goal::NotEqual(_, _) => {}
     }
 }
 
@@ -489,6 +705,7 @@ enum ProofKind {
     Disequality,
     Completeness { scope: RelationScope },
     DefaultNegation,
+    Aggregation { function: AggregateFunction },
 }
 
 /// Materialize solver proof metadata in the canonical proof DAG.  The logic
@@ -527,6 +744,7 @@ fn insert_logic_proof(
         ProofKind::Disequality => "logic/disequality".into(),
         ProofKind::Completeness { scope } => format!("logic/completeness/{scope:?}"),
         ProofKind::DefaultNegation => "logic/default-negation".into(),
+        ProofKind::Aggregation { function } => format!("logic/aggregate/{function:?}"),
     };
     let mut metadata = BTreeMap::new();
     metadata.insert("logic-kind".into(), rule.clone());
@@ -571,6 +789,8 @@ pub enum TraceEvent {
     CacheMiss,
     FixedPointIteration { iteration: usize, new_facts: usize },
     CycleWithoutBase { predicate: String },
+    UnstratifiedNegation { predicates: Vec<String> },
+    UnstratifiedAggregation { predicates: Vec<String> },
     ResourceLimit { resource: String },
     Unsupported { detail: String },
 }
@@ -649,12 +869,24 @@ impl SearchResult {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LogicError {
     NonGroundFact(Literal),
+    UnstratifiedNegation { predicates: Vec<String> },
+    UnstratifiedAggregation { predicates: Vec<String> },
 }
 
 impl fmt::Display for LogicError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NonGroundFact(literal) => write!(formatter, "facts must be ground: {literal}"),
+            Self::UnstratifiedNegation { predicates } => write!(
+                formatter,
+                "default negation is recursive through the same stratum: {}",
+                predicates.join(", ")
+            ),
+            Self::UnstratifiedAggregation { predicates } => write!(
+                formatter,
+                "aggregation is recursive through the same stratum: {}",
+                predicates.join(", ")
+            ),
         }
     }
 }
@@ -821,6 +1053,7 @@ struct SearchState {
     incomplete: bool,
     open_world: bool,
     unsupported: bool,
+    completeness: BTreeSet<RelationScope>,
     trace: Vec<TraceEvent>,
     proofs: Proof,
 }
@@ -843,6 +1076,10 @@ impl SearchState {
             self.trace.push(event);
         }
     }
+
+    fn require_completeness(&mut self, scopes: impl IntoIterator<Item = RelationScope>) {
+        self.completeness.extend(scopes);
+    }
 }
 
 struct View<'a> {
@@ -860,8 +1097,35 @@ struct EvalCandidate {
 fn evaluate_uncached(program: &Program, goal: &Goal, context: &SemanticContext) -> SearchResult {
     let mut state = SearchState::default();
     let mut relation = Relation::default();
+    let stratification = match program.stratification() {
+        Ok(stratification) => Some(stratification),
+        Err(error) => {
+            match &error {
+                LogicError::UnstratifiedNegation { predicates } => {
+                    state.trace_event(TraceEvent::UnstratifiedNegation {
+                        predicates: predicates.clone(),
+                    });
+                }
+                LogicError::UnstratifiedAggregation { predicates } => {
+                    state.trace_event(TraceEvent::UnstratifiedAggregation {
+                        predicates: predicates.clone(),
+                    });
+                }
+                LogicError::NonGroundFact(_) => {}
+            }
+            state.unsupported = true;
+            None
+        }
+    };
     for fact in &program.facts {
         if !state.step(context.resource_profile) {
+            break;
+        }
+        if relation.facts.len() >= context.resource_profile.max_terms {
+            state.incomplete = true;
+            state.trace_event(TraceEvent::ResourceLimit {
+                resource: "relation terms".into(),
+            });
             break;
         }
         let proof = insert_logic_proof(
@@ -874,91 +1138,85 @@ fn evaluate_uncached(program: &Program, goal: &Goal, context: &SemanticContext) 
         );
         relation.insert(fact.literal.clone(), vec![proof]);
     }
-    if relation.facts.len() > context.resource_profile.max_terms {
-        state.incomplete = true;
-        state.trace_event(TraceEvent::ResourceLimit {
-            resource: "relation terms".into(),
-        });
-    }
-
     let mut fresh = FreshVars {
         next: max_var_id(program, goal).saturating_add(1),
     };
     let mut iteration = 0;
-    loop {
-        if iteration >= context.resource_profile.max_iterations {
-            state.incomplete = true;
-            state.trace_event(TraceEvent::ResourceLimit {
-                resource: "fixed-point iterations".into(),
-            });
-            break;
-        }
-        iteration += 1;
-        let mut new_facts = 0;
-        for clause in &program.clauses {
-            if contains_default_negation(&clause.body) {
-                state.unsupported = true;
-                state.trace_event(TraceEvent::Unsupported {
-                    detail:
-                        "default negation in clauses is outside the positive fixed-point fragment"
-                            .into(),
-                });
-                continue;
-            }
-            let fresh_clause = clause.freshen(&mut fresh);
-            let candidates = {
-                let mut view = View {
-                    state: &mut state,
-                    relation: &relation,
-                    context,
-                };
-                evaluate_goal(&fresh_clause.body, &Substitution::new(), &mut view)
-            };
-            for candidate in candidates {
-                let head = apply_literal(&fresh_clause.head, &candidate.substitution);
-                if !head.is_ground() {
-                    state.unsupported = true;
-                    state.trace_event(TraceEvent::Unsupported {
-                        detail: "unsafe clause head remains open".into(),
-                    });
-                    continue;
-                }
-                if relation.contains(&head) {
-                    continue;
-                }
-                if relation.facts.len() >= context.resource_profile.max_terms {
+    if let Some(stratification) = &stratification {
+        let max_stratum = stratification.values().copied().max().unwrap_or(0);
+        'strata: for current_stratum in 0..=max_stratum {
+            loop {
+                if iteration >= context.resource_profile.max_iterations {
                     state.incomplete = true;
                     state.trace_event(TraceEvent::ResourceLimit {
-                        resource: "relation terms".into(),
+                        resource: "fixed-point iterations".into(),
                     });
+                    break 'strata;
+                }
+                iteration += 1;
+                let mut new_facts = 0;
+                for clause in &program.clauses {
+                    if stratification.get(&predicate_name(clause.head.atom()))
+                        != Some(&current_stratum)
+                    {
+                        continue;
+                    }
+                    let fresh_clause = clause.freshen(&mut fresh);
+                    let candidates = {
+                        let mut view = View {
+                            state: &mut state,
+                            relation: &relation,
+                            context,
+                        };
+                        evaluate_goal(&fresh_clause.body, &Substitution::new(), &mut view)
+                    };
+                    for candidate in candidates {
+                        let head = apply_literal(&fresh_clause.head, &candidate.substitution);
+                        if !head.is_ground() {
+                            state.unsupported = true;
+                            state.trace_event(TraceEvent::Unsupported {
+                                detail: "unsafe clause head remains open".into(),
+                            });
+                            continue;
+                        }
+                        if relation.contains(&head) {
+                            continue;
+                        }
+                        if relation.facts.len() >= context.resource_profile.max_terms {
+                            state.incomplete = true;
+                            state.trace_event(TraceEvent::ResourceLimit {
+                                resource: "relation terms".into(),
+                            });
+                            break;
+                        }
+                        let proof = insert_logic_proof(
+                            &mut state.proofs,
+                            Goal::Atom(head.clone()),
+                            ProofKind::Rule {
+                                clause: clause_digest(&fresh_clause),
+                            },
+                            candidate.proofs,
+                        );
+                        if relation.insert(head, vec![proof]) {
+                            new_facts += 1;
+                        }
+                    }
+                    if state.incomplete {
+                        break;
+                    }
+                }
+                state.trace_event(TraceEvent::FixedPointIteration {
+                    iteration,
+                    new_facts,
+                });
+                if new_facts == 0 || state.incomplete {
                     break;
                 }
-                let proof = insert_logic_proof(
-                    &mut state.proofs,
-                    Goal::Atom(head.clone()),
-                    ProofKind::Rule {
-                        clause: clause_digest(&fresh_clause),
-                    },
-                    candidate.proofs,
-                );
-                if relation.insert(head, vec![proof]) {
-                    new_facts += 1;
-                }
             }
-            if state.incomplete {
-                break;
-            }
-        }
-        state.trace_event(TraceEvent::FixedPointIteration {
-            iteration,
-            new_facts,
-        });
-        if new_facts == 0 || state.incomplete {
-            break;
         }
     }
 
-    if !state.incomplete {
+    if !state.incomplete && !state.unsupported {
         mark_no_base_cycles(program, &relation, &mut state);
     }
 
@@ -1021,11 +1279,12 @@ fn evaluate_uncached(program: &Program, goal: &Goal, context: &SemanticContext) 
         )
         .expect("candidate count greater than one produces multiple answers"),
     };
-    let blockers = if completion == Completion::ResourceLimited {
+    let mut blockers = if completion == Completion::ResourceLimited {
         vec![Requirement::ResourceBoundary]
     } else {
         Vec::new()
     };
+    blockers.extend(state.completeness.iter().map(completeness_requirement));
     let conflicts = if truth == Truth::Both {
         vec![
             Conflict::new(
@@ -1054,6 +1313,16 @@ fn evaluate_uncached(program: &Program, goal: &Goal, context: &SemanticContext) 
         candidates,
         trace: state.trace,
     }
+}
+
+fn completeness_requirement(scope: &RelationScope) -> Requirement {
+    let bytes = format!("{scope:?}").into_bytes();
+    let id = CompletenessId::new(crate::model::ContentHash::domain_separated(
+        "axiom/logic/completeness",
+        &bytes,
+    ))
+    .expect("domain-separated completeness ids are non-zero");
+    Requirement::Completeness(id)
 }
 
 fn goal_id(goal: &Goal) -> GoalId {
@@ -1212,6 +1481,7 @@ fn evaluate_goal(goal: &Goal, input: &Substitution, view: &mut View<'_>) -> Vec<
             };
             if !complete {
                 view.state.open_world = true;
+                view.state.require_completeness(scopes);
                 return Vec::new();
             }
             let inner = evaluate_goal(body, input, view);
@@ -1249,7 +1519,139 @@ fn evaluate_goal(goal: &Goal, input: &Substitution, view: &mut View<'_>) -> Vec<
                 Vec::new()
             }
         }
+        Goal::Aggregate(aggregate) => evaluate_aggregate(aggregate, input, view),
     }
+}
+
+fn evaluate_aggregate(
+    aggregate: &AggregateGoal,
+    input: &Substitution,
+    view: &mut View<'_>,
+) -> Vec<EvalCandidate> {
+    let scopes = required_scopes(&aggregate.body);
+    let complete = match &view.context.completeness {
+        Completeness::OpenWorld => scopes.is_empty(),
+        Completeness::Scoped(claims) => claims.covers(&aggregate.body),
+    };
+    if !complete {
+        view.state.open_world = true;
+        view.state.require_completeness(scopes);
+        return Vec::new();
+    }
+    let inner = evaluate_goal(&aggregate.body, input, view);
+    if view.state.incomplete || view.state.unsupported || view.state.open_world {
+        return Vec::new();
+    }
+    let rows = deduplicate_rows(inner, view.context.resource_profile, view.state);
+    if view.state.incomplete {
+        return Vec::new();
+    }
+    let value = match aggregate_value(aggregate, &rows) {
+        Ok(value) => value,
+        Err(detail) => {
+            view.state.unsupported = true;
+            view.state.trace_event(TraceEvent::Unsupported { detail });
+            return Vec::new();
+        }
+    };
+    let Some(substitution) = unify_terms(&aggregate.result, &value, input) else {
+        return Vec::new();
+    };
+    let completeness_proofs = scopes
+        .iter()
+        .map(|scope| {
+            insert_logic_proof(
+                &mut view.state.proofs,
+                Goal::True,
+                ProofKind::Completeness {
+                    scope: scope.clone(),
+                },
+                Vec::new(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut dependencies = rows
+        .iter()
+        .flat_map(|row| row.proofs.iter().copied())
+        .collect::<Vec<_>>();
+    dependencies.extend(completeness_proofs);
+    let proof = insert_logic_proof(
+        &mut view.state.proofs,
+        Goal::Aggregate(aggregate.clone()),
+        ProofKind::Aggregation {
+            function: aggregate.function,
+        },
+        dependencies,
+    );
+    vec![EvalCandidate {
+        substitution,
+        proofs: vec![proof],
+    }]
+}
+
+fn aggregate_value(aggregate: &AggregateGoal, rows: &[EvalCandidate]) -> Result<Term, String> {
+    match aggregate.function {
+        AggregateFunction::Count => Ok(Term::Quantity(crate::ir::ExactQuantity::integer(
+            BigInt::from(rows.len()),
+            crate::ir::Unit::new("count"),
+        ))),
+        AggregateFunction::Sum => {
+            let value = aggregate
+                .value
+                .as_ref()
+                .ok_or_else(|| "sum aggregation requires a value expression".to_owned())?;
+            let mut total = BigRational::from_integer(BigInt::from(0));
+            let mut unit = None;
+            for row in rows {
+                let term = resolve_term(value, &row.substitution);
+                let Term::Quantity(quantity) = term else {
+                    return Err("sum aggregation requires exact quantity values".into());
+                };
+                if let Some(existing) = &unit {
+                    let compatible = quantity.unit() == Some(existing)
+                        || (quantity.is_zero() && quantity.unit().is_none());
+                    if !compatible {
+                        return Err("sum aggregation requires one compatible unit".into());
+                    }
+                } else if let Some(quantity_unit) = quantity.unit() {
+                    unit = Some(quantity_unit.clone());
+                }
+                total += quantity.value().clone();
+            }
+            crate::ir::ExactQuantity::new(total, unit)
+                .map(Term::Quantity)
+                .map_err(|error| error.to_string())
+        }
+    }
+}
+
+fn deduplicate_rows(
+    candidates: Vec<EvalCandidate>,
+    resources: ResourceProfile,
+    state: &mut SearchState,
+) -> Vec<EvalCandidate> {
+    let mut unique = BTreeMap::<Vec<u8>, EvalCandidate>::new();
+    for candidate in candidates {
+        let key = substitution_key(&candidate.substitution);
+        if !unique.contains_key(&key) && unique.len() >= resources.max_terms {
+            state.incomplete = true;
+            state.trace_event(TraceEvent::ResourceLimit {
+                resource: "aggregate rows".into(),
+            });
+            break;
+        }
+        unique
+            .entry(key)
+            .and_modify(|existing| {
+                for proof in &candidate.proofs {
+                    if !existing.proofs.contains(proof) {
+                        existing.proofs.push(*proof);
+                    }
+                }
+            })
+            .or_insert(candidate);
+    }
+    unique.into_values().collect()
 }
 
 fn opposite_candidates(goal: &Goal, view: &mut View<'_>) -> Vec<EvalCandidate> {
@@ -1484,17 +1886,15 @@ fn rename_goal(goal: &Goal, replacements: &BTreeMap<Var, Var>) -> Goal {
             rename_term(right, replacements),
         ),
         Goal::DefaultNot(body) => Goal::DefaultNot(Box::new(rename_goal(body, replacements))),
-    }
-}
-
-fn contains_default_negation(goal: &Goal) -> bool {
-    match goal {
-        Goal::DefaultNot(_) => true,
-        Goal::And(goals) | Goal::Or(goals) => goals.iter().any(contains_default_negation),
-        Goal::Exists { body, .. } => contains_default_negation(body),
-        Goal::True | Goal::False | Goal::Atom(_) | Goal::Equal(_, _) | Goal::NotEqual(_, _) => {
-            false
-        }
+        Goal::Aggregate(aggregate) => Goal::Aggregate(AggregateGoal {
+            function: aggregate.function,
+            body: Box::new(rename_goal(&aggregate.body, replacements)),
+            value: aggregate
+                .value
+                .as_ref()
+                .map(|value| rename_term(value, replacements)),
+            result: rename_term(&aggregate.result, replacements),
+        }),
     }
 }
 
@@ -1515,6 +1915,7 @@ fn collect_scopes(goal: &Goal, output: &mut BTreeSet<RelationScope>) {
             }
         }
         Goal::Exists { body, .. } | Goal::DefaultNot(body) => collect_scopes(body, output),
+        Goal::Aggregate(aggregate) => collect_scopes(&aggregate.body, output),
         Goal::True | Goal::False | Goal::Equal(_, _) | Goal::NotEqual(_, _) => {}
     }
 }
@@ -1689,6 +2090,7 @@ fn positive_predicates(goal: &Goal, output: &mut BTreeSet<String>) {
             }
         }
         Goal::Exists { body, .. } | Goal::DefaultNot(body) => positive_predicates(body, output),
+        Goal::Aggregate(aggregate) => positive_predicates(&aggregate.body, output),
         Goal::True
         | Goal::False
         | Goal::Atom(Literal::Negative(_))
@@ -1937,6 +2339,17 @@ fn canonical_goal_with_names(goal: &Goal, names: &mut Names) -> Vec<u8> {
             bytes.extend(canonical_goal_with_names(body, names));
             bytes
         }
+        Goal::Aggregate(aggregate) => {
+            let mut bytes = format!("aggregate:{:?}:", aggregate.function).into_bytes();
+            bytes.extend(canonical_goal_with_names(&aggregate.body, names));
+            bytes.push(0);
+            if let Some(value) = &aggregate.value {
+                bytes.extend(canonical_term_text(value, names).into_bytes());
+            }
+            bytes.push(0);
+            bytes.extend(canonical_term_text(&aggregate.result, names).into_bytes());
+            bytes
+        }
     }
 }
 
@@ -2037,6 +2450,10 @@ mod tests {
 
     fn v(id: u32) -> Term {
         Term::var(variable(id))
+    }
+
+    fn quantity(value: i64, unit: &str) -> Term {
+        Term::Quantity(ir::ExactQuantity::integer(value, ir::Unit::new(unit)))
     }
 
     fn pos(name: &str, args: Vec<Term>) -> Goal {
@@ -2406,6 +2823,165 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(cycles, BTreeSet::from(["p", "q"]));
         assert_eq!(result.truth(), Truth::Neither);
+    }
+
+    #[test]
+    fn stratified_default_negation_uses_lower_complete_stratum() {
+        let mut program = Program::new();
+        program
+            .add_fact(Literal::positive(atom("active", vec![value("x")])))
+            .unwrap();
+        let subject = variable(10);
+        program.add_clause(Clause::new(
+            Literal::positive(atom("eligible", vec![Term::var(subject.clone())])),
+            Goal::and(vec![
+                pos("active", vec![Term::var(subject.clone())]),
+                Goal::default_not(pos("blocked", vec![Term::var(subject)])),
+            ]),
+        ));
+        let context =
+            SemanticContext::default().complete_relation("blocked", 1, Polarity::Positive);
+        let result = Solver::new().solve(&program, &pos("eligible", vec![value("x")]), &context);
+        assert_eq!(result.truth(), Truth::TrueOnly);
+        assert_eq!(result.completion(), Completion::Complete);
+        assert!(result.check_proofs().is_ok());
+    }
+
+    #[test]
+    fn unstratified_negation_is_rejected_explicitly() {
+        let mut program = Program::new();
+        program.add_clause(Clause::new(
+            Literal::positive(atom("p", vec![v(1)])),
+            Goal::default_not(pos("q", vec![v(1)])),
+        ));
+        program.add_clause(Clause::new(
+            Literal::positive(atom("q", vec![v(1)])),
+            pos("p", vec![v(1)]),
+        ));
+        assert!(matches!(
+            program.validate(),
+            Err(LogicError::UnstratifiedNegation { .. })
+        ));
+        let result = Solver::new().solve(
+            &program,
+            &pos("p", vec![value("x")]),
+            &SemanticContext::default().complete_relation("q", 1, Polarity::Positive),
+        );
+        assert_eq!(result.completion(), Completion::OpenWorld);
+        assert!(
+            result
+                .trace()
+                .iter()
+                .any(|event| matches!(event, TraceEvent::UnstratifiedNegation { .. }))
+        );
+        assert_eq!(result.truth(), Truth::Neither);
+    }
+
+    #[test]
+    fn finite_complete_count_and_sum_are_exact() {
+        let mut program = Program::new();
+        program
+            .add_fact(Literal::positive(atom(
+                "amount",
+                vec![value("a"), quantity(2, "USD")],
+            )))
+            .unwrap();
+        program
+            .add_fact(Literal::positive(atom(
+                "amount",
+                vec![value("b"), quantity(3, "USD")],
+            )))
+            .unwrap();
+        let row = variable(20);
+        let amount = variable(21);
+        let count = variable(22);
+        let count_goal = Goal::count(
+            pos(
+                "amount",
+                vec![Term::var(row.clone()), Term::var(amount.clone())],
+            ),
+            Term::var(count.clone()),
+        );
+        let context = SemanticContext::default().complete_relation("amount", 2, Polarity::Positive);
+        let count_result = Solver::new().solve(&program, &count_goal, &context);
+        assert_eq!(count_result.truth(), Truth::TrueOnly);
+        assert_eq!(count_result.completion(), Completion::Complete);
+        assert_eq!(
+            count_result.candidates()[0].substitution.resolved(&count),
+            Some(quantity(2, "count"))
+        );
+        assert!(count_result.check_proofs().is_ok());
+
+        let total = variable(23);
+        let sum_goal = Goal::sum(
+            pos("amount", vec![Term::var(row), Term::var(amount.clone())]),
+            Term::var(amount),
+            Term::var(total.clone()),
+        );
+        let sum_result = Solver::new().solve(&program, &sum_goal, &context);
+        assert_eq!(sum_result.truth(), Truth::TrueOnly);
+        assert_eq!(sum_result.completion(), Completion::Complete);
+        assert_eq!(
+            sum_result.candidates()[0].substitution.resolved(&total),
+            Some(quantity(5, "USD"))
+        );
+        assert!(sum_result.check_proofs().is_ok());
+    }
+
+    #[test]
+    fn aggregate_without_completeness_and_under_budget_is_unknown() {
+        let mut program = Program::new();
+        program
+            .add_fact(Literal::positive(atom(
+                "amount",
+                vec![value("a"), quantity(2, "USD")],
+            )))
+            .unwrap();
+        let row = variable(30);
+        let amount = variable(31);
+        let result_var = variable(32);
+        let goal = Goal::sum(
+            pos("amount", vec![Term::var(row), Term::var(amount.clone())]),
+            Term::var(amount),
+            Term::var(result_var),
+        );
+        let open = Solver::new().solve(&program, &goal, &SemanticContext::default());
+        assert_eq!(open.completion(), Completion::OpenWorld);
+        assert_eq!(open.truth(), Truth::Neither);
+        assert!(open.resolution().is_blocked());
+
+        let limited_context = SemanticContext::default()
+            .complete_relation("amount", 2, Polarity::Positive)
+            .with_resources(ResourceProfile::bounded(0));
+        let limited = Solver::new().solve(&program, &goal, &limited_context);
+        assert_eq!(limited.completion(), Completion::ResourceLimited);
+        assert_ne!(limited.truth(), Truth::FalseOnly);
+    }
+
+    #[test]
+    fn aggregation_cycles_are_rejected_explicitly() {
+        let mut program = Program::new();
+        let aggregate_value_var = variable(40);
+        program.add_clause(Clause::new(
+            Literal::positive(atom("total", vec![v(1)])),
+            Goal::count(pos("total", vec![v(1)]), Term::var(aggregate_value_var)),
+        ));
+        assert!(matches!(
+            program.validate(),
+            Err(LogicError::UnstratifiedAggregation { .. })
+        ));
+        let result = Solver::new().solve(
+            &program,
+            &pos("total", vec![value("x")]),
+            &SemanticContext::default().complete_relation("total", 1, Polarity::Positive),
+        );
+        assert!(
+            result
+                .trace()
+                .iter()
+                .any(|event| matches!(event, TraceEvent::UnstratifiedAggregation { .. }))
+        );
+        assert_eq!(result.completion(), Completion::OpenWorld);
     }
 
     #[allow(dead_code)]

@@ -24,16 +24,21 @@ come from a fresh `Workspace` and fresh incremental database, so they do not
 turn cache replay into a determinism claim.  `peak_memory_bytes`, when
 available, is the process-lifetime peak resident set size obtained from the
 target's `getrusage` API (KiB converted to bytes on Linux; bytes on macOS).
-The scope is called out in the JSON `note`; unsupported platform or parallel
-engine measurements remain `null` rather than being inferred.
+The scope is called out in the JSON `note`. Independent-worker fields compare
+serial and concurrent clean workspaces; they are not shared-engine parallelism.
+Legacy shared-engine fields and unsupported platform measurements remain
+`null` rather than being inferred.
+The legacy `semantic_relation_*` fields also remain `null`; the measured graph
+sizes are named `dependency_graph_nodes` and `dependency_graph_edges` because
+they describe incremental dependency indexes, not domain relation cardinality.
 
-The corpus uses the V0 source vocabulary where it exists.  Invoice/payment,
-ownership, corporate-action, and recursive-rule shapes are represented by
-labelled evidence rows and comments because those domains are not yet
-accepted by the V0 parser.  Their unsupported metrics are emitted as `null`
-with an explicit reason. Non-null timings, proof sizes, cache data, and RSS for
-these rows measure only the accepted V0 evidence projection; they are not
-measurements of the richer domain semantics represented by the shape.
+The corpus uses the V0 source vocabulary where it exists. Invoice/payment is
+an executable obligation/settlement/satisfaction workload. Ownership,
+corporate-action, and recursive-rule shapes remain labelled evidence rows and
+comments because those domains are not yet accepted by the V0 parser. Their
+unsupported metrics are emitted as `null` with an explicit reason. Non-null
+timings, proof sizes, cache data, and RSS for those rows measure only the
+accepted V0 evidence projection, not the richer domain shape.
 
 The performance numbers are measurements from the current process, not
 assertions.  The performance goals copied from section XVII are emitted in a

@@ -22,6 +22,7 @@ const RAW_EVIDENCE_DOMAIN: &str = "axiom.raw-evidence.v1";
 /// These states are intentionally not folded into `Option<Vec<u8>>`: a source
 /// that was never supplied is different from a source that was redacted or a
 /// payload that failed integrity checks.
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub enum Availability {
     /// The source payload is available and may be inspected.
@@ -946,7 +947,12 @@ impl ImportBatch {
         let mut keys: Vec<_> = self
             .observations
             .iter()
-            .map(|evidence| ImportKey::from_evidence(evidence, self.adapter.as_ref()))
+            .map(|evidence| {
+                (
+                    ImportKey::from_evidence(evidence, self.adapter.as_ref()),
+                    EvidenceDerivation::from_evidence(evidence, self.adapter.as_ref()),
+                )
+            })
             .collect();
         keys.sort();
         let mut bytes = Vec::new();
@@ -958,8 +964,9 @@ impl ImportBatch {
                 bytes.extend_from_slice(hash.as_bytes());
             }
         }
-        for key in keys {
+        for (key, derivation) in keys {
             key.encode(&mut bytes);
+            derivation.encode(&mut bytes);
         }
         ContentHash::domain_separated("axiom.import-batch.v1", &bytes)
     }
@@ -1100,6 +1107,44 @@ impl ImportKey {
     }
 }
 
+/// One recorded derivation of a semantic source observation.
+///
+/// Derivation details are audit history, not source-row identity. Replaying
+/// the same row with a new span, timestamp, note, or generated occurrence is
+/// idempotent while every distinct derivation remains inspectable here.
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct EvidenceDerivation {
+    pub occurrence: OccurrenceId,
+    pub provenance: Provenance,
+    pub authority: Authority,
+    pub note: Option<String>,
+}
+
+impl EvidenceDerivation {
+    fn from_evidence(evidence: &RawEvidence, batch_adapter: Option<&AdapterProvenance>) -> Self {
+        let mut provenance = evidence.provenance.clone();
+        if provenance.adapter.is_none() {
+            provenance.adapter = batch_adapter.cloned();
+        }
+        Self {
+            occurrence: evidence.identity.occurrence.clone(),
+            provenance,
+            authority: evidence.authority.clone(),
+            note: evidence.note.clone(),
+        }
+    }
+
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        put_string(bytes, self.occurrence.as_str());
+        put_string(bytes, self.provenance.source.as_str());
+        put_optional_adapter(bytes, self.provenance.adapter.as_ref());
+        put_spans(bytes, &self.provenance.spans);
+        put_optional_string(bytes, self.provenance.observed_at.as_deref());
+        put_authority(bytes, &self.authority);
+        put_optional_string(bytes, self.note.as_deref());
+    }
+}
+
 fn put_optional_adapter(bytes: &mut Vec<u8>, adapter: Option<&AdapterProvenance>) {
     match adapter {
         Some(adapter) => {
@@ -1116,6 +1161,78 @@ fn put_optional_adapter(bytes: &mut Vec<u8>, adapter: Option<&AdapterProvenance>
         }
         None => bytes.push(0),
     }
+}
+
+fn put_spans(bytes: &mut Vec<u8>, spans: &[SourceSpan]) {
+    bytes.extend_from_slice(&(spans.len() as u64).to_be_bytes());
+    for span in spans {
+        put_string(bytes, span.source.as_str());
+        match &span.locator {
+            SpanLocator::Bytes { start, end } => {
+                bytes.push(0);
+                bytes.extend_from_slice(&start.to_be_bytes());
+                bytes.extend_from_slice(&end.to_be_bytes());
+            }
+            SpanLocator::LineColumn {
+                start_line,
+                start_column,
+                end_line,
+                end_column,
+            } => {
+                bytes.push(1);
+                bytes.extend_from_slice(&start_line.to_be_bytes());
+                bytes.extend_from_slice(&start_column.to_be_bytes());
+                bytes.extend_from_slice(&end_line.to_be_bytes());
+                bytes.extend_from_slice(&end_column.to_be_bytes());
+            }
+            SpanLocator::JsonPointer(pointer) => {
+                bytes.push(2);
+                put_string(bytes, pointer);
+            }
+            SpanLocator::CsvRow { row, columns } => {
+                bytes.push(3);
+                bytes.extend_from_slice(&row.to_be_bytes());
+                match columns {
+                    Some((start, end)) => {
+                        bytes.push(1);
+                        bytes.extend_from_slice(&start.to_be_bytes());
+                        bytes.extend_from_slice(&end.to_be_bytes());
+                    }
+                    None => bytes.push(0),
+                }
+            }
+            SpanLocator::PdfRegion {
+                page,
+                x1,
+                y1,
+                x2,
+                y2,
+            } => {
+                bytes.push(4);
+                bytes.extend_from_slice(&page.to_be_bytes());
+                bytes.extend_from_slice(&x1.to_be_bytes());
+                bytes.extend_from_slice(&y1.to_be_bytes());
+                bytes.extend_from_slice(&x2.to_be_bytes());
+                bytes.extend_from_slice(&y2.to_be_bytes());
+            }
+            SpanLocator::Other(value) => {
+                bytes.push(5);
+                put_string(bytes, value);
+            }
+        }
+    }
+}
+
+fn put_authority(bytes: &mut Vec<u8>, authority: &Authority) {
+    bytes.push(match authority.kind {
+        AuthorityKind::SourceObservation => 0,
+        AuthorityKind::InstitutionalRecord => 1,
+        AuthorityKind::UserAssertion => 2,
+        AuthorityKind::PolicyDerivation => 3,
+        AuthorityKind::SignedDecision => 4,
+        AuthorityKind::Unknown => 5,
+    });
+    put_string(bytes, &authority.subject);
 }
 
 fn put_string(bytes: &mut Vec<u8>, value: &str) {
@@ -1138,9 +1255,18 @@ pub enum RelationError {
     MissingEndpoint {
         identity: Identity,
     },
+    MissingScope {
+        relation: EvidenceRelationKind,
+    },
+    InvalidEndpoint {
+        relation: EvidenceRelationKind,
+    },
     UnbalancedConservation {
         relation: EvidenceRelationKind,
         balances: Option<bool>,
+    },
+    ConservationMembersMismatch {
+        relation: EvidenceRelationKind,
     },
 }
 
@@ -1152,9 +1278,22 @@ impl fmt::Display for RelationError {
                 "relation endpoint occurrence {} is not present in the evidence store",
                 identity.occurrence
             ),
+            Self::MissingScope { relation } => {
+                write!(
+                    formatter,
+                    "{relation:?} relation requires a correction scope"
+                )
+            }
+            Self::InvalidEndpoint { relation } => {
+                write!(formatter, "{relation:?} relation has identical endpoints")
+            }
             Self::UnbalancedConservation { relation, balances } => write!(
                 formatter,
                 "{relation:?} relation requires explicit balanced conservation (got {balances:?})"
+            ),
+            Self::ConservationMembersMismatch { relation } => write!(
+                formatter,
+                "{relation:?} conservation metadata does not match relation members"
             ),
         }
     }
@@ -1220,6 +1359,7 @@ impl<'a> EvidenceLookup<'a> {
 pub struct EvidenceStore {
     evidence: BTreeMap<StoredKey, RawEvidence>,
     imports: BTreeMap<ImportKey, StoredKey>,
+    derivations: BTreeMap<StoredKey, Vec<EvidenceDerivation>>,
     relations: Vec<EvidenceRelation>,
     candidates: Vec<CandidateIdentityLink>,
 }
@@ -1269,6 +1409,15 @@ impl EvidenceStore {
         self.iter()
     }
 
+    /// Return every distinct derivation recorded for a stored occurrence.
+    pub fn derivations_for(&self, occurrence: &OccurrenceId) -> Vec<&EvidenceDerivation> {
+        self.derivations
+            .iter()
+            .filter(|(key, _)| &key.occurrence == occurrence)
+            .flat_map(|(_, derivations)| derivations)
+            .collect()
+    }
+
     pub fn relations(&self) -> impl Iterator<Item = &EvidenceRelation> {
         self.relations.iter()
     }
@@ -1283,10 +1432,16 @@ impl EvidenceStore {
     pub fn insert(&mut self, evidence: RawEvidence) -> Result<ImportDisposition, ImportError> {
         let occurrence = evidence.identity.occurrence.clone();
         let key = ImportKey::from_evidence(&evidence, None);
-        if let Some(existing_occurrence) = self.imports.get(&key) {
+        let derivation = EvidenceDerivation::from_evidence(&evidence, None);
+        if let Some(stored_key) = self.imports.get(&key).cloned() {
             // The exact source observation already exists, even when a caller
             // regenerated a local occurrence ID around the same external row.
-            if self.evidence.contains_key(existing_occurrence) {
+            if self.evidence.contains_key(&stored_key) {
+                let history = self.derivations.entry(stored_key).or_default();
+                if !history.contains(&derivation) {
+                    history.push(derivation);
+                    history.sort();
+                }
                 return Ok(ImportDisposition::AlreadyPresent);
             }
         }
@@ -1295,12 +1450,10 @@ impl EvidenceStore {
         // is a distinct immutable derivation, not a conflict; the adapter is
         // already part of `key`.  The same occurrence under the same adapter
         // remains protected from accidental replacement.
-        if let Some(existing) = self
-            .evidence
-            .values()
-            .find(|existing| existing.identity.occurrence == occurrence)
-            && existing.provenance.adapter == evidence.provenance.adapter
-        {
+        if let Some(existing) = self.evidence.values().find(|existing| {
+            existing.identity.occurrence == occurrence
+                && existing.provenance.adapter == evidence.provenance.adapter
+        }) {
             if existing == &evidence {
                 return Ok(ImportDisposition::AlreadyPresent);
             }
@@ -1316,6 +1469,8 @@ impl EvidenceStore {
             occurrence,
         };
         self.imports.insert(key, stored_key.clone());
+        self.derivations
+            .insert(stored_key.clone(), vec![derivation]);
         self.evidence.insert(stored_key, evidence);
         Ok(ImportDisposition::Inserted)
     }
@@ -1339,6 +1494,11 @@ impl EvidenceStore {
         observations.sort_by(|left, right| {
             ImportKey::from_evidence(left, None).cmp(&ImportKey::from_evidence(right, None))
         });
+
+        // Validate and apply against a clone so a malformed batch cannot
+        // leave a prefix of its rows visible.  Import is a single immutable
+        // boundary: callers either see every observation or none of them.
+        let mut staged = self.clone();
         let mut items = Vec::with_capacity(observations.len());
         for observation in observations {
             if observation.provenance.source != batch.source {
@@ -1348,13 +1508,14 @@ impl EvidenceStore {
                 });
             }
             let occurrence = observation.identity.occurrence.clone();
-            let disposition = self.insert(observation)?;
+            let disposition = staged.insert(observation)?;
             items.push(ImportItem {
                 occurrence,
                 disposition,
             });
         }
         items.sort_by(|left, right| left.occurrence.cmp(&right.occurrence));
+        *self = staged;
         Ok(ImportReport {
             batch: batch_hash,
             items,
@@ -1364,6 +1525,20 @@ impl EvidenceStore {
     /// Add an explicit relation.  Duplicate relation insertion is harmless;
     /// no relation insertion alters the evidence set.
     pub fn add_relation(&mut self, relation: EvidenceRelation) -> Result<bool, RelationError> {
+        if matches!(
+            relation.kind,
+            EvidenceRelationKind::Corrects | EvidenceRelationKind::Supersedes
+        ) && relation.scope.is_none()
+        {
+            return Err(RelationError::MissingScope {
+                relation: relation.kind,
+            });
+        }
+        if relation.source == relation.target {
+            return Err(RelationError::InvalidEndpoint {
+                relation: relation.kind,
+            });
+        }
         for identity in relation.sources().chain(relation.targets()) {
             if !self.contains_identity(identity) {
                 return Err(RelationError::MissingEndpoint {
@@ -1375,6 +1550,33 @@ impl EvidenceStore {
             relation.kind,
             EvidenceRelationKind::Splits | EvidenceRelationKind::Merges
         ) {
+            let Some(conservation) = relation.conservation.as_ref() else {
+                return Err(RelationError::UnbalancedConservation {
+                    relation: relation.kind,
+                    balances: None,
+                });
+            };
+            let mut expected_inputs: Vec<_> = relation.sources().cloned().collect();
+            let mut expected_outputs: Vec<_> = relation.targets().cloned().collect();
+            let mut actual_inputs: Vec<_> = conservation
+                .inputs
+                .iter()
+                .map(|leg| leg.identity.clone())
+                .collect();
+            let mut actual_outputs: Vec<_> = conservation
+                .outputs
+                .iter()
+                .map(|leg| leg.identity.clone())
+                .collect();
+            expected_inputs.sort_by(identity_order);
+            expected_outputs.sort_by(identity_order);
+            actual_inputs.sort_by(identity_order);
+            actual_outputs.sort_by(identity_order);
+            if expected_inputs != actual_inputs || expected_outputs != actual_outputs {
+                return Err(RelationError::ConservationMembersMismatch {
+                    relation: relation.kind,
+                });
+            }
             let balances = relation
                 .conservation
                 .as_ref()
@@ -1543,6 +1745,40 @@ mod tests {
     }
 
     #[test]
+    fn failed_batch_is_atomic_and_does_not_leave_a_prefix() {
+        let first = row("bank", "first", "row-1", b"first");
+        let wrong_source = row("other", "second", "row-2", b"second");
+        let mut store = EvidenceStore::new();
+        let result = store.import_batch(batch("bank", [first, wrong_source]));
+        assert!(matches!(result, Err(ImportError::SourceMismatch { .. })));
+        assert!(store.is_empty());
+    }
+
+    #[test]
+    fn changed_provenance_is_retained_without_duplicating_the_source_row() {
+        let first =
+            row("bank", "occurrence-a", "row-184", b"same").with_note("first adapter observation");
+        let second =
+            row("bank", "regenerated", "row-184", b"same").with_note("reviewed after import");
+        let mut store = EvidenceStore::new();
+        assert_eq!(store.insert(first).unwrap(), ImportDisposition::Inserted);
+        assert_eq!(
+            store.insert(second).unwrap(),
+            ImportDisposition::AlreadyPresent
+        );
+        assert_eq!(store.len(), 1);
+        let derivations = store.derivations_for(&OccurrenceId::new("occurrence-a"));
+        assert_eq!(derivations.len(), 2);
+        assert_eq!(
+            derivations
+                .iter()
+                .filter_map(|derivation| derivation.note.as_deref())
+                .collect::<Vec<_>>(),
+            vec!["first adapter observation", "reviewed after import"]
+        );
+    }
+
+    #[test]
     fn same_row_under_new_adapter_version_retains_derivation_history() {
         let observation = row("bank", "occurrence-a", "row-184", b"same");
         let mut store = EvidenceStore::new();
@@ -1588,6 +1824,41 @@ mod tests {
         assert_eq!(
             store
                 .all_for_occurrence(&OccurrenceId::new("occurrence-a"))
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn occurrence_conflict_is_checked_within_each_adapter_version() {
+        let original = row("bank", "occurrence-a", "row-184", b"same");
+        let changed = row("bank", "occurrence-a", "row-184", b"changed");
+        let mut store = EvidenceStore::new();
+        store
+            .import_batch(
+                ImportBatch::from_observations("bank", [original.clone()])
+                    .with_adapter(AdapterProvenance::new("bank-csv", "1")),
+            )
+            .unwrap();
+        store
+            .import_batch(
+                ImportBatch::from_observations("bank", [original])
+                    .with_adapter(AdapterProvenance::new("bank-csv", "2")),
+            )
+            .unwrap();
+
+        let result = store.import_batch(
+            ImportBatch::from_observations("bank", [changed])
+                .with_adapter(AdapterProvenance::new("bank-csv", "2")),
+        );
+        assert!(matches!(
+            result,
+            Err(ImportError::OccurrenceConflict { .. })
+        ));
+        assert_eq!(store.len(), 2);
+        assert_eq!(
+            store
+                .derivations_for(&OccurrenceId::new("occurrence-a"))
                 .len(),
             2
         );
@@ -1847,6 +2118,45 @@ mod tests {
             })
         );
         assert_eq!(store.relations().count(), 0);
+    }
+
+    #[test]
+    fn correction_relations_require_scope_and_split_metadata_members() {
+        let left = row("bank", "left", "row-left", b"left");
+        let right = row("bank", "right", "row-right", b"right");
+        let left_id = left.identity().clone();
+        let right_id = right.identity().clone();
+        let mut store = EvidenceStore::new();
+        store.import_batch(batch("bank", [left, right])).unwrap();
+        let missing_scope = EvidenceRelation::new(
+            EvidenceRelationKind::Corrects,
+            left_id.clone(),
+            right_id.clone(),
+        );
+        assert_eq!(
+            store.add_relation(missing_scope),
+            Err(RelationError::MissingScope {
+                relation: EvidenceRelationKind::Corrects,
+            })
+        );
+        let forged_metadata = EvidenceRelation::splits(
+            left_id.clone(),
+            [right_id.clone()],
+            ConservationMetadata::for_split(
+                Identity::new(
+                    "not-left",
+                    ContentHash::domain_separated("test", b"not-left"),
+                ),
+                [right_id],
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            store.add_relation(forged_metadata),
+            Err(RelationError::ConservationMembersMismatch {
+                relation: EvidenceRelationKind::Splits,
+            })
+        );
     }
 
     #[test]

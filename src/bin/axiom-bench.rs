@@ -8,6 +8,7 @@
 use std::env;
 use std::fmt::Write as _;
 use std::hint::black_box;
+use std::thread;
 use std::time::Instant;
 
 use axiom_ledger::incremental::{IncrementalDb, MemoOutcome, QueryError, QueryKey};
@@ -168,7 +169,9 @@ struct Timing {
     workspace_replay_ns: Option<u128>,
     proof_check_ns: Option<u128>,
     explanation_ns: Option<u128>,
+    changed_incremental_solve_ns: Option<u128>,
     changed_full_solve_ns: Option<u128>,
+    independent_workers_ns: Option<u128>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -177,8 +180,8 @@ struct Sizes {
     source_lines: usize,
     forms: Option<usize>,
     changed_source_bytes: Option<usize>,
-    semantic_relation_nodes: Option<usize>,
-    semantic_relation_edges: Option<usize>,
+    dependency_graph_nodes: Option<usize>,
+    dependency_graph_edges: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -192,11 +195,12 @@ struct Metrics {
     semantic_invalidation_edges: Option<usize>,
     explanation_bytes: Option<usize>,
     cycle_errors: Option<usize>,
-    determinism_across_thread_counts: Option<bool>,
+    independent_worker_determinism: Option<bool>,
     same_process_cache_replay_equal: Option<bool>,
     independent_clean_recompute_equal: Option<bool>,
     peak_memory_bytes: Option<usize>,
-    thread_count_equivalence: Option<bool>,
+    independent_worker_equivalence: Option<bool>,
+    concurrent_worker_count: Option<usize>,
     build_profile: Option<&'static str>,
     resource_profile: Option<&'static str>,
     note: Option<&'static str>,
@@ -378,28 +382,28 @@ fn measure_workload(
         source_lines: generated.source.lines().count(),
         forms: None,
         changed_source_bytes: generated.changed_source.as_ref().map(String::len),
-        semantic_relation_nodes: None,
-        semantic_relation_edges: None,
+        dependency_graph_nodes: None,
+        dependency_graph_edges: None,
     };
     let mut metrics = Metrics {
-        determinism_across_thread_counts: None,
+        independent_worker_determinism: None,
         same_process_cache_replay_equal: None,
         peak_memory_bytes: None,
-        thread_count_equivalence: None,
+        independent_worker_equivalence: None,
         build_profile: Some(if cfg!(debug_assertions) {
             "debug"
         } else {
             "release"
         }),
         resource_profile: Some(if process_peak_memory_bytes().is_some() {
-            "single-threaded; process peak RSS via getrusage"
+            "concurrent independent workers; process peak RSS via getrusage"
         } else {
-            "single-threaded; process peak RSS unavailable"
+            "concurrent independent workers; process peak RSS unavailable"
         }),
         note: Some(if process_peak_memory_bytes().is_some() {
-            "peak_memory_bytes is process-lifetime peak RSS; parallel/thread-count metrics remain null because no parallel engine path exists"
+            "peak_memory_bytes is process-lifetime peak RSS; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
         } else {
-            "peak RSS is unavailable on this platform; parallel/thread-count metrics remain null because no parallel engine path exists"
+            "peak RSS is unavailable on this platform; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
         }),
         ..Metrics::default()
     };
@@ -459,6 +463,12 @@ fn measure_workload(
         &generated.source,
         samples,
     )?);
+    let (independent_workers_ns, workers_equivalent) =
+        median_independent_worker_comparison(workload, &generated.source, samples)?;
+    timing.independent_workers_ns = Some(independent_workers_ns);
+    metrics.independent_worker_determinism = Some(workers_equivalent);
+    metrics.independent_worker_equivalence = Some(workers_equivalent);
+    metrics.concurrent_worker_count = Some(2);
     timing.proof_check_ns = Some(median_proof_check(&analysis, samples));
     metrics.proof_nodes = Some(analysis.proof.nodes.len());
     metrics.proof_roots = Some(analysis.proof.roots.len());
@@ -466,9 +476,8 @@ fn measure_workload(
         Some(analysis.dependencies.values().map(Vec::len).sum::<usize>());
     metrics.semantic_invalidation_edges =
         Some(analysis.invalidations.values().map(Vec::len).sum::<usize>());
-    sizes.semantic_relation_nodes =
-        Some(analysis.dependencies.len() + analysis.invalidations.len());
-    sizes.semantic_relation_edges = Some(
+    sizes.dependency_graph_nodes = Some(analysis.dependencies.len() + analysis.invalidations.len());
+    sizes.dependency_graph_edges = Some(
         analysis.dependencies.values().map(Vec::len).sum::<usize>()
             + analysis.invalidations.values().map(Vec::len).sum::<usize>(),
     );
@@ -532,6 +541,12 @@ fn measure_workload(
                 workload.name()
             ));
         }
+        timing.changed_incremental_solve_ns = Some(median_incremental_solve(
+            workload,
+            &generated.source,
+            changed,
+            samples,
+        )?);
         timing.changed_full_solve_ns = Some(if workload == Workload::PackageUpgrade {
             median_package_upgrade_solve(&generated.source, samples)?
         } else {
@@ -639,6 +654,60 @@ fn median_package_upgrade_solve(source: &str, samples: usize) -> Result<u128, St
     Ok(median(values))
 }
 
+fn median_incremental_solve(
+    workload: Workload,
+    source: &str,
+    changed: &str,
+    samples: usize,
+) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let mut workspace = Workspace::new();
+        let mut loaded = workspace
+            .load_source("benchmark/incremental", source.as_bytes())
+            .map_err(|error| error.to_string())?;
+        if workload == Workload::PackageUpgrade {
+            let package = workspace
+                .put_policy_package(StorePolicyPackage::new(
+                    "lots/fifo",
+                    "1.0.0",
+                    b"selector=earliest_acquisition\ntie=ambiguous".to_vec(),
+                ))
+                .map_err(|error| error.to_string())?;
+            loaded = workspace
+                .commit_with_packages(loaded.commit_id(), [package])
+                .map_err(|error| error.to_string())?;
+        }
+        workspace
+            .analyze_commit(loaded.commit_id())
+            .map_err(|error| error.to_string())?;
+        workspace.clear_incremental_trace();
+        let start = Instant::now();
+        let changed_commit = if workload == Workload::PackageUpgrade {
+            let package = workspace
+                .put_policy_package(StorePolicyPackage::new(
+                    "lots/fifo",
+                    "1.1.0",
+                    b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+                ))
+                .map_err(|error| error.to_string())?;
+            workspace
+                .commit_with_packages(loaded.commit_id(), [package])
+                .map_err(|error| error.to_string())?
+        } else {
+            workspace
+                .load_source("benchmark/incremental", changed.as_bytes())
+                .map_err(|error| error.to_string())?
+        };
+        let analysis = workspace
+            .analyze_commit(changed_commit.commit_id())
+            .map_err(|error| error.to_string())?;
+        black_box(analysis.proof.nodes.len());
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
+}
+
 fn median_cold_solve(workload: Workload, source: &str, samples: usize) -> Result<u128, String> {
     let mut values = Vec::with_capacity(samples);
     for _ in 0..samples {
@@ -690,6 +759,56 @@ fn median_independent_clean_solve(
         values.push(start.elapsed().as_nanos());
     }
     Ok(median(values))
+}
+
+/// Compare one worker with two concurrent workers using the same clean
+/// workspace recipe.  The production workspace is deliberately not shared
+/// across threads: this is a benchmark-level parallel equivalence probe for
+/// independent goals, and does not claim that `Workspace` itself is `Sync` or
+/// that the engine has a shared parallel execution path.
+fn median_independent_worker_comparison(
+    workload: Workload,
+    source: &str,
+    samples: usize,
+) -> Result<(u128, bool), String> {
+    let mut values = Vec::with_capacity(samples);
+    let mut equivalent = true;
+    for _ in 0..samples {
+        let single = independent_clean_analyses(workload, source, 1)?;
+        let start = Instant::now();
+        let concurrent = independent_clean_analyses(workload, source, 2)?;
+        values.push(start.elapsed().as_nanos());
+        let Some(reference) = single.first() else {
+            return Err("worker comparison produced no serial result".into());
+        };
+        equivalent &= concurrent.iter().all(|candidate| candidate == reference);
+    }
+    Ok((median(values), equivalent))
+}
+
+fn independent_clean_analyses(
+    workload: Workload,
+    source: &str,
+    thread_count: usize,
+) -> Result<Vec<axiom_ledger::workspace::CommitAnalysis>, String> {
+    if thread_count == 0 {
+        return Err("worker comparison requires at least one worker".into());
+    }
+    thread::scope(|scope| {
+        let handles = (0..thread_count)
+            .map(|_| {
+                scope.spawn(|| independent_clean_analysis(workload, "benchmark/worker", source))
+            })
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| "independent benchmark worker panicked".to_string())?
+            })
+            .collect()
+    })
 }
 
 fn median_workspace_replay(
@@ -769,8 +888,8 @@ fn self_test(quick: bool, scale: u64) -> Result<usize, String> {
     let test_scale = scale.min(2);
     let mut checks = 0usize;
     for workload in Workload::ALL {
-        let left = generate(workload, true, test_scale)?;
-        let right = generate(workload, true, test_scale)?;
+        let left = generate(workload, quick, test_scale)?;
+        let right = generate(workload, quick, test_scale)?;
         if left.source != right.source || left.changed_source != right.changed_source {
             return Err(format!(
                 "{}: generator is not deterministic",
@@ -906,6 +1025,13 @@ fn self_test(quick: bool, scale: u64) -> Result<usize, String> {
         ));
     }
     checks += 1;
+    let worker_probe = generate(Workload::HighFrequencyLots, true, test_scale)?;
+    let (_, workers_equivalent) =
+        median_independent_worker_comparison(Workload::HighFrequencyLots, &worker_probe.source, 1)?;
+    if !workers_equivalent {
+        return Err("concurrent independent worker differs from the serial result".into());
+    }
+    checks += 1;
     if !quick {
         let one = generate(Workload::OneRowCloseChange, false, test_scale)?;
         if one.changed_source == Some(one.source.clone()) {
@@ -957,7 +1083,7 @@ fn print_json_line(record: &ResultRecord) {
     );
     let _ = write!(
         output,
-        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_full_solve_ns\":{}",
+        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_incremental_solve_ns\":{},\"changed_full_solve_ns\":{},\"parallel_solve_ns\":null,\"independent_workers_ns\":{}",
         record.timing.generation_ns,
         option_number(record.timing.normalization_ns),
         option_number(record.timing.parse_ns),
@@ -966,12 +1092,14 @@ fn print_json_line(record: &ResultRecord) {
         option_number(record.timing.workspace_replay_ns),
         option_number(record.timing.proof_check_ns),
         option_number(record.timing.explanation_ns),
+        option_number(record.timing.changed_incremental_solve_ns),
         option_number(record.timing.changed_full_solve_ns),
+        option_number(record.timing.independent_workers_ns),
     );
     output.push_str("},\"sizes\":{");
     let _ = write!(
         output,
-        "\"source_bytes\":{},\"source_lines\":{},\"forms\":{},\"changed_source_bytes\":{},\"semantic_relation_nodes\":{},\"semantic_relation_edges\":{}",
+        "\"source_bytes\":{},\"source_lines\":{},\"forms\":{},\"changed_source_bytes\":{},\"semantic_relation_nodes\":null,\"semantic_relation_edges\":null,\"dependency_graph_nodes\":{},\"dependency_graph_edges\":{}",
         record.sizes.source_bytes,
         record.sizes.source_lines,
         option_number(record.sizes.forms.map(|value| value as u128)),
@@ -979,20 +1107,20 @@ fn print_json_line(record: &ResultRecord) {
         option_number(
             record
                 .sizes
-                .semantic_relation_nodes
+                .dependency_graph_nodes
                 .map(|value| value as u128)
         ),
         option_number(
             record
                 .sizes
-                .semantic_relation_edges
+                .dependency_graph_edges
                 .map(|value| value as u128)
         ),
     );
     output.push_str("},\"metrics\":{");
     let _ = write!(
         output,
-        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"determinism_across_thread_counts\":{},\"same_process_cache_replay_equal\":{},\"independent_clean_recompute_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{}",
+        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"determinism_across_thread_counts\":null,\"same_process_cache_replay_equal\":{},\"independent_clean_recompute_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":null,\"parallel_thread_count\":null,\"independent_worker_determinism\":{},\"independent_worker_equivalence\":{},\"concurrent_worker_count\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{}",
         option_number(record.metrics.cache_hits.map(|value| value as u128)),
         option_number(record.metrics.cache_misses.map(|value| value as u128)),
         option_number(
@@ -1017,11 +1145,17 @@ fn print_json_line(record: &ResultRecord) {
         ),
         option_number(record.metrics.explanation_bytes.map(|value| value as u128)),
         option_number(record.metrics.cycle_errors.map(|value| value as u128)),
-        option_bool(record.metrics.determinism_across_thread_counts),
         option_bool(record.metrics.same_process_cache_replay_equal),
         option_bool(record.metrics.independent_clean_recompute_equal),
         option_number(record.metrics.peak_memory_bytes.map(|value| value as u128)),
-        option_bool(record.metrics.thread_count_equivalence),
+        option_bool(record.metrics.independent_worker_determinism),
+        option_bool(record.metrics.independent_worker_equivalence),
+        option_number(
+            record
+                .metrics
+                .concurrent_worker_count
+                .map(|value| value as u128)
+        ),
         option_string(record.metrics.build_profile),
         option_string(record.metrics.resource_profile),
         option_string(record.metrics.note),
@@ -1080,7 +1214,7 @@ fn print_human_summary(records: &[ResultRecord]) {
         "replay is end-to-end Workspace analysis, including materialization and content-addressed proof persistence"
     );
     eprintln!(
-        "full corpus sizes are deterministic row counts (quick uses 1/10 scale); --scale multiplies them"
+        "full and quick corpus sizes are deterministic; --scale multiplies their configured row counts"
     );
 }
 
@@ -1310,7 +1444,7 @@ fn multi_currency(count: usize) -> Result<GeneratedWorkload, String> {
         &["shape: USD, EUR, GBP, and BTC positions with dated quotes"],
     );
     let assets = ["SERV", "MACH", "DATA"];
-    let currencies = ["USD", "EUR", "GBP"];
+    let currencies = ["USD", "EUR", "GBP", "BTC"];
     for index in 0..count {
         let asset = assets[index % assets.len()];
         let currency = currencies[index % currencies.len()];
@@ -1394,6 +1528,12 @@ fn corporate_actions(count: usize) -> Result<GeneratedWorkload, String> {
                 5 + index % 19
             );
         }
+        if index % 13 == 0 {
+            let _ = writeln!(source, "; corporate-action merger/{:05}", index / 13);
+        }
+        if index % 17 == 0 {
+            let _ = writeln!(source, "; corporate-action spin-off/{:05}", index / 17);
+        }
     }
     append_sell(
         &mut source,
@@ -1423,39 +1563,33 @@ fn invoice_payment_graph(count: usize) -> Result<GeneratedWorkload, String> {
     let mut source = header(
         "invoice-payments",
         &[
-            "shape: invoice -> authorization -> settlement -> allocation graph",
-            "V0 representation: stable references on settlement observations",
+            "shape: invoice -> settlement -> allocation graph (issued history is the authorization evidence)",
+            "V0 representation: obligation, settlement, and satisfaction forms with stable references",
         ],
     );
     for index in 0..count {
+        let customer = format!("customer/{:04}", index % 97);
+        let amount = 100 + index % 37;
         let _ = writeln!(
             source,
-            "; invoice inv/{index:06} customer customer/{:04} due 2028-12-31",
-            index % 97
+            "obligation inv/{index:06}\n  debtor {customer}\n  creditor merchant\n  performance transfer {amount} USD\n  due 2028-12-31"
         );
         let _ = writeln!(
             source,
-            "observe settlement payment/{index:06} {} USD into receivables",
-            100 + index % 37
+            "settlement payment/{index:06}\n  kind ach\n  from {customer}\n  to merchant\n  instrument USD\n  amount {amount} USD\n  state issued at 2028-01-01\n  state settled at 2028-01-03"
         );
-        if index % 5 == 0 {
-            let _ = writeln!(
-                source,
-                "observe position customer/{:04} {} USD",
-                index % 97,
-                100 + index % 37
-            );
-        }
+        let _ = writeln!(
+            source,
+            "satisfy allocation/{index:06}\n  obligation inv/{index:06}\n  settlement payment/{index:06}\n  amount {amount} USD\n  state applied"
+        );
     }
     Ok(GeneratedWorkload {
         source,
         changed_source: None,
         changed_kind: None,
-        explain_goal: None,
-        semantic_supported: false,
-        unsupported_reason: Some(
-            "invoice allocation edges are labelled evidence, not a V0 graph relation",
-        ),
+        explain_goal: Some("obligation:inv/000000".into()),
+        semantic_supported: true,
+        unsupported_reason: None,
     })
 }
 
@@ -1583,8 +1717,11 @@ fn one_row_close_change(count: usize) -> Result<GeneratedWorkload, String> {
     source.push_str(
         "use lots/fifo for period-close\nobserve settlement close/sale 150 USD into checking\n",
     );
-    let mut changed = source.clone();
-    changed.push_str("observe position checking 151 USD\n");
+    let changed = source.replacen(
+        "observe settlement close/sale 150 USD into checking",
+        "observe settlement close/sale 151 USD into checking",
+        1,
+    );
     Ok(GeneratedWorkload {
         source,
         changed_source: Some(changed),

@@ -38,16 +38,17 @@ experiments, but it is not part of this contract.
 - [x] Four-valued support and `Truth × Multiplicity × Completion` results.
 - [x] Scoped completeness claims and decisions.
 - [ ] At least 75 independently executable edge-case fixtures spanning
-  sections XIV A–I. The corpus names 134 cases and currently has 12 grouped
-  smoke suites; a shared suite is not counted as proof of every mapped case.
+  sections XIV A–I. The corpus names 134 cases and currently has 29
+  case-specific tests plus 12 grouped smoke suites; a shared suite is not
+  counted as proof of every mapped case.
 
 ### Gate 1 — executable reference semantics
 
 - [x] Small, exhaustive reference evaluator.
 - [x] Reference relations for candidate/selected lot, valuation, basis, gain,
   balances, obligation satisfaction, recognition, and availability.
-- [ ] Structured positive proof, negative proof, blocker, conflict, and repair
-  results.
+- [x] Structured positive proof, negative proof, blocker, conflict, completion,
+  and inert repair results; negative support requires scoped completeness.
 - [x] Reference fixtures remain permanently runnable as a semantic oracle.
 
 ### Gate 2 — vertical slice
@@ -69,20 +70,28 @@ experiments, but it is not part of this contract.
   decision, conflict, quote, settlement, position, partial-lot, and multi-lot
   cases through the production `Workspace` boundary.
 - [ ] Real incremental quote-change invalidation test.
+  Source-partition instrumentation now proves the intended valuation-only
+  dependency shape and clean-run equivalence, but the authoritative engine
+  still analyzes a source ledger as one unit.
 
 ### Gate 3 — finance-native solver kernel
 
 - [x] Canonical typed IR and alpha-equivalent goal identity.
-- [x] Rollback unification with occurs checks and typed row/refinement support.
-- [x] Tabled candidate search with positive fixed points and cycle classes.
-- [ ] Stratified negation and finite complete aggregation.
+- [ ] Rollback unification with occurs checks and typed row support; a general
+  refinement system remains open.
+- [ ] Positive least-fixed-point evaluation and cycle diagnostics exist, but a
+  general tabled candidate-search engine remains open.
+- [x] Stratified negation and exact finite count/sum aggregation, with explicit
+  rejection of negative and aggregate dependency cycles.
 - [x] Resource bounds produce `Incomplete`, never refutation.
 - [ ] Theory boundaries for exact arithmetic, units, time, relations, and
   contract state.
 - [ ] Proof checker verifies every accepted certificate without invoking the
   main solver. Allocation, inventory-conservation, and recognition
   certificates are now checked without the solver, including their typed
-  source edges and aggregate arithmetic.
+  source edges and aggregate arithmetic. Logic count/sum currently emits a
+  structurally checked trace, not an independently checked aggregate
+  certificate.
 
 ### Gate 4 — language and incremental compiler
 
@@ -106,10 +115,13 @@ experiments, but it is not part of this contract.
 - [x] Immutable content-addressed evidence, statement, decision, package,
   proof, commit, and close objects.
 - [ ] Corrections/supersession, tombstones, unavailable/redacted/deleted
-  states, and as-known-at queries.
-- [ ] Semantic branch/merge with unresolved conflicts preserved.
+  states, and as-known-at queries. The immutable store now implements these
+  primitives; production workspace/analysis integration remains open.
+- [ ] Semantic branch/merge with unresolved conflicts preserved. Store merges
+  retain divergent decisions, statement polarities, and evidence corrections;
+  durable first-class collaboration conflict objects remain open.
 - [x] Raw import bytes, versioned adapter provenance, idempotent re-import,
-  split/merge links, and decision inbox.
+  retained derivation history, split/merge links, and decision inbox.
 - [ ] Signed, reproducible close objects pin the complete semantic context.
   Commit/close signing bytes exclude signatures, and the store now requires a
   caller-supplied verifier for signed insertion; key management and a complete
@@ -153,17 +165,20 @@ experiments, but it is not part of this contract.
 
 - [x] Bounded recurrence and uncertain scenario assumptions.
 - [x] Liquidity graph with time/fee/capacity/risk/tax dimensions.
-- [ ] Pareto alternatives and infeasible-core diagnostics. Pareto routes are
-  implemented; minimal infeasible cores are not.
-- [ ] Approximate optimizer outputs are verified against exact constraints.
+- [x] Pareto alternatives and inclusion-minimal exact infeasible-core
+  diagnostics for the implemented liquidity and scenario constraints.
+- [x] Approximate route and scenario candidates cross an exact verification
+  boundary; there is not yet a general optimizer frontend.
 
 ### Gate 10 — scale and assurance
 
 - [ ] Benchmark corpus and performance/invalidation metrics from section XVII.
   The runner covers all named shapes and reports unsupported semantics honestly;
-  production Workspace cache/invalidation, normalization, and relation-size
+  production Workspace cache/invalidation, normalization, and dependency-graph
   metrics, independent clean-recomputation equality, and process peak RSS are
-  measured; parallel determinism and several domain workloads remain.
+  measured. Serial/concurrent independent-workspace equivalence is measured
+  separately and does not claim shared-engine parallelism. Several domain
+  workloads and per-workload peak memory remain open.
 - [ ] Property, differential, incremental/full, and parallel/single-threaded
   equivalence suites.
 - [ ] Parser, canonicalization, unification, cycles, proof, packages, time,
@@ -175,17 +190,18 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 269 library tests, 4 CLI tests, and 8 independent reference/production
-  differential tests;
-- 134 named constitutional cases with 12 grouped smoke suites; 58 cases are
-  explicit implementation inventory, and the remaining mappings still need
-  independent case-specific assertions before Gate 0 can close;
+- 295 library tests, 4 CLI tests, 8 independent reference/production
+  differential tests, and 5 structured-reference outcome tests;
+- 134 named constitutional cases with 29 independent case-specific tests and
+  12 grouped smoke suites; the remaining mappings still need independent
+  assertions before Gate 0 can close;
 - 14 deterministic heavy-ledger integration tests and two explicit 10,000-row
   stress tests, including a full obligation/settlement/satisfaction network;
 - an 11-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
-  clean-recomputation equivalence plus process peak RSS; unavailable parallel
-  metrics remain explicitly `null` rather than simulated;
+  clean-recomputation equivalence plus process peak RSS; concurrent
+  independent-worker equivalence is labelled distinctly from shared-engine
+  parallelism;
 - strict all-target Clippy and exact source-to-commit-to-analysis proof checks.
 
 These numbers are evidence, not a completion claim. In particular, several

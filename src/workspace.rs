@@ -44,6 +44,8 @@ use crate::surface::SurfaceFile;
 const SOURCE_OCCURRENCE_PREFIX: &str = "source/";
 const SOURCE_AUTHOR: &str = "workspace/source";
 const ANALYSIS_AUTHOR: &str = "workspace/analysis";
+const QUOTE_PARTITION: &str = "quotes";
+const UNRELATED_PARTITION: &str = "unrelated";
 
 /// An immutable source file together with its lossless surface and persisted
 /// source commit.
@@ -557,6 +559,22 @@ impl Workspace {
             .map_err(WorkspaceError::Incremental)?;
         let elaboration_key = QueryKey::new(format!("workspace/elaborate/{}", source.source()))
             .map_err(WorkspaceError::Incremental)?;
+        // Keep the semantic stages visible to the incremental database.  The
+        // engine still owns the authoritative proof-producing analysis, but
+        // these stage queries make the quote -> valuation -> recognition ->
+        // report dependency path explicit at the source/analysis boundary.
+        // In particular, a quote correction must not evict derivations that
+        // only consume the non-quote partition of the source.
+        let valuation_key = QueryKey::new(format!("workspace/valuation/{}", source.source()))
+            .map_err(WorkspaceError::Incremental)?;
+        let recognition_key = QueryKey::new(format!("workspace/recognition/{}", source.source()))
+            .map_err(WorkspaceError::Incremental)?;
+        let report_key = QueryKey::new(format!("workspace/report/{}", source.source()))
+            .map_err(WorkspaceError::Incremental)?;
+        let position_key = QueryKey::new(format!("workspace/position/{}", source.source()))
+            .map_err(WorkspaceError::Incremental)?;
+        let settlement_key = QueryKey::new(format!("workspace/settlement/{}", source.source()))
+            .map_err(WorkspaceError::Incremental)?;
         let source_bytes = source.bytes().to_vec();
         let source_for_query = source.clone();
         let source_for_elaboration = source.clone();
@@ -568,6 +586,8 @@ impl Workspace {
             .iter()
             .map(|package| package.hash().to_string())
             .collect::<Vec<_>>();
+        let quote_partition_key = source_partition_key(source.source(), QUOTE_PARTITION);
+        let unrelated_partition_key = source_partition_key(source.source(), UNRELATED_PARTITION);
         let prepared = self
             .incremental
             .evaluate_typed(analysis_key, move |context| {
@@ -605,7 +625,99 @@ impl Workspace {
                             (ledger, source_for_elaboration.content().as_bytes().to_vec())
                         })
                 })?;
-                let mut analysis = engine::analyze_with_registry(&ledger, &registry_for_query);
+                let ledger_for_report = ledger.clone();
+                let package_source_for_report = package_source_for_query.clone();
+                let package_names_for_report = package_names_for_query.clone();
+                let package_hashes_for_report = package_hashes.clone();
+                let registry_for_report = registry_for_query.clone();
+                let report = context.query_typed(report_key, move |context| {
+                    let _ = context.query(valuation_key.clone(), |context| {
+                        let Some(input) = context.input(&quote_partition_key) else {
+                            return MemoOutcome::incomplete("quote partition is missing");
+                        };
+                        // This value is the exact quote-sensitive source
+                        // partition consumed by the valuation stage.
+                        MemoOutcome::value(input.content().to_vec())
+                    });
+                    let _ = context.query(position_key.clone(), |context| {
+                        let Some(input) = context.input(&unrelated_partition_key) else {
+                            return MemoOutcome::incomplete(
+                                "unrelated source partition is missing",
+                            );
+                        };
+                        MemoOutcome::value(input.content().to_vec())
+                    });
+                    let _ = context.query(settlement_key.clone(), |context| {
+                        let Some(input) = context.input(&unrelated_partition_key) else {
+                            return MemoOutcome::incomplete(
+                                "unrelated source partition is missing",
+                            );
+                        };
+                        MemoOutcome::value(input.content().to_vec())
+                    });
+                    let recognition = context.query(recognition_key.clone(), |context| {
+                        let valuation = context.query(valuation_key.clone(), |_context| {
+                            MemoOutcome::incomplete("valuation stage was not evaluated")
+                        });
+                        if !valuation.is_value() {
+                            return valuation;
+                        }
+                        let position = context.query(position_key.clone(), |_context| {
+                            MemoOutcome::incomplete("position stage was not evaluated")
+                        });
+                        if !position.is_value() {
+                            return position;
+                        }
+                        let settlement = context.query(settlement_key.clone(), |_context| {
+                            MemoOutcome::incomplete("settlement stage was not evaluated")
+                        });
+                        if !settlement.is_value() {
+                            return settlement;
+                        }
+                        let Some(input) = context.input(&unrelated_partition_key) else {
+                            return MemoOutcome::incomplete(
+                                "unrelated source partition is missing",
+                            );
+                        };
+                        MemoOutcome::value(input.content().to_vec())
+                    });
+                    if !recognition.is_value() {
+                        return Err(recognition);
+                    }
+                    let report_position = context.query(position_key.clone(), |_context| {
+                        MemoOutcome::incomplete("position stage was not evaluated")
+                    });
+                    if !report_position.is_value() {
+                        return Err(report_position);
+                    }
+                    let report_settlement = context.query(settlement_key.clone(), |_context| {
+                        MemoOutcome::incomplete("settlement stage was not evaluated")
+                    });
+                    if !report_settlement.is_value() {
+                        return Err(report_settlement);
+                    }
+                    for package_name in &package_names_for_report {
+                        let key = SourceKey::new(package_input_name(
+                            &package_source_for_report,
+                            package_name,
+                        ))
+                        .map_err(|error| {
+                            MemoOutcome::error(QueryError::explicit("input", error.to_string()))
+                        })?;
+                        let _ = context.input(&key);
+                    }
+                    let analysis =
+                        engine::analyze_with_registry(&ledger_for_report, &registry_for_report);
+                    let mut bytes = Vec::new();
+                    for root in &analysis.proof.roots {
+                        bytes.extend_from_slice(&root.0);
+                    }
+                    if !package_hashes_for_report.is_empty() {
+                        bytes.extend_from_slice(package_hashes_for_report.join(",").as_bytes());
+                    }
+                    Ok((analysis, bytes))
+                })?;
+                let mut analysis = report;
                 let mut metadata = BTreeMap::from([
                     (
                         "source-commit".to_string(),
@@ -791,6 +903,17 @@ impl Workspace {
     fn sync_source_input(&mut self, source: &SourceId, bytes: &[u8]) -> Result<(), WorkspaceError> {
         self.incremental
             .upsert_input(source_key(source), "source", bytes.to_vec())?;
+        let (quotes, unrelated) = source_partitions(bytes);
+        self.incremental.upsert_input(
+            source_partition_key(source, QUOTE_PARTITION),
+            "source-partition",
+            quotes,
+        )?;
+        self.incremental.upsert_input(
+            source_partition_key(source, UNRELATED_PARTITION),
+            "source-partition",
+            unrelated,
+        )?;
         Ok(())
     }
 
@@ -986,6 +1109,50 @@ impl Workspace {
 fn source_key(source: &SourceId) -> SourceKey {
     SourceKey::new(format!("workspace/source/{source}"))
         .expect("workspace source keys are never empty")
+}
+
+fn source_partition_key(source: &SourceId, partition: &str) -> SourceKey {
+    SourceKey::new(format!("workspace/source/{source}/{partition}"))
+        .expect("workspace source partition keys are never empty")
+}
+
+/// Split a source into the quote-sensitive and remaining semantic partitions.
+///
+/// This intentionally works at the tolerant surface boundary rather than the
+/// strict parser boundary: loading a source retains editor-invalid text, but
+/// a quote-only correction can still invalidate only valuation consumers.
+/// Node spans include their indented block and exclude surrounding trivia, so
+/// comments and blank lines do not accidentally become quote dependencies.
+fn source_partitions(bytes: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let Ok(source) = str::from_utf8(bytes) else {
+        return (Vec::new(), bytes.to_vec());
+    };
+    let surface = SurfaceFile::parse(source);
+    let mut quote_ranges = surface
+        .nodes()
+        .iter()
+        .filter(|node| node.head.as_deref() == Some("quote"))
+        .map(|node| node.span)
+        .collect::<Vec<_>>();
+    quote_ranges.sort_by_key(|span| span.start);
+
+    let mut quotes = Vec::new();
+    let mut unrelated = Vec::new();
+    let mut cursor = 0;
+    for span in quote_ranges {
+        if span.start > cursor {
+            unrelated.extend_from_slice(&bytes[cursor..span.start]);
+        }
+        if span.end > span.start && span.end <= bytes.len() {
+            quotes.extend_from_slice(&bytes[span.start..span.end]);
+            quotes.push(b'\n');
+        }
+        cursor = cursor.max(span.end);
+    }
+    if cursor < bytes.len() {
+        unrelated.extend_from_slice(&bytes[cursor..]);
+    }
+    (quotes, unrelated)
 }
 
 fn package_input_name(source: &SourceId, name: &str) -> String {
@@ -1384,6 +1551,111 @@ use lots/fifo for tax-us
         assert_eq!(incremental.analysis, full.analysis);
         assert_eq!(incremental.proof(), full.proof());
         assert_eq!(incremental.metadata, full.metadata);
+    }
+
+    #[test]
+    fn real_quote_change_recomputes_valuation_recognition_report_and_reuses_unrelated_derivations()
+    {
+        let source_text = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+quote close on 2026-09-20
+  1 ABC = 52 USD
+observe position brokerage 10 ABC
+observe settlement sell 500 USD into checking
+"#;
+        let mut workspace = Workspace::new();
+        let first = workspace.load_source("book", source_text).unwrap();
+        let initial = workspace.analyze_commit(first.commit).unwrap();
+        assert_eq!(initial.quote_status.len(), 1);
+
+        workspace.clear_incremental_trace();
+        let changed = workspace
+            .load_source(
+                "book",
+                source_text.replace("1 ABC = 52 USD", "1 ABC = 53 USD"),
+            )
+            .unwrap();
+        let incremental = workspace.analyze_commit(changed.commit).unwrap();
+        let trace = workspace.incremental_trace().to_vec();
+
+        let recomputed = trace
+            .iter()
+            .filter_map(|event| match event {
+                TraceEvent::Recomputed { query, .. } => Some(query.as_str()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        assert!(recomputed.contains("workspace/valuation/book"));
+        assert!(recomputed.contains("workspace/recognition/book"));
+        assert!(recomputed.contains("workspace/report/book"));
+        assert!(!recomputed.contains("workspace/position/book"));
+        assert!(!recomputed.contains("workspace/settlement/book"));
+        assert!(recomputed.iter().all(|query| {
+            matches!(
+                *query,
+                "workspace/valuation/book"
+                    | "workspace/recognition/book"
+                    | "workspace/report/book"
+                    | "workspace/elaborate/book"
+                    | "workspace/analyze/book"
+            )
+        }));
+
+        assert!(trace.iter().any(|event| {
+            matches!(
+                event,
+                TraceEvent::CacheHit { query, .. }
+                    if query.as_str() == "workspace/position/book"
+            )
+        }));
+        assert!(trace.iter().any(|event| {
+            matches!(
+                event,
+                TraceEvent::CacheHit { query, .. }
+                    if query.as_str() == "workspace/settlement/book"
+            )
+        }));
+        let invalidated = trace
+            .iter()
+            .filter_map(|event| match event {
+                TraceEvent::Invalidated { query, .. } => Some(query.as_str()),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>();
+        assert!(invalidated.contains("workspace/valuation/book"));
+        assert!(invalidated.contains("workspace/recognition/book"));
+        assert!(invalidated.contains("workspace/report/book"));
+        assert!(!invalidated.contains("workspace/position/book"));
+        assert!(!invalidated.contains("workspace/settlement/book"));
+        assert!(invalidated.iter().all(|query| {
+            matches!(
+                *query,
+                "workspace/valuation/book"
+                    | "workspace/recognition/book"
+                    | "workspace/report/book"
+                    | "workspace/elaborate/book"
+                    | "workspace/analyze/book"
+            )
+        }));
+
+        // The real source-to-analysis result remains identical to an
+        // independent clean evaluation, including its proof and metadata.
+        let mut clean = Workspace::from_store(workspace.store().clone());
+        let full = clean.analyze_commit(changed.commit).unwrap();
+        assert_eq!(incremental.analysis, full.analysis);
+        assert_eq!(incremental.proof(), full.proof());
+        assert_eq!(incremental.metadata, full.metadata);
+        assert_eq!(initial.sales, incremental.sales);
+        assert_eq!(initial.positions, incremental.positions);
+        assert_eq!(initial.settlements, incremental.settlements);
+        assert_ne!(initial.quotes, incremental.quotes);
+        assert_ne!(initial.analysis, incremental.analysis);
     }
 
     #[test]
