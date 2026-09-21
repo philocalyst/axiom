@@ -640,6 +640,38 @@ impl Workspace {
         let source_ledger = self.source_ledger(source)?;
         let source_value = self.store.commit(source)?.clone();
         let packages: Vec<_> = packages.into_iter().collect();
+        let commit_value = Commit::new(
+            [source],
+            source_value.evidence,
+            [],
+            source_value.decisions,
+            [],
+            packages.clone(),
+            [],
+            SOURCE_AUTHOR,
+        )
+        .with_conflicts(source_value.conflicts);
+        let commit = self.store.put_commit(commit_value)?;
+        self.sync_package_inputs(source_ledger.source(), source_ledger.bytes(), &packages)?;
+        self.heads
+            .insert(source_ledger.evidence.source().clone(), commit);
+        self.materialize_source_commit(commit)
+    }
+
+    /// Attach one already-persisted compiler artifact as immutable source
+    /// context. The current sale analysis does not execute this artifact;
+    /// binding it to the source commit establishes the exact authority seam
+    /// that community-form elaboration will consume. Replacing legacy policy
+    /// roots clears this context because no equivalence is assumed between
+    /// the two package representations.
+    pub fn commit_with_compiled_artifact(
+        &mut self,
+        source: CommitId,
+        artifact: CompiledArtifactId,
+    ) -> Result<SourceLedger, WorkspaceError> {
+        let source_ledger = self.source_ledger(source)?;
+        self.store.compiled_artifact(artifact)?;
+        let source_value = self.store.commit(source)?.clone();
         let commit = self.store.put_commit(
             Commit::new(
                 [source],
@@ -647,13 +679,13 @@ impl Workspace {
                 [],
                 source_value.decisions,
                 [],
-                packages.clone(),
+                source_value.packages,
                 [],
                 SOURCE_AUTHOR,
             )
+            .with_compiled_artifact(artifact)
             .with_conflicts(source_value.conflicts),
         )?;
-        self.sync_package_inputs(source_ledger.source(), source_ledger.bytes(), &packages)?;
         self.heads
             .insert(source_ledger.evidence.source().clone(), commit);
         self.materialize_source_commit(commit)
@@ -1093,6 +1125,7 @@ impl Workspace {
             decisions: source_commit_value.decisions,
             completeness: Vec::new(),
             packages: source_commit_value.packages,
+            compiled_artifact: source_commit_value.compiled_artifact,
             proofs: vec![proof_id],
             conflicts: source_commit_value.conflicts,
             schema_version: source_commit_value.schema_version,
@@ -1237,19 +1270,22 @@ impl Workspace {
             corrected = corrected.with_external(external);
         }
         let corrected_id = self.store.put_evidence(corrected)?;
-        let commit = self.store.put_commit(
-            Commit::new(
-                [prior],
-                [corrected_id],
-                [],
-                prior_value.decisions,
-                [],
-                prior_value.packages,
-                [],
-                SOURCE_AUTHOR,
-            )
-            .with_conflicts(prior_value.conflicts),
-        )?;
+        let commit_value = Commit::new(
+            [prior],
+            [corrected_id],
+            [],
+            prior_value.decisions,
+            [],
+            prior_value.packages,
+            [],
+            SOURCE_AUTHOR,
+        );
+        let commit_value = match prior_value.compiled_artifact {
+            Some(artifact) => commit_value.with_compiled_artifact(artifact),
+            None => commit_value,
+        }
+        .with_conflicts(prior_value.conflicts);
+        let commit = self.store.put_commit(commit_value)?;
         self.heads.insert(source, commit);
         self.materialize_source_commit(commit)
     }

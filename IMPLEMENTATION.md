@@ -73,6 +73,11 @@ experiments, but it is not part of this contract.
   operation rather than a `commit:<hash>` string convention. The checker
   requires one rooted binding covering every other terminal root, and the
   store requires its external address to name an actual commit.
+- [x] Source commits can pin exactly one independently verified compiled
+  package artifact as immutable context. Corrections and analysis children
+  inherit it exactly, divergent merges reject it, and legacy policy-package
+  replacement clears it. The sale engine deliberately does not execute this
+  context yet; it is the authority seam for future community-form elaboration.
 - [ ] Every answer has a proposition-specific independently checked proof.
   Lot allocation, inventory conservation, and recognized gain now use typed,
   independently recomputed certificates. Direct obligations, settlement

@@ -23,6 +23,7 @@ use crate::proof::{
 };
 
 const SCHEMA_VERSION: &str = "axiom/store/v3";
+const COMMIT_SCHEMA_VERSION: &str = "axiom/store/commit/v4";
 pub(crate) const ANALYSIS_AUTHOR: &str = "workspace/analysis";
 const EVIDENCE_CONTENT_DOMAIN: &str = "axiom/store/evidence-content/v1";
 
@@ -773,6 +774,10 @@ pub struct Commit {
     pub decisions: Vec<DecisionId>,
     pub completeness: Vec<CompletenessId>,
     pub packages: Vec<PackageId>,
+    /// The persisted compiler artifact selected for this exact snapshot.  It
+    /// is intentionally separate from policy-package roots: one artifact
+    /// already represents the complete compiled package set.
+    pub compiled_artifact: Option<CompiledArtifactId>,
     pub proofs: Vec<ProofObjectId>,
     /// Durable semantic conflicts. A later snapshot may replace an unresolved
     /// conflict only with a [`ConflictRecord`] that explicitly resolves it.
@@ -801,9 +806,10 @@ impl Commit {
             decisions: canonical_set(decisions),
             completeness: canonical_set(completeness),
             packages: canonical_set(packages),
+            compiled_artifact: None,
             proofs: canonical_set(proofs),
             conflicts: Vec::new(),
-            schema_version: SCHEMA_VERSION.to_string(),
+            schema_version: COMMIT_SCHEMA_VERSION.to_string(),
             author: author.into(),
             signatures: Vec::new(),
         }
@@ -822,6 +828,12 @@ impl Commit {
 
     pub fn with_conflicts(mut self, conflicts: impl IntoIterator<Item = ConflictId>) -> Self {
         self.conflicts = canonical_set(conflicts);
+        self
+    }
+
+    /// Pin one persisted compiler artifact to this exact snapshot.
+    pub fn with_compiled_artifact(mut self, artifact: CompiledArtifactId) -> Self {
+        self.compiled_artifact = Some(artifact);
         self
     }
 
@@ -1445,6 +1457,7 @@ impl ObjectStore {
             || !analysis.completeness.is_empty()
             || analysis.decisions != source.decisions
             || analysis.packages != source.packages
+            || analysis.compiled_artifact != source.compiled_artifact
             || analysis.conflicts != source.conflicts
             || analysis.schema_version != source.schema_version
             || analysis.author != ANALYSIS_AUTHOR
@@ -2107,6 +2120,18 @@ impl ObjectStore {
         proofs.extend(right_value.proofs.iter().copied());
         canonicalize_vec(&mut proofs);
 
+        let compiled_artifact = if left_value.compiled_artifact == right_value.compiled_artifact {
+            left_value.compiled_artifact
+        } else if left_value.compiled_artifact == base_value.compiled_artifact {
+            right_value.compiled_artifact
+        } else if right_value.compiled_artifact == base_value.compiled_artifact {
+            left_value.compiled_artifact
+        } else {
+            return Err(StoreError::InvalidObject(
+                "divergent compiled artifacts require an explicit resolution".into(),
+            ));
+        };
+
         let mut conflicts = evidence_conflicts;
         conflicts.extend(statement_conflicts);
         conflicts.extend(decision_conflicts);
@@ -2140,7 +2165,11 @@ impl ObjectStore {
             packages,
             proofs,
             author,
-        )
+        );
+        let merged = match compiled_artifact {
+            Some(artifact) => merged.with_compiled_artifact(artifact),
+            None => merged,
+        }
         .with_conflicts(conflict_objects.clone());
         let commit = self.put_commit(merged)?;
         let mut unresolved_conflicts = Vec::new();
@@ -2168,7 +2197,7 @@ impl ObjectStore {
     }
 
     fn validate_commit(&self, value: &Commit) -> Result<(), StoreError> {
-        if value.schema_version != SCHEMA_VERSION {
+        if value.schema_version != COMMIT_SCHEMA_VERSION {
             return Err(StoreError::InvalidObject(format!(
                 "unsupported commit schema version {}",
                 value.schema_version
@@ -2191,6 +2220,9 @@ impl ObjectStore {
         }
         for id in &value.packages {
             self.require_kind(id.hash(), ObjectKind::Package)?;
+        }
+        if let Some(id) = value.compiled_artifact {
+            self.require_kind(id.hash(), ObjectKind::CompiledArtifact)?;
         }
         for id in &value.proofs {
             self.require_kind(id.hash(), ObjectKind::Proof)?;
@@ -3094,6 +3126,7 @@ fn encode_commit(out: &mut Vec<u8>, value: &Commit) {
     put_ids(out, &value.decisions);
     put_ids(out, &value.completeness);
     put_ids(out, &value.packages);
+    put_optional_hash(out, value.compiled_artifact.map(ObjectId::hash));
     put_ids(out, &value.proofs);
     put_ids(out, &value.conflicts);
     put_string(out, &value.schema_version);
