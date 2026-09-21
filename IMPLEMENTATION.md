@@ -68,8 +68,10 @@ experiments, but it is not part of this contract.
   now do as well. Quote, position/reconciliation, cash-settlement,
   settlement/reconciliation, and journal answers now carry typed certificates
   whose values and typed source edges are recomputed by the checker;
-  source-commit binding and the remaining answer families still need
-  equivalent end-to-end treatment.
+  blocked-sale answers now bind exact quantity, proceeds, both units,
+  reason, account, asset, and the typed sale observation. Source-commit
+  binding and the remaining answer families still need equivalent end-to-end
+  treatment.
 - [x] Source-order property tests.
 - [x] Actual/scenario isolation test.
 - [x] Reference/production differential tests cover generated FIFO/LIFO,
@@ -123,7 +125,11 @@ experiments, but it is not part of this contract.
   exported-name coherence, and emits independently verifiable artifacts;
   Workspace now compiles those artifacts through its typed incremental graph
   with exact lockfile, package-set, and module-content dependencies.
-  Persistent package-object integration remains open.
+  Compiled artifacts can now be persisted as immutable store objects whose
+  artifact hash and complete compiler-input roots are independently
+  recomputed on insertion and read. Equivalence to the separately represented
+  executable policy-package objects is deliberately not claimed; that
+  conversion proof remains open.
 - [ ] LSP diagnostics, completion, and proof navigation foundation. A typed-HIR
   document index and checked proof-DAG navigator now provide the three core
   operations. A checked authoring surface retains exact source commits, checks
@@ -141,9 +147,10 @@ experiments, but it is not part of this contract.
 - [ ] Semantic branch/merge with unresolved conflicts preserved. Store merges
   retain divergent decisions, statement polarities, and evidence corrections;
   they now persist content-addressed conflict lifecycle records into commits,
-  reject silent conflict drops, and block closes until an explicit resolution
-  record is committed. Production analysis/collaboration integration remains
-  open.
+  reject non-ancestor merge bases, compare scoped decision selections and
+  completeness branch snapshots, reject silent conflict drops, and block
+  closes until an explicit resolution record is committed. Production
+  analysis/collaboration integration remains open.
 - [x] Raw import bytes, versioned adapter provenance, idempotent re-import,
   retained derivation history, split/merge links, and decision inbox.
 - [ ] Signed, reproducible close objects pin the complete semantic context.
@@ -188,9 +195,11 @@ experiments, but it is not part of this contract.
 ### Gate 8 — collaboration and adapters
 
 - [ ] Signed packages and decisions, access labels, and redacted proofs. Typed
-  verified attestations, principal labels, and hidden-node proof commitments
-  exist as a foundation; persisted labels and store/workspace enforcement
-  remain open.
+  verified attestations, principal labels, hidden-node commitments, and a
+  complete-source proof commitment exist as a foundation. Exact hidden hashes
+  remain dictionary-testable, and authority for an expected source root still
+  comes from the caller; confidentiality-safe commitments, persisted labels,
+  and store/workspace enforcement remain open.
 - [ ] Capability-limited component adapters that can emit observations only.
   The public collaboration adapter boundary currently exposes only immutable
   observation batches; a runtime capability sandbox remains open.
@@ -215,16 +224,24 @@ experiments, but it is not part of this contract.
   child-process peak RSS are
   measured. Serial/concurrent independent-workspace equivalence is measured
   separately and does not claim shared-engine parallelism. Currency exchange,
-  corporate action, ownership-role, and recursive-logic workloads now report
-  separately timed public-domain-API probes alongside honest source-projection
-  scope labels. Remaining domain workloads and shared-engine parallel
-  measurement remain open.
+  corporate action, invoice/payment, ownership-role, package-upgrade, and
+  recursive-logic workloads now report separately timed public-domain-API
+  probes alongside honest source-projection scope labels. The one-row close
+  workload reports only real Workspace revision/invalidation metrics; it does
+  not claim a separate close semantic probe. Remaining domain workloads and
+  shared-engine parallel measurement remain open.
 - [ ] Property, differential, incremental/full, and parallel/single-threaded
-  equivalence suites.
+  equivalence suites. A deterministic generated suite now exercises roughly
+  1,500 parser, canonicalization, unification, cycle, time, unit, package,
+  merge, and adapter cases through public APIs; fuzzing and full concurrency
+  equivalence remain open.
 - [ ] Parser, canonicalization, unification, cycles, proof, packages, time,
   units, merges, and adapter fuzz targets.
 - [ ] Stable file/package formats and a mechanized specification of the small
-  trusted checker boundary.
+  trusted checker boundary. Proof format v1 now has an executable byte-level
+  specification, independent encoder coverage, literal hash vectors, and
+  optional-ID conformance tests; decoding, migration, and mechanized proof
+  remain open.
 
 ## Reproducible evidence snapshot
 
@@ -237,10 +254,11 @@ The current foundation checkpoint is exercised by:
   raw count, keeps Gate 0 open;
 - 14 deterministic heavy-ledger integration tests, 2 heavy economic-system
   workflows, 7 adversarial property tests, and two explicit 10,000-row release
-  stress tests, including a full obligation/settlement/satisfaction network;
+  stress tests, including a full obligation/settlement/satisfaction network,
+  plus 9 generated assurance-family tests spanning roughly 1,500 cases;
 - an 11-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
-  clean-recomputation equivalence, four public-domain-API semantic probes, and
+  clean-recomputation equivalence, six public-domain-API semantic probes, and
   process peak RSS; concurrent
   independent-worker equivalence is labelled distinctly from shared-engine
   parallelism;

@@ -2253,7 +2253,13 @@ pub fn validate_satisfaction_network(
 
     let mut allocation_ids = BTreeSet::new();
     let mut by_obligation = BTreeMap::<ObligationId, Quantity>::new();
+    // `by_settlement` is the amount that currently satisfies an obligation.
+    // It intentionally ignores a returned/reversed settlement because such a
+    // settlement is not effective.  Capacity is tracked separately below:
+    // even an ineffective settlement remains one finite transfer and must
+    // not be allocated to more than its declared amount across obligations.
     let mut by_settlement = BTreeMap::<SettlementId, Quantity>::new();
+    let mut by_settlement_capacity = BTreeMap::<SettlementId, Quantity>::new();
     for allocation in allocations {
         allocation.validate()?;
         if !allocation_ids.insert(allocation.id.clone()) {
@@ -2293,15 +2299,22 @@ pub fn validate_satisfaction_network(
                     .unwrap_or_else(|| "<polymorphic zero>".to_string()),
             });
         }
-        if allocation.state == AllocationState::Applied && settlement.is_effective() {
-            let obligation_total = by_obligation
-                .entry(obligation.id.clone())
-                .or_insert_with(Quantity::zero);
-            *obligation_total = obligation_total.checked_add(&allocation.quantity)?;
-            let settlement_total = by_settlement
+        if allocation.state == AllocationState::Applied {
+            let capacity_total = by_settlement_capacity
                 .entry(settlement.id.clone())
                 .or_insert_with(Quantity::zero);
-            *settlement_total = settlement_total.checked_add(&allocation.quantity)?;
+            *capacity_total = capacity_total.checked_add(&allocation.quantity)?;
+
+            if settlement.is_effective() {
+                let obligation_total = by_obligation
+                    .entry(obligation.id.clone())
+                    .or_insert_with(Quantity::zero);
+                *obligation_total = obligation_total.checked_add(&allocation.quantity)?;
+                let settlement_total = by_settlement
+                    .entry(settlement.id.clone())
+                    .or_insert_with(Quantity::zero);
+                *settlement_total = settlement_total.checked_add(&allocation.quantity)?;
+            }
         }
     }
 
@@ -2322,7 +2335,7 @@ pub fn validate_satisfaction_network(
     }
     let mut settlement_unused = BTreeMap::new();
     for settlement in settlements {
-        let allocated = by_settlement
+        let allocated = by_settlement_capacity
             .remove(&settlement.id)
             .unwrap_or_else(Quantity::zero);
         if allocated.number > settlement.amount.number {
@@ -2332,9 +2345,15 @@ pub fn validate_satisfaction_network(
                 allocated: Box::new(allocated),
             });
         }
+        // Report current effective capacity, rather than historical applied
+        // allocations against a returned/reversed settlement.  The latter
+        // are still bounded above; they simply do not satisfy obligations.
+        let effective_allocated = by_settlement
+            .remove(&settlement.id)
+            .unwrap_or_else(Quantity::zero);
         settlement_unused.insert(
             settlement.id.clone(),
-            settlement.amount.checked_sub(&allocated)?,
+            settlement.amount.checked_sub(&effective_allocated)?,
         );
     }
     Ok(SatisfactionSummary {
@@ -2384,28 +2403,32 @@ pub fn validate_obligation_allocation(
         if !allocation_ids.insert(allocation.id.clone()) {
             return Err(OntologyError::DuplicateAllocation(allocation.id.clone()));
         }
-        require_positive(&allocation.quantity, "an allocation quantity")?;
+        allocation.validate()?;
         let settlement = settlements
             .iter()
             .find(|settlement| settlement.id == allocation.settlement)
             .ok_or(OntologyError::AllocationMismatch)?;
-        if allocation.state == AllocationState::Applied && settlement.is_effective() {
-            if allocation.quantity.unit != settlement.amount.unit {
-                return Err(OntologyError::UnitMismatch {
-                    left: allocation
-                        .quantity
-                        .unit
-                        .as_ref()
-                        .map(ToString::to_string)
-                        .unwrap_or_else(|| "<polymorphic zero>".to_string()),
-                    right: settlement
-                        .amount
-                        .unit
-                        .as_ref()
-                        .map(ToString::to_string)
-                        .unwrap_or_else(|| "<polymorphic zero>".to_string()),
-                });
-            }
+        settlement.validate()?;
+        // Unit compatibility is structural and must hold for proposed and
+        // reversed allocations too; otherwise a malformed allocation can sit
+        // dormant until a later state change makes it effective.
+        if allocation.quantity.unit != settlement.amount.unit {
+            return Err(OntologyError::UnitMismatch {
+                left: allocation
+                    .quantity
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<polymorphic zero>".to_string()),
+                right: settlement
+                    .amount
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<polymorphic zero>".to_string()),
+            });
+        }
+        if allocation.state == AllocationState::Applied {
             let total = allocated_by_settlement
                 .entry(settlement.id.clone())
                 .or_insert_with(Quantity::zero);
@@ -2427,9 +2450,10 @@ pub fn validate_obligation_allocation(
     }
 
     let mut allocated = Quantity::zero();
-    for allocation in allocations.iter().filter(|allocation| {
-        allocation.obligation == obligation.id && allocation.state == AllocationState::Applied
-    }) {
+    for allocation in allocations
+        .iter()
+        .filter(|allocation| allocation.obligation == obligation.id)
+    {
         let Some(settlement) = settlements
             .iter()
             .find(|settlement| settlement.id == allocation.settlement)
@@ -2471,7 +2495,7 @@ pub fn validate_obligation_allocation(
         if allocation.quantity.number > settlement.amount.number {
             return Err(OntologyError::AllocationMismatch);
         }
-        if settlement.is_effective() {
+        if allocation.state == AllocationState::Applied && settlement.is_effective() {
             allocated = allocated.checked_add(&allocation.quantity)?;
         }
     }
@@ -2749,8 +2773,10 @@ impl ExchangeRecord {
     }
 }
 
-/// Exchange legs conserve each instrument across the complete exchange, even
-/// when the two sides barter different instruments.
+/// Explicitly labelled give/receive legs conserve any instrument that appears
+/// on both sides of an exchange, even when the exchange also barters other
+/// instruments. Unlabelled legs retain the original structural API and are
+/// checked for quantity, endpoints, and party closure only.
 pub fn validate_exchange_legs(exchange: &ExchangeRecord) -> Result<(), OntologyError> {
     if exchange.legs.len() < 2 {
         return Err(OntologyError::InvalidEvent {
@@ -2758,19 +2784,28 @@ pub fn validate_exchange_legs(exchange: &ExchangeRecord) -> Result<(), OntologyE
             reason: "an exchange needs at least two legs".to_string(),
         });
     }
-    let mut endpoint_activity: BTreeMap<Endpoint, (usize, usize)> = BTreeMap::new();
+    // An exchange can move value between two accounts held by the same
+    // entity (for example checking -> brokerage).  Closure is therefore a
+    // party-level property, not an exact endpoint identity property.
+    let mut entity_activity: BTreeMap<EntityId, (usize, usize)> = BTreeMap::new();
     let mut give: BTreeMap<InstrumentId, Quantity> = BTreeMap::new();
     let mut receive: BTreeMap<InstrumentId, Quantity> = BTreeMap::new();
     for leg in &exchange.legs {
         require_positive(&leg.quantity, "an exchange leg")?;
+        validate_endpoint(&leg.from, "exchange source entity")?;
+        validate_endpoint(&leg.to, "exchange destination entity")?;
+        require_identifier(leg.instrument.as_str(), "instrument")?;
         if leg.from == leg.to {
             return Err(OntologyError::InvalidEvent {
                 kind: "exchange",
                 reason: "an exchange leg needs distinct endpoints".to_string(),
             });
         }
-        endpoint_activity.entry(leg.from.clone()).or_default().0 += 1;
-        endpoint_activity.entry(leg.to.clone()).or_default().1 += 1;
+        entity_activity
+            .entry(leg.from.entity.clone())
+            .or_default()
+            .0 += 1;
+        entity_activity.entry(leg.to.entity.clone()).or_default().1 += 1;
         match leg.side {
             ExchangeSide::Give => {
                 add_side_quantity(&mut give, &leg.instrument, &leg.quantity)?;
@@ -2781,14 +2816,15 @@ pub fn validate_exchange_legs(exchange: &ExchangeRecord) -> Result<(), OntologyE
             ExchangeSide::Unspecified => {}
         }
     }
-    // A closed exchange requires each participating endpoint to give and
+    // A closed exchange requires each participating entity to give and
     // receive something. A one-way leg is a transfer, not an exchange. This
-    // admits ordinary barter and multi-party exchange cycles.
-    for (endpoint, (outgoing, incoming)) in endpoint_activity {
+    // admits ordinary barter and multi-party exchange cycles while allowing
+    // one party's value to move between its own qualified endpoints.
+    for (entity, (outgoing, incoming)) in entity_activity {
         if outgoing == 0 || incoming == 0 {
             return Err(OntologyError::InvalidEvent {
                 kind: "exchange",
-                reason: format!("endpoint {} is not closed", endpoint.entity),
+                reason: format!("entity {entity} is not closed"),
             });
         }
     }
@@ -2799,6 +2835,22 @@ pub fn validate_exchange_legs(exchange: &ExchangeRecord) -> Result<(), OntologyE
     // to occur on only one side: barter conserves each instrument within its
     // own transfer leg, while the exchange couples the legs economically.
     for (instrument, outgoing) in give {
+        if let Some(incoming) = receive.get(&instrument)
+            && outgoing.unit != incoming.unit
+        {
+            return Err(OntologyError::UnitMismatch {
+                left: outgoing
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<polymorphic zero>".to_string()),
+                right: incoming
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<polymorphic zero>".to_string()),
+            });
+        }
         if let Some(incoming) = receive.get(&instrument)
             && !quantities_equal(&outgoing, incoming)?
         {
@@ -2818,6 +2870,20 @@ fn add_side_quantity(
     quantity: &Quantity,
 ) -> Result<(), OntologyError> {
     if let Some(total) = totals.get_mut(instrument) {
+        if total.unit != quantity.unit {
+            return Err(OntologyError::UnitMismatch {
+                left: total
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<polymorphic zero>".to_string()),
+                right: quantity
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<polymorphic zero>".to_string()),
+            });
+        }
         *total = total.checked_add(quantity)?;
     } else {
         totals.insert(instrument.clone(), quantity.clone());

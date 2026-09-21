@@ -354,9 +354,13 @@ impl std::error::Error for AccessError {}
 /// Hidden nodes are not replaced by fabricated placeholders.  Their exact
 /// [`ProofId`] values remain in `hidden`, while `frontier` records the
 /// commitments at which a visible path reaches hidden material (plus hidden
-/// roots).  A recipient can therefore validate all disclosed node hashes and
-/// all disclosed/hidden edge boundaries without learning hidden statements,
-/// operations, or metadata.
+/// roots). A recipient can therefore validate disclosed node hashes and
+/// disclosed/hidden edge boundaries.
+///
+/// This is selective disclosure, not zero knowledge: exact hidden node IDs
+/// are commitments to their payloads and may permit dictionary attacks when a
+/// hidden statement has low entropy. Confidential sharing requires a future
+/// salted/Merkle or keyed commitment format in addition to authorization.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RedactedProof {
     /// Visible, complete proof nodes keyed by their content IDs.
@@ -369,6 +373,8 @@ pub struct RedactedProof {
     frontier: Vec<ProofId>,
     /// A compact commitment to the complete hidden-ID set.
     hidden_commitment: ContentHash,
+    /// The content root of the complete, checked source proof.
+    source_commitment: ProofId,
 }
 
 impl RedactedProof {
@@ -400,12 +406,14 @@ impl RedactedProof {
         let roots = proof.roots.clone();
         let frontier = expected_frontier(&nodes, &hidden, &roots)?;
         let hidden_commitment = hidden_commitment_for(&hidden);
+        let source_commitment = proof.content_hash();
         let projection = Self {
             nodes,
             hidden,
             roots,
             frontier,
             hidden_commitment,
+            source_commitment,
         };
         projection.check()?;
         Ok(projection)
@@ -435,6 +443,20 @@ impl RedactedProof {
         }
         if self.hidden_commitment != hidden_commitment_for(&self.hidden) {
             return Err(ProjectionError::HiddenCommitmentMismatch);
+        }
+        if self.nodes.keys().any(|id| self.hidden.contains(id)) {
+            return Err(ProjectionError::OverlappingPartition);
+        }
+        if self.source_commitment
+            != Proof::content_hash_from_ids(
+                self.roots.iter().copied(),
+                self.nodes
+                    .keys()
+                    .copied()
+                    .chain(self.hidden.iter().copied()),
+            )
+        {
+            return Err(ProjectionError::SourceCommitmentMismatch);
         }
         for (id, node) in &self.nodes {
             if id != &node.id || !node.is_well_formed() {
@@ -495,17 +517,23 @@ impl RedactedProof {
         self.hidden_commitment
     }
 
-    /// Anchor this projection to roots obtained from an authenticated source.
-    pub fn verify_against_roots(&self, expected: &[ProofId]) -> Result<(), ProjectionError> {
-        self.check()?;
-        if self.roots != expected {
-            return Err(ProjectionError::RootCommitmentMismatch);
-        }
-        Ok(())
+    /// Return the complete checked proof's content root.
+    pub const fn source_commitment(&self) -> ProofId {
+        self.source_commitment
     }
 
-    pub fn hidden_ids(&self) -> impl Iterator<Item = ProofId> + '_ {
-        self.hidden.iter().copied()
+    /// Verify this projection against an authenticated complete-proof root.
+    ///
+    /// The projection's own hash checks prove internal consistency. The
+    /// expected root must come from the caller's trusted store, signature, or
+    /// ledger commit; accepting a root supplied by the projection would not
+    /// establish provenance.
+    pub fn verify_against_source(&self, expected: ProofId) -> Result<(), ProjectionError> {
+        self.check()?;
+        if self.source_commitment != expected {
+            return Err(ProjectionError::SourceCommitmentMismatch);
+        }
+        Ok(())
     }
 }
 
@@ -652,7 +680,8 @@ pub enum ProjectionError {
         id: ProofId,
     },
     HiddenCommitmentMismatch,
-    RootCommitmentMismatch,
+    SourceCommitmentMismatch,
+    OverlappingPartition,
     UnreachableVisibleNode {
         id: ProofId,
     },
@@ -693,8 +722,11 @@ impl fmt::Display for ProjectionError {
             Self::HiddenCommitmentMismatch => {
                 formatter.write_str("hidden proof commitment mismatches hidden IDs")
             }
-            Self::RootCommitmentMismatch => {
-                formatter.write_str("redacted proof roots do not match the authenticated roots")
+            Self::SourceCommitmentMismatch => {
+                formatter.write_str("redacted proof does not match the authenticated source proof")
+            }
+            Self::OverlappingPartition => {
+                formatter.write_str("visible and hidden proof partitions overlap")
             }
             Self::UnreachableVisibleNode { id } => {
                 write!(formatter, "visible node {id} is unreachable from roots")
@@ -810,8 +842,21 @@ mod tests {
     fn redacted_projection_keeps_hidden_commitments_and_frontier() {
         let (proof, leaf, root) = tiny_proof();
         let projection = RedactedProof::from_proof(&proof, [root]).unwrap();
-        assert_eq!(projection.hidden_ids().collect::<Vec<_>>(), vec![leaf]);
+        assert_eq!(
+            projection.hidden.iter().copied().collect::<Vec<_>>(),
+            vec![leaf]
+        );
         assert_eq!(projection.frontier, vec![leaf]);
+        assert_eq!(projection.source_commitment(), proof.content_hash());
+        assert!(
+            projection
+                .verify_against_source(proof.content_hash())
+                .is_ok()
+        );
+        assert!(matches!(
+            projection.verify_against_source(ProofId([99; 32])),
+            Err(ProjectionError::SourceCommitmentMismatch)
+        ));
         assert!(projection.check().is_ok());
     }
 
@@ -837,5 +882,24 @@ mod tests {
             Err(ProjectionError::InvalidFrontier { .. })
         ));
         projection.frontier = vec![ProofId([99; 32])];
+
+        let (proof, leaf, root) = tiny_proof();
+        let mut projection = RedactedProof::from_proof(&proof, [root]).unwrap();
+        projection.hidden.remove(&leaf);
+        assert!(matches!(
+            projection.check(),
+            Err(ProjectionError::HiddenCommitmentMismatch)
+                | Err(ProjectionError::SourceCommitmentMismatch)
+        ));
+
+        let (proof, leaf, root) = tiny_proof();
+        let mut projection = RedactedProof::from_proof(&proof, [root]).unwrap();
+        projection.hidden.insert(root);
+        projection.hidden_commitment = hidden_commitment_for(&projection.hidden);
+        assert!(matches!(
+            projection.check(),
+            Err(ProjectionError::OverlappingPartition)
+        ));
+        assert!(projection.hidden.contains(&leaf));
     }
 }

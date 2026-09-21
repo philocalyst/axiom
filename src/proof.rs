@@ -116,6 +116,25 @@ pub struct CashSettlementObservationCertificate {
     pub into: Option<String>,
 }
 
+/// Proposition-specific public answer for a sale whose recognition is
+/// blocked.  The source edge is deliberately typed: a blocked answer cannot
+/// borrow a same-shaped source from another sale, and its economic identity
+/// is carried in exact fields rather than in statement text or metadata.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct BlockedSaleCertificate {
+    pub sale: String,
+    pub source_proof: ProofId,
+    pub quantity: Exact,
+    pub proceeds: Exact,
+    pub quantity_unit: String,
+    pub value_unit: String,
+    pub account: String,
+    pub asset: String,
+    /// Canonical blocker reason, such as `ambiguous-lot:a,b` or
+    /// `policy-decision-conflict:a:b`.
+    pub reason: String,
+}
+
 /// Independent comparison of one cash-settlement observation with the
 /// proceeds of its authored sale.  A reconciliation is deliberately a
 /// concrete certificate rather than a generic `Derive`: both source leaves,
@@ -284,6 +303,8 @@ pub enum Operation {
     PositionObservation(PositionObservationCertificate),
     /// Typed source observation for an observed cash settlement.
     CashSettlementObservation(CashSettlementObservationCertificate),
+    /// Proposition-specific public answer for a blocked sale.
+    BlockedSale(BlockedSaleCertificate),
     /// Exact comparison between a cash-settlement observation and sale
     /// proceeds, with both typed source proofs retained in the payload.
     SettlementReconciliation(SettlementReconciliationCertificate),
@@ -301,6 +322,10 @@ pub enum Operation {
         source: String,
         account: String,
         asset: String,
+        quantity: Exact,
+        proceeds: Exact,
+        quantity_unit: String,
+        value_unit: String,
     },
     /// Typed source observation for one obligation.
     ObligationObservation(ObligationObservationCertificate),
@@ -386,6 +411,7 @@ impl Operation {
             Self::QuoteObservation(..) => b"quote-observation",
             Self::PositionObservation(..) => b"position-observation",
             Self::CashSettlementObservation(..) => b"cash-settlement-observation",
+            Self::BlockedSale(..) => b"blocked-sale",
             Self::SettlementReconciliation(..) => b"settlement-reconciliation",
             Self::LotObservation { .. } => b"lot-observation",
             Self::SaleObservation { .. } => b"sale-observation",
@@ -432,6 +458,17 @@ impl Operation {
                 put_string(out, &certificate.unit);
                 put_optional_string(out, certificate.into.as_deref());
             }
+            Self::BlockedSale(certificate) => {
+                put_string(out, &certificate.sale);
+                put_proof_id(out, &certificate.source_proof);
+                put_string(out, &certificate.quantity.canonical_string());
+                put_string(out, &certificate.proceeds.canonical_string());
+                put_string(out, &certificate.quantity_unit);
+                put_string(out, &certificate.value_unit);
+                put_string(out, &certificate.account);
+                put_string(out, &certificate.asset);
+                put_string(out, &certificate.reason);
+            }
             Self::SettlementReconciliation(certificate) => {
                 put_string(out, &certificate.settlement);
                 put_proof_id(out, &certificate.source_proof);
@@ -460,11 +497,19 @@ impl Operation {
                 source,
                 account,
                 asset,
+                quantity,
+                proceeds,
+                quantity_unit,
+                value_unit,
             } => {
                 put_string(out, sale);
                 put_string(out, source);
                 put_string(out, account);
                 put_string(out, asset);
+                put_string(out, &quantity.canonical_string());
+                put_string(out, &proceeds.canonical_string());
+                put_string(out, quantity_unit);
+                put_string(out, value_unit);
             }
             Self::ObligationObservation(certificate) => {
                 put_string(out, &certificate.obligation);
@@ -795,6 +840,9 @@ impl Proof {
                 {
                     return Err(CheckError::InvalidCashSettlementObservation { id: *id });
                 }
+                Operation::BlockedSale(certificate) if !valid_blocked_sale(certificate) => {
+                    return Err(CheckError::InvalidBlockedSale { id: *id });
+                }
                 Operation::SettlementReconciliation(certificate)
                     if !valid_settlement_reconciliation(certificate) =>
                 {
@@ -932,7 +980,8 @@ impl Proof {
                 Operation::Observation { source } => source.trim().is_empty(),
                 Operation::QuoteObservation(..)
                 | Operation::PositionObservation(..)
-                | Operation::CashSettlementObservation(..) => false,
+                | Operation::CashSettlementObservation(..)
+                | Operation::BlockedSale(..) => false,
                 Operation::SettlementReconciliation(..) => false,
                 Operation::LotObservation {
                     lot,
@@ -953,11 +1002,16 @@ impl Proof {
                     source,
                     account,
                     asset,
+                    quantity_unit,
+                    value_unit,
+                    ..
                 } => {
                     sale.trim().is_empty()
                         || source.trim().is_empty()
                         || account.trim().is_empty()
                         || asset.trim().is_empty()
+                        || quantity_unit.trim().is_empty()
+                        || value_unit.trim().is_empty()
                 }
                 Operation::ObligationObservation(certificate) => {
                     certificate.obligation.trim().is_empty()
@@ -1034,6 +1088,16 @@ impl Proof {
         let effective_allocations = effective_allocation_index(self);
         for (id, node) in &self.nodes {
             match &node.operation {
+                Operation::BlockedSale(certificate) => {
+                    if !node.inputs.contains(&certificate.source_proof)
+                        || !blocked_sale_matches_source(
+                            self.nodes.get(&certificate.source_proof),
+                            certificate,
+                        )
+                    {
+                        return Err(CheckError::InvalidBlockedSale { id: *id });
+                    }
+                }
                 Operation::SettlementReconciliation(certificate) => {
                     if !node.inputs.contains(&certificate.source_proof)
                         || !node.inputs.contains(&certificate.sale_proof)
@@ -1311,6 +1375,7 @@ impl Proof {
                     | Operation::InventoryConservation { .. }
                     | Operation::Recognition { .. }
                     | Operation::SettlementReconciliation(..)
+                    | Operation::BlockedSale(..)
                     | Operation::SettlementHistory(..)
                     | Operation::SatisfactionAllocation(..)
                     | Operation::ObligationBalance(..)
@@ -1365,16 +1430,34 @@ impl Proof {
     /// Return the proof's stable content root.  This is useful as a cache key
     /// and deliberately includes roots as well as reachable node content.
     pub fn content_hash(&self) -> ProofId {
+        Self::content_hash_from_ids(self.roots.iter().copied(), self.nodes.keys().copied())
+    }
+
+    /// Compute the canonical content root from proof roots and node IDs.
+    ///
+    /// This is the compact commitment used by [`Self::content_hash`].  It is
+    /// public so proof projections can authenticate a complete ID set without
+    /// reimplementing the byte encoding or relying on hidden node payloads.
+    pub fn content_hash_from_ids(
+        roots: impl IntoIterator<Item = ProofId>,
+        ids: impl IntoIterator<Item = ProofId>,
+    ) -> ProofId {
+        let mut roots = roots.into_iter().collect::<Vec<_>>();
+        roots.sort_unstable();
+        roots.dedup();
+        let mut ids = ids.into_iter().collect::<Vec<_>>();
+        ids.sort_unstable();
+        ids.dedup();
         let mut bytes = Vec::new();
         put_bytes(&mut bytes, b"axiom/proof/v1");
-        put_u64(&mut bytes, self.roots.len() as u64);
-        for root in &self.roots {
+        put_u64(&mut bytes, roots.len() as u64);
+        for root in roots {
             bytes.extend_from_slice(&root.0);
         }
-        put_u64(&mut bytes, self.nodes.len() as u64);
-        for (id, node) in &self.nodes {
+        put_u64(&mut bytes, ids.len() as u64);
+        for id in ids {
             bytes.extend_from_slice(&id.0);
-            bytes.extend_from_slice(&node.id.0);
+            bytes.extend_from_slice(&id.0);
         }
         ProofId(*blake3::hash(&bytes).as_bytes())
     }
@@ -1422,6 +1505,7 @@ pub enum CheckError {
     InvalidQuoteObservation { id: ProofId },
     InvalidPositionObservation { id: ProofId },
     InvalidCashSettlementObservation { id: ProofId },
+    InvalidBlockedSale { id: ProofId },
     InvalidSettlementReconciliation { id: ProofId },
     InvalidObligationObservation { id: ProofId },
     InvalidSettlementObservation { id: ProofId },
@@ -1479,6 +1563,9 @@ impl fmt::Display for CheckError {
                     f,
                     "proof node {id} contains an invalid cash settlement observation"
                 )
+            }
+            Self::InvalidBlockedSale { id } => {
+                write!(f, "proof node {id} contains an invalid blocked sale")
             }
             Self::InvalidSettlementReconciliation { id } => {
                 write!(
@@ -1613,6 +1700,46 @@ fn valid_cash_settlement_observation(certificate: &CashSettlementObservationCert
             .into
             .as_deref()
             .is_none_or(|account| !account.trim().is_empty())
+}
+
+fn valid_blocked_sale(certificate: &BlockedSaleCertificate) -> bool {
+    !certificate.sale.trim().is_empty()
+        && certificate.source_proof != ProofId::ZERO
+        && !certificate.quantity_unit.trim().is_empty()
+        && !certificate.value_unit.trim().is_empty()
+        && !certificate.account.trim().is_empty()
+        && !certificate.asset.trim().is_empty()
+        && valid_blocked_sale_reason(&certificate.reason)
+        && (certificate.reason == "invalid-amount"
+            || (!certificate.quantity.is_negative()
+                && !certificate.quantity.is_zero()
+                && !certificate.proceeds.is_negative()
+                && !certificate.proceeds.is_zero()))
+}
+
+fn valid_blocked_sale_reason(reason: &str) -> bool {
+    let reason = reason.trim();
+    let Some((kind, detail)) = reason.split_once(':') else {
+        return matches!(
+            reason,
+            "missing-lot" | "invalid-amount" | "incompatible-unit"
+        );
+    };
+    if detail.trim().is_empty() {
+        return false;
+    }
+    match kind {
+        "ambiguous-lot" => detail
+            .split(',')
+            .all(|candidate| !candidate.trim().is_empty()),
+        "policy-decision-conflict" => {
+            let mut lots = detail.split(':');
+            lots.next().is_some_and(|lot| !lot.trim().is_empty())
+                && lots.next().is_some_and(|lot| !lot.trim().is_empty())
+                && lots.next().is_none()
+        }
+        _ => false,
+    }
 }
 
 fn valid_settlement_reconciliation(certificate: &SettlementReconciliationCertificate) -> bool {
@@ -2380,6 +2507,28 @@ fn sale_observation_matches(node: Option<&Node>, sale: &str, account: &str, asse
     )
 }
 
+fn blocked_sale_matches_source(node: Option<&Node>, certificate: &BlockedSaleCertificate) -> bool {
+    matches!(
+        node.map(|node| &node.operation),
+        Some(Operation::SaleObservation {
+            sale: observed,
+            account,
+            asset,
+            quantity,
+            proceeds,
+            quantity_unit,
+            value_unit,
+            ..
+        }) if observed == &certificate.sale
+            && account == &certificate.account
+            && asset == &certificate.asset
+            && quantity == &certificate.quantity
+            && proceeds == &certificate.proceeds
+            && quantity_unit == &certificate.quantity_unit
+            && value_unit == &certificate.value_unit
+    )
+}
+
 /// Metadata remains diagnostic and extensible, but fields that duplicate a
 /// proposition's typed payload must agree when present.  In particular this
 /// prevents a caller from re-hashing a node with a forged `lot` or amount in
@@ -2620,6 +2769,10 @@ mod tests {
                 source: "sell sale/one".into(),
                 account: "brokerage".into(),
                 asset: "ABC".into(),
+                quantity: Exact::from(3_i64),
+                proceeds: Exact::from(30_i64),
+                quantity_unit: "ABC".into(),
+                value_unit: "USD".into(),
             },
             vec![],
             BTreeMap::new(),

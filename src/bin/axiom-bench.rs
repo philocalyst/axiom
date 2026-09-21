@@ -20,9 +20,11 @@ use axiom_ledger::ir::{Atom, Nominal, NominalKind, Term, Var};
 use axiom_ledger::logic::{Clause, Goal, Literal, Program, SemanticContext, Solver, Truth};
 use axiom_ledger::model::{Quantity, Unit};
 use axiom_ledger::ontology::{
-    Endpoint, ExchangeLeg, ExchangeRecord, Instrument, InstrumentKind, Role, RoleAssignment,
-    RoleAssignments,
+    Endpoint, ExchangeLeg, ExchangeRecord, Instrument, InstrumentKind, Obligation, Role,
+    RoleAssignment, RoleAssignments, SatisfactionAllocation, Settlement, SettlementState,
+    validate_satisfaction_network,
 };
+use axiom_ledger::package::{LotCandidate, PolicyPackage, Selection};
 use axiom_ledger::render::render_why;
 use axiom_ledger::store::PolicyPackage as StorePolicyPackage;
 use axiom_ledger::surface::SurfaceFile;
@@ -180,7 +182,9 @@ struct GeneratedWorkload {
 enum SemanticProbeKind {
     CurrencyExchange,
     CorporateActions,
+    InvoicePaymentGraph,
     OwnershipRoles,
+    PackageUpgrade,
     RecursiveLogic,
 }
 
@@ -189,7 +193,9 @@ impl SemanticProbeKind {
         match self {
             Self::CurrencyExchange => "ontology.exchange_unit_validation",
             Self::CorporateActions => "contracts.corporate_action_validation",
+            Self::InvoicePaymentGraph => "ontology.satisfaction_network_validation",
             Self::OwnershipRoles => "ontology.role_assignment_validation",
+            Self::PackageUpgrade => "package.versioned_selection_validation",
             Self::RecursiveLogic => "logic.positive_fixed_point_validation",
         }
     }
@@ -476,13 +482,13 @@ fn measure_workload(
         }),
         note: Some(if process_peak_memory_bytes().is_some() {
             if generated.semantic_supported {
-                "peak_memory_bytes is the isolated workload child-process peak RSS; semantic_probe_ns measures the separately reported public ontology/contracts/logic probe when semantic_probe_api is present; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+                "peak_memory_bytes is the isolated workload child-process peak RSS; semantic_probe_ns measures the separately reported public ontology/contracts/logic/store/package probe when semantic_probe_api is present; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
             } else {
                 "shape_only: parsed metrics describe only the accepted V0 evidence projection, not the richer domain shape; peak_memory_bytes is the isolated workload child-process peak RSS; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
             }
         } else {
             if generated.semantic_supported {
-                "peak RSS is unavailable on this platform; semantic_probe_ns measures the separately reported public ontology/contracts/logic probe when semantic_probe_api is present; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
+                "peak RSS is unavailable on this platform; semantic_probe_ns measures the separately reported public ontology/contracts/logic/store/package probe when semantic_probe_api is present; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
             } else {
                 "shape_only: parsed metrics describe only the accepted V0 evidence projection, not the richer domain shape; peak RSS is unavailable on this platform; changed_incremental_solve_ns times the warm input update/commit plus analysis after the base analysis; changed_full_solve_ns times clean recomputation; independent-worker metrics compare serial and concurrent clean Workspace analyses, not a shared parallel engine"
             }
@@ -1240,7 +1246,9 @@ fn run_semantic_probe(
     match kind {
         SemanticProbeKind::CurrencyExchange => currency_exchange_probe(items),
         SemanticProbeKind::CorporateActions => corporate_actions_probe(items),
+        SemanticProbeKind::InvoicePaymentGraph => invoice_payment_graph_probe(items),
         SemanticProbeKind::OwnershipRoles => ownership_roles_probe(items),
+        SemanticProbeKind::PackageUpgrade => package_upgrade_probe(items),
         SemanticProbeKind::RecursiveLogic => recursive_logic_probe(items),
     }
 }
@@ -1403,6 +1411,77 @@ fn corporate_actions_probe(items: usize) -> Result<SemanticProbeResult, String> 
     })
 }
 
+fn invoice_payment_graph_probe(items: usize) -> Result<SemanticProbeResult, String> {
+    let mut obligations = Vec::with_capacity(items);
+    let mut settlements = Vec::with_capacity(items);
+    let mut allocations = Vec::with_capacity(items);
+    for index in 0..items {
+        let customer = format!("customer/{index:06}");
+        let amount = (100 + index % 37) as i128;
+        let quantity =
+            Quantity::with_unit(axiom_ledger::exact::ExactNumber::integer(amount), "USD")
+                .map_err(|error| format!("invoice quantity {index}: {error}"))?;
+        let obligation = Obligation::transfer(
+            format!("inv/{index:06}"),
+            customer.clone(),
+            "merchant",
+            "USD",
+            quantity.clone(),
+        )
+        .map_err(|error| format!("invoice obligation {index}: {error}"))?;
+        obligation
+            .validate()
+            .map_err(|error| format!("invoice validation {index}: {error}"))?;
+        let mut settlement = Settlement::new_with_kind(
+            format!("payment/{index:06}"),
+            axiom_ledger::model::SettlementKind::Ach,
+            Endpoint::entity(customer),
+            Endpoint::entity("merchant"),
+            "USD",
+            quantity.clone(),
+        )
+        .map_err(|error| format!("payment construction {index}: {error}"))?;
+        settlement
+            .transition(SettlementState::Presented, None, None)
+            .map_err(|error| format!("payment presented transition {index}: {error}"))?;
+        settlement
+            .transition(SettlementState::Settled, None, None)
+            .map_err(|error| format!("payment settled transition {index}: {error}"))?;
+        settlement
+            .validate()
+            .map_err(|error| format!("payment validation {index}: {error}"))?;
+        let allocation = SatisfactionAllocation::new(
+            format!("allocation/{index:06}"),
+            obligation.id.clone(),
+            settlement.id.clone(),
+            quantity,
+        )
+        .map_err(|error| format!("allocation construction {index}: {error}"))?
+        .applied();
+        allocations.push(allocation);
+        obligations.push(obligation);
+        settlements.push(settlement);
+    }
+
+    let summary = validate_satisfaction_network(&obligations, &settlements, &allocations)
+        .map_err(|error| format!("invoice/payment graph validation: {error}"))?;
+    if summary
+        .obligation_remaining
+        .values()
+        .any(|quantity| !quantity.is_zero())
+        || summary
+            .settlement_unused
+            .values()
+            .any(|quantity| !quantity.is_zero())
+    {
+        return Err("invoice/payment graph did not fully allocate settled payments".into());
+    }
+    Ok(SemanticProbeResult {
+        items,
+        results: summary.obligation_remaining.len() + summary.settlement_unused.len(),
+    })
+}
+
 fn ownership_roles_probe(items: usize) -> Result<SemanticProbeResult, String> {
     let half = axiom_ledger::exact::ExactNumber::rational(1, 2)
         .map_err(|error| format!("ownership share: {error}"))?;
@@ -1430,6 +1509,53 @@ fn ownership_roles_probe(items: usize) -> Result<SemanticProbeResult, String> {
         .validate()
         .map_err(|error| format!("ownership role validation: {error}"))?;
     let results = assignments.assignments.len();
+    Ok(SemanticProbeResult { items, results })
+}
+
+fn package_upgrade_probe(items: usize) -> Result<SemanticProbeResult, String> {
+    let earliest = PolicyPackage::new(
+        "lots/fifo",
+        "1.0.0",
+        "selector=earliest_acquisition\ntie=ambiguous",
+    );
+    let latest = PolicyPackage::new(
+        "lots/fifo",
+        "1.1.0",
+        "selector=latest_acquisition\ntie=ambiguous",
+    );
+    let earliest_program = earliest
+        .compile()
+        .map_err(|error| format!("package v1 compile: {error}"))?;
+    let latest_program = latest
+        .compile()
+        .map_err(|error| format!("package v2 compile: {error}"))?;
+    if earliest.hash() == latest.hash() {
+        return Err("package upgrade probe produced identical package identities".into());
+    }
+    let mut results = 0usize;
+    for index in 0..items {
+        let early = LotCandidate::new(
+            format!("upgrade/lot/{index:06}/early"),
+            axiom_ledger::model::Date::new(2020, 1, 1)
+                .map_err(|error| format!("package candidate date {index}: {error}"))?,
+        );
+        let late = LotCandidate::new(
+            format!("upgrade/lot/{index:06}/late"),
+            axiom_ledger::model::Date::new(2020, 2, 1)
+                .map_err(|error| format!("package candidate date {index}: {error}"))?,
+        );
+        let candidates = [early, late];
+        let selected_early = earliest_program.evaluate(candidates.iter());
+        let selected_late = latest_program.evaluate(candidates.iter());
+        if selected_early != Selection::Unique(candidates[0].id.clone())
+            || selected_late != Selection::Unique(candidates[1].id.clone())
+        {
+            return Err(format!(
+                "package upgrade changed no deterministic selection for row {index}"
+            ));
+        }
+        results += 2;
+    }
     Ok(SemanticProbeResult { items, results })
 }
 
@@ -2094,8 +2220,8 @@ fn invoice_payment_graph(count: usize) -> Result<GeneratedWorkload, String> {
         explain_goal: Some("obligation:inv/000000".into()),
         semantic_supported: true,
         unsupported_reason: None,
-        semantic_probe: None,
-        semantic_probe_items: 0,
+        semantic_probe: Some(SemanticProbeKind::InvoicePaymentGraph),
+        semantic_probe_items: count,
     })
 }
 
@@ -2300,8 +2426,8 @@ fn package_upgrade(count: usize) -> Result<GeneratedWorkload, String> {
         explain_goal: Some("gain:upgrade/sale".into()),
         semantic_supported: true,
         unsupported_reason: None,
-        semantic_probe: None,
-        semantic_probe_items: 0,
+        semantic_probe: Some(SemanticProbeKind::PackageUpgrade),
+        semantic_probe_items: count,
     })
 }
 

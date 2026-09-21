@@ -38,8 +38,9 @@ use crate::package_lock::Lockfile;
 use crate::parser::{self, ParseError};
 use crate::proof::{Node, Operation, Proof};
 use crate::store::{
-    Commit, CommitId, Evidence, EvidenceId, EvidenceState, ObjectStore, PackageId,
-    PolicyPackage as StoredPolicyPackage, ProofObject, ProofObjectId, StoreError,
+    Commit, CommitId, CompiledArtifactId, CompiledArtifactObject, Evidence, EvidenceId,
+    EvidenceState, ObjectStore, PackageId, PolicyPackage as StoredPolicyPackage, ProofObject,
+    ProofObjectId, StoreError,
 };
 use crate::surface::SurfaceFile;
 
@@ -502,6 +503,38 @@ impl Workspace {
                 )),
             })?;
         Ok(value)
+    }
+
+    /// Persist one independently verified compiler artifact through the
+    /// workspace's canonical object store.
+    pub fn persist_compiled_artifact(
+        &mut self,
+        artifact: CompiledArtifact,
+    ) -> Result<CompiledArtifactId, WorkspaceError> {
+        Ok(self.store.put_compiled_artifact(artifact)?)
+    }
+
+    /// Compile and persist a package set in one explicit boundary operation.
+    /// The returned artifact is the compiler value; the ID addresses only its
+    /// immutable store envelope.
+    pub fn compile_packages_persisted<I>(
+        &mut self,
+        packages: I,
+        lockfile: &Lockfile,
+    ) -> Result<(CompiledArtifactId, CompiledArtifact), WorkspaceError>
+    where
+        I: IntoIterator<Item = PackageInput>,
+    {
+        let artifact = self.compile_packages(packages, lockfile)?;
+        let id = self.persist_compiled_artifact(artifact.clone())?;
+        Ok((id, artifact))
+    }
+
+    pub fn compiled_artifact(
+        &self,
+        id: CompiledArtifactId,
+    ) -> Result<&CompiledArtifactObject, WorkspaceError> {
+        Ok(self.store.compiled_artifact(id)?)
     }
 
     /// The canonical incremental database used by all workspace analysis.

@@ -16,6 +16,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use crate::model::{BookId, ContentHash, Date, ExternalId};
+use crate::package_compiler::CompiledArtifact;
 use crate::proof::{
     Node as CanonicalNode, Operation as CanonicalOperation, Proof as CanonicalProof,
 };
@@ -31,6 +32,7 @@ pub enum ObjectKind {
     Decision,
     Completeness,
     Package,
+    CompiledArtifact,
     Proof,
     Conflict,
     Commit,
@@ -45,6 +47,7 @@ impl ObjectKind {
             Self::Decision => "decision",
             Self::Completeness => "completeness",
             Self::Package => "package",
+            Self::CompiledArtifact => "compiled-artifact",
             Self::Proof => "proof",
             Self::Conflict => "conflict",
             Self::Commit => "commit",
@@ -80,6 +83,7 @@ kind_marker!(StatementKind, Statement);
 kind_marker!(DecisionKind, Decision);
 kind_marker!(CompletenessKind, Completeness);
 kind_marker!(PackageKind, Package);
+kind_marker!(CompiledArtifactKind, CompiledArtifact);
 kind_marker!(ProofKind, Proof);
 kind_marker!(ConflictKind, Conflict);
 kind_marker!(CommitKind, Commit);
@@ -127,6 +131,8 @@ pub type StatementId = ObjectId<StatementKind>;
 pub type DecisionId = ObjectId<DecisionKind>;
 pub type CompletenessId = ObjectId<CompletenessKind>;
 pub type PackageId = ObjectId<PackageKind>;
+/// The store address of a deterministic compiled package artifact.
+pub type CompiledArtifactId = ObjectId<CompiledArtifactKind>;
 /// The store address of a persisted proof object.  This is deliberately
 /// distinct from [`crate::proof::ProofId`], which is the identity of a proof
 /// node inside the canonical DAG.  A stored object may contain many nodes and
@@ -584,6 +590,63 @@ impl PolicyPackage {
     }
 }
 
+/// An immutable storage envelope for one compiler artifact.
+///
+/// The artifact is the sole semantic authority. Its canonical bytes contain
+/// the lockfile, compiled packages, modules, and exports; its hash is
+/// recomputed whenever the object crosses the store boundary. Stored policy
+/// objects are a distinct representation and are not claimed as equivalent
+/// without an explicit conversion proof.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompiledArtifactObject {
+    pub artifact: CompiledArtifact,
+}
+
+impl CompiledArtifactObject {
+    pub fn new(artifact: CompiledArtifact) -> Self {
+        Self { artifact }
+    }
+
+    pub fn artifact_hash(&self) -> ContentHash {
+        self.artifact.artifact_hash()
+    }
+
+    pub fn input_roots(&self) -> Vec<ContentHash> {
+        self.artifact.package_roots()
+    }
+
+    /// Check the artifact's content hash against its complete canonical body.
+    pub fn verify_integrity(&self) -> Result<(), StoreError> {
+        let expected = self.artifact.recomputed_hash();
+        if expected != self.artifact.artifact_hash() {
+            return Err(StoreError::InvalidObject(format!(
+                "compiled artifact hash is {}, expected {}",
+                self.artifact.artifact_hash(),
+                expected
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl Ord for CompiledArtifactObject {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.artifact_hash()
+            .cmp(&other.artifact_hash())
+            .then_with(|| {
+                self.artifact
+                    .canonical_bytes()
+                    .cmp(&other.artifact.canonical_bytes())
+            })
+    }
+}
+
+impl PartialOrd for CompiledArtifactObject {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// Canonical proof content plus references to other store objects pinned by a
 /// commit.  The store validates the proof DAG before assigning its own typed
 /// object address.
@@ -907,6 +970,7 @@ pub enum StoredObject {
     Decision(Decision),
     Completeness(Completeness),
     Package(PolicyPackage),
+    CompiledArtifact(CompiledArtifactObject),
     Proof(ProofObject),
     Conflict(ConflictRecord),
     Commit(Commit),
@@ -921,6 +985,7 @@ impl StoredObject {
             Self::Decision(_) => ObjectKind::Decision,
             Self::Completeness(_) => ObjectKind::Completeness,
             Self::Package(_) => ObjectKind::Package,
+            Self::CompiledArtifact(_) => ObjectKind::CompiledArtifact,
             Self::Proof(_) => ObjectKind::Proof,
             Self::Conflict(_) => ObjectKind::Conflict,
             Self::Commit(_) => ObjectKind::Commit,
@@ -939,6 +1004,7 @@ impl StoredObject {
             Self::Decision(value) => encode_decision(&mut out, value),
             Self::Completeness(value) => encode_completeness(&mut out, value),
             Self::Package(value) => encode_package(&mut out, value),
+            Self::CompiledArtifact(value) => encode_compiled_artifact(&mut out, value),
             Self::Proof(value) => encode_proof(&mut out, value),
             Self::Conflict(value) => encode_conflict_record(&mut out, value),
             Self::Commit(value) => encode_commit(&mut out, value),
@@ -1158,6 +1224,8 @@ impl ObjectStore {
                 .proof
                 .check()
                 .map_err(|error| StoreError::InvalidObject(format!("invalid proof: {error}")))?;
+        } else if let StoredObject::CompiledArtifact(value) = object {
+            value.verify_integrity()?;
         }
         Ok(object)
     }
@@ -1180,6 +1248,8 @@ impl ObjectStore {
                 value.proof.check().map_err(|error| {
                     StoreError::InvalidObject(format!("invalid proof {hash}: {error}"))
                 })?;
+            } else if let StoredObject::CompiledArtifact(value) = object {
+                value.verify_integrity()?;
             }
         }
         Ok(())
@@ -1272,6 +1342,19 @@ impl ObjectStore {
             }
         }
         Ok(PackageId::new(self.insert(StoredObject::Package(value))?))
+    }
+
+    /// Persist a compiler artifact after independently checking its content
+    /// hash and complete package-input roots.
+    pub fn put_compiled_artifact(
+        &mut self,
+        artifact: CompiledArtifact,
+    ) -> Result<CompiledArtifactId, StoreError> {
+        let value = CompiledArtifactObject::new(artifact);
+        value.verify_integrity()?;
+        Ok(CompiledArtifactId::new(
+            self.insert(StoredObject::CompiledArtifact(value))?,
+        ))
     }
 
     pub fn put_proof(&mut self, value: ProofObject) -> Result<ProofObjectId, StoreError> {
@@ -1740,6 +1823,20 @@ impl ObjectStore {
         }
     }
 
+    pub fn compiled_artifact(
+        &self,
+        id: CompiledArtifactId,
+    ) -> Result<&CompiledArtifactObject, StoreError> {
+        match self.get(id.hash())? {
+            StoredObject::CompiledArtifact(value) => Ok(value),
+            object => Err(StoreError::WrongKind {
+                hash: id.hash(),
+                expected: ObjectKind::CompiledArtifact,
+                actual: object.kind(),
+            }),
+        }
+    }
+
     pub fn proof(&self, id: ProofObjectId) -> Result<&ProofObject, StoreError> {
         match self.get(id.hash())? {
             StoredObject::Proof(value) => Ok(value),
@@ -1871,8 +1968,11 @@ impl ObjectStore {
         right: CommitId,
         author: impl Into<String>,
     ) -> Result<MergeResult, StoreError> {
-        self.require_ancestor(base, left)?;
-        self.require_ancestor(base, right)?;
+        // A three-way merge is only meaningful when the caller supplies one
+        // commit that is an ancestor of both heads.  Validate all three
+        // addresses before walking ancestry so a forged/mistyped typed ID
+        // cannot be mistaken for an empty branch or an implicit base.
+        self.validate_merge_inputs(base, left, right)?;
         let base_value = self.commit(base)?.clone();
         let left_value = self.commit(left)?.clone();
         let right_value = self.commit(right)?.clone();
@@ -2038,6 +2138,22 @@ impl ObjectStore {
         }
     }
 
+    fn validate_merge_inputs(
+        &self,
+        base: CommitId,
+        left: CommitId,
+        right: CommitId,
+    ) -> Result<(), StoreError> {
+        // Resolve every input first.  In particular, require_ancestor must
+        // not accept `base == branch` before establishing that the address is
+        // actually present and names a commit.
+        self.commit(base)?;
+        self.commit(left)?;
+        self.commit(right)?;
+        self.require_ancestor(base, left)?;
+        self.require_ancestor(base, right)
+    }
+
     fn require_ancestor(&self, base: CommitId, branch: CommitId) -> Result<(), StoreError> {
         let mut pending = vec![branch];
         let mut visited = BTreeSet::new();
@@ -2081,15 +2197,19 @@ impl ObjectStore {
                 let mut chosen = l.clone();
                 chosen.extend(r.iter().copied());
                 canonicalize_vec(&mut chosen);
-                conflicts.push(MergeConflict::Decisions {
-                    subject: subject.clone(),
-                    scope: scope.clone(),
-                    left: l.clone(),
-                    right: r.clone(),
-                });
                 chosen
             };
-            if self.decision_values_conflict(&chosen)? && (l != b || r != b) {
+            // A delete-versus-edit is a conflict even when the selected
+            // result contains only the edited value: the empty branch would
+            // otherwise disappear from `chosen` and the divergence would be
+            // silently accepted.  IDs may differ for harmless metadata
+            // revisions, so compare selected values rather than addresses.
+            let both_changed = l != b && r != b;
+            let changed_selection =
+                self.decision_selections(&l)? != self.decision_selections(&r)?;
+            if (self.decision_values_conflict(&chosen)? || (both_changed && changed_selection))
+                && (l != b || r != b)
+            {
                 conflicts.push(MergeConflict::Decisions {
                     subject,
                     scope,
@@ -2259,11 +2379,15 @@ impl ObjectStore {
     }
 
     fn decision_values_conflict(&self, ids: &[DecisionId]) -> Result<bool, StoreError> {
+        Ok(self.decision_selections(ids)?.len() > 1)
+    }
+
+    fn decision_selections(&self, ids: &[DecisionId]) -> Result<BTreeSet<String>, StoreError> {
         let mut selected = BTreeSet::new();
         for id in ids {
             selected.insert(self.decision(*id)?.selected.clone());
         }
-        Ok(selected.len() > 1)
+        Ok(selected)
     }
 
     fn decision_groups(&self, ids: &[DecisionId]) -> Result<DecisionGroups, StoreError> {
@@ -2393,7 +2517,14 @@ impl ObjectStore {
                 canonicalize_vec(&mut chosen);
                 chosen
             };
-            if self.completeness_conflicts(&chosen, &chosen)? {
+            // Compare the two branch snapshots, rather than the selected
+            // result against itself.  When one branch leaves the base claim
+            // unchanged and the other replaces it, selecting only the
+            // changed branch would otherwise hide an overlapping opposite
+            // completeness assertion.
+            let both_changed = l != b && r != b;
+            let delete_edit_conflict = both_changed && (l.is_empty() != r.is_empty());
+            if self.completeness_conflicts(&l, &r)? || delete_edit_conflict {
                 conflicts.push(MergeConflict::Completeness {
                     relation: key.0.clone(),
                     source: key.1.clone(),
@@ -2736,6 +2867,11 @@ fn encode_package(out: &mut Vec<u8>, value: &PolicyPackage) {
     dependencies.dedup();
     put_hashes(out, &dependencies);
     put_optional_hash(out, value.supersedes.map(ObjectId::hash));
+}
+
+fn encode_compiled_artifact(out: &mut Vec<u8>, value: &CompiledArtifactObject) {
+    put_hash(out, value.artifact.artifact_hash());
+    put_bytes(out, &value.artifact.canonical_bytes());
 }
 
 fn encode_proof(out: &mut Vec<u8>, value: &ProofObject) {

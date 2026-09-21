@@ -92,6 +92,33 @@ pub struct CompiledPackage {
     pub modules: Vec<CompiledModule>,
 }
 
+impl CompiledPackage {
+    /// Return the content address of this package's complete compiled input.
+    ///
+    /// The package root is deliberately derived from the normalized compiler
+    /// result rather than from an insertion-order-dependent wrapper.
+    pub fn root_hash(&self) -> ContentHash {
+        let mut modules = self.modules.clone();
+        modules.sort_by(|left, right| {
+            left.path
+                .canonical()
+                .cmp(&right.path.canonical())
+                .then(left.content_id.cmp(&right.content_id))
+        });
+        let mut bytes = Vec::new();
+        put_text(&mut bytes, "package-root");
+        put_text(&mut bytes, &self.name);
+        put_text(&mut bytes, &self.version.to_string());
+        bytes.extend_from_slice(self.manifest_hash.as_bytes());
+        put_u64(&mut bytes, modules.len());
+        for module in modules {
+            put_text(&mut bytes, &module.path.canonical());
+            bytes.extend_from_slice(&module.content_id.bytes());
+        }
+        ContentHash::domain_separated("axiom/package-root/v1", &bytes)
+    }
+}
+
 /// A compiled package set bound to exactly one lockfile and its manifests.
 ///
 /// The artifact hash is private so callers cannot construct a seemingly valid
@@ -119,6 +146,19 @@ impl CompiledArtifact {
     }
     pub fn artifact_hash(&self) -> ContentHash {
         self.artifact_hash
+    }
+
+    /// Return the deterministic root for each compiled package in this
+    /// artifact. These roots are content identities, not store locations.
+    pub fn package_roots(&self) -> Vec<ContentHash> {
+        let mut roots = self
+            .packages
+            .iter()
+            .map(CompiledPackage::root_hash)
+            .collect::<Vec<_>>();
+        roots.sort();
+        roots.dedup();
+        roots
     }
 
     /// Return the canonical bytes used to derive [`Self::artifact_hash`].

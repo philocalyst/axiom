@@ -167,6 +167,10 @@ fn domain_api_workloads_report_real_semantic_probes() {
     for (workload, api) in [
         ("multi-currency", "ontology.exchange_unit_validation"),
         ("corporate-actions", "contracts.corporate_action_validation"),
+        (
+            "invoice-payment-graph",
+            "ontology.satisfaction_network_validation",
+        ),
         ("ownership-network", "ontology.role_assignment_validation"),
         (
             "adversarial-recursion",
@@ -205,9 +209,13 @@ fn domain_api_workloads_report_real_semantic_probes() {
 
 #[test]
 fn revision_workloads_report_incremental_timing_and_invalidation() {
-    for (workload, changed_kind) in [
-        ("one-row-close-change", "evidence_row"),
-        ("package-upgrade", "package"),
+    for (workload, changed_kind, api) in [
+        ("one-row-close-change", "evidence_row", None),
+        (
+            "package-upgrade",
+            "package",
+            Some("package.versioned_selection_validation"),
+        ),
     ] {
         let line = measurement(workload);
         assert!(
@@ -219,6 +227,24 @@ fn revision_workloads_report_incremental_timing_and_invalidation() {
                 && !line.contains("\"changed_full_solve_ns\":null"),
             "revision timing is incomplete for {workload}: {line}"
         );
+        if let Some(api) = api {
+            assert!(
+                !line.contains("\"semantic_probe_ns\":null")
+                    && line.contains(&format!("\"semantic_probe_api\":\"{api}\"")),
+                "revision semantic probe is missing for {workload}: {line}"
+            );
+            assert!(
+                field_value(&line, "semantic_probe_items")
+                    .parse::<u64>()
+                    .expect("semantic_probe_items is numeric")
+                    > 0
+                    && field_value(&line, "semantic_probe_results")
+                        .parse::<u64>()
+                        .expect("semantic_probe_results is numeric")
+                        > 0,
+                "revision semantic probe did not produce validated results: {line}"
+            );
+        }
         assert!(
             !line.contains("\"invalidated_queries\":null")
                 && !line.contains("\"invalidated_queries\":0"),

@@ -12,12 +12,13 @@ use crate::exact::Exact;
 use crate::model::{self, Date, Ledger, LedgerForm, LotSelector};
 use crate::package::{LotCandidate, PolicyRegistry, Selection, SelectionProgram};
 use crate::proof::{
-    CashSettlementObservationCertificate, JournalEntryCertificate, JournalLineCertificate,
-    LotAllocationCertificate, Node, ObligationBalanceCertificate, ObligationObservationCertificate,
-    Operation, PositionObservationCertificate, PositionReconciliationCertificate, Proof, ProofId,
-    QuoteObservationCertificate, SatisfactionAllocationCertificate,
-    SatisfactionObservationCertificate, SettlementBalanceCertificate, SettlementHistoryCertificate,
-    SettlementObservationCertificate, SettlementReconciliationCertificate, SettlementTransition,
+    BlockedSaleCertificate, CashSettlementObservationCertificate, JournalEntryCertificate,
+    JournalLineCertificate, LotAllocationCertificate, Node, ObligationBalanceCertificate,
+    ObligationObservationCertificate, Operation, PositionObservationCertificate,
+    PositionReconciliationCertificate, Proof, ProofId, QuoteObservationCertificate,
+    SatisfactionAllocationCertificate, SatisfactionObservationCertificate,
+    SettlementBalanceCertificate, SettlementHistoryCertificate, SettlementObservationCertificate,
+    SettlementReconciliationCertificate, SettlementTransition,
 };
 
 pub use crate::model::Quantity;
@@ -324,6 +325,11 @@ pub enum AnalysisCheckError {
         proof: ProofId,
         reason: String,
     },
+    InvalidBlockedSaleResult {
+        sale: String,
+        proof: ProofId,
+        reason: String,
+    },
     InvalidJournalResult {
         sale: String,
         proof: ProofId,
@@ -347,6 +353,7 @@ impl AnalysisCheckError {
             | Self::Proof(crate::proof::CheckError::InvalidQuoteObservation { id })
             | Self::Proof(crate::proof::CheckError::InvalidPositionObservation { id })
             | Self::Proof(crate::proof::CheckError::InvalidCashSettlementObservation { id })
+            | Self::Proof(crate::proof::CheckError::InvalidBlockedSale { id })
             | Self::Proof(crate::proof::CheckError::InvalidSettlementReconciliation { id })
             | Self::Proof(crate::proof::CheckError::InvalidLotAllocation { id })
             | Self::Proof(crate::proof::CheckError::InvalidInventoryConservation { id })
@@ -365,6 +372,7 @@ impl AnalysisCheckError {
             | Self::InvalidQuoteResult { proof, .. }
             | Self::InvalidPositionResult { proof, .. }
             | Self::InvalidSettlementResult { proof, .. }
+            | Self::InvalidBlockedSaleResult { proof, .. }
             | Self::InvalidJournalResult { proof, .. } => Some(*proof),
             Self::InvalidDependencyIndex { .. } => None,
         }
@@ -416,6 +424,9 @@ impl fmt::Display for AnalysisCheckError {
                 formatter,
                 "invalid settlement result `{settlement}`: {reason}"
             ),
+            Self::InvalidBlockedSaleResult { sale, reason, .. } => {
+                write!(formatter, "invalid blocked sale result `{sale}`: {reason}")
+            }
             Self::InvalidJournalResult { sale, reason, .. } => {
                 write!(formatter, "invalid journal result `{sale}`: {reason}")
             }
@@ -1561,19 +1572,21 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
 
     for (index, sell) in sales_raw {
         let source = source_key("sell", &sell_material(&sell));
-        let sale_operation = sell
-            .quantity
-            .unit
-            .as_ref()
-            .map(|unit| Operation::SaleObservation {
+        let sale_operation = match (sell.quantity.unit.as_ref(), sell.proceeds.unit.as_ref()) {
+            (Some(quantity_unit), Some(value_unit)) => Operation::SaleObservation {
                 sale: sell.label.clone(),
                 source: source.clone(),
                 account: sell.from.as_str().to_owned(),
-                asset: unit.as_str().to_owned(),
-            })
-            .unwrap_or_else(|| Operation::Observation {
+                asset: quantity_unit.as_str().to_owned(),
+                quantity: sell.quantity.number.clone(),
+                proceeds: sell.proceeds.number.clone(),
+                quantity_unit: quantity_unit.as_str().to_owned(),
+                value_unit: value_unit.as_str().to_owned(),
+            },
+            _ => Operation::Observation {
                 source: source.clone(),
-            });
+            },
+        };
         let sale_proof = proof.insert(Node::new(
             format!("sale {}/{}", sell.label, source),
             sale_operation,
@@ -2187,6 +2200,33 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 journal.push(entry);
             }
             id
+        } else if let Some(reason) = blocked_sale_reason(&status) {
+            let quantity_unit = quantity
+                .unit
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "?unit".into());
+            let value_unit = proceeds
+                .unit
+                .as_ref()
+                .map(ToString::to_string)
+                .unwrap_or_else(|| "?unit".into());
+            proof.insert(Node::new(
+                format!("blocked sale {}/{}", sell.label, source),
+                Operation::BlockedSale(BlockedSaleCertificate {
+                    sale: sell.label.clone(),
+                    source_proof: sale_proof,
+                    quantity: quantity.number.clone(),
+                    proceeds: proceeds.number.clone(),
+                    quantity_unit,
+                    value_unit,
+                    account: account.clone(),
+                    asset: asset.clone(),
+                    reason,
+                }),
+                vec![sale_proof],
+                metadata_for(&source, "blocked-sale", None),
+            ))
         } else {
             sale_proof
         };
@@ -2879,6 +2919,24 @@ fn aggregate_allocations(allocations: &[LotAllocation], proof: ProofId) -> Optio
     })
 }
 
+fn blocked_sale_reason(status: &RecognitionStatus) -> Option<String> {
+    match status {
+        RecognitionStatus::Recognized => None,
+        RecognitionStatus::Ambiguous { candidates } if !candidates.is_empty() => {
+            Some(format!("ambiguous-lot:{}", candidates.join(",")))
+        }
+        RecognitionStatus::Conflict {
+            policy_lot,
+            decision_lot,
+        } => Some(format!(
+            "policy-decision-conflict:{policy_lot}:{decision_lot}"
+        )),
+        RecognitionStatus::MissingLot => Some("missing-lot".into()),
+        RecognitionStatus::InvalidAmount => Some("invalid-amount".into()),
+        RecognitionStatus::Ambiguous { .. } => Some("ambiguous-lot:unresolved".into()),
+    }
+}
+
 fn check_public_answers(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
     let expected_sales = analysis
         .proof
@@ -2894,6 +2952,86 @@ fn check_public_answers(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
         expected_sales.iter().map(String::as_str).collect(),
         analysis.sales.iter().map(|sale| sale.id.as_str()),
     )?;
+
+    for sale in &analysis.sales {
+        require_goal_proof(analysis, &format!("gain:{}", sale.id), sale.proof)?;
+        if sale.status.is_complete() {
+            continue;
+        }
+        // The finance-native sale validation below owns malformed amounts.
+        // Preserve that diagnostic before attempting to validate a blocked
+        // public answer whose exact amount cannot be a valid sale quantity.
+        if sale.quantity.number.is_negative()
+            || sale.quantity.number.is_zero()
+            || sale.quantity.unit.is_none()
+            || sale.proceeds.number.is_negative()
+            || sale.proceeds.number.is_zero()
+            || sale.proceeds.unit.is_none()
+        {
+            continue;
+        }
+        let Some(node) = analysis.proof.node(sale.proof) else {
+            return Err(AnalysisCheckError::InvalidBlockedSaleResult {
+                sale: sale.id.clone(),
+                proof: sale.proof,
+                reason: "blocked sale proof is missing".into(),
+            });
+        };
+        let quantity_unit = sale
+            .quantity
+            .unit
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        let value_unit = sale
+            .proceeds
+            .unit
+            .as_ref()
+            .map(ToString::to_string)
+            .unwrap_or_default();
+        let expected_reason = blocked_sale_reason(&sale.status).ok_or_else(|| {
+            AnalysisCheckError::InvalidBlockedSaleResult {
+                sale: sale.id.clone(),
+                proof: sale.proof,
+                reason: "recognized sale has a blocked public answer".into(),
+            }
+        })?;
+        let valid = analysis.proof.roots.contains(&sale.proof)
+            && matches!(
+                &node.operation,
+                Operation::BlockedSale(certificate)
+                    if certificate.sale == sale.id
+                        && certificate.quantity == sale.quantity.number
+                        && certificate.proceeds == sale.proceeds.number
+                        && certificate.quantity_unit == quantity_unit
+                        && certificate.value_unit == value_unit
+                        && certificate.account == sale.account
+                        && certificate.asset == sale.asset
+                        && certificate.reason == expected_reason
+                        && certificate.source_proof != ProofId::ZERO
+                        && node.inputs.contains(&certificate.source_proof)
+                        && analysis.proof.node(certificate.source_proof).is_some_and(|source| {
+                            matches!(
+                                &source.operation,
+                                Operation::SaleObservation {
+                                    sale: source_sale,
+                                    account: source_account,
+                                    asset: source_asset,
+                                    ..
+                                } if source_sale == &sale.id
+                                    && source_account == &sale.account
+                                    && source_asset == &sale.asset
+                            )
+                        })
+            );
+        if !valid {
+            return Err(AnalysisCheckError::InvalidBlockedSaleResult {
+                sale: sale.id.clone(),
+                proof: sale.proof,
+                reason: "blocked result is not bound to the sale source and blocker".into(),
+            });
+        }
+    }
 
     for quote in &analysis.quotes {
         require_goal_proof(analysis, &format!("quote:{}", quote.id), quote.proof)?;
