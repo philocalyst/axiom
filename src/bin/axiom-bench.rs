@@ -426,7 +426,7 @@ fn measure_workload(
     let elaborated = workspace
         .elaborate_commit(source.commit_id())
         .map_err(|error| format!("{}: parse failed: {error}", workload.name()))?;
-    sizes.forms = Some(elaborated.ledger.forms.len());
+    sizes.forms = Some(elaborated.forms.len());
     let analysis = workspace
         .analyze_commit(source.commit_id())
         .map_err(|error| format!("{}: analysis failed: {error}", workload.name()))?;
@@ -595,7 +595,7 @@ fn median_parse(source: &str, samples: usize) -> Result<u128, String> {
         let parsed = workspace
             .elaborate_commit(loaded.commit_id())
             .map_err(|error| error.to_string())?;
-        black_box(parsed.ledger.forms.len());
+        black_box(parsed.forms.len());
         values.push(start.elapsed().as_nanos());
     }
     Ok(median(values))

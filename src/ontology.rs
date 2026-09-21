@@ -109,6 +109,10 @@ pub enum OntologyError {
         amount: Box<Quantity>,
         allocated: Box<Quantity>,
     },
+    DuplicateObligation(ObligationId),
+    DuplicateSettlement(SettlementId),
+    UnknownObligation(ObligationId),
+    UnknownSettlement(SettlementId),
     DuplicateAllocation(AllocationId),
     InvalidSettlementTransition {
         from: Option<SettlementState>,
@@ -189,6 +193,10 @@ impl fmt::Display for OntologyError {
                 formatter,
                 "settlement {settlement} is allocated {allocated} against {amount}"
             ),
+            Self::DuplicateObligation(id) => write!(formatter, "duplicate obligation {id}"),
+            Self::DuplicateSettlement(id) => write!(formatter, "duplicate settlement {id}"),
+            Self::UnknownObligation(id) => write!(formatter, "unknown obligation {id}"),
+            Self::UnknownSettlement(id) => write!(formatter, "unknown settlement {id}"),
             Self::DuplicateAllocation(id) => write!(formatter, "duplicate allocation {id}"),
             Self::InvalidSettlementTransition { from, to } => {
                 write!(
@@ -293,6 +301,25 @@ fn validate_named_instrument(
                 instrument.id
             ),
         });
+    }
+    Ok(())
+}
+
+fn require_identifier(value: &str, kind: &'static str) -> Result<(), OntologyError> {
+    if value.trim().is_empty() {
+        Err(OntologyError::EmptyIdentifier(kind))
+    } else {
+        Ok(())
+    }
+}
+
+fn validate_endpoint(endpoint: &Endpoint, kind: &'static str) -> Result<(), OntologyError> {
+    require_identifier(endpoint.entity.as_str(), kind)?;
+    if let Some(account) = &endpoint.account {
+        require_identifier(account.as_str(), "account")?;
+    }
+    if let Some(position) = &endpoint.position {
+        require_identifier(position.as_str(), "position")?;
     }
     Ok(())
 }
@@ -1169,6 +1196,76 @@ impl Obligation {
         self
     }
 
+    /// Validate the structural parts of an obligation before it participates
+    /// in a satisfaction network.  Builders reject invalid quantities, but
+    /// the public fields intentionally remain inspectable and can be assembled
+    /// directly by importers.
+    pub fn validate(&self) -> Result<(), OntologyError> {
+        require_identifier(self.id.as_str(), "obligation")?;
+        require_identifier(self.debtor.as_str(), "debtor")?;
+        require_identifier(self.creditor.as_str(), "creditor")?;
+        if let Some(contract) = &self.contract {
+            require_identifier(contract.as_str(), "contract")?;
+        }
+        let quantity = self.promised_quantity()?;
+        require_positive(quantity, "an obligation must promise a positive quantity")?;
+        match &self.performance {
+            Performance::Transfer {
+                instrument,
+                from,
+                to,
+                ..
+            } => {
+                require_identifier(instrument.as_str(), "instrument")?;
+                require_identifier(to.as_str(), "creditor")?;
+                if quantity.unit.as_ref().map(Unit::as_str) != Some(instrument.as_str()) {
+                    return Err(OntologyError::UnitMismatch {
+                        left: instrument.to_string(),
+                        right: quantity
+                            .unit
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| "<missing>".to_string()),
+                    });
+                }
+                if to != &self.creditor {
+                    return Err(OntologyError::AllocationMismatch);
+                }
+                if let Some(from) = from {
+                    require_identifier(from.as_str(), "debtor")?;
+                    if from != &self.debtor {
+                        return Err(OntologyError::AllocationMismatch);
+                    }
+                }
+            }
+            Performance::Deliver { instrument, to, .. } => {
+                require_identifier(instrument.as_str(), "instrument")?;
+                require_identifier(to.as_str(), "creditor")?;
+                if quantity.unit.as_ref().map(Unit::as_str) != Some(instrument.as_str()) {
+                    return Err(OntologyError::UnitMismatch {
+                        left: instrument.to_string(),
+                        right: quantity
+                            .unit
+                            .as_ref()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| "<missing>".to_string()),
+                    });
+                }
+                if to != &self.creditor {
+                    return Err(OntologyError::AllocationMismatch);
+                }
+            }
+            Performance::Service { description } if description.trim().is_empty() => {
+                return Err(OntologyError::InvalidEvent {
+                    kind: "obligation",
+                    reason: "service performance needs a description".to_string(),
+                });
+            }
+            Performance::Service { .. } => {}
+        }
+        Ok(())
+    }
+
     pub fn promised_quantity(&self) -> Result<&Quantity, OntologyError> {
         self.performance
             .quantity()
@@ -1222,6 +1319,11 @@ pub enum SettlementState {
     Reversed,
     Rejected,
     Cancelled,
+    Refunded,
+    Disputed,
+    ChargedBack,
+    Represented,
+    Resolved,
 }
 
 fn settlement_transition_is_legal(from: Option<&SettlementState>, to: &SettlementState) -> bool {
@@ -1251,6 +1353,24 @@ fn settlement_transition_is_legal(from: Option<&SettlementState>, to: &Settlemen
             | (Some(SettlementState::Pending), SettlementState::Cancelled)
             | (Some(SettlementState::Settled), SettlementState::Returned)
             | (Some(SettlementState::Settled), SettlementState::Reversed)
+            | (Some(SettlementState::Settled), SettlementState::Refunded)
+            | (Some(SettlementState::Settled), SettlementState::Disputed)
+            | (Some(SettlementState::Settled), SettlementState::ChargedBack)
+            | (Some(SettlementState::Disputed), SettlementState::Resolved)
+            | (
+                Some(SettlementState::Disputed),
+                SettlementState::ChargedBack
+            )
+            | (
+                Some(SettlementState::ChargedBack),
+                SettlementState::Represented
+            )
+            | (Some(SettlementState::Represented), SettlementState::Pending)
+            | (Some(SettlementState::Represented), SettlementState::Settled)
+            | (
+                Some(SettlementState::Represented),
+                SettlementState::Rejected
+            )
             | (Some(SettlementState::Returned), SettlementState::Presented)
             | (Some(SettlementState::Returned), SettlementState::Cancelled)
             | (Some(SettlementState::Reversed), SettlementState::Presented)
@@ -1279,6 +1399,41 @@ pub struct SettlementTransition {
     pub state: SettlementState,
     pub at: Option<Date>,
     pub reason: Option<String>,
+}
+
+/// Validate an ordered settlement history, including the date order carried
+/// by transitions.  Missing dates do not reset the ordering cursor: once two
+/// dated observations establish an order, a later dated observation may not
+/// move backwards merely because an intervening event had no date.
+pub fn validate_settlement_history(
+    settlement: &SettlementId,
+    history: &[SettlementTransition],
+) -> Result<(), OntologyError> {
+    if history.is_empty() {
+        return Err(OntologyError::InvalidEvent {
+            kind: "settlement",
+            reason: "settlement history cannot be empty".to_string(),
+        });
+    }
+    let mut previous_at = None;
+    for transition in history {
+        if let (Some(previous), Some(current)) = (previous_at, transition.at)
+            && current < previous
+        {
+            return Err(OntologyError::NonChronologicalSettlement {
+                settlement: settlement.clone(),
+                previous,
+                current,
+            });
+        }
+        previous_at = transition.at.or(previous_at);
+    }
+    validate_settlement_states(
+        &history
+            .iter()
+            .map(|transition| transition.state.clone())
+            .collect::<Vec<_>>(),
+    )
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -1341,15 +1496,39 @@ impl Settlement {
         })
     }
 
+    pub fn from_history(
+        id: impl Into<SettlementId>,
+        from: Endpoint,
+        to: Endpoint,
+        instrument: impl Into<InstrumentId>,
+        amount: Quantity,
+        history: Vec<SettlementTransition>,
+    ) -> Result<Self, OntologyError> {
+        let settlement = Self {
+            id: id.into(),
+            from,
+            to,
+            instrument: instrument.into(),
+            amount,
+            history,
+        };
+        settlement.validate()?;
+        Ok(settlement)
+    }
+
     pub fn transition(
         &mut self,
         state: SettlementState,
         at: Option<Date>,
         reason: Option<String>,
     ) -> Result<(), OntologyError> {
-        if let (Some(previous), Some(current)) =
-            (self.history.last().and_then(|transition| transition.at), at)
-            && current < previous
+        if let (Some(previous), Some(current)) = (
+            self.history
+                .iter()
+                .rev()
+                .find_map(|transition| transition.at),
+            at,
+        ) && current < previous
         {
             return Err(OntologyError::NonChronologicalSettlement {
                 settlement: self.id.clone(),
@@ -1373,7 +1552,32 @@ impl Settlement {
     }
 
     pub fn is_effective(&self) -> bool {
+        // `Resolved` only says that a dispute reached an outcome; this
+        // record does not carry that outcome.  Treating it as effective would
+        // silently choose "the payment stood" over "the payment was
+        // reversed".  A resolved dispute therefore needs a separate explicit
+        // settled observation before it can satisfy an obligation.
         matches!(self.latest_state(), Some(SettlementState::Settled))
+    }
+
+    pub fn validate(&self) -> Result<(), OntologyError> {
+        require_identifier(self.id.as_str(), "settlement")?;
+        validate_endpoint(&self.from, "settlement source entity")?;
+        validate_endpoint(&self.to, "settlement destination entity")?;
+        require_identifier(self.instrument.as_str(), "instrument")?;
+        require_positive(&self.amount, "a settlement must have a positive amount")?;
+        if self.amount.unit.as_ref().map(Unit::as_str) != Some(self.instrument.as_str()) {
+            return Err(OntologyError::UnitMismatch {
+                left: self.instrument.to_string(),
+                right: self
+                    .amount
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<missing>".to_string()),
+            });
+        }
+        validate_settlement_history(&self.id, &self.history)
     }
 
     pub fn validate_with_instrument(&self, instrument: &Instrument) -> Result<(), OntologyError> {
@@ -1436,6 +1640,143 @@ impl SatisfactionAllocation {
         self.state = AllocationState::Reversed;
         self
     }
+
+    pub fn validate(&self) -> Result<(), OntologyError> {
+        require_identifier(self.id.as_str(), "allocation")?;
+        require_identifier(self.obligation.as_str(), "obligation")?;
+        require_identifier(self.settlement.as_str(), "settlement")?;
+        require_positive(
+            &self.quantity,
+            "an allocation must have a positive quantity",
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SatisfactionSummary {
+    pub obligation_remaining: BTreeMap<ObligationId, Quantity>,
+    pub settlement_unused: BTreeMap<SettlementId, Quantity>,
+}
+
+/// Validate the complete many-to-many satisfaction network in one indexed
+/// pass. No obligation can over-consume performance and no settlement can be
+/// spent twice across different obligations.
+pub fn validate_satisfaction_network(
+    obligations: &[Obligation],
+    settlements: &[Settlement],
+    allocations: &[SatisfactionAllocation],
+) -> Result<SatisfactionSummary, OntologyError> {
+    let mut obligation_by_id = BTreeMap::new();
+    for obligation in obligations {
+        obligation.validate()?;
+        if obligation_by_id
+            .insert(obligation.id.clone(), obligation)
+            .is_some()
+        {
+            return Err(OntologyError::DuplicateObligation(obligation.id.clone()));
+        }
+    }
+    let mut settlement_by_id = BTreeMap::new();
+    for settlement in settlements {
+        settlement.validate()?;
+        if settlement_by_id
+            .insert(settlement.id.clone(), settlement)
+            .is_some()
+        {
+            return Err(OntologyError::DuplicateSettlement(settlement.id.clone()));
+        }
+    }
+
+    let mut allocation_ids = BTreeSet::new();
+    let mut by_obligation = BTreeMap::<ObligationId, Quantity>::new();
+    let mut by_settlement = BTreeMap::<SettlementId, Quantity>::new();
+    for allocation in allocations {
+        allocation.validate()?;
+        if !allocation_ids.insert(allocation.id.clone()) {
+            return Err(OntologyError::DuplicateAllocation(allocation.id.clone()));
+        }
+        let obligation = obligation_by_id
+            .get(&allocation.obligation)
+            .ok_or_else(|| OntologyError::UnknownObligation(allocation.obligation.clone()))?;
+        let settlement = settlement_by_id
+            .get(&allocation.settlement)
+            .ok_or_else(|| OntologyError::UnknownSettlement(allocation.settlement.clone()))?;
+        let promised = obligation.promised_quantity()?;
+        let instrument = obligation
+            .performance
+            .instrument()
+            .ok_or(OntologyError::AllocationMismatch)?;
+        if settlement.instrument != *instrument
+            || settlement.from.entity != obligation.debtor
+            || settlement.to.entity != obligation.creditor
+        {
+            return Err(OntologyError::AllocationMismatch);
+        }
+        if allocation.quantity.unit != promised.unit
+            || allocation.quantity.unit != settlement.amount.unit
+        {
+            return Err(OntologyError::UnitMismatch {
+                left: allocation
+                    .quantity
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<polymorphic zero>".to_string()),
+                right: promised
+                    .unit
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "<polymorphic zero>".to_string()),
+            });
+        }
+        if allocation.state == AllocationState::Applied && settlement.is_effective() {
+            let obligation_total = by_obligation
+                .entry(obligation.id.clone())
+                .or_insert_with(Quantity::zero);
+            *obligation_total = obligation_total.checked_add(&allocation.quantity)?;
+            let settlement_total = by_settlement
+                .entry(settlement.id.clone())
+                .or_insert_with(Quantity::zero);
+            *settlement_total = settlement_total.checked_add(&allocation.quantity)?;
+        }
+    }
+
+    let mut obligation_remaining = BTreeMap::new();
+    for obligation in obligations {
+        let promised = obligation.promised_quantity()?.clone();
+        let allocated = by_obligation
+            .remove(&obligation.id)
+            .unwrap_or_else(Quantity::zero);
+        if allocated.number > promised.number {
+            return Err(OntologyError::ObligationOverallocated {
+                obligation: obligation.id.clone(),
+                promised: Box::new(promised),
+                allocated: Box::new(allocated),
+            });
+        }
+        obligation_remaining.insert(obligation.id.clone(), promised.checked_sub(&allocated)?);
+    }
+    let mut settlement_unused = BTreeMap::new();
+    for settlement in settlements {
+        let allocated = by_settlement
+            .remove(&settlement.id)
+            .unwrap_or_else(Quantity::zero);
+        if allocated.number > settlement.amount.number {
+            return Err(OntologyError::SettlementOverallocated {
+                settlement: settlement.id.clone(),
+                amount: Box::new(settlement.amount.clone()),
+                allocated: Box::new(allocated),
+            });
+        }
+        settlement_unused.insert(
+            settlement.id.clone(),
+            settlement.amount.checked_sub(&allocated)?,
+        );
+    }
+    Ok(SatisfactionSummary {
+        obligation_remaining,
+        settlement_unused,
+    })
 }
 
 /// Check that all effective allocations for one obligation fit inside its
@@ -1460,11 +1801,22 @@ pub fn validate_obligation_allocation(
     }
 
     // A settlement is one finite transfer of custody.  Aggregate all applied
-    // allocations, not only the current obligation, before checking its
-    // capacity; otherwise two obligations can each appear valid while
-    // silently spending the same settled payment.
+    // allocations for settlements used by this obligation, not only the
+    // current obligation, before checking capacity; otherwise two obligations
+    // can each appear valid while silently spending the same settled payment.
+    // Allocations attached to unrelated settlements are deliberately outside
+    // this scoped helper.  The complete-network validator below is the place
+    // that validates every obligation and settlement atomically.
+    let relevant_settlements: BTreeSet<SettlementId> = allocations
+        .iter()
+        .filter(|allocation| allocation.obligation == obligation.id)
+        .map(|allocation| allocation.settlement.clone())
+        .collect();
     let mut allocated_by_settlement: BTreeMap<SettlementId, Quantity> = BTreeMap::new();
     for allocation in allocations {
+        if !relevant_settlements.contains(&allocation.settlement) {
+            continue;
+        }
         if !allocation_ids.insert(allocation.id.clone()) {
             return Err(OntologyError::DuplicateAllocation(allocation.id.clone()));
         }
@@ -3225,6 +3577,404 @@ mod tests {
                 .unwrap(),
             quantity("100", "USD")
         );
+    }
+
+    #[test]
+    fn satisfaction_network_rejects_duplicate_ids_and_unknown_references() {
+        let obligation =
+            Obligation::transfer("invoice", "alice", "vendor", "USD", quantity("100", "USD"))
+                .unwrap();
+        let settlement = Settlement::new(
+            "payment",
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            quantity("100", "USD"),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            validate_satisfaction_network(
+                &[obligation.clone(), obligation.clone()],
+                std::slice::from_ref(&settlement),
+                &[],
+            ),
+            Err(OntologyError::DuplicateObligation(id)) if id == obligation.id
+        ));
+        assert!(matches!(
+            validate_satisfaction_network(
+                std::slice::from_ref(&obligation),
+                &[settlement.clone(), settlement.clone()],
+                &[],
+            ),
+            Err(OntologyError::DuplicateSettlement(id)) if id == settlement.id
+        ));
+        let duplicate_allocation = SatisfactionAllocation::new(
+            "same-allocation",
+            "invoice",
+            "payment",
+            quantity("10", "USD"),
+        )
+        .unwrap();
+        assert!(matches!(
+            validate_satisfaction_network(
+                std::slice::from_ref(&obligation),
+                std::slice::from_ref(&settlement),
+                &[duplicate_allocation.clone(), duplicate_allocation],
+            ),
+            Err(OntologyError::DuplicateAllocation(id)) if id == AllocationId::new("same-allocation")
+        ));
+
+        let unknown_obligation = SatisfactionAllocation::new(
+            "allocation-unknown-obligation",
+            "missing-invoice",
+            "payment",
+            quantity("10", "USD"),
+        )
+        .unwrap()
+        .applied();
+        assert!(matches!(
+            validate_satisfaction_network(
+                std::slice::from_ref(&obligation),
+                std::slice::from_ref(&settlement),
+                &[unknown_obligation],
+            ),
+            Err(OntologyError::UnknownObligation(id)) if id == ObligationId::new("missing-invoice")
+        ));
+
+        let unknown_settlement = SatisfactionAllocation::new(
+            "allocation-unknown-settlement",
+            "invoice",
+            "missing-payment",
+            quantity("10", "USD"),
+        )
+        .unwrap()
+        .applied();
+        assert!(matches!(
+            validate_satisfaction_network(
+                std::slice::from_ref(&obligation),
+                std::slice::from_ref(&settlement),
+                &[unknown_settlement],
+            ),
+            Err(OntologyError::UnknownSettlement(id)) if id == SettlementId::new("missing-payment")
+        ));
+    }
+
+    #[test]
+    fn satisfaction_network_caps_one_settlement_across_obligations() {
+        let first =
+            Obligation::transfer("invoice-1", "alice", "vendor", "USD", quantity("60", "USD"))
+                .unwrap();
+        let second =
+            Obligation::transfer("invoice-2", "alice", "vendor", "USD", quantity("60", "USD"))
+                .unwrap();
+        let mut settlement = Settlement::new(
+            "payment",
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            quantity("100", "USD"),
+        )
+        .unwrap();
+        settlement
+            .transition(SettlementState::Presented, None, None)
+            .unwrap();
+        settlement
+            .transition(SettlementState::Settled, None, None)
+            .unwrap();
+        let allocations = vec![
+            SatisfactionAllocation::new(
+                "allocation-1",
+                "invoice-1",
+                "payment",
+                quantity("60", "USD"),
+            )
+            .unwrap()
+            .applied(),
+            SatisfactionAllocation::new(
+                "allocation-2",
+                "invoice-2",
+                "payment",
+                quantity("60", "USD"),
+            )
+            .unwrap()
+            .applied(),
+        ];
+        assert!(matches!(
+            validate_satisfaction_network(&[first, second], &[settlement], &allocations),
+            Err(OntologyError::SettlementOverallocated { settlement, .. })
+                if settlement == SettlementId::new("payment")
+        ));
+    }
+
+    #[test]
+    fn satisfaction_network_checks_allocation_units_and_endpoints() {
+        let obligation =
+            Obligation::transfer("invoice", "alice", "vendor", "USD", quantity("100", "USD"))
+                .unwrap();
+        let mut settlement = Settlement::new(
+            "payment",
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            quantity("100", "USD"),
+        )
+        .unwrap();
+        settlement
+            .transition(SettlementState::Presented, None, None)
+            .unwrap();
+        settlement
+            .transition(SettlementState::Settled, None, None)
+            .unwrap();
+
+        let wrong_unit = SatisfactionAllocation::new(
+            "allocation-unit",
+            "invoice",
+            "payment",
+            quantity("100", "EUR"),
+        )
+        .unwrap()
+        .applied();
+        assert!(matches!(
+            validate_satisfaction_network(
+                std::slice::from_ref(&obligation),
+                std::slice::from_ref(&settlement),
+                &[wrong_unit],
+            ),
+            Err(OntologyError::UnitMismatch { .. })
+        ));
+
+        let wrong_endpoint = Settlement::new(
+            "wrong-payment",
+            endpoint("mallory"),
+            endpoint("vendor"),
+            "USD",
+            quantity("100", "USD"),
+        )
+        .unwrap();
+        let endpoint_allocation = SatisfactionAllocation::new(
+            "allocation-endpoint",
+            "invoice",
+            "wrong-payment",
+            quantity("100", "USD"),
+        )
+        .unwrap()
+        .applied();
+        assert_eq!(
+            validate_satisfaction_network(
+                std::slice::from_ref(&obligation),
+                &[wrong_endpoint],
+                &[endpoint_allocation],
+            ),
+            Err(OntologyError::AllocationMismatch)
+        );
+    }
+
+    #[test]
+    fn direct_domain_values_cannot_disagree_with_their_units_or_parties() {
+        let mut obligation =
+            Obligation::transfer("invoice", "alice", "vendor", "USD", quantity("10", "USD"))
+                .unwrap();
+        let Performance::Transfer { instrument, .. } = &mut obligation.performance else {
+            unreachable!()
+        };
+        *instrument = InstrumentId::new("EUR");
+        assert!(matches!(
+            obligation.validate(),
+            Err(OntologyError::UnitMismatch { .. })
+        ));
+
+        let mut obligation =
+            Obligation::transfer("invoice", "alice", "vendor", "USD", quantity("10", "USD"))
+                .unwrap();
+        let Performance::Transfer { to, .. } = &mut obligation.performance else {
+            unreachable!()
+        };
+        *to = EntityId::new("mallory");
+        assert_eq!(
+            obligation.validate(),
+            Err(OntologyError::AllocationMismatch)
+        );
+
+        let mut settlement = Settlement::new(
+            "payment",
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            quantity("10", "USD"),
+        )
+        .unwrap();
+        settlement.instrument = InstrumentId::new("EUR");
+        assert!(matches!(
+            settlement.validate(),
+            Err(OntologyError::UnitMismatch { .. })
+        ));
+        settlement.instrument = InstrumentId::new("USD");
+        settlement.amount.unit = None;
+        assert!(matches!(
+            settlement.validate(),
+            Err(OntologyError::UnitMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn per_obligation_validation_scopes_unrelated_settlements() {
+        let obligation =
+            Obligation::transfer("invoice", "alice", "vendor", "USD", quantity("100", "USD"))
+                .unwrap();
+        let mut payment = Settlement::new(
+            "payment",
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            quantity("100", "USD"),
+        )
+        .unwrap();
+        payment
+            .transition(SettlementState::Presented, None, None)
+            .unwrap();
+        payment
+            .transition(SettlementState::Settled, None, None)
+            .unwrap();
+        let unrelated = Settlement::new(
+            "unrelated-payment",
+            endpoint("mallory"),
+            endpoint("other-vendor"),
+            "EUR",
+            quantity("1", "EUR"),
+        )
+        .unwrap();
+        let allocations = vec![
+            SatisfactionAllocation::new("allocation", "invoice", "payment", quantity("100", "USD"))
+                .unwrap()
+                .applied(),
+            // This allocation belongs to another settlement component.  It
+            // must not prevent checking the invoice above.
+            SatisfactionAllocation {
+                id: AllocationId::new("unrelated-allocation"),
+                obligation: ObligationId::new("other-invoice"),
+                settlement: SettlementId::new("unrelated-payment"),
+                quantity: quantity("1", "EUR"),
+                state: AllocationState::Applied,
+            },
+        ];
+        validate_obligation_allocation(&obligation, &allocations, &[payment, unrelated]).unwrap();
+    }
+
+    #[test]
+    fn returned_charged_back_and_unresolved_disputes_restore_remaining() {
+        let obligation =
+            Obligation::transfer("invoice", "alice", "vendor", "USD", quantity("100", "USD"))
+                .unwrap();
+        let allocation =
+            SatisfactionAllocation::new("allocation", "invoice", "payment", quantity("100", "USD"))
+                .unwrap()
+                .applied();
+
+        for terminal in [
+            SettlementState::Returned,
+            SettlementState::Refunded,
+            SettlementState::ChargedBack,
+            SettlementState::Resolved,
+        ] {
+            let mut settlement = Settlement::new(
+                "payment",
+                endpoint("alice"),
+                endpoint("vendor"),
+                "USD",
+                quantity("100", "USD"),
+            )
+            .unwrap();
+            settlement
+                .transition(SettlementState::Presented, None, None)
+                .unwrap();
+            settlement
+                .transition(SettlementState::Settled, None, None)
+                .unwrap();
+            match terminal {
+                SettlementState::Returned => settlement.returned(None, "bounced").unwrap(),
+                SettlementState::Refunded => settlement
+                    .transition(SettlementState::Refunded, None, Some("refunded".into()))
+                    .unwrap(),
+                SettlementState::ChargedBack => settlement
+                    .transition(
+                        SettlementState::ChargedBack,
+                        None,
+                        Some("chargeback".into()),
+                    )
+                    .unwrap(),
+                SettlementState::Resolved => {
+                    settlement
+                        .transition(SettlementState::Disputed, None, Some("disputed".into()))
+                        .unwrap();
+                    settlement
+                        .transition(SettlementState::Resolved, None, Some("resolved".into()))
+                        .unwrap();
+                }
+                _ => unreachable!(),
+            }
+            assert!(!settlement.is_effective());
+            assert_eq!(
+                obligation
+                    .remaining(
+                        std::slice::from_ref(&allocation),
+                        std::slice::from_ref(&settlement)
+                    )
+                    .unwrap(),
+                quantity("100", "USD")
+            );
+        }
+    }
+
+    #[test]
+    fn settlement_history_uses_source_order_for_chronology() {
+        let id = SettlementId::new("payment");
+        let history = vec![
+            SettlementTransition {
+                state: SettlementState::Issued,
+                at: Some(Date::new(2026, 1, 2).unwrap()),
+                reason: None,
+            },
+            SettlementTransition {
+                state: SettlementState::Presented,
+                at: Some(Date::new(2026, 1, 1).unwrap()),
+                reason: None,
+            },
+        ];
+        assert!(matches!(
+            validate_settlement_history(&id, &history),
+            Err(OntologyError::NonChronologicalSettlement { settlement, .. })
+                if settlement == id
+        ));
+
+        let mut settlement = Settlement::from_history(
+            "payment",
+            endpoint("alice"),
+            endpoint("vendor"),
+            "USD",
+            quantity("10", "USD"),
+            vec![
+                SettlementTransition {
+                    state: SettlementState::Issued,
+                    at: Some(Date::new(2026, 1, 2).unwrap()),
+                    reason: None,
+                },
+                SettlementTransition {
+                    state: SettlementState::Presented,
+                    at: None,
+                    reason: None,
+                },
+            ],
+        )
+        .unwrap();
+        assert!(matches!(
+            settlement.transition(
+                SettlementState::Settled,
+                Some(Date::new(2026, 1, 1).unwrap()),
+                None,
+            ),
+            Err(OntologyError::NonChronologicalSettlement { .. })
+        ));
     }
 
     #[test]

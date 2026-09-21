@@ -91,8 +91,8 @@ impl SourceLedger {
 /// A strict model ledger with the source commit it was elaborated from.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoundLedger {
-    pub source_commit: CommitId,
-    pub ledger: Ledger,
+    source_commit: CommitId,
+    ledger: Ledger,
 }
 
 impl BoundLedger {
@@ -121,16 +121,16 @@ impl Deref for BoundLedger {
 /// `analysis_commit` pins it without changing the source commit.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitAnalysis {
-    pub source_commit: CommitId,
-    pub analysis_commit: CommitId,
-    pub ledger: BoundLedger,
+    source_commit: CommitId,
+    analysis_commit: CommitId,
+    ledger: BoundLedger,
     pub analysis: Analysis,
     /// The executable registry resolved from the source commit's package
     /// roots.  Keeping this alongside the bound result lets callers render
     /// the same package set that was actually evaluated.
     pub policy_registry: PolicyRegistry,
-    pub proof_id: ProofObjectId,
-    pub metadata: BTreeMap<String, String>,
+    proof_id: ProofObjectId,
+    metadata: BTreeMap<String, String>,
 }
 
 impl CommitAnalysis {
@@ -154,8 +154,52 @@ impl CommitAnalysis {
         &self.analysis.proof
     }
 
+    pub fn ledger(&self) -> &BoundLedger {
+        &self.ledger
+    }
+
+    pub fn analysis(&self) -> &Analysis {
+        &self.analysis
+    }
+
+    pub fn policy_registry(&self) -> &PolicyRegistry {
+        &self.policy_registry
+    }
+
+    pub fn metadata(&self) -> &BTreeMap<String, String> {
+        &self.metadata
+    }
+
     pub fn check_proof(&self) -> Result<(), crate::proof::CheckError> {
-        self.analysis.check_proof()
+        self.analysis.check_proof()?;
+        let expected = self.source_commit.hash().to_string();
+        let mut bindings = self.analysis.proof.nodes.values().filter(|node| {
+            matches!(
+                &node.operation,
+                Operation::Observation { source } if source.starts_with("commit:")
+            )
+        });
+        let Some(binding) = bindings.next() else {
+            return Err(crate::proof::CheckError::InvalidOperation {
+                id: crate::proof::ProofId::ZERO,
+            });
+        };
+        let valid_operation = matches!(
+            &binding.operation,
+            Operation::Observation { source } if source == &format!("commit:{expected}")
+        );
+        let mut expected_inputs = self.analysis.proof.roots.clone();
+        expected_inputs.retain(|root| *root != binding.id);
+        if bindings.next().is_some()
+            || self.ledger.source_commit != self.source_commit
+            || !valid_operation
+            || binding.metadata.get("source-commit") != Some(&expected)
+            || !self.analysis.proof.roots.contains(&binding.id)
+            || binding.inputs != expected_inputs
+        {
+            return Err(crate::proof::CheckError::InvalidOperation { id: binding.id });
+        }
+        Ok(())
     }
 }
 
@@ -1058,6 +1102,38 @@ mod tests {
         assert!(workspace.store().proof(evaluated.proof_id).is_ok());
         assert!(workspace.store().commit(evaluated.analysis_commit).is_ok());
         assert_ne!(evaluated.analysis_commit, source.commit);
+
+        let other = workspace
+            .load_source(
+                "other-book",
+                "book other\nbuy lot-b on 2026-01-02\n  1 XYZ into checking\n  for 2 USD\n",
+            )
+            .unwrap();
+        let mut forged = evaluated.clone();
+        forged.source_commit = other.commit;
+        forged.ledger.source_commit = other.commit;
+        assert!(forged.check_proof().is_err());
+
+        let mut missing_binding = evaluated.clone();
+        let binding = missing_binding
+            .analysis
+            .proof
+            .nodes
+            .values()
+            .find(|node| {
+                matches!(
+                    &node.operation,
+                    Operation::Observation { source } if source.starts_with("commit:")
+                )
+            })
+            .unwrap()
+            .id;
+        missing_binding
+            .analysis
+            .proof
+            .roots
+            .retain(|root| *root != binding);
+        assert!(missing_binding.check_proof().is_err());
     }
 
     #[test]

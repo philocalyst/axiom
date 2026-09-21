@@ -9,8 +9,8 @@ use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
 use crate::engine::{
-    Analysis, Issue, IssueCode, JournalEntry, JournalLine, ObservationStatus, QuoteStatus,
-    RecognitionStatus, Side,
+    Analysis, Issue, IssueCode, JournalEntry, JournalLine, ObligationStatus, ObservationStatus,
+    QuoteStatus, RecognitionStatus, Side,
 };
 use crate::package::PolicyRegistry;
 use crate::proof::Operation;
@@ -153,6 +153,69 @@ pub fn render_check(analysis: &Analysis) -> String {
                     let _ = writeln!(out, "  {label}  conflicting ({})", quote_ids.join(", "));
                 }
             }
+        }
+    }
+
+    if !analysis.obligations.is_empty() {
+        out.push_str("\nobligations\n");
+        for obligation in &analysis.obligations {
+            let status = match obligation.status {
+                ObligationStatus::Outstanding => "outstanding",
+                ObligationStatus::PartiallySatisfied => "partially satisfied",
+                ObligationStatus::Satisfied => "satisfied",
+                ObligationStatus::Invalid => "invalid",
+            };
+            let remaining = obligation
+                .remaining
+                .as_ref()
+                .map(quantity)
+                .unwrap_or_else(|| "unknown".into());
+            let due = obligation
+                .due
+                .map(|date| format!("  due {date}"))
+                .unwrap_or_default();
+            let _ = writeln!(
+                out,
+                "  {}  {}  remaining {}{}",
+                obligation.id, status, remaining, due
+            );
+        }
+    }
+    if !analysis.settlement_histories.is_empty() {
+        out.push_str("\nsettlements\n");
+        for settlement in &analysis.settlement_histories {
+            let unused = settlement
+                .unused
+                .as_ref()
+                .map(quantity)
+                .unwrap_or_else(|| "unknown".into());
+            let _ = writeln!(
+                out,
+                "  {}  {}  {}  {}  unused {}",
+                settlement.id,
+                settlement_kind(settlement.kind),
+                settlement_state(settlement.current),
+                if settlement.effective {
+                    "effective"
+                } else {
+                    "ineffective"
+                },
+                unused
+            );
+        }
+    }
+    if !analysis.satisfactions.is_empty() {
+        out.push_str("\nsatisfactions\n");
+        for satisfaction in &analysis.satisfactions {
+            let _ = writeln!(
+                out,
+                "  {}  {} -> {}  {}  {}",
+                satisfaction.id,
+                satisfaction.settlement,
+                satisfaction.obligation,
+                quantity(&satisfaction.amount),
+                satisfaction_state(satisfaction.state)
+            );
         }
     }
 
@@ -316,6 +379,32 @@ pub fn render_why(analysis: &Analysis, goal: &str) -> Result<String, RenderError
             }
             "settlement" => {
                 if let Some(settlement) = analysis
+                    .settlement_histories
+                    .iter()
+                    .find(|settlement| settlement.id == subject)
+                {
+                    let status = if settlement.unused.is_none() {
+                        "invalid"
+                    } else if settlement.effective {
+                        "effective"
+                    } else {
+                        "ineffective"
+                    };
+                    let _ = writeln!(out, "status: {status}");
+                    out.push_str("because:\n  source: settlement history\n");
+                    let _ = writeln!(
+                        out,
+                        "  kind: {}\n  current state: {}",
+                        settlement_kind(settlement.kind),
+                        settlement_state(settlement.current)
+                    );
+                    let unused = settlement
+                        .unused
+                        .as_ref()
+                        .map(quantity)
+                        .unwrap_or_else(|| "unknown".into());
+                    let _ = writeln!(out, "result: unused {unused}");
+                } else if let Some(settlement) = analysis
                     .settlements
                     .iter()
                     .find(|settlement| settlement.reference == subject)
@@ -325,11 +414,100 @@ pub fn render_why(analysis: &Analysis, goal: &str) -> Result<String, RenderError
                     let _ = writeln!(out, "result: {}", quantity(&settlement.quantity));
                 }
             }
+            "obligation" => {
+                if let Some(obligation) = analysis
+                    .obligations
+                    .iter()
+                    .find(|obligation| obligation.id == subject)
+                {
+                    let status = match obligation.status {
+                        ObligationStatus::Outstanding => "outstanding",
+                        ObligationStatus::PartiallySatisfied => "partially satisfied",
+                        ObligationStatus::Satisfied => "satisfied",
+                        ObligationStatus::Invalid => "invalid",
+                    };
+                    let _ = writeln!(out, "status: {status}");
+                    let _ = writeln!(
+                        out,
+                        "because:\n  {} owes {} to {}",
+                        obligation.debtor,
+                        quantity(&obligation.promised),
+                        obligation.creditor
+                    );
+                    if let Some(due) = obligation.due {
+                        let _ = writeln!(out, "  due: {due}");
+                    }
+                    let remaining = obligation
+                        .remaining
+                        .as_ref()
+                        .map(quantity)
+                        .unwrap_or_else(|| "unknown".into());
+                    let _ = writeln!(out, "result: remaining {remaining}");
+                }
+            }
+            "satisfaction" => {
+                if let Some(satisfaction) = analysis
+                    .satisfactions
+                    .iter()
+                    .find(|satisfaction| satisfaction.id == subject)
+                {
+                    let status = if satisfaction.effective {
+                        "effective"
+                    } else {
+                        "ineffective"
+                    };
+                    let _ = writeln!(out, "status: {status}");
+                    let _ = writeln!(
+                        out,
+                        "because:\n  settlement `{}` allocates {} to obligation `{}`\n  allocation state: {}",
+                        satisfaction.settlement,
+                        quantity(&satisfaction.amount),
+                        satisfaction.obligation,
+                        satisfaction_state(satisfaction.state)
+                    );
+                }
+            }
             _ => {}
         }
     }
 
     Ok(out)
+}
+
+fn settlement_kind(kind: crate::model::SettlementKind) -> &'static str {
+    match kind {
+        crate::model::SettlementKind::Ach => "ach",
+        crate::model::SettlementKind::Card => "card",
+        crate::model::SettlementKind::Check => "check",
+    }
+}
+
+fn settlement_state(state: crate::model::SettlementStateKind) -> &'static str {
+    use crate::model::SettlementStateKind as State;
+    match state {
+        State::Issued => "issued",
+        State::Authorized => "authorized",
+        State::Presented => "presented",
+        State::Pending => "pending",
+        State::Settled => "settled",
+        State::Returned => "returned",
+        State::Reversed => "reversed",
+        State::Rejected => "rejected",
+        State::Cancelled => "cancelled",
+        State::Refunded => "refunded",
+        State::Disputed => "disputed",
+        State::ChargedBack => "charged-back",
+        State::Represented => "represented",
+        State::Resolved => "resolved",
+    }
+}
+
+fn satisfaction_state(state: crate::model::SatisfactionState) -> &'static str {
+    match state {
+        crate::model::SatisfactionState::Proposed => "proposed",
+        crate::model::SatisfactionState::Applied => "applied",
+        crate::model::SatisfactionState::Reversed => "reversed",
+    }
 }
 
 /// Render the fixed V0 source vocabulary and the policy selected by this book.
@@ -352,7 +530,7 @@ pub fn render_packages_with_registry(
     out.push_str("packages\n");
     let _ = writeln!(out, "book: {book}");
     out.push_str("\nsource vocabulary\n");
-    out.push_str("  buy, sell, quote, observe, use, decide\n");
+    out.push_str("  buy, sell, quote, obligation, settlement, satisfy, observe, use, decide\n");
     out.push_str("  V0 keeps this vocabulary fixed.\n");
     out.push_str("\npolicies\n");
     let packages = registry.packages().collect::<Vec<_>>();
@@ -517,6 +695,11 @@ fn render_next_actions(analysis: &Analysis, out: &mut String) {
                 actions.insert("add or identify enough eligible inventory for the sale".into());
             }
             IssueCode::PositionConflict | IssueCode::SettlementConflict => {}
+            IssueCode::ObligationConflict => {
+                actions.insert(
+                    "correct the obligation, settlement history, or satisfaction allocation".into(),
+                );
+            }
             IssueCode::AmbiguousLot
             | IssueCode::DecisionConflict
             | IssueCode::PolicyDecisionConflict
@@ -544,6 +727,7 @@ fn issue_code(issue: &Issue) -> &'static str {
         IssueCode::UnknownPolicy => "unknown policy",
         IssueCode::IncompatibleUnit => "incompatible unit",
         IssueCode::InvalidAmount => "invalid amount",
+        IssueCode::ObligationConflict => "obligation conflict",
     }
 }
 
@@ -617,10 +801,53 @@ observe settlement sell 500 USD
     }
 
     #[test]
+    fn why_explains_authored_obligations_settlements_and_satisfactions() {
+        let analysis = analyze(
+            &parse_ledger(
+                r#"book receivables
+obligation invoice/a
+  debtor customer
+  creditor vendor
+  performance transfer 10 USD
+  due 2026-10-01
+settlement payment/a
+  kind ach
+  from customer
+  to vendor
+  amount 10 USD
+  state issued
+  state presented
+  state settled
+satisfy allocation/a
+  obligation invoice/a
+  settlement payment/a
+  amount 10 USD
+  state applied
+"#,
+            )
+            .unwrap(),
+        );
+        let obligation = render_why(&analysis, "obligation:invoice/a").unwrap();
+        assert!(obligation.contains("status: satisfied"));
+        assert!(obligation.contains("customer owes 10 USD to vendor"));
+        assert!(obligation.contains("due: 2026-10-01"));
+        let settlement = render_why(&analysis, "settlement:payment/a").unwrap();
+        assert!(settlement.contains("status: effective"));
+        assert!(settlement.contains("current state: settled"));
+        let satisfaction = render_why(&analysis, "satisfaction:allocation/a").unwrap();
+        assert!(satisfaction.contains("status: effective"));
+        assert!(satisfaction.contains("allocation state: applied"));
+    }
+
+    #[test]
     fn packages_are_content_addressed_and_mark_active_policy() {
         let output = render_packages("tax-us", Some("lots/fifo"));
         assert!(output.contains("source vocabulary\n"));
-        assert!(output.contains("buy, sell, quote, observe, use, decide"));
+        assert!(
+            output.contains(
+                "buy, sell, quote, obligation, settlement, satisfy, observe, use, decide"
+            )
+        );
         assert!(output.contains("lots/fifo@0"));
         assert!(output.contains("[active]"));
     }

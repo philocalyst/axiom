@@ -8,8 +8,10 @@
 //! V0 journal surface does not claim to encode those relations.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
+use std::time::Instant;
 
-use axiom_ledger::engine::{IssueCode, ObservationStatus, RecognitionStatus};
+use axiom_ledger::engine::{IssueCode, ObligationStatus, ObservationStatus, RecognitionStatus};
 use axiom_ledger::evidence::{
     AdapterProvenance, Authority, Confidence, CorrectionScope, EvidenceLookup, EvidenceRelation,
     EvidenceStore, ImportBatch, RawEvidence, SourceSpan,
@@ -23,7 +25,9 @@ use axiom_ledger::liquidity::{
 use axiom_ledger::logic::{
     Goal, Literal, Polarity as LogicPolarity, Program, ResourceProfile, SemanticContext, Solver,
 };
-use axiom_ledger::model::{ContentHash, Date, Quantity, Unit};
+use axiom_ledger::model::{
+    ContentHash, Date, Quantity, SatisfactionState, SettlementStateKind, Unit,
+};
 use axiom_ledger::ontology::{
     Encumbrance, EncumbranceKind, Endpoint, ExchangeLeg, ExchangeRecord, Instrument,
     InstrumentKind, Obligation, OntologyError, Position, Role, RoleAssignments,
@@ -65,6 +69,38 @@ fn quantity(number: &str, unit: &str) -> Quantity {
 
 fn hash(seed: u8) -> ContentHash {
     ContentHash::domain_separated("axiom-heavy-ledger-test", &[seed])
+}
+
+/// Build a source-ledger fixture with one obligation, one settlement history,
+/// and one applied satisfaction allocation per row.  The IDs deliberately
+/// carry stable zero-padded ordinals: this makes source order, first/last key
+/// checks, and proof identities reproducible while keeping the rows realistic
+/// enough to exercise the same parser path as imported receivables.
+fn obligation_settlement_fixture(rows: usize) -> String {
+    let mut source = String::with_capacity(rows.saturating_mul(420) + 32);
+    source.push_str("book receivables\n");
+    for row in 0..rows {
+        writeln!(
+            source,
+            "obligation invoice/{row:05}\n  debtor customer/{row:05}\n  creditor vendor/{row:05}\n  performance transfer 100 USD\n  due 2026-12-31"
+        )
+        .expect("writing obligation fixture");
+    }
+    for row in 0..rows {
+        writeln!(
+            source,
+            "settlement payment/{row:05}\n  kind ach\n  from customer/{row:05}\n  to vendor/{row:05}\n  amount 100 USD\n  state issued at 2026-01-01\n  state presented at 2026-01-02\n  state pending at 2026-01-03\n  state settled at 2026-01-04"
+        )
+        .expect("writing settlement fixture");
+    }
+    for row in 0..rows {
+        writeln!(
+            source,
+            "satisfy allocation/{row:05}\n  obligation invoice/{row:05}\n  settlement payment/{row:05}\n  amount 100 USD\n  state applied"
+        )
+        .expect("writing satisfaction fixture");
+    }
+    source
 }
 
 fn proof(seed: u8) -> ProofId {
@@ -341,6 +377,188 @@ fn multi_year_fixture_parses_journal_subset() {
         .analysis
         .check_proof()
         .expect("fixture produces a valid proof graph");
+}
+
+/// The authored source form is also exercised end-to-end on a small checked-in
+/// fixture.  Keeping this case out of the stress test makes ordinary CI cover
+/// the complete obligation/settlement/satisfaction path and its proof binding.
+#[test]
+fn obligation_settlement_satisfaction_fixture_is_deterministic() {
+    let source = include_str!("../fixtures/heavy/obligation_settlement_satisfaction.axm");
+    let surface = parse_source(source).expect("ontology fixture preserves its source surface");
+    assert_eq!(surface.statements.len(), 9);
+    let ledger = parse_ledger(source).expect("ontology fixture strictly elaborates");
+    assert_eq!(ledger.forms.len(), 9);
+
+    let mut workspace = Workspace::new();
+    let loaded = workspace
+        .load_source("fixtures/heavy/obligation-settlement-satisfaction", source)
+        .expect("ontology fixture enters the immutable source store");
+    let first = workspace
+        .analyze_commit(loaded.commit_id())
+        .expect("ontology fixture reaches production analysis")
+        .analysis;
+    first
+        .check_proof()
+        .expect("ontology fixture proof graph checks independently");
+
+    assert_eq!(
+        first
+            .obligations
+            .iter()
+            .map(|obligation| obligation.id.as_str())
+            .collect::<Vec<_>>(),
+        ["invoice/00001", "invoice/00002", "invoice/00003"]
+    );
+    assert!(first.obligations.iter().all(|obligation| {
+        obligation.status == ObligationStatus::Satisfied
+            && obligation
+                .remaining
+                .as_ref()
+                .is_some_and(|remaining| remaining.is_zero())
+    }));
+    assert!(first.settlement_histories.iter().all(|settlement| {
+        settlement.current == SettlementStateKind::Settled
+            && settlement.effective
+            && settlement
+                .unused
+                .as_ref()
+                .is_some_and(|unused| unused.is_zero())
+    }));
+    assert!(first.satisfactions.iter().all(|satisfaction| {
+        satisfaction.state == SatisfactionState::Applied && satisfaction.effective
+    }));
+    assert!(
+        first.issues.is_empty(),
+        "fixture issues: {:?}",
+        first.issues
+    );
+
+    // Re-evaluating the same immutable source must retain stable key results;
+    // this guards against traversal-order-dependent proof or view assembly.
+    let second = workspace
+        .analyze_commit(loaded.commit_id())
+        .expect("re-evaluation remains deterministic")
+        .analysis;
+    assert_eq!(
+        first
+            .obligations
+            .iter()
+            .map(|obligation| (&obligation.id, obligation.proof))
+            .collect::<Vec<_>>(),
+        second
+            .obligations
+            .iter()
+            .map(|obligation| (&obligation.id, obligation.proof))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(first.proof.roots, second.proof.roots);
+    assert_eq!(first.proof.nodes.len(), second.proof.nodes.len());
+}
+
+/// A 10,000-row source-ledger profile for the authored ontology forms.  It is
+/// ignored because the proof DAG and exact arithmetic make this a profiling
+/// workload rather than a normal unit test, but the assertions intentionally
+/// cover parsing, analysis, proof checking, stable keys, and a generous wall
+/// bound that catches accidental quadratic scans.
+#[test]
+#[ignore = "deterministic 10,000-row source-ledger profile; run explicitly"]
+fn stress_ten_thousand_obligations_settlements_and_satisfactions() {
+    const ROWS: usize = 10_000;
+    let started = Instant::now();
+    let source = obligation_settlement_fixture(ROWS);
+    let parsed = parse_ledger(&source).expect("10,000-row ontology source parses");
+    assert_eq!(parsed.forms.len(), ROWS * 3);
+    assert!(
+        parsed
+            .forms
+            .first()
+            .is_some_and(|form| { matches!(form, axiom_ledger::model::LedgerForm::Obligation(_)) })
+    );
+    assert!(
+        parsed
+            .forms
+            .get(ROWS)
+            .is_some_and(|form| { matches!(form, axiom_ledger::model::LedgerForm::Settlement(_)) })
+    );
+    assert!(
+        parsed.forms.last().is_some_and(|form| {
+            matches!(form, axiom_ledger::model::LedgerForm::Satisfaction(_))
+        })
+    );
+
+    let mut workspace = Workspace::new();
+    let loaded = workspace
+        .load_source(
+            "fixtures/heavy/obligation-settlement-satisfaction-10k",
+            &source,
+        )
+        .expect("10,000-row ontology source enters immutable storage");
+    let analyzed = workspace
+        .analyze_commit(loaded.commit_id())
+        .expect("10,000-row ontology source reaches production analysis");
+    let analysis = analyzed.analysis;
+    assert_eq!(analysis.obligations.len(), ROWS);
+    assert_eq!(analysis.settlement_histories.len(), ROWS);
+    assert_eq!(analysis.satisfactions.len(), ROWS);
+    assert_eq!(analysis.obligations.first().unwrap().id, "invoice/00000");
+    assert_eq!(analysis.obligations.last().unwrap().id, "invoice/09999");
+    assert_eq!(
+        analysis.settlement_histories.first().unwrap().id,
+        "payment/00000"
+    );
+    assert_eq!(
+        analysis.settlement_histories.last().unwrap().id,
+        "payment/09999"
+    );
+    assert_eq!(
+        analysis.satisfactions.first().unwrap().id,
+        "allocation/00000"
+    );
+    assert_eq!(
+        analysis.satisfactions.last().unwrap().id,
+        "allocation/09999"
+    );
+    assert!(analysis.obligations.iter().all(|obligation| {
+        obligation.status == ObligationStatus::Satisfied
+            && obligation
+                .remaining
+                .as_ref()
+                .is_some_and(|remaining| remaining.is_zero())
+    }));
+    assert!(
+        analysis
+            .settlement_histories
+            .iter()
+            .all(|settlement| settlement.effective)
+    );
+    assert!(
+        analysis
+            .satisfactions
+            .iter()
+            .all(
+                |satisfaction| satisfaction.state == SatisfactionState::Applied
+                    && satisfaction.effective
+            )
+    );
+    assert!(
+        analysis.issues.is_empty(),
+        "stress fixture issues: {:?}",
+        analysis.issues
+    );
+    analysis
+        .check_proof()
+        .expect("10,000-row ontology proof graph checks independently");
+
+    // This is deliberately a very generous bound for slower CI hosts.  It is
+    // not a benchmark target; it only rejects an accidental all-pairs pass
+    // that would turn this 30,001-form fixture into an unbounded test.
+    let limit = if cfg!(debug_assertions) { 180 } else { 60 };
+    assert!(
+        started.elapsed().as_secs() < limit,
+        "10,000-row ontology fixture took {:?} (limit {limit}s); likely quadratic",
+        started.elapsed()
+    );
 }
 
 /// A single source-ledger workload exercises the production path from strict

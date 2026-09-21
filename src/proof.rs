@@ -75,6 +75,124 @@ pub struct LotAllocationCertificate {
     pub value_unit: String,
 }
 
+/// One ordered state observation in a settlement history.
+///
+/// This deliberately uses canonical text for the state and date.  The proof
+/// module must remain independent from the engine and ontology crates; the
+/// engine-facing boundary can serialize its typed state/date values here.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SettlementTransition {
+    pub state: String,
+    pub at: Option<String>,
+}
+
+/// Typed source observation for an obligation.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ObligationObservationCertificate {
+    pub obligation: String,
+    pub debtor: String,
+    pub creditor: String,
+    pub promised: Exact,
+    pub unit: String,
+    pub due: Option<String>,
+}
+
+/// Typed source observation for a settlement and its authoritative history.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SettlementObservationCertificate {
+    pub settlement: String,
+    pub kind: String,
+    pub from: String,
+    pub to: String,
+    pub instrument: String,
+    pub amount: Exact,
+    pub unit: String,
+    pub history: Vec<SettlementTransition>,
+}
+
+/// Typed source observation for a satisfaction allocation.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SatisfactionObservationCertificate {
+    pub satisfaction: String,
+    pub obligation: String,
+    pub settlement: String,
+    pub amount: Exact,
+    pub unit: String,
+    /// Expected canonical spelling is `proposed`, `applied`, or `reversed`.
+    /// The checker accepts case variants at this boundary for ergonomic
+    /// engine adapters, while the value remains content-addressed as given.
+    pub state: String,
+}
+
+/// A self-contained certificate for a settlement's ordered history and its
+/// current effectiveness.  `settlement_proof` must point at the matching
+/// [`Operation::SettlementObservation`] source leaf.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SettlementHistoryCertificate {
+    pub settlement: String,
+    pub settlement_proof: ProofId,
+    pub kind: String,
+    pub from: String,
+    pub to: String,
+    pub instrument: String,
+    pub amount: Exact,
+    pub unit: String,
+    pub history: Vec<SettlementTransition>,
+    pub current: String,
+    pub effective: bool,
+}
+
+/// One typed satisfaction allocation.  The three proof IDs intentionally
+/// remain in the payload as well as in `Node::inputs`: this prevents a
+/// certificate from borrowing a same-shaped source belonging to a different
+/// obligation or settlement.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SatisfactionAllocationCertificate {
+    pub satisfaction: String,
+    pub satisfaction_proof: ProofId,
+    pub obligation: String,
+    pub obligation_proof: ProofId,
+    pub settlement: String,
+    pub settlement_proof: ProofId,
+    pub amount: Exact,
+    pub unit: String,
+    /// Expected canonical spelling is `proposed`, `applied`, or `reversed`.
+    pub state: String,
+}
+
+/// Conservation certificate for one obligation.  The listed allocation IDs
+/// must be exactly all effective applied allocations for this obligation.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ObligationBalanceCertificate {
+    pub obligation: String,
+    pub obligation_proof: ProofId,
+    pub promised: Exact,
+    pub allocated: Exact,
+    pub remaining: Exact,
+    pub unit: String,
+    pub allocations: Vec<ProofId>,
+}
+
+/// Conservation certificate for one settlement.  The listed allocation IDs
+/// must be exactly all effective applied allocations for this settlement.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SettlementBalanceCertificate {
+    pub settlement: String,
+    pub settlement_proof: ProofId,
+    pub amount: Exact,
+    pub allocated: Exact,
+    pub unused: Exact,
+    pub unit: String,
+    pub allocations: Vec<ProofId>,
+}
+
+/// Short aliases kept for engine adapters that name the source leaves by
+/// their domain object rather than by their proof role.
+pub type ObligationCertificate = ObligationObservationCertificate;
+pub type SettlementCertificate = SettlementObservationCertificate;
+pub type SatisfactionCertificate = SatisfactionObservationCertificate;
+pub type SettlementTransitionCertificate = SettlementTransition;
+
 /// A deterministic derivation operation.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Operation {
@@ -84,6 +202,12 @@ pub enum Operation {
     LotObservation { lot: String, source: String },
     /// Source observation for one named disposal.
     SaleObservation { sale: String, source: String },
+    /// Typed source observation for one obligation.
+    ObligationObservation(ObligationObservationCertificate),
+    /// Typed source observation for one settlement and its ordered history.
+    SettlementObservation(SettlementObservationCertificate),
+    /// Typed source observation for one satisfaction allocation.
+    SatisfactionObservation(SatisfactionObservationCertificate),
     /// A rule application.  The rule name is content-addressed by the
     /// package layer when one exists; the checker treats it as data.
     Derive { rule: String },
@@ -126,6 +250,15 @@ pub enum Operation {
         quantity_unit: String,
         value_unit: String,
     },
+    /// Independently checked ordered settlement history and effectiveness.
+    SettlementHistory(Box<SettlementHistoryCertificate>),
+    /// Independently checked identity and endpoint/unit links for one
+    /// satisfaction allocation.
+    SatisfactionAllocation(Box<SatisfactionAllocationCertificate>),
+    /// `promised = effective allocated + remaining` for one obligation.
+    ObligationBalance(Box<ObligationBalanceCertificate>),
+    /// `amount = effective allocated + unused` for one settlement.
+    SettlementBalance(Box<SettlementBalanceCertificate>),
     /// A selected answer to an explicitly named resolution question.
     Decision { subject: String, answer: String },
     /// A policy application.  Policy and decision results are intentionally
@@ -145,11 +278,18 @@ impl Operation {
             Self::Observation { .. } => b"observation",
             Self::LotObservation { .. } => b"lot-observation",
             Self::SaleObservation { .. } => b"sale-observation",
+            Self::ObligationObservation(..) => b"obligation-observation",
+            Self::SettlementObservation(..) => b"settlement-observation",
+            Self::SatisfactionObservation(..) => b"satisfaction-observation",
             Self::Derive { .. } => b"derive",
             Self::Arithmetic { .. } => b"arithmetic",
             Self::LotAllocation(..) => b"lot-allocation",
             Self::InventoryConservation { .. } => b"inventory-conservation",
             Self::Recognition { .. } => b"recognition",
+            Self::SettlementHistory(..) => b"settlement-history",
+            Self::SatisfactionAllocation(..) => b"satisfaction-allocation",
+            Self::ObligationBalance(..) => b"obligation-balance",
+            Self::SettlementBalance(..) => b"settlement-balance",
             Self::Decision { .. } => b"decision",
             Self::Policy { .. } => b"policy",
             Self::Conflict { .. } => b"conflict",
@@ -167,6 +307,32 @@ impl Operation {
             Self::SaleObservation { sale, source } => {
                 put_string(out, sale);
                 put_string(out, source);
+            }
+            Self::ObligationObservation(certificate) => {
+                put_string(out, &certificate.obligation);
+                put_string(out, &certificate.debtor);
+                put_string(out, &certificate.creditor);
+                put_string(out, &certificate.promised.canonical_string());
+                put_string(out, &certificate.unit);
+                put_optional_string(out, certificate.due.as_deref());
+            }
+            Self::SettlementObservation(certificate) => {
+                put_string(out, &certificate.settlement);
+                put_string(out, &certificate.kind);
+                put_string(out, &certificate.from);
+                put_string(out, &certificate.to);
+                put_string(out, &certificate.instrument);
+                put_string(out, &certificate.amount.canonical_string());
+                put_string(out, &certificate.unit);
+                put_transitions(out, &certificate.history);
+            }
+            Self::SatisfactionObservation(certificate) => {
+                put_string(out, &certificate.satisfaction);
+                put_string(out, &certificate.obligation);
+                put_string(out, &certificate.settlement);
+                put_string(out, &certificate.amount.canonical_string());
+                put_string(out, &certificate.unit);
+                put_string(out, &certificate.state);
             }
             Self::Derive { rule } => put_string(out, rule),
             Self::Arithmetic {
@@ -236,6 +402,48 @@ impl Operation {
                 put_string(out, &gain.canonical_string());
                 put_string(out, quantity_unit);
                 put_string(out, value_unit);
+            }
+            Self::SettlementHistory(certificate) => {
+                put_string(out, &certificate.settlement);
+                put_proof_id(out, &certificate.settlement_proof);
+                put_string(out, &certificate.kind);
+                put_string(out, &certificate.from);
+                put_string(out, &certificate.to);
+                put_string(out, &certificate.instrument);
+                put_string(out, &certificate.amount.canonical_string());
+                put_string(out, &certificate.unit);
+                put_transitions(out, &certificate.history);
+                put_string(out, &certificate.current);
+                out.push(u8::from(certificate.effective));
+            }
+            Self::SatisfactionAllocation(certificate) => {
+                put_string(out, &certificate.satisfaction);
+                put_proof_id(out, &certificate.satisfaction_proof);
+                put_string(out, &certificate.obligation);
+                put_proof_id(out, &certificate.obligation_proof);
+                put_string(out, &certificate.settlement);
+                put_proof_id(out, &certificate.settlement_proof);
+                put_string(out, &certificate.amount.canonical_string());
+                put_string(out, &certificate.unit);
+                put_string(out, &certificate.state);
+            }
+            Self::ObligationBalance(certificate) => {
+                put_string(out, &certificate.obligation);
+                put_proof_id(out, &certificate.obligation_proof);
+                put_string(out, &certificate.promised.canonical_string());
+                put_string(out, &certificate.allocated.canonical_string());
+                put_string(out, &certificate.remaining.canonical_string());
+                put_string(out, &certificate.unit);
+                put_proof_ids(out, &certificate.allocations);
+            }
+            Self::SettlementBalance(certificate) => {
+                put_string(out, &certificate.settlement);
+                put_proof_id(out, &certificate.settlement_proof);
+                put_string(out, &certificate.amount.canonical_string());
+                put_string(out, &certificate.allocated.canonical_string());
+                put_string(out, &certificate.unused.canonical_string());
+                put_string(out, &certificate.unit);
+                put_proof_ids(out, &certificate.allocations);
             }
             Self::Decision { subject, answer } => {
                 put_string(out, subject);
@@ -338,10 +546,17 @@ impl Proof {
     }
 
     pub fn root(&mut self, id: ProofId) {
-        if !self.roots.contains(&id) {
-            self.roots.push(id);
-            self.roots.sort();
+        if let Err(index) = self.roots.binary_search(&id) {
+            self.roots.insert(index, id);
         }
+    }
+
+    /// Add a batch of roots with one canonicalization pass. Large analyses
+    /// must not repeatedly shift and sort the root vector.
+    pub fn root_all(&mut self, roots: impl IntoIterator<Item = ProofId>) {
+        self.roots.extend(roots);
+        self.roots.sort_unstable();
+        self.roots.dedup();
     }
 
     pub fn node(&self, id: ProofId) -> Option<&Node> {
@@ -386,6 +601,21 @@ impl Proof {
                 return Err(CheckError::InvalidArithmetic { id: *id });
             }
             match &node.operation {
+                Operation::ObligationObservation(certificate)
+                    if !valid_obligation_observation(certificate) =>
+                {
+                    return Err(CheckError::InvalidObligationObservation { id: *id });
+                }
+                Operation::SettlementObservation(certificate)
+                    if !valid_settlement_observation(certificate) =>
+                {
+                    return Err(CheckError::InvalidSettlementObservation { id: *id });
+                }
+                Operation::SatisfactionObservation(certificate)
+                    if !valid_satisfaction_observation(certificate) =>
+                {
+                    return Err(CheckError::InvalidSatisfactionObservation { id: *id });
+                }
                 Operation::LotAllocation(certificate) => {
                     if !valid_lot_allocation(certificate)
                         || !certificate_metadata_matches(
@@ -469,6 +699,26 @@ impl Proof {
                 {
                     return Err(CheckError::InvalidRecognition { id: *id });
                 }
+                Operation::SettlementHistory(certificate)
+                    if !valid_settlement_history_certificate(certificate) =>
+                {
+                    return Err(CheckError::InvalidSettlementHistory { id: *id });
+                }
+                Operation::SatisfactionAllocation(certificate)
+                    if !valid_satisfaction_allocation(certificate) =>
+                {
+                    return Err(CheckError::InvalidSatisfactionAllocation { id: *id });
+                }
+                Operation::ObligationBalance(certificate)
+                    if !valid_obligation_balance(certificate) =>
+                {
+                    return Err(CheckError::InvalidObligationBalance { id: *id });
+                }
+                Operation::SettlementBalance(certificate)
+                    if !valid_settlement_balance(certificate) =>
+                {
+                    return Err(CheckError::InvalidSettlementBalance { id: *id });
+                }
                 _ => {}
             }
             let invalid_operation = match &node.operation {
@@ -479,13 +729,37 @@ impl Proof {
                 Operation::SaleObservation { sale, source } => {
                     sale.trim().is_empty() || source.trim().is_empty()
                 }
+                Operation::ObligationObservation(certificate) => {
+                    certificate.obligation.trim().is_empty()
+                        || certificate.debtor.trim().is_empty()
+                        || certificate.creditor.trim().is_empty()
+                        || certificate.unit.trim().is_empty()
+                }
+                Operation::SettlementObservation(certificate) => {
+                    certificate.settlement.trim().is_empty()
+                        || certificate.from.trim().is_empty()
+                        || certificate.to.trim().is_empty()
+                        || certificate.instrument.trim().is_empty()
+                        || certificate.unit.trim().is_empty()
+                }
+                Operation::SatisfactionObservation(certificate) => {
+                    certificate.satisfaction.trim().is_empty()
+                        || certificate.obligation.trim().is_empty()
+                        || certificate.settlement.trim().is_empty()
+                        || certificate.unit.trim().is_empty()
+                        || certificate.state.trim().is_empty()
+                }
                 Operation::Derive { rule } => rule.trim().is_empty(),
                 Operation::Arithmetic { rule, unit, .. } => {
                     rule.trim().is_empty() || unit.trim().is_empty()
                 }
                 Operation::LotAllocation(..)
                 | Operation::InventoryConservation { .. }
-                | Operation::Recognition { .. } => false,
+                | Operation::Recognition { .. }
+                | Operation::SettlementHistory(..)
+                | Operation::SatisfactionAllocation(..)
+                | Operation::ObligationBalance(..)
+                | Operation::SettlementBalance(..) => false,
                 Operation::Decision { subject, answer } => {
                     subject.trim().is_empty() || answer.trim().is_empty()
                 }
@@ -520,8 +794,39 @@ impl Proof {
         // and reject reusing one allocation in two inventory histories.
         let mut allocation_uses: BTreeMap<ProofId, ProofId> = BTreeMap::new();
         let mut predecessor_uses: BTreeMap<ProofId, ProofId> = BTreeMap::new();
+        let mut obligation_balance_uses: BTreeMap<ProofId, ProofId> = BTreeMap::new();
+        let mut settlement_balance_uses: BTreeMap<ProofId, ProofId> = BTreeMap::new();
+        let mut obligation_sources: BTreeMap<String, ProofId> = BTreeMap::new();
+        let mut settlement_sources: BTreeMap<String, ProofId> = BTreeMap::new();
+        let mut satisfaction_sources: BTreeMap<String, ProofId> = BTreeMap::new();
+        let mut satisfaction_certificates: BTreeMap<String, ProofId> = BTreeMap::new();
+        let effective_allocations = effective_allocation_index(self);
         for (id, node) in &self.nodes {
             match &node.operation {
+                Operation::ObligationObservation(certificate) => {
+                    if obligation_sources
+                        .insert(certificate.obligation.clone(), *id)
+                        .is_some()
+                    {
+                        return Err(CheckError::DuplicateObligationObservation { id: *id });
+                    }
+                }
+                Operation::SettlementObservation(certificate) => {
+                    if settlement_sources
+                        .insert(certificate.settlement.clone(), *id)
+                        .is_some()
+                    {
+                        return Err(CheckError::DuplicateSettlementObservation { id: *id });
+                    }
+                }
+                Operation::SatisfactionObservation(certificate) => {
+                    if satisfaction_sources
+                        .insert(certificate.satisfaction.clone(), *id)
+                        .is_some()
+                    {
+                        return Err(CheckError::DuplicateSatisfactionObservation { id: *id });
+                    }
+                }
                 Operation::LotAllocation(certificate) => {
                     if !node.inputs.contains(&certificate.lot_proof)
                         || !node.inputs.contains(&certificate.sale_proof)
@@ -613,6 +918,59 @@ impl Proof {
                         return Err(CheckError::InvalidInventoryConservation { id: *id });
                     }
                 }
+                Operation::SettlementHistory(certificate) => {
+                    if !node.inputs.contains(&certificate.settlement_proof)
+                        || !settlement_history_matches_source(
+                            self.nodes.get(&certificate.settlement_proof),
+                            certificate,
+                        )
+                    {
+                        return Err(CheckError::InvalidSettlementHistory { id: *id });
+                    }
+                }
+                Operation::SatisfactionAllocation(certificate) => {
+                    if satisfaction_certificates
+                        .insert(certificate.satisfaction.clone(), *id)
+                        .is_some()
+                        || !node.inputs.contains(&certificate.satisfaction_proof)
+                        || !node.inputs.contains(&certificate.obligation_proof)
+                        || !node.inputs.contains(&certificate.settlement_proof)
+                        || !satisfaction_allocation_matches_sources(
+                            self.nodes.get(&certificate.satisfaction_proof),
+                            self.nodes.get(&certificate.obligation_proof),
+                            self.nodes.get(&certificate.settlement_proof),
+                            certificate,
+                        )
+                    {
+                        return Err(CheckError::InvalidSatisfactionAllocation { id: *id });
+                    }
+                }
+                Operation::ObligationBalance(certificate) => {
+                    if !node.inputs.contains(&certificate.obligation_proof)
+                        || !obligation_balance_matches(
+                            self,
+                            *id,
+                            certificate,
+                            &mut obligation_balance_uses,
+                            &effective_allocations,
+                        )
+                    {
+                        return Err(CheckError::InvalidObligationBalance { id: *id });
+                    }
+                }
+                Operation::SettlementBalance(certificate) => {
+                    if !node.inputs.contains(&certificate.settlement_proof)
+                        || !settlement_balance_matches(
+                            self,
+                            *id,
+                            certificate,
+                            &mut settlement_balance_uses,
+                            &effective_allocations,
+                        )
+                    {
+                        return Err(CheckError::InvalidSettlementBalance { id: *id });
+                    }
+                }
                 Operation::Recognition {
                     sale,
                     sale_proof,
@@ -689,6 +1047,10 @@ impl Proof {
                 Operation::LotAllocation(..)
                     | Operation::InventoryConservation { .. }
                     | Operation::Recognition { .. }
+                    | Operation::SettlementHistory(..)
+                    | Operation::SatisfactionAllocation(..)
+                    | Operation::ObligationBalance(..)
+                    | Operation::SettlementBalance(..)
             ) && !reachable.contains(id)
             {
                 return Err(CheckError::UnreachableCertificate { id: *id });
@@ -786,9 +1148,19 @@ pub enum CheckError {
     MissingRoot { root: ProofId },
     MissingNode { id: ProofId },
     InvalidArithmetic { id: ProofId },
+    InvalidObligationObservation { id: ProofId },
+    InvalidSettlementObservation { id: ProofId },
+    InvalidSatisfactionObservation { id: ProofId },
     InvalidLotAllocation { id: ProofId },
     InvalidInventoryConservation { id: ProofId },
     InvalidRecognition { id: ProofId },
+    InvalidSettlementHistory { id: ProofId },
+    InvalidSatisfactionAllocation { id: ProofId },
+    InvalidObligationBalance { id: ProofId },
+    InvalidSettlementBalance { id: ProofId },
+    DuplicateObligationObservation { id: ProofId },
+    DuplicateSettlementObservation { id: ProofId },
+    DuplicateSatisfactionObservation { id: ProofId },
     UnreachableCertificate { id: ProofId },
     InvalidOperation { id: ProofId },
     Cycle,
@@ -816,6 +1188,24 @@ impl fmt::Display for CheckError {
                     "proof node {id} contains an invalid arithmetic certificate"
                 )
             }
+            Self::InvalidObligationObservation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid obligation observation"
+                )
+            }
+            Self::InvalidSettlementObservation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid settlement observation"
+                )
+            }
+            Self::InvalidSatisfactionObservation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid satisfaction observation"
+                )
+            }
             Self::InvalidLotAllocation { id } => {
                 write!(
                     f,
@@ -834,6 +1224,39 @@ impl fmt::Display for CheckError {
                     "proof node {id} contains an invalid recognition certificate"
                 )
             }
+            Self::InvalidSettlementHistory { id } => {
+                write!(f, "proof node {id} contains an invalid settlement history")
+            }
+            Self::InvalidSatisfactionAllocation { id } => {
+                write!(
+                    f,
+                    "proof node {id} contains an invalid satisfaction allocation"
+                )
+            }
+            Self::InvalidObligationBalance { id } => {
+                write!(f, "proof node {id} contains an invalid obligation balance")
+            }
+            Self::InvalidSettlementBalance { id } => {
+                write!(f, "proof node {id} contains an invalid settlement balance")
+            }
+            Self::DuplicateObligationObservation { id } => {
+                write!(
+                    f,
+                    "proof bundle contains duplicate obligation observation at {id}"
+                )
+            }
+            Self::DuplicateSettlementObservation { id } => {
+                write!(
+                    f,
+                    "proof bundle contains duplicate settlement observation at {id}"
+                )
+            }
+            Self::DuplicateSatisfactionObservation { id } => {
+                write!(
+                    f,
+                    "proof bundle contains duplicate satisfaction observation at {id}"
+                )
+            }
             Self::UnreachableCertificate { id } => {
                 write!(f, "proof certificate {id} is not reachable from any root")
             }
@@ -846,6 +1269,450 @@ impl fmt::Display for CheckError {
 }
 
 impl std::error::Error for CheckError {}
+
+fn valid_obligation_observation(certificate: &ObligationObservationCertificate) -> bool {
+    !certificate.obligation.trim().is_empty()
+        && !certificate.debtor.trim().is_empty()
+        && !certificate.creditor.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && !certificate.promised.is_negative()
+        && !certificate.promised.is_zero()
+        && certificate.due.as_deref().is_none_or(valid_canonical_date)
+}
+
+fn valid_settlement_observation(certificate: &SettlementObservationCertificate) -> bool {
+    !certificate.settlement.trim().is_empty()
+        && valid_settlement_kind(&certificate.kind)
+        && !certificate.from.trim().is_empty()
+        && !certificate.to.trim().is_empty()
+        && !certificate.instrument.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && certificate.instrument == certificate.unit
+        && !certificate.amount.is_negative()
+        && !certificate.amount.is_zero()
+        && valid_settlement_history(&certificate.settlement, &certificate.history).is_some()
+}
+
+fn valid_satisfaction_observation(certificate: &SatisfactionObservationCertificate) -> bool {
+    !certificate.satisfaction.trim().is_empty()
+        && !certificate.obligation.trim().is_empty()
+        && !certificate.settlement.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && !certificate.amount.is_negative()
+        && !certificate.amount.is_zero()
+        && valid_allocation_state(&certificate.state)
+}
+
+fn valid_settlement_history_certificate(certificate: &SettlementHistoryCertificate) -> bool {
+    !certificate.settlement.trim().is_empty()
+        && valid_settlement_kind(&certificate.kind)
+        && !certificate.from.trim().is_empty()
+        && !certificate.to.trim().is_empty()
+        && !certificate.instrument.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && certificate.instrument == certificate.unit
+        && !certificate.amount.is_negative()
+        && !certificate.amount.is_zero()
+        && valid_settlement_history(&certificate.settlement, &certificate.history).is_some_and(
+            |(current, effective)| {
+                certificate.current == current && certificate.effective == effective
+            },
+        )
+}
+
+fn valid_satisfaction_allocation(certificate: &SatisfactionAllocationCertificate) -> bool {
+    !certificate.satisfaction.trim().is_empty()
+        && !certificate.obligation.trim().is_empty()
+        && !certificate.settlement.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && !certificate.amount.is_negative()
+        && !certificate.amount.is_zero()
+        && valid_allocation_state(&certificate.state)
+}
+
+fn valid_obligation_balance(certificate: &ObligationBalanceCertificate) -> bool {
+    !certificate.obligation.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && !certificate.promised.is_negative()
+        && !certificate.allocated.is_negative()
+        && !certificate.remaining.is_negative()
+        && certificate.allocated.checked_add(&certificate.remaining) == certificate.promised
+        && unique_proof_ids(&certificate.allocations)
+}
+
+fn valid_settlement_balance(certificate: &SettlementBalanceCertificate) -> bool {
+    !certificate.settlement.trim().is_empty()
+        && !certificate.unit.trim().is_empty()
+        && !certificate.amount.is_negative()
+        && !certificate.allocated.is_negative()
+        && !certificate.unused.is_negative()
+        && certificate.allocated.checked_add(&certificate.unused) == certificate.amount
+        && unique_proof_ids(&certificate.allocations)
+}
+
+fn valid_allocation_state(state: &str) -> bool {
+    matches!(
+        state.trim().to_ascii_lowercase().as_str(),
+        "proposed" | "applied" | "reversed"
+    )
+}
+
+fn valid_settlement_kind(kind: &str) -> bool {
+    matches!(kind.trim(), "ach" | "card" | "check")
+}
+
+fn valid_canonical_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
+        && parse_date_key(value).is_some()
+}
+
+fn is_applied(state: &str) -> bool {
+    state.trim().eq_ignore_ascii_case("applied")
+}
+
+fn unique_proof_ids(ids: &[ProofId]) -> bool {
+    ids.iter().collect::<BTreeSet<_>>().len() == ids.len()
+}
+
+/// Validate a source settlement history without calling the ontology.  The
+/// return value is the independently derived current state and effectiveness.
+fn valid_settlement_history(
+    settlement: &str,
+    history: &[SettlementTransition],
+) -> Option<(String, bool)> {
+    if settlement.trim().is_empty() || history.is_empty() {
+        return None;
+    }
+    let mut previous_state: Option<&str> = None;
+    let mut previous_at = None;
+    for transition in history {
+        if transition.state.trim().is_empty() || !valid_settlement_state(&transition.state) {
+            return None;
+        }
+        let state = transition.state.trim();
+        if !settlement_transition_is_legal(previous_state, state) {
+            return None;
+        }
+        if let Some(at) = transition.at.as_deref() {
+            if !valid_canonical_date(at) {
+                return None;
+            }
+            let current_at = parse_date_key(at)?;
+            if previous_at.is_some_and(|previous| current_at < previous) {
+                return None;
+            }
+            previous_at = Some(current_at);
+        }
+        previous_state = Some(state);
+    }
+    let current = previous_state?.to_string();
+    // `resolved` records that a dispute ended, but does not say who prevailed.
+    // Only an explicit settled state proves effective payment.
+    let effective = current.eq_ignore_ascii_case("settled");
+    Some((current, effective))
+}
+
+fn valid_settlement_state(state: &str) -> bool {
+    matches!(
+        state.trim().to_ascii_lowercase().as_str(),
+        "issued"
+            | "authorized"
+            | "presented"
+            | "pending"
+            | "settled"
+            | "returned"
+            | "reversed"
+            | "rejected"
+            | "cancelled"
+            | "refunded"
+            | "disputed"
+            | "charged-back"
+            | "represented"
+            | "resolved"
+    )
+}
+
+fn settlement_transition_is_legal(previous: Option<&str>, next: &str) -> bool {
+    let next = next.trim().to_ascii_lowercase();
+    let previous = previous.map(|state| state.trim().to_ascii_lowercase());
+    matches!(
+        (previous.as_deref(), next.as_str()),
+        (None, "issued")
+            | (Some("issued"), "authorized" | "presented" | "cancelled")
+            | (Some("authorized"), "presented" | "cancelled" | "rejected")
+            | (
+                Some("presented"),
+                "pending" | "settled" | "returned" | "rejected" | "cancelled"
+            )
+            | (
+                Some("pending"),
+                "settled" | "returned" | "rejected" | "cancelled"
+            )
+            | (
+                Some("settled"),
+                "returned" | "reversed" | "refunded" | "disputed" | "charged-back"
+            )
+            | (Some("disputed"), "resolved" | "charged-back")
+            | (Some("charged-back"), "represented")
+            | (Some("represented"), "pending" | "settled" | "rejected")
+            | (Some("returned"), "presented" | "cancelled")
+            | (Some("reversed"), "presented" | "cancelled")
+            | (Some("rejected"), "presented" | "cancelled")
+    )
+}
+
+fn parse_date_key(value: &str) -> Option<(i32, u8, u8)> {
+    let mut pieces = value.split('-');
+    let year = pieces.next()?.parse::<i32>().ok()?;
+    let month = pieces.next()?.parse::<u8>().ok()?;
+    let day = pieces.next()?.parse::<u8>().ok()?;
+    if pieces.next().is_some()
+        || !(1..=12).contains(&month)
+        || day == 0
+        || day > days_in_month(year, month)
+    {
+        return None;
+    }
+    Some((year, month, day))
+}
+
+fn days_in_month(year: i32, month: u8) -> u8 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn settlement_history_matches_source(
+    node: Option<&Node>,
+    certificate: &SettlementHistoryCertificate,
+) -> bool {
+    let Some(Node {
+        operation: Operation::SettlementObservation(source),
+        ..
+    }) = node
+    else {
+        return false;
+    };
+    source.settlement == certificate.settlement
+        && source.kind == certificate.kind
+        && source.from == certificate.from
+        && source.to == certificate.to
+        && source.instrument == certificate.instrument
+        && source.amount == certificate.amount
+        && source.unit == certificate.unit
+        && source.history == certificate.history
+        && valid_settlement_history(&source.settlement, &source.history).is_some_and(
+            |(current, effective)| {
+                certificate.current == current && certificate.effective == effective
+            },
+        )
+}
+
+fn satisfaction_allocation_matches_sources(
+    satisfaction_node: Option<&Node>,
+    obligation_node: Option<&Node>,
+    settlement_node: Option<&Node>,
+    certificate: &SatisfactionAllocationCertificate,
+) -> bool {
+    let Some(Node {
+        operation: Operation::SatisfactionObservation(satisfaction),
+        ..
+    }) = satisfaction_node
+    else {
+        return false;
+    };
+    let Some(Node {
+        operation: Operation::ObligationObservation(obligation),
+        ..
+    }) = obligation_node
+    else {
+        return false;
+    };
+    let Some(Node {
+        operation: Operation::SettlementObservation(settlement),
+        ..
+    }) = settlement_node
+    else {
+        return false;
+    };
+    satisfaction.satisfaction == certificate.satisfaction
+        && satisfaction.obligation == certificate.obligation
+        && satisfaction.settlement == certificate.settlement
+        && satisfaction.amount == certificate.amount
+        && satisfaction.unit == certificate.unit
+        && satisfaction.state == certificate.state
+        && obligation.obligation == certificate.obligation
+        && settlement.settlement == certificate.settlement
+        && obligation.debtor == settlement.from
+        && obligation.creditor == settlement.to
+        && obligation.unit == settlement.unit
+        && obligation.unit == certificate.unit
+        && settlement.instrument == certificate.unit
+}
+
+fn settlement_is_effective(node: Option<&Node>) -> bool {
+    let Some(Node {
+        operation: Operation::SettlementObservation(settlement),
+        ..
+    }) = node
+    else {
+        return false;
+    };
+    valid_settlement_history(&settlement.settlement, &settlement.history)
+        .is_some_and(|(_, effective)| effective)
+}
+
+fn allocation_is_effective(proof: &Proof, node: &Node) -> bool {
+    let Operation::SatisfactionAllocation(certificate) = &node.operation else {
+        return false;
+    };
+    is_applied(&certificate.state)
+        && settlement_is_effective(proof.nodes.get(&certificate.settlement_proof))
+}
+
+/// Effective satisfaction allocations are shared by obligation and
+/// settlement balance certificates.  Building these indexes once avoids
+/// rescanning the complete proof DAG for every balance node.
+struct EffectiveAllocationIndex {
+    by_obligation: BTreeMap<String, (BTreeSet<ProofId>, Exact)>,
+    by_settlement: BTreeMap<String, (BTreeSet<ProofId>, Exact)>,
+}
+
+fn effective_allocation_index(proof: &Proof) -> EffectiveAllocationIndex {
+    let mut index = EffectiveAllocationIndex {
+        by_obligation: BTreeMap::new(),
+        by_settlement: BTreeMap::new(),
+    };
+    for (id, node) in &proof.nodes {
+        let Operation::SatisfactionAllocation(certificate) = &node.operation else {
+            continue;
+        };
+        if !allocation_is_effective(proof, node) {
+            continue;
+        }
+        let obligation = index
+            .by_obligation
+            .entry(certificate.obligation.clone())
+            .or_insert_with(|| (BTreeSet::new(), Exact::from(0i64)));
+        obligation.0.insert(*id);
+        obligation.1 = obligation.1.checked_add(&certificate.amount);
+
+        let settlement = index
+            .by_settlement
+            .entry(certificate.settlement.clone())
+            .or_insert_with(|| (BTreeSet::new(), Exact::from(0i64)));
+        settlement.0.insert(*id);
+        settlement.1 = settlement.1.checked_add(&certificate.amount);
+    }
+    index
+}
+
+fn obligation_balance_matches(
+    proof: &Proof,
+    node_id: ProofId,
+    certificate: &ObligationBalanceCertificate,
+    uses: &mut BTreeMap<ProofId, ProofId>,
+    index: &EffectiveAllocationIndex,
+) -> bool {
+    if uses.insert(certificate.obligation_proof, node_id).is_some() {
+        return false;
+    }
+    let Some(Node {
+        operation: Operation::ObligationObservation(obligation),
+        ..
+    }) = proof.nodes.get(&certificate.obligation_proof)
+    else {
+        return false;
+    };
+    if obligation.obligation != certificate.obligation
+        || obligation.promised != certificate.promised
+        || obligation.unit != certificate.unit
+    {
+        return false;
+    }
+    let Some(balance) = proof.nodes.get(&node_id) else {
+        return false;
+    };
+    let listed = certificate
+        .allocations
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let expected = index.by_obligation.get(&certificate.obligation);
+    let allocations_match = match expected {
+        Some((expected_ids, expected_total)) => {
+            &listed == expected_ids && &certificate.allocated == expected_total
+        }
+        None => listed.is_empty() && certificate.allocated.is_zero(),
+    };
+    allocations_match
+        && certificate.allocated.checked_add(&certificate.remaining) == certificate.promised
+        && certificate.allocations.iter().all(|allocation| {
+            balance.inputs.binary_search(allocation).is_ok()
+                && proof.nodes.get(allocation).is_some_and(|node| {
+                    matches!(node.operation, Operation::SatisfactionAllocation(_))
+                })
+        })
+}
+
+fn settlement_balance_matches(
+    proof: &Proof,
+    node_id: ProofId,
+    certificate: &SettlementBalanceCertificate,
+    uses: &mut BTreeMap<ProofId, ProofId>,
+    index: &EffectiveAllocationIndex,
+) -> bool {
+    if uses.insert(certificate.settlement_proof, node_id).is_some() {
+        return false;
+    }
+    let Some(Node {
+        operation: Operation::SettlementObservation(settlement),
+        ..
+    }) = proof.nodes.get(&certificate.settlement_proof)
+    else {
+        return false;
+    };
+    if settlement.settlement != certificate.settlement
+        || settlement.amount != certificate.amount
+        || settlement.unit != certificate.unit
+    {
+        return false;
+    }
+    let Some(balance) = proof.nodes.get(&node_id) else {
+        return false;
+    };
+    let listed = certificate
+        .allocations
+        .iter()
+        .copied()
+        .collect::<BTreeSet<_>>();
+    let expected = index.by_settlement.get(&certificate.settlement);
+    let allocations_match = match expected {
+        Some((expected_ids, expected_total)) => {
+            &listed == expected_ids && &certificate.allocated == expected_total
+        }
+        None => listed.is_empty() && certificate.allocated.is_zero(),
+    };
+    allocations_match
+        && certificate.allocated.checked_add(&certificate.unused) == certificate.amount
+        && certificate.allocations.iter().all(|allocation| {
+            balance.inputs.binary_search(allocation).is_ok()
+                && proof.nodes.get(allocation).is_some_and(|node| {
+                    matches!(node.operation, Operation::SatisfactionAllocation(_))
+                })
+        })
+}
 
 fn valid_lot_allocation(certificate: &LotAllocationCertificate) -> bool {
     let Some(sale_ratio) = certificate
@@ -1001,6 +1868,37 @@ fn put_optional_proof_id(out: &mut Vec<u8>, value: Option<ProofId>) {
         Some(value) => {
             out.push(1);
             put_proof_id(out, &value);
+        }
+        None => out.push(0),
+    }
+}
+
+fn put_proof_ids(out: &mut Vec<u8>, values: &[ProofId]) {
+    put_u64(out, values.len() as u64);
+    for value in values {
+        put_proof_id(out, value);
+    }
+}
+
+fn put_transitions(out: &mut Vec<u8>, values: &[SettlementTransition]) {
+    put_u64(out, values.len() as u64);
+    for value in values {
+        put_string(out, &value.state);
+        match &value.at {
+            Some(at) => {
+                out.push(1);
+                put_string(out, at);
+            }
+            None => out.push(0),
+        }
+    }
+}
+
+fn put_optional_string(out: &mut Vec<u8>, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            out.push(1);
+            put_string(out, value);
         }
         None => out.push(0),
     }
@@ -1240,5 +2138,229 @@ mod tests {
         proof.insert(second);
         proof.root(second_id);
         assert!(proof.check().is_ok());
+    }
+
+    fn satisfaction_fixture(
+        current: &str,
+        effective: bool,
+        allocation_amount: i64,
+        remaining: i64,
+        unused: i64,
+    ) -> Proof {
+        let obligation = Node::new(
+            "obligation invoice",
+            Operation::ObligationObservation(ObligationObservationCertificate {
+                obligation: "invoice".into(),
+                debtor: "alice".into(),
+                creditor: "bob".into(),
+                promised: Exact::from(100i64),
+                unit: "USD".into(),
+                due: Some("2026-12-31".into()),
+            }),
+            vec![],
+            BTreeMap::new(),
+        );
+        let settlement_source = Node::new(
+            "settlement payment",
+            Operation::SettlementObservation(SettlementObservationCertificate {
+                settlement: "payment".into(),
+                kind: "ach".into(),
+                from: "alice".into(),
+                to: "bob".into(),
+                instrument: "USD".into(),
+                amount: Exact::from(60i64),
+                unit: "USD".into(),
+                history: vec![
+                    SettlementTransition {
+                        state: "issued".into(),
+                        at: Some("2026-01-01".into()),
+                    },
+                    SettlementTransition {
+                        state: "presented".into(),
+                        at: Some("2026-01-02".into()),
+                    },
+                    SettlementTransition {
+                        state: "settled".into(),
+                        at: Some("2026-01-03".into()),
+                    },
+                ],
+            }),
+            vec![],
+            BTreeMap::new(),
+        );
+        let satisfaction = Node::new(
+            "satisfaction allocation-1",
+            Operation::SatisfactionObservation(SatisfactionObservationCertificate {
+                satisfaction: "allocation-1".into(),
+                obligation: "invoice".into(),
+                settlement: "payment".into(),
+                amount: Exact::from(allocation_amount),
+                unit: "USD".into(),
+                state: "applied".into(),
+            }),
+            vec![],
+            BTreeMap::new(),
+        );
+        let history = Node::new(
+            "settlement history payment",
+            Operation::SettlementHistory(Box::new(SettlementHistoryCertificate {
+                settlement: "payment".into(),
+                settlement_proof: settlement_source.id,
+                kind: "ach".into(),
+                from: "alice".into(),
+                to: "bob".into(),
+                instrument: "USD".into(),
+                amount: Exact::from(60i64),
+                unit: "USD".into(),
+                history: match &settlement_source.operation {
+                    Operation::SettlementObservation(source) => source.history.clone(),
+                    _ => unreachable!(),
+                },
+                current: current.into(),
+                effective,
+            })),
+            vec![settlement_source.id],
+            BTreeMap::new(),
+        );
+        let allocation = Node::new(
+            "apply allocation-1",
+            Operation::SatisfactionAllocation(Box::new(SatisfactionAllocationCertificate {
+                satisfaction: "allocation-1".into(),
+                satisfaction_proof: satisfaction.id,
+                obligation: "invoice".into(),
+                obligation_proof: obligation.id,
+                settlement: "payment".into(),
+                settlement_proof: settlement_source.id,
+                amount: Exact::from(allocation_amount),
+                unit: "USD".into(),
+                state: "applied".into(),
+            })),
+            vec![satisfaction.id, obligation.id, settlement_source.id],
+            BTreeMap::new(),
+        );
+        let obligation_balance = Node::new(
+            "balance invoice",
+            Operation::ObligationBalance(Box::new(ObligationBalanceCertificate {
+                obligation: "invoice".into(),
+                obligation_proof: obligation.id,
+                promised: Exact::from(100i64),
+                allocated: Exact::from(allocation_amount),
+                remaining: Exact::from(remaining),
+                unit: "USD".into(),
+                allocations: vec![allocation.id],
+            })),
+            vec![obligation.id, allocation.id],
+            BTreeMap::new(),
+        );
+        let settlement_balance = Node::new(
+            "balance payment",
+            Operation::SettlementBalance(Box::new(SettlementBalanceCertificate {
+                settlement: "payment".into(),
+                settlement_proof: settlement_source.id,
+                amount: Exact::from(60i64),
+                allocated: Exact::from(allocation_amount),
+                unused: Exact::from(unused),
+                unit: "USD".into(),
+                allocations: vec![allocation.id],
+            })),
+            vec![settlement_source.id, allocation.id],
+            BTreeMap::new(),
+        );
+        let obligation_balance_id = obligation_balance.id;
+        let settlement_balance_id = settlement_balance.id;
+        let history_id = history.id;
+        let mut proof = Proof::new();
+        for node in [
+            obligation,
+            settlement_source,
+            satisfaction,
+            history,
+            allocation,
+            obligation_balance,
+            settlement_balance,
+        ] {
+            proof.insert(node);
+        }
+        proof.root(obligation_balance_id);
+        proof.root(settlement_balance_id);
+        proof.root(history_id);
+        proof
+    }
+
+    #[test]
+    fn checker_verifies_typed_satisfaction_balances_and_history() {
+        assert!(
+            satisfaction_fixture("settled", true, 60, 40, 0)
+                .check()
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn checker_rejects_tampered_satisfaction_certificates() {
+        assert!(matches!(
+            satisfaction_fixture("issued", true, 60, 40, 0).check(),
+            Err(CheckError::InvalidSettlementHistory { .. })
+        ));
+        assert!(
+            satisfaction_fixture("settled", true, 61, 39, 0)
+                .check()
+                .is_err()
+        );
+        assert!(
+            satisfaction_fixture("settled", true, 60, 41, 0)
+                .check()
+                .is_err()
+        );
+        assert!(
+            satisfaction_fixture("settled", true, 60, 40, 1)
+                .check()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn typed_source_payload_includes_due_and_settlement_kind() {
+        let obligation = |due| {
+            Node::new(
+                "obligation invoice",
+                Operation::ObligationObservation(ObligationObservationCertificate {
+                    obligation: "invoice".into(),
+                    debtor: "alice".into(),
+                    creditor: "bob".into(),
+                    promised: Exact::from(100i64),
+                    unit: "USD".into(),
+                    due,
+                }),
+                vec![],
+                BTreeMap::new(),
+            )
+        };
+        assert_ne!(
+            obligation(Some("2026-12-31".into())).id,
+            obligation(Some("2027-01-01".into())).id
+        );
+
+        let settlement = |kind| {
+            Node::new(
+                "settlement payment",
+                Operation::SettlementObservation(SettlementObservationCertificate {
+                    settlement: "payment".into(),
+                    kind,
+                    from: "alice".into(),
+                    to: "bob".into(),
+                    instrument: "USD".into(),
+                    amount: Exact::from(60i64),
+                    unit: "USD".into(),
+                    history: vec![SettlementTransition {
+                        state: "issued".into(),
+                        at: None,
+                    }],
+                }),
+                vec![],
+                BTreeMap::new(),
+            )
+        };
+        assert_ne!(settlement("ach".into()).id, settlement("card".into()).id);
     }
 }

@@ -94,7 +94,7 @@ where
             return 1;
         }
     };
-    let analysis = &committed.analysis;
+    let analysis = committed.analysis();
 
     let output = match &command.kind {
         CommandKind::Check => render_check(analysis),
@@ -109,7 +109,7 @@ where
         CommandKind::Packages => render_packages_with_registry(
             &analysis.book,
             analysis.policy.as_deref(),
-            &committed.policy_registry,
+            committed.policy_registry(),
         ),
         CommandKind::Help => unreachable!("help returned before reading a ledger"),
     };

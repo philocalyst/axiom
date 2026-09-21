@@ -621,6 +621,74 @@ pub struct SettlementObservation {
     pub into: Option<AccountId>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum SettlementKind {
+    Ach,
+    Card,
+    Check,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum SettlementStateKind {
+    Issued,
+    Authorized,
+    Presented,
+    Pending,
+    Settled,
+    Returned,
+    Reversed,
+    Rejected,
+    Cancelled,
+    Refunded,
+    Disputed,
+    ChargedBack,
+    Represented,
+    Resolved,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum SatisfactionState {
+    Proposed,
+    Applied,
+    Reversed,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceObligation {
+    pub occurrence: OccurrenceId,
+    pub debtor: EntityId,
+    pub creditor: EntityId,
+    pub quantity: Quantity,
+    pub due: Option<Date>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceSettlementState {
+    pub state: SettlementStateKind,
+    pub at: Option<Date>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceSettlement {
+    pub occurrence: OccurrenceId,
+    pub kind: SettlementKind,
+    pub from: EntityId,
+    pub to: EntityId,
+    pub instrument: InstrumentId,
+    pub amount: Quantity,
+    /// Authoritative observation order; never sort this history.
+    pub history: Vec<SourceSettlementState>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceSatisfaction {
+    pub occurrence: OccurrenceId,
+    pub obligation: OccurrenceId,
+    pub settlement: OccurrenceId,
+    pub amount: Quantity,
+    pub state: SatisfactionState,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PolicyUse {
     pub book: BookId,
@@ -639,6 +707,9 @@ pub enum LedgerForm {
     Buy(Buy),
     Sell(Sell),
     Quote(Quote),
+    Obligation(SourceObligation),
+    Settlement(SourceSettlement),
+    Satisfaction(SourceSatisfaction),
     ObservePosition(PositionObservation),
     ObserveSettlement(SettlementObservation),
     UsePolicy(PolicyUse),
@@ -651,6 +722,9 @@ impl LedgerForm {
             Self::Buy(value) => Some(&value.occurrence),
             Self::Sell(value) => Some(&value.occurrence),
             Self::Quote(value) => Some(&value.occurrence),
+            Self::Obligation(value) => Some(&value.occurrence),
+            Self::Settlement(value) => Some(&value.occurrence),
+            Self::Satisfaction(value) => Some(&value.occurrence),
             Self::ObservePosition(value) => Some(&value.occurrence),
             Self::ObserveSettlement(value) => Some(&value.occurrence),
             Self::UsePolicy(_) | Self::Decide(_) => None,

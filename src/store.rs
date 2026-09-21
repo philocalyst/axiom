@@ -1104,6 +1104,40 @@ impl ObjectStore {
             .proof
             .check()
             .map_err(|error| StoreError::InvalidObject(format!("invalid proof: {error}")))?;
+        let commit_bindings = value
+            .proof
+            .nodes
+            .values()
+            .filter(|node| {
+                matches!(
+                    &node.operation,
+                    CanonicalOperation::Observation { source }
+                        if source.starts_with("commit:")
+                )
+            })
+            .collect::<Vec<_>>();
+        if !commit_bindings.is_empty() {
+            let binding = commit_bindings[0];
+            let expected = value.roots.first().map(ToString::to_string);
+            let source_matches = matches!(
+                &binding.operation,
+                CanonicalOperation::Observation { source }
+                    if Some(source.strip_prefix("commit:").unwrap_or_default())
+                        == expected.as_deref()
+            );
+            let mut expected_inputs = value.proof.roots.clone();
+            expected_inputs.retain(|root| *root != binding.id);
+            if commit_bindings.len() != 1
+                || value.roots.len() != 1
+                || !source_matches
+                || !value.proof.roots.contains(&binding.id)
+                || binding.inputs != expected_inputs
+            {
+                return Err(StoreError::InvalidObject(
+                    "proof commit binding does not match its external root".into(),
+                ));
+            }
+        }
         for root in &value.roots {
             if *root != ContentHash::ZERO {
                 self.get(*root)?;

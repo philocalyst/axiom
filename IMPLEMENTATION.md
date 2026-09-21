@@ -60,8 +60,9 @@ experiments, but it is not part of this contract.
 - [x] Journal is a derived monetary projection.
 - [ ] Every answer has a proposition-specific independently checked proof.
   Lot allocation, inventory conservation, and recognized gain now use typed,
-  independently recomputed certificates; the remaining answer families still
-  need equivalent certificate types.
+  independently recomputed certificates. Direct obligations, settlement
+  histories, satisfaction allocations, and both remaining-balance families
+  now do as well; the remaining answer families still need equivalent types.
 - [x] Source-order property tests.
 - [x] Actual/scenario isolation test.
 - [x] Reference/production differential tests cover generated FIFO/LIFO,
@@ -121,6 +122,10 @@ experiments, but it is not part of this contract.
 - [x] Directional transfers, exchanges, issue/retire, and conservation checks.
 - [x] Obligations and many-to-many payment satisfaction.
 - [ ] Check/card/ACH state histories, reversals, refunds, and chargebacks.
+  V0 checks ordered built-in histories and conservatively treats returned,
+  reversed, refunded, disputed, charged-back, and merely resolved instruments
+  as ineffective. Package-defined lifecycles and append-only targeted
+  correction events remain open.
 - [ ] Cash and accrual recognizers, invoices, monthly close, journal export.
 - [x] Budgets and forecasts remain isolated scenarios.
 
@@ -170,13 +175,13 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 246 library tests, 4 CLI tests, and 3 independent reference/production
+- 269 library tests, 4 CLI tests, and 8 independent reference/production
   differential tests;
 - 134 named constitutional cases with 12 grouped smoke suites; 58 cases are
   explicit implementation inventory, and the remaining mappings still need
   independent case-specific assertions before Gate 0 can close;
-- 13 deterministic heavy-ledger integration tests and an explicit 10,000-row
-  stress test;
+- 14 deterministic heavy-ledger integration tests and two explicit 10,000-row
+  stress tests, including a full obligation/settlement/satisfaction network;
 - an 11-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
   clean-recomputation equivalence plus process peak RSS; unavailable parallel

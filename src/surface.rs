@@ -739,13 +739,23 @@ fn classify_node(head: Option<&str>, meaningful: &[usize]) -> NodeKind {
     }
     match head {
         "book" | "buy" | "sell" | "quote" | "observe" | "use" | "decide" | "event" | "entity"
-        | "instrument" | "account" | "view" | "obligation" | "check" | "scenario" | "complete"
-        | "report" => {
+        | "instrument" | "account" | "view" | "obligation" | "settlement" | "satisfy" | "check"
+        | "scenario" | "complete" | "report" => {
             if known_head_is_malformed(head, meaningful) {
                 NodeKind::Error
             } else if matches!(
                 head,
-                "book" | "buy" | "sell" | "quote" | "observe" | "use" | "decide" | "event"
+                "book"
+                    | "buy"
+                    | "sell"
+                    | "quote"
+                    | "observe"
+                    | "use"
+                    | "decide"
+                    | "event"
+                    | "obligation"
+                    | "settlement"
+                    | "satisfy"
             ) {
                 NodeKind::Form
             } else {
@@ -766,8 +776,8 @@ fn known_head_is_malformed(head: &str, meaningful: &[usize]) -> bool {
         "decide" => count < 2,
         // A declaration/event may be a header followed by an indented body;
         // only an absent name is definitely malformed at this layer.
-        "event" | "entity" | "instrument" | "account" | "view" | "obligation" | "check"
-        | "scenario" | "complete" | "report" => count < 2,
+        "event" | "entity" | "instrument" | "account" | "view" | "obligation" | "settlement"
+        | "satisfy" | "check" | "scenario" | "complete" | "report" => count < 2,
         _ => false,
     }
 }
@@ -805,6 +815,11 @@ fn form_is_incomplete(head: &str, meaningful: &[usize], tokens: &[Token]) -> boo
         "buy" => !has("into") || !has("for"),
         "sell" => !has("from") || !has("for") || !has("lot"),
         "quote" => !has("="),
+        "obligation" => !has("debtor") || !has("creditor") || !has("performance"),
+        "settlement" => {
+            !has("kind") || !has("from") || !has("to") || !has("amount") || !has("state")
+        }
+        "satisfy" => !has("obligation") || !has("settlement") || !has("amount") || !has("state"),
         _ => false,
     }
 }
@@ -1059,6 +1074,37 @@ mod tests {
         assert_eq!(canonical, "value foo : bar @ baz\n\u{00a0}???\n");
         assert_eq!(canonical_format(&canonical), canonical);
         assert!(canonical_round_trip(source));
+    }
+
+    #[test]
+    fn ontology_headers_are_forms_and_incomplete_blocks_recover() {
+        let source = "book tax-us\nobligation invoice\n  debtor alice\nsettlement payment\n  state issued\nsatisfy allocation\n";
+        let file = SurfaceFile::parse(source);
+        assert_eq!(
+            file.nodes()
+                .iter()
+                .map(|node| node.kind)
+                .collect::<Vec<_>>(),
+            [
+                NodeKind::Form,
+                NodeKind::Error,
+                NodeKind::Error,
+                NodeKind::Error
+            ]
+        );
+        assert_eq!(file.error_nodes().count(), 3);
+        assert!(
+            file.errors()
+                .any(|diagnostic| diagnostic.message.contains("incomplete `obligation`"))
+        );
+        assert!(
+            file.errors()
+                .any(|diagnostic| diagnostic.message.contains("incomplete `settlement`"))
+        );
+        assert!(
+            file.errors()
+                .any(|diagnostic| diagnostic.message.contains("incomplete `satisfy`"))
+        );
     }
 
     #[test]

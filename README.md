@@ -22,6 +22,37 @@ sell sell on 2026-09-20
 use lots/fifo for tax-us
 ```
 
+The same surface records a direct obligation and its payment without journal
+machinery or a second configuration language:
+
+```text
+obligation invoice/a
+  debtor customer
+  creditor vendor
+  performance transfer 100 USD
+  due 2026-10-01
+
+settlement payment/a
+  kind ach
+  from customer
+  to vendor
+  amount 100 USD
+  state issued
+  state presented
+  state settled
+
+satisfy allocation/a
+  obligation invoice/a
+  settlement payment/a
+  amount 100 USD
+  state applied
+```
+
+The amount unit is the settlement instrument; it is written once. Partial and
+many-to-many allocations use more `satisfy` blocks. Settlement history stays
+ordered source evidence, and only a valid settled instrument reduces an
+obligation. Derived balances never become a second ledger.
+
 Every non-zero quantity carries a unit. In V0, only a lot selector may remain
 open (`?lot` or `?`); it stays visible until a policy or an explicit decision
 resolves it. Derived results never rewrite the ledger.
@@ -49,9 +80,10 @@ blocked. The authored sale remains the record of the asset movement. An
 unresolved lot or decision remains explicit rather than being silently
 balanced.
 
-`why` explains a goal (for example `gain:sell`) in terms of its source,
-observations, policy, and decisions. `packages` lists the fixed V0 source
-vocabulary and the policy packages used by the ledger.
+`why` explains a goal (for example `gain:sell`, `obligation:invoice/a`, or
+`satisfaction:allocation/a`) in terms of its source, observations, policy, and
+decisions. `packages` lists the fixed V0 source vocabulary and the policy
+packages used by the ledger.
 
 Output is stable and intended for both a person at a terminal and a checked-in
 review. The same source and package set produce the same result on repeated
@@ -68,6 +100,8 @@ silently rewriting prior history.
 cargo test --locked --offline --all-targets
 cargo test --locked --offline --test heavy_ledgers \
   stress_ten_thousand_evidence_rows -- --ignored
+cargo test --locked --offline --release --test heavy_ledgers \
+  stress_ten_thousand_obligations_settlements_and_satisfactions -- --ignored
 cargo run --release --locked --offline --bin axiom-bench -- --self-test
 cargo run --release --locked --offline --bin axiom-bench
 ```
@@ -90,9 +124,10 @@ exact source bytes -> immutable commit -> observations -> resolution
 The journal is a compact authoring and interoperability surface, not the
 underlying ontology. Accounts, positions, obligations, transfers, evidence,
 time, and policies remain distinct so the same accepted economic fact can feed
-multiple books. V0 intentionally exposes only the small source vocabulary
-above; broader extension mechanisms remain design material, not implemented
-language features.
+multiple books. V0 intentionally exposes a small built-in vocabulary for
+trades, direct obligations, settlements, and satisfactions. Community-defined
+economic forms and lifecycle packages remain architectural direction, not an
+implemented extension mechanism.
 
 See [`DESIGN.md`](DESIGN.md) for the executable implementation contract,
 [`confirmed-direction.md`](confirmed-direction.md) for the full architectural

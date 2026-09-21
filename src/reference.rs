@@ -13,7 +13,7 @@
 //! Unknowns and disagreements are represented as data; in particular, an
 //! unresolved lot and disagreeing quotes never become a guessed answer.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::exact::Exact;
 use crate::model::{self, Date, Ledger, LedgerForm, LotSelector, Unit};
@@ -224,6 +224,57 @@ pub struct Balance {
 
 pub type BalanceFact = Balance;
 
+/// The reference view of one authored transfer obligation.  This mirrors
+/// the engine's public fields but is computed from source forms directly.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObligationStatus {
+    Outstanding,
+    PartiallySatisfied,
+    Satisfied,
+    Invalid,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferenceObligation {
+    pub id: String,
+    pub debtor: String,
+    pub creditor: String,
+    pub promised: Quantity,
+    pub remaining: Option<Quantity>,
+    pub status: ObligationStatus,
+}
+
+pub type ObligationView = ReferenceObligation;
+pub type ObligationFact = ReferenceObligation;
+
+/// One authored settlement and its ordered state history.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferenceSettlementHistory {
+    pub id: String,
+    pub kind: model::SettlementKind,
+    pub amount: Quantity,
+    pub current: model::SettlementStateKind,
+    pub effective: bool,
+    pub unused: Option<Quantity>,
+}
+
+pub type SettlementHistoryView = ReferenceSettlementHistory;
+pub type SettlementHistoryFact = ReferenceSettlementHistory;
+
+/// One authored allocation between an obligation and settlement.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferenceSatisfaction {
+    pub id: String,
+    pub obligation: String,
+    pub settlement: String,
+    pub amount: Quantity,
+    pub state: model::SatisfactionState,
+    pub effective: bool,
+}
+
+pub type SatisfactionView = ReferenceSatisfaction;
+pub type SatisfactionFact = ReferenceSatisfaction;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SatisfactionStatus {
     Satisfied,
@@ -288,6 +339,7 @@ pub enum ReferenceIssueCode {
     InvalidAmount,
     PositionConflict,
     SettlementConflict,
+    ObligationConflict,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -313,6 +365,9 @@ pub struct ReferenceResult {
     pub gain: Vec<Gain>,
     pub balances: Vec<Balance>,
     pub positions: Vec<Position>,
+    pub obligations: Vec<ReferenceObligation>,
+    pub settlement_histories: Vec<ReferenceSettlementHistory>,
+    pub satisfactions: Vec<ReferenceSatisfaction>,
     pub satisfies: Vec<Satisfies>,
     pub recognized: Vec<Recognized>,
     pub available: Vec<Available>,
@@ -381,6 +436,18 @@ impl ReferenceResult {
         self.valuation.iter().find(|valuation| valuation.id == id)
     }
 
+    pub fn obligation(&self, id: &str) -> Option<&ReferenceObligation> {
+        self.obligations
+            .iter()
+            .find(|obligation| obligation.id == id)
+    }
+
+    pub fn settlement_history(&self, id: &str) -> Option<&ReferenceSettlementHistory> {
+        self.settlement_histories
+            .iter()
+            .find(|settlement| settlement.id == id)
+    }
+
     /// A stable, relation-only projection convenient for differential tests.
     /// It intentionally excludes vector order, so adding unrelated evidence
     /// or changing source order cannot alter a semantic comparison.
@@ -416,6 +483,15 @@ impl ReferenceResult {
         }
         for position in &self.positions {
             chunks.push(format!("position|{position:?}"));
+        }
+        for obligation in &self.obligations {
+            chunks.push(format!("obligation|{obligation:?}"));
+        }
+        for settlement in &self.settlement_histories {
+            chunks.push(format!("settlement_history|{settlement:?}"));
+        }
+        for satisfaction in &self.satisfactions {
+            chunks.push(format!("satisfaction|{satisfaction:?}"));
         }
         for satisfies in &self.satisfies {
             chunks.push(format!("satisfies|{satisfies:?}"));
@@ -468,6 +544,9 @@ pub fn evaluate(ledger: &Ledger) -> ReferenceResult {
     let mut raw_quotes = Vec::new();
     let mut raw_positions = Vec::new();
     let mut raw_settlements = Vec::new();
+    let mut raw_obligations = Vec::new();
+    let mut raw_settlement_histories = Vec::new();
+    let mut raw_satisfactions = Vec::new();
     let mut policies = Vec::new();
     let mut decisions: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     let mut issues = Vec::new();
@@ -513,6 +592,9 @@ pub fn evaluate(ledger: &Ledger) -> ReferenceResult {
                     .or_default()
                     .insert(decision.lot.as_str().to_owned());
             }
+            LedgerForm::Obligation(obligation) => raw_obligations.push(obligation.clone()),
+            LedgerForm::Settlement(settlement) => raw_settlement_histories.push(settlement.clone()),
+            LedgerForm::Satisfaction(satisfaction) => raw_satisfactions.push(satisfaction.clone()),
         }
     }
 
@@ -620,6 +702,14 @@ pub fn evaluate(ledger: &Ledger) -> ReferenceResult {
             });
         }
     }
+
+    let (obligations, settlement_histories, satisfactions, obligation_issues) =
+        build_satisfaction_network(
+            &raw_obligations,
+            &raw_settlement_histories,
+            &raw_satisfactions,
+        );
+    issues.extend(obligation_issues);
 
     let mut candidate_lot = Vec::new();
     let mut selected_lot = Vec::new();
@@ -1185,11 +1275,599 @@ pub fn evaluate(ledger: &Ledger) -> ReferenceResult {
         gain: gains,
         balances,
         positions,
+        obligations,
+        settlement_histories,
+        satisfactions,
         satisfies,
         recognized,
         available,
         issues,
     }
+}
+
+/// Evaluate authored obligations without constructing ontology values.  This
+/// is intentionally a small indexed pass over the source model: it validates
+/// the same observable boundaries as the engine, but owns its arithmetic and
+/// settlement-state transition table so a shared validator cannot mask a
+/// regression in either implementation.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+enum ComponentSide {
+    Obligation,
+    Settlement,
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+struct ComponentNode {
+    side: ComponentSide,
+    id: String,
+}
+
+impl ComponentNode {
+    fn obligation(id: &str) -> Self {
+        Self {
+            side: ComponentSide::Obligation,
+            id: id.to_owned(),
+        }
+    }
+
+    fn settlement(id: &str) -> Self {
+        Self {
+            side: ComponentSide::Settlement,
+            id: id.to_owned(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct ComponentGraph {
+    nodes: HashMap<ComponentNode, usize>,
+    parent: Vec<usize>,
+    rank: Vec<usize>,
+}
+
+impl ComponentGraph {
+    fn node(&mut self, node: ComponentNode) -> usize {
+        if let Some(index) = self.nodes.get(&node) {
+            return *index;
+        }
+        let index = self.parent.len();
+        self.nodes.insert(node, index);
+        self.parent.push(index);
+        self.rank.push(0);
+        index
+    }
+
+    fn find(&mut self, mut node: usize) -> usize {
+        let mut root = node;
+        while self.parent[root] != root {
+            root = self.parent[root];
+        }
+        while self.parent[node] != node {
+            let next = self.parent[node];
+            self.parent[node] = root;
+            node = next;
+        }
+        root
+    }
+
+    fn union(&mut self, left: usize, right: usize) {
+        let mut left = self.find(left);
+        let mut right = self.find(right);
+        if left == right {
+            return;
+        }
+        if self.rank[left] < self.rank[right] {
+            std::mem::swap(&mut left, &mut right);
+        }
+        self.parent[right] = left;
+        if self.rank[left] == self.rank[right] {
+            self.rank[left] += 1;
+        }
+    }
+}
+
+struct ComponentSummary {
+    valid: bool,
+    obligation_remaining: HashMap<String, Quantity>,
+    settlement_unused: HashMap<String, Quantity>,
+}
+
+fn build_satisfaction_network(
+    obligations: &[model::SourceObligation],
+    settlements: &[model::SourceSettlement],
+    allocations: &[model::SourceSatisfaction],
+) -> (
+    Vec<ReferenceObligation>,
+    Vec<ReferenceSettlementHistory>,
+    Vec<ReferenceSatisfaction>,
+    Vec<ReferenceIssue>,
+) {
+    let valid_obligation = obligations
+        .iter()
+        .map(valid_source_obligation)
+        .collect::<Vec<_>>();
+    let valid_settlement = settlements
+        .iter()
+        .map(valid_source_settlement)
+        .collect::<Vec<_>>();
+    let valid_allocation = allocations
+        .iter()
+        .map(valid_source_satisfaction)
+        .collect::<Vec<_>>();
+    let effective_settlements = settlements
+        .iter()
+        .enumerate()
+        .filter(|(index, settlement)| {
+            valid_settlement[*index] && settlement_is_effective(settlement)
+        })
+        .map(|(_, settlement)| settlement.occurrence.as_str().to_owned())
+        .collect::<HashSet<_>>();
+
+    // Build the bipartite graph once.  Every valid authored row is a node;
+    // an allocation is an edge, including an edge to an unknown id.  This
+    // keeps malformed components local while unrelated components retain
+    // usable balances.  Hash maps plus union-find keep this pass linear.
+    let mut graph = ComponentGraph::default();
+    for (index, source) in obligations.iter().enumerate() {
+        if valid_obligation[index] {
+            graph.node(ComponentNode::obligation(source.occurrence.as_str()));
+        }
+    }
+    for (index, source) in settlements.iter().enumerate() {
+        if valid_settlement[index] {
+            graph.node(ComponentNode::settlement(source.occurrence.as_str()));
+        }
+    }
+    let mut global_conflict = valid_obligation.iter().any(|valid| !valid)
+        || valid_settlement.iter().any(|valid| !valid)
+        || valid_allocation.iter().any(|valid| !valid);
+    let mut allocation_ids = HashSet::new();
+    for (index, source) in allocations.iter().enumerate() {
+        if !valid_allocation[index] {
+            continue;
+        }
+        if !allocation_ids.insert(source.occurrence.as_str().to_owned()) {
+            // The production component pass still checks this duplicate in
+            // the global network, even if the duplicate edges are otherwise
+            // disconnected.
+            global_conflict = true;
+        }
+        let obligation = graph.node(ComponentNode::obligation(source.obligation.as_str()));
+        let settlement = graph.node(ComponentNode::settlement(source.settlement.as_str()));
+        graph.union(obligation, settlement);
+    }
+
+    let mut obligation_components = HashMap::<usize, Vec<usize>>::new();
+    for (index, source) in obligations.iter().enumerate() {
+        if valid_obligation[index] {
+            let node = graph
+                .nodes
+                .get(&ComponentNode::obligation(source.occurrence.as_str()))
+                .copied()
+                .expect("valid obligation node");
+            obligation_components
+                .entry(graph.find(node))
+                .or_default()
+                .push(index);
+        }
+    }
+    let mut settlement_components = HashMap::<usize, Vec<usize>>::new();
+    for (index, source) in settlements.iter().enumerate() {
+        if valid_settlement[index] {
+            let node = graph
+                .nodes
+                .get(&ComponentNode::settlement(source.occurrence.as_str()))
+                .copied()
+                .expect("valid settlement node");
+            settlement_components
+                .entry(graph.find(node))
+                .or_default()
+                .push(index);
+        }
+    }
+    let mut allocation_components = HashMap::<usize, Vec<usize>>::new();
+    for (index, source) in allocations.iter().enumerate() {
+        if valid_allocation[index] {
+            let node = graph
+                .nodes
+                .get(&ComponentNode::obligation(source.obligation.as_str()))
+                .copied()
+                .expect("allocation obligation node");
+            allocation_components
+                .entry(graph.find(node))
+                .or_default()
+                .push(index);
+        }
+    }
+
+    let mut roots = HashSet::new();
+    roots.extend(obligation_components.keys().copied());
+    roots.extend(settlement_components.keys().copied());
+    roots.extend(allocation_components.keys().copied());
+    let mut summaries = HashMap::<usize, ComponentSummary>::new();
+    for root in roots {
+        let summary = validate_component(
+            obligations,
+            settlements,
+            allocations,
+            obligation_components
+                .get(&root)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+            settlement_components
+                .get(&root)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+            allocation_components
+                .get(&root)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+        );
+        global_conflict |= !summary.valid;
+        summaries.insert(root, summary);
+    }
+
+    let mut reference_obligations = obligations
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            let id = source.occurrence.as_str().to_owned();
+            let remaining = component_for_obligation(source, index, &valid_obligation, &mut graph)
+                .and_then(|root| summaries.get(&root))
+                .filter(|summary| summary.valid)
+                .and_then(|summary| summary.obligation_remaining.get(&id).cloned());
+            let status = match &remaining {
+                None => ObligationStatus::Invalid,
+                Some(value) if value.is_zero() => ObligationStatus::Satisfied,
+                Some(value) if *value == source.quantity => ObligationStatus::Outstanding,
+                Some(_) => ObligationStatus::PartiallySatisfied,
+            };
+            ReferenceObligation {
+                id,
+                debtor: source.debtor.as_str().to_owned(),
+                creditor: source.creditor.as_str().to_owned(),
+                promised: source.quantity.clone(),
+                remaining,
+                status,
+            }
+        })
+        .collect::<Vec<_>>();
+    reference_obligations.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let mut reference_settlements = settlements
+        .iter()
+        .enumerate()
+        .map(|(index, source)| {
+            let id = source.occurrence.as_str().to_owned();
+            let unused = component_for_settlement(source, index, &valid_settlement, &mut graph)
+                .and_then(|root| summaries.get(&root))
+                .filter(|summary| summary.valid)
+                .and_then(|summary| summary.settlement_unused.get(&id).cloned());
+            ReferenceSettlementHistory {
+                id,
+                kind: source.kind,
+                amount: source.amount.clone(),
+                current: source
+                    .history
+                    .last()
+                    .map(|state| state.state)
+                    .unwrap_or(model::SettlementStateKind::Issued),
+                effective: valid_settlement[index] && settlement_is_effective(source),
+                unused,
+            }
+        })
+        .collect::<Vec<_>>();
+    reference_settlements.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let mut reference_allocations = allocations
+        .iter()
+        .enumerate()
+        .map(|(index, source)| ReferenceSatisfaction {
+            id: source.occurrence.as_str().to_owned(),
+            obligation: source.obligation.as_str().to_owned(),
+            settlement: source.settlement.as_str().to_owned(),
+            amount: source.amount.clone(),
+            state: source.state,
+            effective: valid_allocation[index]
+                && source.state == model::SatisfactionState::Applied
+                && component_for_allocation(source, &mut graph)
+                    .and_then(|root| summaries.get(&root))
+                    .is_some_and(|summary| summary.valid)
+                && effective_settlements.contains(source.settlement.as_str()),
+        })
+        .collect::<Vec<_>>();
+    reference_allocations.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let issues = if global_conflict {
+        vec![ReferenceIssue {
+            code: ReferenceIssueCode::ObligationConflict,
+            message: "obligation satisfaction network is inconsistent".into(),
+            sale: None,
+        }]
+    } else {
+        Vec::new()
+    };
+    (
+        reference_obligations,
+        reference_settlements,
+        reference_allocations,
+        issues,
+    )
+}
+
+fn validate_component(
+    obligations: &[model::SourceObligation],
+    settlements: &[model::SourceSettlement],
+    allocations: &[model::SourceSatisfaction],
+    obligation_indices: &[usize],
+    settlement_indices: &[usize],
+    allocation_indices: &[usize],
+) -> ComponentSummary {
+    let mut valid = true;
+    let mut obligation_by_id = HashMap::<String, usize>::new();
+    let mut settlement_by_id = HashMap::<String, usize>::new();
+    for &index in obligation_indices {
+        if obligation_by_id
+            .insert(obligations[index].occurrence.as_str().to_owned(), index)
+            .is_some()
+        {
+            valid = false;
+        }
+    }
+    for &index in settlement_indices {
+        if settlement_by_id
+            .insert(settlements[index].occurrence.as_str().to_owned(), index)
+            .is_some()
+        {
+            valid = false;
+        }
+    }
+
+    let mut allocation_ids = HashSet::new();
+    let mut by_obligation = HashMap::<String, Quantity>::new();
+    let mut by_settlement = HashMap::<String, Quantity>::new();
+    for &index in allocation_indices {
+        let allocation = &allocations[index];
+        if !allocation_ids.insert(allocation.occurrence.as_str().to_owned()) {
+            valid = false;
+            continue;
+        }
+        let (Some(&obligation_index), Some(&settlement_index)) = (
+            obligation_by_id.get(allocation.obligation.as_str()),
+            settlement_by_id.get(allocation.settlement.as_str()),
+        ) else {
+            valid = false;
+            continue;
+        };
+        let obligation = &obligations[obligation_index];
+        let settlement = &settlements[settlement_index];
+        let instrument = obligation.quantity.unit.as_ref().map(ToString::to_string);
+        let endpoints_match = settlement.from == obligation.debtor
+            && settlement.to == obligation.creditor
+            && instrument.as_deref() == Some(settlement.instrument.as_str());
+        let units_match = allocation.amount.unit == obligation.quantity.unit
+            && allocation.amount.unit == settlement.amount.unit;
+        if !endpoints_match || !units_match {
+            valid = false;
+            continue;
+        }
+        if allocation.state == model::SatisfactionState::Applied
+            && settlement_is_effective(settlement)
+            && (add_to_map(
+                &mut by_obligation,
+                allocation.obligation.as_str(),
+                &allocation.amount,
+            )
+            .is_err()
+                || add_to_map(
+                    &mut by_settlement,
+                    allocation.settlement.as_str(),
+                    &allocation.amount,
+                )
+                .is_err())
+        {
+            valid = false;
+        }
+    }
+
+    for (id, total) in &by_obligation {
+        let Some(&index) = obligation_by_id.get(id) else {
+            valid = false;
+            continue;
+        };
+        if total.number > obligations[index].quantity.number {
+            valid = false;
+        }
+    }
+    for (id, total) in &by_settlement {
+        let Some(&index) = settlement_by_id.get(id) else {
+            valid = false;
+            continue;
+        };
+        if total.number > settlements[index].amount.number {
+            valid = false;
+        }
+    }
+    if !valid {
+        return ComponentSummary {
+            valid: false,
+            obligation_remaining: HashMap::new(),
+            settlement_unused: HashMap::new(),
+        };
+    }
+
+    let mut obligation_remaining = HashMap::new();
+    for &index in obligation_indices {
+        let source = &obligations[index];
+        let allocated = by_obligation
+            .get(source.occurrence.as_str())
+            .cloned()
+            .unwrap_or_else(Quantity::zero);
+        let Ok(remaining) = source.quantity.checked_sub(&allocated) else {
+            return ComponentSummary {
+                valid: false,
+                obligation_remaining: HashMap::new(),
+                settlement_unused: HashMap::new(),
+            };
+        };
+        obligation_remaining.insert(source.occurrence.as_str().to_owned(), remaining);
+    }
+    let mut settlement_unused = HashMap::new();
+    for &index in settlement_indices {
+        let source = &settlements[index];
+        let allocated = by_settlement
+            .get(source.occurrence.as_str())
+            .cloned()
+            .unwrap_or_else(Quantity::zero);
+        let Ok(unused) = source.amount.checked_sub(&allocated) else {
+            return ComponentSummary {
+                valid: false,
+                obligation_remaining: HashMap::new(),
+                settlement_unused: HashMap::new(),
+            };
+        };
+        settlement_unused.insert(source.occurrence.as_str().to_owned(), unused);
+    }
+    ComponentSummary {
+        valid: true,
+        obligation_remaining,
+        settlement_unused,
+    }
+}
+
+fn component_for_obligation(
+    source: &model::SourceObligation,
+    index: usize,
+    valid: &[bool],
+    graph: &mut ComponentGraph,
+) -> Option<usize> {
+    if !valid[index] {
+        return None;
+    }
+    graph
+        .nodes
+        .get(&ComponentNode::obligation(source.occurrence.as_str()))
+        .copied()
+        .map(|node| graph.find(node))
+}
+
+fn component_for_settlement(
+    source: &model::SourceSettlement,
+    index: usize,
+    valid: &[bool],
+    graph: &mut ComponentGraph,
+) -> Option<usize> {
+    if !valid[index] {
+        return None;
+    }
+    graph
+        .nodes
+        .get(&ComponentNode::settlement(source.occurrence.as_str()))
+        .copied()
+        .map(|node| graph.find(node))
+}
+
+fn component_for_allocation(
+    source: &model::SourceSatisfaction,
+    graph: &mut ComponentGraph,
+) -> Option<usize> {
+    graph
+        .nodes
+        .get(&ComponentNode::obligation(source.obligation.as_str()))
+        .copied()
+        .map(|node| graph.find(node))
+}
+
+fn add_to_map(
+    totals: &mut HashMap<String, Quantity>,
+    id: &str,
+    amount: &Quantity,
+) -> Result<(), ()> {
+    if let Some(total) = totals.get_mut(id) {
+        *total = total.checked_add(amount).map_err(|_| ())?;
+    } else {
+        totals.insert(id.to_owned(), amount.clone());
+    }
+    Ok(())
+}
+
+fn valid_source_obligation(source: &model::SourceObligation) -> bool {
+    !source.occurrence.is_empty()
+        && !source.debtor.is_empty()
+        && !source.creditor.is_empty()
+        && valid_positive_quantity(&source.quantity)
+}
+
+fn valid_source_settlement(source: &model::SourceSettlement) -> bool {
+    !source.occurrence.is_empty()
+        && !source.from.is_empty()
+        && !source.to.is_empty()
+        && !source.instrument.is_empty()
+        && valid_positive_quantity(&source.amount)
+        && !source.history.is_empty()
+        && valid_settlement_history(&source.history)
+}
+
+fn valid_source_satisfaction(source: &model::SourceSatisfaction) -> bool {
+    !source.occurrence.is_empty()
+        && !source.obligation.is_empty()
+        && !source.settlement.is_empty()
+        && valid_positive_quantity(&source.amount)
+}
+
+fn valid_positive_quantity(quantity: &Quantity) -> bool {
+    quantity.unit.is_some() && !quantity.number.is_zero() && !quantity.number.is_negative()
+}
+
+fn settlement_is_effective(source: &model::SourceSettlement) -> bool {
+    matches!(
+        source.history.last().map(|state| state.state),
+        Some(model::SettlementStateKind::Settled)
+    )
+}
+
+fn valid_settlement_history(history: &[model::SourceSettlementState]) -> bool {
+    let mut previous_at = None;
+    let mut previous = None;
+    for transition in history {
+        if let (Some(previous), Some(current)) = (previous_at, transition.at)
+            && current < previous
+        {
+            return false;
+        }
+        if !legal_settlement_transition(previous, transition.state) {
+            return false;
+        }
+        previous_at = transition.at.or(previous_at);
+        previous = Some(transition.state);
+    }
+    true
+}
+
+fn legal_settlement_transition(
+    previous: Option<model::SettlementStateKind>,
+    next: model::SettlementStateKind,
+) -> bool {
+    use model::SettlementStateKind::*;
+    matches!(
+        (previous, next),
+        (None, Issued)
+            | (Some(Issued), Authorized | Presented | Cancelled)
+            | (Some(Authorized), Presented | Cancelled | Rejected)
+            | (
+                Some(Presented),
+                Pending | Settled | Returned | Rejected | Cancelled
+            )
+            | (Some(Pending), Settled | Returned | Rejected | Cancelled)
+            | (
+                Some(Settled),
+                Returned | Reversed | Refunded | Disputed | ChargedBack
+            )
+            | (Some(Disputed), Resolved | ChargedBack)
+            | (Some(ChargedBack), Represented)
+            | (Some(Represented), Pending | Settled | Rejected)
+            | (Some(Returned | Reversed | Rejected), Presented | Cancelled)
+    )
 }
 
 /// Conventional aliases make the oracle pleasant to use from differential

@@ -5,13 +5,18 @@
 //! balanced journal projection.  It never changes the source ledger and it
 //! never silently chooses an answer when more than one answer is admissible.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
 use crate::exact::Exact;
 use crate::model::{self, Date, Ledger, LedgerForm, LotSelector};
 use crate::package::{LotCandidate, PolicyRegistry, Selection, SelectionProgram};
-use crate::proof::{LotAllocationCertificate, Node, Operation, Proof, ProofId};
+use crate::proof::{
+    LotAllocationCertificate, Node, ObligationBalanceCertificate, ObligationObservationCertificate,
+    Operation, Proof, ProofId, SatisfactionAllocationCertificate,
+    SatisfactionObservationCertificate, SettlementBalanceCertificate, SettlementHistoryCertificate,
+    SettlementObservationCertificate, SettlementTransition,
+};
 
 pub use crate::model::Quantity;
 
@@ -148,6 +153,49 @@ pub struct SettlementView {
     pub status: ObservationStatus,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObligationStatus {
+    Outstanding,
+    PartiallySatisfied,
+    Satisfied,
+    Invalid,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObligationView {
+    pub id: String,
+    pub debtor: String,
+    pub creditor: String,
+    pub promised: Quantity,
+    pub due: Option<model::Date>,
+    pub remaining: Option<Quantity>,
+    pub status: ObligationStatus,
+    pub proof: ProofId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SettlementHistoryView {
+    pub id: String,
+    pub kind: model::SettlementKind,
+    pub amount: Quantity,
+    pub current: model::SettlementStateKind,
+    pub effective: bool,
+    pub unused: Option<Quantity>,
+    pub proof: ProofId,
+    source: model::SourceSettlement,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SatisfactionView {
+    pub id: String,
+    pub obligation: String,
+    pub settlement: String,
+    pub amount: Quantity,
+    pub state: model::SatisfactionState,
+    pub effective: bool,
+    pub proof: ProofId,
+}
+
 /// Evidence observations are not silently promoted to accepted facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ObservationStatus {
@@ -220,6 +268,7 @@ pub enum IssueCode {
     UnknownPolicy,
     IncompatibleUnit,
     InvalidAmount,
+    ObligationConflict,
 }
 
 /// Failure from the finance-native semantic pass over an [`Analysis`].
@@ -253,6 +302,14 @@ pub enum AnalysisCheckError {
         proof: ProofId,
         reason: String,
     },
+    InvalidSatisfactionResult {
+        subject: String,
+        proof: ProofId,
+        reason: String,
+    },
+    InvalidDependencyIndex {
+        reason: String,
+    },
 }
 
 impl AnalysisCheckError {
@@ -275,7 +332,9 @@ impl AnalysisCheckError {
             | Self::MissingRecognition { proof, .. }
             | Self::UnknownLot { proof, .. }
             | Self::InvalidAllocation { proof, .. }
-            | Self::InvalidRecognition { proof, .. } => Some(*proof),
+            | Self::InvalidRecognition { proof, .. }
+            | Self::InvalidSatisfactionResult { proof, .. } => Some(*proof),
+            Self::InvalidDependencyIndex { .. } => None,
         }
     }
 }
@@ -307,6 +366,15 @@ impl fmt::Display for AnalysisCheckError {
             Self::InvalidRecognition { sale, reason, .. } => {
                 write!(formatter, "invalid recognition for sale `{sale}`: {reason}")
             }
+            Self::InvalidSatisfactionResult {
+                subject, reason, ..
+            } => write!(
+                formatter,
+                "invalid obligation or settlement result `{subject}`: {reason}"
+            ),
+            Self::InvalidDependencyIndex { reason } => {
+                write!(formatter, "invalid dependency index: {reason}")
+            }
         }
     }
 }
@@ -324,6 +392,9 @@ pub struct Analysis {
     pub quote_status: BTreeMap<String, QuoteStatus>,
     pub positions: Vec<PositionView>,
     pub settlements: Vec<SettlementView>,
+    pub obligations: Vec<ObligationView>,
+    pub settlement_histories: Vec<SettlementHistoryView>,
+    pub satisfactions: Vec<SatisfactionView>,
     pub journal: Vec<JournalEntry>,
     pub issues: Vec<Issue>,
     pub proof: Proof,
@@ -362,6 +433,8 @@ impl Analysis {
     /// slices.  No solver or metadata convention is consulted.
     pub fn check_semantics(&self) -> Result<(), AnalysisCheckError> {
         self.proof.check().map_err(AnalysisCheckError::Proof)?;
+        check_dependency_indexes(self)?;
+        check_satisfaction_results(self)?;
 
         let lots_by_id = self
             .lots
@@ -730,6 +803,12 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
     let mut quotes = Vec::new();
     let mut positions = Vec::new();
     let mut settlements = Vec::new();
+    let mut source_obligations = Vec::new();
+    let mut source_settlements = Vec::new();
+    let mut source_satisfactions = Vec::new();
+    let mut obligation_proofs = BTreeMap::new();
+    let mut settlement_history_proofs = BTreeMap::new();
+    let mut satisfaction_proofs = BTreeMap::new();
     let mut policy = None;
     let mut policy_proof = None;
     let mut policy_uses = Vec::new();
@@ -781,6 +860,60 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 if let Some(view) = make_quote(quote, node) {
                     quotes.push(view);
                 }
+            }
+            LedgerForm::Obligation(obligation) => {
+                let source = obligation_material(obligation);
+                let id = obligation.occurrence.as_str().to_owned();
+                let source_id = source_key("obligation", &source);
+                let operation = typed_obligation_certificate(obligation)
+                    .map(Operation::ObligationObservation)
+                    .unwrap_or_else(|| Operation::Observation {
+                        source: source_id.clone(),
+                    });
+                let proof_id = proof.insert(Node::new(
+                    format!("obligation {id}"),
+                    operation,
+                    Vec::new(),
+                    metadata_for(&source_id, "obligation", Some(index + 1)),
+                ));
+                obligation_proofs.insert(id, proof_id);
+                source_obligations.push(obligation.clone());
+            }
+            LedgerForm::Settlement(settlement) => {
+                let source = settlement_history_material(settlement);
+                let id = settlement.occurrence.as_str().to_owned();
+                let source_id = source_key("settlement-history", &source);
+                let operation = typed_settlement_certificate(settlement)
+                    .map(Operation::SettlementObservation)
+                    .unwrap_or_else(|| Operation::Observation {
+                        source: source_id.clone(),
+                    });
+                let proof_id = proof.insert(Node::new(
+                    format!("settlement history {id}"),
+                    operation,
+                    Vec::new(),
+                    metadata_for(&source_id, "settlement-history", Some(index + 1)),
+                ));
+                settlement_history_proofs.insert(id, proof_id);
+                source_settlements.push(settlement.clone());
+            }
+            LedgerForm::Satisfaction(satisfaction) => {
+                let source = satisfaction_material(satisfaction);
+                let id = satisfaction.occurrence.as_str().to_owned();
+                let source_id = source_key("satisfaction", &source);
+                let operation = typed_satisfaction_certificate(satisfaction)
+                    .map(Operation::SatisfactionObservation)
+                    .unwrap_or_else(|| Operation::Observation {
+                        source: source_id.clone(),
+                    });
+                let proof_id = proof.insert(Node::new(
+                    format!("satisfaction {id}"),
+                    operation,
+                    Vec::new(),
+                    metadata_for(&source_id, "satisfaction", Some(index + 1)),
+                ));
+                satisfaction_proofs.insert(id, proof_id);
+                source_satisfactions.push(satisfaction.clone());
             }
             LedgerForm::ObservePosition(observation) => {
                 let source = source_key(
@@ -1165,6 +1298,19 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
     let mut journal = Vec::new();
     let mut dependencies: BTreeMap<String, Vec<ProofId>> = BTreeMap::new();
     let mut invalidations: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let (obligations, settlement_histories, satisfactions) =
+        analyze_satisfaction_sources(SatisfactionContext {
+            source_obligations: &source_obligations,
+            source_settlements: &source_settlements,
+            source_satisfactions: &source_satisfactions,
+            obligation_proofs: &obligation_proofs,
+            settlement_proofs: &settlement_history_proofs,
+            satisfaction_proofs: &satisfaction_proofs,
+            proof: &mut proof,
+            issues: &mut issues,
+            dependencies: &mut dependencies,
+            invalidations: &mut invalidations,
+        });
     // Inventory is consumed once, in economic event order. Lots themselves remain
     // immutable evidence; this map is the derived remaining quantity shared
     // by every sale in the analysis.
@@ -2088,16 +2234,13 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
         goals.sort();
         goals.dedup();
     }
-    for roots in dependencies.values() {
-        for root in roots {
-            proof.root(*root);
-        }
-    }
-    for issue in &issues {
-        if let Some(root) = issue.proof {
-            proof.root(root);
-        }
-    }
+    let proof_roots = dependencies
+        .values()
+        .flatten()
+        .copied()
+        .chain(issues.iter().filter_map(|issue| issue.proof))
+        .collect::<Vec<_>>();
+    proof.root_all(proof_roots);
     issues.sort_by(|left, right| {
         left.sale
             .cmp(&right.sale)
@@ -2115,6 +2258,9 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
         quote_status,
         positions,
         settlements,
+        obligations,
+        settlement_histories,
+        satisfactions,
         journal,
         issues,
         proof,
@@ -2785,6 +2931,1540 @@ fn make_journal(
     }
 }
 
+type SatisfactionViews = (
+    Vec<ObligationView>,
+    Vec<SettlementHistoryView>,
+    Vec<SatisfactionView>,
+);
+
+struct SatisfactionContext<'a> {
+    source_obligations: &'a [model::SourceObligation],
+    source_settlements: &'a [model::SourceSettlement],
+    source_satisfactions: &'a [model::SourceSatisfaction],
+    obligation_proofs: &'a BTreeMap<String, ProofId>,
+    settlement_proofs: &'a BTreeMap<String, ProofId>,
+    satisfaction_proofs: &'a BTreeMap<String, ProofId>,
+    proof: &'a mut Proof,
+    issues: &'a mut Vec<Issue>,
+    dependencies: &'a mut BTreeMap<String, Vec<ProofId>>,
+    invalidations: &'a mut BTreeMap<String, Vec<String>>,
+}
+
+struct SatisfactionDisjointSet {
+    parent: Vec<usize>,
+    rank: Vec<u8>,
+}
+
+impl SatisfactionDisjointSet {
+    fn new() -> Self {
+        Self {
+            parent: Vec::new(),
+            rank: Vec::new(),
+        }
+    }
+
+    fn add(&mut self) -> usize {
+        let node = self.parent.len();
+        self.parent.push(node);
+        self.rank.push(0);
+        node
+    }
+
+    fn find(&mut self, node: usize) -> usize {
+        if self.parent[node] != node {
+            let root = self.find(self.parent[node]);
+            self.parent[node] = root;
+        }
+        self.parent[node]
+    }
+
+    fn union(&mut self, left: usize, right: usize) {
+        let mut left = self.find(left);
+        let mut right = self.find(right);
+        if left == right {
+            return;
+        }
+        if self.rank[left] < self.rank[right] {
+            std::mem::swap(&mut left, &mut right);
+        }
+        self.parent[right] = left;
+        if self.rank[left] == self.rank[right] {
+            self.rank[left] += 1;
+        }
+    }
+}
+
+fn satisfaction_node(
+    nodes: &mut HashMap<String, usize>,
+    dsu: &mut SatisfactionDisjointSet,
+    id: &str,
+) -> usize {
+    if let Some(node) = nodes.get(id) {
+        return *node;
+    }
+    let node = dsu.add();
+    nodes.insert(id.to_owned(), node);
+    node
+}
+
+struct SatisfactionComponent {
+    obligations: Vec<crate::ontology::Obligation>,
+    settlements: Vec<crate::ontology::Settlement>,
+    allocations: Vec<crate::ontology::SatisfactionAllocation>,
+    summary: Result<crate::ontology::SatisfactionSummary, crate::ontology::OntologyError>,
+    proof_inputs: Vec<ProofId>,
+}
+
+struct SatisfactionNetwork {
+    components: Vec<SatisfactionComponent>,
+    obligation_components: HashMap<String, usize>,
+    settlement_components: HashMap<String, usize>,
+    settlements_by_id: HashMap<String, usize>,
+    allocations_by_id: HashMap<String, usize>,
+    allocations_by_obligation: HashMap<String, Vec<usize>>,
+    allocations_by_settlement: HashMap<String, Vec<usize>>,
+}
+
+impl SatisfactionNetwork {
+    fn new(
+        obligations: &[crate::ontology::Obligation],
+        settlements: &[crate::ontology::Settlement],
+        allocations: &[crate::ontology::SatisfactionAllocation],
+    ) -> Self {
+        let mut dsu = SatisfactionDisjointSet::new();
+        let mut obligation_nodes = HashMap::with_capacity(obligations.len());
+        let mut settlement_nodes = HashMap::with_capacity(settlements.len());
+        for obligation in obligations {
+            satisfaction_node(&mut obligation_nodes, &mut dsu, obligation.id.as_str());
+        }
+        for settlement in settlements {
+            satisfaction_node(&mut settlement_nodes, &mut dsu, settlement.id.as_str());
+        }
+        for allocation in allocations {
+            let obligation = satisfaction_node(
+                &mut obligation_nodes,
+                &mut dsu,
+                allocation.obligation.as_str(),
+            );
+            let settlement = satisfaction_node(
+                &mut settlement_nodes,
+                &mut dsu,
+                allocation.settlement.as_str(),
+            );
+            dsu.union(obligation, settlement);
+        }
+
+        let mut component_by_root = HashMap::new();
+        let mut component_count = 0;
+        for node in 0..dsu.parent.len() {
+            let root = dsu.find(node);
+            if let std::collections::hash_map::Entry::Vacant(entry) = component_by_root.entry(root)
+            {
+                entry.insert(component_count);
+                component_count += 1;
+            }
+        }
+        let mut components = (0..component_count)
+            .map(|_| SatisfactionComponent {
+                obligations: Vec::new(),
+                settlements: Vec::new(),
+                allocations: Vec::new(),
+                summary: Err(crate::ontology::OntologyError::InvalidEvent {
+                    kind: "satisfaction",
+                    reason: "component has no validation result".into(),
+                }),
+                proof_inputs: Vec::new(),
+            })
+            .collect::<Vec<_>>();
+
+        let obligation_components = obligation_nodes
+            .iter()
+            .map(|(id, node)| (id.clone(), component_by_root[&dsu.find(*node)]))
+            .collect::<HashMap<_, _>>();
+        let settlement_components = settlement_nodes
+            .iter()
+            .map(|(id, node)| (id.clone(), component_by_root[&dsu.find(*node)]))
+            .collect::<HashMap<_, _>>();
+        for obligation in obligations {
+            let component = obligation_components[obligation.id.as_str()];
+            components[component].obligations.push(obligation.clone());
+        }
+        for settlement in settlements {
+            let component = settlement_components[settlement.id.as_str()];
+            components[component].settlements.push(settlement.clone());
+        }
+        let mut allocations_by_id = HashMap::with_capacity(allocations.len());
+        let mut allocations_by_obligation = HashMap::<String, Vec<usize>>::new();
+        let mut allocations_by_settlement = HashMap::<String, Vec<usize>>::new();
+        for (index, allocation) in allocations.iter().enumerate() {
+            let component = obligation_components
+                .get(allocation.obligation.as_str())
+                .copied()
+                .or_else(|| {
+                    settlement_components
+                        .get(allocation.settlement.as_str())
+                        .copied()
+                })
+                .expect("allocation endpoints were indexed above");
+            components[component].allocations.push(allocation.clone());
+            allocations_by_id
+                .entry(allocation.id.as_str().to_owned())
+                .or_insert(index);
+            allocations_by_obligation
+                .entry(allocation.obligation.as_str().to_owned())
+                .or_default()
+                .push(index);
+            allocations_by_settlement
+                .entry(allocation.settlement.as_str().to_owned())
+                .or_default()
+                .push(index);
+        }
+        for component in &mut components {
+            component.summary = crate::ontology::validate_satisfaction_network(
+                &component.obligations,
+                &component.settlements,
+                &component.allocations,
+            );
+        }
+
+        let mut settlements_by_id = HashMap::with_capacity(settlements.len());
+        for (index, settlement) in settlements.iter().enumerate() {
+            settlements_by_id
+                .entry(settlement.id.as_str().to_owned())
+                .or_insert(index);
+        }
+        Self {
+            components,
+            obligation_components,
+            settlement_components,
+            settlements_by_id,
+            allocations_by_id,
+            allocations_by_obligation,
+            allocations_by_settlement,
+        }
+    }
+
+    fn component_for_obligation(&self, id: &str) -> Option<&SatisfactionComponent> {
+        self.obligation_components
+            .get(id)
+            .and_then(|index| self.components.get(*index))
+    }
+
+    fn component_for_settlement(&self, id: &str) -> Option<&SatisfactionComponent> {
+        self.settlement_components
+            .get(id)
+            .and_then(|index| self.components.get(*index))
+    }
+}
+
+fn satisfaction_component_proof_inputs(
+    component: &SatisfactionComponent,
+    obligation_proofs: &BTreeMap<String, ProofId>,
+    settlement_proofs: &BTreeMap<String, ProofId>,
+    satisfaction_proofs: &BTreeMap<String, ProofId>,
+) -> Vec<ProofId> {
+    let mut inputs = BTreeSet::new();
+    for obligation in &component.obligations {
+        if let Some(proof) = obligation_proofs.get(obligation.id.as_str()) {
+            inputs.insert(*proof);
+        }
+    }
+    for settlement in &component.settlements {
+        if let Some(proof) = settlement_proofs.get(settlement.id.as_str()) {
+            inputs.insert(*proof);
+        }
+    }
+    for allocation in &component.allocations {
+        if let Some(proof) = satisfaction_proofs.get(allocation.id.as_str()) {
+            inputs.insert(*proof);
+        }
+    }
+    inputs.into_iter().collect()
+}
+
+fn analyze_satisfaction_sources(context: SatisfactionContext<'_>) -> SatisfactionViews {
+    use crate::ontology as economic;
+
+    let SatisfactionContext {
+        source_obligations,
+        source_settlements,
+        source_satisfactions,
+        obligation_proofs,
+        settlement_proofs,
+        satisfaction_proofs,
+        proof,
+        issues,
+        dependencies,
+        invalidations,
+    } = context;
+    let mut first_error = None;
+    let mut first_error_source = None;
+
+    let mut obligations = Vec::with_capacity(source_obligations.len());
+    for source in source_obligations {
+        let result = source
+            .quantity
+            .unit
+            .as_ref()
+            .map(|unit| unit.as_str())
+            .ok_or(economic::OntologyError::InvalidQuantity {
+                context: "an obligation needs an instrument unit",
+            })
+            .and_then(|unit| {
+                economic::Obligation::transfer(
+                    source.occurrence.as_str(),
+                    source.debtor.as_str(),
+                    source.creditor.as_str(),
+                    unit,
+                    source.quantity.clone(),
+                )
+            });
+        match result {
+            Ok(obligation) => obligations.push(match source.due {
+                Some(due) => obligation.due_on(due),
+                None => obligation,
+            }),
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                    first_error_source = Some(("obligation", source.occurrence.as_str()));
+                }
+            }
+        }
+    }
+
+    let mut settlements = Vec::with_capacity(source_settlements.len());
+    for source in source_settlements {
+        let history = source
+            .history
+            .iter()
+            .map(|transition| economic::SettlementTransition {
+                state: ontology_settlement_state(transition.state),
+                at: transition.at,
+                reason: None,
+            })
+            .collect();
+        let result = economic::Settlement::from_history(
+            source.occurrence.as_str(),
+            economic::Endpoint::entity(source.from.as_str()),
+            economic::Endpoint::entity(source.to.as_str()),
+            source.instrument.as_str(),
+            source.amount.clone(),
+            history,
+        );
+        match result {
+            Ok(settlement) => settlements.push(settlement),
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                    first_error_source = Some(("settlement", source.occurrence.as_str()));
+                }
+            }
+        }
+    }
+
+    let mut allocations = Vec::with_capacity(source_satisfactions.len());
+    for source in source_satisfactions {
+        let result = economic::SatisfactionAllocation::new(
+            source.occurrence.as_str(),
+            source.obligation.as_str(),
+            source.settlement.as_str(),
+            source.amount.clone(),
+        )
+        .map(|allocation| match source.state {
+            model::SatisfactionState::Proposed => allocation,
+            model::SatisfactionState::Applied => allocation.applied(),
+            model::SatisfactionState::Reversed => allocation.reversed(),
+        });
+        match result {
+            Ok(allocation) => allocations.push(allocation),
+            Err(error) => {
+                if first_error.is_none() {
+                    first_error = Some(error);
+                    first_error_source = Some(("satisfaction", source.occurrence.as_str()));
+                }
+            }
+        }
+    }
+
+    let mut network = SatisfactionNetwork::new(&obligations, &settlements, &allocations);
+    for component in &mut network.components {
+        component.proof_inputs = satisfaction_component_proof_inputs(
+            component,
+            obligation_proofs,
+            settlement_proofs,
+            satisfaction_proofs,
+        );
+    }
+
+    if let Some(reason) = first_error.as_ref().map(ToString::to_string) {
+        let inputs = first_error_source
+            .and_then(|(kind, id)| match kind {
+                "obligation" => obligation_proofs.get(id),
+                "settlement" => settlement_proofs.get(id),
+                "satisfaction" => satisfaction_proofs.get(id),
+                _ => None,
+            })
+            .copied()
+            .into_iter()
+            .collect();
+        let conflict = proof.insert(Node::new(
+            "obligation satisfaction conflict",
+            Operation::Conflict {
+                subject: "satisfaction-network".into(),
+                reason,
+            },
+            inputs,
+            metadata_for("satisfaction-network", "obligation-conflict", None),
+        ));
+        issues.push(Issue {
+            code: IssueCode::ObligationConflict,
+            message: first_error.as_ref().unwrap().to_string(),
+            sale: None,
+            proof: Some(conflict),
+        });
+    }
+    for component in &network.components {
+        let Err(error) = &component.summary else {
+            continue;
+        };
+        let reason = error.to_string();
+        let conflict = proof.insert(Node::new(
+            "obligation satisfaction conflict",
+            Operation::Conflict {
+                subject: "satisfaction-network".into(),
+                reason: reason.clone(),
+            },
+            component.proof_inputs.clone(),
+            metadata_for("satisfaction-network", "obligation-conflict", None),
+        ));
+        issues.push(Issue {
+            code: IssueCode::ObligationConflict,
+            message: reason,
+            sale: None,
+            proof: Some(conflict),
+        });
+    }
+
+    // Bind every independently valid authored source to a typed proof leaf,
+    // then expose the exact settlement/allocation/balance certificates that
+    // consumers can check without rerunning the ontology.  Invalid source
+    // facts deliberately remain generic observations (created above), so a
+    // blocked ledger still has a structurally checkable proof bundle.
+    let mut settlement_history_certificate_proofs = BTreeMap::<String, ProofId>::new();
+    for source in source_settlements {
+        let id = source.occurrence.as_str().to_owned();
+        let Some(&settlement_proof) = settlement_proofs.get(&id) else {
+            continue;
+        };
+        let source_is_typed = proof
+            .node(settlement_proof)
+            .is_some_and(|node| matches!(node.operation, Operation::SettlementObservation(_)));
+        let source_is_valid = network.settlements_by_id.contains_key(id.as_str());
+        if !source_is_typed || !source_is_valid {
+            continue;
+        }
+        let history = source
+            .history
+            .iter()
+            .map(|transition| SettlementTransition {
+                state: settlement_state_text(transition.state).into(),
+                at: transition.at.map(|date| date.to_string()),
+            })
+            .collect::<Vec<_>>();
+        let Some(current) = history.last().map(|transition| transition.state.clone()) else {
+            continue;
+        };
+        let effective = network
+            .settlements_by_id
+            .get(id.as_str())
+            .and_then(|index| settlements.get(*index))
+            .is_some_and(economic::Settlement::is_effective);
+        let certificate = SettlementHistoryCertificate {
+            settlement: id.clone(),
+            settlement_proof,
+            kind: settlement_kind_text(source.kind).into(),
+            from: source.from.as_str().to_owned(),
+            to: source.to.as_str().to_owned(),
+            instrument: source.instrument.as_str().to_owned(),
+            amount: source.amount.number.clone(),
+            unit: source
+                .amount
+                .unit
+                .as_ref()
+                .expect("typed settlement has a unit")
+                .as_str()
+                .to_owned(),
+            history,
+            current,
+            effective,
+        };
+        let certificate_proof = proof.insert(Node::new(
+            format!("settlement history certificate {id}"),
+            Operation::SettlementHistory(Box::new(certificate)),
+            vec![settlement_proof],
+            metadata_for(
+                &source_key("settlement-history", &settlement_history_material(source)),
+                "settlement-history-certificate",
+                None,
+            ),
+        ));
+        settlement_history_certificate_proofs.insert(id, certificate_proof);
+    }
+
+    let mut satisfaction_allocation_proofs = BTreeMap::<String, ProofId>::new();
+    for source in source_satisfactions {
+        let id = source.occurrence.as_str().to_owned();
+        let Some(&satisfaction_proof) = satisfaction_proofs.get(&id) else {
+            continue;
+        };
+        let Some(&obligation_proof) = obligation_proofs.get(source.obligation.as_str()) else {
+            continue;
+        };
+        let Some(&settlement_proof) = settlement_proofs.get(source.settlement.as_str()) else {
+            continue;
+        };
+        let typed_obligation =
+            proof
+                .node(obligation_proof)
+                .and_then(|node| match &node.operation {
+                    Operation::ObligationObservation(certificate) => Some(certificate),
+                    _ => None,
+                });
+        let typed_settlement =
+            proof
+                .node(settlement_proof)
+                .and_then(|node| match &node.operation {
+                    Operation::SettlementObservation(certificate) => Some(certificate),
+                    _ => None,
+                });
+        let typed_satisfaction = proof
+            .node(satisfaction_proof)
+            .is_some_and(|node| matches!(node.operation, Operation::SatisfactionObservation(_)));
+        let Some(obligation) = typed_obligation else {
+            continue;
+        };
+        let Some(settlement) = typed_settlement else {
+            continue;
+        };
+        if !typed_satisfaction
+            || obligation.debtor != settlement.from
+            || obligation.creditor != settlement.to
+            || obligation.unit != settlement.unit
+            || obligation.unit
+                != source
+                    .amount
+                    .unit
+                    .as_ref()
+                    .map(|unit| unit.as_str())
+                    .unwrap_or("")
+            || settlement.instrument != obligation.unit
+            || !network.allocations_by_id.contains_key(id.as_str())
+        {
+            continue;
+        }
+        let certificate = SatisfactionAllocationCertificate {
+            satisfaction: id.clone(),
+            satisfaction_proof,
+            obligation: source.obligation.as_str().to_owned(),
+            obligation_proof,
+            settlement: source.settlement.as_str().to_owned(),
+            settlement_proof,
+            amount: source.amount.number.clone(),
+            unit: source
+                .amount
+                .unit
+                .as_ref()
+                .expect("typed satisfaction has a unit")
+                .as_str()
+                .to_owned(),
+            state: satisfaction_state_text(source.state).into(),
+        };
+        let certificate_proof = proof.insert(Node::new(
+            format!("satisfaction allocation certificate {id}"),
+            Operation::SatisfactionAllocation(Box::new(certificate)),
+            vec![satisfaction_proof, obligation_proof, settlement_proof],
+            metadata_for(
+                &source_key("satisfaction", &satisfaction_material(source)),
+                "satisfaction-allocation",
+                None,
+            ),
+        ));
+        satisfaction_allocation_proofs.insert(id, certificate_proof);
+    }
+
+    let mut obligation_balance_proofs = BTreeMap::<String, ProofId>::new();
+    for source in source_obligations {
+        let id = source.occurrence.as_str().to_owned();
+        let Some(&obligation_proof) = obligation_proofs.get(&id) else {
+            continue;
+        };
+        if !proof
+            .node(obligation_proof)
+            .is_some_and(|node| matches!(node.operation, Operation::ObligationObservation(_)))
+        {
+            continue;
+        }
+        let Some(component) = network.component_for_obligation(&id) else {
+            continue;
+        };
+        let Ok(summary) = &component.summary else {
+            continue;
+        };
+        let Some(remaining) = summary
+            .obligation_remaining
+            .get(&economic::ObligationId::new(id.clone()))
+            .cloned()
+        else {
+            continue;
+        };
+        let allocation_ids = network
+            .allocations_by_obligation
+            .get(id.as_str())
+            .into_iter()
+            .flatten()
+            .filter_map(|index| allocations.get(*index))
+            .filter(|allocation| {
+                allocation.state == economic::AllocationState::Applied
+                    && network
+                        .settlements_by_id
+                        .get(allocation.settlement.as_str())
+                        .and_then(|index| settlements.get(*index))
+                        .is_some_and(economic::Settlement::is_effective)
+            })
+            .filter_map(|allocation| satisfaction_allocation_proofs.get(allocation.id.as_str()))
+            .copied()
+            .collect::<Vec<_>>();
+        let mut allocation_ids = allocation_ids;
+        allocation_ids.sort();
+        allocation_ids.dedup();
+        let allocated = allocation_ids
+            .iter()
+            .fold(Exact::from(0i64), |total, proof_id| {
+                proof
+                    .node(*proof_id)
+                    .and_then(|node| match &node.operation {
+                        Operation::SatisfactionAllocation(certificate) => {
+                            Some(certificate.amount.clone())
+                        }
+                        _ => None,
+                    })
+                    .map(|amount| total.checked_add(&amount))
+                    .unwrap_or(total)
+            });
+        if allocated.checked_add(&remaining.number) != source.quantity.number {
+            continue;
+        }
+        let Some(unit) = source
+            .quantity
+            .unit
+            .as_ref()
+            .map(|unit| unit.as_str().to_owned())
+        else {
+            continue;
+        };
+        let certificate = ObligationBalanceCertificate {
+            obligation: id.clone(),
+            obligation_proof,
+            promised: source.quantity.number.clone(),
+            allocated,
+            remaining: remaining.number,
+            unit,
+            allocations: allocation_ids.clone(),
+        };
+        let mut inputs = vec![obligation_proof];
+        inputs.extend(allocation_ids);
+        let balance_proof = proof.insert(Node::new(
+            format!("obligation balance certificate {id}"),
+            Operation::ObligationBalance(Box::new(certificate)),
+            inputs,
+            metadata_for(&id, "obligation-balance", None),
+        ));
+        obligation_balance_proofs.insert(id, balance_proof);
+    }
+
+    let mut settlement_balance_proofs = BTreeMap::<String, ProofId>::new();
+    for source in source_settlements {
+        let id = source.occurrence.as_str().to_owned();
+        let Some(&settlement_proof) = settlement_proofs.get(&id) else {
+            continue;
+        };
+        if !settlement_history_certificate_proofs.contains_key(&id) {
+            continue;
+        }
+        let Some(component) = network.component_for_settlement(&id) else {
+            continue;
+        };
+        let Ok(summary) = &component.summary else {
+            continue;
+        };
+        let Some(unused) = summary
+            .settlement_unused
+            .get(&economic::SettlementId::new(id.clone()))
+            .cloned()
+        else {
+            continue;
+        };
+        let allocation_ids = network
+            .allocations_by_settlement
+            .get(id.as_str())
+            .into_iter()
+            .flatten()
+            .filter_map(|index| allocations.get(*index))
+            .filter(|allocation| {
+                allocation.state == economic::AllocationState::Applied
+                    && network
+                        .settlements_by_id
+                        .get(id.as_str())
+                        .and_then(|index| settlements.get(*index))
+                        .is_some_and(economic::Settlement::is_effective)
+            })
+            .filter_map(|allocation| satisfaction_allocation_proofs.get(allocation.id.as_str()))
+            .copied()
+            .collect::<Vec<_>>();
+        let mut allocation_ids = allocation_ids;
+        allocation_ids.sort();
+        allocation_ids.dedup();
+        let allocated = allocation_ids
+            .iter()
+            .fold(Exact::from(0i64), |total, proof_id| {
+                proof
+                    .node(*proof_id)
+                    .and_then(|node| match &node.operation {
+                        Operation::SatisfactionAllocation(certificate) => {
+                            Some(certificate.amount.clone())
+                        }
+                        _ => None,
+                    })
+                    .map(|amount| total.checked_add(&amount))
+                    .unwrap_or(total)
+            });
+        let Some(unit) = source
+            .amount
+            .unit
+            .as_ref()
+            .map(|unit| unit.as_str().to_owned())
+        else {
+            continue;
+        };
+        if allocated.checked_add(&unused.number) != source.amount.number {
+            continue;
+        }
+        let certificate = SettlementBalanceCertificate {
+            settlement: id.clone(),
+            settlement_proof,
+            amount: source.amount.number.clone(),
+            allocated,
+            unused: unused.number,
+            unit,
+            allocations: allocation_ids.clone(),
+        };
+        let mut inputs = vec![settlement_proof];
+        if let Some(history_proof) = settlement_history_certificate_proofs.get(&id) {
+            inputs.push(*history_proof);
+        }
+        inputs.extend(allocation_ids);
+        let balance_proof = proof.insert(Node::new(
+            format!("settlement balance certificate {id}"),
+            Operation::SettlementBalance(Box::new(certificate)),
+            inputs,
+            metadata_for(&id, "settlement-balance", None),
+        ));
+        settlement_balance_proofs.insert(id, balance_proof);
+    }
+
+    let obligation_views = source_obligations
+        .iter()
+        .map(|source| {
+            let id = source.occurrence.as_str().to_owned();
+            let proof_id = obligation_proofs[&id];
+            let remaining = network
+                .component_for_obligation(&id)
+                .and_then(|component| component.summary.as_ref().ok())
+                .and_then(|summary| {
+                    summary
+                        .obligation_remaining
+                        .get(&economic::ObligationId::new(id.clone()))
+                        .cloned()
+                });
+            let status = match &remaining {
+                None => ObligationStatus::Invalid,
+                Some(value) if value.is_zero() => ObligationStatus::Satisfied,
+                Some(value) if *value == source.quantity => ObligationStatus::Outstanding,
+                Some(_) => ObligationStatus::PartiallySatisfied,
+            };
+            let result_proof = obligation_balance_proofs
+                .get(&id)
+                .copied()
+                .unwrap_or(proof_id);
+            let mut roots = network
+                .component_for_obligation(&id)
+                .map(|component| component.proof_inputs.clone())
+                .unwrap_or_else(|| vec![proof_id]);
+            if !roots.contains(&proof_id) {
+                roots.push(proof_id);
+            }
+            if let Some(balance) = obligation_balance_proofs.get(&id) {
+                roots.push(*balance);
+            }
+            dependencies.insert(format!("obligation:{id}"), roots);
+            invalidations
+                .entry(source_key("obligation", &obligation_material(source)))
+                .or_default()
+                .push(format!("obligation:{id}"));
+            ObligationView {
+                id,
+                debtor: source.debtor.as_str().to_owned(),
+                creditor: source.creditor.as_str().to_owned(),
+                promised: source.quantity.clone(),
+                due: source.due,
+                remaining,
+                status,
+                proof: result_proof,
+            }
+        })
+        .collect();
+    let settlement_views: Vec<SettlementHistoryView> = source_settlements
+        .iter()
+        .map(|source| {
+            let id = source.occurrence.as_str().to_owned();
+            let proof_id = settlement_proofs[&id];
+            let mut roots = network
+                .component_for_settlement(&id)
+                .map(|component| component.proof_inputs.clone())
+                .unwrap_or_else(|| vec![proof_id]);
+            if !roots.contains(&proof_id) {
+                roots.push(proof_id);
+            }
+            if let Some(history) = settlement_history_certificate_proofs.get(&id) {
+                roots.push(*history);
+            }
+            if let Some(balance) = settlement_balance_proofs.get(&id) {
+                roots.push(*balance);
+            }
+            dependencies.insert(format!("settlement:{id}"), roots);
+            invalidations
+                .entry(source_key(
+                    "settlement-history",
+                    &settlement_history_material(source),
+                ))
+                .or_default()
+                .push(format!("settlement:{id}"));
+            let current = source
+                .history
+                .last()
+                .map(|state| state.state)
+                .unwrap_or(model::SettlementStateKind::Issued);
+            let effective = network
+                .settlements_by_id
+                .get(id.as_str())
+                .and_then(|index| settlements.get(*index))
+                .is_some_and(economic::Settlement::is_effective);
+            let component_summary = network
+                .component_for_settlement(&id)
+                .and_then(|component| component.summary.as_ref().ok());
+            let result_proof = settlement_balance_proofs
+                .get(&id)
+                .or_else(|| settlement_history_certificate_proofs.get(&id))
+                .copied()
+                .unwrap_or(proof_id);
+            SettlementHistoryView {
+                id: id.clone(),
+                kind: source.kind,
+                amount: source.amount.clone(),
+                current,
+                effective,
+                unused: component_summary.as_ref().and_then(|summary| {
+                    summary
+                        .settlement_unused
+                        .get(&economic::SettlementId::new(id))
+                        .cloned()
+                }),
+                proof: result_proof,
+                source: source.clone(),
+            }
+        })
+        .collect();
+    let satisfaction_views = source_satisfactions
+        .iter()
+        .map(|source| {
+            let id = source.occurrence.as_str().to_owned();
+            let proof_id = satisfaction_proofs[&id];
+            let mut roots = vec![proof_id];
+            if let Some(allocation) = satisfaction_allocation_proofs.get(&id) {
+                roots.push(*allocation);
+            }
+            dependencies.insert(format!("satisfaction:{id}"), roots);
+            invalidations
+                .entry(source_key("satisfaction", &satisfaction_material(source)))
+                .or_default()
+                .push(format!("satisfaction:{id}"));
+            let source_allocation_is_valid = network
+                .allocations_by_id
+                .get(id.as_str())
+                .and_then(|index| allocations.get(*index))
+                .is_some_and(|allocation| {
+                    allocation.obligation.as_str() == source.obligation.as_str()
+                        && allocation.settlement.as_str() == source.settlement.as_str()
+                        && allocation.quantity == source.amount
+                });
+            let component_valid = network
+                .obligation_components
+                .get(source.obligation.as_str())
+                .zip(
+                    network
+                        .settlement_components
+                        .get(source.settlement.as_str()),
+                )
+                .is_some_and(|(obligation, settlement)| {
+                    obligation == settlement && network.components[*obligation].summary.is_ok()
+                });
+            let effective = source.state == model::SatisfactionState::Applied
+                && source_allocation_is_valid
+                && component_valid
+                && network
+                    .settlements_by_id
+                    .get(source.settlement.as_str())
+                    .and_then(|index| settlements.get(*index))
+                    .is_some_and(economic::Settlement::is_effective);
+            let result_proof = satisfaction_allocation_proofs
+                .get(&id)
+                .copied()
+                .unwrap_or(proof_id);
+            SatisfactionView {
+                id,
+                obligation: source.obligation.as_str().to_owned(),
+                settlement: source.settlement.as_str().to_owned(),
+                amount: source.amount.clone(),
+                state: source.state,
+                effective,
+                proof: result_proof,
+            }
+        })
+        .collect();
+    (obligation_views, settlement_views, satisfaction_views)
+}
+
+fn check_satisfaction_results(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
+    let expected_obligations = authored_source_ids(&analysis.proof, "obligation", "obligation ");
+    let expected_settlements =
+        authored_source_ids(&analysis.proof, "settlement-history", "settlement history ");
+    let expected_satisfactions =
+        authored_source_ids(&analysis.proof, "satisfaction", "satisfaction ");
+    require_complete_views(
+        "obligation",
+        expected_obligations,
+        analysis.obligations.iter().map(|view| view.id.as_str()),
+    )?;
+    require_complete_views(
+        "settlement",
+        expected_settlements,
+        analysis
+            .settlement_histories
+            .iter()
+            .map(|view| view.id.as_str()),
+    )?;
+    require_complete_views(
+        "satisfaction",
+        expected_satisfactions,
+        analysis.satisfactions.iter().map(|view| view.id.as_str()),
+    )?;
+
+    let mut certified_obligations = BTreeSet::new();
+    let mut certified_settlements = BTreeSet::new();
+    for node in analysis.proof.nodes.values() {
+        match &node.operation {
+            Operation::ObligationBalance(balance) => {
+                certified_obligations.insert(balance.obligation.as_str());
+            }
+            Operation::SettlementBalance(balance) => {
+                certified_settlements.insert(balance.settlement.as_str());
+            }
+            _ => {}
+        }
+    }
+    for view in &analysis.obligations {
+        require_goal_proof(analysis, &format!("obligation:{}", view.id), view.proof)?;
+        let Some(remaining) = &view.remaining else {
+            if view.status != ObligationStatus::Invalid {
+                return Err(invalid_satisfaction_result(
+                    &view.id,
+                    view.proof,
+                    "an invalid obligation must not claim a status",
+                ));
+            }
+            let valid = analysis
+                .proof
+                .node(view.proof)
+                .is_some_and(|node| match &node.operation {
+                    Operation::ObligationObservation(source) => {
+                        source.obligation == view.id
+                            && source.debtor == view.debtor
+                            && source.creditor == view.creditor
+                            && source.promised == view.promised.number
+                            && view.promised.unit.as_ref().map(model::Unit::as_str)
+                                == Some(source.unit.as_str())
+                            && source.due == view.due.map(|date| date.to_string())
+                    }
+                    Operation::Observation { source } => {
+                        node.statement.as_str() == format!("obligation {}", view.id)
+                            && *source == source_key("obligation", &obligation_view_material(view))
+                    }
+                    _ => false,
+                })
+                && analysis.proof.roots.contains(&view.proof);
+            if !valid {
+                return Err(invalid_satisfaction_result(
+                    &view.id,
+                    view.proof,
+                    "invalid obligation view does not match its typed source",
+                ));
+            }
+            continue;
+        };
+        let Some(node) = analysis.proof.node(view.proof) else {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "result proof is missing",
+            ));
+        };
+        let Operation::ObligationBalance(balance) = &node.operation else {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "valid obligation does not point at its balance certificate",
+            ));
+        };
+        let Some(source) = analysis.proof.node(balance.obligation_proof) else {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "obligation source proof is missing",
+            ));
+        };
+        let Operation::ObligationObservation(source) = &source.operation else {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "obligation balance is not bound to a typed source",
+            ));
+        };
+        let expected_status = if remaining.is_zero() {
+            ObligationStatus::Satisfied
+        } else if *remaining == view.promised {
+            ObligationStatus::Outstanding
+        } else {
+            ObligationStatus::PartiallySatisfied
+        };
+        if source.obligation != view.id
+            || source.debtor != view.debtor
+            || source.creditor != view.creditor
+            || source.promised != view.promised.number
+            || view.promised.unit.as_ref().map(model::Unit::as_str) != Some(source.unit.as_str())
+            || source.due != view.due.map(|date| date.to_string())
+            || balance.remaining != remaining.number
+            || balance.unit != source.unit
+            || view.status != expected_status
+            || !analysis.proof.roots.contains(&view.proof)
+        {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "obligation view does not match its source and balance certificates",
+            ));
+        }
+    }
+
+    for view in &analysis.settlement_histories {
+        require_goal_proof(analysis, &format!("settlement:{}", view.id), view.proof)?;
+        if !settlement_view_matches_source(view) {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "settlement view does not match its authored source",
+            ));
+        }
+        let Some(unused) = &view.unused else {
+            let Some(node) = analysis.proof.node(view.proof) else {
+                return Err(invalid_satisfaction_result(
+                    &view.id,
+                    view.proof,
+                    "result proof is missing",
+                ));
+            };
+            match &node.operation {
+                Operation::SettlementHistory(history) => {
+                    if history.settlement != view.id
+                        || history.kind != settlement_kind_text(view.kind)
+                        || history.current != settlement_state_text(view.current)
+                        || history.effective != view.effective
+                        || history.amount != view.amount.number
+                        || view.amount.unit.as_ref().map(model::Unit::as_str)
+                            != Some(history.unit.as_str())
+                        || !analysis.proof.roots.contains(&view.proof)
+                    {
+                        return Err(invalid_satisfaction_result(
+                            &view.id,
+                            view.proof,
+                            "conflicted settlement view does not match its history certificate",
+                        ));
+                    }
+                }
+                Operation::Observation { source }
+                    if !view.effective
+                        && node.statement.as_str() == format!("settlement history {}", view.id)
+                        && *source
+                            == source_key(
+                                "settlement-history",
+                                &settlement_history_material(&view.source),
+                            )
+                        && analysis.proof.roots.contains(&view.proof) => {}
+                _ => {
+                    return Err(invalid_satisfaction_result(
+                        &view.id,
+                        view.proof,
+                        "uncertified settlement result",
+                    ));
+                }
+            }
+            continue;
+        };
+        let Some(node) = analysis.proof.node(view.proof) else {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "result proof is missing",
+            ));
+        };
+        let Operation::SettlementBalance(balance) = &node.operation else {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "valid settlement does not point at its balance certificate",
+            ));
+        };
+        let history = node.inputs.iter().find_map(|input| {
+            analysis
+                .proof
+                .node(*input)
+                .and_then(|node| match &node.operation {
+                    Operation::SettlementHistory(history) if history.settlement == view.id => {
+                        Some(history.as_ref())
+                    }
+                    _ => None,
+                })
+        });
+        let Some(history) = history else {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "settlement balance has no matching history certificate",
+            ));
+        };
+        if balance.settlement != view.id
+            || balance.amount != view.amount.number
+            || view.amount.unit.as_ref().map(model::Unit::as_str) != Some(balance.unit.as_str())
+            || balance.unused != unused.number
+            || history.kind != settlement_kind_text(view.kind)
+            || history.current != settlement_state_text(view.current)
+            || history.effective != view.effective
+            || !analysis.proof.roots.contains(&view.proof)
+        {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "settlement view does not match its history and balance certificates",
+            ));
+        }
+    }
+
+    for view in &analysis.satisfactions {
+        let Some(node) = analysis.proof.node(view.proof) else {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "result proof is missing",
+            ));
+        };
+        let mut expected_dependencies = vec![view.proof];
+        if let Operation::SatisfactionAllocation(allocation) = &node.operation {
+            expected_dependencies.push(allocation.satisfaction_proof);
+        }
+        expected_dependencies.sort_unstable();
+        expected_dependencies.dedup();
+        if analysis
+            .dependencies
+            .get(&format!("satisfaction:{}", view.id))
+            != Some(&expected_dependencies)
+        {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "satisfaction dependency set does not match its certificates",
+            ));
+        }
+        let Operation::SatisfactionAllocation(allocation) = &node.operation else {
+            let valid_source = match &node.operation {
+                Operation::SatisfactionObservation(source) => {
+                    source.satisfaction == view.id
+                        && source.obligation == view.obligation
+                        && source.settlement == view.settlement
+                        && source.amount == view.amount.number
+                        && view.amount.unit.as_ref().map(model::Unit::as_str)
+                            == Some(source.unit.as_str())
+                        && source.state == satisfaction_state_text(view.state)
+                }
+                Operation::Observation { source } => {
+                    node.statement.as_str() == format!("satisfaction {}", view.id)
+                        && *source == source_key("satisfaction", &satisfaction_view_material(view))
+                }
+                _ => false,
+            };
+            let valid_source =
+                valid_source && !view.effective && analysis.proof.roots.contains(&view.proof);
+            if !valid_source {
+                return Err(invalid_satisfaction_result(
+                    &view.id,
+                    view.proof,
+                    "ineffective satisfaction is not bound to its source observation",
+                ));
+            }
+            continue;
+        };
+        let settlement_effective = analysis
+            .proof
+            .node(allocation.settlement_proof)
+            .and_then(|node| match &node.operation {
+                Operation::SettlementObservation(settlement) => settlement.history.last(),
+                _ => None,
+            })
+            .is_some_and(|transition| transition.state == "settled");
+        let effective = view.state == model::SatisfactionState::Applied
+            && settlement_effective
+            && certified_obligations.contains(view.obligation.as_str())
+            && certified_settlements.contains(view.settlement.as_str());
+        if allocation.satisfaction != view.id
+            || allocation.obligation != view.obligation
+            || allocation.settlement != view.settlement
+            || allocation.amount != view.amount.number
+            || view.amount.unit.as_ref().map(model::Unit::as_str) != Some(allocation.unit.as_str())
+            || allocation.state != satisfaction_state_text(view.state)
+            || view.effective != effective
+            || !analysis.proof.roots.contains(&view.proof)
+        {
+            return Err(invalid_satisfaction_result(
+                &view.id,
+                view.proof,
+                "satisfaction view does not match its allocation certificate",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn require_goal_proof(
+    analysis: &Analysis,
+    goal: &str,
+    proof: ProofId,
+) -> Result<(), AnalysisCheckError> {
+    if !analysis
+        .dependencies
+        .get(goal)
+        .is_some_and(|roots| roots.binary_search(&proof).is_ok())
+    {
+        return Err(AnalysisCheckError::InvalidDependencyIndex {
+            reason: format!("goal `{goal}` does not contain its result proof"),
+        });
+    }
+    Ok(())
+}
+
+fn authored_source_ids<'a>(
+    proof: &'a Proof,
+    kind: &str,
+    statement_prefix: &str,
+) -> BTreeSet<&'a str> {
+    proof
+        .nodes
+        .values()
+        .filter(|node| node.metadata.get("kind").is_some_and(|value| value == kind))
+        .filter_map(|node| node.statement.as_str().strip_prefix(statement_prefix))
+        .collect()
+}
+
+fn require_complete_views<'a>(
+    kind: &str,
+    expected: BTreeSet<&'a str>,
+    actual: impl Iterator<Item = &'a str>,
+) -> Result<(), AnalysisCheckError> {
+    let actual = actual.collect::<Vec<_>>();
+    let unique = actual.iter().copied().collect::<BTreeSet<_>>();
+    if actual.len() != unique.len() || unique != expected {
+        return Err(AnalysisCheckError::InvalidSatisfactionResult {
+            subject: kind.into(),
+            proof: ProofId::ZERO,
+            reason: format!("{kind} views do not exactly cover authored sources"),
+        });
+    }
+    Ok(())
+}
+
+fn obligation_view_material(view: &ObligationView) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        view.id,
+        view.debtor,
+        view.creditor,
+        view.promised.canonical(),
+        view.due
+            .map(|date| date.to_string())
+            .unwrap_or_else(|| "-".into())
+    )
+}
+
+fn satisfaction_view_material(view: &SatisfactionView) -> String {
+    format!(
+        "{}|{}|{}|{}|{:?}",
+        view.id,
+        view.obligation,
+        view.settlement,
+        view.amount.canonical(),
+        view.state
+    )
+}
+
+fn settlement_view_matches_source(view: &SettlementHistoryView) -> bool {
+    view.id == view.source.occurrence.as_str()
+        && view.kind == view.source.kind
+        && view.amount == view.source.amount
+        && view.current
+            == view
+                .source
+                .history
+                .last()
+                .map(|transition| transition.state)
+                .unwrap_or(model::SettlementStateKind::Issued)
+}
+
+fn check_dependency_indexes(analysis: &Analysis) -> Result<(), AnalysisCheckError> {
+    let mut expected_invalidations = BTreeMap::<String, Vec<String>>::new();
+    for (goal, roots) in &analysis.dependencies {
+        if roots.is_empty() || !roots.windows(2).all(|pair| pair[0] < pair[1]) {
+            return Err(AnalysisCheckError::InvalidDependencyIndex {
+                reason: format!("goal `{goal}` does not have a canonical dependency set"),
+            });
+        }
+        for root in roots {
+            if !analysis.proof.roots.contains(root) {
+                return Err(AnalysisCheckError::InvalidDependencyIndex {
+                    reason: format!("goal `{goal}` names a proof that is not a root"),
+                });
+            }
+            let node = analysis.proof.node(*root).ok_or_else(|| {
+                AnalysisCheckError::InvalidDependencyIndex {
+                    reason: format!("goal `{goal}` names a missing proof"),
+                }
+            })?;
+            if let Some(source) = node.metadata.get("invalidation") {
+                expected_invalidations
+                    .entry(source.clone())
+                    .or_default()
+                    .push(goal.clone());
+            }
+        }
+    }
+    for goals in expected_invalidations.values_mut() {
+        goals.sort();
+        goals.dedup();
+    }
+    if analysis.invalidations != expected_invalidations {
+        return Err(AnalysisCheckError::InvalidDependencyIndex {
+            reason: "reverse invalidations do not match proof dependencies".into(),
+        });
+    }
+    Ok(())
+}
+
+fn invalid_satisfaction_result(subject: &str, proof: ProofId, reason: &str) -> AnalysisCheckError {
+    AnalysisCheckError::InvalidSatisfactionResult {
+        subject: subject.to_owned(),
+        proof,
+        reason: reason.to_owned(),
+    }
+}
+
+fn ontology_settlement_state(
+    state: model::SettlementStateKind,
+) -> crate::ontology::SettlementState {
+    use crate::ontology::SettlementState as Target;
+    match state {
+        model::SettlementStateKind::Issued => Target::Issued,
+        model::SettlementStateKind::Authorized => Target::Authorized,
+        model::SettlementStateKind::Presented => Target::Presented,
+        model::SettlementStateKind::Pending => Target::Pending,
+        model::SettlementStateKind::Settled => Target::Settled,
+        model::SettlementStateKind::Returned => Target::Returned,
+        model::SettlementStateKind::Reversed => Target::Reversed,
+        model::SettlementStateKind::Rejected => Target::Rejected,
+        model::SettlementStateKind::Cancelled => Target::Cancelled,
+        model::SettlementStateKind::Refunded => Target::Refunded,
+        model::SettlementStateKind::Disputed => Target::Disputed,
+        model::SettlementStateKind::ChargedBack => Target::ChargedBack,
+        model::SettlementStateKind::Represented => Target::Represented,
+        model::SettlementStateKind::Resolved => Target::Resolved,
+    }
+}
+
+fn typed_obligation_certificate(
+    source: &model::SourceObligation,
+) -> Option<ObligationObservationCertificate> {
+    let unit = source.quantity.unit.as_ref()?.as_str().to_owned();
+    if source.quantity.number.is_negative() || source.quantity.number.is_zero() {
+        return None;
+    }
+    Some(ObligationObservationCertificate {
+        obligation: source.occurrence.as_str().to_owned(),
+        debtor: source.debtor.as_str().to_owned(),
+        creditor: source.creditor.as_str().to_owned(),
+        promised: source.quantity.number.clone(),
+        unit,
+        due: source.due.map(|date| date.to_string()),
+    })
+}
+
+fn typed_settlement_certificate(
+    source: &model::SourceSettlement,
+) -> Option<SettlementObservationCertificate> {
+    let unit = source.amount.unit.as_ref()?.as_str().to_owned();
+    if source.amount.number.is_negative()
+        || source.amount.number.is_zero()
+        || source.instrument.as_str().is_empty()
+        || !source_settlement_history_is_valid(source)
+    {
+        return None;
+    }
+    let history = source
+        .history
+        .iter()
+        .map(|transition| SettlementTransition {
+            state: settlement_state_text(transition.state).into(),
+            at: transition.at.map(|date| date.to_string()),
+        })
+        .collect();
+    Some(SettlementObservationCertificate {
+        settlement: source.occurrence.as_str().to_owned(),
+        kind: settlement_kind_text(source.kind).into(),
+        from: source.from.as_str().to_owned(),
+        to: source.to.as_str().to_owned(),
+        instrument: source.instrument.as_str().to_owned(),
+        amount: source.amount.number.clone(),
+        unit,
+        history,
+    })
+}
+
+fn typed_satisfaction_certificate(
+    source: &model::SourceSatisfaction,
+) -> Option<SatisfactionObservationCertificate> {
+    let unit = source.amount.unit.as_ref()?.as_str().to_owned();
+    if source.amount.number.is_negative() || source.amount.number.is_zero() {
+        return None;
+    }
+    Some(SatisfactionObservationCertificate {
+        satisfaction: source.occurrence.as_str().to_owned(),
+        obligation: source.obligation.as_str().to_owned(),
+        settlement: source.settlement.as_str().to_owned(),
+        amount: source.amount.number.clone(),
+        unit,
+        state: satisfaction_state_text(source.state).into(),
+    })
+}
+
+fn settlement_kind_text(kind: model::SettlementKind) -> &'static str {
+    match kind {
+        model::SettlementKind::Ach => "ach",
+        model::SettlementKind::Card => "card",
+        model::SettlementKind::Check => "check",
+    }
+}
+
+fn settlement_state_text(state: model::SettlementStateKind) -> &'static str {
+    match state {
+        model::SettlementStateKind::Issued => "issued",
+        model::SettlementStateKind::Authorized => "authorized",
+        model::SettlementStateKind::Presented => "presented",
+        model::SettlementStateKind::Pending => "pending",
+        model::SettlementStateKind::Settled => "settled",
+        model::SettlementStateKind::Returned => "returned",
+        model::SettlementStateKind::Reversed => "reversed",
+        model::SettlementStateKind::Rejected => "rejected",
+        model::SettlementStateKind::Cancelled => "cancelled",
+        model::SettlementStateKind::Refunded => "refunded",
+        model::SettlementStateKind::Disputed => "disputed",
+        model::SettlementStateKind::ChargedBack => "charged-back",
+        model::SettlementStateKind::Represented => "represented",
+        model::SettlementStateKind::Resolved => "resolved",
+    }
+}
+
+fn satisfaction_state_text(state: model::SatisfactionState) -> &'static str {
+    match state {
+        model::SatisfactionState::Proposed => "proposed",
+        model::SatisfactionState::Applied => "applied",
+        model::SatisfactionState::Reversed => "reversed",
+    }
+}
+
+fn source_settlement_history_is_valid(source: &model::SourceSettlement) -> bool {
+    if source.history.is_empty() {
+        return false;
+    }
+    let mut previous = None;
+    let mut previous_at = None;
+    for transition in &source.history {
+        if !settlement_transition_is_legal(previous, transition.state) {
+            return false;
+        }
+        if let Some(at) = transition.at {
+            if previous_at.is_some_and(|previous| at < previous) {
+                return false;
+            }
+            previous_at = Some(at);
+        }
+        previous = Some(transition.state);
+    }
+    true
+}
+
+fn settlement_transition_is_legal(
+    previous: Option<model::SettlementStateKind>,
+    next: model::SettlementStateKind,
+) -> bool {
+    use model::SettlementStateKind::*;
+    matches!(
+        (previous, next),
+        (None, Issued)
+            | (Some(Issued), Authorized | Presented | Cancelled)
+            | (Some(Authorized), Presented | Cancelled | Rejected)
+            | (
+                Some(Presented),
+                Pending | Settled | Returned | Rejected | Cancelled
+            )
+            | (Some(Pending), Settled | Returned | Rejected | Cancelled)
+            | (
+                Some(Settled),
+                Returned | Reversed | Refunded | Disputed | ChargedBack
+            )
+            | (Some(Disputed), Resolved | ChargedBack)
+            | (Some(ChargedBack), Represented)
+            | (Some(Represented), Pending | Settled | Rejected)
+            | (Some(Returned), Presented | Cancelled)
+            | (Some(Reversed), Presented | Cancelled)
+            | (Some(Rejected), Presented | Cancelled)
+    )
+}
+
 fn matching_settlement<'a>(
     settlements: &'a [SettlementView],
     sale: &str,
@@ -2874,6 +4554,59 @@ fn sell_material(sell: &model::Sell) -> String {
         canonical_model_quantity(&sell.quantity),
         canonical_model_quantity(&sell.proceeds),
         lot,
+    )
+}
+
+fn obligation_material(obligation: &model::SourceObligation) -> String {
+    format!(
+        "{}|{}|{}|{}|{}",
+        obligation.occurrence,
+        obligation.debtor,
+        obligation.creditor,
+        obligation.quantity.canonical(),
+        obligation
+            .due
+            .map(|date| date.to_string())
+            .unwrap_or_else(|| "-".into())
+    )
+}
+
+fn settlement_history_material(settlement: &model::SourceSettlement) -> String {
+    let history = settlement
+        .history
+        .iter()
+        .map(|transition| {
+            format!(
+                "{:?}@{}",
+                transition.state,
+                transition
+                    .at
+                    .map(|date| date.to_string())
+                    .unwrap_or_else(|| "-".into())
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{}|{:?}|{}|{}|{}|{}|{}",
+        settlement.occurrence,
+        settlement.kind,
+        settlement.from,
+        settlement.to,
+        settlement.instrument,
+        settlement.amount.canonical(),
+        history
+    )
+}
+
+fn satisfaction_material(satisfaction: &model::SourceSatisfaction) -> String {
+    format!(
+        "{}|{}|{}|{}|{:?}",
+        satisfaction.occurrence,
+        satisfaction.obligation,
+        satisfaction.settlement,
+        satisfaction.amount.canonical(),
+        satisfaction.state
     )
 }
 
@@ -3627,6 +5360,439 @@ sell sale/a on 2026-02-01
             forged.check_semantics(),
             Err(AnalysisCheckError::InvalidAllocation { .. })
         ));
+    }
+
+    #[test]
+    fn authored_obligation_network_tracks_partial_returned_and_overallocated_payments() {
+        let partial = analyze(
+            &parse_ledger(
+                r#"book receivables
+obligation invoice/a
+  debtor customer
+  creditor vendor
+  performance transfer 100 USD
+settlement payment/a
+  kind ach
+  from customer
+  to vendor
+  instrument USD
+  amount 60 USD
+  state issued at 2026-01-01
+  state presented at 2026-01-02
+  state settled at 2026-01-03
+satisfy allocation/a
+  obligation invoice/a
+  settlement payment/a
+  amount 60 USD
+  state applied
+"#,
+            )
+            .unwrap(),
+        );
+        assert_eq!(partial.obligations.len(), 1);
+        assert_eq!(
+            partial.obligations[0].status,
+            ObligationStatus::PartiallySatisfied
+        );
+        assert_eq!(
+            partial.obligations[0].remaining.as_ref().unwrap().number,
+            Exact::from(40i64)
+        );
+        assert_eq!(
+            partial.settlement_histories[0].current,
+            model::SettlementStateKind::Settled
+        );
+        assert!(partial.settlement_histories[0].effective);
+        assert_eq!(
+            partial.settlement_histories[0]
+                .unused
+                .as_ref()
+                .unwrap()
+                .number,
+            Exact::from(0i64)
+        );
+        assert!(partial.satisfactions[0].effective);
+        partial.check_proof().unwrap();
+
+        let returned = analyze(
+            &parse_ledger(
+                r#"book receivables
+obligation invoice/a
+  debtor customer
+  creditor vendor
+  performance transfer 100 USD
+settlement payment/a
+  kind check
+  from customer
+  to vendor
+  instrument USD
+  amount 100 USD
+  state issued
+  state presented
+  state settled
+  state returned
+satisfy allocation/a
+  obligation invoice/a
+  settlement payment/a
+  amount 100 USD
+  state applied
+"#,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            returned.obligations[0].status,
+            ObligationStatus::Outstanding
+        );
+        assert!(!returned.settlement_histories[0].effective);
+        assert!(!returned.satisfactions[0].effective);
+        assert_eq!(
+            returned.settlement_histories[0]
+                .unused
+                .as_ref()
+                .unwrap()
+                .number,
+            Exact::from(100i64)
+        );
+
+        let overallocated = analyze(
+            &parse_ledger(
+                r#"book receivables
+obligation invoice/a
+  debtor customer
+  creditor vendor
+  performance transfer 100 USD
+obligation invoice/b
+  debtor customer
+  creditor vendor
+  performance transfer 100 USD
+obligation invoice/c
+  debtor customer
+  creditor vendor
+  performance transfer 30 USD
+settlement payment/a
+  kind ach
+  from customer
+  to vendor
+  instrument USD
+  amount 100 USD
+  state issued
+  state presented
+  state settled
+satisfy allocation/a
+  obligation invoice/a
+  settlement payment/a
+  amount 60 USD
+  state applied
+satisfy allocation/b
+  obligation invoice/b
+  settlement payment/a
+  amount 60 USD
+  state applied
+settlement payment/c
+  kind ach
+  from customer
+  to vendor
+  instrument USD
+  amount 30 USD
+  state issued
+  state presented
+  state settled
+satisfy allocation/c
+  obligation invoice/c
+  settlement payment/c
+  amount 30 USD
+  state applied
+"#,
+            )
+            .unwrap(),
+        );
+        assert!(overallocated.blocked());
+        assert!(
+            overallocated
+                .issues
+                .iter()
+                .any(|issue| issue.code == IssueCode::ObligationConflict)
+        );
+        assert_eq!(overallocated.obligations.len(), 3);
+        assert_eq!(
+            overallocated.obligations[0].status,
+            ObligationStatus::Invalid
+        );
+        assert_eq!(
+            overallocated.obligations[1].status,
+            ObligationStatus::Invalid
+        );
+        assert_eq!(
+            overallocated.obligations[2].status,
+            ObligationStatus::Satisfied
+        );
+        assert_eq!(overallocated.settlement_histories.len(), 2);
+        assert!(
+            overallocated
+                .settlement_histories
+                .iter()
+                .find(|settlement| settlement.id == "payment/a")
+                .unwrap()
+                .unused
+                .is_none()
+        );
+        assert_eq!(
+            overallocated
+                .settlement_histories
+                .iter()
+                .find(|settlement| settlement.id == "payment/c")
+                .unwrap()
+                .unused
+                .as_ref()
+                .unwrap()
+                .number,
+            Exact::from(0i64)
+        );
+        assert!(
+            !overallocated
+                .satisfactions
+                .iter()
+                .find(|satisfaction| satisfaction.id == "allocation/a")
+                .unwrap()
+                .effective
+        );
+        assert!(
+            !overallocated
+                .satisfactions
+                .iter()
+                .find(|satisfaction| satisfaction.id == "allocation/b")
+                .unwrap()
+                .effective
+        );
+        assert!(
+            overallocated
+                .satisfactions
+                .iter()
+                .find(|satisfaction| satisfaction.id == "allocation/c")
+                .unwrap()
+                .effective
+        );
+        overallocated.check_proof().unwrap();
+
+        let mut malformed_ledger = parse_ledger(
+            r#"book receivables
+obligation invoice/invalid
+  debtor customer
+  creditor vendor
+  performance transfer 100 USD
+"#,
+        )
+        .unwrap();
+        let LedgerForm::Obligation(obligation) = &mut malformed_ledger.forms[0] else {
+            panic!("expected obligation source");
+        };
+        obligation.quantity.number = Exact::from(-1i64);
+        let malformed = analyze(&malformed_ledger);
+        assert_eq!(malformed.obligations.len(), 1);
+        assert_eq!(malformed.obligations[0].status, ObligationStatus::Invalid);
+        assert_eq!(malformed.obligations[0].remaining, None);
+        let issue = malformed
+            .issues
+            .iter()
+            .find(|issue| issue.code == IssueCode::ObligationConflict)
+            .expect("invalid obligation constructor is surfaced");
+        assert_eq!(
+            issue.message,
+            "invalid quantity: an obligation must promise a positive quantity"
+        );
+        malformed.check_proof().unwrap();
+    }
+
+    #[test]
+    fn typed_satisfaction_certificates_reject_tampering() {
+        let mut analysis = analyze(
+            &parse_ledger(
+                r#"book receivables
+obligation invoice/a
+  debtor customer
+  creditor vendor
+  performance transfer 10 USD
+settlement payment/a
+  kind ach
+  from customer
+  to vendor
+  instrument USD
+  amount 10 USD
+  state issued
+  state presented
+  state settled
+satisfy allocation/a
+  obligation invoice/a
+  settlement payment/a
+  amount 10 USD
+  state applied
+"#,
+            )
+            .unwrap(),
+        );
+        assert!(
+            analysis
+                .proof
+                .nodes
+                .values()
+                .any(|node| { matches!(node.operation, Operation::ObligationObservation(_)) })
+        );
+        assert!(
+            analysis
+                .proof
+                .nodes
+                .values()
+                .any(|node| { matches!(node.operation, Operation::SettlementObservation(_)) })
+        );
+        let mut forged = analysis.clone();
+        forged.obligations[0].status = ObligationStatus::Outstanding;
+        assert!(forged.check_proof().is_err());
+        let mut forged = analysis.clone();
+        forged.settlement_histories[0].effective = false;
+        assert!(forged.check_proof().is_err());
+        let mut forged = analysis.clone();
+        forged.satisfactions[0].effective = false;
+        assert!(forged.check_proof().is_err());
+        let mut forged = analysis.clone();
+        forged
+            .dependencies
+            .get_mut("obligation:invoice/a")
+            .unwrap()
+            .pop();
+        assert!(forged.check_proof().is_err());
+        let mut forged = analysis.clone();
+        forged
+            .dependencies
+            .get_mut("satisfaction:allocation/a")
+            .unwrap()
+            .pop();
+        assert!(forged.check_proof().is_err());
+        let mut forged = analysis.clone();
+        forged.invalidations.clear();
+        assert!(forged.check_proof().is_err());
+        let mut forged = analysis.clone();
+        forged.obligations.clear();
+        forged.settlement_histories.clear();
+        forged.satisfactions.clear();
+        assert!(forged.check_proof().is_err());
+        let mut forged = analysis.clone();
+        forged.satisfactions[0].effective = false;
+        forged.satisfactions[0].proof = forged.obligations[0].proof;
+        assert!(forged.check_proof().is_err());
+
+        let allocation = analysis
+            .proof
+            .nodes
+            .values()
+            .find(|node| matches!(node.operation, Operation::SatisfactionAllocation(_)))
+            .expect("typed satisfaction allocation certificate");
+        let allocation_id = allocation.id;
+        let node = analysis.proof.nodes.get_mut(&allocation_id).unwrap();
+        let Operation::SatisfactionAllocation(certificate) = &mut node.operation else {
+            unreachable!();
+        };
+        certificate.amount = Exact::from(9i64);
+        assert!(analysis.check_proof().is_err());
+
+        let mut malformed_ledger = parse_ledger(
+            r#"book receivables
+settlement payment/invalid
+  kind ach
+  from customer
+  to vendor
+  amount 10 USD
+  state issued
+  state presented
+  state settled
+"#,
+        )
+        .unwrap();
+        let LedgerForm::Settlement(settlement) = &mut malformed_ledger.forms[0] else {
+            unreachable!();
+        };
+        settlement.amount.unit = None;
+        let malformed = analyze(&malformed_ledger);
+        malformed.check_proof().unwrap();
+        let mut forged = malformed.clone();
+        forged.settlement_histories[0].amount.number = Exact::from(11i64);
+        assert!(forged.check_proof().is_err());
+    }
+
+    #[test]
+    fn authored_settlement_history_preserves_order_and_rejects_illegal_transitions() {
+        let analysis = analyze(
+            &parse_ledger(
+                r#"book receivables
+obligation invoice/a
+  debtor customer
+  creditor vendor
+  performance transfer 10 USD
+settlement payment/a
+  kind card
+  from customer
+  to vendor
+  instrument USD
+  amount 10 USD
+  state issued at 2026-01-03
+  state settled at 2026-01-02
+satisfy allocation/a
+  obligation invoice/a
+  settlement payment/a
+  amount 10 USD
+  state applied
+"#,
+            )
+            .unwrap(),
+        );
+        assert!(analysis.blocked());
+        assert_eq!(analysis.obligations.len(), 1);
+        assert_eq!(analysis.settlement_histories.len(), 1);
+        assert_eq!(analysis.satisfactions.len(), 1);
+        assert_eq!(analysis.obligations[0].status, ObligationStatus::Invalid);
+        assert_eq!(
+            analysis.settlement_histories[0].current,
+            model::SettlementStateKind::Settled
+        );
+        assert!(!analysis.settlement_histories[0].effective);
+        assert!(analysis.settlement_histories[0].unused.is_none());
+        assert!(!analysis.satisfactions[0].effective);
+        let issue = analysis
+            .issues
+            .iter()
+            .find(|issue| issue.code == IssueCode::ObligationConflict)
+            .expect("invalid settlement history is surfaced");
+        assert_eq!(
+            issue.message,
+            "settlement payment/a moves backward from 2026-01-03 to 2026-01-02"
+        );
+        analysis.check_proof().unwrap();
+    }
+
+    #[test]
+    fn charged_back_history_uses_the_canonical_source_spelling_in_proofs() {
+        let analysis = analyze(
+            &parse_ledger(
+                r#"book receivables
+settlement payment/a
+  kind card
+  from customer
+  to vendor
+  amount 10 USD
+  state issued
+  state presented
+  state settled
+  state charged-back
+"#,
+            )
+            .unwrap(),
+        );
+        assert_eq!(
+            analysis.settlement_histories[0].current,
+            model::SettlementStateKind::ChargedBack
+        );
+        assert!(!analysis.settlement_histories[0].effective);
+        analysis.check_proof().unwrap();
     }
 
     #[test]
