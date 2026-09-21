@@ -66,6 +66,26 @@ impl SelectionProgram {
             Selection::Ambiguous(tied)
         }
     }
+
+    /// Return candidates in the deterministic acquisition order implemented by
+    /// this compiled program.  `evaluate` remains the single-answer API used
+    /// by callers that need the package's explicit tie rule; allocation uses
+    /// this ordered view after checking that the policy has a unique extreme.
+    pub fn ordered<'a, I>(self, candidates: I) -> Vec<LotCandidate>
+    where
+        I: IntoIterator<Item = &'a LotCandidate>,
+    {
+        let mut candidates = candidates.into_iter().cloned().collect::<Vec<_>>();
+        candidates.sort_by(|left, right| {
+            left.date
+                .cmp(&right.date)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        if matches!(self.order, AcquisitionOrder::Latest) {
+            candidates.reverse();
+        }
+        candidates
+    }
 }
 
 impl fmt::Display for SelectionProgram {
@@ -405,6 +425,17 @@ mod tests {
         assert_eq!(
             program.evaluate(&tie),
             Selection::Ambiguous(vec!["a".into(), "b".into()])
+        );
+        assert_eq!(
+            program
+                .ordered(&[
+                    LotCandidate::new("one", date(1)),
+                    LotCandidate::new("two", date(2)),
+                ])
+                .into_iter()
+                .map(|candidate| candidate.id)
+                .collect::<Vec<_>>(),
+            vec!["two", "one"]
         );
     }
 

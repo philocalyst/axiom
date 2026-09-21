@@ -12,8 +12,10 @@
 //! [`MemoOutcome::Incomplete`].  Neither condition is represented as a false
 //! semantic answer, and neither is cached as a successful value.
 
+use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
+use std::sync::Arc;
 
 use crate::model::ContentHash;
 
@@ -304,11 +306,46 @@ pub enum TraceEvent {
     },
 }
 
+/// Counts for the trace currently retained by an incremental database.
+///
+/// These are observations of the database, not estimates of work performed by
+/// a caller.  In particular, a cache hit is counted only when the evaluator
+/// actually skipped the query closure, and an invalidation is counted only
+/// when a previously recorded memo was marked stale.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TraceMetrics {
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+    pub invalidated_queries: usize,
+    pub recomputed_queries: usize,
+    pub dependency_edges: usize,
+}
+
+impl TraceMetrics {
+    pub fn from_trace(trace: &[TraceEvent]) -> Self {
+        let mut metrics = Self::default();
+        for event in trace {
+            match event {
+                TraceEvent::CacheHit { .. } => metrics.cache_hits += 1,
+                TraceEvent::Evaluating { .. } => metrics.cache_misses += 1,
+                TraceEvent::Invalidated { .. } => metrics.invalidated_queries += 1,
+                TraceEvent::Recomputed { dependencies, .. } => {
+                    metrics.recomputed_queries += 1;
+                    metrics.dependency_edges += dependencies.len();
+                }
+                TraceEvent::Cycle { .. } | TraceEvent::ResourceExhausted { .. } => {}
+            }
+        }
+        metrics
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct MemoRecord {
     revision: Revision,
     dependencies: Vec<Dependency>,
     outcome: MemoOutcome,
+    resource_limit: Option<u64>,
     /// Only successful values are cacheable.  Errors and incomplete results
     /// are retained for diagnostics but must be retried on the next request.
     cacheable: bool,
@@ -320,6 +357,7 @@ pub struct MemoSnapshot {
     revision: Revision,
     dependencies: Vec<Dependency>,
     outcome: MemoOutcome,
+    resource_limit: Option<u64>,
     valid: bool,
 }
 
@@ -334,6 +372,10 @@ impl MemoSnapshot {
 
     pub fn outcome(&self) -> &MemoOutcome {
         &self.outcome
+    }
+
+    pub fn resource_limit(&self) -> Option<u64> {
+        self.resource_limit
     }
 
     pub fn is_valid(&self) -> bool {
@@ -383,6 +425,18 @@ impl<'db> QueryContext<'db> {
     {
         self.depend_on_query(key.clone());
         self.db.evaluate_inner(key, compute)
+    }
+
+    /// Evaluate a child query whose successful value is retained by the
+    /// database's typed memo store.  The query edge is recorded just like
+    /// [`Self::query`], so invalidation remains exact.
+    pub fn query_typed<T, F>(&mut self, key: QueryKey, compute: F) -> Result<T, MemoOutcome>
+    where
+        T: Clone + Send + Sync + 'static,
+        F: FnOnce(&mut QueryContext<'_>) -> Result<(T, Vec<u8>), MemoOutcome>,
+    {
+        self.depend_on_query(key.clone());
+        self.db.evaluate_typed(key, compute)
     }
 
     /// Borrow a narrow adapter for an existing semantic engine.  The adapter
@@ -444,7 +498,7 @@ impl<'context, 'db> EngineDependencyAdapter<'context, 'db> {
 }
 
 /// A compact exact incremental semantic database.
-#[derive(Clone, Debug, Default)]
+#[derive(Default)]
 pub struct IncrementalDb {
     revision: Revision,
     inputs: BTreeMap<InputId, ContentInput>,
@@ -456,6 +510,47 @@ pub struct IncrementalDb {
     resource_limit: Option<u64>,
     work_used: u64,
     trace: Vec<TraceEvent>,
+    typed_values: BTreeMap<QueryKey, Arc<dyn Any + Send + Sync>>,
+}
+
+impl fmt::Debug for IncrementalDb {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("IncrementalDb")
+            .field("revision", &self.revision)
+            .field("inputs", &self.inputs)
+            .field("bindings", &self.bindings)
+            .field("memos", &self.memos)
+            .field("reverse_inputs", &self.reverse_inputs)
+            .field("reverse_queries", &self.reverse_queries)
+            .field("active", &self.active)
+            .field("resource_limit", &self.resource_limit)
+            .field("work_used", &self.work_used)
+            .field("trace", &self.trace)
+            .field(
+                "typed_values",
+                &self.typed_values.keys().collect::<Vec<_>>(),
+            )
+            .finish()
+    }
+}
+
+impl Clone for IncrementalDb {
+    fn clone(&self) -> Self {
+        Self {
+            revision: self.revision,
+            inputs: self.inputs.clone(),
+            bindings: self.bindings.clone(),
+            memos: self.memos.clone(),
+            reverse_inputs: self.reverse_inputs.clone(),
+            reverse_queries: self.reverse_queries.clone(),
+            active: self.active.clone(),
+            resource_limit: self.resource_limit,
+            work_used: self.work_used,
+            trace: self.trace.clone(),
+            typed_values: self.typed_values.clone(),
+        }
+    }
 }
 
 impl IncrementalDb {
@@ -526,7 +621,7 @@ impl IncrementalDb {
         // The available resource profile affects whether a query may be
         // evaluated at all.  A complete value from a generous profile cannot
         // be replayed as though a stricter profile had produced it.
-        let profile_changed = self.resource_limit != limit || self.work_used != 0;
+        let profile_changed = self.resource_limit != limit;
         if !profile_changed {
             return;
         }
@@ -547,16 +642,21 @@ impl IncrementalDb {
         &self.trace
     }
 
+    pub fn trace_metrics(&self) -> TraceMetrics {
+        TraceMetrics::from_trace(&self.trace)
+    }
+
     pub fn memo(&self, key: &QueryKey) -> Option<MemoSnapshot> {
         let memo = self.memos.get(key)?;
         Some(MemoSnapshot {
             revision: memo.revision,
             dependencies: memo.dependencies.clone(),
             outcome: memo.outcome.clone(),
+            resource_limit: memo.resource_limit,
             // Revision is provenance for when this value was computed, not a
             // coarse invalidation fence.  Unrelated input changes must leave
             // this memo usable; precise reverse edges mark affected memos.
-            valid: memo.cacheable,
+            valid: memo.cacheable && memo.resource_limit == self.resource_limit,
         })
     }
 
@@ -586,6 +686,55 @@ impl IncrementalDb {
         self.evaluate_inner(key, compute)
     }
 
+    /// Evaluate a query while retaining a typed successful result in this
+    /// database.  This is the sole typed cache used by Workspace; no caller
+    /// maintains a parallel result map.  The byte vector is the stable,
+    /// content-addressed identity used by the untyped memo layer.
+    pub fn evaluate_typed<T, F>(&mut self, key: QueryKey, compute: F) -> Result<T, MemoOutcome>
+    where
+        T: Clone + Send + Sync + 'static,
+        F: FnOnce(&mut QueryContext<'_>) -> Result<(T, Vec<u8>), MemoOutcome>,
+    {
+        let has_typed_value = self
+            .typed_values
+            .get(&key)
+            .is_some_and(|value| value.downcast_ref::<T>().is_some());
+        if !has_typed_value
+            && let Some(memo) = self.memos.get_mut(&key)
+            && memo.cacheable
+            && memo.resource_limit == self.resource_limit
+        {
+            memo.cacheable = false;
+            self.trace.push(TraceEvent::Invalidated {
+                query: key.clone(),
+                revision: self.revision,
+            });
+        }
+        let mut produced = None;
+        let outcome = self.evaluate(key.clone(), |context| match compute(context) {
+            Ok((value, bytes)) => {
+                produced = Some(value);
+                MemoOutcome::value(bytes)
+            }
+            Err(outcome) => outcome,
+        });
+        if !outcome.is_value() {
+            return Err(outcome);
+        }
+        if let Some(value) = produced {
+            self.typed_values
+                .insert(key, Arc::new(value.clone()) as Arc<dyn Any + Send + Sync>);
+            return Ok(value);
+        }
+        self.typed_values
+            .get(&key)
+            .and_then(|value| value.downcast_ref::<T>())
+            .cloned()
+            .ok_or(MemoOutcome::Error(QueryError::EvaluationState {
+                query: key,
+            }))
+    }
+
     fn evaluate_inner<F>(&mut self, key: QueryKey, compute: F) -> MemoOutcome
     where
         F: FnOnce(&mut QueryContext<'_>) -> MemoOutcome,
@@ -602,6 +751,7 @@ impl IncrementalDb {
 
         if let Some(memo) = self.memos.get(&key)
             && memo.cacheable
+            && memo.resource_limit == self.resource_limit
         {
             self.trace.push(TraceEvent::CacheHit {
                 query: key,
@@ -677,6 +827,10 @@ impl IncrementalDb {
             }
         }
         let cacheable = outcome.is_value();
+        // Any recomputation replaces the memo's value namespace. A caller
+        // using the untyped API must not leave an older typed payload behind
+        // for a later typed cache hit.
+        self.typed_values.remove(&key);
         let revision = self.revision;
         self.memos.insert(
             key.clone(),
@@ -684,6 +838,7 @@ impl IncrementalDb {
                 revision,
                 dependencies: dependencies.clone(),
                 outcome: outcome.clone(),
+                resource_limit: self.resource_limit,
                 cacheable,
             },
         );
@@ -696,11 +851,30 @@ impl IncrementalDb {
     }
 
     fn remove_reverse_edges(&mut self, key: &QueryKey) {
-        for dependents in self.reverse_inputs.values_mut() {
-            dependents.remove(key);
-        }
-        for dependents in self.reverse_queries.values_mut() {
-            dependents.remove(key);
+        let dependencies = self
+            .memos
+            .get(key)
+            .map(|memo| memo.dependencies.clone())
+            .unwrap_or_default();
+        for dependency in dependencies {
+            match dependency {
+                Dependency::Input { source, .. } => {
+                    if let Some(dependents) = self.reverse_inputs.get_mut(&source) {
+                        dependents.remove(key);
+                        if dependents.is_empty() {
+                            self.reverse_inputs.remove(&source);
+                        }
+                    }
+                }
+                Dependency::Query(query) => {
+                    if let Some(dependents) = self.reverse_queries.get_mut(&query) {
+                        dependents.remove(key);
+                        if dependents.is_empty() {
+                            self.reverse_queries.remove(&query);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -716,12 +890,12 @@ impl IncrementalDb {
             if !seen.insert(query.clone()) {
                 continue;
             }
-            let had_memo = self.memos.contains_key(&query);
             if let Some(memo) = self.memos.get_mut(&query) {
+                let was_cacheable = memo.cacheable && memo.resource_limit == self.resource_limit;
                 memo.cacheable = false;
                 // Keep the old revision and edges for explainability and for
                 // continuing the reverse walk through this stale node.
-                if had_memo {
+                if was_cacheable {
                     self.trace.push(TraceEvent::Invalidated {
                         query: query.clone(),
                         revision: self.revision,
@@ -1064,5 +1238,36 @@ mod tests {
                 Dependency::Query(query("recognition/close")),
             ]
         );
+    }
+
+    #[test]
+    fn untyped_recomputation_cannot_replay_an_old_typed_value() {
+        let input = source("input");
+        let key = query("mixed");
+        let mut db = IncrementalDb::new();
+        db.upsert_input(input.clone(), "text", b"a".to_vec())
+            .unwrap();
+        let first = db
+            .evaluate_typed(key.clone(), |context| {
+                let value = context.input(&input).unwrap().content().to_vec();
+                Ok((value.clone(), value))
+            })
+            .unwrap();
+        assert_eq!(first, b"a");
+
+        db.upsert_input(input.clone(), "text", b"b".to_vec())
+            .unwrap();
+        let second = db.evaluate(key.clone(), |context| {
+            MemoOutcome::value(context.input(&input).unwrap().content().to_vec())
+        });
+        assert_eq!(second.as_value().unwrap().bytes(), b"b");
+
+        let typed = db
+            .evaluate_typed::<Vec<u8>, _>(key, |context| {
+                let value = context.input(&input).unwrap().content().to_vec();
+                Ok((value.clone(), value))
+            })
+            .unwrap();
+        assert_eq!(typed, b"b");
     }
 }

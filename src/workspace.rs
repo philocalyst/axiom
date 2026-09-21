@@ -28,13 +28,16 @@ use std::str;
 
 use crate::engine::{self, Analysis};
 use crate::evidence::{Authority, Provenance, RawEvidence};
+use crate::incremental::{
+    IncrementalDb, MemoOutcome, QueryError, QueryKey, SourceKey, TraceEvent, TraceMetrics,
+};
 use crate::model::{ContentHash, Identity, Ledger, SourceId};
 use crate::package::PolicyRegistry;
 use crate::parser::{self, ParseError};
 use crate::proof::{Node, Operation, Proof};
 use crate::store::{
-    Commit, CommitId, Evidence, EvidenceId, EvidenceState, ObjectStore, PackageId, ProofObject,
-    ProofObjectId, StoreError,
+    Commit, CommitId, Evidence, EvidenceId, EvidenceState, ObjectStore, PackageId, PolicyPackage,
+    ProofObject, ProofObjectId, StoreError,
 };
 use crate::surface::SurfaceFile;
 
@@ -164,11 +167,25 @@ impl Deref for CommitAnalysis {
     }
 }
 
+/// The typed value retained by [`IncrementalDb`].  Store object IDs are
+/// intentionally added only after the memo has been evaluated: persistence
+/// is a content-addressed side effect, while this value is the semantic
+/// result that can be replayed on a cache hit without invoking the engine.
+#[derive(Clone, Debug)]
+struct PreparedAnalysis {
+    source_commit: CommitId,
+    ledger: BoundLedger,
+    analysis: Analysis,
+    policy_registry: PolicyRegistry,
+    metadata: BTreeMap<String, String>,
+}
+
 /// A failure at the source/commit/elaboration/evaluation boundary.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorkspaceError {
     Store(StoreError),
     Parse(ParseError),
+    Incremental(crate::incremental::DatabaseError),
     InvalidUtf8,
     EmptySource,
     NotSourceCommit {
@@ -196,6 +213,7 @@ impl fmt::Display for WorkspaceError {
         match self {
             Self::Store(error) => write!(formatter, "workspace store error: {error}"),
             Self::Parse(error) => write!(formatter, "source parse error: {error}"),
+            Self::Incremental(error) => write!(formatter, "workspace incremental error: {error}"),
             Self::InvalidUtf8 => formatter.write_str("source bytes are not valid UTF-8"),
             Self::EmptySource => formatter.write_str("source identifier cannot be empty"),
             Self::NotSourceCommit { commit, reason } => {
@@ -236,14 +254,21 @@ impl From<ParseError> for WorkspaceError {
     }
 }
 
+impl From<crate::incremental::DatabaseError> for WorkspaceError {
+    fn from(value: crate::incremental::DatabaseError) -> Self {
+        Self::Incremental(value)
+    }
+}
+
 /// The canonical immutable-object boundary for source ledgers, corrections,
 /// elaboration, and proof-producing evaluation.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct Workspace {
     store: ObjectStore,
     /// A branch reference is not another evidence store.  It only remembers
     /// which source commit `load_source` should treat as the current head.
     heads: BTreeMap<SourceId, CommitId>,
+    incremental: IncrementalDb,
 }
 
 impl Workspace {
@@ -255,6 +280,7 @@ impl Workspace {
         Self {
             store,
             heads: BTreeMap::new(),
+            incremental: IncrementalDb::new(),
         }
     }
 
@@ -262,8 +288,45 @@ impl Workspace {
         &self.store
     }
 
-    pub fn store_mut(&mut self) -> &mut ObjectStore {
+    #[cfg(test)]
+    pub(crate) fn store_mut(&mut self) -> &mut ObjectStore {
         &mut self.store
+    }
+
+    /// Add an immutable policy package without exposing mutation of the
+    /// ledger's canonical object store.
+    pub fn put_policy_package(
+        &mut self,
+        package: PolicyPackage,
+    ) -> Result<PackageId, WorkspaceError> {
+        Ok(self.store.put_package(package)?)
+    }
+
+    /// The canonical incremental database used by all workspace analysis.
+    /// Its trace is intentionally exposed as a read-only observation surface
+    /// for editors and benchmark instrumentation.
+    pub fn incremental_db(&self) -> &IncrementalDb {
+        &self.incremental
+    }
+
+    pub fn incremental_trace(&self) -> &[TraceEvent] {
+        self.incremental.trace()
+    }
+
+    pub fn incremental_metrics(&self) -> TraceMetrics {
+        self.incremental.trace_metrics()
+    }
+
+    pub fn clear_incremental_trace(&mut self) {
+        self.incremental.clear_trace();
+    }
+
+    pub fn set_resource_limit(&mut self, limit: Option<u64>) {
+        self.incremental.set_resource_limit(limit);
+    }
+
+    pub fn resource_limit(&self) -> Option<u64> {
+        self.incremental.resource_limit()
     }
 
     /// Return the current branch head remembered for a source, if this
@@ -297,6 +360,7 @@ impl Workspace {
             return self.correct_source_inner(head, source, bytes, "source bytes changed");
         }
 
+        self.sync_source_input(&source, &bytes)?;
         let raw = raw_source_evidence(source.clone(), bytes);
         let evidence = canonical_evidence(&raw);
         let evidence_id = self.store.put_evidence(evidence)?;
@@ -360,16 +424,18 @@ impl Workspace {
     ) -> Result<SourceLedger, WorkspaceError> {
         let source_ledger = self.source_ledger(source)?;
         let source_value = self.store.commit(source)?.clone();
+        let packages: Vec<_> = packages.into_iter().collect();
         let commit = self.store.put_commit(Commit::new(
             [source],
             source_value.evidence,
             [],
             [],
             [],
-            packages,
+            packages.clone(),
             [],
             SOURCE_AUTHOR,
         ))?;
+        self.sync_package_inputs(source_ledger.source(), source_ledger.bytes(), &packages)?;
         self.heads
             .insert(source_ledger.evidence.source().clone(), commit);
         self.materialize_source_commit(commit)
@@ -394,88 +460,126 @@ impl Workspace {
     /// Analyze one source commit, persist a commit-binding proof, and return
     /// engine output whose proof and metadata are bound to `commit`.
     pub fn analyze_commit(&mut self, commit: CommitId) -> Result<CommitAnalysis, WorkspaceError> {
-        let ledger = self.elaborate_commit(commit)?;
         let source = self.source_ledger(commit)?;
         let source_commit_value = self.store.commit(commit)?.clone();
+        self.sync_source_input(source.source(), source.bytes())?;
+        let package_names = source_package_names(source.bytes());
+        self.sync_package_inputs(
+            source.source(),
+            source.bytes(),
+            &source_commit_value.packages,
+        )?;
         let policy_registry = self.policy_registry(commit)?;
-        let mut analysis = engine::analyze_with_registry(&ledger.ledger, &policy_registry);
-        let mut metadata = BTreeMap::from([
-            ("source-commit".to_string(), commit.hash().to_string()),
-            (
-                "source-evidence".to_string(),
-                source.evidence.content().to_string(),
-            ),
-            ("source".to_string(), source.source().to_string()),
-        ]);
-        if !source_commit_value.packages.is_empty() {
-            metadata.insert(
-                "policy-packages".to_string(),
-                source_commit_value
-                    .packages
-                    .iter()
-                    .map(|package| package.hash().to_string())
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
-        }
-
-        let original_roots = analysis.proof.roots.clone();
-        let binding = analysis.proof.insert(Node::new(
-            format!("source commit {}", commit.hash()),
-            Operation::Observation {
-                source: format!("commit:{}", commit.hash()),
-            },
-            original_roots,
-            metadata.clone(),
-        ));
-        analysis.proof.root(binding);
-        analysis.proof.check().map_err(|error| {
-            WorkspaceError::Store(StoreError::InvalidObject(format!(
-                "bound analysis proof is invalid: {error}"
-            )))
-        })?;
-
-        let proof_object = ProofObject {
-            proof: analysis.proof.clone(),
-            roots: vec![commit.hash()],
-        };
-        let proof_id = self.store.put_proof(proof_object)?;
-
-        // A source commit is immutable.  The proof is pinned by a new child
-        // commit, making the evaluation result itself content addressed.
-        let analysis_commit = self.store.put_commit(Commit {
-            parents: vec![commit],
-            // The source roots are inherited through `parents`; copying them
-            // here would make the analysis commit look like a second source
-            // observation to history/as-known-at queries.
-            evidence: Vec::new(),
-            statements: Vec::new(),
-            decisions: Vec::new(),
-            completeness: Vec::new(),
-            // The analysis result remains tied to the exact policy roots that
-            // were evaluated.  They are context, not a second source
-            // observation, so they are intentionally copied without copying
-            // the source evidence roots.
-            packages: source_commit_value.packages.clone(),
-            proofs: vec![proof_id],
-            schema_version: source_commit_value.schema_version,
-            author: ANALYSIS_AUTHOR.to_string(),
-            signatures: Vec::new(),
-        })?;
-
-        metadata.insert(
-            "analysis-commit".to_string(),
-            analysis_commit.hash().to_string(),
-        );
-        Ok(CommitAnalysis {
-            source_commit: commit,
-            analysis_commit,
-            ledger,
-            analysis,
-            policy_registry,
-            proof_id,
-            metadata,
-        })
+        let source_key = source_key(source.source());
+        let commit_key = SourceKey::new(format!("workspace/commit/{}", source.source()))
+            .map_err(WorkspaceError::Incremental)?;
+        self.incremental.upsert_input(
+            commit_key.clone(),
+            "commit",
+            commit.hash().as_bytes().to_vec(),
+        )?;
+        let analysis_key = QueryKey::new(format!("workspace/analyze/{}", source.source()))
+            .map_err(WorkspaceError::Incremental)?;
+        let elaboration_key = QueryKey::new(format!("workspace/elaborate/{}", source.source()))
+            .map_err(WorkspaceError::Incremental)?;
+        let source_bytes = source.bytes().to_vec();
+        let source_for_query = source.clone();
+        let source_for_elaboration = source.clone();
+        let package_source_for_query = source.source().clone();
+        let registry_for_query = policy_registry.clone();
+        let package_names_for_query = package_names.clone();
+        let package_hashes = source_commit_value
+            .packages
+            .iter()
+            .map(|package| package.hash().to_string())
+            .collect::<Vec<_>>();
+        let prepared = self
+            .incremental
+            .evaluate_typed(analysis_key, move |context| {
+                let _ = context.input(&commit_key);
+                for package_name in &package_names_for_query {
+                    let key =
+                        SourceKey::new(package_input_name(&package_source_for_query, package_name))
+                            .map_err(|error| {
+                                MemoOutcome::error(QueryError::explicit("input", error.to_string()))
+                            })?;
+                    let _ = context.input(&key);
+                }
+                let ledger = context.query_typed(elaboration_key, move |context| {
+                    let Some(input) = context.input(&source_key) else {
+                        return Err(MemoOutcome::incomplete("source input is missing"));
+                    };
+                    if input.content() != source_bytes.as_slice() {
+                        return Err(MemoOutcome::error(QueryError::explicit(
+                            "source-mismatch",
+                            "source binding does not match the requested commit",
+                        )));
+                    }
+                    let source_text = str::from_utf8(input.content()).map_err(|_| {
+                        MemoOutcome::error(QueryError::explicit(
+                            "utf8",
+                            "source bytes are not valid UTF-8",
+                        ))
+                    })?;
+                    let surface = SurfaceFile::parse(source_text);
+                    parser::parse_surface_ledger(&surface)
+                        .map_err(|error| {
+                            MemoOutcome::error(QueryError::explicit("parse", error.to_string()))
+                        })
+                        .map(|ledger| {
+                            (ledger, source_for_elaboration.content().as_bytes().to_vec())
+                        })
+                })?;
+                let mut analysis = engine::analyze_with_registry(&ledger, &registry_for_query);
+                let mut metadata = BTreeMap::from([
+                    (
+                        "source-commit".to_string(),
+                        source_for_query.commit.hash().to_string(),
+                    ),
+                    (
+                        "source-evidence".to_string(),
+                        source_for_query.evidence.content().to_string(),
+                    ),
+                    ("source".to_string(), source_for_query.source().to_string()),
+                ]);
+                if !package_hashes.is_empty() {
+                    metadata.insert("policy-packages".to_string(), package_hashes.join(","));
+                }
+                let original_roots = analysis.proof.roots.clone();
+                let binding = analysis.proof.insert(Node::new(
+                    format!("source commit {}", source_for_query.commit.hash()),
+                    Operation::Observation {
+                        source: format!("commit:{}", source_for_query.commit.hash()),
+                    },
+                    original_roots,
+                    metadata.clone(),
+                ));
+                analysis.proof.root(binding);
+                analysis.proof.check().map_err(|error| {
+                    MemoOutcome::error(QueryError::explicit(
+                        "proof",
+                        format!("bound analysis proof is invalid: {error}"),
+                    ))
+                })?;
+                let prepared = PreparedAnalysis {
+                    source_commit: source_for_query.commit,
+                    ledger: BoundLedger {
+                        source_commit: source_for_query.commit,
+                        ledger,
+                    },
+                    analysis,
+                    policy_registry: registry_for_query,
+                    metadata,
+                };
+                let mut bytes = Vec::new();
+                bytes.extend_from_slice(prepared.source_commit.hash().as_bytes());
+                for root in &prepared.analysis.proof.roots {
+                    bytes.extend_from_slice(&root.0);
+                }
+                Ok((prepared, bytes))
+            })
+            .map_err(|outcome| self.workspace_error_from_memo(commit, outcome))?;
+        self.persist_prepared(prepared)
     }
 
     /// Return all commits reachable from `latest`, newest first.  This is a
@@ -557,6 +661,109 @@ impl Workspace {
         Ok(self.store.evidence_history(latest)?)
     }
 
+    fn persist_prepared(
+        &mut self,
+        prepared: PreparedAnalysis,
+    ) -> Result<CommitAnalysis, WorkspaceError> {
+        let source_commit = prepared.source_commit;
+        let source_commit_value = self.store.commit(source_commit)?.clone();
+        let proof_id = self.store.put_proof(ProofObject {
+            proof: prepared.analysis.proof.clone(),
+            roots: vec![source_commit.hash()],
+        })?;
+        let analysis_commit = self.store.put_commit(Commit {
+            parents: vec![source_commit],
+            evidence: Vec::new(),
+            statements: Vec::new(),
+            decisions: Vec::new(),
+            completeness: Vec::new(),
+            packages: source_commit_value.packages,
+            proofs: vec![proof_id],
+            schema_version: source_commit_value.schema_version,
+            author: ANALYSIS_AUTHOR.to_string(),
+            signatures: Vec::new(),
+        })?;
+        let mut metadata = prepared.metadata;
+        metadata.insert(
+            "analysis-commit".to_string(),
+            analysis_commit.hash().to_string(),
+        );
+        Ok(CommitAnalysis {
+            source_commit,
+            analysis_commit,
+            ledger: prepared.ledger,
+            analysis: prepared.analysis,
+            policy_registry: prepared.policy_registry,
+            proof_id,
+            metadata,
+        })
+    }
+
+    fn workspace_error_from_memo(&self, commit: CommitId, outcome: MemoOutcome) -> WorkspaceError {
+        if let Err(error) = self.elaborate_commit(commit) {
+            return error;
+        }
+        let message = match outcome {
+            MemoOutcome::Error(error) => error.to_string(),
+            MemoOutcome::Incomplete { reason } => reason,
+            MemoOutcome::Value(_) => "typed memo state mismatch".to_string(),
+        };
+        WorkspaceError::Store(StoreError::InvalidObject(format!(
+            "incremental analysis failed: {message}"
+        )))
+    }
+
+    fn sync_source_input(&mut self, source: &SourceId, bytes: &[u8]) -> Result<(), WorkspaceError> {
+        self.incremental
+            .upsert_input(source_key(source), "source", bytes.to_vec())?;
+        Ok(())
+    }
+
+    fn sync_package_inputs(
+        &mut self,
+        source: &SourceId,
+        bytes: &[u8],
+        packages: &[PackageId],
+    ) -> Result<(), WorkspaceError> {
+        let names = source_package_names(bytes);
+        for name in names {
+            let mut matching = packages
+                .iter()
+                .filter_map(|id| self.store.package(*id).ok().map(|package| (*id, package)))
+                .filter(|(_, package)| package.name == name)
+                .collect::<Vec<_>>();
+            matching.sort_by_key(|(id, _)| *id);
+            let content = if matching.is_empty() {
+                if let Some(builtin) = crate::package::builtin_policy(&name) {
+                    builtin.canonical_bytes()
+                } else {
+                    format!("missing:{name}").into_bytes()
+                }
+            } else {
+                let mut content = Vec::new();
+                for (id, package) in matching {
+                    content.extend_from_slice(id.hash().as_bytes());
+                    content.extend_from_slice(&package.body);
+                    content.extend_from_slice(package.name.as_bytes());
+                    content.extend_from_slice(package.version.as_bytes());
+                    for (key, value) in &package.manifest {
+                        content.extend_from_slice(key.as_bytes());
+                        content.push(0);
+                        content.extend_from_slice(value.as_bytes());
+                        content.push(0xff);
+                    }
+                }
+                content
+            };
+            self.incremental.upsert_input(
+                SourceKey::new(package_input_name(source, &name))?,
+                "package",
+                content,
+            )?;
+        }
+        Ok(())
+    }
+
     fn correct_source_inner(
         &mut self,
         prior: CommitId,
@@ -580,8 +787,9 @@ impl Workspace {
                     commit: prior,
                     reason: "source commit has no evidence".to_string(),
                 })?;
-        let old = self.store.evidence(prior_evidence)?;
+        let old = self.store.evidence(prior_evidence)?.clone();
         let occurrence = old.occurrence.clone();
+        self.sync_source_input(&source, &bytes)?;
         let mut corrected = Evidence::correction(
             occurrence,
             source.to_string(),
@@ -697,6 +905,28 @@ impl Workspace {
             surface: SurfaceFile::parse(source),
         })
     }
+}
+
+fn source_key(source: &SourceId) -> SourceKey {
+    SourceKey::new(format!("workspace/source/{source}"))
+        .expect("workspace source keys are never empty")
+}
+
+fn package_input_name(source: &SourceId, name: &str) -> String {
+    format!("workspace/package/{source}/{name}")
+}
+
+fn source_package_names(bytes: &[u8]) -> BTreeSet<String> {
+    let Ok(source) = str::from_utf8(bytes) else {
+        return BTreeSet::new();
+    };
+    source
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            (words.next() == Some("use")).then(|| words.next().map(str::to_owned))?
+        })
+        .collect()
 }
 
 fn ensure_utf8(bytes: &[u8]) -> Result<(), WorkspaceError> {
@@ -1013,5 +1243,137 @@ use lots/fifo for tax-us
         assert_eq!(canonical.external_id().unwrap().as_str(), "external-1");
         assert_eq!(canonical.content, b"x");
         assert_ne!(raw.content(), ContentHash::ZERO);
+    }
+
+    #[test]
+    fn unchanged_analysis_is_a_workspace_cache_hit_and_changed_output_matches_clean_run() {
+        let mut workspace = Workspace::new();
+        let first = workspace.load_source("book", SOURCE).unwrap();
+        let initial = workspace.analyze_commit(first.commit).unwrap();
+        workspace.clear_incremental_trace();
+        let replay = workspace.analyze_commit(first.commit).unwrap();
+        assert_eq!(replay, initial);
+        assert!(
+            workspace
+                .incremental_trace()
+                .iter()
+                .any(|event| matches!(event, TraceEvent::CacheHit { .. }))
+        );
+
+        let changed = workspace
+            .load_source("book", SOURCE.replace("100 USD", "110 USD"))
+            .unwrap();
+        let incremental = workspace.analyze_commit(changed.commit).unwrap();
+        let invalidated = workspace.incremental_metrics().invalidated_queries;
+        assert!(
+            invalidated >= 2,
+            "source and analysis stages are invalidated"
+        );
+
+        let mut clean = Workspace::from_store(workspace.store().clone());
+        let full = clean.analyze_commit(changed.commit).unwrap();
+        assert_eq!(incremental.analysis, full.analysis);
+        assert_eq!(incremental.proof(), full.proof());
+        assert_eq!(incremental.metadata, full.metadata);
+    }
+
+    #[test]
+    fn package_upgrade_invalidates_analysis_but_reuses_elaboration() {
+        let source_text = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+buy buy/two on 2026-02-04
+  10 ABC into brokerage
+  for 300 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+use lots/fifo for tax-us
+"#;
+        let mut workspace = Workspace::new();
+        let source = workspace.load_source("book", source_text).unwrap();
+        let first_package = workspace
+            .store_mut()
+            .put_package(StorePolicyPackage::new(
+                "lots/fifo",
+                "1",
+                b"selector=earliest_acquisition\ntie=ambiguous".to_vec(),
+            ))
+            .unwrap();
+        let first = workspace
+            .commit_with_packages(source.commit, [first_package])
+            .unwrap();
+        let _ = workspace.analyze_commit(first.commit).unwrap();
+
+        let upgraded_package = workspace
+            .store_mut()
+            .put_package(StorePolicyPackage::new(
+                "lots/fifo",
+                "2",
+                b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+            ))
+            .unwrap();
+        workspace.clear_incremental_trace();
+        let upgraded = workspace
+            .commit_with_packages(first.commit, [upgraded_package])
+            .unwrap();
+        let changed = workspace.analyze_commit(upgraded.commit).unwrap();
+        let trace = workspace.incremental_trace();
+        assert!(trace.iter().any(|event| matches!(event, TraceEvent::Invalidated { query, .. } if query.as_str().contains("analyze"))));
+        assert!(trace.iter().any(|event| matches!(event, TraceEvent::CacheHit { query, .. } if query.as_str().contains("elaborate"))));
+        assert_eq!(
+            changed.sale("sell").unwrap().selected_lot.as_deref(),
+            Some("buy/two")
+        );
+    }
+
+    #[test]
+    fn package_inputs_are_isolated_by_source_workspace() {
+        let source_text = r#"book tax-us
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+sell sell on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+use lots/fifo for tax-us
+"#;
+        let mut workspace = Workspace::new();
+        let first_package = workspace
+            .put_policy_package(StorePolicyPackage::new(
+                "lots/fifo",
+                "1",
+                b"selector=earliest_acquisition\ntie=ambiguous".to_vec(),
+            ))
+            .unwrap();
+        let second_package = workspace
+            .put_policy_package(StorePolicyPackage::new(
+                "lots/fifo",
+                "2",
+                b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+            ))
+            .unwrap();
+        let first = workspace.load_source("first", source_text).unwrap();
+        let first = workspace
+            .commit_with_packages(first.commit, [first_package])
+            .unwrap();
+        let second = workspace.load_source("second", source_text).unwrap();
+        let second = workspace
+            .commit_with_packages(second.commit, [second_package])
+            .unwrap();
+
+        let first_analysis = workspace.analyze_commit(first.commit).unwrap();
+        let _ = workspace.analyze_commit(second.commit).unwrap();
+        workspace.clear_incremental_trace();
+        let replay = workspace.analyze_commit(first.commit).unwrap();
+
+        assert_eq!(replay, first_analysis);
+        let metrics = workspace.incremental_metrics();
+        assert!(metrics.cache_hits >= 1);
+        assert_eq!(metrics.cache_misses, 0);
+        assert_eq!(metrics.invalidated_queries, 0);
     }
 }

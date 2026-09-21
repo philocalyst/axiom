@@ -606,6 +606,14 @@ impl Signature {
     }
 }
 
+/// Verification boundary for signed immutable objects. The store owns the
+/// canonical payload; cryptographic key lookup and revocation policy stay
+/// outside the semantic kernel.
+pub trait SignatureVerifier {
+    fn verify(&self, signer: &str, algorithm: &str, payload: ContentHash, signature: &[u8])
+    -> bool;
+}
+
 /// A reproducible branch snapshot.  Roots are sets in the semantic sense;
 /// constructors and insertion both normalize their order and remove repeats.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -669,6 +677,15 @@ impl Commit {
         canonicalize_vec(&mut self.proofs);
         self.signatures.sort();
         self.signatures.dedup();
+    }
+
+    pub fn signing_hash(&self) -> ContentHash {
+        let mut unsigned = self.clone();
+        unsigned.canonicalize();
+        unsigned.signatures.clear();
+        let mut bytes = Vec::new();
+        encode_commit(&mut bytes, &unsigned);
+        ContentHash::domain_separated("axiom/store/commit-signing/v1", &bytes)
     }
 }
 
@@ -744,6 +761,20 @@ impl Close {
     pub fn superseding(mut self, prior: CloseId) -> Self {
         self.supersedes = Some(prior);
         self
+    }
+
+    /// Domain-separated canonical payload signed by every close signature.
+    /// Signatures themselves are excluded, avoiding hash/signature circularity.
+    pub fn signing_hash(&self) -> ContentHash {
+        let mut unsigned = self.clone();
+        unsigned.policies.sort();
+        unsigned.policies.dedup();
+        unsigned.exceptions.sort();
+        unsigned.exceptions.dedup();
+        unsigned.signatures.clear();
+        let mut bytes = Vec::new();
+        encode_close(&mut bytes, &unsigned);
+        ContentHash::domain_separated("axiom/store/close-signing/v1", &bytes)
     }
 }
 
@@ -1018,13 +1049,95 @@ impl ObjectStore {
         Ok(ProofObjectId::new(self.insert(StoredObject::Proof(value))?))
     }
 
-    pub fn put_commit(&mut self, mut value: Commit) -> Result<CommitId, StoreError> {
+    pub fn put_commit(&mut self, value: Commit) -> Result<CommitId, StoreError> {
+        if !value.signatures.is_empty() {
+            return Err(StoreError::InvalidObject(
+                "signed commit requires signature verification".into(),
+            ));
+        }
+        self.put_commit_inner(value)
+    }
+
+    pub fn put_commit_verified(
+        &mut self,
+        value: Commit,
+        verifier: &impl SignatureVerifier,
+    ) -> Result<CommitId, StoreError> {
+        if value.signatures.is_empty() {
+            return Err(StoreError::InvalidObject(
+                "verified commit requires at least one signature".into(),
+            ));
+        }
+        let payload = value.signing_hash();
+        for signature in &value.signatures {
+            if signature.signer.trim().is_empty()
+                || signature.algorithm.trim().is_empty()
+                || signature.bytes.is_empty()
+                || !verifier.verify(
+                    &signature.signer,
+                    &signature.algorithm,
+                    payload,
+                    &signature.bytes,
+                )
+            {
+                return Err(StoreError::InvalidObject(format!(
+                    "commit signature from {} is invalid",
+                    signature.signer
+                )));
+            }
+        }
+        self.put_commit_inner(value)
+    }
+
+    fn put_commit_inner(&mut self, mut value: Commit) -> Result<CommitId, StoreError> {
         value.canonicalize();
         self.validate_commit(&value)?;
         Ok(CommitId::new(self.insert(StoredObject::Commit(value))?))
     }
 
-    pub fn put_close(&mut self, mut value: Close) -> Result<CloseId, StoreError> {
+    /// Store an unsigned close. Signed closes must cross
+    /// [`Self::put_close_verified`] so opaque bytes cannot be treated as trust.
+    pub fn put_close(&mut self, value: Close) -> Result<CloseId, StoreError> {
+        if !value.signatures.is_empty() {
+            return Err(StoreError::InvalidObject(
+                "signed close requires signature verification".into(),
+            ));
+        }
+        self.put_close_inner(value)
+    }
+
+    pub fn put_close_verified(
+        &mut self,
+        value: Close,
+        verifier: &impl SignatureVerifier,
+    ) -> Result<CloseId, StoreError> {
+        if value.signatures.is_empty() {
+            return Err(StoreError::InvalidObject(
+                "verified close requires at least one signature".into(),
+            ));
+        }
+        let payload = value.signing_hash();
+        for signature in &value.signatures {
+            if signature.signer.trim().is_empty()
+                || signature.algorithm.trim().is_empty()
+                || signature.bytes.is_empty()
+                || !verifier.verify(
+                    &signature.signer,
+                    &signature.algorithm,
+                    payload,
+                    &signature.bytes,
+                )
+            {
+                return Err(StoreError::InvalidObject(format!(
+                    "close signature from {} is invalid",
+                    signature.signer
+                )));
+            }
+        }
+        self.put_close_inner(value)
+    }
+
+    fn put_close_inner(&mut self, mut value: Close) -> Result<CloseId, StoreError> {
         value.policies.sort();
         value.policies.dedup();
         value.exceptions.sort();
@@ -1794,6 +1907,20 @@ fn encode_close(out: &mut Vec<u8>, value: &Close) {
 mod tests {
     use super::*;
 
+    struct EchoVerifier;
+
+    impl SignatureVerifier for EchoVerifier {
+        fn verify(
+            &self,
+            _signer: &str,
+            algorithm: &str,
+            payload: ContentHash,
+            signature: &[u8],
+        ) -> bool {
+            algorithm == "test-only" && signature == payload.as_bytes()
+        }
+    }
+
     fn date(text: &str) -> Date {
         text.parse().unwrap()
     }
@@ -1840,6 +1967,23 @@ mod tests {
             store.commit(first_id).unwrap().evidence,
             vec![a.min(b), a.max(b)]
         );
+
+        let unsigned = Commit::new([], [a], [], [], [], [], [], "signed-author");
+        let mut noncanonical = unsigned.clone();
+        noncanonical.evidence = vec![a, a];
+        assert_eq!(noncanonical.signing_hash(), unsigned.signing_hash());
+        let signed = unsigned.clone().with_signatures([Signature::new(
+            "alice",
+            "test-only",
+            unsigned.signing_hash().as_bytes().to_vec(),
+        )]);
+        assert!(matches!(
+            store.put_commit(signed.clone()),
+            Err(StoreError::InvalidObject(_))
+        ));
+        store
+            .put_commit_verified(signed, &EchoVerifier)
+            .expect("canonical commit signature verifies");
     }
 
     #[test]
@@ -2207,6 +2351,46 @@ mod tests {
             .unwrap();
         assert_ne!(first, second);
         assert_eq!(store.close(second).unwrap().supersedes, Some(first));
+
+        let unsigned = Close::new(
+            Period::new(date("2027-01-01"), date("2027-12-31")).unwrap(),
+            "tax",
+            [package],
+            source,
+            proof.hash(),
+        );
+        let mut noncanonical = unsigned.clone();
+        noncanonical.policies = vec![package, package];
+        noncanonical.exceptions = vec!["z".into(), "a".into(), "z".into()];
+        let canonical = unsigned.clone().with_exceptions(["a", "z"]);
+        assert_eq!(noncanonical.signing_hash(), canonical.signing_hash());
+        let payload = unsigned.signing_hash();
+        let signed = unsigned.with_signatures([Signature::new(
+            "alice",
+            "test-only",
+            payload.as_bytes().to_vec(),
+        )]);
+        assert!(matches!(
+            store.put_close(signed.clone()),
+            Err(StoreError::InvalidObject(_))
+        ));
+        let signed_id = store
+            .put_close_verified(signed, &EchoVerifier)
+            .expect("canonical payload signature verifies");
+        assert_eq!(store.close(signed_id).unwrap().signatures.len(), 1);
+
+        let invalid = Close::new(
+            Period::new(date("2028-01-01"), date("2028-12-31")).unwrap(),
+            "tax",
+            [package],
+            source,
+            proof.hash(),
+        )
+        .with_signatures([Signature::new("alice", "test-only", b"forged".to_vec())]);
+        assert!(matches!(
+            store.put_close_verified(invalid, &EchoVerifier),
+            Err(StoreError::InvalidObject(_))
+        ));
     }
 
     #[test]

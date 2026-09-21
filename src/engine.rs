@@ -32,6 +32,24 @@ pub struct Lot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConditionalGain {
     pub lot_id: String,
+    /// Quantity of the holding represented by this conditional result.  For
+    /// an unresolved single-lot alternative this is the sale quantity; for a
+    /// recognized allocation it is the exact slice consumed from the lot.
+    pub quantity: Quantity,
+    pub proceeds: Quantity,
+    pub basis: Quantity,
+    pub gain: Quantity,
+    pub proof: ProofId,
+}
+
+/// One exact, recognized slice of a sale.  A sale may consume several lots;
+/// keeping each slice explicit makes conservation and audit explanations
+/// possible without overloading `selected_lot` (which remains for the common
+/// one-lot case).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LotAllocation {
+    pub lot_id: String,
+    pub quantity: Quantity,
     pub proceeds: Quantity,
     pub basis: Quantity,
     pub gain: Quantity,
@@ -48,6 +66,14 @@ pub struct SaleAnalysis {
     pub proceeds: Quantity,
     pub eligible_lots: Vec<String>,
     pub conditional_gains: Vec<ConditionalGain>,
+    /// Recognized allocations, in deterministic economic/policy order.
+    pub allocations: Vec<LotAllocation>,
+    /// Aggregate recognized arithmetic, when this sale is complete.  The
+    /// per-lot values remain in `allocations`.
+    pub recognized: Option<ConditionalGain>,
+    /// All lots consumed by this sale.  `selected_lot` is retained as a
+    /// compatibility convenience and is populated only for one-lot sales.
+    pub selected_lots: Vec<String>,
     pub selected_lot: Option<String>,
     pub status: RecognitionStatus,
     pub proof: ProofId,
@@ -170,11 +196,15 @@ pub struct Issue {
     pub proof: Option<ProofId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum IssueCode {
     AmbiguousLot,
+    DecisionConflict,
     PolicyDecisionConflict,
     MissingLot,
+    InsufficientInventory,
+    PositionConflict,
+    SettlementConflict,
     AmbiguousQuote,
     UnknownPolicy,
     IncompatibleUnit,
@@ -221,10 +251,7 @@ impl Analysis {
 
     pub fn recognized_gain(&self, id: &str) -> Option<&ConditionalGain> {
         let sale = self.sale(id)?;
-        let lot = sale.selected_lot.as_ref()?;
-        sale.conditional_gains
-            .iter()
-            .find(|gain| &gain.lot_id == lot)
+        sale.recognized.as_ref()
     }
 
     pub fn dependency_roots(&self, goal: &str) -> &[ProofId] {
@@ -257,9 +284,9 @@ impl fmt::Display for RecognitionStatus {
     }
 }
 
-/// Analyze one parsed ledger inside the workspace boundary. All ordering is
-/// derived from source order and explicit policy; no map iteration or
-/// hash-map randomization affects it. External callers must use
+/// Analyze one parsed ledger inside the workspace boundary. Economic events
+/// are ordered by date, stable identity, and explicit policy; no map iteration
+/// or hash-map randomization affects them. External callers must use
 /// [`crate::workspace::Workspace::analyze_commit`] so the result is bound to
 /// an immutable source commit.
 #[cfg(test)]
@@ -479,6 +506,18 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
     for choices in decisions_by_sale.values_mut() {
         choices.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
     }
+    decisions.sort();
+    decisions.dedup();
+    // Inventory consumption follows economic time, never textual placement.
+    // Labels make independent events deterministic, but may not decide which
+    // same-day sale gets scarce shared inventory. Such sales are blocked below
+    // unless distinct decisions make their allocations independent.
+    sales_raw.sort_by(|left, right| {
+        left.1
+            .date
+            .cmp(&right.1.date)
+            .then_with(|| left.1.label.cmp(&right.1.label))
+    });
     let sale_names = sales_raw
         .iter()
         .map(|(_, sale)| sale.label.as_str())
@@ -495,7 +534,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 metadata_for(sale_name, "decision-conflict", None),
             ));
             issues.push(Issue {
-                code: IssueCode::PolicyDecisionConflict,
+                code: IssueCode::DecisionConflict,
                 message: format!(
                     "decisions for sale `{sale_name}` select {}",
                     choices
@@ -524,6 +563,42 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 sale: Some(sale_name.clone()),
                 proof: Some(target_proof),
             });
+        }
+    }
+
+    let mut simultaneous_sales = BTreeMap::<(model::Date, String, String), Vec<String>>::new();
+    for (_, sale) in &sales_raw {
+        if let Some((account, asset, _)) = holding_of_model(sale) {
+            simultaneous_sales
+                .entry((sale.date, account, asset))
+                .or_default()
+                .push(sale.label.clone());
+        }
+    }
+    let mut unresolved_simultaneous = BTreeMap::<String, Vec<String>>::new();
+    for labels in simultaneous_sales
+        .into_values()
+        .filter(|labels| labels.len() > 1)
+    {
+        let selected = labels
+            .iter()
+            .filter_map(|label| {
+                let sale = sales_raw
+                    .iter()
+                    .find(|(_, sale)| &sale.label == label)
+                    .map(|(_, sale)| sale)?;
+                if let LotSelector::Explicit(lot) = &sale.lot {
+                    return Some(lot.as_str().to_owned());
+                }
+                let choices = decisions_by_sale.get(label)?;
+                (choices.len() == 1).then(|| choices[0].0.clone())
+            })
+            .collect::<BTreeSet<_>>();
+        let explicitly_disjoint = selected.len() == labels.len();
+        if !explicitly_disjoint {
+            for label in &labels {
+                unresolved_simultaneous.insert(label.clone(), labels.clone());
+            }
         }
     }
 
@@ -665,7 +740,21 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
     let mut journal = Vec::new();
     let mut dependencies: BTreeMap<String, Vec<ProofId>> = BTreeMap::new();
     let mut invalidations: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let multi_sale_unsupported = sales_raw.len() > 1;
+    // Inventory is consumed once, in economic event order. Lots themselves remain
+    // immutable evidence; this map is the derived remaining quantity shared
+    // by every sale in the analysis.
+    let mut remaining: BTreeMap<String, Exact> = lots
+        .iter()
+        .map(|lot| (lot.id.clone(), lot.quantity.number.clone()))
+        .collect();
+    let mut remaining_basis: BTreeMap<String, Exact> = lots
+        .iter()
+        .map(|lot| (lot.id.clone(), lot.basis.number.clone()))
+        .collect();
+    let mut remaining_proofs: BTreeMap<String, Vec<ProofId>> = lots
+        .iter()
+        .map(|lot| (lot.id.clone(), vec![lot.proof]))
+        .collect();
 
     // Observations are evidence, not balances.  Preserve every source node,
     // but explicitly surface contradictory values and never let one
@@ -707,7 +796,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 positions[*index].status = ObservationStatus::Conflict;
             }
             issues.push(Issue {
-                code: IssueCode::PolicyDecisionConflict,
+                code: IssueCode::PositionConflict,
                 message: format!("position observations for `{account}:{asset}` conflict"),
                 sale: None,
                 proof: Some(conflict_proof),
@@ -719,7 +808,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
     for (index, settlement) in settlements.iter().enumerate() {
         if !sale_names.contains(settlement.reference.as_str()) {
             issues.push(Issue {
-                code: IssueCode::MissingLot,
+                code: IssueCode::SettlementConflict,
                 message: format!(
                     "settlement observation `{}` does not match a sale",
                     settlement.reference
@@ -768,7 +857,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 settlements[*index].status = ObservationStatus::Conflict;
             }
             issues.push(Issue {
-                code: IssueCode::PolicyDecisionConflict,
+                code: IssueCode::SettlementConflict,
                 message: format!("settlement observations for `{reference}` conflict"),
                 sale: Some(reference),
                 proof: Some(conflict_proof),
@@ -803,6 +892,9 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 proceeds: quantity_of(&sell.proceeds).unwrap_or_else(zero_quantity),
                 eligible_lots: Vec::new(),
                 conditional_gains: Vec::new(),
+                allocations: Vec::new(),
+                recognized: None,
+                selected_lots: Vec::new(),
                 selected_lot: None,
                 status,
                 proof: sale_proof,
@@ -817,7 +909,9 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                     && lot.account == account
                     && lot.asset == asset
                     && lot.quantity.unit == quantity.unit
-                    && lot.quantity.number >= quantity.number
+                    && remaining
+                        .get(&lot.id)
+                        .is_some_and(|available| !available.is_zero())
             })
             .collect::<Vec<_>>();
         eligible.sort_by(|left, right| {
@@ -831,7 +925,27 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
             .collect::<Vec<_>>();
         let mut conditionals = Vec::new();
         for lot in &eligible {
-            if let Some(gain) = conditional_gain(lot, &quantity, &proceeds, &mut proof, sale_proof)
+            let available = remaining
+                .get(&lot.id)
+                .cloned()
+                .unwrap_or_else(|| Exact::from(0i64));
+            if available >= quantity.number
+                && let Some(available_basis) = remaining_basis.get(&lot.id)
+                && let Some(remaining_inputs) = remaining_proofs.get(&lot.id)
+                && let Some(gain) = conditional_gain(
+                    RemainingLot {
+                        lot,
+                        quantity: &available,
+                        basis: available_basis,
+                        proof_inputs: remaining_inputs,
+                    },
+                    SaleSlice {
+                        quantity: &quantity,
+                        proceeds: &proceeds,
+                        proof: sale_proof,
+                    },
+                    &mut proof,
+                )
             {
                 conditionals.push(gain);
             }
@@ -864,15 +978,23 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 .iter()
                 .map(|lot| LotCandidate::new(lot.id.clone(), lot.date))
                 .collect::<Vec<_>>();
-            (program, program.evaluate(&candidates))
+            (
+                program,
+                program.evaluate(&candidates),
+                program.ordered(&candidates),
+            )
         });
         let policy_lot = policy_selection
             .as_ref()
-            .and_then(|(_, selection)| match selection {
+            .and_then(|(_, selection, _)| match selection {
                 Selection::Unique(lot) => Some(lot.clone()),
                 Selection::None | Selection::Ambiguous(_) => None,
             });
-        let policy_application_proof = policy_selection.as_ref().map(|(program, selection)| {
+        let policy_order = policy_selection
+            .as_ref()
+            .map(|(_, _, ordered)| ordered.iter().map(|lot| lot.id.clone()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        let policy_application_proof = policy_selection.as_ref().map(|(program, selection, _)| {
             let answer = match selection {
                 Selection::None => "none".to_owned(),
                 Selection::Unique(lot) => lot.clone(),
@@ -899,17 +1021,29 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 metadata,
             ))
         });
-        let (mut selected_lot, mut status) = if multi_sale_unsupported {
+        let (mut selected_lot, mut status, mut planned_lots) = if let Some(peers) =
+            unresolved_simultaneous.get(&sell.label)
+        {
             issues.push(Issue {
-                code: IssueCode::MissingLot,
+                code: IssueCode::AmbiguousLot,
                 message: format!(
-                    "sale `{}` is blocked: V0 does not allocate lots across multiple sales",
-                    sell.label
+                    "same-day sales {} compete for shared inventory; add distinct lot selections",
+                    peers
+                        .iter()
+                        .map(|label| format!("`{label}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ),
                 sale: Some(sell.label.clone()),
                 proof: Some(sale_proof),
             });
-            (None, RecognitionStatus::MissingLot)
+            (
+                None,
+                RecognitionStatus::Ambiguous {
+                    candidates: peers.clone(),
+                },
+                Vec::new(),
+            )
         } else if decision_conflict {
             // The conflict proof created while reading decisions is rooted,
             // and no one decision is allowed to leak into selection.
@@ -918,6 +1052,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                 RecognitionStatus::Ambiguous {
                     candidates: decision_lots.clone(),
                 },
+                Vec::new(),
             )
         } else if let Some((explicit_lot, decision_lot)) = explicit_lot
             .clone()
@@ -950,12 +1085,13 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                     policy_lot: explicit_lot,
                     decision_lot,
                 },
+                Vec::new(),
             )
         } else if policy_invalid && !policy_names.is_empty() && requested_lot.is_none() {
             // An invalid package cannot silently degrade to the unique-lot
             // fallback. The package issue above is global and rooted at the
             // policy declaration; this sale remains explicitly blocked.
-            (None, RecognitionStatus::MissingLot)
+            (None, RecognitionStatus::MissingLot, Vec::new())
         } else {
             match (policy_lot.clone(), requested_lot.clone()) {
                 (Some(policy_lot), Some(decision_lot)) if policy_lot != decision_lot => {
@@ -979,6 +1115,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                             policy_lot,
                             decision_lot,
                         },
+                        Vec::new(),
                     )
                 }
                 (Some(policy_lot), Some(decision_lot)) if requested_is_invalid => {
@@ -1009,9 +1146,19 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                             policy_lot,
                             decision_lot,
                         },
+                        Vec::new(),
                     )
                 }
-                (Some(policy_lot), _) => (Some(policy_lot), RecognitionStatus::Recognized),
+                (Some(policy_lot), Some(requested_lot)) => (
+                    Some(policy_lot),
+                    RecognitionStatus::Recognized,
+                    vec![requested_lot],
+                ),
+                (Some(policy_lot), None) => (
+                    Some(policy_lot),
+                    RecognitionStatus::Recognized,
+                    policy_order.clone(),
+                ),
                 (None, Some(decision_lot)) if requested_is_invalid => {
                     issues.push(Issue {
                         code: IssueCode::MissingLot,
@@ -1022,12 +1169,23 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                         sale: Some(sell.label.clone()),
                         proof: Some(sale_proof),
                     });
-                    (None, RecognitionStatus::MissingLot)
+                    (None, RecognitionStatus::MissingLot, Vec::new())
                 }
-                (None, Some(decision_lot)) => (Some(decision_lot), RecognitionStatus::Recognized),
+                (None, Some(decision_lot)) => (
+                    Some(decision_lot.clone()),
+                    RecognitionStatus::Recognized,
+                    vec![decision_lot],
+                ),
+                (None, None) if policy_program.is_some() => {
+                    (None, RecognitionStatus::Recognized, policy_order.clone())
+                }
                 (None, None) if eligible.len() == 1 => (
                     eligible.first().map(|lot| lot.id.clone()),
                     RecognitionStatus::Recognized,
+                    eligible
+                        .first()
+                        .map(|lot| vec![lot.id.clone()])
+                        .unwrap_or_default(),
                 ),
                 (None, None) if eligible.is_empty() => {
                     issues.push(Issue {
@@ -1036,7 +1194,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                         sale: Some(sell.label.clone()),
                         proof: Some(sale_proof),
                     });
-                    (None, RecognitionStatus::MissingLot)
+                    (None, RecognitionStatus::MissingLot, Vec::new())
                 }
                 (None, None) => {
                     issues.push(Issue {
@@ -1053,14 +1211,59 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
                         RecognitionStatus::Ambiguous {
                             candidates: eligible_ids.clone(),
                         },
+                        Vec::new(),
                     )
                 }
             }
         };
-        let selected_gain = selected_lot
-            .as_ref()
-            .and_then(|lot| conditionals.iter().find(|gain| &gain.lot_id == lot));
-        if selected_lot.is_some() && selected_gain.is_none() {
+
+        // A policy supplies an ordered stream, so a sale can consume a
+        // partial first lot and continue into later lots.  An explicit
+        // decision (or the legacy unique-lot fallback) is intentionally
+        // restricted to the named lot.
+        let mut allocation_specs = Vec::<(String, Exact)>::new();
+        if status.is_complete() {
+            let preserve_policy_ties = policy_program.is_some() && requested_lot.is_none();
+            match plan_allocations(
+                &planned_lots,
+                &lots,
+                &remaining,
+                &quantity.number,
+                preserve_policy_ties,
+            ) {
+                AllocationPlan::Complete(specs) => allocation_specs = specs,
+                AllocationPlan::Insufficient { available } => {
+                    issues.push(Issue {
+                        code: IssueCode::InsufficientInventory,
+                        message: format!(
+                            "sale `{}` requires {} {}, but only {} {} remains in eligible lots",
+                            sell.label, quantity.number, asset, available, asset
+                        ),
+                        sale: Some(sell.label.clone()),
+                        proof: Some(sale_proof),
+                    });
+                    status = RecognitionStatus::MissingLot;
+                    selected_lot = None;
+                    planned_lots.clear();
+                }
+                AllocationPlan::Ambiguous { candidates } => {
+                    issues.push(Issue {
+                        code: IssueCode::AmbiguousLot,
+                        message: format!(
+                            "policy reaches tied lots {} for sale `{}`; add a specific decision",
+                            candidates.join(", "),
+                            sell.label
+                        ),
+                        sale: Some(sell.label.clone()),
+                        proof: policy_application_proof,
+                    });
+                    status = RecognitionStatus::Ambiguous { candidates };
+                    selected_lot = None;
+                    planned_lots.clear();
+                }
+            }
+        }
+        if status.is_complete() && allocation_specs.is_empty() {
             issues.push(Issue {
                 code: IssueCode::IncompatibleUnit,
                 message: format!(
@@ -1073,8 +1276,93 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
             selected_lot = None;
             status = RecognitionStatus::InvalidAmount;
         }
-        let sale_result_proof = if let Some(gain) = selected_gain {
-            let mut inputs = vec![sale_proof, gain.proof];
+        let mut allocations = Vec::new();
+        if status.is_complete() {
+            let mut valid = true;
+            for (lot_id, allocated_quantity) in &allocation_specs {
+                let Some(lot) = lots.iter().find(|lot| lot.id == *lot_id) else {
+                    valid = false;
+                    break;
+                };
+                let available_quantity = remaining
+                    .get(lot_id)
+                    .cloned()
+                    .unwrap_or_else(|| Exact::from(0i64));
+                let available_basis = remaining_basis
+                    .get(lot_id)
+                    .cloned()
+                    .unwrap_or_else(|| Exact::from(0i64));
+                let remaining_inputs = remaining_proofs
+                    .get(lot_id)
+                    .cloned()
+                    .unwrap_or_else(|| vec![lot.proof]);
+                let Some(allocation) = lot_allocation(
+                    RemainingLot {
+                        lot,
+                        quantity: &available_quantity,
+                        basis: &available_basis,
+                        proof_inputs: &remaining_inputs,
+                    },
+                    allocated_quantity,
+                    SaleSlice {
+                        quantity: &quantity,
+                        proceeds: &proceeds,
+                        proof: sale_proof,
+                    },
+                    &mut proof,
+                ) else {
+                    valid = false;
+                    break;
+                };
+                allocations.push(allocation);
+            }
+            if !valid {
+                issues.push(Issue {
+                    code: IssueCode::IncompatibleUnit,
+                    message: format!(
+                        "sale `{}` proceeds and eligible lot basis use incompatible units",
+                        sell.label
+                    ),
+                    sale: Some(sell.label.clone()),
+                    proof: Some(sale_proof),
+                });
+                allocations.clear();
+                allocation_specs.clear();
+                selected_lot = None;
+                status = RecognitionStatus::InvalidAmount;
+            }
+        }
+        let selected_lots = allocations
+            .iter()
+            .map(|allocation| allocation.lot_id.clone())
+            .collect::<Vec<_>>();
+        if allocations.len() == 1 {
+            selected_lot = selected_lots.first().cloned();
+        } else if allocations.len() > 1 {
+            selected_lot = None;
+        }
+        for (lot_id, allocated_quantity) in &allocation_specs {
+            if let Some(current) = remaining.get_mut(lot_id) {
+                *current = current.checked_sub(allocated_quantity);
+            }
+            if let Some(allocation) = allocations
+                .iter()
+                .find(|allocation| &allocation.lot_id == lot_id)
+                && let Some(current) = remaining_basis.get_mut(lot_id)
+            {
+                *current = current.checked_sub(&allocation.basis.number);
+            }
+            if let Some(proofs) = remaining_proofs.get_mut(lot_id)
+                && let Some(allocation) = allocations
+                    .iter()
+                    .find(|allocation| &allocation.lot_id == lot_id)
+            {
+                proofs.push(allocation.proof);
+            }
+        }
+        let sale_result_proof = if !allocations.is_empty() {
+            let mut inputs = vec![sale_proof];
+            inputs.extend(allocations.iter().map(|allocation| allocation.proof));
             if let Some(policy_proof) = policy_proof {
                 inputs.push(policy_proof);
             }
@@ -1099,12 +1387,18 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
             if !policy_invalid
                 && let Some(settlement) = matching_settlement(&settlements, &sell.label, &proceeds)
                 && let Some(into) = settlement.into.as_deref()
+                && let Some(total) = aggregate_allocations(&allocations, id)
             {
-                journal.push(make_journal(&sell.label, into, &account, &asset, gain, id));
+                journal.push(make_journal(&sell.label, into, &account, &asset, &total));
             }
             id
         } else {
             sale_proof
+        };
+        let recognized = if status.is_complete() {
+            aggregate_allocations(&allocations, sale_result_proof)
+        } else {
+            None
         };
         let mut goal_roots = std::iter::once(sale_result_proof)
             .chain(eligible.iter().map(|lot| lot.proof))
@@ -1130,6 +1424,9 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
             proceeds,
             eligible_lots: eligible_ids,
             conditional_gains: conditionals,
+            allocations,
+            recognized,
+            selected_lots,
             selected_lot,
             status,
             proof: sale_result_proof,
@@ -1184,7 +1481,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
         } else {
             position.status = ObservationStatus::Conflict;
             issues.push(Issue {
-                code: IssueCode::PolicyDecisionConflict,
+                code: IssueCode::PositionConflict,
                 message: format!(
                     "observed position `{}` is {} {}, but authored events imply {} {}",
                     position.account,
@@ -1239,7 +1536,7 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
         } else {
             settlement.status = ObservationStatus::Conflict;
             issues.push(Issue {
-                code: IssueCode::PolicyDecisionConflict,
+                code: IssueCode::SettlementConflict,
                 message: format!(
                     "observed settlement `{}` is {}, but sale proceeds are {}",
                     settlement.reference,
@@ -1299,6 +1596,13 @@ pub(crate) fn analyze_with_registry(ledger: &Ledger, registry: &PolicyRegistry) 
             proof.root(root);
         }
     }
+    issues.sort_by(|left, right| {
+        left.sale
+            .cmp(&right.sale)
+            .then_with(|| left.code.cmp(&right.code))
+            .then_with(|| left.message.cmp(&right.message))
+            .then_with(|| left.proof.cmp(&right.proof))
+    });
     Analysis {
         book,
         policy,
@@ -1363,19 +1667,115 @@ fn make_quote(quote: &model::Quote, proof: ProofId) -> Option<QuoteView> {
     })
 }
 
+#[derive(Clone, Copy)]
+struct RemainingLot<'a> {
+    lot: &'a Lot,
+    quantity: &'a Exact,
+    basis: &'a Exact,
+    proof_inputs: &'a [ProofId],
+}
+
+#[derive(Clone, Copy)]
+struct SaleSlice<'a> {
+    quantity: &'a Quantity,
+    proceeds: &'a Quantity,
+    proof: ProofId,
+}
+
+enum AllocationPlan {
+    Complete(Vec<(String, Exact)>),
+    Insufficient { available: Exact },
+    Ambiguous { candidates: Vec<String> },
+}
+
+fn plan_allocations(
+    ordered_lots: &[String],
+    lots: &[Lot],
+    remaining: &BTreeMap<String, Exact>,
+    required: &Exact,
+    preserve_date_ties: bool,
+) -> AllocationPlan {
+    let available = ordered_lots.iter().fold(Exact::from(0i64), |total, id| {
+        total.checked_add(remaining.get(id).unwrap_or(&Exact::from(0i64)))
+    });
+    if &available < required {
+        return AllocationPlan::Insufficient { available };
+    }
+
+    let mut specs = Vec::new();
+    let mut left = required.clone();
+    let mut index = 0;
+    while index < ordered_lots.len() && !left.is_zero() {
+        let date = lots
+            .iter()
+            .find(|lot| lot.id == ordered_lots[index])
+            .map(|lot| lot.date);
+        let mut end = index + 1;
+        while preserve_date_ties
+            && end < ordered_lots.len()
+            && lots
+                .iter()
+                .find(|lot| lot.id == ordered_lots[end])
+                .map(|lot| lot.date)
+                == date
+        {
+            end += 1;
+        }
+        let group = &ordered_lots[index..end];
+        let group_available = group.iter().fold(Exact::from(0i64), |total, id| {
+            total.checked_add(remaining.get(id).unwrap_or(&Exact::from(0i64)))
+        });
+        if preserve_date_ties && group.len() > 1 && left < group_available {
+            return AllocationPlan::Ambiguous {
+                candidates: group.to_vec(),
+            };
+        }
+        for id in group {
+            if left.is_zero() {
+                break;
+            }
+            let available = remaining
+                .get(id)
+                .cloned()
+                .unwrap_or_else(|| Exact::from(0i64));
+            if available.is_zero() {
+                continue;
+            }
+            let take = if available < left {
+                available
+            } else {
+                left.clone()
+            };
+            left = left.checked_sub(&take);
+            specs.push((id.clone(), take));
+        }
+        index = end;
+    }
+    AllocationPlan::Complete(specs)
+}
+
 fn conditional_gain(
-    lot: &Lot,
-    sold: &Quantity,
-    proceeds: &Quantity,
+    inventory: RemainingLot<'_>,
+    sale: SaleSlice<'_>,
     proof: &mut Proof,
-    sale_proof: ProofId,
 ) -> Option<ConditionalGain> {
+    let RemainingLot {
+        lot,
+        quantity: available_quantity,
+        basis: available_basis,
+        proof_inputs: remaining_inputs,
+    } = inventory;
+    let SaleSlice {
+        quantity: sold,
+        proceeds,
+        proof: sale_proof,
+    } = sale;
     if lot.quantity.unit != sold.unit || proceeds.unit.is_none() || lot.basis.unit != proceeds.unit
     {
         return None;
     }
-    let ratio = sold.number.checked_div(&lot.quantity.number).ok()?;
-    let allocated_basis = lot.basis.number.checked_mul(&ratio);
+    let ratio = sold.number.checked_div(available_quantity).ok()?;
+    let allocated_basis = available_basis.checked_mul(&ratio);
     let gain = proceeds.number.checked_sub(&allocated_basis);
     let basis = Quantity::new(allocated_basis.clone(), lot.basis.unit.clone()).ok()?;
     let gain = Quantity::new(gain.clone(), proceeds.unit.clone()).ok()?;
@@ -1390,15 +1790,142 @@ fn conditional_gain(
             result: gain.number.clone(),
             unit: proceeds.unit.as_ref()?.to_string(),
         },
-        vec![lot.proof, sale_proof],
+        remaining_inputs
+            .iter()
+            .copied()
+            .chain(std::iter::once(sale_proof))
+            .collect(),
         metadata,
     ));
     Some(ConditionalGain {
         lot_id: lot.id.clone(),
+        quantity: sold.clone(),
         proceeds: proceeds.clone(),
         basis,
         gain,
         proof: proof_id,
+    })
+}
+
+/// Build one exact slice of a recognized sale.  Both the holding basis and
+/// the sale proceeds are allocated by the same rational quantity fraction;
+/// no decimal rounding is introduced at an allocation boundary.
+fn lot_allocation(
+    inventory: RemainingLot<'_>,
+    allocated_quantity: &Exact,
+    sale: SaleSlice<'_>,
+    proof: &mut Proof,
+) -> Option<LotAllocation> {
+    let RemainingLot {
+        lot,
+        quantity: available_quantity,
+        basis: available_basis,
+        proof_inputs: remaining_inputs,
+    } = inventory;
+    let SaleSlice {
+        quantity: sale_quantity,
+        proceeds: sale_proceeds,
+        proof: sale_proof,
+    } = sale;
+    if allocated_quantity.is_zero()
+        || lot.quantity.unit != sale_quantity.unit
+        || sale_quantity.number.is_zero()
+        || sale_proceeds.unit.is_none()
+        || lot.basis.unit != sale_proceeds.unit
+    {
+        return None;
+    }
+    let quantity = Quantity::new(allocated_quantity.clone(), lot.quantity.unit.clone()).ok()?;
+    let sale_ratio = allocated_quantity.checked_div(&sale_quantity.number).ok()?;
+    let inventory_ratio = allocated_quantity.checked_div(available_quantity).ok()?;
+    let allocated_basis_number = available_basis.checked_mul(&inventory_ratio);
+    let allocated_proceeds_number = sale_proceeds.number.checked_mul(&sale_ratio);
+    let basis = Quantity::new(allocated_basis_number.clone(), lot.basis.unit.clone()).ok()?;
+    let proceeds = Quantity::new(
+        allocated_proceeds_number.clone(),
+        sale_proceeds.unit.clone(),
+    )
+    .ok()?;
+    let gain_number = allocated_proceeds_number.checked_sub(&allocated_basis_number);
+    let gain = Quantity::new(gain_number.clone(), sale_proceeds.unit.clone()).ok()?;
+
+    let mut allocation_metadata = metadata_for(&lot.id, "lot-allocation", None);
+    allocation_metadata.insert(
+        "sale-quantity".into(),
+        sale_quantity.number.canonical_string(),
+    );
+    allocation_metadata.insert(
+        "allocated-quantity".into(),
+        allocated_quantity.canonical_string(),
+    );
+    allocation_metadata.insert(
+        "allocated-proceeds".into(),
+        allocated_proceeds_number.canonical_string(),
+    );
+    allocation_metadata.insert(
+        "allocated-basis".into(),
+        allocated_basis_number.canonical_string(),
+    );
+    let allocation_proof = proof.insert(Node::new(
+        format!("allocate {} from {}", allocated_quantity, lot.id),
+        Operation::Derive {
+            rule: "allocate-lot-proportionally".into(),
+        },
+        remaining_inputs
+            .iter()
+            .copied()
+            .chain(std::iter::once(sale_proof))
+            .collect(),
+        allocation_metadata,
+    ));
+    let mut gain_metadata = metadata_for(&lot.id, "allocated-gain", None);
+    gain_metadata.insert("lot".into(), lot.id.clone());
+    gain_metadata.insert("quantity".into(), allocated_quantity.canonical_string());
+    let gain_proof = proof.insert(Node::new(
+        format!("allocated gain {} on {}", lot.id, sale_proof),
+        Operation::Arithmetic {
+            rule: "gain = allocated proceeds - allocated basis".into(),
+            minuend: allocated_proceeds_number,
+            subtrahend: allocated_basis_number,
+            result: gain_number,
+            unit: sale_proceeds.unit.as_ref()?.to_string(),
+        },
+        vec![allocation_proof],
+        gain_metadata,
+    ));
+    Some(LotAllocation {
+        lot_id: lot.id.clone(),
+        quantity,
+        proceeds,
+        basis,
+        gain,
+        proof: gain_proof,
+    })
+}
+
+fn aggregate_allocations(allocations: &[LotAllocation], proof: ProofId) -> Option<ConditionalGain> {
+    allocations.first()?;
+    let mut quantity = Quantity::zero();
+    let mut proceeds = Quantity::zero();
+    let mut basis = Quantity::zero();
+    let mut gain = Quantity::zero();
+    for allocation in allocations {
+        quantity = quantity.checked_add(&allocation.quantity).ok()?;
+        proceeds = proceeds.checked_add(&allocation.proceeds).ok()?;
+        basis = basis.checked_add(&allocation.basis).ok()?;
+        gain = gain.checked_add(&allocation.gain).ok()?;
+    }
+    Some(ConditionalGain {
+        lot_id: allocations
+            .iter()
+            .map(|allocation| allocation.lot_id.as_str())
+            .collect::<Vec<_>>()
+            .join(","),
+        quantity,
+        proceeds,
+        basis,
+        gain,
+        proof,
     })
 }
 
@@ -1408,7 +1935,6 @@ fn make_journal(
     account: &str,
     asset: &str,
     gain: &ConditionalGain,
-    proof: ProofId,
 ) -> JournalEntry {
     JournalEntry {
         sale: sale.to_owned(),
@@ -1429,7 +1955,7 @@ fn make_journal(
                 quantity: gain.gain.clone(),
             },
         ],
-        proof,
+        proof: gain.proof,
     }
 }
 
@@ -1510,13 +2036,18 @@ fn buy_material(buy: &model::Buy) -> String {
 }
 
 fn sell_material(sell: &model::Sell) -> String {
+    let lot = match &sell.lot {
+        LotSelector::Explicit(lot) => format!("explicit:{lot}"),
+        LotSelector::Hole(hole) => format!("hole:{hole}"),
+    };
     format!(
-        "{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}",
         sell.label,
         sell.date,
         sell.from,
         canonical_model_quantity(&sell.quantity),
         canonical_model_quantity(&sell.proceeds),
+        lot,
     )
 }
 
@@ -1836,7 +2367,7 @@ decide sell lot buy/two
     }
 
     #[test]
-    fn v0_blocks_multiple_sales_instead_of_reusing_a_lot() {
+    fn multiple_sales_deplete_one_lot_without_reuse() {
         let source = r#"book tax-us
 buy buy/one on 2026-01-04
   20 ABC into brokerage
@@ -1853,17 +2384,350 @@ sell second on 2026-09-21
         let result = analyze(&parse_ledger(source).unwrap());
         assert_eq!(result.journal.len(), 0);
         assert_eq!(result.sales.len(), 2);
-        assert!(result.sales.iter().all(|sale| sale.selected_lot.is_none()));
+        assert!(result.sales.iter().all(|sale| sale.status.is_complete()));
+        assert!(
+            result
+                .sales
+                .iter()
+                .all(|sale| sale.selected_lot.as_deref() == Some("buy/one"))
+        );
         assert_eq!(
+            result
+                .sales
+                .iter()
+                .map(|sale| sale.allocations[0].quantity.number.to_string())
+                .collect::<Vec<_>>(),
+            vec!["10", "10"]
+        );
+        assert!(
+            !result
+                .issues
+                .iter()
+                .any(|issue| issue.message.contains("multiple sales"))
+        );
+        assert!(!result.blocked());
+        assert!(result.check_proof().is_ok());
+    }
+
+    #[test]
+    fn policy_allocates_partial_and_cross_lot_sales_exactly() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  3 ABC into brokerage
+  for 10 USD
+  fee 2 USD
+buy buy/two on 2026-02-04
+  4 ABC into brokerage
+  for 20 USD
+sell first on 2026-09-20
+  1 ABC from brokerage
+  for 5 USD
+  lot ?lot
+sell second on 2026-09-21
+  5 ABC from brokerage
+  for 25 USD
+  lot ?lot
+use lots/fifo for tax-us
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        let first = result.sale("first").unwrap();
+        assert_eq!(first.selected_lot.as_deref(), Some("buy/one"));
+        assert_eq!(first.allocations[0].quantity.number.to_string(), "1");
+        assert_eq!(first.allocations[0].basis.number.canonical_string(), "4");
+        assert_eq!(first.allocations[0].gain.number.canonical_string(), "1");
+
+        let second = result.sale("second").unwrap();
+        assert!(second.status.is_complete());
+        assert_eq!(second.selected_lot, None);
+        assert_eq!(
+            second
+                .allocations
+                .iter()
+                .map(|allocation| allocation.lot_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["buy/one", "buy/two"]
+        );
+        assert_eq!(second.allocations[0].quantity.number.to_string(), "2");
+        assert_eq!(second.allocations[0].basis.number.canonical_string(), "8");
+        assert_eq!(second.allocations[1].quantity.number.to_string(), "3");
+        assert_eq!(second.allocations[1].basis.number.canonical_string(), "15");
+        assert_eq!(
+            result
+                .recognized_gain("second")
+                .unwrap()
+                .gain
+                .number
+                .canonical_string(),
+            "2"
+        );
+        assert!(result.check_proof().is_ok());
+    }
+
+    #[test]
+    fn lifo_allocates_from_newest_lot_then_crosses_back() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  2 ABC into brokerage
+  for 10 USD
+buy buy/two on 2026-02-04
+  3 ABC into brokerage
+  for 30 USD
+sell sell on 2026-09-20
+  4 ABC from brokerage
+  for 40 USD
+  lot ?lot
+use lots/lifo for tax-us
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        let sale = result.sale("sell").unwrap();
+        assert!(sale.status.is_complete());
+        assert_eq!(
+            sale.allocations
+                .iter()
+                .map(|allocation| allocation.lot_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["buy/two", "buy/one"]
+        );
+        assert_eq!(sale.allocations[0].quantity.number.to_string(), "3");
+        assert_eq!(sale.allocations[1].quantity.number.to_string(), "1");
+        assert!(result.check_proof().is_ok());
+    }
+
+    #[test]
+    fn explicit_decision_conflict_remains_blocked_before_allocation() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  2 ABC into brokerage
+  for 10 USD
+buy buy/two on 2026-02-04
+  2 ABC into brokerage
+  for 20 USD
+sell sell on 2026-09-20
+  3 ABC from brokerage
+  for 30 USD
+  lot ?lot
+use lots/fifo for tax-us
+decide sell lot buy/two
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        let sale = result.sale("sell").unwrap();
+        assert!(matches!(sale.status, RecognitionStatus::Conflict { .. }));
+        assert!(sale.allocations.is_empty());
+        assert!(result.issues.iter().any(|issue| {
+            issue.code == IssueCode::PolicyDecisionConflict
+                && issue.message.contains("policy selects")
+        }));
+        assert!(result.check_proof().is_ok());
+    }
+
+    #[test]
+    fn economic_date_controls_shared_inventory_not_source_order() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  3 ABC into brokerage
+  for 3 USD
+sell second on 2026-09-21
+  2 ABC from brokerage
+  for 2 USD
+  lot ?lot
+sell first on 2026-09-20
+  2 ABC from brokerage
+  for 2 USD
+  lot ?lot
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        assert!(result.sale("first").unwrap().status.is_complete());
+        assert!(matches!(
+            result.sale("second").unwrap().status,
+            RecognitionStatus::MissingLot
+        ));
+        assert_eq!(
+            result.sale("first").unwrap().allocations[0]
+                .quantity
+                .number
+                .to_string(),
+            "2"
+        );
+        assert!(result.sale("second").unwrap().allocations.is_empty());
+        assert!(result.issues.iter().any(|issue| {
+            issue.sale.as_deref() == Some("second")
+                && issue.code == IssueCode::InsufficientInventory
+        }));
+        assert!(result.check_proof().is_ok());
+    }
+
+    #[test]
+    fn same_day_sales_need_disjoint_ledger_decisions_not_label_order() {
+        let unresolved = r#"book tax-us
+buy buy/one on 2026-01-04
+  3 ABC into brokerage
+  for 3 USD
+sell alpha on 2026-09-20
+  2 ABC from brokerage
+  for 2 USD
+  lot ?lot
+sell zulu on 2026-09-20
+  2 ABC from brokerage
+  for 2 USD
+  lot ?lot
+"#;
+        let blocked = analyze(&parse_ledger(unresolved).unwrap());
+        assert!(
+            blocked
+                .sales
+                .iter()
+                .all(|sale| matches!(sale.status, RecognitionStatus::Ambiguous { .. }))
+        );
+        assert!(blocked.sales.iter().all(|sale| sale.allocations.is_empty()));
+
+        let resolved = r#"book tax-us
+buy buy/one on 2026-01-04
+  2 ABC into brokerage
+  for 2 USD
+buy buy/two on 2026-01-05
+  2 ABC into brokerage
+  for 4 USD
+sell alpha on 2026-09-20
+  2 ABC from brokerage
+  for 3 USD
+  lot ?lot
+sell zulu on 2026-09-20
+  2 ABC from brokerage
+  for 5 USD
+  lot ?lot
+decide alpha lot buy/two
+decide zulu lot buy/one
+"#;
+        let decided = analyze(&parse_ledger(resolved).unwrap());
+        assert_eq!(
+            decided.sale("alpha").unwrap().selected_lot.as_deref(),
+            Some("buy/two")
+        );
+        assert_eq!(
+            decided.sale("zulu").unwrap().selected_lot.as_deref(),
+            Some("buy/one")
+        );
+        assert!(decided.sales.iter().all(|sale| sale.status.is_complete()));
+        assert!(decided.check_proof().is_ok());
+    }
+
+    #[test]
+    fn policy_ties_require_a_decision_only_when_partially_consumed() {
+        let tied_first = r#"book tax-us
+buy buy/a on 2026-01-04
+  1 ABC into brokerage
+  for 10 USD
+buy buy/b on 2026-01-04
+  1 ABC into brokerage
+  for 20 USD
+sell sell on 2026-09-20
+  1 ABC from brokerage
+  for 30 USD
+  lot ?lot
+use lots/fifo for tax-us
+decide sell lot buy/b
+"#;
+        let decided = analyze(&parse_ledger(tied_first).unwrap());
+        assert_eq!(
+            decided.sale("sell").unwrap().selected_lot.as_deref(),
+            Some("buy/b")
+        );
+
+        let later_tie = r#"book tax-us
+buy buy/a on 2026-01-03
+  1 ABC into brokerage
+  for 10 USD
+buy buy/b on 2026-01-04
+  1 ABC into brokerage
+  for 20 USD
+buy buy/c on 2026-01-04
+  1 ABC into brokerage
+  for 30 USD
+sell sell on 2026-09-20
+  2 ABC from brokerage
+  for 60 USD
+  lot ?lot
+use lots/fifo for tax-us
+"#;
+        let ambiguous = analyze(&parse_ledger(later_tie).unwrap());
+        assert!(matches!(
+            ambiguous.sale("sell").unwrap().status,
+            RecognitionStatus::Ambiguous { .. }
+        ));
+        assert!(ambiguous.sale("sell").unwrap().allocations.is_empty());
+
+        let all_tied = later_tie.replace("2 ABC from", "3 ABC from");
+        let complete = analyze(&parse_ledger(&all_tied).unwrap());
+        assert!(complete.sale("sell").unwrap().status.is_complete());
+        assert_eq!(complete.sale("sell").unwrap().allocations.len(), 3);
+    }
+
+    #[test]
+    fn insufficient_inventory_does_not_consume_any_lot() {
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  3 ABC into brokerage
+  for 10 USD
+sell first on 2026-09-20
+  2 ABC from brokerage
+  for 8 USD
+  lot ?lot
+sell second on 2026-09-21
+  2 ABC from brokerage
+  for 8 USD
+  lot ?lot
+use lots/fifo for tax-us
+"#;
+        let result = analyze(&parse_ledger(source).unwrap());
+        assert!(result.sale("first").unwrap().status.is_complete());
+        let second = result.sale("second").unwrap();
+        assert!(matches!(second.status, RecognitionStatus::MissingLot));
+        assert!(second.allocations.is_empty());
+        assert!(
             result
                 .issues
                 .iter()
-                .filter(|issue| issue.message.contains("multiple sales"))
-                .count(),
-            2
+                .any(|issue| issue.message.contains("only 1 ABC remains"))
         );
-        assert!(result.blocked());
         assert!(result.check_proof().is_ok());
+    }
+
+    #[test]
+    fn workspace_source_path_runs_multi_lot_fixture_and_binds_proof() {
+        use crate::workspace::Workspace;
+
+        let source = r#"book tax-us
+buy buy/one on 2026-01-04
+  2 ABC into brokerage
+  for 10 USD
+buy buy/two on 2026-02-04
+  2 ABC into brokerage
+  for 20 USD
+sell first on 2026-09-20
+  1 ABC from brokerage
+  for 6 USD
+  lot ?lot
+sell second on 2026-09-21
+  3 ABC from brokerage
+  for 18 USD
+  lot ?lot
+sell third on 2026-09-22
+  1 ABC from brokerage
+  for 6 USD
+  lot ?lot
+use lots/fifo for tax-us
+"#;
+        let mut workspace = Workspace::new();
+        let source = workspace.load_source("tax-us", source).unwrap();
+        let result = workspace.analyze_commit(source.commit).unwrap();
+        assert_eq!(result.sales.len(), 3);
+        assert_eq!(result.sale("first").unwrap().allocations.len(), 1);
+        assert_eq!(result.sale("second").unwrap().allocations.len(), 2);
+        assert!(matches!(
+            result.sale("third").unwrap().status,
+            RecognitionStatus::MissingLot
+        ));
+        result.check_proof().unwrap();
     }
 
     #[test]

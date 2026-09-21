@@ -85,10 +85,27 @@ pub fn render_check(analysis: &Analysis) -> String {
             let _ = writeln!(out, "    eligible lots: {eligible}");
             match &sale.status {
                 RecognitionStatus::Recognized => {
-                    let selected = sale.selected_lot.as_deref().unwrap_or("unknown");
+                    let selected = sale
+                        .selected_lot
+                        .as_deref()
+                        .map(str::to_owned)
+                        .or_else(|| {
+                            (!sale.selected_lots.is_empty()).then(|| sale.selected_lots.join(", "))
+                        })
+                        .unwrap_or_else(|| "unknown".to_owned());
                     let _ = writeln!(out, "    selected lot: {selected}");
                     if let Some(gain) = analysis.recognized_gain(&sale.id) {
                         let _ = writeln!(out, "    gain: {}", quantity(&gain.gain));
+                    }
+                    for allocation in &sale.allocations {
+                        let _ = writeln!(
+                            out,
+                            "      {} -> {} basis {}, gain {}",
+                            allocation.lot_id,
+                            quantity(&allocation.quantity),
+                            quantity(&allocation.basis),
+                            quantity(&allocation.gain)
+                        );
                     }
                     out.push_str("    recognition: recognized\n");
                 }
@@ -496,8 +513,14 @@ fn render_next_actions(analysis: &Analysis, out: &mut String) {
             IssueCode::InvalidAmount => {
                 actions.insert("provide an exact amount with its unit".into());
             }
-            IssueCode::AmbiguousLot | IssueCode::PolicyDecisionConflict | IssueCode::MissingLot => {
+            IssueCode::InsufficientInventory => {
+                actions.insert("add or identify enough eligible inventory for the sale".into());
             }
+            IssueCode::PositionConflict | IssueCode::SettlementConflict => {}
+            IssueCode::AmbiguousLot
+            | IssueCode::DecisionConflict
+            | IssueCode::PolicyDecisionConflict
+            | IssueCode::MissingLot => {}
         };
     }
     if !actions.is_empty() {
@@ -511,8 +534,12 @@ fn render_next_actions(analysis: &Analysis, out: &mut String) {
 fn issue_code(issue: &Issue) -> &'static str {
     match issue.code {
         IssueCode::AmbiguousLot => "ambiguous lot",
+        IssueCode::DecisionConflict => "decision conflict",
         IssueCode::PolicyDecisionConflict => "policy/decision conflict",
         IssueCode::MissingLot => "missing lot",
+        IssueCode::InsufficientInventory => "insufficient inventory",
+        IssueCode::PositionConflict => "position conflict",
+        IssueCode::SettlementConflict => "settlement conflict",
         IssueCode::AmbiguousQuote => "conflicting quote",
         IssueCode::UnknownPolicy => "unknown policy",
         IssueCode::IncompatibleUnit => "incompatible unit",

@@ -61,7 +61,9 @@ experiments, but it is not part of this contract.
 - [ ] Every answer has a proposition-specific independently checked proof.
 - [x] Source-order property tests.
 - [x] Actual/scenario isolation test.
-- [ ] Reference/production differential test.
+- [x] Reference/production differential tests cover generated FIFO/LIFO,
+  decision, conflict, quote, settlement, position, partial-lot, and multi-lot
+  cases through the production `Workspace` boundary.
 - [ ] Real incremental quote-change invalidation test.
 
 ### Gate 3 — finance-native solver kernel
@@ -83,9 +85,10 @@ experiments, but it is not part of this contract.
 - [ ] Typed HIR, modules, names, rows, refinements, annotations, and rule
   classes.
 - [ ] Generic typed holes survive parsing through query results.
-- [ ] Incremental semantic database with precise dependency invalidation. A
-  deterministic kernel and engine edge adapter exist; production evaluation
-  is not yet fully memoized through it.
+- [ ] Incremental semantic database with precise dependency invalidation.
+  Production elaboration and analysis are memoized through the database with
+  exact source/package edges and clean-run equivalence; invalidation within a
+  source file is still stage-granular rather than proposition-granular.
 - [ ] Versioned package compiler, coherence checks, and lockfile.
 - [ ] LSP diagnostics, completion, and proof navigation foundation.
 
@@ -99,6 +102,9 @@ experiments, but it is not part of this contract.
 - [x] Raw import bytes, versioned adapter provenance, idempotent re-import,
   split/merge links, and decision inbox.
 - [ ] Signed, reproducible close objects pin the complete semantic context.
+  Commit/close signing bytes exclude signatures, and the store now requires a
+  caller-supplied verifier for signed insertion; key management and a complete
+  signed-close workflow remain open.
 
 ### Gate 6 — personal and small-business alpha
 
@@ -114,7 +120,9 @@ experiments, but it is not part of this contract.
 
 - [x] Lots track remaining quantity, provenance, rights, adjustments, and
   per-book basis.
-- [ ] Partial and multi-lot allocation without reuse.
+- [x] Partial and multi-lot allocation without reuse, with exact proportional
+  basis/proceeds, FIFO/LIFO package order, and allocation provenance nodes.
+  Proposition-specific independent checking remains open under Gate 2.
 - [x] Quotes carry time, venue, side, source, confidence, and validity.
 - [x] Exact path-preserving multi-currency valuation.
 - [ ] Corporate actions, debt schedules, collateral, and policy packages.
@@ -138,7 +146,9 @@ experiments, but it is not part of this contract.
 
 - [ ] Benchmark corpus and performance/invalidation metrics from section XVII.
   The runner covers all named shapes and reports unsupported semantics honestly;
-  production memory, parallel determinism, and several domain workloads remain.
+  production Workspace cache/invalidation, normalization, and relation-size
+  metrics are measured; peak memory, parallel determinism, and several domain
+  workloads remain.
 - [ ] Property, differential, incremental/full, and parallel/single-threaded
   equivalence suites.
 - [ ] Parser, canonicalization, unification, cycles, proof, packages, time,
@@ -150,15 +160,17 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 229 library tests and 4 CLI tests;
+- 241 library tests, 4 CLI tests, and 3 independent reference/production
+  differential tests;
 - 134 named constitutional cases with 12 grouped smoke suites; 58 cases are
   explicit implementation inventory, and the remaining mappings still need
   independent case-specific assertions before Gate 0 can close;
 - 12 deterministic heavy-ledger integration tests and an explicit 10,000-row
   stress test;
-- an 11-workload section XVII benchmark runner with JSONL measurements and
-  proof/dependency metrics; production incremental/cache, memory, and parallel
-  metrics are explicitly `null` rather than simulated;
+- an 11-workload section XVII benchmark runner with JSONL measurements,
+  proof/dependency metrics, production Workspace cache/invalidation, and
+  clean-recomputation equivalence; unavailable peak-memory and parallel
+  metrics remain explicitly `null` rather than simulated;
 - strict all-target Clippy and exact source-to-commit-to-analysis proof checks.
 
 These numbers are evidence, not a completion claim. In particular, several

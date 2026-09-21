@@ -12,6 +12,8 @@ use std::time::Instant;
 
 use axiom_ledger::incremental::{IncrementalDb, MemoOutcome, QueryError, QueryKey};
 use axiom_ledger::render::render_why;
+use axiom_ledger::store::PolicyPackage as StorePolicyPackage;
+use axiom_ledger::surface::SurfaceFile;
 use axiom_ledger::workspace::Workspace;
 
 const SCHEMA: &str = "axiom-bench/v1";
@@ -159,9 +161,10 @@ enum ChangedKind {
 #[derive(Clone, Debug, Default)]
 struct Timing {
     generation_ns: u128,
+    normalization_ns: Option<u128>,
     parse_ns: Option<u128>,
     solve_cold_ns: Option<u128>,
-    repeated_solve_ns: Option<u128>,
+    workspace_replay_ns: Option<u128>,
     proof_check_ns: Option<u128>,
     explanation_ns: Option<u128>,
     changed_full_solve_ns: Option<u128>,
@@ -173,6 +176,8 @@ struct Sizes {
     source_lines: usize,
     forms: Option<usize>,
     changed_source_bytes: Option<usize>,
+    semantic_relation_nodes: Option<usize>,
+    semantic_relation_edges: Option<usize>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -182,11 +187,16 @@ struct Metrics {
     invalidated_queries: Option<usize>,
     proof_nodes: Option<usize>,
     proof_roots: Option<usize>,
-    dependency_edges: Option<usize>,
-    invalidation_edges: Option<usize>,
+    semantic_dependency_edges: Option<usize>,
+    semantic_invalidation_edges: Option<usize>,
     explanation_bytes: Option<usize>,
     cycle_errors: Option<usize>,
     determinism_across_thread_counts: Option<bool>,
+    same_process_cache_replay_equal: Option<bool>,
+    peak_memory_bytes: Option<usize>,
+    thread_count_equivalence: Option<bool>,
+    build_profile: Option<&'static str>,
+    resource_profile: Option<&'static str>,
     note: Option<&'static str>,
 }
 
@@ -366,22 +376,45 @@ fn measure_workload(
         source_lines: generated.source.lines().count(),
         forms: None,
         changed_source_bytes: generated.changed_source.as_ref().map(String::len),
+        semantic_relation_nodes: None,
+        semantic_relation_edges: None,
     };
     let mut metrics = Metrics {
         determinism_across_thread_counts: None,
+        same_process_cache_replay_equal: None,
+        peak_memory_bytes: None,
+        thread_count_equivalence: None,
+        build_profile: Some(if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }),
+        resource_profile: Some("unbounded-single-thread"),
         note: Some(
-            "production incremental analysis, peak memory, and thread-count equivalence are not exposed; unavailable metrics are null",
+            "peak memory and thread-count equivalence are not measured by this portable harness; null is intentional",
         ),
         ..Metrics::default()
     };
 
     let mut workspace = Workspace::new();
-    let source = workspace
+    let mut source = workspace
         .load_source(
             format!("benchmark/{}", workload.name()),
             generated.source.as_bytes(),
         )
         .map_err(|error| format!("{}: source load failed: {error}", workload.name()))?;
+    if workload == Workload::PackageUpgrade {
+        let package = workspace
+            .put_policy_package(StorePolicyPackage::new(
+                "lots/fifo",
+                "1.0.0",
+                b"selector=earliest_acquisition\ntie=ambiguous".to_vec(),
+            ))
+            .map_err(|error| format!("{}: package v1 failed: {error}", workload.name()))?;
+        source = workspace
+            .commit_with_packages(source.commit_id(), [package])
+            .map_err(|error| format!("{}: package commit failed: {error}", workload.name()))?;
+    }
     let elaborated = workspace
         .elaborate_commit(source.commit_id())
         .map_err(|error| format!("{}: parse failed: {error}", workload.name()))?;
@@ -393,18 +426,33 @@ fn measure_workload(
         .check_proof()
         .map_err(|error| format!("{}: proof check failed: {error}", workload.name()))?;
 
+    timing.normalization_ns = Some(median_normalization(&generated.source, samples)?);
     timing.parse_ns = Some(median_parse(&generated.source, samples)?);
+    workspace.clear_incremental_trace();
     timing.solve_cold_ns = Some(median_cold_solve(&generated.source, samples)?);
-    timing.repeated_solve_ns = Some(median_repeated_solve(
+    timing.workspace_replay_ns = Some(median_workspace_replay(
         &mut workspace,
         source.commit_id(),
         samples,
     )?);
+    let replay_metrics = workspace.incremental_metrics();
+    let replay = workspace
+        .analyze_commit(source.commit_id())
+        .map_err(|error| format!("{}: deterministic replay failed: {error}", workload.name()))?;
+    metrics.same_process_cache_replay_equal = Some(replay == analysis);
     timing.proof_check_ns = Some(median_proof_check(&analysis, samples));
     metrics.proof_nodes = Some(analysis.proof.nodes.len());
     metrics.proof_roots = Some(analysis.proof.roots.len());
-    metrics.dependency_edges = Some(analysis.dependencies.values().map(Vec::len).sum::<usize>());
-    metrics.invalidation_edges = Some(analysis.invalidations.values().map(Vec::len).sum::<usize>());
+    metrics.semantic_dependency_edges =
+        Some(analysis.dependencies.values().map(Vec::len).sum::<usize>());
+    metrics.semantic_invalidation_edges =
+        Some(analysis.invalidations.values().map(Vec::len).sum::<usize>());
+    sizes.semantic_relation_nodes =
+        Some(analysis.dependencies.len() + analysis.invalidations.len());
+    sizes.semantic_relation_edges = Some(
+        analysis.dependencies.values().map(Vec::len).sum::<usize>()
+            + analysis.invalidations.values().map(Vec::len).sum::<usize>(),
+    );
 
     if let Some(goal) = generated.explain_goal.as_deref() {
         let explanation = render_why(&analysis, goal)
@@ -414,9 +462,67 @@ fn measure_workload(
     }
 
     if let Some(changed) = generated.changed_source.as_deref() {
-        timing.changed_full_solve_ns = Some(median_cold_solve(changed, samples)?);
+        let (changed_analysis, clean_store) = if workload == Workload::PackageUpgrade {
+            workspace.clear_incremental_trace();
+            let package = workspace
+                .put_policy_package(StorePolicyPackage::new(
+                    "lots/fifo",
+                    "1.1.0",
+                    b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+                ))
+                .map_err(|error| format!("{}: package v2 failed: {error}", workload.name()))?;
+            let upgraded = workspace
+                .commit_with_packages(source.commit_id(), [package])
+                .map_err(|error| format!("{}: package upgrade failed: {error}", workload.name()))?;
+            let clean_store = workspace.store().clone();
+            let analysis = workspace
+                .analyze_commit(upgraded.commit_id())
+                .map_err(|error| {
+                    format!("{}: incremental upgrade failed: {error}", workload.name())
+                })?;
+            (analysis, clean_store)
+        } else {
+            workspace.clear_incremental_trace();
+            let changed_source = workspace
+                .load_source(format!("benchmark/{}", workload.name()), changed.as_bytes())
+                .map_err(|error| {
+                    format!("{}: changed source load failed: {error}", workload.name())
+                })?;
+            let clean_store = workspace.store().clone();
+            let analysis = workspace
+                .analyze_commit(changed_source.commit_id())
+                .map_err(|error| {
+                    format!(
+                        "{}: incremental changed solve failed: {error}",
+                        workload.name()
+                    )
+                })?;
+            (analysis, clean_store)
+        };
+        let changed_metrics = workspace.incremental_metrics();
+        metrics.cache_hits = Some(replay_metrics.cache_hits + changed_metrics.cache_hits);
+        metrics.cache_misses = Some(replay_metrics.cache_misses + changed_metrics.cache_misses);
+        metrics.invalidated_queries = Some(changed_metrics.invalidated_queries);
+        let mut clean_workspace = Workspace::from_store(clean_store);
+        let clean = clean_workspace
+            .analyze_commit(changed_analysis.source_commit())
+            .map_err(|error| format!("{}: clean recomputation failed: {error}", workload.name()))?;
+        if changed_analysis != clean {
+            return Err(format!(
+                "{}: incremental output differs from clean recomputation",
+                workload.name()
+            ));
+        }
+        timing.changed_full_solve_ns = Some(if workload == Workload::PackageUpgrade {
+            median_package_upgrade_solve(&generated.source, samples)?
+        } else {
+            median_cold_solve(changed, samples)?
+        });
     } else if workload == Workload::AdversarialRecursion {
         metrics.cycle_errors = Some(recursive_cycle_probe()?);
+    } else {
+        metrics.cache_hits = Some(replay_metrics.cache_hits);
+        metrics.cache_misses = Some(replay_metrics.cache_misses);
     }
 
     Ok(ResultRecord {
@@ -475,6 +581,44 @@ fn median_parse(source: &str, samples: usize) -> Result<u128, String> {
     Ok(median(values))
 }
 
+fn median_normalization(source: &str, samples: usize) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        let surface = SurfaceFile::parse(source);
+        black_box(surface.lossless().len());
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
+}
+
+fn median_package_upgrade_solve(source: &str, samples: usize) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        let mut workspace = Workspace::new();
+        let loaded = workspace
+            .load_source("benchmark/package-cold", source.as_bytes())
+            .map_err(|error| error.to_string())?;
+        let package = workspace
+            .put_policy_package(StorePolicyPackage::new(
+                "lots/fifo",
+                "1.1.0",
+                b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+            ))
+            .map_err(|error| error.to_string())?;
+        let committed = workspace
+            .commit_with_packages(loaded.commit_id(), [package])
+            .map_err(|error| error.to_string())?;
+        let analysis = workspace
+            .analyze_commit(committed.commit_id())
+            .map_err(|error| error.to_string())?;
+        black_box(analysis.proof.nodes.len());
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
+}
+
 fn median_cold_solve(source: &str, samples: usize) -> Result<u128, String> {
     let mut values = Vec::with_capacity(samples);
     for _ in 0..samples {
@@ -492,7 +636,7 @@ fn median_cold_solve(source: &str, samples: usize) -> Result<u128, String> {
     Ok(median(values))
 }
 
-fn median_repeated_solve(
+fn median_workspace_replay(
     workspace: &mut Workspace,
     commit: axiom_ledger::store::CommitId,
     samples: usize,
@@ -554,7 +698,7 @@ fn self_test(quick: bool, scale: u64) -> Result<usize, String> {
         }
         checks += 1;
         let mut workspace = Workspace::new();
-        let source = workspace
+        let mut source = workspace
             .load_source(
                 format!("benchmark/self-test/{}", workload.name()),
                 left.source.as_bytes(),
@@ -562,6 +706,25 @@ fn self_test(quick: bool, scale: u64) -> Result<usize, String> {
             .map_err(|error| {
                 format!("{}: self-test source load failed: {error}", workload.name())
             })?;
+        if workload == Workload::PackageUpgrade {
+            let package = workspace
+                .put_policy_package(StorePolicyPackage::new(
+                    "lots/fifo",
+                    "1.0.0",
+                    b"selector=earliest_acquisition\ntie=ambiguous".to_vec(),
+                ))
+                .map_err(|error| {
+                    format!("{}: self-test package failed: {error}", workload.name())
+                })?;
+            source = workspace
+                .commit_with_packages(source.commit_id(), [package])
+                .map_err(|error| {
+                    format!(
+                        "{}: self-test package commit failed: {error}",
+                        workload.name()
+                    )
+                })?;
+        }
         let analysis = workspace
             .analyze_commit(source.commit_id())
             .map_err(|error| format!("{}: self-test analysis failed: {error}", workload.name()))?;
@@ -569,6 +732,73 @@ fn self_test(quick: bool, scale: u64) -> Result<usize, String> {
             .check_proof()
             .map_err(|error| format!("{}: self-test proof failed: {error}", workload.name()))?;
         checks += 1;
+        if workload == Workload::OneRowCloseChange || workload == Workload::PackageUpgrade {
+            workspace.clear_incremental_trace();
+            let changed = if workload == Workload::PackageUpgrade {
+                let package = workspace
+                    .put_policy_package(StorePolicyPackage::new(
+                        "lots/fifo",
+                        "1.1.0",
+                        b"selector=latest_acquisition\ntie=ambiguous".to_vec(),
+                    ))
+                    .map_err(|error| {
+                        format!(
+                            "{}: self-test upgraded package failed: {error}",
+                            workload.name()
+                        )
+                    })?;
+                workspace
+                    .commit_with_packages(source.commit_id(), [package])
+                    .map_err(|error| {
+                        format!(
+                            "{}: self-test package upgrade commit failed: {error}",
+                            workload.name()
+                        )
+                    })?
+            } else {
+                workspace
+                    .load_source(
+                        format!("benchmark/self-test/{}", workload.name()),
+                        left.changed_source
+                            .as_deref()
+                            .unwrap_or_default()
+                            .as_bytes(),
+                    )
+                    .map_err(|error| {
+                        format!(
+                            "{}: self-test changed source failed: {error}",
+                            workload.name()
+                        )
+                    })?
+            };
+            let clean_store = workspace.store().clone();
+            let changed_analysis =
+                workspace
+                    .analyze_commit(changed.commit_id())
+                    .map_err(|error| {
+                        format!("{}: self-test incremental failed: {error}", workload.name())
+                    })?;
+            if workspace.incremental_metrics().invalidated_queries == 0 {
+                return Err(format!(
+                    "{}: self-test saw no invalidation",
+                    workload.name()
+                ));
+            }
+            let mut clean = Workspace::from_store(clean_store);
+            let full = clean.analyze_commit(changed.commit_id()).map_err(|error| {
+                format!(
+                    "{}: self-test clean replay failed: {error}",
+                    workload.name()
+                )
+            })?;
+            if changed_analysis != full {
+                return Err(format!(
+                    "{}: self-test incremental output mismatch",
+                    workload.name()
+                ));
+            }
+            checks += 2;
+        }
     }
     let cycle = recursive_cycle_probe()?;
     if cycle != 1 {
@@ -628,11 +858,12 @@ fn print_json_line(record: &ResultRecord) {
     );
     let _ = write!(
         output,
-        "\"generation_ns\":{},\"parse_ns\":{},\"solve_cold_ns\":{},\"repeated_solve_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_full_solve_ns\":{}",
+        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"solve_cold_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_full_solve_ns\":{}",
         record.timing.generation_ns,
+        option_number(record.timing.normalization_ns),
         option_number(record.timing.parse_ns),
         option_number(record.timing.solve_cold_ns),
-        option_number(record.timing.repeated_solve_ns),
+        option_number(record.timing.workspace_replay_ns),
         option_number(record.timing.proof_check_ns),
         option_number(record.timing.explanation_ns),
         option_number(record.timing.changed_full_solve_ns),
@@ -640,16 +871,28 @@ fn print_json_line(record: &ResultRecord) {
     output.push_str("},\"sizes\":{");
     let _ = write!(
         output,
-        "\"source_bytes\":{},\"source_lines\":{},\"forms\":{},\"changed_source_bytes\":{}",
+        "\"source_bytes\":{},\"source_lines\":{},\"forms\":{},\"changed_source_bytes\":{},\"semantic_relation_nodes\":{},\"semantic_relation_edges\":{}",
         record.sizes.source_bytes,
         record.sizes.source_lines,
         option_number(record.sizes.forms.map(|value| value as u128)),
         option_number(record.sizes.changed_source_bytes.map(|value| value as u128)),
+        option_number(
+            record
+                .sizes
+                .semantic_relation_nodes
+                .map(|value| value as u128)
+        ),
+        option_number(
+            record
+                .sizes
+                .semantic_relation_edges
+                .map(|value| value as u128)
+        ),
     );
     output.push_str("},\"metrics\":{");
     let _ = write!(
         output,
-        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"dependency_edges\":{},\"invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"determinism_across_thread_counts\":{},\"note\":{},\"unsupported_reason\":{}",
+        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"determinism_across_thread_counts\":{},\"same_process_cache_replay_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{}",
         option_number(record.metrics.cache_hits.map(|value| value as u128)),
         option_number(record.metrics.cache_misses.map(|value| value as u128)),
         option_number(
@@ -660,11 +903,26 @@ fn print_json_line(record: &ResultRecord) {
         ),
         option_number(record.metrics.proof_nodes.map(|value| value as u128)),
         option_number(record.metrics.proof_roots.map(|value| value as u128)),
-        option_number(record.metrics.dependency_edges.map(|value| value as u128)),
-        option_number(record.metrics.invalidation_edges.map(|value| value as u128)),
+        option_number(
+            record
+                .metrics
+                .semantic_dependency_edges
+                .map(|value| value as u128)
+        ),
+        option_number(
+            record
+                .metrics
+                .semantic_invalidation_edges
+                .map(|value| value as u128)
+        ),
         option_number(record.metrics.explanation_bytes.map(|value| value as u128)),
         option_number(record.metrics.cycle_errors.map(|value| value as u128)),
         option_bool(record.metrics.determinism_across_thread_counts),
+        option_bool(record.metrics.same_process_cache_replay_equal),
+        option_number(record.metrics.peak_memory_bytes.map(|value| value as u128)),
+        option_bool(record.metrics.thread_count_equivalence),
+        option_string(record.metrics.build_profile),
+        option_string(record.metrics.resource_profile),
         option_string(record.metrics.note),
         option_string(record.unsupported_reason),
     );
@@ -675,7 +933,7 @@ fn print_json_line(record: &ResultRecord) {
 fn print_human_summary(records: &[ResultRecord]) {
     eprintln!("Axiom benchmark (measurements; targets are engineering goals, not assertions)");
     eprintln!(
-        "workload                         forms    cold ms  repeat ms  proof   cache  invalid  target"
+        "workload                         forms    cold ms  replay ms  proof   cache  invalid  target"
     );
     eprintln!(
         "-------------------------------- -------- --------- --------- ------- ------ -------- ------------------------"
@@ -689,9 +947,9 @@ fn print_human_summary(records: &[ResultRecord]) {
             .timing
             .solve_cold_ns
             .map_or_else(|| "-".to_string(), format_ms);
-        let repeated = record
+        let replay = record
             .timing
-            .repeated_solve_ns
+            .workspace_replay_ns
             .map_or_else(|| "-".to_string(), format_ms);
         let proof = record
             .metrics
@@ -710,7 +968,7 @@ fn print_human_summary(records: &[ResultRecord]) {
             record.workload.name(),
             forms,
             cold,
-            repeated,
+            replay,
             proof,
             cache,
             invalid,
@@ -718,10 +976,10 @@ fn print_human_summary(records: &[ResultRecord]) {
         );
     }
     eprintln!(
-        "repeat is a fresh deterministic analysis over an existing source commit; it is not a cache hit"
+        "replay is end-to-end Workspace analysis, including materialization and content-addressed proof persistence"
     );
     eprintln!(
-        "null cache/invalidation values mean production incremental analysis is not yet exposed"
+        "full corpus sizes are deterministic row counts (quick uses 1/10 scale); --scale multiplies them"
     );
 }
 
@@ -1270,16 +1528,17 @@ fn package_upgrade(count: usize) -> Result<GeneratedWorkload, String> {
     source.push_str(
         "use lots/fifo for package-upgrade\nobserve settlement upgrade/sale 40 USD into checking\n",
     );
-    let changed_source = source.replace("lots/fifo@1.0.0", "lots/fifo@1.1.0");
+    // The package upgrade is a committed package object, not a source-text
+    // edit.  Keep the source hash unchanged so the measurement cannot be
+    // mistaken for a synthetic comment-only change.
+    let changed_source = source.clone();
     Ok(GeneratedWorkload {
         source,
         changed_source: Some(changed_source),
         changed_kind: Some(ChangedKind::Package),
         explain_goal: Some("gain:upgrade/sale".into()),
-        semantic_supported: false,
-        unsupported_reason: Some(
-            "the package version is an incremental input; V0 policy semantics are unchanged by this fixture",
-        ),
+        semantic_supported: true,
+        unsupported_reason: None,
     })
 }
 
