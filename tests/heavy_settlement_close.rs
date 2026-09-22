@@ -600,6 +600,87 @@ fn roots_are_deterministic_across_fresh_workspaces_and_corrections_are_immutable
 }
 
 #[test]
+fn persisted_close_restatement_is_linear_atomic_and_chainable() {
+    let (mut workspace, original) = workspace_for(FIXTURE);
+    let original_anchor = workspace.persist_settlement_state_proof(original).unwrap();
+    let initial = workspace
+        .persist_settlement_close(
+            original_anchor.projection_commit,
+            cash_policy(),
+            period(2026, 1),
+        )
+        .unwrap();
+
+    let first_text = ["ach-cash/1", "ach-cash/2", "ach-cash/3", "ach-cash/4"]
+        .into_iter()
+        .fold(FIXTURE.to_owned(), |source, occurrence| {
+            replace_form_field(&source, occurrence, "amount 100.25", "amount 101.25")
+        });
+    let first_source = workspace.correct_source(original, &first_text).unwrap();
+    let first_anchor = workspace
+        .persist_settlement_state_proof(first_source.commit)
+        .unwrap();
+    let first_close = workspace
+        .restate_settlement_close(initial, first_anchor.projection_commit)
+        .unwrap();
+    let first_value = workspace.store().settlement_close(first_close).unwrap();
+    assert_eq!(first_value.supersedes(), Some(initial));
+    assert_eq!(first_value.policy(), &cash_policy());
+    assert_eq!(first_value.period(), period(2026, 1));
+
+    // A sibling correction cannot replace a close whose source is the other
+    // correction branch. The cloned-store boundary must leave no object.
+    let sibling_text = ["ach-cash/1", "ach-cash/2", "ach-cash/3", "ach-cash/4"]
+        .into_iter()
+        .fold(FIXTURE.to_owned(), |source, occurrence| {
+            replace_form_field(&source, occurrence, "amount 100.25", "amount 102.25")
+        });
+    let sibling_source = workspace.correct_source(original, sibling_text).unwrap();
+    let sibling_anchor = workspace
+        .persist_settlement_state_proof(sibling_source.commit)
+        .unwrap();
+    let before_sibling = workspace.store().len();
+    let sibling_error = workspace
+        .restate_settlement_close(first_close, sibling_anchor.projection_commit)
+        .unwrap_err();
+    assert!(matches!(
+        sibling_error,
+        WorkspaceError::Store(StoreError::BaseNotAncestor { .. })
+    ));
+    assert_eq!(workspace.store().len(), before_sibling);
+    assert_eq!(
+        workspace
+            .store()
+            .settlement_close(first_close)
+            .unwrap()
+            .supersedes(),
+        Some(initial)
+    );
+
+    // Continue from the accepted correction to prove a multi-step immutable
+    // chain, with each close inheriting the original policy and period.
+    let second_text = ["ach-cash/1", "ach-cash/2", "ach-cash/3", "ach-cash/4"]
+        .into_iter()
+        .fold(first_text.clone(), |source, occurrence| {
+            replace_form_field(&source, occurrence, "amount 101.25", "amount 103.25")
+        });
+    let second_source = workspace
+        .correct_source(first_source.commit, second_text)
+        .unwrap();
+    let second_anchor = workspace
+        .persist_settlement_state_proof(second_source.commit)
+        .unwrap();
+    let second_close = workspace
+        .restate_settlement_close(first_close, second_anchor.projection_commit)
+        .unwrap();
+    let second_value = workspace.store().settlement_close(second_close).unwrap();
+    assert_eq!(second_value.supersedes(), Some(first_close));
+    assert_eq!(second_value.policy(), &cash_policy());
+    assert_eq!(second_value.period(), period(2026, 1));
+    workspace.store().verify().unwrap();
+}
+
+#[test]
 fn invalid_mappings_and_failed_proof_persistence_are_deeply_rejected() {
     let (mut workspace, source_commit) = workspace_for(FIXTURE);
 

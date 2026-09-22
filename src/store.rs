@@ -32,6 +32,9 @@ pub(crate) const ANALYSIS_AUTHOR: &str = "workspace/analysis";
 pub(crate) const SETTLEMENT_PROOF_AUTHOR: &str = "workspace/settlement-proof";
 const SETTLEMENT_CLOSE_VERSION: &str = "axiom/settlement-close/v1";
 const SETTLEMENT_CLOSE_DOMAIN: &str = "axiom/store/settlement-close/v1";
+const SETTLEMENT_CLOSE_RESTATEMENT_VERSION: &str = "axiom/settlement-close/v2";
+const SETTLEMENT_CLOSE_RESTATEMENT_DOMAIN: &str = "axiom/store/settlement-close/v2";
+const MAX_SETTLEMENT_CLOSE_RESTATEMENTS: usize = 1024;
 const EVIDENCE_CONTENT_DOMAIN: &str = "axiom/store/evidence-content/v1";
 
 /// The object families that may be addressed by this store.
@@ -1545,7 +1548,6 @@ impl ObjectStore {
         proof_commit: CommitId,
     ) -> Result<SettlementCloseId, StoreError> {
         let prior = self.settlement_close(previous)?.clone();
-        self.validate_settlement_close(&prior)?;
         let value =
             SettlementCloseObject::restatement(proof_commit, prior.policy, prior.period, previous);
         self.validate_settlement_close(&value)?;
@@ -1555,6 +1557,43 @@ impl ObjectStore {
     }
 
     fn validate_settlement_close(&self, value: &SettlementCloseObject) -> Result<(), StoreError> {
+        let mut current = value.clone();
+        let mut seen = BTreeSet::new();
+        for _ in 0..=MAX_SETTLEMENT_CLOSE_RESTATEMENTS {
+            let previous = current.supersedes;
+            self.validate_settlement_close_single(&current)?;
+            let Some(previous_id) = previous else {
+                return Ok(());
+            };
+            if !seen.insert(previous_id.hash()) {
+                return Err(StoreError::InvalidObject(
+                    "settlement close restatement chain contains a cycle".into(),
+                ));
+            }
+            current = match self.objects.get(&previous_id.hash()) {
+                Some(object) if object.content_hash() == previous_id.hash() => match object {
+                    StoredObject::SettlementClose(previous) => previous.clone(),
+                    object => {
+                        return Err(StoreError::WrongKind {
+                            hash: previous_id.hash(),
+                            expected: ObjectKind::SettlementClose,
+                            actual: object.kind(),
+                        });
+                    }
+                },
+                Some(_) => return Err(StoreError::CorruptObject(previous_id.hash())),
+                None => return Err(StoreError::MissingObject(previous_id.hash())),
+            };
+        }
+        Err(StoreError::InvalidObject(
+            "settlement close restatement chain exceeds resource limit".into(),
+        ))
+    }
+
+    fn validate_settlement_close_single(
+        &self,
+        value: &SettlementCloseObject,
+    ) -> Result<(), StoreError> {
         value
             .period
             .validate()
@@ -1591,8 +1630,17 @@ impl ObjectStore {
             ));
         }
         if let Some(previous_id) = value.supersedes {
-            let previous = self.settlement_close(previous_id)?.clone();
-            self.validate_settlement_close(&previous)?;
+            let previous = match self.objects.get(&previous_id.hash()) {
+                Some(StoredObject::SettlementClose(previous)) => previous.clone(),
+                Some(object) => {
+                    return Err(StoreError::WrongKind {
+                        hash: previous_id.hash(),
+                        expected: ObjectKind::SettlementClose,
+                        actual: object.kind(),
+                    });
+                }
+                None => return Err(StoreError::MissingObject(previous_id.hash())),
+            };
             if previous.policy != value.policy || previous.period != value.period {
                 return Err(StoreError::InvalidObject(
                     "settlement close restatement must preserve policy and period".into(),
@@ -3596,13 +3644,20 @@ fn encode_analysis_artifact(out: &mut Vec<u8>, value: &AnalysisArtifact) {
 }
 
 fn encode_settlement_close(out: &mut Vec<u8>, value: &SettlementCloseObject) {
-    put_string(out, SETTLEMENT_CLOSE_DOMAIN);
-    put_string(out, SETTLEMENT_CLOSE_VERSION);
+    if value.supersedes.is_some() {
+        put_string(out, SETTLEMENT_CLOSE_RESTATEMENT_DOMAIN);
+        put_string(out, SETTLEMENT_CLOSE_RESTATEMENT_VERSION);
+    } else {
+        put_string(out, SETTLEMENT_CLOSE_DOMAIN);
+        put_string(out, SETTLEMENT_CLOSE_VERSION);
+    }
     put_hash(out, value.proof_commit.hash());
     encode_settlement_policy(out, &value.policy);
     put_date(out, value.period.start);
     put_date(out, value.period.end);
-    put_optional_hash(out, value.supersedes.map(ObjectId::hash));
+    if let Some(previous) = value.supersedes {
+        put_optional_hash(out, Some(previous.hash()));
+    }
 }
 
 fn encode_settlement_policy(out: &mut Vec<u8>, policy: &SettlementRecognitionPolicy) {
