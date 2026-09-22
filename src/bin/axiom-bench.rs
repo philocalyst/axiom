@@ -15,7 +15,6 @@ use std::time::Instant;
 use axiom_ledger::contracts::{
     CorporateAction, Dividend, DividendLeg, Merge, Spinoff, SpinoffLeg, Split, TransformationLeg,
 };
-use axiom_ledger::elaboration::ElaboratedForm;
 use axiom_ledger::hir::{
     AstDeclaration, AstDeclarationKind, AstModule, AstType, ModulePath, Name, QualifiedName,
     Span as HirSpan,
@@ -23,7 +22,7 @@ use axiom_ledger::hir::{
 use axiom_ledger::incremental::{IncrementalDb, MemoOutcome, QueryError, QueryKey};
 use axiom_ledger::ir::{Atom, Nominal, NominalKind, Term, Var};
 use axiom_ledger::logic::{Clause, Goal, Literal, Program, SemanticContext, Solver, Truth};
-use axiom_ledger::model::{ContentHash, Quantity, Unit};
+use axiom_ledger::model::{Quantity, Unit};
 use axiom_ledger::ontology::{
     Endpoint, ExchangeLeg, ExchangeRecord, Instrument, InstrumentKind, Obligation, OntologyError,
     Role, RoleAssignment, RoleAssignments, SatisfactionAllocation, Settlement, SettlementState,
@@ -44,6 +43,10 @@ const SCHEMA: &str = "axiom-bench/v1";
 const DEFAULT_SCALE: u64 = 1;
 const FULL_SAMPLES: usize = 3;
 const QUICK_SAMPLES: usize = 1;
+/// Large package-authored corpora are measured as independent source commits.
+/// This keeps the authoritative Workspace/object-store path intact while
+/// bounding the live CST, elaborated forms, proof, and store to one batch.
+const BOUNDED_BATCH_SIZE: usize = 256;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Workload {
@@ -316,6 +319,19 @@ struct Metrics {
     settlement_store_verify_verified: Option<bool>,
     settlement_source_revision_verified: Option<bool>,
     settlement_atomic_negative_verified: Option<bool>,
+    settlement_batch_source_commits_hash: Option<String>,
+    settlement_batch_artifact_ids_hash: Option<String>,
+    settlement_batch_artifacts_hash: Option<String>,
+    settlement_batch_proofs_hash: Option<String>,
+    settlement_batch_proof_bytes_total: Option<usize>,
+    settlement_batch_projection_commits_hash: Option<String>,
+    settlement_batch_coverage_hash: Option<String>,
+    execution_mode: Option<&'static str>,
+    provenance_path: Option<&'static str>,
+    batch_count: Option<usize>,
+    batch_size: Option<usize>,
+    max_batch_forms: Option<usize>,
+    authority_binding_checks: Option<usize>,
 }
 
 #[derive(Clone, Debug)]
@@ -358,6 +374,16 @@ struct SettlementExecution {
     proof_id: axiom_ledger::store::SettlementStateProofId,
     forms: usize,
     oracle: SettlementOracle,
+}
+
+struct BoundedSettlementExecution {
+    first: SettlementExecution,
+    oracle: SettlementOracle,
+    forms: usize,
+    max_batch_forms: usize,
+    authority_binding_checks: usize,
+    source_revision_verified: Option<bool>,
+    atomic_negative_verified: Option<bool>,
 }
 
 struct SettlementTimings {
@@ -415,8 +441,10 @@ fn run() -> Result<(), String> {
                 "--settlement-boundary-probe requires --workload settlement-state-proof".into(),
             );
         }
-        let generated = generate(Workload::SettlementStateProof, options.quick, options.scale)?;
-        let execution = execute_settlement_path(&generated.source)?;
+        let profile =
+            bounded_profile(Workload::SettlementStateProof, options.quick, options.scale)?;
+        let source = settlement_state_batch(0, profile.total_items, false)?;
+        let execution = execute_settlement_path(&source, 0)?;
         println!(
             "{{\"schema\":\"{SCHEMA}\",\"kind\":\"settlement_boundary_probe\",\"workload\":\"settlement-state-proof\",\"forms\":{},\"proof_bytes\":{}}}",
             execution.forms, execution.oracle.proof_bytes
@@ -824,72 +852,51 @@ fn measure_generic_form_workload(
     samples: usize,
     isolate_peak_memory: bool,
 ) -> Result<ResultRecord, String> {
-    let source_hash = stable_hash(generated.source.as_bytes());
-    let changed_source_hash = generated
-        .changed_source
-        .as_ref()
-        .map(|source| stable_hash(source.as_bytes()));
-    let item_count = generated.semantic_probe_items;
-    let (mut workspace, base_commit, artifact) = generic_workspace_fixture(&generated.source)?;
-    let base_bound = workspace
-        .elaborate_package_forms(base_commit)
-        .map_err(|error| format!("{}: document elaboration failed: {error}", workload.name()))?;
-    if base_bound.source_commit() != base_commit
-        || base_bound.artifact_hash() != artifact.artifact_hash()
-    {
-        return Err(format!(
-            "{}: elaborated forms lost their source/artifact authority binding",
-            workload.name()
-        ));
+    let profile = bounded_profile(workload, quick, scale)?;
+    let mut runs = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        runs.push(measure_generic_batches(profile)?);
     }
-    let base_forms = base_bound.into_forms();
-    let package_root = artifact.package_roots()[0];
-    let qualified_name = generic_form_schema_name()?;
-    if base_forms.len() != item_count {
-        return Err(format!(
-            "{}: document elaboration returned {} forms, expected {item_count}",
-            workload.name(),
-            base_forms.len()
-        ));
-    }
-
-    let document_elaboration_ns = median_workspace_document(&workspace, base_commit, samples)?;
-    let schema_lookup_ns = median_generic_schema_lookup(
-        &artifact,
-        package_root,
-        &qualified_name,
-        item_count,
-        samples,
-    )?;
-    let canonical_values_ns = median_generic_canonical_values(&base_forms, samples)?;
-    let parse_ns = median_surface_parse(&generated.source, item_count, samples);
-    let normalization_ns = median_generic_normalization(&generated.source, samples);
-    let package_compile_ns = median_generic_package_compile(samples)?;
-
-    let mut timing = Timing {
-        generation_ns: median_generation(workload, quick, scale, samples)?,
-        normalization_ns: Some(normalization_ns),
-        parse_ns: Some(parse_ns),
-        semantic_probe_ns: Some(document_elaboration_ns),
-        package_compile_ns: Some(package_compile_ns),
-        document_elaboration_ns: Some(document_elaboration_ns),
-        schema_lookup_ns: Some(schema_lookup_ns),
-        canonical_values_ns: Some(canonical_values_ns),
-        changed_document_elaboration_ns: None,
+    let run = runs
+        .last()
+        .ok_or_else(|| "generic bounded benchmark produced no run".to_owned())?;
+    let source_hash = run.source_hash.clone();
+    let changed_source_hash = Some(run.changed_source_hash.clone());
+    let median_field = |field: fn(&GenericBatchMeasurements) -> u128| {
+        median(runs.iter().map(field).collect::<Vec<_>>())
+    };
+    let timing = Timing {
+        generation_ns: median_field(|run| run.generation_ns),
+        normalization_ns: Some(median_field(|run| run.normalization_ns)),
+        parse_ns: Some(median_field(|run| run.parse_ns)),
+        semantic_probe_ns: Some(median_field(|run| run.document_elaboration_ns)),
+        package_compile_ns: Some(median_field(|run| run.package_compile_ns)),
+        document_elaboration_ns: Some(median_field(|run| run.document_elaboration_ns)),
+        schema_lookup_ns: Some(median_field(|run| run.schema_lookup_ns)),
+        canonical_values_ns: Some(median_field(|run| run.canonical_values_ns)),
+        changed_document_elaboration_ns: Some(median_field(|run| {
+            run.changed_document_elaboration_ns
+        })),
         ..Timing::default()
     };
     let mut metrics = Metrics {
         same_process_cache_replay_equal: None,
         independent_clean_recompute_equal: None,
-        semantic_probe_items: Some(item_count),
-        semantic_probe_results: Some(base_forms.len()),
+        semantic_probe_items: Some(profile.total_items),
+        semantic_probe_results: Some(run.forms),
         semantic_probe_api: Some("surface.package.document_elaboration"),
-        canonical_value_count: Some(base_forms.len()),
-        schema_lookup_count: Some(item_count),
-        document_result_count: Some(base_forms.len()),
-        revision_result_count: None,
-        revision_mode: None,
+        canonical_value_count: Some(run.forms),
+        schema_lookup_count: Some(run.forms),
+        document_result_count: Some(run.forms),
+        revision_result_count: Some(run.changed_forms),
+        revision_mode: Some("bounded_batch_workspace_re_elaboration"),
         authority_binding_verified: Some(true),
+        execution_mode: Some("bounded_batches"),
+        provenance_path: Some("Workspace::elaborate_package_forms"),
+        batch_count: Some(profile.batch_count()),
+        batch_size: Some(profile.batch_size),
+        max_batch_forms: Some(run.max_batch_forms),
+        authority_binding_checks: Some(run.authority_binding_checks),
         build_profile: Some(if cfg!(debug_assertions) {
             "debug"
         } else {
@@ -901,49 +908,10 @@ fn measure_generic_form_workload(
             "per-workload child-process peak RSS unavailable"
         }),
         note: Some(
-            "semantic_supported: package-compiled record schema + lossless SurfaceFile + Workspace::elaborate_package_forms on a commit pinned to a persisted artifact; package_compile_ns includes deterministic fixture construction, compilation, and object-store persistence; document_elaboration_ns includes typed schema validation and canonical value construction; schema_lookup_ns measures exact package-root schema resolution; canonical_values_ns rechecks canonical SchemaBoundRecord values; source revision timings are warm re-elaboration measurements because Workspace::analyze_commit does not yet lower generic forms and therefore are not incremental-cache claims",
+            "semantic_supported: every bounded batch is a lossless SurfaceFile loaded into a fresh Workspace, pinned to its persisted compiled artifact, then elaborated through Workspace::elaborate_package_forms; package_compile_ns includes package compilation/persistence per batch; document_elaboration_ns is the sum of authoritative batch elaboration scopes; source revision timings are bounded fresh-workspace re-elaboration and are not incremental-cache claims; peak_memory_bytes is isolated child-process peak RSS",
         ),
         ..Metrics::default()
     };
-
-    if let Some(changed) = generated.changed_source.as_deref() {
-        let changed_commit = workspace
-            .load_source("benchmark/generic-form-elaboration", changed.as_bytes())
-            .map_err(|error| format!("{}: changed source load failed: {error}", workload.name()))?;
-        let changed_bound = workspace
-            .elaborate_package_forms(changed_commit.commit_id())
-            .map_err(|error| {
-                format!(
-                    "{}: changed document elaboration failed: {error}",
-                    workload.name()
-                )
-            })?;
-        let changed_forms = changed_bound.forms();
-        if changed_forms.len() != base_forms.len() {
-            return Err(format!(
-                "{}: source revision changed form count from {} to {}",
-                workload.name(),
-                base_forms.len(),
-                changed_forms.len()
-            ));
-        }
-        if base_forms
-            .first()
-            .zip(changed_forms.first())
-            .is_some_and(|(left, right)| {
-                left.value().content_hash() == right.value().content_hash()
-            })
-        {
-            return Err(format!(
-                "{}: source revision did not change a canonical form value",
-                workload.name()
-            ));
-        }
-        let changed_ns = median_generic_workspace_revision(&generated.source, changed, samples)?;
-        timing.changed_document_elaboration_ns = Some(changed_ns);
-        metrics.revision_result_count = Some(changed_forms.len());
-        metrics.revision_mode = Some("warm_surface_re_elaboration");
-    }
 
     metrics.peak_memory_bytes = if isolate_peak_memory {
         isolated_peak_memory_bytes(workload, quick, scale)?
@@ -963,10 +931,10 @@ fn measure_generic_form_workload(
         status: "measured",
         timing,
         sizes: Sizes {
-            source_bytes: generated.source.len(),
-            source_lines: generated.source.lines().count(),
-            forms: Some(base_forms.len()),
-            changed_source_bytes: generated.changed_source.as_ref().map(String::len),
+            source_bytes: run.source_bytes,
+            source_lines: run.source_lines,
+            forms: Some(run.forms),
+            changed_source_bytes: Some(run.changed_source_bytes),
             dependency_graph_nodes: None,
             dependency_graph_edges: None,
         },
@@ -985,41 +953,27 @@ fn measure_settlement_state_proof_workload(
     samples: usize,
     isolate_peak_memory: bool,
 ) -> Result<ResultRecord, String> {
-    let source_hash = stable_hash(generated.source.as_bytes());
-    let changed_source_hash = generated
-        .changed_source
-        .as_ref()
-        .map(|source| stable_hash(source.as_bytes()));
-    let execution = execute_settlement_path(&generated.source)?;
-    let independent = execute_settlement_path(&generated.source)?;
+    let profile = bounded_profile(workload, quick, scale)?;
+    let (source_hash, source_bytes, source_lines) = bounded_source_stats(profile, false)?;
+    let (changed_hash, changed_source_bytes, _) = bounded_source_stats(profile, true)?;
+    let changed_source_hash = Some(changed_hash);
+    let execution = execute_bounded_settlement(profile, true)?;
+    let independent = execute_bounded_settlement(profile, false)?;
     let deterministic = execution.oracle == independent.oracle;
     if !deterministic {
         return Err("settlement path is not deterministic across fresh workspaces".into());
     }
 
-    let revised = generated
-        .changed_source
-        .as_deref()
-        .map(|changed| validate_settlement_source_revision(&execution, changed))
-        .transpose()?;
-    let atomic_negative = validate_settlement_atomic_negative(
-        &generated.source,
-        generated.source.replacen("amount 100", "amount -1", 1),
-    )?;
+    let revised = execution.source_revision_verified;
+    let atomic_negative = execution.atomic_negative_verified.unwrap_or(false);
+    let single_batch = profile.batch_count() == 1;
 
-    let settlement_timings = median_settlement_timings(
-        &generated.source,
-        generated.changed_source.as_deref(),
-        samples,
-    )?;
+    let settlement_timings =
+        median_settlement_timings(profile, generated.changed_source.as_deref(), samples)?;
     let timing = Timing {
-        generation_ns: median_generation(workload, quick, scale, samples)?,
-        normalization_ns: Some(median_generic_normalization(&generated.source, samples)),
-        parse_ns: Some(median_surface_parse(
-            &generated.source,
-            execution.forms,
-            samples,
-        )),
+        generation_ns: median_bounded_generation(profile, samples)?,
+        normalization_ns: Some(median_bounded_normalization(profile, samples)?),
+        parse_ns: Some(median_bounded_surface_parse(profile, samples)?),
         settlement_setup_ns: Some(settlement_timings.setup_ns),
         document_elaboration_ns: Some(settlement_timings.document_elaboration_ns),
         settlement_document_projection_ns: Some(settlement_timings.document_projection_ns),
@@ -1036,18 +990,30 @@ fn measure_settlement_state_proof_workload(
         // independent probe is timed for this workload.
         independent_clean_recompute_equal: Some(deterministic),
         settlement_coverage_count: Some(execution.oracle.coverage_count),
-        settlement_coverage_hash: Some(execution.oracle.coverage_hash.clone()),
-        settlement_source_commit_hash: Some(execution.oracle.source_commit_hash.clone()),
-        settlement_artifact_id_hash: Some(execution.oracle.artifact_id_hash.clone()),
-        settlement_artifact_hash: Some(execution.oracle.artifact_hash.clone()),
-        settlement_proof_hash: Some(execution.oracle.proof_hash.clone()),
-        settlement_proof_bytes: Some(execution.oracle.proof_bytes),
-        settlement_projection_commit_hash: Some(execution.oracle.projection_commit_hash.clone()),
+        settlement_coverage_hash: single_batch.then(|| execution.oracle.coverage_hash.clone()),
+        settlement_source_commit_hash: single_batch
+            .then(|| execution.oracle.source_commit_hash.clone()),
+        settlement_artifact_id_hash: single_batch
+            .then(|| execution.oracle.artifact_id_hash.clone()),
+        settlement_artifact_hash: single_batch.then(|| execution.oracle.artifact_hash.clone()),
+        settlement_proof_hash: single_batch.then(|| execution.oracle.proof_hash.clone()),
+        settlement_proof_bytes: single_batch.then_some(execution.oracle.proof_bytes),
+        settlement_projection_commit_hash: single_batch
+            .then(|| execution.oracle.projection_commit_hash.clone()),
         settlement_binding_verified: Some(true),
         settlement_proof_check_verified: Some(true),
         settlement_store_verify_verified: Some(true),
         settlement_source_revision_verified: revised,
         settlement_atomic_negative_verified: Some(atomic_negative),
+        settlement_batch_source_commits_hash: Some(execution.oracle.source_commit_hash.clone()),
+        settlement_batch_artifact_ids_hash: Some(execution.oracle.artifact_id_hash.clone()),
+        settlement_batch_artifacts_hash: Some(execution.oracle.artifact_hash.clone()),
+        settlement_batch_proofs_hash: Some(execution.oracle.proof_hash.clone()),
+        settlement_batch_proof_bytes_total: Some(execution.oracle.proof_bytes),
+        settlement_batch_projection_commits_hash: Some(
+            execution.oracle.projection_commit_hash.clone(),
+        ),
+        settlement_batch_coverage_hash: Some(execution.oracle.coverage_hash.clone()),
         peak_memory_bytes: if isolate_peak_memory {
             isolated_peak_memory_bytes(workload, quick, scale)?
         } else {
@@ -1056,6 +1022,12 @@ fn measure_settlement_state_proof_workload(
         revision_result_count: revised.map(|_| execution.forms),
         revision_mode: revised.map(|_| "source_revision_persistence"),
         authority_binding_verified: Some(true),
+        execution_mode: Some("bounded_batches"),
+        provenance_path: Some("Workspace::persist_settlement_state_proof"),
+        batch_count: Some(profile.batch_count()),
+        batch_size: Some(profile.batch_size),
+        max_batch_forms: Some(execution.max_batch_forms),
+        authority_binding_checks: Some(execution.authority_binding_checks),
         build_profile: Some(if cfg!(debug_assertions) {
             "debug"
         } else {
@@ -1067,7 +1039,7 @@ fn measure_settlement_state_proof_workload(
             "per-workload child-process peak RSS unavailable"
         }),
         note: Some(
-            "settlement_state_proof: settlement_setup_ns includes source load, package compilation/persistence, and artifact pinning; document_elaboration_ns is direct elaboration; settlement_document_projection_ns includes Workspace document elaboration plus settlement projection; settlement_persistence_boundary_ns covers typed proof/child-commit persistence; source-revision and verification timings are separate public Workspace/ObjectStore measurements; peak_memory_bytes is isolated workload child-process peak RSS via getrusage",
+            "settlement_state_proof: this is a bounded corpus of independent authoritative ledgers, never one combined proof; singular settlement authority fields are populated only for a one-batch run, while settlement_batch_* fields are deterministic corpus aggregates; every batch uses a fresh Workspace, persisted package compilation, source-commit artifact pinning, Workspace::persist_settlement_state_proof, proof checking, ObjectStore::verify, source revision, and atomic-negative validation; timing fields sum their named work across batches; peak_memory_bytes is isolated child-process peak RSS",
         ),
         ..Metrics::default()
     };
@@ -1084,10 +1056,10 @@ fn measure_settlement_state_proof_workload(
         status: "measured",
         timing,
         sizes: Sizes {
-            source_bytes: generated.source.len(),
-            source_lines: generated.source.lines().count(),
+            source_bytes,
+            source_lines,
             forms: Some(execution.forms),
-            changed_source_bytes: generated.changed_source.as_ref().map(String::len),
+            changed_source_bytes: Some(changed_source_bytes),
             dependency_graph_nodes: None,
             dependency_graph_edges: None,
         },
@@ -1098,7 +1070,85 @@ fn measure_settlement_state_proof_workload(
     })
 }
 
-fn execute_settlement_path(source: &str) -> Result<SettlementExecution, String> {
+fn execute_bounded_settlement(
+    profile: BoundedProfile,
+    verify_mutations: bool,
+) -> Result<BoundedSettlementExecution, String> {
+    let mut first = None;
+    let mut source_hash = HashState::new();
+    let mut artifact_id_hash = HashState::new();
+    let mut artifact_hash = HashState::new();
+    let mut proof_hash = HashState::new();
+    let mut projection_hash = HashState::new();
+    let mut coverage_hash = HashState::new();
+    let mut forms: usize = 0;
+    let mut proof_bytes: usize = 0;
+    let mut max_batch_forms = 0;
+    let mut authority_binding_checks: usize = 0;
+    let mut source_revision_verified = verify_mutations.then_some(true);
+    let mut atomic_negative_verified = verify_mutations.then_some(true);
+    for start in (0..profile.total_items).step_by(profile.batch_size) {
+        let count = (profile.total_items - start).min(profile.batch_size);
+        let source = bounded_source(profile, start, count, false)?;
+        let execution = execute_settlement_path(&source, start)?;
+        if execution.forms != count {
+            return Err(format!(
+                "settlement bounded batch at {start} returned {} forms, expected {count}",
+                execution.forms
+            ));
+        }
+        source_hash.update(execution.oracle.source_commit_hash.as_bytes());
+        artifact_id_hash.update(execution.oracle.artifact_id_hash.as_bytes());
+        artifact_hash.update(execution.oracle.artifact_hash.as_bytes());
+        proof_hash.update(execution.oracle.proof_hash.as_bytes());
+        projection_hash.update(execution.oracle.projection_commit_hash.as_bytes());
+        coverage_hash.update(execution.oracle.coverage_hash.as_bytes());
+        forms = forms.saturating_add(execution.forms);
+        proof_bytes = proof_bytes.saturating_add(execution.oracle.proof_bytes);
+        max_batch_forms = max_batch_forms.max(execution.forms);
+        authority_binding_checks = authority_binding_checks.saturating_add(1);
+        if verify_mutations {
+            let changed = bounded_source(profile, start, count, true)?;
+            source_revision_verified = Some(
+                source_revision_verified.unwrap_or(true)
+                    && validate_settlement_source_revision(&execution, &changed)?,
+            );
+            let malformed = source.replacen(&format!("amount {}", 100 + start), "amount -1", 1);
+            atomic_negative_verified = Some(
+                atomic_negative_verified.unwrap_or(true)
+                    && validate_settlement_atomic_negative(&source, malformed)?,
+            );
+        }
+        if first.is_none() {
+            first = Some(execution);
+        }
+    }
+    let first = first.ok_or_else(|| "settlement bounded corpus is empty".to_owned())?;
+    let oracle = SettlementOracle {
+        source_commit_hash: source_hash.finish(),
+        artifact_id_hash: artifact_id_hash.finish(),
+        artifact_hash: artifact_hash.finish(),
+        proof_hash: proof_hash.finish(),
+        proof_bytes,
+        projection_commit_hash: projection_hash.finish(),
+        coverage_hash: coverage_hash.finish(),
+        coverage_count: forms,
+    };
+    Ok(BoundedSettlementExecution {
+        first,
+        oracle,
+        forms,
+        max_batch_forms,
+        authority_binding_checks,
+        source_revision_verified,
+        atomic_negative_verified,
+    })
+}
+
+fn execute_settlement_path(
+    source: &str,
+    occurrence_start: usize,
+) -> Result<SettlementExecution, String> {
     let (mut workspace, source_commit, artifact_id, artifact) =
         settlement_workspace_fixture(source)?;
     let bound = workspace
@@ -1126,7 +1176,7 @@ fn execute_settlement_path(source: &str) -> Result<SettlementExecution, String> 
     {
         return Err("settlement projection lost source/artifact binding or coverage".into());
     }
-    let expected_occurrences = (0..forms)
+    let expected_occurrences = (occurrence_start..occurrence_start + forms)
         .map(|index| format!("settlement/{index:06}"))
         .collect::<Vec<_>>();
     let actual_occurrences = projection
@@ -1356,7 +1406,7 @@ fn settlement_state_package_input() -> Result<(PackageInput, Lockfile), String> 
 }
 
 fn median_settlement_timings(
-    source: &str,
+    profile: BoundedProfile,
     changed: Option<&str>,
     samples: usize,
 ) -> Result<SettlementTimings, String> {
@@ -1368,55 +1418,83 @@ fn median_settlement_timings(
     let mut store_verify = Vec::with_capacity(samples);
     let mut source_revision = Vec::with_capacity(samples);
     for _ in 0..samples {
-        let mut workspace = Workspace::new();
-        let (package_input, lockfile) = settlement_state_package_input()?;
-        let start = Instant::now();
-        let (commit, _artifact_id, artifact) =
-            pin_settlement_workspace(&mut workspace, source, package_input, &lockfile)?;
-        setup.push(start.elapsed().as_nanos());
-        let document_projection_start = Instant::now();
-        let document_start = Instant::now();
-        let forms = workspace
-            .elaborate_package_forms(commit)
-            .map_err(|error| format!("settlement document elaboration failed: {error}"))?;
-        black_box((forms.forms().len(), artifact.artifact_hash()));
-        document.push(document_start.elapsed().as_nanos());
-        let projected = workspace
-            .project_settlement_states(commit)
-            .map_err(|error| format!("settlement projection failed: {error}"))?;
-        black_box(projected.records().len());
-        document_projection.push(document_projection_start.elapsed().as_nanos());
-        let start = Instant::now();
-        let persisted = workspace
-            .persist_settlement_state_proof(commit)
-            .map_err(|error| format!("settlement proof persistence failed: {error}"))?;
-        black_box(persisted.proof_id.hash());
-        persistence_boundary.push(start.elapsed().as_nanos());
-        let proof = workspace
-            .store()
-            .settlement_state_proof(persisted.proof_id)
-            .map_err(|error| format!("settlement proof lookup failed: {error}"))?;
-        let start = Instant::now();
-        proof
-            .check(workspace.store())
-            .map_err(|error| format!("settlement proof check failed: {error}"))?;
-        black_box(proof.coverage().len());
-        proof_check.push(start.elapsed().as_nanos());
-        let start = Instant::now();
-        workspace
-            .store()
-            .verify()
-            .map_err(|error| format!("settlement store verification failed: {error}"))?;
-        store_verify.push(start.elapsed().as_nanos());
-        if let Some(changed) = changed {
+        let mut setup_total = 0;
+        let mut document_total = 0;
+        let mut projection_total = 0;
+        let mut persistence_total = 0;
+        let mut proof_total = 0;
+        let mut verify_total = 0;
+        for start_index in (0..profile.total_items).step_by(profile.batch_size) {
+            let count = (profile.total_items - start_index).min(profile.batch_size);
+            let source = bounded_source(profile, start_index, count, false)?;
+            let mut workspace = Workspace::new();
+            let (package_input, lockfile) = settlement_state_package_input()?;
             let start = Instant::now();
-            let corrected = workspace
-                .correct_source(commit, changed.as_bytes())
-                .map_err(|error| format!("settlement source revision failed: {error}"))?;
-            let corrected_proof = workspace
-                .persist_settlement_state_proof(corrected.commit_id())
-                .map_err(|error| format!("settlement corrected proof failed: {error}"))?;
-            black_box(corrected_proof.proof_id.hash());
+            let (commit, artifact_id, artifact) =
+                pin_settlement_workspace(&mut workspace, &source, package_input, &lockfile)?;
+            setup_total += start.elapsed().as_nanos();
+            let document_projection_start = Instant::now();
+            let document_start = Instant::now();
+            let forms = workspace
+                .elaborate_package_forms(commit)
+                .map_err(|error| format!("settlement document elaboration failed: {error}"))?;
+            if forms.source_commit() != commit
+                || forms.compiled_artifact() != artifact_id
+                || forms.artifact_hash() != artifact.artifact_hash()
+                || forms.forms().len() != count
+            {
+                return Err("settlement timing batch lost source/artifact binding".into());
+            }
+            black_box((forms.forms().len(), artifact.artifact_hash()));
+            document_total += document_start.elapsed().as_nanos();
+            let projected = workspace
+                .project_settlement_states(commit)
+                .map_err(|error| format!("settlement projection failed: {error}"))?;
+            if projected.records().len() != count {
+                return Err("settlement timing batch changed projection coverage".into());
+            }
+            black_box(projected.records().len());
+            projection_total += document_projection_start.elapsed().as_nanos();
+            let start = Instant::now();
+            let persisted = workspace
+                .persist_settlement_state_proof(commit)
+                .map_err(|error| format!("settlement proof persistence failed: {error}"))?;
+            black_box(persisted.proof_id.hash());
+            persistence_total += start.elapsed().as_nanos();
+            let proof = workspace
+                .store()
+                .settlement_state_proof(persisted.proof_id)
+                .map_err(|error| format!("settlement proof lookup failed: {error}"))?;
+            let start = Instant::now();
+            proof
+                .check(workspace.store())
+                .map_err(|error| format!("settlement proof check failed: {error}"))?;
+            black_box(proof.coverage().len());
+            proof_total += start.elapsed().as_nanos();
+            let start = Instant::now();
+            workspace
+                .store()
+                .verify()
+                .map_err(|error| format!("settlement store verification failed: {error}"))?;
+            verify_total += start.elapsed().as_nanos();
+        }
+        setup.push(setup_total);
+        document.push(document_total);
+        document_projection.push(projection_total);
+        persistence_boundary.push(persistence_total);
+        proof_check.push(proof_total);
+        store_verify.push(verify_total);
+        if changed.is_some() {
+            let start = Instant::now();
+            for start_index in (0..profile.total_items).step_by(profile.batch_size) {
+                let count = (profile.total_items - start_index).min(profile.batch_size);
+                let source = bounded_source(profile, start_index, count, true)?;
+                let (mut workspace, commit, _, _) = settlement_workspace_fixture(&source)?;
+                let corrected = workspace
+                    .persist_settlement_state_proof(commit)
+                    .map_err(|error| format!("settlement source revision failed: {error}"))?;
+                black_box(corrected.proof_id.hash());
+            }
             source_revision.push(start.elapsed().as_nanos());
         }
     }
@@ -1492,116 +1570,324 @@ fn generic_workspace_fixture(
     Ok((workspace, pinned.commit_id(), artifact))
 }
 
-fn median_generic_package_compile(samples: usize) -> Result<u128, String> {
-    let mut values = Vec::with_capacity(samples);
-    for _ in 0..samples {
-        let start = Instant::now();
-        let mut workspace = Workspace::new();
-        let (package, lockfile) = generic_form_package_input()?;
-        let (_, artifact) = workspace
-            .compile_packages_persisted([package], &lockfile)
-            .map_err(|error| format!("generic form package compilation failed: {error}"))?;
-        black_box(artifact.artifact_hash());
-        values.push(start.elapsed().as_nanos());
-    }
-    Ok(median(values))
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BoundedCorpus {
+    GenericForms,
+    SettlementStates,
 }
 
-fn median_surface_parse(source: &str, expected_forms: usize, samples: usize) -> u128 {
-    let mut values = Vec::with_capacity(samples);
-    for _ in 0..samples {
-        let start = Instant::now();
-        let surface = SurfaceFile::parse(source);
-        black_box(surface.forms().count() == expected_forms);
-        values.push(start.elapsed().as_nanos());
-    }
-    median(values)
+#[derive(Clone, Copy, Debug)]
+struct BoundedProfile {
+    corpus: BoundedCorpus,
+    total_items: usize,
+    batch_size: usize,
 }
 
-fn median_generic_normalization(source: &str, samples: usize) -> u128 {
-    let mut values = Vec::with_capacity(samples);
-    for _ in 0..samples {
-        let start = Instant::now();
-        let surface = SurfaceFile::parse(source);
-        black_box(surface.canonical().len());
-        values.push(start.elapsed().as_nanos());
+impl BoundedProfile {
+    fn batch_count(self) -> usize {
+        self.total_items.div_ceil(self.batch_size)
     }
-    median(values)
 }
 
-fn median_workspace_document(
-    workspace: &Workspace,
-    commit: axiom_ledger::store::CommitId,
-    samples: usize,
-) -> Result<u128, String> {
-    let mut values = Vec::with_capacity(samples);
-    for _ in 0..samples {
-        let start = Instant::now();
-        let elaborated = workspace
-            .elaborate_package_forms(commit)
-            .map_err(|error| format!("generic document elaboration failed: {error}"))?;
-        black_box(elaborated.forms().len());
-        values.push(start.elapsed().as_nanos());
-    }
-    Ok(median(values))
-}
-
-fn median_generic_schema_lookup(
-    artifact: &CompiledArtifact,
-    package_root: ContentHash,
-    qualified_name: &QualifiedName,
-    count: usize,
-    samples: usize,
-) -> Result<u128, String> {
-    let mut values = Vec::with_capacity(samples);
-    for _ in 0..samples {
-        let start = Instant::now();
-        for _ in 0..count {
-            let schema = artifact
-                .resolve_record_schema(package_root, qualified_name)
-                .map_err(|error| format!("generic schema lookup failed: {error}"))?;
-            black_box(schema.schema_id());
+fn bounded_profile(workload: Workload, quick: bool, scale: u64) -> Result<BoundedProfile, String> {
+    let base: u64 = 1000;
+    let total = base
+        .checked_mul(scale)
+        .ok_or_else(|| format!("{}: --scale overflows row count", workload.name()))?;
+    let total = usize::try_from(total)
+        .map_err(|_| format!("{}: row count exceeds usize", workload.name()))?;
+    match workload {
+        Workload::GenericFormElaboration => Ok(BoundedProfile {
+            corpus: BoundedCorpus::GenericForms,
+            total_items: total,
+            batch_size: BOUNDED_BATCH_SIZE,
+        }),
+        Workload::SettlementStateProof => {
+            let base: u64 = if quick { 1 } else { 64 };
+            let total = base
+                .checked_mul(scale)
+                .ok_or_else(|| format!("{}: --scale overflows row count", workload.name()))?;
+            let total = usize::try_from(total)
+                .map_err(|_| format!("{}: row count exceeds usize", workload.name()))?;
+            Ok(BoundedProfile {
+                corpus: BoundedCorpus::SettlementStates,
+                total_items: total,
+                batch_size: BOUNDED_BATCH_SIZE,
+            })
         }
-        values.push(start.elapsed().as_nanos());
+        _ => Err(format!("{} is not a bounded benchmark", workload.name())),
     }
-    Ok(median(values))
 }
 
-fn median_generic_canonical_values(
-    forms: &[ElaboratedForm],
-    samples: usize,
-) -> Result<u128, String> {
-    let mut values = Vec::with_capacity(samples);
-    for _ in 0..samples {
-        let start = Instant::now();
+fn bounded_source(
+    profile: BoundedProfile,
+    start: usize,
+    count: usize,
+    changed: bool,
+) -> Result<String, String> {
+    match profile.corpus {
+        BoundedCorpus::GenericForms => generic_form_batch(start, count, changed),
+        BoundedCorpus::SettlementStates => settlement_state_batch(start, count, changed),
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct HashState {
+    first: u64,
+    second: u64,
+}
+
+impl HashState {
+    fn new() -> Self {
+        Self {
+            first: 0xcbf29ce484222325,
+            second: 0x84222325cbf29ce4,
+        }
+    }
+
+    fn update(&mut self, bytes: &[u8]) {
+        for byte in bytes {
+            self.first ^= u64::from(*byte);
+            self.first = self.first.wrapping_mul(0x100000001b3);
+            self.second ^= u64::from(byte.wrapping_add(0x9d));
+            self.second = self.second.rotate_left(7).wrapping_mul(0x100000001b3);
+        }
+    }
+
+    fn finish(self) -> String {
+        format!("{:016x}{:016x}", self.first, self.second)
+    }
+}
+
+fn bounded_source_stats(
+    profile: BoundedProfile,
+    changed: bool,
+) -> Result<(String, usize, usize), String> {
+    let mut hash = HashState::new();
+    let mut bytes: usize = 0;
+    let mut lines: usize = 0;
+    for start in (0..profile.total_items).step_by(profile.batch_size) {
+        let count = (profile.total_items - start).min(profile.batch_size);
+        let source = bounded_source(profile, start, count, changed && start == 0)?;
+        hash.update(source.as_bytes());
+        bytes = bytes.saturating_add(source.len());
+        lines = lines.saturating_add(source.lines().count());
+    }
+    Ok((hash.finish(), bytes, lines))
+}
+
+#[derive(Clone, Debug, Default)]
+struct GenericBatchMeasurements {
+    source_hash: String,
+    changed_source_hash: String,
+    source_bytes: usize,
+    source_lines: usize,
+    changed_source_bytes: usize,
+    forms: usize,
+    changed_forms: usize,
+    max_batch_forms: usize,
+    authority_binding_checks: usize,
+    generation_ns: u128,
+    normalization_ns: u128,
+    parse_ns: u128,
+    package_compile_ns: u128,
+    document_elaboration_ns: u128,
+    schema_lookup_ns: u128,
+    canonical_values_ns: u128,
+    changed_document_elaboration_ns: u128,
+    first_value_hash: Option<String>,
+    changed_first_value_hash: Option<String>,
+}
+
+fn measure_generic_batches(profile: BoundedProfile) -> Result<GenericBatchMeasurements, String> {
+    let (source_hash, source_bytes, source_lines) = bounded_source_stats(profile, false)?;
+    let (changed_source_hash, changed_source_bytes, _) = bounded_source_stats(profile, true)?;
+    let mut result = GenericBatchMeasurements {
+        source_hash,
+        changed_source_hash,
+        source_bytes,
+        source_lines,
+        changed_source_bytes,
+        ..GenericBatchMeasurements::default()
+    };
+
+    let generation_start = Instant::now();
+    for start in (0..profile.total_items).step_by(profile.batch_size) {
+        let count = (profile.total_items - start).min(profile.batch_size);
+        black_box(bounded_source(profile, start, count, false)?.len());
+    }
+    result.generation_ns = generation_start.elapsed().as_nanos();
+
+    for start in (0..profile.total_items).step_by(profile.batch_size) {
+        let count = (profile.total_items - start).min(profile.batch_size);
+        let source = bounded_source(profile, start, count, false)?;
+        result.max_batch_forms = result.max_batch_forms.max(count);
+        let parse_start = Instant::now();
+        let surface = SurfaceFile::parse(source.clone());
+        let parsed_forms = surface.forms().count();
+        result.parse_ns = result
+            .parse_ns
+            .saturating_add(parse_start.elapsed().as_nanos());
+        if parsed_forms != count {
+            return Err(format!(
+                "generic bounded batch at {start} parsed {parsed_forms} forms, expected {count}"
+            ));
+        }
+        let normalization_start = Instant::now();
+        black_box(surface.canonical().len());
+        result.normalization_ns = result
+            .normalization_ns
+            .saturating_add(normalization_start.elapsed().as_nanos());
+
+        let compile_start = Instant::now();
+        let (workspace, commit, artifact) = generic_workspace_fixture(&source)?;
+        result.package_compile_ns = result
+            .package_compile_ns
+            .saturating_add(compile_start.elapsed().as_nanos());
+        let document_start = Instant::now();
+        let bound = workspace
+            .elaborate_package_forms(commit)
+            .map_err(|error| format!("generic bounded document elaboration failed: {error}"))?;
+        result.document_elaboration_ns = result
+            .document_elaboration_ns
+            .saturating_add(document_start.elapsed().as_nanos());
+        let committed_artifact = workspace
+            .store()
+            .commit(commit)
+            .map_err(|error| format!("generic bounded commit lookup failed: {error}"))?
+            .compiled_artifact
+            .ok_or_else(|| "generic bounded commit lost artifact pin".to_owned())?;
+        if bound.source_commit() != commit
+            || bound.artifact_hash() != artifact.artifact_hash()
+            || bound.compiled_artifact() != committed_artifact
+        {
+            return Err("generic bounded forms lost source/artifact authority binding".into());
+        }
+        let forms = bound.forms();
+        if forms.len() != count {
+            return Err(format!(
+                "generic bounded elaboration returned {} forms, expected {count}",
+                forms.len()
+            ));
+        }
+        let package_root = artifact.package_roots()[0];
+        let schema = generic_form_schema_name()?;
+        let schema_start = Instant::now();
+        for form in forms {
+            let resolved = artifact
+                .resolve_record_schema(package_root, &schema)
+                .map_err(|error| format!("generic bounded schema lookup failed: {error}"))?;
+            if form.package_root() != package_root
+                || form.schema().schema_id() != resolved.schema_id()
+            {
+                return Err("generic bounded form schema escaped the pinned package root".into());
+            }
+            black_box(resolved.schema_id());
+        }
+        result.schema_lookup_ns = result
+            .schema_lookup_ns
+            .saturating_add(schema_start.elapsed().as_nanos());
+        let canonical_start = Instant::now();
+        let mut first_value_hash = None;
         for form in forms {
             let canonical = form
                 .schema()
                 .check_concrete_record(form.value().record())
-                .map_err(|error| format!("generic canonical value check failed: {error}"))?;
+                .map_err(|error| {
+                    format!("generic bounded canonical value check failed: {error}")
+                })?;
+            if start == 0 && first_value_hash.is_none() {
+                first_value_hash = Some(canonical.content_hash().to_string());
+            }
             black_box(canonical.content_hash());
+        }
+        result.canonical_values_ns = result
+            .canonical_values_ns
+            .saturating_add(canonical_start.elapsed().as_nanos());
+        result.forms = result.forms.saturating_add(forms.len());
+        result.authority_binding_checks = result.authority_binding_checks.saturating_add(1);
+        result.first_value_hash = result.first_value_hash.or(first_value_hash);
+    }
+
+    for start in (0..profile.total_items).step_by(profile.batch_size) {
+        let count = (profile.total_items - start).min(profile.batch_size);
+        let source = bounded_source(profile, start, count, true)?;
+        let (workspace, commit, artifact) = generic_workspace_fixture(&source)?;
+        let revision_start = Instant::now();
+        let bound = workspace
+            .elaborate_package_forms(commit)
+            .map_err(|error| format!("generic bounded changed elaboration failed: {error}"))?;
+        result.changed_document_elaboration_ns = result
+            .changed_document_elaboration_ns
+            .saturating_add(revision_start.elapsed().as_nanos());
+        if bound.source_commit() != commit || bound.artifact_hash() != artifact.artifact_hash() {
+            return Err(
+                "generic bounded changed forms lost source/artifact authority binding".into(),
+            );
+        }
+        result.changed_forms = result.changed_forms.saturating_add(bound.forms().len());
+        if bound.forms().len() != count {
+            return Err("generic bounded changed batch form count mismatch".into());
+        }
+        if start == 0 {
+            result.changed_first_value_hash = bound
+                .forms()
+                .first()
+                .map(|form| form.value().content_hash().to_string());
+        }
+    }
+    if result.forms != profile.total_items || result.changed_forms != profile.total_items {
+        return Err(format!(
+            "generic bounded corpus count mismatch: {} / {} vs {}",
+            result.forms, result.changed_forms, profile.total_items
+        ));
+    }
+    if result.first_value_hash == result.changed_first_value_hash {
+        return Err("generic bounded source revision did not change a canonical value".into());
+    }
+    Ok(result)
+}
+
+fn median_bounded_surface_parse(profile: BoundedProfile, samples: usize) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        for batch_start in (0..profile.total_items).step_by(profile.batch_size) {
+            let count = (profile.total_items - batch_start).min(profile.batch_size);
+            let source = bounded_source(profile, batch_start, count, false)?;
+            let surface = SurfaceFile::parse(source);
+            if surface.forms().count() != count {
+                return Err("bounded source parser count mismatch".into());
+            }
+            black_box(surface.forms().count());
         }
         values.push(start.elapsed().as_nanos());
     }
     Ok(median(values))
 }
 
-fn median_generic_workspace_revision(
-    source: &str,
-    changed: &str,
-    samples: usize,
-) -> Result<u128, String> {
+fn median_bounded_generation(profile: BoundedProfile, samples: usize) -> Result<u128, String> {
     let mut values = Vec::with_capacity(samples);
     for _ in 0..samples {
-        let (mut workspace, _base_commit, _) = generic_workspace_fixture(source)?;
         let start = Instant::now();
-        let changed_commit = workspace
-            .load_source("benchmark/generic-form-elaboration", changed.as_bytes())
-            .map_err(|error| format!("generic source revision failed: {error}"))?;
-        let elaborated = workspace
-            .elaborate_package_forms(changed_commit.commit_id())
-            .map_err(|error| format!("generic source revision failed: {error}"))?;
-        black_box(elaborated.forms().len());
+        for batch_start in (0..profile.total_items).step_by(profile.batch_size) {
+            let count = (profile.total_items - batch_start).min(profile.batch_size);
+            black_box(bounded_source(profile, batch_start, count, false)?.len());
+        }
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
+}
+
+fn median_bounded_normalization(profile: BoundedProfile, samples: usize) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        for batch_start in (0..profile.total_items).step_by(profile.batch_size) {
+            let count = (profile.total_items - batch_start).min(profile.batch_size);
+            let source = bounded_source(profile, batch_start, count, false)?;
+            black_box(SurfaceFile::parse(source).canonical().len());
+        }
         values.push(start.elapsed().as_nanos());
     }
     Ok(median(values))
@@ -1990,7 +2276,7 @@ fn self_test(_quick: bool, scale: u64) -> Result<usize, String> {
             continue;
         }
         if workload == Workload::SettlementStateProof {
-            checks += settlement_state_proof_self_test(&left)?;
+            checks += settlement_state_proof_self_test(&left, test_scale)?;
             continue;
         }
         let mut workspace = Workspace::new();
@@ -2153,71 +2439,30 @@ fn self_test(_quick: bool, scale: u64) -> Result<usize, String> {
     Ok(checks)
 }
 
-fn generic_form_self_test(generated: &GeneratedWorkload, _scale: u64) -> Result<usize, String> {
-    let (mut workspace, base_commit, artifact) = generic_workspace_fixture(&generated.source)?;
-    let bound = workspace
-        .elaborate_package_forms(base_commit)
-        .map_err(|error| format!("generic form self-test elaboration failed: {error}"))?;
-    let forms = bound.forms();
-    if forms.len() != generated.semantic_probe_items {
-        return Err(format!(
-            "generic form self-test returned {} forms, expected {}",
-            forms.len(),
-            generated.semantic_probe_items
-        ));
-    }
-    let canonical = forms
-        .iter()
-        .map(|form| {
-            form.schema()
-                .check_concrete_record(form.value().record())
-                .map(|value| value.content_hash())
-                .map_err(|error| format!("generic form self-test canonical value failed: {error}"))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if canonical.len() != forms.len() {
-        return Err("generic form self-test did not canonicalize every value".into());
-    }
-    let package_root = artifact.package_roots()[0];
-    let schema = generic_form_schema_name()?;
-    if artifact
-        .resolve_record_schema(package_root, &schema)
-        .is_err()
+fn generic_form_self_test(_generated: &GeneratedWorkload, scale: u64) -> Result<usize, String> {
+    let profile = bounded_profile(Workload::GenericFormElaboration, false, scale)?;
+    let measured = measure_generic_batches(profile)?;
+    if measured.forms != profile.total_items
+        || measured.changed_forms != profile.total_items
+        || measured.authority_binding_checks != profile.batch_count()
+        || measured.first_value_hash == measured.changed_first_value_hash
     {
-        return Err("generic form self-test schema lookup failed".into());
-    }
-    let changed = generated
-        .changed_source
-        .as_deref()
-        .ok_or_else(|| "generic form self-test has no source revision".to_string())?;
-    let changed_commit = workspace
-        .load_source("benchmark/generic-form-elaboration", changed.as_bytes())
-        .map_err(|error| format!("generic form self-test changed source failed: {error}"))?;
-    let changed_bound = workspace
-        .elaborate_package_forms(changed_commit.commit_id())
-        .map_err(|error| format!("generic form self-test changed elaboration failed: {error}"))?;
-    let changed_forms = changed_bound.forms();
-    if changed_forms.len() != forms.len()
-        || changed_forms
-            .first()
-            .zip(forms.first())
-            .is_none_or(|(left, right)| left.value().content_hash() == right.value().content_hash())
-    {
-        return Err(
-            "generic form self-test source revision did not change a canonical value".into(),
-        );
+        return Err("generic bounded self-test did not validate every authoritative batch".into());
     }
     Ok(4)
 }
 
-fn settlement_state_proof_self_test(generated: &GeneratedWorkload) -> Result<usize, String> {
-    let execution = execute_settlement_path(&generated.source)?;
-    if execution.forms != generated.semantic_probe_items
-        || execution.oracle.coverage_count != execution.forms
+fn settlement_state_proof_self_test(
+    generated: &GeneratedWorkload,
+    scale: u64,
+) -> Result<usize, String> {
+    let profile = bounded_profile(Workload::SettlementStateProof, false, scale)?;
+    let execution = execute_bounded_settlement(profile, true)?;
+    if execution.forms != profile.total_items || execution.oracle.coverage_count != execution.forms
     {
         return Err("settlement self-test coverage count mismatch".into());
     }
-    let independent = execute_settlement_path(&generated.source)?;
+    let independent = execute_bounded_settlement(profile, false)?;
     if execution.oracle != independent.oracle {
         return Err("settlement self-test fresh-workspace oracle mismatch".into());
     }
@@ -2225,7 +2470,7 @@ fn settlement_state_proof_self_test(generated: &GeneratedWorkload) -> Result<usi
         .changed_source
         .as_deref()
         .ok_or_else(|| "settlement self-test has no correction source".to_string())?;
-    if !validate_settlement_source_revision(&execution, changed)?
+    if !validate_settlement_source_revision(&execution.first, changed)?
         || !validate_settlement_atomic_negative(
             &generated.source,
             generated.source.replacen("amount 100", "amount -1", 1),
@@ -2753,7 +2998,7 @@ fn print_json_line(record: &ResultRecord) {
     output.push_str("},\"metrics\":{");
     let _ = write!(
         output,
-        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"semantic_probe_items\":{},\"semantic_probe_results\":{},\"semantic_probe_api\":{},\"determinism_across_thread_counts\":null,\"same_process_cache_replay_equal\":{},\"independent_clean_recompute_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":null,\"parallel_thread_count\":null,\"independent_worker_determinism\":{},\"independent_worker_equivalence\":{},\"concurrent_worker_count\":{},\"canonical_value_count\":{},\"schema_lookup_count\":{},\"document_result_count\":{},\"revision_result_count\":{},\"revision_mode\":{},\"authority_binding_verified\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{},\"settlement_coverage_count\":{},\"settlement_coverage_hash\":{},\"settlement_source_commit_hash\":{},\"settlement_artifact_id_hash\":{},\"settlement_artifact_hash\":{},\"settlement_proof_hash\":{},\"settlement_proof_bytes\":{},\"settlement_projection_commit_hash\":{},\"settlement_binding_verified\":{},\"settlement_proof_check_verified\":{},\"settlement_store_verify_verified\":{},\"settlement_source_revision_verified\":{},\"settlement_atomic_negative_verified\":{}",
+        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"semantic_probe_items\":{},\"semantic_probe_results\":{},\"semantic_probe_api\":{},\"determinism_across_thread_counts\":null,\"same_process_cache_replay_equal\":{},\"independent_clean_recompute_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":null,\"parallel_thread_count\":null,\"independent_worker_determinism\":{},\"independent_worker_equivalence\":{},\"concurrent_worker_count\":{},\"canonical_value_count\":{},\"schema_lookup_count\":{},\"document_result_count\":{},\"revision_result_count\":{},\"revision_mode\":{},\"authority_binding_verified\":{},\"execution_mode\":{},\"provenance_path\":{},\"batch_count\":{},\"batch_size\":{},\"max_batch_forms\":{},\"authority_binding_checks\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{},\"settlement_coverage_count\":{},\"settlement_coverage_hash\":{},\"settlement_source_commit_hash\":{},\"settlement_artifact_id_hash\":{},\"settlement_artifact_hash\":{},\"settlement_proof_hash\":{},\"settlement_proof_bytes\":{},\"settlement_projection_commit_hash\":{},\"settlement_binding_verified\":{},\"settlement_proof_check_verified\":{},\"settlement_store_verify_verified\":{},\"settlement_source_revision_verified\":{},\"settlement_atomic_negative_verified\":{},\"settlement_batch_source_commits_hash\":{},\"settlement_batch_artifact_ids_hash\":{},\"settlement_batch_artifacts_hash\":{},\"settlement_batch_proofs_hash\":{},\"settlement_batch_proof_bytes_total\":{},\"settlement_batch_projection_commits_hash\":{},\"settlement_batch_coverage_hash\":{}",
         option_number(record.metrics.cache_hits.map(|value| value as u128)),
         option_number(record.metrics.cache_misses.map(|value| value as u128)),
         option_number(
@@ -2828,6 +3073,17 @@ fn print_json_line(record: &ResultRecord) {
         ),
         option_string(record.metrics.revision_mode),
         option_bool(record.metrics.authority_binding_verified),
+        option_string(record.metrics.execution_mode),
+        option_string(record.metrics.provenance_path),
+        option_number(record.metrics.batch_count.map(|value| value as u128)),
+        option_number(record.metrics.batch_size.map(|value| value as u128)),
+        option_number(record.metrics.max_batch_forms.map(|value| value as u128)),
+        option_number(
+            record
+                .metrics
+                .authority_binding_checks
+                .map(|value| value as u128),
+        ),
         option_string(record.metrics.build_profile),
         option_string(record.metrics.resource_profile),
         option_string(record.metrics.note),
@@ -2855,6 +3111,28 @@ fn print_json_line(record: &ResultRecord) {
         option_bool(record.metrics.settlement_store_verify_verified),
         option_bool(record.metrics.settlement_source_revision_verified),
         option_bool(record.metrics.settlement_atomic_negative_verified),
+        option_string(
+            record
+                .metrics
+                .settlement_batch_source_commits_hash
+                .as_deref(),
+        ),
+        option_string(record.metrics.settlement_batch_artifact_ids_hash.as_deref(),),
+        option_string(record.metrics.settlement_batch_artifacts_hash.as_deref(),),
+        option_string(record.metrics.settlement_batch_proofs_hash.as_deref()),
+        option_number(
+            record
+                .metrics
+                .settlement_batch_proof_bytes_total
+                .map(|value| value as u128),
+        ),
+        option_string(
+            record
+                .metrics
+                .settlement_batch_projection_commits_hash
+                .as_deref(),
+        ),
+        option_string(record.metrics.settlement_batch_coverage_hash.as_deref()),
     );
     output.push_str("}}");
     println!("{output}");
@@ -3594,29 +3872,9 @@ fn large_proof(count: usize) -> Result<GeneratedWorkload, String> {
 }
 
 fn generic_form_elaboration(count: usize) -> Result<GeneratedWorkload, String> {
-    let mut source = String::with_capacity(count.saturating_mul(150));
-    for index in 0..count {
-        let _ = writeln!(
-            source,
-            "form generic/{index:06} : forms::types::Row\n  approved {}\n  count {index}\n  note \"row-{index:06}\"\n  total {}\n",
-            index % 2 == 0,
-            index * 3 + 7,
-        );
-    }
-    // Edit one existing data row in place.  The form identity, schema and row
-    // count remain stable while the canonical text value changes.
-    let old_row = "  note \"row-000000\"\n";
-    let new_row = "  note \"row-000000-edited\"\n";
-    if source.matches(old_row).count() != 1 {
-        return Err("generic form revision source is missing its first data row".into());
-    }
-    let changed = source.replacen(old_row, new_row, 1);
-    if changed.matches(old_row).next().is_some()
-        || changed.matches(new_row).count() != 1
-        || changed.lines().count() != source.lines().count()
-    {
-        return Err("generic form revision did not replace exactly one data row".into());
-    }
+    let batch_count = count.min(BOUNDED_BATCH_SIZE);
+    let source = generic_form_batch(0, batch_count, false)?;
+    let changed = generic_form_batch(0, batch_count, true)?;
     Ok(GeneratedWorkload {
         source,
         changed_source: Some(changed),
@@ -3629,29 +3887,28 @@ fn generic_form_elaboration(count: usize) -> Result<GeneratedWorkload, String> {
     })
 }
 
-fn settlement_state_proof(count: usize) -> Result<GeneratedWorkload, String> {
-    let mut source = String::with_capacity(count.saturating_mul(220));
-    for index in 0..count {
+fn generic_form_batch(start: usize, count: usize, changed: bool) -> Result<String, String> {
+    let mut source = String::with_capacity(count.saturating_mul(150));
+    for index in start..start.saturating_add(count) {
+        let note = if changed && index == 0 {
+            "row-000000-edited".to_owned()
+        } else {
+            format!("row-{index:06}")
+        };
         let _ = writeln!(
             source,
-            "form settlement/{index:06} : payments::types::SettlementState\n  settlement payment/{index:06}\n  kind ach\n  state issued\n  at 2026-01-01\n  from customer/{index:06}\n  to merchant/{index:06}\n  instrument USD\n  amount {}\n",
-            100 + index,
+            "form generic/{index:06} : forms::types::Row\n  approved {}\n  count {index}\n  note \"{note}\"\n  total {}\n",
+            index % 2 == 0,
+            index * 3 + 7,
         );
     }
-    // Keep one existing capable value stable in identity while changing its
-    // exact amount.  This exercises source revision and a new proof child.
-    let old_row = "  amount 100\n";
-    let new_row = "  amount 100.5\n";
-    if source.matches(old_row).count() != 1 {
-        return Err("settlement proof revision source is missing its first row".into());
-    }
-    let changed = source.replacen(old_row, new_row, 1);
-    if changed.matches(old_row).next().is_some()
-        || changed.matches(new_row).count() != 1
-        || changed.lines().count() != source.lines().count()
-    {
-        return Err("settlement proof revision did not replace exactly one form value".into());
-    }
+    Ok(source)
+}
+
+fn settlement_state_proof(count: usize) -> Result<GeneratedWorkload, String> {
+    let batch_count = count.min(BOUNDED_BATCH_SIZE);
+    let source = settlement_state_batch(0, batch_count, false)?;
+    let changed = settlement_state_batch(0, batch_count, true)?;
     Ok(GeneratedWorkload {
         source,
         changed_source: Some(changed),
@@ -3662,4 +3919,20 @@ fn settlement_state_proof(count: usize) -> Result<GeneratedWorkload, String> {
         semantic_probe: None,
         semantic_probe_items: count,
     })
+}
+
+fn settlement_state_batch(start: usize, count: usize, changed: bool) -> Result<String, String> {
+    let mut source = String::with_capacity(count.saturating_mul(220));
+    for index in start..start.saturating_add(count) {
+        let amount = if changed && index == start {
+            "100.5".to_owned()
+        } else {
+            (100 + index).to_string()
+        };
+        let _ = writeln!(
+            source,
+            "form settlement/{index:06} : payments::types::SettlementState\n  settlement payment/{index:06}\n  kind ach\n  state issued\n  at 2026-01-01\n  from customer/{index:06}\n  to merchant/{index:06}\n  instrument USD\n  amount {amount}\n",
+        );
+    }
+    Ok(source)
 }

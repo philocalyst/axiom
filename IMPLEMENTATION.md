@@ -155,7 +155,14 @@ experiments, but it is not part of this contract.
   headers and unaddressable package names, and resolves same-named schemas only
   through the exact artifact pinned by the source commit. SettlementStateV1
   forms additionally have an independent typed proof and commit-anchored
-  persistence path. Nested row-qualified holes, aliases, refinements, phase
+  persistence path. Packages can now define a bounded `FormSurfaceV1` that
+  performs only total one-to-one field renaming onto a closed primitive record.
+  Its definitions are package-root/artifact-hash bound, resource bounded, and
+  revalidated at store boundaries; there are no defaults, expressions,
+  inference, alias chains, or cross-package lookup. Capability-bearing targets
+  are rejected until a new independently replayable proof version exists.
+  Nested row-qualified holes, semantic authoring templates, aliases,
+  refinements, phase
   wrappers, general proof certificates, and query-result transport remain
   open.
 - [ ] Incremental semantic database with precise dependency invalidation.
@@ -304,11 +311,16 @@ experiments, but it is not part of this contract.
   `generic-form-elaboration`,
   exercises 1,000/10,000/100,000-form profiles through persisted compilation,
   source-commit artifact pinning, schema-bound document elaboration, canonical
-  value rechecking, and a one-row correction. Its warm re-elaboration timings
-  are explicitly not labelled as incremental-engine metrics. The thirteenth
-  settlement-state-proof workload exercises the public typed persistence path;
-  its current boundary accepts 3,309 rows and rejects 3,310 because the
-  canonical proof bytes exceed the limit. `settlement_setup_ns` includes source
+  value rechecking, and a one-row correction. Large profiles are explicitly a
+  corpus of independent 256-form authoritative batches, not one ledger; the
+  release 10k/100k gate checks exact counts, provenance, and a 128 MiB RSS
+  ceiling. Its revision timings are explicitly not labelled as
+  incremental-engine metrics. The thirteenth settlement-state-proof workload
+  likewise labels batch aggregates separately from singular proof identities
+  and verifies revisions and atomic rejection in every batch. Its separate
+  single-proof public typed persistence boundary accepts 3,309 rows and
+  rejects 3,310 because the canonical proof bytes exceed the limit.
+  `settlement_setup_ns` includes source
   load, package compilation/persistence, and artifact pinning;
   `document_elaboration_ns` is direct elaboration, while
   `settlement_document_projection_ns` includes Workspace elaboration plus
@@ -333,7 +345,7 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 382 library tests, 4 CLI tests, 8 independent reference/production
+- 388 library tests, 4 CLI tests, 8 independent reference/production
   differential tests, and 5 structured-reference outcome tests;
 - 134 named constitutional cases with exactly 75 registry-linked independent
   case-specific tests and 12 grouped smoke suites; semantic review, not the

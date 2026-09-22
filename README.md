@@ -101,6 +101,13 @@ by its source commit, validated as an ordered ACH/card/check history, checked a
 second time by an independent typed proof checker, and anchored by a derived
 commit. Record shape or schema names alone never grant this authority.
 
+Packages may also publish a `FormSurfaceV1`: a bounded, one-hop renaming of
+fields for an existing closed primitive record. The mapping is part of the
+compiled artifact and resolves only through its exact package root. It has no
+defaults, expressions, inference, aliases, cross-package lookup, or semantic
+power. Compact forms deliberately cannot target a semantic capability until a
+new proof format can replay that lowering independently.
+
 ### Settlement vertical slice
 
 `SettlementStateV1Proof` remains the dedicated typed authority for this path.
@@ -144,6 +151,10 @@ On Linux and macOS, peak resident memory is measured with `getrusage` and
 labelled as process-lifetime RSS. Independent-worker measurements compare
 serial and concurrent clean workspaces; they do not claim a shared parallel
 engine, whose legacy schema fields remain `null`.
+The 10k/100k generic-form profiles use 256-form authoritative batches and
+report that execution mode explicitly; they are a bounded corpus, not one
+giant ledger. Settlement scale uses the same honest batching contract, while
+the separate 3,309/3,310 probe remains a single-proof boundary measurement.
 
 ## Design
 

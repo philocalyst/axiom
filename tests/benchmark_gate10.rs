@@ -1,5 +1,7 @@
 use std::process::Command;
 
+use serde_json::Value;
+
 fn assert_json_object(line: &str) {
     let bytes = line.as_bytes();
     assert!(
@@ -63,6 +65,39 @@ fn field_value<'a>(line: &'a str, field: &str) -> &'a str {
     value.trim()
 }
 
+fn parsed_json(line: &str) -> Value {
+    let value: Value = serde_json::from_str(line).expect("benchmark line must be valid JSON");
+    let object = value
+        .as_object()
+        .expect("measurement must be a JSON object");
+    assert_eq!(
+        object.get("schema").and_then(Value::as_str),
+        Some("axiom-bench/v1")
+    );
+    assert!(object.get("workload").and_then(Value::as_str).is_some());
+    assert!(object.get("quick").and_then(Value::as_bool).is_some());
+    assert!(object.get("scale").and_then(Value::as_u64).is_some());
+    assert!(object.get("samples").and_then(Value::as_u64).is_some());
+    assert!(object.get("status").and_then(Value::as_str).is_some());
+    assert!(
+        object
+            .get("semantic_supported")
+            .and_then(Value::as_bool)
+            .is_some()
+    );
+    assert!(object.get("source_hash").and_then(Value::as_str).is_some());
+    assert!(object.get("targets").and_then(Value::as_object).is_some());
+    assert!(
+        object
+            .get("measurements")
+            .and_then(Value::as_object)
+            .is_some()
+    );
+    assert!(object.get("sizes").and_then(Value::as_object).is_some());
+    assert!(object.get("metrics").and_then(Value::as_object).is_some());
+    value
+}
+
 fn measurement(workload: &str) -> String {
     let output = Command::new(env!("CARGO_BIN_EXE_axiom-bench"))
         .args(["--quick", "--workload", workload])
@@ -90,6 +125,7 @@ fn measurement(workload: &str) -> String {
         .copied()
         .unwrap_or_else(|| panic!("benchmark emitted no measurement for {workload}"));
     assert_json_object(line);
+    let parsed = parsed_json(line);
     for field in [
         "schema",
         "workload",
@@ -129,6 +165,12 @@ fn measurement(workload: &str) -> String {
         "settlement_store_verify_verified",
         "settlement_source_revision_verified",
         "settlement_atomic_negative_verified",
+        "execution_mode",
+        "provenance_path",
+        "batch_count",
+        "batch_size",
+        "max_batch_forms",
+        "authority_binding_checks",
     ] {
         assert_field_once(line, field);
     }
@@ -145,6 +187,22 @@ fn measurement(workload: &str) -> String {
         line.contains(&format!("\"workload\":\"{workload}\"")),
         "benchmark returned the wrong workload: {line}"
     );
+    let metrics = parsed["metrics"].as_object().expect("metrics object");
+    for field in [
+        "peak_memory_bytes",
+        "batch_count",
+        "batch_size",
+        "max_batch_forms",
+    ] {
+        assert!(
+            metrics.get(field).is_some(),
+            "missing typed metric {field}: {line}"
+        );
+        assert!(
+            metrics[field].is_number() || metrics[field].is_null(),
+            "metric {field} is not numeric/null: {line}"
+        );
+    }
     line.to_owned()
 }
 
@@ -280,7 +338,7 @@ fn generic_form_workload_uses_pinned_document_elaboration_and_canonical_values()
         "{line}"
     );
     assert!(
-        line.contains("\"revision_mode\":\"warm_surface_re_elaboration\""),
+        line.contains("\"revision_mode\":\"bounded_batch_workspace_re_elaboration\""),
         "{line}"
     );
     assert!(line.contains("\"changed_kind\":\"evidence_row\""), "{line}");
@@ -439,7 +497,98 @@ fn generic_form_scale_profiles_complete() {
             "true",
             "{line}"
         );
+        assert_eq!(
+            field_value(line.trim(), "execution_mode"),
+            "\"bounded_batches\"",
+            "{line}"
+        );
+        assert_eq!(field_value(line.trim(), "batch_size"), "256", "{line}");
+        assert!(
+            field_value(line.trim(), "max_batch_forms")
+                .parse::<u64>()
+                .expect("max batch forms")
+                <= 256,
+            "batch bound exceeded: {line}"
+        );
+        let peak = field_value(line.trim(), "peak_memory_bytes")
+            .parse::<u64>()
+            .expect("peak RSS");
+        assert!(peak < 128 * 1024 * 1024, "bounded RSS regression: {line}");
     }
+}
+
+#[test]
+fn bounded_generic_batches_have_structural_scale_and_provenance_guards() {
+    let output = Command::new(env!("CARGO_BIN_EXE_axiom-bench"))
+        .args([
+            "--quick",
+            "--scale",
+            "2",
+            "--workload",
+            "generic-form-elaboration",
+        ])
+        .output()
+        .expect("bounded generic benchmark should start");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let line = String::from_utf8(output.stdout).expect("benchmark JSON is UTF-8");
+    let value = parsed_json(line.trim());
+    assert_eq!(value["sizes"]["forms"].as_u64(), Some(2000));
+    assert_eq!(value["metrics"]["batch_count"].as_u64(), Some(8));
+    assert_eq!(value["metrics"]["batch_size"].as_u64(), Some(256));
+    assert_eq!(value["metrics"]["max_batch_forms"].as_u64(), Some(256));
+    assert_eq!(
+        value["metrics"]["provenance_path"].as_str(),
+        Some("Workspace::elaborate_package_forms")
+    );
+    assert_eq!(
+        value["metrics"]["authority_binding_verified"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        value["metrics"]["authority_binding_checks"].as_u64(),
+        Some(8)
+    );
+}
+
+#[test]
+fn bounded_settlement_batches_do_not_masquerade_as_one_proof() {
+    let output = Command::new(env!("CARGO_BIN_EXE_axiom-bench"))
+        .args([
+            "--quick",
+            "--scale",
+            "300",
+            "--workload",
+            "settlement-state-proof",
+        ])
+        .output()
+        .expect("bounded settlement benchmark should start");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let line = String::from_utf8(output.stdout).expect("benchmark JSON is UTF-8");
+    let value = parsed_json(line.trim());
+    let metrics = &value["metrics"];
+    assert_eq!(value["sizes"]["forms"].as_u64(), Some(300));
+    assert_eq!(metrics["batch_count"].as_u64(), Some(2));
+    assert_eq!(metrics["max_batch_forms"].as_u64(), Some(256));
+    assert!(metrics["settlement_proof_hash"].is_null());
+    assert!(metrics["settlement_source_commit_hash"].is_null());
+    assert!(metrics["settlement_batch_proofs_hash"].is_string());
+    assert!(metrics["settlement_batch_source_commits_hash"].is_string());
+    assert_eq!(
+        metrics["settlement_source_revision_verified"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        metrics["settlement_atomic_negative_verified"].as_bool(),
+        Some(true)
+    );
 }
 
 #[test]

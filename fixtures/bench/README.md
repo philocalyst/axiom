@@ -45,16 +45,22 @@ and semantic probe timings are not conflated. The generic-form workload runs
 through persisted package compilation, source-commit artifact pinning, exact
 schema-bound document elaboration, canonical value verification, and a one-row
 correction. `--scale 1`, `10`, and `100` select its 1k, 10k, and 100k profiles.
-Its revision measurement is warm re-elaboration, not an incremental-cache
-claim. Unsupported metrics remain `null` rather than being inferred.
+Those profiles are executed as independent 256-form authoritative batches;
+`execution_mode`, counts, authority checks, and peak RSS make that boundary
+explicit. They do not claim one 100k-form ledger. Revision measurement is
+bounded fresh-workspace re-elaboration, not an incremental-cache claim.
+Unsupported metrics remain `null` rather than being inferred.
 
 The `settlement-state-proof` workload runs the complete package-authored
 SettlementStateV1 path: persisted package compilation, artifact pinning,
 document elaboration, ordered settlement projection, independent proof
 checking, typed proof-child commit persistence, and `ObjectStore::verify`. It
-also checks that a source revision creates a new proof authority while a
-rejected negative amount leaves the store unchanged. Quick mode uses one form
-per scale unit. The public proof boundary has a 4,096-row architectural cap,
+also checks in every batch that a source revision creates a new proof authority
+while a rejected negative amount leaves the store unchanged. Multi-batch runs
+populate explicit `settlement_batch_*` aggregate fields; singular proof,
+commit, and artifact fields are emitted only for a one-batch run. Quick mode
+uses one form per scale unit. The separate public single-proof boundary has a
+4,096-row architectural cap,
 but the canonical proof-byte limit is reached first for this corpus; therefore
 `--quick --scale 4096` is expected to be rejected. The ignored release gate
 discovers the largest successful scale through the public Workspace
