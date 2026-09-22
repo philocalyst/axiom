@@ -282,6 +282,182 @@ impl SyntaxNode {
     }
 }
 
+/// A borrowed view over a generic package-authored `form` node.
+///
+/// This is intentionally a view over the existing lossless CST rather than a
+/// second parsed AST.  Header names and field values remain [`Token`]s, so an
+/// editor or a package compiler can diagnose malformed input without first
+/// losing its spelling.
+#[derive(Clone, Copy, Debug)]
+pub struct FormView<'a> {
+    file: &'a SurfaceFile,
+    node: &'a SyntaxNode,
+}
+
+impl<'a> FormView<'a> {
+    fn new(file: &'a SurfaceFile, node: &'a SyntaxNode) -> Self {
+        Self { file, node }
+    }
+
+    /// The underlying top-level node.
+    pub fn node(&self) -> &'a SyntaxNode {
+        self.node
+    }
+
+    /// The identifier occurrence immediately following `form`, if present.
+    /// Generic-form syntax deliberately uses identifier spellings (including
+    /// `/`, `-`, and `:` name bytes); malformed or non-identifier occurrences
+    /// return `None` without fabricating an identity.
+    pub fn occurrence(&self) -> Option<&'a Token> {
+        form_header_parts(self.file.tokens(), self.node).occurrence
+    }
+
+    /// The schema token slice after the header's `:` delimiter.  Whitespace
+    /// and comments are retained; use [`Self::schema_parts`] when only
+    /// meaningful tokens are wanted.
+    pub fn schema_tokens(&self) -> &'a [Token] {
+        let parts = form_header_parts(self.file.tokens(), self.node);
+        &self.file.tokens()[parts.schema_start..parts.schema_end]
+    }
+
+    /// Meaningful schema pieces, in source order, without coercing or joining
+    /// their source spellings.
+    pub fn schema_parts(&self) -> impl Iterator<Item = &'a Token> {
+        self.schema_tokens()
+            .iter()
+            .filter(|token| !token.is_trivia())
+    }
+
+    /// Every non-trivia indented physical line belonging to this form,
+    /// including lines whose first token is malformed. Duplicate field names
+    /// are deliberately not collapsed.
+    pub fn fields(&self) -> impl Iterator<Item = FormField<'a>> + 'a {
+        FormFieldIter::new(self.file, self.node)
+    }
+}
+
+/// An iterator over the physical field lines in a generic form.
+#[derive(Clone, Debug)]
+struct FormFieldIter<'a> {
+    file: &'a SurfaceFile,
+    node: &'a SyntaxNode,
+    next: usize,
+}
+
+impl<'a> FormFieldIter<'a> {
+    fn new(file: &'a SurfaceFile, node: &'a SyntaxNode) -> Self {
+        let (_, header_end) = form_header_range(file.tokens(), node);
+        Self {
+            file,
+            node,
+            next: header_end,
+        }
+    }
+}
+
+impl<'a> Iterator for FormFieldIter<'a> {
+    type Item = FormField<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let tokens = self.file.tokens();
+        loop {
+            while self.next < self.node.token_end
+                && (tokens[self.next].kind == TokenKind::Newline
+                    || tokens[self.next].span.line == self.node.span.line)
+            {
+                self.next += 1;
+            }
+            if self.next >= self.node.token_end {
+                return None;
+            }
+            let start = self.next;
+            let line = tokens[start].span.line;
+            while self.next < self.node.token_end
+                && tokens[self.next].kind != TokenKind::Newline
+                && tokens[self.next].span.line == line
+            {
+                self.next += 1;
+            }
+            let end = self.next;
+            if tokens[start..end].iter().any(|token| !token.is_trivia()) {
+                return Some(FormField {
+                    file: self.file,
+                    node: self.node,
+                    token_start: start,
+                    token_end: end,
+                });
+            }
+        }
+    }
+}
+
+/// One generic form field occurrence.  It is a physical occurrence, not a
+/// map entry: repeated names and malformed lines remain separately visible.
+#[derive(Clone, Copy, Debug)]
+pub struct FormField<'a> {
+    file: &'a SurfaceFile,
+    node: &'a SyntaxNode,
+    token_start: usize,
+    token_end: usize,
+}
+
+impl<'a> FormField<'a> {
+    pub fn span(&self) -> Span {
+        let tokens = &self.file.tokens()[self.token_start..self.token_end];
+        let start = tokens
+            .first()
+            .map_or(self.node.span.end, |token| token.span.start);
+        let end = tokens.last().map_or(start, |token| token.span.end);
+        Span::new(
+            start,
+            end,
+            tokens
+                .first()
+                .map_or(self.node.span.line, |token| token.span.line),
+            tokens
+                .first()
+                .map_or(self.node.span.column, |token| token.span.column),
+        )
+    }
+
+    /// The exact token slice for this physical line, including indentation,
+    /// separators, comments, and malformed punctuation.
+    pub fn tokens(&self) -> &'a [Token] {
+        &self.file.tokens()[self.token_start..self.token_end]
+    }
+
+    /// The first meaningful field-name token, when one exists.  A line which
+    /// starts with punctuation or a comment is still returned as a field with
+    /// no name, preserving it for later diagnostics.
+    pub fn name(&self) -> Option<&'a Token> {
+        self.tokens()
+            .iter()
+            .find(|token| !token.is_trivia())
+            .filter(|token| token.kind == TokenKind::Identifier)
+    }
+
+    /// The exact token slice after the first meaningful name token.  No value
+    /// conversion or validation happens here.
+    pub fn value_tokens(&self) -> &'a [Token] {
+        let Some((offset, _)) = self
+            .tokens()
+            .iter()
+            .enumerate()
+            .find(|(_, token)| !token.is_trivia())
+            .filter(|(_, token)| token.kind == TokenKind::Identifier)
+        else {
+            return &[];
+        };
+        &self.tokens()[offset + 1..]
+    }
+
+    pub fn value_parts(&self) -> impl Iterator<Item = &'a Token> {
+        self.value_tokens()
+            .iter()
+            .filter(|token| !token.is_trivia())
+    }
+}
+
 /// A lossless parsed source file.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SurfaceFile {
@@ -340,6 +516,21 @@ impl SurfaceFile {
 
     pub fn node(&self, id: NodeId) -> Option<&SyntaxNode> {
         self.nodes.iter().find(|node| node.id == id)
+    }
+
+    /// Borrow each generic package-authored form without building another AST.
+    pub fn forms(&self) -> impl Iterator<Item = FormView<'_>> {
+        self.nodes
+            .iter()
+            .filter(|node| node.head.as_deref() == Some("form"))
+            .map(|node| FormView::new(self, node))
+    }
+
+    pub fn form(&self, id: NodeId) -> Option<FormView<'_>> {
+        self.nodes
+            .iter()
+            .find(|node| node.id == id && node.head.as_deref() == Some("form"))
+            .map(|node| FormView::new(self, node))
     }
 
     /// Stable source identity for a semantic node.
@@ -500,6 +691,22 @@ fn lex(source: &str) -> Vec<Token> {
             continue;
         }
 
+        // `:` is normally a legal name byte in ledger account spellings
+        // (`Assets:Checking`).  The generic-form header is the one place
+        // where it is a delimiter, so recognize that delimiter from the
+        // already-emitted `form` and occurrence tokens without changing the
+        // tokenization of ordinary journal lines.
+        if byte == b':' && is_form_header_delimiter(&tokens, start_line) {
+            index += 1;
+            tokens.push(Token {
+                kind: TokenKind::Punctuation(':'),
+                span: Span::new(start, index, start_line, start_column),
+                lexeme: ":".to_owned(),
+            });
+            column += 1;
+            continue;
+        }
+
         if byte == b'?' {
             index += 1;
             if bytes.get(index) == Some(&b'?') {
@@ -556,7 +763,10 @@ fn lex(source: &str) -> Vec<Token> {
 
         if is_name_byte(byte) {
             index += 1;
-            while index < bytes.len() && is_name_byte(bytes[index]) {
+            while index < bytes.len()
+                && is_name_byte(bytes[index])
+                && !(bytes[index] == b':' && is_form_header_occurrence(&tokens, start_line))
+            {
                 index += 1;
             }
             let spelling = &source[start..index];
@@ -601,6 +811,29 @@ fn lex(source: &str) -> Vec<Token> {
 fn is_name_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric()
         || matches!(byte, b'/' | b'_' | b'-' | b'.' | b':' | b'@' | b'+' | b'%')
+}
+
+fn form_line_meaningful(tokens: &[Token], line: usize) -> impl Iterator<Item = &Token> {
+    tokens
+        .iter()
+        .filter(move |token| token.span.line == line && !token.is_trivia())
+}
+
+fn is_form_header_occurrence(tokens: &[Token], line: usize) -> bool {
+    let mut meaningful = form_line_meaningful(tokens, line);
+    meaningful
+        .next()
+        .is_some_and(|token| token.lexeme == "form")
+        && meaningful.next().is_none()
+}
+
+fn is_form_header_delimiter(tokens: &[Token], line: usize) -> bool {
+    let mut meaningful = form_line_meaningful(tokens, line);
+    meaningful
+        .next()
+        .is_some_and(|token| token.lexeme == "form")
+        && meaningful.next().is_some()
+        && meaningful.next().is_none()
 }
 
 fn is_number(spelling: &str) -> bool {
@@ -738,6 +971,7 @@ fn classify_node(head: Option<&str>, meaningful: &[usize]) -> NodeKind {
         return NodeKind::JournalEntry;
     }
     match head {
+        "form" => NodeKind::Form,
         "book" | "buy" | "sell" | "quote" | "observe" | "use" | "decide" | "event" | "entity"
         | "instrument" | "account" | "view" | "obligation" | "settlement" | "satisfy" | "check"
         | "scenario" | "complete" | "report" => {
@@ -812,6 +1046,7 @@ fn form_is_incomplete(head: &str, meaningful: &[usize], tokens: &[Token]) -> boo
             .any(|index| tokens[*index].lexeme == spelling)
     };
     match head {
+        "form" => !form_header_is_complete(meaningful, tokens),
         "buy" => !has("into") || !has("for"),
         "sell" => !has("from") || !has("for") || !has("lot"),
         "quote" => !has("="),
@@ -821,6 +1056,62 @@ fn form_is_incomplete(head: &str, meaningful: &[usize], tokens: &[Token]) -> boo
         }
         "satisfy" => !has("obligation") || !has("settlement") || !has("amount") || !has("state"),
         _ => false,
+    }
+}
+
+fn form_header_is_complete(meaningful: &[usize], tokens: &[Token]) -> bool {
+    let Some(first) = meaningful.first() else {
+        return false;
+    };
+    let line = tokens[*first].span.line;
+    let mut header = meaningful
+        .iter()
+        .copied()
+        .filter(|index| tokens[*index].span.line == line);
+    if header
+        .next()
+        .is_none_or(|index| tokens[index].lexeme != "form")
+        || header.next().is_none()
+    {
+        return false;
+    }
+    header.any(|index| tokens[index].lexeme == ":") && header.next().is_some()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct FormHeaderParts<'a> {
+    occurrence: Option<&'a Token>,
+    schema_start: usize,
+    schema_end: usize,
+}
+
+fn form_header_range(tokens: &[Token], node: &SyntaxNode) -> (usize, usize) {
+    let end = (node.token_start..node.token_end)
+        .find(|index| {
+            tokens[*index].kind == TokenKind::Newline || tokens[*index].span.line != node.span.line
+        })
+        .unwrap_or(node.token_end);
+    (node.token_start, end)
+}
+
+fn form_header_parts<'a>(tokens: &'a [Token], node: &SyntaxNode) -> FormHeaderParts<'a> {
+    let (_, end) = form_header_range(tokens, node);
+    let mut meaningful = (node.token_start..end).filter(|index| !tokens[*index].is_trivia());
+    let _head = meaningful.next();
+    let occurrence = meaningful
+        .next()
+        .map(|index| &tokens[index])
+        .filter(|token| token.kind == TokenKind::Identifier);
+    let schema_start = meaningful
+        .find(|index| tokens[*index].lexeme == ":")
+        .map_or(end, |index| index + 1);
+    let schema_end = (schema_start..end)
+        .find(|index| tokens[*index].kind == TokenKind::Comment)
+        .unwrap_or(end);
+    FormHeaderParts {
+        occurrence,
+        schema_start,
+        schema_end,
     }
 }
 
@@ -1124,6 +1415,117 @@ mod tests {
                 .find(|token| token.is_hole())
                 .map(|token| token.lexeme.as_str()),
             Some("?row")
+        );
+    }
+
+    #[test]
+    fn generic_forms_expose_lossless_header_and_repeated_field_occurrences() {
+        let source = "form invoice/1 : billing::Invoice ; header\n  amount  100 USD\n  state issued\n  state settled\n  ??? raw ?amount\n\nbook tax-us\n";
+        let file = SurfaceFile::parse(source);
+        assert_eq!(file.nodes()[0].kind, NodeKind::Form);
+        let form = file.forms().next().expect("generic form");
+        assert_eq!(
+            form.occurrence().map(|token| token.lexeme.as_str()),
+            Some("invoice/1")
+        );
+        assert_eq!(
+            form.schema_parts()
+                .map(|token| token.lexeme.as_str())
+                .collect::<Vec<_>>(),
+            ["billing::Invoice"]
+        );
+        let fields = form.fields().collect::<Vec<_>>();
+        assert_eq!(fields.len(), 4);
+        assert_eq!(
+            fields
+                .iter()
+                .map(|field| field.name().map(|token| token.lexeme.as_str()))
+                .collect::<Vec<_>>(),
+            [Some("amount"), Some("state"), Some("state"), None]
+        );
+        assert_eq!(
+            fields[1]
+                .value_parts()
+                .map(|token| token.lexeme.as_str())
+                .collect::<Vec<_>>(),
+            ["issued"]
+        );
+        assert_eq!(fields[2].span().text(source), Some("  state settled"));
+        assert_eq!(
+            fields[3]
+                .tokens()
+                .iter()
+                .map(|token| token.lexeme.as_str())
+                .collect::<String>(),
+            "  ??? raw ?amount"
+        );
+        assert!(fields[3].value_tokens().is_empty());
+        assert_eq!(file.lossless(), source);
+        assert_eq!(
+            canonical_format(source),
+            canonical_format(&file.canonical())
+        );
+    }
+
+    #[test]
+    fn incomplete_generic_form_header_recovers_without_dropping_field_bytes() {
+        let source = "form invoice/1\n  amount 100 USD\n";
+        let file = SurfaceFile::parse(source);
+        assert_eq!(file.nodes()[0].kind, NodeKind::Error);
+        let recovered = file.forms().next().expect("recoverable form view");
+        assert_eq!(recovered.fields().count(), 1);
+        assert_eq!(
+            file.nodes()[0].span.text(source),
+            Some("form invoice/1\n  amount 100 USD")
+        );
+        assert_eq!(file.lossless(), source);
+        assert_eq!(
+            file.tokens()
+                .iter()
+                .map(|token| token.lexeme.as_str())
+                .collect::<String>(),
+            source
+        );
+        assert!(
+            file.errors()
+                .any(|diagnostic| diagnostic.message.contains("incomplete `form`"))
+        );
+    }
+
+    #[test]
+    fn generic_form_delimiter_spacing_is_semantically_equivalent() {
+        for header in [
+            "form invoice/1 : billing::Invoice",
+            "form invoice/1: billing::Invoice",
+            "form invoice/1 :billing::Invoice",
+            "form invoice/1:billing::Invoice",
+        ] {
+            let file = SurfaceFile::parse(format!("{header}\n  amount 1\n"));
+            let form = file.forms().next().expect("generic form");
+            assert_eq!(form.node().kind, NodeKind::Form, "{header}");
+            assert_eq!(
+                form.schema_parts()
+                    .map(|token| token.lexeme.as_str())
+                    .collect::<String>(),
+                "billing::Invoice",
+                "{header}"
+            );
+        }
+    }
+
+    #[test]
+    fn generic_form_fields_skip_trivia_only_lines_consistently() {
+        let file = SurfaceFile::parse(
+            "form invoice/1 : billing::Invoice\n  ; explanation\n  amount 1\n  # note\n  state issued\n",
+        );
+        assert_eq!(
+            file.forms()
+                .next()
+                .unwrap()
+                .fields()
+                .filter_map(|field| field.name().map(|token| token.lexeme.as_str()))
+                .collect::<Vec<_>>(),
+            ["amount", "state"]
         );
     }
 }

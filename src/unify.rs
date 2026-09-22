@@ -8,6 +8,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
+use num_rational::BigRational;
+use num_traits::Zero;
+
 use crate::ir::{Atom, ExactQuantity, Goal, Record, Sort, Term, Unit, Var, VarKind};
 
 /// A position in the trail.  Entries are replayed backwards on rollback.
@@ -426,6 +429,9 @@ impl Unifier {
     fn unify_inner(&mut self, left: &Term, right: &Term) -> Result<(), UnifyError> {
         let left = self.walk(left);
         let right = self.walk(right);
+        if !valid_scalar(&left) || !valid_scalar(&right) {
+            return Err(self.error(UnifyErrorKind::ConstructorMismatch, &left, &right));
+        }
         if left == right {
             return Ok(());
         }
@@ -458,6 +464,13 @@ impl Unifier {
                 }
             }
             (Term::Quantity(left), Term::Quantity(right)) => self.unify_quantity(left, right),
+            (Term::Integer(_) | Term::Decimal(_), Term::Integer(_) | Term::Decimal(_)) => {
+                if scalar_rational(&left) == scalar_rational(&right) {
+                    Ok(())
+                } else {
+                    Err(self.error(UnifyErrorKind::ConstructorMismatch, &left, &right))
+                }
+            }
             (Term::Record(left), Term::Record(right)) => self.unify_record(left, right),
             (Term::Tuple(left), Term::Tuple(right)) => {
                 if left.len() != right.len() {
@@ -790,6 +803,10 @@ fn merge_sorts(left: &Sort, right: &Sort) -> Option<Sort> {
 fn accepts(sort: &Sort, term: &Term) -> bool {
     match sort {
         Sort::Any => true,
+        Sort::Bool => matches!(term, Term::Bool(_) | Term::Var(_)),
+        Sort::Text => matches!(term, Term::Text(_) | Term::Var(_)),
+        Sort::Integer => matches!(term, Term::Integer(_) | Term::Var(_)),
+        Sort::Decimal => matches!(term, Term::Integer(_) | Term::Decimal(_) | Term::Var(_)),
         Sort::Nominal(expected) => match term {
             Term::Nominal(nominal) => expected.as_ref().is_none_or(|kind| kind == &nominal.kind),
             Term::Var(_) => true,
@@ -812,6 +829,21 @@ fn accepts(sort: &Sort, term: &Term) -> bool {
         Sort::Atom => false,
         Sort::Goal => false,
     }
+}
+
+fn scalar_rational(term: &Term) -> Option<BigRational> {
+    match term {
+        Term::Integer(value) => Some(BigRational::from_integer(value.clone())),
+        Term::Decimal(value) if !value.denom().is_zero() => Some(BigRational::new(
+            value.numer().clone(),
+            value.denom().clone(),
+        )),
+        _ => None,
+    }
+}
+
+fn valid_scalar(term: &Term) -> bool {
+    !matches!(term, Term::Decimal(value) if value.denom().is_zero())
 }
 
 fn units_compatible(left: &ExactQuantity, right: &ExactQuantity) -> bool {
@@ -964,5 +996,39 @@ mod tests {
             .unwrap(),
         );
         assert!(unifier.unify(&one_third, &two_thirds).is_err());
+    }
+
+    #[test]
+    fn scalar_unification_is_exact_across_integer_and_decimal_terms() {
+        let mut unifier = Unifier::new();
+        let integer = Term::integer(5);
+        let decimal = Term::Decimal(BigRational::new_raw(BigInt::from(10), BigInt::from(2)));
+        assert!(unifier.unify(&integer, &decimal).is_ok());
+
+        let reduced = Term::Decimal(BigRational::new_raw(BigInt::from(2), BigInt::from(4)));
+        let canonical = Term::decimal(BigRational::new(BigInt::from(1), BigInt::from(2)));
+        assert!(unifier.unify(&reduced, &canonical).is_ok());
+    }
+
+    #[test]
+    fn scalar_unification_never_rounds() {
+        let mut unifier = Unifier::new();
+        let exact = Term::decimal(BigRational::new(BigInt::from(1), BigInt::from(3)));
+        let rounded = Term::decimal(BigRational::new(BigInt::from(333), BigInt::from(1000)));
+        assert!(unifier.unify(&exact, &rounded).is_err());
+
+        let integer = Term::integer(1);
+        let decimal = Term::decimal(BigRational::new(BigInt::from(1001), BigInt::from(1000)));
+        assert!(unifier.unify(&integer, &decimal).is_err());
+    }
+
+    #[test]
+    fn decimal_holes_accept_exact_integer_widening_and_reject_invalid_rationals() {
+        let mut unifier = Unifier::new();
+        let hole = Term::Var(Var::hole(7, "decimal", Sort::Decimal));
+        assert!(unifier.unify(&hole, &Term::integer(5)).is_ok());
+
+        let invalid = Term::Decimal(BigRational::new_raw(BigInt::from(1), BigInt::from(0)));
+        assert!(Unifier::new().unify(&invalid, &invalid).is_err());
     }
 }

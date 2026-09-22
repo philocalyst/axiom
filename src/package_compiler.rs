@@ -17,6 +17,7 @@ use crate::package_lock::{Lockfile, PackageLockError, PackageManifest, PackageRe
 
 const ARTIFACT_DOMAIN: &str = "axiom/package-artifact/v1";
 const RECORD_SCHEMA_DOMAIN: &str = "axiom/package-record-schema/v1";
+const RECORD_VALUE_DOMAIN: &str = "axiom/package-record-value/v1";
 
 /// The input to one package compilation unit.
 ///
@@ -303,6 +304,380 @@ impl RecordSchema {
     pub fn schema_id(&self) -> ContentHash {
         self.schema_id
     }
+
+    /// Check and schema-guide the normalization of one IR record.
+    ///
+    /// Decimal fields accept integer literals by exact widening; no other
+    /// coercions are performed. Aliases, functions, refinements, and phase
+    /// wrappers require a later compiler boundary with their semantics.
+    pub fn check_concrete_record(
+        &self,
+        record: &crate::ir::Record,
+    ) -> Result<SchemaBoundRecord, RecordValueError> {
+        let normalized = normalize_row(&self.row, record, &mut Vec::new())?;
+
+        let canonical = crate::ir::canonicalize_term(
+            &crate::ir::Term::Record(normalized),
+            &crate::ir::CanonicalContext::default(),
+        );
+        let canonical_record = match canonical.value {
+            crate::ir::Term::Record(record) => record,
+            _ => unreachable!("canonicalizing a record returns a record"),
+        };
+        let content_hash = record_value_hash(self.schema_id, &canonical.bytes);
+        Ok(SchemaBoundRecord {
+            schema_id: self.schema_id,
+            record: canonical_record,
+            content_hash,
+        })
+    }
+}
+
+/// A record that has passed a concrete [`RecordSchema`] check.
+///
+/// The schema identity and canonical record are private so callers cannot
+/// mutate one without invalidating the content hash.  Use [`Self::record`]
+/// when handing the value to another IR consumer.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SchemaBoundRecord {
+    schema_id: ContentHash,
+    record: crate::ir::Record,
+    content_hash: ContentHash,
+}
+
+impl SchemaBoundRecord {
+    pub fn schema_id(&self) -> ContentHash {
+        self.schema_id
+    }
+
+    pub fn record(&self) -> &crate::ir::Record {
+        &self.record
+    }
+
+    pub fn content_hash(&self) -> ContentHash {
+        self.content_hash
+    }
+}
+
+/// A failure to turn an untrusted IR record into a schema-bound value.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RecordValueError {
+    MissingField {
+        path: Vec<String>,
+    },
+    UnexpectedField {
+        path: Vec<String>,
+    },
+    UnexpectedRowTail {
+        path: Vec<String>,
+    },
+    InvalidRowTail {
+        path: Vec<String>,
+    },
+    InvalidDecimal {
+        path: Vec<String>,
+    },
+    RecordHoleNeedsSchema {
+        path: Vec<String>,
+    },
+    DuplicateSchemaField {
+        path: Vec<String>,
+    },
+    UntypedHole {
+        path: Vec<String>,
+    },
+    HoleSortMismatch {
+        path: Vec<String>,
+        expected: String,
+        actual: String,
+    },
+    TypeMismatch {
+        path: Vec<String>,
+        expected: String,
+        actual: String,
+    },
+    UnsupportedType {
+        path: Vec<String>,
+        ty: String,
+    },
+}
+
+impl fmt::Display for RecordValueError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingField { path } => {
+                write!(
+                    formatter,
+                    "record is missing field `{}`",
+                    display_path(path)
+                )
+            }
+            Self::UnexpectedField { path } => {
+                write!(
+                    formatter,
+                    "record has unexpected field `{}`",
+                    display_path(path)
+                )
+            }
+            Self::UnexpectedRowTail { path } => write!(
+                formatter,
+                "closed record `{}` cannot carry a row tail",
+                display_path(path)
+            ),
+            Self::InvalidRowTail { path } => write!(
+                formatter,
+                "open record `{}` requires a row-typed tail",
+                display_path(path)
+            ),
+            Self::InvalidDecimal { path } => write!(
+                formatter,
+                "record field `{}` has a decimal with a zero denominator",
+                display_path(path)
+            ),
+            Self::RecordHoleNeedsSchema { path } => write!(
+                formatter,
+                "record field `{}` has a hole without a row schema",
+                display_path(path)
+            ),
+            Self::DuplicateSchemaField { path } => write!(
+                formatter,
+                "schema declares duplicate field `{}`",
+                display_path(path)
+            ),
+            Self::UntypedHole { path } => write!(
+                formatter,
+                "record field `{}` requires a typed hole variable",
+                display_path(path)
+            ),
+            Self::HoleSortMismatch {
+                path,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "record field `{}` has hole sort `{actual}`, incompatible with `{expected}`",
+                display_path(path)
+            ),
+            Self::TypeMismatch {
+                path,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "record field `{}` has `{actual}`, expected `{expected}`",
+                display_path(path)
+            ),
+            Self::UnsupportedType { path, ty } => write!(
+                formatter,
+                "record field `{}` uses unsupported type `{ty}`",
+                display_path(path)
+            ),
+        }
+    }
+}
+
+impl std::error::Error for RecordValueError {}
+
+fn normalize_row(
+    row: &crate::hir::Row,
+    record: &crate::ir::Record,
+    path: &mut Vec<String>,
+) -> Result<crate::ir::Record, RecordValueError> {
+    let fields = row.fields();
+    let mut known = BTreeSet::new();
+    for field in fields {
+        if !known.insert(field.name.as_str()) {
+            path.push(field.name.as_str().to_owned());
+            let error = RecordValueError::DuplicateSchemaField { path: path.clone() };
+            path.pop();
+            return Err(error);
+        }
+    }
+
+    let mut normalized = record.clone();
+    for field in fields {
+        let name = field.name.as_str().to_owned();
+        path.push(name.clone());
+        let symbol = crate::ir::Symbol::from(name.as_str());
+        let result = match record.fields.get(&symbol) {
+            Some(value) => normalize_type(&field.ty, value, path),
+            None => Err(RecordValueError::MissingField { path: path.clone() }),
+        };
+        path.pop();
+        normalized.fields.insert(symbol, result?);
+    }
+
+    if !row.is_open() {
+        for name in normalized.fields.keys() {
+            if !known.contains(name.as_str()) {
+                path.push(name.as_str().to_owned());
+                let error = RecordValueError::UnexpectedField { path: path.clone() };
+                path.pop();
+                return Err(error);
+            }
+        }
+        if normalized.rest.is_some() {
+            return Err(RecordValueError::UnexpectedRowTail { path: path.clone() });
+        }
+    } else if let Some(rest) = &normalized.rest
+        && !(matches!(rest.kind, crate::ir::VarKind::Row)
+            && matches!(rest.sort, crate::ir::Sort::Row))
+        && !(matches!(rest.kind, crate::ir::VarKind::Hole)
+            && matches!(rest.sort, crate::ir::Sort::Row))
+    {
+        return Err(RecordValueError::InvalidRowTail { path: path.clone() });
+    }
+    Ok(normalized)
+}
+
+fn normalize_type(
+    ty: &Type,
+    value: &crate::ir::Term,
+    path: &mut Vec<String>,
+) -> Result<crate::ir::Term, RecordValueError> {
+    match ty {
+        Type::Bool => {
+            normalize_primitive(ty, value, matches!(value, crate::ir::Term::Bool(_)), path)
+        }
+        Type::Text => {
+            normalize_primitive(ty, value, matches!(value, crate::ir::Term::Text(_)), path)
+        }
+        Type::Integer => normalize_primitive(
+            ty,
+            value,
+            matches!(value, crate::ir::Term::Integer(_)),
+            path,
+        ),
+        Type::Decimal => match value {
+            crate::ir::Term::Decimal(value) if !num_traits::Zero::is_zero(value.denom()) => {
+                Ok(crate::ir::Term::decimal(value.clone()))
+            }
+            crate::ir::Term::Decimal(_) => {
+                Err(RecordValueError::InvalidDecimal { path: path.clone() })
+            }
+            crate::ir::Term::Integer(value) => Ok(crate::ir::Term::Decimal(
+                num_rational::BigRational::from_integer(value.clone()),
+            )),
+            crate::ir::Term::Var(variable) if variable.kind == crate::ir::VarKind::Hole => {
+                normalize_hole(ty, variable, path)
+            }
+            _ => Err(type_mismatch(ty, value, path)),
+        },
+        Type::Record(row) => match value {
+            crate::ir::Term::Record(record) => {
+                normalize_row(row, record, path).map(crate::ir::Term::Record)
+            }
+            crate::ir::Term::Var(variable) if variable.kind == crate::ir::VarKind::Hole => {
+                Err(RecordValueError::RecordHoleNeedsSchema { path: path.clone() })
+            }
+            _ => Err(type_mismatch(ty, value, path)),
+        },
+        Type::Unit
+        | Type::Hole(_)
+        | Type::Named(_)
+        | Type::Variable(_)
+        | Type::Function { .. }
+        | Type::Refined { .. }
+        | Type::AtPhase { .. } => Err(RecordValueError::UnsupportedType {
+            path: path.clone(),
+            ty: ty.canonical(),
+        }),
+    }
+}
+
+fn normalize_primitive(
+    expected: &Type,
+    value: &crate::ir::Term,
+    matches: bool,
+    path: &[String],
+) -> Result<crate::ir::Term, RecordValueError> {
+    if matches {
+        Ok(value.clone())
+    } else if let crate::ir::Term::Var(variable) = value
+        && variable.kind == crate::ir::VarKind::Hole
+    {
+        normalize_hole(expected, variable, path)
+    } else if let crate::ir::Term::Var(_) = value {
+        Err(RecordValueError::UntypedHole {
+            path: path.to_vec(),
+        })
+    } else {
+        Err(type_mismatch(expected, value, path))
+    }
+}
+
+fn normalize_hole(
+    expected: &Type,
+    variable: &crate::ir::Var,
+    path: &[String],
+) -> Result<crate::ir::Term, RecordValueError> {
+    if hole_sort_accepts(expected, &variable.sort) {
+        Ok(crate::ir::Term::Var(variable.clone()))
+    } else {
+        Err(RecordValueError::HoleSortMismatch {
+            path: path.to_vec(),
+            expected: expected.canonical(),
+            actual: format!("{:?}", variable.sort),
+        })
+    }
+}
+
+fn hole_sort_accepts(expected: &Type, sort: &crate::ir::Sort) -> bool {
+    match expected {
+        Type::Unit => false,
+        Type::Bool => matches!(sort, crate::ir::Sort::Bool),
+        Type::Text => matches!(sort, crate::ir::Sort::Text),
+        Type::Integer => matches!(sort, crate::ir::Sort::Integer),
+        Type::Decimal => matches!(sort, crate::ir::Sort::Integer | crate::ir::Sort::Decimal),
+        Type::Record(_) => matches!(sort, crate::ir::Sort::Record),
+        Type::Hole(_) => false,
+        Type::Named(_)
+        | Type::Variable(_)
+        | Type::Function { .. }
+        | Type::Refined { .. }
+        | Type::AtPhase { .. } => false,
+    }
+}
+
+fn type_mismatch(expected: &Type, value: &crate::ir::Term, path: &[String]) -> RecordValueError {
+    RecordValueError::TypeMismatch {
+        path: path.to_vec(),
+        expected: expected.canonical(),
+        actual: term_kind(value).to_owned(),
+    }
+}
+
+fn term_kind(value: &crate::ir::Term) -> &'static str {
+    match value {
+        crate::ir::Term::Var(_) => "variable",
+        crate::ir::Term::Nominal(_) => "nominal",
+        crate::ir::Term::Unit(_) => "unit",
+        crate::ir::Term::Quantity(_) => "quantity",
+        crate::ir::Term::Record(_) => "record",
+        crate::ir::Term::Tuple(_) => "tuple",
+        crate::ir::Term::App { .. } => "application",
+        crate::ir::Term::Bool(_) => "boolean",
+        crate::ir::Term::Text(_) => "text",
+        crate::ir::Term::Integer(_) => "integer",
+        crate::ir::Term::Decimal(_) => "decimal",
+    }
+}
+
+fn display_path(path: &[String]) -> String {
+    if path.is_empty() {
+        "<record>".to_owned()
+    } else {
+        path.join(".")
+    }
+}
+
+fn record_value_hash(schema_id: ContentHash, canonical_bytes: &[u8]) -> ContentHash {
+    let mut bytes = Vec::new();
+    put_text(&mut bytes, "checked-record");
+    bytes.extend_from_slice(schema_id.as_bytes());
+    put_u64(&mut bytes, canonical_bytes.len());
+    bytes.extend_from_slice(canonical_bytes);
+    ContentHash::domain_separated(RECORD_VALUE_DOMAIN, &bytes)
 }
 
 /// Failure to resolve a record schema without falling back to a name-only
@@ -382,6 +757,11 @@ pub enum PackageCompileError {
         package: String,
         qualified_name: String,
     },
+    InvalidExportType {
+        package: String,
+        qualified_name: String,
+        reason: String,
+    },
     ArtifactHashMismatch {
         expected: ContentHash,
         actual: ContentHash,
@@ -426,6 +806,14 @@ impl fmt::Display for PackageCompileError {
                 formatter,
                 "package `{package}` exports `{qualified_name}` more than once"
             ),
+            Self::InvalidExportType {
+                package,
+                qualified_name,
+                reason,
+            } => write!(
+                formatter,
+                "package `{package}` export `{qualified_name}` has an invalid type: {reason}"
+            ),
             Self::ArtifactHashMismatch { expected, actual } => write!(
                 formatter,
                 "compiled artifact hash is {actual}, expected {expected}"
@@ -444,6 +832,54 @@ impl std::error::Error for PackageCompileError {
             Self::Manifest(error) | Self::Lockfile(error) => Some(error),
             _ => None,
         }
+    }
+}
+
+fn validate_declaration_type(kind: &DeclarationKind) -> Result<(), String> {
+    match kind {
+        DeclarationKind::Type { ty } | DeclarationKind::Value { ty, .. } => validate_type(ty),
+        DeclarationKind::Rule { input, output } => {
+            validate_type(input)?;
+            validate_type(output)
+        }
+    }
+}
+
+fn validate_type(ty: &Type) -> Result<(), String> {
+    match ty {
+        Type::Record(row) => {
+            let mut names = BTreeSet::new();
+            let mut previous = None;
+            for field in row.fields() {
+                if !names.insert(field.name.as_str()) {
+                    return Err(format!("duplicate record field `{}`", field.name));
+                }
+                if previous.is_some_and(|name| name >= &field.name) {
+                    return Err(format!(
+                        "record field `{}` is not in canonical order",
+                        field.name
+                    ));
+                }
+                previous = Some(&field.name);
+                validate_type(&field.ty)?;
+            }
+            Ok(())
+        }
+        Type::Function { arguments, result } => {
+            for argument in arguments {
+                validate_type(argument)?;
+            }
+            validate_type(result)
+        }
+        Type::Refined { base, .. } | Type::AtPhase { value: base, .. } => validate_type(base),
+        Type::Unit
+        | Type::Bool
+        | Type::Text
+        | Type::Integer
+        | Type::Decimal
+        | Type::Named(_)
+        | Type::Variable(_)
+        | Type::Hole(_) => Ok(()),
     }
 }
 
@@ -497,6 +933,13 @@ where
                     name: declaration.name.clone(),
                 };
                 let canonical_name = qualified_name.canonical();
+                validate_declaration_type(&declaration.kind).map_err(|reason| {
+                    PackageCompileError::InvalidExportType {
+                        package: input.manifest.name.clone(),
+                        qualified_name: canonical_name.clone(),
+                        reason,
+                    }
+                })?;
                 let key = (input.manifest.name.clone(), canonical_name.clone());
                 let export = CompiledExport {
                     package: input.manifest.name.clone(),
@@ -806,6 +1249,7 @@ mod tests {
     use super::*;
     use crate::hir::{
         AstDeclaration, AstDeclarationKind, AstModule, AstType, ModulePath, Name, Row, Span,
+        TypeVar,
     };
     use crate::package_lock::{Dependency, LockedPackage, VersionReq};
 
@@ -925,6 +1369,47 @@ mod tests {
         assert!(matches!(
             compile([PackageInput::new(package, [broken])], &lock),
             Err(PackageCompileError::ModuleHasErrors { .. })
+        ));
+    }
+
+    #[test]
+    fn compiler_revalidates_public_hir_row_invariants() {
+        let package = manifest("mutated");
+        let lock = lockfile(std::slice::from_ref(&package));
+        let mut mutated = record_module("types", "Record", &[("amount", AstType::Integer)], None);
+        let DeclarationKind::Type {
+            ty: Type::Record(Row::Closed(fields)),
+        } = &mut mutated.declarations[0].kind
+        else {
+            panic!("fixture must lower to a closed record");
+        };
+        fields.push(fields[0].clone());
+
+        assert!(matches!(
+            compile([PackageInput::new(package, [mutated])], &lock),
+            Err(PackageCompileError::InvalidExportType { reason, .. })
+                if reason.contains("duplicate record field")
+        ));
+
+        let package = manifest("unsorted");
+        let lock = lockfile(std::slice::from_ref(&package));
+        let mut mutated = record_module(
+            "types",
+            "Record",
+            &[("amount", AstType::Integer), ("note", AstType::Text)],
+            None,
+        );
+        let DeclarationKind::Type {
+            ty: Type::Record(Row::Closed(fields)),
+        } = &mut mutated.declarations[0].kind
+        else {
+            panic!("fixture must lower to a closed record");
+        };
+        fields.reverse();
+        assert!(matches!(
+            compile([PackageInput::new(package, [mutated])], &lock),
+            Err(PackageCompileError::InvalidExportType { reason, .. })
+                if reason.contains("canonical order")
         ));
     }
 
@@ -1193,5 +1678,229 @@ mod tests {
             first_schema.row(),
             &Row::Closed(first_schema.row().fields().to_vec())
         );
+    }
+
+    fn direct_schema(row: Row) -> RecordSchema {
+        RecordSchema {
+            package_root: ContentHash::domain_separated("test/package-root", b"records"),
+            qualified_name: qualified_name("types", "Record"),
+            row,
+            schema_id: ContentHash::domain_separated("test/schema", b"records"),
+        }
+    }
+
+    #[test]
+    fn checked_records_are_order_invariant_and_schema_bound() {
+        let schema = direct_schema(Row::Closed(vec![
+            crate::hir::Field {
+                name: Name::new("amount").unwrap(),
+                ty: Type::Integer,
+            },
+            crate::hir::Field {
+                name: Name::new("note").unwrap(),
+                ty: Type::Text,
+            },
+        ]));
+        let left = crate::ir::Record::closed([
+            ("note", crate::ir::Term::Text("ok".to_owned())),
+            (
+                "amount",
+                crate::ir::Term::Integer(num_bigint::BigInt::from(7)),
+            ),
+        ]);
+        let right = crate::ir::Record::closed([
+            (
+                "amount",
+                crate::ir::Term::Integer(num_bigint::BigInt::from(7)),
+            ),
+            ("note", crate::ir::Term::Text("ok".to_owned())),
+        ]);
+        let first = schema.check_concrete_record(&left).unwrap();
+        let second = schema.check_concrete_record(&right).unwrap();
+        assert_eq!(first.record(), second.record());
+        assert_eq!(first.content_hash(), second.content_hash());
+        assert_eq!(first.schema_id(), schema.schema_id());
+
+        let mut other_schema = schema.clone();
+        other_schema.schema_id = ContentHash::domain_separated("test/schema", b"other");
+        assert_ne!(
+            first.content_hash(),
+            other_schema
+                .check_concrete_record(&left)
+                .unwrap()
+                .content_hash()
+        );
+    }
+
+    #[test]
+    fn schema_bound_records_reject_missing_extra_and_wrong_numeric_fields() {
+        let schema = direct_schema(Row::Closed(vec![crate::hir::Field {
+            name: Name::new("amount").unwrap(),
+            ty: Type::Integer,
+        }]));
+        let missing = crate::ir::Record::closed(std::iter::empty::<(&str, crate::ir::Term)>());
+        assert!(matches!(
+            schema.check_concrete_record(&missing),
+            Err(RecordValueError::MissingField { .. })
+        ));
+        let extra = crate::ir::Record::closed([
+            (
+                "amount",
+                crate::ir::Term::Integer(num_bigint::BigInt::from(1)),
+            ),
+            ("surprise", crate::ir::Term::Bool(true)),
+        ]);
+        assert!(matches!(
+            schema.check_concrete_record(&extra),
+            Err(RecordValueError::UnexpectedField { .. })
+        ));
+        let decimal = crate::ir::Record::closed([(
+            "amount",
+            crate::ir::Term::Decimal(num_rational::BigRational::from_integer(
+                num_bigint::BigInt::from(1),
+            )),
+        )]);
+        assert!(matches!(
+            schema.check_concrete_record(&decimal),
+            Err(RecordValueError::TypeMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn decimal_schema_normalizes_integer_and_decimal_spellings_to_one_value() {
+        let schema = direct_schema(Row::Closed(vec![crate::hir::Field {
+            name: Name::new("amount").unwrap(),
+            ty: Type::Decimal,
+        }]));
+        let integer = crate::ir::Record::closed([("amount", crate::ir::Term::integer(5))]);
+        let decimal = crate::ir::Record::closed([(
+            "amount",
+            crate::ir::Term::decimal(num_rational::BigRational::from_integer(
+                num_bigint::BigInt::from(5),
+            )),
+        )]);
+
+        let integer = schema.check_concrete_record(&integer).unwrap();
+        let decimal = schema.check_concrete_record(&decimal).unwrap();
+        assert_eq!(integer.record(), decimal.record());
+        assert_eq!(integer.content_hash(), decimal.content_hash());
+
+        let invalid = crate::ir::Record::closed([(
+            "amount",
+            crate::ir::Term::Decimal(num_rational::BigRational::new_raw(
+                num_bigint::BigInt::from(1),
+                num_bigint::BigInt::from(0),
+            )),
+        )]);
+        assert!(matches!(
+            schema.check_concrete_record(&invalid),
+            Err(RecordValueError::InvalidDecimal { .. })
+        ));
+    }
+
+    #[test]
+    fn checked_records_handle_nested_open_rows_and_typed_holes() {
+        let schema = direct_schema(Row::Open {
+            fields: vec![
+                crate::hir::Field {
+                    name: Name::new("child").unwrap(),
+                    ty: Type::Record(Row::Closed(vec![crate::hir::Field {
+                        name: Name::new("label").unwrap(),
+                        ty: Type::Text,
+                    }])),
+                },
+                crate::hir::Field {
+                    name: Name::new("hole").unwrap(),
+                    ty: Type::Text,
+                },
+            ],
+            tail: TypeVar(0),
+        });
+        let record = crate::ir::Record::closed([
+            (
+                "child",
+                crate::ir::Term::Record(crate::ir::Record::closed([(
+                    "label",
+                    crate::ir::Term::Text("nested".to_owned()),
+                )])),
+            ),
+            (
+                "hole",
+                crate::ir::Term::Var(crate::ir::Var::hole(4, "value", crate::ir::Sort::Text)),
+            ),
+            ("extension", crate::ir::Term::Bool(true)),
+        ]);
+        assert!(schema.check_concrete_record(&record).is_ok());
+
+        let bad_hole = crate::ir::Record::closed([
+            (
+                "child",
+                crate::ir::Term::Record(crate::ir::Record::closed([(
+                    "label",
+                    crate::ir::Term::Text("nested".to_owned()),
+                )])),
+            ),
+            ("hole", crate::ir::Term::Var(crate::ir::Var::inference(4))),
+        ]);
+        assert!(matches!(
+            schema.check_concrete_record(&bad_hole),
+            Err(RecordValueError::UntypedHole { .. })
+        ));
+
+        let any_hole = crate::ir::Record::closed([
+            (
+                "child",
+                crate::ir::Term::Record(crate::ir::Record::closed([(
+                    "label",
+                    crate::ir::Term::Text("nested".to_owned()),
+                )])),
+            ),
+            (
+                "hole",
+                crate::ir::Term::Var(crate::ir::Var::hole(5, "untyped", crate::ir::Sort::Any)),
+            ),
+        ]);
+        assert!(matches!(
+            schema.check_concrete_record(&any_hole),
+            Err(RecordValueError::HoleSortMismatch { .. })
+        ));
+
+        let record_hole = crate::ir::Record::closed([
+            (
+                "child",
+                crate::ir::Term::Var(crate::ir::Var::hole(6, "record", crate::ir::Sort::Record)),
+            ),
+            ("hole", crate::ir::Term::Text("resolved".to_owned())),
+        ]);
+        assert!(matches!(
+            schema.check_concrete_record(&record_hole),
+            Err(RecordValueError::RecordHoleNeedsSchema { .. })
+        ));
+    }
+
+    #[test]
+    fn checked_records_reject_aliases_functions_and_invalid_tails_explicitly() {
+        let alias = direct_schema(Row::Closed(vec![crate::hir::Field {
+            name: Name::new("value").unwrap(),
+            ty: Type::Named(qualified_name("types", "Alias")),
+        }]));
+        let value = crate::ir::Record::closed([("value", crate::ir::Term::Text("x".into()))]);
+        assert!(matches!(
+            alias.check_concrete_record(&value),
+            Err(RecordValueError::UnsupportedType { .. })
+        ));
+
+        let open = direct_schema(Row::Open {
+            fields: vec![],
+            tail: TypeVar(0),
+        });
+        let invalid_tail = crate::ir::Record::open(
+            std::iter::empty::<(&str, crate::ir::Term)>(),
+            crate::ir::Var::inference(1),
+        );
+        assert!(matches!(
+            open.check_concrete_record(&invalid_tail),
+            Err(RecordValueError::InvalidRowTail { .. })
+        ));
     }
 }

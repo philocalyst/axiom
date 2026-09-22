@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use blake3::Hasher;
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
 use num_rational::BigRational;
 use num_traits::Zero;
 
@@ -175,6 +175,9 @@ pub struct ExactQuantity {
 
 impl ExactQuantity {
     pub fn new(value: BigRational, unit: Option<Unit>) -> Result<Self, QuantityError> {
+        if value.denom().is_zero() {
+            return Err(QuantityError::ZeroDenominator);
+        }
         if value.is_zero() || unit.is_some() {
             Ok(Self { value, unit })
         } else {
@@ -340,6 +343,10 @@ pub enum VarKind {
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Sort {
     Any,
+    Bool,
+    Text,
+    Integer,
+    Decimal,
     Nominal(Option<NominalKind>),
     Unit(Option<Unit>),
     Quantity(Option<Unit>),
@@ -399,6 +406,13 @@ pub enum Term {
     Nominal(Nominal),
     Unit(Unit),
     Quantity(ExactQuantity),
+    /// An exact integer scalar.  Numeric literals stay arbitrary precision at
+    /// the IR boundary; there is no lossy machine-number escape hatch.
+    Integer(BigInt),
+    /// An exact decimal scalar.  The current HIR carries decimal values as
+    /// normalized rationals; retaining a distinct term keeps the author's
+    /// declared decimal sort visible to schema checking.
+    Decimal(BigRational),
     Record(Record),
     Tuple(Vec<Term>),
     App {
@@ -421,6 +435,14 @@ impl Term {
     pub fn quantity(quantity: ExactQuantity) -> Self {
         debug_assert!(quantity.to_model_quantity().is_ok());
         Self::Quantity(quantity)
+    }
+
+    pub fn integer(value: impl Into<BigInt>) -> Self {
+        Self::Integer(value.into())
+    }
+
+    pub fn decimal(value: BigRational) -> Self {
+        Self::Decimal(normalize_rational(&value))
     }
 
     pub fn record(record: Record) -> Self {
@@ -610,6 +632,14 @@ fn encode_term(term: &Term, bytes: &mut Vec<u8>) {
             bytes.push(b'q');
             bytes.extend_from_slice(&quantity.canonical_bytes());
         }
+        Term::Integer(value) => {
+            bytes.push(b'i');
+            write_bigint(bytes, value);
+        }
+        Term::Decimal(value) => {
+            bytes.push(b'd');
+            write_normalized_rational(bytes, value);
+        }
         Term::Record(record) => {
             bytes.push(b'r');
             write_len(bytes, record.fields.len());
@@ -703,6 +733,10 @@ fn encode_var(variable: &Var, bytes: &mut Vec<u8>) {
 fn encode_sort(sort: &Sort, bytes: &mut Vec<u8>) {
     match sort {
         Sort::Any => bytes.push(0),
+        Sort::Bool => bytes.push(8),
+        Sort::Text => bytes.push(9),
+        Sort::Integer => bytes.push(10),
+        Sort::Decimal => bytes.push(11),
         Sort::Nominal(kind) => {
             bytes.push(1);
             match kind {
@@ -766,6 +800,30 @@ fn write_symbol(bytes: &mut Vec<u8>, symbol: &Symbol) {
     write_bytes(bytes, symbol.as_str().as_bytes());
 }
 
+fn write_bigint(bytes: &mut Vec<u8>, value: &BigInt) {
+    let (tag, magnitude) = match value.sign() {
+        Sign::Minus => (0u8, value.magnitude().to_bytes_be()),
+        Sign::NoSign => (1u8, Vec::new()),
+        Sign::Plus => (2u8, value.magnitude().to_bytes_be()),
+    };
+    bytes.push(tag);
+    write_bytes(bytes, &magnitude);
+}
+
+fn write_normalized_rational(bytes: &mut Vec<u8>, value: &BigRational) {
+    let value = normalize_rational(value);
+    write_bigint(bytes, value.numer());
+    write_bigint(bytes, value.denom());
+}
+
+fn normalize_rational(value: &BigRational) -> BigRational {
+    if value.denom().is_zero() {
+        value.clone()
+    } else {
+        BigRational::new(value.numer().clone(), value.denom().clone())
+    }
+}
+
 fn write_bytes(bytes: &mut Vec<u8>, value: &[u8]) {
     write_len(bytes, value.len());
     bytes.extend_from_slice(value);
@@ -805,6 +863,8 @@ impl Canonicalizer {
             Term::Nominal(nominal) => Term::Nominal(nominal.clone()),
             Term::Unit(unit) => Term::Unit(unit.clone()),
             Term::Quantity(quantity) => Term::Quantity(quantity.clone()),
+            Term::Integer(value) => Term::Integer(value.clone()),
+            Term::Decimal(value) => Term::Decimal(normalize_rational(value)),
             Term::Record(record) => Term::Record(Record {
                 fields: record
                     .fields
@@ -932,6 +992,63 @@ mod tests {
         let zero = ExactQuantity::zero();
         assert!(zero.value().is_zero());
         assert!(zero.unit().is_none());
+        assert_eq!(
+            ExactQuantity::new(
+                BigRational::new_raw(BigInt::from(1), BigInt::zero()),
+                Some(Unit::new("USD")),
+            ),
+            Err(QuantityError::ZeroDenominator)
+        );
+    }
+
+    #[test]
+    fn scalar_terms_keep_arbitrary_precision_without_floats() {
+        let integer = BigInt::from(10u8).pow(128);
+        let integer_term = Term::integer(integer.clone());
+        assert_eq!(integer_term, Term::Integer(integer));
+
+        let decimal = BigRational::new(BigInt::from(125u8), BigInt::from(100u8));
+        let decimal_term = Term::decimal(decimal.clone());
+        assert_eq!(decimal_term, Term::Decimal(decimal));
+    }
+
+    #[test]
+    fn scalar_canonical_encoding_has_distinct_tags_and_normalized_rationals() {
+        let context = CanonicalContext::default();
+        let integer = canonicalize_term(&Term::integer(7), &context);
+        let decimal = canonicalize_term(
+            &Term::decimal(BigRational::from_integer(BigInt::from(7))),
+            &context,
+        );
+        assert_ne!(decimal.bytes, integer.bytes);
+        assert_eq!(integer.bytes[0], b'i');
+        assert_eq!(decimal.bytes[0], b'd');
+
+        let reduced = canonicalize_term(
+            &Term::decimal(BigRational::new_raw(BigInt::from(2), BigInt::from(4))),
+            &context,
+        );
+        let canonical = canonicalize_term(
+            &Term::decimal(BigRational::new(BigInt::from(1), BigInt::from(2))),
+            &context,
+        );
+        assert_eq!(
+            reduced.value,
+            Term::decimal(BigRational::new(BigInt::from(1), BigInt::from(2)))
+        );
+        assert_eq!(reduced.bytes, canonical.bytes);
+        assert_eq!(reduced.hash, canonical.hash);
+    }
+
+    #[test]
+    fn scalar_canonical_encoding_orders_sign_and_magnitude_unambiguously() {
+        let context = CanonicalContext::default();
+        let negative = canonicalize_term(&Term::integer(-7), &context);
+        let zero = canonicalize_term(&Term::integer(0), &context);
+        let positive = canonicalize_term(&Term::integer(7), &context);
+        assert_ne!(negative.bytes, zero.bytes);
+        assert_ne!(zero.bytes, positive.bytes);
+        assert_ne!(negative.bytes, positive.bytes);
     }
 
     #[test]

@@ -129,6 +129,13 @@ experiments, but it is not part of this contract.
   typed-hole constraints; annotations, surface lowering, and compiler
   integration remain open.
 - [ ] Generic typed holes survive parsing through query results.
+  Package-authored `form` blocks now stay in the single lossless CST and
+  elaborate exact Bool/Text/Integer/Decimal fields and primitive typed holes
+  against a package-root-qualified compiled record schema. Duplicate,
+  malformed, missing, unknown, and ill-typed fields retain source-local
+  diagnostics; the resulting immutable record binds one schema ID and one
+  canonical value hash. Nested row-qualified holes, aliases, refinements,
+  phase wrappers, proof certificates, and query-result transport remain open.
 - [ ] Incremental semantic database with precise dependency invalidation.
   Production elaboration and analysis are memoized through the database with
   exact source/package edges and clean-run equivalence; invalidation within a
@@ -150,7 +157,10 @@ experiments, but it is not part of this contract.
   package. An immutable resolver binds direct record schemas to the exact
   artifact, package root, qualified name, and complete row type. Equivalence
   to the separately represented executable policy-package objects is
-  deliberately not claimed; that conversion proof remains open.
+  deliberately not claimed; that conversion proof remains open. The compiler
+  now revalidates public HIR row order and uniqueness at its authority
+  boundary, and schema-guided record binding normalizes exact integer-to-
+  decimal widening so source spellings cannot fork semantic value identity.
 - [ ] LSP diagnostics, completion, and proof navigation foundation. A typed-HIR
   document index and checked proof-DAG navigator now provide the three core
   operations. A checked authoring surface retains exact source commits, checks
@@ -268,7 +278,7 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 338 library tests, 4 CLI tests, 8 independent reference/production
+- 367 library tests, 4 CLI tests, 8 independent reference/production
   differential tests, and 5 structured-reference outcome tests;
 - 134 named constitutional cases with exactly 75 registry-linked independent
   case-specific tests and 12 grouped smoke suites; semantic review, not the
