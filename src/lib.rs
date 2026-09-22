@@ -42,5 +42,8 @@ pub mod workspace;
 // `Analysis` is the stable result type returned by the workspace boundary.
 // The parser and engine entry points themselves stay crate-private so an
 // external caller cannot accidentally evaluate an uncommitted ledger.
-pub use elaboration::{ElaboratedForm, FormDiagnostic, FormDiagnosticCode, FormElaborationError};
+pub use elaboration::{
+    CompactFormOriginV1, ElaboratedForm, FormDiagnostic, FormDiagnosticCode, FormElaborationError,
+    FormOrigin,
+};
 pub use engine::Analysis;

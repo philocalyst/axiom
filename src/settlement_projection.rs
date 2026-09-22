@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use crate::elaboration::ElaboratedForm;
+use crate::elaboration::{ElaboratedForm, FormOrigin};
 use crate::exact::ExactNumber;
 use crate::ir::{Record, Term, Var};
 use crate::model::{
@@ -49,6 +49,7 @@ pub(crate) struct CapableSettlementForm {
     package_root: ContentHash,
     qualified_schema: String,
     schema_id: ContentHash,
+    origin: FormOrigin,
     record: SettlementStateRecord,
 }
 
@@ -75,6 +76,10 @@ impl CapableSettlementForm {
 
     pub(crate) fn record(&self) -> &SettlementStateRecord {
         &self.record
+    }
+
+    pub(crate) fn origin(&self) -> &FormOrigin {
+        &self.origin
     }
 }
 
@@ -207,6 +212,7 @@ pub(crate) fn project_settlement_states(
             package_root: form.package_root(),
             qualified_schema: form.schema().qualified_name().canonical(),
             schema_id: form.schema().schema_id(),
+            origin: form.origin().clone(),
             record,
         });
     }

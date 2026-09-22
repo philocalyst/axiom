@@ -18,7 +18,7 @@ use crate::hir::{ModulePath, Name, QualifiedName, Type};
 use crate::ir::{Record, Sort, Symbol, Term, Var};
 use crate::model::{ContentHash, OccurrenceId};
 use crate::package_compiler::{
-    CompiledArtifact, FormTemplateV1, MAX_FORM_SURFACE_SOURCE_BYTES_V1,
+    CompiledArtifact, FormFieldMappingV1, FormTemplateV1, MAX_FORM_SURFACE_SOURCE_BYTES_V1,
     MAX_FORM_SURFACE_SOURCE_FIELDS_V1, RecordSchema, RecordSchemaError, RecordValueError,
     SchemaBoundRecord,
 };
@@ -87,6 +87,54 @@ pub struct ElaboratedForm {
     occurrence: OccurrenceId,
     schema: RecordSchema,
     value: SchemaBoundRecord,
+    origin: FormOrigin,
+}
+
+/// The syntax route through which a form reached its checked record value.
+///
+/// This is deliberately retained as read-only metadata on the elaborated
+/// result.  A compact template is copied from the pinned compiled artifact,
+/// after canonicalization; it is not resolved again from a package name and
+/// it carries no semantic authority by itself.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormOrigin {
+    Direct,
+    Compact(CompactFormOriginV1),
+}
+
+/// The normalized package template used to elaborate a compact form.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompactFormOriginV1 {
+    template: QualifiedName,
+    target: QualifiedName,
+    mappings: Vec<FormFieldMappingV1>,
+}
+
+impl CompactFormOriginV1 {
+    pub fn template(&self) -> &QualifiedName {
+        &self.template
+    }
+
+    pub fn target(&self) -> &QualifiedName {
+        &self.target
+    }
+
+    pub fn mappings(&self) -> &[FormFieldMappingV1] {
+        &self.mappings
+    }
+}
+
+impl FormOrigin {
+    pub fn is_direct(&self) -> bool {
+        matches!(self, Self::Direct)
+    }
+
+    pub fn compact(&self) -> Option<&CompactFormOriginV1> {
+        match self {
+            Self::Direct => None,
+            Self::Compact(origin) => Some(origin),
+        }
+    }
 }
 
 impl ElaboratedForm {
@@ -108,6 +156,10 @@ impl ElaboratedForm {
 
     pub fn value(&self) -> &SchemaBoundRecord {
         &self.value
+    }
+
+    pub fn origin(&self) -> &FormOrigin {
+        &self.origin
     }
 }
 
@@ -330,6 +382,7 @@ fn elaborate_form_with_schema_reference(
         occurrence: occurrence.expect("missing occurrence emitted a diagnostic"),
         schema,
         value,
+        origin: FormOrigin::Direct,
     })
 }
 
@@ -362,15 +415,6 @@ fn elaborate_compact_form(
             return Err(FormElaborationError::SchemaResolution { error, diagnostics });
         }
     };
-    if let Some(capability) = schema.capability() {
-        diagnostics.push(FormDiagnostic::error(
-            FormDiagnosticCode::UnsupportedType,
-            schema_span,
-            format!(
-                "compact forms cannot target semantic capability `{capability}` without a versioned replay proof"
-            ),
-        ));
-    }
     if schema.row().is_open() {
         diagnostics.push(FormDiagnostic::error(
             FormDiagnosticCode::UnsupportedType,
@@ -499,6 +543,11 @@ fn elaborate_compact_form(
         occurrence: occurrence.expect("missing occurrence emitted a diagnostic"),
         schema,
         value,
+        origin: FormOrigin::Compact(CompactFormOriginV1 {
+            template: template.name.clone(),
+            target: template.target.clone(),
+            mappings: template.mappings.clone(),
+        }),
     })
 }
 

@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::elaboration;
+use crate::elaboration::FormOrigin;
 use crate::exact::ExactNumber;
 use crate::ir::{Record, Term};
 use crate::model::{
@@ -16,7 +17,9 @@ use crate::model::{
     SourceId,
 };
 use crate::ontology::SettlementState;
-use crate::package_compiler::{CompiledArtifact, RecordSchema, SchemaCapability};
+use crate::package_compiler::{
+    CompiledArtifact, FormFieldMappingV1, RecordSchema, SchemaCapability,
+};
 use crate::settlement_projection::{
     CapableSettlementForm, SettlementProjection, SettlementProjectionError,
 };
@@ -26,6 +29,10 @@ use crate::workspace::BoundPackageForms;
 
 /// The independent settlement proof format.  This is not proof-format-v1.
 pub const SETTLEMENT_STATE_PROOF_VERSION: &str = "axiom/settlement-state-proof/v1";
+/// Versioned settlement proof selected whenever at least one capable form was
+/// authored through a package compact template.  Keeping this as a sibling
+/// version preserves every v1 payload and identity byte-for-byte.
+pub const SETTLEMENT_STATE_PROOF_VERSION_V2: &str = "axiom/settlement-state-proof/v2";
 /// Conservative fixed limits for an in-memory proof object.  These are part
 /// of the checker boundary, not a generic resource framework.
 pub const MAX_SETTLEMENT_PROOF_ROWS: usize = 4096;
@@ -35,6 +42,21 @@ pub const MAX_SETTLEMENT_PROOF_EXACT_BYTES: usize = 4096;
 pub const MAX_SETTLEMENT_PROOF_CANONICAL_BYTES: usize = 1_048_576;
 const OCCURRENCE_HASH_DOMAIN: &str = "axiom/settlement-state-proof/occurrence/v1";
 const COVERAGE_HASH_DOMAIN: &str = "axiom/settlement-state-proof/coverage/v1";
+const COVERAGE_HASH_V2_DOMAIN: &str = "axiom/settlement-state-proof/coverage/v2";
+const CANONICAL_V2_DOMAIN: &str = "axiom/settlement-state-proof/canonical/v2";
+
+/// The syntax origin retained by a v2 capable-form entry.  This is evidence
+/// about how the checked value was authored, not a semantic authority: replay
+/// resolves the pinned artifact and independently derives the same origin.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SettlementStateFormOriginV2 {
+    Direct,
+    Compact {
+        template: String,
+        target: String,
+        mappings: Vec<FormFieldMappingV1>,
+    },
+}
 
 /// The exact source evidence identity from which the proof's forms were
 /// elaborated.  Occurrence and content remain separate identities.
@@ -64,6 +86,9 @@ pub struct SettlementStateV1Entry {
     pub to: EntityId,
     pub instrument: InstrumentId,
     pub amount: Quantity,
+    /// Present only in a v2 proof.  `None` is the historical v1 encoding and
+    /// is intentionally ignored by v1 canonical bytes.
+    pub origin: Option<SettlementStateFormOriginV2>,
 }
 
 /// A self-contained proof of one exact source/artifact/schema capable-form
@@ -141,7 +166,11 @@ impl SettlementStateV1Proof {
         if forms.len() > MAX_SETTLEMENT_PROOF_ROWS {
             return Err(invalid("resource limit: too many settlement proof rows"));
         }
-        let coverage = forms.iter().map(entry_from_form).collect::<Vec<_>>();
+        let v2 = forms.iter().any(|form| form.origin().compact().is_some());
+        let coverage = forms
+            .iter()
+            .map(|form| entry_from_form(form, v2))
+            .collect::<Vec<_>>();
         let source_evidence = SourceEvidenceIdentity {
             evidence,
             source: source.source().clone(),
@@ -150,7 +179,11 @@ impl SettlementStateV1Proof {
             external: source.identity().external.clone(),
         };
         let mut proof = Self {
-            version: SETTLEMENT_STATE_PROOF_VERSION.to_owned(),
+            version: if v2 {
+                SETTLEMENT_STATE_PROOF_VERSION_V2.to_owned()
+            } else {
+                SETTLEMENT_STATE_PROOF_VERSION.to_owned()
+            },
             source_commit: projection.source_commit(),
             compiled_artifact: projection.compiled_artifact(),
             compiled_artifact_hash: projection.artifact_hash(),
@@ -171,14 +204,26 @@ impl SettlementStateV1Proof {
         let mut bytes = Vec::new();
         put_u64(&mut bytes, self.coverage.len() as u64);
         for entry in &self.coverage {
-            encode_entry(&mut bytes, entry);
+            if self.version == SETTLEMENT_STATE_PROOF_VERSION_V2 {
+                encode_entry_v2(&mut bytes, entry);
+            } else {
+                encode_entry(&mut bytes, entry);
+            }
         }
-        ContentHash::domain_separated(COVERAGE_HASH_DOMAIN, &bytes)
+        let domain = if self.version == SETTLEMENT_STATE_PROOF_VERSION_V2 {
+            COVERAGE_HASH_V2_DOMAIN
+        } else {
+            COVERAGE_HASH_DOMAIN
+        };
+        ContentHash::domain_separated(domain, &bytes)
     }
 
     /// Canonical payload used by the dedicated store object family.
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut out = Vec::new();
+        if self.version == SETTLEMENT_STATE_PROOF_VERSION_V2 {
+            put_string(&mut out, CANONICAL_V2_DOMAIN);
+        }
         put_string(&mut out, &self.version);
         put_hash(&mut out, self.source_commit.hash());
         put_hash(&mut out, self.compiled_artifact.hash());
@@ -196,7 +241,11 @@ impl SettlementStateV1Proof {
         );
         put_u64(&mut out, self.coverage.len() as u64);
         for entry in &self.coverage {
-            encode_entry(&mut out, entry);
+            if self.version == SETTLEMENT_STATE_PROOF_VERSION_V2 {
+                encode_entry_v2(&mut out, entry);
+            } else {
+                encode_entry(&mut out, entry);
+            }
         }
         put_hash(&mut out, self.coverage_hash);
         out
@@ -283,10 +332,14 @@ impl SettlementStateV1Proof {
             artifact_hash: self.compiled_artifact_hash,
             forms,
         };
+        let v2 = self.version == SETTLEMENT_STATE_PROOF_VERSION_V2;
         let mut expected = Vec::new();
         for form in bound.forms() {
             if form.schema().capability() != Some(SchemaCapability::SettlementStateV1) {
                 continue;
+            }
+            if !v2 && form.origin().compact().is_some() {
+                return Err(invalid("v1 proof cannot authorize compact capable forms"));
             }
             let qualified_schema = form.schema().qualified_name().canonical();
             let schema = resolve_schema(
@@ -302,7 +355,21 @@ impl SettlementStateV1Proof {
                     "re-elaborated form schema identity is inconsistent",
                 ));
             }
-            expected.push(entry_from_elaborated_form(form)?);
+            expected.push(entry_from_elaborated_form(form, v2)?);
+        }
+        if v2 {
+            if !expected.iter().any(|entry| {
+                matches!(
+                    entry.origin,
+                    Some(SettlementStateFormOriginV2::Compact { .. })
+                )
+            }) {
+                return Err(invalid(
+                    "v2 proof must contain at least one compact capable form",
+                ));
+            }
+        } else if expected.iter().any(|entry| entry.origin.is_some()) {
+            return Err(invalid("v1 proof cannot authorize compact capable forms"));
         }
         validate_independent_history(&expected)?;
         if expected.len() != self.coverage.len() {
@@ -318,7 +385,9 @@ impl SettlementStateV1Proof {
 
     fn check_payload(&self) -> Result<(), SettlementProofError> {
         self.check_resource_limits()?;
-        if self.version != SETTLEMENT_STATE_PROOF_VERSION {
+        if self.version != SETTLEMENT_STATE_PROOF_VERSION
+            && self.version != SETTLEMENT_STATE_PROOF_VERSION_V2
+        {
             return Err(invalid("unsupported proof version"));
         }
         if self.coverage.is_empty() {
@@ -367,6 +436,19 @@ impl SettlementStateV1Proof {
                     "amount must be positive and denominated by instrument",
                 ));
             }
+            match (&self.version[..], &entry.origin) {
+                (SETTLEMENT_STATE_PROOF_VERSION, None) => {}
+                (SETTLEMENT_STATE_PROOF_VERSION, Some(_)) => {
+                    return Err(invalid("v1 coverage cannot contain form origins"));
+                }
+                (SETTLEMENT_STATE_PROOF_VERSION_V2, Some(origin)) => {
+                    validate_origin(origin)?;
+                }
+                (SETTLEMENT_STATE_PROOF_VERSION_V2, None) => {
+                    return Err(invalid("v2 coverage must contain form origins"));
+                }
+                _ => unreachable!("proof version checked above"),
+            }
         }
         validate_independent_history(&self.coverage)
     }
@@ -413,13 +495,150 @@ impl SettlementStateV1Proof {
             }) {
                 return Err(invalid("resource limit: amount unit is too large"));
             }
+            if let Some(SettlementStateFormOriginV2::Compact {
+                template,
+                target,
+                mappings,
+            }) = &entry.origin
+            {
+                for value in [template.as_str(), target.as_str()] {
+                    if value.len() > MAX_SETTLEMENT_PROOF_IDENTIFIER_BYTES {
+                        return Err(invalid(
+                            "resource limit: form template identity is too large",
+                        ));
+                    }
+                }
+                if mappings.len() > crate::package_compiler::MAX_FORM_SURFACE_MAPPINGS_V1 {
+                    return Err(invalid(
+                        "resource limit: form template mapping count is too large",
+                    ));
+                }
+                for mapping in mappings {
+                    if mapping.source.len() > MAX_SETTLEMENT_PROOF_IDENTIFIER_BYTES
+                        || mapping.target.len() > MAX_SETTLEMENT_PROOF_IDENTIFIER_BYTES
+                    {
+                        return Err(invalid(
+                            "resource limit: form template mapping is too large",
+                        ));
+                    }
+                }
+            }
         }
-        if self.canonical_bytes().len() > MAX_SETTLEMENT_PROOF_CANONICAL_BYTES {
+        self.check_canonical_size()?;
+        Ok(())
+    }
+
+    /// Bound the canonical payload without constructing it.  This must run
+    /// before `canonical_bytes`: compact origins are repeated once per proof
+    /// row, so a caller-controlled mapping vector must never force a large
+    /// temporary allocation merely to discover that the final payload is too
+    /// large.
+    fn check_canonical_size(&self) -> Result<(), SettlementProofError> {
+        let limit = MAX_SETTLEMENT_PROOF_CANONICAL_BYTES;
+        let mut size = 0usize;
+        if self.version == SETTLEMENT_STATE_PROOF_VERSION_V2
+            && !bounded_string(&mut size, CANONICAL_V2_DOMAIN, limit)
+        {
+            return Err(invalid(
+                "resource limit: canonical proof payload is too large",
+            ));
+        }
+        if !bounded_string(&mut size, &self.version, limit)
+            || !bounded_add(&mut size, 5 * 32, limit)
+            || !bounded_string(&mut size, self.source_evidence.source.as_str(), limit)
+            || !bounded_string(&mut size, self.source_evidence.occurrence.as_str(), limit)
+            || !bounded_add(&mut size, 1, limit)
+            || self
+                .source_evidence
+                .external
+                .as_ref()
+                .is_some_and(|value| !bounded_string(&mut size, value.as_str(), limit))
+            || !bounded_add(&mut size, 8, limit)
+            || self
+                .coverage
+                .iter()
+                .any(|entry| !encoded_entry_size(&mut size, entry, self.version.as_str(), limit))
+            || !bounded_add(&mut size, 32, limit)
+        {
             return Err(invalid(
                 "resource limit: canonical proof payload is too large",
             ));
         }
         Ok(())
+    }
+}
+
+fn bounded_add(size: &mut usize, amount: usize, limit: usize) -> bool {
+    let Some(next) = size.checked_add(amount) else {
+        return false;
+    };
+    if next > limit {
+        return false;
+    }
+    *size = next;
+    true
+}
+
+fn bounded_string(size: &mut usize, value: &str, limit: usize) -> bool {
+    bounded_add(size, 8, limit) && bounded_add(size, value.len(), limit)
+}
+
+fn encoded_entry_size(
+    size: &mut usize,
+    entry: &SettlementStateV1Entry,
+    version: &str,
+    limit: usize,
+) -> bool {
+    for value in [
+        entry.occurrence.as_str(),
+        entry.qualified_schema.as_str(),
+        entry.settlement.as_str(),
+        kind_name(entry.rail),
+        state_name(&entry.state),
+        entry.from.as_str(),
+        entry.to.as_str(),
+        entry.instrument.as_str(),
+        entry.amount.number.canonical_string().as_str(),
+    ] {
+        if !bounded_string(size, value, limit) {
+            return false;
+        }
+    }
+    if !bounded_add(size, 32 + 32 + 32 + 32 + 6, limit) || !bounded_add(size, 1, limit) {
+        return false;
+    }
+    if let Some(unit) = entry.amount.unit()
+        && !bounded_string(size, &unit.to_string(), limit)
+    {
+        return false;
+    }
+    if version != SETTLEMENT_STATE_PROOF_VERSION_V2 {
+        return true;
+    }
+    match entry.origin.as_ref() {
+        Some(SettlementStateFormOriginV2::Direct) => bounded_string(size, "direct", limit),
+        Some(SettlementStateFormOriginV2::Compact {
+            template,
+            target,
+            mappings,
+        }) => {
+            if !bounded_string(size, "compact", limit)
+                || !bounded_string(size, template, limit)
+                || !bounded_string(size, target, limit)
+                || !bounded_add(size, 8, limit)
+            {
+                return false;
+            }
+            for mapping in mappings {
+                if !bounded_string(size, &mapping.source, limit)
+                    || !bounded_string(size, &mapping.target, limit)
+                {
+                    return false;
+                }
+            }
+            true
+        }
+        None => bounded_string(size, "missing-origin", limit),
     }
 }
 
@@ -457,6 +676,7 @@ fn parse_qualified_schema(source: &str) -> Result<crate::hir::QualifiedName, Set
 /// contract at the proof authority boundary.
 fn entry_from_elaborated_form(
     form: &elaboration::ElaboratedForm,
+    include_origin: bool,
 ) -> Result<SettlementStateV1Entry, SettlementProofError> {
     let occurrence = form.occurrence().clone();
     let occurrence_text = occurrence.as_str();
@@ -564,7 +784,19 @@ fn entry_from_elaborated_form(
         to,
         instrument,
         amount,
+        origin: include_origin.then(|| origin_from_form(form.origin())),
     })
+}
+
+fn origin_from_form(origin: &FormOrigin) -> SettlementStateFormOriginV2 {
+    match origin {
+        FormOrigin::Direct => SettlementStateFormOriginV2::Direct,
+        FormOrigin::Compact(compact) => SettlementStateFormOriginV2::Compact {
+            template: compact.template().canonical(),
+            target: compact.target().canonical(),
+            mappings: compact.mappings().to_vec(),
+        },
+    }
 }
 
 fn form_text<'a>(
@@ -773,7 +1005,7 @@ fn independent_transition_is_legal(
     }
 }
 
-fn entry_from_form(form: &CapableSettlementForm) -> SettlementStateV1Entry {
+fn entry_from_form(form: &CapableSettlementForm, include_origin: bool) -> SettlementStateV1Entry {
     let record = form.record();
     SettlementStateV1Entry {
         occurrence: form.occurrence().clone(),
@@ -792,6 +1024,7 @@ fn entry_from_form(form: &CapableSettlementForm) -> SettlementStateV1Entry {
         to: record.to.entity.clone(),
         instrument: record.instrument.clone(),
         amount: record.amount.clone(),
+        origin: include_origin.then(|| origin_from_form(form.origin())),
     }
 }
 
@@ -801,6 +1034,39 @@ fn occurrence_hash(occurrence: &OccurrenceId) -> ContentHash {
 
 fn invalid(reason: impl Into<String>) -> SettlementProofError {
     SettlementProofError::Invalid(reason.into())
+}
+
+fn validate_origin(origin: &SettlementStateFormOriginV2) -> Result<(), SettlementProofError> {
+    match origin {
+        SettlementStateFormOriginV2::Direct => Ok(()),
+        SettlementStateFormOriginV2::Compact {
+            template,
+            target,
+            mappings,
+        } => {
+            if !canonical_identifier(template)
+                || !canonical_identifier(target)
+                || mappings.is_empty()
+            {
+                return Err(invalid("compact form origin is not canonical"));
+            }
+            let mut sources = BTreeSet::new();
+            let mut targets = BTreeSet::new();
+            for mapping in mappings {
+                if !canonical_identifier(&mapping.source)
+                    || !canonical_identifier(&mapping.target)
+                    || !sources.insert(mapping.source.clone())
+                    || !targets.insert(mapping.target.clone())
+                {
+                    return Err(invalid("compact form origin mapping is not canonical"));
+                }
+            }
+            if mappings.windows(2).any(|pair| pair[0] > pair[1]) {
+                return Err(invalid("compact form origin mapping is not normalized"));
+            }
+            Ok(())
+        }
+    }
 }
 
 fn canonical_identifier(value: &str) -> bool {
@@ -879,4 +1145,26 @@ fn encode_entry(out: &mut Vec<u8>, entry: &SettlementStateV1Entry) {
     put_string(out, entry.instrument.as_str());
     put_string(out, &entry.amount.number.canonical_string());
     put_optional_string(out, entry.amount.unit().map(ToString::to_string).as_deref());
+}
+
+fn encode_entry_v2(out: &mut Vec<u8>, entry: &SettlementStateV1Entry) {
+    encode_entry(out, entry);
+    match entry.origin.as_ref() {
+        Some(SettlementStateFormOriginV2::Direct) => put_string(out, "direct"),
+        Some(SettlementStateFormOriginV2::Compact {
+            template,
+            target,
+            mappings,
+        }) => {
+            put_string(out, "compact");
+            put_string(out, template);
+            put_string(out, target);
+            put_u64(out, mappings.len() as u64);
+            for mapping in mappings {
+                put_string(out, &mapping.source);
+                put_string(out, &mapping.target);
+            }
+        }
+        None => put_string(out, "missing-origin"),
+    }
 }

@@ -21,6 +21,11 @@ const RECORD_SCHEMA_DOMAIN: &str = "axiom/package-record-schema/v1";
 const CAPABILITY_RECORD_SCHEMA_DOMAIN: &str = "axiom/package-record-schema/v2";
 const RECORD_VALUE_DOMAIN: &str = "axiom/package-record-value/v1";
 const FORM_SURFACE_ARTIFACT_DOMAIN: &str = "axiom/package-artifact/v3";
+// A semantic capability embedded in a package-local form surface changes the
+// meaning of elaboration.  Keep those inputs out of every historical v1/v2/v3
+// identity domain, even though ordinary (non-capable) form surfaces retain
+// their v3 identities byte-for-byte.
+const SEMANTIC_FORM_SURFACE_ARTIFACT_DOMAIN: &str = "axiom/package-artifact/v4";
 
 /// Resource bounds for the deliberately small declarative authoring surface.
 /// These are part of the format contract: callers must not be able to turn a
@@ -319,7 +324,11 @@ impl PackageInput {
         let domain = if self.form_surface.is_some() {
             put_schema_capabilities(&mut bytes, &self.schema_capabilities);
             put_form_surface(&mut bytes, self.form_surface.as_ref());
-            "axiom/package-input/v3"
+            if has_semantic_form_surface(self.form_surface.as_ref(), &self.schema_capabilities) {
+                "axiom/package-input/v4"
+            } else {
+                "axiom/package-input/v3"
+            }
         } else if self.schema_capabilities.is_empty() {
             "axiom/package-input/v1"
         } else {
@@ -442,7 +451,12 @@ impl CompiledPackage {
         let domain = if self.schema_capabilities.is_empty() {
             if self.form_surface.is_some() {
                 put_form_surface(&mut bytes, self.form_surface.as_ref());
-                "axiom/package-root/v3"
+                if has_semantic_form_surface(self.form_surface.as_ref(), &self.schema_capabilities)
+                {
+                    "axiom/package-root/v4"
+                } else {
+                    "axiom/package-root/v3"
+                }
             } else {
                 "axiom/package-root/v1"
             }
@@ -450,7 +464,12 @@ impl CompiledPackage {
             put_schema_capabilities(&mut bytes, &self.schema_capabilities);
             if self.form_surface.is_some() {
                 put_form_surface(&mut bytes, self.form_surface.as_ref());
-                "axiom/package-root/v3"
+                if has_semantic_form_surface(self.form_surface.as_ref(), &self.schema_capabilities)
+                {
+                    "axiom/package-root/v4"
+                } else {
+                    "axiom/package-root/v3"
+                }
             } else {
                 "axiom/package-root/v2"
             }
@@ -1440,6 +1459,21 @@ fn canonical_schema_capabilities(
     capabilities
 }
 
+fn has_semantic_form_surface(
+    surface: Option<&FormSurfaceV1>,
+    capabilities: &[SchemaCapabilityBinding],
+) -> bool {
+    let Some(surface) = surface else {
+        return false;
+    };
+    surface.templates.iter().any(|template| {
+        capabilities.iter().any(|binding| {
+            binding.qualified_name == template.target
+                && matches!(binding.capability, SchemaCapability::SettlementStateV1)
+        })
+    })
+}
+
 /// Validate the one canonical capability representation against the exports
 /// in an artifact. This is deliberately shared by compilation and artifact
 /// verification so a capability can never be checked under subtly different
@@ -1592,24 +1626,25 @@ fn validate_form_surfaces(
                     },
                 });
             }
-            if package
+            if let Some(capability) = package
                 .schema_capabilities
                 .iter()
-                .any(|binding| binding.qualified_name == template.target)
+                .find(|binding| binding.qualified_name == template.target)
+                .map(|binding| binding.capability)
             {
-                let capability = package
-                    .schema_capabilities
-                    .iter()
-                    .find(|binding| binding.qualified_name == template.target)
-                    .expect("capability checked above")
-                    .capability;
-                return Err(PackageCompileError::InvalidFormSurface {
-                    package: package.name.clone(),
-                    reason: FormSurfaceValidationError::TargetCarriesCapability {
-                        template: template.name.canonical(),
-                        capability,
-                    },
-                });
+                // SettlementStateV1 is the one capability whose package
+                // authoring syntax has an independently replayable proof.
+                // Every future capability must opt into its own versioned
+                // replay contract before compact syntax can target it.
+                if !matches!(capability, SchemaCapability::SettlementStateV1) {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::TargetCarriesCapability {
+                            template: template.name.canonical(),
+                            capability,
+                        },
+                    });
+                }
             }
 
             let mut sources = BTreeSet::new();
@@ -1970,7 +2005,12 @@ fn artifact_hash(
     let has_form_surfaces = packages
         .iter()
         .any(|package| package.form_surface.is_some());
-    let domain = if has_form_surfaces {
+    let has_semantic_form_surfaces = packages.iter().any(|package| {
+        has_semantic_form_surface(package.form_surface.as_ref(), &package.schema_capabilities)
+    });
+    let domain = if has_semantic_form_surfaces {
+        SEMANTIC_FORM_SURFACE_ARTIFACT_DOMAIN
+    } else if has_form_surfaces {
         FORM_SURFACE_ARTIFACT_DOMAIN
     } else if packages
         .iter()
@@ -3369,7 +3409,7 @@ mod tests {
     }
 
     #[test]
-    fn artifact_coherence_rejects_compact_capability_target() {
+    fn artifact_coherence_allows_the_settlement_capability_target() {
         let (input, schema) = settlement_state_input();
         let lock = lockfile(std::slice::from_ref(&input.manifest));
         let mut artifact = compile([input], &lock).unwrap();
@@ -3380,13 +3420,7 @@ mod tests {
                 .into_iter()
                 .map(|(name, _)| FormFieldMappingV1::new(name, name)),
         )]));
-        assert!(matches!(
-            artifact.validate_internal_coherence(),
-            Err(PackageCompileError::InvalidFormSurface {
-                reason: FormSurfaceValidationError::TargetCarriesCapability { .. },
-                ..
-            })
-        ));
+        assert!(artifact.validate_internal_coherence().is_ok());
     }
 
     #[test]
