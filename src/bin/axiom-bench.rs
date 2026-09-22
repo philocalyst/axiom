@@ -452,6 +452,7 @@ struct Options {
     rss_probe: bool,
     settlement_boundary_probe: bool,
     settlement_surface: SettlementSurface,
+    settlement_surface_explicit: bool,
 }
 
 fn main() {
@@ -466,6 +467,14 @@ fn run() -> Result<(), String> {
     if options.help {
         print_help();
         return Ok(());
+    }
+    if options.settlement_surface_explicit
+        && options.workload != Some(Workload::SettlementStateProof)
+    {
+        return Err("--settlement-surface requires --workload settlement-state-proof".to_string());
+    }
+    if options.settlement_surface_explicit && options.self_test {
+        return Err("--settlement-surface cannot be combined with --self-test".to_string());
     }
     if options.rss_probe {
         let workload = options
@@ -482,11 +491,21 @@ fn run() -> Result<(), String> {
             options.settlement_surface,
         )?;
         let peak = process_peak_memory_bytes();
-        println!(
-            "{{\"schema\":\"{SCHEMA}\",\"kind\":\"rss_probe\",\"workload\":\"{}\",\"peak_memory_bytes\":{}}}",
-            workload.name(),
-            option_number(peak.map(|value| value as u128))
-        );
+        if workload == Workload::SettlementStateProof {
+            println!(
+                "{{\"schema\":\"{SCHEMA}\",\"kind\":\"rss_probe\",\"workload\":\"{}\",\"peak_memory_bytes\":{},\"settlement_surface_profile\":\"{}\",\"settlement_proof_version\":\"{}\"}}",
+                workload.name(),
+                option_number(peak.map(|value| value as u128)),
+                options.settlement_surface.profile(),
+                options.settlement_surface.proof_version(),
+            );
+        } else {
+            println!(
+                "{{\"schema\":\"{SCHEMA}\",\"kind\":\"rss_probe\",\"workload\":\"{}\",\"peak_memory_bytes\":{}}}",
+                workload.name(),
+                option_number(peak.map(|value| value as u128))
+            );
+        }
         return Ok(());
     }
     if options.settlement_boundary_probe {
@@ -505,8 +524,11 @@ fn run() -> Result<(), String> {
             settlement_state_batch(0, profile.total_items, false, profile.surface.is_compact())?;
         let execution = execute_settlement_path(&source, 0, profile.surface)?;
         println!(
-            "{{\"schema\":\"{SCHEMA}\",\"kind\":\"settlement_boundary_probe\",\"workload\":\"settlement-state-proof\",\"forms\":{},\"proof_bytes\":{}}}",
-            execution.forms, execution.oracle.proof_bytes
+            "{{\"schema\":\"{SCHEMA}\",\"kind\":\"settlement_boundary_probe\",\"workload\":\"settlement-state-proof\",\"forms\":{},\"proof_bytes\":{},\"settlement_surface_profile\":\"{}\",\"settlement_proof_version\":\"{}\"}}",
+            execution.forms,
+            execution.oracle.proof_bytes,
+            profile.surface.profile(),
+            profile.surface.proof_version(),
         );
         return Ok(());
     }
@@ -558,6 +580,7 @@ impl Options {
             rss_probe: false,
             settlement_boundary_probe: false,
             settlement_surface: SettlementSurface::DirectV1,
+            settlement_surface_explicit: false,
         };
         let args: Vec<String> = args.collect();
         let mut index = 0;
@@ -573,11 +596,13 @@ impl Options {
                         "--settlement-surface requires direct-v1 or compact-v1".to_string()
                     })?;
                     options.settlement_surface = SettlementSurface::parse(value)?;
+                    options.settlement_surface_explicit = true;
                 }
                 value if value.starts_with("--settlement-surface=") => {
                     options.settlement_surface = SettlementSurface::parse(
                         value.trim_start_matches("--settlement-surface="),
                     )?;
+                    options.settlement_surface_explicit = true;
                 }
                 "-h" | "--help" => options.help = true,
                 "--scale" => {
@@ -1560,7 +1585,6 @@ fn median_settlement_timings(
             let (commit, artifact_id, artifact) =
                 pin_settlement_workspace(&mut workspace, &source, package_input, &lockfile)?;
             setup_total += start.elapsed().as_nanos();
-            let document_projection_start = Instant::now();
             let document_start = Instant::now();
             let forms = workspace
                 .elaborate_package_forms(commit)
@@ -1574,6 +1598,9 @@ fn median_settlement_timings(
             }
             black_box((forms.forms().len(), artifact.artifact_hash()));
             document_total += document_start.elapsed().as_nanos();
+            // This metric is projection-only. Document elaboration above has
+            // its own timer and must not be charged a second time here.
+            let document_projection_start = Instant::now();
             let projected = workspace
                 .project_settlement_states(commit)
                 .map_err(|error| format!("settlement projection failed: {error}"))?;
@@ -2356,13 +2383,32 @@ fn isolated_peak_memory_bytes(
     }
     let line = lines[0];
     let prefix = format!(
-        "{{\"schema\":\"{SCHEMA}\",\"kind\":\"rss_probe\",\"workload\":\"{}\",\"peak_memory_bytes\":",
+        "{{\"schema\":\"{SCHEMA}\",\"kind\":\"rss_probe\",\"workload\":\"{}\",",
         workload.name()
     );
-    let value = line
+    let payload = line
         .strip_prefix(&prefix)
-        .and_then(|value| value.strip_suffix('}'))
         .ok_or_else(|| format!("RSS probe returned malformed JSON: {line}"))?;
+    let value = payload
+        .strip_prefix("\"peak_memory_bytes\":")
+        .and_then(|value| value.split([',', '}']).next())
+        .ok_or_else(|| format!("RSS probe returned malformed JSON: {line}"))?;
+    if workload == Workload::SettlementStateProof {
+        let profile = format!(
+            "\"settlement_surface_profile\":\"{}\"",
+            settlement_surface.profile()
+        );
+        let version = format!(
+            "\"settlement_proof_version\":\"{}\"",
+            settlement_surface.proof_version()
+        );
+        if !line.contains(&profile) || !line.contains(&version) {
+            return Err(format!(
+                "RSS probe provenance does not match {}: {line}",
+                settlement_surface.profile()
+            ));
+        }
+    }
     if value == "null" {
         return Ok(None);
     }

@@ -467,6 +467,89 @@ fn settlement_compact_surface_reports_v2_provenance_without_masquerading_as_v1()
 }
 
 #[test]
+fn settlement_probe_outputs_identify_direct_and_compact_authority() {
+    for (compact, profile, version) in [
+        (false, "direct_v1", "axiom/settlement-state-proof/v1"),
+        (
+            true,
+            "compact_v1_proof_v2",
+            "axiom/settlement-state-proof/v2",
+        ),
+    ] {
+        let mut rss_args = vec![
+            "--quick".to_owned(),
+            "--rss-probe".to_owned(),
+            "--workload".to_owned(),
+            "settlement-state-proof".to_owned(),
+        ];
+        let mut boundary_args = vec![
+            "--quick".to_owned(),
+            "--settlement-boundary-probe".to_owned(),
+            "--workload".to_owned(),
+            "settlement-state-proof".to_owned(),
+        ];
+        if compact {
+            rss_args.extend(["--settlement-surface".to_owned(), "compact-v1".to_owned()]);
+            boundary_args.extend(["--settlement-surface".to_owned(), "compact-v1".to_owned()]);
+        }
+        for args in [rss_args, boundary_args] {
+            let output = Command::new(env!("CARGO_BIN_EXE_axiom-bench"))
+                .args(args)
+                .output()
+                .expect("settlement probe should start");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let value: Value = serde_json::from_slice(&output.stdout).expect("probe JSON");
+            assert_eq!(value["settlement_surface_profile"].as_str(), Some(profile));
+            assert_eq!(value["settlement_proof_version"].as_str(), Some(version));
+        }
+    }
+}
+
+#[test]
+fn settlement_surface_flag_rejects_unrelated_and_self_test_invocations() {
+    for (args, expected) in [
+        (
+            vec!["--quick", "--settlement-surface", "compact-v1"],
+            "--settlement-surface requires --workload settlement-state-proof",
+        ),
+        (
+            vec![
+                "--quick",
+                "--workload",
+                "invoice-payment-graph",
+                "--settlement-surface",
+                "compact-v1",
+            ],
+            "--settlement-surface requires --workload settlement-state-proof",
+        ),
+        (
+            vec![
+                "--self-test",
+                "--workload",
+                "settlement-state-proof",
+                "--settlement-surface",
+                "compact-v1",
+            ],
+            "--settlement-surface cannot be combined with --self-test",
+        ),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_axiom-bench"))
+            .args(args)
+            .output()
+            .expect("benchmark should start");
+        assert!(!output.status.success());
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr).trim(),
+            format!("axiom-bench: {expected}")
+        );
+    }
+}
+
+#[test]
 #[ignore = "release stress gate for the discovered public settlement-persistence boundary"]
 fn settlement_state_proof_scale_boundary_discovers_maximum() {
     fn run(scale: u64) -> std::process::Output {
