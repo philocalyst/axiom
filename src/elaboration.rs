@@ -18,7 +18,9 @@ use crate::hir::{ModulePath, Name, QualifiedName, Type};
 use crate::ir::{Record, Sort, Symbol, Term, Var};
 use crate::model::{ContentHash, OccurrenceId};
 use crate::package_compiler::{
-    CompiledArtifact, RecordSchema, RecordSchemaError, RecordValueError, SchemaBoundRecord,
+    CompiledArtifact, FormTemplateV1, MAX_FORM_SURFACE_SOURCE_BYTES_V1,
+    MAX_FORM_SURFACE_SOURCE_FIELDS_V1, RecordSchema, RecordSchemaError, RecordValueError,
+    SchemaBoundRecord,
 };
 use crate::surface::{FormView, NodeId, Severity, Span, Token, TokenKind};
 
@@ -44,6 +46,7 @@ pub enum FormDiagnosticCode {
     UnsupportedType,
     DuplicateOccurrence,
     InternalValueCheck,
+    ResourceLimit,
 }
 
 /// A diagnostic whose span points into the exact source retained by
@@ -185,7 +188,12 @@ fn elaborate_form(
         return Err(FormElaborationError::Diagnostics(diagnostics));
     };
 
-    elaborate_form_with_schema_reference(form, artifact, package_root, schema_reference)
+    match artifact.resolve_form_template(package_root, &schema_reference.qualified_name) {
+        Ok(template) => elaborate_compact_form(form, artifact, package_root, &template),
+        Err(_) => {
+            elaborate_form_with_schema_reference(form, artifact, package_root, schema_reference)
+        }
+    }
 }
 
 fn elaborate_form_with_schema_reference(
@@ -325,6 +333,175 @@ fn elaborate_form_with_schema_reference(
     })
 }
 
+/// Lower one compact package-defined form by expanding only its validated
+/// one-hop field mapping. The resulting record still crosses the same
+/// `SchemaBoundRecord` checker as a canonical form; the template is not a
+/// second schema or a capability authority.
+fn elaborate_compact_form(
+    form: FormView<'_>,
+    artifact: &CompiledArtifact,
+    package_root: ContentHash,
+    template: &FormTemplateV1,
+) -> Result<ElaboratedForm, FormElaborationError> {
+    let mut diagnostics = Vec::new();
+    add_form_header_diagnostics(form, &mut diagnostics);
+    let occurrence = parse_occurrence(form, &mut diagnostics);
+    let schema_span = form
+        .schema_parts()
+        .next()
+        .map_or_else(|| form.node().span, |token| token.span);
+    let schema = match artifact.resolve_record_schema(package_root, &template.target) {
+        Ok(schema) => schema,
+        Err(error) => {
+            diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::UnknownSchema,
+                schema_span,
+                error.to_string(),
+            ));
+            sort_diagnostics(&mut diagnostics);
+            return Err(FormElaborationError::SchemaResolution { error, diagnostics });
+        }
+    };
+    if let Some(capability) = schema.capability() {
+        diagnostics.push(FormDiagnostic::error(
+            FormDiagnosticCode::UnsupportedType,
+            schema_span,
+            format!(
+                "compact forms cannot target semantic capability `{capability}` without a versioned replay proof"
+            ),
+        ));
+    }
+    if schema.row().is_open() {
+        diagnostics.push(FormDiagnostic::error(
+            FormDiagnosticCode::UnsupportedType,
+            schema_span,
+            "compact form target must be a closed record",
+        ));
+    }
+
+    let mappings = template
+        .mappings
+        .iter()
+        .map(|mapping| (mapping.source.as_str(), mapping.target.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    let mut fields = BTreeMap::<Symbol, Term>::new();
+    let mut source_fields = BTreeMap::<String, Span>::new();
+    let mut hole_table = HoleTable::default();
+    let schema_fields = schema.row().fields();
+    let source_field_count = form.fields().count();
+    if source_field_count > MAX_FORM_SURFACE_SOURCE_FIELDS_V1 {
+        diagnostics.push(FormDiagnostic::error(
+            FormDiagnosticCode::ResourceLimit,
+            form.node().span,
+            format!(
+                "compact form has {source_field_count} source fields; limit is {MAX_FORM_SURFACE_SOURCE_FIELDS_V1}"
+            ),
+        ));
+        return Err(FormElaborationError::Diagnostics(diagnostics));
+    }
+
+    for field in form.fields() {
+        let meaningful = field
+            .tokens()
+            .iter()
+            .filter(|token| !token.is_trivia())
+            .collect::<Vec<_>>();
+        let Some(name_token) = meaningful.first().copied() else {
+            continue;
+        };
+        if name_token.kind != TokenKind::Identifier {
+            diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::MalformedField,
+                field.span(),
+                "compact form field must begin with an identifier",
+            ));
+            continue;
+        }
+        let source = name_token.lexeme.clone();
+        let field_span = field.span();
+        if source_fields.insert(source.clone(), field_span).is_some() {
+            diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::DuplicateField,
+                name_token.span,
+                format!("duplicate compact source field `{source}`"),
+            ));
+            continue;
+        }
+        let Some(target) = mappings.get(source.as_str()).copied() else {
+            diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::UnknownField,
+                name_token.span,
+                format!(
+                    "compact source field `{source}` is not declared by template `{}`",
+                    template.name.canonical()
+                ),
+            ));
+            continue;
+        };
+        let Some(schema_field) = schema_fields
+            .iter()
+            .find(|schema_field| schema_field.name.as_str() == target)
+        else {
+            diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::UnknownField,
+                name_token.span,
+                format!("template target field `{target}` is not declared by the record schema"),
+            ));
+            continue;
+        };
+        let values = meaningful.into_iter().skip(1).collect::<Vec<_>>();
+        if values.iter().any(|token| token.kind.is_hole()) {
+            let span = values
+                .iter()
+                .find(|token| token.kind.is_hole())
+                .map_or(field_span, |token| token.span);
+            diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::UnsupportedType,
+                span,
+                "compact forms do not support inference holes",
+            ));
+        } else if let Some(value) = elaborate_value(
+            &schema_field.ty,
+            &values,
+            field_span,
+            &mut hole_table,
+            &mut diagnostics,
+        ) {
+            fields.insert(Symbol::from(target), value);
+        }
+    }
+
+    for schema_field in schema_fields {
+        let target = schema_field.name.as_str();
+        if !fields.contains_key(&Symbol::from(target)) {
+            diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::MissingField,
+                form.node().span,
+                format!("compact form is missing source mapping/value for target field `{target}`"),
+            ));
+        }
+    }
+    sort_diagnostics(&mut diagnostics);
+    if !diagnostics.is_empty() {
+        return Err(FormElaborationError::Diagnostics(diagnostics));
+    }
+
+    let record = Record::closed(fields);
+    let value = schema.check_concrete_record(&record).map_err(|error| {
+        FormElaborationError::Diagnostics(vec![value_error_diagnostic(
+            &error,
+            &source_fields,
+            form.node().span,
+        )])
+    })?;
+    Ok(ElaboratedForm {
+        node_id: form.node().id,
+        occurrence: occurrence.expect("missing occurrence emitted a diagnostic"),
+        schema,
+        value,
+    })
+}
+
 fn add_form_header_diagnostics(form: FormView<'_>, diagnostics: &mut Vec<FormDiagnostic>) {
     if let Some(error) = form.node().error.as_ref() {
         diagnostics.push(FormDiagnostic::error(
@@ -378,6 +555,25 @@ pub(crate) fn elaborate_document(
     let mut elaborated = Vec::new();
     let mut occurrences = BTreeSet::new();
     let mut diagnostics = Vec::new();
+
+    if artifact
+        .packages()
+        .iter()
+        .any(|package| package.form_surface().is_some())
+        && file.lossless().len() > MAX_FORM_SURFACE_SOURCE_BYTES_V1
+    {
+        diagnostics.push(FormDiagnostic::error(
+            FormDiagnosticCode::ResourceLimit,
+            file.forms()
+                .next()
+                .map_or_else(Span::default, |form| form.node().span),
+            format!(
+                "source is {} bytes; compact form surface limit is {MAX_FORM_SURFACE_SOURCE_BYTES_V1}",
+                file.lossless().len()
+            ),
+        ));
+        return Err(FormElaborationError::Diagnostics(diagnostics));
+    }
 
     // Occurrence identity belongs to the source document, even when a form's
     // schema or fields are invalid. Reserve every well-spelled occurrence up
@@ -433,12 +629,16 @@ pub(crate) fn elaborate_document(
             continue;
         };
 
-        match elaborate_form_with_schema_reference(
-            form,
-            artifact,
-            package.root_hash(),
-            schema_reference,
-        ) {
+        let package_root = package.root_hash();
+        let result = match artifact
+            .resolve_form_template(package_root, &schema_reference.qualified_name)
+        {
+            Ok(template) => elaborate_compact_form(form, artifact, package_root, &template),
+            Err(_) => {
+                elaborate_form_with_schema_reference(form, artifact, package_root, schema_reference)
+            }
+        };
+        match result {
             Ok(value) => elaborated.push(value),
             Err(error) => diagnostics.extend(error.diagnostics().iter().cloned()),
         }
@@ -811,7 +1011,9 @@ fn sort_diagnostics(diagnostics: &mut [FormDiagnostic]) {
 mod tests {
     use super::*;
     use crate::hir::{AstDeclaration, AstDeclarationKind, AstModule, AstType, Span as HirSpan};
-    use crate::package_compiler::{PackageInput, compile};
+    use crate::package_compiler::{
+        FormFieldMappingV1, FormSurfaceV1, FormTemplateV1, PackageInput, compile,
+    };
     use crate::package_lock::{
         Dependency, LockedPackage, Lockfile, PackageManifest, Version, VersionReq,
     };
@@ -893,6 +1095,59 @@ mod tests {
             PackageInput::new(manifest, [module])
         });
         compile(inputs, &lock).unwrap()
+    }
+
+    fn compact_artifact() -> (CompiledArtifact, ContentHash) {
+        let manifest = PackageManifest::new("billing", Version::new(1, 0, 0), "types");
+        let lock = Lockfile {
+            roots: vec![Dependency::new(
+                "billing",
+                VersionReq::Exact(manifest.version),
+            )],
+            packages: vec![LockedPackage {
+                name: manifest.name.clone(),
+                version: manifest.version,
+                hash: manifest.hash(),
+                dependencies: Vec::new(),
+            }],
+        };
+        let module = crate::hir::lower(AstModule {
+            path: ModulePath::root(Name::new("types").unwrap()),
+            declarations: vec![AstDeclaration {
+                name: "Invoice".to_owned(),
+                kind: AstDeclarationKind::Type(AstType::Record {
+                    fields: vec![
+                        ("approved".to_owned(), AstType::Bool),
+                        ("count".to_owned(), AstType::Integer),
+                        ("note".to_owned(), AstType::Text),
+                    ],
+                    open_tail: None,
+                }),
+                span: HirSpan::new(0, 7),
+            }],
+        });
+        let surface = FormSurfaceV1::new([FormTemplateV1::new(
+            QualifiedName {
+                module: ModulePath::root(Name::new("forms").unwrap()),
+                name: Name::new("CompactInvoice").unwrap(),
+            },
+            QualifiedName {
+                module: ModulePath::root(Name::new("types").unwrap()),
+                name: Name::new("Invoice").unwrap(),
+            },
+            [
+                FormFieldMappingV1::new("ok", "approved"),
+                FormFieldMappingV1::new("n", "count"),
+                FormFieldMappingV1::new("memo", "note"),
+            ],
+        )]);
+        let artifact = compile(
+            [PackageInput::new(manifest, [module]).with_form_surface(surface)],
+            &lock,
+        )
+        .unwrap();
+        let root = artifact.package_roots()[0];
+        (artifact, root)
     }
 
     #[test]
@@ -994,6 +1249,32 @@ mod tests {
         let first = elaborate_form(first.forms().next().unwrap(), &artifact, root).unwrap();
         let second = elaborate_form(second.forms().next().unwrap(), &artifact, root).unwrap();
         assert_eq!(first.value(), second.value());
+    }
+
+    #[test]
+    fn compact_form_expands_to_the_same_checked_value_and_keeps_source_spans() {
+        let (artifact, root) = compact_artifact();
+        let canonical = SurfaceFile::parse(
+            "form invoice/1 : billing::types::Invoice\n  approved true\n  count 7\n  note paid\n",
+        );
+        let compact = SurfaceFile::parse(
+            "form invoice/1 : billing::forms::CompactInvoice\n  ok true\n  n 7\n  memo paid\n",
+        );
+        let direct = elaborate_form(canonical.forms().next().unwrap(), &artifact, root).unwrap();
+        let compact = elaborate_form(compact.forms().next().unwrap(), &artifact, root).unwrap();
+        assert_eq!(direct.value(), compact.value());
+        assert_eq!(
+            compact.value().record().field("count"),
+            Some(&Term::Integer(7.into()))
+        );
+
+        let malformed = SurfaceFile::parse(
+            "form invoice/1 : billing::forms::CompactInvoice\n  n 7\n  memo paid\n",
+        );
+        let error = elaborate_form(malformed.forms().next().unwrap(), &artifact, root).unwrap_err();
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code == FormDiagnosticCode::MissingField && diagnostic.span.line == 1
+        }));
     }
 
     #[test]

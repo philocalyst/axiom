@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::hir::{
-    Declaration, DeclarationKind, Diagnostic, Module, ModulePath, QualifiedName, Type,
+    Declaration, DeclarationKind, Diagnostic, Module, ModulePath, Name, QualifiedName, Type,
 };
 use crate::model::ContentHash;
 use crate::package_lock::{Lockfile, PackageLockError, PackageManifest, PackageRegistry, Version};
@@ -20,6 +20,217 @@ const CAPABILITY_ARTIFACT_DOMAIN: &str = "axiom/package-artifact/v2";
 const RECORD_SCHEMA_DOMAIN: &str = "axiom/package-record-schema/v1";
 const CAPABILITY_RECORD_SCHEMA_DOMAIN: &str = "axiom/package-record-schema/v2";
 const RECORD_VALUE_DOMAIN: &str = "axiom/package-record-value/v1";
+const FORM_SURFACE_ARTIFACT_DOMAIN: &str = "axiom/package-artifact/v3";
+
+/// Resource bounds for the deliberately small declarative authoring surface.
+/// These are part of the format contract: callers must not be able to turn a
+/// package manifest into an unbounded source-to-record expansion.
+pub const MAX_FORM_SURFACE_TEMPLATES_V1: usize = 128;
+pub const MAX_FORM_SURFACE_MAPPINGS_V1: usize = 64;
+pub const MAX_FORM_SURFACE_NAME_BYTES_V1: usize = 128;
+pub const MAX_FORM_SURFACE_EXPANSION_FIELDS_V1: usize = 64;
+pub const MAX_FORM_SURFACE_SOURCE_FIELDS_V1: usize = 64;
+pub const MAX_FORM_SURFACE_SOURCE_BYTES_V1: usize = 1 << 20;
+
+/// One total, one-to-one source-to-target field mapping in a form template.
+/// Values are intentionally only names: there are no defaults, expressions,
+/// aliases, inference, or nested expansion hidden in this representation.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct FormFieldMappingV1 {
+    pub source: String,
+    pub target: String,
+}
+
+impl FormFieldMappingV1 {
+    pub fn new(source: impl Into<String>, target: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            target: target.into(),
+        }
+    }
+}
+
+/// A package-local compact form template. `target` is resolved only in the
+/// exact package root that owns this template; it is never an ambient or
+/// cross-package lookup.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct FormTemplateV1 {
+    pub name: QualifiedName,
+    pub target: QualifiedName,
+    pub mappings: Vec<FormFieldMappingV1>,
+}
+
+impl FormTemplateV1 {
+    pub fn new(
+        name: QualifiedName,
+        target: QualifiedName,
+        mappings: impl IntoIterator<Item = FormFieldMappingV1>,
+    ) -> Self {
+        Self {
+            name,
+            target,
+            mappings: mappings.into_iter().collect(),
+        }
+    }
+}
+
+/// The versioned, declarative package authoring surface.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct FormSurfaceV1 {
+    pub templates: Vec<FormTemplateV1>,
+}
+
+impl FormSurfaceV1 {
+    pub fn new(templates: impl IntoIterator<Item = FormTemplateV1>) -> Self {
+        Self {
+            templates: templates.into_iter().collect(),
+        }
+    }
+
+    fn canonicalized(&self) -> Self {
+        let mut surface = self.clone();
+        surface.templates.sort_by(|left, right| {
+            left.name
+                .canonical()
+                .cmp(&right.name.canonical())
+                .then(left.target.canonical().cmp(&right.target.canonical()))
+        });
+        for template in &mut surface.templates {
+            template.mappings.sort();
+        }
+        surface
+    }
+}
+
+/// Validation failures for a package-defined [`FormSurfaceV1`].
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum FormSurfaceValidationError {
+    EmptySurface,
+    TooManyTemplates {
+        actual: usize,
+    },
+    TooManyMappings {
+        template: String,
+        actual: usize,
+    },
+    NameTooLong {
+        role: &'static str,
+        name: String,
+    },
+    EmptyName {
+        role: &'static str,
+    },
+    InvalidName {
+        role: &'static str,
+        name: String,
+    },
+    DuplicateTemplate {
+        name: String,
+    },
+    TemplateExportCollision {
+        name: String,
+    },
+    DuplicateSourceField {
+        template: String,
+        field: String,
+    },
+    DuplicateTargetField {
+        template: String,
+        field: String,
+    },
+    MissingTargetField {
+        template: String,
+        field: String,
+    },
+    UnknownTargetField {
+        template: String,
+        field: String,
+    },
+    TargetNotRecord {
+        template: String,
+    },
+    TargetNotClosed {
+        template: String,
+    },
+    TargetUnsupportedType {
+        template: String,
+        field: String,
+    },
+    TargetCarriesCapability {
+        template: String,
+        capability: SchemaCapability,
+    },
+}
+
+impl fmt::Display for FormSurfaceValidationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptySurface => {
+                formatter.write_str("form surface must define at least one template")
+            }
+            Self::TooManyTemplates { actual } => write!(
+                formatter,
+                "form surface defines {actual} templates, limit is {MAX_FORM_SURFACE_TEMPLATES_V1}"
+            ),
+            Self::TooManyMappings { template, actual } => write!(
+                formatter,
+                "form template `{template}` defines {actual} mappings, limit is {MAX_FORM_SURFACE_MAPPINGS_V1}"
+            ),
+            Self::NameTooLong { role, name } => write!(
+                formatter,
+                "{role} name `{name}` exceeds {MAX_FORM_SURFACE_NAME_BYTES_V1} bytes"
+            ),
+            Self::EmptyName { role } => write!(formatter, "{role} name is empty"),
+            Self::InvalidName { role, name } => {
+                write!(formatter, "{role} name `{name}` is malformed")
+            }
+            Self::DuplicateTemplate { name } => {
+                write!(formatter, "form template `{name}` is repeated")
+            }
+            Self::TemplateExportCollision { name } => write!(
+                formatter,
+                "form template `{name}` collides with an exported declaration"
+            ),
+            Self::DuplicateSourceField { template, field } => write!(
+                formatter,
+                "form template `{template}` maps source field `{field}` more than once"
+            ),
+            Self::DuplicateTargetField { template, field } => write!(
+                formatter,
+                "form template `{template}` maps target field `{field}` more than once"
+            ),
+            Self::MissingTargetField { template, field } => write!(
+                formatter,
+                "form template `{template}` does not map target field `{field}`"
+            ),
+            Self::UnknownTargetField { template, field } => write!(
+                formatter,
+                "form template `{template}` maps unknown target field `{field}`"
+            ),
+            Self::TargetNotRecord { template } => write!(
+                formatter,
+                "form template `{template}` target is not a direct record"
+            ),
+            Self::TargetNotClosed { template } => write!(
+                formatter,
+                "form template `{template}` target has an open row"
+            ),
+            Self::TargetUnsupportedType { template, field } => write!(
+                formatter,
+                "form template `{template}` target field `{field}` is not a supported primitive"
+            ),
+            Self::TargetCarriesCapability {
+                template,
+                capability,
+            } => write!(
+                formatter,
+                "form template `{template}` cannot carry schema capability `{capability}`"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FormSurfaceValidationError {}
 
 /// The input to one package compilation unit.
 ///
@@ -34,6 +245,9 @@ pub struct PackageInput {
     /// package.  A capability is never inferred from a declaration name or
     /// type shape; the compiler validates each binding below.
     schema_capabilities: Vec<SchemaCapabilityBinding>,
+    /// Optional package-local compact authoring definitions. These are
+    /// declarative data and are compiled into the artifact identity.
+    form_surface: Option<FormSurfaceV1>,
 }
 
 impl PackageInput {
@@ -42,6 +256,7 @@ impl PackageInput {
             manifest,
             modules: modules.into_iter().collect(),
             schema_capabilities: Vec::new(),
+            form_surface: None,
         }
     }
 
@@ -66,6 +281,15 @@ impl PackageInput {
         &self.schema_capabilities
     }
 
+    pub fn with_form_surface(mut self, surface: FormSurfaceV1) -> Self {
+        self.form_surface = Some(surface);
+        self
+    }
+
+    pub fn form_surface(&self) -> Option<&FormSurfaceV1> {
+        self.form_surface.as_ref()
+    }
+
     /// Return the content identity of the complete compiler input.
     ///
     /// A manifest hash alone is not sufficient for an incremental package
@@ -73,7 +297,15 @@ impl PackageInput {
     /// changing one must invalidate the package compilation.  Module order is
     /// intentionally ignored here for the same reason it is ignored by
     /// [`compile`].
-    pub fn input_hash(&self) -> ContentHash {
+    pub fn input_hash(&self) -> Result<ContentHash, PackageCompileError> {
+        if let Some(surface) = self.form_surface.as_ref() {
+            validate_form_surface_resource_bounds(surface).map_err(|reason| {
+                PackageCompileError::InvalidFormSurface {
+                    package: self.manifest.name.clone(),
+                    reason,
+                }
+            })?;
+        }
         let mut modules = self.modules.iter().collect::<Vec<_>>();
         modules.sort_by(|left, right| module_order(left, right));
         let mut bytes = Vec::new();
@@ -84,13 +316,17 @@ impl PackageInput {
             put_text(&mut bytes, &module.path.canonical());
             bytes.extend_from_slice(&module.recomputed_content_id().bytes());
         }
-        let domain = if self.schema_capabilities.is_empty() {
+        let domain = if self.form_surface.is_some() {
+            put_schema_capabilities(&mut bytes, &self.schema_capabilities);
+            put_form_surface(&mut bytes, self.form_surface.as_ref());
+            "axiom/package-input/v3"
+        } else if self.schema_capabilities.is_empty() {
             "axiom/package-input/v1"
         } else {
             put_schema_capabilities(&mut bytes, &self.schema_capabilities);
             "axiom/package-input/v2"
         };
-        ContentHash::domain_separated(domain, &bytes)
+        Ok(ContentHash::domain_separated(domain, &bytes))
     }
 }
 
@@ -169,11 +405,16 @@ pub struct CompiledPackage {
     /// export is never given a second capability field; resolution joins
     /// this package-local index to the export by canonical name.
     schema_capabilities: Vec<SchemaCapabilityBinding>,
+    form_surface: Option<FormSurfaceV1>,
 }
 
 impl CompiledPackage {
     pub fn schema_capabilities(&self) -> &[SchemaCapabilityBinding] {
         &self.schema_capabilities
+    }
+
+    pub fn form_surface(&self) -> Option<&FormSurfaceV1> {
+        self.form_surface.as_ref()
     }
 
     /// Return the content address of this package's complete compiled input.
@@ -199,10 +440,20 @@ impl CompiledPackage {
             bytes.extend_from_slice(&module.content_id.bytes());
         }
         let domain = if self.schema_capabilities.is_empty() {
-            "axiom/package-root/v1"
+            if self.form_surface.is_some() {
+                put_form_surface(&mut bytes, self.form_surface.as_ref());
+                "axiom/package-root/v3"
+            } else {
+                "axiom/package-root/v1"
+            }
         } else {
             put_schema_capabilities(&mut bytes, &self.schema_capabilities);
-            "axiom/package-root/v2"
+            if self.form_surface.is_some() {
+                put_form_surface(&mut bytes, self.form_surface.as_ref());
+                "axiom/package-root/v3"
+            } else {
+                "axiom/package-root/v2"
+            }
         };
         ContentHash::domain_separated(domain, &bytes)
     }
@@ -275,6 +526,11 @@ impl CompiledArtifact {
         validate_compiled_capabilities(&self.packages, &self.exports)
     }
 
+    pub(crate) fn validate_internal_coherence(&self) -> Result<(), PackageCompileError> {
+        self.validate_capability_coherence()?;
+        validate_form_surfaces(&self.packages, &self.exports)
+    }
+
     /// Resolve one directly exported record declaration against the exact
     /// package that owns it.
     ///
@@ -337,6 +593,38 @@ impl CompiledArtifact {
         })
     }
 
+    /// Resolve one package-local compact form template. The package root is
+    /// mandatory even though the template spelling is qualified: names never
+    /// escape the exact artifact/package context selected by the caller.
+    pub fn resolve_form_template(
+        &self,
+        package_root: ContentHash,
+        qualified_name: &QualifiedName,
+    ) -> Result<FormTemplateV1, FormSurfaceResolveError> {
+        let package = self
+            .packages
+            .iter()
+            .find(|package| package.root_hash() == package_root)
+            .ok_or(FormSurfaceResolveError::UnknownPackageRoot { package_root })?;
+        let Some(surface) = package.form_surface.as_ref() else {
+            return Err(FormSurfaceResolveError::UnknownTemplate {
+                package_root,
+                package: package.name.clone(),
+                qualified_name: Box::new(qualified_name.clone()),
+            });
+        };
+        surface
+            .templates
+            .iter()
+            .find(|template| template.name == *qualified_name)
+            .cloned()
+            .ok_or(FormSurfaceResolveError::UnknownTemplate {
+                package_root,
+                package: package.name.clone(),
+                qualified_name: Box::new(qualified_name.clone()),
+            })
+    }
+
     /// Verify this artifact against fresh package and lockfile inputs.
     ///
     /// Verification checks both the artifact's internal hash and the complete
@@ -347,7 +635,7 @@ impl CompiledArtifact {
     where
         I: IntoIterator<Item = PackageInput>,
     {
-        self.validate_capability_coherence()?;
+        self.validate_internal_coherence()?;
 
         let recomputed = self.recomputed_hash();
         if recomputed != self.artifact_hash {
@@ -380,6 +668,42 @@ impl CompiledArtifact {
         self.verify(packages, lockfile)
     }
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FormSurfaceResolveError {
+    UnknownPackageRoot {
+        package_root: ContentHash,
+    },
+    UnknownTemplate {
+        package_root: ContentHash,
+        package: String,
+        qualified_name: Box<QualifiedName>,
+    },
+}
+
+impl fmt::Display for FormSurfaceResolveError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownPackageRoot { package_root } => {
+                write!(
+                    formatter,
+                    "compiled package root `{package_root}` is unknown"
+                )
+            }
+            Self::UnknownTemplate {
+                package_root,
+                package,
+                qualified_name,
+            } => write!(
+                formatter,
+                "form template `{}` is unknown in package `{package}` rooted at `{package_root}`",
+                qualified_name.canonical()
+            ),
+        }
+    }
+}
+
+impl std::error::Error for FormSurfaceResolveError {}
 
 /// The immutable schema view returned by [`CompiledArtifact::resolve_record_schema`].
 ///
@@ -893,6 +1217,10 @@ pub enum PackageCompileError {
         qualified_name: String,
         reason: String,
     },
+    InvalidFormSurface {
+        package: String,
+        reason: FormSurfaceValidationError,
+    },
     ArtifactHashMismatch {
         expected: ContentHash,
         actual: ContentHash,
@@ -969,6 +1297,12 @@ impl fmt::Display for PackageCompileError {
                 formatter,
                 "package `{package}` export `{qualified_name}` has an invalid type: {reason}"
             ),
+            Self::InvalidFormSurface { package, reason } => {
+                write!(
+                    formatter,
+                    "package `{package}` has an invalid form surface: {reason}"
+                )
+            }
             Self::ArtifactHashMismatch { expected, actual } => write!(
                 formatter,
                 "compiled artifact hash is {actual}, expected {expected}"
@@ -1148,6 +1482,251 @@ fn validate_compiled_capabilities(
     Ok(())
 }
 
+fn validate_form_surfaces(
+    packages: &[CompiledPackage],
+    exports: &[CompiledExport],
+) -> Result<(), PackageCompileError> {
+    for package in packages {
+        let Some(surface) = package.form_surface.as_ref() else {
+            continue;
+        };
+        if surface.templates.is_empty() {
+            return Err(PackageCompileError::InvalidFormSurface {
+                package: package.name.clone(),
+                reason: FormSurfaceValidationError::EmptySurface,
+            });
+        }
+        validate_form_surface_resource_bounds(surface).map_err(|reason| {
+            PackageCompileError::InvalidFormSurface {
+                package: package.name.clone(),
+                reason,
+            }
+        })?;
+
+        let mut names = BTreeSet::new();
+        for template in &surface.templates {
+            let template_name = template.name.canonical();
+            if !names.insert(template_name.clone()) {
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::DuplicateTemplate {
+                        name: template_name,
+                    },
+                });
+            }
+            if template_name.len() > MAX_FORM_SURFACE_NAME_BYTES_V1 {
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::NameTooLong {
+                        role: "template",
+                        name: template_name,
+                    },
+                });
+            }
+            if exports.iter().any(|export| {
+                export.package == package.name && export.qualified_name == template.name
+            }) {
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::TemplateExportCollision {
+                        name: template.name.canonical(),
+                    },
+                });
+            }
+            if template.target.canonical().len() > MAX_FORM_SURFACE_NAME_BYTES_V1 {
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::NameTooLong {
+                        role: "target",
+                        name: template.target.canonical(),
+                    },
+                });
+            }
+            if template.mappings.is_empty()
+                || template.mappings.len() > MAX_FORM_SURFACE_MAPPINGS_V1
+            {
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::TooManyMappings {
+                        template: template.name.canonical(),
+                        actual: template.mappings.len(),
+                    },
+                });
+            }
+
+            let Some(target) = exports.iter().find(|export| {
+                export.package == package.name && export.qualified_name == template.target
+            }) else {
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::TargetNotRecord {
+                        template: template.name.canonical(),
+                    },
+                });
+            };
+            let DeclarationKind::Type {
+                ty: Type::Record(row),
+            } = &target.kind
+            else {
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::TargetNotRecord {
+                        template: template.name.canonical(),
+                    },
+                });
+            };
+            if row.is_open() {
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::TargetNotClosed {
+                        template: template.name.canonical(),
+                    },
+                });
+            }
+            if row.fields().len() > MAX_FORM_SURFACE_EXPANSION_FIELDS_V1 {
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::TooManyMappings {
+                        template: template.name.canonical(),
+                        actual: row.fields().len(),
+                    },
+                });
+            }
+            if package
+                .schema_capabilities
+                .iter()
+                .any(|binding| binding.qualified_name == template.target)
+            {
+                let capability = package
+                    .schema_capabilities
+                    .iter()
+                    .find(|binding| binding.qualified_name == template.target)
+                    .expect("capability checked above")
+                    .capability;
+                return Err(PackageCompileError::InvalidFormSurface {
+                    package: package.name.clone(),
+                    reason: FormSurfaceValidationError::TargetCarriesCapability {
+                        template: template.name.canonical(),
+                        capability,
+                    },
+                });
+            }
+
+            let mut sources = BTreeSet::new();
+            let mut targets = BTreeSet::new();
+            for mapping in &template.mappings {
+                if mapping.source.is_empty() {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::EmptyName {
+                            role: "source field",
+                        },
+                    });
+                }
+                if mapping.target.is_empty() {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::EmptyName {
+                            role: "target field",
+                        },
+                    });
+                }
+                if mapping.source.len() > MAX_FORM_SURFACE_NAME_BYTES_V1 {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::NameTooLong {
+                            role: "source field",
+                            name: mapping.source.clone(),
+                        },
+                    });
+                }
+                if mapping.target.len() > MAX_FORM_SURFACE_NAME_BYTES_V1 {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::NameTooLong {
+                            role: "target field",
+                            name: mapping.target.clone(),
+                        },
+                    });
+                }
+                if Name::new(mapping.source.clone()).is_err() {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::InvalidName {
+                            role: "source field",
+                            name: mapping.source.clone(),
+                        },
+                    });
+                }
+                if Name::new(mapping.target.clone()).is_err() {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::InvalidName {
+                            role: "target field",
+                            name: mapping.target.clone(),
+                        },
+                    });
+                }
+                if !sources.insert(mapping.source.clone()) {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::DuplicateSourceField {
+                            template: template.name.canonical(),
+                            field: mapping.source.clone(),
+                        },
+                    });
+                }
+                if !targets.insert(mapping.target.clone()) {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::DuplicateTargetField {
+                            template: template.name.canonical(),
+                            field: mapping.target.clone(),
+                        },
+                    });
+                }
+                let Some(field) = row
+                    .fields()
+                    .iter()
+                    .find(|field| field.name.as_str() == mapping.target)
+                else {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::UnknownTargetField {
+                            template: template.name.canonical(),
+                            field: mapping.target.clone(),
+                        },
+                    });
+                };
+                if !matches!(
+                    field.ty,
+                    Type::Bool | Type::Text | Type::Integer | Type::Decimal
+                ) {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::TargetUnsupportedType {
+                            template: template.name.canonical(),
+                            field: mapping.target.clone(),
+                        },
+                    });
+                }
+            }
+            for field in row.fields() {
+                if !targets.contains(field.name.as_str()) {
+                    return Err(PackageCompileError::InvalidFormSurface {
+                        package: package.name.clone(),
+                        reason: FormSurfaceValidationError::MissingTargetField {
+                            template: template.name.canonical(),
+                            field: field.name.as_str().to_owned(),
+                        },
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Compile a deterministic package set from validated HIR modules.
 ///
 /// Package inputs may arrive in any order.  Package names, module paths, and
@@ -1228,11 +1807,16 @@ where
             manifest_hash: input.manifest.hash(),
             modules: compiled_modules,
             schema_capabilities,
+            form_surface: input
+                .form_surface
+                .as_ref()
+                .map(FormSurfaceV1::canonicalized),
         });
     }
 
     let exports = exports.into_values().collect::<Vec<_>>();
     validate_compiled_capabilities(&compiled_packages, &exports)?;
+    validate_form_surfaces(&compiled_packages, &exports)?;
     let artifact_hash = artifact_hash(lockfile_hash, &compiled_packages, &exports);
     Ok(CompiledArtifact {
         lockfile_hash,
@@ -1383,7 +1967,12 @@ fn artifact_hash(
     packages: &[CompiledPackage],
     exports: &[CompiledExport],
 ) -> ContentHash {
-    let domain = if packages
+    let has_form_surfaces = packages
+        .iter()
+        .any(|package| package.form_surface.is_some());
+    let domain = if has_form_surfaces {
+        FORM_SURFACE_ARTIFACT_DOMAIN
+    } else if packages
         .iter()
         .all(|package| package.schema_capabilities.is_empty())
     {
@@ -1424,6 +2013,9 @@ fn artifact_bytes(
     let has_capabilities = packages
         .iter()
         .any(|package| !package.schema_capabilities.is_empty());
+    let has_form_surfaces = packages
+        .iter()
+        .any(|package| package.form_surface.is_some());
     let mut bytes = Vec::new();
     put_text(&mut bytes, "artifact");
     bytes.extend_from_slice(lockfile_hash.as_bytes());
@@ -1453,6 +2045,9 @@ fn artifact_bytes(
         }
         if has_capabilities {
             put_schema_capabilities(&mut bytes, &package.schema_capabilities);
+        }
+        if has_form_surfaces {
+            put_form_surface(&mut bytes, package.form_surface.as_ref());
         }
     }
 
@@ -1529,6 +2124,78 @@ fn put_schema_capabilities(bytes: &mut Vec<u8>, capabilities: &[SchemaCapability
         put_text(bytes, &binding.qualified_name.canonical());
         put_text(bytes, binding.capability.canonical_name());
     }
+}
+
+fn put_form_surface(bytes: &mut Vec<u8>, surface: Option<&FormSurfaceV1>) {
+    let Some(surface) = surface else {
+        put_text(bytes, "no-form-surface-v1");
+        return;
+    };
+    put_text(bytes, "form-surface-v1");
+    let surface = surface.canonicalized();
+    put_u64(bytes, surface.templates.len());
+    for template in surface.templates {
+        put_text(bytes, &template.name.canonical());
+        put_text(bytes, &template.target.canonical());
+        put_u64(bytes, template.mappings.len());
+        for mapping in template.mappings {
+            put_text(bytes, &mapping.source);
+            put_text(bytes, &mapping.target);
+        }
+    }
+}
+
+fn validate_form_surface_resource_bounds(
+    surface: &FormSurfaceV1,
+) -> Result<(), FormSurfaceValidationError> {
+    if surface.templates.len() > MAX_FORM_SURFACE_TEMPLATES_V1 {
+        return Err(FormSurfaceValidationError::TooManyTemplates {
+            actual: surface.templates.len(),
+        });
+    }
+    for template in &surface.templates {
+        for (role, bytes) in [
+            ("template", qualified_name_bytes(&template.name)),
+            ("target", qualified_name_bytes(&template.target)),
+        ] {
+            if bytes > MAX_FORM_SURFACE_NAME_BYTES_V1 {
+                return Err(FormSurfaceValidationError::NameTooLong {
+                    role,
+                    name: format!("<{bytes} bytes>"),
+                });
+            }
+        }
+        if template.mappings.len() > MAX_FORM_SURFACE_MAPPINGS_V1 {
+            return Err(FormSurfaceValidationError::TooManyMappings {
+                template: template.name.canonical(),
+                actual: template.mappings.len(),
+            });
+        }
+        for mapping in &template.mappings {
+            for (role, name) in [
+                ("source field", &mapping.source),
+                ("target field", &mapping.target),
+            ] {
+                if name.len() > MAX_FORM_SURFACE_NAME_BYTES_V1 {
+                    return Err(FormSurfaceValidationError::NameTooLong {
+                        role,
+                        name: format!("<{} bytes>", name.len()),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn qualified_name_bytes(name: &QualifiedName) -> usize {
+    let segments = name.module.segments();
+    segments
+        .iter()
+        .map(|segment| segment.as_str().len())
+        .chain(std::iter::once(name.name.as_str().len()))
+        .fold(0usize, |total, length| total.saturating_add(length))
+        .saturating_add(segments.len().saturating_mul(2))
 }
 
 fn put_optional_schema_capability(bytes: &mut Vec<u8>, capability: Option<SchemaCapability>) {
@@ -1778,7 +2445,7 @@ mod tests {
                 .capability(),
             None
         );
-        assert_ne!(unbound.input_hash(), bound.input_hash());
+        assert_ne!(unbound.input_hash().unwrap(), bound.input_hash().unwrap());
         assert_ne!(
             unbound_artifact.package_roots(),
             bound_artifact.package_roots()
@@ -1947,7 +2614,7 @@ mod tests {
             .with_schema_capability(first_name, SchemaCapability::SettlementStateV1);
         let lock = lockfile(std::slice::from_ref(&package));
 
-        assert_eq!(left.input_hash(), right.input_hash());
+        assert_eq!(left.input_hash().unwrap(), right.input_hash().unwrap());
         assert_eq!(
             compile([left], &lock).unwrap(),
             compile([right], &lock).unwrap()
@@ -2569,6 +3236,188 @@ mod tests {
         assert!(matches!(
             open.check_concrete_record(&invalid_tail),
             Err(RecordValueError::InvalidRowTail { .. })
+        ));
+    }
+
+    #[test]
+    fn form_surface_is_hash_bound_and_resolves_only_inside_its_package_root() {
+        let package_manifest = manifest("forms");
+        let schema = qualified_name("types", "Invoice");
+        let template = qualified_name("forms", "CompactInvoice");
+        let surface = FormSurfaceV1::new([FormTemplateV1::new(
+            template.clone(),
+            schema.clone(),
+            [
+                FormFieldMappingV1::new("ok", "approved"),
+                FormFieldMappingV1::new("n", "count"),
+                FormFieldMappingV1::new("memo", "note"),
+            ],
+        )]);
+        let input = PackageInput::new(
+            package_manifest.clone(),
+            [record_module(
+                "types",
+                "Invoice",
+                &[
+                    ("approved", AstType::Bool),
+                    ("count", AstType::Integer),
+                    ("note", AstType::Text),
+                ],
+                None,
+            )],
+        )
+        .with_form_surface(surface.clone());
+        let lock = lockfile(&[package_manifest]);
+        let artifact = compile([input.clone()], &lock).unwrap();
+        let root = artifact.package_roots()[0];
+        assert_eq!(
+            artifact
+                .resolve_form_template(root, &template)
+                .unwrap()
+                .target,
+            schema
+        );
+        assert!(matches!(
+            artifact.resolve_form_template(ContentHash::ZERO, &template),
+            Err(FormSurfaceResolveError::UnknownPackageRoot { .. })
+        ));
+
+        let changed = input.with_form_surface(FormSurfaceV1::new([FormTemplateV1::new(
+            qualified_name("forms", "CompactInvoice"),
+            qualified_name("types", "Invoice"),
+            [
+                FormFieldMappingV1::new("ok", "approved"),
+                FormFieldMappingV1::new("number", "count"),
+                FormFieldMappingV1::new("memo", "note"),
+            ],
+        )]));
+        let changed_artifact = compile([changed], &lockfile(&[manifest("forms")])).unwrap();
+        assert_ne!(artifact.artifact_hash(), changed_artifact.artifact_hash());
+    }
+
+    #[test]
+    fn form_surface_rejects_ambiguous_or_non_total_mappings() {
+        let package_manifest = manifest("forms");
+        let schema = qualified_name("types", "Invoice");
+        let target = FormTemplateV1::new(
+            qualified_name("forms", "CompactInvoice"),
+            schema,
+            [
+                FormFieldMappingV1::new("number", "count"),
+                FormFieldMappingV1::new("other", "count"),
+                FormFieldMappingV1::new("memo", "note"),
+            ],
+        );
+        let input = PackageInput::new(
+            package_manifest.clone(),
+            [record_module(
+                "types",
+                "Invoice",
+                &[
+                    ("approved", AstType::Bool),
+                    ("count", AstType::Integer),
+                    ("note", AstType::Text),
+                ],
+                None,
+            )],
+        )
+        .with_form_surface(FormSurfaceV1::new([target]));
+        assert!(matches!(
+            compile([input], &lockfile(&[package_manifest]),),
+            Err(PackageCompileError::InvalidFormSurface {
+                reason: FormSurfaceValidationError::DuplicateTargetField { .. },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn form_surface_mapping_order_is_not_identity() {
+        let package_manifest = manifest("forms");
+        let schema = qualified_name("types", "Invoice");
+        let template = qualified_name("forms", "CompactInvoice");
+        let make = |mappings| {
+            PackageInput::new(
+                package_manifest.clone(),
+                [record_module(
+                    "types",
+                    "Invoice",
+                    &[("count", AstType::Integer), ("note", AstType::Text)],
+                    None,
+                )],
+            )
+            .with_form_surface(FormSurfaceV1::new([FormTemplateV1::new(
+                template.clone(),
+                schema.clone(),
+                mappings,
+            )]))
+        };
+        let first = make(vec![
+            FormFieldMappingV1::new("n", "count"),
+            FormFieldMappingV1::new("memo", "note"),
+        ]);
+        let second = make(vec![
+            FormFieldMappingV1::new("memo", "note"),
+            FormFieldMappingV1::new("n", "count"),
+        ]);
+        let lock = lockfile(std::slice::from_ref(&package_manifest));
+        assert_eq!(first.input_hash().unwrap(), second.input_hash().unwrap());
+        assert_eq!(
+            compile([first], &lock).unwrap(),
+            compile([second], &lock).unwrap()
+        );
+    }
+
+    #[test]
+    fn artifact_coherence_rejects_compact_capability_target() {
+        let (input, schema) = settlement_state_input();
+        let lock = lockfile(std::slice::from_ref(&input.manifest));
+        let mut artifact = compile([input], &lock).unwrap();
+        artifact.packages[0].form_surface = Some(FormSurfaceV1::new([FormTemplateV1::new(
+            qualified_name("forms", "CompactSettlement"),
+            schema,
+            settlement_state_fields()
+                .into_iter()
+                .map(|(name, _)| FormFieldMappingV1::new(name, name)),
+        )]));
+        assert!(matches!(
+            artifact.validate_internal_coherence(),
+            Err(PackageCompileError::InvalidFormSurface {
+                reason: FormSurfaceValidationError::TargetCarriesCapability { .. },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn form_surface_resource_limits_apply_before_input_hashing() {
+        let package = manifest("forms");
+        let schema = qualified_name("types", "Invoice");
+        let templates = (0..=MAX_FORM_SURFACE_TEMPLATES_V1)
+            .map(|index| {
+                FormTemplateV1::new(
+                    qualified_name("forms", &format!("Compact{index}")),
+                    schema.clone(),
+                    [FormFieldMappingV1::new("n", "count")],
+                )
+            })
+            .collect::<Vec<_>>();
+        let input = PackageInput::new(
+            package,
+            [record_module(
+                "types",
+                "Invoice",
+                &[("count", AstType::Integer)],
+                None,
+            )],
+        )
+        .with_form_surface(FormSurfaceV1::new(templates));
+        assert!(matches!(
+            input.input_hash(),
+            Err(PackageCompileError::InvalidFormSurface {
+                reason: FormSurfaceValidationError::TooManyTemplates { .. },
+                ..
+            })
         ));
     }
 }

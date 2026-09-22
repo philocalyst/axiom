@@ -508,14 +508,15 @@ impl Workspace {
         let mut package_hashes = packages
             .iter()
             .map(PackageInput::input_hash)
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         package_hashes.sort();
 
         for package in &packages {
+            let input_hash = package.input_hash()?;
             self.incremental.upsert_input(
                 package_input_key(package),
                 "package-hir",
-                package.input_hash().as_bytes().to_vec(),
+                input_hash.as_bytes().to_vec(),
             )?;
         }
         self.incremental.upsert_input(

@@ -645,6 +645,9 @@ impl CompiledArtifactObject {
 
     /// Check the artifact's content hash against its complete canonical body.
     pub fn verify_integrity(&self) -> Result<(), StoreError> {
+        self.artifact
+            .validate_internal_coherence()
+            .map_err(|error| StoreError::InvalidObject(error.to_string()))?;
         let expected = self.artifact.recomputed_hash();
         if expected != self.artifact.artifact_hash() {
             return Err(StoreError::InvalidObject(format!(
