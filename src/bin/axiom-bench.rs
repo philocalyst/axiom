@@ -303,7 +303,7 @@ struct Timing {
     canonical_values_ns: Option<u128>,
     changed_document_elaboration_ns: Option<u128>,
     settlement_setup_ns: Option<u128>,
-    settlement_document_projection_ns: Option<u128>,
+    settlement_projection_call_ns: Option<u128>,
     settlement_persistence_boundary_ns: Option<u128>,
     settlement_proof_check_ns: Option<u128>,
     settlement_store_verify_ns: Option<u128>,
@@ -435,7 +435,7 @@ struct BoundedSettlementExecution {
 struct SettlementTimings {
     setup_ns: u128,
     document_elaboration_ns: u128,
-    document_projection_ns: u128,
+    projection_call_ns: u128,
     persistence_boundary_ns: u128,
     proof_check_ns: u128,
     store_verify_ns: u128,
@@ -1085,7 +1085,7 @@ fn measure_settlement_state_proof_workload(
         parse_ns: Some(median_bounded_surface_parse(profile, samples)?),
         settlement_setup_ns: Some(settlement_timings.setup_ns),
         document_elaboration_ns: Some(settlement_timings.document_elaboration_ns),
-        settlement_document_projection_ns: Some(settlement_timings.document_projection_ns),
+        settlement_projection_call_ns: Some(settlement_timings.projection_call_ns),
         settlement_persistence_boundary_ns: Some(settlement_timings.persistence_boundary_ns),
         settlement_proof_check_ns: Some(settlement_timings.proof_check_ns),
         settlement_store_verify_ns: Some(settlement_timings.store_verify_ns),
@@ -1564,7 +1564,7 @@ fn median_settlement_timings(
 ) -> Result<SettlementTimings, String> {
     let mut setup = Vec::with_capacity(samples);
     let mut document = Vec::with_capacity(samples);
-    let mut document_projection = Vec::with_capacity(samples);
+    let mut projection_call = Vec::with_capacity(samples);
     let mut persistence_boundary = Vec::with_capacity(samples);
     let mut proof_check = Vec::with_capacity(samples);
     let mut store_verify = Vec::with_capacity(samples);
@@ -1572,7 +1572,7 @@ fn median_settlement_timings(
     for _ in 0..samples {
         let mut setup_total = 0;
         let mut document_total = 0;
-        let mut projection_total = 0;
+        let mut projection_call_total = 0;
         let mut persistence_total = 0;
         let mut proof_total = 0;
         let mut verify_total = 0;
@@ -1598,9 +1598,10 @@ fn median_settlement_timings(
             }
             black_box((forms.forms().len(), artifact.artifact_hash()));
             document_total += document_start.elapsed().as_nanos();
-            // This metric is projection-only. Document elaboration above has
-            // its own timer and must not be charged a second time here.
-            let document_projection_start = Instant::now();
+            // Time the full public projection call. It internally re-elaborates
+            // the pinned document, so this intentionally overlaps
+            // document_elaboration_ns; no bypass API is used.
+            let projection_call_start = Instant::now();
             let projected = workspace
                 .project_settlement_states(commit)
                 .map_err(|error| format!("settlement projection failed: {error}"))?;
@@ -1608,7 +1609,7 @@ fn median_settlement_timings(
                 return Err("settlement timing batch changed projection coverage".into());
             }
             black_box(projected.records().len());
-            projection_total += document_projection_start.elapsed().as_nanos();
+            projection_call_total += projection_call_start.elapsed().as_nanos();
             let start = Instant::now();
             let persisted = workspace
                 .persist_settlement_state_proof(commit)
@@ -1634,7 +1635,7 @@ fn median_settlement_timings(
         }
         setup.push(setup_total);
         document.push(document_total);
-        document_projection.push(projection_total);
+        projection_call.push(projection_call_total);
         persistence_boundary.push(persistence_total);
         proof_check.push(proof_total);
         store_verify.push(verify_total);
@@ -1656,7 +1657,7 @@ fn median_settlement_timings(
     Ok(SettlementTimings {
         setup_ns: median(setup),
         document_elaboration_ns: median(document),
-        document_projection_ns: median(document_projection),
+        projection_call_ns: median(projection_call),
         persistence_boundary_ns: median(persistence_boundary),
         proof_check_ns: median(proof_check),
         store_verify_ns: median(store_verify),
@@ -3158,7 +3159,7 @@ fn print_json_line(record: &ResultRecord) {
     );
     let _ = write!(
         output,
-        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"semantic_probe_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_incremental_solve_ns\":{},\"changed_full_solve_ns\":{},\"parallel_solve_ns\":null,\"independent_workers_ns\":{},\"package_compile_ns\":{},\"document_elaboration_ns\":{},\"schema_lookup_ns\":{},\"canonical_values_ns\":{},\"changed_document_elaboration_ns\":{},\"settlement_setup_ns\":{},\"settlement_document_projection_ns\":{},\"settlement_persistence_boundary_ns\":{},\"settlement_proof_check_ns\":{},\"settlement_store_verify_ns\":{},\"settlement_source_revision_ns\":{}",
+        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"semantic_probe_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_incremental_solve_ns\":{},\"changed_full_solve_ns\":{},\"parallel_solve_ns\":null,\"independent_workers_ns\":{},\"package_compile_ns\":{},\"document_elaboration_ns\":{},\"schema_lookup_ns\":{},\"canonical_values_ns\":{},\"changed_document_elaboration_ns\":{},\"settlement_setup_ns\":{},\"settlement_projection_call_ns\":{},\"settlement_persistence_boundary_ns\":{},\"settlement_proof_check_ns\":{},\"settlement_store_verify_ns\":{},\"settlement_source_revision_ns\":{}",
         record.timing.generation_ns,
         option_number(record.timing.normalization_ns),
         option_number(record.timing.parse_ns),
@@ -3177,7 +3178,7 @@ fn print_json_line(record: &ResultRecord) {
         option_number(record.timing.canonical_values_ns),
         option_number(record.timing.changed_document_elaboration_ns),
         option_number(record.timing.settlement_setup_ns),
-        option_number(record.timing.settlement_document_projection_ns),
+        option_number(record.timing.settlement_projection_call_ns),
         option_number(record.timing.settlement_persistence_boundary_ns),
         option_number(record.timing.settlement_proof_check_ns),
         option_number(record.timing.settlement_store_verify_ns),

@@ -68,8 +68,10 @@ discovers the largest successful scale through the public Workspace
 persistence path (currently 3,309 rows) and checks the exact canonical-byte
 rejection at the next scale.
 Its `settlement_setup_ns` includes source loading, package compilation and
-persistence, and artifact pinning; `settlement_document_projection_ns`
-includes the Workspace document elaboration performed by the projection call.
+persistence, and artifact pinning; `settlement_projection_call_ns` measures the
+full public `Workspace::project_settlement_states` call. That call internally
+re-elaborates the pinned document, so this timing intentionally overlaps
+`document_elaboration_ns`; it does not use a projection bypass.
 `settlement_persistence_boundary_ns` measures typed proof and child-commit
 persistence. `peak_memory_bytes` remains the isolated workload child-process
 peak RSS when `getrusage` is available.

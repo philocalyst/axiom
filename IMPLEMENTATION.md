@@ -341,8 +341,11 @@ experiments, but it is not part of this contract.
   `settlement_setup_ns` includes source
   load, package compilation/persistence, and artifact pinning;
   `document_elaboration_ns` is direct elaboration, while
-  `settlement_document_projection_ns` includes Workspace elaboration plus
-  settlement projection. Remaining domain workloads and shared-engine parallel
+  `settlement_projection_call_ns` measures the full public
+  `Workspace::project_settlement_states` call. That call internally
+  re-elaborates the pinned document, so this timing intentionally overlaps
+  `document_elaboration_ns`; it does not use a projection bypass.
+  Remaining domain workloads and shared-engine parallel
   measurement remain open. A separate 1,000-form release stress gate exercises
   capable-form projection, independent proof checking, commit anchoring, and
   full-store verification end to end.

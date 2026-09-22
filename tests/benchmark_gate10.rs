@@ -147,7 +147,7 @@ fn measurement(workload: &str) -> String {
     }
     for field in [
         "settlement_setup_ns",
-        "settlement_document_projection_ns",
+        "settlement_projection_call_ns",
         "settlement_persistence_boundary_ns",
         "settlement_proof_check_ns",
         "settlement_store_verify_ns",
@@ -386,7 +386,7 @@ fn settlement_state_proof_workload_uses_public_persisted_path_and_oracle() {
     for field in [
         "document_elaboration_ns",
         "settlement_setup_ns",
-        "settlement_document_projection_ns",
+        "settlement_projection_call_ns",
         "settlement_persistence_boundary_ns",
         "settlement_proof_check_ns",
         "settlement_store_verify_ns",
