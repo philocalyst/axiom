@@ -418,6 +418,55 @@ fn settlement_state_proof_workload_uses_public_persisted_path_and_oracle() {
 }
 
 #[test]
+fn settlement_compact_surface_reports_v2_provenance_without_masquerading_as_v1() {
+    let output = Command::new(env!("CARGO_BIN_EXE_axiom-bench"))
+        .args([
+            "--quick",
+            "--workload",
+            "settlement-state-proof",
+            "--settlement-surface",
+            "compact-v1",
+        ])
+        .output()
+        .expect("compact settlement benchmark should start");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let line = String::from_utf8(output.stdout).expect("benchmark JSON is UTF-8");
+    let value = parsed_json(line.trim());
+    let metrics = &value["metrics"];
+    assert_eq!(
+        metrics["settlement_surface_profile"].as_str(),
+        Some("compact_v1_proof_v2")
+    );
+    assert_eq!(
+        metrics["settlement_proof_version"].as_str(),
+        Some("axiom/settlement-state-proof/v2")
+    );
+    assert_eq!(
+        metrics["settlement_proof_check_verified"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        metrics["settlement_store_verify_verified"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        metrics["settlement_source_revision_verified"].as_bool(),
+        Some(true)
+    );
+    assert_eq!(
+        metrics["settlement_atomic_negative_verified"].as_bool(),
+        Some(true)
+    );
+    assert!(metrics["settlement_proof_bytes"].as_u64().unwrap_or(0) > 0);
+    assert!(metrics["settlement_artifact_hash"].is_string());
+    assert!(metrics["settlement_batch_artifacts_hash"].is_string());
+}
+
+#[test]
 #[ignore = "release stress gate for the discovered public settlement-persistence boundary"]
 fn settlement_state_proof_scale_boundary_discovers_maximum() {
     fn run(scale: u64) -> std::process::Output {

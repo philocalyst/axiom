@@ -13,6 +13,7 @@ cargo run --quiet --bin axiom-bench -- --quick
 cargo run --quiet --bin axiom-bench -- --scale 4 --workload large-proof-explanation
 cargo run --release --quiet --bin axiom-bench -- --quick --scale 100 --workload generic-form-elaboration
 cargo run --release --quiet --bin axiom-bench -- --quick --workload settlement-state-proof
+cargo run --release --quiet --bin axiom-bench -- --quick --workload settlement-state-proof --settlement-surface compact-v1
 cargo run --quiet --bin axiom-bench -- --self-test
 # discovers and verifies the release persistence boundary (ignored by default)
 cargo test --release --test benchmark_gate10 settlement_state_proof_scale_boundary_discovers_maximum -- --ignored
@@ -72,6 +73,16 @@ includes the Workspace document elaboration performed by the projection call.
 `settlement_persistence_boundary_ns` measures typed proof and child-commit
 persistence. `peak_memory_bytes` remains the isolated workload child-process
 peak RSS when `getrusage` is available.
+
+Pass `--settlement-surface compact-v1` to run the same bounded corpus through
+the package-defined compact authoring surface. The compact profile shares the
+direct workload's persistence/check/revision/atomic-negative machinery, but
+its JSON carries `settlement_surface_profile=compact_v1_proof_v2` and an
+explicit v2 proof version. This keeps compact package compilation,
+elaboration/projection, proof persistence/checking, canonical proof-byte size,
+source revision, atomic rejection, and peak RSS comparable without presenting
+the result as the historical direct-v1 baseline. Direct mode remains the
+default and retains its v1 identities.
 
 The performance numbers are measurements from the current process, not
 assertions.  The performance goals copied from section XVII are emitted in a

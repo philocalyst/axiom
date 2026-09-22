@@ -29,7 +29,10 @@ use axiom_ledger::ontology::{
     validate_satisfaction_network,
 };
 use axiom_ledger::package::{LotCandidate, PolicyPackage, Selection};
-use axiom_ledger::package_compiler::{CompiledArtifact, PackageInput, SchemaCapability};
+use axiom_ledger::package_compiler::{
+    CompiledArtifact, FormFieldMappingV1, FormSurfaceV1, FormTemplateV1, PackageInput,
+    SchemaCapability,
+};
 use axiom_ledger::package_lock::{
     Dependency, LockedPackage, Lockfile, PackageManifest, Version, VersionReq,
 };
@@ -151,6 +154,46 @@ impl Workload {
                 "package-bound settlement histories through projection and independent proof persistence"
             }
         }
+    }
+}
+
+/// Authoring surface used by the bounded SettlementStateV1 workload.  The
+/// default is the historical direct schema spelling; compact mode is an
+/// explicit opt-in so its v2 proof timings and identities cannot be confused
+/// with the direct v1 baseline.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SettlementSurface {
+    DirectV1,
+    CompactV1,
+}
+
+impl SettlementSurface {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().replace('_', "-").as_str() {
+            "direct" | "direct-v1" => Ok(Self::DirectV1),
+            "compact" | "compact-v1" | "compact-v1-proof-v2" => Ok(Self::CompactV1),
+            _ => Err(format!(
+                "unknown settlement surface {value}; choose direct-v1 or compact-v1"
+            )),
+        }
+    }
+
+    fn profile(self) -> &'static str {
+        match self {
+            Self::DirectV1 => "direct_v1",
+            Self::CompactV1 => "compact_v1_proof_v2",
+        }
+    }
+
+    fn proof_version(self) -> &'static str {
+        match self {
+            Self::DirectV1 => axiom_ledger::settlement_proof::SETTLEMENT_STATE_PROOF_VERSION,
+            Self::CompactV1 => axiom_ledger::settlement_proof::SETTLEMENT_STATE_PROOF_VERSION_V2,
+        }
+    }
+
+    fn is_compact(self) -> bool {
+        matches!(self, Self::CompactV1)
     }
 }
 
@@ -326,6 +369,8 @@ struct Metrics {
     settlement_batch_proof_bytes_total: Option<usize>,
     settlement_batch_projection_commits_hash: Option<String>,
     settlement_batch_coverage_hash: Option<String>,
+    settlement_surface_profile: Option<&'static str>,
+    settlement_proof_version: Option<&'static str>,
     execution_mode: Option<&'static str>,
     provenance_path: Option<&'static str>,
     batch_count: Option<usize>,
@@ -366,6 +411,7 @@ struct SettlementOracle {
     projection_commit_hash: String,
     coverage_hash: String,
     coverage_count: usize,
+    proof_version: String,
 }
 
 struct SettlementExecution {
@@ -405,6 +451,7 @@ struct Options {
     help: bool,
     rss_probe: bool,
     settlement_boundary_probe: bool,
+    settlement_surface: SettlementSurface,
 }
 
 fn main() {
@@ -426,7 +473,14 @@ fn run() -> Result<(), String> {
             .ok_or_else(|| "--rss-probe requires --workload".to_string())?;
         // One representative run keeps RSS a workload measurement rather
         // than the peak of a timing suite.
-        let _ = measure_workload(workload, options.quick, options.scale, 1, false)?;
+        let _ = measure_workload(
+            workload,
+            options.quick,
+            options.scale,
+            1,
+            false,
+            options.settlement_surface,
+        )?;
         let peak = process_peak_memory_bytes();
         println!(
             "{{\"schema\":\"{SCHEMA}\",\"kind\":\"rss_probe\",\"workload\":\"{}\",\"peak_memory_bytes\":{}}}",
@@ -441,10 +495,15 @@ fn run() -> Result<(), String> {
                 "--settlement-boundary-probe requires --workload settlement-state-proof".into(),
             );
         }
-        let profile =
-            bounded_profile(Workload::SettlementStateProof, options.quick, options.scale)?;
-        let source = settlement_state_batch(0, profile.total_items, false)?;
-        let execution = execute_settlement_path(&source, 0)?;
+        let profile = bounded_profile(
+            Workload::SettlementStateProof,
+            options.quick,
+            options.scale,
+            options.settlement_surface,
+        )?;
+        let source =
+            settlement_state_batch(0, profile.total_items, false, profile.surface.is_compact())?;
+        let execution = execute_settlement_path(&source, 0, profile.surface)?;
         println!(
             "{{\"schema\":\"{SCHEMA}\",\"kind\":\"settlement_boundary_probe\",\"workload\":\"settlement-state-proof\",\"forms\":{},\"proof_bytes\":{}}}",
             execution.forms, execution.oracle.proof_bytes
@@ -473,7 +532,14 @@ fn run() -> Result<(), String> {
 
     let mut records = Vec::with_capacity(workloads.len());
     for workload in workloads {
-        let record = measure_workload(workload, options.quick, options.scale, samples, true)?;
+        let record = measure_workload(
+            workload,
+            options.quick,
+            options.scale,
+            samples,
+            true,
+            options.settlement_surface,
+        )?;
         print_json_line(&record);
         records.push(record);
     }
@@ -491,6 +557,7 @@ impl Options {
             help: false,
             rss_probe: false,
             settlement_boundary_probe: false,
+            settlement_surface: SettlementSurface::DirectV1,
         };
         let args: Vec<String> = args.collect();
         let mut index = 0;
@@ -500,6 +567,18 @@ impl Options {
                 "--self-test" => options.self_test = true,
                 "--rss-probe" => options.rss_probe = true,
                 "--settlement-boundary-probe" => options.settlement_boundary_probe = true,
+                "--settlement-surface" => {
+                    index += 1;
+                    let value = args.get(index).ok_or_else(|| {
+                        "--settlement-surface requires direct-v1 or compact-v1".to_string()
+                    })?;
+                    options.settlement_surface = SettlementSurface::parse(value)?;
+                }
+                value if value.starts_with("--settlement-surface=") => {
+                    options.settlement_surface = SettlementSurface::parse(
+                        value.trim_start_matches("--settlement-surface="),
+                    )?;
+                }
                 "-h" | "--help" => options.help = true,
                 "--scale" => {
                     index += 1;
@@ -565,6 +644,8 @@ the human summary is written to stderr. Timings are measurements, not assertions
 --quick          one timing sample and workload-specific reduced row counts\n\
 --scale N        multiply deterministic row counts (default: 1)\n\
 --workload NAME  run one named workload (underscores are accepted)\n\
+--settlement-surface NAME\n\
+                 settlement-state-proof authoring profile: direct-v1 (default) or compact-v1\n\
 --self-test      run deterministic corpus/parser/proof/incremental checks\n\
 --settlement-boundary-probe\n\
                  run only the public SettlementStateV1 persistence boundary"
@@ -577,8 +658,9 @@ fn measure_workload(
     scale: u64,
     samples: usize,
     isolate_peak_memory: bool,
+    settlement_surface: SettlementSurface,
 ) -> Result<ResultRecord, String> {
-    let generated = generate(workload, quick, scale)?;
+    let generated = generate(workload, quick, scale, settlement_surface)?;
     if workload == Workload::GenericFormElaboration {
         return measure_generic_form_workload(
             generated,
@@ -597,6 +679,7 @@ fn measure_workload(
             scale,
             samples,
             isolate_peak_memory,
+            settlement_surface,
         );
     }
     let source_hash = stable_hash(generated.source.as_bytes());
@@ -810,7 +893,7 @@ fn measure_workload(
         metrics.cache_misses = Some(replay_metrics.cache_misses);
     }
     metrics.peak_memory_bytes = if isolate_peak_memory {
-        isolated_peak_memory_bytes(workload, quick, scale)?
+        isolated_peak_memory_bytes(workload, quick, scale, SettlementSurface::DirectV1)?
     } else {
         None
     };
@@ -852,7 +935,7 @@ fn measure_generic_form_workload(
     samples: usize,
     isolate_peak_memory: bool,
 ) -> Result<ResultRecord, String> {
-    let profile = bounded_profile(workload, quick, scale)?;
+    let profile = bounded_profile(workload, quick, scale, SettlementSurface::DirectV1)?;
     let mut runs = Vec::with_capacity(samples);
     for _ in 0..samples {
         runs.push(measure_generic_batches(profile)?);
@@ -914,7 +997,7 @@ fn measure_generic_form_workload(
     };
 
     metrics.peak_memory_bytes = if isolate_peak_memory {
-        isolated_peak_memory_bytes(workload, quick, scale)?
+        isolated_peak_memory_bytes(workload, quick, scale, SettlementSurface::DirectV1)?
     } else {
         None
     };
@@ -952,8 +1035,9 @@ fn measure_settlement_state_proof_workload(
     scale: u64,
     samples: usize,
     isolate_peak_memory: bool,
+    settlement_surface: SettlementSurface,
 ) -> Result<ResultRecord, String> {
-    let profile = bounded_profile(workload, quick, scale)?;
+    let profile = bounded_profile(workload, quick, scale, settlement_surface)?;
     let (source_hash, source_bytes, source_lines) = bounded_source_stats(profile, false)?;
     let (changed_hash, changed_source_bytes, _) = bounded_source_stats(profile, true)?;
     let changed_source_hash = Some(changed_hash);
@@ -1014,8 +1098,10 @@ fn measure_settlement_state_proof_workload(
             execution.oracle.projection_commit_hash.clone(),
         ),
         settlement_batch_coverage_hash: Some(execution.oracle.coverage_hash.clone()),
+        settlement_surface_profile: Some(settlement_surface.profile()),
+        settlement_proof_version: Some(settlement_surface.proof_version()),
         peak_memory_bytes: if isolate_peak_memory {
-            isolated_peak_memory_bytes(workload, quick, scale)?
+            isolated_peak_memory_bytes(workload, quick, scale, settlement_surface)?
         } else {
             None
         },
@@ -1090,7 +1176,7 @@ fn execute_bounded_settlement(
     for start in (0..profile.total_items).step_by(profile.batch_size) {
         let count = (profile.total_items - start).min(profile.batch_size);
         let source = bounded_source(profile, start, count, false)?;
-        let execution = execute_settlement_path(&source, start)?;
+        let execution = execute_settlement_path(&source, start, profile.surface)?;
         if execution.forms != count {
             return Err(format!(
                 "settlement bounded batch at {start} returned {} forms, expected {count}",
@@ -1113,10 +1199,14 @@ fn execute_bounded_settlement(
                 source_revision_verified.unwrap_or(true)
                     && validate_settlement_source_revision(&execution, &changed)?,
             );
-            let malformed = source.replacen(&format!("amount {}", 100 + start), "amount -1", 1);
+            let malformed = if profile.surface.is_compact() {
+                source.replacen(&format!("a {}", 100 + start), "a -1", 1)
+            } else {
+                source.replacen(&format!("amount {}", 100 + start), "amount -1", 1)
+            };
             atomic_negative_verified = Some(
                 atomic_negative_verified.unwrap_or(true)
-                    && validate_settlement_atomic_negative(&source, malformed)?,
+                    && validate_settlement_atomic_negative(&source, malformed, profile.surface)?,
             );
         }
         if first.is_none() {
@@ -1133,6 +1223,7 @@ fn execute_bounded_settlement(
         projection_commit_hash: projection_hash.finish(),
         coverage_hash: coverage_hash.finish(),
         coverage_count: forms,
+        proof_version: first.oracle.proof_version.clone(),
     };
     Ok(BoundedSettlementExecution {
         first,
@@ -1148,9 +1239,10 @@ fn execute_bounded_settlement(
 fn execute_settlement_path(
     source: &str,
     occurrence_start: usize,
+    settlement_surface: SettlementSurface,
 ) -> Result<SettlementExecution, String> {
     let (mut workspace, source_commit, artifact_id, artifact) =
-        settlement_workspace_fixture(source)?;
+        settlement_workspace_fixture(source, settlement_surface)?;
     let bound = workspace
         .elaborate_package_forms(source_commit)
         .map_err(|error| format!("settlement document elaboration failed: {error}"))?;
@@ -1194,6 +1286,13 @@ fn execute_settlement_path(
         .store()
         .settlement_state_proof(persisted.proof_id)
         .map_err(|error| format!("settlement proof lookup failed: {error}"))?;
+    if proof.version != settlement_surface.proof_version() {
+        return Err(format!(
+            "settlement profile {} persisted unexpected proof version {}",
+            settlement_surface.profile(),
+            proof.version
+        ));
+    }
     proof
         .check(workspace.store())
         .map_err(|error| format!("independent settlement proof check failed: {error}"))?;
@@ -1231,6 +1330,7 @@ fn execute_settlement_path(
         coverage_hash: proof.coverage_hash.to_string(),
         coverage_count: proof.coverage().len(),
         proof_bytes: proof.canonical_bytes().len(),
+        proof_version: proof.version.clone(),
     };
     Ok(SettlementExecution {
         workspace,
@@ -1283,8 +1383,10 @@ fn validate_settlement_source_revision(
 fn validate_settlement_atomic_negative(
     source: &str,
     invalid_source: String,
+    settlement_surface: SettlementSurface,
 ) -> Result<bool, String> {
-    let (mut workspace, source_commit, _, _) = settlement_workspace_fixture(source)?;
+    let (mut workspace, source_commit, _, _) =
+        settlement_workspace_fixture(source, settlement_surface)?;
     let corrected = workspace
         .correct_source(source_commit, invalid_source.as_bytes())
         .map_err(|error| format!("settlement negative correction failed: {error}"))?;
@@ -1317,6 +1419,7 @@ fn validate_settlement_atomic_negative(
 
 fn settlement_workspace_fixture(
     source: &str,
+    settlement_surface: SettlementSurface,
 ) -> Result<
     (
         Workspace,
@@ -1327,7 +1430,7 @@ fn settlement_workspace_fixture(
     String,
 > {
     let mut workspace = Workspace::new();
-    let (package, lockfile) = settlement_state_package_input()?;
+    let (package, lockfile) = settlement_state_package_input(settlement_surface)?;
     let (source_commit, artifact_id, artifact) =
         pin_settlement_workspace(&mut workspace, source, package, &lockfile)?;
     Ok((workspace, source_commit, artifact_id, artifact))
@@ -1358,7 +1461,9 @@ fn pin_settlement_workspace(
     Ok((pinned.commit_id(), artifact_id, artifact))
 }
 
-fn settlement_state_package_input() -> Result<(PackageInput, Lockfile), String> {
+fn settlement_state_package_input(
+    settlement_surface: SettlementSurface,
+) -> Result<(PackageInput, Lockfile), String> {
     let manifest = PackageManifest::new(
         "payments",
         Version::new(1, 0, 0),
@@ -1388,8 +1493,30 @@ fn settlement_state_package_input() -> Result<(PackageInput, Lockfile), String> 
             span: HirSpan::default(),
         }],
     });
-    let package = PackageInput::new(manifest.clone(), [module])
-        .with_schema_capability(schema, SchemaCapability::SettlementStateV1);
+    let mut package = PackageInput::new(manifest.clone(), [module])
+        .with_schema_capability(schema.clone(), SchemaCapability::SettlementStateV1);
+    if settlement_surface.is_compact() {
+        let template = QualifiedName {
+            module: ModulePath::root(Name::new("forms").map_err(|error| format!("{error:?}"))?),
+            name: Name::new("CompactSettlement").map_err(|error| format!("{error:?}"))?,
+        };
+        package = package.with_form_surface(FormSurfaceV1::new([FormTemplateV1::new(
+            template,
+            schema,
+            [
+                ("s", "settlement"),
+                ("k", "kind"),
+                ("x", "state"),
+                ("d", "at"),
+                ("f", "from"),
+                ("t", "to"),
+                ("i", "instrument"),
+                ("a", "amount"),
+            ]
+            .into_iter()
+            .map(|(source, target)| FormFieldMappingV1::new(source, target)),
+        )]));
+    }
     let lockfile = Lockfile {
         roots: vec![Dependency::new(
             manifest.name.clone(),
@@ -1428,7 +1555,7 @@ fn median_settlement_timings(
             let count = (profile.total_items - start_index).min(profile.batch_size);
             let source = bounded_source(profile, start_index, count, false)?;
             let mut workspace = Workspace::new();
-            let (package_input, lockfile) = settlement_state_package_input()?;
+            let (package_input, lockfile) = settlement_state_package_input(profile.surface)?;
             let start = Instant::now();
             let (commit, artifact_id, artifact) =
                 pin_settlement_workspace(&mut workspace, &source, package_input, &lockfile)?;
@@ -1489,7 +1616,8 @@ fn median_settlement_timings(
             for start_index in (0..profile.total_items).step_by(profile.batch_size) {
                 let count = (profile.total_items - start_index).min(profile.batch_size);
                 let source = bounded_source(profile, start_index, count, true)?;
-                let (mut workspace, commit, _, _) = settlement_workspace_fixture(&source)?;
+                let (mut workspace, commit, _, _) =
+                    settlement_workspace_fixture(&source, profile.surface)?;
                 let corrected = workspace
                     .persist_settlement_state_proof(commit)
                     .map_err(|error| format!("settlement source revision failed: {error}"))?;
@@ -1579,6 +1707,7 @@ enum BoundedCorpus {
 #[derive(Clone, Copy, Debug)]
 struct BoundedProfile {
     corpus: BoundedCorpus,
+    surface: SettlementSurface,
     total_items: usize,
     batch_size: usize,
 }
@@ -1589,7 +1718,12 @@ impl BoundedProfile {
     }
 }
 
-fn bounded_profile(workload: Workload, quick: bool, scale: u64) -> Result<BoundedProfile, String> {
+fn bounded_profile(
+    workload: Workload,
+    quick: bool,
+    scale: u64,
+    settlement_surface: SettlementSurface,
+) -> Result<BoundedProfile, String> {
     let base: u64 = 1000;
     let total = base
         .checked_mul(scale)
@@ -1599,6 +1733,7 @@ fn bounded_profile(workload: Workload, quick: bool, scale: u64) -> Result<Bounde
     match workload {
         Workload::GenericFormElaboration => Ok(BoundedProfile {
             corpus: BoundedCorpus::GenericForms,
+            surface: SettlementSurface::DirectV1,
             total_items: total,
             batch_size: BOUNDED_BATCH_SIZE,
         }),
@@ -1611,6 +1746,7 @@ fn bounded_profile(workload: Workload, quick: bool, scale: u64) -> Result<Bounde
                 .map_err(|_| format!("{}: row count exceeds usize", workload.name()))?;
             Ok(BoundedProfile {
                 corpus: BoundedCorpus::SettlementStates,
+                surface: settlement_surface,
                 total_items: total,
                 batch_size: BOUNDED_BATCH_SIZE,
             })
@@ -1627,7 +1763,9 @@ fn bounded_source(
 ) -> Result<String, String> {
     match profile.corpus {
         BoundedCorpus::GenericForms => generic_form_batch(start, count, changed),
-        BoundedCorpus::SettlementStates => settlement_state_batch(start, count, changed),
+        BoundedCorpus::SettlementStates => {
+            settlement_state_batch(start, count, changed, profile.surface.is_compact())
+        }
     }
 }
 
@@ -1902,7 +2040,7 @@ fn median_generation(
     let mut values = Vec::with_capacity(samples);
     for _ in 0..samples {
         let start = Instant::now();
-        let generated = generate(workload, quick, scale)?;
+        let generated = generate(workload, quick, scale, SettlementSurface::DirectV1)?;
         black_box(generated.source.len());
         values.push(start.elapsed().as_nanos());
     }
@@ -2179,6 +2317,7 @@ fn isolated_peak_memory_bytes(
     workload: Workload,
     quick: bool,
     scale: u64,
+    settlement_surface: SettlementSurface,
 ) -> Result<Option<usize>, String> {
     let executable = env::current_exe()
         .map_err(|error| format!("cannot locate benchmark executable for RSS probe: {error}"))?;
@@ -2187,6 +2326,9 @@ fn isolated_peak_memory_bytes(
         .arg("--rss-probe")
         .arg("--workload")
         .arg(workload.name());
+    if settlement_surface.is_compact() {
+        command.arg("--settlement-surface").arg("compact-v1");
+    }
     if quick {
         command.arg("--quick");
     }
@@ -2262,8 +2404,8 @@ fn self_test(_quick: bool, scale: u64) -> Result<usize, String> {
     let test_scale = scale.min(2);
     let mut checks = 0usize;
     for workload in Workload::ALL {
-        let left = generate(workload, false, test_scale)?;
-        let right = generate(workload, false, test_scale)?;
+        let left = generate(workload, false, test_scale, SettlementSurface::DirectV1)?;
+        let right = generate(workload, false, test_scale, SettlementSurface::DirectV1)?;
         if left.source != right.source || left.changed_source != right.changed_source {
             return Err(format!(
                 "{}: generator is not deterministic",
@@ -2421,14 +2563,24 @@ fn self_test(_quick: bool, scale: u64) -> Result<usize, String> {
         ));
     }
     checks += 1;
-    let worker_probe = generate(Workload::HighFrequencyLots, false, test_scale)?;
+    let worker_probe = generate(
+        Workload::HighFrequencyLots,
+        false,
+        test_scale,
+        SettlementSurface::DirectV1,
+    )?;
     let (_, workers_equivalent) =
         median_independent_worker_comparison(Workload::HighFrequencyLots, &worker_probe.source, 1)?;
     if !workers_equivalent {
         return Err("concurrent independent worker differs from the serial result".into());
     }
     checks += 1;
-    let one = generate(Workload::OneRowCloseChange, false, test_scale)?;
+    let one = generate(
+        Workload::OneRowCloseChange,
+        false,
+        test_scale,
+        SettlementSurface::DirectV1,
+    )?;
     if one.changed_source == Some(one.source.clone()) {
         return Err("one-row close change did not change source".into());
     }
@@ -2440,7 +2592,12 @@ fn self_test(_quick: bool, scale: u64) -> Result<usize, String> {
 }
 
 fn generic_form_self_test(_generated: &GeneratedWorkload, scale: u64) -> Result<usize, String> {
-    let profile = bounded_profile(Workload::GenericFormElaboration, false, scale)?;
+    let profile = bounded_profile(
+        Workload::GenericFormElaboration,
+        false,
+        scale,
+        SettlementSurface::DirectV1,
+    )?;
     let measured = measure_generic_batches(profile)?;
     if measured.forms != profile.total_items
         || measured.changed_forms != profile.total_items
@@ -2456,7 +2613,12 @@ fn settlement_state_proof_self_test(
     generated: &GeneratedWorkload,
     scale: u64,
 ) -> Result<usize, String> {
-    let profile = bounded_profile(Workload::SettlementStateProof, false, scale)?;
+    let profile = bounded_profile(
+        Workload::SettlementStateProof,
+        false,
+        scale,
+        SettlementSurface::DirectV1,
+    )?;
     let execution = execute_bounded_settlement(profile, true)?;
     if execution.forms != profile.total_items || execution.oracle.coverage_count != execution.forms
     {
@@ -2474,6 +2636,7 @@ fn settlement_state_proof_self_test(
         || !validate_settlement_atomic_negative(
             &generated.source,
             generated.source.replacen("amount 100", "amount -1", 1),
+            SettlementSurface::DirectV1,
         )?
     {
         return Err("settlement self-test correction/atomic negative failed".into());
@@ -3134,6 +3297,12 @@ fn print_json_line(record: &ResultRecord) {
         ),
         option_string(record.metrics.settlement_batch_coverage_hash.as_deref()),
     );
+    let _ = write!(
+        output,
+        ",\"settlement_surface_profile\":{},\"settlement_proof_version\":{}",
+        option_string(record.metrics.settlement_surface_profile),
+        option_string(record.metrics.settlement_proof_version),
+    );
     output.push_str("}}");
     println!("{output}");
 }
@@ -3252,7 +3421,12 @@ fn stable_hash(bytes: &[u8]) -> String {
     format!("{first:016x}{second:016x}")
 }
 
-fn generate(workload: Workload, quick: bool, scale: u64) -> Result<GeneratedWorkload, String> {
+fn generate(
+    workload: Workload,
+    quick: bool,
+    scale: u64,
+    settlement_surface: SettlementSurface,
+) -> Result<GeneratedWorkload, String> {
     let base = |full: u64, small: u64| -> Result<usize, String> {
         let count = if quick { small } else { full };
         let count = count
@@ -3277,7 +3451,9 @@ fn generate(workload: Workload, quick: bool, scale: u64) -> Result<GeneratedWork
         Workload::GenericFormElaboration => generic_form_elaboration(base(1000, 1000)?),
         // Quick mode deliberately uses one row so --scale maps directly to
         // the dedicated 4,096-row proof boundary.
-        Workload::SettlementStateProof => settlement_state_proof(base(64, 1)?),
+        Workload::SettlementStateProof => {
+            settlement_state_proof(base(64, 1)?, settlement_surface.is_compact())
+        }
     }
 }
 
@@ -3905,10 +4081,10 @@ fn generic_form_batch(start: usize, count: usize, changed: bool) -> Result<Strin
     Ok(source)
 }
 
-fn settlement_state_proof(count: usize) -> Result<GeneratedWorkload, String> {
+fn settlement_state_proof(count: usize, compact: bool) -> Result<GeneratedWorkload, String> {
     let batch_count = count.min(BOUNDED_BATCH_SIZE);
-    let source = settlement_state_batch(0, batch_count, false)?;
-    let changed = settlement_state_batch(0, batch_count, true)?;
+    let source = settlement_state_batch(0, batch_count, false, compact)?;
+    let changed = settlement_state_batch(0, batch_count, true, compact)?;
     Ok(GeneratedWorkload {
         source,
         changed_source: Some(changed),
@@ -3921,18 +4097,35 @@ fn settlement_state_proof(count: usize) -> Result<GeneratedWorkload, String> {
     })
 }
 
-fn settlement_state_batch(start: usize, count: usize, changed: bool) -> Result<String, String> {
+fn settlement_state_batch(
+    start: usize,
+    count: usize,
+    changed: bool,
+    compact: bool,
+) -> Result<String, String> {
     let mut source = String::with_capacity(count.saturating_mul(220));
+    let schema = if compact {
+        "payments::forms::CompactSettlement"
+    } else {
+        "payments::types::SettlementState"
+    };
     for index in start..start.saturating_add(count) {
         let amount = if changed && index == start {
             "100.5".to_owned()
         } else {
             (100 + index).to_string()
         };
-        let _ = writeln!(
-            source,
-            "form settlement/{index:06} : payments::types::SettlementState\n  settlement payment/{index:06}\n  kind ach\n  state issued\n  at 2026-01-01\n  from customer/{index:06}\n  to merchant/{index:06}\n  instrument USD\n  amount {amount}\n",
-        );
+        if compact {
+            let _ = writeln!(
+                source,
+                "form settlement/{index:06} : {schema}\n  s payment/{index:06}\n  k ach\n  x issued\n  d 2026-01-01\n  f customer/{index:06}\n  t merchant/{index:06}\n  i USD\n  a {amount}\n",
+            );
+        } else {
+            let _ = writeln!(
+                source,
+                "form settlement/{index:06} : {schema}\n  settlement payment/{index:06}\n  kind ach\n  state issued\n  at 2026-01-01\n  from customer/{index:06}\n  to merchant/{index:06}\n  instrument USD\n  amount {amount}\n",
+            );
+        }
     }
     Ok(source)
 }
