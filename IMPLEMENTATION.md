@@ -82,6 +82,15 @@ experiments, but it is not part of this contract.
   ID/hash, package-qualified schema IDs, and canonical value hashes. There is
   no ambient registry or public unbound elaboration fallback. The sale engine
   still does not execute these generic values.
+- [x] An explicit `SettlementStateV1` package capability crosses that boundary
+  end to end. The compiler accepts only the exact closed eight-field schema and
+  binds the capability into v2 package/artifact/schema identities without
+  changing legacy v1 hashes. Projection rejects holes, non-canonical IDs and
+  dates, non-positive exact amounts, inconsistent facts, and illegal
+  rail-specific histories. A separate proof format independently re-decodes
+  the source, checks ordered exhaustive coverage and transitions, binds every
+  form to its evidence, artifact, package root, schema, occurrence, and value,
+  enforces fixed resource limits, and is reachable from a typed derived commit.
 - [ ] Every answer has a proposition-specific independently checked proof.
   Lot allocation, inventory conservation, and recognized gain now use typed,
   independently recomputed certificates. Direct obligations, settlement
@@ -141,9 +150,11 @@ experiments, but it is not part of this contract.
   canonical value hash. Document elaboration aggregates independent failures,
   reserves occurrence IDs even for otherwise invalid forms, rejects malformed
   headers and unaddressable package names, and resolves same-named schemas only
-  through the exact artifact pinned by the source commit. Nested row-qualified
-  holes, aliases, refinements, phase wrappers, proof certificates, and query-
-  result transport remain open.
+  through the exact artifact pinned by the source commit. SettlementStateV1
+  forms additionally have an independent typed proof and commit-anchored
+  persistence path. Nested row-qualified holes, aliases, refinements, phase
+  wrappers, general proof certificates, and query-result transport remain
+  open.
 - [ ] Incremental semantic database with precise dependency invalidation.
   Production elaboration and analysis are memoized through the database with
   exact source/package edges and clean-run equivalence; invalidation within a
@@ -179,7 +190,9 @@ experiments, but it is not part of this contract.
 ### Gate 5 — immutable store and reconciliation
 
 - [x] Immutable content-addressed evidence, statement, decision, package,
-  proof, commit, and close objects.
+  generic proof, typed settlement proof, commit, and close objects. Settlement
+  proof commits preserve the exact source artifact/package context and merge
+  only as explicit typed roots.
 - [ ] Corrections/supersession, tombstones, unavailable/redacted/deleted
   states, and as-known-at queries. The immutable store now implements these
   primitives; production workspace/analysis integration remains open.
@@ -210,8 +223,10 @@ experiments, but it is not part of this contract.
   Rail-specific append-only transition validation now distinguishes ACH,
   card, and check lifecycles, including check re-presentation, and validates
   bounded targeted provisional credits, fees, corrections, reversals, refunds,
-  and chargebacks. Source-language, package-defined lifecycle, and engine
-  integration remain open.
+  and chargebacks. Package-authored SettlementStateV1 source forms now project
+  and persist proven histories through an explicit versioned capability;
+  executable package-defined lifecycle rules and recognition-engine integration
+  remain open.
 - [ ] Cash and accrual recognizers, invoices, monthly close, journal export.
 - [x] Budgets and forecasts remain isolated scenarios.
 
@@ -272,7 +287,9 @@ experiments, but it is not part of this contract.
   source-commit artifact pinning, schema-bound document elaboration, canonical
   value rechecking, and a one-row correction. Its warm re-elaboration timings
   are explicitly not labelled as incremental-engine metrics. Remaining domain
-  workloads and shared-engine parallel measurement remain open.
+  workloads and shared-engine parallel measurement remain open. A separate
+  1,000-form release stress gate exercises capable-form projection, independent
+  proof checking, commit anchoring, and full-store verification end to end.
 - [ ] Property, differential, incremental/full, and parallel/single-threaded
   equivalence suites. A deterministic generated suite now exercises roughly
   1,500 parser, canonicalization, unification, cycle, time, unit, package,
@@ -290,16 +307,17 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 374 library tests, 4 CLI tests, 8 independent reference/production
+- 378 library tests, 4 CLI tests, 8 independent reference/production
   differential tests, and 5 structured-reference outcome tests;
 - 134 named constitutional cases with exactly 75 registry-linked independent
   case-specific tests and 12 grouped smoke suites; semantic review, not the
   raw count, keeps Gate 0 open;
 - 14 deterministic heavy-ledger integration tests, 2 heavy economic-system
   workflows, 7 adversarial property tests, two explicit 10,000-row ledger
-  release stress tests, and one explicit 10,000/100,000 generic-form release
-  stress gate, including a full obligation/settlement/satisfaction network,
-  plus 9 generated assurance-family tests spanning roughly 1,500 cases;
+  release stress tests, one explicit 10,000/100,000 generic-form release
+  stress gate, and one 1,000-form independently checked settlement-proof gate,
+  including a full obligation/settlement/satisfaction network, plus 9 generated
+  assurance-family tests spanning roughly 1,500 cases;
 - a 12-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
   clean-recomputation equivalence, six public-domain-API semantic probes, and

@@ -29,6 +29,8 @@ pub mod reference;
 pub mod render;
 pub mod scenario;
 pub mod semantics;
+pub mod settlement_projection;
+pub mod settlement_proof;
 pub mod store;
 pub mod surface;
 pub mod time;

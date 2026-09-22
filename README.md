@@ -94,6 +94,13 @@ commit before elaboration. Analysis proofs are bound to that source commit, so
 changing even source trivia creates a new auditable source identity without
 silently rewriting prior history.
 
+Package-authored forms have one deliberately narrow semantic extension point:
+an exported record may explicitly carry the versioned `SettlementStateV1`
+capability. A capable form is decoded only through the compiled artifact pinned
+by its source commit, validated as an ordered ACH/card/check history, checked a
+second time by an independent typed proof checker, and anchored by a derived
+commit. Record shape or schema names alone never grant this authority.
+
 ## Assurance workloads
 
 ```text
@@ -102,6 +109,8 @@ cargo test --locked --offline --test heavy_ledgers \
   stress_ten_thousand_evidence_rows -- --ignored
 cargo test --locked --offline --release --test heavy_ledgers \
   stress_ten_thousand_obligations_settlements_and_satisfactions -- --ignored
+cargo test --locked --offline --release --test settlement_proof \
+  stress_thousand_settlement_forms_project_prove_anchor_and_verify -- --ignored --exact
 cargo run --release --locked --offline --bin axiom-bench -- --self-test
 cargo run --release --locked --offline --bin axiom-bench
 ```
@@ -121,15 +130,19 @@ The semantic pipeline is:
 ```text
 exact source bytes -> immutable commit -> observations -> resolution
                    -> recognition -> journal/proof bound to the commit
+
+package form -> pinned artifact capability -> settlement event graph
+             -> independent typed proof -> derived proof commit
 ```
 
 The journal is a compact authoring and interoperability surface, not the
 underlying ontology. Accounts, positions, obligations, transfers, evidence,
 time, and policies remain distinct so the same accepted economic fact can feed
 multiple books. V0 intentionally exposes a small built-in vocabulary for
-trades, direct obligations, settlements, and satisfactions. Community-defined
-economic forms and lifecycle packages remain architectural direction, not an
-implemented extension mechanism.
+trades, direct obligations, settlements, and satisfactions. Community packages
+can now define the authoring schema for the fixed `SettlementStateV1`
+capability. Arbitrary executable economic behavior and package-defined
+recognition remain architectural direction, not implemented authority.
 
 See [`DESIGN.md`](DESIGN.md) for the executable implementation contract,
 [`confirmed-direction.md`](confirmed-direction.md) for the full architectural

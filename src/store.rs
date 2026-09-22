@@ -21,10 +21,12 @@ use crate::proof::{
     Node as CanonicalNode, Operation as CanonicalOperation, Proof as CanonicalProof,
     ProofId as CanonicalProofId,
 };
+use crate::settlement_proof::{SettlementProofError, SettlementStateV1Proof};
 
 const SCHEMA_VERSION: &str = "axiom/store/v3";
-const COMMIT_SCHEMA_VERSION: &str = "axiom/store/commit/v4";
+const COMMIT_SCHEMA_VERSION: &str = "axiom/store/commit/v5";
 pub(crate) const ANALYSIS_AUTHOR: &str = "workspace/analysis";
+pub(crate) const SETTLEMENT_PROOF_AUTHOR: &str = "workspace/settlement-proof";
 const EVIDENCE_CONTENT_DOMAIN: &str = "axiom/store/evidence-content/v1";
 
 /// The object families that may be addressed by this store.
@@ -37,6 +39,7 @@ pub enum ObjectKind {
     Package,
     CompiledArtifact,
     AnalysisArtifact,
+    SettlementStateProof,
     Proof,
     Conflict,
     Commit,
@@ -53,6 +56,7 @@ impl ObjectKind {
             Self::Package => "package",
             Self::CompiledArtifact => "compiled-artifact",
             Self::AnalysisArtifact => "analysis-artifact",
+            Self::SettlementStateProof => "settlement-state-proof",
             Self::Proof => "proof",
             Self::Conflict => "conflict",
             Self::Commit => "commit",
@@ -90,6 +94,7 @@ kind_marker!(CompletenessKind, Completeness);
 kind_marker!(PackageKind, Package);
 kind_marker!(CompiledArtifactKind, CompiledArtifact);
 kind_marker!(AnalysisArtifactKind, AnalysisArtifact);
+kind_marker!(SettlementStateProofKind, SettlementStateProof);
 kind_marker!(ProofKind, Proof);
 kind_marker!(ConflictKind, Conflict);
 kind_marker!(CommitKind, Commit);
@@ -143,6 +148,8 @@ pub type CompiledArtifactId = ObjectId<CompiledArtifactKind>;
 /// artifact is the only authority a close may cite; unlike a generic proof it
 /// carries the complete source/analysis/package/result binding.
 pub type AnalysisArtifactId = ObjectId<AnalysisArtifactKind>;
+/// The store address of a checked SettlementStateV1 projection proof.
+pub type SettlementStateProofId = ObjectId<SettlementStateProofKind>;
 /// The store address of a persisted proof object.  This is deliberately
 /// distinct from [`crate::proof::ProofId`], which is the identity of a proof
 /// node inside the canonical DAG.  A stored object may contain many nodes and
@@ -778,6 +785,10 @@ pub struct Commit {
     /// is intentionally separate from policy-package roots: one artifact
     /// already represents the complete compiled package set.
     pub compiled_artifact: Option<CompiledArtifactId>,
+    /// Checked SettlementStateV1 projection proofs anchored by this commit.
+    /// These are distinct from generic proof objects and are only valid on a
+    /// deterministic child of the exact source commit named by each proof.
+    pub settlement_proofs: Vec<SettlementStateProofId>,
     pub proofs: Vec<ProofObjectId>,
     /// Durable semantic conflicts. A later snapshot may replace an unresolved
     /// conflict only with a [`ConflictRecord`] that explicitly resolves it.
@@ -807,6 +818,7 @@ impl Commit {
             completeness: canonical_set(completeness),
             packages: canonical_set(packages),
             compiled_artifact: None,
+            settlement_proofs: Vec::new(),
             proofs: canonical_set(proofs),
             conflicts: Vec::new(),
             schema_version: COMMIT_SCHEMA_VERSION.to_string(),
@@ -837,6 +849,15 @@ impl Commit {
         self
     }
 
+    /// Pin checked SettlementStateV1 projection proofs to this commit.
+    pub fn with_settlement_proofs(
+        mut self,
+        proofs: impl IntoIterator<Item = SettlementStateProofId>,
+    ) -> Self {
+        self.settlement_proofs = canonical_set(proofs);
+        self
+    }
+
     pub fn canonicalize(&mut self) {
         canonicalize_vec(&mut self.parents);
         canonicalize_vec(&mut self.evidence);
@@ -844,6 +865,7 @@ impl Commit {
         canonicalize_vec(&mut self.decisions);
         canonicalize_vec(&mut self.completeness);
         canonicalize_vec(&mut self.packages);
+        canonicalize_vec(&mut self.settlement_proofs);
         canonicalize_vec(&mut self.proofs);
         canonicalize_vec(&mut self.conflicts);
         self.signatures.sort();
@@ -1003,6 +1025,7 @@ pub enum StoredObject {
     Package(PolicyPackage),
     CompiledArtifact(CompiledArtifactObject),
     AnalysisArtifact(AnalysisArtifact),
+    SettlementStateProof(SettlementStateV1Proof),
     Proof(ProofObject),
     Conflict(ConflictRecord),
     Commit(Commit),
@@ -1019,6 +1042,7 @@ impl StoredObject {
             Self::Package(_) => ObjectKind::Package,
             Self::CompiledArtifact(_) => ObjectKind::CompiledArtifact,
             Self::AnalysisArtifact(_) => ObjectKind::AnalysisArtifact,
+            Self::SettlementStateProof(_) => ObjectKind::SettlementStateProof,
             Self::Proof(_) => ObjectKind::Proof,
             Self::Conflict(_) => ObjectKind::Conflict,
             Self::Commit(_) => ObjectKind::Commit,
@@ -1039,6 +1063,7 @@ impl StoredObject {
             Self::Package(value) => encode_package(&mut out, value),
             Self::CompiledArtifact(value) => encode_compiled_artifact(&mut out, value),
             Self::AnalysisArtifact(value) => encode_analysis_artifact(&mut out, value),
+            Self::SettlementStateProof(value) => put_bytes(&mut out, &value.canonical_bytes()),
             Self::Proof(value) => encode_proof(&mut out, value),
             Self::Conflict(value) => encode_conflict_record(&mut out, value),
             Self::Commit(value) => encode_commit(&mut out, value),
@@ -1210,6 +1235,13 @@ impl fmt::Display for StoreError {
 
 impl std::error::Error for StoreError {}
 
+fn settlement_proof_store_error(error: SettlementProofError) -> StoreError {
+    match error {
+        SettlementProofError::Store(error) => error,
+        error => StoreError::InvalidObject(error.to_string()),
+    }
+}
+
 /// A small immutable-by-API content-addressed store.  There is deliberately
 /// no mutable accessor for stored bytes; all writes are insert-only and equal
 /// content returns the existing address.
@@ -1262,6 +1294,9 @@ impl ObjectStore {
             value.verify_integrity()?;
         } else if let StoredObject::AnalysisArtifact(value) = object {
             self.validate_analysis_artifact(value)?;
+        } else if let StoredObject::SettlementStateProof(value) = object {
+            self.validate_source_snapshot(value.source_commit)?;
+            value.check(self).map_err(settlement_proof_store_error)?;
         }
         Ok(object)
     }
@@ -1288,6 +1323,11 @@ impl ObjectStore {
                 value.verify_integrity()?;
             } else if let StoredObject::AnalysisArtifact(value) = object {
                 self.validate_analysis_artifact(value)?;
+            } else if let StoredObject::SettlementStateProof(value) = object {
+                self.validate_source_snapshot(value.source_commit)?;
+                value.check(self).map_err(settlement_proof_store_error)?;
+            } else if let StoredObject::Commit(value) = object {
+                self.validate_commit(value)?;
             }
         }
         Ok(())
@@ -1392,6 +1432,21 @@ impl ObjectStore {
         value.verify_integrity()?;
         Ok(CompiledArtifactId::new(
             self.insert(StoredObject::CompiledArtifact(value))?,
+        ))
+    }
+
+    /// Persist a checked SettlementStateV1 proof in its dedicated object
+    /// family.  The proof checker re-reads the source and artifact before the
+    /// object is inserted, so a generic or rehashed forged payload cannot be
+    /// stored as settlement authority.
+    pub fn put_settlement_state_proof(
+        &mut self,
+        value: SettlementStateV1Proof,
+    ) -> Result<SettlementStateProofId, StoreError> {
+        self.validate_source_snapshot(value.source_commit)?;
+        value.check(self).map_err(settlement_proof_store_error)?;
+        Ok(SettlementStateProofId::new(
+            self.insert(StoredObject::SettlementStateProof(value))?,
         ))
     }
 
@@ -1933,6 +1988,20 @@ impl ObjectStore {
         }
     }
 
+    pub fn settlement_state_proof(
+        &self,
+        id: SettlementStateProofId,
+    ) -> Result<&SettlementStateV1Proof, StoreError> {
+        match self.get(id.hash())? {
+            StoredObject::SettlementStateProof(value) => Ok(value),
+            object => Err(StoreError::WrongKind {
+                hash: id.hash(),
+                expected: ObjectKind::SettlementStateProof,
+                actual: object.kind(),
+            }),
+        }
+    }
+
     pub fn analysis_artifact(
         &self,
         id: AnalysisArtifactId,
@@ -2058,6 +2127,95 @@ impl ObjectStore {
         Ok(reachable.difference(&superseded).copied().collect())
     }
 
+    /// Validate that `commit` is an ordinary source snapshot. Corrections
+    /// must supersede the unique source value visible at the direct parent;
+    /// older ancestry may contain explicitly resolved merges and therefore
+    /// is not incorrectly required to be a linear source chain.
+    pub(crate) fn validate_source_snapshot(&self, commit: CommitId) -> Result<(), StoreError> {
+        let value = self.commit(commit)?.clone();
+        if value.parents.len() > 1 {
+            return Err(StoreError::InvalidObject(
+                "source commits cannot be merge commits".into(),
+            ));
+        }
+        let [evidence_id] = value.evidence.as_slice() else {
+            return Err(StoreError::InvalidObject(
+                "source commit must pin exactly one evidence root".into(),
+            ));
+        };
+        if !value.statements.is_empty()
+            || !value.completeness.is_empty()
+            || !value.proofs.is_empty()
+            || !value.settlement_proofs.is_empty()
+        {
+            return Err(StoreError::InvalidObject(
+                "commit contains non-source roots other than policy packages".into(),
+            ));
+        }
+
+        let mut resolution_decisions = BTreeSet::new();
+        for conflict_id in &value.conflicts {
+            let conflict = self.conflict(*conflict_id)?;
+            let Some(decision) = conflict.resolution else {
+                return Err(StoreError::InvalidObject(
+                    "source contains unresolved semantic conflicts".into(),
+                ));
+            };
+            resolution_decisions.insert(decision);
+        }
+        if value
+            .decisions
+            .iter()
+            .any(|decision| !resolution_decisions.contains(decision))
+        {
+            return Err(StoreError::InvalidObject(
+                "source contains a decision that does not resolve a conflict".into(),
+            ));
+        }
+
+        let evidence = self.evidence(*evidence_id)?;
+        match &evidence.state {
+            EvidenceState::Present => {}
+            EvidenceState::Correction {
+                supersedes, scope, ..
+            } => {
+                if scope != "whole-source" {
+                    return Err(StoreError::InvalidObject(
+                        "source correction must use scope whole-source".into(),
+                    ));
+                }
+                let Some(parent) = value.parents.first().copied() else {
+                    return Err(StoreError::InvalidObject(
+                        "source correction must have a parent snapshot".into(),
+                    ));
+                };
+                let visible = self.evidence_as_known_at(&evidence.source, parent)?;
+                if visible.as_slice() != [*supersedes] {
+                    return Err(StoreError::InvalidObject(
+                        "source correction must supersede the unique value visible at its parent"
+                            .into(),
+                    ));
+                }
+                let prior = self.evidence(*supersedes)?;
+                if evidence.source != prior.source
+                    || evidence.occurrence != prior.occurrence
+                    || evidence.external != prior.external
+                {
+                    return Err(StoreError::InvalidObject(
+                        "source correction must retain source, occurrence, and external identity"
+                            .into(),
+                    ));
+                }
+            }
+            _ => {
+                return Err(StoreError::InvalidObject(
+                    "source evidence must be Present or a whole-source Correction".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Compatibility spelling for callers that phrase the query as
     /// “as-known-at”.
     pub fn as_known_at(
@@ -2120,6 +2278,11 @@ impl ObjectStore {
         proofs.extend(right_value.proofs.iter().copied());
         canonicalize_vec(&mut proofs);
 
+        let mut settlement_proofs = base_value.settlement_proofs.clone();
+        settlement_proofs.extend(left_value.settlement_proofs.iter().copied());
+        settlement_proofs.extend(right_value.settlement_proofs.iter().copied());
+        canonicalize_vec(&mut settlement_proofs);
+
         let compiled_artifact = if left_value.compiled_artifact == right_value.compiled_artifact {
             left_value.compiled_artifact
         } else if left_value.compiled_artifact == base_value.compiled_artifact {
@@ -2170,6 +2333,7 @@ impl ObjectStore {
             Some(artifact) => merged.with_compiled_artifact(artifact),
             None => merged,
         }
+        .with_settlement_proofs(settlement_proofs)
         .with_conflicts(conflict_objects.clone());
         let commit = self.put_commit(merged)?;
         let mut unresolved_conflicts = Vec::new();
@@ -2227,6 +2391,18 @@ impl ObjectStore {
         for id in &value.proofs {
             self.require_kind(id.hash(), ObjectKind::Proof)?;
         }
+        for id in &value.settlement_proofs {
+            self.require_kind(id.hash(), ObjectKind::SettlementStateProof)?;
+        }
+        if value.parents.len() <= 1
+            && !value.evidence.is_empty()
+            && !value.settlement_proofs.is_empty()
+        {
+            return Err(StoreError::InvalidObject(
+                "source commits cannot pin settlement proof roots".into(),
+            ));
+        }
+        self.validate_settlement_proof_anchors(value)?;
         for id in &value.conflicts {
             self.require_kind(id.hash(), ObjectKind::Conflict)?;
             if let Some(decision) = self.conflict(*id)?.resolution
@@ -2249,6 +2425,54 @@ impl ObjectStore {
                         "commit drops unresolved conflict {inherited} without a resolution"
                     )));
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_settlement_proof_anchors(&self, value: &Commit) -> Result<(), StoreError> {
+        if value.settlement_proofs.is_empty() {
+            return Ok(());
+        }
+        let Some(first_parent) = value.parents.first().copied() else {
+            return Err(StoreError::InvalidObject(
+                "settlement proof child must have a source parent".into(),
+            ));
+        };
+        for proof_id in &value.settlement_proofs {
+            let proof = self.settlement_state_proof(*proof_id)?;
+            self.validate_source_snapshot(proof.source_commit)?;
+            proof.check(self).map_err(settlement_proof_store_error)?;
+            if value.parents.len() == 1 {
+                if first_parent != proof.source_commit {
+                    return Err(StoreError::InvalidObject(
+                        "settlement proof child must name the proof source as its exact parent"
+                            .into(),
+                    ));
+                }
+                let source = self.commit(proof.source_commit)?;
+                if !value.evidence.is_empty()
+                    || !value.statements.is_empty()
+                    || !value.decisions.is_empty()
+                    || !value.completeness.is_empty()
+                    || !value.proofs.is_empty()
+                    || value.packages != source.packages
+                    || value.compiled_artifact != source.compiled_artifact
+                    || value.conflicts != source.conflicts
+                    || value.author != SETTLEMENT_PROOF_AUTHOR
+                    || !value.signatures.is_empty()
+                {
+                    return Err(StoreError::InvalidObject(
+                        "settlement proof child does not preserve its exact source snapshot".into(),
+                    ));
+                }
+            } else if !value.parents.iter().any(|parent| {
+                self.commit(*parent)
+                    .is_ok_and(|parent| parent.settlement_proofs.contains(proof_id))
+            }) {
+                return Err(StoreError::InvalidObject(
+                    "merged settlement proof root must be inherited from a direct parent".into(),
+                ));
             }
         }
         Ok(())
@@ -3127,6 +3351,7 @@ fn encode_commit(out: &mut Vec<u8>, value: &Commit) {
     put_ids(out, &value.completeness);
     put_ids(out, &value.packages);
     put_optional_hash(out, value.compiled_artifact.map(ObjectId::hash));
+    put_ids(out, &value.settlement_proofs);
     put_ids(out, &value.proofs);
     put_ids(out, &value.conflicts);
     put_string(out, &value.schema_version);

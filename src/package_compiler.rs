@@ -16,7 +16,9 @@ use crate::model::ContentHash;
 use crate::package_lock::{Lockfile, PackageLockError, PackageManifest, PackageRegistry, Version};
 
 const ARTIFACT_DOMAIN: &str = "axiom/package-artifact/v1";
+const CAPABILITY_ARTIFACT_DOMAIN: &str = "axiom/package-artifact/v2";
 const RECORD_SCHEMA_DOMAIN: &str = "axiom/package-record-schema/v1";
+const CAPABILITY_RECORD_SCHEMA_DOMAIN: &str = "axiom/package-record-schema/v2";
 const RECORD_VALUE_DOMAIN: &str = "axiom/package-record-value/v1";
 
 /// The input to one package compilation unit.
@@ -28,6 +30,10 @@ const RECORD_VALUE_DOMAIN: &str = "axiom/package-record-value/v1";
 pub struct PackageInput {
     pub manifest: PackageManifest,
     pub modules: Vec<Module>,
+    /// Explicit capabilities attached to exported declarations in this
+    /// package.  A capability is never inferred from a declaration name or
+    /// type shape; the compiler validates each binding below.
+    schema_capabilities: Vec<SchemaCapabilityBinding>,
 }
 
 impl PackageInput {
@@ -35,11 +41,29 @@ impl PackageInput {
         Self {
             manifest,
             modules: modules.into_iter().collect(),
+            schema_capabilities: Vec::new(),
         }
+    }
+
+    /// Attach one versioned capability to an exported schema.  Duplicate
+    /// bindings are retained until compilation so the compiler can reject
+    /// them explicitly rather than silently changing their meaning.
+    pub fn with_schema_capability(
+        mut self,
+        qualified_name: QualifiedName,
+        capability: SchemaCapability,
+    ) -> Self {
+        self.schema_capabilities
+            .push(SchemaCapabilityBinding::new(qualified_name, capability));
+        self
     }
 
     pub fn manifest_hash(&self) -> ContentHash {
         self.manifest.hash()
+    }
+
+    pub fn schema_capabilities(&self) -> &[SchemaCapabilityBinding] {
+        &self.schema_capabilities
     }
 
     /// Return the content identity of the complete compiler input.
@@ -60,7 +84,55 @@ impl PackageInput {
             put_text(&mut bytes, &module.path.canonical());
             bytes.extend_from_slice(&module.recomputed_content_id().bytes());
         }
-        ContentHash::domain_separated("axiom/package-input/v1", &bytes)
+        let domain = if self.schema_capabilities.is_empty() {
+            "axiom/package-input/v1"
+        } else {
+            put_schema_capabilities(&mut bytes, &self.schema_capabilities);
+            "axiom/package-input/v2"
+        };
+        ContentHash::domain_separated(domain, &bytes)
+    }
+}
+
+/// A versioned semantic capability which a package may explicitly export.
+///
+/// The version is part of the variant, rather than being inferred from a
+/// package name, declaration name, or record shape.  Adding a future version
+/// therefore creates a new capability and a new content identity.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum SchemaCapability {
+    SettlementStateV1,
+}
+
+impl SchemaCapability {
+    pub const fn canonical_name(self) -> &'static str {
+        match self {
+            Self::SettlementStateV1 => "settlement-state/v1",
+        }
+    }
+}
+
+impl fmt::Display for SchemaCapability {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.canonical_name())
+    }
+}
+
+/// An explicit attachment between a package export and a versioned schema
+/// capability.  The qualified name keeps the attachment package-local while
+/// still making the export identity unambiguous in an artifact.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct SchemaCapabilityBinding {
+    pub qualified_name: QualifiedName,
+    pub capability: SchemaCapability,
+}
+
+impl SchemaCapabilityBinding {
+    pub fn new(qualified_name: QualifiedName, capability: SchemaCapability) -> Self {
+        Self {
+            qualified_name,
+            capability,
+        }
     }
 }
 
@@ -92,9 +164,14 @@ pub struct CompiledPackage {
     pub version: Version,
     pub manifest_hash: ContentHash,
     pub modules: Vec<CompiledModule>,
+    schema_capabilities: Vec<SchemaCapabilityBinding>,
 }
 
 impl CompiledPackage {
+    pub fn schema_capabilities(&self) -> &[SchemaCapabilityBinding] {
+        &self.schema_capabilities
+    }
+
     /// Return the content address of this package's complete compiled input.
     ///
     /// The package root is deliberately derived from the normalized compiler
@@ -117,7 +194,13 @@ impl CompiledPackage {
             put_text(&mut bytes, &module.path.canonical());
             bytes.extend_from_slice(&module.content_id.bytes());
         }
-        ContentHash::domain_separated("axiom/package-root/v1", &bytes)
+        let domain = if self.schema_capabilities.is_empty() {
+            "axiom/package-root/v1"
+        } else {
+            put_schema_capabilities(&mut bytes, &self.schema_capabilities);
+            "axiom/package-root/v2"
+        };
+        ContentHash::domain_separated(domain, &bytes)
     }
 }
 
@@ -218,15 +301,23 @@ impl CompiledArtifact {
             });
         };
 
+        let capability = package
+            .schema_capabilities
+            .iter()
+            .find(|binding| binding.qualified_name == *qualified_name)
+            .map(|binding| binding.capability);
+
         Ok(RecordSchema {
             package_root,
             qualified_name: qualified_name.clone(),
             row: row.clone(),
+            capability,
             schema_id: record_schema_id(
                 self.artifact_hash,
                 package_root,
                 qualified_name,
                 &export.kind,
+                capability,
             ),
         })
     }
@@ -285,6 +376,7 @@ pub struct RecordSchema {
     package_root: ContentHash,
     qualified_name: QualifiedName,
     row: crate::hir::Row,
+    capability: Option<SchemaCapability>,
     schema_id: ContentHash,
 }
 
@@ -299,6 +391,13 @@ impl RecordSchema {
 
     pub fn row(&self) -> &crate::hir::Row {
         &self.row
+    }
+
+    /// Return the explicit capability attached to this exported schema.
+    /// `None` means the schema is ordinary and carries no semantic projection
+    /// authority.
+    pub fn capability(&self) -> Option<SchemaCapability> {
+        self.capability
     }
 
     pub fn schema_id(&self) -> ContentHash {
@@ -757,6 +856,21 @@ pub enum PackageCompileError {
         package: String,
         qualified_name: String,
     },
+    DuplicateSchemaCapability {
+        package: String,
+        qualified_name: String,
+    },
+    UnknownSchemaCapabilityExport {
+        package: String,
+        qualified_name: String,
+        capability: SchemaCapability,
+    },
+    InvalidSchemaCapability {
+        package: String,
+        qualified_name: String,
+        capability: SchemaCapability,
+        reason: String,
+    },
     InvalidExportType {
         package: String,
         qualified_name: String,
@@ -805,6 +919,30 @@ impl fmt::Display for PackageCompileError {
             } => write!(
                 formatter,
                 "package `{package}` exports `{qualified_name}` more than once"
+            ),
+            Self::DuplicateSchemaCapability {
+                package,
+                qualified_name,
+            } => write!(
+                formatter,
+                "package `{package}` attaches more than one schema capability to `{qualified_name}`"
+            ),
+            Self::UnknownSchemaCapabilityExport {
+                package,
+                qualified_name,
+                capability,
+            } => write!(
+                formatter,
+                "package `{package}` attaches capability `{capability}` to unknown export `{qualified_name}`"
+            ),
+            Self::InvalidSchemaCapability {
+                package,
+                qualified_name,
+                capability,
+                reason,
+            } => write!(
+                formatter,
+                "package `{package}` export `{qualified_name}` cannot carry capability `{capability}`: {reason}"
             ),
             Self::InvalidExportType {
                 package,
@@ -883,6 +1021,61 @@ fn validate_type(ty: &Type) -> Result<(), String> {
     }
 }
 
+fn validate_schema_capability(
+    capability: SchemaCapability,
+    kind: &DeclarationKind,
+) -> Result<(), String> {
+    let DeclarationKind::Type {
+        ty: Type::Record(row),
+    } = kind
+    else {
+        return Err("capability requires a direct exported record type".to_owned());
+    };
+
+    if row.is_open() {
+        return Err("capability requires a closed record row".to_owned());
+    }
+
+    match capability {
+        SchemaCapability::SettlementStateV1 => {
+            // HIR rows are canonicalized by field name.  Keep this list in
+            // canonical order so the capability cannot accidentally accept a
+            // declaration whose ordering was changed by a public HIR caller.
+            let expected = [
+                ("amount", Type::Decimal),
+                ("at", Type::Text),
+                ("from", Type::Text),
+                ("instrument", Type::Text),
+                ("kind", Type::Text),
+                ("settlement", Type::Text),
+                ("state", Type::Text),
+                ("to", Type::Text),
+            ];
+            let fields = row.fields();
+            if fields.len() != expected.len() {
+                return Err(format!(
+                    "SettlementStateV1 requires exactly these {} fields: settlement Text, kind Text, state Text, at Text, from Text, to Text, instrument Text, amount Decimal",
+                    expected.len()
+                ));
+            }
+            for (field, (expected_name, expected_type)) in fields.iter().zip(expected) {
+                if field.name.as_str() != expected_name {
+                    return Err(format!(
+                        "SettlementStateV1 requires field `{expected_name}`, found `{}`",
+                        field.name
+                    ));
+                }
+                if field.ty != expected_type {
+                    return Err(format!(
+                        "SettlementStateV1 field `{expected_name}` must have primitive type `{expected_type:?}`"
+                    ));
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
 /// Compile a deterministic package set from validated HIR modules.
 ///
 /// Package inputs may arrive in any order.  Package names, module paths, and
@@ -955,11 +1148,42 @@ where
             }
         }
 
+        let mut schema_capabilities = input.schema_capabilities.clone();
+        schema_capabilities.sort();
+        let mut capability_names = BTreeSet::new();
+        for binding in &schema_capabilities {
+            let canonical_name = binding.qualified_name.canonical();
+            if !capability_names.insert(canonical_name.clone()) {
+                return Err(PackageCompileError::DuplicateSchemaCapability {
+                    package: input.manifest.name.clone(),
+                    qualified_name: canonical_name,
+                });
+            }
+
+            let key = (input.manifest.name.clone(), canonical_name.clone());
+            let Some(export) = exports.get(&key) else {
+                return Err(PackageCompileError::UnknownSchemaCapabilityExport {
+                    package: input.manifest.name.clone(),
+                    qualified_name: canonical_name,
+                    capability: binding.capability,
+                });
+            };
+            validate_schema_capability(binding.capability, &export.kind).map_err(|reason| {
+                PackageCompileError::InvalidSchemaCapability {
+                    package: input.manifest.name.clone(),
+                    qualified_name: binding.qualified_name.canonical(),
+                    capability: binding.capability,
+                    reason,
+                }
+            })?;
+        }
+
         compiled_packages.push(CompiledPackage {
             name: input.manifest.name.clone(),
             version: input.manifest.version,
             manifest_hash: input.manifest.hash(),
             modules: compiled_modules,
+            schema_capabilities,
         });
     }
 
@@ -1114,10 +1338,15 @@ fn artifact_hash(
     packages: &[CompiledPackage],
     exports: &[CompiledExport],
 ) -> ContentHash {
-    ContentHash::domain_separated(
-        ARTIFACT_DOMAIN,
-        &artifact_bytes(lockfile_hash, packages, exports),
-    )
+    let domain = if packages
+        .iter()
+        .all(|package| package.schema_capabilities.is_empty())
+    {
+        ARTIFACT_DOMAIN
+    } else {
+        CAPABILITY_ARTIFACT_DOMAIN
+    };
+    ContentHash::domain_separated(domain, &artifact_bytes(lockfile_hash, packages, exports))
 }
 
 fn record_schema_id(
@@ -1125,6 +1354,7 @@ fn record_schema_id(
     package_root: ContentHash,
     qualified_name: &QualifiedName,
     declaration: &DeclarationKind,
+    capability: Option<SchemaCapability>,
 ) -> ContentHash {
     let mut bytes = Vec::new();
     put_text(&mut bytes, "record-schema");
@@ -1132,7 +1362,13 @@ fn record_schema_id(
     bytes.extend_from_slice(package_root.as_bytes());
     put_text(&mut bytes, &qualified_name.canonical());
     bytes.extend_from_slice(&declaration_kind_bytes(declaration));
-    ContentHash::domain_separated(RECORD_SCHEMA_DOMAIN, &bytes)
+    let domain = if let Some(capability) = capability {
+        put_optional_schema_capability(&mut bytes, Some(capability));
+        CAPABILITY_RECORD_SCHEMA_DOMAIN
+    } else {
+        RECORD_SCHEMA_DOMAIN
+    };
+    ContentHash::domain_separated(domain, &bytes)
 }
 
 fn artifact_bytes(
@@ -1140,6 +1376,9 @@ fn artifact_bytes(
     packages: &[CompiledPackage],
     exports: &[CompiledExport],
 ) -> Vec<u8> {
+    let has_capabilities = packages
+        .iter()
+        .any(|package| !package.schema_capabilities.is_empty());
     let mut bytes = Vec::new();
     put_text(&mut bytes, "artifact");
     bytes.extend_from_slice(lockfile_hash.as_bytes());
@@ -1166,6 +1405,9 @@ fn artifact_bytes(
         for module in modules {
             put_text(&mut bytes, &module.path.canonical());
             bytes.extend_from_slice(&module.content_id.bytes());
+        }
+        if has_capabilities {
+            put_schema_capabilities(&mut bytes, &package.schema_capabilities);
         }
     }
 
@@ -1235,6 +1477,26 @@ fn put_type(bytes: &mut Vec<u8>, ty: &Type) {
     bytes.extend_from_slice(&canonical);
 }
 
+fn put_schema_capabilities(bytes: &mut Vec<u8>, capabilities: &[SchemaCapabilityBinding]) {
+    let mut capabilities = capabilities.to_vec();
+    capabilities.sort();
+    put_u64(bytes, capabilities.len());
+    for binding in capabilities {
+        put_text(bytes, &binding.qualified_name.canonical());
+        put_text(bytes, binding.capability.canonical_name());
+    }
+}
+
+fn put_optional_schema_capability(bytes: &mut Vec<u8>, capability: Option<SchemaCapability>) {
+    match capability {
+        Some(capability) => {
+            put_text(bytes, "capability");
+            put_text(bytes, capability.canonical_name());
+        }
+        None => put_text(bytes, "no-capability"),
+    }
+}
+
 fn put_u64(bytes: &mut Vec<u8>, value: usize) {
     bytes.extend_from_slice(&(value as u64).to_be_bytes());
 }
@@ -1289,6 +1551,35 @@ mod tests {
                 open_tail,
             }),
         )
+    }
+
+    fn settlement_state_fields() -> Vec<(&'static str, AstType)> {
+        vec![
+            ("settlement", AstType::Text),
+            ("kind", AstType::Text),
+            ("state", AstType::Text),
+            ("at", AstType::Text),
+            ("from", AstType::Text),
+            ("to", AstType::Text),
+            ("instrument", AstType::Text),
+            ("amount", AstType::Decimal),
+        ]
+    }
+
+    fn settlement_state_input() -> (PackageInput, QualifiedName) {
+        let package = manifest("settlement-capability");
+        let schema = qualified_name("types", "SettlementState");
+        let mut input = PackageInput::new(
+            package,
+            [record_module(
+                "types",
+                "SettlementState",
+                &settlement_state_fields(),
+                None,
+            )],
+        );
+        input = input.with_schema_capability(schema.clone(), SchemaCapability::SettlementStateV1);
+        (input, schema)
     }
 
     fn qualified_name(path: &str, name: &str) -> QualifiedName {
@@ -1411,6 +1702,212 @@ mod tests {
             Err(PackageCompileError::InvalidExportType { reason, .. })
                 if reason.contains("canonical order")
         ));
+    }
+
+    #[test]
+    fn settlement_state_capability_is_explicit_and_hash_bound() {
+        let (bound, schema) = settlement_state_input();
+        let package = bound.manifest.clone();
+        let lock = lockfile(std::slice::from_ref(&package));
+        let unbound = PackageInput::new(
+            package.clone(),
+            [record_module(
+                "types",
+                "SettlementState",
+                &settlement_state_fields(),
+                None,
+            )],
+        );
+        let unbound_artifact = compile([unbound.clone()], &lock).unwrap();
+        let bound_artifact = compile([bound.clone()], &lock).unwrap();
+        let root = bound_artifact.package_roots()[0];
+        let resolved = bound_artifact.resolve_record_schema(root, &schema).unwrap();
+
+        assert_eq!(
+            resolved.capability(),
+            Some(SchemaCapability::SettlementStateV1)
+        );
+        assert_eq!(
+            unbound_artifact
+                .resolve_record_schema(unbound_artifact.package_roots()[0], &schema)
+                .unwrap()
+                .capability(),
+            None
+        );
+        assert_ne!(unbound.input_hash(), bound.input_hash());
+        assert_ne!(
+            unbound_artifact.package_roots(),
+            bound_artifact.package_roots()
+        );
+        assert_ne!(
+            unbound_artifact.artifact_hash(),
+            bound_artifact.artifact_hash()
+        );
+        assert_eq!(
+            unbound_artifact.artifact_hash(),
+            ContentHash::domain_separated(ARTIFACT_DOMAIN, &unbound_artifact.canonical_bytes())
+        );
+        assert_eq!(
+            bound_artifact.artifact_hash(),
+            ContentHash::domain_separated(
+                CAPABILITY_ARTIFACT_DOMAIN,
+                &bound_artifact.canonical_bytes()
+            )
+        );
+        bound_artifact.verify([bound], &lock).unwrap();
+        assert!(
+            unbound_artifact
+                .verify([bound_artifact_input()], &lock)
+                .is_err()
+        );
+
+        fn bound_artifact_input() -> PackageInput {
+            settlement_state_input().0
+        }
+    }
+
+    #[test]
+    fn settlement_state_capability_rejects_duplicate_and_unknown_bindings() {
+        let (bound, schema) = settlement_state_input();
+        let package = bound.manifest.clone();
+        let lock = lockfile(std::slice::from_ref(&package));
+        let duplicate = bound
+            .clone()
+            .with_schema_capability(schema.clone(), SchemaCapability::SettlementStateV1);
+        assert!(matches!(
+            compile([duplicate], &lock),
+            Err(PackageCompileError::DuplicateSchemaCapability { .. })
+        ));
+
+        let unknown_name = qualified_name("types", "Missing");
+        let unknown = PackageInput::new(
+            package,
+            [record_module(
+                "types",
+                "SettlementState",
+                &settlement_state_fields(),
+                None,
+            )],
+        )
+        .with_schema_capability(unknown_name, SchemaCapability::SettlementStateV1);
+        assert!(matches!(
+            compile([unknown], &lock),
+            Err(PackageCompileError::UnknownSchemaCapabilityExport { .. })
+        ));
+    }
+
+    #[test]
+    fn settlement_state_capability_requires_exact_closed_primitive_schema() {
+        let cases = [
+            ("open", Some(7), settlement_state_fields()),
+            (
+                "missing",
+                None,
+                settlement_state_fields()
+                    .into_iter()
+                    .filter(|(name, _)| *name != "amount")
+                    .collect(),
+            ),
+            (
+                "extra",
+                None,
+                settlement_state_fields()
+                    .into_iter()
+                    .chain([("extra", AstType::Text)])
+                    .collect(),
+            ),
+        ];
+        for (name, open_tail, fields) in cases {
+            let package = manifest("settlement-capability");
+            let schema = qualified_name("types", name);
+            let lock = lockfile(std::slice::from_ref(&package));
+            let input =
+                PackageInput::new(package, [record_module("types", name, &fields, open_tail)])
+                    .with_schema_capability(schema, SchemaCapability::SettlementStateV1);
+            assert!(matches!(
+                compile([input], &lock),
+                Err(PackageCompileError::InvalidSchemaCapability { .. })
+            ));
+        }
+
+        for replacement in [
+            Type::Integer,
+            Type::Named(QualifiedName {
+                module: ModulePath::root(Name::new("types").unwrap()),
+                name: Name::new("Amount").unwrap(),
+            }),
+            Type::Refined {
+                base: Box::new(Type::Decimal),
+                predicate: crate::hir::Predicate::Named(Name::new("positive").unwrap()),
+            },
+        ] {
+            let package = manifest("settlement-capability");
+            let schema = qualified_name("types", "SettlementState");
+            let lock = lockfile(std::slice::from_ref(&package));
+            let mut module =
+                record_module("types", "SettlementState", &settlement_state_fields(), None);
+            let DeclarationKind::Type {
+                ty: Type::Record(Row::Closed(fields)),
+            } = &mut module.declarations[0].kind
+            else {
+                panic!("fixture must lower to a closed record");
+            };
+            fields[0].ty = replacement;
+            let input = PackageInput::new(package, [module])
+                .with_schema_capability(schema, SchemaCapability::SettlementStateV1);
+            assert!(matches!(
+                compile([input], &lock),
+                Err(PackageCompileError::InvalidSchemaCapability { .. })
+            ));
+        }
+
+        let package = manifest("settlement-capability");
+        let lock = lockfile(std::slice::from_ref(&package));
+        let value = module_at(
+            "types",
+            "SettlementState",
+            AstDeclarationKind::Value {
+                ty: AstType::Text,
+                expression: Some(crate::hir::AstExpression::Text("not-a-record".to_owned())),
+            },
+        );
+        let input = PackageInput::new(package, [value]).with_schema_capability(
+            qualified_name("types", "SettlementState"),
+            SchemaCapability::SettlementStateV1,
+        );
+        assert!(matches!(
+            compile([input], &lock),
+            Err(PackageCompileError::InvalidSchemaCapability { .. })
+        ));
+    }
+
+    #[test]
+    fn capability_binding_order_is_not_identity() {
+        let package = manifest("settlement-capability");
+        let first_name = qualified_name("first", "SettlementState");
+        let second_name = qualified_name("second", "SettlementState");
+        let modules = [
+            record_module("first", "SettlementState", &settlement_state_fields(), None),
+            record_module(
+                "second",
+                "SettlementState",
+                &settlement_state_fields(),
+                None,
+            ),
+        ];
+        let left = PackageInput::new(package.clone(), modules.clone())
+            .with_schema_capability(first_name.clone(), SchemaCapability::SettlementStateV1)
+            .with_schema_capability(second_name.clone(), SchemaCapability::SettlementStateV1);
+        let right = PackageInput::new(package.clone(), modules)
+            .with_schema_capability(second_name, SchemaCapability::SettlementStateV1)
+            .with_schema_capability(first_name, SchemaCapability::SettlementStateV1);
+        let lock = lockfile(std::slice::from_ref(&package));
+
+        assert_eq!(left.input_hash(), right.input_hash());
+        assert_eq!(
+            compile([left], &lock).unwrap(),
+            compile([right], &lock).unwrap()
+        );
     }
 
     #[test]
@@ -1685,6 +2182,7 @@ mod tests {
             package_root: ContentHash::domain_separated("test/package-root", b"records"),
             qualified_name: qualified_name("types", "Record"),
             row,
+            capability: None,
             schema_id: ContentHash::domain_separated("test/schema", b"records"),
         }
     }
