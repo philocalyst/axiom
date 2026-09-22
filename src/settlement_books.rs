@@ -188,13 +188,13 @@ impl From<SettlementProofError> for SettlementBookError {
 }
 
 impl SettlementWorld {
-    pub(crate) fn build(
-        projection: &SettlementProjection,
-        source: &RawEvidence,
-        evidence: EvidenceId,
+    /// Reconstruct a world from the exact persisted proof payload. The proof
+    /// is checked against the store before any grouped history is derived, so
+    /// the in-memory world never becomes a second authority.
+    pub(crate) fn from_checked_proof(
+        proof: SettlementStateV1Proof,
         store: &ObjectStore,
     ) -> Result<Self, SettlementBookError> {
-        let proof = SettlementStateV1Proof::from_projection(projection, source, evidence)?;
         proof.check(store)?;
         let histories = derive_histories(&proof)?;
         let authority_hash = authority_hash(&proof);
@@ -203,6 +203,16 @@ impl SettlementWorld {
             histories,
             authority_hash,
         })
+    }
+
+    pub(crate) fn build(
+        projection: &SettlementProjection,
+        source: &RawEvidence,
+        evidence: EvidenceId,
+        store: &ObjectStore,
+    ) -> Result<Self, SettlementBookError> {
+        let proof = SettlementStateV1Proof::from_projection(projection, source, evidence)?;
+        Self::from_checked_proof(proof, store)
     }
 
     pub fn settlement_proof(&self) -> &SettlementStateV1Proof {
@@ -304,9 +314,7 @@ impl SettlementWorld {
         policy: SettlementRecognitionPolicy,
         period: SettlementReportingPeriod,
     ) -> Result<SettlementClose, SettlementBookError> {
-        if period.start > period.end {
-            return Err(invalid("reporting period start is after its end"));
-        }
+        period.validate()?;
         let recognition = self.recognize_internal(policy.clone(), Some(period))?;
         let journal_root = recognition.journal().map(SettlementJournal::root);
         let recognized_root = recognition.root();
@@ -333,7 +341,7 @@ impl SettlementWorld {
 
 /// The only two settlement recognition interpretations.  There is
 /// intentionally no accrual variant.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum SettlementRecognitionPolicy {
     Observation,
     Cash {
@@ -706,6 +714,22 @@ impl SettlementReportingPeriod {
         Self { start, end }
     }
 
+    /// Validate both civil dates and their inclusive ordering at every
+    /// settlement-close boundary. Public fields remain convenient for
+    /// decoding, so callers must not rely on construction alone for validity.
+    pub fn validate(&self) -> Result<(), SettlementBookError> {
+        if Date::new(self.start.year, self.start.month, self.start.day).is_err() {
+            return Err(invalid("reporting period start is not a valid civil date"));
+        }
+        if Date::new(self.end.year, self.end.month, self.end.day).is_err() {
+            return Err(invalid("reporting period end is not a valid civil date"));
+        }
+        if self.start > self.end {
+            return Err(invalid("reporting period start is after its end"));
+        }
+        Ok(())
+    }
+
     pub fn contains(&self, date: Date) -> bool {
         date >= self.start && date <= self.end
     }
@@ -761,9 +785,7 @@ impl SettlementClose {
     }
 
     fn check_without_store(&self) -> Result<(), SettlementBookError> {
-        if self.period.start > self.period.end {
-            return Err(invalid("reporting period start is after its end"));
-        }
+        self.period.validate()?;
         for fact in self.recognition.facts() {
             if !self.period.contains(fact.date()) {
                 return Err(SettlementBookError::OutOfPeriod {

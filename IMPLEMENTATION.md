@@ -193,11 +193,14 @@ experiments, but it is not part of this contract.
 ### Gate 5 — immutable store and reconciliation
 
 - [x] Immutable content-addressed evidence, statement, decision, package,
-  generic proof, typed settlement proof, commit, and existing sale-close
-  objects. Settlement proof commits preserve the exact source
-  artifact/package context and merge only as explicit typed roots. The
-  settlement vertical slice's `SettlementClose` is a content-addressed,
-  checked projection, not a persisted close object.
+  generic proof, typed settlement proof, commit, existing sale-close objects,
+  and typed `SettlementCloseObject`/`SettlementCloseId` values. Settlement
+  proof commits preserve the exact source artifact/package context and merge
+  only as explicit typed roots. A settlement close stores the exact proof-child
+  lineage, full policy, and reporting period; insertion, lookup, and full-store
+  verification independently recompute the typed world, recognition, journal,
+  and close. Workspace persistence is atomic. This close family has no
+  supersedes or restatement linkage.
 - [ ] Corrections/supersession, tombstones, unavailable/redacted/deleted
   states, and as-known-at queries. The immutable store now implements these
   primitives; production workspace/analysis integration remains open.
@@ -237,8 +240,12 @@ experiments, but it is not part of this contract.
   `Observation` and `Cash` only: cash excludes histories whose final state is
   ineffective, requires explicit distinct endpoint-account mappings, and emits
   balanced immutable journal projections. Its monthly close is content-
-  addressed and filters by the policy date; it is not persisted, and it does
-  not infer accrual or integrate with general obligations/`analyze_commit`.
+  addressed, filters by the policy date, and persists atomically as a typed
+  `SettlementCloseObject` only from an exact settlement-proof child; store
+  boundaries independently recompute its world, recognition, journal, and
+  close. Corrections create distinct close IDs while old closes remain valid;
+  there is no supersedes/restatement linkage. This does not infer accrual or
+  integrate with general obligations/`analyze_commit`.
 - [x] Budgets and forecasts remain isolated scenarios.
 
 ### Gate 7 — investments and contracts
@@ -335,11 +342,12 @@ The current foundation checkpoint is exercised by:
   workflows, 7 adversarial property tests, two explicit 10,000-row ledger
   release stress tests, one explicit 10,000/100,000 generic-form release
   stress gate, and one 1,000-form independently checked settlement-proof gate,
-  plus five focused settlement vertical-slice tests over a 26-row fixture (6
-  histories, 3 rails, 2 instruments, and 3 monthly periods) with adversarial
-  mapping, transition, identity, persistence, determinism, and correction
-  checks, including a full obligation/settlement/satisfaction network, plus 9
-  generated assurance-family tests spanning roughly 1,500 cases;
+  plus 8 focused `settlement_books` tests and 5 focused settlement
+  vertical-slice tests over a 26-row fixture (6 histories, 3 rails, 2
+  instruments, and 3 monthly periods) with adversarial mapping, transition,
+  identity, persistence, determinism, and correction checks, including a full
+  obligation/settlement/satisfaction network, plus 9 generated assurance-family
+  tests spanning roughly 1,500 cases;
 - a 13-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
   clean-recomputation equivalence, six public-domain-API semantic probes, and

@@ -21,12 +21,17 @@ use crate::proof::{
     Node as CanonicalNode, Operation as CanonicalOperation, Proof as CanonicalProof,
     ProofId as CanonicalProofId,
 };
+use crate::settlement_books::{
+    SettlementRecognitionPolicy, SettlementReportingPeriod, SettlementWorld,
+};
 use crate::settlement_proof::{SettlementProofError, SettlementStateV1Proof};
 
 const SCHEMA_VERSION: &str = "axiom/store/v3";
 const COMMIT_SCHEMA_VERSION: &str = "axiom/store/commit/v5";
 pub(crate) const ANALYSIS_AUTHOR: &str = "workspace/analysis";
 pub(crate) const SETTLEMENT_PROOF_AUTHOR: &str = "workspace/settlement-proof";
+const SETTLEMENT_CLOSE_VERSION: &str = "axiom/settlement-close/v1";
+const SETTLEMENT_CLOSE_DOMAIN: &str = "axiom/store/settlement-close/v1";
 const EVIDENCE_CONTENT_DOMAIN: &str = "axiom/store/evidence-content/v1";
 
 /// The object families that may be addressed by this store.
@@ -40,6 +45,7 @@ pub enum ObjectKind {
     CompiledArtifact,
     AnalysisArtifact,
     SettlementStateProof,
+    SettlementClose,
     Proof,
     Conflict,
     Commit,
@@ -57,6 +63,7 @@ impl ObjectKind {
             Self::CompiledArtifact => "compiled-artifact",
             Self::AnalysisArtifact => "analysis-artifact",
             Self::SettlementStateProof => "settlement-state-proof",
+            Self::SettlementClose => "settlement-close",
             Self::Proof => "proof",
             Self::Conflict => "conflict",
             Self::Commit => "commit",
@@ -95,6 +102,7 @@ kind_marker!(PackageKind, Package);
 kind_marker!(CompiledArtifactKind, CompiledArtifact);
 kind_marker!(AnalysisArtifactKind, AnalysisArtifact);
 kind_marker!(SettlementStateProofKind, SettlementStateProof);
+kind_marker!(SettlementCloseKind, SettlementClose);
 kind_marker!(ProofKind, Proof);
 kind_marker!(ConflictKind, Conflict);
 kind_marker!(CommitKind, Commit);
@@ -150,6 +158,9 @@ pub type CompiledArtifactId = ObjectId<CompiledArtifactKind>;
 pub type AnalysisArtifactId = ObjectId<AnalysisArtifactKind>;
 /// The store address of a checked SettlementStateV1 projection proof.
 pub type SettlementStateProofId = ObjectId<SettlementStateProofKind>;
+/// The store address of a typed close over one exact SettlementStateV1 proof
+/// child. This is distinct from the generic sale-ledger close family.
+pub type SettlementCloseId = ObjectId<SettlementCloseKind>;
 /// The store address of a persisted proof object.  This is deliberately
 /// distinct from [`crate::proof::ProofId`], which is the identity of a proof
 /// node inside the canonical DAG.  A stored object may contain many nodes and
@@ -920,6 +931,42 @@ pub struct AnalysisArtifact {
     period: Period,
 }
 
+/// A typed, persisted settlement close. It stores only the exact proof-child
+/// lineage, policy, and reporting period; all world, recognition, journal,
+/// and close roots are recomputed from those authorities at every boundary.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct SettlementCloseObject {
+    proof_commit: CommitId,
+    policy: SettlementRecognitionPolicy,
+    period: SettlementReportingPeriod,
+}
+
+impl SettlementCloseObject {
+    pub(crate) fn new(
+        proof_commit: CommitId,
+        policy: SettlementRecognitionPolicy,
+        period: SettlementReportingPeriod,
+    ) -> Self {
+        Self {
+            proof_commit,
+            policy,
+            period,
+        }
+    }
+
+    pub fn proof_commit(&self) -> CommitId {
+        self.proof_commit
+    }
+
+    pub fn policy(&self) -> &SettlementRecognitionPolicy {
+        &self.policy
+    }
+
+    pub fn period(&self) -> SettlementReportingPeriod {
+        self.period
+    }
+}
+
 impl AnalysisArtifact {
     /// This constructor is crate-private on purpose.  External callers must
     /// obtain an artifact through the workspace's checked close flow.
@@ -1026,6 +1073,7 @@ pub enum StoredObject {
     CompiledArtifact(CompiledArtifactObject),
     AnalysisArtifact(AnalysisArtifact),
     SettlementStateProof(SettlementStateV1Proof),
+    SettlementClose(SettlementCloseObject),
     Proof(ProofObject),
     Conflict(ConflictRecord),
     Commit(Commit),
@@ -1043,6 +1091,7 @@ impl StoredObject {
             Self::CompiledArtifact(_) => ObjectKind::CompiledArtifact,
             Self::AnalysisArtifact(_) => ObjectKind::AnalysisArtifact,
             Self::SettlementStateProof(_) => ObjectKind::SettlementStateProof,
+            Self::SettlementClose(_) => ObjectKind::SettlementClose,
             Self::Proof(_) => ObjectKind::Proof,
             Self::Conflict(_) => ObjectKind::Conflict,
             Self::Commit(_) => ObjectKind::Commit,
@@ -1064,6 +1113,7 @@ impl StoredObject {
             Self::CompiledArtifact(value) => encode_compiled_artifact(&mut out, value),
             Self::AnalysisArtifact(value) => encode_analysis_artifact(&mut out, value),
             Self::SettlementStateProof(value) => put_bytes(&mut out, &value.canonical_bytes()),
+            Self::SettlementClose(value) => encode_settlement_close(&mut out, value),
             Self::Proof(value) => encode_proof(&mut out, value),
             Self::Conflict(value) => encode_conflict_record(&mut out, value),
             Self::Commit(value) => encode_commit(&mut out, value),
@@ -1297,6 +1347,8 @@ impl ObjectStore {
         } else if let StoredObject::SettlementStateProof(value) = object {
             self.validate_source_snapshot(value.source_commit)?;
             value.check(self).map_err(settlement_proof_store_error)?;
+        } else if let StoredObject::SettlementClose(value) = object {
+            self.validate_settlement_close(value)?;
         }
         Ok(object)
     }
@@ -1326,6 +1378,8 @@ impl ObjectStore {
             } else if let StoredObject::SettlementStateProof(value) = object {
                 self.validate_source_snapshot(value.source_commit)?;
                 value.check(self).map_err(settlement_proof_store_error)?;
+            } else if let StoredObject::SettlementClose(value) = object {
+                self.validate_settlement_close(value)?;
             } else if let StoredObject::Commit(value) = object {
                 self.validate_commit(value)?;
             }
@@ -1448,6 +1502,67 @@ impl ObjectStore {
         Ok(SettlementStateProofId::new(
             self.insert(StoredObject::SettlementStateProof(value))?,
         ))
+    }
+
+    /// Persist a typed settlement close. The exact proof child, source,
+    /// artifact, and policy outputs are re-derived before insertion.
+    pub(crate) fn put_settlement_close(
+        &mut self,
+        value: SettlementCloseObject,
+    ) -> Result<SettlementCloseId, StoreError> {
+        self.validate_settlement_close(&value)?;
+        Ok(SettlementCloseId::new(
+            self.insert(StoredObject::SettlementClose(value))?,
+        ))
+    }
+
+    fn validate_settlement_close(&self, value: &SettlementCloseObject) -> Result<(), StoreError> {
+        value
+            .period
+            .validate()
+            .map_err(|error| StoreError::InvalidObject(error.to_string()))?;
+        let child = self.commit(value.proof_commit)?.clone();
+        let [source_id] = child.parents.as_slice() else {
+            return Err(StoreError::InvalidObject(
+                "settlement close must point to one proof child with one source parent".into(),
+            ));
+        };
+        let [proof_id] = child.settlement_proofs.as_slice() else {
+            return Err(StoreError::InvalidObject(
+                "settlement close proof child must pin exactly one settlement proof".into(),
+            ));
+        };
+        let source = self.commit(*source_id)?.clone();
+        self.validate_source_snapshot(*source_id)?;
+        let proof = self.settlement_state_proof(*proof_id)?.clone();
+        if proof.source_commit != *source_id
+            || !child.evidence.is_empty()
+            || !child.statements.is_empty()
+            || !child.decisions.is_empty()
+            || !child.completeness.is_empty()
+            || !child.proofs.is_empty()
+            || child.packages != source.packages
+            || child.compiled_artifact != source.compiled_artifact
+            || child.conflicts != source.conflicts
+            || child.schema_version != source.schema_version
+            || child.author != SETTLEMENT_PROOF_AUTHOR
+            || !child.signatures.is_empty()
+        {
+            return Err(StoreError::InvalidObject(
+                "settlement close proof child does not preserve its exact source snapshot".into(),
+            ));
+        }
+        let world = SettlementWorld::from_checked_proof(proof, self).map_err(|error| {
+            StoreError::InvalidObject(format!("invalid settlement close world: {error}"))
+        })?;
+        let close = world
+            .close(value.policy.clone(), value.period)
+            .map_err(|error| {
+                StoreError::InvalidObject(format!("invalid settlement close: {error}"))
+            })?;
+        close.check(self).map_err(|error| {
+            StoreError::InvalidObject(format!("invalid settlement close: {error}"))
+        })
     }
 
     /// Persist the only close authority. This boundary is crate-private so
@@ -1997,6 +2112,20 @@ impl ObjectStore {
             object => Err(StoreError::WrongKind {
                 hash: id.hash(),
                 expected: ObjectKind::SettlementStateProof,
+                actual: object.kind(),
+            }),
+        }
+    }
+
+    pub fn settlement_close(
+        &self,
+        id: SettlementCloseId,
+    ) -> Result<&SettlementCloseObject, StoreError> {
+        match self.get(id.hash())? {
+            StoredObject::SettlementClose(value) => Ok(value),
+            object => Err(StoreError::WrongKind {
+                hash: id.hash(),
+                expected: ObjectKind::SettlementClose,
                 actual: object.kind(),
             }),
         }
@@ -3376,6 +3505,29 @@ fn encode_analysis_artifact(out: &mut Vec<u8>, value: &AnalysisArtifact) {
     put_string(out, value.book.as_str());
     put_date(out, value.period.from);
     put_date(out, value.period.until);
+}
+
+fn encode_settlement_close(out: &mut Vec<u8>, value: &SettlementCloseObject) {
+    put_string(out, SETTLEMENT_CLOSE_DOMAIN);
+    put_string(out, SETTLEMENT_CLOSE_VERSION);
+    put_hash(out, value.proof_commit.hash());
+    encode_settlement_policy(out, &value.policy);
+    put_date(out, value.period.start);
+    put_date(out, value.period.end);
+}
+
+fn encode_settlement_policy(out: &mut Vec<u8>, policy: &SettlementRecognitionPolicy) {
+    match policy {
+        SettlementRecognitionPolicy::Observation => out.push(0),
+        SettlementRecognitionPolicy::Cash { accounts } => {
+            out.push(1);
+            put_u64(out, accounts.len() as u64);
+            for (endpoint, account) in accounts {
+                put_string(out, endpoint.as_str());
+                put_string(out, account.as_str());
+            }
+        }
+    }
 }
 
 #[cfg(test)]

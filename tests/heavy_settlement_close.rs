@@ -20,7 +20,7 @@ use axiom_ledger::settlement_books::{
     SettlementReportingPeriod,
 };
 use axiom_ledger::settlement_projection::SettlementProjectionError;
-use axiom_ledger::store::CommitId;
+use axiom_ledger::store::{CommitId, StoreError};
 use axiom_ledger::workspace::{Workspace, WorkspaceError};
 
 const FIXTURE: &str = include_str!("../fixtures/heavy/settlement_world_close.axm");
@@ -405,9 +405,33 @@ fn heavy_fixture_runs_compile_proof_world_recognition_journals_and_closes() {
     cash.check(&world).unwrap();
     assert_fact_authorities(&cash, world.authority_hash());
 
-    let january = world.close(policy.clone(), period(2026, 1)).unwrap();
-    let february = world.close(policy.clone(), period(2026, 2)).unwrap();
-    let march = world.close(policy.clone(), period(2026, 3)).unwrap();
+    let january_period = period(2026, 1);
+    let february_period = period(2026, 2);
+    let march_period = period(2026, 3);
+    let january = world.close(policy.clone(), january_period).unwrap();
+    let february = world.close(policy.clone(), february_period).unwrap();
+    let march = world.close(policy.clone(), march_period).unwrap();
+    let persisted_january = workspace
+        .persist_settlement_close(anchor.projection_commit, policy.clone(), january_period)
+        .unwrap();
+    let persisted_february = workspace
+        .persist_settlement_close(anchor.projection_commit, policy.clone(), february_period)
+        .unwrap();
+    let persisted_march = workspace
+        .persist_settlement_close(anchor.projection_commit, policy.clone(), march_period)
+        .unwrap();
+    assert_ne!(persisted_january, persisted_february);
+    assert_ne!(persisted_february, persisted_march);
+    for (id, expected_period) in [
+        (persisted_january, january_period),
+        (persisted_february, february_period),
+        (persisted_march, march_period),
+    ] {
+        let stored = workspace.store().settlement_close(id).unwrap();
+        assert_eq!(stored.proof_commit(), anchor.projection_commit);
+        assert_eq!(stored.policy(), &policy);
+        assert_eq!(stored.period(), expected_period);
+    }
     january.check(workspace.store()).unwrap();
     february.check(workspace.store()).unwrap();
     march.check(workspace.store()).unwrap();
@@ -461,19 +485,41 @@ fn roots_are_deterministic_across_fresh_workspaces_and_corrections_are_immutable
     let (mut first, first_source) = workspace_for(FIXTURE);
     let first_anchor = first.persist_settlement_state_proof(first_source).unwrap();
     let first_world = first.settlement_world(first_source).unwrap();
-    let first_close = first_world.close(cash_policy(), period(2026, 1)).unwrap();
+    let first_periods = [period(2026, 1), period(2026, 2), period(2026, 3)];
+    let first_close = first_world.close(cash_policy(), first_periods[0]).unwrap();
+    let first_persisted_closes = first_periods
+        .into_iter()
+        .map(|period| {
+            first
+                .persist_settlement_close(first_anchor.projection_commit, cash_policy(), period)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_ne!(first_persisted_closes[0], first_persisted_closes[1]);
+    assert_ne!(first_persisted_closes[1], first_persisted_closes[2]);
 
     let (mut second, second_source) = workspace_for(FIXTURE);
     let second_anchor = second
         .persist_settlement_state_proof(second_source)
         .unwrap();
     let second_world = second.settlement_world(second_source).unwrap();
-    let second_close = second_world.close(cash_policy(), period(2026, 1)).unwrap();
+    let second_close = second_world.close(cash_policy(), first_periods[0]).unwrap();
+    let second_persisted_closes = first_periods
+        .into_iter()
+        .map(|period| {
+            second
+                .persist_settlement_close(second_anchor.projection_commit, cash_policy(), period)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
 
     assert_eq!(first_source, second_source);
     assert_eq!(first_anchor, second_anchor);
     assert_eq!(first_world.authority_hash(), second_world.authority_hash());
     assert_eq!(first_close.root(), second_close.root());
+    assert_eq!(first_persisted_closes, second_persisted_closes);
+    first.store().verify().unwrap();
+    second.store().verify().unwrap();
 
     let old_store_len = first.store().len();
     let old_proof = first
@@ -496,6 +542,13 @@ fn roots_are_deterministic_across_fresh_workspaces_and_corrections_are_immutable
     let corrected_close = corrected_world
         .close(cash_policy(), period(2026, 1))
         .unwrap();
+    let corrected_persisted_close = first
+        .persist_settlement_close(
+            corrected_anchor.projection_commit,
+            cash_policy(),
+            period(2026, 1),
+        )
+        .unwrap();
 
     assert_ne!(corrected.commit, first_source);
     assert_ne!(corrected_anchor.proof_id, first_anchor.proof_id);
@@ -504,6 +557,7 @@ fn roots_are_deterministic_across_fresh_workspaces_and_corrections_are_immutable
         first_world.authority_hash()
     );
     assert_ne!(corrected_close.root(), first_close.root());
+    assert_ne!(corrected_persisted_close, first_persisted_closes[0]);
     assert_eq!(old_proof.coverage()[0].amount.canonical(), "401/4 USD");
     assert_eq!(
         corrected_world
@@ -522,13 +576,51 @@ fn roots_are_deterministic_across_fresh_workspaces_and_corrections_are_immutable
         .unwrap()
         .check(first.store())
         .unwrap();
+    let old_stored_close = first
+        .store()
+        .settlement_close(first_persisted_closes[0])
+        .unwrap();
+    assert_eq!(
+        old_stored_close.proof_commit(),
+        first_anchor.projection_commit
+    );
+    assert_eq!(old_stored_close.policy(), &cash_policy());
+    assert_eq!(old_stored_close.period(), first_periods[0]);
+    let corrected_stored_close = first
+        .store()
+        .settlement_close(corrected_persisted_close)
+        .unwrap();
+    assert_eq!(
+        corrected_stored_close.proof_commit(),
+        corrected_anchor.projection_commit
+    );
+    assert_eq!(corrected_stored_close.period(), first_periods[0]);
     assert!(first.store().len() > old_store_len);
     first.store().verify().unwrap();
 }
 
 #[test]
 fn invalid_mappings_and_failed_proof_persistence_are_deeply_rejected() {
-    let (workspace, source_commit) = workspace_for(FIXTURE);
+    let (mut workspace, source_commit) = workspace_for(FIXTURE);
+
+    let before_unanchored_close = workspace.store().len();
+    assert_eq!(
+        workspace
+            .persist_settlement_close(
+                source_commit,
+                cash_policy(),
+                SettlementReportingPeriod::new(
+                    Date::new(2026, 1, 1).unwrap(),
+                    Date::new(2026, 1, 31).unwrap(),
+                ),
+            )
+            .unwrap_err(),
+        WorkspaceError::Store(StoreError::InvalidObject(
+            "settlement close proof child must pin exactly one settlement proof".to_owned(),
+        ))
+    );
+    assert_eq!(workspace.store().len(), before_unanchored_close);
+    workspace.store().verify().unwrap();
 
     let missing = SettlementRecognitionPolicy::cash([
         (

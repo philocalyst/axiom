@@ -1,7 +1,7 @@
 use axiom_ledger::hir::{
     AstDeclaration, AstDeclarationKind, AstModule, AstType, ModulePath, Name, Span,
 };
-use axiom_ledger::model::{AccountId, EntityId};
+use axiom_ledger::model::{AccountId, Date, EntityId};
 use axiom_ledger::package_compiler::{PackageInput, SchemaCapability};
 use axiom_ledger::package_lock::{
     Dependency, LockedPackage, Lockfile, PackageManifest, Version, VersionReq,
@@ -270,4 +270,140 @@ fn close_projects_only_facts_in_the_requested_period() {
     assert_eq!(january.recognition().facts().len(), 1);
     assert_eq!(january.recognition().facts()[0].settlement(), "jan");
     january.check(workspace.store()).unwrap();
+}
+
+#[test]
+fn persisted_close_is_typed_replayable_and_atomic() {
+    let source = "form one/1 : payments::types::SettlementState\n  settlement p\n  kind ach\n  state issued\n  at 2026-01-01\n  from alice\n  to bank\n  instrument USD\n  amount 100\n\nform one/2 : payments::types::SettlementState\n  settlement p\n  kind ach\n  state presented\n  at 2026-01-01\n  from alice\n  to bank\n  instrument USD\n  amount 100\n\nform one/3 : payments::types::SettlementState\n  settlement p\n  kind ach\n  state settled\n  at 2026-01-02\n  from alice\n  to bank\n  instrument USD\n  amount 100\n";
+    let (mut workspace, source_commit) = setup(source);
+    let proof = workspace
+        .persist_settlement_state_proof(source_commit)
+        .unwrap();
+    let policy = SettlementRecognitionPolicy::cash([
+        (EntityId::new("alice"), AccountId::new("cash")),
+        (EntityId::new("bank"), AccountId::new("bank")),
+    ])
+    .unwrap();
+    let period = SettlementReportingPeriod::new(
+        "2026-01-01".parse().unwrap(),
+        "2026-01-31".parse().unwrap(),
+    );
+    let close_id = workspace
+        .persist_settlement_close(proof.projection_commit, policy.clone(), period)
+        .unwrap();
+    let close = workspace.store().settlement_close(close_id).unwrap();
+    assert_eq!(close.proof_commit(), proof.projection_commit);
+    assert_eq!(close.policy(), &policy);
+    assert_eq!(close.period(), period);
+    workspace.store().verify().unwrap();
+
+    let reloaded = Workspace::from_store(workspace.store().clone());
+    assert_eq!(reloaded.store().settlement_close(close_id).unwrap(), close);
+    reloaded.store().verify().unwrap();
+
+    let before = workspace.store().len();
+    let error = workspace
+        .persist_settlement_close(
+            source_commit,
+            SettlementRecognitionPolicy::observation(),
+            period,
+        )
+        .expect_err("a source commit is not a proof child");
+    assert!(matches!(
+        error,
+        axiom_ledger::workspace::WorkspaceError::Store(
+            axiom_ledger::store::StoreError::InvalidObject(reason)
+        ) if reason == "settlement close proof child must pin exactly one settlement proof"
+    ));
+    assert_eq!(workspace.store().len(), before);
+
+    let before = workspace.store().len();
+    let missing_account =
+        SettlementRecognitionPolicy::cash([(EntityId::new("alice"), AccountId::new("cash"))])
+            .unwrap();
+    let error = workspace
+        .persist_settlement_close(proof.projection_commit, missing_account, period)
+        .expect_err("cash close requires every endpoint mapping");
+    assert!(matches!(
+        error,
+        axiom_ledger::workspace::WorkspaceError::Store(
+            axiom_ledger::store::StoreError::InvalidObject(reason)
+        ) if reason == "invalid settlement close: cash settlement `p` has no account mapping for endpoint `bank`"
+    ));
+    assert_eq!(workspace.store().len(), before);
+    workspace.store().verify().unwrap();
+}
+
+#[test]
+fn persisted_close_rejects_forged_period_before_store_swap() {
+    let source = "form one/1 : payments::types::SettlementState\n  settlement p\n  kind ach\n  state issued\n  at 2026-01-01\n  from alice\n  to bank\n  instrument USD\n  amount 100\n\nform one/2 : payments::types::SettlementState\n  settlement p\n  kind ach\n  state presented\n  at 2026-01-01\n  from alice\n  to bank\n  instrument USD\n  amount 100\n\nform one/3 : payments::types::SettlementState\n  settlement p\n  kind ach\n  state settled\n  at 2026-01-02\n  from alice\n  to bank\n  instrument USD\n  amount 100\n";
+    let (mut workspace, source_commit) = setup(source);
+    let proof = workspace
+        .persist_settlement_state_proof(source_commit)
+        .unwrap();
+    let before = workspace.store().len();
+    let reversed = SettlementReportingPeriod::new(
+        "2026-02-01".parse().unwrap(),
+        "2026-01-01".parse().unwrap(),
+    );
+    let error = workspace
+        .persist_settlement_close(
+            proof.projection_commit,
+            SettlementRecognitionPolicy::observation(),
+            reversed,
+        )
+        .expect_err("reversed periods must be rejected");
+    assert!(matches!(
+        error,
+        axiom_ledger::workspace::WorkspaceError::Store(
+            axiom_ledger::store::StoreError::InvalidObject(reason)
+        ) if reason == "invalid settlement book: reporting period start is after its end"
+    ));
+    assert_eq!(workspace.store().len(), before);
+    assert!(
+        workspace
+            .store()
+            .settlement_close(axiom_ledger::store::SettlementCloseId::new(
+                axiom_ledger::model::ContentHash::ZERO
+            ))
+            .is_err()
+    );
+    workspace.store().verify().unwrap();
+}
+
+#[test]
+fn persisted_close_rejects_invalid_civil_dates_atomically() {
+    let source = "form one/1 : payments::types::SettlementState\n  settlement p\n  kind ach\n  state issued\n  at 2026-01-01\n  from alice\n  to bank\n  instrument USD\n  amount 100\n\nform one/2 : payments::types::SettlementState\n  settlement p\n  kind ach\n  state presented\n  at 2026-01-01\n  from alice\n  to bank\n  instrument USD\n  amount 100\n\nform one/3 : payments::types::SettlementState\n  settlement p\n  kind ach\n  state settled\n  at 2026-01-02\n  from alice\n  to bank\n  instrument USD\n  amount 100\n";
+    let (mut workspace, source_commit) = setup(source);
+    let proof = workspace
+        .persist_settlement_state_proof(source_commit)
+        .unwrap();
+    let before = workspace.store().len();
+    let invalid = SettlementReportingPeriod::new(
+        Date {
+            year: 2026,
+            month: 2,
+            day: 31,
+        },
+        Date {
+            year: 2026,
+            month: 3,
+            day: 1,
+        },
+    );
+    let error = workspace
+        .persist_settlement_close(
+            proof.projection_commit,
+            SettlementRecognitionPolicy::observation(),
+            invalid,
+        )
+        .expect_err("invalid civil dates must be rejected");
+    assert!(matches!(
+        error,
+        axiom_ledger::workspace::WorkspaceError::Store(
+            axiom_ledger::store::StoreError::InvalidObject(reason)
+        ) if reason == "invalid settlement book: reporting period start is not a valid civil date"
+    ));
+    assert_eq!(workspace.store().len(), before);
+    workspace.store().verify().unwrap();
 }

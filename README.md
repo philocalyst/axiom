@@ -113,9 +113,14 @@ Cash recognition includes only histories whose final state is `settled`. It
 requires explicit, distinct endpoint-to-account mappings and produces balanced,
 immutable journal entries with typed proof edges. A monthly close is a
 content-addressed projection filtered by the policy date (settlement date for
-cash, occurrence date for observation); it is checked in memory rather than
-persisted as a close object. Corrections create new source, proof,
-recognition, and close roots while the old results remain checkable.
+cash, occurrence date for observation), then persisted as a typed
+`SettlementCloseObject` under a distinct `SettlementCloseId`. It can be
+created only from the exact persisted settlement-proof child; the stored policy
+and period are rechecked by independently recomputing the typed world,
+recognition, journal, and close at insertion, lookup, and full-store
+verification. Workspace persistence is atomic. Corrections create distinct
+close IDs while old closes remain checkable; this path has no supersedes or
+restatement linkage.
 
 ## Assurance workloads
 

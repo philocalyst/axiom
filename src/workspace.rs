@@ -40,7 +40,9 @@ use crate::package_compiler::{
 use crate::package_lock::Lockfile;
 use crate::parser::{self, ParseError};
 use crate::proof::{CommitBindingCertificate, Node, Operation, Proof};
-use crate::settlement_books::{SettlementBookError, SettlementWorld};
+use crate::settlement_books::{
+    SettlementBookError, SettlementRecognitionPolicy, SettlementReportingPeriod, SettlementWorld,
+};
 use crate::settlement_projection::{self, SettlementProjection, SettlementProjectionError};
 use crate::settlement_proof::{
     MAX_SETTLEMENT_PROOF_ROWS, MAX_SETTLEMENT_PROOF_SOURCE_BYTES, SettlementProofError,
@@ -50,7 +52,7 @@ use crate::store::{
     ANALYSIS_AUTHOR, AnalysisArtifact, Close, CloseId, Commit, CommitId, CompiledArtifactId,
     CompiledArtifactObject, Evidence, EvidenceId, EvidenceState, ObjectStore, PackageId, Period,
     PolicyPackage as StoredPolicyPackage, ProofObject, ProofObjectId, SETTLEMENT_PROOF_AUTHOR,
-    SettlementStateProofId, StoreError,
+    SettlementCloseId, SettlementCloseObject, SettlementStateProofId, StoreError,
 };
 use crate::surface::SurfaceFile;
 
@@ -946,6 +948,26 @@ impl Workspace {
             projection_commit,
             proof_id,
         })
+    }
+
+    /// Persist a typed settlement close over one exact persisted proof child.
+    /// The cloned-store boundary keeps failed validation atomic; the store
+    /// independently reconstructs the world, recognition, journal, and close
+    /// from the proof child rather than trusting caller-supplied roots.
+    pub fn persist_settlement_close(
+        &mut self,
+        proof_commit: CommitId,
+        policy: SettlementRecognitionPolicy,
+        period: SettlementReportingPeriod,
+    ) -> Result<SettlementCloseId, WorkspaceError> {
+        let mut staging = self.store.clone();
+        let close = staging.put_settlement_close(SettlementCloseObject::new(
+            proof_commit,
+            policy,
+            period,
+        ))?;
+        self.store = staging;
+        Ok(close)
     }
 
     /// Compatibility spelling for callers that use “elaborate” as the phase
