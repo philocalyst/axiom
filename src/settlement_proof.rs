@@ -292,7 +292,7 @@ impl SettlementStateV1Proof {
         if evidence.content.is_empty() {
             return Err(invalid("source evidence has no payload"));
         }
-        if evidence.content.len() > MAX_SETTLEMENT_PROOF_CANONICAL_BYTES {
+        if evidence.content.len() > MAX_SETTLEMENT_PROOF_SOURCE_BYTES {
             return Err(invalid(
                 "resource limit: source evidence payload is too large",
             ));
@@ -564,6 +564,11 @@ impl SettlementStateV1Proof {
                 "resource limit: canonical proof payload is too large",
             ));
         }
+        // Tests and debug builds continuously prove that the allocation-free
+        // estimator stays identical to the canonical encoder. The assertion
+        // runs only after the estimate is within the fixed bound, so hostile
+        // payloads still cannot force the allocation this guard prevents.
+        debug_assert_eq!(size, self.canonical_bytes().len());
         Ok(())
     }
 }

@@ -95,8 +95,15 @@ experiments, but it is not part of this contract.
   form to its evidence, artifact, package root, schema, occurrence, and value,
   enforces fixed resource limits, and is reachable from a typed derived commit.
   `SettlementStateV1Proof` remains the only authority for this package-authored
-  path; it is not a general package lifecycle program or an `analyze_commit` /
-  obligation integration.
+  path. A package may expose a bounded one-hop compact syntax for this exact
+  capability: semantic form surfaces use new v4 package/artifact identity
+  domains, elaboration retains the normalized syntax origin, and any compact
+  capable form selects settlement proof v2. The v2 checker independently
+  re-elaborates the exact source and compares template, target, complete field
+  mapping, schema/value identity, and ordered exhaustive coverage. Direct-only
+  capable sources keep byte-identical v1 proof identities. This is not a
+  general package lifecycle program or an `analyze_commit` / obligation
+  integration.
 - [ ] Every answer has a proposition-specific independently checked proof.
   Lot allocation, inventory conservation, and recognized gain now use typed,
   independently recomputed certificates. Direct obligations, settlement
@@ -163,11 +170,15 @@ experiments, but it is not part of this contract.
   Its definitions are package-root/artifact-hash bound, resource bounded, and
   revalidated at store boundaries; there are no defaults, expressions,
   inference, alias chains, or cross-package lookup. Capability-bearing targets
-  are rejected until a new independently replayable proof version exists.
+  other than `SettlementStateV1` are rejected until a dedicated,
+  independently replayable proof version exists.
   Nested row-qualified holes, semantic authoring templates, aliases,
   refinements, phase
   wrappers, general proof certificates, and query-result transport remain
-  open.
+  open. `SettlementStateV1` is the sole capability exception: compact syntax
+  is accepted only because its dedicated proof v2 replays the exact lowering;
+  all future capabilities remain rejected without an equivalent typed replay
+  contract.
 - [ ] Incremental semantic database with precise dependency invalidation.
   Production elaboration and analysis are memoized through the database with
   exact source/package edges and clean-run equivalence; invalidation within a

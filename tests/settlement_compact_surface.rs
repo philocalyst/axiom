@@ -227,6 +227,15 @@ fn direct_settlement_proof_retains_v1_identity_and_compact_changes_artifact_iden
         .settlement_state_proof(persisted.proof_id)
         .unwrap();
     assert_eq!(proof.version, SETTLEMENT_STATE_PROOF_VERSION);
+    assert_eq!(
+        persisted.proof_id.to_string(),
+        "b191c78f841b7dd2ae4cb5445b13fb1328194434663c5abb4c787011c5635106"
+    );
+    assert_eq!(
+        axiom_ledger::model::ContentHash::from_digest(blake3::hash(&proof.canonical_bytes()))
+            .to_string(),
+        "f19cf1b2975b12e9213599968d84d1e33b7a9b4444150f71029997f6880af9a7"
+    );
     assert_eq!(proof.canonical_bytes(), {
         let reloaded = workspace
             .store()
@@ -264,15 +273,40 @@ fn v2_origin_tampering_is_rejected_even_after_rehashing_coverage() {
         .store()
         .settlement_state_proof(persisted.proof_id)
         .unwrap();
-    let mut forged = proof.clone();
-    let Some(SettlementStateFormOriginV2::Compact { mappings, .. }) =
-        forged.coverage[0].origin.as_mut()
-    else {
-        panic!("expected compact origin");
-    };
-    mappings.reverse();
-    forged.coverage_hash = forged.recompute_coverage_hash();
-    assert!(forged.check(workspace.store()).is_err());
+    for field in ["template", "target", "mapping-order", "origin-tag"] {
+        let mut forged = proof.clone();
+        match (field, forged.coverage[0].origin.as_mut()) {
+            ("template", Some(SettlementStateFormOriginV2::Compact { template, .. })) => {
+                template.push_str("-forged")
+            }
+            ("target", Some(SettlementStateFormOriginV2::Compact { target, .. })) => {
+                target.push_str("-forged");
+            }
+            ("mapping-order", Some(SettlementStateFormOriginV2::Compact { mappings, .. })) => {
+                mappings.reverse()
+            }
+            ("origin-tag", Some(origin @ SettlementStateFormOriginV2::Compact { .. })) => {
+                *origin = SettlementStateFormOriginV2::Direct;
+            }
+            _ => panic!("expected compact origin"),
+        }
+        forged.coverage_hash = forged.recompute_coverage_hash();
+        assert!(
+            forged.check(workspace.store()).is_err(),
+            "forged {field} was accepted"
+        );
+    }
+
+    let mut downgraded = proof.clone();
+    downgraded.version = SETTLEMENT_STATE_PROOF_VERSION.to_owned();
+    for entry in &mut downgraded.coverage {
+        entry.origin = None;
+    }
+    downgraded.coverage_hash = downgraded.recompute_coverage_hash();
+    assert!(
+        downgraded.check(workspace.store()).is_err(),
+        "a compact source was accepted through the v1 proof path"
+    );
 }
 
 #[test]

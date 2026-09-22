@@ -105,8 +105,12 @@ Packages may also publish a `FormSurfaceV1`: a bounded, one-hop renaming of
 fields for an existing closed primitive record. The mapping is part of the
 compiled artifact and resolves only through its exact package root. It has no
 defaults, expressions, inference, aliases, cross-package lookup, or semantic
-power. Compact forms deliberately cannot target a semantic capability until a
-new proof format can replay that lowering independently.
+power. Compact forms may target `SettlementStateV1` because settlement proof
+v2 records their exact syntax origin and independently replays the source,
+template, mapping, schema, value, and source order through the pinned artifact.
+Direct capable forms retain the byte-identical v1 proof path. Every other
+semantic capability remains rejected until it defines its own versioned replay
+contract.
 
 ### Settlement vertical slice
 
