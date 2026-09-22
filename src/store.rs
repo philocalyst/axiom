@@ -1653,7 +1653,20 @@ impl ObjectStore {
                 ));
             };
             self.require_ancestor(*previous_source_id, *source_id)?;
+            if source.parents.as_slice() != [*previous_source_id] {
+                return Err(StoreError::InvalidObject(
+                    "settlement close restatement must follow the immediate source correction"
+                        .into(),
+                ));
+            }
             let previous_source = self.commit(*previous_source_id)?.clone();
+            if source.packages != previous_source.packages
+                || source.compiled_artifact != previous_source.compiled_artifact
+            {
+                return Err(StoreError::InvalidObject(
+                    "settlement close restatement changed source package context".into(),
+                ));
+            }
             let [previous_evidence_id] = previous_source.evidence.as_slice() else {
                 return Err(StoreError::InvalidObject(
                     "previous settlement close source has no evidence".into(),

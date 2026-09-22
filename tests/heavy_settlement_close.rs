@@ -670,6 +670,17 @@ fn persisted_close_restatement_is_linear_atomic_and_chainable() {
     let second_anchor = workspace
         .persist_settlement_state_proof(second_source.commit)
         .unwrap();
+    let before_skipped = workspace.store().len();
+    let skipped_error = workspace
+        .restate_settlement_close(initial, second_anchor.projection_commit)
+        .unwrap_err();
+    assert_eq!(
+        skipped_error,
+        WorkspaceError::Store(StoreError::InvalidObject(
+            "settlement close restatement must follow the immediate source correction".to_owned(),
+        ))
+    );
+    assert_eq!(workspace.store().len(), before_skipped);
     let second_close = workspace
         .restate_settlement_close(first_close, second_anchor.projection_commit)
         .unwrap();
