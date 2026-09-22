@@ -22,13 +22,14 @@ use crate::package_compiler::{
 };
 use crate::surface::{FormView, NodeId, Severity, Span, Token, TokenKind};
 
-/// The source-local diagnostic classes emitted by [`elaborate_form`].
+/// The source-local diagnostic classes emitted while elaborating forms.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum FormDiagnosticCode {
     IncompleteForm,
     InvalidOccurrence,
     MissingSchema,
     InvalidSchema,
+    UnknownPackage,
     PackageMismatch,
     UnknownSchema,
     NotRecordSchema,
@@ -163,41 +164,13 @@ impl std::error::Error for FormElaborationError {}
 /// authority: [`CompiledArtifact::resolve_record_schema`] receives both that
 /// name and the caller-provided package root.  This prevents an identically
 /// named record in another package from being selected accidentally.
-pub fn elaborate_form(
+#[cfg(test)]
+fn elaborate_form(
     form: FormView<'_>,
     artifact: &CompiledArtifact,
     package_root: ContentHash,
 ) -> Result<ElaboratedForm, FormElaborationError> {
     let mut diagnostics = Vec::new();
-    if let Some(error) = form.node().error.as_ref() {
-        diagnostics.push(FormDiagnostic::error(
-            FormDiagnosticCode::IncompleteForm,
-            error.span,
-            error.message.clone(),
-        ));
-    }
-    let occurrence = match form.occurrence() {
-        Some(token) => match OccurrenceId::try_new(token.lexeme.clone()) {
-            Ok(occurrence) => Some(occurrence),
-            Err(error) => {
-                diagnostics.push(FormDiagnostic::error(
-                    FormDiagnosticCode::InvalidOccurrence,
-                    token.span,
-                    error.to_string(),
-                ));
-                None
-            }
-        },
-        None => {
-            diagnostics.push(FormDiagnostic::error(
-                FormDiagnosticCode::InvalidOccurrence,
-                form.node().span,
-                "form header requires an occurrence identifier",
-            ));
-            None
-        }
-    };
-
     let schema_parts = form.schema_parts().collect::<Vec<_>>();
     let schema_span = schema_parts
         .first()
@@ -206,9 +179,26 @@ pub fn elaborate_form(
     let Some(schema_reference) =
         parse_schema_reference(&schema_parts, schema_span, &mut diagnostics)
     else {
+        add_form_header_diagnostics(form, &mut diagnostics);
+        let _ = parse_occurrence(form, &mut diagnostics);
         sort_diagnostics(&mut diagnostics);
         return Err(FormElaborationError::Diagnostics(diagnostics));
     };
+
+    elaborate_form_with_schema_reference(form, artifact, package_root, schema_reference)
+}
+
+fn elaborate_form_with_schema_reference(
+    form: FormView<'_>,
+    artifact: &CompiledArtifact,
+    package_root: ContentHash,
+    schema_reference: SchemaReference,
+) -> Result<ElaboratedForm, FormElaborationError> {
+    let mut diagnostics = Vec::new();
+    add_form_header_diagnostics(form, &mut diagnostics);
+    let occurrence = parse_occurrence(form, &mut diagnostics);
+
+    let schema_span = schema_reference.span;
 
     if let Some(package) = artifact
         .packages()
@@ -335,37 +325,137 @@ pub fn elaborate_form(
     })
 }
 
-/// Elaborate a document's forms while enforcing ledger-wide occurrence
-/// uniqueness. Each form carries the exact package root already selected by
-/// the caller's pinned artifact context; no display-name fallback is used.
-pub fn elaborate_forms<'a>(
-    forms: impl IntoIterator<Item = (FormView<'a>, ContentHash)>,
+fn add_form_header_diagnostics(form: FormView<'_>, diagnostics: &mut Vec<FormDiagnostic>) {
+    if let Some(error) = form.node().error.as_ref() {
+        diagnostics.push(FormDiagnostic::error(
+            FormDiagnosticCode::IncompleteForm,
+            error.span,
+            error.message.clone(),
+        ));
+    }
+}
+
+fn parse_occurrence(
+    form: FormView<'_>,
+    diagnostics: &mut Vec<FormDiagnostic>,
+) -> Option<OccurrenceId> {
+    match form.occurrence() {
+        Some(token) => match OccurrenceId::try_new(token.lexeme.clone()) {
+            Ok(occurrence) => Some(occurrence),
+            Err(error) => {
+                diagnostics.push(FormDiagnostic::error(
+                    FormDiagnosticCode::InvalidOccurrence,
+                    token.span,
+                    error.to_string(),
+                ));
+                None
+            }
+        },
+        None => {
+            diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::InvalidOccurrence,
+                form.node().span,
+                "form header requires an occurrence identifier",
+            ));
+            None
+        }
+    }
+}
+
+/// Elaborate every generic form in a source document against one exact,
+/// already-compiled artifact.
+///
+/// The package segment printed in a form header is only a display key.  It is
+/// resolved by exact name within `artifact.packages()` and immediately turned
+/// into that package's content root.  No ambient registry, package name-only
+/// export lookup, or fallback root participates in this operation.  Thus an
+/// artifact upgrade (including a module or version change) changes the schema
+/// and value identities returned here.
+pub(crate) fn elaborate_document(
+    file: &crate::surface::SurfaceFile,
     artifact: &CompiledArtifact,
 ) -> Result<Vec<ElaboratedForm>, FormElaborationError> {
     let mut elaborated = Vec::new();
     let mut occurrences = BTreeSet::new();
-    for (form, package_root) in forms {
-        let occurrence_span = form
-            .occurrence()
-            .map_or(form.node().span, |token| token.span);
-        let value = elaborate_form(form, artifact, package_root)?;
-        if !occurrences.insert(value.occurrence.clone()) {
-            return Err(FormElaborationError::Diagnostics(vec![
-                FormDiagnostic::error(
-                    FormDiagnosticCode::DuplicateOccurrence,
-                    occurrence_span,
-                    format!("duplicate form occurrence `{}`", value.occurrence),
-                ),
-            ]));
+    let mut diagnostics = Vec::new();
+
+    // Occurrence identity belongs to the source document, even when a form's
+    // schema or fields are invalid. Reserve every well-spelled occurrence up
+    // front so one error cannot hide a second, independent duplicate.
+    for form in file.forms() {
+        let mut occurrence_diagnostics = Vec::new();
+        if let Some(occurrence) = parse_occurrence(form, &mut occurrence_diagnostics)
+            && !occurrences.insert(occurrence.clone())
+        {
+            let span = form
+                .occurrence()
+                .map_or(form.node().span, |token| token.span);
+            diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::DuplicateOccurrence,
+                span,
+                format!("duplicate form occurrence `{occurrence}`"),
+            ));
         }
-        elaborated.push(value);
     }
-    Ok(elaborated)
+
+    for form in file.forms() {
+        let mut schema_diagnostics = Vec::new();
+        let schema_parts = form.schema_parts().collect::<Vec<_>>();
+        let schema_span = schema_parts
+            .first()
+            .map(|token| token.span)
+            .unwrap_or_else(|| form.node().span);
+        let Some(schema_reference) =
+            parse_schema_reference(&schema_parts, schema_span, &mut schema_diagnostics)
+        else {
+            add_form_header_diagnostics(form, &mut schema_diagnostics);
+            let _ = parse_occurrence(form, &mut schema_diagnostics);
+            diagnostics.extend(schema_diagnostics);
+            continue;
+        };
+
+        let Some(package) = artifact
+            .packages()
+            .iter()
+            .find(|package| package.name == schema_reference.package)
+        else {
+            schema_diagnostics.push(FormDiagnostic::error(
+                FormDiagnosticCode::UnknownPackage,
+                schema_span,
+                format!(
+                    "package `{}` is not present in the pinned compiled artifact",
+                    schema_reference.package
+                ),
+            ));
+            add_form_header_diagnostics(form, &mut schema_diagnostics);
+            let _ = parse_occurrence(form, &mut schema_diagnostics);
+            diagnostics.extend(schema_diagnostics);
+            continue;
+        };
+
+        match elaborate_form_with_schema_reference(
+            form,
+            artifact,
+            package.root_hash(),
+            schema_reference,
+        ) {
+            Ok(value) => elaborated.push(value),
+            Err(error) => diagnostics.extend(error.diagnostics().iter().cloned()),
+        }
+    }
+
+    if diagnostics.is_empty() {
+        Ok(elaborated)
+    } else {
+        sort_diagnostics(&mut diagnostics);
+        Err(FormElaborationError::Diagnostics(diagnostics))
+    }
 }
 
 struct SchemaReference {
     package: String,
     qualified_name: QualifiedName,
+    span: Span,
 }
 
 fn parse_schema_reference(
@@ -430,6 +520,7 @@ fn parse_schema_reference(
             module: ModulePath::new(names).expect("schema has a module segment"),
             name,
         },
+        span,
     })
 }
 
@@ -766,6 +857,44 @@ mod tests {
         (artifact, root)
     }
 
+    fn artifact_for_packages(package_names: &[&str], version: Version) -> CompiledArtifact {
+        let manifests = package_names
+            .iter()
+            .map(|name| PackageManifest::new(*name, version, "types"))
+            .collect::<Vec<_>>();
+        let lock = Lockfile {
+            roots: manifests
+                .iter()
+                .map(|manifest| Dependency::new(manifest.name.clone(), VersionReq::Exact(version)))
+                .collect(),
+            packages: manifests
+                .iter()
+                .map(|manifest| LockedPackage {
+                    name: manifest.name.clone(),
+                    version,
+                    hash: manifest.hash(),
+                    dependencies: Vec::new(),
+                })
+                .collect(),
+        };
+        let module_path = ModulePath::root(Name::new("types").unwrap());
+        let inputs = manifests.into_iter().map(|manifest| {
+            let module = crate::hir::lower(AstModule {
+                path: module_path.clone(),
+                declarations: vec![AstDeclaration {
+                    name: "Invoice".to_owned(),
+                    kind: AstDeclarationKind::Type(AstType::Record {
+                        fields: vec![("amount".to_owned(), AstType::Integer)],
+                        open_tail: None,
+                    }),
+                    span: HirSpan::new(0, 7),
+                }],
+            });
+            PackageInput::new(manifest, [module])
+        });
+        compile(inputs, &lock).unwrap()
+    }
+
     #[test]
     fn elaborates_exact_scalars_and_typed_holes() {
         let (artifact, root) = artifact();
@@ -913,11 +1042,11 @@ mod tests {
 
     #[test]
     fn batch_elaboration_rejects_duplicate_occurrences_and_open_source_schemas() {
-        let (artifact, root) = artifact();
+        let (artifact, _root) = artifact();
         let file = SurfaceFile::parse(
             "form invoice/1 : billing::types::Invoice\n  approved true\n  count 1\n  total 1\n  note first\nform invoice/1 : billing::types::Invoice\n  approved false\n  count 2\n  total 2\n  note second\n",
         );
-        let error = elaborate_forms(file.forms().map(|form| (form, root)), &artifact).unwrap_err();
+        let error = elaborate_document(&file, &artifact).unwrap_err();
         assert!(
             error
                 .diagnostics()
@@ -936,5 +1065,88 @@ mod tests {
                 .iter()
                 .any(|diagnostic| diagnostic.code == FormDiagnosticCode::UnsupportedType)
         );
+    }
+
+    #[test]
+    fn document_binds_same_short_schema_name_to_each_pinned_package() {
+        let artifact = artifact_for_packages(&["billing", "receivable"], Version::new(1, 0, 0));
+        let file = SurfaceFile::parse(
+            "form billing/1 : billing::types::Invoice\n  amount 7\nform receivable/1 : receivable::types::Invoice\n  amount 7\n",
+        );
+        let values = elaborate_document(&file, &artifact).unwrap();
+        assert_eq!(values.len(), 2);
+        assert_ne!(values[0].package_root(), values[1].package_root());
+        assert_ne!(
+            values[0].schema().schema_id(),
+            values[1].schema().schema_id()
+        );
+        assert_ne!(
+            values[0].value().content_hash(),
+            values[1].value().content_hash()
+        );
+    }
+
+    #[test]
+    fn document_rejects_unknown_packages_without_name_fallback() {
+        let artifact = artifact_for_packages(&["billing"], Version::new(1, 0, 0));
+        let file = SurfaceFile::parse("form invoice/1 : missing::types::Invoice\n  amount 7\n");
+        let error = elaborate_document(&file, &artifact).unwrap_err();
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code == FormDiagnosticCode::UnknownPackage
+                && diagnostic.message.contains("missing")
+        }));
+        assert!(
+            !error
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == FormDiagnosticCode::UnknownSchema)
+        );
+    }
+
+    #[test]
+    fn document_package_upgrade_changes_schema_and_value_identity() {
+        let source = SurfaceFile::parse("form invoice/1 : billing::types::Invoice\n  amount 7\n");
+        let first = artifact_for_packages(&["billing"], Version::new(1, 0, 0));
+        let second = artifact_for_packages(&["billing"], Version::new(2, 0, 0));
+        let first = elaborate_document(&source, &first).unwrap().remove(0);
+        let second = elaborate_document(&source, &second).unwrap().remove(0);
+        assert_ne!(first.package_root(), second.package_root());
+        assert_ne!(first.schema().schema_id(), second.schema().schema_id());
+        assert_ne!(first.value().content_hash(), second.value().content_hash());
+    }
+
+    #[test]
+    fn document_enforces_occurrence_uniqueness_across_all_forms() {
+        let artifact = artifact_for_packages(&["billing", "receivable"], Version::new(1, 0, 0));
+        let file = SurfaceFile::parse(
+            "form invoice/1 : billing::types::Invoice\n  amount 7\nform invoice/1 : receivable::types::Invoice\n  amount 8\n",
+        );
+        let error = elaborate_document(&file, &artifact).unwrap_err();
+        assert!(error.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code == FormDiagnosticCode::DuplicateOccurrence && diagnostic.span.line == 3
+        }));
+    }
+
+    #[test]
+    fn document_reports_duplicates_even_when_the_first_form_is_invalid() {
+        let artifact = artifact_for_packages(&["billing"], Version::new(1, 0, 0));
+        let file = SurfaceFile::parse(
+            "form invoice/1 : billing::types::Invoice\n  amount nope\nform invoice/1 : billing::types::Invoice\n  amount 8\nform other/1 : missing::types::Invoice\n  amount 9\n",
+        );
+        let error = elaborate_document(&file, &artifact).unwrap_err();
+        for code in [
+            FormDiagnosticCode::InvalidValue,
+            FormDiagnosticCode::DuplicateOccurrence,
+            FormDiagnosticCode::UnknownPackage,
+        ] {
+            assert!(
+                error
+                    .diagnostics()
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == code),
+                "missing {code:?}: {:?}",
+                error.diagnostics()
+            );
+        }
     }
 }

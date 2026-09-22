@@ -143,14 +143,19 @@ impl PackageManifest {
     }
 
     pub fn validate(&self) -> Result<(), PackageLockError> {
-        if self.name.trim().is_empty() || self.name.chars().any(char::is_whitespace) {
+        if self.name.trim().is_empty()
+            || self.name.chars().any(char::is_whitespace)
+            || self.name.contains("::")
+        {
             return Err(PackageLockError::InvalidName(self.name.clone()));
         }
         if self.body.trim().is_empty() {
             return Err(PackageLockError::EmptyBody(self.name.clone()));
         }
         if self.dependencies.iter().any(|dependency| {
-            dependency.name.trim().is_empty() || dependency.name.chars().any(char::is_whitespace)
+            dependency.name.trim().is_empty()
+                || dependency.name.chars().any(char::is_whitespace)
+                || dependency.name.contains("::")
         }) {
             return Err(PackageLockError::InvalidDependency(self.name.clone()));
         }
@@ -621,6 +626,18 @@ mod tests {
                 Dependency::new(*name, VersionReq::parse(requirement).unwrap())
             }),
         )
+    }
+
+    #[test]
+    fn package_names_cannot_steal_the_schema_separator() {
+        assert!(matches!(
+            package("billing::shadow", "1.0.0", &[]).validate(),
+            Err(PackageLockError::InvalidName(_))
+        ));
+        assert!(matches!(
+            package("billing", "1.0.0", &[("types::shadow", "=1.0.0")]).validate(),
+            Err(PackageLockError::InvalidDependency(_))
+        ));
     }
 
     #[test]

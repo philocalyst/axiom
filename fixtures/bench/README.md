@@ -1,7 +1,8 @@
 # Axiom benchmark corpus
 
 `axiom-bench` is the source of truth for the reproducible XVII corpus.  It
-generates the eleven named workloads from `confirmed-direction.md` using only
+generates the eleven named workloads from `confirmed-direction.md` plus the
+package-authored generic-form workload using only
 the Rust standard library and the checked-in Axiom parser/model APIs; no input
 files, network access, random seed, wall clock, or floating-point arithmetic
 are involved in workload generation.  The optional peak-RSS observation uses
@@ -10,6 +11,7 @@ the target's native `getrusage` resource API.
 ```text
 cargo run --quiet --bin axiom-bench -- --quick
 cargo run --quiet --bin axiom-bench -- --scale 4 --workload large-proof-explanation
+cargo run --release --quiet --bin axiom-bench -- --quick --scale 100 --workload generic-form-elaboration
 cargo run --quiet --bin axiom-bench -- --self-test
 ```
 
@@ -33,12 +35,15 @@ sizes are named `dependency_graph_nodes` and `dependency_graph_edges` because
 they describe incremental dependency indexes, not domain relation cardinality.
 
 The corpus uses the V0 source vocabulary where it exists. Invoice/payment is
-an executable obligation/settlement/satisfaction workload. Ownership,
-corporate-action, and recursive-rule shapes remain labelled evidence rows and
-comments because those domains are not yet accepted by the V0 parser. Their
-unsupported metrics are emitted as `null` with an explicit reason. Non-null
-timings, proof sizes, cache data, and RSS for those rows measure only the
-accepted V0 evidence projection, not the richer domain shape.
+an executable obligation/settlement/satisfaction workload. Currency,
+corporate-action, ownership, package-upgrade, and recursive-rule workloads
+also run separately labelled public domain-API probes; their source projection
+and semantic probe timings are not conflated. The generic-form workload runs
+through persisted package compilation, source-commit artifact pinning, exact
+schema-bound document elaboration, canonical value verification, and a one-row
+correction. `--scale 1`, `10`, and `100` select its 1k, 10k, and 100k profiles.
+Its revision measurement is warm re-elaboration, not an incremental-cache
+claim. Unsupported metrics remain `null` rather than being inferred.
 
 The performance numbers are measurements from the current process, not
 assertions.  The performance goals copied from section XVII are emitted in a

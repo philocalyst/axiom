@@ -208,6 +208,109 @@ fn domain_api_workloads_report_real_semantic_probes() {
 }
 
 #[test]
+fn generic_form_workload_uses_pinned_document_elaboration_and_canonical_values() {
+    let line = measurement("generic-form-elaboration");
+    assert!(line.contains("\"status\":\"measured\""), "{line}");
+    assert!(line.contains("\"semantic_supported\":true"), "{line}");
+    assert!(
+        line.contains("\"semantic_probe_api\":\"surface.package.document_elaboration\""),
+        "{line}"
+    );
+    assert!(
+        line.contains("Workspace::elaborate_package_forms"),
+        "{line}"
+    );
+    assert_eq!(
+        field_value(&line, "authority_binding_verified"),
+        "true",
+        "{line}"
+    );
+    assert_eq!(field_value(&line, "forms"), "1000", "{line}");
+    for field in [
+        "package_compile_ns",
+        "document_elaboration_ns",
+        "schema_lookup_ns",
+        "canonical_values_ns",
+        "changed_document_elaboration_ns",
+    ] {
+        assert_ne!(field_value(&line, field), "null", "{field}: {line}");
+    }
+    assert_eq!(
+        field_value(&line, "canonical_value_count"),
+        "1000",
+        "{line}"
+    );
+    assert_eq!(field_value(&line, "schema_lookup_count"), "1000", "{line}");
+    assert_eq!(
+        field_value(&line, "document_result_count"),
+        "1000",
+        "{line}"
+    );
+    assert_eq!(
+        field_value(&line, "revision_result_count"),
+        "1000",
+        "{line}"
+    );
+    assert!(
+        line.contains("\"revision_mode\":\"warm_surface_re_elaboration\""),
+        "{line}"
+    );
+    assert!(line.contains("\"changed_kind\":\"evidence_row\""), "{line}");
+    assert!(
+        line.contains("\"changed_incremental_solve_ns\":null"),
+        "{line}"
+    );
+    assert!(line.contains("\"changed_full_solve_ns\":null"), "{line}");
+    assert!(
+        line.contains("\"independent_clean_solve_ns\":null"),
+        "{line}"
+    );
+    assert!(
+        line.contains("\"same_process_cache_replay_equal\":null"),
+        "{line}"
+    );
+    assert!(
+        line.contains("\"independent_clean_recompute_equal\":null"),
+        "{line}"
+    );
+    let source_hash = field_value(&line, "source_hash");
+    let changed_hash = field_value(&line, "changed_source_hash");
+    assert_ne!(
+        source_hash, changed_hash,
+        "generic source edit did not change input"
+    );
+}
+
+#[test]
+#[ignore = "release stress gate for the explicit 10k and 100k generic-form profiles"]
+fn generic_form_scale_profiles_complete() {
+    for (scale, expected) in [("10", "10000"), ("100", "100000")] {
+        let output = Command::new(env!("CARGO_BIN_EXE_axiom-bench"))
+            .args([
+                "--quick",
+                "--scale",
+                scale,
+                "--workload",
+                "generic-form-elaboration",
+            ])
+            .output()
+            .expect("scaled generic-form benchmark should start");
+        assert!(
+            output.status.success(),
+            "scale {scale} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let line = String::from_utf8(output.stdout).expect("benchmark JSON is UTF-8");
+        assert_eq!(field_value(line.trim(), "forms"), expected, "{line}");
+        assert_eq!(
+            field_value(line.trim(), "authority_binding_verified"),
+            "true",
+            "{line}"
+        );
+    }
+}
+
+#[test]
 fn revision_workloads_report_incremental_timing_and_invalidation() {
     for (workload, changed_kind, api) in [
         ("one-row-close-change", "evidence_row", None),
@@ -341,5 +444,5 @@ fn full_corpus_self_test_is_not_replaced_by_quick_scaling() {
     assert_json_object(stdout.trim());
     assert!(stdout.contains("\"kind\":\"self_test\""), "{stdout}");
     assert!(stdout.contains("\"status\":\"ok\""), "{stdout}");
-    assert!(stdout.contains("\"checks\":40"), "{stdout}");
+    assert!(stdout.contains("\"checks\":45"), "{stdout}");
 }

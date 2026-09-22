@@ -15,16 +15,25 @@ use std::time::Instant;
 use axiom_ledger::contracts::{
     CorporateAction, Dividend, DividendLeg, Merge, Spinoff, SpinoffLeg, Split, TransformationLeg,
 };
+use axiom_ledger::elaboration::ElaboratedForm;
+use axiom_ledger::hir::{
+    AstDeclaration, AstDeclarationKind, AstModule, AstType, ModulePath, Name, QualifiedName,
+    Span as HirSpan,
+};
 use axiom_ledger::incremental::{IncrementalDb, MemoOutcome, QueryError, QueryKey};
 use axiom_ledger::ir::{Atom, Nominal, NominalKind, Term, Var};
 use axiom_ledger::logic::{Clause, Goal, Literal, Program, SemanticContext, Solver, Truth};
-use axiom_ledger::model::{Quantity, Unit};
+use axiom_ledger::model::{ContentHash, Quantity, Unit};
 use axiom_ledger::ontology::{
     Endpoint, ExchangeLeg, ExchangeRecord, Instrument, InstrumentKind, Obligation, Role,
     RoleAssignment, RoleAssignments, SatisfactionAllocation, Settlement, SettlementState,
     validate_satisfaction_network,
 };
 use axiom_ledger::package::{LotCandidate, PolicyPackage, Selection};
+use axiom_ledger::package_compiler::{CompiledArtifact, PackageInput};
+use axiom_ledger::package_lock::{
+    Dependency, LockedPackage, Lockfile, PackageManifest, Version, VersionReq,
+};
 use axiom_ledger::render::render_why;
 use axiom_ledger::store::PolicyPackage as StorePolicyPackage;
 use axiom_ledger::surface::SurfaceFile;
@@ -48,10 +57,11 @@ enum Workload {
     PackageUpgrade,
     AdversarialRecursion,
     LargeProofExplanation,
+    GenericFormElaboration,
 }
 
 impl Workload {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 12] = [
         Self::TenYearPersonalHistory,
         Self::HighFrequencyLots,
         Self::MultiCurrency,
@@ -63,6 +73,7 @@ impl Workload {
         Self::PackageUpgrade,
         Self::AdversarialRecursion,
         Self::LargeProofExplanation,
+        Self::GenericFormElaboration,
     ];
 
     fn name(self) -> &'static str {
@@ -78,6 +89,7 @@ impl Workload {
             Self::PackageUpgrade => "package-upgrade",
             Self::AdversarialRecursion => "adversarial-recursion",
             Self::LargeProofExplanation => "large-proof-explanation",
+            Self::GenericFormElaboration => "generic-form-elaboration",
         }
     }
 
@@ -101,6 +113,7 @@ impl Workload {
             | Self::OwnershipNetwork
             | Self::AdversarialRecursion
             | Self::LargeProofExplanation => Target::IncrementalSeconds,
+            Self::GenericFormElaboration => Target::WarmInteractive,
         }
     }
 
@@ -123,6 +136,9 @@ impl Workload {
                 "recursive evidence plus logic fixed-point and cycle probes"
             }
             Self::LargeProofExplanation => "large proof DAG and source explanation",
+            Self::GenericFormElaboration => {
+                "package-bound generic record forms through surface/document elaboration"
+            }
         }
     }
 }
@@ -227,6 +243,11 @@ struct Timing {
     changed_incremental_solve_ns: Option<u128>,
     changed_full_solve_ns: Option<u128>,
     independent_workers_ns: Option<u128>,
+    package_compile_ns: Option<u128>,
+    document_elaboration_ns: Option<u128>,
+    schema_lookup_ns: Option<u128>,
+    canonical_values_ns: Option<u128>,
+    changed_document_elaboration_ns: Option<u128>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -256,6 +277,12 @@ struct Metrics {
     peak_memory_bytes: Option<usize>,
     independent_worker_equivalence: Option<bool>,
     concurrent_worker_count: Option<usize>,
+    canonical_value_count: Option<usize>,
+    schema_lookup_count: Option<usize>,
+    document_result_count: Option<usize>,
+    revision_result_count: Option<usize>,
+    revision_mode: Option<&'static str>,
+    authority_binding_verified: Option<bool>,
     semantic_probe_items: Option<usize>,
     semantic_probe_results: Option<usize>,
     semantic_probe_api: Option<&'static str>,
@@ -445,6 +472,16 @@ fn measure_workload(
     isolate_peak_memory: bool,
 ) -> Result<ResultRecord, String> {
     let generated = generate(workload, quick, scale)?;
+    if workload == Workload::GenericFormElaboration {
+        return measure_generic_form_workload(
+            generated,
+            workload,
+            quick,
+            scale,
+            samples,
+            isolate_peak_memory,
+        );
+    }
     let source_hash = stable_hash(generated.source.as_bytes());
     let changed_source_hash = generated
         .changed_source
@@ -682,6 +719,349 @@ fn measure_workload(
         target: workload.target(),
         description: workload.description(),
     })
+}
+
+/// Measure the real generic-form path separately from the strict ledger
+/// parser.  Generic forms are intentionally authoring-surface input, so they
+/// do not have a `book` declaration and cannot be routed through
+/// `Workspace::analyze_commit` until the domain parser grows a generic-form
+/// lowering.  This path still crosses the public package compiler and
+/// `elaborate_document` boundary, and every reported result is schema-bound.
+fn measure_generic_form_workload(
+    generated: GeneratedWorkload,
+    workload: Workload,
+    quick: bool,
+    scale: u64,
+    samples: usize,
+    isolate_peak_memory: bool,
+) -> Result<ResultRecord, String> {
+    let source_hash = stable_hash(generated.source.as_bytes());
+    let changed_source_hash = generated
+        .changed_source
+        .as_ref()
+        .map(|source| stable_hash(source.as_bytes()));
+    let item_count = generated.semantic_probe_items;
+    let (mut workspace, base_commit, artifact) = generic_workspace_fixture(&generated.source)?;
+    let base_bound = workspace
+        .elaborate_package_forms(base_commit)
+        .map_err(|error| format!("{}: document elaboration failed: {error}", workload.name()))?;
+    if base_bound.source_commit() != base_commit
+        || base_bound.artifact_hash() != artifact.artifact_hash()
+    {
+        return Err(format!(
+            "{}: elaborated forms lost their source/artifact authority binding",
+            workload.name()
+        ));
+    }
+    let base_forms = base_bound.into_forms();
+    let package_root = artifact.package_roots()[0];
+    let qualified_name = generic_form_schema_name()?;
+    if base_forms.len() != item_count {
+        return Err(format!(
+            "{}: document elaboration returned {} forms, expected {item_count}",
+            workload.name(),
+            base_forms.len()
+        ));
+    }
+
+    let document_elaboration_ns = median_workspace_document(&workspace, base_commit, samples)?;
+    let schema_lookup_ns = median_generic_schema_lookup(
+        &artifact,
+        package_root,
+        &qualified_name,
+        item_count,
+        samples,
+    )?;
+    let canonical_values_ns = median_generic_canonical_values(&base_forms, samples)?;
+    let parse_ns = median_surface_parse(&generated.source, item_count, samples);
+    let normalization_ns = median_generic_normalization(&generated.source, samples);
+    let package_compile_ns = median_generic_package_compile(samples)?;
+
+    let mut timing = Timing {
+        generation_ns: median_generation(workload, quick, scale, samples)?,
+        normalization_ns: Some(normalization_ns),
+        parse_ns: Some(parse_ns),
+        semantic_probe_ns: Some(document_elaboration_ns),
+        package_compile_ns: Some(package_compile_ns),
+        document_elaboration_ns: Some(document_elaboration_ns),
+        schema_lookup_ns: Some(schema_lookup_ns),
+        canonical_values_ns: Some(canonical_values_ns),
+        changed_document_elaboration_ns: None,
+        ..Timing::default()
+    };
+    let mut metrics = Metrics {
+        same_process_cache_replay_equal: None,
+        independent_clean_recompute_equal: None,
+        semantic_probe_items: Some(item_count),
+        semantic_probe_results: Some(base_forms.len()),
+        semantic_probe_api: Some("surface.package.document_elaboration"),
+        canonical_value_count: Some(base_forms.len()),
+        schema_lookup_count: Some(item_count),
+        document_result_count: Some(base_forms.len()),
+        revision_result_count: None,
+        revision_mode: None,
+        authority_binding_verified: Some(true),
+        build_profile: Some(if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }),
+        resource_profile: Some(if process_peak_memory_bytes().is_some() {
+            "per-workload child-process peak RSS via getrusage"
+        } else {
+            "per-workload child-process peak RSS unavailable"
+        }),
+        note: Some(
+            "semantic_supported: package-compiled record schema + lossless SurfaceFile + Workspace::elaborate_package_forms on a commit pinned to a persisted artifact; package_compile_ns includes deterministic fixture construction, compilation, and object-store persistence; document_elaboration_ns includes typed schema validation and canonical value construction; schema_lookup_ns measures exact package-root schema resolution; canonical_values_ns rechecks canonical SchemaBoundRecord values; source revision timings are warm re-elaboration measurements because Workspace::analyze_commit does not yet lower generic forms and therefore are not incremental-cache claims",
+        ),
+        ..Metrics::default()
+    };
+
+    if let Some(changed) = generated.changed_source.as_deref() {
+        let changed_commit = workspace
+            .load_source("benchmark/generic-form-elaboration", changed.as_bytes())
+            .map_err(|error| format!("{}: changed source load failed: {error}", workload.name()))?;
+        let changed_bound = workspace
+            .elaborate_package_forms(changed_commit.commit_id())
+            .map_err(|error| {
+                format!(
+                    "{}: changed document elaboration failed: {error}",
+                    workload.name()
+                )
+            })?;
+        let changed_forms = changed_bound.forms();
+        if changed_forms.len() != base_forms.len() {
+            return Err(format!(
+                "{}: source revision changed form count from {} to {}",
+                workload.name(),
+                base_forms.len(),
+                changed_forms.len()
+            ));
+        }
+        if base_forms
+            .first()
+            .zip(changed_forms.first())
+            .is_some_and(|(left, right)| {
+                left.value().content_hash() == right.value().content_hash()
+            })
+        {
+            return Err(format!(
+                "{}: source revision did not change a canonical form value",
+                workload.name()
+            ));
+        }
+        let changed_ns = median_generic_workspace_revision(&generated.source, changed, samples)?;
+        timing.changed_document_elaboration_ns = Some(changed_ns);
+        metrics.revision_result_count = Some(changed_forms.len());
+        metrics.revision_mode = Some("warm_surface_re_elaboration");
+    }
+
+    metrics.peak_memory_bytes = if isolate_peak_memory {
+        isolated_peak_memory_bytes(workload, quick, scale)?
+    } else {
+        None
+    };
+
+    Ok(ResultRecord {
+        workload,
+        quick,
+        scale,
+        samples,
+        source_hash,
+        changed_source_hash,
+        changed_kind: generated.changed_kind,
+        semantic_supported: true,
+        status: "measured",
+        timing,
+        sizes: Sizes {
+            source_bytes: generated.source.len(),
+            source_lines: generated.source.lines().count(),
+            forms: Some(base_forms.len()),
+            changed_source_bytes: generated.changed_source.as_ref().map(String::len),
+            dependency_graph_nodes: None,
+            dependency_graph_edges: None,
+        },
+        metrics,
+        unsupported_reason: None,
+        target: workload.target(),
+        description: workload.description(),
+    })
+}
+
+fn generic_form_schema_name() -> Result<QualifiedName, String> {
+    Ok(QualifiedName {
+        module: ModulePath::root(Name::new("types").map_err(|error| format!("{error:?}"))?),
+        name: Name::new("Row").map_err(|error| format!("{error:?}"))?,
+    })
+}
+
+fn generic_form_package_input() -> Result<(PackageInput, Lockfile), String> {
+    let manifest = PackageManifest::new(
+        "forms",
+        Version::new(1, 0, 0),
+        "generic-record-benchmark-v1",
+    );
+    let lockfile = Lockfile {
+        roots: vec![Dependency::new(
+            manifest.name.clone(),
+            VersionReq::Exact(manifest.version),
+        )],
+        packages: vec![LockedPackage {
+            name: manifest.name.clone(),
+            version: manifest.version,
+            hash: manifest.hash(),
+            dependencies: manifest.dependencies.clone(),
+        }],
+    };
+    let module = axiom_ledger::hir::lower(AstModule {
+        path: ModulePath::root(Name::new("types").map_err(|error| format!("{error:?}"))?),
+        declarations: vec![AstDeclaration {
+            name: "Row".to_owned(),
+            kind: AstDeclarationKind::Type(AstType::Record {
+                fields: vec![
+                    ("approved".to_owned(), AstType::Bool),
+                    ("count".to_owned(), AstType::Integer),
+                    ("note".to_owned(), AstType::Text),
+                    ("total".to_owned(), AstType::Decimal),
+                ],
+                open_tail: None,
+            }),
+            span: HirSpan::default(),
+        }],
+    });
+    Ok((PackageInput::new(manifest, [module]), lockfile))
+}
+
+fn generic_workspace_fixture(
+    source: &str,
+) -> Result<(Workspace, axiom_ledger::store::CommitId, CompiledArtifact), String> {
+    let mut workspace = Workspace::new();
+    let loaded = workspace
+        .load_source("benchmark/generic-form-elaboration", source.as_bytes())
+        .map_err(|error| format!("generic form source load failed: {error}"))?;
+    let (package, lockfile) = generic_form_package_input()?;
+    let (artifact_id, artifact) = workspace
+        .compile_packages_persisted([package], &lockfile)
+        .map_err(|error| format!("generic form package persistence failed: {error}"))?;
+    let pinned = workspace
+        .commit_with_compiled_artifact(loaded.commit_id(), artifact_id)
+        .map_err(|error| format!("generic form artifact pinning failed: {error}"))?;
+    Ok((workspace, pinned.commit_id(), artifact))
+}
+
+fn median_generic_package_compile(samples: usize) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        let mut workspace = Workspace::new();
+        let (package, lockfile) = generic_form_package_input()?;
+        let (_, artifact) = workspace
+            .compile_packages_persisted([package], &lockfile)
+            .map_err(|error| format!("generic form package compilation failed: {error}"))?;
+        black_box(artifact.artifact_hash());
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
+}
+
+fn median_surface_parse(source: &str, expected_forms: usize, samples: usize) -> u128 {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        let surface = SurfaceFile::parse(source);
+        black_box(surface.forms().count() == expected_forms);
+        values.push(start.elapsed().as_nanos());
+    }
+    median(values)
+}
+
+fn median_generic_normalization(source: &str, samples: usize) -> u128 {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        let surface = SurfaceFile::parse(source);
+        black_box(surface.canonical().len());
+        values.push(start.elapsed().as_nanos());
+    }
+    median(values)
+}
+
+fn median_workspace_document(
+    workspace: &Workspace,
+    commit: axiom_ledger::store::CommitId,
+    samples: usize,
+) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        let elaborated = workspace
+            .elaborate_package_forms(commit)
+            .map_err(|error| format!("generic document elaboration failed: {error}"))?;
+        black_box(elaborated.forms().len());
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
+}
+
+fn median_generic_schema_lookup(
+    artifact: &CompiledArtifact,
+    package_root: ContentHash,
+    qualified_name: &QualifiedName,
+    count: usize,
+    samples: usize,
+) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        for _ in 0..count {
+            let schema = artifact
+                .resolve_record_schema(package_root, qualified_name)
+                .map_err(|error| format!("generic schema lookup failed: {error}"))?;
+            black_box(schema.schema_id());
+        }
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
+}
+
+fn median_generic_canonical_values(
+    forms: &[ElaboratedForm],
+    samples: usize,
+) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        for form in forms {
+            let canonical = form
+                .schema()
+                .check_concrete_record(form.value().record())
+                .map_err(|error| format!("generic canonical value check failed: {error}"))?;
+            black_box(canonical.content_hash());
+        }
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
+}
+
+fn median_generic_workspace_revision(
+    source: &str,
+    changed: &str,
+    samples: usize,
+) -> Result<u128, String> {
+    let mut values = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let (mut workspace, _base_commit, _) = generic_workspace_fixture(source)?;
+        let start = Instant::now();
+        let changed_commit = workspace
+            .load_source("benchmark/generic-form-elaboration", changed.as_bytes())
+            .map_err(|error| format!("generic source revision failed: {error}"))?;
+        let elaborated = workspace
+            .elaborate_package_forms(changed_commit.commit_id())
+            .map_err(|error| format!("generic source revision failed: {error}"))?;
+        black_box(elaborated.forms().len());
+        values.push(start.elapsed().as_nanos());
+    }
+    Ok(median(values))
 }
 
 fn median_generation(
@@ -1062,6 +1442,10 @@ fn self_test(_quick: bool, scale: u64) -> Result<usize, String> {
             ));
         }
         checks += 1;
+        if workload == Workload::GenericFormElaboration {
+            checks += generic_form_self_test(&left, test_scale)?;
+            continue;
+        }
         let mut workspace = Workspace::new();
         let mut source = workspace
             .load_source(
@@ -1220,6 +1604,63 @@ fn self_test(_quick: bool, scale: u64) -> Result<usize, String> {
         return Err("self-test did not execute its minimum checks".into());
     }
     Ok(checks)
+}
+
+fn generic_form_self_test(generated: &GeneratedWorkload, _scale: u64) -> Result<usize, String> {
+    let (mut workspace, base_commit, artifact) = generic_workspace_fixture(&generated.source)?;
+    let bound = workspace
+        .elaborate_package_forms(base_commit)
+        .map_err(|error| format!("generic form self-test elaboration failed: {error}"))?;
+    let forms = bound.forms();
+    if forms.len() != generated.semantic_probe_items {
+        return Err(format!(
+            "generic form self-test returned {} forms, expected {}",
+            forms.len(),
+            generated.semantic_probe_items
+        ));
+    }
+    let canonical = forms
+        .iter()
+        .map(|form| {
+            form.schema()
+                .check_concrete_record(form.value().record())
+                .map(|value| value.content_hash())
+                .map_err(|error| format!("generic form self-test canonical value failed: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if canonical.len() != forms.len() {
+        return Err("generic form self-test did not canonicalize every value".into());
+    }
+    let package_root = artifact.package_roots()[0];
+    let schema = generic_form_schema_name()?;
+    if artifact
+        .resolve_record_schema(package_root, &schema)
+        .is_err()
+    {
+        return Err("generic form self-test schema lookup failed".into());
+    }
+    let changed = generated
+        .changed_source
+        .as_deref()
+        .ok_or_else(|| "generic form self-test has no source revision".to_string())?;
+    let changed_commit = workspace
+        .load_source("benchmark/generic-form-elaboration", changed.as_bytes())
+        .map_err(|error| format!("generic form self-test changed source failed: {error}"))?;
+    let changed_bound = workspace
+        .elaborate_package_forms(changed_commit.commit_id())
+        .map_err(|error| format!("generic form self-test changed elaboration failed: {error}"))?;
+    let changed_forms = changed_bound.forms();
+    if changed_forms.len() != forms.len()
+        || changed_forms
+            .first()
+            .zip(forms.first())
+            .is_none_or(|(left, right)| left.value().content_hash() == right.value().content_hash())
+    {
+        return Err(
+            "generic form self-test source revision did not change a canonical value".into(),
+        );
+    }
+    Ok(4)
 }
 
 fn recursive_cycle_probe() -> Result<usize, String> {
@@ -1690,7 +2131,7 @@ fn print_json_line(record: &ResultRecord) {
     );
     let _ = write!(
         output,
-        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"semantic_probe_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_incremental_solve_ns\":{},\"changed_full_solve_ns\":{},\"parallel_solve_ns\":null,\"independent_workers_ns\":{}",
+        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"semantic_probe_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_incremental_solve_ns\":{},\"changed_full_solve_ns\":{},\"parallel_solve_ns\":null,\"independent_workers_ns\":{},\"package_compile_ns\":{},\"document_elaboration_ns\":{},\"schema_lookup_ns\":{},\"canonical_values_ns\":{},\"changed_document_elaboration_ns\":{}",
         record.timing.generation_ns,
         option_number(record.timing.normalization_ns),
         option_number(record.timing.parse_ns),
@@ -1703,6 +2144,11 @@ fn print_json_line(record: &ResultRecord) {
         option_number(record.timing.changed_incremental_solve_ns),
         option_number(record.timing.changed_full_solve_ns),
         option_number(record.timing.independent_workers_ns),
+        option_number(record.timing.package_compile_ns),
+        option_number(record.timing.document_elaboration_ns),
+        option_number(record.timing.schema_lookup_ns),
+        option_number(record.timing.canonical_values_ns),
+        option_number(record.timing.changed_document_elaboration_ns),
     );
     output.push_str("},\"sizes\":{");
     let _ = write!(
@@ -1728,7 +2174,7 @@ fn print_json_line(record: &ResultRecord) {
     output.push_str("},\"metrics\":{");
     let _ = write!(
         output,
-        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"semantic_probe_items\":{},\"semantic_probe_results\":{},\"semantic_probe_api\":{},\"determinism_across_thread_counts\":null,\"same_process_cache_replay_equal\":{},\"independent_clean_recompute_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":null,\"parallel_thread_count\":null,\"independent_worker_determinism\":{},\"independent_worker_equivalence\":{},\"concurrent_worker_count\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{}",
+        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"semantic_probe_items\":{},\"semantic_probe_results\":{},\"semantic_probe_api\":{},\"determinism_across_thread_counts\":null,\"same_process_cache_replay_equal\":{},\"independent_clean_recompute_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":null,\"parallel_thread_count\":null,\"independent_worker_determinism\":{},\"independent_worker_equivalence\":{},\"concurrent_worker_count\":{},\"canonical_value_count\":{},\"schema_lookup_count\":{},\"document_result_count\":{},\"revision_result_count\":{},\"revision_mode\":{},\"authority_binding_verified\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{}",
         option_number(record.metrics.cache_hits.map(|value| value as u128)),
         option_number(record.metrics.cache_misses.map(|value| value as u128)),
         option_number(
@@ -1777,6 +2223,32 @@ fn print_json_line(record: &ResultRecord) {
                 .concurrent_worker_count
                 .map(|value| value as u128)
         ),
+        option_number(
+            record
+                .metrics
+                .canonical_value_count
+                .map(|value| value as u128)
+        ),
+        option_number(
+            record
+                .metrics
+                .schema_lookup_count
+                .map(|value| value as u128)
+        ),
+        option_number(
+            record
+                .metrics
+                .document_result_count
+                .map(|value| value as u128)
+        ),
+        option_number(
+            record
+                .metrics
+                .revision_result_count
+                .map(|value| value as u128)
+        ),
+        option_string(record.metrics.revision_mode),
+        option_bool(record.metrics.authority_binding_verified),
         option_string(record.metrics.build_profile),
         option_string(record.metrics.resource_profile),
         option_string(record.metrics.note),
@@ -1910,6 +2382,9 @@ fn generate(workload: Workload, quick: bool, scale: u64) -> Result<GeneratedWork
         Workload::PackageUpgrade => package_upgrade(base(64, 8)?),
         Workload::AdversarialRecursion => adversarial_recursion(base(100, 10)?),
         Workload::LargeProofExplanation => large_proof(base(1000, 100)?),
+        // Keep the default corpus at 1,000 forms; --scale 10 and --scale 100
+        // are the explicit 10k/100k form-elaboration profiles.
+        Workload::GenericFormElaboration => generic_form_elaboration(base(1000, 1000)?),
     }
 }
 
@@ -2500,5 +2975,41 @@ fn large_proof(count: usize) -> Result<GeneratedWorkload, String> {
         unsupported_reason: None,
         semantic_probe: None,
         semantic_probe_items: 0,
+    })
+}
+
+fn generic_form_elaboration(count: usize) -> Result<GeneratedWorkload, String> {
+    let mut source = String::with_capacity(count.saturating_mul(150));
+    for index in 0..count {
+        let _ = writeln!(
+            source,
+            "form generic/{index:06} : forms::types::Row\n  approved {}\n  count {index}\n  note \"row-{index:06}\"\n  total {}\n",
+            index % 2 == 0,
+            index * 3 + 7,
+        );
+    }
+    // Edit one existing data row in place.  The form identity, schema and row
+    // count remain stable while the canonical text value changes.
+    let old_row = "  note \"row-000000\"\n";
+    let new_row = "  note \"row-000000-edited\"\n";
+    if source.matches(old_row).count() != 1 {
+        return Err("generic form revision source is missing its first data row".into());
+    }
+    let changed = source.replacen(old_row, new_row, 1);
+    if changed.matches(old_row).next().is_some()
+        || changed.matches(new_row).count() != 1
+        || changed.lines().count() != source.lines().count()
+    {
+        return Err("generic form revision did not replace exactly one data row".into());
+    }
+    Ok(GeneratedWorkload {
+        source,
+        changed_source: Some(changed),
+        changed_kind: Some(ChangedKind::EvidenceRow),
+        explain_goal: None,
+        semantic_supported: true,
+        unsupported_reason: None,
+        semantic_probe: None,
+        semantic_probe_items: count,
     })
 }

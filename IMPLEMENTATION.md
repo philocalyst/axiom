@@ -76,8 +76,12 @@ experiments, but it is not part of this contract.
 - [x] Source commits can pin exactly one independently verified compiled
   package artifact as immutable context. Corrections and analysis children
   inherit it exactly, divergent merges reject it, and legacy policy-package
-  replacement clears it. The sale engine deliberately does not execute this
-  context yet; it is the authority seam for future community-form elaboration.
+  replacement clears it. Package-authored forms now elaborate only through
+  this source-commit boundary: exact committed bytes select package names
+  inside the pinned artifact, and results retain the source commit, artifact
+  ID/hash, package-qualified schema IDs, and canonical value hashes. There is
+  no ambient registry or public unbound elaboration fallback. The sale engine
+  still does not execute these generic values.
 - [ ] Every answer has a proposition-specific independently checked proof.
   Lot allocation, inventory conservation, and recognized gain now use typed,
   independently recomputed certificates. Direct obligations, settlement
@@ -134,8 +138,12 @@ experiments, but it is not part of this contract.
   against a package-root-qualified compiled record schema. Duplicate,
   malformed, missing, unknown, and ill-typed fields retain source-local
   diagnostics; the resulting immutable record binds one schema ID and one
-  canonical value hash. Nested row-qualified holes, aliases, refinements,
-  phase wrappers, proof certificates, and query-result transport remain open.
+  canonical value hash. Document elaboration aggregates independent failures,
+  reserves occurrence IDs even for otherwise invalid forms, rejects malformed
+  headers and unaddressable package names, and resolves same-named schemas only
+  through the exact artifact pinned by the source commit. Nested row-qualified
+  holes, aliases, refinements, phase wrappers, proof certificates, and query-
+  result transport remain open.
 - [ ] Incremental semantic database with precise dependency invalidation.
   Production elaboration and analysis are memoized through the database with
   exact source/package edges and clean-run equivalence; invalidation within a
@@ -259,8 +267,12 @@ experiments, but it is not part of this contract.
   recursive-logic workloads now report separately timed public-domain-API
   probes alongside honest source-projection scope labels. The one-row close
   workload reports only real Workspace revision/invalidation metrics; it does
-  not claim a separate close semantic probe. Remaining domain workloads and
-  shared-engine parallel measurement remain open.
+  not claim a separate close semantic probe. A twelfth generic-form workload
+  exercises 1,000/10,000/100,000-form profiles through persisted compilation,
+  source-commit artifact pinning, schema-bound document elaboration, canonical
+  value rechecking, and a one-row correction. Its warm re-elaboration timings
+  are explicitly not labelled as incremental-engine metrics. Remaining domain
+  workloads and shared-engine parallel measurement remain open.
 - [ ] Property, differential, incremental/full, and parallel/single-threaded
   equivalence suites. A deterministic generated suite now exercises roughly
   1,500 parser, canonicalization, unification, cycle, time, unit, package,
@@ -278,16 +290,17 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 367 library tests, 4 CLI tests, 8 independent reference/production
+- 374 library tests, 4 CLI tests, 8 independent reference/production
   differential tests, and 5 structured-reference outcome tests;
 - 134 named constitutional cases with exactly 75 registry-linked independent
   case-specific tests and 12 grouped smoke suites; semantic review, not the
   raw count, keeps Gate 0 open;
 - 14 deterministic heavy-ledger integration tests, 2 heavy economic-system
-  workflows, 7 adversarial property tests, and two explicit 10,000-row release
-  stress tests, including a full obligation/settlement/satisfaction network,
+  workflows, 7 adversarial property tests, two explicit 10,000-row ledger
+  release stress tests, and one explicit 10,000/100,000 generic-form release
+  stress gate, including a full obligation/settlement/satisfaction network,
   plus 9 generated assurance-family tests spanning roughly 1,500 cases;
-- an 11-workload section XVII benchmark runner with JSONL measurements,
+- a 12-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
   clean-recomputation equivalence, six public-domain-API semantic probes, and
   process peak RSS; concurrent

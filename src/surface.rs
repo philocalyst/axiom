@@ -306,8 +306,9 @@ impl<'a> FormView<'a> {
 
     /// The identifier occurrence immediately following `form`, if present.
     /// Generic-form syntax deliberately uses identifier spellings (including
-    /// `/`, `-`, and `:` name bytes); malformed or non-identifier occurrences
-    /// return `None` without fabricating an identity.
+    /// `/` and `-` name bytes); `:` is reserved for the schema delimiter.
+    /// Malformed or non-identifier occurrences return `None` without
+    /// fabricating an identity.
     pub fn occurrence(&self) -> Option<&'a Token> {
         form_header_parts(self.file.tokens(), self.node).occurrence
     }
@@ -813,14 +814,16 @@ fn is_name_byte(byte: u8) -> bool {
         || matches!(byte, b'/' | b'_' | b'-' | b'.' | b':' | b'@' | b'+' | b'%')
 }
 
-fn form_line_meaningful(tokens: &[Token], line: usize) -> impl Iterator<Item = &Token> {
+fn form_line_meaningful_reverse(tokens: &[Token], line: usize) -> impl Iterator<Item = &Token> {
     tokens
         .iter()
-        .filter(move |token| token.span.line == line && !token.is_trivia())
+        .rev()
+        .take_while(move |token| token.span.line == line)
+        .filter(|token| !token.is_trivia())
 }
 
 fn is_form_header_occurrence(tokens: &[Token], line: usize) -> bool {
-    let mut meaningful = form_line_meaningful(tokens, line);
+    let mut meaningful = form_line_meaningful_reverse(tokens, line);
     meaningful
         .next()
         .is_some_and(|token| token.lexeme == "form")
@@ -828,11 +831,11 @@ fn is_form_header_occurrence(tokens: &[Token], line: usize) -> bool {
 }
 
 fn is_form_header_delimiter(tokens: &[Token], line: usize) -> bool {
-    let mut meaningful = form_line_meaningful(tokens, line);
-    meaningful
-        .next()
-        .is_some_and(|token| token.lexeme == "form")
-        && meaningful.next().is_some()
+    let mut meaningful = form_line_meaningful_reverse(tokens, line);
+    meaningful.next().is_some()
+        && meaningful
+            .next()
+            .is_some_and(|token| token.lexeme == "form")
         && meaningful.next().is_none()
 }
 
@@ -1068,14 +1071,20 @@ fn form_header_is_complete(meaningful: &[usize], tokens: &[Token]) -> bool {
         .iter()
         .copied()
         .filter(|index| tokens[*index].span.line == line);
-    if header
-        .next()
-        .is_none_or(|index| tokens[index].lexeme != "form")
-        || header.next().is_none()
+    let (Some(head), Some(occurrence), Some(delimiter)) =
+        (header.next(), header.next(), header.next())
+    else {
+        return false;
+    };
+    if tokens[head].lexeme != "form"
+        || tokens[occurrence].kind != TokenKind::Identifier
+        || tokens[occurrence].lexeme.contains(':')
+        || tokens[delimiter].kind != TokenKind::Punctuation(':')
+        || tokens[delimiter].lexeme != ":"
     {
         return false;
     }
-    header.any(|index| tokens[index].lexeme == ":") && header.next().is_some()
+    header.next().is_some()
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1490,6 +1499,18 @@ mod tests {
             file.errors()
                 .any(|diagnostic| diagnostic.message.contains("incomplete `form`"))
         );
+    }
+
+    #[test]
+    fn generic_form_header_rejects_tokens_between_occurrence_and_schema_delimiter() {
+        let source = "form invoice/1 extra : billing::Invoice\n  amount 100 USD\n";
+        let file = SurfaceFile::parse(source);
+        assert_eq!(file.nodes()[0].kind, NodeKind::Error);
+        assert_eq!(file.lossless(), source);
+        assert_eq!(file.nodes()[0].span.text(source), Some(source.trim_end()));
+        let diagnostic = file.errors().next().expect("header diagnostic");
+        assert_eq!(diagnostic.span.line, 1);
+        assert!(diagnostic.message.contains("incomplete `form`"));
     }
 
     #[test]

@@ -26,6 +26,7 @@ use std::fmt;
 use std::ops::Deref;
 use std::str;
 
+use crate::elaboration::{self, ElaboratedForm, FormElaborationError};
 use crate::engine::{self, Analysis};
 use crate::evidence::{Authority, Provenance, RawEvidence};
 use crate::incremental::{
@@ -122,6 +123,42 @@ impl Deref for BoundLedger {
 
     fn deref(&self) -> &Self::Target {
         &self.ledger
+    }
+}
+
+/// Package-authored forms elaborated against one exact source snapshot and
+/// the compiled artifact pinned by that snapshot.
+///
+/// The artifact ID and semantic hash are retained alongside the forms. Each
+/// form's schema/value identity is derived from that exact artifact and its
+/// package root, while the source commit identifies the exact source bytes.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoundPackageForms {
+    source_commit: CommitId,
+    compiled_artifact: CompiledArtifactId,
+    artifact_hash: ContentHash,
+    forms: Vec<ElaboratedForm>,
+}
+
+impl BoundPackageForms {
+    pub fn source_commit(&self) -> CommitId {
+        self.source_commit
+    }
+
+    pub fn compiled_artifact(&self) -> CompiledArtifactId {
+        self.compiled_artifact
+    }
+
+    pub fn artifact_hash(&self) -> ContentHash {
+        self.artifact_hash
+    }
+
+    pub fn forms(&self) -> &[ElaboratedForm] {
+        &self.forms
+    }
+
+    pub fn into_forms(self) -> Vec<ElaboratedForm> {
+        self.forms
     }
 }
 
@@ -224,8 +261,12 @@ pub enum WorkspaceError {
     Parse(ParseError),
     Incremental(crate::incremental::DatabaseError),
     PackageCompile(PackageCompileError),
+    PackageFormElaboration(FormElaborationError),
     InvalidUtf8,
     EmptySource,
+    MissingCompiledArtifact {
+        commit: CommitId,
+    },
     NotSourceCommit {
         commit: CommitId,
         reason: String,
@@ -255,8 +296,18 @@ impl fmt::Display for WorkspaceError {
             Self::PackageCompile(error) => {
                 write!(formatter, "workspace package compile error: {error}")
             }
+            Self::PackageFormElaboration(error) => {
+                write!(
+                    formatter,
+                    "workspace package-form elaboration error: {error}"
+                )
+            }
             Self::InvalidUtf8 => formatter.write_str("source bytes are not valid UTF-8"),
             Self::EmptySource => formatter.write_str("source identifier cannot be empty"),
+            Self::MissingCompiledArtifact { commit } => write!(
+                formatter,
+                "source commit {commit} does not pin a compiled package artifact"
+            ),
             Self::NotSourceCommit { commit, reason } => {
                 write!(
                     formatter,
@@ -304,6 +355,12 @@ impl From<crate::incremental::DatabaseError> for WorkspaceError {
 impl From<PackageCompileError> for WorkspaceError {
     fn from(value: PackageCompileError) -> Self {
         Self::PackageCompile(value)
+    }
+}
+
+impl From<FormElaborationError> for WorkspaceError {
+    fn from(value: FormElaborationError) -> Self {
+        Self::PackageFormElaboration(value)
     }
 }
 
@@ -698,6 +755,33 @@ impl Workspace {
         Ok(BoundLedger {
             source_commit: commit,
             ledger,
+        })
+    }
+
+    /// Elaborate every package-authored `form` in the exact source bytes
+    /// pinned by `commit` against that commit's persisted compiled artifact.
+    ///
+    /// This boundary deliberately does not call [`Self::policy_registry`]:
+    /// package forms are authoritative only through the artifact ID committed
+    /// on this snapshot.  The artifact lookup also rechecks its content hash,
+    /// so missing, wrong-kind, corrupt, or internally tampered objects fail
+    /// before any source form is elaborated.
+    pub fn elaborate_package_forms(
+        &self,
+        commit: CommitId,
+    ) -> Result<BoundPackageForms, WorkspaceError> {
+        let source = self.source_ledger(commit)?;
+        let source_value = self.store.commit(commit)?.clone();
+        let artifact_id = source_value
+            .compiled_artifact
+            .ok_or(WorkspaceError::MissingCompiledArtifact { commit })?;
+        let artifact = &self.store.compiled_artifact(artifact_id)?.artifact;
+        let forms = elaboration::elaborate_document(source.surface(), artifact)?;
+        Ok(BoundPackageForms {
+            source_commit: commit,
+            compiled_artifact: artifact_id,
+            artifact_hash: artifact.artifact_hash(),
+            forms,
         })
     }
 
