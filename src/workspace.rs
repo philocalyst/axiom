@@ -1232,6 +1232,23 @@ impl Workspace {
         source_commit: CommitId,
         period: Period,
     ) -> Result<CloseId, WorkspaceError> {
+        // Closing is a transaction over the workspace boundary.  Analysis
+        // persistence is useful for a successful close, but a blocked or
+        // malformed source must not leave an orphan analysis commit/proof in
+        // the caller's store merely because close reached a later gate.
+        let mut staged = self.clone();
+        let result = staged.close_sale_ledger_inner(source_commit, period);
+        if result.is_ok() {
+            *self = staged;
+        }
+        result
+    }
+
+    fn close_sale_ledger_inner(
+        &mut self,
+        source_commit: CommitId,
+        period: Period,
+    ) -> Result<CloseId, WorkspaceError> {
         let analysis = self.analyze_commit(source_commit)?;
         analysis.check_proof().map_err(|error| {
             WorkspaceError::Store(StoreError::InvalidObject(format!(

@@ -1,0 +1,57 @@
+# A mixed source-first business ledger: inventory, sales, cash observations,
+# a card settlement history, an obligation network, and independent valuation.
+book tax-us
+
+buy inventory/early on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+  fee 1 USD
+
+buy inventory/late on 2026-02-04
+  10 ABC into brokerage
+  for 300 USD
+  fee 1 USD
+
+sell sale/fifo on 2026-09-20
+  15 ABC from brokerage
+  for 750 USD
+  lot ?lot
+
+sell sale/explicit on 2026-09-21
+  2 ABC from brokerage
+  for 140 USD
+  lot ?lot
+
+use lots/fifo for tax-us
+decide sale/explicit lot inventory/late
+
+observe position brokerage 3 ABC
+observe settlement sale/fifo 750 USD into checking
+observe settlement sale/explicit 140 USD into checking
+
+quote quote/one on 2026-09-30
+  1 ABC = 50 USD
+quote quote/two on 2026-09-30
+  1 ABC = 51 USD
+
+obligation invoice/card
+  debtor customer
+  creditor merchant
+  performance transfer 100 USD
+  due 2026-10-01
+
+settlement card/payment
+  kind card
+  from customer
+  to merchant
+  amount 100 USD
+  state issued at 2026-09-01
+  state authorized at 2026-09-01
+  state presented at 2026-09-02
+  state settled at 2026-09-03
+
+satisfy allocation/card
+  obligation invoice/card
+  settlement card/payment
+  amount 100 USD
+  state applied
