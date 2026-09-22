@@ -2,7 +2,10 @@
 //! direct gains remain usable beside conflicting valuation evidence, while
 //! observed cash and positions must reconcile before a close can be sealed.
 
-use axiom_ledger::engine::{IssueCode, ObservationStatus, QuoteStatus, RecognitionStatus};
+use axiom_ledger::engine::{
+    IssueCode, ObligationStatus, ObservationStatus, QuoteStatus, RecognitionStatus,
+};
+use axiom_ledger::model::SettlementStateKind;
 use axiom_ledger::store::{ObjectKind, Period, StoreError};
 use axiom_ledger::workspace::{Workspace, WorkspaceError};
 
@@ -34,7 +37,7 @@ fn assert_obligation_network(analysis: &axiom_ledger::engine::Analysis) {
         obligation.remaining.as_ref().map(|value| value.canonical()),
         Some("0 USD".to_owned())
     );
-    assert_eq!(format!("{:?}", obligation.status), "Satisfied");
+    assert_eq!(obligation.status, ObligationStatus::Satisfied);
 
     let history = analysis
         .settlement_histories
@@ -42,7 +45,7 @@ fn assert_obligation_network(analysis: &axiom_ledger::engine::Analysis) {
         .find(|value| value.id == "card/payment")
         .unwrap();
     assert_eq!(history.amount.canonical(), "100 USD");
-    assert_eq!(format!("{:?}", history.current), "Settled");
+    assert_eq!(history.current, SettlementStateKind::Settled);
     assert!(history.effective);
 
     let satisfaction = analysis

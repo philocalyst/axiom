@@ -67,6 +67,9 @@ experiments, but it is not part of this contract.
   typed period, and the complete recognized-sale/journal result set. Generic
   proof envelopes, stale sources, field relabelling, blocked results, empty
   books, and sales outside the requested period cannot authorize this path.
+  Close construction is transactional across analysis proof, analysis commit,
+  sealed artifact, and close insertion: a late blocked-close failure leaves no
+  orphan authority objects or incremental state behind.
   This deliberately narrow API does not yet claim general close semantics for
   non-sale economic systems or mixed-period ledgers.
 - [x] Analysis proofs bind their immutable source commit with a typed proof
@@ -354,7 +357,7 @@ The current foundation checkpoint is exercised by:
 - 134 named constitutional cases with exactly 75 registry-linked independent
   case-specific tests and 12 grouped smoke suites; semantic review, not the
   raw count, keeps Gate 0 open;
-- 14 deterministic heavy-ledger integration tests, 2 heavy economic-system
+- 14 deterministic heavy-ledger integration tests, 3 heavy economic-system
   workflows, 7 adversarial property tests, two explicit 10,000-row ledger
   release stress tests, one explicit 10,000/100,000 generic-form release
   stress gate, and one 1,000-form independently checked settlement-proof gate,
