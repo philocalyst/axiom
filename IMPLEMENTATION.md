@@ -206,8 +206,11 @@ experiments, but it is not part of this contract.
   only as explicit typed roots. A settlement close stores the exact proof-child
   lineage, full policy, and reporting period; insertion, lookup, and full-store
   verification independently recompute the typed world, recognition, journal,
-  and close. Workspace persistence is atomic. This close family has no
-  supersedes or restatement linkage.
+  and close. Workspace persistence is atomic. Settlement restatement names only
+  the previous close and a corrected proof child; it inherits policy/period,
+  requires a direct whole-source correction with identical source identity,
+  rejects sibling histories, preserves legacy v1 close IDs, and validates a
+  bounded v2 supersession chain without mutating historical closes.
 - [ ] Corrections/supersession, tombstones, unavailable/redacted/deleted
   states, and as-known-at queries. The immutable store now implements these
   primitives; production workspace/analysis integration remains open.
@@ -251,7 +254,8 @@ experiments, but it is not part of this contract.
   `SettlementCloseObject` only from an exact settlement-proof child; store
   boundaries independently recompute its world, recognition, journal, and
   close. Corrections create distinct close IDs while old closes remain valid;
-  there is no supersedes/restatement linkage. This does not infer accrual or
+  a typed restatement can link a corrected close to its immediate predecessor
+  while inheriting the exact policy and period. This does not infer accrual or
   integrate with general obligations/`analyze_commit`.
 - [x] Budgets and forecasts remain isolated scenarios.
 
@@ -354,7 +358,7 @@ The current foundation checkpoint is exercised by:
   workflows, 7 adversarial property tests, two explicit 10,000-row ledger
   release stress tests, one explicit 10,000/100,000 generic-form release
   stress gate, and one 1,000-form independently checked settlement-proof gate,
-  plus 8 focused `settlement_books` tests and 5 focused settlement
+  plus 8 focused `settlement_books` tests and 6 focused settlement
   vertical-slice tests over a 26-row fixture (6 histories, 3 rails, 2
   instruments, and 3 monthly periods) with adversarial mapping, transition,
   identity, persistence, determinism, and correction checks, including a full

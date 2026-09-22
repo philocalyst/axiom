@@ -126,8 +126,12 @@ created only from the exact persisted settlement-proof child; the stored policy
 and period are rechecked by independently recomputing the typed world,
 recognition, journal, and close at insertion, lookup, and full-store
 verification. Workspace persistence is atomic. Corrections create distinct
-close IDs while old closes remain checkable; this path has no supersedes or
-restatement linkage.
+close IDs while old closes remain checkable. `restate_settlement_close` takes
+only the prior close and the corrected proof commit: policy and period are
+inherited, so callers cannot silently change the reporting contract. The store
+requires a direct whole-source correction on the same source identity, rejects
+sibling branches atomically, and replays a bounded immutable supersession chain
+at insertion, lookup, and full-store verification.
 
 ## Assurance workloads
 
