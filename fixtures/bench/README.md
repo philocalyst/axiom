@@ -72,6 +72,8 @@ persistence, and artifact pinning; `settlement_projection_call_ns` measures the
 full public `Workspace::project_settlement_states` call. That call internally
 re-elaborates the pinned document, so this timing intentionally overlaps
 `document_elaboration_ns`; it does not use a projection bypass.
+The schema-v1 key `settlement_document_projection_ns` remains as a deprecated
+alias with the same inclusive value for existing JSON consumers.
 `settlement_persistence_boundary_ns` measures typed proof and child-commit
 persistence. `peak_memory_bytes` remains the isolated workload child-process
 peak RSS when `getrusage` is available.

@@ -147,6 +147,7 @@ fn measurement(workload: &str) -> String {
     }
     for field in [
         "settlement_setup_ns",
+        "settlement_document_projection_ns",
         "settlement_projection_call_ns",
         "settlement_persistence_boundary_ns",
         "settlement_proof_check_ns",
@@ -386,6 +387,7 @@ fn settlement_state_proof_workload_uses_public_persisted_path_and_oracle() {
     for field in [
         "document_elaboration_ns",
         "settlement_setup_ns",
+        "settlement_document_projection_ns",
         "settlement_projection_call_ns",
         "settlement_persistence_boundary_ns",
         "settlement_proof_check_ns",
@@ -415,6 +417,12 @@ fn settlement_state_proof_workload_uses_public_persisted_path_and_oracle() {
     assert!(line.contains("\"changed_kind\":\"evidence_row\""), "{line}");
     assert!(line.contains("\"settlement_coverage_hash\":\""), "{line}");
     assert!(line.contains("\"settlement_proof_bytes\":"), "{line}");
+    let value = parsed_json(&line);
+    assert_eq!(
+        value["measurements"]["settlement_document_projection_ns"],
+        value["measurements"]["settlement_projection_call_ns"],
+        "deprecated timing alias diverged: {line}"
+    );
 }
 
 #[test]

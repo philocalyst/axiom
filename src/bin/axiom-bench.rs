@@ -3159,7 +3159,7 @@ fn print_json_line(record: &ResultRecord) {
     );
     let _ = write!(
         output,
-        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"semantic_probe_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_incremental_solve_ns\":{},\"changed_full_solve_ns\":{},\"parallel_solve_ns\":null,\"independent_workers_ns\":{},\"package_compile_ns\":{},\"document_elaboration_ns\":{},\"schema_lookup_ns\":{},\"canonical_values_ns\":{},\"changed_document_elaboration_ns\":{},\"settlement_setup_ns\":{},\"settlement_projection_call_ns\":{},\"settlement_persistence_boundary_ns\":{},\"settlement_proof_check_ns\":{},\"settlement_store_verify_ns\":{},\"settlement_source_revision_ns\":{}",
+        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"semantic_probe_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_incremental_solve_ns\":{},\"changed_full_solve_ns\":{},\"parallel_solve_ns\":null,\"independent_workers_ns\":{},\"package_compile_ns\":{},\"document_elaboration_ns\":{},\"schema_lookup_ns\":{},\"canonical_values_ns\":{},\"changed_document_elaboration_ns\":{},\"settlement_setup_ns\":{},\"settlement_document_projection_ns\":{},\"settlement_projection_call_ns\":{},\"settlement_persistence_boundary_ns\":{},\"settlement_proof_check_ns\":{},\"settlement_store_verify_ns\":{},\"settlement_source_revision_ns\":{}",
         record.timing.generation_ns,
         option_number(record.timing.normalization_ns),
         option_number(record.timing.parse_ns),
@@ -3178,6 +3178,10 @@ fn print_json_line(record: &ResultRecord) {
         option_number(record.timing.canonical_values_ns),
         option_number(record.timing.changed_document_elaboration_ns),
         option_number(record.timing.settlement_setup_ns),
+        // Deprecated benchmark-schema-v1 alias. Both keys intentionally name
+        // the same inclusive public projection call; new consumers should use
+        // `settlement_projection_call_ns`.
+        option_number(record.timing.settlement_projection_call_ns),
         option_number(record.timing.settlement_projection_call_ns),
         option_number(record.timing.settlement_persistence_boundary_ns),
         option_number(record.timing.settlement_proof_check_ns),

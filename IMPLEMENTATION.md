@@ -345,6 +345,8 @@ experiments, but it is not part of this contract.
   `Workspace::project_settlement_states` call. That call internally
   re-elaborates the pinned document, so this timing intentionally overlaps
   `document_elaboration_ns`; it does not use a projection bypass.
+  The schema-v1 key `settlement_document_projection_ns` remains as a
+  deprecated alias carrying the same inclusive value.
   Remaining domain workloads and shared-engine parallel
   measurement remain open. A separate 1,000-form release stress gate exercises
   capable-form projection, independent proof checking, commit anchoring, and
