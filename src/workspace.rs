@@ -971,6 +971,21 @@ impl Workspace {
         Ok(close)
     }
 
+    /// Persist a correction of an existing settlement close. The prior
+    /// close supplies its policy and reporting period; the only new authority
+    /// is a checked proof child for a strict source correction.
+    pub fn restate_settlement_close(
+        &mut self,
+        previous_close: SettlementCloseId,
+        corrected_proof_commit: CommitId,
+    ) -> Result<SettlementCloseId, WorkspaceError> {
+        let mut staging = self.store.clone();
+        let close =
+            staging.put_settlement_close_restatement(previous_close, corrected_proof_commit)?;
+        self.store = staging;
+        Ok(close)
+    }
+
     /// Compatibility spelling for callers that use “elaborate” as the phase
     /// name rather than “elaborate_commit”.
     pub fn elaborate(&self, commit: CommitId) -> Result<BoundLedger, WorkspaceError> {

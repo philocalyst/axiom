@@ -942,6 +942,7 @@ pub struct SettlementCloseObject {
     proof_commit: CommitId,
     policy: SettlementRecognitionPolicy,
     period: SettlementReportingPeriod,
+    supersedes: Option<SettlementCloseId>,
 }
 
 impl SettlementCloseObject {
@@ -954,6 +955,21 @@ impl SettlementCloseObject {
             proof_commit,
             policy,
             period,
+            supersedes: None,
+        }
+    }
+
+    pub(crate) fn restatement(
+        proof_commit: CommitId,
+        policy: SettlementRecognitionPolicy,
+        period: SettlementReportingPeriod,
+        supersedes: SettlementCloseId,
+    ) -> Self {
+        Self {
+            proof_commit,
+            policy,
+            period,
+            supersedes: Some(supersedes),
         }
     }
 
@@ -967,6 +983,10 @@ impl SettlementCloseObject {
 
     pub fn period(&self) -> SettlementReportingPeriod {
         self.period
+    }
+
+    pub fn supersedes(&self) -> Option<SettlementCloseId> {
+        self.supersedes
     }
 }
 
@@ -1519,6 +1539,21 @@ impl ObjectStore {
         ))
     }
 
+    pub(crate) fn put_settlement_close_restatement(
+        &mut self,
+        previous: SettlementCloseId,
+        proof_commit: CommitId,
+    ) -> Result<SettlementCloseId, StoreError> {
+        let prior = self.settlement_close(previous)?.clone();
+        self.validate_settlement_close(&prior)?;
+        let value =
+            SettlementCloseObject::restatement(proof_commit, prior.policy, prior.period, previous);
+        self.validate_settlement_close(&value)?;
+        Ok(SettlementCloseId::new(
+            self.insert(StoredObject::SettlementClose(value))?,
+        ))
+    }
+
     fn validate_settlement_close(&self, value: &SettlementCloseObject) -> Result<(), StoreError> {
         value
             .period
@@ -1554,6 +1589,56 @@ impl ObjectStore {
             return Err(StoreError::InvalidObject(
                 "settlement close proof child does not preserve its exact source snapshot".into(),
             ));
+        }
+        if let Some(previous_id) = value.supersedes {
+            let previous = self.settlement_close(previous_id)?.clone();
+            self.validate_settlement_close(&previous)?;
+            if previous.policy != value.policy || previous.period != value.period {
+                return Err(StoreError::InvalidObject(
+                    "settlement close restatement must preserve policy and period".into(),
+                ));
+            }
+            let previous_child = self.commit(previous.proof_commit)?.clone();
+            let [previous_source_id] = previous_child.parents.as_slice() else {
+                return Err(StoreError::InvalidObject(
+                    "previous settlement close has no source parent".into(),
+                ));
+            };
+            self.require_ancestor(*previous_source_id, *source_id)?;
+            let previous_source = self.commit(*previous_source_id)?.clone();
+            let [previous_evidence_id] = previous_source.evidence.as_slice() else {
+                return Err(StoreError::InvalidObject(
+                    "previous settlement close source has no evidence".into(),
+                ));
+            };
+            let [corrected_evidence_id] = source.evidence.as_slice() else {
+                return Err(StoreError::InvalidObject(
+                    "corrected settlement close source has no evidence".into(),
+                ));
+            };
+            if previous_evidence_id == corrected_evidence_id {
+                return Err(StoreError::InvalidObject(
+                    "settlement close restatement must use a corrected source".into(),
+                ));
+            }
+            let old_evidence = self.evidence(*previous_evidence_id)?;
+            let corrected_evidence = self.evidence(*corrected_evidence_id)?;
+            if old_evidence.occurrence != corrected_evidence.occurrence
+                || old_evidence.source != corrected_evidence.source
+                || old_evidence.external != corrected_evidence.external
+            {
+                return Err(StoreError::InvalidObject(
+                    "settlement close restatement changed source identity".into(),
+                ));
+            }
+            if !matches!(
+                corrected_evidence.state,
+                EvidenceState::Correction { supersedes, .. } if supersedes == *previous_evidence_id
+            ) {
+                return Err(StoreError::InvalidObject(
+                    "settlement close restatement must use an explicit evidence correction".into(),
+                ));
+            }
         }
         let world = SettlementWorld::from_checked_proof(proof, self).map_err(|error| {
             StoreError::InvalidObject(format!("invalid settlement close world: {error}"))
@@ -3517,6 +3602,7 @@ fn encode_settlement_close(out: &mut Vec<u8>, value: &SettlementCloseObject) {
     encode_settlement_policy(out, &value.policy);
     put_date(out, value.period.start);
     put_date(out, value.period.end);
+    put_optional_hash(out, value.supersedes.map(ObjectId::hash));
 }
 
 fn encode_settlement_policy(out: &mut Vec<u8>, policy: &SettlementRecognitionPolicy) {
