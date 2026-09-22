@@ -1,8 +1,8 @@
 # Axiom benchmark corpus
 
 `axiom-bench` is the source of truth for the reproducible XVII corpus.  It
-generates the eleven named workloads from `confirmed-direction.md` plus the
-package-authored generic-form workload using only
+generates the named workloads from `confirmed-direction.md` plus the
+package-authored generic-form and settlement-proof workloads using only
 the Rust standard library and the checked-in Axiom parser/model APIs; no input
 files, network access, random seed, wall clock, or floating-point arithmetic
 are involved in workload generation.  The optional peak-RSS observation uses
@@ -12,7 +12,10 @@ the target's native `getrusage` resource API.
 cargo run --quiet --bin axiom-bench -- --quick
 cargo run --quiet --bin axiom-bench -- --scale 4 --workload large-proof-explanation
 cargo run --release --quiet --bin axiom-bench -- --quick --scale 100 --workload generic-form-elaboration
+cargo run --release --quiet --bin axiom-bench -- --quick --workload settlement-state-proof
 cargo run --quiet --bin axiom-bench -- --self-test
+# discovers and verifies the release persistence boundary (ignored by default)
+cargo test --release --test benchmark_gate10 settlement_state_proof_scale_boundary_discovers_maximum -- --ignored
 ```
 
 Each stdout line is one stable JSON object.  Human-readable tables go to
@@ -44,6 +47,25 @@ schema-bound document elaboration, canonical value verification, and a one-row
 correction. `--scale 1`, `10`, and `100` select its 1k, 10k, and 100k profiles.
 Its revision measurement is warm re-elaboration, not an incremental-cache
 claim. Unsupported metrics remain `null` rather than being inferred.
+
+The `settlement-state-proof` workload runs the complete package-authored
+SettlementStateV1 path: persisted package compilation, artifact pinning,
+document elaboration, ordered settlement projection, independent proof
+checking, typed proof-child commit persistence, and `ObjectStore::verify`. It
+also checks that a source revision creates a new proof authority while a
+rejected negative amount leaves the store unchanged. Quick mode uses one form
+per scale unit. The public proof boundary has a 4,096-row architectural cap,
+but the canonical proof-byte limit is reached first for this corpus; therefore
+`--quick --scale 4096` is expected to be rejected. The ignored release gate
+discovers the largest successful scale through the public Workspace
+persistence path (currently 3,309 rows) and checks the exact canonical-byte
+rejection at the next scale.
+Its `settlement_setup_ns` includes source loading, package compilation and
+persistence, and artifact pinning; `settlement_document_projection_ns`
+includes the Workspace document elaboration performed by the projection call.
+`settlement_persistence_boundary_ns` measures typed proof and child-commit
+persistence. `peak_memory_bytes` remains the isolated workload child-process
+peak RSS when `getrusage` is available.
 
 The performance numbers are measurements from the current process, not
 assertions.  The performance goals copied from section XVII are emitted in a

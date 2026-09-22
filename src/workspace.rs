@@ -40,6 +40,7 @@ use crate::package_compiler::{
 use crate::package_lock::Lockfile;
 use crate::parser::{self, ParseError};
 use crate::proof::{CommitBindingCertificate, Node, Operation, Proof};
+use crate::settlement_books::{SettlementBookError, SettlementWorld};
 use crate::settlement_projection::{self, SettlementProjection, SettlementProjectionError};
 use crate::settlement_proof::{
     MAX_SETTLEMENT_PROOF_ROWS, MAX_SETTLEMENT_PROOF_SOURCE_BYTES, SettlementProofError,
@@ -281,6 +282,7 @@ pub enum WorkspaceError {
     PackageFormElaboration(FormElaborationError),
     SettlementProjection(SettlementProjectionError),
     SettlementProof(SettlementProofError),
+    SettlementBook(SettlementBookError),
     InvalidUtf8,
     EmptySource,
     MissingCompiledArtifact {
@@ -326,6 +328,9 @@ impl fmt::Display for WorkspaceError {
             }
             Self::SettlementProof(error) => {
                 write!(formatter, "workspace settlement proof error: {error}")
+            }
+            Self::SettlementBook(error) => {
+                write!(formatter, "workspace settlement book error: {error}")
             }
             Self::InvalidUtf8 => formatter.write_str("source bytes are not valid UTF-8"),
             Self::EmptySource => formatter.write_str("source identifier cannot be empty"),
@@ -398,6 +403,12 @@ impl From<SettlementProjectionError> for WorkspaceError {
 impl From<SettlementProofError> for WorkspaceError {
     fn from(value: SettlementProofError) -> Self {
         Self::SettlementProof(value)
+    }
+}
+
+impl From<SettlementBookError> for WorkspaceError {
+    fn from(value: SettlementBookError) -> Self {
+        Self::SettlementBook(value)
     }
 }
 
@@ -831,6 +842,50 @@ impl Workspace {
     ) -> Result<SettlementProjection, WorkspaceError> {
         let forms = self.elaborate_package_forms(commit)?;
         Ok(settlement_projection::project_settlement_states(&forms)?)
+    }
+
+    /// Build a checked accepted settlement world from one exact source
+    /// snapshot.  This is intentionally read-only: it validates the pinned
+    /// artifact and source evidence in memory and does not persist a proof or
+    /// child commit.  Use [`Self::persist_settlement_state_proof`] when a
+    /// store object is explicitly desired.
+    pub fn settlement_world(&self, commit: CommitId) -> Result<SettlementWorld, WorkspaceError> {
+        let source = self.source_ledger(commit)?;
+        if source.bytes().len() > MAX_SETTLEMENT_PROOF_SOURCE_BYTES {
+            return Err(SettlementProofError::Invalid(
+                "resource limit: settlement proof source is too large".into(),
+            )
+            .into());
+        }
+        let forms = self.elaborate_package_forms(commit)?;
+        let capable_forms = forms
+            .forms()
+            .iter()
+            .filter(|form| form.schema().capability() == Some(SchemaCapability::SettlementStateV1))
+            .count();
+        if capable_forms > MAX_SETTLEMENT_PROOF_ROWS {
+            return Err(SettlementProofError::Invalid(
+                "resource limit: too many settlement proof rows".into(),
+            )
+            .into());
+        }
+        let projection = settlement_projection::project_settlement_states(&forms)?;
+        let source_value = self.store.commit(commit)?.clone();
+        let evidence =
+            source_value
+                .evidence
+                .first()
+                .copied()
+                .ok_or(WorkspaceError::NotSourceCommit {
+                    commit,
+                    reason: "source commit has no evidence".into(),
+                })?;
+        Ok(SettlementWorld::build(
+            &projection,
+            source.evidence(),
+            evidence,
+            &self.store,
+        )?)
     }
 
     /// Build and persist a checked SettlementStateV1 proof for an exact source

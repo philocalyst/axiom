@@ -73,6 +73,11 @@ fn measurement(workload: &str) -> String {
         "benchmark failed for {workload}: {}",
         String::from_utf8_lossy(&output.stderr)
     );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("\"kind\":\"rss_probe\""),
+        "RSS child protocol leaked into the human table: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8(output.stdout).expect("benchmark JSON is UTF-8");
     let lines = stdout.lines().collect::<Vec<_>>();
     assert_eq!(
@@ -101,6 +106,29 @@ fn measurement(workload: &str) -> String {
         "measurements",
         "sizes",
         "metrics",
+    ] {
+        assert_field_once(line, field);
+    }
+    for field in [
+        "settlement_setup_ns",
+        "settlement_document_projection_ns",
+        "settlement_persistence_boundary_ns",
+        "settlement_proof_check_ns",
+        "settlement_store_verify_ns",
+        "settlement_source_revision_ns",
+        "settlement_coverage_count",
+        "settlement_coverage_hash",
+        "settlement_source_commit_hash",
+        "settlement_artifact_id_hash",
+        "settlement_artifact_hash",
+        "settlement_proof_hash",
+        "settlement_proof_bytes",
+        "settlement_projection_commit_hash",
+        "settlement_binding_verified",
+        "settlement_proof_check_verified",
+        "settlement_store_verify_verified",
+        "settlement_source_revision_verified",
+        "settlement_atomic_negative_verified",
     ] {
         assert_field_once(line, field);
     }
@@ -282,6 +310,110 @@ fn generic_form_workload_uses_pinned_document_elaboration_and_canonical_values()
 }
 
 #[test]
+fn settlement_state_proof_workload_uses_public_persisted_path_and_oracle() {
+    let line = measurement("settlement-state-proof");
+    assert!(line.contains("\"status\":\"measured\""), "{line}");
+    assert!(line.contains("\"semantic_supported\":true"), "{line}");
+    assert!(line.contains("\"semantic_probe_api\":null"), "{line}");
+    assert!(line.contains("\"semantic_probe_items\":null"), "{line}");
+    assert!(line.contains("\"semantic_probe_results\":null"), "{line}");
+    assert_eq!(field_value(&line, "forms"), "1", "{line}");
+    assert_eq!(
+        field_value(&line, "settlement_coverage_count"),
+        "1",
+        "{line}"
+    );
+    assert_eq!(field_value(&line, "package_compile_ns"), "null", "{line}");
+    assert!(!line.contains("\"settlement_projection_ns\":"), "{line}");
+    for field in [
+        "document_elaboration_ns",
+        "settlement_setup_ns",
+        "settlement_document_projection_ns",
+        "settlement_persistence_boundary_ns",
+        "settlement_proof_check_ns",
+        "settlement_store_verify_ns",
+        "settlement_source_revision_ns",
+        "settlement_coverage_hash",
+        "settlement_source_commit_hash",
+        "settlement_artifact_id_hash",
+        "settlement_artifact_hash",
+        "settlement_proof_hash",
+        "settlement_proof_bytes",
+        "settlement_projection_commit_hash",
+    ] {
+        assert_ne!(field_value(&line, field), "null", "{field}: {line}");
+    }
+    for field in [
+        "settlement_binding_verified",
+        "settlement_proof_check_verified",
+        "settlement_store_verify_verified",
+        "settlement_source_revision_verified",
+        "settlement_atomic_negative_verified",
+        "independent_clean_recompute_equal",
+        "authority_binding_verified",
+    ] {
+        assert_eq!(field_value(&line, field), "true", "{field}: {line}");
+    }
+    assert!(line.contains("\"changed_kind\":\"evidence_row\""), "{line}");
+    assert!(line.contains("\"settlement_coverage_hash\":\""), "{line}");
+    assert!(line.contains("\"settlement_proof_bytes\":"), "{line}");
+}
+
+#[test]
+#[ignore = "release stress gate for the discovered public settlement-persistence boundary"]
+fn settlement_state_proof_scale_boundary_discovers_maximum() {
+    fn run(scale: u64) -> std::process::Output {
+        Command::new(env!("CARGO_BIN_EXE_axiom-bench"))
+            .args([
+                "--quick",
+                "--scale",
+                &scale.to_string(),
+                "--workload",
+                "settlement-state-proof",
+                "--settlement-boundary-probe",
+            ])
+            .output()
+            .expect("settlement benchmark should start")
+    }
+
+    // The row cap is only an architectural upper bound.  The public
+    // persistence path also enforces the canonical proof-byte limit, so find
+    // the actual accepted boundary instead of assuming that 4,096 rows fit.
+    let mut low = 1_u64;
+    let mut high = 4096_u64;
+    while low < high {
+        let middle = low + (high - low).div_ceil(2);
+        if run(middle).status.success() {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    let accepted = run(low);
+    assert!(
+        accepted.status.success(),
+        "discovered boundary {low} failed: {}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    assert_eq!(low, 3309, "unexpected discovered canonical-byte boundary");
+
+    let expected = "axiom-bench: settlement proof persistence failed: workspace settlement proof error: invalid SettlementStateV1 proof: resource limit: canonical proof payload is too large";
+    let rejected = run(low + 1);
+    assert_eq!(low + 1, 3310);
+    assert!(!rejected.status.success());
+    assert_eq!(String::from_utf8_lossy(&rejected.stderr).trim(), expected);
+
+    // This is intentionally a public-persistence rejection as well; the
+    // benchmark has no local row preflight that could mask the authority.
+    let architectural_limit = run(4096);
+    assert!(!architectural_limit.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&architectural_limit.stderr).trim(),
+        expected
+    );
+}
+
+#[test]
 #[ignore = "release stress gate for the explicit 10k and 100k generic-form profiles"]
 fn generic_form_scale_profiles_complete() {
     for (scale, expected) in [("10", "10000"), ("100", "100000")] {
@@ -392,40 +524,42 @@ fn revision_workloads_report_incremental_timing_and_invalidation() {
 
 #[test]
 fn peak_rss_is_isolated_per_workload_and_schema_stays_stable() {
-    let first = measurement("invoice-payment-graph");
-    let second = measurement("invoice-payment-graph");
-    for line in [&first, &second] {
-        if cfg!(any(target_os = "linux", target_os = "macos")) {
-            assert!(
-                line.contains("\"resource_profile\":\"per-workload child-process peak RSS"),
-                "RSS provenance is missing: {line}"
-            );
-            assert!(
-                line.contains("\"peak_memory_bytes\":")
-                    && !line.contains("\"peak_memory_bytes\":null"),
-                "isolated RSS was not measured: {line}"
-            );
-            assert!(
-                line.contains("isolated workload child-process peak RSS"),
-                "RSS note does not identify the measurement boundary: {line}"
-            );
-        } else {
-            assert!(line.contains("\"peak_memory_bytes\":null"));
-            assert!(line.contains("peak RSS unavailable"));
+    for workload in ["invoice-payment-graph", "settlement-state-proof"] {
+        let first = measurement(workload);
+        let second = measurement(workload);
+        for line in [&first, &second] {
+            if cfg!(any(target_os = "linux", target_os = "macos")) {
+                assert!(
+                    field_value(line, "resource_profile")
+                        == "\"per-workload child-process peak RSS via getrusage\"",
+                    "RSS provenance is missing: {line}"
+                );
+                assert!(
+                    line.contains("\"peak_memory_bytes\":")
+                        && !line.contains("\"peak_memory_bytes\":null"),
+                    "isolated RSS was not measured: {line}"
+                );
+            } else {
+                assert!(line.contains("\"peak_memory_bytes\":null"));
+                assert_eq!(
+                    field_value(line, "resource_profile"),
+                    "\"per-workload child-process peak RSS unavailable\""
+                );
+            }
         }
+        // Generation is deterministic even though timings and RSS are
+        // naturally observations and may differ between invocations.
+        let hash = |line: &str| {
+            line.split("\"source_hash\":\"")
+                .nth(1)
+                .and_then(|tail| tail.split('"').next())
+                .expect("source hash")
+                .to_owned()
+        };
+        assert_eq!(hash(&first), hash(&second));
+        assert_eq!(first.matches("\"schema\":").count(), 1);
+        assert_eq!(second.matches("\"schema\":").count(), 1);
     }
-    // Generation is deterministic even though timings and RSS are naturally
-    // observations and may differ between invocations.
-    let hash = |line: &str| {
-        line.split("\"source_hash\":\"")
-            .nth(1)
-            .and_then(|tail| tail.split('"').next())
-            .expect("source hash")
-            .to_owned()
-    };
-    assert_eq!(hash(&first), hash(&second));
-    assert_eq!(first.matches("\"schema\":").count(), 1);
-    assert_eq!(second.matches("\"schema\":").count(), 1);
 }
 
 #[test]
@@ -444,5 +578,5 @@ fn full_corpus_self_test_is_not_replaced_by_quick_scaling() {
     assert_json_object(stdout.trim());
     assert!(stdout.contains("\"kind\":\"self_test\""), "{stdout}");
     assert!(stdout.contains("\"status\":\"ok\""), "{stdout}");
-    assert!(stdout.contains("\"checks\":45"), "{stdout}");
+    assert!(stdout.contains("\"checks\":50"), "{stdout}");
 }

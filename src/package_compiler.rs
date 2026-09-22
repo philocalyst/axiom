@@ -149,7 +149,8 @@ pub struct CompiledModule {
 /// One declaration exported by a package.
 ///
 /// HIR has no visibility modifier yet, so every declaration in an error-free
-/// module is an export at this boundary.
+/// module is an export at this boundary. Capability metadata remains on the
+/// owning [`CompiledPackage`] so this type cannot carry a second truth.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompiledExport {
     pub package: String,
@@ -164,6 +165,9 @@ pub struct CompiledPackage {
     pub version: Version,
     pub manifest_hash: ContentHash,
     pub modules: Vec<CompiledModule>,
+    /// The sole canonical capability representation for this package.  An
+    /// export is never given a second capability field; resolution joins
+    /// this package-local index to the export by canonical name.
     schema_capabilities: Vec<SchemaCapabilityBinding>,
 }
 
@@ -260,6 +264,17 @@ impl CompiledArtifact {
         artifact_hash(self.lockfile_hash, &self.packages, &self.exports)
     }
 
+    /// Check that every explicit capability binding still names the same
+    /// direct record export it was validated against during compilation.
+    ///
+    /// Capability bindings are canonicalized and owned by
+    /// [`CompiledPackage`].  Keeping this check at the artifact boundary
+    /// prevents a future representation from growing a second, drifting
+    /// capability field on [`CompiledExport`].
+    fn validate_capability_coherence(&self) -> Result<(), PackageCompileError> {
+        validate_compiled_capabilities(&self.packages, &self.exports)
+    }
+
     /// Resolve one directly exported record declaration against the exact
     /// package that owns it.
     ///
@@ -332,6 +347,8 @@ impl CompiledArtifact {
     where
         I: IntoIterator<Item = PackageInput>,
     {
+        self.validate_capability_coherence()?;
+
         let recomputed = self.recomputed_hash();
         if recomputed != self.artifact_hash {
             return Err(PackageCompileError::ArtifactHashMismatch {
@@ -1076,6 +1093,61 @@ fn validate_schema_capability(
     }
 }
 
+fn canonical_schema_capabilities(
+    capabilities: &[SchemaCapabilityBinding],
+) -> Vec<SchemaCapabilityBinding> {
+    let mut capabilities = capabilities.to_vec();
+    capabilities.sort_by(|left, right| {
+        left.qualified_name
+            .canonical()
+            .cmp(&right.qualified_name.canonical())
+            .then(left.capability.cmp(&right.capability))
+    });
+    capabilities
+}
+
+/// Validate the one canonical capability representation against the exports
+/// in an artifact. This is deliberately shared by compilation and artifact
+/// verification so a capability can never be checked under subtly different
+/// rules at those trust boundaries; ordinary schema lookup stays inexpensive.
+fn validate_compiled_capabilities(
+    packages: &[CompiledPackage],
+    exports: &[CompiledExport],
+) -> Result<(), PackageCompileError> {
+    for package in packages {
+        let mut capability_names = BTreeSet::new();
+        for binding in canonical_schema_capabilities(&package.schema_capabilities) {
+            let canonical_name = binding.qualified_name.canonical();
+            if !capability_names.insert(canonical_name.clone()) {
+                return Err(PackageCompileError::DuplicateSchemaCapability {
+                    package: package.name.clone(),
+                    qualified_name: canonical_name,
+                });
+            }
+
+            let Some(export) = exports.iter().find(|export| {
+                export.package == package.name
+                    && export.qualified_name.canonical() == canonical_name
+            }) else {
+                return Err(PackageCompileError::UnknownSchemaCapabilityExport {
+                    package: package.name.clone(),
+                    qualified_name: canonical_name,
+                    capability: binding.capability,
+                });
+            };
+            validate_schema_capability(binding.capability, &export.kind).map_err(|reason| {
+                PackageCompileError::InvalidSchemaCapability {
+                    package: package.name.clone(),
+                    qualified_name: binding.qualified_name.canonical(),
+                    capability: binding.capability,
+                    reason,
+                }
+            })?;
+        }
+    }
+    Ok(())
+}
+
 /// Compile a deterministic package set from validated HIR modules.
 ///
 /// Package inputs may arrive in any order.  Package names, module paths, and
@@ -1148,35 +1220,7 @@ where
             }
         }
 
-        let mut schema_capabilities = input.schema_capabilities.clone();
-        schema_capabilities.sort();
-        let mut capability_names = BTreeSet::new();
-        for binding in &schema_capabilities {
-            let canonical_name = binding.qualified_name.canonical();
-            if !capability_names.insert(canonical_name.clone()) {
-                return Err(PackageCompileError::DuplicateSchemaCapability {
-                    package: input.manifest.name.clone(),
-                    qualified_name: canonical_name,
-                });
-            }
-
-            let key = (input.manifest.name.clone(), canonical_name.clone());
-            let Some(export) = exports.get(&key) else {
-                return Err(PackageCompileError::UnknownSchemaCapabilityExport {
-                    package: input.manifest.name.clone(),
-                    qualified_name: canonical_name,
-                    capability: binding.capability,
-                });
-            };
-            validate_schema_capability(binding.capability, &export.kind).map_err(|reason| {
-                PackageCompileError::InvalidSchemaCapability {
-                    package: input.manifest.name.clone(),
-                    qualified_name: binding.qualified_name.canonical(),
-                    capability: binding.capability,
-                    reason,
-                }
-            })?;
-        }
+        let schema_capabilities = canonical_schema_capabilities(&input.schema_capabilities);
 
         compiled_packages.push(CompiledPackage {
             name: input.manifest.name.clone(),
@@ -1188,6 +1232,7 @@ where
     }
 
     let exports = exports.into_values().collect::<Vec<_>>();
+    validate_compiled_capabilities(&compiled_packages, &exports)?;
     let artifact_hash = artifact_hash(lockfile_hash, &compiled_packages, &exports);
     Ok(CompiledArtifact {
         lockfile_hash,
@@ -1478,8 +1523,7 @@ fn put_type(bytes: &mut Vec<u8>, ty: &Type) {
 }
 
 fn put_schema_capabilities(bytes: &mut Vec<u8>, capabilities: &[SchemaCapabilityBinding]) {
-    let mut capabilities = capabilities.to_vec();
-    capabilities.sort();
+    let capabilities = canonical_schema_capabilities(capabilities);
     put_u64(bytes, capabilities.len());
     for binding in capabilities {
         put_text(bytes, &binding.qualified_name.canonical());
@@ -1908,6 +1952,132 @@ mod tests {
             compile([left], &lock).unwrap(),
             compile([right], &lock).unwrap()
         );
+    }
+
+    #[test]
+    fn same_shaped_same_named_schemas_keep_package_local_capabilities() {
+        let first = manifest("first");
+        let second = manifest("second");
+        let lock = lockfile(&[first.clone(), second.clone()]);
+        let name = qualified_name("types", "SettlementState");
+        let first_input = PackageInput::new(
+            first,
+            [record_module(
+                "types",
+                "SettlementState",
+                &settlement_state_fields(),
+                None,
+            )],
+        )
+        .with_schema_capability(name.clone(), SchemaCapability::SettlementStateV1);
+        let second_input = PackageInput::new(
+            second,
+            [record_module(
+                "types",
+                "SettlementState",
+                &settlement_state_fields(),
+                None,
+            )],
+        );
+        let artifact = compile([first_input, second_input], &lock).unwrap();
+        let first_root = artifact
+            .packages()
+            .iter()
+            .find(|package| package.name == "first")
+            .unwrap()
+            .root_hash();
+        let second_root = artifact
+            .packages()
+            .iter()
+            .find(|package| package.name == "second")
+            .unwrap()
+            .root_hash();
+
+        let first_schema = artifact.resolve_record_schema(first_root, &name).unwrap();
+        let second_schema = artifact.resolve_record_schema(second_root, &name).unwrap();
+        assert_eq!(
+            first_schema.capability(),
+            Some(SchemaCapability::SettlementStateV1)
+        );
+        assert_eq!(second_schema.capability(), None);
+        assert_ne!(first_schema.schema_id(), second_schema.schema_id());
+    }
+
+    #[test]
+    fn capability_on_wrong_declaration_kind_is_rejected_at_compile_boundary() {
+        let package = manifest("wrong-kind");
+        let lock = lockfile(std::slice::from_ref(&package));
+        let name = qualified_name("types", "SettlementState");
+        let input = PackageInput::new(
+            package,
+            [module_at(
+                "types",
+                "SettlementState",
+                AstDeclarationKind::Rule {
+                    input: AstType::Text,
+                    output: AstType::Text,
+                },
+            )],
+        )
+        .with_schema_capability(name, SchemaCapability::SettlementStateV1);
+
+        assert!(matches!(
+            compile([input], &lock),
+            Err(PackageCompileError::InvalidSchemaCapability { .. })
+        ));
+    }
+
+    #[test]
+    fn capability_name_and_package_version_are_stable_identity_inputs() {
+        assert_eq!(
+            SchemaCapability::SettlementStateV1.canonical_name(),
+            "settlement-state/v1"
+        );
+        assert_eq!(
+            SchemaCapability::SettlementStateV1.to_string(),
+            "settlement-state/v1"
+        );
+
+        let schema = qualified_name("types", "SettlementState");
+        let v1 = manifest("versioned");
+        let v2 = PackageManifest::new("versioned", Version::new(1, 0, 1), "hir-package");
+        let v1_input = PackageInput::new(
+            v1.clone(),
+            [record_module(
+                "types",
+                "SettlementState",
+                &settlement_state_fields(),
+                None,
+            )],
+        )
+        .with_schema_capability(schema.clone(), SchemaCapability::SettlementStateV1);
+        let v2_input = PackageInput::new(
+            v2.clone(),
+            [record_module(
+                "types",
+                "SettlementState",
+                &settlement_state_fields(),
+                None,
+            )],
+        )
+        .with_schema_capability(schema, SchemaCapability::SettlementStateV1);
+        let first = compile([v1_input], &lockfile(std::slice::from_ref(&v1))).unwrap();
+        let second = compile([v2_input], &lockfile(std::slice::from_ref(&v2))).unwrap();
+        assert_ne!(first.package_roots(), second.package_roots());
+        assert_ne!(first.artifact_hash(), second.artifact_hash());
+    }
+
+    #[test]
+    fn capability_coherence_is_rechecked_at_verification() {
+        let (input, _) = settlement_state_input();
+        let lock = lockfile(std::slice::from_ref(&input.manifest));
+        let mut artifact = compile([input.clone()], &lock).unwrap();
+        artifact.packages[0].schema_capabilities[0].qualified_name =
+            qualified_name("types", "Wrong");
+        assert!(matches!(
+            artifact.verify([input], &lock),
+            Err(PackageCompileError::UnknownSchemaCapabilityExport { .. })
+        ));
     }
 
     #[test]

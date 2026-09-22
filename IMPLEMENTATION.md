@@ -91,6 +91,9 @@ experiments, but it is not part of this contract.
   the source, checks ordered exhaustive coverage and transitions, binds every
   form to its evidence, artifact, package root, schema, occurrence, and value,
   enforces fixed resource limits, and is reachable from a typed derived commit.
+  `SettlementStateV1Proof` remains the only authority for this package-authored
+  path; it is not a general package lifecycle program or an `analyze_commit` /
+  obligation integration.
 - [ ] Every answer has a proposition-specific independently checked proof.
   Lot allocation, inventory conservation, and recognized gain now use typed,
   independently recomputed certificates. Direct obligations, settlement
@@ -190,9 +193,11 @@ experiments, but it is not part of this contract.
 ### Gate 5 — immutable store and reconciliation
 
 - [x] Immutable content-addressed evidence, statement, decision, package,
-  generic proof, typed settlement proof, commit, and close objects. Settlement
-  proof commits preserve the exact source artifact/package context and merge
-  only as explicit typed roots.
+  generic proof, typed settlement proof, commit, and existing sale-close
+  objects. Settlement proof commits preserve the exact source
+  artifact/package context and merge only as explicit typed roots. The
+  settlement vertical slice's `SettlementClose` is a content-addressed,
+  checked projection, not a persisted close object.
 - [ ] Corrections/supersession, tombstones, unavailable/redacted/deleted
   states, and as-known-at queries. The immutable store now implements these
   primitives; production workspace/analysis integration remains open.
@@ -227,7 +232,13 @@ experiments, but it is not part of this contract.
   and persist proven histories through an explicit versioned capability;
   executable package-defined lifecycle rules and recognition-engine integration
   remain open.
-- [ ] Cash and accrual recognizers, invoices, monthly close, journal export.
+- [ ] General cash and accrual recognizers, invoices, monthly close, journal
+  export. The narrow `SettlementWorld` projection now exposes typed
+  `Observation` and `Cash` only: cash excludes histories whose final state is
+  ineffective, requires explicit distinct endpoint-account mappings, and emits
+  balanced immutable journal projections. Its monthly close is content-
+  addressed and filters by the policy date; it is not persisted, and it does
+  not infer accrual or integrate with general obligations/`analyze_commit`.
 - [x] Budgets and forecasts remain isolated scenarios.
 
 ### Gate 7 — investments and contracts
@@ -272,7 +283,7 @@ experiments, but it is not part of this contract.
 ### Gate 10 — scale and assurance
 
 - [ ] Benchmark corpus and performance/invalidation metrics from section XVII.
-  The runner covers all named shapes and reports unsupported semantics honestly;
+  The runner now has 13 workloads and reports unsupported semantics honestly;
   production Workspace cache/invalidation, normalization, and dependency-graph
   metrics, independent clean-recomputation equality, and isolated per-workload
   child-process peak RSS are
@@ -282,14 +293,22 @@ experiments, but it is not part of this contract.
   recursive-logic workloads now report separately timed public-domain-API
   probes alongside honest source-projection scope labels. The one-row close
   workload reports only real Workspace revision/invalidation metrics; it does
-  not claim a separate close semantic probe. A twelfth generic-form workload
+  not claim a separate close semantic probe. The twelfth workload,
+  `generic-form-elaboration`,
   exercises 1,000/10,000/100,000-form profiles through persisted compilation,
   source-commit artifact pinning, schema-bound document elaboration, canonical
   value rechecking, and a one-row correction. Its warm re-elaboration timings
-  are explicitly not labelled as incremental-engine metrics. Remaining domain
-  workloads and shared-engine parallel measurement remain open. A separate
-  1,000-form release stress gate exercises capable-form projection, independent
-  proof checking, commit anchoring, and full-store verification end to end.
+  are explicitly not labelled as incremental-engine metrics. The thirteenth
+  settlement-state-proof workload exercises the public typed persistence path;
+  its current boundary accepts 3,309 rows and rejects 3,310 because the
+  canonical proof bytes exceed the limit. `settlement_setup_ns` includes source
+  load, package compilation/persistence, and artifact pinning;
+  `document_elaboration_ns` is direct elaboration, while
+  `settlement_document_projection_ns` includes Workspace elaboration plus
+  settlement projection. Remaining domain workloads and shared-engine parallel
+  measurement remain open. A separate 1,000-form release stress gate exercises
+  capable-form projection, independent proof checking, commit anchoring, and
+  full-store verification end to end.
 - [ ] Property, differential, incremental/full, and parallel/single-threaded
   equivalence suites. A deterministic generated suite now exercises roughly
   1,500 parser, canonicalization, unification, cycle, time, unit, package,
@@ -307,7 +326,7 @@ experiments, but it is not part of this contract.
 
 The current foundation checkpoint is exercised by:
 
-- 378 library tests, 4 CLI tests, 8 independent reference/production
+- 382 library tests, 4 CLI tests, 8 independent reference/production
   differential tests, and 5 structured-reference outcome tests;
 - 134 named constitutional cases with exactly 75 registry-linked independent
   case-specific tests and 12 grouped smoke suites; semantic review, not the
@@ -316,9 +335,12 @@ The current foundation checkpoint is exercised by:
   workflows, 7 adversarial property tests, two explicit 10,000-row ledger
   release stress tests, one explicit 10,000/100,000 generic-form release
   stress gate, and one 1,000-form independently checked settlement-proof gate,
-  including a full obligation/settlement/satisfaction network, plus 9 generated
-  assurance-family tests spanning roughly 1,500 cases;
-- a 12-workload section XVII benchmark runner with JSONL measurements,
+  plus five focused settlement vertical-slice tests over a 26-row fixture (6
+  histories, 3 rails, 2 instruments, and 3 monthly periods) with adversarial
+  mapping, transition, identity, persistence, determinism, and correction
+  checks, including a full obligation/settlement/satisfaction network, plus 9
+  generated assurance-family tests spanning roughly 1,500 cases;
+- a 13-workload section XVII benchmark runner with JSONL measurements,
   proof/dependency metrics, production Workspace cache/invalidation, and
   clean-recomputation equivalence, six public-domain-API semantic probes, and
   process peak RSS; concurrent

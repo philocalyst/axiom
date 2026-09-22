@@ -101,6 +101,22 @@ by its source commit, validated as an ordered ACH/card/check history, checked a
 second time by an independent typed proof checker, and anchored by a derived
 commit. Record shape or schema names alone never grant this authority.
 
+### Settlement vertical slice
+
+`SettlementStateV1Proof` remains the dedicated typed authority for this path.
+`SettlementWorld` is a checked, read-only projection with exactly two typed
+interpretations: `Observation` and `Cash`; it performs no accrual inference,
+does not execute arbitrary package lifecycle programs, and is not wired into
+general `analyze_commit` or obligation analysis.
+
+Cash recognition includes only histories whose final state is `settled`. It
+requires explicit, distinct endpoint-to-account mappings and produces balanced,
+immutable journal entries with typed proof edges. A monthly close is a
+content-addressed projection filtered by the policy date (settlement date for
+cash, occurrence date for observation); it is checked in memory rather than
+persisted as a close object. Corrections create new source, proof,
+recognition, and close roots while the old results remain checkable.
+
 ## Assurance workloads
 
 ```text
@@ -111,6 +127,7 @@ cargo test --locked --offline --release --test heavy_ledgers \
   stress_ten_thousand_obligations_settlements_and_satisfactions -- --ignored
 cargo test --locked --offline --release --test settlement_proof \
   stress_thousand_settlement_forms_project_prove_anchor_and_verify -- --ignored --exact
+cargo test --locked --offline --test heavy_settlement_close
 cargo run --release --locked --offline --bin axiom-bench -- --self-test
 cargo run --release --locked --offline --bin axiom-bench
 ```
@@ -142,7 +159,8 @@ multiple books. V0 intentionally exposes a small built-in vocabulary for
 trades, direct obligations, settlements, and satisfactions. Community packages
 can now define the authoring schema for the fixed `SettlementStateV1`
 capability. Arbitrary executable economic behavior and package-defined
-recognition remain architectural direction, not implemented authority.
+recognition remain architectural direction, not implemented authority; the
+typed settlement world above is the deliberately narrow exception.
 
 See [`DESIGN.md`](DESIGN.md) for the executable implementation contract,
 [`confirmed-direction.md`](confirmed-direction.md) for the full architectural

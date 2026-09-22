@@ -25,19 +25,20 @@ use axiom_ledger::ir::{Atom, Nominal, NominalKind, Term, Var};
 use axiom_ledger::logic::{Clause, Goal, Literal, Program, SemanticContext, Solver, Truth};
 use axiom_ledger::model::{ContentHash, Quantity, Unit};
 use axiom_ledger::ontology::{
-    Endpoint, ExchangeLeg, ExchangeRecord, Instrument, InstrumentKind, Obligation, Role,
-    RoleAssignment, RoleAssignments, SatisfactionAllocation, Settlement, SettlementState,
+    Endpoint, ExchangeLeg, ExchangeRecord, Instrument, InstrumentKind, Obligation, OntologyError,
+    Role, RoleAssignment, RoleAssignments, SatisfactionAllocation, Settlement, SettlementState,
     validate_satisfaction_network,
 };
 use axiom_ledger::package::{LotCandidate, PolicyPackage, Selection};
-use axiom_ledger::package_compiler::{CompiledArtifact, PackageInput};
+use axiom_ledger::package_compiler::{CompiledArtifact, PackageInput, SchemaCapability};
 use axiom_ledger::package_lock::{
     Dependency, LockedPackage, Lockfile, PackageManifest, Version, VersionReq,
 };
 use axiom_ledger::render::render_why;
+use axiom_ledger::settlement_projection::SettlementProjectionError;
 use axiom_ledger::store::PolicyPackage as StorePolicyPackage;
 use axiom_ledger::surface::SurfaceFile;
-use axiom_ledger::workspace::Workspace;
+use axiom_ledger::workspace::{Workspace, WorkspaceError};
 
 const SCHEMA: &str = "axiom-bench/v1";
 const DEFAULT_SCALE: u64 = 1;
@@ -58,10 +59,11 @@ enum Workload {
     AdversarialRecursion,
     LargeProofExplanation,
     GenericFormElaboration,
+    SettlementStateProof,
 }
 
 impl Workload {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 13] = [
         Self::TenYearPersonalHistory,
         Self::HighFrequencyLots,
         Self::MultiCurrency,
@@ -74,6 +76,7 @@ impl Workload {
         Self::AdversarialRecursion,
         Self::LargeProofExplanation,
         Self::GenericFormElaboration,
+        Self::SettlementStateProof,
     ];
 
     fn name(self) -> &'static str {
@@ -90,6 +93,7 @@ impl Workload {
             Self::AdversarialRecursion => "adversarial-recursion",
             Self::LargeProofExplanation => "large-proof-explanation",
             Self::GenericFormElaboration => "generic-form-elaboration",
+            Self::SettlementStateProof => "settlement-state-proof",
         }
     }
 
@@ -114,6 +118,7 @@ impl Workload {
             | Self::AdversarialRecursion
             | Self::LargeProofExplanation => Target::IncrementalSeconds,
             Self::GenericFormElaboration => Target::WarmInteractive,
+            Self::SettlementStateProof => Target::IncrementalSeconds,
         }
     }
 
@@ -138,6 +143,9 @@ impl Workload {
             Self::LargeProofExplanation => "large proof DAG and source explanation",
             Self::GenericFormElaboration => {
                 "package-bound generic record forms through surface/document elaboration"
+            }
+            Self::SettlementStateProof => {
+                "package-bound settlement histories through projection and independent proof persistence"
             }
         }
     }
@@ -248,6 +256,12 @@ struct Timing {
     schema_lookup_ns: Option<u128>,
     canonical_values_ns: Option<u128>,
     changed_document_elaboration_ns: Option<u128>,
+    settlement_setup_ns: Option<u128>,
+    settlement_document_projection_ns: Option<u128>,
+    settlement_persistence_boundary_ns: Option<u128>,
+    settlement_proof_check_ns: Option<u128>,
+    settlement_store_verify_ns: Option<u128>,
+    settlement_source_revision_ns: Option<u128>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -289,6 +303,19 @@ struct Metrics {
     build_profile: Option<&'static str>,
     resource_profile: Option<&'static str>,
     note: Option<&'static str>,
+    settlement_coverage_count: Option<usize>,
+    settlement_coverage_hash: Option<String>,
+    settlement_source_commit_hash: Option<String>,
+    settlement_artifact_id_hash: Option<String>,
+    settlement_artifact_hash: Option<String>,
+    settlement_proof_hash: Option<String>,
+    settlement_proof_bytes: Option<usize>,
+    settlement_projection_commit_hash: Option<String>,
+    settlement_binding_verified: Option<bool>,
+    settlement_proof_check_verified: Option<bool>,
+    settlement_store_verify_verified: Option<bool>,
+    settlement_source_revision_verified: Option<bool>,
+    settlement_atomic_negative_verified: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -310,6 +337,39 @@ struct ResultRecord {
     description: &'static str,
 }
 
+/// The content-addressed identities that make the settlement workload a
+/// reproducibility check rather than a timing-only probe.  Every field is
+/// derived from a fresh workspace/store path and compared across runs.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SettlementOracle {
+    source_commit_hash: String,
+    artifact_id_hash: String,
+    artifact_hash: String,
+    proof_hash: String,
+    proof_bytes: usize,
+    projection_commit_hash: String,
+    coverage_hash: String,
+    coverage_count: usize,
+}
+
+struct SettlementExecution {
+    workspace: Workspace,
+    source_commit: axiom_ledger::store::CommitId,
+    proof_id: axiom_ledger::store::SettlementStateProofId,
+    forms: usize,
+    oracle: SettlementOracle,
+}
+
+struct SettlementTimings {
+    setup_ns: u128,
+    document_elaboration_ns: u128,
+    document_projection_ns: u128,
+    persistence_boundary_ns: u128,
+    proof_check_ns: u128,
+    store_verify_ns: u128,
+    source_revision_ns: Option<u128>,
+}
+
 #[derive(Clone, Debug)]
 struct Options {
     quick: bool,
@@ -318,6 +378,7 @@ struct Options {
     self_test: bool,
     help: bool,
     rss_probe: bool,
+    settlement_boundary_probe: bool,
 }
 
 fn main() {
@@ -345,6 +406,20 @@ fn run() -> Result<(), String> {
             "{{\"schema\":\"{SCHEMA}\",\"kind\":\"rss_probe\",\"workload\":\"{}\",\"peak_memory_bytes\":{}}}",
             workload.name(),
             option_number(peak.map(|value| value as u128))
+        );
+        return Ok(());
+    }
+    if options.settlement_boundary_probe {
+        if options.workload != Some(Workload::SettlementStateProof) {
+            return Err(
+                "--settlement-boundary-probe requires --workload settlement-state-proof".into(),
+            );
+        }
+        let generated = generate(Workload::SettlementStateProof, options.quick, options.scale)?;
+        let execution = execute_settlement_path(&generated.source)?;
+        println!(
+            "{{\"schema\":\"{SCHEMA}\",\"kind\":\"settlement_boundary_probe\",\"workload\":\"settlement-state-proof\",\"forms\":{},\"proof_bytes\":{}}}",
+            execution.forms, execution.oracle.proof_bytes
         );
         return Ok(());
     }
@@ -387,6 +462,7 @@ impl Options {
             self_test: false,
             help: false,
             rss_probe: false,
+            settlement_boundary_probe: false,
         };
         let args: Vec<String> = args.collect();
         let mut index = 0;
@@ -395,6 +471,7 @@ impl Options {
                 "--quick" => options.quick = true,
                 "--self-test" => options.self_test = true,
                 "--rss-probe" => options.rss_probe = true,
+                "--settlement-boundary-probe" => options.settlement_boundary_probe = true,
                 "-h" | "--help" => options.help = true,
                 "--scale" => {
                     index += 1;
@@ -460,7 +537,9 @@ the human summary is written to stderr. Timings are measurements, not assertions
 --quick          one timing sample and workload-specific reduced row counts\n\
 --scale N        multiply deterministic row counts (default: 1)\n\
 --workload NAME  run one named workload (underscores are accepted)\n\
---self-test      run deterministic corpus/parser/proof/incremental checks"
+--self-test      run deterministic corpus/parser/proof/incremental checks\n\
+--settlement-boundary-probe\n\
+                 run only the public SettlementStateV1 persistence boundary"
     );
 }
 
@@ -474,6 +553,16 @@ fn measure_workload(
     let generated = generate(workload, quick, scale)?;
     if workload == Workload::GenericFormElaboration {
         return measure_generic_form_workload(
+            generated,
+            workload,
+            quick,
+            scale,
+            samples,
+            isolate_peak_memory,
+        );
+    }
+    if workload == Workload::SettlementStateProof {
+        return measure_settlement_state_proof_workload(
             generated,
             workload,
             quick,
@@ -885,6 +974,460 @@ fn measure_generic_form_workload(
         unsupported_reason: None,
         target: workload.target(),
         description: workload.description(),
+    })
+}
+
+fn measure_settlement_state_proof_workload(
+    generated: GeneratedWorkload,
+    workload: Workload,
+    quick: bool,
+    scale: u64,
+    samples: usize,
+    isolate_peak_memory: bool,
+) -> Result<ResultRecord, String> {
+    let source_hash = stable_hash(generated.source.as_bytes());
+    let changed_source_hash = generated
+        .changed_source
+        .as_ref()
+        .map(|source| stable_hash(source.as_bytes()));
+    let execution = execute_settlement_path(&generated.source)?;
+    let independent = execute_settlement_path(&generated.source)?;
+    let deterministic = execution.oracle == independent.oracle;
+    if !deterministic {
+        return Err("settlement path is not deterministic across fresh workspaces".into());
+    }
+
+    let revised = generated
+        .changed_source
+        .as_deref()
+        .map(|changed| validate_settlement_source_revision(&execution, changed))
+        .transpose()?;
+    let atomic_negative = validate_settlement_atomic_negative(
+        &generated.source,
+        generated.source.replacen("amount 100", "amount -1", 1),
+    )?;
+
+    let settlement_timings = median_settlement_timings(
+        &generated.source,
+        generated.changed_source.as_deref(),
+        samples,
+    )?;
+    let timing = Timing {
+        generation_ns: median_generation(workload, quick, scale, samples)?,
+        normalization_ns: Some(median_generic_normalization(&generated.source, samples)),
+        parse_ns: Some(median_surface_parse(
+            &generated.source,
+            execution.forms,
+            samples,
+        )),
+        settlement_setup_ns: Some(settlement_timings.setup_ns),
+        document_elaboration_ns: Some(settlement_timings.document_elaboration_ns),
+        settlement_document_projection_ns: Some(settlement_timings.document_projection_ns),
+        settlement_persistence_boundary_ns: Some(settlement_timings.persistence_boundary_ns),
+        settlement_proof_check_ns: Some(settlement_timings.proof_check_ns),
+        settlement_store_verify_ns: Some(settlement_timings.store_verify_ns),
+        settlement_source_revision_ns: settlement_timings.source_revision_ns,
+        ..Timing::default()
+    };
+
+    let metrics = Metrics {
+        // Settlement persistence is a Workspace/ObjectStore boundary, not a
+        // semantic probe.  Leave semantic-probe fields unset because no
+        // independent probe is timed for this workload.
+        independent_clean_recompute_equal: Some(deterministic),
+        settlement_coverage_count: Some(execution.oracle.coverage_count),
+        settlement_coverage_hash: Some(execution.oracle.coverage_hash.clone()),
+        settlement_source_commit_hash: Some(execution.oracle.source_commit_hash.clone()),
+        settlement_artifact_id_hash: Some(execution.oracle.artifact_id_hash.clone()),
+        settlement_artifact_hash: Some(execution.oracle.artifact_hash.clone()),
+        settlement_proof_hash: Some(execution.oracle.proof_hash.clone()),
+        settlement_proof_bytes: Some(execution.oracle.proof_bytes),
+        settlement_projection_commit_hash: Some(execution.oracle.projection_commit_hash.clone()),
+        settlement_binding_verified: Some(true),
+        settlement_proof_check_verified: Some(true),
+        settlement_store_verify_verified: Some(true),
+        settlement_source_revision_verified: revised,
+        settlement_atomic_negative_verified: Some(atomic_negative),
+        peak_memory_bytes: if isolate_peak_memory {
+            isolated_peak_memory_bytes(workload, quick, scale)?
+        } else {
+            None
+        },
+        revision_result_count: revised.map(|_| execution.forms),
+        revision_mode: revised.map(|_| "source_revision_persistence"),
+        authority_binding_verified: Some(true),
+        build_profile: Some(if cfg!(debug_assertions) {
+            "debug"
+        } else {
+            "release"
+        }),
+        resource_profile: Some(if process_peak_memory_bytes().is_some() {
+            "per-workload child-process peak RSS via getrusage"
+        } else {
+            "per-workload child-process peak RSS unavailable"
+        }),
+        note: Some(
+            "settlement_state_proof: settlement_setup_ns includes source load, package compilation/persistence, and artifact pinning; document_elaboration_ns is direct elaboration; settlement_document_projection_ns includes Workspace document elaboration plus settlement projection; settlement_persistence_boundary_ns covers typed proof/child-commit persistence; source-revision and verification timings are separate public Workspace/ObjectStore measurements; peak_memory_bytes is isolated workload child-process peak RSS via getrusage",
+        ),
+        ..Metrics::default()
+    };
+
+    Ok(ResultRecord {
+        workload,
+        quick,
+        scale,
+        samples,
+        source_hash,
+        changed_source_hash,
+        changed_kind: generated.changed_kind,
+        semantic_supported: true,
+        status: "measured",
+        timing,
+        sizes: Sizes {
+            source_bytes: generated.source.len(),
+            source_lines: generated.source.lines().count(),
+            forms: Some(execution.forms),
+            changed_source_bytes: generated.changed_source.as_ref().map(String::len),
+            dependency_graph_nodes: None,
+            dependency_graph_edges: None,
+        },
+        metrics,
+        unsupported_reason: None,
+        target: workload.target(),
+        description: workload.description(),
+    })
+}
+
+fn execute_settlement_path(source: &str) -> Result<SettlementExecution, String> {
+    let (mut workspace, source_commit, artifact_id, artifact) =
+        settlement_workspace_fixture(source)?;
+    let bound = workspace
+        .elaborate_package_forms(source_commit)
+        .map_err(|error| format!("settlement document elaboration failed: {error}"))?;
+    if bound.source_commit() != source_commit
+        || bound.compiled_artifact() != artifact_id
+        || bound.artifact_hash() != artifact.artifact_hash()
+    {
+        return Err("settlement forms lost source/artifact authority binding".into());
+    }
+    let forms = bound.forms().len();
+    if forms == 0 {
+        return Err(format!(
+            "settlement workload has {forms} forms; expected at least one"
+        ));
+    }
+    let projection = workspace
+        .project_settlement_states(source_commit)
+        .map_err(|error| format!("settlement projection failed: {error}"))?;
+    if projection.source_commit() != source_commit
+        || projection.compiled_artifact() != artifact_id
+        || projection.artifact_hash() != artifact.artifact_hash()
+        || projection.records().len() != forms
+    {
+        return Err("settlement projection lost source/artifact binding or coverage".into());
+    }
+    let expected_occurrences = (0..forms)
+        .map(|index| format!("settlement/{index:06}"))
+        .collect::<Vec<_>>();
+    let actual_occurrences = projection
+        .records()
+        .map(|record| record.occurrence.as_str().to_owned())
+        .collect::<Vec<_>>();
+    if actual_occurrences != expected_occurrences {
+        return Err("settlement projection changed exact source order".into());
+    }
+
+    let persisted = workspace
+        .persist_settlement_state_proof(source_commit)
+        .map_err(|error| format!("settlement proof persistence failed: {error}"))?;
+    let proof = workspace
+        .store()
+        .settlement_state_proof(persisted.proof_id)
+        .map_err(|error| format!("settlement proof lookup failed: {error}"))?;
+    proof
+        .check(workspace.store())
+        .map_err(|error| format!("independent settlement proof check failed: {error}"))?;
+    let source_value = workspace
+        .store()
+        .commit(source_commit)
+        .map_err(|error| format!("settlement source lookup failed: {error}"))?;
+    let child = workspace
+        .store()
+        .commit(persisted.projection_commit)
+        .map_err(|error| format!("settlement child lookup failed: {error}"))?;
+    if persisted.source_commit != source_commit
+        || proof.source_commit != source_commit
+        || proof.compiled_artifact != artifact_id
+        || proof.compiled_artifact_hash != artifact.artifact_hash()
+        || child.parents != vec![source_commit]
+        || child.settlement_proofs != vec![persisted.proof_id]
+        || !child.evidence.is_empty()
+        || child.compiled_artifact != source_value.compiled_artifact
+        || child.packages != source_value.packages
+    {
+        return Err("settlement proof or typed child commit is not bound to source".into());
+    }
+    workspace
+        .store()
+        .verify()
+        .map_err(|error| format!("settlement store verification failed: {error}"))?;
+
+    let oracle = SettlementOracle {
+        source_commit_hash: source_commit.hash().to_string(),
+        artifact_id_hash: artifact_id.hash().to_string(),
+        artifact_hash: artifact.artifact_hash().to_string(),
+        proof_hash: persisted.proof_id.hash().to_string(),
+        projection_commit_hash: persisted.projection_commit.hash().to_string(),
+        coverage_hash: proof.coverage_hash.to_string(),
+        coverage_count: proof.coverage().len(),
+        proof_bytes: proof.canonical_bytes().len(),
+    };
+    Ok(SettlementExecution {
+        workspace,
+        source_commit,
+        proof_id: persisted.proof_id,
+        forms,
+        oracle,
+    })
+}
+
+fn validate_settlement_source_revision(
+    execution: &SettlementExecution,
+    changed: &str,
+) -> Result<bool, String> {
+    let mut workspace = execution.workspace.clone();
+    let corrected_source = workspace
+        .correct_source(execution.source_commit, changed.as_bytes())
+        .map_err(|error| format!("settlement source revision failed: {error}"))?;
+    let corrected = workspace
+        .persist_settlement_state_proof(corrected_source.commit_id())
+        .map_err(|error| format!("settlement corrected proof failed: {error}"))?;
+    let proof = workspace
+        .store()
+        .settlement_state_proof(corrected.proof_id)
+        .map_err(|error| format!("settlement corrected proof lookup failed: {error}"))?;
+    proof
+        .check(workspace.store())
+        .map_err(|error| format!("settlement corrected proof check failed: {error}"))?;
+    let child = workspace
+        .store()
+        .commit(corrected.projection_commit)
+        .map_err(|error| format!("settlement corrected child lookup failed: {error}"))?;
+    let original = workspace
+        .store()
+        .settlement_state_proof(execution.proof_id)
+        .map_err(|error| format!("settlement original proof lookup failed: {error}"))?;
+    original
+        .check(workspace.store())
+        .map_err(|error| format!("settlement original proof was not retained: {error}"))?;
+    workspace
+        .store()
+        .verify()
+        .map_err(|error| format!("settlement corrected store verification failed: {error}"))?;
+    Ok(corrected.source_commit != execution.source_commit
+        && corrected.proof_id != execution.proof_id
+        && child.parents == vec![corrected.source_commit]
+        && child.settlement_proofs == vec![corrected.proof_id])
+}
+
+fn validate_settlement_atomic_negative(
+    source: &str,
+    invalid_source: String,
+) -> Result<bool, String> {
+    let (mut workspace, source_commit, _, _) = settlement_workspace_fixture(source)?;
+    let corrected = workspace
+        .correct_source(source_commit, invalid_source.as_bytes())
+        .map_err(|error| format!("settlement negative correction failed: {error}"))?;
+    let before = workspace.store().len();
+    let failed = match workspace.persist_settlement_state_proof(corrected.commit_id()) {
+        Err(WorkspaceError::SettlementProjection(SettlementProjectionError::Ontology(
+            OntologyError::InvalidQuantity {
+                context: "a settlement state amount",
+            },
+        ))) => true,
+        Err(error) => {
+            return Err(format!(
+                "settlement negative amount returned the wrong public error: {error}"
+            ));
+        }
+        Ok(_) => {
+            return Err("settlement negative amount unexpectedly persisted".into());
+        }
+    };
+    let unchanged = workspace.store().len() == before;
+    workspace
+        .store()
+        .verify()
+        .map_err(|error| format!("settlement negative store verification failed: {error}"))?;
+    if !failed || !unchanged {
+        return Err("settlement negative amount violated atomic persistence".into());
+    }
+    Ok(true)
+}
+
+fn settlement_workspace_fixture(
+    source: &str,
+) -> Result<
+    (
+        Workspace,
+        axiom_ledger::store::CommitId,
+        axiom_ledger::store::CompiledArtifactId,
+        CompiledArtifact,
+    ),
+    String,
+> {
+    let mut workspace = Workspace::new();
+    let (package, lockfile) = settlement_state_package_input()?;
+    let (source_commit, artifact_id, artifact) =
+        pin_settlement_workspace(&mut workspace, source, package, &lockfile)?;
+    Ok((workspace, source_commit, artifact_id, artifact))
+}
+
+fn pin_settlement_workspace(
+    workspace: &mut Workspace,
+    source: &str,
+    package: PackageInput,
+    lockfile: &Lockfile,
+) -> Result<
+    (
+        axiom_ledger::store::CommitId,
+        axiom_ledger::store::CompiledArtifactId,
+        CompiledArtifact,
+    ),
+    String,
+> {
+    let loaded = workspace
+        .load_source("benchmark/settlement-state-proof", source.as_bytes())
+        .map_err(|error| format!("settlement source load failed: {error}"))?;
+    let (artifact_id, artifact) = workspace
+        .compile_packages_persisted([package], lockfile)
+        .map_err(|error| format!("settlement package persistence failed: {error}"))?;
+    let pinned = workspace
+        .commit_with_compiled_artifact(loaded.commit_id(), artifact_id)
+        .map_err(|error| format!("settlement artifact pinning failed: {error}"))?;
+    Ok((pinned.commit_id(), artifact_id, artifact))
+}
+
+fn settlement_state_package_input() -> Result<(PackageInput, Lockfile), String> {
+    let manifest = PackageManifest::new(
+        "payments",
+        Version::new(1, 0, 0),
+        "settlement-state-benchmark-v1",
+    );
+    let schema = QualifiedName {
+        module: ModulePath::root(Name::new("types").map_err(|error| format!("{error:?}"))?),
+        name: Name::new("SettlementState").map_err(|error| format!("{error:?}"))?,
+    };
+    let module = axiom_ledger::hir::lower(AstModule {
+        path: ModulePath::root(Name::new("types").map_err(|error| format!("{error:?}"))?),
+        declarations: vec![AstDeclaration {
+            name: "SettlementState".to_owned(),
+            kind: AstDeclarationKind::Type(AstType::Record {
+                fields: vec![
+                    ("settlement".to_owned(), AstType::Text),
+                    ("kind".to_owned(), AstType::Text),
+                    ("state".to_owned(), AstType::Text),
+                    ("at".to_owned(), AstType::Text),
+                    ("from".to_owned(), AstType::Text),
+                    ("to".to_owned(), AstType::Text),
+                    ("instrument".to_owned(), AstType::Text),
+                    ("amount".to_owned(), AstType::Decimal),
+                ],
+                open_tail: None,
+            }),
+            span: HirSpan::default(),
+        }],
+    });
+    let package = PackageInput::new(manifest.clone(), [module])
+        .with_schema_capability(schema, SchemaCapability::SettlementStateV1);
+    let lockfile = Lockfile {
+        roots: vec![Dependency::new(
+            manifest.name.clone(),
+            VersionReq::Exact(manifest.version),
+        )],
+        packages: vec![LockedPackage {
+            name: manifest.name.clone(),
+            version: manifest.version,
+            hash: manifest.hash(),
+            dependencies: manifest.dependencies.clone(),
+        }],
+    };
+    Ok((package, lockfile))
+}
+
+fn median_settlement_timings(
+    source: &str,
+    changed: Option<&str>,
+    samples: usize,
+) -> Result<SettlementTimings, String> {
+    let mut setup = Vec::with_capacity(samples);
+    let mut document = Vec::with_capacity(samples);
+    let mut document_projection = Vec::with_capacity(samples);
+    let mut persistence_boundary = Vec::with_capacity(samples);
+    let mut proof_check = Vec::with_capacity(samples);
+    let mut store_verify = Vec::with_capacity(samples);
+    let mut source_revision = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let mut workspace = Workspace::new();
+        let (package_input, lockfile) = settlement_state_package_input()?;
+        let start = Instant::now();
+        let (commit, _artifact_id, artifact) =
+            pin_settlement_workspace(&mut workspace, source, package_input, &lockfile)?;
+        setup.push(start.elapsed().as_nanos());
+        let document_projection_start = Instant::now();
+        let document_start = Instant::now();
+        let forms = workspace
+            .elaborate_package_forms(commit)
+            .map_err(|error| format!("settlement document elaboration failed: {error}"))?;
+        black_box((forms.forms().len(), artifact.artifact_hash()));
+        document.push(document_start.elapsed().as_nanos());
+        let projected = workspace
+            .project_settlement_states(commit)
+            .map_err(|error| format!("settlement projection failed: {error}"))?;
+        black_box(projected.records().len());
+        document_projection.push(document_projection_start.elapsed().as_nanos());
+        let start = Instant::now();
+        let persisted = workspace
+            .persist_settlement_state_proof(commit)
+            .map_err(|error| format!("settlement proof persistence failed: {error}"))?;
+        black_box(persisted.proof_id.hash());
+        persistence_boundary.push(start.elapsed().as_nanos());
+        let proof = workspace
+            .store()
+            .settlement_state_proof(persisted.proof_id)
+            .map_err(|error| format!("settlement proof lookup failed: {error}"))?;
+        let start = Instant::now();
+        proof
+            .check(workspace.store())
+            .map_err(|error| format!("settlement proof check failed: {error}"))?;
+        black_box(proof.coverage().len());
+        proof_check.push(start.elapsed().as_nanos());
+        let start = Instant::now();
+        workspace
+            .store()
+            .verify()
+            .map_err(|error| format!("settlement store verification failed: {error}"))?;
+        store_verify.push(start.elapsed().as_nanos());
+        if let Some(changed) = changed {
+            let start = Instant::now();
+            let corrected = workspace
+                .correct_source(commit, changed.as_bytes())
+                .map_err(|error| format!("settlement source revision failed: {error}"))?;
+            let corrected_proof = workspace
+                .persist_settlement_state_proof(corrected.commit_id())
+                .map_err(|error| format!("settlement corrected proof failed: {error}"))?;
+            black_box(corrected_proof.proof_id.hash());
+            source_revision.push(start.elapsed().as_nanos());
+        }
+    }
+    Ok(SettlementTimings {
+        setup_ns: median(setup),
+        document_elaboration_ns: median(document),
+        document_projection_ns: median(document_projection),
+        persistence_boundary_ns: median(persistence_boundary),
+        proof_check_ns: median(proof_check),
+        store_verify_ns: median(store_verify),
+        source_revision_ns: (!source_revision.is_empty()).then(|| median(source_revision)),
     })
 }
 
@@ -1446,6 +1989,10 @@ fn self_test(_quick: bool, scale: u64) -> Result<usize, String> {
             checks += generic_form_self_test(&left, test_scale)?;
             continue;
         }
+        if workload == Workload::SettlementStateProof {
+            checks += settlement_state_proof_self_test(&left)?;
+            continue;
+        }
         let mut workspace = Workspace::new();
         let mut source = workspace
             .load_source(
@@ -1659,6 +2206,32 @@ fn generic_form_self_test(generated: &GeneratedWorkload, _scale: u64) -> Result<
         return Err(
             "generic form self-test source revision did not change a canonical value".into(),
         );
+    }
+    Ok(4)
+}
+
+fn settlement_state_proof_self_test(generated: &GeneratedWorkload) -> Result<usize, String> {
+    let execution = execute_settlement_path(&generated.source)?;
+    if execution.forms != generated.semantic_probe_items
+        || execution.oracle.coverage_count != execution.forms
+    {
+        return Err("settlement self-test coverage count mismatch".into());
+    }
+    let independent = execute_settlement_path(&generated.source)?;
+    if execution.oracle != independent.oracle {
+        return Err("settlement self-test fresh-workspace oracle mismatch".into());
+    }
+    let changed = generated
+        .changed_source
+        .as_deref()
+        .ok_or_else(|| "settlement self-test has no correction source".to_string())?;
+    if !validate_settlement_source_revision(&execution, changed)?
+        || !validate_settlement_atomic_negative(
+            &generated.source,
+            generated.source.replacen("amount 100", "amount -1", 1),
+        )?
+    {
+        return Err("settlement self-test correction/atomic negative failed".into());
     }
     Ok(4)
 }
@@ -2131,7 +2704,7 @@ fn print_json_line(record: &ResultRecord) {
     );
     let _ = write!(
         output,
-        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"semantic_probe_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_incremental_solve_ns\":{},\"changed_full_solve_ns\":{},\"parallel_solve_ns\":null,\"independent_workers_ns\":{},\"package_compile_ns\":{},\"document_elaboration_ns\":{},\"schema_lookup_ns\":{},\"canonical_values_ns\":{},\"changed_document_elaboration_ns\":{}",
+        "\"generation_ns\":{},\"normalization_ns\":{},\"parse_ns\":{},\"semantic_probe_ns\":{},\"solve_cold_ns\":{},\"independent_clean_solve_ns\":{},\"workspace_replay_ns\":{},\"proof_check_ns\":{},\"explanation_ns\":{},\"changed_incremental_solve_ns\":{},\"changed_full_solve_ns\":{},\"parallel_solve_ns\":null,\"independent_workers_ns\":{},\"package_compile_ns\":{},\"document_elaboration_ns\":{},\"schema_lookup_ns\":{},\"canonical_values_ns\":{},\"changed_document_elaboration_ns\":{},\"settlement_setup_ns\":{},\"settlement_document_projection_ns\":{},\"settlement_persistence_boundary_ns\":{},\"settlement_proof_check_ns\":{},\"settlement_store_verify_ns\":{},\"settlement_source_revision_ns\":{}",
         record.timing.generation_ns,
         option_number(record.timing.normalization_ns),
         option_number(record.timing.parse_ns),
@@ -2149,6 +2722,12 @@ fn print_json_line(record: &ResultRecord) {
         option_number(record.timing.schema_lookup_ns),
         option_number(record.timing.canonical_values_ns),
         option_number(record.timing.changed_document_elaboration_ns),
+        option_number(record.timing.settlement_setup_ns),
+        option_number(record.timing.settlement_document_projection_ns),
+        option_number(record.timing.settlement_persistence_boundary_ns),
+        option_number(record.timing.settlement_proof_check_ns),
+        option_number(record.timing.settlement_store_verify_ns),
+        option_number(record.timing.settlement_source_revision_ns),
     );
     output.push_str("},\"sizes\":{");
     let _ = write!(
@@ -2174,7 +2753,7 @@ fn print_json_line(record: &ResultRecord) {
     output.push_str("},\"metrics\":{");
     let _ = write!(
         output,
-        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"semantic_probe_items\":{},\"semantic_probe_results\":{},\"semantic_probe_api\":{},\"determinism_across_thread_counts\":null,\"same_process_cache_replay_equal\":{},\"independent_clean_recompute_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":null,\"parallel_thread_count\":null,\"independent_worker_determinism\":{},\"independent_worker_equivalence\":{},\"concurrent_worker_count\":{},\"canonical_value_count\":{},\"schema_lookup_count\":{},\"document_result_count\":{},\"revision_result_count\":{},\"revision_mode\":{},\"authority_binding_verified\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{}",
+        "\"cache_hits\":{},\"cache_misses\":{},\"invalidated_queries\":{},\"proof_nodes\":{},\"proof_roots\":{},\"semantic_dependency_edges\":{},\"semantic_invalidation_edges\":{},\"explanation_bytes\":{},\"cycle_errors\":{},\"semantic_probe_items\":{},\"semantic_probe_results\":{},\"semantic_probe_api\":{},\"determinism_across_thread_counts\":null,\"same_process_cache_replay_equal\":{},\"independent_clean_recompute_equal\":{},\"peak_memory_bytes\":{},\"thread_count_equivalence\":null,\"parallel_thread_count\":null,\"independent_worker_determinism\":{},\"independent_worker_equivalence\":{},\"concurrent_worker_count\":{},\"canonical_value_count\":{},\"schema_lookup_count\":{},\"document_result_count\":{},\"revision_result_count\":{},\"revision_mode\":{},\"authority_binding_verified\":{},\"build_profile\":{},\"resource_profile\":{},\"note\":{},\"unsupported_reason\":{},\"settlement_coverage_count\":{},\"settlement_coverage_hash\":{},\"settlement_source_commit_hash\":{},\"settlement_artifact_id_hash\":{},\"settlement_artifact_hash\":{},\"settlement_proof_hash\":{},\"settlement_proof_bytes\":{},\"settlement_projection_commit_hash\":{},\"settlement_binding_verified\":{},\"settlement_proof_check_verified\":{},\"settlement_store_verify_verified\":{},\"settlement_source_revision_verified\":{},\"settlement_atomic_negative_verified\":{}",
         option_number(record.metrics.cache_hits.map(|value| value as u128)),
         option_number(record.metrics.cache_misses.map(|value| value as u128)),
         option_number(
@@ -2253,6 +2832,29 @@ fn print_json_line(record: &ResultRecord) {
         option_string(record.metrics.resource_profile),
         option_string(record.metrics.note),
         option_string(record.unsupported_reason),
+        option_number(
+            record
+                .metrics
+                .settlement_coverage_count
+                .map(|value| value as u128)
+        ),
+        option_string(record.metrics.settlement_coverage_hash.as_deref()),
+        option_string(record.metrics.settlement_source_commit_hash.as_deref()),
+        option_string(record.metrics.settlement_artifact_id_hash.as_deref()),
+        option_string(record.metrics.settlement_artifact_hash.as_deref()),
+        option_string(record.metrics.settlement_proof_hash.as_deref()),
+        option_number(
+            record
+                .metrics
+                .settlement_proof_bytes
+                .map(|value| value as u128)
+        ),
+        option_string(record.metrics.settlement_projection_commit_hash.as_deref()),
+        option_bool(record.metrics.settlement_binding_verified),
+        option_bool(record.metrics.settlement_proof_check_verified),
+        option_bool(record.metrics.settlement_store_verify_verified),
+        option_bool(record.metrics.settlement_source_revision_verified),
+        option_bool(record.metrics.settlement_atomic_negative_verified),
     );
     output.push_str("}}");
     println!("{output}");
@@ -2261,10 +2863,10 @@ fn print_json_line(record: &ResultRecord) {
 fn print_human_summary(records: &[ResultRecord]) {
     eprintln!("Axiom benchmark (measurements; targets are engineering goals, not assertions)");
     eprintln!(
-        "workload                         forms    cold ms  replay ms  proof   cache  invalid  target"
+        "workload                         forms    cold ms  replay ms  proof  settle ms  proof B  cache  invalid  target"
     );
     eprintln!(
-        "-------------------------------- -------- --------- --------- ------- ------ -------- ------------------------"
+        "-------------------------------- -------- --------- --------- ------ --------- -------- ------ -------- ------------------------"
     );
     for record in records {
         let forms = record
@@ -2283,6 +2885,14 @@ fn print_human_summary(records: &[ResultRecord]) {
             .metrics
             .proof_nodes
             .map_or_else(|| "-".to_string(), |value| value.to_string());
+        let settlement = record
+            .timing
+            .settlement_persistence_boundary_ns
+            .map_or_else(|| "N/A".to_string(), format_ms);
+        let proof_bytes = record
+            .metrics
+            .settlement_proof_bytes
+            .map_or_else(|| "N/A".to_string(), |value| value.to_string());
         let cache = record
             .metrics
             .cache_hits
@@ -2292,12 +2902,14 @@ fn print_human_summary(records: &[ResultRecord]) {
             .invalidated_queries
             .map_or_else(|| "null".to_string(), |value| value.to_string());
         eprintln!(
-            "{:<32} {:>8} {:>9} {:>9} {:>7} {:>6} {:>8} {}",
+            "{:<32} {:>8} {:>9} {:>9} {:>6} {:>9} {:>8} {:>6} {:>8} {}",
             record.workload.name(),
             forms,
             cold,
             replay,
             proof,
+            settlement,
+            proof_bytes,
             cache,
             invalid,
             record.target.human()
@@ -2385,6 +2997,9 @@ fn generate(workload: Workload, quick: bool, scale: u64) -> Result<GeneratedWork
         // Keep the default corpus at 1,000 forms; --scale 10 and --scale 100
         // are the explicit 10k/100k form-elaboration profiles.
         Workload::GenericFormElaboration => generic_form_elaboration(base(1000, 1000)?),
+        // Quick mode deliberately uses one row so --scale maps directly to
+        // the dedicated 4,096-row proof boundary.
+        Workload::SettlementStateProof => settlement_state_proof(base(64, 1)?),
     }
 }
 
@@ -3001,6 +3616,41 @@ fn generic_form_elaboration(count: usize) -> Result<GeneratedWorkload, String> {
         || changed.lines().count() != source.lines().count()
     {
         return Err("generic form revision did not replace exactly one data row".into());
+    }
+    Ok(GeneratedWorkload {
+        source,
+        changed_source: Some(changed),
+        changed_kind: Some(ChangedKind::EvidenceRow),
+        explain_goal: None,
+        semantic_supported: true,
+        unsupported_reason: None,
+        semantic_probe: None,
+        semantic_probe_items: count,
+    })
+}
+
+fn settlement_state_proof(count: usize) -> Result<GeneratedWorkload, String> {
+    let mut source = String::with_capacity(count.saturating_mul(220));
+    for index in 0..count {
+        let _ = writeln!(
+            source,
+            "form settlement/{index:06} : payments::types::SettlementState\n  settlement payment/{index:06}\n  kind ach\n  state issued\n  at 2026-01-01\n  from customer/{index:06}\n  to merchant/{index:06}\n  instrument USD\n  amount {}\n",
+            100 + index,
+        );
+    }
+    // Keep one existing capable value stable in identity while changing its
+    // exact amount.  This exercises source revision and a new proof child.
+    let old_row = "  amount 100\n";
+    let new_row = "  amount 100.5\n";
+    if source.matches(old_row).count() != 1 {
+        return Err("settlement proof revision source is missing its first row".into());
+    }
+    let changed = source.replacen(old_row, new_row, 1);
+    if changed.matches(old_row).next().is_some()
+        || changed.matches(new_row).count() != 1
+        || changed.lines().count() != source.lines().count()
+    {
+        return Err("settlement proof revision did not replace exactly one form value".into());
     }
     Ok(GeneratedWorkload {
         source,
