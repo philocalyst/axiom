@@ -30,6 +30,8 @@ pub(crate) enum Tok<'s> {
     Number(Dec),
     /// The written number of `10%`, not yet divided by 100.
     Percent(Dec),
+    /// `1/3`: numerator and denominator as written, the latter unchecked.
+    Fraction(Dec, Dec),
     Span(Span),
     /// A lowercase word or `/`-separated path, possibly a glob. Keywords are
     /// names too: only the grammar knows where they count.
@@ -485,8 +487,11 @@ impl<'s> Lexer<'s> {
             (end, classes) = (part.end, classes | part.classes);
         }
         self.pos = end;
+        let text = &self.src[start..end];
         match classes & (LOWER | SYMBOL | SLASH) {
-            0 => Tok::Unit(&self.src[start..end]),
+            0 => Tok::Unit(text),
+            // `USD/MI`: a rate is two units around one slash.
+            SLASH if is_rate(text) => Tok::Unit(text),
             _ => Tok::Invalid(Malformed::Word),
         }
     }
@@ -638,6 +643,9 @@ fn classify_digit_word(text: &str) -> Tok<'_> {
     if let Some(span) = Span::parse(bytes) {
         return Tok::Span(span);
     }
+    if let Some((top, bottom)) = fraction_of(text) {
+        return Tok::Fraction(top, bottom);
+    }
     match () {
         _ if is_unpadded_date(text) => Tok::Invalid(Malformed::LooseDate),
         _ if is_slash_date(text) => Tok::Invalid(Malformed::SlashDate),
@@ -645,6 +653,22 @@ fn classify_digit_word(text: &str) -> Tok<'_> {
         _ if bytes.iter().any(u8::is_ascii_uppercase) => Tok::Invalid(Malformed::Word),
         _ => Tok::Name(text),
     }
+}
+
+/// `USD/MI`: two units joined by a slash.
+fn is_rate(text: &str) -> bool {
+    let is_unit = |part: &str| part.bytes().next().is_some_and(|first| first.is_ascii_uppercase());
+    text.split_once('/').is_some_and(|(per, of)| is_unit(per) && is_unit(of) && !of.contains('/'))
+}
+
+/// `1/3`: two whole numbers around one slash.
+fn fraction_of(text: &str) -> Option<(Dec, Dec)> {
+    let number = |part: &str| {
+        let digits = part.bytes().all(|b| matches!(b, b'0'..=b'9' | b'_'));
+        Dec::parse(part.as_bytes()).filter(|_| digits && (!part.contains('_') || underscores_between_digits(part.as_bytes())))
+    };
+    let (top, bottom) = text.split_once('/')?;
+    Some((number(top)?, number(bottom)?))
 }
 
 /// Whether every `_` in `text` sits between two digits.
