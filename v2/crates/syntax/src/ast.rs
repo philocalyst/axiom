@@ -990,14 +990,17 @@ pub struct Law<'s> {
 /// When a law applies.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Trigger {
-    /// `on in`: value arrives in a governed place.
+    /// `on in`: value arrives at the governed thing.
     In,
-    /// `on out`: value leaves a governed place.
+    /// `on out`: value leaves it.
     Out,
-    /// `on gain`: parcels leaving a governed place realize a gain.
+    /// `on gain`: parcels leaving it realize a gain.
     Gain,
-    /// `on spend`: money tied to a restricted entity leaves its owner's places.
+    /// `on spend`: money tied to a restricted entity leaves its owner.
     Spend,
+    /// `on flow`: a flow of the governed purpose (under an asset, one whose
+    /// purpose is `of` it).
+    Flow,
     /// `each month` or `each year`: a period of the governed thing ends.
     Each(Period),
     /// `each year closing 04-15`: the year is judged on that day of the next.
@@ -1009,7 +1012,7 @@ pub enum Trigger {
     },
     /// `by EXPR`: the journal reaches that date.
     By(ExprId),
-    /// `always`: after any change to a governed place.
+    /// `always`: after any change to the governed thing.
     Always,
 }
 
@@ -1053,7 +1056,7 @@ pub enum StepKind<'s> {
     Effect(Effect<'s>),
 }
 
-/// What a law does to the world: an obligation, or a tally.
+/// What a law does to the world: an obligation, a tally, or a basis.
 #[derive(Debug)]
 pub enum Effect<'s> {
     /// `owe EXPR to ENTITY [by EXPR] [as NAME]`: `amount` is owed to the entity
@@ -1062,6 +1065,13 @@ pub enum Effect<'s> {
     Owe { amount: ExprId, to: Name<'s>, due: Option<ExprId>, name: Option<Name<'s>> },
     /// `count EXPR as NAME`: adds `amount` to the tally `name`.
     Count { amount: ExprId, name: Name<'s> },
+    /// `consume EXPR`: lowers the basis of the governed asset (or its part)
+    /// by `amount`: depreciation, depletion.
+    Consume(ExprId),
+    /// `carry EXPR to UNIT within SPAN`: holds a disallowed loss and adds it to
+    /// the basis of the nearest acquisition of `to` within `within`, before or
+    /// after (a wash sale).
+    Carry { amount: ExprId, to: Name<'s>, within: Span },
 }
 
 // ─── Expressions ────────────────────────────────────────────────────────────
@@ -1155,7 +1165,9 @@ pub enum ExprKind<'s> {
     Name(Name<'s>),
     /// `USD`
     Unit(Name<'s>),
-    /// `#house`
+    /// `#groceries`
+    Purpose(Name<'s>),
+    /// `^inv-12`
     Code(Code<'s>),
     /// `self.purpose`: a field of the first.
     Field(ExprId, Name<'s>),
@@ -1169,6 +1181,8 @@ pub enum ExprKind<'s> {
     Binary(BinOp, ExprId, ExprId),
     /// `x is 401k | ira`: true when `x` matches any alternative.
     Is(ExprId, Many<ExprId>),
+    /// `repair of self`, in an alternative of `is`: a purpose, and the object it takes.
+    Of(ExprId, ExprId),
     /// `if c then a else b`
     If(ExprId, ExprId, ExprId),
     /// `0 USD 10% | 12_400 USD 12% | …`: thresholds and marginal rates.

@@ -83,6 +83,18 @@ law fourth-payment
   each year closing 04-15
   count amount as estimated
 
+law rental-expenses
+  on flow
+  when purpose is repair of self | #insurance and not ^lump
+  let last = tally(rental-income, year - 1)
+  consume amount
+  count amount as rental-expenses
+
+law wash-sale
+  on gain
+  when gain < empty
+  require tally(losses) <= 0 USD else carry gain to VTI within 30d
+
 // Paycheck: legs are targets.
 2026-01-15 acme -> 5_200 USD
   /// Pre-tax deferral.
@@ -320,7 +332,7 @@ fn the_v4_sketch_parses_clean() {
 #[test]
 fn a_realistic_file_parses_into_the_expected_shapes() {
     let file = parse_clean(EXAMPLE);
-    assert_eq!(file.items.len(), 76);
+    assert_eq!(file.items.len(), 78);
     let txns = txns(&file);
 
     // A paycheck: one named side, legs for the other, the last taking the remainder.
@@ -949,11 +961,12 @@ fn children(file: &File, kind: &ExprKind) -> Vec<ExprId> {
         | ExprKind::Empty
         | ExprKind::Name(_)
         | ExprKind::Unit(_)
+        | ExprKind::Purpose(_)
         | ExprKind::Code(_) => vec![],
         ExprKind::Field(base, _) | ExprKind::Unary(_, base) => vec![*base],
         ExprKind::Index(base, keys) => [*base].into_iter().chain(file[*keys].iter().copied()).collect(),
         ExprKind::Call(_, args) => file[*args].to_vec(),
-        ExprKind::Binary(_, lhs, rhs) => vec![*lhs, *rhs],
+        ExprKind::Binary(_, lhs, rhs) | ExprKind::Of(lhs, rhs) => vec![*lhs, *rhs],
         ExprKind::Is(lhs, alternatives) => [*lhs].into_iter().chain(file[*alternatives].iter().copied()).collect(),
         ExprKind::If(condition, then, otherwise) => vec![*condition, *then, *otherwise],
         ExprKind::Schedule(rows) => file[*rows].iter().flat_map(|row| [row.threshold, row.rate]).collect(),
@@ -963,7 +976,7 @@ fn children(file: &File, kind: &ExprKind) -> Vec<ExprId> {
 fn effect_roots(effect: &Effect) -> Vec<ExprId> {
     match effect {
         Effect::Owe { amount, due, .. } => [*amount].into_iter().chain(*due).collect(),
-        Effect::Count { amount, .. } => vec![*amount],
+        Effect::Count { amount, .. } | Effect::Consume(amount) | Effect::Carry { amount, .. } => vec![*amount],
     }
 }
 
@@ -1069,7 +1082,7 @@ fn show(file: &File, id: ExprId, src: &str) -> String {
     let exprs = &file.exprs;
     match &exprs[id].kind {
         ExprKind::Name(text) | ExprKind::Unit(text) => text.0.to_string(),
-        ExprKind::Num(_) | ExprKind::Amount(_) => src[exprs[id].loc.range()].to_string(),
+        ExprKind::Num(_) | ExprKind::Amount(_) | ExprKind::Span(_) => src[exprs[id].loc.range()].to_string(),
         ExprKind::Unary(UnOp::Neg, x) => format!("(-{})", show(file, *x, src)),
         ExprKind::Unary(UnOp::Not, x) => format!("(not {})", show(file, *x, src)),
         ExprKind::Binary(op, a, b) => format!("({} {} {})", show(file, *a, src), op.symbol(), show(file, *b, src)),
@@ -1078,6 +1091,13 @@ fn show(file: &File, id: ExprId, src: &str) -> String {
             format!("({} is {})", show(file, *x, src), alts.join(" | "))
         }
         ExprKind::Field(base, name) => format!("{}.{}", show(file, *base, src), name.0),
+        ExprKind::Purpose(name) => format!("#{}", name.0),
+        ExprKind::Code(code) => code.0.to_string(),
+        ExprKind::Of(purpose, object) => format!("({} of {})", show(file, *purpose, src), show(file, *object, src)),
+        ExprKind::Call(name, args) => {
+            let args: Vec<String> = file[*args].iter().map(|&arg| show(file, arg, src)).collect();
+            format!("{}({})", name.0, args.join(", "))
+        }
         ExprKind::If(c, t, e) => {
             format!("(if {} then {} else {})", show(file, *c, src), show(file, *t, src), show(file, *e, src))
         }
@@ -1103,6 +1123,37 @@ fn operators_bind_as_documented() {
     assert_eq!(condition("owner.age >= 5 USD"), "(owner.age >= 5 USD)");
     assert_eq!(condition("x is 529"), "(x is 529)");
     only_error("law l\n  always\n  when a < b < c\n", "chained-comparison");
+}
+
+#[test]
+fn expressions_name_purposes_codes_and_last_years_tallies() {
+    assert_eq!(condition("purpose is #groceries | ^inv-12"), "(purpose is #groceries | ^inv-12)");
+    // A purpose takes its object with `of`, in a bare name or a marked one.
+    assert_eq!(condition("purpose is repair of self | #insurance"), "(purpose is (repair of self) | #insurance)");
+    assert_eq!(condition("purpose is #improvement of self.owner"), "(purpose is (#improvement of self.owner))");
+    assert_eq!(condition("tally(x, year - 1) > 0 USD"), "(tally(x, (year - 1)) > 0 USD)");
+    assert_eq!(condition("straight-line(cost, 27.5y, from)"), "straight-line(cost, 27.5y, from)");
+}
+
+#[test]
+fn laws_may_fire_on_flows_and_consume_or_carry() {
+    let file = parse_clean(EXAMPLE);
+    let laws: Vec<&Law> = file.iter().collect();
+    let rental = laws.iter().find(|law| law.name.0 == "rental-expenses").unwrap();
+    assert_eq!(rental.trigger, Trigger::Flow);
+    let steps = &file[rental.steps];
+    assert!(matches!(steps[2].kind, StepKind::Effect(Effect::Consume(_))));
+    let wash = laws.iter().find(|law| law.name.0 == "wash-sale").unwrap();
+    let StepKind::Require { otherwise: Some(Effect::Carry { to, within, .. }), .. } = file[wash.steps][1].kind else {
+        panic!("a require that carries a loss")
+    };
+    assert_eq!((to.0, within), ("VTI", Span::days(30)));
+
+    only_error("law l\n  on flow\n  consume\n", "expected-expression");
+    only_error("law l\n  on flow\n  carry a to VTI\n", "expected-keyword");
+    only_error("law l\n  on flow\n  carry a to VTI within soon\n", "expected-span");
+    only_error("law l\n  on flow\n  carry a within 30d\n", "expected-to");
+    only_error("law l\n  on flws\n", "unknown-trigger");
 }
 
 #[test]

@@ -63,9 +63,10 @@ impl<'s> Parser<'s> {
 
     /// Whether the line is the schedule: it starts with an amount or a cadence.
     fn at_schedule(&self) -> bool {
+        let is_cadence = |word: &str| CADENCES.iter().any(|(cadence, _)| *cadence == word);
         match self.tok() {
             Tok::Number(_) => true,
-            Tok::Name(word) => matches!(word, "buy" | "twice" | "every") || CADENCES.iter().any(|(each, _)| *each == word),
+            Tok::Name(word) => matches!(word, "buy" | "twice" | "every") || is_cadence(word),
             _ => false,
         }
     }

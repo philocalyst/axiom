@@ -8,13 +8,20 @@ use crate::lex::{Tok, Token};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported};
 
-const ON_TRIGGERS: [(&str, Trigger); 4] =
-    [("in", Trigger::In), ("out", Trigger::Out), ("gain", Trigger::Gain), ("spend", Trigger::Spend)];
+const ON_TRIGGERS: [(&str, Trigger); 5] = [
+    ("in", Trigger::In),
+    ("out", Trigger::Out),
+    ("gain", Trigger::Gain),
+    ("spend", Trigger::Spend),
+    ("flow", Trigger::Flow),
+];
 
 pub(crate) const PERIODS: [(&str, Period); 2] = [("month", Period::Month), ("year", Period::Year)];
 
 const TRIGGER_WORDS: [&str; 4] = ["on", "each", "by", "always"];
-const STEP_WORDS: [&str; 6] = ["when", "let", "require", "warn", "owe", "count"];
+const STEP_WORDS: [&str; 4] = ["when", "let", "require", "warn"];
+/// The steps that do something to the world, which `require … else` may name too.
+const EFFECTS: [&str; 4] = ["owe", "count", "consume", "carry"];
 
 /// The trigger a law has so far, and where it was written.
 type Triggered = Option<(Trigger, Loc)>;
@@ -123,7 +130,7 @@ impl<'s> Parser<'s> {
                 let message = self.take_message();
                 Ok(StepKind::Require { cond, otherwise, message, warn: word == "warn" })
             }
-            "owe" | "count" => self.effect_after(word).map(StepKind::Effect),
+            _ if EFFECTS.contains(&word) => self.effect_after(word).map(StepKind::Effect),
             _ => Err(self.unknown_step(keyword, word)),
         }
     }
@@ -133,37 +140,48 @@ impl<'s> Parser<'s> {
         Some(self.bump_as(Name(text)))
     }
 
-    /// `owe EXPR to …` or `count EXPR as …`, after `else`.
+    /// An effect, after `else`.
     fn effect(&mut self) -> Parse<Effect<'s>> {
-        let word = ["owe", "count"].into_iter().find(|word| self.eat_word(word).is_some());
-        match word {
+        match EFFECTS.into_iter().find(|word| self.eat_word(word).is_some()) {
             Some(word) => self.effect_after(word),
-            None => Err(self.expected("expected-effect", "an effect: `owe` or `count`")),
+            None => Err(self.expected("expected-effect", "an effect: `owe`, `count`, `consume` or `carry`")),
         }
     }
 
-    /// What follows `owe` or `count`: `EXPR to ENTITY [by EXPR] [as NAME]`, or
-    /// `EXPR as NAME`.
+    /// What follows an effect's word: `EXPR to ENTITY [by EXPR] [as NAME]`,
+    /// `EXPR as NAME`, `EXPR`, or `EXPR to UNIT within SPAN`.
     fn effect_after(&mut self, word: &str) -> Parse<Effect<'s>> {
         let amount = self.expression()?;
-        if word == "count" {
-            self.expect_word("as", "expected-as", "`as` and the tally's name")?;
-            let name = self.name("expected-name", "the tally's name, such as `wages`")?;
-            return Ok(Effect::Count { amount, name });
+        match word {
+            "consume" => Ok(Effect::Consume(amount)),
+            "count" => {
+                self.expect_word("as", "expected-as", "`as` and the tally's name")?;
+                let name = self.name("expected-name", "the tally's name, such as `wages`")?;
+                Ok(Effect::Count { amount, name })
+            }
+            "carry" => {
+                self.expect_word("to", "expected-to", "`to` and the commodity whose basis takes it")?;
+                let to = self.unit("expected-commodity", "the commodity, such as `VTI`")?;
+                self.keyword("within")?;
+                let within = |tok| if let Tok::Span(span) = tok { Some(span) } else { None };
+                Ok(Effect::Carry { amount, to, within: self.take(within, "expected-span", "a span such as `30d`")? })
+            }
+            _ => {
+                self.expect_word("to", "expected-to", "`to` and the entity owed")?;
+                let to = self.name("expected-name", "the entity owed, such as `irs`")?;
+                let due = self.eat_word("by").map(|_| self.expression()).transpose()?;
+                let named = self.eat_word("as").map(|_| self.name("expected-name", "a name for the obligation"));
+                Ok(Effect::Owe { amount, to, due, name: named.transpose()? })
+            }
         }
-        self.expect_word("to", "expected-to", "`to` and the entity owed")?;
-        let to = self.name("expected-name", "the entity owed, such as `irs`")?;
-        let due = self.eat_word("by").map(|_| self.expression()).transpose()?;
-        let name = self.eat_word("as").map(|_| self.name("expected-name", "a name for the obligation")).transpose()?;
-        Ok(Effect::Owe { amount, to, due, name })
     }
 
     fn unknown_step(&mut self, keyword: Token<'s>, word: &str) -> Reported {
         let diag = Diagnostic::error("unknown-step", format!("unknown step `{word}`"))
             .label(keyword.loc, "not a step of a law");
-        let diag = match closest(word, STEP_WORDS.into_iter().chain(TRIGGER_WORDS)) {
+        let diag = match closest(word, STEP_WORDS.into_iter().chain(EFFECTS).chain(TRIGGER_WORDS)) {
             Some(near) => diag.fix(format!("did you mean `{near}`?"), keyword.loc, near),
-            None => diag.note("a law has a trigger, then `when`, `let`, `require`, `warn`, `owe` and `count` steps"),
+            None => diag.note("a law has a trigger, then `when`, `let`, `require`, `warn`, `owe`, `count`, `consume`, `carry`"),
         };
         self.report(diag)
     }
@@ -172,7 +190,7 @@ impl<'s> Parser<'s> {
 fn missing_trigger(header: Loc) -> Diagnostic {
     Diagnostic::error("missing-trigger", "this law has no trigger")
         .label(header, "when does it apply?")
-        .help("start the body with a trigger: `on in|out|gain|spend`, `each month|year`, `by DATE` or `always`")
+        .help("start the body with a trigger: `on in|out|gain|spend|flow`, `each month|year`, `by DATE` or `always`")
 }
 
 fn second_trigger(loc: Loc, first: Loc) -> Diagnostic {
