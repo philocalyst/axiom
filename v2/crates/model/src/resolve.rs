@@ -40,25 +40,10 @@ pub(crate) enum Cause {
     Plan,
 }
 
-/// The outcome of looking a name up among one sort of thing.
-pub(crate) enum Sought<T> {
-    Found(Id<T>),
-    /// Nothing answers. Other sorts of thing may.
-    Missing,
-    /// Several answer. That is an error whatever else exists.
-    Ambiguous(Diagnostic),
-}
-
-impl<T> Sought<T> {
-    /// The id, or the diagnostic: `missing` says what a miss means.
-    pub fn or_else(self, missing: impl FnOnce() -> Diagnostic) -> Result<Id<T>, Diagnostic> {
-        match self {
-            Sought::Found(id) => Ok(id),
-            Sought::Missing => Err(missing()),
-            Sought::Ambiguous(diagnostic) => Err(diagnostic),
-        }
-    }
-}
+/// What looking a name up among one sort of thing found: the thing, nothing
+/// (other sorts of thing may answer), or several, which is an error whatever
+/// else exists.
+pub(crate) type Seek<T> = Result<Option<Id<T>>, Diagnostic>;
 
 impl<'s> World<'s> {
     /// The symbol of a text the survey interned: codes, docs, waiver reasons.
@@ -115,11 +100,11 @@ impl<'s> World<'s> {
         kinds::unresolved(miss, word, &self.book.lookup.kinds, &self.book.names, &self.book.systems, loc_of)
     }
 
-    pub fn seek_kind(&self, home: Home, word: Word) -> Sought<Kind> {
+    pub fn seek_kind(&self, home: Home, word: Word) -> Seek<Kind> {
         match self.find_kind(home, word) {
-            Ok(kind) => Sought::Found(kind),
-            Err(miss @ Miss::Ambiguous(_)) => Sought::Ambiguous(self.kind_miss(miss, word)),
-            Err(Miss::Unknown { .. }) => Sought::Missing,
+            Ok(kind) => Ok(Some(kind)),
+            Err(Miss::Unknown { .. }) => Ok(None),
+            Err(miss) => Err(self.kind_miss(miss, word)),
         }
     }
 
@@ -130,12 +115,12 @@ impl<'s> World<'s> {
     // ─── Entities ───────────────────────────────────────────────────────────
 
     /// The entity `home` can see under `word`.
-    pub fn seek_entity(&self, home: Home, word: Word) -> Sought<Entity> {
+    pub fn seek_entity(&self, home: Home, word: Word) -> Seek<Entity> {
         let (lookup, scope) = (&self.book.lookup.entities, self.scopes.of(home));
         match lookup.find(&self.book.names, scope, word.text) {
-            Found::One(entity) => Sought::Found(entity),
-            Found::Nothing => Sought::Missing,
-            Found::Several(ids) => Sought::Ambiguous(self.ambiguous_entity(word, &ids)),
+            Found::One(entity) => Ok(Some(entity)),
+            Found::Nothing => Ok(None),
+            Found::Several(ids) => Err(self.ambiguous_entity(word, &ids)),
         }
     }
 
@@ -162,27 +147,27 @@ impl<'s> World<'s> {
     }
 
     pub fn entity(&self, home: Home, word: Word) -> Result<Id<Entity>, Diagnostic> {
-        self.seek_entity(home, word).or_else(|| self.missing_entity(home, word))
+        self.seek_entity(home, word)?.ok_or_else(|| self.missing_entity(home, word))
     }
 
     // ─── Places ─────────────────────────────────────────────────────────────
 
     /// A place by full path, unique suffix or alias. Not an entity.
-    pub fn seek_place(&self, word: Word) -> Sought<Place> {
+    pub fn seek_place(&self, word: Word) -> Seek<Place> {
         match self.book.lookup.places.find(&self.book.names, word.text, |_| true) {
-            Found::One(place) => Sought::Found(place),
-            Found::Nothing => Sought::Missing,
+            Found::One(place) => Ok(Some(place)),
+            Found::Nothing => Ok(None),
             Found::Several(ids) => {
                 let places = &self.book.places;
                 let names = &self.book.lookup.places;
                 let candidates = self.candidates(names, &ids, |id| places[id].path, |id| places[id].loc);
-                Sought::Ambiguous(ambiguous("ambiguous-place", "accounts", word, &candidates))
+                Err(ambiguous("ambiguous-place", "accounts", word, &candidates))
             }
         }
     }
 
     pub fn place(&self, word: Word) -> Result<Id<Place>, Diagnostic> {
-        self.seek_place(word).or_else(|| self.explain_unknown_place(word, false))
+        self.seek_place(word)?.ok_or_else(|| self.explain_unknown_place(word, false))
     }
 
     /// A place written as one end of a flow: a place, `?`, or an entity, which
@@ -216,10 +201,10 @@ impl<'s> World<'s> {
             Cause::Place => self.explain_unknown_place(word, true),
             Cause::AmbiguousPlace => self.explain_ambiguous_place(word),
             Cause::Entity => self.explain_unknown_entity(word),
-            Cause::AmbiguousEntity => match self.seek_entity(Home::Project, word) {
-                Sought::Ambiguous(diagnostic) => diagnostic,
-                _ => unknown("unknown-entity", "entity", word, None),
-            },
+            Cause::AmbiguousEntity => self
+                .seek_entity(Home::Project, word)
+                .err()
+                .unwrap_or_else(|| unknown("unknown-entity", "entity", word, None)),
             Cause::NoVia => self.explain_no_via(word),
             Cause::Commodity => self.explain_commodity(word),
             Cause::Plan => unknown("unknown-plan", "plan", word, None),
@@ -302,7 +287,7 @@ impl<'s> World<'s> {
     fn explain_unknown_entity(&self, word: Word) -> Diagnostic {
         let mut diagnostic = self.missing_entity(Home::Project, word);
         diagnostic = diagnostic.note("a payee must be a declared entity, so that it is typed like everything else");
-        if let Sought::Found(place) = self.seek_place(word) {
+        if let Ok(Some(place)) = self.seek_place(word) {
             let path = self.book.name(self.book.places[place].path);
             diagnostic = Diagnostic::error(
                 "unknown-entity",
@@ -316,10 +301,7 @@ impl<'s> World<'s> {
     }
 
     fn explain_no_via(&self, word: Word) -> Diagnostic {
-        let entity = match self.seek_entity(Home::Project, word) {
-            Sought::Found(entity) => Some(&self.book.entities[entity]),
-            _ => None,
-        };
+        let entity = self.seek_entity(Home::Project, word).ok().flatten().map(|entity| &self.book.entities[entity]);
         let mut diagnostic = Diagnostic::error(
             "entity-without-via",
             format!("`{}` is not tied to a place, so a flow cannot end there", word.text),
@@ -365,7 +347,7 @@ impl<'s> World<'s> {
     /// The param `home` can see under `word`: its own system's first, then its
     /// ancestors', then the used systems' (which must not disagree). Written
     /// `us/401k/limit`, it names that system's param, used or not.
-    pub fn seek_param(&self, home: Home, word: Word) -> Sought<Param> {
+    pub fn seek_param(&self, home: Home, word: Word) -> Seek<Param> {
         let (lookup, names) = (&self.book.lookup.params, &self.book.names);
         let scope = self.scopes.of(home);
         let (qualifier, leaf) = match word.text.rsplit_once('/') {
@@ -386,8 +368,8 @@ impl<'s> World<'s> {
         let best: Vec<Id<Param>> =
             seen.into_iter().filter(|&id| Some(scope.rank(lookup.home(id))) == nearest).collect();
         match best.as_slice() {
-            [only] => Sought::Found(*only),
-            [] => Sought::Missing,
+            [only] => Ok(Some(*only)),
+            [] => Ok(None),
             several => {
                 let candidates: Vec<Candidate> = several
                     .iter()
@@ -403,7 +385,7 @@ impl<'s> World<'s> {
                         }
                     })
                     .collect();
-                Sought::Ambiguous(ambiguous("ambiguous-param", "params", word, &candidates))
+                Err(ambiguous("ambiguous-param", "params", word, &candidates))
             }
         }
     }

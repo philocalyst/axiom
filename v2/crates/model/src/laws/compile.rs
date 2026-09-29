@@ -16,20 +16,26 @@ use axiom_syntax::{
     self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep, UnOp,
 };
 
-use super::types::{binary, expected, is_amount, is_test, mismatch, negate, unify};
+use super::types::{binary, expected, is_test, mismatch, negate, unify};
 use super::vars::When;
 use crate::book::{Entity, Param};
 use crate::declare::World;
-use crate::errors::{Word, article, list};
+use crate::errors::{Word, article, count, list, suggest};
 use crate::law::{
     Closing, Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Step, StepKind, Trigger, Ty, Value, Var, Window,
 };
-use crate::names::near;
 use crate::params::Shape;
-use crate::resolve::Sought;
 use crate::scope::Home;
+use crate::values::fits;
 
 const FUNCTIONS: [&str; 8] = ["total", "tally", "min", "max", "abs", "progressive", "value", "date"];
+
+/// The functions whose arguments are all of one type each: what they must be, and what they give.
+const FIXED: [(&str, &[Ty], Func, Ty); 3] = [
+    ("progressive", &[Ty::Schedule, Ty::Amount], Func::Progressive, Ty::Amount),
+    ("value", &[Ty::Amount, Ty::Unit], Func::Value, Ty::Amount),
+    ("date", &[Ty::Num, Ty::Num, Ty::Num], Func::Date, Ty::Day),
+];
 
 /// How the arguments of a call and a name in a pattern are read.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -41,29 +47,6 @@ enum Role {
     ParamBase,
     /// An alternative of `is`: a kind, place, entity or pattern, never a variable.
     Pattern,
-}
-
-/// The type a root expression must have.
-#[derive(Clone, Copy)]
-enum Want {
-    Amount,
-    Day,
-}
-
-impl Want {
-    fn accepts(self, ty: Ty) -> bool {
-        match self {
-            Want::Amount => is_amount(ty),
-            Want::Day => ty == Ty::Day,
-        }
-    }
-
-    fn phrase(self) -> &'static str {
-        match self {
-            Want::Amount => "an amount",
-            Want::Day => "a date",
-        }
-    }
 }
 
 /// Why a node has no type.
@@ -169,7 +152,7 @@ impl<'s> Compiler<'_, '_, 's> {
             ast::Trigger::Each(period) => Trigger::Each(period, None),
             ast::Trigger::Closing { month, day } => Trigger::Each(ast::Period::Year, Some(Closing { month, day })),
             ast::Trigger::Always => Trigger::Always,
-            ast::Trigger::By(root) => Trigger::By(self.expression(root, Want::Day)?),
+            ast::Trigger::By(root) => Trigger::By(self.expression(root, Ty::Day)?),
         })
     }
 
@@ -199,30 +182,25 @@ impl<'s> Compiler<'_, '_, 's> {
     fn effect(&mut self, effect: &WrittenEffect<'s>) -> Option<Effect> {
         match effect {
             WrittenEffect::Owe { amount, to, due, name } => {
-                let amount = self.expression(*amount, Want::Amount)?;
+                let amount = self.expression(*amount, Ty::Amount)?;
                 let to = self.owed_to(to.0);
                 let due = match due {
-                    Some(due) => Some(self.expression(*due, Want::Day)?),
+                    Some(due) => Some(self.expression(*due, Ty::Day)?),
                     None => None,
                 };
                 let name = name.map_or(self.law_name, |name| self.world.book.names.intern(name.0));
                 Some(Effect::Owe { amount, to: to?, due, name })
             }
             WrittenEffect::Count { amount, name } => {
-                let amount = self.expression(*amount, Want::Amount)?;
+                let amount = self.expression(*amount, Ty::Amount)?;
                 Some(Effect::Count { amount, name: self.world.book.names.intern(name.0) })
             }
         }
     }
 
     fn owed_to(&mut self, name: &'s str) -> Option<Id<Entity>> {
-        match self.world.entity(self.home, Word { text: name, loc: self.file.loc(name) }) {
-            Ok(entity) => Some(entity),
-            Err(diagnostic) => {
-                self.report(diagnostic);
-                None
-            }
-        }
+        let entity = self.world.entity(self.home, Word { text: name, loc: self.file.loc(name) });
+        entity.map_err(|diagnostic| self.report(diagnostic)).ok()
     }
 
     fn report(&mut self, diagnostic: Diagnostic) {
@@ -283,14 +261,14 @@ impl<'s> Compiler<'_, '_, 's> {
         (!self.poisoned[node.index()]).then_some(node)
     }
 
-    /// A root that must have the type `want`.
-    fn expression(&mut self, root: ExprId, want: Want) -> Option<NodeId> {
+    /// A root that must have the type `want`: an amount or a date.
+    fn expression(&mut self, root: ExprId, want: Ty) -> Option<NodeId> {
         let node = self.value(root)?;
         let found = &self.nodes[node.index()];
-        if want.accepts(found.ty) {
+        if fits(want, found.ty) {
             return Some(node);
         }
-        let diagnostic = expected(want.phrase(), found.ty, found.loc);
+        let diagnostic = expected(&article(want.word()), found.ty, found.loc);
         self.report(diagnostic);
         None
     }
@@ -375,12 +353,10 @@ impl<'s> Compiler<'_, '_, 's> {
                 if let Some(var) = Var::parse(word.text) {
                     return self.variable(var, word);
                 }
-                match self.world.seek_param(self.home, word) {
-                    Sought::Found(param) => return self.bare_param(param, word),
-                    Sought::Ambiguous(diagnostic) => return Err(diagnostic.into()),
-                    Sought::Missing => {}
+                match self.world.seek_param(self.home, word)? {
+                    Some(param) => self.bare_param(param, word),
+                    None => self.constant(word),
                 }
-                self.constant(word)
             }
         }
     }
@@ -416,23 +392,18 @@ impl<'s> Compiler<'_, '_, 's> {
         if is_pattern(word.text) {
             return Ok((Op::Const(Value::Glob(self.world.book.names.intern(word.text))), Ty::Glob));
         }
-        match self.world.seek_kind(self.home, word) {
-            Sought::Found(kind) => return Ok((Op::Const(Value::Kind(kind)), Ty::Kind)),
-            Sought::Ambiguous(diagnostic) => return Err(diagnostic.into()),
-            Sought::Missing => {}
+        if let Some(kind) = self.world.seek_kind(self.home, word)? {
+            return Ok((Op::Const(Value::Kind(kind)), Ty::Kind));
         }
         // A system knows nothing of the project's places.
-        if self.home == Home::Project {
-            match self.world.seek_place(word) {
-                Sought::Found(place) => return Ok((Op::Const(Value::Place(place)), Ty::Place)),
-                Sought::Ambiguous(diagnostic) => return Err(diagnostic.into()),
-                Sought::Missing => {}
-            }
+        if self.home == Home::Project
+            && let Some(place) = self.world.seek_place(word)?
+        {
+            return Ok((Op::Const(Value::Place(place)), Ty::Place));
         }
-        match self.world.seek_entity(self.home, word) {
-            Sought::Found(entity) => Ok((Op::Const(Value::Entity(entity)), Ty::Entity)),
-            Sought::Ambiguous(diagnostic) => Err(diagnostic.into()),
-            Sought::Missing => Err(self.unknown_constant(word).into()),
+        match self.world.seek_entity(self.home, word)? {
+            Some(entity) => Ok((Op::Const(Value::Entity(entity)), Ty::Entity)),
+            None => Err(self.unknown_constant(word).into()),
         }
     }
 
@@ -459,13 +430,10 @@ impl<'s> Compiler<'_, '_, 's> {
         if self.home == Home::Project {
             known.extend(lookup.places.keys(names));
         }
-        let mut diagnostic = Diagnostic::error("unknown-name", format!("`{}` means nothing in this law", word.text))
+        let diagnostic = Diagnostic::error("unknown-name", format!("`{}` means nothing in this law", word.text))
             .label(word.loc, "not a variable, param, kind, place or entity here")
             .note("a name in a law is a variable of the trigger (`amount`, `from`, `date`, …), a `let`, a param, or a kind, place or entity");
-        if let Some(near) = near(word.text, known) {
-            diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), word.loc, near);
-        }
-        diagnostic
+        suggest(diagnostic, word.loc, word.text, known)
     }
 
     // ─── Fields and lookups ─────────────────────────────────────────────────
@@ -512,9 +480,7 @@ impl<'s> Compiler<'_, '_, 's> {
             Diagnostic::error("unknown-field", format!("{} has no `{}`", article(ty.word()), field.text))
                 .label(field.loc, "no such field")
                 .context(self.file.exprs[receiver].loc, format!("this is {}", article(ty.word())));
-        if let Some(near) = near(field.text, valid.iter().copied()) {
-            diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), field.loc, near);
-        }
+        diagnostic = suggest(diagnostic, field.loc, field.text, valid.iter().copied());
         if valid.is_empty() {
             diagnostic.note(format!("{} has no fields", article(ty.word())))
         } else {
@@ -530,7 +496,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 .into());
         };
         let word = Word { text: name.0, loc: self.file.exprs[base].loc };
-        let param = self.world.seek_param(self.home, word).or_else(|| self.world.missing_param(self.home, word))?;
+        let param = self.world.seek_param(self.home, word)?.ok_or_else(|| self.world.missing_param(self.home, word))?;
         let keys = self.children(keys)?;
         self.check_keys(param, word, &keys, loc)?;
         Ok((Op::Param(param, keys.into_iter().map(|(node, _)| node).collect()), self.param_ty(param)))
@@ -567,17 +533,10 @@ impl<'s> Compiler<'_, '_, 's> {
     fn check_keys(&self, param: Id<Param>, word: Word, keys: &[(NodeId, Ty)], loc: Loc) -> Check<()> {
         let shape = Shape::of(&self.world.book.params[param].rows[0]);
         if keys.len() != shape.keys() {
-            let plural = |n: usize| if n == 1 { "key" } else { "keys" };
+            let takes = count(shape.keys(), "key");
             return Err(Diagnostic::error(
                 "param-lookup",
-                format!(
-                    "`{}` takes {} {}, but {} {} given",
-                    word.text,
-                    shape.keys(),
-                    plural(shape.keys()),
-                    keys.len(),
-                    if keys.len() == 1 { "was" } else { "were" }
-                ),
+                format!("`{}` takes {takes}, not {}", word.text, keys.len()),
             )
             .label(loc, "wrong number of keys")
             .context(self.world.book.params[param].loc, "the param")
@@ -634,34 +593,17 @@ impl<'s> Compiler<'_, '_, 's> {
                 let ty = negate(ty_at(0)).ok_or_else(|| expected("an amount or a number", ty_at(0), arg_loc(0)))?;
                 (Func::Abs, ty)
             }
-            "progressive" => {
-                arity(2, 2)?;
-                if ty_at(0) != Ty::Schedule {
-                    return Err(expected("a schedule", ty_at(0), arg_loc(0)).into());
+            name => {
+                let Some(&(_, wants, func, ty)) = FIXED.iter().find(|entry| entry.0 == name) else {
+                    return Err(self.unknown_function(function).into());
+                };
+                arity(wants.len(), wants.len())?;
+                if let Some((at, &want)) = wants.iter().enumerate().find(|&(at, &want)| !fits(want, ty_at(at))) {
+                    let phrase = if want == Ty::Unit { "a commodity".into() } else { article(want.word()) };
+                    return Err(expected(&phrase, ty_at(at), arg_loc(at)).into());
                 }
-                if !is_amount(ty_at(1)) {
-                    return Err(expected("an amount", ty_at(1), arg_loc(1)).into());
-                }
-                (Func::Progressive, Ty::Amount)
+                (func, ty)
             }
-            "value" => {
-                arity(2, 2)?;
-                if !is_amount(ty_at(0)) {
-                    return Err(expected("an amount", ty_at(0), arg_loc(0)).into());
-                }
-                if ty_at(1) != Ty::Unit {
-                    return Err(expected("a commodity", ty_at(1), arg_loc(1)).into());
-                }
-                (Func::Value, Ty::Amount)
-            }
-            "date" => {
-                arity(3, 3)?;
-                if let Some(at) = (0..3).find(|&at| ty_at(at) != Ty::Num) {
-                    return Err(expected("a number", ty_at(at), arg_loc(at)).into());
-                }
-                (Func::Date, Ty::Day)
-            }
-            _ => return Err(self.unknown_function(function).into()),
         };
         Ok((Op::Call(func, nodes), ty))
     }
@@ -707,25 +649,19 @@ impl<'s> Compiler<'_, '_, 's> {
             return Err(expected("the name of a tally", Ty::Num, expr.loc).into());
         };
         if !self.world.tallies.contains(name.0) {
-            let mut diagnostic = Diagnostic::error("unknown-tally", format!("no law counts `{}`", name.0))
+            let diagnostic = Diagnostic::error("unknown-tally", format!("no law counts `{}`", name.0))
                 .label(expr.loc, "nothing is tallied under this name")
                 .note("`tally(NAME)` reads what `count … as NAME` lines add up");
-            if let Some(near) = near(name.0, self.world.tallies.iter().copied()) {
-                diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), expr.loc, near);
-            }
-            return Err(diagnostic.into());
+            return Err(suggest(diagnostic, expr.loc, name.0, self.world.tallies.iter().copied()).into());
         }
         Ok(Func::Tally(self.world.book.names.intern(name.0)))
     }
 
     fn unknown_function(&self, function: Word) -> Diagnostic {
-        let mut diagnostic = Diagnostic::error("unknown-function", format!("there is no function `{}`", function.text))
+        let diagnostic = Diagnostic::error("unknown-function", format!("there is no function `{}`", function.text))
             .label(function.loc, "not a function")
             .note(format!("the functions are {}", list(&FUNCTIONS)));
-        if let Some(near) = near(function.text, FUNCTIONS) {
-            diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), function.loc, near);
-        }
-        diagnostic
+        suggest(diagnostic, function.loc, function.text, FUNCTIONS)
     }
 
     // ─── Operators ──────────────────────────────────────────────────────────

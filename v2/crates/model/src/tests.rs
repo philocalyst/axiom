@@ -970,3 +970,51 @@ law damaged
     assert!(diags.is_empty(), "nothing follows from the missing line: {diags:?}");
     assert!(book.law("damaged").is_err(), "and the law is left out rather than run without its `let`");
 }
+
+#[test]
+fn a_header_waiver_covers_every_leg_with_one_location() {
+    let text = "
+2026-01-13 acme -> 5_200 USD ! \"late\"
+  savings   800 USD
+  checking  ...
+2026-01-14 acme -> 100 USD
+  savings   40 USD ! \"only this leg\"
+  checking  ...
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let flows = flows_of(book);
+        let waived: Vec<_> = flows.iter().map(|flow| flow.waive.map(|waive| waive.loc)).collect();
+        assert!(waived[0].is_some() && waived[0] == waived[1], "one `!` on the header, one location: {waived:?}");
+        assert!(waived[2].is_some() && waived[3].is_none(), "a leg's own `!` covers that leg alone: {waived:?}");
+        let txns: Vec<_> = book.txns.iter().map(|(_, txn)| txn.waive.is_some()).collect();
+        assert_eq!(txns, [true, false]);
+        assert_ne!(waived[0], waived[2]);
+    });
+}
+
+#[test]
+fn a_due_day_belongs_to_the_header_and_an_opening_line_says_since() {
+    let text = "
+2026-01-13 acme -> 100 USD
+  savings   40 USD due 30d
+  checking  ...
+";
+    with_book(text, |_, diags| assert_eq!(codes(diags), ["due-on-leg"], "{diags:?}"));
+}
+
+#[test]
+fn an_occurrence_may_only_override_legs_the_plan_has() {
+    let text = "
+plan paycheck every 2w from 2026-01-02 acme -> 5_200 USD
+  savings   800 USD
+  checking  ...
+2026-01-16 paycheck
+  brokerage  100 USD
+";
+    with_book(text, |book, diags| {
+        assert_eq!(codes(diags), ["plan-leg"], "{diags:?}");
+        assert!(diags[0].notes[0].contains("savings"), "{:?}", diags[0].notes);
+        assert!(book.flows.is_empty(), "the occurrence adds no flows when one of its lines is wrong");
+    });
+}

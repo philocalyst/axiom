@@ -3,6 +3,8 @@
 
 use axiom_core::{Day, Diagnostic, Loc};
 
+use crate::names::near;
+
 /// A word as written, and where.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Word<'s> {
@@ -16,6 +18,19 @@ pub(crate) fn unknown(code: &'static str, noun: &str, word: Word, suggestion: Op
         .label(word.loc, format!("not a known {noun}"));
     match suggestion {
         Some(near) => diagnostic.fix(format!("did you mean `{near}`?"), word.loc, near),
+        None => diagnostic,
+    }
+}
+
+/// `did you mean X?`, as an edit at `loc`, when `candidates` holds a near miss of `word`.
+pub(crate) fn suggest<'a>(
+    diagnostic: Diagnostic,
+    loc: Loc,
+    word: &str,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Diagnostic {
+    match near(word, candidates) {
+        Some(near) => diagnostic.fix(format!("did you mean `{near}`?"), loc, near),
         None => diagnostic,
     }
 }
