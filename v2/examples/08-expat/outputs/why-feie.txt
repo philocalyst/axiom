@@ -1,4 +1,4 @@
-$ axiom why feie --today 2026-01-06
+$ axiom why feie --today 2026-04-16
 
 Why feie
 
@@ -6,16 +6,23 @@ Why feie
   ───────────────────────────────────────────────────────────
   When      each year
   Governs   everyone living under us/abroad, and all they own
-  Written   systems/us/abroad.ax:41
-  Ran       1 times
-  Recorded  0 violations, 3 effects
+  Written   systems/us/abroad.ax:50
+  Ran       1 time
+  Recorded  0 violations, 4 effects
   · The foreign earned income exclusion (IRC §911): pay earned abroad, up to a
   · yearly limit prorated by the days spent abroad, is not taxed by the United
-  · States. `days-abroad` is the number of qualifying days in the year.
+  · States. It comes off income as an adjustment. The income that stays is taxed
+  · as if the excluded pay were on top of it (IRC §911(f), the "stacking rule"): the
+  · extra tax is the tax on everything less the tax on the excluded pay less the
+  · tax on what is left, and it is added to the year's other taxes.
+  ·
+  · To fix: `days-abroad` is the number of qualifying days in the year; the
+  · exclusion cannot exceed the limit for those days or the pay earned abroad.
 
 Recent effects
-  Date        Effect                     Amount  Owed to            From
-  ────────────────────────────────────────────────────────────────────────────
-  2025-12-31  feie-excluded       37,564.58 USD                     period end
-  2025-12-31  agi                -37,564.58 USD                     period end
-  2025-12-31  feie-stacking-tax    3,599.64 USD  irs by 2026-04-15  period end
+  Date        Effect             Owner         Amount  Owed to  From
+  ────────────────────────────────────────────────────────────────────────
+  2025-12-31  feie-excluded      me     37,564.58 USD           period end
+  2025-12-31  adjustments        me     37,564.58 USD           period end
+  2025-12-31  other-taxes        me      3,463.56 USD           period end
+  2025-12-31  feie-stacking-tax  me      3,463.56 USD           period end

@@ -1,8 +1,8 @@
 2025-07-01 girokonto -> de-rent 1_450 EUR / hausverwaltung
 2025-07-03 visa -> subscriptions 15.49 USD / netflix
 
-/// The savings move to a German high-interest account. The US bank does the transfer and keeps a rate spread of about 1.1% instead of writing a fee: both amounts are written, the cost is implicit.
-2025-07-03 us-savings 24_000.00 USD -> tagesgeld 20_334.10 EUR
+/// The savings move to a German high-interest account. The US bank does the transfer and keeps a rate spread of about 1.1% instead of writing a fee: the flow states the euros received and the rate it charged (the mid-market rate of the day is in prices/fx.ax), so the 24,000.00 dollars out follow from it and the cost is implicit.
+2025-07-03 us-savings -> tagesgeld 20_334.11 EUR @ 1.180283 USD
 2025-07-03 girokonto -> groceries 47.09 EUR
 2025-07-05 us-checking -> 420 USD / mohela
   student-loan            309.44 USD   // principal
@@ -35,9 +35,9 @@
   kapitalertragsteuer     8.85 EUR
   tagesgeld               ...
 2025-07-31 visa = 53.48 USD
-2025-07-31 us-checking = 13_738.04 USD
+2025-07-31 us-checking = 18_139.04 USD
 2025-07-31 us-savings = 18_238.53 USD
 2025-07-31 student-loan = 28_978.63 USD
 2025-07-31 girokonto = 5_860.61 EUR
-2025-07-31 tagesgeld = 20_358.80 EUR
+2025-07-31 tagesgeld = 20_358.81 EUR
 2025-07-31 kaution = 3_600.00 EUR

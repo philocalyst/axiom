@@ -1,96 +1,15 @@
-$ axiom register visa --today 2026-01-06
+$ axiom register visa --from 2025-10-01 --to 2025-10-20 --today 2026-04-16
 
 Register: liabilities/visa
 
-  Date        With                     Payee         Note         Amount        Balance
-  ─────────────────────────────────────────────────────────────────────────────────────
-  2025-01-01  equity/opening                               -1,284.19 USD  -1,284.19 USD
-  2025-01-04  expenses/groceries                              -90.40 USD  -1,374.59 USD
-  2025-01-09  expenses/dining                                -116.98 USD  -1,491.57 USD
-  2025-01-11  expenses/groceries                              -71.37 USD  -1,562.94 USD
-  2025-01-14  expenses/utilities                             -139.34 USD  -1,702.28 USD
-  2025-01-16  expenses/transport                              -35.11 USD  -1,737.39 USD
-  2025-01-18  expenses/groceries                             -102.27 USD  -1,839.66 USD
-  2025-01-20  assets/bank/us-checking                       1,284.19 USD    -555.47 USD
-  2025-01-21  expenses/dining                                -109.93 USD    -665.40 USD
-  2025-01-23  expenses/shopping                               -65.60 USD    -731.00 USD
-  2025-01-25  expenses/groceries                             -111.35 USD    -842.35 USD
-  2025-02-04  expenses/groceries                             -111.32 USD    -953.67 USD
-  2025-02-09  expenses/dining                                 -76.25 USD  -1,029.92 USD
-  2025-02-11  expenses/groceries                             -104.55 USD  -1,134.47 USD
-  2025-02-14  expenses/utilities                             -103.46 USD  -1,237.93 USD
-  2025-02-16  expenses/transport                              -79.83 USD  -1,317.76 USD
-  2025-02-18  expenses/groceries                              -88.06 USD  -1,405.82 USD
-  2025-02-20  assets/bank/us-checking                         842.35 USD    -563.47 USD
-  2025-02-21  expenses/dining                                 -48.73 USD    -612.20 USD
-  2025-02-23  expenses/shopping                               -33.40 USD    -645.60 USD
-  2025-02-25  expenses/groceries                              -81.34 USD    -726.94 USD
-  2025-03-04  expenses/groceries                             -106.69 USD    -833.63 USD
-  2025-03-09  expenses/dining                                -112.17 USD    -945.80 USD
-  2025-03-11  expenses/groceries                              -94.12 USD  -1,039.92 USD
-  2025-03-14  expenses/utilities                              -97.96 USD  -1,137.88 USD
-  2025-03-16  expenses/transport                              -45.50 USD  -1,183.38 USD
-  2025-03-18  expenses/groceries                             -169.24 USD  -1,352.62 USD
-  2025-03-20  assets/bank/us-checking                         726.94 USD    -625.68 USD
-  2025-03-21  expenses/dining                                 -35.05 USD    -660.73 USD
-  2025-03-23  expenses/shopping                              -135.43 USD    -796.16 USD
-  2025-03-25  expenses/groceries                              -90.18 USD    -886.34 USD
-  2025-04-04  expenses/groceries                             -129.48 USD  -1,015.82 USD
-  2025-04-09  expenses/dining                                 -67.08 USD  -1,082.90 USD
-  2025-04-11  expenses/groceries                             -122.22 USD  -1,205.12 USD
-  2025-04-14  expenses/utilities                             -124.83 USD  -1,329.95 USD
-  2025-04-16  expenses/transport                              -68.98 USD  -1,398.93 USD
-  2025-04-18  expenses/groceries                             -161.12 USD  -1,560.05 USD
-  2025-04-20  assets/bank/us-checking                         886.34 USD    -673.71 USD
-  2025-04-21  expenses/dining                                 -76.52 USD    -750.23 USD
-  2025-04-23  expenses/shopping                               -54.16 USD    -804.39 USD
-  2025-04-25  expenses/groceries                              -65.15 USD    -869.54 USD
-  2025-05-04  expenses/groceries                             -155.14 USD  -1,024.68 USD
-  2025-05-09  expenses/dining                                 -79.09 USD  -1,103.77 USD
-  2025-05-11  expenses/groceries                              -77.45 USD  -1,181.22 USD
-  2025-05-14  expenses/utilities                             -156.22 USD  -1,337.44 USD
-  2025-05-16  expenses/transport                              -64.74 USD  -1,402.18 USD
-  2025-05-18  expenses/groceries                             -145.60 USD  -1,547.78 USD
-  2025-05-20  assets/bank/us-checking                         869.54 USD    -678.24 USD
-  2025-05-21  expenses/dining                                -100.48 USD    -778.72 USD
-  2025-05-23  expenses/shopping                               -78.56 USD    -857.28 USD
-  2025-05-25  expenses/groceries                              -88.54 USD    -945.82 USD
-  2025-06-04  expenses/groceries                             -149.03 USD  -1,094.85 USD
-  2025-06-09  expenses/dining                                 -50.80 USD  -1,145.65 USD
-  2025-06-11  expenses/groceries                             -128.79 USD  -1,274.44 USD
-  2025-06-14  expenses/utilities                              -96.83 USD  -1,371.27 USD
-  2025-06-14  expenses/travel          lufthansa           -1,180.40 USD  -2,551.67 USD
-  2025-06-16  expenses/transport                              -71.41 USD  -2,623.08 USD
-  2025-06-18  expenses/groceries                             -143.19 USD  -2,766.27 USD
-  2025-06-20  assets/bank/us-checking                         945.82 USD  -1,820.45 USD
-  2025-06-21  expenses/dining                                -106.00 USD  -1,926.45 USD
-  2025-06-23  expenses/shopping                              -173.39 USD  -2,099.84 USD
-  2025-06-25  expenses/groceries                             -100.29 USD  -2,200.13 USD
-  2025-07-03  expenses/subscriptions   netflix                -15.49 USD  -2,215.62 USD
-  2025-07-07  expenses/subscriptions   apple                   -2.99 USD  -2,218.61 USD
-  2025-07-15  expenses/subscriptions   us-phone               -35.00 USD  -2,253.61 USD
-  2025-07-20  assets/bank/us-checking                       2,200.13 USD     -53.48 USD
-  2025-08-03  expenses/subscriptions   netflix                -15.49 USD     -68.97 USD
-  2025-08-07  expenses/subscriptions   apple                   -2.99 USD     -71.96 USD
-  2025-08-15  expenses/subscriptions   us-phone               -35.00 USD    -106.96 USD
-  2025-08-20  assets/bank/us-checking                          53.48 USD     -53.48 USD
-  2025-09-03  expenses/subscriptions   netflix                -15.49 USD     -68.97 USD
-  2025-09-07  expenses/subscriptions   apple                   -2.99 USD     -71.96 USD
-  2025-09-15  expenses/subscriptions   us-phone               -35.00 USD    -106.96 USD
-  2025-09-20  assets/bank/us-checking                          53.48 USD     -53.48 USD
-  2025-10-03  expenses/subscriptions   netflix                -15.49 USD     -68.97 USD
-  2025-10-07  expenses/subscriptions   apple                   -2.99 USD     -71.96 USD
-  2025-10-10  expenses/travel          london-hotel          -855.51 USD    -927.47 USD
-  2025-10-10  expenses/fx-fees         london-hotel           -25.67 USD    -953.14 USD
-  2025-10-14  expenses/travel          london-hotel           -77.75 USD  -1,030.89 USD
-  2025-10-14  expenses/fx-fees         london-hotel            -2.33 USD  -1,033.22 USD
-  2025-10-15  expenses/subscriptions   us-phone               -35.00 USD  -1,068.22 USD
-  2025-10-20  assets/bank/us-checking                          53.48 USD  -1,014.74 USD
-  2025-11-03  expenses/subscriptions   netflix                -15.49 USD  -1,030.23 USD
-  2025-11-07  expenses/subscriptions   apple                   -2.99 USD  -1,033.22 USD
-  2025-11-15  expenses/subscriptions   us-phone               -35.00 USD  -1,068.22 USD
-  2025-11-20  assets/bank/us-checking                       1,014.74 USD     -53.48 USD
-  2025-12-03  expenses/subscriptions   netflix                -15.49 USD     -68.97 USD
-  2025-12-07  expenses/subscriptions   apple                   -2.99 USD     -71.96 USD
-  2025-12-15  expenses/subscriptions   us-phone               -35.00 USD    -106.96 USD
-  2025-12-20  assets/bank/us-checking                          53.48 USD     -53.48 USD
+  Date        With                     Payee         Note      Amount       Balance
+  ─────────────────────────────────────────────────────────────────────────────────
+  2025-10-01  opening balance                                             53.48 USD
+  2025-10-03  expenses/subscriptions   netflix              15.49 USD     68.97 USD
+  2025-10-07  expenses/subscriptions   apple                 2.99 USD     71.96 USD
+  2025-10-10  expenses/travel          london-hotel        855.51 USD    927.47 USD
+  2025-10-10  expenses/fx-fees         london-hotel         25.67 USD    953.14 USD
+  2025-10-14  expenses/travel          london-hotel         77.75 USD  1,030.89 USD
+  2025-10-14  expenses/fx-fees         london-hotel          2.33 USD  1,033.22 USD
+  2025-10-15  expenses/subscriptions   us-phone             35.00 USD  1,068.22 USD
+  2025-10-20  assets/bank/us-checking                      -53.48 USD  1,014.74 USD

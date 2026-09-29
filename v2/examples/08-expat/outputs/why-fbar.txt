@@ -1,4 +1,4 @@
-$ axiom why fbar --today 2026-01-06
+$ axiom why fbar --today 2026-04-16
 
 Why fbar
 
@@ -6,18 +6,18 @@ Why fbar
   ─────────────────────────────────
   When      each year
   Governs   everything in this book
-  Written   accounts.ax:169
-  Ran       1 times
-  Recorded  1 violations, 1 effects
+  Written   accounts.ax:171
+  Ran       1 time
+  Recorded  1 violation, 1 effect
   · FBAR: the highest values of the year, account by account, added up. Each
   · value is at the rate of the day, where the Treasury uses one year-end rate.
 
 Recent violations
-  Date        Violation                                                               From
-  ──────────────────────────────────────────────────────────────────────────────────────────────
-  2025-12-31  foreign accounts passed 10,000 USD: file FinCEN 114 (FBAR) by April 15  period end
+  Date        Violation                                                                                                                                      From
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-12-31  foreign accounts passed 10,000 USD: file FinCEN 114 (FBAR) by April 15: 38,927.16 USD against a limit of 10,000.00 USD, over by 28,927.16 USD  period end
 
 Recent effects
-  Date        Effect                 Amount  Owed to  From
-  ──────────────────────────────────────────────────────────────
-  2025-12-31  fbar-aggregate  38,927.15 USD           period end
+  Date        Effect          Owner         Amount  Owed to  From
+  ─────────────────────────────────────────────────────────────────────
+  2025-12-31  fbar-aggregate  me     38,927.16 USD           period end

@@ -1,7 +1,12 @@
-// Where the money is, in three currencies, and who is paid. The foreign account
-// reporting check is the running-maximum trick described below.
+// Where the money is, in three currencies, and who is paid. Euros and pounds are
+// cash here: they are declared in `std` as currencies, so spending them realizes
+// no capital gain, and `available` counts them. The foreign account reporting
+// check is the running-maximum trick described below.
 
 // ─── United States ──────────────────────────────────────────────────────────
+
+/// Interest paid on a student loan, which `tax.ax` deducts up to a limit.
+kind student-loan-interest : expense
 
 account assets/bank/us-checking : bank
 account assets/bank/us-savings  : bank
@@ -29,7 +34,6 @@ account liabilities/student-loan : loan
 /// The current account (Girokonto): salary arrives here and rent leaves.
 account assets/de/girokonto : bank
   holds EUR
-  select fifo
   law fbar-max
     always
     let v = value(balance, USD)
@@ -38,7 +42,6 @@ account assets/de/girokonto : bank
 /// A high-interest savings account (Tagesgeld).
 account assets/de/tagesgeld : bank
   holds EUR
-  select fifo
   law fbar-max
     always
     let v = value(balance, USD)
@@ -57,7 +60,6 @@ account assets/de/kaution : bank
 /// A Wise account in pounds, for the trip. It is a foreign account too.
 account assets/uk/wise : bank
   holds GBP
-  select fifo
   law fbar-max
     always
     let v = value(balance, USD)
@@ -70,7 +72,6 @@ account income/salary-us : wages
 account income/salary-de : foreign-wages
 account income/interest    : interest
 account income/interest-de : interest
-account equity/opening
 
 
 // ─── Expenses ───────────────────────────────────────────────────────────────
@@ -91,7 +92,8 @@ account expenses/phone
 account expenses/travel
 account expenses/conference
 account expenses/sightseeing
-account expenses/loan-interest
+/// Interest on the student loan: the servicer's statement splits each payment. `tax.ax` counts it.
+account expenses/loan-interest : student-loan-interest
 
 /// What conversions and card fees cost. Written by hand: a conversion with a
 /// spread, not a fee, has no line here.

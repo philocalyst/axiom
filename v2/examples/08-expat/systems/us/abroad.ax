@@ -1,21 +1,22 @@
 /// A United States citizen living abroad.
 ///
 /// The United States taxes its citizens on everything they earn anywhere, so
-/// nothing of `us` stops applying when someone moves. `lives` cannot say "under
-/// two jurisdictions at once" (a second residence ends the first), so this system
-/// nests under `us`: whoever lives at `us/abroad/<country>` is under `us` (federal
-/// law, by the path) and under the country's own laws.
+/// nothing of `us` stops applying when someone moves. A citizen abroad `lives us`
+/// (or a state of it, until the move) and, on the days abroad, also
+/// `lives us/abroad` and the country. Residences may overlap, so both systems
+/// govern the same days. This one adds what only a citizen abroad has:
 ///
-/// What it adds:
 ///   foreign-earned   pay from a place of kind `foreign-wages`, in dollars
 ///   feie-excluded    the foreign earned income exclusion (Form 2555)
 ///
+/// The exclusion is an adjustment: it counts into the `adjustments` line of `us`,
+/// which takes it off income, and the tax it costs through the "stacking rule"
+/// counts into `other-taxes`, so the payments already made are set against the
+/// whole of it.
+///
 /// Simplified on purpose: the choice between the exclusion and the foreign tax
 /// credit is fixed, and a year's qualifying days are a param (laws cannot count
-/// days). The "stacking rule" (the income that is not excluded is taxed at the
-/// rates the excluded income would have used, IRC §911(f)) is written as an extra
-/// obligation, because the `us` law cannot be told to stack: it computes tax on
-/// what is left.
+/// days). The housing exclusion is not modelled.
 ///
 /// The figures are community-maintained data. Verify them against the IRS (Rev.
 /// Proc. 2024-40 for 2025) before relying on them.
@@ -30,6 +31,8 @@ kind foreign-wages : wages
 
 /// Pay from a foreign employer counts as foreign earned income, in dollars at
 /// the rate of the day.
+///
+/// To fix: pay earned abroad must arrive from a place of kind `foreign-wages`.
 law count-foreign-earned
   on in
   when from is foreign-wages
@@ -37,17 +40,24 @@ law count-foreign-earned
 
 /// The foreign earned income exclusion (IRC §911): pay earned abroad, up to a
 /// yearly limit prorated by the days spent abroad, is not taxed by the United
-/// States. `days-abroad` is the number of qualifying days in the year.
+/// States. It comes off income as an adjustment. The income that stays is taxed
+/// as if the excluded pay were on top of it (IRC §911(f), the "stacking rule"): the
+/// extra tax is the tax on everything less the tax on the excluded pay less the
+/// tax on what is left, and it is added to the year's other taxes.
+///
+/// To fix: `days-abroad` is the number of qualifying days in the year; the
+/// exclusion cannot exceed the limit for those days or the pay earned abroad.
 law feie
-  each year
+  each year closing 04-15
   let cap = feie-limit[year] * days-abroad[year] / 365
   let excluded = min(tally(foreign-earned), cap)
-  let with-it = max(tally(agi) - standard-deduction[year, owner.filing], empty)
+  let with-it = max(tally(total-income) - tally(adjustments) - standard-deduction[year, owner.filing], empty)
   let without = max(with-it - excluded, empty)
   let stacking = progressive(ordinary[year, owner.filing], with-it) - progressive(ordinary[year, owner.filing], excluded) - progressive(ordinary[year, owner.filing], without)
   count excluded as feie-excluded
-  count -excluded as agi
-  owe max(stacking, empty) to irs by date(year + 1, 4, 15) as feie-stacking-tax
+  count excluded as adjustments
+  count max(stacking, empty) as other-taxes
+  count max(stacking, empty) as feie-stacking-tax
 
 
 // The exclusion limit per person (IRC §911(b)(2)(D)). Rev. Proc. 2024-40 (2025).

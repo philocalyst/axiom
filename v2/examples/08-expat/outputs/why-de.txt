@@ -1,0 +1,6 @@
+$ axiom why de --today 2026-04-16
+
+error[ambiguous-place]: `de` could be `assets/de`, `expenses/taxes/de`
+  = help: write more of the place's path
+
+✗ 1 error

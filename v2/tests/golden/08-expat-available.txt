@@ -1,23 +1,23 @@
-Available on 2026-01-06
+Available on 2026-04-16
 
 What you can spend
   In hand                                       Amount
   ────────────────────────────────────────────────────
-  Money in hand                          67,058.46 USD
-    assets/bank/us-checking              15,604.75 USD
+  Money in hand                          70,259.47 USD
+    assets/bank/us-checking              18,805.75 USD
     assets/bank/us-savings               18,559.94 USD
     assets/de/girokonto (7,481.00 EUR)    8,799.90 USD
-    assets/de/tagesgeld (20,482.76 EUR)  24,093.87 USD
+    assets/de/tagesgeld (20,482.77 EUR)  24,093.88 USD
   ────────────────────────────────────────────────────
-  Available to spend                     67,058.46 USD
+  Available to spend                     70,259.47 USD
 
 What it would take to reach the rest
-  Holding                           Liquid in          Value           Cost            Net  Because
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/de/kaution (3,600.00 EUR)  700d        4,234.68 USD                  4,234.68 USD
-  assets/retirement/us-401k         5d         66,600.00 USD  14,737.57 USD  51,862.43 USD  driven by early-withdrawal-penalty 6,660.00 USD, federal-income-tax 5,822.00 USD, ca-income-tax 2,255.57 USD
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today               70,834.68 USD  14,737.57 USD  56,097.11 USD
-  · Each line withdraws the whole holding into assets/bank/us-savings on 2026-01-06 and runs the
+  Holding                           Liquid in          Value          Cost            Net  Because
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/de/kaution (3,600.00 EUR)  700d        4,234.68 USD                 4,234.68 USD
+  assets/retirement/us-401k         5d         66,600.00 USD  6,660.00 USD  59,940.00 USD  driven by early-withdrawal-penalty 6,660.00 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today               70,834.68 USD  6,660.00 USD  64,174.68 USD
+  · Each line withdraws the whole holding into assets/bank/us-checking on 2026-04-16 and runs the
     year out through the laws. Cost is what they would then owe beyond what they already will:
     penalties, and the tax on any income it creates.

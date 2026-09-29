@@ -1,7 +1,0 @@
-$ axiom lots wise --today 2026-01-06
-
-Lots at 2026-01-06
-
-  Place  Quantity  Basis  Acquired  Held  Value  Unrealized  Term  Note
-  ─────────────────────────────────────────────────────────────────────
-  · No parcels: everything held is plain money.

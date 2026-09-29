@@ -135,6 +135,9 @@ def read_journal(root):
                 into = money(tm2.group(1)) if tm2 else None
                 into_unit = tm2.group(2) if tm2 else None
                 tail = tm2.group(3) if tm2 else ""
+            elif not right:
+                # `SRC AMOUNT UNIT ->` and nothing after it: the indented legs are the targets
+                dst, tail = "", ""
             else:
                 dst_m = re.match(r"^(\S+)(.*)$", right)
                 dst = dst_m.group(1)

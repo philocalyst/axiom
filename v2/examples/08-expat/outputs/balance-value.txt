@@ -1,54 +1,54 @@
-$ axiom balance --value --today 2026-01-06
+$ axiom balance --value --today 2026-04-16
 
-Balances at 2026-01-06
+Balances at 2026-04-16
 
   Place                         Value (USD)
   ─────────────────────────────────────────
-  assets                     137,893.14 USD
-    bank                      34,164.69 USD
-      us-checking             15,604.75 USD
+  assets                     141,094.15 USD
+    bank                      37,365.69 USD
+      us-checking             18,805.75 USD
       us-savings              18,559.94 USD
-    de                        37,128.45 USD
+    de                        37,128.46 USD
       girokonto                8,799.90 USD
       kaution                  4,234.68 USD
-      tagesgeld               24,093.87 USD
+      tagesgeld               24,093.88 USD
     retirement                66,600.00 USD
       us-401k                 66,600.00 USD
   ─────────────────────────────────────────
   equity                      90,165.96 USD
     opening                   90,165.96 USD
   ─────────────────────────────────────────
-  expenses                    81,786.75 USD
-    conference                   221.71 USD
-    de-rent                   10,233.81 USD
-    dining                     2,003.51 USD
-    fx-fees                      119.92 USD
-    groceries                  4,567.01 USD
+  expenses                    78,184.86 USD
+    conference                   220.87 USD
+    de-rent                   10,100.13 USD
+    dining                     1,992.76 USD
+    fx-fees                      119.51 USD
+    groceries                  4,543.41 USD
     loan-interest              1,333.42 USD
     moving                     2,150.00 USD
-    phone                        141.09 USD
+    phone                        139.34 USD
     sf-rent                   20,400.00 USD
-    shopping                   1,054.34 USD
-    sightseeing                   36.95 USD
+    shopping                   1,048.39 USD
+    sightseeing                   36.72 USD
     subscriptions                320.88 USD
-    taxes                     35,350.33 USD
-      de                      14,663.11 USD
-        kapitalertragsteuer       62.64 USD
-        lohnsteuer             6,387.31 USD
-        sozialabgaben          8,213.16 USD
-      federal                 10,740.00 USD
+    taxes                     31,938.78 USD
+      de                      14,452.56 USD
+        kapitalertragsteuer       61.85 USD
+        lohnsteuer             6,295.55 USD
+        sozialabgaben          8,095.16 USD
+      federal                  8,920.00 USD
       payroll                  4,781.22 USD
       sdi                        750.00 USD
-      state                    4,416.00 USD
-    transit                      538.08 USD
+      state                    3,035.00 USD
+    transit                      531.43 USD
     transport                    365.57 USD
-    travel                     2,231.49 USD
+    travel                     2,225.01 USD
     utilities                    718.64 USD
   ─────────────────────────────────────────
-  income                     102,109.59 USD
+  income                     101,559.05 USD
     interest                   1,259.94 USD
-    interest-de                  237.51 USD
-    salary-de                 38,112.12 USD
+    interest-de                  234.51 USD
+    salary-de                 37,564.58 USD
     salary-us                 62,500.02 USD
   ─────────────────────────────────────────
   liabilities                 27,467.30 USD
@@ -57,7 +57,7 @@ Balances at 2026-01-06
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       137,893.14 USD
+  Assets       141,094.15 USD
   Liabilities   27,467.30 USD
   ───────────────────────────
-  Net worth    110,425.84 USD
+  Net worth    113,626.85 USD

@@ -1,4 +1,4 @@
-$ axiom flow --by year --today 2026-01-06
+$ axiom flow --by year --today 2026-04-16
 
 Income and spending
 
@@ -13,7 +13,7 @@ Income and spending
   ───────────────────────────────────────────────────────────────────
   Total income               101,586.39 USD            101,586.39 USD
   ───────────────────────────────────────────────────────────────────
-  expenses                    81,385.86 USD             81,385.86 USD
+  expenses                    77,329.86 USD             77,329.86 USD
     conference                   220.87 USD                220.87 USD
     de-rent                   10,100.13 USD             10,100.13 USD
     dining                     1,992.76 USD              1,992.76 USD
@@ -26,20 +26,20 @@ Income and spending
     shopping                   1,048.39 USD              1,048.39 USD
     sightseeing                   36.72 USD                 36.72 USD
     subscriptions                320.88 USD                320.88 USD
-    taxes                     35,139.78 USD             35,139.78 USD
+    taxes                     31,083.78 USD             31,083.78 USD
       de                      14,452.56 USD             14,452.56 USD
         kapitalertragsteuer       61.85 USD                 61.85 USD
         lohnsteuer             6,295.55 USD              6,295.55 USD
         sozialabgaben          8,095.16 USD              8,095.16 USD
-      federal                 10,740.00 USD             10,740.00 USD
+      federal                  8,280.00 USD              8,280.00 USD
       payroll                  4,781.22 USD              4,781.22 USD
       sdi                        750.00 USD                750.00 USD
-      state                    4,416.00 USD              4,416.00 USD
+      state                    2,820.00 USD              2,820.00 USD
     transit                      531.43 USD                531.43 USD
     transport                    365.57 USD                365.57 USD
     travel                     2,225.01 USD              2,225.01 USD
     utilities                    718.64 USD                718.64 USD
   ───────────────────────────────────────────────────────────────────
-  Net                         20,200.53 USD  0.00 USD   20,200.53 USD
+  Net                         24,256.53 USD  0.00 USD   24,256.53 USD
   · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
     them.
