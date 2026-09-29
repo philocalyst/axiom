@@ -7,7 +7,6 @@
 //! file is for the model to check: it reports a misfiled file once, where the
 //! parser could only report every line.
 
-use axiom_core::day::days_in_month;
 use axiom_core::{Day, Diagnostic, Loc};
 
 use crate::ast::*;
@@ -59,9 +58,10 @@ impl<'s> Parser<'s> {
             return Err(self.expected("expected-day", "a month and day, like `04-15`"));
         };
         self.bump();
-        match (1..=12).contains(&month) && (1..=days_in_month(2024, month.into())).contains(&day.into()) {
-            true => Ok((month, day)),
-            false => self.fail(not_a_day(token.loc, self.text(token.loc))),
+        // In a leap year, so that `02-29` is a day of some year.
+        match Day::from_ymd(2024, month.into(), day.into()) {
+            Some(_) => Ok((month, day)),
+            None => self.fail(not_a_day(token.loc, self.text(token.loc))),
         }
     }
 
@@ -100,11 +100,7 @@ impl<'s> Parser<'s> {
 
 /// A short date in a file whose place does not give the rest.
 fn short_date(at: Loc, written: &str, place: Place) -> Diagnostic {
-    let missing = match (place.year, written.len()) {
-        (None, 2) => "year and month",
-        (Some(_), 2) => "month",
-        _ => "year",
-    };
+    let missing = if place.year.is_some() { "month" } else { "year" };
     Diagnostic::error("short-date", format!("`{written}` leaves out the {missing}, which this file does not give"))
         .label(at, "write the whole date here")
         .note("a date may be short only where its file's folder gives the rest: `15` is enough in `journal/2026/03.ax`")

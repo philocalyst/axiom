@@ -26,6 +26,10 @@ impl<'s> Parser<'s> {
         while what == DeclKind::Entity && self.eat(",").is_some() {
             names.push(self.name_like("expected-name", "another entity name")?);
         }
+        if what == DeclKind::Account && ["income/", "expenses/", "equity/"].iter().any(|root| names[0].starts_with(root)) {
+            let note = chart_account(self.loc_of(&names[0]), names[0].0);
+            self.diags.push(note);
+        }
         let kind = self.eat(":").and_then(|_| self.name_like("expected-kind", "a kind after `:`").ok());
         let at = if what == DeclKind::Account { self.eat_word("at") } else { None };
         let at = at.and_then(|_| self.name("expected-name", "the institution it is with, such as `chase`").ok());
@@ -216,6 +220,14 @@ impl<'s> Parser<'s> {
         self.emit(&header, Sync { file, run }, ItemKind::Sync);
         Ok(())
     }
+}
+
+/// An account under `income/`, `expenses/` or `equity/`, as v3's chart had them. Whether
+/// it is one is for the model to judge, so this is only a note.
+fn chart_account(loc: Loc, name: &str) -> Diagnostic {
+    Diagnostic::info("chart-account", format!("`{name}` is a v3 chart account: v4 has no income, expense or equity ones"))
+        .label(loc, "what a flow is for is its purpose, and whom it is with is its party")
+        .help("declare the party (`entity lumen : employer`), and write `#purpose` where its kind does not say")
 }
 
 fn abbreviated_schedule(loc: Loc) -> Diagnostic {

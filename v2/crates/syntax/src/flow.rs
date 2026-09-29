@@ -9,7 +9,7 @@ use axiom_core::{Diagnostic, Id, Loc};
 use crate::ast::*;
 use crate::lex::Tok;
 use crate::lines::Line;
-use crate::parser::{Parse, Parser, Scope};
+use crate::parser::{Parse, Parser, Reported, Scope};
 
 const POLICIES: [(&str, Policy); 4] =
     [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
@@ -234,6 +234,15 @@ impl<'s> Parser<'s> {
         }
     }
 
+    /// A `#name` where v3 wrote a code: v4 writes `^name`, and `#name` is a purpose.
+    pub fn hash_code(&mut self, at: Loc) -> Reported {
+        let code = format!("^{}", &self.text(at)[1..]);
+        let diag = Diagnostic::error("hash-code", "a code is written `^code`, and `#name` is a purpose")
+            .label(at, "a purpose goes in a flow's tail, not here")
+            .fix(format!("write `{code}`"), at, code);
+        self.report(diag)
+    }
+
     /// `!` with an optional reason string.
     pub fn waiver(&mut self) -> Parse<Waive<'s>> {
         let bang = self.bump().loc;
@@ -263,19 +272,20 @@ impl<'s> Parser<'s> {
 
     // ─── Selectors ──────────────────────────────────────────────────────────
 
-    /// `[fifo, 2024, 2026-01..2026-06, 2026-01-22, #house]` after a place: adds
+    /// `[fifo, 2024, 2026-01..2026-06, 2026-01-22, ^house]` after an end: adds
     /// each selector to the table.
     fn selector(&mut self) -> Parse<()> {
         let open = self.bump().loc;
         loop {
             let select = match self.tok() {
                 Tok::Code(code) => self.bump_as(Select::Code(code)),
+                Tok::Purpose(_) => return Err(self.hash_code(self.peek().loc)),
                 Tok::Name(_) => {
                     let (policy, loc) = self.choose(&POLICIES, "unknown-policy", "lot policy")?;
                     Select::Policy(policy, loc)
                 }
                 _ => {
-                    let what = "a lot selector: a policy, year, month, date, range or `#code`";
+                    let what = "a lot selector: a policy, year, month, date, range or `^code`";
                     let (first, last, loc) = self.days("expected-selector", what)?;
                     Select::Range(first, last, loc)
                 }

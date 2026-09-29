@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use axiom_core::{Day, Dec, Diagnostic, FileId, Span};
+use axiom_core::{Day, Dec, Diagnostic, FileId, Severity, Span};
 
 use crate::ast::*;
 use crate::lex::{Lexer, Malformed, Tok};
@@ -469,6 +469,32 @@ fn a_contract_keeps_its_good_lines_and_says_what_is_wrong_with_the_bad() {
 }
 
 #[test]
+fn a_v3_code_is_written_with_a_caret_now() {
+    for (src, replaced) in [
+        ("2026-02-06 #check-1041 settled\n", "#check-1041"),
+        ("2026-09-02 fidelity[#house] all -> checking 5 USD\n", "#house"),
+        ("2026-09-02 fidelity[fifo, #house.a] all -> checking 5 USD\n", "#house.a"),
+    ] {
+        let error = only_error(src, "hash-code");
+        assert_eq!(first_fix(src, &error), (replaced, &*format!("^{}", &replaced[1..])), "{src}");
+    }
+    // In a tail it is a purpose, which only the model can say is not one.
+    parse_clean("2026-09-02 a -> b 5 USD #house\n");
+}
+
+#[test]
+fn a_chart_account_is_marked_with_a_note_and_kept() {
+    let src = "account income/salary : wages\naccount expenses/food\naccount equity/opening\naccount assets/bank : bank\n";
+    let (file, diags) = parse(FileId(0), src);
+    let marked: Vec<&str> = diags.iter().map(|diag| &src[diag.anchor().unwrap().range()]).collect();
+    assert_eq!(marked, ["income/salary", "expenses/food", "equity/opening"]);
+    assert!(diags.iter().all(|diag| diag.severity == Severity::Note && diag.code == "chart-account"));
+    assert_eq!(file.iter::<Decl>().count(), 4, "the accounts are kept, and the model judges them");
+    // Only accounts have a chart, and only under those roots.
+    parse_clean("entity income/x\naccount incomes/x : y\n");
+}
+
+#[test]
 fn a_plan_is_a_contract_now() {
     for src in ["every month on 1 checking -> landlord 2_400 USD\n", "plan paycheck every 2w acme -> 5_200 USD\n  a ...\n"] {
         let error = only_error(src, "plan-is-a-contract");
@@ -894,7 +920,7 @@ fn any_other_date_may_leave_out_the_year_when_the_place_gives_it() {
 fn a_short_date_where_the_place_does_not_give_the_rest_is_an_error() {
     // (place, source, what the date leaves out)
     let cases = [
-        (Place::default(), "15 a -> b 5 USD\n", "year and month"),
+        (Place::default(), "15 a -> b 5 USD\n", "year"),
         (YEAR, "15 a -> b 5 USD\n", "month"),
         (Place::default(), "03-15 a -> b 5 USD\n", "year"),
         (Place::default(), "2026-03-15 a -> b 5 USD due 04-01\n", "year"),
@@ -1312,7 +1338,7 @@ account assets/broken :
 #[test]
 fn a_declaration_keeps_its_good_lines_when_one_is_bad() {
     let src = "\
-account expenses/food : expense
+account food : expense
   owner me
   budget (
   2026 single

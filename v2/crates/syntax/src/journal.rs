@@ -24,6 +24,7 @@ impl<'s> Parser<'s> {
                 self.emit(&header, Event { date, code, state, state_loc }, ItemKind::Event);
                 Ok(())
             }
+            Tok::Purpose(_) => Err(self.hash_code(self.peek().loc)),
             // A commodity that starts a flow is a party: `VTI -> fidelity 198.12 USD`.
             Tok::Unit(_) if self.lexer.peek_second().tok != Tok::Punct("->") => self.price_or_split(line, date),
             _ => self.transaction(line, date),

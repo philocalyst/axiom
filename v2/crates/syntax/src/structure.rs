@@ -22,13 +22,15 @@ const KEYWORDS: [&str; 18] = [
 
 /// Words that start a line inside a block, and what owns such a block. Written
 /// at column 0 they are a block's line whose block was forgotten.
-const BLOCK_WORDS: [(&str, &str); 9] = [
+const BLOCK_WORDS: [(&str, &str); 11] = [
     ("when", "law"),
     ("let", "law"),
     ("require", "law"),
     ("warn", "law"),
     ("owe", "law"),
     ("count", "law"),
+    ("consume", "law"),
+    ("carry", "law"),
     ("always", "law"),
     ("each", "law"),
     ("run", "sync"),
@@ -120,7 +122,7 @@ impl<'s> Parser<'s> {
         let diag = Diagnostic::error("unknown-keyword", format!("unknown keyword `{word}`"))
             .label(keyword.loc, "a line starts with a date or a keyword");
         let indent = self.point(line.start as u32);
-        let looks_like_leg = matches!(self.tok(), Tok::Number(_) | Tok::Punct("..." | "=" | "(" | "?"));
+        let looks_like_leg = matches!(self.tok(), Tok::Number(_) | Tok::Percent(_) | Tok::Punct("..." | "=" | "(" | "?"));
         let near = closest(word, KEYWORDS);
         let diag = if let Some(near) = near {
             diag.fix(format!("did you mean `{near}`?"), keyword.loc, near)
