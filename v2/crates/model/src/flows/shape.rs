@@ -188,6 +188,9 @@ impl<'a, 's> Elab<'a, 's> {
             Ok(end) => end,
             Err(cause) => return self.miss(cause, text),
         };
+        if end.entity.is_some() && self.world.any_taken() {
+            self.note_if_shadowing(text);
+        }
         let sym = |code: ast::Code| self.world.sym(code.name());
         let selects = &self.file[place.select];
         let select = selects
@@ -200,6 +203,15 @@ impl<'a, 's> Elab<'a, 's> {
             })
             .collect();
         Some(Placed { end, loc: self.file.loc(text), select, basis: place.is_basis(self.file) })
+    }
+
+    /// Notes an entity written where an account's path also ends with the
+    /// name, to be explained once (see [`Cause::Shadowed`]).
+    #[inline(never)]
+    fn note_if_shadowing(&mut self, text: &'s str) {
+        if self.world.taken(text).is_some_and(|taken| taken.clash) {
+            self.miss::<()>(Cause::Shadowed, text);
+        }
     }
 
     // Inlined: what it returns is built where it is wanted, not copied up out of a call.

@@ -8,11 +8,11 @@
 
 use axiom_core::diag::closest;
 use axiom_core::num::DecError;
-use axiom_core::{Dec, Diagnostic, Id, Loc, Sym};
+use axiom_core::{Dec, Diagnostic, Id, Loc, Map, Sym};
 
-use crate::book::{Amount, Class, Commodity, Entity, Kind, Miss, Param, Place, System};
+use crate::book::{Amount, Class, Commodity, Entity, Kind, Miss, Param, Place, System, Taken};
 use crate::declare::{World, near_place};
-use crate::errors::{Candidate, Word, ambiguous, count, list, not_used, unknown};
+use crate::errors::{Candidate, Word, ambiguous, count, list, list_and, not_used, unknown};
 use crate::kinds;
 use crate::names::{Found, Names};
 use crate::scope::Home;
@@ -34,6 +34,9 @@ pub(crate) enum Cause {
     AmbiguousPlace,
     Entity,
     AmbiguousEntity,
+    /// A name that is an entity's and also ends an account's path. The entity
+    /// takes it, which is reported once, since the account may have been meant.
+    Shadowed,
     /// An entity in place position that has no `via`.
     NoVia,
     Commodity,
@@ -177,11 +180,51 @@ impl<'s> World<'s> {
         self.seek_place(word)?.ok_or_else(|| self.explain_unknown_place(word, false))
     }
 
+    /// The names that mean an entity in a flow although an account's path also
+    /// ends with them. An entity is declared on purpose, so it takes the name,
+    /// and a line that writes it names the counterparty. When the account is
+    /// not the entity's own place, the account is what the line may have
+    /// meant, so the line is reported (see [`Cause::Shadowed`]).
+    pub fn taken_names(&self) -> Map<Sym, Taken> {
+        let (book, scope) = (&self.book, self.scopes.of(Home::Project));
+        let entities = &book.lookup.entities;
+        let mut taken = Map::default();
+        for name in entities.names.keys(&book.names) {
+            let Found::One(entity) = entities.find(&book.names, scope, name) else { continue };
+            let Some(via) = book.entities[entity].via else { continue };
+            let accounts = book.lookup.places.candidates(&book.names, name);
+            if !accounts.is_empty() {
+                let clash = accounts.iter().any(|&place| place != via);
+                taken.insert(self.sym(name), Taken { entity, clash });
+            }
+        }
+        taken
+    }
+
+    /// Whether some entity takes a name from an account. Almost no book has
+    /// such a name, and every name of every flow asks.
+    #[inline(always)]
+    pub fn any_taken(&self) -> bool {
+        !self.book.lookup.taken.is_empty()
+    }
+
+    /// What entity takes `text` from an account, if one does.
+    #[inline(never)]
+    pub fn taken(&self, text: &str) -> Option<Taken> {
+        self.book.names.get(text).and_then(|sym| self.book.lookup.taken.get(&sym)).copied()
+    }
+
     /// A place written as one end of a flow: a place, `?`, or an entity, which
     /// stands for its `via` place.
     pub fn find_end(&self, text: &str) -> Result<End, Cause> {
         if text == "?" {
             return Ok(End { place: self.book.roots.unknown, entity: None });
+        }
+        if self.any_taken()
+            && let Some(Taken { entity, .. }) = self.taken(text)
+        {
+            let place = self.book.entities[entity].via.expect("only an entity with a `via` takes a name");
+            return Ok(End { place, entity: Some(entity) });
         }
         match self.book.lookup.places.find(&self.book.names, text, |_| true) {
             Found::One(place) => {
@@ -212,11 +255,14 @@ impl<'s> World<'s> {
                 .seek_entity(Home::Project, word)
                 .err()
                 .unwrap_or_else(|| unknown("unknown-entity", "entity", word, None)),
+            Cause::Shadowed => self.explain_shadowed(word),
             Cause::NoVia => self.explain_no_via(word),
             Cause::Commodity => self.explain_commodity(word),
             Cause::Plan => unknown("unknown-plan", "plan", word, None),
         };
-        if uses > 1 || cause == Cause::AmbiguousPlace {
+        if cause == Cause::Shadowed {
+            diagnostic = diagnostic.note(format!("it is written on {}, and each takes the entity", count(uses, "line")));
+        } else if uses > 1 || cause == Cause::AmbiguousPlace {
             diagnostic = diagnostic.note(format!("it is written on {}, and none of them is kept", count(uses, "line")));
         }
         diagnostic
@@ -287,6 +333,47 @@ impl<'s> World<'s> {
         for &id in &ids {
             let shortest = self.book.lookup.places.shortest_unique(names, path(id), id);
             diagnostic = diagnostic.help(format!("or write `{shortest}` for `{}` where it is meant", path(id)));
+        }
+        diagnostic
+    }
+
+    /// One report for a name that an entity and an account's path both answer
+    /// to, at the declaration that made it so: the later one.
+    fn explain_shadowed(&self, word: Word) -> Diagnostic {
+        let (book, names) = (&self.book, &self.book.names);
+        let entity = self.seek_entity(Home::Project, word).ok().flatten().expect("a shadowed name is an entity's");
+        let via = book.entities[entity].via;
+        let accounts: Vec<Id<Place>> =
+            book.lookup.places.candidates(names, word.text).iter().copied().filter(|&id| Some(id) != via).collect();
+        let path = |id: Id<Place>| book.name(book.places[id].path);
+        let entity_path = book.name(book.entities[entity].path);
+        let ends: Vec<&str> = accounts.iter().map(|&id| path(id)).collect();
+        let headline =
+            format!("`{}` is both an entity and the end of {}, and lines still write it", word.text, list_and(&ends));
+        let mut declared: Vec<(Loc, String)> = accounts
+            .iter()
+            .filter_map(|&id| Some((book.places[id].loc?, format!("the account `{}`", path(id)))))
+            .chain(book.entities[entity].loc.map(|loc| (loc, format!("the entity `{entity_path}`"))))
+            .collect();
+        declared.sort_by_key(|&(loc, _)| loc);
+        let mut diagnostic = match declared.split_last() {
+            Some(((later, _), earlier)) => {
+                let mut diagnostic = Diagnostic::error("ambiguous-name", headline)
+                    .label(*later, format!("now also answers to `{}`", word.text));
+                for (loc, what) in earlier {
+                    diagnostic = diagnostic.context(*loc, format!("{what} was declared before it"));
+                }
+                diagnostic
+            }
+            None => Diagnostic::error("ambiguous-name", headline).label(word.loc, "which is meant?"),
+        };
+        diagnostic = diagnostic
+            .context(word.loc, format!("`{}` is first written here, and means the entity `{entity_path}`", word.text))
+            .note("a name written in a flow means the entity, which was declared on purpose, and not an account that only ends with it");
+        for &id in &accounts {
+            let avoiding = |suffix: &str| suffix != word.text;
+            let shortest = book.lookup.places.shortest_unique_avoiding(names, path(id), id, avoiding);
+            diagnostic = diagnostic.help(format!("write `{shortest}` where `{}` is meant", path(id)));
         }
         diagnostic
     }

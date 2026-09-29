@@ -189,6 +189,7 @@ pub(crate) fn declare<'a, 's>(
             params: Scoped::default(),
             laws: Names::default(),
             commodities: commodities.by_symbol,
+            taken: Map::default(),
         },
     };
     let declared = Declared {

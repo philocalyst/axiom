@@ -69,6 +69,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let scopes = declare::scopes(entries, &systems, &systems_tree, &mut diags);
     let mut world = declare::declare(&surveyed, &settings, names, systems_tree, systems, scopes, &mut diags);
     let budgets = props::apply(&mut world, entries, &mut diags);
+    world.book.lookup.taken = world.taken_names();
     params::declare(&mut world, entries, &mut diags);
     laws::declare(&mut world, &sites, entries, budgets, &mut diags);
     let rank = laws::rank(&world.book, &mut diags);

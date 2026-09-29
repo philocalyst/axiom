@@ -104,8 +104,9 @@ claim has a due day and `check` reports it when it is missed).
   is on Alex's leg. `due` can only be on the header.
 - **A schedule is one due day.** The loan is repaid 250.00 USD a month, but the claim has one due date, the last
   payment's; nothing says that May's payment was late.
-- **A place that ends in an entity's name shadows the entity.** `assets/owed/lantern` would silently take every
-  payroll flow written `lantern -> ...`, so the receivable places are `by-ben`, `by-cleo`, `by-lantern`.
+- **A place that ends in an entity's name is an ambiguity, and the entity wins.** `assets/owed/lantern` next to
+  `entity lantern` (payroll) is an `ambiguous-name` error, and every `lantern -> ...` means the entity, so the
+  receivable places are `by-ben`, `by-cleo`, `by-lantern`.
 - **Thirds are hand-rounded.** 69.99 USD is 23.33 + 23.33 + 23.33, and any extra cent (73.54 USD is 24.52 + 24.51 + 24.51) is on Alex's
   leg; the language does no splitting.
 - **`axiom balance --at DATE` panics before an accepted gap.** The wallet's `!` on 2025-08-31 is a pad, and a balance at

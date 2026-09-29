@@ -122,9 +122,21 @@ impl<T> Names<T> {
     /// The shortest suffix of `path` that names `id` alone: what to write to
     /// disambiguate.
     pub fn shortest_unique<'p>(&self, names: &Interner, path: &'p str, id: Id<T>) -> &'p str {
+        self.shortest_unique_avoiding(names, path, id, |_| true)
+    }
+
+    /// The shortest suffix of `path` that names `id` alone and that `allowed`
+    /// admits: a name another kind of thing takes cannot be the way out.
+    pub fn shortest_unique_avoiding<'p>(
+        &self,
+        names: &Interner,
+        path: &'p str,
+        id: Id<T>,
+        allowed: impl Fn(&str) -> bool,
+    ) -> &'p str {
         let mut by_length: Vec<&str> = suffixes(path).collect();
         by_length.reverse();
-        by_length.into_iter().find(|suffix| self.candidates(names, suffix) == [id]).unwrap_or(path)
+        by_length.into_iter().find(|&suffix| allowed(suffix) && self.candidates(names, suffix) == [id]).unwrap_or(path)
     }
 
     /// The known name closest to `text`, among the things `visible` admits.

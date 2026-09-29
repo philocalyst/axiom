@@ -118,6 +118,44 @@ account assets/broker/checking : broker
 }
 
 #[test]
+fn an_entity_takes_a_name_from_an_account_that_only_ends_with_it_and_the_clash_is_said_once() {
+    let text = "
+account assets/owed/acme : receivable
+2026-01-05 acme -> checking 100 USD
+2026-01-06 acme -> checking 100 USD
+2026-01-07 owed/acme -> checking 50 USD
+";
+    with_book(text, |book, diags| {
+        assert_eq!(codes(diags), ["ambiguous-name"], "{diags:?}");
+        let said = &diags[0];
+        assert_eq!(said.message, "`acme` is both an entity and the end of `assets/owed/acme`, and lines still write it");
+        assert!(said.notes.iter().any(|note| note.contains("written on 2 lines, and each takes the entity")));
+        assert!(said.help.iter().any(|help| help.text.contains("write `owed/acme` where `assets/owed/acme` is meant")));
+        let paid = ["income/salary", "income/salary", "assets/owed/acme"];
+        let from: Vec<_> = book.flows.iter().map(|(_, flow)| book.name(book.places[flow.from].path)).collect();
+        assert_eq!(from, paid, "the entity wins in flows, and the longer suffix still means the account");
+    });
+}
+
+#[test]
+fn an_entity_that_stands_for_the_account_is_no_clash_and_an_unwritten_name_is_not_reported() {
+    let text = "
+account assets/owed/kim : receivable
+entity kim : employer
+  via assets/owed/kim
+account assets/owed/pat : receivable
+2026-01-05 kim -> checking 10 USD
+2026-01-06 owed/pat -> checking 10 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let flow = &book.flows[axiom_core::Id::new(0)];
+        assert_eq!(book.name(book.places[flow.from].path), "assets/owed/kim");
+        assert!(flow.payee.is_some(), "the entity is still the payee");
+    });
+}
+
+#[test]
 fn a_misspelled_name_is_reported_with_the_closest_one() {
     with_book("2026-01-05 savings -> chekcing 10 USD\n2026-01-06 savings -> checking 10 USD", |book, diags| {
         assert_eq!(codes(diags), ["unknown-place"]);
