@@ -8,7 +8,7 @@
 //! one leg's place, and the others are paid to or from it.
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Diagnostic, Id, Loc};
+use axiom_core::{Day, Diagnostic, Id, Loc, Sym};
 
 use super::faults::{self, Written};
 use super::pairing::{self, Share};
@@ -361,6 +361,10 @@ impl Elab<'_, '_> {
         let tail = &mv.tail;
         let mut select = if mv.to.basis { mv.to.select.clone() } else { mv.from.select.clone() };
         select.extend(tail.settles.map(crate::journal::Select::Code));
+        let codes: Box<[Sym]> = match tail.codes.is_empty() {
+            true => Box::default(),
+            false => tail.codes.iter().map(|&(code, _)| code).collect(),
+        };
         let basis_end = match (mv.from.basis, mv.to.basis) {
             (true, _) => Some(End::From),
             (_, true) => Some(End::To),
@@ -381,7 +385,7 @@ impl Elab<'_, '_> {
             txn: Id::new(self.txn),
             payee: tail.payee,
             select: select.into(),
-            codes: tail.codes.iter().map(|&(code, _)| code).collect(),
+            codes,
             loc: mv.loc,
             waive: tail.waive,
             terms,
