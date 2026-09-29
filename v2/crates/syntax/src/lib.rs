@@ -23,6 +23,7 @@
 pub mod ast;
 
 mod amount;
+mod dates;
 mod decl;
 mod expr;
 mod flow;
@@ -63,12 +64,16 @@ const PIECE_TARGET: usize = 1 << 23;
 /// Files larger than this cannot be cut into the 256 pieces an index can name.
 const FILE_MAX: usize = 256 * PIECE_TARGET;
 
-/// Parses one file. Every item that parses is kept; each one that does not
-/// produces a diagnostic and is skipped. Diagnostics come in source order.
+/// Parses one file, which is in `place`. Every item that parses is kept; each
+/// one that does not produces a diagnostic and is skipped. Diagnostics come in
+/// source order.
+///
+/// A date short of what `place` gives is completed here; that a whole date
+/// agrees with `place` is the model's to check (see [`Place`]).
 ///
 /// A large file is cut at item boundaries and its pieces are parsed on every
 /// core. They keep their tables, and the file is their items in order.
-pub fn parse(file: FileId, src: &str) -> (File<'_>, Vec<Diagnostic>) {
+pub fn parse(file: FileId, src: &str, place: Place) -> (File<'_>, Vec<Diagnostic>) {
     if src.len() > FILE_MAX {
         let diag = Diagnostic::error("file-too-large", "source files are limited to 2 GiB")
             .label(Loc::new(file, 0, 0), "this file is larger");
@@ -79,13 +84,13 @@ pub fn parse(file: FileId, src: &str) -> (File<'_>, Vec<Diagnostic>) {
         true => 1,
         false => (cores * PIECES_PER_CORE).max(src.len().div_ceil(PIECE_TARGET)).min(256),
     };
-    parse_in(file, src, pieces)
+    parse_in(file, src, place, pieces)
 }
 
 /// [`parse`] with the file cut into about `pieces` pieces.
-pub(crate) fn parse_in(file: FileId, src: &str, pieces: usize) -> (File<'_>, Vec<Diagnostic>) {
+pub(crate) fn parse_in(file: FileId, src: &str, place: Place, pieces: usize) -> (File<'_>, Vec<Diagnostic>) {
     let ranges: Vec<(usize, Range<usize>)> = cut(src, pieces).into_iter().enumerate().collect();
-    let parsed = par::map_each(&ranges, |(number, range)| parse_piece(file, src, range.clone(), *number));
+    let parsed = par::map_each(&ranges, |(number, range)| parse_piece(file, src, place, range.clone(), *number));
     let (mut pieces, mut diags, mut tabs) = (Vec::new(), Vec::new(), Tabs::default());
     for (piece, more, more_tabs) in parsed {
         pieces.push(piece);
@@ -98,8 +103,14 @@ pub(crate) fn parse_in(file: FileId, src: &str, pieces: usize) -> (File<'_>, Vec
 }
 
 /// Piece number `number` of the file, `src[range]`, parsed.
-fn parse_piece(file: FileId, src: &str, range: Range<usize>, number: usize) -> (Piece<'_>, Vec<Diagnostic>, Tabs) {
-    let mut parser = Parser::new(file, src, range.clone(), number);
+fn parse_piece(
+    file: FileId,
+    src: &str,
+    place: Place,
+    range: Range<usize>,
+    number: usize,
+) -> (Piece<'_>, Vec<Diagnostic>, Tabs) {
+    let mut parser = Parser::new(file, src, range.clone(), number, place);
     let (items, dated) = count_items(&src.as_bytes()[range]);
     parser.items.reserve(items);
     parser.t.txns.reserve(dated);

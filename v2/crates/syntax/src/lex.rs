@@ -1,7 +1,7 @@
 //! Tokens: the words, numbers, dates and punctuation of one line.
 //!
-//! Nothing is copied: names, commodities, codes and strings are slices of the
-//! source, and dates and numbers are converted by the parsers in `axiom-core`.
+//! Nothing is copied: names, commodities, purposes, codes and strings are slices
+//! of the source, and dates and numbers are converted by the parsers in `axiom-core`.
 //! The three commonest words (a path, a plain number, a commodity) have a
 //! fast path that reads them in one pass; everything odd about a word is left
 //! to the general path, which classifies it byte by byte. A token that is not a
@@ -21,6 +21,10 @@ pub(crate) enum Tok<'s> {
     Date(Day),
     /// `YYYY-MM`, as the first day of the month.
     Month(Day),
+    /// `MM-DD` as written, unchecked: the parser says whether it is a date (in
+    /// a file whose place gives the year) or a day of every year, and whether
+    /// it exists.
+    MonthDay(u8, u8),
     /// Digits with optional `_` separators and `.fraction`. A year is a
     /// four-digit number; the parser decides where that matters.
     Number(Dec),
@@ -32,6 +36,9 @@ pub(crate) enum Tok<'s> {
     Name(&'s str),
     /// A commodity: `USD`, `BRK.B`.
     Unit(&'s str),
+    /// `#groceries`, what a flow is for: the name, without its `#`.
+    Purpose(Name<'s>),
+    /// `^inv-12`, what marks flows that belong together: `^` included.
     Code(Code<'s>),
     /// A string's contents between the quotes, escapes unprocessed.
     Str(&'s str),
@@ -58,6 +65,8 @@ pub(crate) enum Malformed {
     SlashDate,
     /// `1__000`, or more digits than a number can hold.
     Number,
+    /// Years with a fraction that is not a whole number of months: `27.33y`.
+    Span,
     /// A commodity stuck to its number: `50USD`.
     GluedAmount,
     UnterminatedString,
@@ -65,8 +74,8 @@ pub(crate) enum Malformed {
     Escape(u32),
     /// `$50`: a currency symbol instead of a commodity.
     Currency,
-    /// `#` with nothing valid after it.
-    Code,
+    /// `#` or `^` with nothing valid after it.
+    Mark,
     /// A word that is neither a name (lowercase) nor a commodity (uppercase).
     Word,
     Character,
@@ -193,7 +202,8 @@ impl<'s> Lexer<'s> {
             b'0'..=b'9' => self.digit_word(start),
             b'a'..=b'z' => self.name(start),
             b'A'..=b'Z' => self.unit(start),
-            b'#' => self.code(start),
+            b'#' => self.purpose(start),
+            b'^' => self.code(start),
             b'"' => self.string(start),
             // A star touching a word is a glob (`*-trip`); alone it multiplies.
             b'*' if bytes.get(start + 1).is_some_and(|&b| CLASS[b as usize] != 0) => self.odd_name(start),
@@ -311,7 +321,12 @@ impl<'s> Lexer<'s> {
     /// follow it, so `2026..2027` is a range and `84.20` a number.
     fn number(&mut self, start: usize, word_end: usize, classes: u8) -> Tok<'s> {
         let end = word_end + fraction(&self.bytes[word_end..]);
-        if end > word_end && self.bytes.get(end).is_some_and(|&b| CLASS[b as usize] != 0) {
+        let bytes = self.bytes;
+        let ends_word = |at: usize| bytes.get(at).is_none_or(|&b| CLASS[b as usize] == 0);
+        if end > word_end && bytes.get(end) == Some(&b'y') && ends_word(end + 1) {
+            return self.fractional_years(start, end);
+        }
+        if end > word_end && !ends_word(end) {
             // `84.20USD`: a fraction leaves no word boundary, unlike `84USD`.
             self.pos = self.scan_word(end).end;
             return Tok::Invalid(if self.bytes[end].is_ascii_uppercase() {
@@ -329,6 +344,15 @@ impl<'s> Lexer<'s> {
             (Some(number), false) => Tok::Number(number),
             (Some(number), true) => Tok::Percent(number),
         }
+    }
+
+    /// `27.5y`: years with a fraction, as the whole months they come to.
+    fn fractional_years(&mut self, start: usize, end: usize) -> Tok<'s> {
+        self.pos = end + 1;
+        let months = Dec::parse(&self.bytes[start..end])
+            .and_then(|years| Dec { mantissa: years.mantissa.checked_mul(12)?, scale: years.scale }.to_qty(0).ok())
+            .and_then(|months| i32::try_from(months.0).ok());
+        months.map_or(Tok::Invalid(Malformed::Span), |months| Tok::Span(Span::months(months)))
     }
 
     fn unit(&mut self, start: usize) -> Tok<'s> {
@@ -353,6 +377,19 @@ impl<'s> Lexer<'s> {
         }
     }
 
+    /// `#purpose`: a name behind a `#`.
+    fn purpose(&mut self, start: usize) -> Tok<'s> {
+        if !self.bytes.get(start + 1).is_some_and(|&b| CLASS[b as usize] != 0) {
+            self.pos = start + 1;
+            return Tok::Invalid(Malformed::Mark);
+        }
+        match self.name(start + 1) {
+            Tok::Name(name) => Tok::Purpose(Name(name)),
+            invalid => invalid,
+        }
+    }
+
+    /// `^code`: lowercase letters, digits and `-_:./*` behind a `^`.
     fn code(&mut self, start: usize) -> Tok<'s> {
         let is_code_byte = |b: u8| CLASS[b as usize] != 0 || matches!(b, b':' | b'/');
         let mut end = start + 1;
@@ -368,7 +405,7 @@ impl<'s> Lexer<'s> {
         match text.bytes().nth(1) {
             _ if text.bytes().any(|b| b.is_ascii_uppercase()) => Tok::Invalid(Malformed::Word),
             Some(b'a'..=b'z' | b'0'..=b'9') => Tok::Code(Code(text)),
-            _ => Tok::Invalid(Malformed::Code),
+            _ => Tok::Invalid(Malformed::Mark),
         }
     }
 
@@ -501,6 +538,9 @@ fn classify_digit_word(text: &str) -> Tok<'_> {
     }
     if is_shaped(bytes, b"dddd-dd") {
         return Day::parse(&[bytes, b"-01"].concat()).map_or(Tok::Invalid(Malformed::Date), Tok::Month);
+    }
+    if is_shaped(bytes, b"dd-dd") {
+        return Tok::MonthDay((bytes[0] - b'0') * 10 + bytes[1] - b'0', (bytes[3] - b'0') * 10 + bytes[4] - b'0');
     }
     if let Some(span) = Span::parse(bytes) {
         return Tok::Span(span);

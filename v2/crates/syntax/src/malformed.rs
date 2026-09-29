@@ -31,38 +31,54 @@ pub(crate) fn clip(text: &str, max: usize) -> String {
 /// The diagnostic for a malformed token whose source text is `text` at `loc`.
 pub(crate) fn diagnose(kind: Malformed, loc: Loc, text: &str) -> Diagnostic {
     match kind {
-        Malformed::Date => not_a_date(loc, text),
+        Malformed::Date => malformed_date(loc, text),
         Malformed::LooseDate => unpadded_date(loc, text),
         Malformed::SlashDate => slash_date(loc, text),
         Malformed::Number => bad_number(loc, text),
+        Malformed::Span => bad_span(loc, text),
         Malformed::GluedAmount => glued_amount(loc, text),
         Malformed::UnterminatedString => unterminated_string(loc),
         Malformed::Escape(at) => bad_escape(loc, text, at),
         Malformed::Currency => currency_symbol(loc, text),
-        Malformed::Code => bad_code(loc),
+        Malformed::Mark => bad_mark(loc, text),
         Malformed::Word => mixed_case(loc, text),
         Malformed::Character => stray_character(loc, text),
     }
 }
 
-/// `2026-02-30`, `2026-13-01`: the right shape, but not on the calendar. The
-/// label lands on the offending month or day, not the whole date.
-fn not_a_date(loc: Loc, text: &str) -> Diagnostic {
-    let field = |from: u32| Loc::new(loc.file, loc.start + from, loc.start + from + 2);
+/// `2026-02-30`, `2026-13-01`: the right shape, but not on the calendar.
+fn malformed_date(loc: Loc, text: &str) -> Diagnostic {
     let number = |from: usize| text.get(from..from + 2).and_then(|digits| digits.parse::<u32>().ok());
-    let year: i32 = text[..4].parse().unwrap_or_default();
-    let month = number(5).unwrap_or_default();
+    let year = text[..4].parse().unwrap_or_default();
+    not_a_date(loc, text, (year, number(5).unwrap_or_default(), number(8).unwrap_or(1)))
+}
+
+/// A date that is not on the calendar, written as `text` at `loc` in one of its
+/// three shapes (`2026-02-30`, `02-30`, `30`), which `(year, month, day)` says in
+/// full: the shorter ones are completed from their file's place. The label
+/// lands on the offending month or day, not the whole date.
+pub(crate) fn not_a_date(loc: Loc, text: &str, (year, month, day): (i32, u32, u32)) -> Diagnostic {
+    // How much of a whole date is left out of what was written.
+    let left_out: u32 = match text.len() {
+        2 => 8,
+        5 => 5,
+        _ => 0,
+    };
+    let field = |from: u32| Loc::new(loc.file, loc.start + from - left_out, loc.start + from - left_out + 2);
     let Some(month_name) = month.checked_sub(1).and_then(|index| MONTHS.get(index as usize)) else {
         return Diagnostic::error("bad-date", format!("`{text}` is not a date: there is no month {month}"))
             .label(field(5), "months run from 01 to 12");
     };
-    let day = number(8).unwrap_or(1);
     let last = days_in_month(year, month);
     if day == 0 {
         return Diagnostic::error("bad-date", format!("`{text}` is not a date: days start at 01"))
             .label(field(8), "there is no day 00");
     }
-    let last_day = format!("{year:04}-{month:02}-{last:02}");
+    let last_day = match text.len() {
+        2 => format!("{last:02}"),
+        5 => format!("{month:02}-{last:02}"),
+        _ => format!("{year:04}-{month:02}-{last:02}"),
+    };
     Diagnostic::error("bad-date", format!("{month_name} {year} has {last} days"))
         .label(field(8), format!("there is no day {day}"))
         .fix(format!("the last day of {month_name} {year} is `{last_day}`"), loc, last_day)
@@ -193,19 +209,27 @@ fn currency_symbol(loc: Loc, text: &str) -> Diagnostic {
     }
 }
 
-fn bad_code(loc: Loc) -> Diagnostic {
-    Diagnostic::error("bad-code", "`#` must be followed by a code")
-        .label(loc, "a code is lowercase letters, digits, `-`, `_`, `:`, `.` or `/`")
-        .help("for example `#check-1041` or `#house`")
+fn bad_span(loc: Loc, text: &str) -> Diagnostic {
+    Diagnostic::error("bad-span", format!("`{}` is not a whole number of months", clip(text, 40)))
+        .label(loc, "a span counts whole months")
+        .help("years may have a fraction that comes to whole months: `27.5y` is `27y6m`")
+}
+
+/// A `#` or `^` with no name after it.
+fn bad_mark(loc: Loc, text: &str) -> Diagnostic {
+    let (what, example) = if text.starts_with('#') { ("purpose", "`#groceries`") } else { ("code", "`^check-1041`") };
+    Diagnostic::error("bad-mark", format!("`{text}` must be followed by a {what}"))
+        .label(loc, format!("a {what} is lowercase letters, digits and `-`, like {example}"))
 }
 
 /// A word that mixes cases, or uses characters names and commodities lack.
 fn mixed_case(loc: Loc, text: &str) -> Diagnostic {
     let mendable = text.len() <= MENDABLE;
-    if let Some(code) = text.strip_prefix('#') {
-        let diag = Diagnostic::error("mixed-case", format!("codes are lowercase, but `{}` is not", clip(text, 40)))
-            .label(loc, "uppercase in a code");
-        let lower = format!("#{}", code.to_ascii_lowercase());
+    if let Some(name) = text.strip_prefix(['#', '^']) {
+        let what = if text.starts_with('#') { "purpose" } else { "code" };
+        let diag = Diagnostic::error("mixed-case", format!("a {what} is lowercase, but `{}` is not", clip(text, 40)))
+            .label(loc, format!("uppercase in a {what}"));
+        let lower = format!("{}{}", &text[..1], name.to_ascii_lowercase());
         return if mendable { diag.fix(format!("write `{lower}`"), loc, lower) } else { diag };
     }
     let mut diag = Diagnostic::error("mixed-case", format!("`{}` is neither a name nor a commodity", clip(text, 40)))

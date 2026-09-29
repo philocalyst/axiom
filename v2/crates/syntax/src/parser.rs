@@ -13,7 +13,7 @@
 use std::ops::Range;
 
 use axiom_core::diag::closest;
-use axiom_core::{Day, Diagnostic, FileId, Id, Loc};
+use axiom_core::{Diagnostic, FileId, Id, Loc};
 
 use crate::ast::*;
 use crate::ast::{PIECE_SHIFT, Piece, local, locate};
@@ -36,6 +36,8 @@ pub(crate) struct Header<'s> {
 pub(crate) struct Parser<'s> {
     pub src: &'s str,
     pub id: FileId,
+    /// What the file's place lets its dates leave out.
+    pub place: Place,
     /// What has been parsed: the items, the expressions, and the tables.
     pub items: Vec<Item<'s>>,
     pub exprs: Vec<Expr<'s>>,
@@ -60,11 +62,12 @@ pub(crate) struct Parser<'s> {
 
 impl<'s> Parser<'s> {
     /// A parser for `src[range]`, which starts at the start of a line and is
-    /// piece number `piece` of the file.
-    pub fn new(id: FileId, src: &'s str, range: Range<usize>, piece: usize) -> Parser<'s> {
+    /// piece number `piece` of the file, which is in `place`.
+    pub fn new(id: FileId, src: &'s str, range: Range<usize>, piece: usize, place: Place) -> Parser<'s> {
         Parser {
             src,
             id,
+            place,
             items: Vec::new(),
             exprs: Vec::new(),
             t: Tables::default(),
@@ -232,10 +235,6 @@ impl<'s> Parser<'s> {
 
     pub fn unit(&mut self, code: &'static str, what: &str) -> Parse<Name<'s>> {
         self.take(|tok| if let Tok::Unit(text) = tok { Some(Name(text)) } else { None }, code, what)
-    }
-
-    pub fn date(&mut self, what: &str) -> Parse<Day> {
-        self.take(|tok| if let Tok::Date(day) = tok { Some(day) } else { None }, "expected-date", what)
     }
 
     /// A name, where a plain integer also counts: `529` is a number by shape,

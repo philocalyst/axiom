@@ -4,10 +4,9 @@
 
 use std::mem::discriminant;
 
-use axiom_core::{Day, Diagnostic, Id, Loc};
+use axiom_core::{Diagnostic, Id, Loc};
 
 use crate::ast::*;
-use crate::journal::empty_range;
 use crate::lex::Tok;
 use crate::lines::Line;
 use crate::parser::{Parse, Parser};
@@ -21,9 +20,9 @@ impl<'s> Parser<'s> {
     /// read first (a `DATE..DATE` spread) count too. Also gives where the arrow
     /// was. The legs come after the header line has ended: see
     /// [`Self::flow_legs`].
-    pub fn flow_head(&mut self, from: End<'s>, clauses: usize) -> Parse<(Flow<'s>, Loc)> {
+    pub fn flow_head(&mut self, from: Side<'s>, clauses: usize) -> Parse<(Flow<'s>, Loc)> {
         let arrow = self.arrow(&from)?;
-        let to = self.end()?;
+        let to = self.side()?;
         let tail = self.tail(clauses)?;
         Ok((Flow { from, to, tail, legs: Many::EMPTY }, arrow))
     }
@@ -46,17 +45,19 @@ impl<'s> Parser<'s> {
         children.map(|()| self.since(mark))
     }
 
-    /// One header end: `checking`, `checking 2_000 USD`, `7 VTI`, or nothing.
+    /// One header side: `checking`, `checking 2_000 USD`, `7 VTI`, or nothing.
     // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
-    pub fn end(&mut self) -> Parse<End<'s>> {
-        let is_place = match self.tok() {
+    pub fn side(&mut self) -> Parse<Side<'s>> {
+        let starts_end = match self.tok() {
             Tok::Name(word) => !matches!(word, "all" | "empty"),
-            // `? USD` is an unknown amount; a lone `?` is the unknown place.
+            // An amount starts with its number, so a commodity first is an end.
+            Tok::Unit(_) => true,
+            // `? USD` is an unknown amount; a lone `?` is the unknown party.
             Tok::Punct("?") => !matches!(self.lexer.peek_second().tok, Tok::Unit(_)),
             _ => false,
         };
-        let place = if is_place { Some(self.place()?) } else { None };
+        let end = if starts_end { Some(self.end()?) } else { None };
         let starts_amount = match self.tok() {
             Tok::Number(_) | Tok::Punct("(" | "?" | "-") => true,
             Tok::Name(word) => matches!(word, "empty" | "all"),
@@ -64,12 +65,12 @@ impl<'s> Parser<'s> {
             _ => false,
         };
         let amount = if starts_amount { Some(self.quantity()?) } else { None };
-        Ok(End { place, amount })
+        Ok(Side { end, amount })
     }
 
     /// The arrow. `=>` and `→` are read as one, with an error that says how to
     /// write it, so the flow around them is still kept.
-    fn arrow(&mut self, from: &End<'s>) -> Parse<Loc> {
+    fn arrow(&mut self, from: &Side<'s>) -> Parse<Loc> {
         if let Some(loc) = self.eat("->") {
             let written = self.text(loc);
             if written != "->" {
@@ -82,10 +83,10 @@ impl<'s> Parser<'s> {
         }
         let token = self.peek();
         let mut diag = self.unexpected(token, "expected-arrow", "`->`");
-        // Another place or amount right where the arrow belongs: a flow written
+        // Another name or amount right where the arrow belongs: a flow written
         // without it.
-        if from.place.is_some() && matches!(token.tok, Tok::Name(_) | Tok::Number(_)) {
-            diag = diag.help("a flow moves value from one place to another: `checking -> food 84.20 USD`").fix(
+        if from.end.is_some() && matches!(token.tok, Tok::Name(_) | Tok::Number(_)) {
+            diag = diag.help("a flow moves value from one end to another: `checking -> food 84.20 USD`").fix(
                 "insert the arrow",
                 self.point(token.loc.start),
                 "-> ",
@@ -94,25 +95,25 @@ impl<'s> Parser<'s> {
         self.fail(diag)
     }
 
-    /// A place, or `?`, with any lot selectors and `.basis`.
-    pub fn place(&mut self) -> Parse<Place<'s>> {
+    /// A name, a commodity or `?`, with any lot selectors.
+    pub fn end(&mut self) -> Parse<End<'s>> {
         let token = self.peek();
-        if !matches!(token.tok, Tok::Name(_) | Tok::Punct("?")) {
-            return Err(self.expected("expected-place", "a place such as `checking`"));
+        if !matches!(token.tok, Tok::Name(_) | Tok::Unit(_) | Tok::Punct("?")) {
+            return Err(self.expected("expected-end", "a name such as `checking`"));
         }
         self.bump();
         let mark = self.mark::<Select>();
         if self.at("[") {
             self.selector()?;
         }
-        // `.basis` must touch what it qualifies, and so is no other token.
-        let basis = self.at(".") && matches!(self.lexer.peek_second().tok, Tok::Name("basis"));
-        if basis && self.peek().loc.start == self.lexer.prev_end() {
-            self.bump();
-            self.bump();
-            self.t.selects.push(Select::Basis);
+        // `.basis` must touch what it follows, and so is no other token.
+        if self.at(".") && self.peek().loc.start == self.lexer.prev_end() {
+            if let Tok::Name("basis") = self.lexer.peek_second().tok {
+                let (dot, word) = (self.bump().loc, self.bump().loc);
+                return self.fail(basis_is_derived(dot.to(word)));
+            }
         }
-        Ok(Place { name: Name(self.text(token.loc)), select: self.since(mark) })
+        Ok(End { name: Name(self.text(token.loc)), select: self.since(mark) })
     }
 
     /// `84.20 USD`, `empty`, `(350 USD)`, `? USD`, or `all [UNIT]`.
@@ -142,7 +143,7 @@ impl<'s> Parser<'s> {
     /// An indented line of a split: `PLACE LEGAMOUNT TAIL`.
     pub fn leg(&mut self, line: &mut Line<'s>) -> Parse<Id<Leg<'s>>> {
         let doc = line.take_doc();
-        let place = self.place()?;
+        let end = self.end()?;
         // What a leg may say that a header end may not: the remainder, or a
         // target balance.
         let amount = match self.tok() {
@@ -153,7 +154,7 @@ impl<'s> Parser<'s> {
         let tail = self.tail(self.mark::<Clause>())?;
         self.expect_eol()?;
         let loc = self.loc_from(line.body);
-        Ok(self.push(Leg { doc, place, amount, tail, loc }))
+        Ok(self.push(Leg { doc, end, amount, tail, loc }))
     }
 
     /// `[/ PAYEE] CODE* [@ PRICE] [for WHAT] [due WHEN] [basis AMOUNT] [! [STRING]]`, in any
@@ -199,12 +200,10 @@ impl<'s> Parser<'s> {
 
     /// After `due`: a date, or a span after the date it is measured from.
     fn due(&mut self) -> Parse<Due> {
-        let pick = |tok| match tok {
-            Tok::Date(day) => Some(Due::On(day)),
-            Tok::Span(span) => Some(Due::After(span)),
-            _ => None,
-        };
-        self.take(pick, "expected-due", "a date or a span such as `30d`")
+        match self.tok() {
+            Tok::Span(span) => Ok(Due::After(self.bump_as(span))),
+            _ => self.date("a date or a span such as `30d`").map(Due::On),
+        }
     }
 
     /// `for #code`, `for car-fund`, or `for` a year, month, date or range.
@@ -228,7 +227,7 @@ impl<'s> Parser<'s> {
 
     /// One side split needs exactly one named side and legs for the other.
     fn check_shape(&mut self, flow: &Flow<'s>, arrow: Loc) -> Parse<()> {
-        let (from_named, to_named) = (flow.from.place.is_some(), flow.to.place.is_some());
+        let (from_named, to_named) = (flow.from.end.is_some(), flow.to.end.is_some());
         let legs = self.slice(flow.legs);
         let diag = match (from_named, to_named, legs.first()) {
             (true, true, Some(leg)) => many_to_many(arrow, leg.loc),
@@ -268,35 +267,6 @@ impl<'s> Parser<'s> {
                 return self.close(open, "]").map(drop);
             }
         }
-    }
-
-    /// A day, month or year, or `A..B` from the first day of one to the last of
-    /// the other: as first and last day, and where it was written.
-    pub fn days(&mut self, code: &'static str, what: &str) -> Parse<(Day, Day, Loc)> {
-        let (first, mut last, mut loc) = self.day_bound(code, what)?;
-        if self.eat("..").is_some() {
-            let (_, end, end_loc) = self.day_bound(code, what)?;
-            (last, loc) = (end, loc.to(end_loc));
-        }
-        if first > last {
-            return self.fail(empty_range(loc, self.text(loc), first, last));
-        }
-        Ok((first, last, loc))
-    }
-
-    /// The first and last day of a written date, month or year.
-    fn day_bound(&mut self, code: &'static str, what: &str) -> Parse<(Day, Day, Loc)> {
-        let token = self.peek();
-        let bound = match token.tok {
-            Tok::Date(day) => (day, day),
-            Tok::Month(first) => (first, first.month_end()),
-            _ => match self.year(token).and_then(|year| Day::from_ymd(year, 1, 1)) {
-                Some(first) => (first, first.year_end()),
-                None => return Err(self.expected(code, what)),
-            },
-        };
-        self.bump();
-        Ok((bound.0, bound.1, token.loc))
     }
 }
 
@@ -343,6 +313,15 @@ fn two_remainders(first: Loc, second: Loc) -> Diagnostic {
         .label(second, "a second `...`")
         .context(first, "this leg already takes whatever remains")
         .help("give one of the legs an amount")
+}
+
+/// `house.basis`: v3 moved a basis like a balance.
+fn basis_is_derived(loc: Loc) -> Diagnostic {
+    Diagnostic::error("basis-end", "a basis is derived, never moved: there is no `.basis`")
+        .label(loc, "not an end any more")
+        .note("an asset's basis is its cost, plus each improvement, less what laws consume")
+        .help("pay an improvement `#improvement of ASSET`, and a law's `consume` lowers a basis")
+        .help("value that arrives with a basis other than its cost says so: `basis AMOUNT`")
 }
 
 fn rest_in_header(loc: Loc) -> Diagnostic {

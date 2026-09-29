@@ -63,7 +63,7 @@ use axiom_core::{Day, Dec, FileId, Id, Loc, Span};
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Name<'s>(pub &'s str);
 
-/// A written `#code`, `#` included. Its location covers the `#` too.
+/// A written `^code`, `^` included. Its location covers the `^` too.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Code<'s>(pub &'s str);
 
@@ -85,7 +85,7 @@ macro_rules! written {
 written!(Name, Code, Doc, Amount);
 
 impl<'s> Code<'s> {
-    /// The code without its `#`: `check-1041`.
+    /// The code without its `^`: `check-1041`.
     pub fn name(self) -> &'s str {
         &self.0[1..]
     }
@@ -123,6 +123,19 @@ impl<'s> Amount<'s> {
     pub fn unit(self) -> Option<Name<'s>> {
         self.0.bytes().rposition(is_blank).map(|blank| Name(&self.0[blank + 1..]))
     }
+}
+
+/// What a file's place in its project says of the dates written in it (§10): a
+/// file in `journal/2026/03.ax` holds March 2026, so its items may be dated
+/// `15`. The tree holds whole days, so nothing after the parser sees the
+/// difference. The default, where nothing is given, is a file that writes every
+/// date in full: the one for files outside `YYYY` folders, and under `layout free`.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct Place {
+    /// The year the file holds.
+    pub year: Option<i32>,
+    /// The month of that year, when the file holds one.
+    pub month: Option<u8>,
 }
 
 // ─── Where a node is ────────────────────────────────────────────────────────
@@ -331,7 +344,7 @@ tables! {
     laws: Law<'s>,
     /// The legs of flows, occurrences and openings: [`Flow::legs`].
     legs: Leg<'s>,
-    /// The selectors of places: [`Place::select`].
+    /// The selectors of ends: [`End::select`].
     selects: Select<'s>,
     /// The clauses of tails: [`Tail::clauses`].
     clauses: Clause<'s>,
@@ -436,9 +449,9 @@ pub struct Txn<'s> {
 #[derive(Debug)]
 pub struct Flow<'s> {
     /// What leaves: the left of the arrow.
-    pub from: End<'s>,
+    pub from: Side<'s>,
     /// What arrives: the right of the arrow.
-    pub to: End<'s>,
+    pub to: Side<'s>,
     /// What the header says about the whole flow, which applies to every leg.
     pub tail: Tail<'s>,
     /// The indented lines under the header: `&file[flow.legs]`.
@@ -447,30 +460,22 @@ pub struct Flow<'s> {
 
 /// One side of a header: `checking`, `checking 2_000 USD`, `7 VTI`, or nothing.
 #[derive(Debug)]
-pub struct End<'s> {
-    /// The place, or `None` when the side is left to the legs or to inference.
-    pub place: Option<Place<'s>>,
+pub struct Side<'s> {
+    /// The end, or `None` when the side is left to the legs or to inference.
+    pub end: Option<End<'s>>,
     /// How much, or `None` when the side states none.
     pub amount: Option<Quantity<'s>>,
 }
 
-/// A place as written: `brokerage[fifo, 2024]`, `house[#roof].basis`.
-#[derive(Debug)]
-pub struct Place<'s> {
-    /// A path, a unique suffix of one, an alias, an entity, or `?` (the
-    /// unknown place).
+/// One end of a flow as written: `brokerage[fifo, 2024]`, `trader-joes`, `VTI`.
+/// The parser cannot tell an account, an owner, a party or an asset apart: all
+/// are names. A commodity in party position (`VTI -> fidelity 198.12 USD`, a
+/// fund that pays) is a name in capitals, and `?` is the unknown party.
+#[derive(Clone, Copy, Debug)]
+pub struct End<'s> {
     pub name: Name<'s>,
-    /// Which parcels of the place the flow addresses, and whether it moves
-    /// their quantity or their basis: `&file[place.select]`.
+    /// Which parcels of it the flow addresses: `&file[end.select]`.
     pub select: Many<Select<'s>>,
-}
-
-impl<'s> Place<'s> {
-    /// Whether the flow moves the basis of the place's parcels rather than
-    /// their quantity: the place is written `PLACE.basis`.
-    pub fn is_basis(&self, file: &File<'s>) -> bool {
-        matches!(file[self.select].last(), Some(Select::Basis))
-    }
 }
 
 /// A lot selector. Days, months and years are normalized to inclusive ranges.
@@ -483,10 +488,6 @@ pub enum Select<'s> {
     Code(Code<'s>),
     /// A lot policy, with where it was written: `[fifo]`.
     Policy(Policy, Loc),
-    /// `.basis`, always last: what the selectors chose is moved by its basis,
-    /// not its quantity. (It is written after the brackets, and costs a
-    /// selector instead of a flag on every place.)
-    Basis,
 }
 
 /// How parcels are chosen when several could leave.
@@ -530,7 +531,7 @@ pub struct Leg<'s> {
     /// The `///` block above it.
     pub doc: Option<Doc<'s>>,
     /// Where the leg's value goes (or, in an opening, what holds it).
-    pub place: Place<'s>,
+    pub end: End<'s>,
     /// How much: fixed, pending, a target balance, or the remainder.
     pub amount: Quantity<'s>,
     /// The leg's own tail, in addition to the header's.
@@ -618,7 +619,7 @@ pub struct Assert<'s> {
     /// The day the balance is checked, at its end.
     pub date: Day,
     /// The place whose balance is stated.
-    pub place: Place<'s>,
+    pub end: End<'s>,
     /// In the place's display sign. Negative (`= -50 USD`) for an overdraft.
     pub amount: Amount<'s>,
     /// What becomes of a difference between the statement and the ledger.

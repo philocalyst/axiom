@@ -60,8 +60,8 @@ impl<'s> Parser<'s> {
         self.begin_line(line);
         let token = self.peek();
         match token.tok {
-            Tok::Date(date) => {
-                self.bump();
+            Tok::Date(_) | Tok::MonthDay(..) | Tok::Number(_) => {
+                let date = self.item_date("a date or a keyword")?;
                 self.journal_entry(line, date)
             }
             Tok::Name(word) => {

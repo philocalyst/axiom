@@ -89,10 +89,10 @@ impl<'s> Parser<'s> {
         let token = self.peek();
         match token.tok {
             Tok::Punct("*") => Ok(self.bump_as(Name(self.text(token.loc)))),
-            Tok::Code(code) => {
-                let name = code.name();
-                let diag = Diagnostic::error("hash-in-pattern", "code patterns are written without `#`")
-                    .label(token.loc, "remove the `#`")
+            Tok::Code(_) | Tok::Purpose(_) => {
+                let (mark, name) = self.text(token.loc).split_at(1);
+                let diag = Diagnostic::error("mark-in-pattern", format!("code patterns are written without `{mark}`"))
+                    .label(token.loc, format!("remove the `{mark}`"))
                     .fix(format!("write `{name}`"), token.loc, name);
                 self.fail(diag)
             }

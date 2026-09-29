@@ -4,7 +4,6 @@ use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Id, Loc};
 
 use crate::ast::*;
-use crate::journal::{month_and_day, not_a_day, valid_year_day};
 use crate::lex::{Tok, Token};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported};
@@ -86,7 +85,8 @@ impl<'s> Parser<'s> {
             "each" => {
                 let (period, _) = self.choose(&PERIODS, "unknown-period", "period")?;
                 match period == Period::Year && self.eat_word("closing").is_some() {
-                    true => self.closing_day().map(|(month, day)| (Trigger::Closing { month, day }, None)),
+                    // The day the year is judged, as month and day: `04-15`.
+                    true => self.month_day().map(|(month, day)| (Trigger::Closing { month, day }, None)),
                     false => Ok((Trigger::Each(period), None)),
                 }
             }
@@ -106,23 +106,6 @@ impl<'s> Parser<'s> {
         let loc = self.loc_from(end.start as usize);
         let filter = self.node(ExprKind::Is(subject, alternatives), loc, first);
         Ok(Some(Step { loc, kind: StepKind::When(filter) }))
-    }
-
-    /// The day an `each year closing` law judges the year: `04-15`.
-    fn closing_day(&mut self) -> Parse<(u8, u8)> {
-        let token = self.peek();
-        let day = match token.tok {
-            Tok::Name(word) => month_and_day(word).map(|day| (day, word)),
-            _ => None,
-        };
-        let Some(((month, day), word)) = day else {
-            return Err(self.expected("expected-day", "the day the year is judged, as month and day: `04-15`"));
-        };
-        self.bump();
-        match valid_year_day(month, day) {
-            true => Ok((month, day)),
-            false => self.fail(not_a_day(token.loc, word)),
-        }
     }
 
     fn step(&mut self, keyword: Token<'s>, word: &str) -> Parse<StepKind<'s>> {

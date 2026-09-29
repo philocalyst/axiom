@@ -1,10 +1,10 @@
 //! Journal items: everything that starts with a date, `opening` blocks, and
 //! plans, which are transactions that repeat.
 
-use axiom_core::day::days_in_month;
 use axiom_core::{Day, Dec, Diagnostic, Loc, Span};
 
 use crate::ast::*;
+use crate::dates::{empty_range, not_a_day};
 use crate::lex::Tok;
 use crate::lines::Line;
 use crate::parser::{Parse, Parser};
@@ -57,10 +57,10 @@ impl<'s> Parser<'s> {
     fn transaction(&mut self, line: &mut Line<'s>, date: Day) -> Parse<()> {
         let clauses = self.mark::<Clause>();
         let spread = self.spread(line, date)?;
-        let from = self.end()?;
+        let from = self.side()?;
         if !spread && from.amount.is_none() && self.at("=") {
-            if let Some(place) = from.place {
-                return self.assertion(line, date, place);
+            if let Some(end) = from.end {
+                return self.assertion(line, date, end);
             }
         }
         let amount = match from.amount {
@@ -68,9 +68,9 @@ impl<'s> Parser<'s> {
             Some(Quantity::Fixed(amount)) => Some(Some(amount)),
             Some(_) => None,
         };
-        if let (false, true, Some(place), Some(amount)) = (spread, self.at_eol(), &from.place, amount) {
-            if place.select.is_empty() {
-                return self.occurrence(line, date, place.name, amount);
+        if let (false, true, Some(end), Some(amount)) = (spread, self.at_eol(), &from.end, amount) {
+            if end.select.is_empty() {
+                return self.occurrence(line, date, end.name, amount);
             }
         }
         let (mut flow, arrow) = self.flow_head(from, clauses)?;
@@ -95,7 +95,7 @@ impl<'s> Parser<'s> {
     }
 
     /// `DATE PLACE = [-]AMOUNT [! [STRING] | via PLACE]`.
-    fn assertion(&mut self, line: &mut Line<'s>, date: Day, place: Place<'s>) -> Parse<()> {
+    fn assertion(&mut self, line: &mut Line<'s>, date: Day, end: End<'s>) -> Parse<()> {
         self.bump();
         let amount = self.signed_amount()?;
         let gap = match self.tok() {
@@ -107,7 +107,7 @@ impl<'s> Parser<'s> {
             _ => Gap::Refused,
         };
         let header = self.end_header(line)?;
-        self.emit(&header, Assert { date, place, amount, gap }, ItemKind::Assert);
+        self.emit(&header, Assert { date, end, amount, gap }, ItemKind::Assert);
         Ok(())
     }
 
@@ -121,7 +121,7 @@ impl<'s> Parser<'s> {
 
     /// `opening DATE` and its lines `PLACE [SELECTOR] AMOUNT [basis AMOUNT] [since DATE]`.
     pub fn opening(&mut self, line: &mut Line<'s>) -> Parse<()> {
-        let date = self.date("the day the balances are stated, like `2024-12-31`")?;
+        let date = self.item_date("the day the balances are stated, like `2024-12-31`")?;
         let header = self.end_header(line)?;
         self.opening = true;
         let lines = self.legs(line, |parser, opening_line| {
@@ -177,7 +177,7 @@ impl<'s> Parser<'s> {
         };
         let mut bounds = Bounds::default();
         self.plan_bounds(&mut bounds)?;
-        let from = self.end()?;
+        let from = self.side()?;
         let (mut flow, arrow) = self.flow_head(from, self.mark::<Clause>())?;
         self.plan_bounds(&mut bounds)?;
         let header = self.end_header(line)?;
@@ -225,60 +225,22 @@ impl<'s> Parser<'s> {
     /// The day within each period: `15`, `04-15`, or `monday`.
     fn plan_day(&mut self) -> Parse<On> {
         let token = self.peek();
-        let written = self.text(token.loc);
         match token.tok {
             Tok::Number(_) => {
                 self.bump();
-                match written.parse::<u8>() {
+                match self.text(token.loc).parse::<u8>() {
                     Ok(day @ 1..=31) => Ok(On::MonthDay(day)),
-                    _ => self.fail(not_a_day(token.loc, written)),
+                    _ => self.fail(not_a_day(token.loc, self.text(token.loc))),
                 }
             }
-            Tok::Name(word) => match month_and_day(word) {
-                Some((month, day)) if valid_year_day(month, day) => {
-                    self.bump();
-                    Ok(On::YearDay { month, day })
-                }
-                Some(_) => self.fail(not_a_day(token.loc, word)),
-                None => self.choose(&WEEKDAYS, "unknown-day", "weekday").map(|(weekday, _)| On::Weekday(weekday)),
-            },
-            _ => Err(self.expected("expected-day", "a day: `15`, `04-15` or a weekday")),
+            Tok::MonthDay(..) => self.month_day().map(|(month, day)| On::YearDay { month, day }),
+            _ => self.choose(&WEEKDAYS, "unknown-day", "weekday").map(|(weekday, _)| On::Weekday(weekday)),
         }
     }
-}
-
-/// `04-15` as (4, 15), when the word is two two-digit numbers around a dash.
-pub(crate) fn month_and_day(word: &str) -> Option<(u8, u8)> {
-    let (month, day) = word.split_once('-')?;
-    let two_digits = |part: &str| if part.len() == 2 { part.parse::<u8>().ok() } else { None };
-    Some((two_digits(month)?, two_digits(day)?))
-}
-
-/// Whether the month has that day in some year: a leap year admits `02-29`.
-pub(crate) fn valid_year_day(month: u8, day: u8) -> bool {
-    (1..=12).contains(&month) && (1..=days_in_month(2024, month.into())).contains(&day.into())
-}
-
-pub(crate) fn not_a_day(loc: Loc, written: &str) -> Diagnostic {
-    Diagnostic::error("bad-day", format!("`{written}` is not a day of the month or year"))
-        .label(loc, "no such day")
-        .help("write a day of the month (`on 15`), a month and day (`on 04-15`), or a weekday (`on monday`)")
 }
 
 fn opening_needs_amount(leg: Loc) -> Diagnostic {
     Diagnostic::error("opening-amount", "an opening line says how much a place holds")
         .label(leg, "no amount here")
         .help("write the balance the statement shows: `checking 10_000 USD`")
-}
-
-/// A range whose end comes before its start, with the bounds swapped as a fix.
-pub(crate) fn empty_range(loc: Loc, written: &str, first: Day, last: Day) -> Diagnostic {
-    let days = first.0 - last.0;
-    let s = if days == 1 { "" } else { "s" };
-    let message = format!("this range ends on {last}, {days} day{s} before it starts on {first}");
-    let diag = Diagnostic::error("empty-range", message).label(loc, "a range runs from the earlier day to the later");
-    match written.split_once("..") {
-        Some((start, end)) => diag.fix("swap the bounds", loc, format!("{end}..{start}")),
-        None => diag,
-    }
 }
