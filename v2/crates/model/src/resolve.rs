@@ -6,6 +6,7 @@
 //! the caller decides the miss is an error, and for the journal only once per
 //! name however often it was written.
 
+use axiom_core::diag::closest;
 use axiom_core::num::DecError;
 use axiom_core::{Dec, Diagnostic, Id, Loc, Sym};
 
@@ -13,7 +14,7 @@ use crate::book::{Amount, Class, Commodity, Entity, Kind, Miss, Param, Place, Sy
 use crate::declare::{World, near_place};
 use crate::errors::{Candidate, Word, ambiguous, count, list, not_used, unknown};
 use crate::kinds;
-use crate::names::{Found, Names, near};
+use crate::names::{Found, Names};
 use crate::scope::Home;
 
 /// A place written in a flow, and the entity it stood for if it was one.
@@ -63,7 +64,7 @@ impl<'s> World<'s> {
 
     fn explain_commodity(&self, word: Word) -> Diagnostic {
         let symbols = self.book.commodities.values().map(|commodity| self.book.name(commodity.symbol));
-        let diagnostic = unknown("unknown-commodity", "commodity", word, near(word.text, symbols));
+        let diagnostic = unknown("unknown-commodity", "commodity", word, closest(word.text, symbols));
         diagnostic.note(format!(
             "commodities are declared with `commodity {}`; USD, EUR, GBP… come with `use std`",
             word.text
@@ -219,8 +220,8 @@ impl<'s> World<'s> {
         let (places, entities, names) = (&self.book.lookup.places, &self.book.lookup.entities.names, &self.book.names);
         let known = places.keys(names);
         let closest = match also_entities {
-            true => near(word.text, known.chain(entities.keys(names))),
-            false => near(word.text, known),
+            true => closest(word.text, known.chain(entities.keys(names))),
+            false => closest(word.text, known),
         };
         let mut diagnostic = unknown("unknown-place", "place", word, closest);
         // A full path is opened unless it is a typo; say which one it was taken for.
@@ -398,7 +399,7 @@ impl<'s> World<'s> {
             .names
             .keys(names)
             .filter(|&known| lookup.names.candidates(names, known).iter().any(|&id| scope.sees(lookup.home(id))));
-        let mut diagnostic = unknown("unknown-param", "param", word, near(word.text, visible));
+        let mut diagnostic = unknown("unknown-param", "param", word, closest(word.text, visible));
         for &hidden in lookup.names.candidates(names, leaf) {
             if let Some(system) = self.param_system(hidden) {
                 diagnostic = not_used(diagnostic, "param", leaf, system);

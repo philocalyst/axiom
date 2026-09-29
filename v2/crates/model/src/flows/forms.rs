@@ -2,6 +2,7 @@
 //! or the holdings of an opening statement. Each becomes moves, and the moves
 //! become flows under one [`Txn`].
 
+use axiom_core::diag::closest;
 use axiom_core::{Day, Diagnostic, Id, Map};
 use axiom_syntax::{self as ast, Item, Quantity};
 
@@ -9,7 +10,6 @@ use super::moves::{Move, Moves};
 use super::shape::{Elab, Placed, Shape, Slot, Stated, Tail};
 use crate::errors::list;
 use crate::journal::{Infer, Mode, Plan, Txn};
-use crate::names::near;
 use crate::prices::implied_quote;
 use crate::resolve::{Cause, End};
 
@@ -136,7 +136,7 @@ impl<'a, 's> Elab<'a, 's> {
         let mut diagnostic = Diagnostic::error("plan-leg", format!("plan `{plan}` has no leg for `{}`", path(placed)))
             .label(placed.loc, "no leg of the plan goes here")
             .note(format!("`{name}` has legs for {}", list(&legs)));
-        if let Some(near) = near(path(placed), legs.iter().copied()) {
+        if let Some(near) = closest(path(placed), legs.iter().copied()) {
             diagnostic = diagnostic.help(format!("did you mean `{near}`?"));
         }
         self.sink.diags.push(diagnostic);

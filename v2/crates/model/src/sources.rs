@@ -1,6 +1,7 @@
 //! The sources, arranged: which files are systems, which are the project, and
 //! the tree of systems they define.
 
+use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Id, Interner, Map, Tree};
 use axiom_syntax::{ItemKind, Setting};
 
@@ -8,7 +9,6 @@ use crate::Source;
 use crate::book::System;
 use crate::errors::{Word, unknown};
 use crate::layout::Layout;
-use crate::names::near;
 use crate::paths;
 use crate::scope::Home;
 
@@ -87,7 +87,7 @@ impl SystemIndex<'_> {
 
     /// The `unknown-system` diagnostic for a `use` or `lives` naming no system.
     pub fn unknown(&self, word: Word) -> Diagnostic {
-        unknown("unknown-system", "system", word, near(word.text, self.by_path.keys().copied()))
+        unknown("unknown-system", "system", word, closest(word.text, self.by_path.keys().copied()))
     }
 }
 

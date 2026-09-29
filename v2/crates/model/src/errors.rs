@@ -1,9 +1,8 @@
 //! The words diagnostics share: a name nothing answers to, a name several
 //! things answer to, a thing declared twice.
 
+use axiom_core::diag::closest;
 use axiom_core::{Day, Diagnostic, Loc};
-
-use crate::names::near;
 
 /// A word as written, and where.
 #[derive(Clone, Copy, Debug)]
@@ -29,7 +28,7 @@ pub(crate) fn suggest<'a>(
     word: &str,
     candidates: impl IntoIterator<Item = &'a str>,
 ) -> Diagnostic {
-    match near(word, candidates) {
+    match closest(word, candidates) {
         Some(near) => diagnostic.fix(format!("did you mean `{near}`?"), loc, near),
         None => diagnostic,
     }

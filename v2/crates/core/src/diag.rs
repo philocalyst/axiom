@@ -158,11 +158,13 @@ impl Diagnostic {
 }
 
 /// The candidate closest to `name` by edit distance, if it is close enough to
-/// be a plausible typo.
+/// be a plausible typo. Candidates whose length alone puts them out of reach
+/// are passed over without computing a distance.
 pub fn closest<'a>(name: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
     let limit = (name.len() / 3).max(1);
     candidates
         .into_iter()
+        .filter(|c| c.len().abs_diff(name.len()) <= limit)
         .map(|c| (distance(name, c), c))
         .filter(|&(d, c)| d <= limit && c != name)
         .min()
@@ -171,7 +173,7 @@ pub fn closest<'a>(name: &str, candidates: impl IntoIterator<Item = &'a str>) ->
 
 /// Optimal-string-alignment distance: insertions, deletions, substitutions, and
 /// transpositions of adjacent characters each cost one.
-fn distance(a: &str, b: &str) -> usize {
+pub fn distance(a: &str, b: &str) -> usize {
     let (a, b) = (a.as_bytes(), b.as_bytes());
     let mut rows = vec![vec![0usize; b.len() + 1]; 3];
     for (j, cell) in rows[1].iter_mut().enumerate() {

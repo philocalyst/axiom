@@ -63,34 +63,6 @@ fn suffixes(path: &str) -> impl Iterator<Item = &str> {
     std::iter::once(path).chain(path.match_indices('/').map(|(at, _)| &path[at + 1..]))
 }
 
-/// The candidate closest to `name`, considering only those whose length could
-/// possibly be close enough: an edit distance costs more than a length check.
-pub(crate) fn near<'a>(name: &str, candidates: impl IntoIterator<Item = &'a str>) -> Option<&'a str> {
-    let window = (name.len() / 3).max(1);
-    closest(name, candidates.into_iter().filter(|candidate| candidate.len().abs_diff(name.len()) <= window))
-}
-
-/// How many single-character edits turn `a` into `b`: insertions, deletions,
-/// substitutions, and swaps of two neighbours.
-pub(crate) fn edits(a: &str, b: &str) -> usize {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    let mut rows = vec![vec![0usize; b.len() + 1]; 3];
-    rows[1].iter_mut().enumerate().for_each(|(j, cell)| *cell = j);
-    for i in 1..=a.len() {
-        rows.rotate_left(1);
-        rows[1][0] = i;
-        for j in 1..=b.len() {
-            let cost = usize::from(a[i - 1] != b[j - 1]);
-            let mut best = (rows[0][j] + 1).min(rows[1][j - 1] + 1).min(rows[0][j - 1] + cost);
-            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
-                best = best.min(rows[2][j - 2] + 1);
-            }
-            rows[1][j] = best;
-        }
-    }
-    rows[1][b.len()]
-}
-
 impl<T> Names<T> {
     /// Registers `id` under `key`, unless something of a higher rank has it.
     pub fn insert<'s>(&mut self, names: &mut Interner<'s>, key: &'s str, rank: Rank, id: Id<T>) {
@@ -158,7 +130,7 @@ impl<T> Names<T> {
     /// The known name closest to `text`, among the things `visible` admits.
     fn suggest(&self, names: &Interner, text: &str, visible: &impl Fn(Id<T>) -> bool) -> Option<Sym> {
         let keys = self.slots.iter().filter(|(_, slot)| slot.ids.as_slice().iter().any(|&id| visible(id)));
-        names.get(near(text, keys.map(|(&key, _)| names.name(key)))?)
+        names.get(closest(text, keys.map(|(&key, _)| names.name(key)))?)
     }
 }
 

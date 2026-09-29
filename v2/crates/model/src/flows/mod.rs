@@ -14,6 +14,7 @@ mod pairing;
 mod records;
 mod shape;
 
+use axiom_core::diag::closest;
 use axiom_core::{Day, Diagnostic, FileId, Groups, Id, Loc, Map, Sym, par};
 use axiom_syntax::ItemKind;
 
@@ -26,7 +27,6 @@ use crate::declare::World;
 use crate::errors::{Word, unknown};
 use crate::journal::{Assert, Event, Flow, Mode, Plan, Prices, Quote, Split, Txn};
 use crate::layout::{Misfiled, dated};
-use crate::names::near;
 use crate::resolve::Cause;
 use crate::sources::Site;
 
@@ -275,7 +275,7 @@ fn explain_misses<'s>(world: &World<'s>, plans: &Plans<'s>, misses: Vec<(Cause, 
                 "unknown-plan",
                 "plan",
                 word,
-                near(text, plans.names.iter().copied().filter(|name| !name.is_empty())),
+                closest(text, plans.names.iter().copied().filter(|name| !name.is_empty())),
             ),
             cause => world.explain(cause, word, uses),
         }
@@ -327,7 +327,7 @@ fn check_events(world: &World, raw: Vec<RawEvent>, diags: &mut Vec<Diagnostic>) 
                 Diagnostic::error("unknown-code", format!("no transaction is marked `#{}`", event.code))
                     .label(event.code_loc, "nothing carries this code")
                     .note("an event names the transaction it changes by its code");
-            if let Some(near) = near(event.code, known) {
+            if let Some(near) = closest(event.code, known) {
                 diagnostic = diagnostic.fix(format!("did you mean `#{near}`?"), event.code_loc, format!("#{near}"));
             }
             diags.push(diagnostic);

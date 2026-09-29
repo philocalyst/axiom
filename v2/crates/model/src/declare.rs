@@ -6,6 +6,7 @@
 //! journal, are resolved against them later.
 
 use axiom_core::diag::closest;
+use axiom_core::diag::distance;
 use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Set, Sym, Tree};
 use axiom_syntax::{DeclKind, ExprKind, Setting};
 
@@ -15,7 +16,7 @@ use crate::cx::Cx;
 use crate::errors::{Word, duplicate, list_and, unknown};
 use crate::kinds::{self, Kinds};
 use crate::law::Rules;
-use crate::names::{Names, Rank, Scoped, edits, near};
+use crate::names::{Names, Rank, Scoped};
 use crate::paths;
 use crate::props::PropTable;
 use crate::scope::{Home, Scopes};
@@ -253,7 +254,7 @@ impl Commodities {
 
     /// The declared commodity `symbol` is a few letters away from, if any.
     fn typo_of<'a>(&self, names: &'a Interner, symbol: &str) -> Option<&'a str> {
-        near(symbol, self.by_symbol.keys().map(|&sym| names.name(sym)))
+        closest(symbol, self.by_symbol.keys().map(|&sym| names.name(sym)))
     }
 }
 
@@ -304,7 +305,7 @@ fn commodities<'s>(
         if declared {
             continue;
         }
-        if named == Some(unit.symbol) || near(unit.symbol, known.iter().copied()).is_none() {
+        if named == Some(unit.symbol) || closest(unit.symbol, known.iter().copied()).is_none() {
             table.add(cx.names, unit.symbol, unit.places, root, Home::Builtin);
         }
     }
@@ -556,7 +557,7 @@ pub(crate) fn near_place<'a>(path: &str, declared: &[&'a str]) -> Option<&'a str
         .iter()
         .copied()
         .filter(|other| other.len().abs_diff(path.len()) <= limit && other.split('/').next() == root)
-        .map(|other| (edits(path, other), other))
+        .map(|other| (distance(path, other), other))
         .filter(|&(distance, _)| distance <= limit)
         .min()
         .map(|(_, other)| other)
