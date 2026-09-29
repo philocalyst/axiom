@@ -78,8 +78,17 @@ pub(crate) struct Seen<'s> {
 }
 
 impl Seen<'_> {
-    /// Takes in what another sighting of the same commodity says.
-    fn absorb(&mut self, other: &Seen) {
+    /// Takes in another sighting of the same commodity. Where it was first
+    /// written is where the journal first says it, or else the earliest
+    /// sighting: `sooner` says whether this one is that.
+    fn absorb(&mut self, other: &Seen, sooner: bool) {
+        if match (other.journal, self.journal) {
+            (true, false) => true,
+            (false, true) => false,
+            _ => sooner,
+        } {
+            self.first = other.first;
+        }
         (self.places, self.journal) = (self.places.max(other.places), self.journal | other.journal);
     }
 }
@@ -270,7 +279,7 @@ impl<'s> Facts<'s> {
     fn merge(&mut self, later: Facts<'s>) {
         for seen in later.units {
             match self.unit_at.get(seen.symbol) {
-                Some(&at) => self.units[at].absorb(&seen),
+                Some(&at) => self.units[at].absorb(&seen, false),
                 None => {
                     self.unit_at.insert(seen.symbol, self.units.len());
                     self.units.push(seen);
@@ -287,10 +296,7 @@ impl<'s> Facts<'s> {
         match self.unit_at.get(symbol) {
             Some(&at) => {
                 let earlier = &mut self.units[at];
-                earlier.absorb(&seen);
-                if first.start < earlier.first.start {
-                    earlier.first = first;
-                }
+                earlier.absorb(&seen, first.start < earlier.first.start);
             }
             None => {
                 self.unit_at.insert(symbol, self.units.len());
