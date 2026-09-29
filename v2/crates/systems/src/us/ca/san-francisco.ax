@@ -1,0 +1,38 @@
+/// The City and County of San Francisco.
+///
+/// California cities do not tax income, so what San Francisco adds for its
+/// residents is small. This system exists to show the last link of the chain
+/// `us`, `us/ca`, `us/ca/san-francisco`: an entity that `lives` here is under
+/// the city's laws, California's and the federal government's, all three.
+///
+/// One illustrative rule is written: the real property transfer tax, owed by
+/// the seller on the price of a sale.
+///
+/// SAMPLE DATA. The rates are community-maintained and were written from the
+/// published tax table, not checked against the Office of the Assessor-Recorder.
+/// Verify them against the City (sfassessor.org, "Transfer tax") before relying
+/// on them, and correct them in a pull request when they are wrong.
+system us/ca/san-francisco
+
+use us/ca
+
+
+/// The City and County of San Francisco.
+entity sf : government
+
+
+/// Selling real property in San Francisco owes the city a transfer tax on the
+/// price (Business and Tax Regulations Code, Article 12-C). The rate rises
+/// with the price and applies to all of it, not only to the part above each
+/// step. It is owed when the sale is recorded. Only sales up to 5,000,000 USD
+/// are covered; above that the rates rise sharply, so work the tax out with
+/// the Assessor-Recorder and record it by hand.
+///
+/// This is charged per lot sold, so a property held as several lots is taxed
+/// lot by lot.
+law transfer-tax
+  on gain
+  when from is property
+  // verify: the three rates against the Assessor-Recorder's current table.
+  let rate = if proceeds <= 250_000 USD then 0.5% else if proceeds < 1_000_000 USD then 0.68% else 0.75%
+  owe rate * proceeds to sf as transfer-tax

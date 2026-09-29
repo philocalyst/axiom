@@ -1,0 +1,66 @@
+/// New York State personal income tax.
+///
+/// Everyone who `lives us/ny` pays New York tax on top of federal tax. This
+/// system reads `agi` from the federal tallies (New York starts from federal
+/// adjusted gross income), subtracts the New York standard deduction and taxes
+/// the rest on the state brackets. Tax withheld or paid to New York during the
+/// year is credited. New York City residents live in `us/ny/nyc`, which
+/// includes this system.
+///
+/// Simplified on purpose: it leaves out itemized deductions, credits, the
+/// New York differences from federal income and the tax benefit recapture on
+/// high incomes. Only the `single` and `joint` filing statuses have figures.
+///
+/// SAMPLE DATA. The figures are community-maintained and were written from the
+/// published tables, not checked against the Department of Taxation and
+/// Finance. Verify them against the NY DTF (tax.ny.gov, "Tax rate schedule"
+/// and the IT-201 instructions) before relying on them, and correct them in a
+/// pull request when they are wrong.
+system us/ny
+
+use us
+
+
+/// The New York State Department of Taxation and Finance.
+entity dtf : government
+
+/// New York income tax withheld from pay, or paid to the DTF directly. Every
+/// arrival counts as New York tax already paid.
+kind ny-tax : expense
+
+
+/// Tax withheld from pay, or paid in installments, is credited against the
+/// tax owed to New York for the year. Send money to a place of kind `ny-tax`,
+/// or let a paycheck leg do it.
+law credit-ny-withholding
+  on in
+  when to is ny-tax
+  count amount as ny-withheld
+
+/// New York State income tax for the year (Tax Law §601), on federal adjusted
+/// gross income less the state standard deduction. Long-term gains are taxed as
+/// ordinary income here. Tax already withheld or paid is credited, and the rest
+/// is owed by April 15 of the next year (Form IT-201). A refund is not booked.
+law state-income-tax
+  each year
+  let taxable = max(tally(agi) - deduction[year, owner.filing], empty)
+  let liability = progressive(brackets[year, owner.filing], taxable)
+  count taxable as ny-taxable-income
+  count liability as ny-income-tax
+  owe max(liability - tally(ny-withheld), empty) to dtf by date(year + 1, 4, 15) as ny-income-tax
+
+
+// The marginal rate above each threshold (Tax Law §601). A year without a row
+// uses the latest earlier one, so 2025 uses the 2024 rates. The 2026 rates
+// are the first five lowered by a tenth of a point in the 2025 state budget.
+// verify: the 2026 rows against the DTF's 2026 rate schedule.
+param brackets
+  2024 single          0 USD 4%    |      8_500 USD 4.5%  |     11_700 USD 5.25% |     13_900 USD 5.5%  |     80_650 USD 6%    |    215_400 USD 6.85% |  1_077_550 USD 9.65% |  5_000_000 USD 10.3% | 25_000_000 USD 10.9%
+  2024 joint           0 USD 4%    |     17_150 USD 4.5%  |     23_600 USD 5.25% |     27_900 USD 5.5%  |    161_550 USD 6%    |    323_200 USD 6.85% |  2_155_350 USD 9.65% |  5_000_000 USD 10.3% | 25_000_000 USD 10.9%
+  2026 single          0 USD 3.9%  |      8_500 USD 4.4%  |     11_700 USD 5.15% |     13_900 USD 5.4%  |     80_650 USD 5.9%  |    215_400 USD 6.85% |  1_077_550 USD 9.65% |  5_000_000 USD 10.3% | 25_000_000 USD 10.9%
+  2026 joint           0 USD 3.9%  |     17_150 USD 4.4%  |     23_600 USD 5.15% |     27_900 USD 5.4%  |    161_550 USD 5.9%  |    323_200 USD 6.85% |  2_155_350 USD 9.65% |  5_000_000 USD 10.3% | 25_000_000 USD 10.9%
+
+// The New York standard deduction (Tax Law §614).
+param deduction
+  2024 single  8_000 USD
+  2024 joint  16_050 USD

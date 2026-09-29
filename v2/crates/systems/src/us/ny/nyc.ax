@@ -1,0 +1,56 @@
+/// New York City resident income tax.
+///
+/// Everyone who `lives us/ny/nyc` pays city income tax on top of New York State
+/// and federal tax, so this is the third link of the chain `us`, `us/ny`,
+/// `us/ny/nyc`. The city taxes the same base as the state: federal adjusted
+/// gross income, less the New York standard deduction (declared by `us/ny`,
+/// which this system includes). Tax withheld or paid to the city during the
+/// year is credited.
+///
+/// Simplified on purpose: it leaves out credits and the city's part-year
+/// resident rules. Only the `single` and `joint` filing statuses have figures.
+///
+/// SAMPLE DATA. The figures are community-maintained and were written from the
+/// published tables, not checked against the Department of Taxation and
+/// Finance. Verify them against the NY DTF (tax.ny.gov, "New York City
+/// resident tax rates") before relying on them, and correct them in a pull
+/// request when they are wrong.
+system us/ny/nyc
+
+use us/ny
+
+
+/// The New York City Department of Finance.
+entity nyc-dof : government
+
+/// New York City income tax withheld from pay, or paid to the city directly.
+/// Every arrival counts as city tax already paid.
+kind nyc-tax : expense
+
+
+/// Tax withheld from pay, or paid in installments, is credited against the
+/// city tax owed for the year. Send money to a place of kind `nyc-tax`, or let
+/// a paycheck leg do it.
+law credit-nyc-withholding
+  on in
+  when to is nyc-tax
+  count amount as nyc-withheld
+
+/// New York City resident income tax for the year (Administrative Code §11-1701),
+/// on the same taxable income as the state. Tax already withheld or paid is
+/// credited, and the rest is owed by April 15 of the next year (Form IT-201).
+/// A refund is not booked.
+law city-income-tax
+  each year
+  let taxable = max(tally(agi) - deduction[year, owner.filing], empty)
+  let liability = progressive(brackets[year, owner.filing], taxable)
+  count liability as nyc-income-tax
+  owe max(liability - tally(nyc-withheld), empty) to nyc-dof by date(year + 1, 4, 15) as nyc-income-tax
+
+
+// The marginal rate above each threshold. They have not changed in years, so
+// the 2024 rows apply to every later year until a new row is written.
+// verify: the rows against the DTF's current resident rate schedule.
+param brackets
+  2024 single      0 USD 3.078% | 12_000 USD 3.762% | 25_000 USD 3.819% | 50_000 USD 3.876%
+  2024 joint       0 USD 3.078% | 21_600 USD 3.762% | 45_000 USD 3.819% | 90_000 USD 3.876%

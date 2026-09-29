@@ -1,0 +1,39 @@
+// January 2026.
+
+2026-01-01 checking -> landlord 2_850 USD
+
+/// The renter's policy is paid once, in January, and covers the whole year. The
+/// range spreads what it costs over those days, so each month's expenses carry
+/// their share.
+2026-01-01..2026-12-31 checking -> insurer 600 USD
+
+2026-01-05 checking -> college 300 USD
+
+2026-01-08 visa -> groceries 84.20 USD / trader-joes
+2026-01-11 visa -> dining 46.80 USD
+
+/// A paycheck: one source, several targets. The last leg is whatever is left,
+/// and `retirement` is a pre-tax deferral into the 401(k).
+2026-01-15 acme -> 8_000 USD
+  retirement       800 USD
+  taxes/federal    880 USD
+  taxes/state      370 USD
+  taxes/payroll    612 USD
+  checking         ...
+
+2026-01-16 checking -> utility 118.40 USD
+2026-01-17 visa -> groceries 132.55 USD / trader-joes
+2026-01-19 visa -> transport 38.50 USD
+2026-01-20 checking -> savings 500 USD
+
+/// Buying shares: the flow names what arrives and at what price, and the cost,
+/// 7 x 285.70 = 1_999.90 USD, leaves checking. The lot remembers it as its basis.
+2026-01-22 checking -> brokerage 7 VTI @ 285.70 USD
+
+2026-01-24 visa -> dining 62.35 USD
+2026-01-28 visa -> groceries 97.10 USD / trader-joes
+2026-01-31 interest -> savings 49.73 USD
+
+2026-01-31 checking = 8_169.70 USD
+2026-01-31 savings = 15_549.73 USD
+2026-01-31 retirement = 42_100 USD

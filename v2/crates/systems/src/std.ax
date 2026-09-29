@@ -1,0 +1,262 @@
+/// The standard kinds and currencies that almost every ledger reaches for.
+///
+/// Place kinds say what an account is (a bank, a broker, a loan) and carry the
+/// rules that follow from it. Commodity kinds say what a unit is (a currency, a
+/// stock, a house). Entity kinds say who someone is (a person, an employer, a
+/// grant).
+///
+/// Currency precision follows ISO 4217. Like every system, this is
+/// community-maintained data: check a figure against its official source
+/// before relying on it, and send a fix when it is wrong.
+system std
+
+
+// ─── Places: assets ─────────────────────────────────────────────────────────
+
+/// Physical cash and money held outside any institution.
+kind cash : asset
+
+/// A checking, savings or money-market account.
+kind bank : asset
+  /// A bank balance below zero is an overdraft: the bank is lending you the
+  /// difference, usually for a fee. Move money in before the payment clears, or
+  /// look for a pending payment or a missing deposit that explains it.
+  law overdraft
+    always
+    warn balance >= empty "balance below zero"
+
+/// A brokerage account. Sales relieve the oldest shares first, unless a
+/// selector or the account says otherwise.
+kind broker : asset
+  select fifo
+
+/// Land, a house or a share of one.
+kind property : asset
+
+/// A car, a boat, anything with a title.
+kind vehicle : asset
+
+
+// ─── Places: liabilities ────────────────────────────────────────────────────
+
+/// Revolving credit. Spending goes in, payments come out of a bank account.
+kind credit-card : liability
+
+/// Money borrowed for a term.
+kind loan : liability
+  has rate     percent
+  has maturity date
+
+  /// A loan is repaid in full by its maturity date. This failed because the
+  /// journal has reached that date with a balance still owed. Record the
+  /// missing payments, or, if the term was extended, update `maturity` on the
+  /// account.
+  law payoff
+    by self.maturity
+    require self.balance == empty "balance still owed at maturity"
+
+/// A loan secured by a home.
+kind mortgage : loan
+
+
+// ─── Places: income ─────────────────────────────────────────────────────────
+
+/// Pay for work. Tax systems count what arrives from a place of this kind.
+kind wages : income
+
+/// Interest earned.
+kind interest : income
+
+/// Dividends earned.
+kind dividends : income
+
+/// Profit from selling something for more than it cost.
+kind gains : income
+
+
+// ─── Places: expenses ───────────────────────────────────────────────────────
+
+/// Tuition, books and fees. A 529 plan and a grant for education spend here.
+kind education : expense
+
+/// Doctors, prescriptions and insurance costs. An HSA spends here.
+kind medical : expense
+
+
+// ─── Commodities ────────────────────────────────────────────────────────────
+
+/// Legal tender.
+kind currency : commodity
+
+/// Anything traded on a market.
+kind security : commodity
+
+/// A share of a company.
+kind stock : security
+  liquidity 1d
+
+/// A pooled fund: a mutual fund or an ETF.
+kind fund : security
+  liquidity 2d
+
+/// A loan you hold, or a note that pays interest.
+kind bond : security
+  liquidity 2d
+
+/// A digital asset.
+kind crypto : commodity
+  liquidity 1d
+
+/// Land and buildings, counted in units you choose (one house, one acre).
+kind real-estate : commodity
+  liquidity 90d
+
+/// A thing you own that is not money: a car, a painting, a bag of gold.
+kind good : commodity
+  liquidity 30d
+
+
+// ─── Entities ───────────────────────────────────────────────────────────────
+
+/// A human being.
+kind person : entity
+  has born   date
+  has filing name
+
+/// Anyone who is not a person: a company, a school, a landlord.
+kind org : entity
+
+/// Someone who pays you for work.
+kind employer : org
+
+/// A body that governs and taxes.
+kind government : org
+
+/// Money given for a stated purpose, until a stated day. Money from a grant
+/// stays tied to it after it lands in your account, and may only be spent on
+/// what the grant names.
+kind grant : entity
+  restricted
+  has purpose kind
+  has until  date
+
+  /// Grant money may only be spent on what the grant names. This payment went
+  /// somewhere else. Pay it from another account, or, if the funder agreed to
+  /// the change, update `purpose` on the grant.
+  law purpose
+    on spend
+    require to is self.purpose "grant money spent outside its purpose"
+
+  /// A grant ends on its `until` date, and unspent money is owed back. Spend
+  /// what is left on the grant's purpose before the deadline, or ask the funder
+  /// for an extension and move `until`.
+  law deadline
+    by self.until
+    require remaining == empty "grant money left unspent at the deadline"
+
+
+// ─── Currencies ─────────────────────────────────────────────────────────────
+
+commodity USD : currency
+  name "United States dollar"
+  precision 2
+
+commodity EUR : currency
+  name "Euro"
+  precision 2
+
+commodity GBP : currency
+  name "Pound sterling"
+  precision 2
+
+commodity CAD : currency
+  name "Canadian dollar"
+  precision 2
+
+commodity AUD : currency
+  name "Australian dollar"
+  precision 2
+
+commodity NZD : currency
+  name "New Zealand dollar"
+  precision 2
+
+commodity CHF : currency
+  name "Swiss franc"
+  precision 2
+
+commodity SEK : currency
+  name "Swedish krona"
+  precision 2
+
+commodity NOK : currency
+  name "Norwegian krone"
+  precision 2
+
+commodity DKK : currency
+  name "Danish krone"
+  precision 2
+
+commodity PLN : currency
+  name "Polish zloty"
+  precision 2
+
+commodity CNY : currency
+  name "Chinese yuan"
+  precision 2
+
+commodity HKD : currency
+  name "Hong Kong dollar"
+  precision 2
+
+commodity SGD : currency
+  name "Singapore dollar"
+  precision 2
+
+commodity INR : currency
+  name "Indian rupee"
+  precision 2
+
+commodity MXN : currency
+  name "Mexican peso"
+  precision 2
+
+commodity BRL : currency
+  name "Brazilian real"
+  precision 2
+
+commodity ZAR : currency
+  name "South African rand"
+  precision 2
+
+commodity JPY : currency
+  name "Japanese yen"
+  precision 0
+
+commodity KRW : currency
+  name "South Korean won"
+  precision 0
+
+commodity VND : currency
+  name "Vietnamese dong"
+  precision 0
+
+commodity ISK : currency
+  name "Icelandic krona"
+  precision 0
+
+commodity BHD : currency
+  name "Bahraini dinar"
+  precision 3
+
+commodity KWD : currency
+  name "Kuwaiti dinar"
+  precision 3
+
+commodity OMR : currency
+  name "Omani rial"
+  precision 3
+
+commodity JOD : currency
+  name "Jordanian dinar"
+  precision 3

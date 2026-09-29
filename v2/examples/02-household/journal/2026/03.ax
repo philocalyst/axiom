@@ -1,0 +1,51 @@
+// March 2026.
+
+2026-03-01 checking -> landlord 2_850 USD
+
+/// February's card statement, paid in full.
+2026-03-03 checking -> visa 722.20 USD
+2026-03-03 visa = empty
+
+2026-03-05 checking -> college 300 USD
+2026-03-06 visa -> groceries 109.30 USD / trader-joes
+2026-03-08 cash -> dining 22.50 USD
+2026-03-09 visa -> dining 52.10 USD
+
+2026-03-13 acme -> 8_000 USD
+  retirement       800 USD
+  taxes/federal    880 USD
+  taxes/state      370 USD
+  taxes/payroll    612 USD
+  checking         ...
+
+2026-03-14 visa -> groceries 121.75 USD / trader-joes
+2026-03-16 checking -> utility 116.30 USD
+2026-03-19 visa -> dining 68.40 USD
+
+/// Selling 8 shares. Two lots are held, at different costs, and the brokerage
+/// account sells the oldest first: all 7 of January's shares and 1 of
+/// February's. Each lot realizes its own gain.
+2026-03-20 brokerage 8 VTI -> checking 2_432.80 USD
+
+2026-03-20 checking -> savings 500 USD
+
+/// Money out of the 529 plan into checking. It does not pay for school, so the
+/// earnings in it are taxable income and owe an additional 10%.
+2026-03-25 college -> checking 1_500 USD
+
+2026-03-26 visa -> groceries 100.45 USD / trader-joes
+2026-03-27 dividends -> brokerage 1.88 USD
+
+/// The wallet should hold 77.50 USD by my records, but it holds 63.00. I do not
+/// know where 14.50 USD went, and I say so with `!`: the gap is booked as
+/// unexplained spending, in the open, instead of being hidden.
+2026-03-31 cash = 63.00 USD !
+
+2026-03-31 interest -> savings 51.14 USD
+
+2026-03-31 checking = 10_332.70 USD
+2026-03-31 savings = 16_647.05 USD
+2026-03-31 retirement = 43_700 USD
+2026-03-31 college = 6_700 USD
+2026-03-31 brokerage = 2 VTI
+2026-03-31 brokerage = 1.88 USD

@@ -1,0 +1,20 @@
+// Balances carried over from the spreadsheet this ledger replaces. They are
+// dated the last day of 2025, so none of it counts toward 2026 contribution
+// limits.
+
+2025-12-31 opening -> checking 15_500 USD
+2025-12-31 opening -> savings 15_000 USD
+
+// Pre-tax money: it arrives in a tax-deferred account with no basis.
+2025-12-31 opening -> retirement 41_300 USD
+
+// The 529 was opened in 2019. What was put in is its basis, so it comes from a
+// bank account and keeps its value as basis. The growth since then comes from
+// nowhere and has none.
+2025-12-31 checking -> college 6_300 USD
+2025-12-31 opening -> college 2_200 USD
+
+2025-12-31 checking = 9_200 USD
+2025-12-31 savings = 15_000 USD
+2025-12-31 retirement = 41_300 USD
+2025-12-31 college = 8_500 USD
