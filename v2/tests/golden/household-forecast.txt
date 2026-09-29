@@ -40,6 +40,6 @@ What recurs
 
 Problems ahead
   Date        Problem
-  ─────────────────────────────────────────────────────────────────────
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
   2026-06-05  assets/bank/checking is overdrawn, down to -37,892.30 USD
-  2026-06-05  overdraft: balance below zero
+  2026-06-05  overdraft: balance below zero: -117.30 USD against a minimum of 0.00 USD, short by 117.30 USD

@@ -20,9 +20,18 @@ use crate::motion::Amounts;
 use crate::scope::display;
 use crate::timeline::{Fact, Moment};
 
-/// Solves every `?` amount it can. Returns the quantities of the flows it
-/// solved, and a diagnostic for each real flow it could not.
-pub(crate) fn solve(book: &Book, events: &Events) -> (Map<Id<Flow>, Amounts>, Vec<Diagnostic>) {
+/// What the solve pass found.
+pub(crate) struct Solution {
+    /// The quantities of the flows it solved.
+    pub amounts: Map<Id<Flow>, Amounts>,
+    /// The real flows it could not solve: the assertions that depend on them cannot be judged.
+    pub unsolved: Vec<Id<Flow>>,
+    /// A diagnostic for each of those flows.
+    pub problems: Vec<Diagnostic>,
+}
+
+/// Solves every `?` amount it can.
+pub(crate) fn solve(book: &Book, events: &Events) -> Solution {
     let unknown: Vec<Id<Flow>> = book
         .flows
         .iter()
@@ -30,7 +39,7 @@ pub(crate) fn solve(book: &Book, events: &Events) -> (Map<Id<Flow>, Amounts>, Ve
         .map(|(id, _)| id)
         .collect();
     if unknown.is_empty() {
-        return (Map::default(), Vec::new());
+        return Solution { amounts: Map::default(), unsolved: Vec::new(), problems: Vec::new() };
     }
     let mut places: Vec<Id<Place>> = unknown.iter().flat_map(|&id| [book.flows[id].from, book.flows[id].to]).collect();
     places.sort_unstable();
@@ -43,19 +52,16 @@ pub(crate) fn solve(book: &Book, events: &Events) -> (Map<Id<Flow>, Amounts>, Ve
     let mut solved: Map<Id<Flow>, Amounts> = Map::default();
     let mut stuck: Map<Id<Flow>, Vec<Stuck>> = Map::default();
     for result in results {
-        for Solution { flow, end, qty } in result.solved {
+        for Found { flow, end, qty } in result.solved {
             solved.entry(flow).or_insert_with(|| fill(&book.flows[flow], end, qty));
         }
         for reason in result.stuck {
             stuck.entry(reason.flow).or_default().push(reason);
         }
     }
-    let diagnostics = unknown
-        .iter()
-        .filter(|id| !solved.contains_key(id))
-        .map(|&id| cannot_infer(book, id, stuck.get(&id).map_or(&[][..], Vec::as_slice)))
-        .collect();
-    (solved, diagnostics)
+    let unsolved: Vec<Id<Flow>> = unknown.into_iter().filter(|id| !solved.contains_key(id)).collect();
+    let problems = unsolved.iter().map(|&id| cannot_infer(book, id, stuck.get(&id).map_or(&[][..], Vec::as_slice))).collect();
+    Solution { amounts: solved, unsolved, problems }
 }
 
 fn is_real(state: State) -> bool {
@@ -76,7 +82,7 @@ fn fill(flow: &Flow, end: End, qty: Qty) -> Amounts {
     amounts
 }
 
-struct Solution {
+struct Found {
     flow: Id<Flow>,
     end: End,
     qty: Qty,
@@ -106,7 +112,7 @@ enum Why {
 
 #[derive(Default)]
 struct PlaceResult {
-    solved: Vec<Solution>,
+    solved: Vec<Found>,
     stuck: Vec<Stuck>,
 }
 
@@ -278,7 +284,7 @@ impl Stretch {
             (Closing::Exact(moved), &[(flow, end, net)]) => match Qty(net * (moved - self.known).0) {
                 _ if net == 0 => out.stuck.push(Stuck { flow, place, why: Why::Cancels }),
                 qty if qty.is_negative() => out.stuck.push(Stuck { flow, place, why: Why::Negative(qty) }),
-                qty => out.solved.push(Solution { flow, end, qty }),
+                qty => out.solved.push(Found { flow, end, qty }),
             },
         }
     }
@@ -345,7 +351,7 @@ mod tests {
         f.flow(4, f.checking, f.food, 20_00);
         f.assert(5, f.checking, 700_00);
         let book = f.book();
-        let (solved, problems) = solve(&book, &Events::default());
+        let Solution { amounts: solved, problems, .. } = solve(&book, &Events::default());
         assert!(problems.is_empty());
         assert_eq!(solved[&atm], Amounts { out: Qty(280_00), arrive: Qty(280_00) });
         let _ = Day(0);
@@ -359,7 +365,7 @@ mod tests {
         let b = f.unknown(3, f.checking, f.food);
         f.assert(4, f.checking, 100_00);
         let book = f.book();
-        let (solved, problems) = solve(&book, &Events::default());
+        let Solution { amounts: solved, problems, .. } = solve(&book, &Events::default());
         assert!(solved.is_empty());
         assert_eq!(problems.len(), 2);
         assert!(problems[0].labels.iter().any(|l| l.loc == book.flows[b].loc && l.text == "also unknown"));

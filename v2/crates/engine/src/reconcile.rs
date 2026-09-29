@@ -6,15 +6,21 @@
 //! It is written in the place's display sign (`visa = 1_234.56 USD` is 1,234.56
 //! owed), so the balance is converted before comparing.
 //!
-//! A mismatch is an error naming the gap and the flows since the last time the
-//! assertion held. With `!` the gap is accepted as an explicit externality: it
-//! moves from `unknown` into the place, so later assertions hold, and is
-//! recorded as a [`Pad`].
+//! A mismatch is an error naming the gap and the flows since the last checkpoint.
+//! The gap is carried: a later assertion that fails by the same amount says
+//! nothing, and one that fails by another reports only what is new. An
+//! assertion that depends on an amount that could not be solved is not judged.
+//! With `!` the gap is accepted as an explicit externality, and with `via` it
+//! is booked to that place: either way it is posted as a flow, so parcels,
+//! basis and laws see it like any other, and recorded as a [`Pad`].
 
-use axiom_model::{Amount, Gap};
+use axiom_core::{Id, Qty};
+use axiom_model::{Amount, Gap, Place, Waive};
 
 use crate::ledger::Ledger;
+use crate::motion::Motion;
 use crate::scope::display;
+use crate::state::Checkpoint;
 use crate::{Pad, explain};
 
 impl<'b, 's> Ledger<'b, 's> {
@@ -24,29 +30,47 @@ impl<'b, 's> Ledger<'b, 's> {
         let (place, unit) = (assert.place, assert.amount.unit);
         let shown = display(book, place, self.world.holdings.qty(place, unit));
         let gap = assert.amount.qty - shown;
-        if gap.is_zero() {
-            self.record.reconciled.insert((place, unit), assert.day);
-            return;
-        }
-        let (counter, waive) = match assert.gap {
-            Gap::Refused => {
-                let since = self.record.reconciled.get(&(place, unit)).copied();
-                let diagnostic = explain::mismatch(book, &self.solved.events, assert, shown, since);
-                self.record.report(diagnostic);
-                return;
+        let last = self.record.checkpoints.get(&(place, unit)).copied().unwrap_or_default();
+        let now = Checkpoint { day: Some(assert.day), gap, unsolved_said: last.unsolved_said };
+        let blame = self.solved.unsolved.get(&(place, unit)).filter(|&&(day, _)| day <= assert.day).map(|&(_, flow)| flow);
+        let now = match (assert.gap, gap.is_zero()) {
+            (_, true) => now,
+            (Gap::Refused, false) => match blame.filter(|_| !last.unsolved_said) {
+                Some(unknown) => {
+                    self.record.report(explain::unchecked(book, assert, book.flows[unknown].loc));
+                    Checkpoint { unsolved_said: true, ..now }
+                }
+                None if gap == last.gap => now,
+                None => {
+                    let others: Vec<_> = self.world.holdings.of(place).map(|slot| (slot.unit, display(book, place, slot.qty))).collect();
+                    let report = explain::mismatch(book, &self.solved.events, assert, (shown, gap - last.gap), last.day, &others);
+                    self.record.report(report);
+                    now
+                }
+            },
+            (Gap::Unexplained(waive), false) => {
+                self.pad(index, gap, book.roots.unknown, Some(waive));
+                Checkpoint { gap: Qty::ZERO, ..now }
             }
-            Gap::Unexplained(waive) => (book.roots.unknown, Some(waive)),
-            Gap::Via { place: counter, .. } => (counter, None),
+            (Gap::Via { place: counter, .. }, false) => {
+                self.pad(index, gap, counter, None);
+                Checkpoint { gap: Qty::ZERO, ..now }
+            }
         };
-        // The pad is what moves into the place, in balance terms.
-        let moved = display(book, place, gap);
-        self.world.holdings.credit(place, unit, moved);
-        self.world.holdings.credit(counter, unit, -moved);
-        let amount = Amount::new(moved, unit);
-        self.record.pads.push(Pad { assert: index as u32, place, counter, amount, day: assert.day });
-        self.record.reconciled.insert((place, unit), assert.day);
+        self.record.checkpoints.insert((place, unit), now);
+    }
+
+    /// Posts the gap as a flow between the asserted place and `counter`.
+    fn pad(&mut self, index: usize, gap: Qty, counter: Id<Place>, waive: Option<Waive>) {
+        let (book, assert) = (self.book, &self.book.asserts[index]);
+        // What moves into the place, in balance terms.
+        let moved = display(book, assert.place, gap);
+        self.post(&Motion::pad(book, assert, counter, moved, waive));
+        let amount = Amount::new(moved, assert.amount.unit);
+        self.record.pads.push(Pad { assert: index as u32, place: assert.place, counter, amount, day: assert.day });
         if let Some(waive) = waive {
-            self.record.report(explain::padded(book, assert, waive, amount));
+            let note = explain::padded(book, assert, waive, amount);
+            self.record.report(note);
         }
     }
 }

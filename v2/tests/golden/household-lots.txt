@@ -1,9 +1,7 @@
 Lots at 2026-03-31
 
-  Place                   Quantity       Basis  Acquired    Held           Value     Unrealized  Term   Note
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/brokerage           2 VTI  582.70 USD  2026-02-18  1m13d     605.10 USD      22.40 USD  short
-  assets/college      1,560.52 USD    0.00 USD  2025-12-31  3m      1,560.52 USD   1,560.52 USD  short
-  assets/retirement  43,700.00 USD    0.00 USD  2025-12-31  3m     43,700.00 USD  43,700.00 USD  short
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Total                             582.70 USD                     45,865.62 USD  45,282.92 USD
+  Place             Quantity       Basis  Acquired    Held        Value  Unrealized  Term   Note
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  assets/brokerage     2 VTI  582.70 USD  2026-02-18  1m13d  605.10 USD   22.40 USD  short
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  Total                       582.70 USD                     605.10 USD   22.40 USD

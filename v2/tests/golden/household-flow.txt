@@ -7,9 +7,9 @@ Income and spending
     grants                                     1,200.00 USD                 1,200.00 USD
     interest                       49.73 USD      46.18 USD     51.14 USD     147.05 USD
     salary                      8,000.00 USD   8,000.00 USD  8,000.00 USD  24,000.00 USD
-    realized gains ≈                             290.11 USD    490.92 USD     781.03 USD
+    realized gains ≈                                           141.55 USD     141.55 USD
   ──────────────────────────────────────────────────────────────────────────────────────
-  Total income                  8,049.73 USD   9,536.29 USD  8,543.94 USD  26,129.96 USD
+  Total income                  8,049.73 USD   9,246.18 USD  8,194.57 USD  25,490.48 USD
   ──────────────────────────────────────────────────────────────────────────────────────
   expenses                      5,342.86 USD  10,751.98 USD  5,353.76 USD  21,448.60 USD
     food                          423.00 USD     681.00 USD    474.50 USD   1,578.50 USD
@@ -26,7 +26,7 @@ Income and spending
     tuition                                    4,800.00 USD                 4,800.00 USD
     utilities                     118.40 USD     121.75 USD    116.30 USD     356.45 USD
   ──────────────────────────────────────────────────────────────────────────────────────
-  Net                 0.00 USD  2,706.87 USD  -1,215.69 USD  3,190.18 USD   4,681.36 USD
+  Net                 0.00 USD  2,706.87 USD  -1,505.80 USD  2,840.81 USD   4,041.88 USD
   · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
     them.
   · Flows written over a date range are recognized a little each day across the periods they cover.

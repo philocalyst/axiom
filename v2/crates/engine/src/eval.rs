@@ -11,19 +11,22 @@
 //! ledger decides what to record. A dry run (does this flow satisfy the laws?)
 //! is therefore the same call with the outcomes ignored.
 
+use std::ops::Deref;
+
 use axiom_core::glob::glob;
 use axiom_core::{Day, Id, Qty, Ratio, Span, Sym, day::days_in_month};
 use axiom_model::{
     Amount, BinOp, Book, Dir, Effect as Consequence, Entity, Fault, Field, Func, Law, NodeId, Op, Param, Prop,
-    StepKind, Subject, Value, Var, Window,
+    Recognition, StepKind, Subject, Value, Var, Window,
 };
 
-use crate::Owed;
 use crate::calc::{Calc, progressive};
 use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
-use crate::scope::inside;
+use crate::scope::{inside, is_money};
 use crate::state::World;
+use crate::totals::share_in_first_year;
+use crate::{Cause, Owed};
 
 /// What laws read: the book and the state as of now.
 #[derive(Clone, Copy)]
@@ -32,18 +35,68 @@ pub(crate) struct Env<'a, 's> {
     pub world: &'a World,
 }
 
-/// What a law's variables are bound to for one firing.
-pub(crate) struct Context<'a> {
+/// What happened that fires laws: a flow moved, a parcel realized a gain, a
+/// period ended or a deadline passed.
+#[derive(Clone, Copy)]
+pub(crate) struct Occasion<'a> {
+    /// When it happened: `date`, and the day prices are read.
     pub day: Day,
-    /// What `self` is.
-    pub subject: Subject,
-    pub owner: Id<Entity>,
+    /// The days it belongs to. `year` and `month` are its first day's, and a
+    /// count is shared out over it. A flow's is its recognition; a period's is
+    /// its last day.
+    pub over: Recognition,
+    /// The days a rule must be in force for: a flow's day, or a whole period.
+    pub span: Recognition,
+    pub cause: Cause,
     /// The flow that fired the law, if one did (not for `each` and `by`).
     pub motion: Option<&'a Motion<'a>>,
     /// `amount`: what the trigger says is moving.
     pub amount: Option<Amount>,
     /// `gain`, `proceeds`, `basis`, `held`, for `on gain`.
     pub realized: Option<Realized>,
+    /// Rules whose subject contains both ends of the flow do not fire: value
+    /// moved around inside the subject neither entered nor left it.
+    pub skip_internal: bool,
+}
+
+impl<'a> Occasion<'a> {
+    pub fn flow(m: &'a Motion<'a>) -> Occasion<'a> {
+        let (over, span) = (m.recognized, Recognition::on(m.day));
+        Occasion { day: m.day, over, span, cause: m.cause, motion: Some(m), amount: None, realized: None, skip_internal: false }
+    }
+
+    /// A period ending, or a deadline passing, on `day`.
+    pub fn time(day: Day, period: Recognition) -> Occasion<'static> {
+        let over = Recognition::on(period.until);
+        Occasion { day, over, span: period, cause: Cause::Time, motion: None, amount: None, realized: None, skip_internal: false }
+    }
+
+    /// The day whose window totals are read: the day a flow moved, or the last
+    /// day of the period a law closes.
+    pub fn anchor(&self) -> Day {
+        if self.motion.is_some() { self.day } else { self.over.from }
+    }
+}
+
+/// What a law's variables are bound to for one firing.
+pub(crate) struct Context<'a> {
+    /// What `self` is.
+    pub subject: Subject,
+    pub owner: Id<Entity>,
+    on: &'a Occasion<'a>,
+}
+
+impl<'a> Context<'a> {
+    pub fn new(subject: Subject, owner: Id<Entity>, on: &'a Occasion<'a>) -> Context<'a> {
+        Context { subject, owner, on }
+    }
+}
+
+impl<'a> Deref for Context<'a> {
+    type Target = Occasion<'a>;
+    fn deref(&self) -> &Occasion<'a> {
+        self.on
+    }
 }
 
 /// One parcel's realization.
@@ -60,12 +113,17 @@ pub(crate) struct Realized {
 pub(crate) enum Outcome {
     /// A `require` or `warn` that does not hold.
     Broken { step: u32, warn: bool },
+    /// A `require … else owe …` that did not hold: priced, and owed.
+    Priced { step: u32, name: Sym, amount: Amount, owed: Owed },
     /// A fault reached a step.
     Faulted { step: u32, fault: Fault },
     /// `count`: adds `amount` (base currency) to a tally.
     Count { name: Sym, amount: Qty },
-    /// `owe`, or a `require … else owe …` that did not hold.
+    /// `owe`.
     Owe { name: Sym, amount: Amount, owed: Owed },
+    /// What a `require` or `warn` compared: `counted <= limit`, the sides of a
+    /// `>=` swapped.
+    Read { step: u32, counted: Amount, limit: Amount },
 }
 
 /// Runs `law`'s steps in order. Returns whether it ran to the end rather than
@@ -137,10 +195,12 @@ impl<'a, 's> Machine<'a, 's> {
                 true
             }
             StepKind::Require { cond, otherwise, warn, .. } => {
-                match self.scan(*cond) {
+                let held = self.scan(*cond);
+                self.read(step, *cond);
+                match held {
                     Value::Bool(true) => {}
                     Value::Bool(false) => match otherwise {
-                        Some(effect) => self.effect(step, effect),
+                        Some(effect) => self.price(step, effect),
                         None => self.out.push(Outcome::Broken { step, warn: *warn }),
                     },
                     Value::Fault(fault) => self.out.push(Outcome::Faulted { step, fault }),
@@ -152,6 +212,31 @@ impl<'a, 's> Machine<'a, 's> {
                 self.effect(step, effect);
                 true
             }
+        }
+    }
+
+    /// Notes what a comparison of amounts compared: the counted side and its limit.
+    fn read(&mut self, step: u32, cond: NodeId) {
+        let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), left, right) = self.law.nodes[cond.index()].op
+        else {
+            return;
+        };
+        let (left, right) = match (self.at(left), self.at(right)) {
+            (Value::Amount(l), Value::Amount(r)) => (l, r),
+            (Value::Amount(l), Value::Empty) => (l, Amount::zero(l.unit)),
+            (Value::Empty, Value::Amount(r)) => (Amount::zero(r.unit), r),
+            _ => return,
+        };
+        let (counted, limit) = if matches!(cmp, BinOp::Lt | BinOp::Le) { (left, right) } else { (right, left) };
+        self.out.push(Outcome::Read { step, counted, limit });
+    }
+
+    /// A `require … else owe …` that failed: the violation is priced.
+    fn price(&mut self, step: u32, effect: &Consequence) {
+        let before = self.out.len();
+        self.effect(step, effect);
+        if let Some(&Outcome::Owe { name, amount, owed }) = self.out.get(before) {
+            self.out[before] = Outcome::Priced { step, name, amount, owed };
         }
     }
 
@@ -197,10 +282,10 @@ impl<'a, 's> Machine<'a, 's> {
     fn tally(&self, name: Sym) -> Value {
         let (ctx, tallies) = (self.ctx, &self.env.world.tallies);
         let counted = self.out.iter().filter_map(|o| match *o {
-            Outcome::Count { name: counted, amount } if counted == name => Some(amount),
+            Outcome::Count { name: counted, amount } if counted == name => Some(share_in_first_year(amount, ctx.over)),
             _ => None,
         });
-        self.base(tallies.read(ctx.owner, ctx.day.year(), name) + counted.sum())
+        self.base(tallies.read(ctx.owner, ctx.over.from.year(), name) + counted.sum())
     }
 
     fn node(&self, at: usize) -> Value {
@@ -245,8 +330,8 @@ impl<'a, 's> Machine<'a, 's> {
             Var::To => flow(|m| Value::Place(m.to)),
             Var::Payee => flow(|m| m.payee.map_or(Value::Empty, Value::Entity)),
             Var::Date => Value::Day(ctx.day),
-            Var::Year => Value::Num(Ratio::int(ctx.day.year() as i64)),
-            Var::Month => Value::Num(Ratio::int(ctx.day.ymd().1 as i64)),
+            Var::Year => Value::Num(Ratio::int(ctx.over.from.year() as i64)),
+            Var::Month => Value::Num(Ratio::int(ctx.over.from.ymd().1 as i64)),
             Var::Subject => match ctx.subject {
                 Subject::Place(place) => Value::Place(place),
                 Subject::Entity(entity) => Value::Entity(entity),
@@ -270,6 +355,10 @@ impl<'a, 's> Machine<'a, 's> {
         match (field, base) {
             (Field::Balance, Value::Place(place)) => self.balance(Subject::Place(place)),
             (Field::Balance, Value::Entity(entity)) => self.balance(Subject::Entity(entity)),
+            (Field::Basis, Value::Place(place)) => self.basis(Subject::Place(place)),
+            (Field::Basis, Value::Entity(entity)) => self.basis(Subject::Entity(entity)),
+            (Field::Unit, Value::Amount(amount)) => Value::Unit(amount.unit),
+            (Field::Unit, Value::Empty) => Value::Unit(book.base),
             (Field::Owner, Value::Place(place)) => Value::Entity(book.places[place].owner),
             (Field::Owner, Value::Entity(entity)) => Value::Entity(entity),
             (Field::Kind, Value::Place(place)) => Value::Kind(book.places[place].kind),
@@ -309,7 +398,7 @@ impl<'a, 's> Machine<'a, 's> {
     /// that starts on or before the day asked. A number key asks for the first
     /// of that year, a date key for that day; with neither, the context day.
     fn param(&self, param: Id<Param>, keys: &[NodeId]) -> Value {
-        let mut when = self.ctx.day;
+        let mut when = self.ctx.anchor();
         for &key in keys {
             match self.at(key) {
                 Value::Fault(fault) => return Value::Fault(fault),
@@ -404,7 +493,7 @@ impl<'a, 's> Machine<'a, 's> {
     fn total(&self, dir: Dir, window: Window, args: &[NodeId]) -> Value {
         let (book, ctx, totals) = (self.book(), self.ctx, &self.env.world.totals);
         let widen = args.iter().find_map(|&a| if let Value::Kind(kind) = self.at(a) { Some(kind) } else { None });
-        let read = |subject| totals.read(subject, dir, window, ctx.day);
+        let read = |subject| totals.read(subject, dir, window, ctx.anchor());
         let sum = match widen {
             None => read(ctx.subject),
             Some(kind) => {
@@ -429,23 +518,38 @@ impl<'a, 's> Machine<'a, 's> {
         }
     }
 
-    /// Everything the subject holds, valued in the base currency, in the sign
-    /// people read it: a credit card's balance is what is owed, as an
-    /// assertion writes it. An entity's balance is its asset places' (natural).
-    fn balance(&self, subject: Subject) -> Value {
-        let (book, holdings): (_, &Holdings) = (self.book(), &self.env.world.holdings);
+    /// The holdings within the subject: a place's subtree, or the asset places
+    /// an entity owns.
+    fn held(&self, subject: Subject) -> impl Iterator<Item = &'a Slot> {
+        let (book, holdings): (&'a Book<'s>, &'a Holdings) = (self.book(), &self.env.world.holdings);
+        let span = match subject {
+            Subject::Place(root) => root.index()..book.places.end(root).index(),
+            Subject::Entity(_) => 0..book.places.len(),
+        };
+        holdings.within(span).filter(move |slot| inside(book, subject, slot.place))
+    }
+
+    /// The sign people read a subject's balance in: a credit card's balance is
+    /// what is owed, as an assertion writes it. An entity's is natural.
+    fn sign(&self, subject: Subject) -> i64 {
         match subject {
-            Subject::Place(root) => {
-                let sign = book.places[root].class.display_sign();
-                let held = |h: &Slot| Amount::new(Qty(h.qty.0 * sign), h.unit);
-                let span = root.index()..book.places.end(root).index();
-                self.sum_in_base(holdings.within(span).map(held))
-            }
-            Subject::Entity(_) => {
-                let held = |h: &Slot| Amount::new(h.qty, h.unit);
-                self.sum_in_base(holdings.iter().filter(|h| inside(book, subject, h.place)).map(held))
-            }
+            Subject::Place(place) => self.book().places[place].class.display_sign(),
+            Subject::Entity(_) => 1,
         }
+    }
+
+    /// Everything the subject holds, valued in the base currency.
+    fn balance(&self, subject: Subject) -> Value {
+        let sign = self.sign(subject);
+        self.sum_in_base(self.held(subject).map(|slot| Amount::new(Qty(slot.qty.0 * sign), slot.unit)))
+    }
+
+    /// What everything the subject holds has already accounted for, in the base
+    /// currency: the total basis of its parcels.
+    fn basis(&self, subject: Subject) -> Value {
+        let (book, sign) = (self.book(), self.sign(subject));
+        let basis: Qty = self.held(subject).map(|slot| slot.basis(is_money(book, slot.place, slot.unit))).sum();
+        self.base(Qty(basis.0 * sign))
     }
 
     /// Money still tied to the subject, a restricted entity.

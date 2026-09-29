@@ -3,12 +3,7 @@ Why assets/college
 Composition
   Holds      Quantity   Plain money  Parcels
   ──────────────────────────────────────────
-  USD    6,700.00 USD  5,139.48 USD        1
-
-Parcels
-  Place               Quantity     Basis  Acquired    Tied to  From
-  ──────────────────────────────────────────────────────────────────────────────────
-  assets/college  1,560.52 USD  0.00 USD  2025-12-31           journal/2025/12.ax:15
+  USD    6,700.00 USD  6,700.00 USD
 
 Governed by
   Law                     When     Governs                                                      Explains                                                                    Written

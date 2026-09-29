@@ -82,6 +82,8 @@ pub(crate) struct Slice {
     pub txn: Id<Txn>,
     pub tied: Option<Id<Entity>>,
     pub origin: Origin,
+    /// What it fetched, in base-currency quanta: what a sale realizes against.
+    pub worth: Qty,
     /// The basis it carries into the target, set once the flow's worth is known.
     pub carried: Qty,
 }
@@ -100,7 +102,7 @@ pub(crate) enum Origin {
 
 impl Slice {
     fn new(qty: Qty, basis: Qty, origin: Origin, (acquired, txn): (Day, Id<Txn>)) -> Slice {
-        Slice { qty, basis, acquired, txn, tied: None, origin, carried: Qty::ZERO }
+        Slice { qty, basis, acquired, txn, tied: None, origin, worth: Qty::ZERO, carried: Qty::ZERO }
     }
 
     /// Value that nothing gave up: base currency is at its face, anything else
@@ -323,6 +325,13 @@ impl Slot {
         out.ambiguous = false;
         out.shortfall = req.need;
         let selection = Selection { selectors: req.selectors, txns: req.txns };
+        // Plain money that covers the need: the common case, and no choice to make.
+        if self.holding.lots.is_empty() && self.holding.plain >= req.need && !selection.constrains() {
+            self.take(Source::Plain, req.need, req, out);
+            out.shortfall = Qty::ZERO;
+            self.qty -= req.need;
+            return;
+        }
         let policy = selection.policy().or(req.policy);
         let in_order = !selection.constrains()
             && match policy {
@@ -745,6 +754,27 @@ impl Holdings {
         self.untidy |= slot.dead > 0;
     }
 
+    /// Spreads `delta` of basis over the parcels one holding of `place` can
+    /// carry (the first that has any the selection admits). `false` if none can.
+    pub fn rebase(
+        &mut self,
+        place: Id<Place>,
+        delta: Qty,
+        selection: &Selection,
+        money: impl Fn(Id<Commodity>) -> bool,
+        now: (Day, Id<Txn>),
+    ) -> bool {
+        let mut at = self.heads[place.index()];
+        while at != NONE {
+            let slot = &mut self.slots[at as usize];
+            if slot.rebase(delta, selection, money(slot.unit), now) {
+                return true;
+            }
+            at = slot.next;
+        }
+        false
+    }
+
     /// A split: every holding of `unit`, in every place, is multiplied by `ratio`.
     pub fn scale(&mut self, unit: Id<Commodity>, ratio: Ratio) {
         self.slots.iter_mut().filter(|slot| slot.unit == unit).for_each(|slot| slot.scale(ratio));
@@ -954,7 +984,7 @@ mod tests {
         let grant = Id::new(4);
         let tied = Parcel { tied: Some(grant), ..lot(5, 5, 9) };
         let held = slot_of(1, 0, &[lot(10, 10, 1), tied], true);
-        let mut first = |permit: bool| {
+        let first = |permit: bool| {
             let permits = [(grant, permit)];
             relieve(&mut held.clone(), 4, &Ask { money: true, permits: &permits, ..PLAIN }).slices[0].tied
         };

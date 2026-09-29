@@ -6,19 +6,20 @@
 //! fact the journal does not hold through the same `post` the journal's own
 //! flows take.
 //!
-//! A clone copies what the future depends on (the world, five timeline cursors,
+//! A clone copies what the future depends on (the world, six timeline cursors,
 //! the small solved tables) and the records so far: flat vectors, so a clone is
 //! a handful of memory copies, never a replay. Nothing is kept per journal flow:
 //! the solve pass remembers only the flows an event or a `?` touched, and the
 //! timeline is cursors into the book's own tables.
 
-use axiom_core::{Day, Id, Qty};
-use axiom_model::{Book, Commodity, End, Flow, Infer, Place, Trigger};
+use axiom_core::{Day, Diagnostic, Id, Map, Qty};
+use axiom_model::{Book, Commodity, End, Flow, Infer, Law, Place, Recognition, Trigger};
 
-use crate::eval::Env;
+use crate::eval::{Env, Occasion};
 use crate::events::{self, Events};
+use crate::fire::{self, Reads};
 use crate::motion::{Amounts, Motion};
-use crate::scope::display;
+use crate::scope::{display, is_money};
 use crate::state::{Record, Scratch, World};
 use crate::timeline::{self, Deadline, Fact, Moment, Sources, Timeline};
 use crate::{Applied, Cause, Holding, Options, Posted, Run, State, explain, infer};
@@ -42,11 +43,21 @@ pub(crate) struct Solved {
     pub deadlines: Vec<Deadline>,
     /// Periods and deadlines fire up to here.
     pub horizon: Day,
+    /// What each `require` and `warn` reads, which decides its window.
+    pub reads: Map<(Id<Law>, u32), Reads>,
+    /// The first day of each place and commodity whose balance depends on an
+    /// amount that could not be solved, and the flow to blame.
+    pub unsolved: Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>,
 }
 
 impl Solved {
     pub fn sources<'a>(&'a self, book: &'a Book<'a>) -> Sources<'a> {
         Sources { book, events: &self.events, deadlines: &self.deadlines, horizon: self.horizon }
+    }
+
+    /// The window a step's limit lives in on this occasion, if it reads one.
+    pub fn window(&self, law: Id<Law>, step: u32, on: &Occasion) -> Option<Recognition> {
+        self.reads.get(&(law, step)).map(|reads| reads.window(on))
     }
 }
 
@@ -64,15 +75,24 @@ impl<'b, 's> Ledger<'b, 's> {
     /// stands at the day before the first fact.
     pub fn new(book: &'b Book<'s>, options: Options) -> Ledger<'b, 's> {
         let (events, mut diagnostics) = events::read(book);
-        let (amounts, problems) = infer::solve(book, &events);
-        diagnostics.extend(problems);
+        let solution = infer::solve(book, &events);
+        diagnostics.extend(solution.problems);
         let world = World::new(book);
         let mut scratch = Scratch::default();
         let horizon = timeline::horizon(book, &events, options.today);
-        let deadlines = timeline::deadlines(Env { book, world: &world }, horizon, &mut scratch.values);
-        let solved = Solved { events, deadlines, horizon };
+        let start = timeline::start(book, &events);
+        let deadlines = timeline::deadlines(Env { book, world: &world }, horizon, start, &mut scratch.values);
+        let unsolved = solution.unsolved.iter().flat_map(|&id| {
+            let flow = &book.flows[id];
+            [((flow.from, flow.out.unit), (flow.day, id)), ((flow.to, flow.arrive.unit), (flow.day, id))]
+        });
+        let mut blocked: Map<_, (Day, Id<Flow>)> = Map::default();
+        for (key, first) in unsolved {
+            blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
+        }
+        let solved = Solved { events, deadlines, horizon, reads: fire::reads(book).into_iter().collect(), unsolved: blocked };
         let periodic = book.rules.timed.iter().any(|rule| matches!(book.laws[rule.law].trigger, Trigger::Each(..)));
-        let timeline = Timeline::new(&solved.sources(book), periodic);
+        let timeline = Timeline::new(&solved.sources(book), start.filter(|_| periodic));
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
         Ledger {
             book,
@@ -80,7 +100,7 @@ impl<'b, 's> Ledger<'b, 's> {
             solved,
             clock: Clock { day, timeline, applied: 0 },
             world,
-            record: Record::new(book, amounts, diagnostics),
+            record: Record::new(book, solution.amounts, diagnostics),
             scratch,
         }
     }
@@ -135,7 +155,7 @@ impl<'b, 's> Ledger<'b, 's> {
         let number = self.clock.applied;
         self.clock.applied += 1;
         let amounts = self.amounts(flow, None);
-        self.post(&Motion::new(flow, Cause::Applied(number), day, amounts));
+        self.post(&Motion::new(self.book, flow, Cause::Applied(number), day, amounts));
         self.world.holdings.tidy();
         self.record.since(marks)
     }
@@ -150,8 +170,26 @@ impl<'b, 's> Ledger<'b, 's> {
         self.world.holdings.iter().map(|slot| &slot.holding).filter(|holding| !holding.is_empty())
     }
 
-    /// Stops and hands over everything recorded along the way.
-    pub fn finish(self) -> Run {
+    /// Stops and hands over everything recorded along the way: the claims
+    /// still open past their day and the waivers that waived nothing are
+    /// reported now, when it is known they stayed so.
+    pub fn finish(mut self) -> Run {
+        self.world.holdings.tidy();
+        let (book, today) = (self.book, self.options.today);
+        let overdue = self.world.holdings.iter().filter(|slot| book.places[slot.place].claim).flat_map(|slot| {
+            let claims = slot.holding.lots.iter().filter(|lot| lot.qty > Qty::ZERO);
+            claims.filter_map(move |lot| explain::overdue(book, slot.place, slot.unit, lot, today))
+        });
+        let mut unused: Vec<_> = self.record.waivers.iter().filter(|&(_, &used)| !used).map(|(&loc, _)| loc).collect();
+        unused.sort_unstable();
+        let mut reports: Vec<Diagnostic> = overdue.collect();
+        reports.extend(unused.into_iter().map(explain::unused_waiver));
+        reports.into_iter().for_each(|report| {
+            self.record.report(report);
+        });
+        let mut headroom = std::mem::take(&mut self.record.passed);
+        headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading.headroom));
+        headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.from));
         let Ledger { book, options, solved, world, record, .. } = self;
         let posted = book.flows.iter().map(|(id, flow)| {
             let amounts = record.amounts.get(&id).copied().unwrap_or_else(|| Amounts::written(flow));
@@ -164,7 +202,7 @@ impl<'b, 's> Ledger<'b, 's> {
             gains: record.gains,
             effects: record.effects,
             violations: record.violations,
-            headroom: Vec::new(),
+            headroom,
             pads: record.pads,
             checks: record.checks.into(),
             diagnostics: record.diagnostics,
@@ -183,6 +221,10 @@ impl<'b, 's> Ledger<'b, 's> {
 
     fn step(&mut self, moment: Moment) {
         match moment.fact {
+            Fact::Split(at) => {
+                let split = self.book.splits[at as usize];
+                self.world.holdings.scale(split.unit, split.ratio);
+            }
             Fact::Flow(id) => {
                 let motion = self.journal_motion(id, moment.day);
                 self.post(&motion);
@@ -204,7 +246,7 @@ impl<'b, 's> Ledger<'b, 's> {
         let book: &'b Book<'s> = self.book;
         let flow = &book.flows[id];
         let amounts = self.amounts(flow, Some(id));
-        Motion::new(flow, Cause::Flow(id), day, amounts)
+        Motion::new(book, flow, Cause::Flow(id), day, amounts)
     }
 
     /// A flow's quantities. `?` amounts were solved before the fold; `=` and
@@ -231,8 +273,8 @@ impl<'b, 's> Ledger<'b, 's> {
         let book = self.book;
         let slot = self.world.holdings.get(flow.from, flow.out.unit);
         let qty = if book.places[flow.from].class.holds_parcels() {
-            let is_base = flow.out.unit == book.base;
-            slot.map_or(Qty::ZERO, |slot| slot.admitted(is_base, &flow.select, &book.txns))
+            let money = is_money(book, flow.from, flow.out.unit);
+            slot.map_or(Qty::ZERO, |slot| slot.admitted(money, &flow.select, &book.txns))
         } else {
             slot.map_or(Qty::ZERO, |slot| slot.plain.max(Qty::ZERO))
         };

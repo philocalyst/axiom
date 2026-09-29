@@ -13,19 +13,12 @@ Counted
     us/401k
       elective-deferrals   2,400.00 USD  3 sources
       pretax               2,400.00 USD  3 sources
-      agi                 22,239.85 USD  25 sources
-  ────────────────────────────────────────────────────────────
-    us/529
-      distributions          349.37 USD  journal/2026/03.ax:34
+      agi                 21,890.48 USD  24 sources
   ────────────────────────────────────────────────────────────
     us/ca
       ca-withheld          1,110.00 USD  3 sources
 
 Owed
-  Owed                          To   Due            Amount  From
-  ───────────────────────────────────────────────────────────────────────────────
-    us/529
-      nonqualified-529-penalty  irs  2026-03-25  34.94 USD  journal/2026/03.ax:34
-  ───────────────────────────────────────────────────────────────────────────────
-  Total owed                                     34.94 USD
+  Owed  To  Due  Amount  From
+  ───────────────────────────
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

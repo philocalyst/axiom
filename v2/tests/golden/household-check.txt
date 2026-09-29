@@ -1,4 +1,4 @@
-warning[law]: law `budget` does not hold for expenses/food
+warning[budget]: expenses/food: 681.00 USD in 2026-02 against a limit of 650.00 USD, over by 31.00 USD
    ╭─[journal/2026/02.ax:57:1]
    │
 57 │ 2026-02-25 visa -> groceries 128.10 USD / trader-joes
@@ -25,4 +25,4 @@ note[pad]: accepted a gap on assets/cash
 ───╯
 
 1 warning
-✓ 68 flows · 29 places · 16 laws enforced · net worth 77,597.73 USD
+✓ 68 flows · 29 places · 14 laws enforced · net worth 77,597.73 USD

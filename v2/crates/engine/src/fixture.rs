@@ -104,6 +104,7 @@ impl Fixture {
         let parents: Vec<_> = spec.iter().map(|&(.., parent)| parent).collect();
         let (mut places, p) = Tree::build(items, &parents).expect("no cycles");
         places[p[5]].deferred = true;
+        places[p[5]].basis = Basis::Zero;
         let mut commodities = Arena::new();
         let usd = commodities.push(commodity(names.intern("USD"), 2));
         let vti = commodities.push(commodity(names.intern("VTI"), 0));

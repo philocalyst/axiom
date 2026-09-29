@@ -4,7 +4,7 @@
 //! clippy reads as inconsistent digit grouping.
 #![allow(clippy::inconsistent_digit_grouping)]
 
-use axiom_core::{Day, Diagnostic, Id, Qty, Ratio, Severity};
+use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder};
@@ -138,7 +138,7 @@ fn a_sale_of_more_than_is_held_leaves_a_negative_balance() {
 
 /// `total(in, year) <= 24_500 USD`, on flows into the retirement account.
 fn deferral_limit(f: &mut Fixture) -> Id<Law> {
-    let (name, doc) = (f.sym("deferral-limit"), f.sym("/// Elective deferrals are capped per calendar year."));
+    let (name, doc) = (f.sym("deferral-limit"), f.sym("/// Elective deferrals are capped per calendar year.\n///\n/// To fix: ask payroll to lower the deferral."));
     let limit = f.usd(24_500_00);
     let mut law = LawBuilder::new(name, Trigger::In).doc(doc);
     let total = law.call(Func::Total(Dir::In, Window::Year), &[], Ty::Amount);
@@ -165,14 +165,22 @@ fn a_failed_law_explains_itself_power_assert_style() {
     let violation = run.violations[0];
     assert_eq!((violation.cause, violation.warn, violation.waived), (Cause::Flow(over), false, false));
     let d = &run.diagnostics[violation.diagnostic as usize];
-    assert_eq!((&*d.code, d.severity), ("law", Severity::Error));
-    assert_eq!(d.message, "Elective deferrals are capped per calendar year.");
+    assert_eq!((&*d.code, d.severity), ("deferral-limit", Severity::Error), "the code is the law's own name");
+    assert_eq!(
+        d.message,
+        "assets/retirement: 25,300.00 USD in 1970 against a limit of 24,500.00 USD, over by 800.00 USD",
+        "the headline is the accounting fact"
+    );
     let primary = d.labels.iter().find(|l| l.primary).unwrap();
     assert_eq!(primary.loc, book.flows[over].loc);
     assert_eq!(primary.text, "this flow: 2,600.00 USD into assets/retirement");
-    let values: Vec<_> = d.labels.iter().filter(|l| !l.primary).map(|l| l.text.as_str()).collect();
-    assert_eq!(values, ["25,300.00 USD", "false"], "each non-constant subexpression, with its value");
-    assert!(d.labels.iter().filter(|l| !l.primary).all(|l| l.loc.file.0 == 1), "located in the law's own source");
+    let others: Vec<_> = d.labels.iter().filter(|l| !l.primary).map(|l| (l.loc.file.0, l.text.as_str())).collect();
+    assert_eq!(
+        others,
+        [(0, "1970-01-11: 22,700.00 USD from income/salary to assets/retirement"), (1, "25,300.00 USD")],
+        "the flows that built the count, then the operand of the failing comparison in the law's own source"
+    );
+    assert_eq!(d.notes, ["Elective deferrals are capped per calendar year."]);
     assert_eq!(d.help[0].text, "at most 1,800.00 USD more can go in this year");
 }
 
@@ -195,7 +203,10 @@ fn a_tally_bound_names_the_room_left_when_the_law_counted_this_flow() {
     let book = f.book();
     let run = run(&book, options());
     let d = &run.diagnostics[run.violations[0].diagnostic as usize];
-    assert_eq!(d.message, "401(k) deferrals over the yearly limit");
+    assert_eq!(
+        d.message,
+        "401(k) deferrals over the yearly limit: 48,700.00 USD in 1970 against a limit of 24,500.00 USD, over by 24,200.00 USD"
+    );
     assert_eq!(d.help[0].text, "at most 1,800.00 USD more can count toward `elective-deferrals` this year");
 }
 
@@ -267,14 +278,15 @@ fn unknown_amounts_are_solved_and_a_failed_assertion_names_the_flows_since() {
     assert_eq!(errors.len(), 1, "{errors:?}");
     let d = errors[0];
     assert_eq!((&*d.code, d.message.as_str()), ("assertion", "assets/checking holds 690.00 USD, not 600.00 USD"));
-    assert_eq!(d.labels[0].text, "90.00 USD too much: the ledger holds more than this");
+    assert_eq!(d.labels[0].text, "90.00 USD less than the ledger holds");
     let since: Vec<_> = d.labels.iter().skip(1).map(|l| (l.loc, l.text.as_str())).collect();
     assert_eq!(
         since,
         [(book.flows[lunch].loc, "-10.00 USD to expenses/food")],
         "only the flows after the last assertion that held"
     );
-    assert_eq!(d.help[0].edit.as_ref().unwrap().1, " !");
+    assert_eq!(d.help[0].text, "record the missing flow", "correcting the books comes before accepting the gap");
+    assert_eq!(d.help.last().unwrap().edit.as_ref().unwrap().1, " !");
 }
 
 #[test]
@@ -435,9 +447,14 @@ fn a_require_with_an_else_prices_the_violation_instead_of_failing() {
     f.flow(2, retirement, checking, 1_000_00);
     let book = f.book();
     let run = run(&book, options());
-    assert!(run.violations.is_empty() && run.diagnostics.is_empty(), "a priced violation is not a failure");
     assert_eq!(run.effects.len(), 1);
-    assert_eq!((run.effects[0].amount.qty, run.effects[0].name), (Qty(100_00), penalty));
+    assert_eq!((run.effects[0].amount.qty, run.effects[0].name, run.effects[0].priced), (Qty(100_00), penalty, true));
+    let [violation] = run.violations[..] else { panic!("one priced violation: {:?}", run.violations) };
+    assert!(violation.priced && !violation.waived && !violation.warn);
+    let d = &run.diagnostics[violation.diagnostic as usize];
+    assert_eq!((&*d.code, d.severity, d.disposition), ("early-withdrawal", Severity::Note, Disposition::Priced));
+    assert_eq!(d.message, "100.00 USD owed to nsf-grant by 1970-01-03: penalty", "what is owed, to whom, and by when");
+    assert!(run.diagnostics.iter().all(|d| !d.is_error()), "a priced violation is a price, not a failure");
 }
 
 #[test]
