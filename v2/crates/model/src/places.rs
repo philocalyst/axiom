@@ -23,11 +23,16 @@ use crate::survey::class_of;
 /// `?` in a flow: where value of unknown origin comes from and unexplained
 /// value goes.
 pub(crate) const UNKNOWN: &str = "equity/unknown";
+/// Where `opening` balances come from.
+pub(crate) const OPENING: &str = "equity/opening";
+/// The built-in place of kind `market`: `via market` on an assertion.
+pub(crate) const MARKET: &str = "income/market";
 
 pub(crate) struct Places {
     pub tree: Tree<Place>,
     pub names: Names<Place>,
     pub unknown: Id<Place>,
+    pub opening: Id<Place>,
     /// The id of each declaration in the catalog, in catalog order; none for an
     /// account whose path starts at no class root.
     pub declared: Vec<Option<Id<Place>>>,
@@ -44,7 +49,7 @@ pub(crate) fn declare<'s>(
     let valid: Vec<bool> = catalog.accounts.iter().map(|written| root_is_valid(written.what, cx)).collect();
     let accounts = || catalog.accounts.iter().zip(&valid).filter(|&(_, &valid)| valid).map(|(written, _)| written);
     let roots = Class::ALL.map(Class::root);
-    let written = roots.into_iter().chain([UNKNOWN]).chain(opened.iter().copied());
+    let written = roots.into_iter().chain([UNKNOWN, OPENING, MARKET]).chain(opened.iter().copied());
     let written = written.chain(accounts().map(|account| account.what.name.text));
     let (mut tree, by_path) = paths::build(written, |path| {
         let class = class_of(path).expect("only paths under a class root are written");
@@ -56,7 +61,10 @@ pub(crate) fn declare<'s>(
             holds: None,
             select: None,
             deferred: false,
+            basis: Default::default(),
+            claim: false,
             liquidity: None,
+            alias: None,
             opened: None,
             closed: None,
             props: Box::default(),
@@ -64,6 +72,8 @@ pub(crate) fn declare<'s>(
             loc: None,
         }
     });
+
+    tree[by_path[MARKET]].kind = kinds.roots.market;
 
     let mut declared = vec![None; catalog.accounts.len()];
     for (at, written) in catalog.accounts.iter().enumerate().filter(|&(at, _)| valid[at]) {
@@ -90,7 +100,7 @@ pub(crate) fn declare<'s>(
     for (id, path) in paths {
         names.insert(cx.names, path, id);
     }
-    Places { unknown: by_path[UNKNOWN], tree, names, declared }
+    Places { unknown: by_path[UNKNOWN], opening: by_path[OPENING], tree, names, declared }
 }
 
 /// Whether `decl` starts at a class root; if not, says so.

@@ -77,6 +77,8 @@ pub struct Run {
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
     pub violations: Vec<Violation>,
+    /// The last reading of every limit, per law step, subject and window.
+    pub headroom: Vec<Headroom>,
     pub pads: Vec<Pad>,
     /// How many times each law ran past its `when` filters, by law id.
     pub checks: Box<[u32]>,
@@ -216,6 +218,8 @@ pub struct Effect {
     pub amount: Amount,
     pub owe: Option<Owed>,
     pub cause: Cause,
+    /// The price of a violated `require … else owe …`.
+    pub priced: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -235,15 +239,42 @@ pub struct Violation {
     pub warn: bool,
     /// By `!` or relaxed mode.
     pub waived: bool,
+    /// A `require … else owe …`: the violation was priced, and its effects are
+    /// the ones with `priced` set that the same firing recorded.
+    pub priced: bool,
     pub diagnostic: u32,
 }
 
-/// An assertion's unexplained gap, accepted with `!` as a flow from `unknown`.
+/// What a limit had counted and what it allowed, the last time one of its
+/// comparisons ran in one window: `counted <= limit`, with the sides of a
+/// `>=` swapped, so the room left is always `limit - counted`.
+#[derive(Clone, Copy, Debug)]
+pub struct Headroom {
+    pub law: Id<Law>,
+    /// The index of the `require` or `warn` step.
+    pub step: u32,
+    pub subject: Subject,
+    pub owner: Id<Entity>,
+    /// The window, inclusive: the month or year of the total or tally the
+    /// comparison reads, or the day itself when it reads neither.
+    pub from: Day,
+    pub until: Day,
+    pub counted: Amount,
+    pub limit: Amount,
+    /// When it was last read.
+    pub day: Day,
+    pub warn: bool,
+}
+
+/// An assertion's gap, accepted with `!` as a flow from `unknown`, or with
+/// `via PLACE` as a flow from that place.
 #[derive(Clone, Copy, Debug)]
 pub struct Pad {
     /// Index into `Book::asserts`.
     pub assert: u32,
     pub place: Id<Place>,
+    /// Where the gap came from: `equity/unknown`, or the `via` place.
+    pub counter: Id<Place>,
     /// What moved into `place` from `unknown` (negative: out of `place`), in
     /// balance terms, not the display sign the assertion is written in.
     pub amount: Amount,

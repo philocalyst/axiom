@@ -8,7 +8,7 @@
 
 use axiom_core::{Arena, Day, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Tree};
 
-use crate::journal::{Assert, Event, Flow, Plan, Prices, Txn};
+use crate::journal::{Assert, Event, Flow, Plan, Prices, Split, Txn};
 use crate::law::{Law, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
 
@@ -45,7 +45,9 @@ pub struct Book<'s> {
     /// Sorted by day, then declaration order.
     pub events: Vec<Event>,
     pub prices: Prices,
-    pub plans: Vec<Plan>,
+    /// Sorted by day, then declaration order.
+    pub splits: Vec<Split>,
+    pub plans: Arena<Plan>,
     pub syncs: Vec<SyncSpec>,
     /// How names are found. [`build`](crate::build) fills it; in a book made by
     /// hand it is empty, and `Book::place` and its siblings find nothing.
@@ -71,6 +73,12 @@ pub struct Roots {
     pub me: Id<Entity>,
     /// `?`: where value of unknown origin comes from and unexplained value goes.
     pub unknown: Id<Place>,
+    /// `equity/opening`: where `opening` balances come from.
+    pub opening: Id<Place>,
+    /// `market : income`: the kind of place a revaluation comes from or goes
+    /// to. A flow between an asset place and one of these changes quantity and
+    /// keeps basis: it realizes nothing.
+    pub market: Id<Kind>,
     pub asset: Id<Kind>,
     pub liability: Id<Kind>,
     pub income: Id<Kind>,
@@ -133,8 +141,15 @@ pub struct Place {
     pub select: Option<Policy>,
     /// Resolved from the kind chain: gains are not realized inside.
     pub deferred: bool,
+    /// Resolved from the kind chain: what basis arriving value takes.
+    pub basis: Basis,
+    /// Resolved from the kind chain: this place holds what others owe, and its
+    /// parcels stay apart by the transaction that made them.
+    pub claim: bool,
     /// Resolved: own, else the kind chain's.
     pub liquidity: Option<Span>,
+    /// `account expenses/business as biz`.
+    pub alias: Option<Sym>,
     pub opened: Option<Day>,
     pub closed: Option<Day>,
     /// Own properties first, then defaults inherited from the kind chain.
@@ -152,17 +167,35 @@ pub struct Entity {
     pub via: Option<Id<Place>>,
     /// Resolved from the kind chain: money from this entity stays tied to it.
     pub restricted: bool,
-    /// Jurisdictions, sorted by start day. Each lasts until the next begins.
+    /// Jurisdictions, sorted by start day. They may overlap.
     pub lives: Box<[Residence]>,
+    /// `member household`: the household this person belongs to, which is
+    /// governed in their place by the systems it lives in.
+    pub member: Option<Id<Entity>>,
     pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
 }
 
+/// `lives us/ca from 2025-01-01 until 2025-06-30`: inclusive, and open-ended
+/// on either side when unwritten.
 #[derive(Clone, Copy, Debug)]
 pub struct Residence {
     pub from: Day,
+    pub until: Day,
     pub system: Id<System>,
+}
+
+/// What basis value arriving from outside the owner's asset places takes.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum Basis {
+    /// Its face value in the base currency, or its `@` price: money already
+    /// taxed, a purchase.
+    #[default]
+    Cost,
+    /// Nothing: pre-tax deferrals, deducted contributions. All of it is gain
+    /// when it leaves.
+    Zero,
 }
 
 /// What something is: `bank`, `401k`, `stock`, `grant`, `person`.
@@ -175,6 +208,8 @@ pub struct Kind {
     // Resolved down the kind chain.
     pub restricted: bool,
     pub deferred: bool,
+    pub basis: Option<Basis>,
+    pub claim: bool,
     pub select: Option<Policy>,
     pub liquidity: Option<Span>,
     /// Properties instances may set: own declarations, then inherited ones.

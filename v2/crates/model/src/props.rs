@@ -184,6 +184,10 @@ fn entity<'s>(world: &mut World<'s>, written: &Written<'_, 's, Decl<'s>>, id: Id
         Ok(())
     });
     lives.sort_by_key(|residence| residence.from);
+    // Until residences may say when they end, each lasts until the next begins.
+    for at in 1..lives.len() {
+        lives[at - 1].until = lives[at].from.add_days(-1);
+    }
     let entity = &mut world.book.entities[id];
     entity.lives = lives.into();
     entity.props = with_defaults(declared, &world.book.kinds[kind].props);
@@ -281,7 +285,7 @@ impl<'s> Args<'_, 's> {
             }
             None => Day(i32::MIN),
         };
-        Ok(Residence { from, system })
+        Ok(Residence { from, until: Day(i32::MAX), system })
     }
 
     fn wrong_missing(&self) -> Diagnostic {

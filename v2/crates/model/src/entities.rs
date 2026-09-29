@@ -31,6 +31,7 @@ pub(crate) fn declare<'s>(catalog: &Catalog<'_, 's>, kinds: &Kinds, cx: &mut Cx<
         via: None,
         restricted: false,
         lives: Box::default(),
+        member: None,
         props: Box::default(),
         doc: None,
         loc: None,

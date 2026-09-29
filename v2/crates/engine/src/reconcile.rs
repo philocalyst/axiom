@@ -11,7 +11,7 @@
 //! moves from `unknown` into the place, so later assertions hold, and is
 //! recorded as a [`Pad`].
 
-use axiom_model::Amount;
+use axiom_model::{Amount, Gap};
 
 use crate::ledger::Ledger;
 use crate::scope::display;
@@ -28,19 +28,25 @@ impl<'b, 's> Ledger<'b, 's> {
             self.record.reconciled.insert((place, unit), assert.day);
             return;
         }
-        let Some(waive) = assert.pad else {
-            let since = self.record.reconciled.get(&(place, unit)).copied();
-            let diagnostic = explain::mismatch(book, &self.solved.events, assert, shown, since);
-            self.record.report(diagnostic);
-            return;
+        let (counter, waive) = match assert.gap {
+            Gap::Refused => {
+                let since = self.record.reconciled.get(&(place, unit)).copied();
+                let diagnostic = explain::mismatch(book, &self.solved.events, assert, shown, since);
+                self.record.report(diagnostic);
+                return;
+            }
+            Gap::Unexplained(waive) => (book.roots.unknown, Some(waive)),
+            Gap::Via { place: counter, .. } => (counter, None),
         };
         // The pad is what moves into the place, in balance terms.
         let moved = display(book, place, gap);
         self.world.holdings.credit(place, unit, moved);
-        self.world.holdings.credit(book.roots.unknown, unit, -moved);
+        self.world.holdings.credit(counter, unit, -moved);
         let amount = Amount::new(moved, unit);
-        self.record.pads.push(Pad { assert: index as u32, place, amount, day: assert.day });
+        self.record.pads.push(Pad { assert: index as u32, place, counter, amount, day: assert.day });
         self.record.reconciled.insert((place, unit), assert.day);
-        self.record.report(explain::padded(book, assert, waive, amount));
+        if let Some(waive) = waive {
+            self.record.report(explain::padded(book, assert, waive, amount));
+        }
     }
 }

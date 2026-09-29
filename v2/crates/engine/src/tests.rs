@@ -508,7 +508,7 @@ fn timed_book(assertion_on: Option<i32>) -> (Book<'static>, Id<Law>) {
     let (equity, cash, me) = (f.equity, f.cash, f.me);
     let (monthly, deadline, months) = (f.sym("monthly"), f.sym("payoff"), f.sym("months"));
     let one = f.usd(100);
-    let mut each = LawBuilder::new(monthly, Trigger::Each(Period::Month));
+    let mut each = LawBuilder::new(monthly, Trigger::Each(Period::Month, None));
     let amount = each.konst(Value::Amount(one), Ty::Amount);
     let each = f.law(each.count(amount, months));
     let mut by = LawBuilder::new(deadline, Trigger::Always);
@@ -633,7 +633,7 @@ fn tallies_count_what_a_filter_lets_through_and_year_end_laws_read_them() {
     let rule = f.rule(count, Subject::Entity(me));
     f.on_in.push((checking, rule));
 
-    let mut owe = LawBuilder::new(taxing, Trigger::Each(Period::Year));
+    let mut owe = LawBuilder::new(taxing, Trigger::Each(Period::Year, None));
     let (rate, earned) =
         (owe.konst(Value::Num(Ratio::new(1, 10).unwrap()), Ty::Num), owe.call(Func::Tally(wages), &[], Ty::Amount));
     let due = owe.bin(BinOp::Mul, rate, earned, Ty::Amount);

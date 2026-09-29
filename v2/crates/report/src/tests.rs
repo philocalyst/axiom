@@ -79,7 +79,9 @@ struct Cast {
 impl Cast {
     fn new() -> Cast {
         let mut names = Interner::default();
-        let (kinds, kind_ids) = Tree::build(vec![kind(names.intern("thing"))], &[None]).unwrap();
+        // `market` is its own kind, so no place of the household is one.
+        let kinds = vec![kind(names.intern("thing")), kind(names.intern("market"))];
+        let (kinds, kind_ids) = Tree::build(kinds, &[None, None]).unwrap();
         let thing = kind_ids[0];
 
         let entities = ["me", "landlord", "irs", "nsf"].map(|name| Entity {
@@ -88,6 +90,7 @@ impl Cast {
             via: None,
             restricted: false,
             lives: Box::default(),
+            member: None,
             props: Box::default(),
             doc: None,
             loc: None,
@@ -109,7 +112,10 @@ impl Cast {
             holds: None,
             select: None,
             deferred: false,
+            basis: Basis::Cost,
+            claim: false,
             liquidity: (path == "assets/retirement").then_some(Span::months(1)),
+            alias: None,
             opened: None,
             closed: None,
             props: Box::default(),
@@ -165,6 +171,8 @@ fn kind(name: Sym) -> Kind {
         system: None,
         restricted: false,
         deferred: false,
+        basis: None,
+        claim: false,
         select: None,
         liquidity: None,
         has: Box::default(),
@@ -213,6 +221,8 @@ fn journal(cast: &mut Cast) -> Journal {
             payee,
             codes: Box::default(),
             waive: None,
+            due: None,
+            plan: None,
             doc: None,
             loc: line(row),
         });
@@ -220,7 +230,7 @@ fn journal(cast: &mut Cast) -> Journal {
         journal.flows.push(Flow {
             day: when,
             // The insurance is paid for the whole year.
-            until: if row == 1 { day(2026, 12, 31) } else { when },
+            recognized: Recognition { from: when, until: if row == 1 { day(2026, 12, 31) } else { when } },
             from: cast.id(from),
             to: cast.id(to),
             out: amount,
@@ -233,6 +243,7 @@ fn journal(cast: &mut Cast) -> Journal {
             codes: if state == State::Pending { Box::new([check]) } else { Box::default() },
             loc: line(row),
             waive: None,
+            terms: None,
         });
         journal.posted.push(Posted { out: Qty(cents), arrive: Qty(cents), state });
     }
@@ -244,7 +255,7 @@ fn rent_plan(cast: &Cast) -> Plan {
     let amount = Amount::new(Qty(180_000), cast.usd);
     let once = Flow {
         day: day(2026, 4, 1),
-        until: day(2026, 4, 1),
+        recognized: Recognition::on(day(2026, 4, 1)),
         from: cast.id("assets/bank/checking"),
         to: cast.id("expenses/rent"),
         out: amount,
@@ -257,8 +268,10 @@ fn rent_plan(cast: &Cast) -> Plan {
         codes: Box::default(),
         loc: line(60),
         waive: None,
+        terms: None,
     };
     Plan {
+        name: None,
         every: Span::months(1),
         on: Some(On::MonthDay(1)),
         from: Some(day(2026, 4, 1)),
@@ -328,6 +341,7 @@ fn records(cast: &mut Cast) -> Records {
         amount: Amount::new(Qty(cents), usd),
         owe,
         cause,
+        priced: false,
     };
     let (us, ca) = (cast.us, cast.california);
     let effects = vec![
@@ -396,8 +410,10 @@ pub(crate) fn household() -> Household {
         equity: Id::new(0),
         commodity: Id::new(0),
         entity: Id::new(0),
+        opening: cast.id("equity/unknown"),
+        market: Id::new(1),
     };
-    let plans = vec![rent_plan(&cast)];
+    let plans = vec![rent_plan(&cast)].into();
     let book = Book {
         names: cast.names,
         base: cast.usd,
@@ -420,6 +436,7 @@ pub(crate) fn household() -> Household {
         events: Vec::new(),
         prices: Prices::default(),
         lookup: Default::default(),
+        splits: Vec::new(),
         plans,
         syncs: Vec::new(),
     };
@@ -430,6 +447,7 @@ pub(crate) fn household() -> Household {
         gains: records.gains,
         effects: records.effects,
         violations: Vec::new(),
+        headroom: Vec::new(),
         pads: Vec::new(),
         checks: vec![0; 2].into(),
         diagnostics: Vec::new(),
@@ -676,7 +694,7 @@ fn the_forecast_folds_plans_and_habits_and_reports_an_overdraft() {
     );
 
     // A 20,000 purchase planned for the 2nd of each month overdraws checking.
-    let mut big = rent_plan_clone(&house.book.plans[0]);
+    let mut big = rent_plan_clone(&house.book.plans[Id::new(0)]);
     big.template[0].to = house.place("expenses/repairs");
     big.template[0].out.qty = Qty(2_000_000);
     big.template[0].arrive.qty = Qty(2_000_000);
@@ -699,6 +717,7 @@ fn available_subtracts_what_is_pending_and_lists_what_is_slower() {
 
 fn rent_plan_clone(plan: &Plan) -> Plan {
     Plan {
+        name: plan.name,
         every: plan.every,
         on: plan.on,
         from: plan.from,

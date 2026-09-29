@@ -24,7 +24,7 @@ impl Events {
     /// A flow's state after events.
     pub fn state(&self, id: Id<Flow>, flow: &Flow) -> State {
         self.states.get(&id).copied().unwrap_or(match flow.mode {
-            Mode::Actual => State::Actual,
+            Mode::Actual | Mode::Opening => State::Actual,
             Mode::Pending => State::Pending,
             Mode::Planned => State::Planned,
         })

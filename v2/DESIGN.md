@@ -51,7 +51,20 @@ written but not cashed. It already reduces what you can spend but not what the
 bank reports. Plans (`every month …`) are **planned** flows that exist only in
 forecasts. Laws produce **owed** flows (taxes, penalties) that are real
 obligations but not yet cash. The journal itself never holds anything but authored
-facts; nothing is generated into it.
+facts; nothing is generated into it. A named plan is a template the journal
+instantiates in one line (`2026-01-16 paycheck`), so what repeats is written once
+and every occurrence is still an authored fact.
+
+A flow has **two times**: the day value moves, and the period it belongs to.
+They are usually the same day. An annual insurance premium is paid in January
+and recognized over the year (`2026-01-01..2026-12-31`); an estimated tax paid
+in January is `for 2025`. Balances and parcels follow the first; tallies,
+budgets, window totals and every report about a period follow the second. That
+one distinction is spreads, accruals, prepaid costs, depreciation schedules and
+"this payment is for last year".
+
+**`for` says what a flow is on account of**: a period (`for 2025`), a claim it
+settles (`for #inv-12`), or someone the money is held for (`for car-fund`).
 
 ## 2. Parcels remember where value came from
 
@@ -70,7 +83,24 @@ This one structure is:
 - **basis tracking** for tax-advantaged accounts: a 529 withdrawal's earnings
   portion is literally the gain on the parcels leaving, relieved pro-rata;
 - **restricted money**: a grant's dollars stay tied to the grant after they land
-  in checking, and spending them on the wrong thing is a violation.
+  in checking, and spending them on the wrong thing is a violation. An envelope
+  or a sinking fund is the same thing laid on by the owner (`for car-fund`), and
+  a tenant's deposit is money held for the tenant;
+- **claims**: an invoice, a loan to a friend, a deposit paid, a reimbursement
+  due. A claim is a parcel in a `claim` place that remembers the transaction that
+  made it (its counterparty, its age, its `due` day) and is relieved by the flows
+  `for` it. Aging, "coming in", and "overdue" are group-bys over parcels.
+
+A parcel's three dimensions can each move. Its quantity moves with flows, and
+with a `split`. Its basis moves with flows into or out of `PLACE.basis`: a
+capital improvement raises it, and depreciation lowers it and recognizes the
+expense. So the balance sheet, the P&L and the tax gain are one double entry. A
+revaluation from a `market` place changes quantity and keeps basis, which is an
+unrealized gain or loss. None of these is a withdrawal. What basis arriving
+value takes is the target kind's rule (`basis zero` for pre-tax money, `basis
+cost` otherwise), overridable per flow, never an accident of the route the money
+took. Opening balances create parcels with the basis and acquisition day the
+statement gives.
 
 The one rule for exchanges: `basis(new) = basis(given) + gain realized`. Taxable
 places realize gains on exchange; `deferred` places (401k, IRA, 529) do not, and
@@ -129,9 +159,29 @@ Constraints narrow: nothing is enforced until something declares it, and once
 declared, it is an error unless you relax it explicitly. There is no warning-only
 `check` directive. `--relaxed` demotes, and `!` waives a single item.
 
+**Laws are a dataflow graph.** The model sees what each law reads (`tally(x)`)
+and writes (`count … as x`) and runs writers before readers, like a spreadsheet.
+So a project extends a system by counting into the lines it reads (an itemized
+deduction, a credit), and never by copying it, and no file name changes a tax
+bill.
+
+**Every limit knows its headroom.** A `require` or `warn` that compares two
+amounts records both sides whenever it runs, per subject and window. "22,100 USD
+of 401(k) room left this year" and "the food budget is 94% used" are those
+records, available before anything breaks.
+
 Time is a flow of actions. A law about the future (a loan's payoff date, a grant's
 deadline) applies once the journal reaches that date. Before then it is a pending
-obligation the forecast can see.
+obligation the forecast can see. A law about a period can wait for the period to
+close (`each year closing 04-15`), so what is recognized `for` that period after
+it ends still counts.
+
+**Who** is a set, not a line. A household is an entity its members belong to.
+It owns joint places, lives somewhere, files, and is governed as one: its
+members' paychecks count into one return. A member keeps what is personal: a
+401(k)'s limit and an age-based penalty are that person's. Residences may
+overlap and end, so a citizen abroad and a part-year resident are each taxed for
+what applies.
 
 ## 5. Systems are written in Axiom
 
@@ -155,25 +205,33 @@ param ordinary
 ## 6. Consequences, not features
 
 - **Balances** fold flows over parcels.
-- **Available to spend** is liquid places, minus pending outflows and restricted
-  parcels. It also shows what each illiquid place would yield if drawn today,
+- **Available to spend** is cash in every currency, minus pending outflows,
+  restricted and earmarked parcels, and obligations falling due. Claims are
+  "coming in", never "to spend". It also shows what each illiquid place would
+  yield if drawn today,
   computed by running a hypothetical withdrawal through the laws. That
   withdrawal pays the 401k's 10% penalty and ordinary tax, and it settles in the
   commodity's liquidity time. **Liquidity is derived from law**, which is exactly
   the notebook's "cost of action".
-- **Budgets** are `warn` laws on categories.
+- **Budgets** are `warn` laws on categories, and **limits** are their headroom:
+  one table of every cap a person lives under, with what is counted and what is
+  left.
 - **Taxes**: jurisdictions' laws tally flows and gains, then `each year` laws
   compute what is owed from the tallies with `progressive(schedule, x)`. The tax
   report is those tallies and obligations, each explainable back to flows.
+- **Claims**: what others owe you and what you owe them, aged, with due days;
+  `check` warns when one is overdue.
 - **Forecast**: planned flows, recurring flows inferred from history (cadence
-  and amount), owed obligations, and commodity growth models run forward. The
-  same laws are evaluated on the projection, so a contribution that *will* exceed
-  its limit in November or a checking account that *will* overdraw is reported
-  before it happens. Variable spending is bootstrapped from history into bands.
+  and amount), claims on their due days, owed obligations, and commodity growth
+  models run forward. The same laws are evaluated on the projection, so a
+  contribution that *will* exceed its limit in November or a checking account
+  that *will* overdraw is reported before it happens. Variable spending is
+  bootstrapped from history into bands.
 - **Gaps in knowledge**: `?` amounts are inferred from later balance assertions.
   `->` to `?` goes to `unknown`, the garbage can that counts. An assertion that
-  does not reconcile names the gap. `!` accepts it as an explicit externality,
-  never silently.
+  does not reconcile names the gap and its likeliest cause. `!` accepts it as an
+  explicit externality, never silently, and `via PLACE` says where it went (a
+  statement's market value, `via market`).
 
 ## 7. Evaluation
 
@@ -184,9 +242,12 @@ bytes ──parse──▶ AST ──model──▶ Book ──engine──▶ R
   parallel)                   columnar)    inference)
 ```
 
-- **Parse**: files are read once and parsed in parallel with `std::thread::scope`.
-  The AST borrows the source, and names are `&str`. Lines split with SIMD `memchr`.
-  Dates and digit runs are parsed eight bytes at a time (SWAR).
+- **Parse**: files are read and parsed in parallel with `std::thread::scope`,
+  and a large file is cut at item boundaries so its pieces parse on every core.
+  The AST is flat: small items whose variable parts (legs, codes, selectors,
+  properties, expressions) live in per-file arenas addressed by typed ranges, so
+  a line costs tens of bytes, not hundreds. Lines split with SIMD `memchr`, and
+  dates, digit runs and names are scanned eight bytes at a time (SWAR).
 - **Model**: names are interned into typed arenas (`Id<Place>`, `Id<Law>` …).
   Kinds are linked, laws are type-checked, and transactions are elaborated into
   flows. Resolution runs on read-only tables, so transaction elaboration is
@@ -214,7 +275,7 @@ bytes ──parse──▶ AST ──model──▶ Book ──engine──▶ R
 
 ```text
 crates/
-  core     numbers, dates, interning, globs, typed ids, diagnostics, par
+  core     numbers, dates, interning, globs, typed ids, trees, groups, diagnostics, par
   syntax   lexer + parser → borrowed AST              (depends: core)
   model    AST → Book: resolution, kinds, laws, flows  (core, syntax)
   engine   Book → Run: timeline, parcels, laws, gains  (core, model)

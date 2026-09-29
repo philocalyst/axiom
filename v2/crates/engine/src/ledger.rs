@@ -71,7 +71,7 @@ impl<'b, 's> Ledger<'b, 's> {
         let horizon = timeline::horizon(book, &events, options.today);
         let deadlines = timeline::deadlines(Env { book, world: &world }, horizon, &mut scratch.values);
         let solved = Solved { events, deadlines, horizon };
-        let periodic = book.rules.timed.iter().any(|rule| matches!(book.laws[rule.law].trigger, Trigger::Each(_)));
+        let periodic = book.rules.timed.iter().any(|rule| matches!(book.laws[rule.law].trigger, Trigger::Each(..)));
         let timeline = Timeline::new(&solved.sources(book), periodic);
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
         Ledger {
@@ -162,6 +162,7 @@ impl<'b, 's> Ledger<'b, 's> {
             gains: record.gains,
             effects: record.effects,
             violations: record.violations,
+            headroom: Vec::new(),
             pads: record.pads,
             checks: record.checks.into(),
             diagnostics: record.diagnostics,

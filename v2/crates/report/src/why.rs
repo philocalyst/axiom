@@ -85,8 +85,8 @@ fn trigger_words(trigger: Trigger) -> &'static str {
         Trigger::Out => "on out",
         Trigger::Gain => "on gain",
         Trigger::Spend => "on spend",
-        Trigger::Each(Period::Month) => "each month",
-        Trigger::Each(Period::Year) => "each year",
+        Trigger::Each(Period::Month, _) => "each month",
+        Trigger::Each(Period::Year, _) => "each year",
         Trigger::By(_) => "by a date",
         Trigger::Always => "always",
     }

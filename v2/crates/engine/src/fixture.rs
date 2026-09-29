@@ -28,6 +28,7 @@ pub(crate) struct Fixture {
     pub food: Id<Place>,
     pub equity: Id<Place>,
     pub unknown: Id<Place>,
+    pub opening: Id<Place>,
     pub card: Id<Place>,
     pub places: Tree<Place>,
     entities: Tree<Entity>,
@@ -55,6 +56,7 @@ impl Fixture {
             via: None,
             restricted,
             lives: Box::new([]),
+            member: None,
             props: Box::new([]),
             doc: None,
             loc: None,
@@ -70,7 +72,10 @@ impl Fixture {
             holds: None,
             select: None,
             deferred: false,
+            basis: Basis::Cost,
+            claim: false,
             liquidity: None,
+            alias: None,
             opened: None,
             closed: None,
             props: Box::new([]),
@@ -119,6 +124,7 @@ impl Fixture {
             food: p[10],
             equity: p[12],
             unknown: p[13],
+            opening: p[12],
             card: p[15],
             places,
             entities,
@@ -211,10 +217,22 @@ impl Fixture {
         let id = Id::new(self.flows.len() as u32);
         let loc = Loc::new(FileId(0), id.index() as u32 * 100, id.index() as u32 * 100 + 50);
         let day = Day(day);
-        self.txns.push(Txn { day, first: id, len: 1, payee: None, codes: Box::new([]), waive: None, doc: None, loc });
+        let txn = Txn {
+            day,
+            first: id,
+            len: 1,
+            payee: None,
+            codes: Box::new([]),
+            waive: None,
+            due: None,
+            plan: None,
+            doc: None,
+            loc,
+        };
+        self.txns.push(txn);
         let flow = Flow {
             day,
-            until: day,
+            recognized: Recognition::on(day),
             from,
             to,
             out,
@@ -227,6 +245,7 @@ impl Fixture {
             codes: Box::new([]),
             loc,
             waive: None,
+            terms: None,
         };
         self.flows.push(flow);
         id
@@ -236,13 +255,13 @@ impl Fixture {
         let amount = self.usd(cents);
         let loc =
             Loc::new(FileId(0), 50_000 + self.asserts.len() as u32 * 100, 50_050 + self.asserts.len() as u32 * 100);
-        self.asserts.push(Assert { day: Day(day), place, amount, pad: None, loc });
+        self.asserts.push(Assert { day: Day(day), place, amount, gap: Gap::Refused, loc });
     }
 
     /// Marks the last assertion `!`.
     pub fn pad_last(&mut self) {
         let loc = self.asserts.last().expect("an assertion to pad").loc;
-        self.asserts.last_mut().expect("an assertion to pad").pad = Some(Waive { loc, reason: None });
+        self.asserts.last_mut().expect("an assertion to pad").gap = Gap::Unexplained(Waive { loc, reason: None });
     }
 
     /// Marks a flow with `code`.
@@ -279,6 +298,8 @@ impl Fixture {
             system: None,
             restricted: false,
             deferred: false,
+            basis: None,
+            claim: false,
             select: None,
             liquidity: None,
             has: Box::new([]),
@@ -287,11 +308,14 @@ impl Fixture {
             doc: None,
             loc: None,
         };
-        let (kinds, _) = Tree::build(vec![kind], &[None]).expect("no cycles");
+        let market = Kind { name: self.names.intern("market"), sort: Sort::Place(Class::Income), ..kind.clone() };
+        let (kinds, _) = Tree::build(vec![kind, market], &[None, None]).expect("no cycles");
         let k = Id::new(0);
         let roots = Roots {
             me: self.me,
             unknown: self.unknown,
+            opening: self.opening,
+            market: Id::new(1),
             asset: k,
             liability: k,
             income: k,
@@ -342,7 +366,8 @@ impl Fixture {
             asserts: self.asserts,
             events: self.events,
             prices: Prices::default(),
-            plans: Vec::new(),
+            splits: Vec::new(),
+            plans: Arena::new(),
             syncs: Vec::new(),
             lookup: Default::default(),
         }

@@ -25,4 +25,4 @@ note[pad]: accepted a gap on assets/cash
 ───╯
 
 1 warning
-✓ 68 flows · 28 places · 16 laws enforced · net worth 77,597.73 USD
+✓ 68 flows · 29 places · 16 laws enforced · net worth 77,597.73 USD

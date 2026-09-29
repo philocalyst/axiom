@@ -115,8 +115,8 @@ impl<'b, 's> Ledger<'b, 's> {
         let ends_year = day == day.year_end();
         for rule in &book.rules.timed {
             let due = match book.laws[rule.law].trigger {
-                Trigger::Each(Period::Month) => true,
-                Trigger::Each(Period::Year) => ends_year,
+                Trigger::Each(Period::Month, _) => true,
+                Trigger::Each(Period::Year, _) => ends_year,
                 _ => false,
             };
             let firing = Firing::time(day);
@@ -152,6 +152,7 @@ impl<'b, 's> Ledger<'b, 's> {
             amount,
             owe,
             cause,
+            priced: false,
         };
         if self.evaluate(rule.law, ctx) {
             self.record.checks[rule.law.index()] += 1;
@@ -198,6 +199,7 @@ impl<'b, 's> Ledger<'b, 's> {
             cause,
             warn,
             waived: waiver.is_some(),
+            priced: false,
             diagnostic,
         });
     }

@@ -8,7 +8,7 @@ use axiom_core::{Day, Diagnostic, Id};
 use super::txn::{Dated, Sink, elaborate};
 use crate::book::{Amount, CodeRule, CodeScope, SyncSpec};
 use crate::catalog::Catalog;
-use crate::journal::{Assert, Event, Mode, Plan, Quote, Waive};
+use crate::journal::{Assert, Event, Gap, Mode, Plan, Quote, Waive};
 use crate::scope::Home;
 use crate::survey::{class_of, code_text};
 use crate::world::World;
@@ -52,9 +52,12 @@ pub(super) fn asserts<'s>(world: &World<'s>, catalog: &Catalog<'_, 's>, diags: &
                 day: assert.date,
                 place: end.place,
                 amount: stated.unwrap_or_else(|| zero_of(world, end.place)),
-                pad: assert
-                    .waive
-                    .map(|waive| Waive { loc: waive.loc, reason: waive.reason.map(|reason| world.sym(reason)) }),
+                gap: match assert.waive {
+                    Some(waive) => {
+                        Gap::Unexplained(Waive { loc: waive.loc, reason: waive.reason.map(|reason| world.sym(reason)) })
+                    }
+                    None => Gap::Refused,
+                },
                 loc: written.item.loc,
             }),
             (end, stated) => diags.extend(end.err().into_iter().chain(stated.err())),
@@ -175,6 +178,7 @@ pub(super) fn plans<'s>(world: &mut World<'s>, catalog: &Catalog<'_, 's>, diags:
         world.book.txns.push(txn);
         let plan = written.what;
         world.book.plans.push(Plan {
+            name: None,
             every: plan.every,
             on: plan.on,
             from: plan.from,

@@ -12,7 +12,7 @@
 //! place order, which keeps the result deterministic.
 
 use axiom_core::{Diagnostic, Groups, Id, Map, Qty, par};
-use axiom_model::{Assert, Book, Commodity, End, Flow, Infer, Place};
+use axiom_model::{Assert, Book, Commodity, End, Flow, Gap, Infer, Place};
 
 use crate::State;
 use crate::events::Events;
@@ -189,10 +189,10 @@ impl Stretches<'_> {
             }
         }
         for &index in &self.anchors[place] {
-            let Assert { day, amount, pad, .. } = self.book.asserts[index as usize];
+            let Assert { day, amount, gap, .. } = self.book.asserts[index as usize];
             if amount.unit == unit {
                 let balance = display(self.book, place, amount.qty);
-                let step = if pad.is_some() { Step::Accepted(balance) } else { Step::Anchor(balance) };
+                let step = if matches!(gap, Gap::Refused) { Step::Anchor(balance) } else { Step::Accepted(balance) };
                 steps.push((Moment { day, fact: Fact::Assert(index) }, step));
             }
         }

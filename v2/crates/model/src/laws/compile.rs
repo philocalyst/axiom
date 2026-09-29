@@ -230,7 +230,7 @@ impl<'s> Compiler<'_, '_, 's> {
             ast::Trigger::Out => Trigger::Out,
             ast::Trigger::Gain => Trigger::Gain,
             ast::Trigger::Spend => Trigger::Spend,
-            ast::Trigger::Each(period) => Trigger::Each(period),
+            ast::Trigger::Each(period) => Trigger::Each(period, None),
             ast::Trigger::Always => Trigger::Always,
             ast::Trigger::By(root) => {
                 let deadline = self.expression(root, Want::Day)?;

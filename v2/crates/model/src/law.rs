@@ -58,10 +58,19 @@ pub enum Trigger {
     Out,
     Gain,
     Spend,
-    Each(Period),
+    /// At the end of each period, or on its `closing` day in the next one.
+    Each(Period, Option<Closing>),
     /// Fires once the journal reaches this date, evaluated per subject.
     By(NodeId),
     Always,
+}
+
+/// `each year closing 04-15`: the law runs for a year on this day of the year
+/// after, so that what is recognized `for` the year until then counts.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct Closing {
+    pub month: u8,
+    pub day: u8,
 }
 
 #[derive(Debug)]
@@ -168,6 +177,10 @@ pub enum Var {
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Field {
     Balance,
+    /// A place's total basis, in the base currency.
+    Basis,
+    /// An amount's commodity.
+    Unit,
     Owner,
     Kind,
     /// From the `born` property to the context date.
@@ -294,9 +307,12 @@ pub enum Fault {
 
 /// Which laws watch what, resolved once so the engine never searches.
 ///
-/// A place's rule list holds, in order: its own and its ancestors' laws, its
-/// kind chain's laws, and the top-level laws of its owner's jurisdictions
-/// (each rule dated by the residence that brings it).
+/// A place's rule list holds its own and its ancestors' laws, its kind chain's
+/// laws, and the top-level laws of its owner's jurisdictions (each rule dated
+/// by the residence that brings it; a household's for its members' places).
+/// Every list, `timed` included, is in dependency order: a law that reads
+/// `tally(x)` comes after every law that counts into `x`, and declaration
+/// order decides the rest.
 #[derive(Default)]
 pub struct Rules {
     pub on_in: Groups<Place, Rule>,

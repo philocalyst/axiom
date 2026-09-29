@@ -19,7 +19,7 @@ use crate::law::Ty;
 use crate::names::Scoped;
 use crate::scope::Home;
 
-pub(crate) const ROOTS: [(&str, Sort); 7] = [
+pub(crate) const ROOTS: [(&str, Sort); 8] = [
     ("asset", Sort::Place(Class::Asset)),
     ("liability", Sort::Place(Class::Liability)),
     ("income", Sort::Place(Class::Income)),
@@ -27,7 +27,13 @@ pub(crate) const ROOTS: [(&str, Sort); 7] = [
     ("equity", Sort::Place(Class::Equity)),
     ("commodity", Sort::Commodity),
     ("entity", Sort::Entity),
+    // Built in, under `income`: the counterpart of revaluations.
+    ("market", Sort::Place(Class::Income)),
 ];
+
+/// The position of `market` in `ROOTS`, and of its parent, `income`.
+const MARKET: usize = 7;
+const INCOME: usize = 2;
 
 /// Where the built-in roots landed in the tree.
 #[derive(Clone, Copy)]
@@ -39,6 +45,7 @@ pub(crate) struct RootKinds {
     pub equity: Id<Kind>,
     pub commodity: Id<Kind>,
     pub entity: Id<Kind>,
+    pub market: Id<Kind>,
 }
 
 impl RootKinds {
@@ -51,6 +58,7 @@ impl RootKinds {
             equity: ids[4],
             commodity: ids[5],
             entity: ids[6],
+            market: ids[MARKET],
         }
     }
 
@@ -103,6 +111,7 @@ pub(crate) fn declare<'s>(catalog: &Catalog<'_, 's>, cx: &mut Cx<'_, 's>) -> Kin
     let index = Scoped::build(cx.names, drafts);
 
     let mut parents: Vec<Option<usize>> = vec![None; ROOTS.len()];
+    parents[MARKET] = Some(INCOME);
     for (at, written) in catalog.kinds.iter().enumerate() {
         if draft_of[at] == parents.len() {
             parents.push(Some(parent_of(written, &index, &kinds, cx)));
@@ -164,6 +173,8 @@ fn root<'s>(names: &mut Interner<'s>, name: &'s str, sort: Sort) -> Kind {
         system: None,
         restricted: false,
         deferred: false,
+        basis: None,
+        claim: false,
         select: None,
         liquidity: None,
         has: Box::default(),

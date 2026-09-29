@@ -59,6 +59,8 @@ impl<'s> World<'s> {
         let roots = Roots {
             me: entities.me,
             unknown: places.unknown,
+            opening: places.opening,
+            market: kinds.roots.market,
             asset: kinds.roots.asset,
             liability: kinds.roots.liability,
             income: kinds.roots.income,
@@ -94,7 +96,8 @@ impl<'s> World<'s> {
             asserts: Vec::new(),
             events: Vec::new(),
             prices: Default::default(),
-            plans: Vec::new(),
+            splits: Vec::new(),
+            plans: Arena::new(),
             syncs: Vec::new(),
             lookup: Lookup {
                 places: places.names,

@@ -15,7 +15,7 @@ use super::pairing::{self, Leg, Price, Share};
 use crate::args::list;
 use crate::book::{Amount, CodeScope, Commodity, Entity, Place};
 use crate::errors::iso;
-use crate::journal::{End, Flow, Infer, Mode, Quote, Select, Txn, Waive};
+use crate::journal::{End, Flow, Infer, Mode, Quote, Recognition, Select, Txn, Waive};
 use crate::prices::implied_quote;
 use crate::resolve::End as Resolved;
 use crate::scope::Home;
@@ -75,6 +75,8 @@ pub(super) fn elaborate<'s>(world: &World<'s>, item: &Item<'s>, dated: Dated, fl
         payee,
         codes: header.codes.iter().map(|&(code, _)| code).collect(),
         waive: header.waive,
+        due: None,
+        plan: None,
         doc: item.doc.map(|doc| world.sym(doc.0)),
         loc: item.loc,
     });
@@ -567,7 +569,7 @@ impl<'s> Elaborator<'_, 's> {
         let mode = if mv.pending && self.dated.mode == Mode::Actual { Mode::Pending } else { self.dated.mode };
         Flow {
             day: self.dated.day,
-            until: self.dated.until,
+            recognized: Recognition { from: self.dated.day, until: self.dated.until },
             from: mv.from.end.place,
             to: mv.to.end.place,
             out: mv.out,
@@ -580,6 +582,7 @@ impl<'s> Elaborator<'_, 's> {
             codes: header.codes.iter().chain(&mv.tail.codes).map(|&(code, _)| code).collect(),
             loc: mv.loc,
             waive: mv.tail.waive.or(header.waive),
+            terms: None,
         }
     }
 

@@ -4,14 +4,14 @@
 //! diagnostic they cause points somewhere meaningful.
 
 use axiom_core::Day;
-use axiom_model::{Amount, Flow, Infer, Mode};
+use axiom_model::{Amount, Flow, Infer, Mode, Recognition};
 
 /// A `Planned` flow on `day`, shaped like `template` (same ends and payee)
 /// but with its own amounts. It carries no codes: those link real events.
 pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
     Flow {
         day,
-        until: day,
+        recognized: Recognition::on(day),
         from: template.from,
         to: template.to,
         out,
@@ -24,5 +24,6 @@ pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
         codes: Box::default(),
         loc: template.loc,
         waive: None,
+        terms: None,
     }
 }

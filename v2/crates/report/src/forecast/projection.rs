@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Ratio};
 use axiom_engine::{Ledger, Options, Run};
-use axiom_model::{Amount, Book, Class, Commodity, Flow, Place};
+use axiom_model::{Amount, Book, Class, Commodity, Flow, Place, Recognition};
 
 use super::habits::Habits;
 use super::recurrence::Schedule;
@@ -39,11 +39,14 @@ impl Expectation<'_> {
     /// Its occurrences after `after`, up to `horizon`, as flows to apply.
     pub fn flows(&self, after: Day, horizon: Day) -> Vec<Flow> {
         // A plan over a date range keeps its width.
-        let width = self.template.until.0 - self.template.day.0;
+        let width = self.template.recognized.until.0 - self.template.recognized.from.0;
         let occurrences = self.schedule.days(after, horizon);
         occurrences
             .into_iter()
-            .map(|day| Flow { until: day.add_days(width), ..planned(self.template, day, self.out, self.arrive) })
+            .map(|day| Flow {
+                recognized: Recognition { from: day, until: day.add_days(width) },
+                ..planned(self.template, day, self.out, self.arrive)
+            })
             .collect()
     }
 }
@@ -51,7 +54,7 @@ impl Expectation<'_> {
 /// One expectation per flow of each plan.
 pub fn from_plans<'b>(book: &'b Book) -> Vec<Expectation<'b>> {
     book.plans
-        .iter()
+        .values()
         .flat_map(|plan| {
             plan.template.iter().map(move |flow| Expectation {
                 origin: Origin::Plan,

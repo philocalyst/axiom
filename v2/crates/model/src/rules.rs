@@ -32,7 +32,7 @@ impl Rules {
                     Trigger::Out => &mut on_out,
                     Trigger::Gain => &mut on_gain,
                     Trigger::Always => &mut always,
-                    Trigger::Spend | Trigger::Each(_) | Trigger::By(_) => continue,
+                    Trigger::Spend | Trigger::Each(..) | Trigger::By(_) => continue,
                 };
                 table.push((place, rule));
             }
@@ -134,7 +134,7 @@ fn spending(book: &Book, written: &WrittenIn) -> Vec<(Id<Entity>, Rule)> {
 /// `each` and `by` laws, once for each subject they govern.
 fn timed(book: &Book) -> Vec<Rule> {
     let mut rules = Vec::new();
-    let timed_laws = book.laws.iter().filter(|(_, law)| matches!(law.trigger, Trigger::Each(_) | Trigger::By(_)));
+    let timed_laws = book.laws.iter().filter(|(_, law)| matches!(law.trigger, Trigger::Each(..) | Trigger::By(_)));
     for (id, law) in timed_laws {
         match law.owner {
             Owner::Place(place) => rules.push(always(id, Subject::Place(place))),

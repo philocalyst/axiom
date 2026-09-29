@@ -121,9 +121,9 @@ impl Statement {
     /// whole range.
     fn record(&mut self, book: &Book, posting: &Posting) {
         let flow = posting.flow;
-        self.spread_seen |= flow.until > flow.day;
+        self.spread_seen |= flow.recognized.until > flow.day;
         self.recognize(book, flow.from, posting.out_in_base(book).map(|qty| -qty), flow.day, flow.day);
-        self.recognize(book, flow.to, posting.arrive_in_base(book), flow.day, flow.until);
+        self.recognize(book, flow.to, posting.arrive_in_base(book), flow.recognized.from, flow.recognized.until);
     }
 
     fn recognize(&mut self, book: &Book, place: Id<Place>, change: Option<Qty>, first: Day, last: Day) {
