@@ -217,7 +217,16 @@ impl<'s> File<'s> {
     /// A file made of its pieces, in order.
     pub(crate) fn new(id: FileId, src: &'s str, pieces: Vec<Piece<'s>>) -> File<'s> {
         let mut file = File { id, src, ..File::default() };
-        file.items.reserve_exact(pieces.iter().map(|piece| piece.items.len()).sum());
+        let total: usize = pieces.iter().map(|piece| piece.items.len()).sum();
+        // The first piece's items are the file's to start with: nearly every
+        // file is one piece, and its items are never copied.
+        let mut pieces = pieces.into_iter();
+        if let Some(first) = pieces.next() {
+            file.items = first.items;
+            file.exprs.parts.push(first.exprs);
+            file.tables.push(first.tables);
+        }
+        file.items.reserve_exact(total - file.items.len());
         for mut piece in pieces {
             file.items.append(&mut piece.items);
             file.exprs.parts.push(piece.exprs);
