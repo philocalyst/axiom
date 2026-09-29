@@ -26,6 +26,10 @@ const C2: u64 = 50_504_432_782_230_121; // ⌈2^64·4 / 1461⌉: divides by days
 const C3: u64 = 8_619_973_866_219_416 * 32 / SCALE as u64; // ⌊2^64 / 2140⌋
 
 impl Day {
+    /// The earliest and latest days there are: the bounds of an unbounded span.
+    pub const MIN: Day = Day(i32::MIN);
+    pub const MAX: Day = Day(i32::MAX);
+
     /// The day for a civil date, if it exists.
     pub fn from_ymd(year: i32, month: u32, day: u32) -> Option<Day> {
         (-999_999..=999_999).contains(&year).then_some(())?;

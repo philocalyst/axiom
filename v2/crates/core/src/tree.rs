@@ -8,7 +8,7 @@
 use std::iter::FusedIterator;
 use std::ops::{Index, IndexMut};
 
-use crate::id::Id;
+use crate::id::{Id, Ids, Run};
 
 const NONE: u32 = u32::MAX;
 
@@ -118,7 +118,7 @@ impl<T> Tree<T> {
 
     /// `id` and everything beneath it, in pre-order.
     pub fn subtree(&self, id: Id<T>) -> Ids<T> {
-        Ids { next: id.index() as u32, end: self.links[id.index()].end, of: std::marker::PhantomData }
+        Run::new(id, self.links[id.index()].end - id.index() as u32).ids()
     }
 
     /// `id`, then its parent, and so on up to its root.
@@ -137,7 +137,7 @@ impl<T> Tree<T> {
     }
 
     pub fn ids(&self) -> Ids<T> {
-        Ids { next: 0, end: self.items.len() as u32, of: std::marker::PhantomData }
+        Run::new(Id::new(0), self.items.len() as u32).ids()
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &T)> {
@@ -171,31 +171,6 @@ impl<T> IndexMut<Id<T>> for Tree<T> {
         &mut self.items[id.index()]
     }
 }
-
-/// A contiguous run of ids.
-pub struct Ids<T> {
-    next: u32,
-    end: u32,
-    of: std::marker::PhantomData<fn() -> T>,
-}
-
-impl<T> Iterator for Ids<T> {
-    type Item = Id<T>;
-    fn next(&mut self) -> Option<Id<T>> {
-        (self.next < self.end).then(|| {
-            self.next += 1;
-            Id::new(self.next - 1)
-        })
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = (self.end - self.next) as usize;
-        (n, Some(n))
-    }
-}
-
-impl<T> ExactSizeIterator for Ids<T> {}
-impl<T> FusedIterator for Ids<T> {}
 
 pub struct Lineage<'t, T> {
     tree: &'t Tree<T>,
