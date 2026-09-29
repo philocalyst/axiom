@@ -5,82 +5,65 @@
 //! advances through the journal one fact at a time, and it can be cloned and
 //! driven further with flows the journal never recorded. That one mechanism
 //! serves the journal itself ([`run`]), forecasts (planned flows), and "what
-//! would I net if I drew this account down today" (a hypothetical withdrawal
+//! would I net if I draw this account down today" (a hypothetical withdrawal
 //! run through the same laws).
+//!
+//! # How a fold is arranged
+//!
+//! Before it starts, the book's loose ends are solved: `events` turns
+//! settlement events into flow states, and `infer` solves `? USD` amounts from
+//! the assertions around them, one place per thread. `timeline` then orders
+//! every fact into one total order of moments, and `ledger` consumes them.
+//!
+//! For each flow, `post` moves value: `relief` chooses which parcels leave,
+//! `holdings` keeps what rests where, `totals` keeps the windowed sums laws
+//! read, `fire` runs the laws that watch the flow, `eval` (with `calc`)
+//! evaluates a law, and `explain` (with `show`) turns a failure into a
+//! diagnostic. `reconcile` checks balance assertions and `scope` says whose
+//! value a flow enters or leaves.
+//!
+//! The fold itself is sequential, because each flow's relief, totals and laws
+//! depend on every flow before it. Everything around it is not.
+
+#![forbid(unsafe_code)]
+
+mod calc;
+mod eval;
+mod events;
+mod explain;
+mod fire;
+mod holdings;
+mod infer;
+mod ledger;
+mod motion;
+mod post;
+mod reconcile;
+mod relief;
+mod scope;
+mod show;
+mod state;
+mod timeline;
+mod totals;
+
+#[cfg(test)]
+mod fixture;
+#[cfg(test)]
+mod tests;
 
 use axiom_core::{Day, Diagnostic, Id, Qty, Sym};
-use axiom_model::{Amount, Book, Commodity, Entity, Flow, Law, Place, Subject, System, Txn};
+use axiom_model::{Amount, Commodity, Entity, Flow, Law, Place, Subject, System, Txn};
+
+pub use ledger::{Ledger, run};
 
 /// How to run.
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
     /// Laws with deadlines (`by`, `each`) fire once the journal reaches them,
-    /// and never past this day.
+    /// and never past this day, or past the journal's last fact if that is
+    /// later: a deadline the journal itself reaches has been reached.
     pub today: Day,
     /// Law violations are warnings (also set by `relaxed` in the book).
     pub relaxed: bool,
-}
-
-/// The book's state as of some day. Cheap to clone relative to a replay.
-#[derive(Clone)]
-pub struct Ledger<'b, 's> {
-    book: &'b Book<'s>,
-}
-
-impl<'b, 's> Ledger<'b, 's> {
-    /// Solves what the journal leaves open (`?` amounts, `=` targets, `all`,
-    /// settlement events) and stands at the day before the first fact.
-    pub fn new(book: &'b Book<'s>, options: Options) -> Ledger<'b, 's> {
-        let _ = options;
-        let _ = book;
-        todo!("lane C")
-    }
-
-    pub fn book(&self) -> &'b Book<'s> {
-        self.book
-    }
-
-    /// The last day folded.
-    pub fn day(&self) -> Day {
-        todo!("lane C")
-    }
-
-    /// Folds the journal's facts, and the deadlines and period ends that fall
-    /// due, through the end of `day`.
-    pub fn advance(&mut self, day: Day) {
-        let _ = day;
-        todo!("lane C")
-    }
-
-    /// Advances to `flow.day`, then applies a flow the journal does not hold
-    /// (planned or hypothetical) exactly as if it did: relief, gains, laws.
-    /// Returns what it caused.
-    pub fn apply(&mut self, flow: &Flow) -> Applied {
-        let _ = flow;
-        todo!("lane C")
-    }
-
-    /// What `place` alone holds of `unit`, in quanta.
-    pub fn balance(&self, place: Id<Place>, unit: Id<Commodity>) -> Qty {
-        let _ = (place, unit);
-        todo!("lane C")
-    }
-
-    /// Every non-empty holding, by place then commodity.
-    pub fn holdings(&self) -> impl Iterator<Item = &Holding> {
-        std::iter::empty()
-    }
-
-    /// Stops and hands over everything recorded along the way.
-    pub fn finish(self) -> Run {
-        todo!("lane C")
-    }
-}
-
-/// The journal folded through `options.today` (and every later journal fact).
-pub fn run(book: &Book, options: Options) -> Run {
-    let _ = (book, options);
-    todo!("lane C")
 }
 
 /// Everything a fold produced. Indices in [`Cause`] and [`Applied`] point into
@@ -145,6 +128,8 @@ impl State {
 }
 
 /// What one place holds of one commodity.
+///
+/// Asset places hold parcels; every other class holds only `plain`.
 #[derive(Clone, Debug)]
 pub struct Holding {
     pub place: Id<Place>,
@@ -152,6 +137,11 @@ pub struct Holding {
     /// Interchangeable value: base currency whose basis is its face, tied to
     /// nothing. Plain money never allocates. Signed: liabilities, income,
     /// expenses and equity hold only this, and an overdraft makes it negative.
+    ///
+    /// For a commodity other than the base, `plain` is what has no parcel
+    /// behind it: the balance of a non-asset place, or, in an asset place, the
+    /// unfilled shortfall of a sale of more than was held (an error the fold
+    /// has already reported; a negative quantity never lives in a lot).
     pub plain: Qty,
     /// Everything that must be told apart, oldest first.
     pub lots: Vec<Parcel>,
@@ -160,6 +150,10 @@ pub struct Holding {
 impl Holding {
     pub fn qty(&self) -> Qty {
         self.plain + self.lots.iter().map(|lot| lot.qty).sum()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.plain.is_zero() && self.lots.is_empty()
     }
 }
 
@@ -250,14 +244,19 @@ pub struct Pad {
     /// Index into `Book::asserts`.
     pub assert: u32,
     pub place: Id<Place>,
+    /// What moved into `place` from `unknown` (negative: out of `place`), in
+    /// balance terms, not the display sign the assertion is written in.
     pub amount: Amount,
     pub day: Day,
 }
 
-/// What one applied flow caused: ranges into the ledger's records.
+/// What one applied flow caused: ranges into the ledger's records. The
+/// diagnostic range covers everything reported while applying it, including
+/// the diagnostics behind its violations.
 #[derive(Clone, Debug, Default)]
 pub struct Applied {
     pub gains: std::ops::Range<usize>,
     pub effects: std::ops::Range<usize>,
     pub violations: std::ops::Range<usize>,
+    pub diagnostics: std::ops::Range<usize>,
 }

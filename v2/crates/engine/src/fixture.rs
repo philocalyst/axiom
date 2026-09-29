@@ -1,0 +1,464 @@
+//! Test books built by hand, so the engine can be exercised without the model
+//! lane's `build`.
+//!
+//! A fixed set of places, entities and commodities; flows, assertions, events,
+//! laws and rules are added by the test. Flows must be added in day order (the
+//! book's contract), and `book()` assembles the tables the engine reads.
+
+use axiom_core::{Arena, Day, FileId, Groups, Id, Interner, Loc, Qty, Sym, Tree};
+use axiom_model::*;
+
+pub(crate) const FAR_PAST: Day = Day(i32::MIN);
+pub(crate) const FAR_FUTURE: Day = Day(i32::MAX);
+
+pub(crate) struct Fixture {
+    pub names: Interner<'static>,
+    pub usd: Id<Commodity>,
+    pub vti: Id<Commodity>,
+    pub me: Id<Entity>,
+    pub grant: Id<Entity>,
+    pub assets: Id<Place>,
+    pub checking: Id<Place>,
+    pub savings: Id<Place>,
+    pub cash: Id<Place>,
+    pub brokerage: Id<Place>,
+    pub retirement: Id<Place>,
+    pub salary: Id<Place>,
+    pub grants: Id<Place>,
+    pub food: Id<Place>,
+    pub equity: Id<Place>,
+    pub unknown: Id<Place>,
+    pub card: Id<Place>,
+    pub places: Tree<Place>,
+    entities: Tree<Entity>,
+    commodities: Arena<Commodity>,
+    pub flows: Vec<Flow>,
+    pub txns: Vec<Txn>,
+    pub asserts: Vec<Assert>,
+    pub events: Vec<Event>,
+    pub laws: Arena<Law>,
+    pub on_in: Vec<(Id<Place>, Rule)>,
+    pub on_out: Vec<(Id<Place>, Rule)>,
+    pub on_gain: Vec<(Id<Place>, Rule)>,
+    pub always: Vec<(Id<Place>, Rule)>,
+    pub on_spend: Vec<(Id<Entity>, Rule)>,
+    pub timed: Vec<Rule>,
+}
+
+impl Fixture {
+    pub fn new() -> Fixture {
+        let mut names = Interner::default();
+        let kind = Id::new(0);
+        let entity = |path: Sym, restricted| Entity {
+            path,
+            kind,
+            via: None,
+            restricted,
+            lives: Box::new([]),
+            props: Box::new([]),
+            doc: None,
+            loc: None,
+        };
+        let people = vec![entity(names.intern("me"), false), entity(names.intern("nsf-grant"), true)];
+        let (entities, ids) = Tree::build(people, &[None, None]).expect("no cycles");
+        let me = ids[0];
+        let place = |path: Sym, class| Place {
+            path,
+            class,
+            kind,
+            owner: me,
+            holds: None,
+            select: None,
+            deferred: false,
+            liquidity: None,
+            opened: None,
+            closed: None,
+            props: Box::new([]),
+            doc: None,
+            loc: None,
+        };
+        let spec: [(&'static str, Class, Option<usize>); 16] = [
+            ("assets", Class::Asset, None),
+            ("assets/checking", Class::Asset, Some(0)),
+            ("assets/savings", Class::Asset, Some(0)),
+            ("assets/cash", Class::Asset, Some(0)),
+            ("assets/brokerage", Class::Asset, Some(0)),
+            ("assets/retirement", Class::Asset, Some(0)),
+            ("income", Class::Income, None),
+            ("income/salary", Class::Income, Some(6)),
+            ("income/grants", Class::Income, Some(6)),
+            ("expenses", Class::Expense, None),
+            ("expenses/food", Class::Expense, Some(9)),
+            ("equity", Class::Equity, None),
+            ("equity/opening", Class::Equity, Some(11)),
+            ("equity/unknown", Class::Equity, Some(11)),
+            ("liabilities", Class::Liability, None),
+            ("liabilities/card", Class::Liability, Some(14)),
+        ];
+        let items = spec.iter().map(|&(path, class, _)| place(names.intern(path), class)).collect();
+        let parents: Vec<_> = spec.iter().map(|&(.., parent)| parent).collect();
+        let (mut places, p) = Tree::build(items, &parents).expect("no cycles");
+        places[p[5]].deferred = true;
+        let mut commodities = Arena::new();
+        let usd = commodities.push(commodity(names.intern("USD"), 2));
+        let vti = commodities.push(commodity(names.intern("VTI"), 0));
+        Fixture {
+            names,
+            usd,
+            vti,
+            me,
+            grant: ids[1],
+            assets: p[0],
+            checking: p[1],
+            savings: p[2],
+            cash: p[3],
+            brokerage: p[4],
+            retirement: p[5],
+            salary: p[7],
+            grants: p[8],
+            food: p[10],
+            equity: p[12],
+            unknown: p[13],
+            card: p[15],
+            places,
+            entities,
+            commodities,
+            flows: Vec::new(),
+            txns: Vec::new(),
+            asserts: Vec::new(),
+            events: Vec::new(),
+            laws: Arena::new(),
+            on_in: Vec::new(),
+            on_out: Vec::new(),
+            on_gain: Vec::new(),
+            always: Vec::new(),
+            on_spend: Vec::new(),
+            timed: Vec::new(),
+        }
+    }
+
+    pub fn sym(&mut self, text: &'static str) -> Sym {
+        self.names.intern(text)
+    }
+
+    pub fn usd(&self, cents: i64) -> Amount {
+        Amount::new(Qty(cents), self.usd)
+    }
+
+    pub fn vti(&self, shares: i64) -> Amount {
+        Amount::new(Qty(shares), self.vti)
+    }
+
+    /// A USD transfer.
+    pub fn flow(&mut self, day: i32, from: Id<Place>, to: Id<Place>, cents: i64) -> Id<Flow> {
+        let amount = self.usd(cents);
+        self.push(day, from, amount, to, amount, Infer::Known)
+    }
+
+    pub fn exchange(&mut self, day: i32, from: Id<Place>, out: Amount, to: Id<Place>, arrive: Amount) -> Id<Flow> {
+        self.push(day, from, out, to, arrive, Infer::Known)
+    }
+
+    /// Checking buys `shares` of VTI for `cents`.
+    pub fn buy(&mut self, day: i32, cents: i64, shares: i64) -> Id<Flow> {
+        let (from, to, out, arrive) = (self.checking, self.brokerage, self.usd(cents), self.vti(shares));
+        self.exchange(day, from, out, to, arrive)
+    }
+
+    /// Checking buys `shares` of VTI for an amount left as `? USD`.
+    pub fn unknown_buy(&mut self, day: i32, shares: i64) -> Id<Flow> {
+        let id = self.buy(day, 0, shares);
+        self.flows[id.index()].infer = Infer::Unknown;
+        id
+    }
+
+    /// The brokerage sells `shares` of VTI into checking for `cents`.
+    pub fn sell(&mut self, day: i32, shares: i64, cents: i64) -> Id<Flow> {
+        let (from, to, out, arrive) = (self.brokerage, self.checking, self.vti(shares), self.usd(cents));
+        self.exchange(day, from, out, to, arrive)
+    }
+
+    /// The brokerage sells everything it holds of VTI for `cents`.
+    pub fn sell_all(&mut self, day: i32, cents: i64) -> Id<Flow> {
+        let id = self.sell(day, 0, cents);
+        self.flows[id.index()].infer = Infer::All;
+        id
+    }
+
+    /// A USD flow whose `end` is written `= balance`.
+    pub fn target_leg(&mut self, day: i32, from: Id<Place>, to: Id<Place>, end: End, balance: i64) -> Id<Flow> {
+        let id = self.flow(day, from, to, 0);
+        self.flows[id.index()].infer = Infer::Target { end, balance: Qty(balance) };
+        id
+    }
+
+    /// A transfer of `? USD`.
+    pub fn unknown(&mut self, day: i32, from: Id<Place>, to: Id<Place>) -> Id<Flow> {
+        let amount = self.usd(0);
+        self.push(day, from, amount, to, amount, Infer::Unknown)
+    }
+
+    fn push(
+        &mut self,
+        day: i32,
+        from: Id<Place>,
+        out: Amount,
+        to: Id<Place>,
+        arrive: Amount,
+        infer: Infer,
+    ) -> Id<Flow> {
+        assert!(self.flows.last().is_none_or(|last| last.day.0 <= day), "flows are added in day order");
+        let id = Id::new(self.flows.len() as u32);
+        let loc = Loc::new(FileId(0), id.index() as u32 * 100, id.index() as u32 * 100 + 50);
+        let day = Day(day);
+        self.txns.push(Txn { day, first: id, len: 1, payee: None, codes: Box::new([]), waive: None, doc: None, loc });
+        let flow = Flow {
+            day,
+            until: day,
+            from,
+            to,
+            out,
+            arrive,
+            mode: Mode::Actual,
+            infer,
+            txn: Id::new(id.index() as u32),
+            payee: None,
+            select: Box::new([]),
+            codes: Box::new([]),
+            loc,
+        };
+        self.flows.push(flow);
+        id
+    }
+
+    pub fn assert(&mut self, day: i32, place: Id<Place>, cents: i64) {
+        let amount = self.usd(cents);
+        let loc =
+            Loc::new(FileId(0), 50_000 + self.asserts.len() as u32 * 100, 50_050 + self.asserts.len() as u32 * 100);
+        self.asserts.push(Assert { day: Day(day), place, amount, pad: None, loc });
+    }
+
+    /// Marks the last assertion `!`.
+    pub fn pad_last(&mut self) {
+        let loc = self.asserts.last().expect("an assertion to pad").loc;
+        self.asserts.last_mut().expect("an assertion to pad").pad = Some(Waive { loc, reason: None });
+    }
+
+    /// Marks a flow with `code`.
+    pub fn mark(&mut self, id: Id<Flow>, code: &'static str) {
+        let code = self.sym(code);
+        self.flows[id.index()].codes = Box::new([code]);
+    }
+
+    /// Marks a flow pending under `code`.
+    pub fn pending(&mut self, id: Id<Flow>, code: &'static str) {
+        self.mark(id, code);
+        self.flows[id.index()].mode = Mode::Pending;
+    }
+
+    pub fn event(&mut self, day: i32, code: &'static str, state: EventState) {
+        let code = self.sym(code);
+        self.events.push(Event { day: Day(day), code, state, loc: Loc::new(FileId(0), 60_000, 60_010) });
+    }
+
+    pub fn law(&mut self, law: LawBuilder) -> Id<Law> {
+        self.laws.push(law.build())
+    }
+
+    /// A rule that applies for all time.
+    pub fn rule(&self, law: Id<Law>, subject: Subject) -> Rule {
+        Rule { law, subject, from: FAR_PAST, until: FAR_FUTURE }
+    }
+
+    pub fn book(mut self) -> Book<'static> {
+        let kind_name = self.names.intern("thing");
+        let kind = Kind {
+            name: kind_name,
+            sort: Sort::Place(Class::Asset),
+            system: None,
+            restricted: false,
+            deferred: false,
+            select: None,
+            liquidity: None,
+            has: Box::new([]),
+            props: Box::new([]),
+            laws: Box::new([]),
+            doc: None,
+            loc: None,
+        };
+        let (kinds, _) = Tree::build(vec![kind], &[None]).expect("no cycles");
+        let k = Id::new(0);
+        let roots = Roots {
+            me: self.me,
+            unknown: self.unknown,
+            asset: k,
+            liability: k,
+            income: k,
+            expense: k,
+            equity: k,
+            commodity: k,
+            entity: k,
+        };
+        let places = self.places.len();
+        let ends = |(i, flow): (usize, &Flow)| {
+            let id = Id::new(i as u32);
+            [Some((flow.from, id)), (flow.to != flow.from).then_some((flow.to, id))]
+        };
+        let touching = Groups::build(places, self.flows.iter().enumerate().flat_map(ends).flatten());
+        let rules = Rules {
+            on_in: Groups::build(places, self.on_in),
+            on_out: Groups::build(places, self.on_out),
+            on_gain: Groups::build(places, self.on_gain),
+            always: Groups::build(places, self.always),
+            on_spend: Groups::build(self.entities.len(), self.on_spend),
+            timed: self.timed,
+        };
+        let (mut txns, mut flows) = (Arena::new(), Arena::new());
+        self.txns.into_iter().for_each(|txn| {
+            txns.push(txn);
+        });
+        self.flows.into_iter().for_each(|flow| {
+            flows.push(flow);
+        });
+        Book {
+            names: self.names,
+            base: self.usd,
+            relaxed: false,
+            roots,
+            places: self.places,
+            entities: self.entities,
+            kinds,
+            systems: Tree::default(),
+            commodities: self.commodities,
+            laws: self.laws,
+            rules,
+            params: Arena::new(),
+            schedules: Arena::new(),
+            codes: Vec::new(),
+            txns,
+            flows,
+            touching,
+            asserts: self.asserts,
+            events: self.events,
+            prices: Prices::default(),
+            plans: Vec::new(),
+            syncs: Vec::new(),
+        }
+    }
+}
+
+fn commodity(symbol: Sym, scale: u8) -> Commodity {
+    Commodity {
+        symbol,
+        kind: Id::new(0),
+        scale,
+        title: None,
+        liquidity: None,
+        growth: None,
+        props: Box::new([]),
+        doc: None,
+        loc: None,
+    }
+}
+
+/// Builds a law's node arena bottom-up, the way the model's compiler does:
+/// children before parents, each node remembering where its subtree starts.
+pub(crate) struct LawBuilder {
+    name: Sym,
+    doc: Option<Sym>,
+    trigger: Trigger,
+    nodes: Vec<Node>,
+    steps: Vec<Step>,
+}
+
+impl LawBuilder {
+    pub fn new(name: Sym, trigger: Trigger) -> LawBuilder {
+        LawBuilder { name, doc: None, trigger, nodes: Vec::new(), steps: Vec::new() }
+    }
+
+    pub fn doc(mut self, doc: Sym) -> LawBuilder {
+        self.doc = Some(doc);
+        self
+    }
+
+    fn node(&mut self, op: Op, ty: Ty, first: Option<NodeId>) -> NodeId {
+        let id = NodeId(self.nodes.len() as u32);
+        let loc = Loc::new(FileId(1), id.0 * 10, id.0 * 10 + 5);
+        self.nodes.push(Node { op, ty, loc, first: first.unwrap_or(id) });
+        id
+    }
+
+    pub fn konst(&mut self, value: Value, ty: Ty) -> NodeId {
+        self.node(Op::Const(value), ty, None)
+    }
+
+    pub fn var(&mut self, var: Var, ty: Ty) -> NodeId {
+        self.node(Op::Var(var), ty, None)
+    }
+
+    pub fn bin(&mut self, op: BinOp, left: NodeId, right: NodeId, ty: Ty) -> NodeId {
+        let first = self.nodes[left.index()].first;
+        self.node(Op::Bin(op, left, right), ty, Some(first))
+    }
+
+    /// `left is alternatives…`
+    pub fn is(&mut self, left: NodeId, alternatives: &[NodeId]) -> NodeId {
+        let first = self.nodes[left.index()].first;
+        self.node(Op::Is(left, alternatives.into()), Ty::Bool, Some(first))
+    }
+
+    pub fn call(&mut self, func: Func, args: &[NodeId], ty: Ty) -> NodeId {
+        let first = args.first().map(|a| self.nodes[a.index()].first);
+        self.node(Op::Call(func, args.into()), ty, first)
+    }
+
+    /// Makes the law a `by` law that fires on the date `node` computes.
+    pub fn by(&mut self, node: NodeId) {
+        self.trigger = Trigger::By(node);
+    }
+
+    fn step(mut self, kind: StepKind) -> LawBuilder {
+        let loc = Loc::new(FileId(1), 500 + self.steps.len() as u32 * 10, 505 + self.steps.len() as u32 * 10);
+        self.steps.push(Step { loc, kind });
+        self
+    }
+
+    pub fn require(self, cond: NodeId, message: Option<Sym>) -> LawBuilder {
+        self.step(StepKind::Require { cond, otherwise: None, message, warn: false })
+    }
+
+    /// `require cond else owe amount to who as name`
+    pub fn require_else_owe(self, cond: NodeId, amount: NodeId, to: Id<Entity>, name: Sym) -> LawBuilder {
+        let otherwise = Some(Effect::Owe { amount, to, due: None, name });
+        self.step(StepKind::Require { cond, otherwise, message: None, warn: false })
+    }
+
+    pub fn warn(self, cond: NodeId) -> LawBuilder {
+        self.step(StepKind::Require { cond, otherwise: None, message: None, warn: true })
+    }
+
+    pub fn when(self, cond: NodeId) -> LawBuilder {
+        self.step(StepKind::When(cond))
+    }
+
+    pub fn count(self, amount: NodeId, name: Sym) -> LawBuilder {
+        self.step(StepKind::Effect(Effect::Count { amount, name }))
+    }
+
+    pub fn owe(self, amount: NodeId, to: Id<Entity>, name: Sym) -> LawBuilder {
+        self.step(StepKind::Effect(Effect::Owe { amount, to, due: None, name }))
+    }
+
+    fn build(self) -> Law {
+        Law {
+            name: self.name,
+            doc: self.doc,
+            owner: Owner::Kind(Id::new(0)),
+            system: None,
+            trigger: self.trigger,
+            steps: self.steps.into(),
+            nodes: self.nodes.into(),
+            loc: Loc::new(FileId(1), 0, 1000),
+        }
+    }
+}
