@@ -10,14 +10,52 @@ use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Loc};
 
 use crate::ast::*;
-use crate::lex::{Tok, Token};
+use crate::lex::{Punct, Tok, Token};
 use crate::lines::Line;
-use crate::parser::{Parse, Parser, Reported};
+use crate::parser::{Parse, Parser, Reported, list_words};
 
-#[rustfmt::skip]
-const KEYWORDS: [&str; 18] = [
-    "account", "entity", "asset", "purpose", "commodity", "kind", "contract", "budget", "code", "param", "law", "sync",
-    "system", "use", "base", "relaxed", "layout", "opening",
+/// What a column-0 line that does not start with a date can be, by its first
+/// word. The table below is the only list of them: the dispatch, the
+/// suggestion for a misspelling and the list in a message all read it.
+#[derive(Clone, Copy)]
+enum Keyword {
+    Account,
+    Entity,
+    Asset,
+    Purpose,
+    Commodity,
+    Kind,
+    Contract,
+    Budget,
+    Code,
+    Param,
+    Law,
+    Sync,
+    Opening,
+    System,
+    Use,
+    Base,
+    Relaxed,
+}
+
+const KEYWORDS: [(&str, Keyword); 17] = [
+    ("account", Keyword::Account),
+    ("entity", Keyword::Entity),
+    ("asset", Keyword::Asset),
+    ("purpose", Keyword::Purpose),
+    ("commodity", Keyword::Commodity),
+    ("kind", Keyword::Kind),
+    ("contract", Keyword::Contract),
+    ("budget", Keyword::Budget),
+    ("code", Keyword::Code),
+    ("param", Keyword::Param),
+    ("law", Keyword::Law),
+    ("sync", Keyword::Sync),
+    ("opening", Keyword::Opening),
+    ("system", Keyword::System),
+    ("use", Keyword::Use),
+    ("base", Keyword::Base),
+    ("relaxed", Keyword::Relaxed),
 ];
 
 /// Words that start a line inside a block, and what owns such a block. Written
@@ -79,40 +117,38 @@ impl<'s> Parser<'s> {
     }
 
     fn keyword_item(&mut self, line: &mut Line<'s>, keyword: Token<'s>, word: &str, first: bool) -> Parse<()> {
-        match word {
-            "account" => self.decl(line, DeclKind::Account),
-            "entity" => self.decl(line, DeclKind::Entity),
-            "asset" => self.decl(line, DeclKind::Asset),
-            "purpose" => self.decl(line, DeclKind::Purpose),
-            "commodity" => self.decl(line, DeclKind::Commodity),
-            "kind" => self.decl(line, DeclKind::Kind),
-            "budget" => self.budget(line),
-            "code" => self.code_rule(line),
-            "param" => self.param(line),
-            "law" => self.law_item(line),
-            "contract" => self.contract(line),
-            "every" | "plan" => self.fail(plan_is_a_contract(keyword.loc, word)),
-            "opening" => self.opening(line),
-            "sync" => self.sync(line),
-            "system" | "use" | "base" | "relaxed" | "layout" => self.setting(line, keyword, word, first),
-            _ => self.unknown_keyword(line, keyword, word, first),
+        let Some(&(_, kind)) = KEYWORDS.iter().find(|(known, _)| *known == word) else {
+            return self.unknown_keyword(line, keyword, word, first);
+        };
+        match kind {
+            Keyword::Account => self.decl(line, DeclKind::Account),
+            Keyword::Entity => self.decl(line, DeclKind::Entity),
+            Keyword::Asset => self.decl(line, DeclKind::Asset),
+            Keyword::Purpose => self.decl(line, DeclKind::Purpose),
+            Keyword::Commodity => self.decl(line, DeclKind::Commodity),
+            Keyword::Kind => self.decl(line, DeclKind::Kind),
+            Keyword::Budget => self.budget(line),
+            Keyword::Code => self.code_rule(line),
+            Keyword::Param => self.param(line),
+            Keyword::Law => self.law_item(line),
+            Keyword::Contract => self.contract(line),
+            Keyword::Opening => self.opening(line),
+            Keyword::Sync => self.sync(line),
+            Keyword::System if !first => self.fail(system_not_first(keyword.loc)),
+            Keyword::System | Keyword::Use => {
+                let path = self.name("expected-path", "a system path such as `us/401k`")?;
+                self.setting(line, if matches!(kind, Keyword::System) { Setting::System(path) } else { Setting::Use(path) })
+            }
+            Keyword::Base => {
+                let unit = self.unit("expected-commodity", "the base commodity, such as `USD`")?;
+                self.setting(line, Setting::Base(unit))
+            }
+            Keyword::Relaxed => self.setting(line, Setting::Relaxed),
         }
     }
 
-    /// One-line directives.
-    fn setting(&mut self, line: &mut Line<'s>, keyword: Token<'s>, word: &str, first: bool) -> Parse<()> {
-        let path = "a system path such as `us/401k`";
-        let setting = match word {
-            "system" if !first => return self.fail(system_not_first(keyword.loc)),
-            "system" => Setting::System(self.name("expected-path", path)?),
-            "use" => Setting::Use(self.name("expected-path", path)?),
-            "base" => Setting::Base(self.unit("expected-commodity", "the base commodity, such as `USD`")?),
-            "relaxed" => Setting::Relaxed,
-            _ => {
-                self.expect_word("free", "expected-layout", "`free`")?;
-                Setting::LayoutFree
-            }
-        };
+    /// A one-line directive, once what it names is read.
+    fn setting(&mut self, line: &mut Line<'s>, setting: Setting<'s>) -> Parse<()> {
         let header = self.end_header(line)?;
         self.emit(&header, setting, ItemKind::Setting);
         Ok(())
@@ -123,22 +159,27 @@ impl<'s> Parser<'s> {
     /// what it declares an error too; otherwise the rest of the line says what
     /// the author probably meant.
     fn unknown_keyword(&mut self, line: &mut Line<'s>, keyword: Token<'s>, word: &str, first: bool) -> Parse<()> {
+        match word {
+            "every" | "plan" => return self.fail(plan_is_a_contract(keyword.loc, word)),
+            "layout" => return self.fail(layout_is_gone(self.line_loc(line))),
+            _ => {}
+        }
         let diag = Diagnostic::error("unknown-keyword", format!("unknown keyword `{word}`"))
             .label(keyword.loc, "a line starts with a date or a keyword");
         let indent = self.point(line.start as u32);
         let looks_like_leg =
-            matches!(self.tok(), Tok::Number(_) | Tok::Percent(_) | Tok::Punct("..." | "=" | "(" | "?"));
-        let near = closest(word, KEYWORDS);
+            matches!(self.tok(), Tok::Number(_) | Tok::Percent(_) | Tok::Punct(Punct::Ellipsis | Punct::Eq | Punct::LParen | Punct::Question));
+        let near = closest(word, KEYWORDS.iter().map(|(known, _)| *known));
         let diag = if let Some(near) = near {
             diag.fix(format!("did you mean `{near}`?"), keyword.loc, near)
         } else if let Some(&(_, owner)) = BLOCK_WORDS.iter().find(|(known, _)| *known == word) {
             diag.fix(format!("`{word}` is a line of a `{owner}`: indent it under one"), indent, "  ")
-        } else if self.at("->") {
+        } else if self.at(Punct::Arrow) {
             diag.help(format!("a transaction starts with its date: `2026-01-15 {word} -> …`"))
         } else if looks_like_leg {
             diag.fix("if this is a leg of the item above, indent it", indent, "  ")
         } else {
-            diag.note(format!("the keywords are `{}`", KEYWORDS.join("`, `")))
+            diag.note(format!("the keywords are {}", list_words(&KEYWORDS)))
         };
         let reported = self.report(diag);
         match near {
@@ -260,6 +301,14 @@ fn plan_is_a_contract(loc: Loc, word: &str) -> Diagnostic {
         .label(loc, "a promise of flows, with a name and a party")
         .note("a contract states its schedule once, and the journal records each time it is kept")
         .help("write `contract NAME with PARTY` and, indented, `45 USD monthly on 8 from visa`; then `08 NAME` says it")
+}
+
+/// v3's `layout free`, which turned off a rule that no longer exists.
+fn layout_is_gone(line: Loc) -> Diagnostic {
+    Diagnostic::error("layout-is-gone", "`layout` is gone: where a file is kept never limits its dates")
+        .label(line, "nothing checks a file's dates against its place")
+        .note("a short date takes its year and month from the nearest heading above it, else from the file's folder")
+        .fix("remove it", line, "")
 }
 
 fn system_not_first(loc: Loc) -> Diagnostic {

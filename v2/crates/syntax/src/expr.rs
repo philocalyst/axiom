@@ -8,7 +8,7 @@
 use axiom_core::{Dec, Diagnostic, Loc};
 
 use crate::ast::*;
-use crate::lex::{Tok, Token};
+use crate::lex::{Punct, Tok, Token};
 use crate::parser::{Parse, Parser};
 
 // Binding powers, loosest first. Binary operators associate to the left. `not`
@@ -21,22 +21,17 @@ const ADD: u8 = 5;
 const MUL: u8 = 6;
 const NEGATE: u8 = 7;
 
-/// The infix operators as written, and how tightly each binds. (`is` is not
-/// one of them: its right side is a list of alternatives.)
-const INFIX: [(&str, BinOp, u8); 12] = [
-    ("or", BinOp::Or, OR),
-    ("and", BinOp::And, AND),
-    ("==", BinOp::Eq, COMPARE),
-    ("!=", BinOp::Ne, COMPARE),
-    ("<", BinOp::Lt, COMPARE),
-    ("<=", BinOp::Le, COMPARE),
-    (">", BinOp::Gt, COMPARE),
-    (">=", BinOp::Ge, COMPARE),
-    ("+", BinOp::Add, ADD),
-    ("-", BinOp::Sub, ADD),
-    ("*", BinOp::Mul, MUL),
-    ("/", BinOp::Div, MUL),
-];
+/// How tightly an infix operator binds. (`is` is not one of them: its right
+/// side is a list of alternatives.)
+fn power(op: BinOp) -> u8 {
+    match op {
+        BinOp::Or => OR,
+        BinOp::And => AND,
+        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => COMPARE,
+        BinOp::Add | BinOp::Sub => ADD,
+        BinOp::Mul | BinOp::Div => MUL,
+    }
+}
 
 /// How deeply expressions may nest. Far beyond what a law needs; the limit
 /// keeps a hostile file from overflowing the stack.
@@ -64,13 +59,13 @@ impl<'s> Parser<'s> {
         while self.peek().loc.start == self.lexer.prev_end() {
             let token = self.peek();
             let kind = match token.tok {
-                Tok::Punct(".") => {
+                Tok::Punct(Punct::Dot) => {
                     self.bump();
                     ExprKind::Field(expr, self.name("expected-name", "a field name after `.`")?)
                 }
-                Tok::Punct("[") => {
+                Tok::Punct(Punct::LBracket) => {
                     self.bump();
-                    ExprKind::Index(expr, self.list(token.loc, "]")?)
+                    ExprKind::Index(expr, self.list(token.loc, Punct::RBracket)?)
                 }
                 _ => break,
             };
@@ -101,13 +96,14 @@ impl<'s> Parser<'s> {
     }
 
     fn infix(&self) -> Option<(Infix, u8)> {
-        match self.tok() {
-            Tok::Name("is") => Some((Infix::Is, COMPARE)),
-            Tok::Name(text) | Tok::Punct(text) => {
-                INFIX.iter().find(|(spelling, ..)| *spelling == text).map(|&(_, op, power)| (Infix::Binary(op), power))
-            }
-            _ => None,
-        }
+        let op = match self.tok() {
+            Tok::Name("is") => return Some((Infix::Is, COMPARE)),
+            Tok::Name("or") => BinOp::Or,
+            Tok::Name("and") => BinOp::And,
+            Tok::Punct(punct) => punct.infix()?,
+            _ => return None,
+        };
+        Some((Infix::Binary(op), power(op)))
     }
 
     /// The right-hand side of an operator whose token was just consumed.
@@ -131,7 +127,7 @@ impl<'s> Parser<'s> {
         let token = self.peek();
         let (op, power) = match token.tok {
             Tok::Name("not") => (UnOp::Not, COMPARE),
-            Tok::Punct("-") => (UnOp::Neg, NEGATE),
+            Tok::Punct(Punct::Minus) => (UnOp::Neg, NEGATE),
             _ => return self.primary(),
         };
         self.bump();
@@ -158,11 +154,11 @@ impl<'s> Parser<'s> {
             Tok::Name("empty") => self.leaf(token, ExprKind::Empty),
             Tok::Name("if") => self.conditional(),
             Tok::Name(text) => self.name_or_call(token, text),
-            Tok::Punct("(") => {
+            Tok::Punct(Punct::LParen) => {
                 // Grouping leaves no node: `(a + b)` is the node of `a + b`.
                 self.bump();
                 let inner = self.expression()?;
-                self.close(token.loc, ")")?;
+                self.close(token.loc, Punct::RParen)?;
                 Ok(inner)
             }
             _ => Err(self.expected("expected-expression", "an expression")),
@@ -193,23 +189,23 @@ impl<'s> Parser<'s> {
         let first = self.next_expr();
         self.bump();
         let paren = self.peek();
-        if !self.at("(") || paren.loc.start != token.loc.end {
+        if !self.at(Punct::LParen) || paren.loc.start != token.loc.end {
             return Ok(self.node(ExprKind::Name(Name(text)), token.loc, first));
         }
         self.bump();
-        let args = self.list(paren.loc, ")")?;
+        let args = self.list(paren.loc, Punct::RParen)?;
         Ok(self.node(ExprKind::Call(Name(text), args), self.loc_from(token.loc.start as usize), first))
     }
 
     /// Comma-separated expressions up to the `closer` of the bracket opened at
     /// `open`. A call may have none.
-    fn list(&mut self, open: Loc, closer: &str) -> Parse<Many<ExprId>> {
+    fn list(&mut self, open: Loc, closer: Punct) -> Parse<Many<ExprId>> {
         let start = self.roots.len();
-        if closer == "]" || !self.at(")") {
+        if closer == Punct::RBracket || !self.at(Punct::RParen) {
             loop {
                 let item = self.expression()?;
                 self.roots.push(item);
-                if self.eat(",").is_none() {
+                if self.eat(Punct::Comma).is_none() {
                     break;
                 }
             }
@@ -222,7 +218,10 @@ impl<'s> Parser<'s> {
     /// one run.
     pub fn roots_since(&mut self, start: usize) -> Many<ExprId> {
         let mark = self.mark::<ExprId>();
-        self.t.ids.extend(self.roots.drain(start..));
+        for at in start..self.roots.len() {
+            self.push(self.roots[at]);
+        }
+        self.roots.truncate(start);
         self.since(mark)
     }
 
@@ -265,7 +264,7 @@ impl<'s> Parser<'s> {
                 alternative = self.node(ExprKind::Of(alternative, object), loc, first);
             }
             self.roots.push(alternative);
-            if self.eat("|").is_none() {
+            if self.eat(Punct::Pipe).is_none() {
                 return Ok(self.roots_since(start));
             }
         }

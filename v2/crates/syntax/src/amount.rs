@@ -3,7 +3,7 @@
 use axiom_core::{Dec, Diagnostic, Loc};
 
 use crate::ast::Amount;
-use crate::lex::{Tok, Token};
+use crate::lex::{Punct, Tok, Token};
 use crate::parser::{Parse, Parser};
 
 /// How much of a file is read to learn which commodities it writes.
@@ -24,7 +24,7 @@ impl<'s> Parser<'s> {
     /// An amount that may be negative, as after `=` in an assertion: an
     /// overdrawn account is `-50 USD`.
     pub fn signed_amount(&mut self) -> Parse<Amount<'s>> {
-        let Some(minus) = self.eat("-") else { return self.amount() };
+        let Some(minus) = self.eat(Punct::Minus) else { return self.amount() };
         let amount = self.measured()?;
         Ok(Amount(self.text(minus.to(self.loc_of(&amount)))))
     }
@@ -35,7 +35,7 @@ impl<'s> Parser<'s> {
     pub fn measured(&mut self) -> Parse<Amount<'s>> {
         let token = self.peek();
         let Tok::Number(num) = token.tok else {
-            let refund = self.at("-") && matches!(self.lexer.peek_second().tok, Tok::Number(_));
+            let refund = self.at(Punct::Minus) && matches!(self.lexer.peek_second().tok, Tok::Number(_));
             return Err(if refund {
                 self.report(negative_amount(token))
             } else {

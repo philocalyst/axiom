@@ -1,10 +1,10 @@
 //! Laws: a trigger, then steps that run top to bottom.
 
 use axiom_core::diag::closest;
-use axiom_core::{Diagnostic, Id, Loc};
+use axiom_core::{Diagnostic, Loc};
 
 use crate::ast::*;
-use crate::lex::{Tok, Token};
+use crate::lex::{Punct, Tok, Token};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported};
 
@@ -36,7 +36,7 @@ impl<'s> Parser<'s> {
 
     /// The rest of `law NAME`, after the keyword, and its body. A law keeps its
     /// good steps when one is bad; without a trigger it is nothing.
-    pub fn law(&mut self, line: &mut Line<'s>) -> Parse<Id<Law<'s>>> {
+    pub fn law(&mut self, line: &mut Line<'s>) -> Parse<Ref<Law<'s>>> {
         let name = self.name("expected-name", "a law name")?;
         let header = self.end_header(line)?;
         let mut trigger: Triggered = None;
@@ -72,7 +72,9 @@ impl<'s> Parser<'s> {
             None if self.mark::<Step>() > mark => self.fail(late_trigger(loc)),
             None => {
                 *trigger = Some((parsed, loc));
-                self.t.steps.extend(filter);
+                if let Some(step) = filter {
+                    self.push(step);
+                }
                 Ok(())
             }
         }
@@ -118,7 +120,7 @@ impl<'s> Parser<'s> {
             "when" => self.expression().map(StepKind::When),
             "let" => {
                 let name = self.name("expected-name", "a name to bind")?;
-                self.expect("=", "expected-equals", "`=` and the value to bind")?;
+                self.expect(Punct::Eq, "expected-equals", "`=` and the value to bind")?;
                 Ok(StepKind::Let(name, self.expression()?))
             }
             "require" | "warn" => {

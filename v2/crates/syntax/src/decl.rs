@@ -7,7 +7,7 @@
 use axiom_core::{Diagnostic, Loc};
 
 use crate::ast::*;
-use crate::lex::Tok;
+use crate::lex::{Punct, Tok};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser};
 
@@ -26,14 +26,14 @@ impl<'s> Parser<'s> {
             DeclKind::Commodity => self.unit("expected-commodity", "a commodity symbol such as `USD`")?,
             _ => self.name_like("expected-name", "a name")?,
         }];
-        while what == DeclKind::Entity && self.eat(",").is_some() {
+        while what == DeclKind::Entity && self.eat(Punct::Comma).is_some() {
             names.push(self.name_like("expected-name", "another entity name")?);
         }
         if what == DeclKind::Account && CHART_ROOTS.iter().any(|root| names[0].starts_with(root)) {
             let note = chart_account(self.loc_of(&names[0]), names[0].0);
             self.diags.push(note);
         }
-        let kind = self.eat(":").and_then(|_| self.name_like("expected-kind", "a kind after `:`").ok());
+        let kind = self.eat(Punct::Colon).and_then(|_| self.name_like("expected-kind", "a kind after `:`").ok());
         let at = if what == DeclKind::Account { self.eat_word("at") } else { None };
         let at = at.and_then(|_| self.name("expected-name", "the institution it is with, such as `chase`").ok());
         let header = self.keep_header(line);
@@ -64,7 +64,7 @@ impl<'s> Parser<'s> {
         let name = self.name("expected-property", "a property name")?;
         let start = self.roots.len();
         while !self.at_eol() {
-            if self.eat(",").is_none() {
+            if self.eat(Punct::Comma).is_none() {
                 let arg = self.primary()?;
                 self.roots.push(arg);
             }
@@ -87,8 +87,8 @@ impl<'s> Parser<'s> {
             parser.expect_word("on", "expected-on", "`on` and where the code may be used")?;
             loop {
                 let place = parser.pattern()?;
-                parser.t.names.push(place);
-                parser.eat("|");
+                parser.push(place);
+                parser.eat(Punct::Pipe);
                 if parser.at_eol() {
                     return Ok(());
                 }
@@ -105,7 +105,7 @@ impl<'s> Parser<'s> {
     fn pattern(&mut self) -> Parse<Name<'s>> {
         let token = self.peek();
         match token.tok {
-            Tok::Punct("*") => Ok(self.bump_as(Name(self.text(token.loc)))),
+            Tok::Punct(Punct::Star) => Ok(self.bump_as(Name(self.text(token.loc)))),
             Tok::Code(_) | Tok::Purpose(_) => {
                 let (mark, name) = self.text(token.loc).split_at(1);
                 let diag = Diagnostic::error("mark-in-pattern", format!("code patterns are written without `{mark}`"))
@@ -131,7 +131,7 @@ impl<'s> Parser<'s> {
     fn param_row(&mut self, line: &Line<'s>) -> Parse<()> {
         let mark = self.mark::<Key>();
         while let Some(key) = self.key() {
-            self.t.keys.push(key);
+            self.push(key);
         }
         let keys = self.since(mark);
         if keys.is_empty() {
@@ -174,11 +174,11 @@ impl<'s> Parser<'s> {
         let mut threshold = first_threshold;
         loop {
             let rate = self.rate()?;
-            self.t.brackets.push(Bracket { threshold, rate });
-            if self.eat("|").is_none() {
+            self.push(Bracket { threshold, rate });
+            if self.eat(Punct::Pipe).is_none() {
                 break;
             }
-            if let Some(dots) = self.eat("...") {
+            if let Some(dots) = self.eat(Punct::Ellipsis) {
                 return self.fail(abbreviated_schedule(dots));
             }
             threshold = self.expression()?;

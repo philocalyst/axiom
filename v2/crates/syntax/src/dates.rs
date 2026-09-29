@@ -10,9 +10,16 @@
 use axiom_core::{Day, Diagnostic, Loc};
 
 use crate::ast::*;
-use crate::lex::{Tok, Token};
+use crate::lex::{Punct, Tok, Token};
 use crate::malformed::not_a_date;
 use crate::parser::{Parse, Parser};
+
+/// The names of the months: the one table of them.
+#[rustfmt::skip]
+pub const MONTHS: [&str; 12] = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+];
 
 impl<'s> Parser<'s> {
     /// The date an item starts with (or `opening` is followed by): a date, `MM-DD`
@@ -21,7 +28,7 @@ impl<'s> Parser<'s> {
         let token = self.peek();
         let Some(day) = self.day_of_month(token) else { return self.date(what) };
         self.bump();
-        self.complete(token.loc, self.place.month, day)
+        self.complete(token.loc, self.folder.month, day)
     }
 
     /// A date, or `MM-DD`.
@@ -39,8 +46,8 @@ impl<'s> Parser<'s> {
 
     /// The day that a short date written at `at` means in this file's place.
     fn complete(&mut self, at: Loc, month: Option<u8>, day: u8) -> Parse<Day> {
-        let (Some(year), Some(month)) = (self.place.year, month) else {
-            return self.fail(short_date(at, self.text(at), self.place));
+        let (Some(year), Some(month)) = (self.folder.year, month) else {
+            return self.fail(short_date(at, self.text(at), self.folder));
         };
         let (month, day) = (u32::from(month), u32::from(day));
         Day::from_ymd(year, month, day).ok_or_else(|| self.report(not_a_date(at, self.text(at), (year, month, day))))
@@ -69,7 +76,7 @@ impl<'s> Parser<'s> {
     /// the other: as first and last day, and where it was written.
     pub fn days(&mut self, code: &'static str, what: &str) -> Parse<(Day, Day, Loc)> {
         let (first, mut last, mut loc) = self.day_bound(code, what)?;
-        if self.eat("..").is_some() {
+        if self.eat(Punct::DotDot).is_some() {
             let (_, end, end_loc) = self.day_bound(code, what)?;
             (last, loc) = (end, loc.to(end_loc));
         }
@@ -99,8 +106,8 @@ impl<'s> Parser<'s> {
 }
 
 /// A short date in a file whose place does not give the rest.
-fn short_date(at: Loc, written: &str, place: Place) -> Diagnostic {
-    let missing = if place.year.is_some() { "month" } else { "year" };
+fn short_date(at: Loc, written: &str, folder: Folder) -> Diagnostic {
+    let missing = if folder.year.is_some() { "month" } else { "year" };
     Diagnostic::error("short-date", format!("`{written}` leaves out the {missing}, which this file does not give"))
         .label(at, "write the whole date here")
         .note("a date may be short only where its file's folder gives the rest: `15` is enough in `journal/2026/03.ax`")

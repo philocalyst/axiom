@@ -4,7 +4,7 @@ use axiom_core::{Day, Dec, Diagnostic, Loc};
 
 use crate::ast::*;
 use crate::dates::empty_range;
-use crate::lex::Tok;
+use crate::lex::{Punct, Tok};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Scope};
 
@@ -26,7 +26,7 @@ impl<'s> Parser<'s> {
             }
             Tok::Purpose(_) => Err(self.hash_code(self.peek().loc)),
             // A commodity that starts a flow is a party: `VTI -> fidelity 198.12 USD`.
-            Tok::Unit(_) if self.lexer.peek_second().tok != Tok::Punct("->") => self.price_or_split(line, date),
+            Tok::Unit(_) if self.lexer.peek_second().tok != Tok::Punct(Punct::Arrow) => self.price_or_split(line, date),
             _ => self.transaction(line, date),
         }
     }
@@ -42,7 +42,7 @@ impl<'s> Parser<'s> {
         // What is left of a contract's name: no amount to speak of, and no lots.
         if let (false, Some(end), None) = (spread, &from.end, &from.amount) {
             match self.tok() {
-                Tok::Punct("=") => return self.assertion(line, date, *end),
+                Tok::Punct(Punct::Eq) => return self.assertion(line, date, *end),
                 Tok::Name("owes") if end.select.is_empty() => {
                     let claim = self.claim(date, end.name)?;
                     let header = self.end_header(line)?;
@@ -74,13 +74,13 @@ impl<'s> Parser<'s> {
     /// over the range, which is what the clause `for DATE..DATE` says. Adds
     /// that clause.
     fn spread(&mut self, line: &Line<'s>, date: Day) -> Parse<bool> {
-        let Some(dots) = self.eat("..") else { return Ok(false) };
+        let Some(dots) = self.eat(Punct::DotDot) else { return Ok(false) };
         let last = self.date("the last day of the range, like `2026-12-31`")?;
         let range = self.loc_from(line.body);
         if last < date {
             return self.fail(empty_range(range, self.text(range), date, last));
         }
-        self.t.clauses.push(Clause { at: dots.to(range), kind: ClauseKind::For(For::Period(date, last)) });
+        self.push(Clause { at: dots.to(range), kind: ClauseKind::For(For::Period(date, last)) });
         Ok(true)
     }
 
@@ -89,7 +89,7 @@ impl<'s> Parser<'s> {
         self.bump();
         let amount = self.signed_amount()?;
         let gap = match self.tok() {
-            Tok::Punct("!") => Gap::Waived(self.waiver()?),
+            Tok::Punct(Punct::Bang) => Gap::Waived(self.waiver()?),
             Tok::Name("via") => {
                 self.bump();
                 Gap::Via(self.name("expected-name", "who the difference is with, like `market`")?)
@@ -106,13 +106,13 @@ impl<'s> Parser<'s> {
         self.bump();
         let creditor = self.name("expected-name", "the party or owner it is owed to")?;
         let amount = self.amount()?;
-        Ok(Claim { date, debtor, creditor, amount, tail: self.tail(self.mark::<Clause>())? })
+        Ok(Claim { date, debtor, creditor, amount, tail: self.tail(Scope::Flow, self.mark::<Clause>())? })
     }
 
     /// `DATE CONTRACT [AMOUNT]` with override legs below.
     fn occurrence(&mut self, line: &mut Line<'s>, date: Day, name: Name<'s>, amount: Option<Amount<'s>>) -> Parse<()> {
         let header = self.end_header(line)?;
-        let legs = self.legs(line, |parser, leg_line| parser.leg(leg_line).map(drop))?;
+        let legs = self.legs(line, |parser, leg_line| parser.leg(leg_line, Scope::Flow).map(drop))?;
         self.emit(&header, Occurrence { date, contract: name, amount, legs }, ItemKind::Occurrence);
         Ok(())
     }
@@ -131,21 +131,19 @@ impl<'s> Parser<'s> {
         let date = self.item_date("the day the balances are stated, like `2024-12-31`")?;
         let header = self.end_header(line)?;
         let claims = self.mark::<Claim>();
-        let lines = self.in_scope(Scope::Opening, |parser| {
-            parser.legs(line, |parser, opening_line| {
-                if let (Tok::Name(debtor), Tok::Name("owes")) = (parser.tok(), parser.lexer.peek_second().tok) {
-                    parser.bump();
-                    let claim = parser.claim(date, Name(debtor))?;
-                    parser.expect_eol()?;
-                    parser.push(claim);
-                    return Ok(());
-                }
-                let leg = parser.leg(opening_line)?;
-                match parser.get(leg).amount {
-                    Quantity::Fixed(_) | Quantity::Whole => Ok(()),
-                    _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),
-                }
-            })
+        let lines = self.legs(line, |parser, opening_line| {
+            if let (Tok::Name(debtor), Tok::Name("owes")) = (parser.tok(), parser.lexer.peek_second().tok) {
+                parser.bump();
+                let claim = parser.claim(date, Name(debtor))?;
+                parser.expect_eol()?;
+                parser.push(claim);
+                return Ok(());
+            }
+            let leg = parser.leg(opening_line, Scope::Opening)?;
+            match parser.get(leg).amount {
+                Quantity::Fixed(_) | Quantity::Whole => Ok(()),
+                _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),
+            }
         });
         let claims = self.since(claims);
         self.emit(&header, Opening { date, lines: lines?, claims }, ItemKind::Opening);

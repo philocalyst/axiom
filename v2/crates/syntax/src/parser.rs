@@ -13,11 +13,11 @@
 use std::ops::Range;
 
 use axiom_core::diag::closest;
-use axiom_core::{Diagnostic, FileId, Id, Loc};
+use axiom_core::{Diagnostic, FileId, Loc};
 
 use crate::ast::*;
-use crate::ast::{PIECE_SHIFT, Piece, local, locate};
-use crate::lex::{Lexer, Tok, Token};
+use crate::ast::{Piece, locate};
+use crate::lex::{Lexer, Punct, Tok, Token};
 use crate::lines::{Line, Lines};
 use crate::malformed::{clip, diagnose};
 
@@ -49,14 +49,14 @@ pub(crate) struct Header<'s> {
 pub(crate) struct Parser<'s> {
     pub src: &'s str,
     pub id: FileId,
-    /// What the file's place lets its dates leave out.
-    pub place: Place,
+    /// What its dates may leave out, from the file's folder and the headings above.
+    pub folder: Folder,
     /// What has been parsed: the items, the expressions, and the tables.
     pub items: Vec<Item<'s>>,
     pub exprs: Vec<Expr<'s>>,
     pub t: Tables<'s>,
-    /// The piece's number in the top bits of every index it makes.
-    base: u32,
+    /// The piece's number, which every index it makes says.
+    piece: usize,
     pub lines: Lines<'s>,
     /// Tokens of the line being parsed.
     pub lexer: Lexer<'s>,
@@ -66,8 +66,6 @@ pub(crate) struct Parser<'s> {
     /// The expression roots of the lists being read. Lists nest (a call inside
     /// an argument), so each is collected here and moved to its table whole.
     pub roots: Vec<ExprId>,
-    /// Where the tails being read are written: what else they may say.
-    pub scope: Scope,
     /// The commodities the file writes, for the amount that names none. Found
     /// when first needed.
     pub units: Option<Vec<&'s str>>,
@@ -75,22 +73,21 @@ pub(crate) struct Parser<'s> {
 
 impl<'s> Parser<'s> {
     /// A parser for `src[range]`, which starts at the start of a line and is
-    /// piece number `piece` of the file, which is in `place`.
-    pub fn new(id: FileId, src: &'s str, range: Range<usize>, piece: usize, place: Place) -> Parser<'s> {
+    /// piece number `piece` of the file, whose dates start out as `folder` says.
+    pub fn new(id: FileId, src: &'s str, range: Range<usize>, piece: usize, folder: Folder) -> Parser<'s> {
         Parser {
             src,
             id,
-            place,
+            folder,
             items: Vec::new(),
             exprs: Vec::new(),
             t: Tables::default(),
-            base: (piece as u32) << PIECE_SHIFT,
+            piece,
             lines: Lines::new(src, id, range),
             lexer: Lexer::new(src, id),
             depth: 0,
             diags: Vec::new(),
             roots: Vec::new(),
-            scope: Scope::Flow,
             units: None,
         }
     }
@@ -133,11 +130,16 @@ impl<'s> Parser<'s> {
 
     // ─── Nodes ──────────────────────────────────────────────────────────────
 
-    /// Adds a node to its table.
-    pub fn push<T: Stored<'s>>(&mut self, node: T) -> Id<T> {
+    /// Adds a node to its table. Every write to the tables goes through here.
+    pub fn push<T: Stored<'s>>(&mut self, node: T) -> Ref<T> {
         let table = T::table_mut(&mut self.t);
         table.push(node);
-        Id::new(self.base | (table.len() as u32 - 1))
+        Ref::new(self.piece, table.len() - 1)
+    }
+
+    /// Makes room for `more` nodes of type `T`.
+    pub fn reserve<T: Stored<'s>>(&mut self, more: usize) {
+        T::table_mut(&mut self.t).reserve(more);
     }
 
     /// Where the next node of type `T` will go: the start of a run to close
@@ -148,12 +150,12 @@ impl<'s> Parser<'s> {
 
     /// The nodes of type `T` added since `mark`.
     pub fn since<T: Stored<'s>>(&self, mark: usize) -> Many<T> {
-        Many::new(self.base | mark as u32, T::table(&self.t).len() - mark)
+        Many::new(Ref::new(self.piece, mark), T::table(&self.t).len() - mark)
     }
 
     /// A node this parser has added.
-    pub fn get<T: Stored<'s>>(&self, id: Id<T>) -> &T {
-        &T::table(&self.t)[local(id.index() as u32)]
+    pub fn get<T: Stored<'s>>(&self, id: Ref<T>) -> &T {
+        &T::table(&self.t)[id.local()]
     }
 
     /// A run of nodes this parser has added.
@@ -162,7 +164,7 @@ impl<'s> Parser<'s> {
     }
 
     /// Adds `node` to its table, and the item that is it.
-    pub fn emit<T: Stored<'s>>(&mut self, header: &Header<'s>, node: T, kind: fn(Id<T>) -> ItemKind<'s>) {
+    pub fn emit<T: Stored<'s>>(&mut self, header: &Header<'s>, node: T, kind: fn(Ref<T>) -> ItemKind<'s>) {
         let kind = kind(self.push(node));
         self.items.push(Item { doc: header.doc, loc: header.loc, kind });
     }
@@ -177,12 +179,12 @@ impl<'s> Parser<'s> {
 
     /// The id the next expression node will get: where a new subtree starts.
     pub fn next_expr(&self) -> ExprId {
-        ExprId(self.base | self.exprs.len() as u32)
+        ExprId::new(self.piece, self.exprs.len())
     }
 
     /// An expression node this parser has added.
     pub fn expr(&self, id: ExprId) -> &Expr<'s> {
-        &self.exprs[local(id.0)]
+        &self.exprs[id.local()]
     }
 
     // ─── Tokens ─────────────────────────────────────────────────────────────
@@ -205,14 +207,6 @@ impl<'s> Parser<'s> {
         value
     }
 
-    /// Reads with the tails being in `scope`.
-    pub fn in_scope<T>(&mut self, scope: Scope, read: impl FnOnce(&mut Self) -> T) -> T {
-        let outer = std::mem::replace(&mut self.scope, scope);
-        let parsed = read(self);
-        self.scope = outer;
-        parsed
-    }
-
     /// Consumes the token, then reads what it introduces.
     pub fn then<T>(&mut self, read: impl FnOnce(&mut Self) -> Parse<T>) -> Parse<T> {
         self.bump();
@@ -224,11 +218,11 @@ impl<'s> Parser<'s> {
     }
 
     /// Whether the next token is the punctuation `punct`.
-    pub fn at(&self, punct: &str) -> bool {
-        matches!(self.tok(), Tok::Punct(next) if next == punct)
+    pub fn at(&self, punct: Punct) -> bool {
+        self.tok() == Tok::Punct(punct)
     }
 
-    pub fn eat(&mut self, punct: &str) -> Option<Loc> {
+    pub fn eat(&mut self, punct: Punct) -> Option<Loc> {
         self.at(punct).then(|| self.bump().loc)
     }
 
@@ -335,7 +329,7 @@ impl<'s> Parser<'s> {
             .label(token.loc, format!("expected {what}"));
         // A `/` touching another is `//` written where it is no comment.
         let touching = |at: Option<usize>| at.is_some_and(|at| self.src.as_bytes().get(at) == Some(&b'/'));
-        let doubled = token.tok == Tok::Punct("/")
+        let doubled = token.tok == Tok::Punct(Punct::Slash)
             && (touching(Some(token.loc.end as usize)) || touching((token.loc.start as usize).checked_sub(1)));
         match doubled {
             true => diag.note("`//` starts a comment only after whitespace, and a path separator is a single `/`"),
@@ -344,7 +338,7 @@ impl<'s> Parser<'s> {
     }
 
     /// Consumes `punct`, or reports that `what` was expected.
-    pub fn expect(&mut self, punct: &str, code: &'static str, what: &str) -> Parse<Loc> {
+    pub fn expect(&mut self, punct: Punct, code: &'static str, what: &str) -> Parse<Loc> {
         self.eat(punct).ok_or_else(|| self.expected(code, what))
     }
 
@@ -358,8 +352,8 @@ impl<'s> Parser<'s> {
         let token = self.peek();
         match token.tok {
             Tok::Eol => Ok(()),
-            Tok::Punct(closer @ (")" | "]")) => {
-                let diag = Diagnostic::error("unbalanced-delimiter", format!("this `{closer}` closes nothing"))
+            Tok::Punct(closer @ (Punct::RParen | Punct::RBracket)) => {
+                let diag = Diagnostic::error("unbalanced-delimiter", format!("this `{}` closes nothing", closer.spelling()))
                     .label(token.loc, "nothing is open here")
                     .fix("remove it", token.loc, "");
                 Err(self.report(diag))
@@ -377,13 +371,13 @@ impl<'s> Parser<'s> {
     }
 
     /// Consumes the `closer` of the bracket opened at `open`.
-    pub fn close(&mut self, open: Loc, closer: &str) -> Parse<Loc> {
+    pub fn close(&mut self, open: Loc, closer: Punct) -> Parse<Loc> {
         if let Some(loc) = self.eat(closer) {
             return Ok(loc);
         }
         let opener = self.text(open);
         let diag = self
-            .unexpected(self.peek(), "unclosed-delimiter", &format!("`{closer}`"))
+            .unexpected(self.peek(), "unclosed-delimiter", &format!("`{}`", closer.spelling()))
             .context(open, format!("this `{opener}` is never closed"));
         self.fail(diag)
     }

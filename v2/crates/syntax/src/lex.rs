@@ -13,7 +13,7 @@
 use axiom_core::{Day, Dec, FileId, Loc, Span};
 use memchr::memchr2;
 
-use crate::ast::{Code, Name};
+use crate::ast::{BinOp, Code, Name};
 
 /// What a token means: what the parser needs, already converted.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -42,14 +42,134 @@ pub(crate) enum Tok<'s> {
     Code(Code<'s>),
     /// A string's contents between the quotes, escapes unprocessed.
     Str(&'s str),
-    /// Punctuation, as it is spelled: `->`, `..`, `(`. What is meant for the
-    /// arrow, `=>` and `→`, is read as one, and the parser can see how it was
-    /// written.
-    Punct(&'static str),
+    /// Punctuation. What is meant for the arrow, `=>` and `→`, is read as one,
+    /// and the parser can see how it was written from the token's text.
+    Punct(Punct),
     /// The end of the line, or of its code when a comment follows.
     Eol,
     /// Not a token. The parser explains why if it ever reaches one.
     Invalid(Malformed),
+}
+
+/// The punctuation of the language, lexed by looking at the bytes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Punct {
+    Arrow,
+    Ellipsis,
+    DotDot,
+    EqEq,
+    Ne,
+    Le,
+    Ge,
+    Slash,
+    Comma,
+    Dot,
+    Eq,
+    Bang,
+    Lt,
+    Gt,
+    Plus,
+    Minus,
+    Star,
+    At,
+    LParen,
+    RParen,
+    LBracket,
+    RBracket,
+    Colon,
+    Question,
+    Pipe,
+}
+
+impl Punct {
+    /// The punctuation at the start of `rest`, and how many bytes it takes: the
+    /// longest that fits. What is meant for `->` (`=>` and `→`) is read as it.
+    pub fn lex(rest: &[u8]) -> Option<(Punct, usize)> {
+        Some(match rest {
+            [b'-', b'>', ..] | [b'=', b'>', ..] => (Punct::Arrow, 2),
+            [0xE2, 0x86, 0x92, ..] => (Punct::Arrow, 3),
+            [b'.', b'.', b'.', ..] => (Punct::Ellipsis, 3),
+            [b'.', b'.', ..] => (Punct::DotDot, 2),
+            [b'=', b'=', ..] => (Punct::EqEq, 2),
+            [b'!', b'=', ..] => (Punct::Ne, 2),
+            [b'<', b'=', ..] => (Punct::Le, 2),
+            [b'>', b'=', ..] => (Punct::Ge, 2),
+            [byte, ..] => (
+                match byte {
+                    b'/' => Punct::Slash,
+                    b',' => Punct::Comma,
+                    b'.' => Punct::Dot,
+                    b'=' => Punct::Eq,
+                    b'!' => Punct::Bang,
+                    b'<' => Punct::Lt,
+                    b'>' => Punct::Gt,
+                    b'+' => Punct::Plus,
+                    b'-' => Punct::Minus,
+                    b'*' => Punct::Star,
+                    b'@' => Punct::At,
+                    b'(' => Punct::LParen,
+                    b')' => Punct::RParen,
+                    b'[' => Punct::LBracket,
+                    b']' => Punct::RBracket,
+                    b':' => Punct::Colon,
+                    b'?' => Punct::Question,
+                    b'|' => Punct::Pipe,
+                    _ => return None,
+                },
+                1,
+            ),
+            [] => return None,
+        })
+    }
+
+    /// As spelled in a message: `->` for the arrow, however it was written.
+    pub fn spelling(self) -> &'static str {
+        match self {
+            Punct::Arrow => "->",
+            Punct::Ellipsis => "...",
+            Punct::DotDot => "..",
+            Punct::EqEq => "==",
+            Punct::Ne => "!=",
+            Punct::Le => "<=",
+            Punct::Ge => ">=",
+            Punct::Slash => "/",
+            Punct::Comma => ",",
+            Punct::Dot => ".",
+            Punct::Eq => "=",
+            Punct::Bang => "!",
+            Punct::Lt => "<",
+            Punct::Gt => ">",
+            Punct::Plus => "+",
+            Punct::Minus => "-",
+            Punct::Star => "*",
+            Punct::At => "@",
+            Punct::LParen => "(",
+            Punct::RParen => ")",
+            Punct::LBracket => "[",
+            Punct::RBracket => "]",
+            Punct::Colon => ":",
+            Punct::Question => "?",
+            Punct::Pipe => "|",
+        }
+    }
+
+    /// The infix operator this spells, if it is one. (`or`, `and` and `is` are
+    /// words.)
+    pub fn infix(self) -> Option<BinOp> {
+        Some(match self {
+            Punct::EqEq => BinOp::Eq,
+            Punct::Ne => BinOp::Ne,
+            Punct::Lt => BinOp::Lt,
+            Punct::Le => BinOp::Le,
+            Punct::Gt => BinOp::Gt,
+            Punct::Ge => BinOp::Ge,
+            Punct::Plus => BinOp::Add,
+            Punct::Minus => BinOp::Sub,
+            Punct::Star => BinOp::Mul,
+            Punct::Slash => BinOp::Div,
+            _ => return None,
+        })
+    }
 }
 
 /// What is wrong with a token that could not be classified. The lexer only
@@ -423,15 +543,11 @@ impl<'s> Lexer<'s> {
         }
     }
 
-    /// Punctuation: the longest that fits. What is meant for `->` (`=>` and
-    /// `→`) is read as it.
+    /// Punctuation, or a character the language does not use.
     fn punctuation(&mut self, start: usize) -> Tok<'s> {
-        let rest = &self.bytes[start..];
-        let Some(&punct) = PUNCT.iter().find(|punct| rest.starts_with(punct.as_bytes())) else {
-            return self.stray(start);
-        };
-        self.pos = start + punct.len();
-        Tok::Punct(if matches!(punct, "=>" | "→") { "->" } else { punct })
+        let Some((punct, len)) = Punct::lex(&self.bytes[start..]) else { return self.stray(start) };
+        self.pos = start + len;
+        Tok::Punct(punct)
     }
 
     /// A character the language does not use. A currency symbol takes the
@@ -459,12 +575,6 @@ fn fraction(bytes: &[u8]) -> usize {
         _ => 0,
     }
 }
-
-/// Every punctuation token, longer spellings before the ones they begin.
-const PUNCT: [&str; 27] = [
-    "->", "=>", "→", "...", "..", "==", "!=", "<=", ">=", "/", ",", ".", "=", "!", "<", ">", "+", "-", "*", "@", "(",
-    ")", "[", "]", ":", "?", "|",
-];
 
 // Byte classes for scanning words with one table lookup per byte. A word is
 // made of the bytes that have a class: `checking`, `trader-joes`, `check-????`.

@@ -14,7 +14,8 @@
 //! | `parser`    | parser state and the helpers every rule shares             |
 //! | `structure` | item dispatch, one-line directives, indented blocks        |
 //! | `journal`   | dated entries and openings                                 |
-//! | `dates`     | dates in full or short of what the file's place gives      |
+//! | `refs`      | typed indices: which piece of the file, and where in it    |
+//! | `dates`     | dates in full or short of what the folder or heading gives |
 //! | `flow`      | flow headers, ends, legs, tails, lot selectors             |
 //! | `contract`  | contracts: schedule, properties, template legs             |
 //! | `amount`    | amounts, and what is said about the ones that are wrong    |
@@ -36,12 +37,14 @@ mod lex;
 mod lines;
 mod malformed;
 mod parser;
+mod refs;
 mod structure;
 
 #[cfg(test)]
 mod tests;
 
 pub use ast::*;
+pub use dates::MONTHS;
 
 use std::ops::Range;
 
@@ -51,6 +54,7 @@ use memchr::{memchr, memchr_iter, memrchr};
 use crate::ast::Piece;
 use crate::lines::{Tabs, unattached_doc};
 use crate::parser::Parser;
+use crate::refs::MAX_PIECES;
 
 /// A file smaller than this is parsed by one thread: cutting and joining would
 /// cost more than it saves.
@@ -64,19 +68,20 @@ const PIECES_PER_CORE: usize = 4;
 /// what an index can say (2^24 of a kind, and a node takes a byte of source).
 const PIECE_TARGET: usize = 1 << 23;
 
-/// Files larger than this cannot be cut into the 256 pieces an index can name.
-const FILE_MAX: usize = 256 * PIECE_TARGET;
+/// Files larger than this cannot be cut into the pieces an index can name.
+const FILE_MAX: usize = MAX_PIECES * PIECE_TARGET;
 
-/// Parses one file, which is in `place`. Every item that parses is kept; each
+/// Parses one file, which is in `folder`. Every item that parses is kept; each
 /// one that does not produces a diagnostic and is skipped. Diagnostics come in
 /// source order.
 ///
-/// A date short of what `place` gives is completed here; that a whole date
-/// agrees with `place` is the model's to check (see [`Place`]).
+/// A date short of what `folder` (or a heading above it) gives is completed
+/// here. Nothing checks that a whole date agrees with either: dates are a
+/// convention of where files are kept, not a law (§10).
 ///
 /// A large file is cut at item boundaries and its pieces are parsed on every
 /// core. They keep their tables, and the file is their items in order.
-pub fn parse(file: FileId, src: &str, place: Place) -> (File<'_>, Vec<Diagnostic>) {
+pub fn parse(file: FileId, src: &str, folder: Folder) -> (File<'_>, Vec<Diagnostic>) {
     if src.len() > FILE_MAX {
         let diag = Diagnostic::error("file-too-large", "source files are limited to 2 GiB")
             .label(Loc::new(file, 0, 0), "this file is larger");
@@ -85,15 +90,15 @@ pub fn parse(file: FileId, src: &str, place: Place) -> (File<'_>, Vec<Diagnostic
     let cores = std::thread::available_parallelism().map_or(1, |cores| cores.get());
     let pieces = match src.len() < PARALLEL_MIN {
         true => 1,
-        false => (cores * PIECES_PER_CORE).max(src.len().div_ceil(PIECE_TARGET)).min(256),
+        false => (cores * PIECES_PER_CORE).max(src.len().div_ceil(PIECE_TARGET)).min(MAX_PIECES),
     };
-    parse_in(file, src, place, pieces)
+    parse_in(file, src, folder, pieces)
 }
 
 /// [`parse`] with the file cut into about `pieces` pieces.
-pub(crate) fn parse_in(file: FileId, src: &str, place: Place, pieces: usize) -> (File<'_>, Vec<Diagnostic>) {
+pub(crate) fn parse_in(file: FileId, src: &str, folder: Folder, pieces: usize) -> (File<'_>, Vec<Diagnostic>) {
     let ranges: Vec<(usize, Range<usize>)> = cut(src, pieces).into_iter().enumerate().collect();
-    let parsed = par::map_each(&ranges, |(number, range)| parse_piece(file, src, place, range.clone(), *number));
+    let parsed = par::map_each(&ranges, |(number, range)| parse_piece(file, src, folder, range.clone(), *number));
     let (mut pieces, mut diags, mut tabs) = (Vec::new(), Vec::new(), Tabs::default());
     for (piece, more, more_tabs) in parsed {
         pieces.push(piece);
@@ -109,11 +114,11 @@ pub(crate) fn parse_in(file: FileId, src: &str, place: Place, pieces: usize) -> 
 type Parsed<'s> = (Piece<'s>, Vec<Diagnostic>, Tabs);
 
 /// Piece number `number` of the file, `src[range]`, parsed.
-fn parse_piece(file: FileId, src: &str, place: Place, range: Range<usize>, number: usize) -> Parsed<'_> {
-    let mut parser = Parser::new(file, src, range.clone(), number, place);
+fn parse_piece(file: FileId, src: &str, folder: Folder, range: Range<usize>, number: usize) -> Parsed<'_> {
+    let mut parser = Parser::new(file, src, range.clone(), number, folder);
     let (items, dated) = count_items(&src.as_bytes()[range]);
     parser.items.reserve(items);
-    parser.t.txns.reserve(dated);
+    parser.reserve::<Txn>(dated);
     parser.items(number == 0);
     let (piece, mut diags, lines) = parser.finish();
     diags.extend(lines.stray_doc.map(unattached_doc));

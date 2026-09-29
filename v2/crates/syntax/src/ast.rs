@@ -9,7 +9,7 @@
 //!
 //! - [`Many<T>`] is a run of `T`s in their table: `&file[flow.legs]` is a
 //!   `&[Leg]`.
-//! - [`Id<T>`] (from `axiom-core`) is one large, rare node in its own table:
+//! - [`Ref<T>`] (from `axiom-core`) is one large, rare node in its own table:
 //!   `&file[id]` is a `&Txn`, a `&Decl`, a `&Law`.
 //! - [`ExprId`] is a node of the [`Exprs`] arena: `file.exprs[id]`.
 //!
@@ -49,11 +49,11 @@
 //! evaluation a single forward scan in which every subexpression's result is
 //! already at hand.
 
-use std::fmt;
-use std::marker::PhantomData;
-use std::ops::{Deref, Index, Range};
+use std::ops::{Deref, Index};
 
-use axiom_core::{Day, Dec, FileId, Id, Loc, Span};
+use axiom_core::{Day, Dec, FileId, Loc, Span};
+
+pub use crate::refs::{Many, Ref};
 
 // ─── Text ───────────────────────────────────────────────────────────────────
 
@@ -128,83 +128,44 @@ impl<'s> Amount<'s> {
 
 /// What a file's place in its project says of the dates written in it (§10): a
 /// file in `journal/2026/03.ax` holds March 2026, so its items may be dated
-/// `15`. The tree holds whole days, so nothing after the parser sees the
+/// `15`. A heading (`2026-04`) gives the lines below it a year and month of its
+/// own. The tree holds whole days, so nothing after the parser sees the
 /// difference. The default, where nothing is given, is a file that writes every
-/// date in full: the one for files outside `YYYY` folders, and under `layout free`.
+/// date in full.
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub struct Place {
+pub struct Folder {
     /// The year the file holds.
     pub year: Option<i32>,
     /// The month of that year, when the file holds one.
     pub month: Option<u8>,
 }
 
-// ─── Where a node is ────────────────────────────────────────────────────────
-
-/// How an index says which piece of the file it is in: its top bits. The rest
-/// is a position in that piece's table, so a piece has at most 2^24 of any one
-/// node, which its size (at most 16 MiB) guarantees: a node takes a byte.
-pub(crate) const PIECE_SHIFT: u32 = 24;
-const LOCAL: u32 = (1 << PIECE_SHIFT) - 1;
-
-/// The position an index names in its piece.
-pub(crate) fn local(raw: u32) -> usize {
-    (raw & LOCAL) as usize
-}
-
-/// A run of `T`s in their table, addressed by position: `&file[many]`.
-pub struct Many<T> {
-    first: u32,
-    len: u32,
-    of: PhantomData<fn() -> T>,
-}
-
-impl<T> Many<T> {
-    /// Nothing. Every empty range is this one.
-    pub const EMPTY: Many<T> = Many { first: 0, len: 0, of: PhantomData };
-
-    /// The `len` nodes from position `first` of a piece's table, as an index
-    /// (piece bits included).
-    pub(crate) fn new(first: u32, len: usize) -> Many<T> {
-        match len {
-            0 => Many::EMPTY,
-            _ => Many { first, len: len as u32, of: PhantomData },
+impl Folder {
+    /// What the path of a file, relative to its project's root (`journal/2026/03.ax`),
+    /// gives its dates: a folder or file named `YYYY` gives the year, and `MM`
+    /// directly beneath it (a folder, or `MM.ax`), or a file `YYYY-MM.ax`, gives the month.
+    pub fn of(path: &str) -> Folder {
+        let number = |text: &str, width: usize| {
+            let digits = text.len() == width && text.bytes().all(|byte| byte.is_ascii_digit());
+            digits.then(|| text.parse::<i32>().ok()).flatten()
+        };
+        let month = |text: &str| number(text, 2).filter(|month| (1..=12).contains(month)).map(|month| month as u8);
+        let (mut folder, mut year_at) = (Folder::default(), 0);
+        for (at, segment) in path.strip_suffix(".ax").unwrap_or(path).split('/').enumerate() {
+            match folder.year {
+                None => match segment.split_once('-') {
+                    Some((year, text)) => {
+                        if let (Some(year), Some(month)) = (number(year, 4), month(text)) {
+                            return Folder { year: Some(year), month: Some(month) };
+                        }
+                    }
+                    None => (folder.year, year_at) = (number(segment, 4), at),
+                },
+                Some(_) if at == year_at + 1 => folder.month = month(segment),
+                Some(_) => {}
+            }
         }
-    }
-
-    /// How many nodes are in the run.
-    pub fn len(self) -> usize {
-        self.len as usize
-    }
-
-    /// Whether the run has no nodes.
-    pub fn is_empty(self) -> bool {
-        self.len == 0
-    }
-
-    /// Where the run is in its piece's table.
-    pub(crate) fn range(self) -> Range<usize> {
-        local(self.first)..local(self.first) + self.len()
-    }
-}
-
-impl<T> Clone for Many<T> {
-    fn clone(&self) -> Many<T> {
-        *self
-    }
-}
-
-impl<T> Copy for Many<T> {}
-
-impl<T> Default for Many<T> {
-    fn default() -> Many<T> {
-        Many::EMPTY
-    }
-}
-
-impl<T> fmt::Debug for Many<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}+{}", self.first >> PIECE_SHIFT, local(self.first), self.len)
+        folder
     }
 }
 
@@ -275,8 +236,8 @@ pub(crate) struct Piece<'s> {
     pub tables: Tables<'s>,
 }
 
-/// A type that lives in one of a piece's [`Tables`], so that a [`Many`] or an
-/// [`Id`] of it can index the [`File`].
+/// A type that lives in one of a piece's [`Tables`], so that a [`Many`] or a
+/// [`Ref`] of it can index the [`File`].
 pub trait Stored<'s>: Sized {
     /// The table of this type in a piece's tables.
     fn table<'t>(tables: &'t Tables<'s>) -> &'t Vec<Self>;
@@ -287,14 +248,14 @@ pub trait Stored<'s>: Sized {
 impl<'s, T: Stored<'s>> Index<Many<T>> for File<'s> {
     type Output = [T];
     fn index(&self, many: Many<T>) -> &[T] {
-        &T::table(&self.tables[(many.first >> PIECE_SHIFT) as usize])[many.range()]
+        &T::table(&self.tables[many.piece()])[many.range()]
     }
 }
 
-impl<'s, T: Stored<'s>> Index<Id<T>> for File<'s> {
+impl<'s, T: Stored<'s>> Index<Ref<T>> for File<'s> {
     type Output = T;
-    fn index(&self, id: Id<T>) -> &T {
-        &T::table(&self.tables[id.index() >> PIECE_SHIFT])[local(id.index() as u32)]
+    fn index(&self, id: Ref<T>) -> &T {
+        &T::table(&self.tables[id.piece()])[id.local()]
     }
 }
 
@@ -392,42 +353,42 @@ pub struct Item<'s> {
 #[derive(Clone, Copy, Debug)]
 pub enum ItemKind<'s> {
     /// `DATE FLOW`
-    Txn(Id<Txn<'s>>),
+    Txn(Ref<Txn<'s>>),
     /// `DATE END = AMOUNT`
-    Assert(Id<Assert<'s>>),
+    Assert(Ref<Assert<'s>>),
     /// `DATE ^code settled|void|returned`
-    Event(Id<Event<'s>>),
+    Event(Ref<Event<'s>>),
     /// `DATE UNIT AMOUNT`
-    Price(Id<Price<'s>>),
+    Price(Ref<Price<'s>>),
     /// `DATE UNIT split N for M`
-    Split(Id<Split<'s>>),
+    Split(Ref<Split<'s>>),
     /// `DATE DEBTOR owes CREDITOR AMOUNT`
-    Claim(Id<Claim<'s>>),
+    Claim(Ref<Claim<'s>>),
     /// `DATE NAME [AMOUNT]`: one occurrence of a contract.
-    Occurrence(Id<Occurrence<'s>>),
+    Occurrence(Ref<Occurrence<'s>>),
     /// `DATE NAME ends`
-    Ending(Id<Ending<'s>>),
+    Ending(Ref<Ending<'s>>),
     /// `opening DATE`
-    Opening(Id<Opening<'s>>),
+    Opening(Ref<Opening<'s>>),
     /// `contract NAME with PARTY`
-    Contract(Id<Contract<'s>>),
+    Contract(Ref<Contract<'s>>),
     /// `account`, `entity`, `asset`, `purpose`, `commodity` or `kind`. One line
     /// naming several entities is one `Decl` per entity, all sharing the same
     /// properties.
-    Decl(Id<Decl<'s>>),
+    Decl(Ref<Decl<'s>>),
     /// `budget PURPOSE AMOUNT monthly|yearly`
-    Budget(Id<Budget<'s>>),
+    Budget(Ref<Budget<'s>>),
     /// `code GLOB`. A line with several globs is one rule per glob, all
     /// sharing the same places.
-    Code(Id<CodeRule<'s>>),
+    Code(Ref<CodeRule<'s>>),
     /// `param NAME`
-    Param(Id<Param<'s>>),
+    Param(Ref<Param<'s>>),
     /// A top-level `law NAME`. Its doc is also the item's.
-    Law(Id<Law<'s>>),
+    Law(Ref<Law<'s>>),
     /// `sync FILE`
-    Sync(Id<Sync<'s>>),
-    /// `system`, `use`, `base`, `relaxed` or `layout free`.
-    Setting(Id<Setting<'s>>),
+    Sync(Ref<Sync<'s>>),
+    /// `system`, `use`, `base` or `relaxed`.
+    Setting(Ref<Setting<'s>>),
 }
 
 /// One-line directives.
@@ -441,8 +402,6 @@ pub enum Setting<'s> {
     Base(Name<'s>),
     /// `relaxed`: law violations become warnings.
     Relaxed,
-    /// `layout free`: folder names stop constraining dates.
-    LayoutFree,
 }
 
 // ─── Journal ────────────────────────────────────────────────────────────────
@@ -519,6 +478,12 @@ pub enum Policy {
     Hifo,
     /// Every parcel in proportion to what it holds.
     Prorata,
+}
+
+impl Policy {
+    /// Every policy, by the word that names it: the one table of them.
+    pub const WORDS: [(&'static str, Policy); 4] =
+        [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
 }
 
 /// How much moves on one side or leg.
@@ -1078,22 +1043,10 @@ pub enum Effect<'s> {
 
 // ─── Expressions ────────────────────────────────────────────────────────────
 
-/// Index of an expression in its file's [`Exprs`]: `file.exprs[id]`.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub struct ExprId(pub(crate) u32);
-
-impl ExprId {
-    /// A number that is unique to the expression and grows through a subtree:
-    /// `id.index() - first.index()` is how far into the subtree a node is.
-    pub fn index(self) -> usize {
-        self.0 as usize
-    }
-
-    /// The position in the piece's arena.
-    fn position(self) -> usize {
-        local(self.0)
-    }
-}
+/// Index of an expression in its file's [`Exprs`]: `file.exprs[id]`. (The
+/// lifetime is the arena's element type's, and no expression is ever borrowed
+/// through it.)
+pub type ExprId = Ref<Expr<'static>>;
 
 /// A file's expressions in post-order: children precede their parent, so every
 /// subtree is the contiguous run `first..=root`. Index it with an [`ExprId`].
@@ -1118,8 +1071,8 @@ pub struct Expr<'s> {
 impl<'s> Exprs<'s> {
     /// The nodes of `root`'s subtree, in evaluation order, ending with `root`.
     pub fn subtree(&self, root: ExprId) -> &[Expr<'s>] {
-        let part = &self.parts[root.0 as usize >> PIECE_SHIFT];
-        &part[part[root.position()].first.position()..=root.position()]
+        let part = &self.parts[root.piece()];
+        &part[part[root.local()].first.local()..=root.local()]
     }
 
     /// Every node of the file, in the order written.
@@ -1141,7 +1094,7 @@ impl<'s> Exprs<'s> {
 impl<'s> Index<ExprId> for Exprs<'s> {
     type Output = Expr<'s>;
     fn index(&self, id: ExprId) -> &Expr<'s> {
-        &self.parts[id.0 as usize >> PIECE_SHIFT][id.position()]
+        &self.parts[id.piece()][id.local()]
     }
 }
 

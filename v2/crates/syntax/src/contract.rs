@@ -11,7 +11,7 @@ use axiom_core::{Diagnostic, Loc, Span};
 
 use crate::ast::*;
 use crate::dates::not_a_day;
-use crate::lex::Tok;
+use crate::lex::{Punct, Tok};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Scope};
 
@@ -48,7 +48,7 @@ impl<'s> Parser<'s> {
                     None => Ok(()),
                 }
             }
-            _ => parser.leg(child).map(drop),
+            _ => parser.leg(child, Scope::Flow).map(drop),
         });
         if schedule.is_none() && body.is_ok() {
             self.report(missing_schedule(header.loc));
@@ -86,7 +86,7 @@ impl<'s> Parser<'s> {
         let on = if self.eat_word("on").is_some() { self.days_of_period()? } else { Many::EMPTY };
         let (direction, _) = self.choose(&DIRECTIONS, "unknown-direction", "direction")?;
         let holding = self.name("expected-name", "the account it is paid from or into, such as `checking`")?;
-        let tail = self.in_scope(Scope::Schedule, |parser| parser.tail(parser.mark::<Clause>()))?;
+        let tail = self.tail(Scope::Schedule, self.mark::<Clause>())?;
         self.expect_eol()?;
         Ok(Schedule { at: self.loc_from(line.body), payment, cadence, on, direction, holding, tail })
     }
@@ -122,8 +122,8 @@ impl<'s> Parser<'s> {
                 Tok::Name(_) => self.choose(&WEEKDAYS, "unknown-day", "weekday").map(|(day, _)| On::Weekday(day))?,
                 _ => return Err(self.expected("expected-day", "a day: `15`, `last`, `04-15` or a weekday")),
             };
-            self.t.days.push(day);
-            if self.eat(",").is_none() {
+            self.push(day);
+            if self.eat(Punct::Comma).is_none() {
                 return Ok(self.since(mark));
             }
         }

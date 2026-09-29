@@ -9,13 +9,8 @@
 use axiom_core::day::days_in_month;
 use axiom_core::{Day, Diagnostic, Loc};
 
+use crate::dates::MONTHS;
 use crate::lex::Malformed;
-
-#[rustfmt::skip]
-const MONTHS: [&str; 12] = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-];
 
 /// The longest word an edit is offered for.
 const MENDABLE: usize = 64;

@@ -4,15 +4,12 @@
 
 use std::mem::discriminant;
 
-use axiom_core::{Diagnostic, Id, Loc};
+use axiom_core::{Diagnostic, Loc};
 
 use crate::ast::*;
-use crate::lex::Tok;
+use crate::lex::{Punct, Tok};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported, Scope};
-
-const POLICIES: [(&str, Policy); 4] =
-    [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
 
 impl<'s> Parser<'s> {
     /// The rest of a header once its source side is read: `-> TARGET TAIL`,
@@ -23,13 +20,13 @@ impl<'s> Parser<'s> {
     pub fn flow_head(&mut self, from: Side<'s>, clauses: usize) -> Parse<(Flow<'s>, Loc)> {
         let arrow = self.arrow(&from)?;
         let to = self.side()?;
-        let tail = self.tail(clauses)?;
+        let tail = self.tail(Scope::Flow, clauses)?;
         Ok((Flow { from, to, tail, legs: Many::EMPTY }, arrow))
     }
 
     /// Reads the legs under `line` into `flow` and checks they fit its sides.
     pub fn flow_legs(&mut self, line: &Line<'s>, flow: &mut Flow<'s>, arrow: Loc) -> Parse<()> {
-        flow.legs = self.legs(line, |parser, leg_line| parser.leg(leg_line).map(drop))?;
+        flow.legs = self.legs(line, |parser, leg_line| parser.leg(leg_line, Scope::Flow).map(drop))?;
         self.check_shape(flow, arrow)
     }
 
@@ -54,14 +51,14 @@ impl<'s> Parser<'s> {
             // An amount starts with its number, so a commodity first is an end.
             Tok::Unit(_) => true,
             // `? USD` is an unknown amount; a lone `?` is the unknown party.
-            Tok::Punct("?") => !matches!(self.lexer.peek_second().tok, Tok::Unit(_)),
+            Tok::Punct(Punct::Question) => !matches!(self.lexer.peek_second().tok, Tok::Unit(_)),
             _ => false,
         };
         let end = if starts_end { Some(self.end()?) } else { None };
         let starts_amount = match self.tok() {
-            Tok::Number(_) | Tok::Punct("(" | "?" | "-") => true,
+            Tok::Number(_) | Tok::Punct(Punct::LParen | Punct::Question | Punct::Minus) => true,
             Tok::Name(word) => matches!(word, "empty" | "all"),
-            Tok::Punct("...") => return self.fail(rest_in_header(self.peek().loc)),
+            Tok::Punct(Punct::Ellipsis) => return self.fail(rest_in_header(self.peek().loc)),
             _ => false,
         };
         let amount = if starts_amount { Some(self.quantity()?) } else { None };
@@ -71,7 +68,7 @@ impl<'s> Parser<'s> {
     /// The arrow. `=>` and `→` are read as one, with an error that says how to
     /// write it, so the flow around them is still kept.
     fn arrow(&mut self, from: &Side<'s>) -> Parse<Loc> {
-        if let Some(loc) = self.eat("->") {
+        if let Some(loc) = self.eat(Punct::Arrow) {
             let written = self.text(loc);
             if written != "->" {
                 let diag = Diagnostic::error("unknown-arrow", format!("`{written}` is not the flow arrow; write `->`"))
@@ -98,16 +95,16 @@ impl<'s> Parser<'s> {
     /// A name, a commodity or `?`, with any lot selectors.
     pub fn end(&mut self) -> Parse<End<'s>> {
         let token = self.peek();
-        if !matches!(token.tok, Tok::Name(_) | Tok::Unit(_) | Tok::Punct("?")) {
+        if !matches!(token.tok, Tok::Name(_) | Tok::Unit(_) | Tok::Punct(Punct::Question)) {
             return Err(self.expected("expected-end", "a name such as `checking`"));
         }
         self.bump();
         let mark = self.mark::<Select>();
-        if self.at("[") {
+        if self.at(Punct::LBracket) {
             self.selector()?;
         }
         // `.basis` must touch what it follows, and so is no other token.
-        if self.at(".") && self.peek().loc.start == self.lexer.prev_end() {
+        if self.at(Punct::Dot) && self.peek().loc.start == self.lexer.prev_end() {
             if let Tok::Name("basis") = self.lexer.peek_second().tok {
                 let (dot, word) = (self.bump().loc, self.bump().loc);
                 return self.fail(basis_is_derived(dot.to(word)));
@@ -121,13 +118,13 @@ impl<'s> Parser<'s> {
     #[inline(always)]
     fn quantity(&mut self) -> Parse<Quantity<'s>> {
         match self.tok() {
-            Tok::Punct("(") => {
+            Tok::Punct(Punct::LParen) => {
                 let open = self.bump().loc;
                 let amount = self.amount()?;
-                self.close(open, ")")?;
+                self.close(open, Punct::RParen)?;
                 Ok(Quantity::Pending(amount))
             }
-            Tok::Punct("?") => {
+            Tok::Punct(Punct::Question) => {
                 self.then(|p| p.unit("expected-commodity", "a commodity such as `USD`")).map(Quantity::Unknown)
             }
             Tok::Name("all") => {
@@ -141,20 +138,20 @@ impl<'s> Parser<'s> {
     }
 
     /// An indented line of a split: `END LEGAMOUNT TAIL`.
-    pub fn leg(&mut self, line: &mut Line<'s>) -> Parse<Id<Leg<'s>>> {
+    pub fn leg(&mut self, line: &mut Line<'s>, scope: Scope) -> Parse<Ref<Leg<'s>>> {
         let doc = line.take_doc();
         let end = self.end()?;
         // What a leg may say that a header side may not: the remainder, a
         // target balance, or a share of the header; and in an opening nothing
         // but a basis, for an asset.
         let amount = match self.tok() {
-            Tok::Punct("...") => self.bump_as(Quantity::Rest),
-            Tok::Punct("=") => Quantity::Target(self.then(Self::amount)?),
+            Tok::Punct(Punct::Ellipsis) => self.bump_as(Quantity::Rest),
+            Tok::Punct(Punct::Eq) => Quantity::Target(self.then(Self::amount)?),
             Tok::Percent(percent) => self.bump_as(Quantity::Percent(percent)),
-            Tok::Name("basis") if self.scope == Scope::Opening => Quantity::Whole,
+            Tok::Name("basis") if scope == Scope::Opening => Quantity::Whole,
             _ => self.quantity()?,
         };
-        let tail = self.tail(self.mark::<Clause>())?;
+        let tail = self.tail(scope, self.mark::<Clause>())?;
         self.expect_eol()?;
         let loc = self.loc_from(line.body);
         Ok(self.push(Leg { doc, end, amount, tail, loc }))
@@ -163,23 +160,23 @@ impl<'s> Parser<'s> {
     /// `[#PURPOSE [of NAME]] [STRING] CODE* [for WHAT] [due WHEN] [basis AMOUNT] [/ PARTY]
     /// [@ PRICE] [! [STRING]]`, in any order; the waiver ends it. Clauses are
     /// kept in the order written, from `mark`.
-    pub fn tail(&mut self, mark: usize) -> Parse<Many<Clause<'s>>> {
+    pub fn tail(&mut self, scope: Scope, mark: usize) -> Parse<Many<Clause<'s>>> {
         loop {
             let token = self.peek();
-            if self.scope == Scope::Schedule && !matches!(token.tok, Tok::Purpose(_) | Tok::Str(_)) {
+            if scope == Scope::Schedule && !matches!(token.tok, Tok::Purpose(_) | Tok::Str(_)) {
                 break;
             }
             let kind = match token.tok {
                 Tok::Purpose(name) => ClauseKind::Purpose(self.purpose(name)?),
                 Tok::Str(text) => self.bump_as(ClauseKind::Description(text)),
                 Tok::Code(code) => self.bump_as(ClauseKind::Code(code)),
-                Tok::Punct("/") => ClauseKind::Party(self.then(|p| p.name("expected-party", "a party"))?),
-                Tok::Punct("@") => ClauseKind::Price(self.then(Self::measured)?),
-                Tok::Punct("!") => ClauseKind::Waive(self.waiver()?),
+                Tok::Punct(Punct::Slash) => ClauseKind::Party(self.then(|p| p.name("expected-party", "a party"))?),
+                Tok::Punct(Punct::At) => ClauseKind::Price(self.then(Self::measured)?),
+                Tok::Punct(Punct::Bang) => ClauseKind::Waive(self.waiver()?),
                 Tok::Name("for") => ClauseKind::For(self.then(|p| p.for_what(token.loc))?),
                 Tok::Name("due") => ClauseKind::Due(self.then(Self::due)?),
                 Tok::Name("basis") => ClauseKind::Basis(self.then(Self::amount)?),
-                Tok::Name("since") if self.scope == Scope::Opening => {
+                Tok::Name("since") if scope == Scope::Opening => {
                     ClauseKind::Since(self.then(|p| p.date("the day the parcels were acquired, like `2023-06-15`"))?)
                 }
                 _ => break,
@@ -190,7 +187,7 @@ impl<'s> Parser<'s> {
             if let Some(first) = earlier.filter(|_| !matches!(kind, ClauseKind::Code(_))) {
                 return Err(self.duplicate(clause_name(&kind), clause.at, first));
             }
-            self.t.clauses.push(clause);
+            self.push(clause);
             if matches!(kind, ClauseKind::Waive(_)) {
                 break;
             }
@@ -275,7 +272,7 @@ impl<'s> Parser<'s> {
                 Tok::Code(code) => self.bump_as(Select::Code(code)),
                 Tok::Purpose(_) => return Err(self.hash_code(self.peek().loc)),
                 Tok::Name(_) => {
-                    let (policy, loc) = self.choose(&POLICIES, "unknown-policy", "lot policy")?;
+                    let (policy, loc) = self.choose(&Policy::WORDS, "unknown-policy", "lot policy")?;
                     Select::Policy(policy, loc)
                 }
                 _ => {
@@ -284,9 +281,9 @@ impl<'s> Parser<'s> {
                     Select::Range(first, last, loc)
                 }
             };
-            self.t.selects.push(select);
-            if self.eat(",").is_none() {
-                return self.close(open, "]").map(drop);
+            self.push(select);
+            if self.eat(Punct::Comma).is_none() {
+                return self.close(open, Punct::RBracket).map(drop);
             }
         }
     }
