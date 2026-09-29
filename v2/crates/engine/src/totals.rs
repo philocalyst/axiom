@@ -139,7 +139,11 @@ impl Windows {
         ahead: Vec::new(),
     };
 
-    /// Moves the current windows on to the ones containing `day`.
+    /// Moves the current windows on to the ones containing `day`. Once a month
+    /// or year, and kept out of line so that its calendar arithmetic is not
+    /// worked out ahead of time on every flow.
+    #[cold]
+    #[inline(never)]
     fn roll(&mut self, day: Day) {
         if !has(self.month.days, day) {
             self.month = Rolling::of(window_of(Window::Month, day), &self.ahead);
