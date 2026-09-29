@@ -148,8 +148,7 @@ impl<'s> Parser<'s> {
 
     fn take_message(&mut self) -> Option<Name<'s>> {
         let Tok::Str(text) = self.tok() else { return None };
-        self.bump();
-        Some(Name(text))
+        Some(self.bump_as(Name(text)))
     }
 
     /// `owe EXPR to …` or `count EXPR as …`, after `else`.

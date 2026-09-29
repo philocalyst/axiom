@@ -23,13 +23,14 @@ const CADENCES: [(&str, Span); 5] = [
 const WEEKDAYS: [(&str, u8); 7] =
     [("monday", 0), ("tuesday", 1), ("wednesday", 2), ("thursday", 3), ("friday", 4), ("saturday", 5), ("sunday", 6)];
 
-/// The optional clauses of a plan header, each with where it was written so a
+/// The optional clauses of a plan header, and where each was written so a
 /// repeat can point back at it.
 #[derive(Default)]
-struct Bounds {
-    on: Option<(On, Loc)>,
-    from: Option<(Day, Loc)>,
-    until: Option<(Day, Loc)>,
+struct Bounds<'s> {
+    on: Option<On>,
+    from: Option<Day>,
+    until: Option<Day>,
+    seen: Vec<(&'s str, Loc)>,
 }
 
 impl<'s> Parser<'s> {
@@ -42,8 +43,7 @@ impl<'s> Parser<'s> {
                 self.bump();
                 let (state, state_loc) = self.choose(&EVENT_STATES, "unknown-event-state", "settlement state")?;
                 let header = self.end_header(line)?;
-                let id = self.push(Event { date, code, state, state_loc });
-                self.emit(&header, ItemKind::Event(id));
+                self.emit(&header, Event { date, code, state, state_loc }, ItemKind::Event);
                 Ok(())
             }
             Tok::Unit(_) => self.price_or_split(line, date),
@@ -76,8 +76,7 @@ impl<'s> Parser<'s> {
         let (mut flow, arrow) = self.flow_head(from, clauses)?;
         let header = self.end_header(line)?;
         self.flow_legs(line, &mut flow, arrow)?;
-        let id = self.push(Txn { date, flow });
-        self.emit(&header, ItemKind::Txn(id));
+        self.emit(&header, Txn { date, flow }, ItemKind::Txn);
         Ok(())
     }
 
@@ -108,8 +107,7 @@ impl<'s> Parser<'s> {
             _ => Gap::Refused,
         };
         let header = self.end_header(line)?;
-        let id = self.push(Assert { date, place, amount, gap });
-        self.emit(&header, ItemKind::Assert(id));
+        self.emit(&header, Assert { date, place, amount, gap }, ItemKind::Assert);
         Ok(())
     }
 
@@ -117,8 +115,7 @@ impl<'s> Parser<'s> {
     fn occurrence(&mut self, line: &mut Line<'s>, date: Day, plan: Name<'s>, amount: Option<Amount<'s>>) -> Parse<()> {
         let header = self.end_header(line)?;
         let legs = self.legs(line, |parser, leg_line| parser.leg(leg_line).map(drop))?;
-        let id = self.push(Occurrence { date, plan, amount, legs });
-        self.emit(&header, ItemKind::Occurrence(id));
+        self.emit(&header, Occurrence { date, plan, amount, legs }, ItemKind::Occurrence);
         Ok(())
     }
 
@@ -135,8 +132,7 @@ impl<'s> Parser<'s> {
             }
         });
         self.opening = false;
-        let id = self.push(Opening { date, lines: lines? });
-        self.emit(&header, ItemKind::Opening(id));
+        self.emit(&header, Opening { date, lines: lines? }, ItemKind::Opening);
         Ok(())
     }
 
@@ -148,14 +144,12 @@ impl<'s> Parser<'s> {
             self.expect_word("for", "expected-for", "`for` and the old number of units, like `split 2 for 1`")?;
             let denominator = self.split_count("the old number of units, like `1` in `split 2 for 1`")?;
             let header = self.end_header(line)?;
-            let id = self.push(Split { date, unit, numerator, denominator });
-            self.emit(&header, ItemKind::Split(id));
+            self.emit(&header, Split { date, unit, numerator, denominator }, ItemKind::Split);
             return Ok(());
         }
         let price = self.measured()?;
         let header = self.end_header(line)?;
-        let id = self.push(Price { date, unit, price });
-        self.emit(&header, ItemKind::Price(id));
+        self.emit(&header, Price { date, unit, price }, ItemKind::Price);
         Ok(())
     }
 
@@ -178,10 +172,7 @@ impl<'s> Parser<'s> {
     /// bounds may equally follow the flow's tail; `name` is that of a named plan.
     pub fn plan(&mut self, line: &mut Line<'s>, name: Option<Name<'s>>) -> Parse<()> {
         let every = match self.tok() {
-            Tok::Span(span) => {
-                self.bump();
-                span
-            }
+            Tok::Span(span) => self.bump_as(span),
             _ => self.choose(&CADENCES, "unknown-cadence", "cadence")?.0,
         };
         let mut bounds = Bounds::default();
@@ -191,10 +182,8 @@ impl<'s> Parser<'s> {
         self.plan_bounds(&mut bounds)?;
         let header = self.end_header(line)?;
         self.flow_legs(line, &mut flow, arrow)?;
-        let Bounds { on, from, until } = bounds;
-        let (on, from, until) = (on.map(|(on, _)| on), from.map(|(day, _)| day), until.map(|(day, _)| day));
-        let id = self.push(Plan { name, every, on, from, until, flow });
-        self.emit(&header, ItemKind::Plan(id));
+        let Bounds { on, from, until, .. } = bounds;
+        self.emit(&header, Plan { name, every, on, from, until, flow }, ItemKind::Plan);
         Ok(())
     }
 
@@ -207,18 +196,17 @@ impl<'s> Parser<'s> {
 
     /// The bounds `on DAY`, `from DATE` and `until DATE|MONTH`, each at most
     /// once and in any order.
-    fn plan_bounds(&mut self, bounds: &mut Bounds) -> Parse<()> {
+    fn plan_bounds(&mut self, bounds: &mut Bounds<'s>) -> Parse<()> {
         while let Tok::Name(word @ ("on" | "from" | "until")) = self.tok() {
             let keyword = self.bump().loc;
-            let earlier = match word {
-                "on" => self.plan_day().map(|on| bounds.on.replace((on, keyword)).map(|(_, first)| first)),
-                "from" => self
-                    .date("the day the plan starts, like `2026-01-01`")
-                    .map(|day| bounds.from.replace((day, keyword)).map(|(_, first)| first)),
-                _ => self.until_day().map(|day| bounds.until.replace((day, keyword)).map(|(_, first)| first)),
-            };
-            if let Some(first) = earlier? {
+            if let Some(&(_, first)) = bounds.seen.iter().find(|(seen, _)| *seen == word) {
                 return Err(self.duplicate(&format!("`{word}` clause"), keyword, first));
+            }
+            bounds.seen.push((word, keyword));
+            match word {
+                "on" => bounds.on = Some(self.plan_day()?),
+                "from" => bounds.from = Some(self.date("the day the plan starts, like `2026-01-01`")?),
+                _ => bounds.until = Some(self.until_day()?),
             }
         }
         Ok(())
@@ -226,13 +214,12 @@ impl<'s> Parser<'s> {
 
     /// `DATE`, or `MONTH` meaning that month's last day.
     fn until_day(&mut self) -> Parse<Day> {
-        let day = match self.tok() {
-            Tok::Date(day) => day,
-            Tok::Month(first) => first.month_end(),
-            _ => return Err(self.expected("expected-date", "a date or month, like `2027-06`")),
+        let pick = |tok| match tok {
+            Tok::Date(day) => Some(day),
+            Tok::Month(first) => Some(first.month_end()),
+            _ => None,
         };
-        self.bump();
-        Ok(day)
+        self.take(pick, "expected-date", "a date or month, like `2027-06`")
     }
 
     /// The day within each period: `15`, `04-15`, or `monday`.

@@ -13,11 +13,10 @@ impl<'s> Parser<'s> {
     /// `NUMBER COMMODITY`, or `empty`.
     pub fn amount(&mut self) -> Parse<Amount<'s>> {
         let token = self.peek();
-        if !matches!(token.tok, Tok::Name("empty")) {
-            return self.measured();
+        match token.tok {
+            Tok::Name("empty") => Ok(self.bump_as(Amount(self.text(token.loc)))),
+            _ => self.measured(),
         }
-        self.bump();
-        Ok(Amount(self.text(token.loc)))
     }
 
     /// An amount that may be negative, as after `=` in an assertion: an

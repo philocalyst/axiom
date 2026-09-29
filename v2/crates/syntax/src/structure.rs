@@ -105,8 +105,7 @@ impl<'s> Parser<'s> {
             }
         };
         let header = self.end_header(line)?;
-        let id = self.push(setting);
-        self.emit(&header, ItemKind::Setting(id));
+        self.emit(&header, setting, ItemKind::Setting);
         Ok(())
     }
 

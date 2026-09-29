@@ -145,8 +145,9 @@ impl<'s> Parser<'s> {
         &T::table(&self.t)[many.range()]
     }
 
-    /// Adds an item to the file.
-    pub fn emit(&mut self, header: &Header<'s>, kind: ItemKind<'s>) {
+    /// Adds `node` to its table, and the item that is it.
+    pub fn emit<T: Stored<'s>>(&mut self, header: &Header<'s>, node: T, kind: fn(Id<T>) -> ItemKind<'s>) {
+        let kind = kind(self.push(node));
         self.items.push(Item { doc: header.doc, loc: header.loc, kind });
     }
 
@@ -180,6 +181,18 @@ impl<'s> Parser<'s> {
 
     pub fn bump(&mut self) -> Token<'s> {
         self.lexer.bump()
+    }
+
+    /// Consumes the token, which meant `value`.
+    pub fn bump_as<T>(&mut self, value: T) -> T {
+        self.bump();
+        value
+    }
+
+    /// Consumes the token, then reads what it introduces.
+    pub fn then<T>(&mut self, read: impl FnOnce(&mut Self) -> Parse<T>) -> Parse<T> {
+        self.bump();
+        read(self)
     }
 
     pub fn at_eol(&self) -> bool {

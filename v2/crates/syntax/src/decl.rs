@@ -37,8 +37,7 @@ impl<'s> Parser<'s> {
         });
         let (props, laws) = (self.since(props), self.since(laws));
         for name in names {
-            let id = self.push(Decl { what, name, alias, kind, props, laws });
-            self.emit(&header, ItemKind::Decl(id));
+            self.emit(&header, Decl { what, name, alias, kind, props, laws }, ItemKind::Decl);
         }
         Ok(())
     }
@@ -80,8 +79,7 @@ impl<'s> Parser<'s> {
         });
         let on = self.since(mark);
         for pattern in patterns {
-            let id = self.push(CodeRule { pattern, on });
-            self.emit(&header, ItemKind::Code(id));
+            self.emit(&header, CodeRule { pattern, on }, ItemKind::Code);
         }
         Ok(())
     }
@@ -90,10 +88,7 @@ impl<'s> Parser<'s> {
     fn pattern(&mut self) -> Parse<Name<'s>> {
         let token = self.peek();
         match token.tok {
-            Tok::Punct("*") => {
-                self.bump();
-                Ok(Name(self.text(token.loc)))
-            }
+            Tok::Punct("*") => Ok(self.bump_as(Name(self.text(token.loc)))),
             Tok::Code(code) => {
                 let name = code.name();
                 let diag = Diagnostic::error("hash-in-pattern", "code patterns are written without `#`")
@@ -112,8 +107,7 @@ impl<'s> Parser<'s> {
         let mark = self.mark::<ParamRow>();
         let _ = self.children(line, |parser, row| parser.param_row(row));
         let rows = self.since(mark);
-        let id = self.push(Param { name, rows });
-        self.emit(&header, ItemKind::Param(id));
+        self.emit(&header, Param { name, rows }, ItemKind::Param);
         Ok(())
     }
 
@@ -209,8 +203,7 @@ impl<'s> Parser<'s> {
             }
         })?;
         let Some(run) = run else { return self.fail(missing_run(header.loc)) };
-        let id = self.push(Sync { file, run });
-        self.emit(&header, ItemKind::Sync(id));
+        self.emit(&header, Sync { file, run }, ItemKind::Sync);
         Ok(())
     }
 }

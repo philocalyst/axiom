@@ -123,8 +123,7 @@ impl<'s> Parser<'s> {
                 Ok(Quantity::Pending(amount))
             }
             Tok::Punct("?") => {
-                self.bump();
-                self.unit("expected-commodity", "a commodity such as `USD`").map(Quantity::Unknown)
+                self.then(|p| p.unit("expected-commodity", "a commodity such as `USD`")).map(Quantity::Unknown)
             }
             Tok::Name("all") => {
                 self.bump();
@@ -143,14 +142,8 @@ impl<'s> Parser<'s> {
         // What a leg may say that a header end may not: the remainder, or a
         // target balance.
         let amount = match self.tok() {
-            Tok::Punct("...") => {
-                self.bump();
-                Quantity::Rest
-            }
-            Tok::Punct("=") => {
-                self.bump();
-                Quantity::Target(self.amount()?)
-            }
+            Tok::Punct("...") => self.bump_as(Quantity::Rest),
+            Tok::Punct("=") => Quantity::Target(self.then(Self::amount)?),
             _ => self.quantity()?,
         };
         let tail = self.tail(self.mark::<Clause>())?;
@@ -175,36 +168,14 @@ impl<'s> Parser<'s> {
                     payee = Some(self.name("expected-payee", "a payee such as `trader-joes`")?);
                     continue;
                 }
-                Tok::Code(code) => {
-                    self.bump();
-                    ClauseKind::Code(code)
-                }
-                Tok::Punct("@") => {
-                    self.bump();
-                    ClauseKind::Price(self.measured()?)
-                }
+                Tok::Code(code) => self.bump_as(ClauseKind::Code(code)),
+                Tok::Punct("@") => ClauseKind::Price(self.then(Self::measured)?),
                 Tok::Punct("!") => ClauseKind::Waive(self.waiver()?),
-                Tok::Name("for") => {
-                    self.bump();
-                    ClauseKind::For(self.for_what()?)
-                }
-                Tok::Name("due") => {
-                    self.bump();
-                    let due = match self.tok() {
-                        Tok::Date(day) => Due::On(day),
-                        Tok::Span(span) => Due::After(span),
-                        _ => return Err(self.expected("expected-due", "a date or a span such as `30d`")),
-                    };
-                    self.bump();
-                    ClauseKind::Due(due)
-                }
-                Tok::Name("basis") => {
-                    self.bump();
-                    ClauseKind::Basis(self.amount()?)
-                }
+                Tok::Name("for") => ClauseKind::For(self.then(Self::for_what)?),
+                Tok::Name("due") => ClauseKind::Due(self.then(Self::due)?),
+                Tok::Name("basis") => ClauseKind::Basis(self.then(Self::amount)?),
                 Tok::Name("since") if self.opening => {
-                    self.bump();
-                    ClauseKind::Since(self.date("the day the parcels were acquired, like `2023-06-15`")?)
+                    ClauseKind::Since(self.then(|p| p.date("the day the parcels were acquired, like `2023-06-15`"))?)
                 }
                 _ => break,
             };
@@ -222,17 +193,21 @@ impl<'s> Parser<'s> {
         Ok(Tail { payee, clauses: self.since(mark) })
     }
 
+    /// After `due`: a date, or a span after the date it is measured from.
+    fn due(&mut self) -> Parse<Due> {
+        let pick = |tok| match tok {
+            Tok::Date(day) => Some(Due::On(day)),
+            Tok::Span(span) => Some(Due::After(span)),
+            _ => None,
+        };
+        self.take(pick, "expected-due", "a date or a span such as `30d`")
+    }
+
     /// `for #code`, `for car-fund`, or `for` a year, month, date or range.
     fn for_what(&mut self) -> Parse<For<'s>> {
         match self.tok() {
-            Tok::Code(code) => {
-                self.bump();
-                Ok(For::Code(code))
-            }
-            Tok::Name(entity) => {
-                self.bump();
-                Ok(For::Entity(Name(entity)))
-            }
+            Tok::Code(code) => Ok(self.bump_as(For::Code(code))),
+            Tok::Name(entity) => Ok(self.bump_as(For::Entity(Name(entity)))),
             _ => {
                 let (first, last, _) = self.days("expected-period", "a period, `#code` or entity after `for`")?;
                 Ok(For::Period(first, last))
@@ -273,10 +248,7 @@ impl<'s> Parser<'s> {
         let open = self.bump().loc;
         loop {
             let select = match self.tok() {
-                Tok::Code(code) => {
-                    self.bump();
-                    Select::Code(code)
-                }
+                Tok::Code(code) => self.bump_as(Select::Code(code)),
                 Tok::Name(_) => {
                     let (policy, loc) = self.choose(&POLICIES, "unknown-policy", "lot policy")?;
                     Select::Policy(policy, loc)
