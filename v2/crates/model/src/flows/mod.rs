@@ -158,14 +158,8 @@ fn build_plans<'s>(
         diags.append(&mut sink.diags);
         misses.append(&mut sink.misses);
         if let Some(name) = plan.name {
-            match plans.by_name.insert(name.0, at) {
-                Some(_) => diags.push(crate::errors::duplicate(
-                    "plan",
-                    Word { text: name.0, loc: file.loc(name.0) },
-                    None,
-                    None,
-                )),
-                None => {}
+            if plans.by_name.insert(name.0, at).is_some() {
+                diags.push(crate::errors::duplicate("plan", Word { text: name.0, loc: file.loc(name.0) }, None, None));
             }
         }
         plans.names.push(plan.name.map_or("", |name| name.0));

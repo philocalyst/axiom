@@ -8,7 +8,7 @@
 //! one leg's place, and the others are paid to or from it.
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Diagnostic, Id};
+use axiom_core::{Day, Diagnostic, Id, Loc};
 
 use super::faults::{self, Written};
 use super::pairing::{self, Share};
@@ -26,7 +26,23 @@ pub(super) struct Move {
     pub infer: Infer,
     pub pending: bool,
     pub tail: Tail,
-    pub loc: axiom_core::Loc,
+    pub loc: Loc,
+}
+
+impl Move {
+    /// A flow from `from` to `to`, with what leaves and what arrives, whether
+    /// its quantity is known and whether it is pending, and what its tail says.
+    fn between(
+        from: &Placed,
+        to: &Placed,
+        amounts: (Amount, Amount),
+        how: (Infer, bool),
+        tail: Tail,
+        loc: Loc,
+    ) -> Move {
+        let (infer, pending) = how;
+        Move { from: from.clone(), to: to.clone(), out: amounts.0, arrive: amounts.1, infer, pending, tail, loc }
+    }
 }
 
 pub(super) struct Moves {
@@ -76,19 +92,6 @@ impl Elab<'_, '_> {
         )
     }
 
-    fn move_between(
-        &self,
-        from: &Placed,
-        to: &Placed,
-        amounts: (Amount, Amount),
-        infer: Infer,
-        pending: bool,
-        tail: Tail,
-        loc: axiom_core::Loc,
-    ) -> Move {
-        Move { from: from.clone(), to: to.clone(), out: amounts.0, arrive: amounts.1, infer, pending, tail, loc }
-    }
-
     // ─── One flow ───────────────────────────────────────────────────────────
 
     /// `checking -> food 84.20 USD`
@@ -113,7 +116,7 @@ impl Elab<'_, '_> {
         let (out, arrive, infer, pending) = self.settle(shape.from.slot, shape.to.slot, price, at)?;
         let counterparty = to.end.entity.or(from.end.entity);
         let tail = Tail { payee: shape.tail.payee.or(counterparty), ..shape.tail.clone() };
-        let mv = self.move_between(from, to, (out, arrive), infer, pending, tail, shape.loc);
+        let mv = Move::between(from, to, (out, arrive), (infer, pending), tail, shape.loc);
         Some(Moves { moves: vec![mv], counterparty })
     }
 
@@ -243,7 +246,9 @@ impl Elab<'_, '_> {
                         false => (self.path(&leg.placed), self.path(named)),
                     })
                     .collect();
-                return self.fail(faults::split(self.world, why, shape.loc, &locs, &ends));
+                // The total is what to point at: it is what the legs fail to make.
+                let header = other.or(own).map_or(shape.loc, |slot| slot.loc);
+                return self.fail(faults::split(self.world, why, header, &locs, &ends));
             }
         };
         let pending = own.into_iter().chain(other).any(|slot| slot.pending);
@@ -263,7 +268,7 @@ impl Elab<'_, '_> {
 
     /// The single amount a split header states, and what the named place itself
     /// states, if it also does.
-    fn split_total(&mut self, named: Option<Slot>, other: Option<Slot>, loc: axiom_core::Loc) -> Option<Total> {
+    fn split_total(&mut self, named: Option<Slot>, other: Option<Slot>, loc: Loc) -> Option<Total> {
         let fixed = |slot: Slot| match slot.stated {
             Stated::Fixed(amount) => Some(amount),
             _ => None,
@@ -326,7 +331,7 @@ impl Elab<'_, '_> {
         };
         let mut tail = shape.tail.over(&leg.tail);
         tail.payee = tail.payee.or(leg.placed.end.entity).or(named.end.entity);
-        self.move_between(from, to, (out, arrive), infer, pending || leg.slot.pending, tail, leg.loc)
+        Move::between(from, to, (out, arrive), (infer, pending || leg.slot.pending), tail, leg.loc)
     }
 
     /// A closing statement: what the named place gives up or takes is exchanged
@@ -360,12 +365,11 @@ impl Elab<'_, '_> {
                 true => (&head.placed, &leg.placed, (share.header, share.leg)),
                 false => (&leg.placed, &head.placed, (share.leg, share.header)),
             };
-            moves.push(self.move_between(
+            moves.push(Move::between(
                 from,
                 to,
                 amounts,
-                Infer::Known,
-                pending || leg.slot.pending,
+                (Infer::Known, pending || leg.slot.pending),
                 leg_tail,
                 leg.loc,
             ));
@@ -374,7 +378,7 @@ impl Elab<'_, '_> {
             true => (named, &head.placed, (own, total)),
             false => (&head.placed, named, (total, own)),
         };
-        let exchange = self.move_between(from, to, amounts, Infer::Known, pending || head.slot.pending, tail, head.loc);
+        let exchange = Move::between(from, to, amounts, (Infer::Known, pending || head.slot.pending), tail, head.loc);
         // Paying into the exchange comes first, and paying out of it last.
         match named_is_from {
             true => moves.insert(0, exchange),

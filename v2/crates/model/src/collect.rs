@@ -141,7 +141,7 @@ pub(crate) fn survey<'a, 's>(sites: &'a [Site<'a, 's>], names: &mut Interner<'s>
             chunks.map(move |(at, items)| Run { site, first: at * RUN, items })
         })
         .collect();
-    let surveys = par::map_each(&runs, |run| Survey::of(run));
+    let surveys = par::map_each(&runs, Survey::of);
 
     let mut merged = Survey::default();
     let mut journal = Vec::new();
