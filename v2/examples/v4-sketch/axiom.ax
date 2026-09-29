@@ -1,0 +1,20 @@
+/// Sam Rivera, a product designer at Lumen. Sam also runs a design studio on
+/// the side, rents a flat in San Francisco, and rents out a condo bought in
+/// 2024.
+///
+/// This is a sketch of the v4 surface, not yet runnable. It shows what the
+/// journal says and, after `▸`, what Axiom infers or derives from it, as an
+/// editor would show it in hints. Nothing after a `▸` is ever typed.
+base USD
+use us/ca/san-francisco
+use us/rental
+
+entity me : person
+  born   1990-04-12
+  filing single
+  lives  us/ca/san-francisco
+
+/// The side business. Its income and costs are its own, and they reach Sam's
+/// return on Schedule C.
+entity studio : sole-proprietorship
+  owner me

@@ -1,0 +1,63 @@
+// January 2026. The book starts here: what Sam holds on the first, then the
+// month. A line naming a contract is that contract kept once.
+
+opening 2026-01-01
+  checking    6_062.55 USD
+  checking    2_350.00 USD for dana                 // her deposit: held, not Sam's
+  savings    15_000.00 USD for emergency            // an envelope Sam keeps
+  fidelity   210 VTI  basis 48_300 USD since 2021-06-01
+  fidelity    60 VXUS basis  3_420 USD since 2023-11-10
+  retirement 56_900.00 USD
+  visa       -1_240.18 USD                          // owed to chase
+  condo      basis 402_000 USD since 2024-02-20     // ▸ 18,372.73 already depreciated (2024–2025)
+                                                    // ▸ mortgage: 312,078.60 owed to rocket, from its terms
+
+2026-01-01 flat          // ▸ 2,900.00 rent from checking · 348.00 of it the studio's office
+2026-01-01 gym           // ▸ 240.00 from visa · fun
+2026-01-01 lease         // ▸ 2,350.00 from dana into checking · rent of condo: rental income
+2026-01-01 mortgage      // ▸ 2,302.90: interest 1,527.88 of condo · principal 365.02 · escrow 410.00
+2026-01-03 figma         // ▸ 15.00 · the studio's
+
+2026-01-05 checking -> me 100 USD                   // cash in hand
+2026-01-05 me -> taqueria-cancun 18.50 USD : dining // ▸ untyped party, purpose written
+2026-01-06 visa -> trader-joes 84.20 USD            // ▸ groceries (trader-joes : grocer) · food 84.20 of 900
+2026-01-08 phone         // ▸ 45.00 from visa · 27.00 of it the studio's
+2026-01-09 visa -> amazon 62.40 USD : household
+
+/// Jo's car repair; back by April.
+2026-01-12 checking -> jo 600 USD due 2026-04-01    // ▸ lent: jo owes 600.00
+
+2026-01-15 job           // ▸ lumen, 4,600.00 gross · wages
+  retirement      276.00 USD                        // ▸ pre-tax deferral · lumen adds 138.00
+  blue-shield     184.20 USD                        // ▸ premium, pre-tax
+  irs             498.00 USD                        // ▸ federal tax paid for 2026 (irs : tax-authority)
+  ftb             196.30 USD                        // ▸ California tax paid for 2026
+  ssa             337.81 USD                        // ▸ payroll tax
+  edd              52.99 USD                        // ▸ SDI: state tax paid
+  checking        ...                               // ▸ 3,054.70
+
+2026-01-16 checking -> savings 400 USD for emergency
+2026-01-20 vti-monthly 1.620 VTI                    // ▸ 500.00 from checking at 308.64
+2026-01-22 netflix       // ▸ 15.49 from visa · fun
+
+/// The studio's new laptop.
+2026-01-24 visa 1_739.13 USD -> laptop / best-buy   // ▸ equipment of studio · 138.09 of it sales tax · expensed (§179)
+2026-01-25 checking -> visa 1_240.18 USD            // December's statement
+
+2026-01-27 halcyon owes studio 3_800 USD due 30d #inv-2026-01 : design
+                                                    // ▸ invoiced: halcyon owes 3,800.00, due 2026-02-26
+
+2026-01-30 visa -> safeway 132.77 USD               // ▸ groceries · food 216.97 of 900
+
+2026-01-31 job
+  retirement      276.00 USD
+  blue-shield     184.20 USD
+  irs             498.00 USD
+  ftb             196.30 USD
+  ssa             337.81 USD
+  edd              52.99 USD
+  checking        ...
+
+2026-01-31 checking   = 8_828.87 USD
+2026-01-31 visa       = 2_333.99 USD                // owed, as the statement shows it
+2026-01-31 retirement = 58_420.18 USD via market    // ▸ 828.00 paid in (552.00 deferred, 276.00 matched) · 692.18 growth

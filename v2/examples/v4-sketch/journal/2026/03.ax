@@ -1,0 +1,40 @@
+// March 2026: a yearly premium, dividends with a foreign tax taken at
+// source, and a contract that ends.
+
+2026-03-01 flat
+2026-03-01 gym
+2026-03-01 lease
+2026-03-01 mortgage
+2026-03-01 condo-insurance   // ▸ 1,140.00 · insurance of condo, 95.00 a month through 2027-02
+2026-03-03 figma
+2026-03-08 phone
+
+/// Cancelled: no more payments are expected, and none is missing.
+2026-03-10 netflix ends
+
+2026-03-15 job
+  retirement      276.00 USD
+  blue-shield     184.20 USD
+  irs             498.00 USD
+  ftb             196.30 USD
+  ssa             337.81 USD
+  edd              52.99 USD
+  checking        ...
+
+2026-03-20 vti-monthly 1.640 VTI
+
+/// Quarterly dividends. A fund that pays is a party like any other: what it
+/// pays is a dividend.
+2026-03-26 VTI -> fidelity 198.12 USD               // ▸ dividend · qualified (VTI : fund)
+2026-03-26 VXUS -> 25.09 USD                        // ▸ dividend, 25.09 gross
+  foreign-tax      2.49 USD                         // ▸ foreign tax paid: a credit on the return (Form 1116)
+  fidelity         ...                              // ▸ 22.60
+
+2026-03-31 job
+  retirement      276.00 USD
+  blue-shield     184.20 USD
+  irs             498.00 USD
+  ftb             196.30 USD
+  ssa             337.81 USD
+  edd              52.99 USD
+  checking        ...

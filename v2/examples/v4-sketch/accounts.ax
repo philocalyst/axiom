@@ -1,0 +1,21 @@
+// ─── Where money sits ───────────────────────────────────────────────────────
+//
+// An account is a position with an institution:
+// - a deposit that Chase owes Sam;
+// - a card on which Sam owes Chase;
+// - shares that Fidelity keeps for him.
+//
+// The institution holds the money and Sam owns it: custody and ownership
+// are separate facts.
+//
+// Money that sits in no account is with its owner. That covers cash in hand,
+// the condo and the laptop. There are no income, expense or equity accounts:
+// what a flow was for is its purpose, and whom it was with is its party.
+
+account checking   : deposit at chase
+account savings    : deposit at chase
+account visa       : card at chase
+account fidelity   : brokerage
+account retirement : 401k at fidelity
+  employer lumen
+account escrow     : escrow at rocket   // property tax and insurance, held by the lender

@@ -1,0 +1,64 @@
+// ─── What Sam has agreed to ─────────────────────────────────────────────────
+//
+// A contract is a promise of flows to come: with whom, how much, how often,
+// and what for.
+// - The journal records each time a contract is kept, in one line, plus what
+//   differed that time.
+// - The forecast runs every contract forward.
+// - `check` notices when one is not kept, such as a rent that never came or
+//   a bill missing from a statement.
+// - What a contract says about its flows (a business share, a covered
+//   period, a loan's interest) applies to every one of them without being
+//   written again.
+
+/// The job: 124,200 USD a year, paid on the 15th and the last day of the
+/// month. Each paystub is restated in the journal, since its amounts move.
+contract job with lumen
+  4_600 USD twice monthly on 15, last      // gross
+  into checking                            // what is left of each paycheck
+  retirement   6%                          // ▸ pre-tax deferral: into a 401k, from wages
+  blue-shield  184.20 USD : premium        // ▸ pre-tax (§125): out of wages and payroll tax
+  match 50% of retirement up to 6%         // ▸ Lumen adds 138.00 to each paycheck's 276.00
+
+/// The flat. A tenth of it is the studio's office.
+contract flat with greystar
+  2_900 USD monthly on 1 from checking     // ▸ rent: greystar is a landlord
+  business 12% for studio                  // 120 of its 1,000 sq ft
+  until 2026-08-31
+
+contract phone with mint
+  45 USD monthly on 8 from visa            // ▸ phone: mint is a phone company
+  business 60% for studio                  // ▸ 27.00 of each bill is the studio's
+
+contract figma with figma
+  15 USD monthly on 3 from visa
+  business 100% for studio
+
+contract netflix with netflix
+  15.49 USD monthly on 22 from visa
+
+contract gym with equinox
+  240 USD monthly on 1 from visa
+
+/// The condo's loan: 320,000 USD at 5.875% over thirty years. How much of
+/// each payment is interest, and how much is principal, follows from these
+/// terms. Nobody splits a payment by hand, and `check` compares the balance
+/// with the statements.
+contract mortgage with rocket
+  borrowed 320_000 USD on 2024-02-20 for condo
+  5.875% over 30 years, monthly on 1 from checking
+  escrow 410 USD monthly into escrow       // property tax and insurance
+
+/// Dana's lease on the condo, with a deposit held for her.
+contract lease with dana
+  2_350 USD monthly on 1 into checking : rent of condo
+  deposit 2_350 USD                        // ▸ held for dana: not Sam's to spend, owed back at the end
+  from 2025-07-01 until 2026-06-30
+
+contract condo-insurance with state-farm
+  1_140 USD yearly on 03-01 from checking : insurance of condo
+  covers the year                          // ▸ recognized at 95.00 a month
+
+/// A standing order: 500 USD of VTI on the 20th.
+contract vti-monthly with fidelity
+  buy VTI for 500 USD monthly on 20 from checking
