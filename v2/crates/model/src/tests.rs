@@ -1018,3 +1018,22 @@ plan paycheck every 2w from 2026-01-02 acme -> 5_200 USD
         assert!(book.flows.is_empty(), "the occurrence adds no flows when one of its lines is wrong");
     });
 }
+
+#[test]
+fn a_filter_on_the_trigger_and_the_basis_and_unit_fields_type_check() {
+    let text = "
+law from-payer
+  on in from acme | savings
+  when amount.unit == USD
+  require from.basis >= empty
+
+law bad-filter
+  on in from acme
+  when amount.unit == 5%
+  require amount > empty
+";
+    with_book(text, |book, diags| {
+        assert_eq!(codes(diags), ["type-mismatch"], "{diags:?}");
+        assert!(book.law("from-payer").is_ok() && book.law("bad-filter").is_err());
+    });
+}

@@ -62,20 +62,18 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let mut names = Interner::default();
     let (sites, systems_tree, systems) = sources::arrange(sources, &mut names, &mut diags);
     let surveyed = collect::survey(&sites, &mut names);
-    diags.extend(surveyed.diags);
-    let entries = surveyed.entries;
+    diags.extend(surveyed.diags.iter().cloned());
 
-    let settings = declare::settings(&entries, &mut diags);
-    let scopes = declare::scopes(&entries, &systems, &systems_tree, &mut diags);
-    let declare = (&surveyed.units, &surveyed.paths, &settings);
-    let mut world =
-        declare::declare(&entries, declare.0, declare.1, declare.2, names, systems_tree, systems, scopes, &mut diags);
-    let budgets = props::apply(&mut world, &entries, &mut diags);
-    params::declare(&mut world, &entries, &mut diags);
-    laws::declare(&mut world, &entries, budgets, &mut diags);
+    let entries = &surveyed.entries;
+    let settings = declare::settings(entries, &mut diags);
+    let scopes = declare::scopes(entries, &systems, &systems_tree, &mut diags);
+    let mut world = declare::declare(&surveyed, &settings, names, systems_tree, systems, scopes, &mut diags);
+    let budgets = props::apply(&mut world, entries, &mut diags);
+    params::declare(&mut world, entries, &mut diags);
+    laws::declare(&mut world, entries, budgets, &mut diags);
     let rank = laws::rank(&world.book, &mut diags);
     rules::govern(&mut world.book, &rank);
-    flows::record(&mut world, &sites, &entries, &surveyed.journal, surveyed.txns, settings.layout_free, &mut diags);
+    flows::record(&mut world, &sites, entries, &surveyed.journal, surveyed.txns, settings.layout_free, &mut diags);
     if !settings.layout_free {
         layout::check(&sites, &mut diags);
     }

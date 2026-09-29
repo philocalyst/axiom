@@ -10,7 +10,7 @@ use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Map, Set, Sym, Tree};
 use axiom_syntax::{DeclKind, ExprKind, Setting};
 
 use crate::book::{Book, Class, Commodity, Entity, Kind, Lookup, Place, Roots, Sort};
-use crate::collect::{Entry, Seen, Written, class_of, decls};
+use crate::collect::{Entry, Seen, Surveyed, Written, class_of, decls};
 use crate::cx::Cx;
 use crate::errors::{Word, duplicate, list_and, unknown};
 use crate::kinds::{self, Kinds};
@@ -126,9 +126,7 @@ pub(crate) fn scopes(
 }
 
 pub(crate) fn declare<'a, 's>(
-    entries: &[Entry<'a, 's>],
-    units: &[Seen<'s>],
-    opened: &[&'s str],
+    surveyed: &Surveyed<'a, 's>,
     settings: &Settings<'s>,
     mut names: Interner<'s>,
     tree: Tree<crate::book::System>,
@@ -137,10 +135,11 @@ pub(crate) fn declare<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> World<'s> {
     let mut cx = Cx { names: &mut names, systems: &tree, scopes: &scopes, diags };
+    let entries = &surveyed.entries;
     let kinds = kinds::declare(entries, &mut cx);
-    let commodities = commodities(entries, units, settings, &kinds, &mut cx);
+    let commodities = commodities(entries, &surveyed.units, settings, &kinds, &mut cx);
     let entities = entities(entries, &kinds, &mut cx);
-    let places = places(entries, opened, &kinds, &entities, &mut cx);
+    let places = places(entries, &surveyed.paths, &kinds, &entities, &mut cx);
 
     let roots = Roots {
         me: entities.me,
