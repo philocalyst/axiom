@@ -12,10 +12,10 @@
 2025-10-03 checking -> utilities 61.84 USD / power-co
 2025-10-04 visa -> dining 16.20 USD
 2025-10-05 visa -> groceries 55.08 USD / kroger
-2025-10-06 checking -> car-fund 100 USD
-2025-10-06 checking -> insurance-fund 100 USD
-2025-10-06 checking -> trip-fund 250 USD
-2025-10-06 checking -> emergency 100 USD
+2025-10-06 checking -> savings 100 USD #car for car-fund
+2025-10-06 checking -> savings 100 USD #insurance for insurance-fund
+2025-10-06 checking -> savings 250 USD #trip for trip-fund
+2025-10-06 checking -> savings 100 USD #emergency for emergency-fund
 2025-10-08 visa -> phone 40 USD / mint-mobile
 2025-10-09 visa -> transport 19.60 USD / rideshare
 2025-10-10 checking -> car 285.40 USD / carmax-finance
@@ -62,7 +62,4 @@
 
 /// The bank shows 27.60 USD less than I do. A Venmo I sent and never wrote down. I accept the gap, visibly, with `!`.
 2025-10-31 checking = 5_464.24 USD !
-2025-10-31 car-fund = 200.00 USD
-2025-10-31 insurance-fund = 900.00 USD
-2025-10-31 trip-fund = 500.00 USD
-2025-10-31 emergency = 2_600.00 USD
+2025-10-31 savings = 4_200.00 USD

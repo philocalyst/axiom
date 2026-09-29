@@ -1,0 +1,17 @@
+$ axiom limits 2025 --today 2026-02-14
+
+Limits in 2025
+
+  Who  Limit                             Window      Counted           Cap     Room left     Used
+  ───────────────────────────────────────────────────────────────────────────────────────────────
+  me   budget on expenses/dining         2025-12  160.00 USD    150.00 USD    -10.00 USD  106.67%
+  me   budget on expenses/gifts          2025     460.60 USD    500.00 USD     39.40 USD   92.12%
+  me   budget on expenses/fun            2025-12  107.06 USD    120.00 USD     12.94 USD   89.22%
+  me   budget on expenses/personal-care  2025-12   35.00 USD     40.00 USD      5.00 USD    87.5%
+  me   budget on expenses/subscriptions  2025-12   65.27 USD     90.00 USD     24.73 USD   72.52%
+  me   budget on expenses/transport      2025-12   84.06 USD    120.00 USD     35.94 USD   70.05%
+  me   budget on expenses/groceries      2025-12  240.50 USD    350.00 USD    109.50 USD   68.71%
+  me   budget on expenses/utilities      2025-12   61.84 USD    100.00 USD     38.16 USD   61.84%
+  me   budget on expenses/clothing       2025-12   43.23 USD     80.00 USD     36.77 USD   54.04%
+  me   budget on expenses/medical        2025      42.40 USD    400.00 USD    357.60 USD    10.6%
+  me   budget on expenses/insurance      2025       0.00 USD  1,200.00 USD  1,200.00 USD       0%

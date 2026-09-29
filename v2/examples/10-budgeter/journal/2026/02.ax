@@ -9,10 +9,10 @@
   taxes/payroll         176.54 USD
   health                60.00 USD
   checking              ...
-2026-02-06 checking -> car-fund 100 USD
-2026-02-06 checking -> insurance-fund 100 USD
-2026-02-06 checking -> trip-fund 250 USD
-2026-02-06 checking -> emergency 100 USD
+2026-02-06 checking -> savings 100 USD #car for car-fund
+2026-02-06 checking -> savings 100 USD #insurance for insurance-fund
+2026-02-06 checking -> savings 250 USD #trip for trip-fund
+2026-02-06 checking -> savings 100 USD #emergency for emergency-fund
 2026-02-07 wallet -> personal-care 35 USD / barber
 2026-02-08 visa -> phone 40 USD / mint-mobile
 2026-02-09 visa -> transport 15.54 USD / rideshare
@@ -22,9 +22,6 @@
 2026-02-12 visa -> groceries 82.49 USD / trader-joes
 2026-02-13 wallet -> dining 6.21 USD
 2026-02-14 visa -> subscriptions 11.99 USD / spotify
-2026-02-14 visa = 827.28 USD
+2026-02-14 visa = 839.28 USD
 2026-02-14 checking = 6_597.01 USD
-2026-02-14 car-fund = 113.75 USD
-2026-02-14 insurance-fund = 200.00 USD
-2026-02-14 trip-fund = 1_500.00 USD
-2026-02-14 emergency = 3_000.00 USD
+2026-02-14 savings = 4_813.75 USD

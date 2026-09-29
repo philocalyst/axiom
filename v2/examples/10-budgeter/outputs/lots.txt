@@ -2,6 +2,11 @@ $ axiom lots --today 2026-02-14
 
 Lots at 2026-02-14
 
-  Place  Quantity  Basis  Acquired  Held  Value  Unrealized  Term  Note
-  ─────────────────────────────────────────────────────────────────────
-  · No parcels: everything held is plain money.
+  Place                    Quantity         Basis  Acquired    Held          Value  Unrealized  Term  Note
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/bank/savings  3,000.00 USD  3,000.00 USD  2025-09-01  5m13d  3,000.00 USD    0.00 USD        #emergency · tied to emergency-fund
+  assets/bank/savings    113.75 USD    113.75 USD  2025-09-06  5m8d     113.75 USD    0.00 USD        #car · tied to car-fund
+  assets/bank/savings  1,500.00 USD  1,500.00 USD  2025-09-06  5m8d   1,500.00 USD    0.00 USD        #trip · tied to trip-fund
+  assets/bank/savings    200.00 USD    200.00 USD  2026-01-06  1m8d     200.00 USD    0.00 USD        #insurance · tied to insurance-fund
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                              4,813.75 USD                     4,813.75 USD    0.00 USD

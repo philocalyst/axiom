@@ -5,9 +5,9 @@ Why #deposit-14
 Flows
   Date        Flow                                         Amount  State                From
   ───────────────────────────────────────────────────────────────────────────────────────────────────────────
-  2025-11-10  income/freelance → assets/bank/checking  350.00 USD  returned 2025-11-14  journal/2025/11.ax:25
+  2025-11-10  income/freelance → assets/bank/checking  350.00 USD  returned 2025-11-14  journal/2025/11.ax:26
 
 Events
   Date        Event     From
   ───────────────────────────────────────────
-  2025-11-14  returned  journal/2025/11.ax:38
+  2025-11-14  returned  journal/2025/11.ax:39

@@ -1,3 +1,5 @@
+$ axiom limits 2026 --today 2026-02-14
+
 Limits in 2026
 
   Who  Limit                             Window        Counted           Cap   Room left    Used

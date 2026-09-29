@@ -1,118 +1,29 @@
-$ axiom register visa --today 2026-02-14
+$ axiom register visa --from 2025-12-01 --to 2025-12-31 --today 2026-02-14
 
 Register: liabilities/visa
 
-  Date        With                    Payee         Note        Amount        Balance
-  ───────────────────────────────────────────────────────────────────────────────────
-  2025-09-04  expenses/dining                               -21.14 USD     -21.14 USD
-  2025-09-05  expenses/groceries      trader-joes           -68.30 USD     -89.44 USD
-  2025-09-08  expenses/phone          mint-mobile           -40.00 USD    -129.44 USD
-  2025-09-09  expenses/transport      rideshare             -11.19 USD    -140.63 USD
-  2025-09-10  expenses/dining                               -27.88 USD    -168.51 USD
-  2025-09-11  expenses/subscriptions  netflix               -15.49 USD    -184.00 USD
-  2025-09-12  expenses/groceries      kroger                -71.55 USD    -255.55 USD
-  2025-09-14  expenses/subscriptions  spotify               -11.99 USD    -267.54 USD
-  2025-09-15  expenses/fun                                  -13.97 USD    -281.51 USD
-  2025-09-16  expenses/dining                               -24.50 USD    -306.01 USD
-  2025-09-17  expenses/subscriptions  hulu                  -17.99 USD    -324.00 USD
-  2025-09-18  expenses/clothing                             -47.60 USD    -371.60 USD
-  2025-09-19  expenses/groceries      trader-joes           -59.00 USD    -430.60 USD
-  2025-09-20  expenses/subscriptions  apple                  -2.99 USD    -433.59 USD
-  2025-09-21  expenses/transport      rideshare             -23.96 USD    -457.55 USD
-  2025-09-23  expenses/dining                               -17.60 USD    -475.15 USD
-  2025-09-24  expenses/fun                                  -57.01 USD    -532.16 USD
-  2025-09-26  expenses/subscriptions  adobe                 -22.99 USD    -555.15 USD
-  2025-09-27  expenses/groceries      kroger                -65.84 USD    -620.99 USD
-  2025-09-28  expenses/dining                               -26.54 USD    -647.53 USD
-  2025-10-04  expenses/dining                               -16.20 USD    -663.73 USD
-  2025-10-05  expenses/groceries      kroger                -55.08 USD    -718.81 USD
-  2025-10-08  expenses/phone          mint-mobile           -40.00 USD    -758.81 USD
-  2025-10-09  expenses/transport      rideshare             -19.60 USD    -778.41 USD
-  2025-10-10  expenses/dining                               -17.99 USD    -796.40 USD
-  2025-10-11  expenses/subscriptions  netflix               -15.49 USD    -811.89 USD
-  2025-10-12  expenses/groceries      aldi                  -85.93 USD    -897.82 USD
-  2025-10-14  expenses/subscriptions  spotify               -11.99 USD    -909.81 USD
-  2025-10-15  expenses/fun                                  -28.01 USD    -937.82 USD
-  2025-10-16  expenses/dining                               -13.06 USD    -950.88 USD
-  2025-10-17  expenses/subscriptions  hulu                  -17.99 USD    -968.87 USD
-  2025-10-18  expenses/clothing                             -24.29 USD    -993.16 USD
-  2025-10-19  expenses/groceries      kroger                -52.97 USD  -1,046.13 USD
-  2025-10-20  expenses/subscriptions  apple                  -2.99 USD  -1,049.12 USD
-  2025-10-21  expenses/transport      rideshare             -17.97 USD  -1,067.09 USD
-  2025-10-22  assets/bank/checking                          647.53 USD    -419.56 USD
-  2025-10-23  expenses/dining                               -43.79 USD    -463.35 USD
-  2025-10-24  expenses/fun                                  -26.01 USD    -489.36 USD
-  2025-10-26  expenses/subscriptions  adobe                 -22.99 USD    -512.35 USD
-  2025-10-27  expenses/groceries      kroger                -69.43 USD    -581.78 USD
-  2025-10-28  expenses/dining                               -11.30 USD    -593.08 USD
-  2025-11-03  expenses/subscriptions  amazon-prime         -139.00 USD    -732.08 USD
-  2025-11-04  expenses/dining                               -21.35 USD    -753.43 USD
-  2025-11-05  expenses/groceries      aldi                  -89.89 USD    -843.32 USD
-  2025-11-06  expenses/medical        urgent-care           -30.00 USD    -873.32 USD
-  2025-11-06  expenses/medical        cvs                   -12.40 USD    -885.72 USD
-  2025-11-08  expenses/phone          mint-mobile           -40.00 USD    -925.72 USD
-  2025-11-09  expenses/transport      rideshare             -21.95 USD    -947.67 USD
-  2025-11-10  expenses/dining                               -43.09 USD    -990.76 USD
-  2025-11-11  expenses/subscriptions  netflix               -15.49 USD  -1,006.25 USD
-  2025-11-12  expenses/groceries      aldi                  -58.40 USD  -1,064.65 USD
-  2025-11-14  expenses/subscriptions  spotify               -11.99 USD  -1,076.64 USD
-  2025-11-15  expenses/fun                                  -34.36 USD  -1,111.00 USD
-  2025-11-16  expenses/dining                               -27.79 USD  -1,138.79 USD
-  2025-11-19  expenses/groceries      aldi                  -73.74 USD  -1,212.53 USD
-  2025-11-20  expenses/subscriptions  apple                  -2.99 USD  -1,215.52 USD
-  2025-11-21  expenses/transport      rideshare             -12.95 USD  -1,228.47 USD
-  2025-11-22  assets/bank/checking                          593.08 USD    -635.39 USD
-  2025-11-23  expenses/dining                               -36.42 USD    -671.81 USD
-  2025-11-24  expenses/fun                                  -32.71 USD    -704.52 USD
-  2025-11-26  expenses/subscriptions  adobe                 -22.99 USD    -727.51 USD
-  2025-11-27  expenses/groceries      aldi                  -51.87 USD    -779.38 USD
-  2025-11-28  expenses/dining                               -18.83 USD    -798.21 USD
-  2025-12-04  expenses/dining                               -27.71 USD    -825.92 USD
-  2025-12-05  expenses/groceries      kroger                -55.93 USD    -881.85 USD
-  2025-12-08  expenses/phone          mint-mobile           -40.00 USD    -921.85 USD
-  2025-12-09  expenses/transport      rideshare             -16.63 USD    -938.48 USD
-  2025-12-10  expenses/dining                               -26.42 USD    -964.90 USD
-  2025-12-11  expenses/subscriptions  netflix               -15.49 USD    -980.39 USD
-  2025-12-12  expenses/groceries      kroger                -58.77 USD  -1,039.16 USD
-  2025-12-14  expenses/subscriptions  spotify               -11.99 USD  -1,051.15 USD
-  2025-12-14  expenses/gifts                               -185.60 USD  -1,236.75 USD
-  2025-12-15  expenses/fun                                  -25.18 USD  -1,261.93 USD
-  2025-12-16  expenses/dining                               -32.76 USD  -1,294.69 USD
-  2025-12-18  expenses/clothing                             -43.23 USD  -1,337.92 USD
-  2025-12-19  expenses/groceries      trader-joes           -61.73 USD  -1,399.65 USD
-  2025-12-20  expenses/gifts                               -200.00 USD  -1,599.65 USD
-  2025-12-20  expenses/subscriptions  apple                  -2.99 USD  -1,602.64 USD
-  2025-12-21  expenses/transport      rideshare             -19.43 USD  -1,622.07 USD
-  2025-12-22  assets/bank/checking                          798.21 USD    -823.86 USD
-  2025-12-23  expenses/dining                               -45.56 USD    -869.42 USD
-  2025-12-24  expenses/fun                                  -52.88 USD    -922.30 USD
-  2025-12-26  expenses/subscriptions  adobe                 -22.99 USD    -945.29 USD
-  2025-12-27  expenses/groceries      kroger                -64.07 USD  -1,009.36 USD
-  2025-12-28  expenses/dining                               -14.47 USD  -1,023.83 USD
-  2026-01-04  expenses/dining                               -20.72 USD  -1,044.55 USD
-  2026-01-05  expenses/groceries      kroger                -48.27 USD  -1,092.82 USD
-  2026-01-08  expenses/phone          mint-mobile           -40.00 USD  -1,132.82 USD
-  2026-01-09  expenses/transport      rideshare             -14.15 USD  -1,146.97 USD
-  2026-01-10  expenses/dining                               -21.85 USD  -1,168.82 USD
-  2026-01-11  expenses/subscriptions  netflix               -15.49 USD  -1,184.31 USD
-  2026-01-12  expenses/groceries      aldi                  -67.05 USD  -1,251.36 USD
-  2026-01-14  expenses/subscriptions  spotify               -11.99 USD  -1,263.35 USD
-  2026-01-15  expenses/fun                                  -35.96 USD  -1,299.31 USD
-  2026-01-16  expenses/dining                               -28.16 USD  -1,327.47 USD
-  2026-01-19  expenses/groceries      trader-joes           -58.55 USD  -1,386.02 USD
-  2026-01-20  expenses/subscriptions  apple                  -2.99 USD  -1,389.01 USD
-  2026-01-21  expenses/transport      rideshare             -23.90 USD  -1,412.91 USD
-  2026-01-22  assets/bank/checking                        1,023.83 USD    -389.08 USD
-  2026-01-23  expenses/dining                               -25.78 USD    -414.86 USD
-  2026-01-24  expenses/fun                                  -38.13 USD    -452.99 USD
-  2026-01-26  expenses/subscriptions  adobe                 -22.99 USD    -475.98 USD
-  2026-01-27  expenses/groceries      trader-joes           -54.65 USD    -530.63 USD
-  2026-01-28  expenses/dining                               -19.23 USD    -549.86 USD
-  2026-02-04  expenses/dining                               -18.42 USD    -568.28 USD
-  2026-02-05  expenses/groceries      trader-joes           -67.86 USD    -636.14 USD
-  2026-02-08  expenses/phone          mint-mobile           -40.00 USD    -676.14 USD
-  2026-02-09  expenses/transport      rideshare             -15.54 USD    -691.68 USD
-  2026-02-10  expenses/dining                               -25.63 USD    -717.31 USD
-  2026-02-11  expenses/subscriptions  netflix               -15.49 USD    -732.80 USD
-  2026-02-12  expenses/groceries      trader-joes           -82.49 USD    -815.29 USD
-  2026-02-14  expenses/subscriptions  spotify               -11.99 USD    -827.28 USD
+  Date        With                    Payee        Note       Amount       Balance
+  ────────────────────────────────────────────────────────────────────────────────
+  2025-12-01  opening balance                                           798.21 USD
+  2025-12-04  expenses/dining                              27.71 USD    825.92 USD
+  2025-12-05  expenses/groceries      kroger               55.93 USD    881.85 USD
+  2025-12-08  expenses/phone          mint-mobile          40.00 USD    921.85 USD
+  2025-12-09  expenses/transport      rideshare            16.63 USD    938.48 USD
+  2025-12-10  expenses/dining                              26.42 USD    964.90 USD
+  2025-12-11  expenses/subscriptions  netflix              15.49 USD    980.39 USD
+  2025-12-12  expenses/groceries      kroger               58.77 USD  1,039.16 USD
+  2025-12-14  expenses/subscriptions  spotify              11.99 USD  1,051.15 USD
+  2025-12-14  expenses/gifts                              185.60 USD  1,236.75 USD
+  2025-12-15  expenses/fun                                 25.18 USD  1,261.93 USD
+  2025-12-16  expenses/dining                              32.76 USD  1,294.69 USD
+  2025-12-18  expenses/clothing                            43.23 USD  1,337.92 USD
+  2025-12-19  expenses/groceries      trader-joes          61.73 USD  1,399.65 USD
+  2025-12-20  expenses/gifts                              200.00 USD  1,599.65 USD
+  2025-12-20  expenses/subscriptions  apple                 2.99 USD  1,602.64 USD
+  2025-12-21  expenses/transport      rideshare            19.43 USD  1,622.07 USD
+  2025-12-22  assets/bank/checking                       -798.21 USD    823.86 USD
+  2025-12-23  expenses/dining                              45.56 USD    869.42 USD
+  2025-12-24  expenses/fun                                 52.88 USD    922.30 USD
+  2025-12-26  expenses/subscriptions  adobe                22.99 USD    945.29 USD
+  2025-12-27  expenses/groceries      kroger               64.07 USD  1,009.36 USD
+  2025-12-28  expenses/dining                              14.47 USD  1,023.83 USD

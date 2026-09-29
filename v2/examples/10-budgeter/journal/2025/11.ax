@@ -3,18 +3,19 @@
 2025-11-01 checking -> fun 29 USD / gym
 2025-11-03 checking -> utilities 61.84 USD / power-co
 
-/// The yearly membership: 139.00 USD, once a year.
-2025-11-03 visa -> subscriptions 139 USD / amazon-prime
+/// The yearly membership: 139.00 USD, once a year. It is paid on November 3 and belongs to the twelve months after: written with the range it covers, the
+/// subscriptions envelope sees 11.58 USD a month instead of a 139.00 USD spike on the day.
+2025-11-03..2026-11-02 visa -> subscriptions 139 USD / amazon-prime
 2025-11-04 visa -> dining 21.35 USD
 2025-11-05 visa -> groceries 89.89 USD / aldi
 
 /// Urgent care copay and the pharmacy.
 2025-11-06 visa -> medical 30 USD / urgent-care
 2025-11-06 visa -> medical 12.40 USD / cvs
-2025-11-06 checking -> car-fund 100 USD
-2025-11-06 checking -> insurance-fund 100 USD
-2025-11-06 checking -> trip-fund 250 USD
-2025-11-06 checking -> emergency 100 USD
+2025-11-06 checking -> savings 100 USD #car for car-fund
+2025-11-06 checking -> savings 100 USD #insurance for insurance-fund
+2025-11-06 checking -> savings 250 USD #trip for trip-fund
+2025-11-06 checking -> savings 100 USD #emergency for emergency-fund
 2025-11-06 checking = 3_625.40 USD
 2025-11-07 checking -> wallet ? USD
 2025-11-08 visa -> phone 40 USD / mint-mobile
@@ -58,7 +59,4 @@
 2025-11-28 visa -> dining 18.83 USD
 2025-11-30 visa = 798.21 USD
 2025-11-30 checking = 6_155.22 USD
-2025-11-30 car-fund = 300.00 USD
-2025-11-30 insurance-fund = 1_000.00 USD
-2025-11-30 trip-fund = 750.00 USD
-2025-11-30 emergency = 2_700.00 USD
+2025-11-30 savings = 4_750.00 USD

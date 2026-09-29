@@ -3,49 +3,48 @@ $ axiom forecast --paths 200 --until 2026-07-15 --today 2026-02-14
 Forecast to 2026-07-15
 
 Liquid net worth
-  Month end       Committed           p10           p50            p90
-  ────────────────────────────────────────────────────────────────────
-  2026-02-14   5,851.29 USD
-  2026-02-28   7,431.46 USD  6,402.14 USD  6,991.30 USD   7,224.36 USD
-  2026-03-31   8,591.56 USD  6,345.02 USD  7,284.03 USD   7,891.76 USD
-  2026-04-30   9,776.16 USD  6,320.76 USD  7,544.35 USD   8,420.24 USD
-  2026-05-31  12,805.91 USD  7,857.15 USD  9,659.21 USD  10,821.07 USD
-  2026-06-30  13,466.01 USD  7,692.23 USD  9,414.34 USD  10,555.77 USD
-  2026-07-15  12,880.44 USD  6,461.60 USD  8,383.19 USD   9,665.55 USD
-  · Committed: liquid assets less debts, in USD, after plans, recurring flows found in history,
-    growth models and obligations as they fall due. Variable spending is not in it.
+  Month end       Committed      Net worth            p10            p50            p90
+  ─────────────────────────────────────────────────────────────────────────────────────
+  2026-02-14   5,839.29 USD  10,653.04 USD
+  2026-02-28   7,419.46 USD  12,233.21 USD   6,416.16 USD   6,993.50 USD   7,220.44 USD
+  2026-03-31   9,129.56 USD  12,793.31 USD   6,881.11 USD   7,986.44 USD   8,511.90 USD
+  2026-04-30  12,450.24 USD  14,527.91 USD   9,117.96 USD  10,564.20 USD  11,368.63 USD
+  2026-05-31  16,029.99 USD  18,107.66 USD  11,819.36 USD  13,269.74 USD  14,253.39 USD
+  2026-06-30  16,240.09 USD  17,967.76 USD  10,895.34 USD  12,501.81 USD  13,783.29 USD
+  2026-07-15  16,204.52 USD  17,932.19 USD  10,489.35 USD  12,032.69 USD  13,370.75 USD
+  · Committed: money in hand, less what is owed on debts with no term and on obligations as they
+    fall due, in USD, after plans, recurring flows found in history and what they can still give.
+    Investments and property are net worth, not liquid. Variable spending is not in it.
   · p10, p50 and p90 are the 10th, 50th and 90th percentile of 200 paths. Each path takes the
     committed figure and subtracts, month by month, a random past month of spending for every
     top-level expense category (from 5 months of history, without the flows already projected). The
     seed is fixed, so the bands are reproducible.
 
 What recurs
-  Expected                                               Every                Amount  Next        Source
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/funds/trip-fund → expenses/travel (airline)     yearly         1,150.00 USD  2026-03-10  plan
-  assets/funds/trip-fund → expenses/travel (hotel)       yearly         1,350.00 USD  2026-06-14  plan
-  assets/bank/checking → expenses/travel (hotel)         yearly           500.00 USD  2026-06-14  plan
-  assets/bank/checking → assets/funds/car-fund           monthly          100.00 USD  2026-03-06  seen 6 times
-  assets/bank/checking → assets/funds/emergency          monthly          100.00 USD  2026-03-06  seen 6 times
-  assets/bank/checking → assets/funds/insurance-fund     monthly          100.00 USD  2026-03-06  seen 6 times
-  assets/bank/checking → assets/funds/trip-fund          monthly          250.00 USD  2026-03-06  seen 6 times
-  assets/bank/checking → expenses/car (carmax-finance)   monthly          285.40 USD  2026-03-10  seen 6 times
-  assets/bank/checking → expenses/fun (gym)              monthly           29.00 USD  2026-03-01  seen 6 times
-  assets/bank/checking → expenses/rent (landlord)        monthly        1,150.00 USD  2026-03-01  seen 6 times
-  assets/bank/checking → expenses/student-loan (mohela)  monthly          190.00 USD  2026-02-15  seen 5 times
-  assets/bank/checking → expenses/transport (metro)      monthly           48.00 USD  2026-03-01  seen 6 times
-  assets/bank/checking → expenses/utilities (power-co)   monthly           61.84 USD  2026-03-03  seen 6 times
-  assets/bank/checking → liabilities/visa                monthly          798.21 USD  2026-02-22  seen 4 times
-  income/salary → assets/bank/checking (studio)          every 2 weeks  1,845.15 USD  2026-02-20  seen 12 times
-  income/salary → expenses/health (studio)               every 2 weeks     60.00 USD  2026-02-20  seen 12 times
-  income/salary → expenses/taxes/federal (studio)        every 2 weeks    226.00 USD  2026-02-20  seen 12 times
-  income/salary → expenses/taxes/payroll (studio)        every 2 weeks    176.54 USD  2026-02-20  seen 12 times
-  liabilities/visa → expenses/dining                     weekly            24.50 USD  2026-02-17  seen 27 times
-  liabilities/visa → expenses/phone (mint-mobile)        monthly           40.00 USD  2026-03-08  seen 6 times
-  liabilities/visa → expenses/subscriptions (adobe)      monthly           22.99 USD  2026-02-26  seen 5 times
-  liabilities/visa → expenses/subscriptions (apple)      monthly            2.99 USD  2026-02-20  seen 5 times
-  liabilities/visa → expenses/subscriptions (netflix)    monthly           15.49 USD  2026-03-11  seen 6 times
-  liabilities/visa → expenses/subscriptions (spotify)    monthly           11.99 USD  2026-03-14  seen 6 times
+  Expected                                                        Every                Amount  Next        Source
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/bank/checking → expenses/student-loan (mohela)           monthly          190.00 USD  2026-02-15  seen 5 times
+  liabilities/visa → expenses/dining                              weekly            24.50 USD  2026-02-17  seen 27 times
+  liabilities/visa → expenses/subscriptions (apple)               monthly            2.99 USD  2026-02-20  seen 5 times
+  income/salary → assets/bank/checking (studio), and 3 more legs  every 2 weeks  2,307.69 USD  2026-02-20  seen 12 times
+  assets/bank/checking → liabilities/visa                         monthly          798.21 USD  2026-02-22  seen 4 times
+  liabilities/visa → expenses/subscriptions (adobe)               monthly           22.99 USD  2026-02-26  seen 5 times
+  assets/bank/checking → expenses/rent (landlord)                 monthly        1,150.00 USD  2026-03-01  seen 6 times
+  assets/bank/checking → expenses/transport (metro)               monthly           48.00 USD  2026-03-01  seen 6 times
+  assets/bank/checking → expenses/fun (gym)                       monthly           29.00 USD  2026-03-01  seen 6 times
+  assets/bank/checking → expenses/utilities (power-co)            monthly           61.84 USD  2026-03-03  seen 6 times
+  liabilities/visa → expenses/phone (mint-mobile)                 monthly           40.00 USD  2026-03-08  seen 6 times
+  assets/bank/savings → expenses/travel (airline)                 yearly         1,150.00 USD  2026-03-10  plan
+  assets/bank/checking → expenses/car (carmax-finance)            monthly          285.40 USD  2026-03-10  seen 6 times
+  liabilities/visa → expenses/subscriptions (netflix)             monthly           15.49 USD  2026-03-11  seen 6 times
+  liabilities/visa → expenses/subscriptions (spotify)             monthly           11.99 USD  2026-03-14  seen 6 times
+  assets/bank/savings → expenses/travel (hotel)                   yearly         1,350.00 USD  2026-06-14  plan
+  assets/bank/checking → expenses/travel (hotel)                  yearly           500.00 USD  2026-06-14  plan
+
+Obligations coming due
+  Due         Obligation          To          Amount
+  ──────────────────────────────────────────────────
+  2026-04-15  federal-income-tax  irs  -1,586.08 USD
 
 Problems ahead
   Date  Problem

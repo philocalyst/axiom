@@ -128,7 +128,8 @@ def read_journal(root):
             # destination place and amount
             tm = re.match(r"^(.*?)\s*(\d[\d_]*(?:\.\d+)?)\s+([A-Z][A-Z0-9._]*)(.*)$", right)
             place_only = right.split()[0] if right and not right[0].isdigit() and not right.startswith("?") else ""
-            if right and (right[0].isdigit() or right.startswith("(") or right.startswith("?")):
+            unknown_place = bool(re.match(r"^\?\s+\(?\d", right))         # `-> ? 14.20 USD`: money out to an unknown place
+            if right and not unknown_place and (right[0].isdigit() or right.startswith("(") or right.startswith("?")):
                 # header names only the source: `-> 5_200 USD` (legs are targets)
                 tm2 = re.match(r"^\(?(\d[\d_]*(?:\.\d+)?)\)?\s+([A-Z][A-Z0-9._]*)(.*)$", right)
                 dst = ""
