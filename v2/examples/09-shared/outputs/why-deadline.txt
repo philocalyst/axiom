@@ -6,7 +6,7 @@ Why deadline
   ─────────────────────────────────
   When      by a date
   Governs   every grant
-  Written   std.ax:207
+  Written   std.ax:204
   Ran       1 time
   Recorded  0 violations, 0 effects
   · A grant ends on its `until` date, and unspent money is owed back.

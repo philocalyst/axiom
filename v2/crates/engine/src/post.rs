@@ -119,15 +119,17 @@ impl<'b, 's> Ledger<'b, 's> {
             need: m.out.qty,
             money: is_money(book, m.from, unit),
             selectors: m.select,
-            policy: source.select,
+            // A flow's selector, then the place's policy, then what the commodity says (currencies are FIFO).
+            policy: source.select.or(book.commodities[unit].select),
             txns: &book.txns,
             permits: &self.scratch.permits,
+            spender: m.terms.spender,
             now,
             explain: !self.record.ambiguous.contains(&m.from),
         };
         self.world.holdings.relieve(m.from, unit, &request, &mut self.scratch.relief);
         if self.scratch.relief.ambiguous && self.record.ambiguous.insert(m.from) {
-            let proceeds = self.proceeds(m);
+            let proceeds = self.realizes(m);
             let diagnostic = explain::ambiguous(book, m, &self.scratch.relief.candidates, proceeds);
             self.record.report(diagnostic);
         }
@@ -149,6 +151,9 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Learns, for each entity a parcel at the source is tied to, whether its
     /// `on spend` laws permit this flow. Only a flow that leaves the owner's
     /// places spends anything; on an internal transfer tied parcels go last.
+    /// A flow written out of an entity says whose money it is, so it needs no
+    /// law to say so: that entity's parcels go first, and nobody else's are
+    /// asked.
     fn ask_ties(&mut self, m: &Motion) {
         self.scratch.permits.clear();
         let Some(slot) = self.world.holdings.get(m.from, m.out.unit).filter(|slot| slot.is_tied()) else { return };
@@ -157,7 +162,7 @@ impl<'b, 's> Ledger<'b, 's> {
                 self.scratch.permits.push((entity, false));
             }
         }
-        if stays_with_owner(m) {
+        if stays_with_owner(m) || m.terms.spender.is_some() {
             return;
         }
         for at in 0..self.scratch.permits.len() {
@@ -191,10 +196,48 @@ impl<'b, 's> Ledger<'b, 's> {
                 (None, true, false, _) => slice.basis,
             };
         }
-        if restarts && proceeds.is_some() && !m.opening {
-            self.realize(m);
+        if restarts && proceeds.is_some() {
+            self.charge_costs(m);
+            if !m.opening {
+                self.realize(m);
+            }
         }
         !restarts && !m.is_exchange()
+    }
+
+    /// What the exchange's fee legs cost it (LANGUAGE §2), shared over its
+    /// slices by quantity: a sale fetched that much less, since a selling cost
+    /// comes off the proceeds, and what a purchase bought cost that much more,
+    /// unless the flow states the basis itself. What arrives from a sale keeps
+    /// the price, because the fee leaves the place it landed in as an expense.
+    fn charge_costs(&mut self, m: &Motion) {
+        let cost = self.exchange_cost(m);
+        if cost.is_zero() {
+            return;
+        }
+        let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
+        let mut shares = Shares::new(cost, whole);
+        let sold = m.out.unit != self.book.base;
+        for slice in &mut self.scratch.relief.slices {
+            let part = shares.take(slice.qty);
+            match sold {
+                true => slice.worth -= part,
+                false if m.terms.basis.is_none() => slice.carried += part,
+                false => {}
+            }
+        }
+    }
+
+    /// What the exchange's fee legs cost it, in the base currency.
+    fn exchange_cost(&mut self, m: &Motion) -> Qty {
+        m.terms.cost.and_then(|cost| self.base_value(m, cost)).unwrap_or(Qty::ZERO)
+    }
+
+    /// What the parcels that leave realize against their basis: what they
+    /// fetched, less the selling cost that comes off it.
+    fn realizes(&mut self, m: &Motion) -> Option<Qty> {
+        let fetched = self.proceeds(m)?;
+        Some(if m.out.unit == self.book.base { fetched } else { fetched - self.exchange_cost(m) })
     }
 
     /// Records a gain, and fires `on gain`, for every relieved lot. Plain money

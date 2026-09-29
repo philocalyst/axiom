@@ -1,5 +1,5 @@
-2025-11-01 checking -> 3_150.00 USD #rent-2025-11 due 2025-11-08
-  rent                    1_050.00 USD / landlord
+2025-11-01 checking -> 3_150.00 USD / landlord #rent-2025-11 due 2025-11-08
+  rent                    1_050.00 USD
   ben                     1_050.00 USD
   cleo                    1_050.00 USD
 2025-11-02 income/tips -> wallet 200.69 USD
@@ -15,8 +15,8 @@
   cleo                    28.74 USD
 2025-11-08 visa -> phone 45 USD / mint-mobile
 2025-11-09 income/tips -> wallet 233.04 USD
-2025-11-09 checking -> 69.99 USD #shared-2025-11 due 2025-12-24
-  utilities               23.33 USD / fiberco
+2025-11-09 checking -> 69.99 USD / fiberco #shared-2025-11 due 2025-12-24
+  utilities               23.33 USD
   ben                     23.33 USD
   cleo                    23.33 USD
 2025-11-09 income/donations -> collective-checking 25 USD

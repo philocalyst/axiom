@@ -35,14 +35,16 @@ outputs/                    every command, run with --today 2026-04-16 unless it
 - **Foreign currency is cash.** The German salary (5,400.00 EUR gross, 3,331.30 EUR net,
   Lohnsteuer and social contributions as split legs), the flat's rent and its blocked
   deposit, the savings moved from the US to a German Tagesgeld account, and a Wise account in
-  pounds are money. A euro spent on groceries is not a sale: `std` spends bank money oldest first,
-  with no account saying so, and `us` counts a currency gain only above 200 USD in one disposal
-  (IRC §988(e)). `axiom gains` still lists the 105 small disposals (27.34 USD in all), and the
+  pounds are money. A euro spent on groceries is not a sale: `std` spends a currency oldest first
+  (`select fifo` on the kind `currency`), with no account saying so, and `us` counts a currency gain only above 200 USD in one disposal
+  (IRC §988(e)). `axiom gains` still lists the 105 small disposals (a loss of 3.27 USD in all), and the
   return counts none of them. `axiom available` counts the euros in hand.
 - **Conversions with a cost.** Two shapes: Wise-style (`girokonto 900 EUR ->` with a fee leg and
   a USD leg) and bank-style, which now states its own rate: `us-savings -> tagesgeld 20_334.11
   EUR @ 1.180283 USD` (the dollars out follow from it, 24,000.00). The mid-market rate is in
-  `prices/fx.ax`, and the difference is the implicit 1.1% spread.
+  `prices/fx.ax`, and the difference is the implicit 1.1% spread. A fee leg into an expense place
+  is a cost of the exchange: the 55.10 USD of the first Wise transfer is part of what the euros
+  cost, so their basis is 9,500.00 USD and not 9,444.90.
 - **The London trip.** Hotel and minibar charged in pounds on the US card: the USD amount, the
   GBP expense it bought, and a separate 3% fee flow, all three on the card statement. Wise pays
   the small purchases in pounds, and what is left goes back to euros.

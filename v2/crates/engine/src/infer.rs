@@ -209,6 +209,10 @@ impl Stretches<'_> {
     /// What one end of one flow does to the balance. `sign` is +1 for
     /// arriving here and -1 for leaving, negated on a reversal.
     fn step_of(&self, place: Id<Place>, flow: &Flow, id: Id<Flow>, end: End, sign: i64) -> Step {
+        // A basis end changes what parcels cost and leaves the balance alone.
+        if !flow.moves_quantity(end) {
+            return Step::Delta(Qty::ZERO);
+        }
         let known = match end {
             End::From => flow.out.qty,
             End::To => flow.arrive.qty,

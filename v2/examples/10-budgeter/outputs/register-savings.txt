@@ -2,33 +2,33 @@ $ axiom register savings --today 2026-02-14
 
 Register: assets/bank/savings
 
-  Date        With                  Payee        Note               Amount       Balance
-  ──────────────────────────────────────────────────────────────────────────────────────
-  2025-09-01  assets/bank/checking               #emergency   2,400.00 USD  2,400.00 USD
-  2025-09-01  assets/bank/checking               #insurance     700.00 USD  3,100.00 USD
-  2025-09-06  assets/bank/checking               #car           100.00 USD  3,200.00 USD
-  2025-09-06  assets/bank/checking               #insurance     100.00 USD  3,300.00 USD
-  2025-09-06  assets/bank/checking               #trip          250.00 USD  3,550.00 USD
-  2025-09-06  assets/bank/checking               #emergency     100.00 USD  3,650.00 USD
-  2025-10-06  assets/bank/checking               #car           100.00 USD  3,750.00 USD
-  2025-10-06  assets/bank/checking               #insurance     100.00 USD  3,850.00 USD
-  2025-10-06  assets/bank/checking               #trip          250.00 USD  4,100.00 USD
-  2025-10-06  assets/bank/checking               #emergency     100.00 USD  4,200.00 USD
-  2025-11-06  assets/bank/checking               #car           100.00 USD  4,300.00 USD
-  2025-11-06  assets/bank/checking               #insurance     100.00 USD  4,400.00 USD
-  2025-11-06  assets/bank/checking               #trip          250.00 USD  4,650.00 USD
-  2025-11-06  assets/bank/checking               #emergency     100.00 USD  4,750.00 USD
-  2025-12-06  assets/bank/checking               #car           100.00 USD  4,850.00 USD
-  2025-12-06  assets/bank/checking               #insurance     100.00 USD  4,950.00 USD
-  2025-12-06  assets/bank/checking               #trip          250.00 USD  5,200.00 USD
-  2025-12-06  assets/bank/checking               #emergency     100.00 USD  5,300.00 USD
-  2025-12-12  expenses/insurance    progressive              -1,100.00 USD  4,200.00 USD
-  2026-01-06  assets/bank/checking               #car           100.00 USD  4,300.00 USD
-  2026-01-06  assets/bank/checking               #insurance     100.00 USD  4,400.00 USD
-  2026-01-06  assets/bank/checking               #trip          250.00 USD  4,650.00 USD
-  2026-01-06  assets/bank/checking               #emergency     100.00 USD  4,750.00 USD
-  2026-01-15  expenses/car-repair   kwik-brakes                -486.25 USD  4,263.75 USD
-  2026-02-06  assets/bank/checking               #car           100.00 USD  4,363.75 USD
-  2026-02-06  assets/bank/checking               #insurance     100.00 USD  4,463.75 USD
-  2026-02-06  assets/bank/checking               #trip          250.00 USD  4,713.75 USD
-  2026-02-06  assets/bank/checking               #emergency     100.00 USD  4,813.75 USD
+  Date        With                  Payee        Note         Amount       Balance
+  ────────────────────────────────────────────────────────────────────────────────
+  2025-09-01  assets/bank/checking                      2,400.00 USD  2,400.00 USD
+  2025-09-01  assets/bank/checking                        700.00 USD  3,100.00 USD
+  2025-09-06  assets/bank/checking                        100.00 USD  3,200.00 USD
+  2025-09-06  assets/bank/checking                        100.00 USD  3,300.00 USD
+  2025-09-06  assets/bank/checking                        250.00 USD  3,550.00 USD
+  2025-09-06  assets/bank/checking                        100.00 USD  3,650.00 USD
+  2025-10-06  assets/bank/checking                        100.00 USD  3,750.00 USD
+  2025-10-06  assets/bank/checking                        100.00 USD  3,850.00 USD
+  2025-10-06  assets/bank/checking                        250.00 USD  4,100.00 USD
+  2025-10-06  assets/bank/checking                        100.00 USD  4,200.00 USD
+  2025-11-06  assets/bank/checking                        100.00 USD  4,300.00 USD
+  2025-11-06  assets/bank/checking                        100.00 USD  4,400.00 USD
+  2025-11-06  assets/bank/checking                        250.00 USD  4,650.00 USD
+  2025-11-06  assets/bank/checking                        100.00 USD  4,750.00 USD
+  2025-12-06  assets/bank/checking                        100.00 USD  4,850.00 USD
+  2025-12-06  assets/bank/checking                        100.00 USD  4,950.00 USD
+  2025-12-06  assets/bank/checking                        250.00 USD  5,200.00 USD
+  2025-12-06  assets/bank/checking                        100.00 USD  5,300.00 USD
+  2025-12-12  expenses/insurance    progressive        -1,100.00 USD  4,200.00 USD
+  2026-01-06  assets/bank/checking                        100.00 USD  4,300.00 USD
+  2026-01-06  assets/bank/checking                        100.00 USD  4,400.00 USD
+  2026-01-06  assets/bank/checking                        250.00 USD  4,650.00 USD
+  2026-01-06  assets/bank/checking                        100.00 USD  4,750.00 USD
+  2026-01-15  expenses/car-repair   kwik-brakes          -486.25 USD  4,263.75 USD
+  2026-02-06  assets/bank/checking                        100.00 USD  4,363.75 USD
+  2026-02-06  assets/bank/checking                        100.00 USD  4,463.75 USD
+  2026-02-06  assets/bank/checking                        250.00 USD  4,713.75 USD
+  2026-02-06  assets/bank/checking                        100.00 USD  4,813.75 USD

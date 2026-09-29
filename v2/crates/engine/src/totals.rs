@@ -8,6 +8,9 @@
 //! a read from another window finds only what was recognized into it. The fold
 //! visits days in order, so nothing is ever recomputed.
 
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
+
 use axiom_core::day::days_in_month;
 use axiom_core::{Day, Groups, Id, Map, Qty, Sym};
 use axiom_model::{Book, Dir, Entity, Func, Law, NodeId, Op, Place, Recognition, Subject, Ty, Window};
@@ -128,6 +131,8 @@ struct Windows {
     closed: Rolling,
     ever: Flowed,
     ahead: Vec<Accrual>,
+    /// The subject waits in [`Reaching`] for the next month, which value recognized ahead of time has reached.
+    reaching: bool,
 }
 
 impl Windows {
@@ -137,6 +142,7 @@ impl Windows {
         closed: Rolling::NEVER,
         ever: Flowed { incoming: Qty::ZERO, outgoing: Qty::ZERO },
         ahead: Vec::new(),
+        reaching: false,
     };
 
     /// Moves the current windows on to the ones containing `day`. Once a month
@@ -156,7 +162,9 @@ impl Windows {
         self.ahead.retain(|accrual| accrual.over.until >= self.month.days.from);
     }
 
-    fn add(&mut self, day: Day, dir: Dir, amount: Qty, over: Recognition) {
+    /// Counts a flow. Returns whether some of it was recognized after the
+    /// month it moved in, and so is now waiting for the windows ahead.
+    fn add(&mut self, day: Day, dir: Dir, amount: Qty, over: Recognition) -> bool {
         *self.ever.side(dir) += amount;
         if !has(self.month.days, day) || !has(self.year.days, day) {
             self.roll(day);
@@ -165,14 +173,16 @@ impl Windows {
         if over.from == day && over.until == day {
             *self.month.flowed.side(dir) += amount;
             *self.year.flowed.side(dir) += amount;
-            return;
+            return false;
         }
         for rolling in [&mut self.month, &mut self.year, &mut self.closed] {
             *rolling.flowed.side(dir) += share(amount, over, rolling.days);
         }
-        if over.until > self.month.days.until {
+        let ahead = over.until > self.month.days.until;
+        if ahead {
             self.ahead.push(Accrual { dir, amount, over });
         }
+        ahead
     }
 
     /// What was recognized into the window containing `day`, which may be
@@ -205,6 +215,37 @@ pub(crate) struct Totals {
     /// that place can enter or leave, found once instead of on every flow.
     through: Groups<Place, Subject>,
     windows: Vec<Windows>,
+    reaching: Reaching,
+}
+
+/// The first day of the next month that some subject enters with value already
+/// recognized into it, earliest first. A subject is here once, and again after
+/// each month for as long as value reaches on.
+#[derive(Clone)]
+struct Reaching {
+    months: BinaryHeap<Reverse<(Day, u32)>>,
+    /// The earliest of them: what every moment of the fold asks about.
+    soonest: Day,
+}
+
+impl Reaching {
+    fn new() -> Reaching {
+        Reaching { months: BinaryHeap::new(), soonest: Day(i32::MAX) }
+    }
+
+    /// Notes that `slot` enters the month that begins on `from`.
+    fn push(&mut self, from: Day, slot: u32) {
+        self.months.push(Reverse((from, slot)));
+        self.soonest = self.soonest.min(from);
+    }
+
+    /// The earliest month that begins by `day`, and whose subject it is for.
+    fn pop(&mut self, day: Day) -> Option<(Day, u32)> {
+        let Reverse(next) = self.months.peek().copied().filter(|&Reverse((from, _))| from <= day)?;
+        self.months.pop();
+        self.soonest = self.months.peek().map_or(Day(i32::MAX), |&Reverse((from, _))| from);
+        Some(next)
+    }
 }
 
 impl Totals {
@@ -215,6 +256,7 @@ impl Totals {
             watched: vec![false; n],
             through: Groups::default(),
             windows: vec![Windows::NONE; n],
+            reaching: Reaching::new(),
         };
         let rules = &book.rules;
         let all = [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always].into_iter().flat_map(|g| g.values());
@@ -256,9 +298,34 @@ impl Totals {
         for (dir, here, there, value) in sides {
             let Some(value) = value else { continue };
             for &subject in self.through[here].iter().filter(|&&subject| !inside(book, subject, there)) {
-                self.windows[slot(self.places, subject)].add(day, dir, value, over);
+                let at = slot(self.places, subject);
+                let windows = &mut self.windows[at];
+                if windows.add(day, dir, value, over) && !windows.reaching {
+                    windows.reaching = true;
+                    self.reaching.push(windows.month.days.until.add_days(1), at as u32);
+                }
             }
         }
+    }
+
+    /// Whether some month begins by `day` with value recognized into it ahead of time.
+    #[inline]
+    pub fn reaches_by(&self, day: Day) -> bool {
+        self.reaching.soonest <= day
+    }
+
+    /// The next month that begins by `day` with value recognized into it ahead
+    /// of time, and the subject it is for. Each month is handed out once, and
+    /// the subject comes back for the month after while value still reaches it.
+    pub fn reached(&mut self, day: Day) -> Option<(Subject, Day)> {
+        let (from, at) = self.reaching.pop(day)?;
+        let month = window_of(Window::Month, from);
+        let windows = &mut self.windows[at as usize];
+        windows.reaching = windows.ahead.iter().any(|accrual| accrual.over.until > month.until);
+        if windows.reaching {
+            self.reaching.push(month.until.add_days(1), at);
+        }
+        Some((subject_at(self.places, at as usize), from))
     }
 
     /// What entered or left `subject` in the window containing `day`.
@@ -272,6 +339,14 @@ fn slot(places: usize, subject: Subject) -> usize {
     match subject {
         Subject::Place(place) => place.index(),
         Subject::Entity(entity) => places + entity.index(),
+    }
+}
+
+/// The subject whose totals are kept at `slot`.
+fn subject_at(places: usize, slot: usize) -> Subject {
+    match slot.checked_sub(places) {
+        None => Subject::Place(Id::new(slot as u32)),
+        Some(entity) => Subject::Entity(Id::new(entity as u32)),
     }
 }
 

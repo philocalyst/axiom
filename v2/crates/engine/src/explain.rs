@@ -159,16 +159,21 @@ impl Frame<'_, '_> {
         atoms
     }
 
-    /// Up to three flows before this one that built what a limit counted.
+    /// Up to three flows before this one that built what a limit counted. A
+    /// window read as it opened had no flow to fire it: the latest to reach it.
     fn contributors(&self, reads: Reads) -> Vec<Id<Flow>> {
         let (book, ctx) = (self.book, self.ctx);
-        let Cause::Flow(current) = ctx.cause else { return Vec::new() };
+        let current = match ctx.cause {
+            Cause::Flow(id) => Some(id),
+            _ if ctx.checking => None,
+            _ => return Vec::new(),
+        };
         let window = reads.window(ctx);
         let mut found: Vec<Id<Flow>> = match reads {
             Reads::Tally(name) => {
                 let of_name = self.effects.iter().rev().filter(|e| e.owner == ctx.owner && e.name == name);
                 let counted = of_name.filter(|e| has(window, e.day)).filter_map(|e| match e.cause {
-                    Cause::Flow(id) if id != current => Some(id),
+                    Cause::Flow(id) if Some(id) != current => Some(id),
                     _ => None,
                 });
                 counted.take(3).collect()
@@ -176,7 +181,10 @@ impl Frame<'_, '_> {
             Reads::Total(dir, _) => {
                 let Subject::Place(place) = ctx.subject else { return Vec::new() };
                 let flows = &book.touching[place];
-                let before = flows.partition_point(|&id| id < current);
+                let before = match current {
+                    Some(current) => flows.partition_point(|&id| id < current),
+                    None => flows.partition_point(|&id| book.flows[id].day <= ctx.day),
+                };
                 let crosses = |flow: &Flow| {
                     let (here, there) = if dir == Dir::In { (flow.to, flow.from) } else { (flow.from, flow.to) };
                     book.places.covers(place, here) && !book.places.covers(place, there)
@@ -438,7 +446,7 @@ fn follows_flow(f: &Frame, step: usize, lhs: NodeId) -> Option<Moves> {
         (Op::Var(Var::Amount), _) => Some(Moves::Flow),
         (Op::Call(Func::Total(Dir::In, window), _), Trigger::In) => Some(Moves::Total(Dir::In, *window)),
         (Op::Call(Func::Total(Dir::Out, window), _), Trigger::Out) => Some(Moves::Total(Dir::Out, *window)),
-        (Op::Call(Func::Tally(name), _), _) => {
+        (Op::Call(Func::Tally(name), args), _) if Func::tally_year(args).is_none() => {
             let counts_amount = |kind: &StepKind| match kind {
                 StepKind::Effect(Consequence::Count { amount, name: counted }) => {
                     counted == name && matches!(f.law.nodes[amount.index()].op, Op::Var(Var::Amount))
@@ -509,7 +517,8 @@ pub(crate) fn mismatch(
         let flow = &book.flows[id];
         let (moved, inflow) = if flow.to == assert.place { (flow.arrive, true) } else { (flow.out, false) };
         let state = events.state(id, flow);
-        if moved.unit != unit {
+        let end = if inflow { End::To } else { End::From };
+        if moved.unit != unit || !flow.moves_quantity(end) {
             continue;
         }
         // Signed the way the assertion is written: `+` raises the shown balance.
@@ -735,14 +744,14 @@ pub(crate) fn overdue(
     lot: &Parcel,
     today: Day,
 ) -> Option<Diagnostic> {
-    let txn = book.txns.get(lot.txn)?;
-    let due = txn.due.filter(|&due| due <= today)?;
-    let who = txn.payee.map_or_else(|| show::place(book, place), |entity| book.name(book.entities[entity].path));
+    let claim = book.paid_into(lot.txn, place)?;
+    let due = claim.terms().due.filter(|&due| due <= today)?;
+    let who = claim.payee.map_or_else(|| show::place(book, place), |entity| book.name(book.entities[entity].path));
     let owed = book.show(Amount::new(lot.qty, unit));
     let late = today.0 - due.0;
     Some(
         Diagnostic::warning("overdue", format!("{who} still owes {owed}, {late} days past its due day {due}"))
-            .label(txn.loc, format!("claimed on {}, due {due}", lot.acquired))
+            .label(claim.loc, format!("claimed on {}, due {due}", lot.acquired))
             .note(format!("open for {} since it was made", today.since(lot.acquired)))
             .help("if it has been paid, record the payment `for` the claim's code"),
     )

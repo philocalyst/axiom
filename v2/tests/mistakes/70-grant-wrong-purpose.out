@@ -5,9 +5,9 @@ error[purpose]: grant money spent outside its purpose
     │ ────────────────────┬────────────────────
     │                     ╰── this flow: 1,200.00 USD of restricted money leaving assets/checking
     │
-    ├─[std.ax:201:13] (built in)
+    ├─[std.ax:198:13] (built in)
     │
-201 │     require to is self.purpose "grant money spent outside its purpose"
+198 │     require to is self.purpose "grant money spent outside its purpose"
     │             ─┬    ──────┬─────
     │              │          ╰── education
     │              ╰── expenses/rent

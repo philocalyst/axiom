@@ -189,6 +189,7 @@ pub(crate) fn declare<'a, 's>(
             params: Scoped::default(),
             laws: Names::default(),
             commodities: commodities.by_symbol,
+            taken: Map::default(),
         },
     };
     let declared = Declared {
@@ -241,6 +242,7 @@ impl Commodities {
             scale: scale.min(MAX_SCALE),
             title: None,
             liquidity: None,
+            select: None,
             growth: None,
             props: Box::default(),
             doc: None,

@@ -10,6 +10,7 @@
 //! [`Value::Fault`], not an early exit. `if`, `and` and `or` pick among values
 //! already computed, so a fault in a branch not taken is never observed.
 
+use axiom_core::day::days_in_month;
 use axiom_core::{Day, Groups, Id, Loc, Ratio, Span, Sym};
 
 use crate::book::{Amount, Commodity, Entity, Kind, Param, Place, Schedule, System};
@@ -98,6 +99,15 @@ pub enum Trigger {
 pub struct Closing {
     pub month: u8,
     pub day: u8,
+}
+
+impl Closing {
+    /// The day the law judges `year`: this day of the next one. February 29
+    /// falls on the 28th in a year that has no 29th.
+    pub fn day_for(self, year: i32) -> Option<Day> {
+        let (next, month) = (year + 1, u32::from(self.month));
+        Day::from_ymd(next, month, u32::from(self.day).min(days_in_month(next, month)))
+    }
 }
 
 #[derive(Debug)]
@@ -223,6 +233,8 @@ pub enum Func {
     /// including the triggering flow, valued in the base currency. An optional
     /// argument widens it to every place of a kind the owner owns.
     Total(Dir, Window),
+    /// What laws counted under the name for the owner, in the current year or,
+    /// with a second argument (a year or a date), in that one.
     Tally(Sym),
     Min,
     Max,
@@ -233,6 +245,14 @@ pub enum Func {
     Value,
     /// `date(y, m, d)`
     Date,
+}
+
+impl Func {
+    /// The year a `tally` call asks for: the operand after the tally's name, if
+    /// there is one.
+    pub fn tally_year(args: &[NodeId]) -> Option<NodeId> {
+        args.get(1).copied()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

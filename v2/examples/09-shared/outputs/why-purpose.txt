@@ -6,7 +6,7 @@ Why purpose
   ─────────────────────────────────
   When      on spend
   Governs   every grant
-  Written   std.ax:199
+  Written   std.ax:196
   Ran       8 times
   Recorded  0 violations, 0 effects
   · Grant money may only be spent on what the grant names. This payment went

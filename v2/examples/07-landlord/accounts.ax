@@ -42,11 +42,11 @@ account assets/bank/rental-bank : bank
 /// Tenants' deposits are kept apart, as the lease requires.
 account assets/bank/deposit-bank : bank
 
-/// The house: land and building together, one unit. The commodity is not
-/// declared with `holds`: a place that holds only HOME would refuse the basis
-/// flows, which are amounts of dollars.
-// WORKAROUND: y/NOTES.md B11, `holds HOME` rejects flows into `house.basis`.
+/// The house: land and building together, one unit. It holds nothing but HOME;
+/// what is paid into its basis (a roof) or taken out of it (depreciation) is
+/// dollars that change what the house cost, and bring no dollars into it.
 account assets/rental/house : rental-property
+  holds HOME
 
 /// The mortgage is money owed to the lender: one claim, made at closing, due at
 /// maturity, and settled by every payment `for #loan`.
@@ -105,6 +105,10 @@ account expenses/rental/depreciation
 
 /// The loan costs, spread over the time the loan lasted.
 account expenses/rental/amortization
+
+/// What it cost to sell the house: the commission and the other seller's costs. Not a rental expense:
+/// they come off the price the sale realizes.
+account expenses/selling-costs
 
 account expenses/own-rent
 account expenses/groceries

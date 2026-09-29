@@ -78,7 +78,7 @@ impl<'a> Posting<'a> {
             End::From => Amount::new(-self.posted.out, self.flow.out.unit),
             End::To => self.arrive(),
         };
-        if moves_quantity(self.flow, end) { Change::Moved(amount) } else { Change::Rebased(amount) }
+        if self.flow.moves_quantity(end) { Change::Moved(amount) } else { Change::Rebased(amount) }
     }
 
     /// What happened at `place`: once for each end of the flow that is there.
@@ -107,13 +107,6 @@ pub enum Change {
     Rebased(Amount),
 }
 
-/// Whether quantity crosses `end` of `flow`. At a `PLACE.basis` end none does:
-/// the flow changes what the place's parcels cost, and nothing arrives there
-/// or leaves it. Every view that reads a flow as money asks this first.
-pub fn moves_quantity(flow: &Flow, end: End) -> bool {
-    flow.terms().basis_end != Some(end)
-}
-
 /// A pad, seen as the flow it stands for: from its counter place into the
 /// place the assertion is about (or out of it, for a negative gap).
 pub fn pad_ends(pad: &Pad) -> [(Id<Place>, Amount); 2] {
@@ -134,20 +127,6 @@ pub fn journal_ends_by(book: &Book, day: Day) -> bool {
         && by(book.events.last().map(|event| event.day))
         && by(book.splits.last().map(|split| split.day))
         && by(book.asserts.last().map(|assert| assert.day))
-}
-
-/// The last day the run folded: `today`, or the journal's last fact if that is
-/// later (the engine's own rule). Periods close and deadlines fire up to here
-/// and no further, so a law with a deadline after it has not run.
-pub fn horizon(book: &Book, run: &Run) -> Day {
-    let last_flow = book.flows.as_slice().last().map(|flow| flow.day);
-    let last_assert = book.asserts.last().map(|assert| assert.day);
-    let landed = |posted: &Posted| match posted.state {
-        State::Settled(on) | State::Returned(on) => Some(on),
-        _ => None,
-    };
-    let last_change = run.posted.iter().filter_map(landed).max();
-    [last_flow, last_assert, last_change].into_iter().flatten().fold(run.today, Day::max)
 }
 
 /// What a place held of one commodity: how many, and, for places that are not

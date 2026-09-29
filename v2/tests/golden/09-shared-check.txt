@@ -8,12 +8,12 @@ warning[overdue]: riley still owes 50.00 USD, 122 days past its due day 2025-12-
    = note: open for 1y6d since it was made
    = help: if it has been paid, record the payment `for` the claim's code
 
-warning[overdue]: assets/owed/by-cleo still owes 50.00 USD, 159 days past its due day 2025-11-08
-  ╭─[journal/2025/11.ax:1:1]
+warning[overdue]: cleo still owes 50.00 USD, 159 days past its due day 2025-11-08
+  ╭─[journal/2025/11.ax:4:3]
   │
-1 │ 2025-11-01 checking -> 3_150.00 USD #rent-2025-11 due 2025-11-08
-  │ ────────────────────────────────┬───────────────────────────────
-  │                                 ╰── claimed on 2025-11-01, due 2025-11-08
+4 │   cleo                    1_050.00 USD
+  │   ──────────────────┬─────────────────
+  │                     ╰── claimed on 2025-11-01, due 2025-11-08
   │
   = note: open for 5m15d since it was made
   = help: if it has been paid, record the payment `for` the claim's code

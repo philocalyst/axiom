@@ -9,10 +9,10 @@ Register: assets/bank/checking
   2025-11-01  expenses/transport     metro                                                 -48.00 USD  4,266.24 USD
   2025-11-01  expenses/fun           gym                                                   -29.00 USD  4,237.24 USD
   2025-11-03  expenses/utilities     power-co                                              -61.84 USD  4,175.40 USD
-  2025-11-06  assets/bank/savings                    #car                                 -100.00 USD  4,075.40 USD
-  2025-11-06  assets/bank/savings                    #insurance                           -100.00 USD  3,975.40 USD
-  2025-11-06  assets/bank/savings                    #trip                                -250.00 USD  3,725.40 USD
-  2025-11-06  assets/bank/savings                    #emergency                           -100.00 USD  3,625.40 USD
+  2025-11-06  assets/bank/savings                                                         -100.00 USD  4,075.40 USD
+  2025-11-06  assets/bank/savings                                                         -100.00 USD  3,975.40 USD
+  2025-11-06  assets/bank/savings                                                         -250.00 USD  3,725.40 USD
+  2025-11-06  assets/bank/savings                                                         -100.00 USD  3,625.40 USD
   2025-11-07  assets/cash/wallet                                                           -80.00 USD  3,545.40 USD
   2025-11-10  income/freelance       corner-cafe     #deposit-14 · returned 2025-11-14     350.00 USD  3,545.40 USD
   2025-11-10  expenses/car           carmax-finance                                       -285.40 USD  3,260.00 USD

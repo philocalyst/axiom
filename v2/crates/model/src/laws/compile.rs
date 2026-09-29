@@ -237,8 +237,9 @@ impl<'s> Compiler<'_, '_, 's> {
                     self.file[args].iter().take(2).for_each(|&arg| mark(arg, Role::Keyword));
                     self.file[args].iter().skip(2).for_each(|&arg| mark(arg, Role::Pattern));
                 }
+                // The name of the tally is a keyword; the year, if there is one, is a value.
                 ExprKind::Call(name, args) if name.0 == "tally" => {
-                    self.file[args].iter().for_each(|&arg| mark(arg, Role::Keyword))
+                    self.file[args].iter().take(1).for_each(|&arg| mark(arg, Role::Keyword))
                 }
                 // Arguments of a function that does not exist mean nothing; the
                 // function is the mistake worth reporting.
@@ -578,7 +579,10 @@ impl<'s> Compiler<'_, '_, 's> {
                 (self.total(&typed)?, Ty::Amount)
             }
             "tally" => {
-                arity(1, 1)?;
+                arity(1, 2)?;
+                if args.len() == 2 && !matches!(ty_at(1), Ty::Num | Ty::Day) {
+                    return Err(expected("a year or a date", ty_at(1), arg_loc(1)).into());
+                }
                 (self.tally(args[0])?, Ty::Amount)
             }
             "min" | "max" => {
@@ -642,7 +646,7 @@ impl<'s> Compiler<'_, '_, 's> {
             .label(self.nodes[node.index()].loc, format!("expected {wanted}"))
     }
 
-    /// `tally(name)`: the name must be counted by some law.
+    /// `tally(name)` or `tally(name, year)`: the name must be counted by some law.
     fn tally(&mut self, arg: ExprId) -> Check<Func> {
         let expr = &self.file.exprs[arg];
         let ExprKind::Name(name) = expr.kind else {

@@ -1,5 +1,5 @@
-2025-09-01 checking -> 3_150.00 USD #rent-2025-09 due 2025-09-08
-  rent                    1_050.00 USD / landlord
+2025-09-01 checking -> 3_150.00 USD / landlord #rent-2025-09 due 2025-09-08
+  rent                    1_050.00 USD
   ben                     1_050.00 USD
   cleo                    1_050.00 USD
 2025-09-02 ben -> checking 1_050.00 USD for #rent-2025-09
@@ -20,8 +20,8 @@
   ben                     26.91 USD
   cleo                    26.91 USD
 2025-09-08 visa -> phone 45 USD / mint-mobile
-2025-09-09 checking -> 69.99 USD #shared-2025-09 due 2025-10-24
-  utilities               23.33 USD / fiberco
+2025-09-09 checking -> 69.99 USD / fiberco #shared-2025-09 due 2025-10-24
+  utilities               23.33 USD
   ben                     23.33 USD
   cleo                    23.33 USD
 2025-09-12 owed-to-ben -> utilities 40.47 USD #power-2025-09 due 2025-10-12   // my third of 121.40, from power-co

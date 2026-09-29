@@ -55,11 +55,13 @@ so it governs every rental the project will ever own.
   `2024-12-18..2025-12-29 rental-bank -> amortization 3_120 USD`: recognized evenly per day
   over the 377 days the loan lasted, 115.86 USD in 2024 and 3,004.14 USD in 2025. The 722.30 USD
   of prepaid interest is 2024's.
-- **The sale is one closing statement.** `2025-12-29 house 1 HOME -> 404_531.25 USD` with legs:
-  the loan payoff (276,282.05 USD `for #loan`, and 1,450.48 USD of interest to the day),
-  tenant B's deposit credit to the buyer, and the rest into the rental account. The
-  404,531.25 is the price less the seller's costs (5% commission and 1.25% of other costs,
-  26,968.75 USD).
+- **The sale is one closing statement.** `2025-12-29 house 1 HOME -> 431_500 USD` with legs:
+  the seller's costs (26,968.75 USD, 5% commission and 1.25% of other costs, into `selling-costs`),
+  the loan payoff (276,282.05 USD `for #loan`), tenant B's deposit credit to the buyer, and the
+  rest into the rental account. A leg into an expense place during an exchange is a cost of it, so
+  the sale realizes 404,531.25 USD (the price less the costs) while the costs stay an expense in
+  `balance` and `flow`. The 1,450.48 USD of interest on the loan to the day of payoff is a flow of
+  its own, not a leg: it is Schedule E interest, and a leg would have made it a cost of the sale.
 - **Recapture.** The sale's gain is measured from the adjusted basis, so `us` counts all of
   it as long-term. `recapture`, a law of `rental-property`, moves as much of it as the
   depreciation taken (`tally(depreciation)`, counted by a law on the expense place) to the
@@ -104,7 +106,7 @@ expenses and the recapture, and `axiom forecast` (`outputs/forecast.txt`, run th
 obligations coming due. The 2024 figures are a stub: the ledger opens on 2024-12-18, and a 2024 return
 would show only a net rental loss of 838.16 USD (the prepaid interest and 14 days of loan costs).
 
-`axiom check`: no diagnostics. 182 flows, 28 places, 15 laws, net worth 173,866.60 USD, all of it in
+`axiom check`: no diagnostics. 183 flows, 29 places, 15 laws, net worth 173,866.60 USD, all of it in
 checking (the rental account, the deposit account, the house, the loan, the bill and the deposits are
 all at zero).
 
@@ -131,15 +133,9 @@ legs), F10 (the deposit is held, not spendable).
 
 ## Still open
 
-- **Selling costs cannot reduce the amount realized.** LANGUAGE says an expense leg of an exchange is a cost of
-  it, but `gains` ignores it: a 26,968.75 USD leg into an expense would be deducted and the gain would stay at
-  proceeds less basis. The closing statement here is written net (404,531.25 USD), and the price of 431,500 USD
-  is in a comment and in `prices/home.ax`, not in the journal.
 - **A recognition range cannot be cut short.** The loan costs should have been written for 30 years and
   accelerated at payoff. Written that way, the rest would never be deducted; this journal, written after the
   sale, gives the range the loan's actual life.
-- **A place that `holds HOME` refuses basis flows.** `assets/rental/house` cannot say `holds HOME` (the basis
-  flows are dollars: `not-held`), so the account is not restricted to its commodity.
 - **Same-day order still matters.** The half month of depreciation on the day of sale must be journalled before
   the sale: the recapture law reads what has been counted so far.
 - **Amortization is typed.** The split of each mortgage payment is computed outside and written on the

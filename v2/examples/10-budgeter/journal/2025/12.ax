@@ -5,10 +5,10 @@
 2025-12-04 visa -> dining 27.71 USD
 2025-12-05 visa -> groceries 55.93 USD / kroger
 2025-12-06 wallet -> personal-care 35 USD / barber
-2025-12-06 checking -> savings 100 USD #car for car-fund
-2025-12-06 checking -> savings 100 USD #insurance for insurance-fund
-2025-12-06 checking -> savings 250 USD #trip for trip-fund
-2025-12-06 checking -> savings 100 USD #emergency for emergency-fund
+2025-12-06 checking -> savings 100 USD for car-fund
+2025-12-06 checking -> savings 100 USD for insurance-fund
+2025-12-06 checking -> savings 250 USD for trip-fund
+2025-12-06 checking -> savings 100 USD for emergency-fund
 2025-12-08 visa -> phone 40 USD / mint-mobile
 2025-12-09 visa -> transport 16.63 USD / rideshare
 
@@ -27,7 +27,7 @@
 /// The yearly car insurance premium, 1,140.00 USD, paid in December for the year that starts in January (`for 2026`): the fund I have been
 /// filling covers what it can and checking covers the rest, and the yearly envelope of 2026 sees the premium, not 2025's.
 2025-12-12 -> insurance 1_140 USD / progressive for 2026
-  savings[#insurance]   1_100.00 USD
+  insurance-fund        1_100.00 USD
   checking              ...
 2025-12-13 wallet -> dining 4.72 USD
 2025-12-14 visa -> subscriptions 11.99 USD / spotify

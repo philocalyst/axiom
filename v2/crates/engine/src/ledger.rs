@@ -17,7 +17,7 @@ use axiom_model::{Book, Cap, Commodity, End, Flow, Infer, Place};
 
 use crate::eval::Env;
 use crate::events::{self, Events};
-use crate::fire;
+use crate::fire::{self, Readers};
 use crate::motion::{Amounts, Motion};
 use crate::scope::{display, is_money};
 use crate::state::{Record, Scratch, World};
@@ -40,11 +40,15 @@ pub struct Ledger<'b, 's> {
 #[derive(Clone)]
 pub(crate) struct Solved {
     pub events: Events,
+    /// The last day the fold reaches ([`Run::horizon`]).
+    pub horizon: Day,
     pub deadlines: Vec<Deadline>,
     /// Some list of rules brings one law to one subject twice: `fire` must not run it twice.
     pub repeats: bool,
     /// By law id: the laws that are one cap on a total in the base currency.
     pub caps: Vec<Option<Cap>>,
+    /// The laws to read as a window opens with value already recognized into it.
+    pub readers: Readers,
     /// The first day of each place and commodity whose balance depends on an
     /// amount that could not be solved, and the flow to blame.
     pub unsolved: Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>,
@@ -85,7 +89,8 @@ impl<'b, 's> Ledger<'b, 's> {
         for (key, first) in unsolved {
             blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
-        let solved = Solved { events, deadlines, repeats: fire::repeats(book), caps: fire::caps(book), unsolved: blocked };
+        let (repeats, caps, readers) = (fire::repeats(book), fire::caps(book), fire::readers(book));
+        let solved = Solved { events, horizon, deadlines, repeats, caps, readers, unsolved: blocked };
         let timeline = Timeline::new(&solved.sources(book));
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
         Ledger {
@@ -128,8 +133,24 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Folds the journal's facts, and the deadlines and period ends that fall
     /// due, through the end of `day`.
     pub fn advance(&mut self, day: Day) {
-        self.advance_through(Moment::end_of(day));
+        self.fold_through(day, Moment::end_of(day));
+    }
+
+    /// Folds what the journal holds through `day`, its flows and assertions,
+    /// and stops before the deadlines and period ends of that day: a month or
+    /// a year that ends on it is not closed yet. What is applied on `day`
+    /// next is a fact of that day and comes before them, as a journal flow of
+    /// that day does; [`advance`](Ledger::advance) closes the day afterwards.
+    /// The holdings are the same as at the end of the day, since a closing
+    /// counts and owes and moves nothing.
+    pub fn advance_to_closing(&mut self, day: Day) {
+        self.fold_through(day, Moment::before_closings(day));
+    }
+
+    fn fold_through(&mut self, day: Day, limit: Moment) {
+        self.advance_through(limit);
         self.clock.day = self.clock.day.max(day);
+        self.enter(day);
         self.world.holdings.tidy();
     }
 
@@ -138,13 +159,17 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Returns what the flow caused, not what the journal did on the way.
     ///
     /// The flow takes its place after the journal's own flows of its day and
-    /// before that day's assertions. A flow dated before the ledger's day is
-    /// applied on the ledger's day: the fold does not travel back. Its `mode`
-    /// is ignored, since applying is what makes it real.
+    /// before that day's assertions and closings, so long as the ledger has
+    /// not folded them: after [`advance`](Ledger::advance) has closed the
+    /// day, the flow is late for its closings, as a journal flow written
+    /// after them would be. A flow dated before the ledger's day is applied
+    /// on the ledger's day: the fold does not travel back. Its `mode` is
+    /// ignored, since applying is what makes it real.
     pub fn apply(&mut self, flow: &Flow) -> Applied {
         let day = flow.day.max(self.clock.day);
         self.advance_through(Moment::after_flows(day));
         self.clock.day = day;
+        self.enter(day);
         let marks = self.record.marks();
         let number = self.clock.applied;
         self.clock.applied += 1;
@@ -202,6 +227,7 @@ impl<'b, 's> Ledger<'b, 's> {
         });
         Run {
             today: options.today,
+            horizon: solved.horizon,
             posted: posted.collect(),
             holdings: world.holdings.into_sorted(),
             gains: record.gains,
@@ -220,6 +246,7 @@ impl<'b, 's> Ledger<'b, 's> {
             let Some(moment) = self.clock.timeline.peek().filter(|&moment| moment <= limit) else { return };
             self.clock.timeline.consume(moment, &self.solved.sources(self.book));
             self.clock.day = moment.day;
+            self.enter(moment.day);
             self.step(moment);
         }
     }

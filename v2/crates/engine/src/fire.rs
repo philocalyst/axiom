@@ -8,11 +8,12 @@
 //! and the last reading of every limit.
 //!
 //! A violated law is reported once per subject and window, at the flow that
-//! crossed the line, and its diagnostic is built only then.
+//! crossed the line (or, for a window that value recognized ahead of time
+//! broke by itself, as the window opens), and its diagnostic is built only then.
 
-use axiom_core::{Day, Diagnostic, Id, Set, Sym};
+use axiom_core::{Day, Diagnostic, Id, Map, Set, Sym};
 use axiom_model::{
-    Amount, Book, Cap, Dir, Entity, Fault, Func, Law, NodeId, Op, Recognition, Rule, StepKind, Trigger, Window,
+    Amount, Book, Cap, Dir, Entity, Fault, Func, Law, NodeId, Op, Recognition, Rule, StepKind, Subject, Trigger, Window,
 };
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
@@ -36,9 +37,10 @@ impl Reads {
     /// The finest total or tally the condition rooted at `cond` reads: the
     /// window a comparison is about is the shortest it reads.
     pub fn of(law: &Law, cond: NodeId) -> Option<Reads> {
-        let read = law.range(cond).filter_map(|at| match law.nodes[at].op {
-            Op::Call(Func::Total(dir, window), _) => Some(Reads::Total(dir, window)),
-            Op::Call(Func::Tally(name), _) => Some(Reads::Tally(name)),
+        let read = law.range(cond).filter_map(|at| match &law.nodes[at].op {
+            Op::Call(Func::Total(dir, window), _) => Some(Reads::Total(*dir, *window)),
+            // A tally of another year is settled, not a window this flow is adding to.
+            Op::Call(Func::Tally(name), args) if Func::tally_year(args).is_none() => Some(Reads::Tally(*name)),
             _ => None,
         });
         read.min_by_key(|read| match read {
@@ -83,6 +85,36 @@ pub(crate) fn repeats(book: &Book) -> bool {
 pub(crate) fn caps(book: &Book) -> Vec<Option<Cap>> {
     let cap = |law: &Law| law.cap().filter(|cap| cap.limit.unit == book.base && law.trigger != Trigger::Always);
     book.laws.values().map(cap).collect()
+}
+
+/// The rules that read window totals, by what they watch and the window whose
+/// opening they want to see: the finest one they read.
+pub(crate) type Readers = Map<(Subject, Window), Vec<Rule>>;
+
+/// The finest window of flow total a law reads, month or year.
+fn window_read(law: &Law) -> Option<Window> {
+    let windows = law.nodes.iter().filter_map(|node| match node.op {
+        Op::Call(Func::Total(_, window), _) if window != Window::Ever => Some(window),
+        _ => None,
+    });
+    windows.min_by_key(|&window| window == Window::Year)
+}
+
+/// Every rule that reads a month's or a year's total, once each.
+pub(crate) fn readers(book: &Book) -> Readers {
+    let windows: Vec<Option<Window>> = book.laws.values().map(window_read).collect();
+    let rules = &book.rules;
+    let mut readers = Readers::default();
+    for (_, list) in [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always].into_iter().flat_map(|t| t.iter()) {
+        for &rule in list {
+            let Some(window) = windows[rule.law.index()] else { continue };
+            let known = readers.entry((rule.subject, window)).or_default();
+            if !known.contains(&rule) {
+                known.push(rule);
+            }
+        }
+    }
+    readers
 }
 
 /// Whether the rule is in force for some day of the occasion.
@@ -131,6 +163,35 @@ impl<'b, 's> Ledger<'b, 's> {
         self.fire(std::slice::from_ref(rule), &Occasion::time(due.day, due.period));
     }
 
+    /// Reads the laws about every month that begins by `day` with value
+    /// already recognized into it, and about the year that month opens. A
+    /// limit on a window's total is checked whenever a flow adds to it, and
+    /// value recognized ahead of time adds to windows no flow will land in: an
+    /// annual premium paid in December `for` the next year, a cost spread over
+    /// months. Reading it as the window opens puts what it counted in the
+    /// headroom, and reports a limit that it alone breaks, once.
+    #[inline]
+    pub(crate) fn enter(&mut self, day: Day) {
+        if self.world.totals.reaches_by(day) {
+            self.enter_months(day);
+        }
+    }
+
+    #[cold]
+    fn enter_months(&mut self, day: Day) {
+        while let Some((subject, from)) = self.world.totals.reached(day) {
+            let readers = std::mem::take(&mut self.solved.readers);
+            for window in [Window::Month, Window::Year] {
+                let period = window_of(window, from);
+                let rules = readers.get(&(subject, window));
+                if let Some(rules) = rules.filter(|_| period.from == from) {
+                    self.fire(rules, &Occasion::window(from, period));
+                }
+            }
+            self.solved.readers = readers;
+        }
+    }
+
     pub(crate) fn evaluate(&mut self, law: Id<Law>, ctx: &Context) -> bool {
         let env = Env { book: self.book, world: &self.world };
         eval::run(env, &self.book.laws[law], ctx, &mut self.scratch.values, &mut self.scratch.outcomes)
@@ -166,17 +227,23 @@ impl<'b, 's> Ledger<'b, 's> {
         }
         for outcome in outcomes.drain(..) {
             match outcome {
-                Outcome::Count { name, amount } => {
+                Outcome::Count { name, amount } if !ctx.checking => {
                     for (day, part) in by_year(amount, ctx.over).filter(|(_, part)| !part.is_zero()) {
                         self.world.tallies.add(ctx.owner, day.year(), name, part);
+                        // What a member's own laws count is a line of the household's year too: the joint return
+                        // reads it, and a limit that is the member's own reads only the member's.
+                        if let (Subject::Place(_), Some(house)) = (ctx.subject, book.entities[ctx.owner].member) {
+                            self.world.tallies.add(house, day.year(), name, part);
+                        }
                         let effect = self.effect(rule, ctx, day, name, Amount::new(part, book.base));
                         self.record.effects.push(effect);
                     }
                 }
-                Outcome::Owe { name, amount, owed } => {
+                Outcome::Owe { name, amount, owed } if !ctx.checking => {
                     let effect = Effect { owe: Some(owed), ..self.effect(rule, ctx, ctx.over.from, name, amount) };
                     self.record.effects.push(effect);
                 }
+                Outcome::Count { .. } | Outcome::Owe { .. } => {}
                 Outcome::Priced { step, name, amount, owed } => self.charge(rule, ctx, step, (name, amount, owed)),
                 Outcome::Broken { step, warn } => self.violate(rule, ctx, step, warn),
                 Outcome::Faulted { step, fault } => self.fault(rule, ctx, step as usize, fault),

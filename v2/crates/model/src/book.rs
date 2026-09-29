@@ -64,6 +64,18 @@ pub struct Lookup {
     pub(crate) params: Scoped<Param>,
     pub(crate) laws: Names<Law>,
     pub(crate) commodities: Map<Sym, Id<Commodity>>,
+    /// The names a flow writes that mean an entity although an account's path
+    /// also ends with them: see [`World::taken`](crate::declare::World).
+    pub(crate) taken: Map<Sym, Taken>,
+}
+
+/// An entity that has a name in flows which an account's path also ends with.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Taken {
+    pub entity: Id<Entity>,
+    /// The account is not the entity's own `via` place, so what a line that
+    /// writes the name meant is unclear.
+    pub clash: bool,
 }
 
 /// Built-in things every book has.
@@ -270,6 +282,9 @@ pub struct Commodity {
     pub scale: u8,
     pub title: Option<Sym>,
     pub liquidity: Option<Span>,
+    /// Resolved from the kind chain (`select fifo` on `currency`): how parcels
+    /// of it are relieved where neither the flow nor the place says.
+    pub select: Option<Policy>,
     /// `grows 5% yearly`: the valuation model forecasts use.
     pub growth: Option<Ratio>,
     pub props: Props,
@@ -424,6 +439,14 @@ impl<'s> Book<'s> {
         let rate = self.prices.rate(amount.unit, unit, day, self.base)?;
         let (from, to) = (self.commodities[amount.unit].scale, self.commodities[unit].scale);
         Some(Amount::new(crate::prices::rescale(amount.qty, from, to, rate)?, unit))
+    }
+
+    /// The flow of `txn` that paid into `place`: what made a parcel there. A
+    /// claim's counterparty is its payee and its due day is its `due`.
+    pub fn paid_into(&self, txn: Id<Txn>, place: Id<Place>) -> Option<&Flow> {
+        let txn = self.txns.get(txn)?;
+        let first = txn.first.index();
+        (first..first + txn.len as usize).map(|at| &self.flows[Id::new(at as u32)]).find(|flow| flow.to == place)
     }
 
     /// `1,234.56 USD`

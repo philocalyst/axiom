@@ -11,7 +11,7 @@ envelopes, the budgets and the 2025 return from the journal text, without Axiom.
 
 ```text
 axiom.ax          root: me (single, born 2001, lives us)
-accounts.ax       accounts, the four funds as envelopes, budgets, payees, codes for checks, deposits and funds
+accounts.ax       accounts, the four funds as envelopes, budgets, payees, codes for checks and deposits
 plans.ax          the June trip, as plans: flights in March, hotel and spending in June
 journal/2025/*    September-December 2025
 journal/2026/*    January and the first half of February 2026
@@ -26,16 +26,18 @@ outputs/          every command, run with --today 2026-02-14
   period, and `axiom limits` and `axiom budget 2025` (or `2026`, or a month) show every envelope: spent, limit,
   room left, per month and for the year. One warning per breach.
 - **Funds are envelopes.** One savings account holds them all, and each deposit is tied to its envelope
-  with `for`: `checking -> savings 100 USD #car for car-fund`. The tied money is not available to
+  with `for`: `checking -> savings 100 USD for car-fund`. The tied money is not available to
   spend, and `axiom available` lists what is held for each: 113.75 USD for the car, 3,000.00 for
   emergencies, 200.00 for insurance and 1,500.00 for the trip. The old project gave each fund
   `liquidity 1d` to keep it out of "available to spend", a hack that also priced it as if it took a day to
-  reach. The car fund pays the 486.25 USD brake job on 2026-01-15 and is left with 113.75 USD; the
+  reach. The car fund pays the 486.25 USD brake job on 2026-01-15 (`car-fund -> car-repair`, the envelope as the
+  source, so the payment takes the parcels tied to it) and is left with 113.75 USD; the
   insurance fund pays 1,100.00 USD of the 1,140.00 USD premium on 2025-12-12 and checking the
   other 40.00 (a two-source split); the trip fund gets 250.00 USD a month.
 - **Yearly bills are spread where they belong.** The premium is paid in December `for 2026`, so the
   yearly envelope of 2026 sees it (1,140.00 USD, then a 12.00 USD policy fee: 1,152.00 of 1,200.00 USD,
-  room 48.00), and 2025's sees nothing. The 139.00 USD Prime membership, paid on November 3, is written
+  room 48.00), and 2025's sees nothing. The envelope counts the premium on its own, 1,140.00 of 1,200.00 USD,
+  before the fee or any other flow lands in 2026. The 139.00 USD Prime membership, paid on November 3, is written
   `2025-11-03..2026-11-02` and recognized a little each day: the subscriptions envelope sees 10.66 USD of it
   in November (28 days of 365), not a 139.00 USD spike that broke the month and warned five times.
 - **Gaps in knowledge.** The ATM amounts are `checking -> wallet ? USD`, solved from the checking
@@ -100,13 +102,6 @@ in part (a warning per breach, not one per flow after it, and the yearly bill no
 
 ## Still open
 
-- **A payment out of an envelope does not choose its parcels.** `car-fund -> car-repair 486.25 USD`, the envelope
-  written as the source, takes the oldest tied parcels in the savings account, whichever envelope they belong to:
-  the trip fund lost what the car fund should have. Each deposit carries a code (`#car`) and the spend names it
-  (`savings[#car] -> ...`). The plans do the same for the trip.
-- **A flow recognized for next year is missing from a yearly budget until another one lands in that year.**
-  The premium alone shows 0.00 USD in 2025 and in 2026; the 12.00 USD policy fee in January is what makes the 2026
-  window appear with 1,152.00 USD.
 - **"Can I afford 3,000 USD in June?" is still two forecasts and a subtraction.** The Net worth column moves by the
   whole trip and Committed by half of it, and the forecast does not project the monthly deposits into the funds.
 - **No rollover.** A budget starts at zero each month, so a bill that is not monthly still needs its own envelope.

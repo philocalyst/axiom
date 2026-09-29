@@ -8,12 +8,13 @@
 //! one leg's place, and the others are paid to or from it.
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Diagnostic, Id, Loc, Sym};
+use axiom_core::{Day, Diagnostic, Id, Loc, Qty, Sym};
+use axiom_syntax::Due;
 
 use super::faults::{self, Written};
 use super::pairing::{self, Share};
 use super::shape::{Elab, Leg, Placed, Shape, Slot, Stated, Tail};
-use crate::book::{Amount, CodeScope, Commodity, Entity, Place};
+use crate::book::{Amount, Class, CodeScope, Commodity, Place};
 use crate::errors::{count, iso, list, list_and};
 use crate::journal::{End, Flow, Infer, Mode, Recognition, Terms};
 
@@ -26,6 +27,8 @@ pub(super) struct Move {
     pub infer: Infer,
     pub pending: bool,
     pub tail: Tail,
+    /// What the expense legs of its transaction cost this exchange.
+    pub cost: Option<Amount>,
     pub loc: Loc,
 }
 
@@ -43,15 +46,14 @@ impl Move {
         loc: Loc,
     ) -> Move {
         let (infer, pending) = how;
-        Move { from: from.clone(), to: to.clone(), out: amounts.0, arrive: amounts.1, infer, pending, tail, loc }
+        let (out, arrive) = amounts;
+        Move { from: from.clone(), to: to.clone(), out, arrive, infer, pending, tail, cost: None, loc }
     }
-}
 
-pub(super) struct Moves {
-    pub moves: Vec<Move>,
-    /// The entity written in place position on the header: the counterparty of
-    /// the whole transaction.
-    pub counterparty: Option<Id<Entity>>,
+    /// One commodity leaves and another arrives.
+    fn is_exchange(&self) -> bool {
+        self.out.unit != self.arrive.unit
+    }
 }
 
 /// The one amount a split allocates, and what the named place itself gives up
@@ -67,7 +69,7 @@ enum Total {
 }
 
 impl Elab<'_, '_> {
-    pub fn moves(&mut self, shape: &Shape) -> Option<Moves> {
+    pub fn moves(&mut self, shape: &Shape) -> Option<Vec<Move>> {
         match (&shape.from.placed, &shape.to.placed, shape.legs.is_empty()) {
             (Some(from), Some(to), true) => self.plain(shape, from, to),
             (Some(named), None, false) => self.split(shape, named, true),
@@ -97,7 +99,7 @@ impl Elab<'_, '_> {
     // ─── One flow ───────────────────────────────────────────────────────────
 
     /// `checking -> food 84.20 USD`
-    fn plain(&mut self, shape: &Shape, from: &Placed, to: &Placed) -> Option<Moves> {
+    fn plain(&mut self, shape: &Shape, from: &Placed, to: &Placed) -> Option<Vec<Move>> {
         let selectors = self.refuse_selectors(to);
         if from.basis && to.basis {
             return self.fail(
@@ -121,7 +123,7 @@ impl Elab<'_, '_> {
         let mv = Move::between(from, to, (out, arrive), (infer, pending), tail, shape.loc);
         let mut moves = std::mem::take(&mut self.spare);
         moves.push(mv);
-        Some(Moves { moves, counterparty })
+        Some(moves)
     }
 
     /// The quantities of a flow whose two sides state what they state.
@@ -211,7 +213,7 @@ impl Elab<'_, '_> {
     // ─── One side split ─────────────────────────────────────────────────────
 
     /// The header names one place; the legs are the other side.
-    fn split(&mut self, shape: &Shape, named: &Placed, named_is_from: bool) -> Option<Moves> {
+    fn split(&mut self, shape: &Shape, named: &Placed, named_is_from: bool) -> Option<Vec<Move>> {
         let (own, other) =
             if named_is_from { (shape.from.slot, shape.to.slot) } else { (shape.to.slot, shape.from.slot) };
         let total = self.split_total(own, other, shape.loc);
@@ -284,7 +286,40 @@ impl Elab<'_, '_> {
                 false => moves.push(exchanged),
             }
         }
-        Some(Moves { moves, counterparty: named.end.entity })
+        self.charge_exchanges(&mut moves);
+        Some(moves)
+    }
+
+    /// A leg into an expense place during an exchange is a cost of that
+    /// exchange (LANGUAGE §2): a trading fee, a sale's commission. It stays an
+    /// expense, and the exchange carries its amount so that the engine, which
+    /// prices, counts it once. Fees are paid in what the exchange is paid in
+    /// (the base currency where it is a side, else what arrives); with several
+    /// exchanges the fees are shared out by what each exchanged.
+    fn charge_exchanges(&self, moves: &mut [Move]) {
+        let book = &self.world.book;
+        let cash = |mv: &Move| if mv.out.unit == book.base { mv.out } else { mv.arrive };
+        let exchanges: Vec<usize> = (0..moves.len()).filter(|&at| moves[at].is_exchange()).collect();
+        let Some(&first) = exchanges.first() else { return };
+        let unit = cash(&moves[first]).unit;
+        let fee = |mv: &Move| {
+            let spent = mv.infer == Infer::Known && !mv.is_exchange() && mv.out.unit == unit;
+            spent && book.places[mv.to.end.place].class == Class::Expense
+        };
+        let fees: Qty = moves.iter().filter(|&mv| fee(mv)).map(|mv| mv.out.qty).sum();
+        let paid_with_it = |&&at: &&usize| cash(&moves[at]).unit == unit;
+        let charged: Vec<usize> = exchanges.iter().filter(paid_with_it).copied().collect();
+        let whole: Qty = charged.iter().map(|&at| cash(&moves[at]).qty).sum();
+        if fees.is_zero() || whole.is_zero() {
+            return;
+        }
+        let (mut seen, mut paid) = (Qty::ZERO, Qty::ZERO);
+        for at in charged {
+            seen += cash(&moves[at]).qty;
+            let owed = fees.share(seen, whole).unwrap_or(fees);
+            moves[at].cost = Some(Amount::new(owed - paid, unit));
+            paid = owed;
+        }
     }
 
     /// The single amount a split header states, and what the named place itself
@@ -351,8 +386,12 @@ impl Elab<'_, '_> {
             Stated::All(_) => Infer::All,
             Stated::Fixed(_) | Stated::Rest => Infer::Known,
         };
+        // The counterparty is the most particular one. What the leg says is first. An entity a leg pays is who it
+        // pays, so it comes before the header's payee; an entity a leg is paid from is where the money came from,
+        // and the header's payee (who the whole is paid to) comes before it. Last, the header's own entity.
         let mut tail = shape.tail.over(&leg.tail);
-        tail.payee = tail.payee.or(leg.placed.end.entity).or(hub.end.entity);
+        let paid = if named_is_from { leg.placed.end.entity } else { None };
+        tail.payee = leg.tail.payee.or(paid).or(shape.tail.payee).or(leg.placed.end.entity).or(hub.end.entity);
         Move::between(from, to, (out, arrive), (infer, pending || leg.slot.pending), tail, leg.loc)
     }
 
@@ -374,8 +413,23 @@ impl Elab<'_, '_> {
             (_, true) => Some(End::To),
             _ => None,
         };
-        let said = tail.basis.is_some() || tail.hold.is_some() || tail.since.is_some() || basis_end.is_some();
-        let terms = said.then(|| Box::new(Terms { basis: tail.basis, hold: tail.hold, basis_end, since: tail.since }));
+        // Only an asset place has parcels to be tied to anyone, so a paycheck from `acme` names no spender.
+        let spender = mv.from.end.entity.filter(|_| self.world.book.places[mv.from.end.place].class == Class::Asset);
+        let due = tail.due.map(|due| match due {
+            Due::On(day) => day,
+            Due::After(span) => day.add(span),
+        });
+        let said = tail.basis.is_some()
+            || tail.hold.is_some()
+            || tail.since.is_some()
+            || basis_end.is_some()
+            || spender.is_some()
+            || mv.cost.is_some()
+            || due.is_some();
+        let terms = said.then(|| {
+            let (basis, hold, since, cost) = (tail.basis, tail.hold, tail.since, mv.cost);
+            Box::new(Terms { basis, hold, basis_end, since, spender, cost, due })
+        });
         let recognized = tail.period.map_or(Recognition::on(day), |(from, until)| Recognition { from, until });
         Some(Flow {
             day,
@@ -409,7 +463,8 @@ impl Elab<'_, '_> {
             );
         }
         for (end, unit) in [(&mv.from, mv.out.unit), (&mv.to, mv.arrive.unit)] {
-            if mv.infer != Infer::All {
+            // A basis end changes what the place's parcels cost, and brings no commodity into or out of it.
+            if mv.infer != Infer::All && !end.basis {
                 kept &= self.check_holds(end, unit);
             }
             kept &= self.check_open(end, day);

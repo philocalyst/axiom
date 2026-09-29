@@ -5,9 +5,9 @@ error[duplicate-declaration]: `USD` is already declared by system `std`
     │           ─┬─
     │            ╰── declared again here
     │
-    ├─[std.ax:214:11] (built in)
+    ├─[std.ax:211:11] (built in)
     │
-214 │ commodity USD : currency
+211 │ commodity USD : currency
     │           ─┬─
     │            ╰── first declared here (built in)
     │

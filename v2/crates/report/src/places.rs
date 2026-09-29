@@ -3,7 +3,6 @@
 use axiom_core::Id;
 use axiom_model::{Book, End, Flow, Place};
 
-use crate::history::moves_quantity;
 
 /// A place's full path.
 pub fn path<'s>(book: &Book<'s>, place: Id<Place>) -> &'s str {
@@ -20,7 +19,7 @@ pub fn names<'a, 's>(book: &'a Book<'s>) -> impl Iterator<Item = &'s str> + 'a {
 pub fn route(book: &Book, flow: &Flow) -> String {
     let end = |end: End, place: Id<Place>| {
         let path = path(book, place);
-        if moves_quantity(flow, end) { path.to_string() } else { format!("{path}.basis") }
+        if flow.moves_quantity(end) { path.to_string() } else { format!("{path}.basis") }
     };
     format!("{} → {}", end(End::From, flow.from), end(End::To, flow.to))
 }

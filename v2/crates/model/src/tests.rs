@@ -118,6 +118,44 @@ account assets/broker/checking : broker
 }
 
 #[test]
+fn an_entity_takes_a_name_from_an_account_that_only_ends_with_it_and_the_clash_is_said_once() {
+    let text = "
+account assets/owed/acme : receivable
+2026-01-05 acme -> checking 100 USD
+2026-01-06 acme -> checking 100 USD
+2026-01-07 owed/acme -> checking 50 USD
+";
+    with_book(text, |book, diags| {
+        assert_eq!(codes(diags), ["ambiguous-name"], "{diags:?}");
+        let said = &diags[0];
+        assert_eq!(said.message, "`acme` is both an entity and the end of `assets/owed/acme`, and lines still write it");
+        assert!(said.notes.iter().any(|note| note.contains("written on 2 lines, and each takes the entity")));
+        assert!(said.help.iter().any(|help| help.text.contains("write `owed/acme` where `assets/owed/acme` is meant")));
+        let paid = ["income/salary", "income/salary", "assets/owed/acme"];
+        let from: Vec<_> = book.flows.iter().map(|(_, flow)| book.name(book.places[flow.from].path)).collect();
+        assert_eq!(from, paid, "the entity wins in flows, and the longer suffix still means the account");
+    });
+}
+
+#[test]
+fn an_entity_that_stands_for_the_account_is_no_clash_and_an_unwritten_name_is_not_reported() {
+    let text = "
+account assets/owed/kim : receivable
+entity kim : employer
+  via assets/owed/kim
+account assets/owed/pat : receivable
+2026-01-05 kim -> checking 10 USD
+2026-01-06 owed/pat -> checking 10 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let flow = &book.flows[axiom_core::Id::new(0)];
+        assert_eq!(book.name(book.places[flow.from].path), "assets/owed/kim");
+        assert!(flow.payee.is_some(), "the entity is still the payee");
+    });
+}
+
+#[test]
 fn a_misspelled_name_is_reported_with_the_closest_one() {
     with_book("2026-01-05 savings -> chekcing 10 USD\n2026-01-06 savings -> checking 10 USD", |book, diags| {
         assert_eq!(codes(diags), ["unknown-place"]);
@@ -150,6 +188,29 @@ fn each_form_of_transaction_pairs_what_leaves_with_what_arrives() {
         );
         let implied = book.prices.quotes().iter().filter(|quote| quote.implied).count();
         assert_eq!(implied, 2, "both exchanges say what a share cost");
+    });
+}
+
+#[test]
+fn the_expense_legs_of_an_exchange_are_its_costs_and_no_other_split_has_any() {
+    let text = "
+2026-01-11 brokerage 10 VTI -> 1_500 USD
+  checking 1_490 USD
+  food 10 USD
+2026-01-12 checking -> 2_000 USD
+  brokerage 7 VTI
+  food 5 USD
+2026-01-13 acme -> 5_200 USD
+  food 200 USD
+  checking ...
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let costs: Vec<_> = book.flows.iter().map(|(_, flow)| flow.terms().cost.map(|cost| cost.qty.0)).collect();
+        // The sale, its payment of the fee, the purchase, its fee, and a paycheck that has none.
+        assert_eq!(costs, [Some(10), None, Some(5), None, None, None]);
+        let exchanges: Vec<_> = book.flows.iter().filter(|(_, flow)| flow.is_exchange()).map(|(_, f)| f.day).collect();
+        assert_eq!(exchanges.len(), 2);
     });
 }
 
@@ -414,9 +475,9 @@ fn due_basis_and_basis_ends_are_kept() {
 ";
     with_book(text, |book, diags| {
         assert!(diags.is_empty(), "{diags:?}");
-        let dues: Vec<Option<String>> = book.txns.iter().map(|(_, txn)| txn.due.map(|day| day.to_string())).collect();
-        assert_eq!(dues, [Some("2026-03-31".into()), Some("2026-05-01".into()), None, None, None]);
         let flows = flows_of(book);
+        let dues: Vec<_> = flows.iter().map(|flow| flow.terms().due.map(|day| day.to_string())).collect();
+        assert_eq!(dues, [Some("2026-03-31".into()), Some("2026-05-01".into()), None, None, None]);
         let usd = book.commodity("USD").unwrap();
         assert_eq!(
             flows[2].terms().basis.map(|qty| book.show(crate::Amount::new(qty, usd)).to_string()),
@@ -424,6 +485,11 @@ fn due_basis_and_basis_ends_are_kept() {
         );
         assert_eq!(flows[3].terms().basis_end, Some(crate::End::To));
         assert_eq!(flows[4].terms().basis_end, Some(crate::End::From));
+        // Quantity crosses every end but the basis one.
+        let crosses = |flow: &crate::Flow| [flow.moves_quantity(crate::End::From), flow.moves_quantity(crate::End::To)];
+        assert_eq!(crosses(flows[0]), [true, true]);
+        assert_eq!(crosses(flows[3]), [true, false]);
+        assert_eq!(crosses(flows[4]), [false, true]);
     });
 }
 
@@ -647,6 +713,42 @@ account assets/owed : receivable
 }
 
 #[test]
+fn a_place_that_holds_one_commodity_still_takes_a_flow_into_its_basis() {
+    let text = "
+commodity HOME : stock
+account assets/house
+  holds HOME
+2026-04-01 checking -> house.basis 100 USD
+2026-04-02 checking -> house 100 USD
+2026-04-03 house.basis 40 USD -> checking
+";
+    with_book(text, |_, diags| {
+        assert_eq!(codes(diags), ["not-held"], "only the flow that brings dollars into the house: {diags:?}");
+    });
+}
+
+#[test]
+fn a_kind_of_commodity_says_how_its_parcels_are_relieved() {
+    let text = "
+kind money : currency
+  select lifo
+kind legal-tender : commodity
+  select fifo
+kind good : commodity
+commodity EUR : currency
+commodity CHF : money
+commodity GLD : good
+commodity BRL : legal-tender
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let select = |symbol: &str| book.commodities[book.commodity(symbol).unwrap()].select;
+        assert_eq!((select("EUR"), select("BRL"), select("GLD")), (None, Some(crate::Policy::Fifo), None));
+        assert_eq!(select("CHF"), Some(crate::Policy::Lifo), "a kind may say otherwise than the one it comes from");
+    });
+}
+
+#[test]
 fn the_built_in_places_and_kinds_resolve_as_names() {
     let text = "
 2026-01-31 savings = 1 USD via market
@@ -713,6 +815,30 @@ law counts
             book.rules.on_in[checking].iter().map(|rule| book.name(book.laws[rule.law].name)).collect();
         assert_eq!(order, ["counts", "reads"], "the count comes first though it is written second");
     });
+}
+
+#[test]
+fn a_tally_is_read_for_another_year_by_a_number_or_a_date_and_by_nothing_else() {
+    let law = |read: &str| {
+        let reads = format!("law reads\n  each year\n  count {read} as before\n");
+        format!("law counts\n  on in\n  count amount as base-total\n\n{reads}")
+    };
+    for read in ["tally(base-total)", "tally(base-total, year - 1)", "tally(base-total, date(2025, 1, 1))"] {
+        with_book(&law(read), |_, diags| assert!(diags.is_empty(), "{read}: {diags:?}"));
+    }
+    with_book(&law("tally(base-total, 5 USD)"), |_, diags| assert_eq!(codes(diags), ["type-mismatch"]));
+    with_book(&law("tally(base-total, year, year)"), |_, diags| assert_eq!(codes(diags), ["call-arity"]));
+}
+
+#[test]
+fn a_closing_judges_a_year_on_its_day_of_the_next() {
+    let day = |year, month, day| axiom_core::Day::from_ymd(year, month, day);
+    let april = crate::Closing { month: 4, day: 15 };
+    assert_eq!(april.day_for(2025), day(2026, 4, 15));
+    // A February 29 closing falls on the 28th in a year that has no 29th.
+    let leap_day = crate::Closing { month: 2, day: 29 };
+    assert_eq!(leap_day.day_for(2025), day(2026, 2, 28));
+    assert_eq!(leap_day.day_for(2027), day(2028, 2, 29));
 }
 
 #[test]
@@ -1026,13 +1152,34 @@ fn a_header_waiver_covers_every_leg_with_one_location() {
 }
 
 #[test]
-fn a_due_day_belongs_to_the_header_and_an_opening_line_says_since() {
+fn a_leg_names_its_own_counterparty_and_due_day_over_the_headers() {
     let text = "
-2026-01-13 acme -> 100 USD
-  savings   40 USD due 30d
-  checking  ...
+entity aldi : grocer
+2026-03-01 checking -> 300 USD / acme #x due 2026-03-08
+  food     100 USD
+  savings  100 USD / aldi
+  aldi     100 USD due 30d
+2026-03-02 -> food 100 USD / aldi
+  savings   40 USD
+  acme      ...
 ";
-    with_book(text, |_, diags| assert_eq!(codes(diags), ["due-on-leg"], "{diags:?}"));
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let name = |flow: &crate::Flow| flow.payee.map(|entity| book.name(book.entities[entity].path));
+        let flows = flows_of(book);
+        let says: Vec<_> = flows.iter().map(|flow| (name(flow), flow.terms().due.map(|day| day.to_string()))).collect();
+        assert_eq!(
+            says,
+            [
+                (Some("acme"), Some("2026-03-08".into())),
+                (Some("aldi"), Some("2026-03-08".into())),
+                (Some("aldi"), Some("2026-03-31".into())),
+                (Some("aldi"), None),
+                (Some("aldi"), None),
+            ],
+            "a leg's own payee, else the entity it pays, else the header's; and its own due"
+        );
+    });
 }
 
 #[test]

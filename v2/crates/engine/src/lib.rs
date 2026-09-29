@@ -47,6 +47,8 @@ mod totals;
 #[cfg(test)]
 mod fixture;
 #[cfg(test)]
+mod source_tests;
+#[cfg(test)]
 mod tests;
 
 use axiom_core::{Day, Diagnostic, Id, Qty, Sym};
@@ -69,6 +71,10 @@ pub struct Options {
 /// these vectors.
 pub struct Run {
     pub today: Day,
+    /// The last day the fold reached: `today`, or the journal's last fact if
+    /// that is later. Periods close and deadlines fire up to here and no
+    /// further, so a law with a deadline after it has not run.
+    pub horizon: Day,
     /// Parallel to `Book::flows`: each journal flow as solved and settled.
     pub posted: Box<[Posted]>,
     /// The final state, by place then commodity.

@@ -169,6 +169,7 @@ impl Cast {
                 scale,
                 title: None,
                 liquidity: None,
+                select: None,
                 growth: None,
                 props: Box::default(),
                 doc: None,
@@ -280,10 +281,8 @@ fn journal(cast: &mut Cast) -> Journal {
             day: when,
             first: Id::new(index as u32),
             len: 1,
-            payee,
             codes: codes.clone(),
             waive: None,
-            due,
             plan: None,
             doc: (row == 13).then(|| cast.names.intern("/// The March design invoice.")),
             loc: line(row),
@@ -305,7 +304,7 @@ fn journal(cast: &mut Cast) -> Journal {
             codes,
             loc: line(row),
             waive: None,
-            terms: None,
+            terms: due.map(|due| Box::new(Terms { due: Some(due), ..Terms::default() })),
         });
         journal.posted.push(Posted { out: Qty(cents), arrive: Qty(cents), state });
     }
@@ -570,6 +569,7 @@ pub(crate) fn household() -> Household {
     };
     let run = Run {
         today: day(2026, 3, 31),
+        horizon: day(2026, 3, 31),
         posted: journal.posted.into(),
         holdings: records.holdings,
         gains: records.gains,

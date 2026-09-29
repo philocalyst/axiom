@@ -2,8 +2,9 @@
 //!
 //! A claim is value someone owes. Owed to you, it is a parcel in a `claim`
 //! place, and each parcel is one claim: it remembers the transaction that made
-//! it. Owed by you, it is a debt in a `payable` place, which holds a plain
-//! balance, so it is told apart by the code on the flows that made and settled it.
+//! it, and the flow of it that paid in has the payee and the `due` day. Owed by
+//! you, it is a debt in a `payable` place, which holds a plain balance, so it is
+//! told apart by the code on the flows that made and settled it.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -23,24 +24,26 @@ pub struct Claim {
     /// Owed to you, or owed by you.
     pub mine: bool,
     pub place: Id<Place>,
-    /// The transaction that made it: its codes, doc, source line and payee.
+    /// The transaction that made it: its codes, doc and source line.
     pub txn: Id<Txn>,
     pub left: Amount,
     pub made: Day,
+    /// Who owes it, or is owed: the payee of the flow that made it.
+    pub payee: Option<Id<Entity>>,
     pub due: Option<Day>,
 }
 
 impl Claim {
     /// Who owes it, or is owed: the payee, else the place the claim sits in.
     pub fn counterparty<'s>(&self, book: &Book<'s>) -> &'s str {
-        match book.txns[self.txn].payee {
+        match self.payee {
             Some(payee) => book.name(book.entities[payee].path),
             None => path(book, self.place),
         }
     }
 
-    pub fn with(&self, book: &Book, entity: Id<Entity>) -> bool {
-        book.txns[self.txn].payee == Some(entity)
+    pub fn with(&self, entity: Id<Entity>) -> bool {
+        self.payee == Some(entity)
     }
 }
 
@@ -61,13 +64,17 @@ pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Ho
     let book = lens.book;
     let claimed = holdings.into_iter().filter(|holding| book.places[holding.place].claim && lens.owns(holding.place));
     let parcels = claimed.flat_map(|holding| {
-        holding.lots.iter().map(move |lot| Claim {
-            mine: true,
-            place: holding.place,
-            txn: lot.txn,
-            left: Amount::new(lot.qty, holding.unit),
-            made: lot.acquired,
-            due: book.txns[lot.txn].due,
+        holding.lots.iter().map(move |lot| {
+            let made = book.paid_into(lot.txn, holding.place);
+            Claim {
+                mine: true,
+                place: holding.place,
+                txn: lot.txn,
+                left: Amount::new(lot.qty, holding.unit),
+                made: lot.acquired,
+                payee: made.and_then(|flow| flow.payee),
+                due: made.and_then(|flow| flow.terms().due),
+            }
         })
     });
     let payable = book.kind("payable").ok();
@@ -93,14 +100,14 @@ pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim>
         let flow = posting.flow;
         if flow.from == place {
             let Some(&code) = flow.codes.first() else { continue };
-            let due = book.txns[flow.txn].due;
             let debt = debts.entry(code).or_insert(Claim {
                 mine: false,
                 place,
                 txn: flow.txn,
                 left: Amount::zero(flow.out.unit),
                 made: flow.day,
-                due,
+                payee: flow.payee,
+                due: flow.terms().due,
             });
             debt.left.qty += posting.out().qty;
         } else if let Some(debt) =

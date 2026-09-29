@@ -50,6 +50,13 @@ impl Flow {
     pub fn terms(&self) -> &Terms {
         self.terms.as_deref().unwrap_or(&Terms::NONE)
     }
+
+    /// Whether quantity crosses `end`. At a `PLACE.basis` end none does: the
+    /// flow changes what the place's parcels cost, and nothing arrives there or
+    /// leaves it. Everything that reads a flow as money asks this first.
+    pub fn moves_quantity(&self, end: End) -> bool {
+        self.terms().basis_end != Some(end)
+    }
 }
 
 /// An inclusive range of days over which a flow is recognized.
@@ -85,10 +92,28 @@ pub struct Terms {
     pub basis_end: Option<End>,
     /// An opening line's `since`: when its parcels were acquired.
     pub since: Option<Day>,
+    /// An entity written as the source (`car-fund -> car-repair 150 USD`): the
+    /// parcels tied to it leave first, whatever its `on spend` laws make of
+    /// the flow, since the flow says whose money it is.
+    pub spender: Option<Id<Entity>>,
+    /// What the legs of an exchange into expense places cost it, in what the
+    /// fee is paid in (a trading fee, a sale's commission): the parcels sold
+    /// fetched that much less, and the parcels bought cost that much more.
+    pub cost: Option<Amount>,
+    /// `due`: the flow made a claim due on this day. In a `claim` place its
+    /// parcel stays apart, and it is this flow's `due` and payee that say who
+    /// owes it and by when.
+    pub due: Option<Day>,
 }
 
 impl Terms {
-    pub const NONE: Terms = Terms { basis: None, hold: None, basis_end: None, since: None };
+    pub const NONE: Terms =
+        Terms { basis: None, hold: None, basis_end: None, since: None, spender: None, cost: None, due: None };
+
+    /// The same terms `days` later: a due day goes with the flow that carries it.
+    pub fn moved(&self, days: i32) -> Terms {
+        Terms { due: self.due.map(|due| due.add_days(days)), ..self.clone() }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -142,13 +167,9 @@ pub struct Txn {
     /// The flows it produced: `first .. first + len` in `Book::flows`.
     pub first: Id<Flow>,
     pub len: u32,
-    pub payee: Option<Id<Entity>>,
     pub codes: Box<[Sym]>,
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,
-    /// `due`: the transaction made a claim due on this day. In a `claim` place
-    /// its parcels stay apart, remembering this transaction.
-    pub due: Option<Day>,
     /// The named plan this transaction is an occurrence of (`DATE paycheck`).
     pub plan: Option<Id<Plan>>,
     pub doc: Option<Sym>,

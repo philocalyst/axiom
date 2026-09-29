@@ -9,10 +9,10 @@
   taxes/payroll         176.54 USD
   health                60.00 USD
   checking              ...
-2026-02-06 checking -> savings 100 USD #car for car-fund
-2026-02-06 checking -> savings 100 USD #insurance for insurance-fund
-2026-02-06 checking -> savings 250 USD #trip for trip-fund
-2026-02-06 checking -> savings 100 USD #emergency for emergency-fund
+2026-02-06 checking -> savings 100 USD for car-fund
+2026-02-06 checking -> savings 100 USD for insurance-fund
+2026-02-06 checking -> savings 250 USD for trip-fund
+2026-02-06 checking -> savings 100 USD for emergency-fund
 2026-02-07 wallet -> personal-care 35 USD / barber
 2026-02-08 visa -> phone 40 USD / mint-mobile
 2026-02-09 visa -> transport 15.54 USD / rideshare

@@ -13,7 +13,7 @@ Income and spending
   ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Total income          10,400.00 USD  10,475.00 USD  10,400.00 USD  10,400.00 USD  8,350.00 USD  10,500.00 USD  10,500.00 USD  34,159.73 USD                                          105,184.73 USD
   ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  expenses               7,668.50 USD   7,786.12 USD   7,602.72 USD   7,569.56 USD  8,961.03 USD   9,662.26 USD   7,737.90 USD   8,918.85 USD                                           65,906.94 USD
+  expenses               7,668.50 USD   7,786.12 USD   7,602.72 USD   7,569.56 USD  8,961.03 USD   9,662.26 USD   7,737.90 USD  35,887.60 USD                                           92,875.69 USD
     dining                 188.11 USD     235.94 USD     142.44 USD     198.62 USD    100.13 USD     143.41 USD     225.04 USD     179.28 USD                                            1,412.97 USD
     groceries              449.02 USD     382.74 USD     291.45 USD     351.48 USD    333.26 USD     392.96 USD     350.35 USD     358.22 USD                                            2,909.48 USD
     living                 326.94 USD     292.67 USD     461.16 USD     319.17 USD    265.91 USD     387.38 USD     423.68 USD     480.04 USD                                            2,956.95 USD
@@ -27,11 +27,12 @@ Income and spending
       property-tax                                                                                 2,190.00 USD                                                                          2,190.00 USD
       repairs                             180.00 USD                                1,246.00 USD                                                                                         1,426.00 USD
       utilities                                                                       154.60 USD                                                                                           154.60 USD
+    selling-costs                                                                                                               26,968.75 USD                                           26,968.75 USD
     taxes                1,827.00 USD   1,827.00 USD   1,827.00 USD   1,827.00 USD  1,827.00 USD   1,827.00 USD   1,827.00 USD   1,827.00 USD                                           14,616.00 USD
       federal            1,215.00 USD   1,215.00 USD   1,215.00 USD   1,215.00 USD  1,215.00 USD   1,215.00 USD   1,215.00 USD   1,215.00 USD                                            9,720.00 USD
       payroll              612.00 USD     612.00 USD     612.00 USD     612.00 USD    612.00 USD     612.00 USD     612.00 USD     612.00 USD                                            4,896.00 USD
   ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Net                    2,731.50 USD   2,688.88 USD   2,797.28 USD   2,830.44 USD   -611.03 USD     837.74 USD   2,762.10 USD  25,240.88 USD  0.00 USD  0.00 USD  0.00 USD  0.00 USD   39,277.79 USD
+  Net                    2,731.50 USD   2,688.88 USD   2,797.28 USD   2,830.44 USD   -611.03 USD     837.74 USD   2,762.10 USD  -1,727.87 USD  0.00 USD  0.00 USD  0.00 USD  0.00 USD   12,309.04 USD
   · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
     them.
   · Flows written over a date range are recognized a little each day across the periods they cover.

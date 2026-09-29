@@ -1,5 +1,5 @@
-2025-08-01 checking -> 3_150.00 USD #rent-2025-08 due 2025-08-08
-  rent                    1_050.00 USD / landlord
+2025-08-01 checking -> 3_150.00 USD / landlord #rent-2025-08 due 2025-08-08
+  rent                    1_050.00 USD
   ben                     1_050.00 USD
   cleo                    1_050.00 USD
 2025-08-02 ben -> checking 1_050.00 USD for #rent-2025-08
@@ -15,8 +15,8 @@
   taxes/payroll           109.44 USD
   checking                ...
 2025-08-08 visa -> phone 45 USD / mint-mobile
-2025-08-09 checking -> 69.99 USD #shared-2025-08 due 2025-09-23
-  utilities               23.33 USD / fiberco
+2025-08-09 checking -> 69.99 USD / fiberco #shared-2025-08 due 2025-09-23
+  utilities               23.33 USD
   ben                     23.33 USD
   cleo                    23.33 USD
 2025-08-10 income/tips -> wallet 135.77 USD
@@ -29,8 +29,8 @@
 
 /// A weekend at a cabin with Ben, Cleo and Riley: the cabin, gas and food, 1,182.80 USD on my card. Four ways: my share is an expense,
 /// and each of the others owes 295.70 USD by September 15 (a claim on each, marked `#trip-2025-08`).
-2025-08-16 visa -> 1_182.80 USD #trip-2025-08 due 2025-09-15
-  travel                  295.70 USD / mountain-cabins
+2025-08-16 visa -> 1_182.80 USD / mountain-cabins #trip-2025-08 due 2025-09-15
+  travel                  295.70 USD
   ben                     295.70 USD
   cleo                    295.70 USD
   riley                   295.70 USD

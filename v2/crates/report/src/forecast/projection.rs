@@ -11,7 +11,7 @@ use axiom_core::{Day, Id, Qty, Ratio};
 use axiom_engine::{Holding, Ledger, Options};
 use axiom_model::{Book, Class, Commodity, End, Flow, Place, Value};
 
-use crate::history::{Held, moves_quantity};
+use crate::history::Held;
 use crate::lens::{Basket, Lens, Liquidity};
 
 /// A cash place that goes below zero.
@@ -93,8 +93,8 @@ fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qt
 /// what is owed. `None` when there is nothing to move.
 fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
     // A basis end moves no quantity, so there is none for it to run out of.
-    let leaves = moves_quantity(&flow, End::From);
-    let arrives = moves_quantity(&flow, End::To);
+    let leaves = flow.moves_quantity(End::From);
+    let arrives = flow.moves_quantity(End::To);
     let held_back =
         leaves && matches!(lens.liquidity(flow.from, flow.out.unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
     let room = if held_back {

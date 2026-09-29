@@ -13,16 +13,11 @@ system std
 
 // ─── Places: assets ─────────────────────────────────────────────────────────
 
-/// Physical cash and money held outside any institution. Money in another
-/// currency is spent oldest first: cash is not an investment, so nothing asks
-/// which lot a euro came from.
+/// Physical cash and money held outside any institution.
 kind cash : asset
-  select fifo
 
-/// A checking, savings or money-market account. Money in another currency is
-/// spent oldest first: a euro spent on groceries is not a sale of a lot.
+/// A checking, savings or money-market account.
 kind bank : asset
-  select fifo
   /// A bank balance below zero is an overdraft: the bank is lending you the
   /// difference, usually for a fee.
   ///
@@ -114,8 +109,10 @@ kind medical : expense
 
 // ─── Commodities ────────────────────────────────────────────────────────────
 
-/// Legal tender.
+/// Legal tender. It is spent oldest first, wherever it is held: a euro spent on
+/// groceries is not a sale of a lot, so nothing asks which one it was.
 kind currency : commodity
+  select fifo
 
 /// Anything traded on a market.
 kind security : commodity

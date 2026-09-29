@@ -35,7 +35,8 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
     // its tax answer too, whether they run at its end or on a closing day.
     let horizon = closings::judged_through(book, at);
     let mut ledger = Ledger::new(book, Options { today: horizon.max(run.today), relaxed: book.relaxed });
-    ledger.advance(at);
+    // A withdrawal is a fact of `at`, so it comes before what closes that day (a month's or a year's end).
+    ledger.advance_to_closing(at);
 
     let holdings: Vec<&Holding> = ledger.holdings().collect();
     let (mut cash, mut slow) = (Vec::new(), Vec::new());

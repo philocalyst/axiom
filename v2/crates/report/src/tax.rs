@@ -13,7 +13,6 @@ use axiom_engine::{Cause, Effect, Owed, Run};
 use axiom_model::{Amount, Book, Commodity, Entity, System};
 
 use crate::closings;
-use crate::history::horizon;
 use crate::lens::Whose;
 use crate::table::{cause_cell, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
@@ -63,9 +62,8 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) ->
 /// The days after the run's end on which closing laws written for `whose`
 /// will judge `year`.
 fn pending_closings(book: &Book, run: &Run, whose: &Whose, year: i32) -> Vec<Day> {
-    let horizon = horizon(book, run);
     let mut days = closings::days_for(book, year, |rule| whose.governs(book, rule.subject));
-    days.retain(|&day| day > horizon);
+    days.retain(|&day| day > run.horizon);
     days
 }
 

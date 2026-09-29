@@ -13,7 +13,7 @@ Income and spending
   ───────────────────────────────────────────────────────────────────────────
   Total income                       144,384.73 USD            144,384.73 USD
   ───────────────────────────────────────────────────────────────────────────
-  expenses               838.16 USD   97,679.97 USD             98,518.13 USD
+  expenses               838.16 USD  124,648.72 USD            125,486.88 USD
     dining                             1,926.42 USD              1,926.42 USD
     groceries                          4,321.33 USD              4,321.33 USD
     living                             4,042.98 USD              4,042.98 USD
@@ -28,11 +28,12 @@ Income and spending
       property-tax                     4,380.00 USD              4,380.00 USD
       repairs                          2,051.00 USD              2,051.00 USD
       utilities                          154.60 USD                154.60 USD
+    selling-costs                     26,968.75 USD             26,968.75 USD
     taxes                             21,924.00 USD             21,924.00 USD
       federal                         14,580.00 USD             14,580.00 USD
       payroll                          7,344.00 USD              7,344.00 USD
   ───────────────────────────────────────────────────────────────────────────
-  Net                   -838.16 USD   46,704.76 USD  0.00 USD   45,866.60 USD
+  Net                   -838.16 USD   19,736.01 USD  0.00 USD   18,897.85 USD
   · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
     them.
   · Flows written over a date range are recognized a little each day across the periods they cover.
