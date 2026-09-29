@@ -135,9 +135,9 @@ impl<'s> Parser<'s> {
         }
     }
 
-    fn take_message(&mut self) -> Option<Name<'s>> {
+    fn take_message(&mut self) -> Option<Text<'s>> {
         let Tok::Str(text) = self.tok() else { return None };
-        Some(self.bump_as(Name(text)))
+        Some(self.bump_as(Text(text)))
     }
 
     /// An effect, after `else`.

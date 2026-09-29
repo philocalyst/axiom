@@ -147,7 +147,7 @@ impl<'s> Parser<'s> {
                 Ok(self.node(ExprKind::Date(day), token.loc, first))
             }
             Tok::Span(span) => self.leaf(token, ExprKind::Span(span)),
-            Tok::Str(text) => self.leaf(token, ExprKind::Str(text)),
+            Tok::Str(text) => self.leaf(token, ExprKind::Str(Text(text))),
             Tok::Unit(text) => self.leaf(token, ExprKind::Unit(Name(text))),
             Tok::Purpose(name) => self.leaf(token, ExprKind::Purpose(name)),
             Tok::Code(code) => self.leaf(token, ExprKind::Code(code)),

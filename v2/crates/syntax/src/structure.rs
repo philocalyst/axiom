@@ -79,6 +79,9 @@ const BLOCK_WORDS: [(&str, &str); 11] = [
 struct Block {
     indent: Option<usize>,
     previous: Loc,
+    /// Whether a line that starts with an amount may be indented further than
+    /// the rest, to line its digits up with those above it.
+    ragged: bool,
 }
 
 impl<'s> Parser<'s> {
@@ -231,9 +234,20 @@ impl<'s> Parser<'s> {
     pub fn children(
         &mut self,
         parent: &Line<'s>,
+        each: impl FnMut(&mut Self, &mut Line<'s>) -> Parse<()>,
+    ) -> Parse<()> {
+        self.block(parent, false, each)
+    }
+
+    /// [`Parser::children`], where with `ragged` a line that starts with an
+    /// amount (an item) may be indented further than the others.
+    pub fn block(
+        &mut self,
+        parent: &Line<'s>,
+        ragged: bool,
         mut each: impl FnMut(&mut Self, &mut Line<'s>) -> Parse<()>,
     ) -> Parse<()> {
-        let mut block = Block { indent: None, previous: self.line_loc(parent) };
+        let mut block = Block { indent: None, previous: self.line_loc(parent), ragged };
         let mut intact = true;
         while let Some(mut line) = self.next_child(parent.indent) {
             if !self.is_aligned(&mut block, &line) {
@@ -271,7 +285,8 @@ impl<'s> Parser<'s> {
     /// reported once.
     fn is_aligned(&mut self, block: &mut Block, line: &Line<'s>) -> bool {
         let expected = *block.indent.get_or_insert(line.indent);
-        if line.indent == expected {
+        let amount_first = matches!(self.src.as_bytes()[line.body], b'0'..=b'9' | b'+' | b'-');
+        if line.indent == expected || (block.ragged && line.indent > expected && amount_first) {
             return true;
         }
         let there = format!("indented {} spaces, where the block uses {expected}", line.indent);

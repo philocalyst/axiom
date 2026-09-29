@@ -207,7 +207,9 @@ pub(crate) struct Token<'s> {
     pub loc: Loc,
 }
 
-/// The tokens of one line, read as they are asked for.
+/// The tokens of one line, read as they are asked for. Cloning one is how a
+/// rule looks further ahead than the two tokens it can peek at.
+#[derive(Clone)]
 pub(crate) struct Lexer<'s> {
     src: &'s str,
     /// The source cut at the end of the line, so running off it is `None`.
@@ -276,13 +278,6 @@ impl<'s> Lexer<'s> {
     /// Where the last consumed token ended.
     pub fn prev_end(&self) -> u32 {
         self.prev_end
-    }
-
-    /// The next non-blank run of characters, raw: what a file name is.
-    pub fn raw_word(&mut self) -> Option<Name<'s>> {
-        let start = self.raw_start()?;
-        let len = self.bytes[start..].iter().position(|&b| b == b' ' || b == b'\t').unwrap_or(self.bytes.len() - start);
-        Some(self.resume(start, start + len))
     }
 
     /// The rest of the line, raw, comments included: what a command is.

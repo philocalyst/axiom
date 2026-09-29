@@ -11,13 +11,11 @@ use crate::lex::{Punct, Tok};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser};
 
-const BUDGET_PERIODS: [(&str, Period); 2] = [("monthly", Period::Month), ("yearly", Period::Year)];
-
 /// Where v3's chart put the accounts that v4 has no accounts for.
 const CHART_ROOTS: [&str; 3] = ["income/", "expenses/", "equity/"];
 
 impl<'s> Parser<'s> {
-    /// `account NAME [: KIND [at NAME]]`, `entity NAME[, NAME…] [: KIND]`, `asset`,
+    /// `account NAME [: KIND [at NAME]]`, `entity NAME[, NAME…] [: KIND] [#PURPOSE]`, `asset`,
     /// `purpose`, `commodity SYMBOL [: KIND]` or `kind NAME [: PARENT]`, with its
     /// indented properties and nested laws. Several entities on a line are one
     /// declaration each, all sharing what is written under them.
@@ -36,6 +34,10 @@ impl<'s> Parser<'s> {
         let kind = self.eat(Punct::Colon).and_then(|_| self.name_like("expected-kind", "a kind after `:`").ok());
         let at = if what == DeclKind::Account { self.eat_word("at") } else { None };
         let at = at.and_then(|_| self.name("expected-name", "the institution it is with, such as `chase`").ok());
+        let purpose = match (what, self.tok()) {
+            (DeclKind::Entity, Tok::Purpose(purpose)) => Some(self.bump_as(purpose)),
+            _ => None,
+        };
         let header = self.keep_header(line);
         let (props, laws) = (self.mark::<Prop>(), self.mark::<Law>());
         let _ = self.children(line, |parser, child| match parser.eat_word("law") {
@@ -44,35 +46,45 @@ impl<'s> Parser<'s> {
         });
         let (props, laws) = (self.since(props), self.since(laws));
         for name in names {
-            self.emit(&header, Decl { what, name, kind, at, props, laws }, ItemKind::Decl);
+            self.emit(&header, Decl { what, name, kind, at, purpose, props, laws }, ItemKind::Decl);
         }
         Ok(())
     }
 
-    /// `budget PURPOSE AMOUNT monthly|yearly`
+    /// `budget PURPOSE LIMIT monthly|yearly [carries]`
     pub fn budget(&mut self, line: &mut Line<'s>) -> Parse<()> {
         let purpose = self.name("expected-name", "the purpose it is for, such as `food`")?;
-        let amount = self.amount()?;
-        let (per, _) = self.choose(&BUDGET_PERIODS, "unknown-period", "budget period")?;
+        let allowance = self.allowance()?;
         let header = self.end_header(line)?;
-        self.emit(&header, Budget { purpose, amount, per }, ItemKind::Budget);
+        self.emit(&header, Budget { purpose, allowance }, ItemKind::Budget);
         Ok(())
     }
 
-    /// `NAME ARG*`: arguments are primary expressions, commas optional.
+    /// A property line of a declaration: `NAME ARG*`.
     pub fn property(&mut self, line: &Line<'s>) -> Parse<()> {
+        let prop = self.prop(false)?;
+        debug_assert_eq!(prop.loc.start as usize, line.body);
+        self.push(prop);
+        Ok(())
+    }
+
+    /// `NAME ARG*`: arguments are primary expressions, commas optional. In a
+    /// statement they stop at what ends one: a string, a code or `until`.
+    pub fn prop(&mut self, in_statement: bool) -> Parse<Prop<'s>> {
+        let start = self.peek().loc.start as usize;
         let name = self.name("expected-property", "a property name")?;
-        let start = self.roots.len();
+        let roots = self.roots.len();
         while !self.at_eol() {
+            if in_statement && matches!(self.tok(), Tok::Str(_) | Tok::Code(_) | Tok::Name("until")) {
+                break;
+            }
             if self.eat(Punct::Comma).is_none() {
                 let arg = self.primary()?;
                 self.roots.push(arg);
             }
         }
-        let args = self.roots_since(start);
-        let loc = self.loc_from(line.body);
-        self.push(Prop { name, args, loc });
-        Ok(())
+        let args = self.roots_since(roots);
+        Ok(Prop { name, args, loc: self.loc_from(start) })
     }
 
     /// `code GLOB [GLOB…]` with `on PLACE-GLOB | KIND …` lines.
@@ -197,31 +209,53 @@ impl<'s> Parser<'s> {
         Ok(self.node(ExprKind::Pct(num), token.loc, first))
     }
 
-    /// `sync FILE` with a `run COMMAND…` line. Both are raw text, not tokens:
-    /// a file name has dots and a command has anything.
+    /// `sync NAME` with a `run COMMAND…` line, and perhaps `into PATH`, which
+    /// are raw text (a command has anything in it, and a path has dots and
+    /// braces), and any other lines, which are properties.
     pub fn sync(&mut self, line: &mut Line<'s>) -> Parse<()> {
-        let Some(file) = self.lexer.raw_word() else {
-            return Err(self.expected("expected-file", "the file to write, like `prices/2026.ax`"));
-        };
+        let name = self.name("expected-name", "what it feeds, such as `checking`")?;
+        if self.at(Punct::Dot) && self.peek().loc.start == self.lexer.prev_end() {
+            return self.fail(self.sync_file(name));
+        }
         let header = self.end_header(line)?;
-        let mut run = None;
-        self.children(line, |parser, _| {
-            parser.expect_word("run", "expected-run", "`run` and a command")?;
-            let Some(command) = parser.lexer.raw_rest() else {
-                return Err(parser.expected("expected-command", "the command to run"));
-            };
-            match run.replace(command) {
-                Some(_) => {
-                    let diag = Diagnostic::error("duplicate-run", "a sync has one `run` command")
-                        .label(parser.loc_of(&command), "second command");
-                    parser.fail(diag)
-                }
-                None => Ok(()),
-            }
+        let (mut run, mut into) = (None, None);
+        let props = self.mark::<Prop>();
+        self.children(line, |parser, child| match parser.tok() {
+            Tok::Name("run") => parser.raw_line("run", "the command to run", &mut run),
+            Tok::Name("into") => parser.raw_line("into", "where to write, like `prices/{year}.ax`", &mut into),
+            _ => parser.property(child),
         })?;
         let Some(run) = run else { return self.fail(missing_run(header.loc)) };
-        self.emit(&header, Sync { file, run }, ItemKind::Sync);
+        let props = self.since(props);
+        self.emit(&header, Sync { name, run: run.0, into: into.map(|(text, _)| text), props }, ItemKind::Sync);
         Ok(())
+    }
+
+    /// A `sync` line that is a word and the raw text after it, once.
+    fn raw_line(&mut self, word: &str, what: &str, slot: &mut Option<(Text<'s>, Loc)>) -> Parse<()> {
+        let keyword = self.bump().loc;
+        let Some(text) = self.lexer.raw_rest() else {
+            return Err(self.expected(if word == "run" { "expected-command" } else { "expected-path" }, what));
+        };
+        let at = keyword.to(self.loc_of(&text));
+        match slot.replace((Text(text.0), at)) {
+            Some((_, first)) => Err(self.duplicate(&format!("`{word}` line"), at, first)),
+            None => Ok(()),
+        }
+    }
+
+    /// v3's `sync prices/2026.ax`, which named the file it wrote. A sync is
+    /// named for what it feeds now, and says where it writes with `into`.
+    fn sync_file(&self, name: Name<'s>) -> Diagnostic {
+        let start = self.loc_of(&name);
+        let len = self.src[start.start as usize..].find([' ', '\t', '\r', '\n']).unwrap_or(self.src.len() - start.start as usize);
+        let file = Loc::new(self.id, start.start, start.start + len as u32);
+        let written = self.text(file);
+        let feeds = name.split('/').next().unwrap_or(&name);
+        Diagnostic::error("sync-file", format!("a sync is named for what it feeds, not for the file `{written}` it writes"))
+            .label(file, "a file is `into`, on a line of its own")
+            .note("`sync prices` names the source, and its lines say `run` a command and `into` a file")
+            .fix(format!("name it `{feeds}` and say where it writes"), file, format!("{feeds}\n  into {written}"))
     }
 }
 

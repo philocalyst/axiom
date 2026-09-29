@@ -39,8 +39,6 @@ pub(crate) enum Scope {
     Opening(Day),
     /// A contract's template: no day, so no short dates.
     Undated,
-    /// A contract's schedule, which says only its purpose and a description.
-    Schedule,
 }
 
 impl Scope {
@@ -48,7 +46,7 @@ impl Scope {
     pub fn day(self) -> Option<Day> {
         match self {
             Scope::Dated(day) | Scope::Opening(day) => Some(day),
-            Scope::Undated | Scope::Schedule => None,
+            Scope::Undated => None,
         }
     }
 

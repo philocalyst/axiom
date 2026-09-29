@@ -20,14 +20,34 @@ impl<'s> Parser<'s> {
     pub fn flow_head(&mut self, from: Side<'s>, date: Day, clauses: usize) -> Parse<(Flow<'s>, Loc)> {
         let arrow = self.arrow(&from)?;
         let to = self.side()?;
+        if self.at(Punct::Slash) {
+            return Err(self.slash(Some((&from, &to))));
+        }
         let tail = self.tail(Scope::Dated(date), clauses)?;
-        Ok((Flow { from, to, tail, legs: Many::EMPTY }, arrow))
+        Ok((Flow { from, to, tail, body: Body::default() }, arrow))
     }
 
     /// Reads the legs under `line` into `flow` and checks they fit its sides.
     pub fn flow_legs(&mut self, line: &Line<'s>, flow: &mut Flow<'s>, date: Day, arrow: Loc) -> Parse<()> {
-        flow.legs = self.legs(line, |parser, leg_line| parser.leg(leg_line, Scope::Dated(date)).map(drop))?;
+        flow.body = self.body(line, Scope::Dated(date))?;
         self.check_shape(flow, arrow)
+    }
+
+    /// The lines under a header, each a leg (it names an end) or an item (it
+    /// starts with a sign or an amount). Items may be indented further than
+    /// their siblings, to line their amounts up.
+    pub fn body(&mut self, line: &Line<'s>, scope: Scope) -> Parse<Body<'s>> {
+        let (legs, items) = (self.mark::<Leg>(), self.mark::<LineItem>());
+        self.block(line, true, |parser, child| match parser.at_item() {
+            true => parser.line_item(child, scope).map(drop),
+            false => parser.leg(child, scope).map(drop),
+        })?;
+        Ok(Body { legs: self.since(legs), items: self.since(items) })
+    }
+
+    /// Whether the next token starts an item and not a leg: a sign, or an amount.
+    pub fn at_item(&self) -> bool {
+        matches!(self.tok(), Tok::Number(_) | Tok::Percent(_) | Tok::Punct(Punct::Plus | Punct::Minus))
     }
 
     /// The legs the lines under `line` make, each parsed by `each`, which adds
@@ -157,20 +177,44 @@ impl<'s> Parser<'s> {
         Ok(self.push(Leg { doc, end, amount, tail, loc }))
     }
 
-    /// `[#PURPOSE [of NAME]] [STRING] CODE* [for WHAT] [due WHEN] [basis AMOUNT] [/ PARTY]
-    /// [@ PRICE] [! [STRING]]`, in any order; the waiver ends it. Clauses are
-    /// kept in the order written, from `mark`.
+    /// An indented line that names no end: `[+ | -] ITEMAMOUNT TAIL`.
+    pub fn line_item(&mut self, line: &mut Line<'s>, scope: Scope) -> Parse<Ref<LineItem<'s>>> {
+        let doc = line.take_doc();
+        let sign = match self.tok() {
+            Tok::Punct(Punct::Plus) => self.bump_as(Sign::Add),
+            Tok::Punct(Punct::Minus) => self.bump_as(Sign::Less),
+            _ => Sign::Carve,
+        };
+        let amount = match self.tok() {
+            Tok::Percent(percent) => {
+                self.bump();
+                match self.eat_word("of") {
+                    Some(_) => ItemAmount::ShareOf(percent, self.amount()?),
+                    None => ItemAmount::Share(percent),
+                }
+            }
+            _ => ItemAmount::Fixed(self.amount()?),
+        };
+        let tail = self.tail(scope, self.mark::<Clause>())?;
+        self.expect_eol()?;
+        let loc = self.loc_from(line.body);
+        Ok(self.push(LineItem { doc, sign, amount, tail, loc }))
+    }
+
+    /// `[#PURPOSE [of NAME]] [STRING] CODE* [via PARTY] [for WHAT] [due WHEN]
+    /// [basis AMOUNT] [@ PRICE] [! [STRING]]`, in any order; the waiver ends
+    /// it. Clauses are kept in the order written, from `mark`.
     pub fn tail(&mut self, scope: Scope, mark: usize) -> Parse<Many<Clause<'s>>> {
         loop {
             let token = self.peek();
-            if scope == Scope::Schedule && !matches!(token.tok, Tok::Purpose(_) | Tok::Str(_)) {
-                break;
-            }
             let kind = match token.tok {
                 Tok::Purpose(name) => ClauseKind::Purpose(self.purpose(name)?),
-                Tok::Str(text) => self.bump_as(ClauseKind::Description(text)),
+                Tok::Str(text) => self.bump_as(ClauseKind::Description(Text(text))),
                 Tok::Code(code) => self.bump_as(ClauseKind::Code(code)),
-                Tok::Punct(Punct::Slash) => ClauseKind::Party(self.then(|p| p.name("expected-party", "a party"))?),
+                Tok::Name("via") => {
+                    ClauseKind::Via(self.then(|p| p.name("expected-party", "the party it went through, such as `paypal`"))?)
+                }
+                Tok::Punct(Punct::Slash) => return Err(self.slash(None)),
                 Tok::Punct(Punct::At) => ClauseKind::Price(self.then(Self::measured)?),
                 Tok::Punct(Punct::Bang) => ClauseKind::Waive(self.waiver()?),
                 Tok::Name("for") => ClauseKind::For(self.then(|p| p.for_what(token.loc))?),
@@ -196,7 +240,7 @@ impl<'s> Parser<'s> {
     }
 
     /// `#NAME [of THING]`, the `#NAME` not yet consumed.
-    fn purpose(&mut self, name: Name<'s>) -> Parse<Purpose<'s>> {
+    pub fn purpose(&mut self, name: Name<'s>) -> Parse<Purpose<'s>> {
         self.bump();
         let of = self.eat_word("of").map(|_| self.name("expected-name", "what the purpose is of, such as `condo`"));
         Ok(Purpose { name, of: of.transpose()? })
@@ -204,7 +248,7 @@ impl<'s> Parser<'s> {
 
     /// After `due`: a date, which if short is the first such day on or after
     /// the day the line is dated, or a span after that day.
-    fn due(&mut self, scope: Scope) -> Parse<Due> {
+    pub fn due(&mut self, scope: Scope) -> Parse<Due> {
         match self.tok() {
             Tok::Span(span) => Ok(Due::After(self.bump_as(span))),
             _ => self.date_from(scope.day(), "a date or a span such as `30d`").map(Due::On),
@@ -215,7 +259,7 @@ impl<'s> Parser<'s> {
     /// the `for` was written.
     fn for_what(&mut self, keyword: Loc) -> Parse<For<'s>> {
         match self.tok() {
-            Tok::Name(entity) => Ok(self.bump_as(For::Entity(Name(entity)))),
+            Tok::Name(whom) => Ok(self.bump_as(For::Whom(Name(whom)))),
             // v3 said which claim a payment settled with `for #code`: now the payment carries the code.
             Tok::Purpose(_) => Err(self.hash_code(keyword.to(self.peek().loc))),
             _ => {
@@ -235,17 +279,52 @@ impl<'s> Parser<'s> {
         self.report(diag)
     }
 
+    /// v3's `/ PARTY`, the `/` being the next token. It named who a payment was
+    /// really for when it went through another end (`checking -> paypal 20 USD
+    /// / etsy-seller`); v4 writes that party as the end and the one it went
+    /// through as `via` (`checking -> etsy-seller 20 USD via paypal`). Where
+    /// the header's two sides are known the fix swaps them, and, since an end
+    /// may as well be an asset that is bought (`visa 1_739.13 USD -> laptop /
+    /// best-buy`), a second fix writes the purchase.
+    pub fn slash(&mut self, header: Option<(&Side<'s>, &Side<'s>)>) -> Reported {
+        let slash = self.bump().loc;
+        let Tok::Name(party) = self.tok() else { return self.expected("expected-party", "the party it was for") };
+        let written = slash.to(self.bump().loc);
+        let mut diag = Diagnostic::error("v3-party", format!("`/ {party}` is written the other way round now"))
+            .label(written, format!("`{party}` is where the flow ends, and the party it went through is `via`"))
+            .note("v3 wrote `checking -> paypal 20 USD / etsy-seller`; v4 writes `checking -> etsy-seller 20 USD via paypal`");
+        let plain = |end: &End<'_>| end.select.is_empty() && &*end.name != "?";
+        if let Some((from, to)) = header {
+            if let Some(end) = to.end.filter(plain) {
+                let end_loc = self.loc_of(&end.name);
+                let between = &self.src[end_loc.end as usize..slash.start as usize];
+                let via = format!("{party}{between}via {}", &*end.name);
+                diag = diag.fix(format!("`{}` is who it went through: `via {}`", &*end.name, &*end.name), end_loc.to(written), via);
+                let amount = match (from.amount, to.amount) {
+                    (Some(Quantity::Fixed(amount)), None) | (None, Some(Quantity::Fixed(amount))) => Some(amount),
+                    _ => None,
+                };
+                if let (Some(source), Some(amount)) = (from.end.filter(plain), amount) {
+                    let bought = format!("{} -> {party} {} #purchase of {}", &*source.name, &*amount, &*end.name);
+                    let how = format!("if `{}` is an asset, it is bought: `#purchase of {}`", &*end.name, &*end.name);
+                    diag = diag.fix(how, self.loc_of(&source.name).to(written), bought);
+                }
+            }
+        }
+        self.report(diag)
+    }
+
     /// `!` with an optional reason string.
     pub fn waiver(&mut self) -> Parse<Waive<'s>> {
         let bang = self.bump().loc;
         let Tok::Str(reason) = self.tok() else { return Ok(Waive { at: bang, reason: None }) };
-        Ok(Waive { at: bang.to(self.bump().loc), reason: Some(reason) })
+        Ok(Waive { at: bang.to(self.bump().loc), reason: Some(Text(reason)) })
     }
 
     /// One side split needs exactly one named side and legs for the other.
     fn check_shape(&mut self, flow: &Flow<'s>, arrow: Loc) -> Parse<()> {
         let (from_named, to_named) = (flow.from.end.is_some(), flow.to.end.is_some());
-        let legs = self.slice(flow.legs);
+        let legs = self.slice(flow.body.legs);
         let diag = match (from_named, to_named, legs.first()) {
             (true, true, Some(leg)) => many_to_many(arrow, leg.loc),
             (false, false, _) => no_end(arrow),
@@ -295,7 +374,7 @@ fn clause_name(kind: &ClauseKind<'_>) -> &'static str {
         ClauseKind::Purpose(_) => "purpose",
         ClauseKind::Description(_) => "description",
         ClauseKind::Code(_) => "code",
-        ClauseKind::Party(_) => "party",
+        ClauseKind::Via(_) => "`via` clause",
         ClauseKind::Price(_) => "price",
         ClauseKind::For(_) => "`for` clause",
         ClauseKind::Due(_) => "`due` clause",
