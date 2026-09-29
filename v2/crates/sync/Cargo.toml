@@ -1,0 +1,10 @@
+[package]
+name = "axiom-sync"
+description = "Sync: statements, invoices and prices recognized, reconciled and written into the journal"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-core.workspace = true
+memchr.workspace = true

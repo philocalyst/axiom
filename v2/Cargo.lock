@@ -48,6 +48,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "axiom-sync"
+version = "0.3.0"
+dependencies = [
+ "axiom-core",
+ "memchr",
+]
+
+[[package]]
 name = "axiom-syntax"
 version = "0.3.0"
 dependencies = [
