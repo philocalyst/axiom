@@ -1,0 +1,7 @@
+$ axiom limits 2025 --today 2026-04-16
+
+Limits in 2025
+
+  Who  Limit                                Window        Counted            Cap  Room left  Used
+  ───────────────────────────────────────────────────────────────────────────────────────────────
+  me   deferral-limit on assets/retirement  2025    23,499.96 USD  23,500.00 USD   0.04 USD  100%

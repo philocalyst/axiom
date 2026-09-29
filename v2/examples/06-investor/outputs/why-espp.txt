@@ -1,0 +1,10 @@
+$ axiom why espp --today 2026-04-16
+
+Why espp
+
+Held for it
+  Place                   Amount  Since       From
+  ─────────────────────────────────────────────────────────────────
+  assets/espp-cash  8,400.00 USD  2025-07-31  journal/2025/07.ax:10
+  ─────────────────────────────────────────────────────────────────
+  Remaining         8,400.00 USD

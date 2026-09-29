@@ -9,21 +9,25 @@
 2025-10-16 checking -> dining 269.95 USD
 2025-10-20 checking -> groceries 334.34 USD
 2025-10-24 checking -> misc 263.20 USD
-2025-10-28 dividends -> schwab 7.58 USD
+2025-10-28 dividends -> schwab 30.23 USD
 2025-10-31 income/salary -> 14_000.00 USD
   retirement          1_958.33 USD   // 401(k) deferral
-  espp-cash           1_400.00 USD   // ESPP contribution, after tax
+  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
   taxes/federal       2_650.00 USD
   taxes/payroll       1_071.00 USD   // Social Security and Medicare
   checking            ...
 2025-10-31 interest -> savings 274.25 USD
-2025-10-31 interest -> fidelity 232.19 USD
-2025-10-31 checking = 56_069.10 USD
+2025-10-31 interest -> fidelity 234.02 USD
+2025-10-31 checking = 70_713.11 USD
 2025-10-31 savings = 82_549.54 USD
 2025-10-31 espp-cash = 5_600.00 USD
-2025-10-31 fidelity = 63.2209 VTI
-2025-10-31 fidelity = 24.3264 MSFT
+2025-10-31 fidelity = 93.5732 VTI
+2025-10-31 fidelity = 36.3264 MSFT
 2025-10-31 fidelity = 19.7153 UNH
+2025-10-31 fidelity = 41.9694 FAST
+2025-10-31 fidelity = 106.4467 VXUS
+2025-10-31 schwab = 133.4448 BND
+2025-10-31 schwab = 38.2029 VXUS
 2025-10-31 etrade = 249.6388 NWND
 2025-10-31 coinbase = 0.15 BTC
 2025-10-31 coinbase = 0.95668225 ETH

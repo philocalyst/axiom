@@ -51,6 +51,7 @@ class Flow:
     file: str = ""
     lineno: int = 0
     header_split: str | None = None            # "src" or "dst" when legs exist
+    price: tuple | None = None                 # (amount, unit) after `@`
 
 
 AMOUNT = r"\(?(\d[\d_]*(?:\.\d+)?)\)?\s+([A-Z][A-Z0-9._]*)"
@@ -150,7 +151,7 @@ def read_journal(root):
             payee, codes, for_, due, basis, waive = parse_tail(tail)
             pending = "(" in left[-12:] or bool(re.search(r"\(\d", right))
             flow = Flow(to_date(day), to_date(until) if until else None, src, dst, out, out_unit, into, into_unit,
-                        payee, codes, for_, due, basis, waive, pending, [], raw, path, i)
+                        payee, codes, for_, due, basis, waive, pending, [], raw, path, i, price=price)
             # legs
             while i < len(lines) and lines[i].startswith("  ") and lines[i].strip() and not lines[i].strip().startswith("//"):
                 leg = re.sub(r"\s//.*$", "", lines[i]).strip()

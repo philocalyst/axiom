@@ -1,4 +1,4 @@
-// What is held, where, and what each kind of place means for tax. The rules that
+// What is held, where, and what each kind of place means for tax. The two laws
 // the shipped systems lack are in tax.ax.
 
 // ─── Kinds ──────────────────────────────────────────────────────────────────
@@ -7,11 +7,16 @@
 /// arrive (Rev. Rul. 2023-14); tax.ax counts them.
 kind staking-income : income
 
-/// A place where a wash sale's disallowed loss is parked: a loss on a sale
-/// that Axiom cannot see is a wash sale, adjusted by hand. Value leaving it
-/// goes into the basis of the replacement shares; tax.ax adds the loss back to
-/// the year's short-term gains.
+/// Where a wash sale's disallowed loss is parked. Axiom does not see the 30-day
+/// window, so the owner says so: a flow from a place of this kind into the basis
+/// of the replacement shares. tax.ax adds what leaves it back to the year's
+/// short-term gains.
 kind wash-adjustment : equity
+
+
+/// The employee stock purchase plan. Pay set aside for it is tied to it: `for espp`
+/// on the paycheck leg. It is not available to spend until it buys shares `for me`.
+entity espp : envelope
 
 
 // ─── Securities and coins ───────────────────────────────────────────────────
@@ -36,6 +41,8 @@ commodity MSFT : stock
   precision 4
 commodity UNH : stock
   precision 4
+/// Fastenal split 2-for-1 on 2025-05-22 (see the journal): prices before that day
+/// are in the old units.
 commodity FAST : stock
   name "Fastenal"
   precision 4
@@ -95,7 +102,7 @@ account income/dividends    : dividends
 account income/interest     : interest
 account income/staking      : staking-income
 
-account equity/opening
+/// The disallowed losses. What has left it is in the basis of replacement shares.
 account equity/wash-sale    : wash-adjustment
 
 
