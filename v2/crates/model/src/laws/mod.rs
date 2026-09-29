@@ -4,61 +4,113 @@
 //! Where a law is written decides what it governs (its [`Owner`]) and what
 //! `self` is inside it. A trigger only fits some owners: value entering a place
 //! is for laws about places, and money leaving a restricted entity's reach is
-//! for laws about entities.
+//! for laws about entities. Laws are numbered in the order written, systems
+//! first, which is the order that decides ties between laws that do not depend
+//! on each other.
 
 mod compile;
+mod order;
 mod types;
 mod vars;
 
-use axiom_core::{Diagnostic, Id};
-use axiom_syntax::{self as ast, BinOp, Trigger as Written};
+use axiom_core::{Diagnostic, Id, Set};
+use axiom_syntax::{self as ast, BinOp, DeclKind, Trigger as Written};
 
+pub(crate) use self::order::rank;
 use self::compile::{Site, compile};
 use crate::book::{Kind, Sort, System};
-use crate::catalog::Catalog;
+use crate::collect::Entry;
+use crate::declare::World;
 use crate::law::{Dir, Func, Law, Node, NodeId, Op, Owner, Step, StepKind, Trigger, Ty, Value, Window};
+use crate::names::Rank;
 use crate::props::Budget;
 use crate::scope::Home;
-use crate::world::World;
 
-pub(crate) fn declare<'s>(world: &mut World<'s>, catalog: &Catalog<'_, 's>, diags: &mut Vec<Diagnostic>) {
-    for written in &catalog.laws {
-        let owner = match written.home() {
-            Home::System(system) => Owner::System(system),
-            Home::Project | Home::Builtin => Owner::Book,
-        };
-        let site = Site { exprs: written.exprs(), home: written.home(), owner, subject: Ty::Entity };
-        add(world, diags, &site, written.what);
-    }
-    for (written, id) in catalog.kinds.iter().zip(world.declared.kinds.clone()) {
-        let subject = match world.book.kinds[id].sort {
-            Sort::Place(_) => Ty::Place,
-            Sort::Entity => Ty::Entity,
-            Sort::Commodity => {
-                misplaced(diags, &written.what.laws, "a commodity kind");
-                continue;
+pub(crate) fn declare<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], budgets: Vec<Budget>, diags: &mut Vec<Diagnostic>) {
+    world.tallies = counted(entries);
+    let mut written: [usize; 4] = [0; 4];
+    let mut seen: Set<(DeclKind, usize)> = Set::default();
+    for entry in entries {
+        match entry {
+            Entry::Law(law) => {
+                let owner = match law.home() {
+                    Home::System(system) => Owner::System(system),
+                    Home::Project | Home::Builtin => Owner::Book,
+                };
+                let site = Site { file: law.file(), home: law.home(), owner, subject: Ty::Entity };
+                add(world, diags, &site, law.node);
             }
-        };
-        let site = Site { exprs: written.exprs(), home: written.home(), owner: Owner::Kind(id), subject };
-        written.what.laws.iter().for_each(|law| add(world, diags, &site, law));
+            Entry::Decl(decl) => {
+                let (file, node) = (decl.file(), decl.node);
+                let at = &mut written[node.what as usize];
+                let position = *at;
+                *at += 1;
+                let (owner, subject, id) = match node.what {
+                    DeclKind::Commodity => {
+                        misplaced(diags, file, node.laws, "a commodity");
+                        continue;
+                    }
+                    DeclKind::Kind => {
+                        let id = world.declared.kinds[position];
+                        let subject = match world.book.kinds[id].sort {
+                            Sort::Place(_) => Ty::Place,
+                            Sort::Entity => Ty::Entity,
+                            Sort::Commodity => {
+                                misplaced(diags, file, node.laws, "a commodity kind");
+                                continue;
+                            }
+                        };
+                        (Owner::Kind(id), subject, id.index())
+                    }
+                    DeclKind::Account => match world.declared.places[position] {
+                        Some(id) => (Owner::Place(id), Ty::Place, id.index()),
+                        None => continue,
+                    },
+                    DeclKind::Entity => {
+                        let id = world.declared.entities[position];
+                        (Owner::Entity(id), Ty::Entity, id.index())
+                    }
+                };
+                // A repeated declaration is reported once, and its laws not compiled twice.
+                if seen.insert((node.what, id)) {
+                    let site = Site { file, home: decl.home(), owner, subject };
+                    file[node.laws].iter().for_each(|law| add(world, diags, &site, law));
+                }
+            }
+            _ => {}
+        }
     }
-    for (written, id) in catalog.accounts.iter().zip(world.declared.places.clone()) {
-        let Some(id) = id else { continue };
-        let site = Site { exprs: written.exprs(), home: written.home(), owner: Owner::Place(id), subject: Ty::Place };
-        written.what.laws.iter().for_each(|law| add(world, diags, &site, law));
-    }
-    for (written, id) in catalog.entities.iter().zip(world.declared.entities.clone()) {
-        let site = Site { exprs: written.exprs(), home: written.home(), owner: Owner::Entity(id), subject: Ty::Entity };
-        written.what.laws.iter().for_each(|law| add(world, diags, &site, law));
-    }
-    for written in &catalog.commodities {
-        misplaced(diags, &written.what.laws, "a commodity");
-    }
-    for budget in std::mem::take(&mut world.budgets) {
+    for budget in budgets {
         let law = budget_law(world, &budget);
         push(world, law);
     }
     register(world);
+}
+
+/// The names some law counts into.
+fn counted<'s>(entries: &[Entry<'_, 's>]) -> Set<&'s str> {
+    let mut names = Set::default();
+    let mut laws = |file: &ast::File<'s>, laws: &[ast::Law<'s>]| {
+        for law in laws {
+            for step in &file[law.steps] {
+                match &step.kind {
+                    ast::StepKind::Effect(ast::Effect::Count { name, .. })
+                    | ast::StepKind::Require { otherwise: Some(ast::Effect::Count { name, .. }), .. } => {
+                        names.insert(name.0);
+                    }
+                    _ => {}
+                }
+            }
+        }
+    };
+    for entry in entries {
+        match entry {
+            Entry::Law(law) => laws(law.file(), std::slice::from_ref(law.node)),
+            Entry::Decl(decl) => laws(decl.file(), &decl.file()[decl.node.laws]),
+            _ => {}
+        }
+    }
+    names
 }
 
 /// Compiles `law` and adds it to the book, if it fits where it was written.
@@ -75,15 +127,15 @@ fn add<'s>(world: &mut World<'s>, diags: &mut Vec<Diagnostic>, site: &Site<'_, '
 fn push(world: &mut World, law: Law) {
     let name = world.book.name(law.name);
     let id = world.book.laws.push(law);
-    world.book.lookup.laws.insert(&mut world.book.names, name, id);
+    world.book.lookup.laws.insert(&mut world.book.names, name, Rank::Path, id);
 }
 
 /// Laws written inside declarations that cannot own them.
-fn misplaced(diags: &mut Vec<Diagnostic>, laws: &[ast::Law], within: &str) {
-    for law in laws {
+fn misplaced(diags: &mut Vec<Diagnostic>, file: &ast::File, laws: ast::Many<ast::Law>, within: &str) {
+    for law in &file[laws] {
         diags.push(
             Diagnostic::error("law-position", format!("a law cannot be written inside {within}"))
-                .label(law.name.loc, "this law has nothing to govern")
+                .label(file.loc(law.name.0), "this law has nothing to govern")
                 .help("laws belong in a place kind, an entity kind, an account, an entity, a system, or the project"),
         );
     }

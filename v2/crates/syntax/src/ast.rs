@@ -964,6 +964,11 @@ impl<'s> Exprs<'s> {
         &part[part[root.position()].first.position()..=root.position()]
     }
 
+    /// Every node of the file, in the order written.
+    pub fn iter(&self) -> impl Iterator<Item = &Expr<'s>> {
+        self.parts.iter().flatten()
+    }
+
     /// How many nodes the file has in all.
     pub fn len(&self) -> usize {
         self.parts.iter().map(Vec::len).sum()

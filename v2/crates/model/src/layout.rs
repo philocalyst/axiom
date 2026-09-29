@@ -1,4 +1,4 @@
-//! Folder layout as a constraint (LANGUAGE §8).
+//! Folder layout as a constraint (LANGUAGE §10).
 //!
 //! Where a file lives says what it may hold. A `YYYY` folder or `YYYY.ax` file
 //! holds one year, a `MM` folder or file after it (or `YYYY-MM.ax`) holds one
@@ -8,9 +8,9 @@
 use axiom_core::{Day, Diagnostic, Loc};
 use axiom_syntax::{Item, ItemKind};
 
-use crate::catalog::{Catalog, Site};
-use crate::errors::iso;
+use crate::errors::{count, iso};
 use crate::scope::Home;
+use crate::sources::Site;
 
 const MONTHS: [&str; 12] = [
     "January",
@@ -48,6 +48,14 @@ pub(crate) struct Layout<'a> {
     year: Option<i32>,
     month: Option<u32>,
     pub only: Only,
+}
+
+/// An item dated outside the file that holds it.
+#[derive(Clone, Copy)]
+pub(crate) struct Misfiled {
+    pub loc: Loc,
+    pub day: Day,
+    pub noun: &'static str,
 }
 
 fn digits(text: &str, count: usize) -> Option<u32> {
@@ -99,7 +107,8 @@ impl<'a> Layout<'a> {
         false
     }
 
-    fn holds(&self, day: Day) -> bool {
+    /// Whether an item dated `day` belongs in this file.
+    pub fn holds(&self, day: Day) -> bool {
         let (year, month, _) = day.ymd();
         self.year.is_none_or(|held| held == year) && self.month.is_none_or(|held| held == month)
     }
@@ -129,72 +138,60 @@ impl<'a> Layout<'a> {
             .collect();
         format!("{}.ax", pieces.join("/"))
     }
+
+    /// One report for a file's misdated items: the root cause is where the
+    /// file is, not any one line of it.
+    pub fn misfiled(&self, path: &str, items: &[Misfiled]) -> Diagnostic {
+        let first = items[0];
+        let date = |item: &Misfiled| Loc::new(item.loc.file, item.loc.start, item.loc.start + 10);
+        let held = self.describe();
+        let headline = match items.len() {
+            1 => format!("this {} is dated {}, which `{path}` does not hold", first.noun, iso(first.day)),
+            more => format!("`{path}` holds {held}, but {} are dated elsewhere", count(more, "item")),
+        };
+        let mut diagnostic = Diagnostic::error("layout", headline).label(date(&first), format!("outside {held}"));
+        for item in items[1..].iter().take(3) {
+            diagnostic = diagnostic.context(date(item), format!("{} dated {}", item.noun, iso(item.day)));
+        }
+        if items.len() > 4 {
+            diagnostic = diagnostic.note(format!("{} more are dated elsewhere too", items.len() - 4));
+        }
+        diagnostic
+            .note(format!("`{path}` holds {held}, because of where it is"))
+            .help(format!("move it to `{}`, or set `layout free` to ignore folder names", self.path_for(first.day)))
+    }
 }
 
 /// The date an item is filed under, and what to call the item.
-fn dated(item: &Item) -> Option<(Day, &'static str)> {
-    match &item.kind {
-        ItemKind::Txn(txn) => Some((txn.date, "transaction")),
-        ItemKind::Assert(assert) => Some((assert.date, "balance assertion")),
-        ItemKind::Event(event) => Some((event.date, "event")),
-        ItemKind::Price(price) => Some((price.date, "price")),
-        _ => None,
-    }
+pub(crate) fn dated(item: &Item, file: &axiom_syntax::File) -> Option<(Day, &'static str)> {
+    Some(match item.kind {
+        ItemKind::Txn(id) => (file[id].date, "transaction"),
+        ItemKind::Assert(id) => (file[id].date, "balance assertion"),
+        ItemKind::Event(id) => (file[id].date, "event"),
+        ItemKind::Price(id) => (file[id].date, "price"),
+        ItemKind::Split(id) => (file[id].date, "split"),
+        ItemKind::Occurrence(id) => (file[id].date, "plan occurrence"),
+        ItemKind::Opening(id) => (file[id].date, "opening"),
+        _ => return None,
+    })
 }
 
-impl Layout<'_> {
-    /// Whether an item dated `day` is filed where its date belongs. Journal
-    /// transactions are checked as they are elaborated.
-    pub fn check_date(&self, path: &str, item: &Item) -> Option<Diagnostic> {
-        let (day, noun) = dated(item)?;
-        if self.holds(day) {
-            return None;
-        }
-        let date = Loc::new(item.loc.file, item.loc.start, item.loc.start + 10);
-        Some(
-            Diagnostic::error("layout", format!("this {noun} is dated {}, which `{path}` does not hold", iso(day)))
-                .label(date, format!("outside {}", self.describe()))
-                .note(format!("`{path}` holds {}, because of where it is", self.describe()))
-                .help(format!("move it to `{}`, or set `layout free` to ignore folder names", self.path_for(day))),
-        )
-    }
-}
-
-/// The rules about what a file may hold, and the dates of everything but
-/// journal transactions.
-pub(crate) fn check(catalog: &Catalog, sites: &[Site], diags: &mut Vec<Diagnostic>) {
-    if catalog.layout_free {
-        return;
-    }
-    let dated_items = catalog
-        .asserts
-        .iter()
-        .map(|written| (written.site, written.item))
-        .chain(catalog.events.iter().map(|written| (written.site, written.item)))
-        .chain(catalog.prices.iter().map(|written| (written.site, written.item)));
-    for (site, item) in dated_items {
-        diags.extend(site.layout.check_date(site.source.path, item));
-    }
+/// The rules about what a file may hold, apart from dates.
+pub(crate) fn check(sites: &[Site], diags: &mut Vec<Diagnostic>) {
     for site in sites.iter().filter(|site| !site.source.embedded) {
+        let items = &site.source.file.items;
         match site.layout.only {
-            Only::Prices => diags.extend(site.source.file.items.iter().filter_map(only_prices)),
-            Only::Systems if site.home == Home::Project => {
-                diags.extend(site.source.file.items.first().map(not_a_system))
-            }
+            Only::Prices => diags.extend(items.iter().filter(|item| !matches!(item.kind, ItemKind::Price(_))).map(only_prices)),
+            Only::Systems if site.home == Home::Project => diags.extend(items.first().map(not_a_system)),
             Only::Systems | Only::Anything => {}
         }
     }
 }
 
-fn only_prices(item: &Item) -> Option<Diagnostic> {
-    if matches!(item.kind, ItemKind::Price(_)) {
-        return None;
-    }
-    Some(
-        Diagnostic::error("layout", "files under `prices/` may contain only prices")
-            .label(item.loc, "this is not a price")
-            .help("move it out of `prices/`, or set `layout free`"),
-    )
+fn only_prices(item: &Item) -> Diagnostic {
+    Diagnostic::error("layout", "files under `prices/` may contain only prices")
+        .label(item.loc, "this is not a price")
+        .help("move it out of `prices/`, or set `layout free`")
 }
 
 fn not_a_system(first: &Item) -> Diagnostic {

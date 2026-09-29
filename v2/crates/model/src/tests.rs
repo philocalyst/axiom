@@ -18,6 +18,7 @@ kind stock : commodity
 ";
 
 const ACCOUNTS: &str = "\
+base USD
 entity acme : employer
   via income/salary
 account assets/bank/checking : bank
