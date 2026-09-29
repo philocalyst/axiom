@@ -22,11 +22,11 @@ Coming in
   Total                                                                                              11,800.00 USD
 
 What it would take to reach the rest
-  Holding                         Liquid in          Value      Cost            Net  Because
-  ──────────────────────────────────────────────────────────────────────────────────────────
-  assets/retirement/sep           3d         29,586.06 USD            29,586.06 USD
-  ──────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today             29,586.06 USD  0.00 USD  29,586.06 USD
+  Holding                         Liquid in          Value          Cost            Net  Because
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/retirement/sep           3d         29,586.06 USD  1,515.84 USD  28,070.22 USD  driven by federal-income-tax 1,515.84 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today             29,586.06 USD  1,515.84 USD  28,070.22 USD
   · Each line withdraws the whole holding into assets/bank/business-checking on 2026-04-16 and runs
-    the year out through the laws. Cost is what they would then owe beyond what they already will:
-    penalties, and the tax on any income it creates.
+    the books on to 2027-04-15, when the year's return closes, through the laws. Cost is what they
+    would then owe beyond what they already will: penalties, and the tax on any income it creates.

@@ -1,4 +1,4 @@
-Forecast to 2027-03-31
+Forecast to 2027-04-15
 
 Liquid net worth
   Month end       Committed       Net worth
@@ -16,6 +16,7 @@ Liquid net worth
   2027-01-31  39,335.33 USD  100,540.43 USD
   2027-02-28  41,099.46 USD  103,404.56 USD
   2027-03-31  42,863.59 USD  106,268.69 USD
+  2027-04-15  45,362.11 USD  109,201.49 USD
   · Committed: money in hand, less what is owed on debts with no term and on obligations as they
     fall due, in USD, after plans, recurring flows found in history and what they can still give.
     Investments and property are net worth, not liquid. Variable spending is not in it.
@@ -37,9 +38,11 @@ What recurs
   assets/bank/checking → expenses/insurance (insurer)           yearly     630.00 USD  2027-01-01  plan
 
 Obligations coming due
-  Due         Obligation                To      Amount
-  ────────────────────────────────────────────────────
-  2027-04-15  nonqualified-529-penalty  irs  34.94 USD
+  Due         Obligation                To        Amount
+  ──────────────────────────────────────────────────────
+  2027-04-15  nonqualified-529-penalty  irs    34.94 USD
+  2027-04-15  federal-income-tax        irs  -230.77 USD
+  2027-04-15  ca-income-tax             ftb  -469.89 USD
 
 Problems ahead
   Date  Problem

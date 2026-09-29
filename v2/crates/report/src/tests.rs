@@ -634,7 +634,7 @@ fn cell(cell: &Cell) -> String {
     }
 }
 
-fn lines(section: &Section) -> Vec<String> {
+pub(crate) fn lines(section: &Section) -> Vec<String> {
     let mark = |row: &Row| match row.style {
         Style::Normal => "",
         Style::Total => "=",
@@ -651,7 +651,7 @@ fn lines(section: &Section) -> Vec<String> {
         .collect()
 }
 
-fn show(report: &Report) -> String {
+pub(crate) fn show(report: &Report) -> String {
     let mut out = format!("# {}\n", report.title);
     for section in &report.sections {
         out += &format!("##{}\n", section.heading.as_ref().map_or(String::new(), |heading| format!(" {heading}")));
@@ -924,14 +924,16 @@ fn a_budget_reads_its_window_from_headroom_and_a_year_lists_its_months() {
     assert!(
         february.contains("!expenses/insurance | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%")
     );
-    // The year: each envelope's year, then its months. Insurance is one yearly reading.
+    // The year: each envelope's year, then its months up to today (March, which
+    // nothing has reached yet, is wholly unspent). Insurance is one yearly reading.
     let year = house.report(Query::Budget { at: Some(day(2026, 2, 10)), by: Period::Year });
     assert_eq!(
         lines(&year.sections[0]),
         [
-            "expenses/food | budget | 2026 | 204.20 USD | 1,000.00 USD | 795.80 USD | 20.42%",
+            "expenses/food | budget | 2026 | 204.20 USD | 1,500.00 USD | 1,295.80 USD | 1021/75%",
             "~   |  | 2026-01 | 84.20 USD | 500.00 USD | 415.80 USD | 16.84%",
             "~   |  | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%",
+            "~   |  | 2026-03 | 0.00 USD | 500.00 USD | 500.00 USD | 0%",
             "!expenses/insurance | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
         ]
     );

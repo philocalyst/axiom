@@ -17,11 +17,13 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) ->
     let year = year.unwrap_or_else(|| run.today.year());
     let (start, end) =
         (Day::from_ymd(year, 1, 1).unwrap_or(run.today), Day::from_ymd(year, 12, 31).unwrap_or(run.today));
-    let all = &current(book, run, end.min(run.today));
+    let today = end.min(run.today);
+    let all = &current(book, run, today, today);
     // A floor of nothing (`balance >= empty`) is an invariant, not a limit:
     // what stands above it is the balance, which `balance` already shows.
     let limit = |reading: &&Headroom| !(is_floor(book, reading) && reading.counted.qty.is_zero());
-    let touching = all.iter().filter(|reading| whose.includes(reading.owner) && reading.from <= end && reading.until >= start);
+    let touching =
+        all.iter().filter(|reading| whose.includes(reading.owner) && reading.from <= end && reading.until >= start);
     let readings = latest(touching.filter(limit));
     let floors = readings.iter().any(|reading| is_floor(book, reading));
     let mut table = section(book, readings);

@@ -8,8 +8,8 @@ Counted
     total-income  20,229.21 USD  45 sources
     payments       2,034.00 USD  9 sources
     pretax           540.00 USD  9 sources
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
 
 Owed
-  Owed  To  Due  Amount  From
-  ───────────────────────────
-  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
+  · The 2025 return closes on 2026-04-15; what it owes is not figured yet; the tallies are counted
+    so far.

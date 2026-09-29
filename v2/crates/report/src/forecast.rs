@@ -23,6 +23,7 @@ use self::expected::{Expectation, Origin, expected};
 use self::projection::{Trace, project};
 use self::variable::Variable;
 use crate::calendar::Periods;
+use crate::closings;
 use crate::lens::{Lens, Whose};
 use crate::places::{path, route};
 use crate::table::{headline, plural};
@@ -36,7 +37,7 @@ const MIN_HISTORY_MONTHS: usize = 3;
 
 pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: Option<Day>, paths: u32) -> Report<'s> {
     let today = run.today;
-    let until = until.unwrap_or_else(|| today.add(Span::months(12))).max(today);
+    let until = until.unwrap_or_else(|| default_horizon(book, today)).max(today);
     let lens = Lens::new(book, whose, today);
 
     let expected = expected(lens, run);
@@ -61,6 +62,19 @@ pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: 
         .with(expected_section(book, &expected, today, until))
         .with(owed_section(book, &due))
         .with(problems_section(book, &trace, today))
+}
+
+/// A return that closes within this long after the default horizon is looked
+/// at too: its tax is part of where the year the horizon falls in is heading.
+const CLOSING_REACH: Span = Span::months(4);
+
+/// A year from today, or the day a return closes if that is soon after.
+fn default_horizon(book: &Book, today: Day) -> Day {
+    let year_ahead = today.add(Span::months(12));
+    match closings::next_after(book, year_ahead) {
+        Some(closes) if closes <= year_ahead.add(CLOSING_REACH) => closes,
+        _ => year_ahead,
+    }
 }
 
 /// Today, then the end of every month up to `until`, which closes the last.

@@ -11,7 +11,7 @@ use std::iter;
 use axiom_core::num::{POW10, div_round, mul_div};
 use axiom_core::{Day, Diagnostic, Id, Qty, Span};
 use axiom_engine::Holding;
-use axiom_model::{Amount, Book, Class, Commodity, Entity, Kind, Place};
+use axiom_model::{Amount, Book, Class, Commodity, Entity, Kind, Place, Subject};
 
 use crate::history::Held;
 use crate::resolve;
@@ -36,6 +36,15 @@ impl Whose {
 
     pub fn includes(&self, entity: Id<Entity>) -> bool {
         self.0.as_ref().is_none_or(|owners| owners.contains(&entity))
+    }
+
+    /// Whether a law's subject is one of these owners': the entity itself, or
+    /// the owner of the place.
+    pub fn governs(&self, book: &Book, subject: Subject) -> bool {
+        self.includes(match subject {
+            Subject::Place(place) => book.places[place].owner,
+            Subject::Entity(entity) => entity,
+        })
     }
 }
 

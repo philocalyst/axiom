@@ -5,9 +5,9 @@ Why us/abroad
   · Lives here: me.
 
 Laws
-  Law                                                                            When       Counted for residents                                                                                                Written
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  count-foreign-earned                                                           on in      foreign-earned 37,564.58 USD                                                                                         systems/us/abroad.ax:36
+  Law                                                                            When                     Counted for residents                                                                                                Written
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  count-foreign-earned                                                           on in                    foreign-earned 37,564.58 USD                                                                                         systems/us/abroad.ax:36
     Pay from a foreign employer counts as foreign earned income, in dollars at…
-  feie                                                                           each year  adjustments 37,564.58 USD · feie-excluded 37,564.58 USD · other-taxes 3,463.56 USD · feie-stacking-tax 3,463.56 USD  systems/us/abroad.ax:50
+  feie                                                                           each year closing 04-15  adjustments 37,564.58 USD · feie-excluded 37,564.58 USD · other-taxes 3,463.56 USD · feie-stacking-tax 3,463.56 USD  systems/us/abroad.ax:50
     The foreign earned income exclusion (IRC §911): pay earned abroad, up to a…

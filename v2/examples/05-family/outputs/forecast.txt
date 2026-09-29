@@ -1,6 +1,6 @@
 $ axiom forecast --paths 200 --today 2026-01-05
 
-Forecast to 2027-01-05
+Forecast to 2027-04-15
 
 Liquid net worth
   Month end        Committed       Net worth             p10             p50             p90
@@ -18,7 +18,10 @@ Liquid net worth
   2026-10-31  189,200.31 USD  797,351.33 USD  178,551.42 USD  181,081.46 USD  183,266.85 USD
   2026-11-30  195,040.27 USD  804,625.16 USD  183,177.81 USD  186,215.77 USD  188,457.41 USD
   2026-12-31  203,736.78 USD  819,318.87 USD  190,835.18 USD  193,817.95 USD  196,361.27 USD
-  2027-01-05  201,846.08 USD  819,043.11 USD  188,852.30 USD  191,776.04 USD  194,309.14 USD
+  2027-01-31  212,301.46 USD  828,159.69 USD  198,215.51 USD  201,500.92 USD  204,013.30 USD
+  2027-02-28  218,141.42 USD  838,733.52 USD  203,243.93 USD  206,781.52 USD  208,948.87 USD
+  2027-03-31  229,709.01 USD  856,234.98 USD  214,098.15 USD  217,319.48 USD  220,031.73 USD
+  2027-04-15  233,102.74 USD  856,611.51 USD  217,168.81 USD  220,384.97 USD  222,984.31 USD
   · Committed: money in hand, less what is owed on debts with no term and on obligations as they
     fall due, in USD, after plans, recurring flows found in history and what they can still give.
     Investments and property are net worth, not liquid. Variable spending is not in it.
@@ -65,6 +68,8 @@ Obligations coming due
   2026-04-15  nonqualified-529-penalty  irs      18.62 USD
   2026-04-15  federal-income-tax        irs  -3,643.87 USD
   2026-04-15  ca-income-tax             ftb     477.03 USD
+  2027-04-15  federal-income-tax        irs  -3,317.00 USD
+  2027-04-15  ca-income-tax             ftb     471.53 USD
 
 Problems ahead
   Date  Problem

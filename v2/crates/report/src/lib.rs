@@ -13,6 +13,7 @@ mod balance;
 mod budget;
 mod calendar;
 mod claims;
+mod closings;
 mod flow;
 mod forecast;
 mod gains;
@@ -29,6 +30,8 @@ mod table;
 mod tax;
 mod why;
 
+#[cfg(test)]
+mod source_tests;
 #[cfg(test)]
 mod tests;
 

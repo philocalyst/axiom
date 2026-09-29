@@ -1,6 +1,6 @@
 $ axiom forecast --paths 200 --today 2026-01-06
 
-Forecast to 2027-01-06
+Forecast to 2027-04-15
 
 Liquid net worth
   Month end        Committed       Net worth             p10             p50             p90
@@ -18,7 +18,10 @@ Liquid net worth
   2026-10-31  214,548.81 USD  212,984.40 USD  198,653.70 USD  202,874.47 USD  206,860.72 USD
   2026-11-30  218,265.59 USD  216,701.18 USD  200,594.73 USD  205,446.41 USD  209,043.15 USD
   2026-12-31  221,982.37 USD  220,417.96 USD  202,852.68 USD  208,162.49 USD  212,192.68 USD
-  2027-01-06  220,032.37 USD  218,467.96 USD  200,823.29 USD  205,842.97 USD  209,761.66 USD
+  2027-01-31  225,699.15 USD  224,134.74 USD  204,904.23 USD  210,588.78 USD  214,639.34 USD
+  2027-02-28  229,415.93 USD  227,851.52 USD  207,508.14 USD  212,861.40 USD  217,380.16 USD
+  2027-03-31  233,132.71 USD  231,568.30 USD  209,069.89 USD  215,513.73 USD  220,273.30 USD
+  2027-04-15  233,472.71 USD  229,618.30 USD  208,974.82 USD  215,225.79 USD  220,134.47 USD
   · Committed: money in hand, less what is owed on debts with no term and on obligations as they
     fall due, in USD, after plans, recurring flows found in history and what they can still give.
     Investments and property are net worth, not liquid. Variable spending is not in it.
@@ -34,7 +37,7 @@ What recurs
   income/rent → assets/bank/rental-bank                                        monthly  2,500.00 USD              plan
   assets/bank/rental-bank → expenses/rental/interest (lender), and 1 more leg  monthly  1,809.59 USD              plan
   assets/bank/rental-bank → expenses/rental/management (hartwell-pm)           monthly    200.00 USD              plan
-  assets/rental/house → expenses/rental/depreciation                           monthly    478.31 USD              plan
+  assets/rental/house.basis → expenses/rental/depreciation                     monthly    478.31 USD              plan
   assets/bank/checking → expenses/dining                                       monthly    179.28 USD  2026-01-19  seen 12 times
   assets/bank/checking → expenses/living                                       monthly    326.94 USD  2026-01-22  seen 12 times
   income/salary → assets/bank/checking, and 2 more legs                        monthly  8,000.00 USD  2026-01-28  plan
@@ -44,6 +47,7 @@ Obligations coming due
   Due         Obligation          To          Amount
   ──────────────────────────────────────────────────
   2026-04-15  federal-income-tax  irs  -1,564.41 USD
+  2027-04-15  federal-income-tax  irs  -2,290.00 USD
 
 Problems ahead
   Date  Problem

@@ -125,7 +125,7 @@ the check prints. There are no liabilities.
 
 `axiom available`: 171,521.72 USD to spend. Money in hand is 179,921.72; the 8,400.00 USD of the plan
 is listed under *held for espp* and taken off. Every holding is listed with the time it takes to reach and, for
-the 401(k), the 10% early-withdrawal penalty (11,773.33 USD).
+the 401(k), the 10% early-withdrawal penalty (11,773.33 USD) and the federal tax on the withdrawal.
 
 `axiom gains 2025`: 18 short-term rows (proceeds 62,075.84, basis 57,625.40, gain 4,450.44) and 5 long-term rows
 (23,869.54, 24,454.21, -584.67). The UNH loss of -2,949.54 is in the short-term rows at its full amount; the
@@ -153,12 +153,9 @@ states cost and day).
   it shows as short-term even though the disallowed loss belongs to a lot bought in January.
 - **A purchase with two sources still takes two lines.** The ESPP purchase is the cash the plan held plus, as
   a second line, the discount into the basis; a single transaction cannot have a cash leg and a basis leg.
-- **Tax on money drawn is missing from `available`'s costs.** The fork stops at the end of the year and the return
-  closes on April 15 of the next: the 7,397.22 USD of unrealized gain in the employer stock costs nothing in the
-  table, and the 401(k) shows the penalty but not the income tax on the withdrawal.
-- **`balance --value` counts a basis flow as money.** Its assets read 479,480.93 USD and its net worth the same,
-  9,619.97 USD above the 469,860.96 USD of `check` and of plain `balance`: the 7,641.37 USD of ESPP discounts and
-  the 1,978.60 USD of the wash sale, flows into a lot's basis, are valued as if they had arrived in the place
-  (it also prints "3 flows have no price on their day"). The report needs to skip flows into `PLACE.basis`.
+- **`available` prices a withdrawal against the year so far.** It folds the journal to the day and runs the laws on
+  to the day the return closes, but knows no pay to come. The journal ends in 2025, so 2026 has no income yet: the
+  7,397.22 USD of unrealized gain in the employer stock lies under the standard deduction and costs nothing in the
+  table, and the 401(k) shows the tax the withdrawal itself would owe as well as the penalty.
 - **A market fall is not shown.** The 401(k) here has only contributions and interest; the market
   revaluation case (`via market` in an account that penalizes withdrawals) is shown in `05-family`.

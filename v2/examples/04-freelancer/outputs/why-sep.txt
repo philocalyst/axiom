@@ -18,24 +18,24 @@ Limits
   me   contribution-limit on assets/retirement/sep  2025    8,000.00 USD  11,399.25 USD  3,399.25 USD  70.18%
 
 Governed by
-  Law                   When       Explains                                                        Written
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Law                   When                     Explains                                                        Written
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Limits
-    contribution-limit  each year  A SEP-IRA takes at most 20% of net earnings after half of the…  accounts.ax:31
+    contribution-limit  each year closing 04-15  A SEP-IRA takes at most 20% of net earnings after half of the…  accounts.ax:31
   · 13 more laws only count, into adjustments, distributions, dividends, interest,
     investment-income, itemized, long-term-gains, payments, pretax, salt, sep-contributions,
     short-term-gains, total-income, wages.
 
 Recent flows
-  Date        With                           Payee  Note                                     Amount        Balance
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  2025-01-01  equity/opening                                                          18,350.00 USD  18,350.00 USD
-  2025-03-31  equity/unknown                        unexplained gap, accepted with !    -385.35 USD  17,964.65 USD
-  2025-06-27  assets/bank/business-checking                                            2,000.00 USD  19,964.65 USD
-  2025-06-30  equity/unknown                        unexplained gap, accepted with !   1,477.38 USD  21,442.03 USD
-  2025-09-26  assets/bank/business-checking                                            2,000.00 USD  23,442.03 USD
-  2025-09-30  equity/unknown                        unexplained gap, accepted with !     984.57 USD  24,426.60 USD
-  2025-12-22  assets/bank/business-checking                                            2,000.00 USD  26,426.60 USD
-  2025-12-31  equity/unknown                        unexplained gap, accepted with !     607.81 USD  27,034.41 USD
-  2026-01-28  assets/bank/business-checking                                            2,000.00 USD  29,034.41 USD
-  2026-03-31  equity/unknown                        unexplained gap, accepted with !     551.65 USD  29,586.06 USD
+  Date        With                           Payee  Note                               Amount        Balance
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-01-01  equity/opening                                                    18,350.00 USD  18,350.00 USD
+  2025-03-31  income/market                         revalued via income/market    -385.35 USD  17,964.65 USD
+  2025-06-27  assets/bank/business-checking                                      2,000.00 USD  19,964.65 USD
+  2025-06-30  income/market                         revalued via income/market   1,477.38 USD  21,442.03 USD
+  2025-09-26  assets/bank/business-checking                                      2,000.00 USD  23,442.03 USD
+  2025-09-30  income/market                         revalued via income/market     984.57 USD  24,426.60 USD
+  2025-12-22  assets/bank/business-checking                                      2,000.00 USD  26,426.60 USD
+  2025-12-31  income/market                         revalued via income/market     607.81 USD  27,034.41 USD
+  2026-01-28  assets/bank/business-checking                                      2,000.00 USD  29,034.41 USD
+  2026-03-31  income/market                         revalued via income/market     551.65 USD  29,586.06 USD

@@ -4,7 +4,9 @@ Budgets for 2026
 
   Place                   Law     Window          Spent         Limit        Left    Used
   ───────────────────────────────────────────────────────────────────────────────────────
-  expenses/clothing       budget  2026-01      0.00 USD     80.00 USD   80.00 USD      0%
+  expenses/clothing       budget  2026         0.00 USD    160.00 USD  160.00 USD      0%
+                                  2026-01      0.00 USD     80.00 USD   80.00 USD      0%
+                                  2026-02      0.00 USD     80.00 USD   80.00 USD      0%
   expenses/dining         budget  2026       180.45 USD    300.00 USD  119.55 USD  60.15%
                                   2026-01    130.19 USD    150.00 USD   19.81 USD  86.79%
                                   2026-02     50.26 USD    150.00 USD   99.74 USD  33.51%

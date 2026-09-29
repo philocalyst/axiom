@@ -9,8 +9,8 @@ Counted
     wages         40,192.89 USD  110 sources
     total-income  40,192.89 USD  110 sources
     payments       3,854.21 USD  22 sources
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
 
 Owed
-  Owed  To  Due  Amount  From
-  ───────────────────────────
-  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
+  · The 2025 return closes on 2026-04-15; what it owes is not figured yet; the tallies are counted
+    so far.

@@ -8,10 +8,10 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Map, Qty};
 use axiom_engine::Run;
-use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Plan, Recognition, Txn};
+use axiom_model::{Amount, Book, Class, End, Entity, Flow, Place, Plan, Txn};
 
 use super::recurrence::{Schedule, detect, median};
-use crate::history::{Posting, postings};
+use crate::history::{Posting, moves_quantity, postings};
 use crate::lens::Lens;
 use crate::synth::planned;
 
@@ -40,15 +40,8 @@ pub struct Expectation<'b> {
 impl Expectation<'_> {
     /// Its occurrences after `after`, up to `horizon`, as flows to apply.
     pub fn flows(&self, after: Day, horizon: Day) -> Vec<Flow> {
-        // A plan over a date range keeps its width.
-        let width = self.template.recognized.until.0 - self.template.recognized.from.0;
         let days = self.schedule.days(after, horizon);
-        days.into_iter()
-            .map(|day| Flow {
-                recognized: Recognition { from: day, until: day.add_days(width) },
-                ..planned(self.template, day, self.out, self.arrive)
-            })
-            .collect()
+        days.into_iter().map(|day| planned(self.template, day, self.out, self.arrive)).collect()
     }
 
     /// Whether `other` says the same thing: the same pair, at the same
@@ -191,15 +184,17 @@ fn has_ended(book: &Book, run: &Run, habit: &Expectation) -> bool {
         let found = run.holdings.binary_search_by_key(&(place, unit), |holding| (holding.place, holding.unit));
         found.map_or(Qty::ZERO, |at| run.holdings[at].qty())
     };
-    let ends = [(flow.from, flow.out.unit), (flow.to, flow.arrive.unit)];
-    ends.into_iter().filter(|&(place, _)| matches!(book.places[place].class, Class::Asset | Class::Liability)).any(
-        |(place, unit)| {
-            let recent = book.touching[place].iter().rev().map(|&id| &book.flows[id]);
-            let mut others = recent.take_while(|other| other.day >= since);
-            held(place, unit).is_zero()
-                && !others.any(|other| (other.from, other.to, other.payee) != (flow.from, flow.to, flow.payee))
-        },
-    )
+    // A basis end moves nothing through its account, so an empty account says nothing there.
+    let ends = [(End::From, flow.from, flow.out.unit), (End::To, flow.to, flow.arrive.unit)];
+    let on_sheet = |&(end, place, _): &(End, _, _)| {
+        moves_quantity(flow, end) && matches!(book.places[place].class, Class::Asset | Class::Liability)
+    };
+    ends.into_iter().filter(on_sheet).any(|(_, place, unit)| {
+        let recent = book.touching[place].iter().rev().map(|&id| &book.flows[id]);
+        let mut others = recent.take_while(|other| other.day >= since);
+        held(place, unit).is_zero()
+            && !others.any(|other| (other.from, other.to, other.payee) != (flow.from, flow.to, flow.payee))
+    })
 }
 
 #[cfg(test)]
@@ -259,5 +254,35 @@ mod tests {
         // Recent activity elsewhere on the account keeps it alive.
         house.run.today = day(2026, 4, 10);
         assert!(!has_ended(&house.book, &house.run, &habit), "an invoice was written on it this month");
+    }
+
+    /// The house holds no dollars, and depreciation never moves any through it:
+    /// its empty dollar balance does not say the rhythm is over.
+    #[test]
+    fn a_monthly_depreciation_does_not_end_because_the_house_holds_no_dollars() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+commodity HOME
+  precision 0
+
+account assets/house
+account expenses/depreciation
+
+opening 2026-01-01
+  house 1 HOME basis 120_000 USD
+
+2026-01-31 house.basis -> depreciation 300 USD
+2026-02-28 house.basis -> depreciation 300 USD
+2026-03-31 house.basis -> depreciation 300 USD
+2026-04-30 house.basis -> depreciation 300 USD
+";
+        crate::source_tests::with_run(source, day(2026, 5, 10), |book, run| {
+            let whose = crate::lens::Whose::default();
+            let found = expected(Lens::new(book, &whose, run.today), run);
+            assert_eq!(found.len(), 1, "the depreciation is a habit");
+            assert_eq!(found[0].template.terms().basis_end, Some(End::From));
+        });
     }
 }

@@ -7,7 +7,7 @@ use axiom_model::{Amount, Book, Flow};
 use super::event_words;
 use crate::history::Posting;
 use crate::places::{path, route};
-use crate::table::creditor;
+use crate::table::{creditor, gap_words};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Explains the items whose source overlaps `at`.
@@ -58,8 +58,8 @@ fn items(book: &Book, run: &Run, at: Loc, flows: &[Id<Flow>]) -> Vec<(String, Lo
         items.push((format!("flow: {}, {amounts}", route(book, flow)), flow.loc));
     }
     for (index, assertion) in book.asserts.iter().enumerate().filter(|(_, assertion)| overlaps(assertion.loc, at)) {
-        let padded = run.pads.iter().any(|pad| pad.assert as usize == index);
-        let gap = if padded { ", gap accepted with !" } else { "" };
+        let gap = run.pads.iter().find(|pad| pad.assert as usize == index).map(|pad| gap_words(book, pad));
+        let gap = gap.map_or(String::new(), |words| format!(", {words}"));
         items.push((
             format!("assertion: {} = {}{gap}", path(book, assertion.place), book.show(assertion.amount)),
             assertion.loc,

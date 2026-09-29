@@ -14,11 +14,11 @@ What you can spend
   Available to spend               32,150.92 USD
 
 What it would take to reach the rest
-  Holding                         Liquid in           Value      Cost             Net  Because
-  ────────────────────────────────────────────────────────────────────────────────────────────
-  assets/rental/house (1 HOME)    90d        405,000.00 USD            405,000.00 USD
-  ────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today             405,000.00 USD  0.00 USD  405,000.00 USD
-  · Each line withdraws the whole holding into assets/bank/checking on 2025-09-20 and runs the year
-    out through the laws. Cost is what they would then owe beyond what they already will: penalties,
-    and the tax on any income it creates.
+  Holding                         Liquid in           Value        Cost             Net  Because
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/rental/house (1 HOME)    90d        405,000.00 USD  314.96 USD  404,685.04 USD  driven by federal-income-tax 314.96 USD
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today             405,000.00 USD  314.96 USD  404,685.04 USD
+  · Each line withdraws the whole holding into assets/bank/checking on 2025-09-20 and runs the books
+    on to 2026-04-15, when the year's return closes, through the laws. Cost is what they would then
+    owe beyond what they already will: penalties, and the tax on any income it creates.

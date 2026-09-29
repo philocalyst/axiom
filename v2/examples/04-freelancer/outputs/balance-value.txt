@@ -13,10 +13,9 @@ Balances at 2026-04-16
     retirement            29,586.06 USD
       sep                 29,586.06 USD
   ─────────────────────────────────────
-  equity                  38,338.00 USD
+  equity                  35,101.94 USD
     odometer                 645.38 USD
     opening               34,456.56 USD
-    unknown                3,236.06 USD
   ─────────────────────────────────────
   expenses                76,612.46 USD
     bad-debt               3,800.00 USD
@@ -46,9 +45,10 @@ Balances at 2026-04-16
       federal             14,100.00 USD
     transport                823.17 USD
   ─────────────────────────────────────
-  income                 108,496.93 USD
+  income                 111,732.99 USD
     design               108,000.00 USD
     interest                 409.53 USD
+    market                 3,236.06 USD
     rewards                   87.40 USD
   ─────────────────────────────────────
   liabilities                132.70 USD

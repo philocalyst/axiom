@@ -9,3 +9,6 @@ license.workspace = true
 axiom-core.workspace = true
 axiom-model.workspace = true
 axiom-engine.workspace = true
+
+[dev-dependencies]
+axiom-syntax.workspace = true

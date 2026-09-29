@@ -12,12 +12,12 @@ What you can spend
   Available to spend                     70,259.47 USD
 
 What it would take to reach the rest
-  Holding                           Liquid in          Value          Cost            Net  Because
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/de/kaution (3,600.00 EUR)  700d        4,234.68 USD                 4,234.68 USD
-  assets/retirement/us-401k         5d         66,600.00 USD  6,660.00 USD  59,940.00 USD  driven by early-withdrawal-penalty 6,660.00 USD
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today               70,834.68 USD  6,660.00 USD  64,174.68 USD
+  Holding                           Liquid in          Value           Cost            Net  Because
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/de/kaution (3,600.00 EUR)  700d        4,234.68 USD                  4,234.68 USD
+  assets/retirement/us-401k         5d         66,600.00 USD  12,482.00 USD  54,118.00 USD  driven by early-withdrawal-penalty 6,660.00 USD, federal-income-tax 5,822.00 USD
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today               70,834.68 USD  12,482.00 USD  58,352.68 USD
   · Each line withdraws the whole holding into assets/bank/us-checking on 2026-04-16 and runs the
-    year out through the laws. Cost is what they would then owe beyond what they already will:
-    penalties, and the tax on any income it creates.
+    books on to 2027-04-15, when the year's return closes, through the laws. Cost is what they would
+    then owe beyond what they already will: penalties, and the tax on any income it creates.

@@ -80,7 +80,8 @@ that way and then compared with the output.
 
 Run with `--today 2026-02-10` instead (`outputs/tax-2025-before-closing.txt`), the
 return has not closed: `axiom tax` shows what was counted and the payments so
-far, and no tax, because the laws that figure it wait for April 15.
+far, and says the return closes on 2026-04-15 instead of showing a tax, because the
+laws that figure it wait for that day.
 
 `axiom check`: no errors, three warnings, each one taught: Northpeak's 2,600.00 USD
 invoice is 106 days past due, Orbit Labs' 6,000.00 USD invoice is 7 days past
@@ -129,7 +130,5 @@ window).
 - **One law per due date.** `by` names one day and `closing` fires once a year, so
   Q1-Q3 of each year is one law each. 2025's are written; 2026's are not, and
   nothing warns that they are missing (F27).
-- **Plans drop `for`.** A plan's `for 2026` is not carried into the forecast, so
-  the January installment is planned in December (`plans.ax`).
 - **Cash or accrual is not a property of the person.** The cash method is a law on
   the receivable account.

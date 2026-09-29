@@ -4,13 +4,13 @@ Balances at 2025-06-30
 
   Place               Value (USD)
   ───────────────────────────────
-  assets           410,066.54 USD
+  assets           400,446.57 USD
     bank           111,148.82 USD
       checking      29,690.83 USD
       savings       81,457.99 USD
     coinbase        18,393.87 USD
-    etrade          58,812.68 USD
-    fidelity        73,444.50 USD
+    etrade          51,171.31 USD
+    fidelity        71,465.90 USD
     retirement     105,983.30 USD
     schwab          27,535.50 USD
     wallet          14,747.87 USD
@@ -41,7 +41,7 @@ Balances at 2025-06-30
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       410,066.54 USD
+  Assets       400,446.57 USD
   Liabilities        0.00 USD
   ───────────────────────────
-  Net worth    410,066.54 USD
+  Net worth    400,446.57 USD

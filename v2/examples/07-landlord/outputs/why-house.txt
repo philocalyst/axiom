@@ -10,16 +10,14 @@ Governed by
     total-income, wages.
 
 Recent flows
-  Date        With                          Payee           Note               Amount         Balance
-  ───────────────────────────────────────────────────────────────────────────────────────────────────
-  2025-07-31  opening balance                                                          -5,024.69 USD
-  ───────────────────────────────────────────────────────────────────────────────────────────────────
-  2025-07-31  opening balance                                                                  1 HOME
-  2025-07-31  expenses/rental/depreciation                               -913.58 USD   -5,938.27 USD
-  2025-08-31  expenses/rental/depreciation                               -913.58 USD   -6,851.85 USD
-  2025-09-15  liabilities/bills             summit-roofing  #inv-roof  14,200.00 USD    7,348.15 USD
-  2025-09-30  expenses/rental/depreciation                               -935.10 USD    6,413.05 USD
-  2025-10-31  expenses/rental/depreciation                               -956.61 USD    5,456.44 USD
-  2025-11-30  expenses/rental/depreciation                               -956.61 USD    4,499.83 USD
-  2025-12-29  expenses/rental/depreciation                               -478.31 USD    4,021.52 USD
-  2025-12-29  assets/bank/rental-bank                                         -1 HOME          0 HOME
+  Date        With                          Payee           Note                               Amount  Balance
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-07-31  opening balance                                                                           1 HOME
+  2025-07-31  expenses/rental/depreciation                  basis -913.58 USD
+  2025-08-31  expenses/rental/depreciation                  basis -913.58 USD
+  2025-09-15  liabilities/bills             summit-roofing  basis +14,200.00 USD · #inv-roof
+  2025-09-30  expenses/rental/depreciation                  basis -935.10 USD
+  2025-10-31  expenses/rental/depreciation                  basis -956.61 USD
+  2025-11-30  expenses/rental/depreciation                  basis -956.61 USD
+  2025-12-29  expenses/rental/depreciation                  basis -478.31 USD
+  2025-12-29  assets/bank/rental-bank                                                         -1 HOME   0 HOME

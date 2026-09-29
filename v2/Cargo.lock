@@ -42,6 +42,7 @@ dependencies = [
  "axiom-core",
  "axiom-engine",
  "axiom-model",
+ "axiom-syntax",
 ]
 
 [[package]]

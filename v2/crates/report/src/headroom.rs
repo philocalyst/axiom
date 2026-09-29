@@ -9,31 +9,47 @@ use axiom_core::{Day, Id, Map, Qty, Ratio, Set};
 use axiom_engine::{Headroom, Run};
 use axiom_model::{Amount, BinOp, Book, Func, Law, Op, Period, StepKind, Subject, Value, Window};
 
-/// Every limit's readings, and for each budget that nothing has reached in the
-/// window holding `at`, a reading of nothing against its written limit: a
-/// budget no flow touched is still a budget, wholly unspent. Before the
-/// journal begins there is nothing to budget.
-pub fn current(book: &Book, run: &Run, at: Day) -> Vec<Headroom> {
+use crate::calendar::Periods;
+
+/// Every limit's readings, and for each budget that nothing has reached in a
+/// window that touches `from..=to`, a reading of nothing against its written
+/// limit: a budget no flow touched is still a budget, wholly unspent. Before
+/// the journal begins there is nothing to budget.
+pub fn current(book: &Book, run: &Run, from: Day, to: Day) -> Vec<Headroom> {
     let mut readings = run.headroom.clone();
-    if book.flows.as_slice().first().is_none_or(|first| at < first.day) {
-        return readings;
-    }
+    let Some(begins) = book.flows.as_slice().first().map(|first| first.day) else { return readings };
     let mut read: Set<(Id<Law>, u32, Subject, Day)> =
         readings.iter().map(|reading| (reading.law, reading.step, reading.subject, reading.from)).collect();
+    let (months, years) = (Periods::covering(Period::Month, from, to), Periods::covering(Period::Year, from, to));
     let rules = book.rules.on_in.values().iter().chain(book.rules.on_out.values());
-    for rule in rules.filter(|rule| (rule.from..=rule.until).contains(&at)) {
+    for rule in rules {
         let (Subject::Place(place), Some((step, window, limit))) = (rule.subject, budget(&book.laws[rule.law])) else {
             continue;
         };
-        let (from, until) = match window {
-            Window::Month => (at.month_start(), at.month_end()),
-            Window::Year => (at.year_start(), at.year_end()),
+        let windows = match window {
+            Window::Month => &months,
+            Window::Year => &years,
             Window::Ever => continue,
         };
-        if read.insert((rule.law, step, rule.subject, from)) {
-            let (owner, counted) = (book.places[place].owner, Amount::new(Qty::ZERO, limit.unit));
-            let (law, subject) = (rule.law, rule.subject);
-            readings.push(Headroom { law, step, subject, owner, from, until, counted, limit, day: at, warn: true });
+        for index in 0..windows.len() {
+            let (start, until) = (windows.start(index), windows.end(index));
+            let in_force = rule.from <= until && start <= rule.until;
+            if in_force && begins <= until && read.insert((rule.law, step, rule.subject, start)) {
+                let (owner, counted) = (book.places[place].owner, Amount::new(Qty::ZERO, limit.unit));
+                let (law, subject, day) = (rule.law, rule.subject, until.min(to));
+                readings.push(Headroom {
+                    law,
+                    step,
+                    subject,
+                    owner,
+                    from: start,
+                    until,
+                    counted,
+                    limit,
+                    day,
+                    warn: true,
+                });
+            }
         }
     }
     readings

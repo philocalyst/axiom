@@ -4,16 +4,14 @@ Balances at 2025-08-31
 
   Place                     Balance
   ─────────────────────────────────
-  assets             47,483.65 USD
+  assets             54,335.50 USD
                              1 HOME
     bank             54,335.50 USD
       checking       47,132.93 USD
       deposit-bank    2,400.00 USD
       rental-bank     4,802.57 USD
-    rental           -6,851.85 USD
-                             1 HOME
-      house          -6,851.85 USD
-                             1 HOME
+    rental                   1 HOME
+      house                  1 HOME
   ─────────────────────────────────
   equity            128,000.00 USD
     opening         128,000.00 USD
@@ -46,7 +44,7 @@ Balances at 2025-08-31
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       452,483.65 USD
+  Assets       459,335.50 USD
   Liabilities  279,689.84 USD
   ───────────────────────────
-  Net worth    172,793.81 USD
+  Net worth    179,645.66 USD

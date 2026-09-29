@@ -40,6 +40,8 @@ Owed
     family · us/529
       nonqualified-529-penalty (penalty)  irs  2026-04-15  39.29 USD  2 sources
   ─────────────────────────────────────────────────────────────────────────────
-  Total owed                                               39.29 USD
+  Total owed so far                                        39.29 USD
+  · The 2025 return closes on 2026-04-15; what it owes is not figured yet; the tallies are counted
+    so far.
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
   · A penalty is the price of a violated law: it is owed instead of the law failing.

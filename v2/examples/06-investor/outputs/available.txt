@@ -18,7 +18,7 @@ What you can spend
 
 What it would take to reach the rest
   Holding                           Liquid in           Value           Cost             Net  Because
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   assets/coinbase (0.13 BTC)        1d          11,848.89 USD                  11,848.89 USD
   assets/coinbase (0.95668225 ETH)  1d           2,963.94 USD                   2,963.94 USD
   assets/etrade (295.5686 NWND)     1d          56,453.60 USD                  56,453.60 USD
@@ -28,12 +28,12 @@ What it would take to reach the rest
   assets/fidelity (28.3264 MSFT)    1d          13,709.98 USD                  13,709.98 USD
   assets/fidelity (19.7153 UNH)     1d           6,305.15 USD                   6,305.15 USD
   assets/fidelity (41.9694 FAST)    1d           1,766.91 USD                   1,766.91 USD
-  assets/retirement                 5d         117,733.28 USD  11,773.33 USD  105,959.95 USD  driven by early-withdrawal-penalty 11,773.33 USD
+  assets/retirement                 5d         117,733.28 USD  28,844.65 USD   88,888.63 USD  driven by federal-income-tax 17,071.32 USD, early-withdrawal-penalty 11,773.33 USD
   assets/schwab (38.2029 VXUS)      2d           3,037.13 USD                   3,037.13 USD
   assets/schwab (133.4448 BND)      2d           9,922.96 USD                   9,922.96 USD
   assets/wallet (5.08049844 ETH)    1d          15,740.10 USD                  15,740.10 USD
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today               289,939.25 USD  11,773.33 USD  278,165.92 USD
-  · Each line withdraws the whole holding into assets/bank/checking on 2026-04-16 and runs the year
-    out through the laws. Cost is what they would then owe beyond what they already will: penalties,
-    and the tax on any income it creates.
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today               289,939.25 USD  28,844.65 USD  261,094.60 USD
+  · Each line withdraws the whole holding into assets/bank/checking on 2026-04-16 and runs the books
+    on to 2027-04-15, when the year's return closes, through the laws. Cost is what they would then
+    owe beyond what they already will: penalties, and the tax on any income it creates.
