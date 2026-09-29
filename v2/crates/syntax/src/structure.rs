@@ -15,9 +15,9 @@ use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported};
 
 #[rustfmt::skip]
-const KEYWORDS: [&str; 16] = [
-    "account", "entity", "commodity", "kind", "code", "param", "law", "every", "plan", "sync", "system", "use",
-    "base", "relaxed", "layout", "opening",
+const KEYWORDS: [&str; 15] = [
+    "account", "entity", "commodity", "kind", "contract", "code", "param", "law", "sync", "system", "use", "base",
+    "relaxed", "layout", "opening",
 ];
 
 /// Words that start a line inside a block, and what owns such a block. Written
@@ -81,8 +81,8 @@ impl<'s> Parser<'s> {
             "code" => self.code_rule(line),
             "param" => self.param(line),
             "law" => self.law_item(line),
-            "every" => self.plan(line, None),
-            "plan" => self.named_plan(line),
+            "contract" => self.contract(line),
+            "every" | "plan" => self.fail(plan_is_a_contract(keyword.loc, word)),
             "opening" => self.opening(line),
             "sync" => self.sync(line),
             "system" | "use" | "base" | "relaxed" | "layout" => self.setting(line, keyword, word, first),
@@ -242,6 +242,14 @@ impl<'s> Parser<'s> {
             self.diags.push(diag);
         }
     }
+}
+
+/// v3's `every …` and `plan NAME every …`.
+fn plan_is_a_contract(loc: Loc, word: &str) -> Diagnostic {
+    Diagnostic::error("plan-is-a-contract", format!("`{word}` is gone: what repeats is a contract"))
+        .label(loc, "a promise of flows, with a name and a party")
+        .note("a contract states its schedule once, and the journal records each time it is kept")
+        .help("write `contract NAME with PARTY` and, indented, `45 USD monthly on 8 from visa`; then `08 NAME` kept")
 }
 
 fn system_not_first(loc: Loc) -> Diagnostic {

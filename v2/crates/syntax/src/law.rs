@@ -11,7 +11,7 @@ use crate::parser::{Parse, Parser, Reported};
 const ON_TRIGGERS: [(&str, Trigger); 4] =
     [("in", Trigger::In), ("out", Trigger::Out), ("gain", Trigger::Gain), ("spend", Trigger::Spend)];
 
-const PERIODS: [(&str, Period); 2] = [("month", Period::Month), ("year", Period::Year)];
+pub(crate) const PERIODS: [(&str, Period); 2] = [("month", Period::Month), ("year", Period::Year)];
 
 const TRIGGER_WORDS: [&str; 4] = ["on", "each", "by", "always"];
 const STEP_WORDS: [&str; 6] = ["when", "let", "require", "warn", "owe", "count"];

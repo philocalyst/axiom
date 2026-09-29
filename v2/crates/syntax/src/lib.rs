@@ -13,8 +13,10 @@
 //! | `lex`       | one line's tokens, with two of lookahead                   |
 //! | `parser`    | parser state and the helpers every rule shares             |
 //! | `structure` | item dispatch, one-line directives, indented blocks        |
-//! | `journal`   | dated entries, openings and plans                          |
+//! | `journal`   | dated entries and openings                                 |
+//! | `dates`     | dates in full or short of what the file's place gives      |
 //! | `flow`      | flow headers, ends, legs, tails, lot selectors             |
+//! | `contract`  | contracts: schedule, properties, template legs             |
 //! | `amount`    | amounts, and what is said about the ones that are wrong    |
 //! | `decl`, `law` | declarations, params, syncs, laws                        |
 //! | `expr`      | the expression grammar                                     |
@@ -23,6 +25,7 @@
 pub mod ast;
 
 mod amount;
+mod contract;
 mod dates;
 mod decl;
 mod expr;
@@ -102,14 +105,11 @@ pub(crate) fn parse_in(file: FileId, src: &str, place: Place, pieces: usize) -> 
     (File::new(file, src, pieces), diags)
 }
 
+/// A parsed piece, what it found wrong, and its lines that were indented with tabs.
+type Parsed<'s> = (Piece<'s>, Vec<Diagnostic>, Tabs);
+
 /// Piece number `number` of the file, `src[range]`, parsed.
-fn parse_piece(
-    file: FileId,
-    src: &str,
-    place: Place,
-    range: Range<usize>,
-    number: usize,
-) -> (Piece<'_>, Vec<Diagnostic>, Tabs) {
+fn parse_piece(file: FileId, src: &str, place: Place, range: Range<usize>, number: usize) -> Parsed<'_> {
     let mut parser = Parser::new(file, src, range.clone(), number, place);
     let (items, dated) = count_items(&src.as_bytes()[range]);
     parser.items.reserve(items);

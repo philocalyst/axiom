@@ -1,37 +1,15 @@
-//! Journal items: everything that starts with a date, `opening` blocks, and
-//! plans, which are transactions that repeat.
+//! Journal items: everything that starts with a date, and `opening` blocks.
 
-use axiom_core::{Day, Dec, Diagnostic, Loc, Span};
+use axiom_core::{Day, Dec, Diagnostic, Loc};
 
 use crate::ast::*;
-use crate::dates::{empty_range, not_a_day};
+use crate::dates::empty_range;
 use crate::lex::Tok;
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Scope};
 
 const EVENT_STATES: [(&str, EventState); 3] =
     [("settled", EventState::Settled), ("void", EventState::Void), ("returned", EventState::Returned)];
-
-const CADENCES: [(&str, Span); 5] = [
-    ("day", Span::days(1)),
-    ("week", Span::days(7)),
-    ("month", Span::months(1)),
-    ("quarter", Span::months(3)),
-    ("year", Span::months(12)),
-];
-
-const WEEKDAYS: [(&str, u8); 7] =
-    [("monday", 0), ("tuesday", 1), ("wednesday", 2), ("thursday", 3), ("friday", 4), ("saturday", 5), ("sunday", 6)];
-
-/// The optional clauses of a plan header, and where each was written so a
-/// repeat can point back at it.
-#[derive(Default)]
-struct Bounds<'s> {
-    on: Option<On>,
-    from: Option<Day>,
-    until: Option<Day>,
-    seen: Vec<(&'s str, Loc)>,
-}
 
 impl<'s> Parser<'s> {
     /// A line that began with a date. What follows it says which kind of entry
@@ -204,78 +182,6 @@ impl<'s> Parser<'s> {
         }
         self.bump();
         Ok(count)
-    }
-
-    // ─── Plans ──────────────────────────────────────────────────────────────
-
-    /// `every CADENCE [on DAY] [from DATE] [until DATE|MONTH] FLOW`, where the
-    /// bounds may equally follow the flow's tail; `name` is that of a named plan.
-    pub fn plan(&mut self, line: &mut Line<'s>, name: Option<Name<'s>>) -> Parse<()> {
-        let every = match self.tok() {
-            Tok::Span(span) => self.bump_as(span),
-            _ => self.choose(&CADENCES, "unknown-cadence", "cadence")?.0,
-        };
-        let mut bounds = Bounds::default();
-        self.plan_bounds(&mut bounds)?;
-        let from = self.side()?;
-        let (mut flow, arrow) = self.flow_head(from, self.mark::<Clause>())?;
-        self.plan_bounds(&mut bounds)?;
-        let header = self.end_header(line)?;
-        self.flow_legs(line, &mut flow, arrow)?;
-        let Bounds { on, from, until, .. } = bounds;
-        self.emit(&header, Plan { name, every, on, from, until, flow }, ItemKind::Plan);
-        Ok(())
-    }
-
-    /// `plan NAME every …`
-    pub fn named_plan(&mut self, line: &mut Line<'s>) -> Parse<()> {
-        let name = self.name("expected-name", "a plan name")?;
-        self.expect_word("every", "expected-every", "`every` and how often the plan happens, like `every 2w`")?;
-        self.plan(line, Some(name))
-    }
-
-    /// The bounds `on DAY`, `from DATE` and `until DATE|MONTH`, each at most
-    /// once and in any order.
-    fn plan_bounds(&mut self, bounds: &mut Bounds<'s>) -> Parse<()> {
-        while let Tok::Name(word @ ("on" | "from" | "until")) = self.tok() {
-            let keyword = self.bump().loc;
-            if let Some(&(_, first)) = bounds.seen.iter().find(|(seen, _)| *seen == word) {
-                return Err(self.duplicate(&format!("`{word}` clause"), keyword, first));
-            }
-            bounds.seen.push((word, keyword));
-            match word {
-                "on" => bounds.on = Some(self.plan_day()?),
-                "from" => bounds.from = Some(self.date("the day the plan starts, like `2026-01-01`")?),
-                _ => bounds.until = Some(self.until_day()?),
-            }
-        }
-        Ok(())
-    }
-
-    /// `DATE`, or `MONTH` meaning that month's last day.
-    fn until_day(&mut self) -> Parse<Day> {
-        let pick = |tok| match tok {
-            Tok::Date(day) => Some(day),
-            Tok::Month(first) => Some(first.month_end()),
-            _ => None,
-        };
-        self.take(pick, "expected-date", "a date or month, like `2027-06`")
-    }
-
-    /// The day within each period: `15`, `04-15`, or `monday`.
-    fn plan_day(&mut self) -> Parse<On> {
-        let token = self.peek();
-        match token.tok {
-            Tok::Number(_) => {
-                self.bump();
-                match self.text(token.loc).parse::<u8>() {
-                    Ok(day @ 1..=31) => Ok(On::MonthDay(day)),
-                    _ => self.fail(not_a_day(token.loc, self.text(token.loc))),
-                }
-            }
-            Tok::MonthDay(..) => self.month_day().map(|(month, day)| On::YearDay { month, day }),
-            _ => self.choose(&WEEKDAYS, "unknown-day", "weekday").map(|(weekday, _)| On::Weekday(weekday)),
-        }
     }
 }
 

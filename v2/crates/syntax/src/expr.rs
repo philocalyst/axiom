@@ -146,6 +146,10 @@ impl<'s> Parser<'s> {
             Tok::Number(num) => self.number(token, num),
             Tok::Percent(num) => self.leaf(token, ExprKind::Pct(num)),
             Tok::Date(day) => self.leaf(token, ExprKind::Date(day)),
+            Tok::MonthDay(..) => {
+                let (first, day) = (self.next_expr(), self.date("a date")?);
+                Ok(self.node(ExprKind::Date(day), token.loc, first))
+            }
             Tok::Span(span) => self.leaf(token, ExprKind::Span(span)),
             Tok::Str(text) => self.leaf(token, ExprKind::Str(text)),
             Tok::Unit(text) => self.leaf(token, ExprKind::Unit(Name(text))),

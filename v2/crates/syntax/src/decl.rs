@@ -43,7 +43,7 @@ impl<'s> Parser<'s> {
     }
 
     /// `NAME ARG*`: arguments are primary expressions, commas optional.
-    fn property(&mut self, line: &Line<'s>) -> Parse<()> {
+    pub fn property(&mut self, line: &Line<'s>) -> Parse<()> {
         let name = self.name("expected-property", "a property name")?;
         let start = self.roots.len();
         while !self.at_eol() {

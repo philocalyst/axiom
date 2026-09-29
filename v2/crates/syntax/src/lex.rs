@@ -202,8 +202,7 @@ impl<'s> Lexer<'s> {
             b'0'..=b'9' => self.digit_word(start),
             b'a'..=b'z' => self.name(start),
             b'A'..=b'Z' => self.unit(start),
-            b'#' => self.purpose(start),
-            b'^' => self.code(start),
+            b'#' | b'^' => self.mark(start),
             b'"' => self.string(start),
             // A star touching a word is a glob (`*-trip`); alone it multiplies.
             b'*' if bytes.get(start + 1).is_some_and(|&b| CLASS[b as usize] != 0) => self.odd_name(start),
@@ -377,20 +376,8 @@ impl<'s> Lexer<'s> {
         }
     }
 
-    /// `#purpose`: a name behind a `#`.
-    fn purpose(&mut self, start: usize) -> Tok<'s> {
-        if !self.bytes.get(start + 1).is_some_and(|&b| CLASS[b as usize] != 0) {
-            self.pos = start + 1;
-            return Tok::Invalid(Malformed::Mark);
-        }
-        match self.name(start + 1) {
-            Tok::Name(name) => Tok::Purpose(Name(name)),
-            invalid => invalid,
-        }
-    }
-
-    /// `^code`: lowercase letters, digits and `-_:./*` behind a `^`.
-    fn code(&mut self, start: usize) -> Tok<'s> {
+    /// `#purpose` or `^code`: lowercase letters, digits and `-_:./*` behind the mark.
+    fn mark(&mut self, start: usize) -> Tok<'s> {
         let is_code_byte = |b: u8| CLASS[b as usize] != 0 || matches!(b, b':' | b'/');
         let mut end = start + 1;
         while let Some(&b) = self.bytes.get(end) {
@@ -404,6 +391,7 @@ impl<'s> Lexer<'s> {
         let text = &self.src[start..end];
         match text.bytes().nth(1) {
             _ if text.bytes().any(|b| b.is_ascii_uppercase()) => Tok::Invalid(Malformed::Word),
+            Some(b'a'..=b'z' | b'0'..=b'9') if text.starts_with('#') => Tok::Purpose(Name(&text[1..])),
             Some(b'a'..=b'z' | b'0'..=b'9') => Tok::Code(Code(text)),
             _ => Tok::Invalid(Malformed::Mark),
         }

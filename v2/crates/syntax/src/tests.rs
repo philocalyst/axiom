@@ -140,13 +140,41 @@ opening 2024-12-31
   taxes/federal  950 USD
 2026-03-13 paycheck 5_900 USD
 
-every month on 1 checking -> landlord 2_400 USD until 2027-06
-every 2w checking -> savings 100 USD
-every year on 04-15 from 2026-01-01 checking -> irs 3_000 USD
-every week on friday until 2027-01-01 checking -> cash 40 USD
-plan paycheck every 2w from 2026-01-02 acme -> 5_200 USD
-  retirement     800 USD
-  checking       ...
+/// The job, paid twice a month.
+contract job with lumen
+  4_600 USD twice monthly on 15, last into checking #wages "gross"
+  /// Six percent of the gross is deferred.
+  retirement   6%
+  blue-shield  184.20 USD #premium
+  match 50% of retirement up to 6%
+
+contract flat with greystar
+  2_900 USD monthly on 1 from checking
+  business 12% for studio
+  until 2026-08-31
+
+contract mortgage with rocket
+  loan 320_000 USD on 2024-02-20 at 5.875% over 30y for condo
+  monthly on 1 from checking
+  escrow 410 USD into escrow
+
+contract lease with dana
+  2_350 USD monthly on 1 into checking #rent of condo
+  deposit 2_350 USD
+  from 2025-07-01 until 2026-06-30
+  law no-late-rent
+    on in
+    warn total(in, month) <= 2_350 USD
+
+contract condo-insurance with state-farm
+  1_140 USD yearly on 03-01 from checking #insurance of condo
+  covers the year
+
+contract vti-monthly with fidelity
+  buy VTI for 500 USD monthly on 20 from checking
+
+contract gym with equinox
+  every 2w on friday from checking
 
 sync prices/2026.ax
   run python3 fetch_prices.py --symbol VTI // not a comment
@@ -237,7 +265,7 @@ fn clauses<'f, 's>(file: &'f File<'s>, tail: Many<Clause<'s>>) -> Vec<&'f Clause
 #[test]
 fn a_realistic_file_parses_into_the_expected_shapes() {
     let file = parse_clean(EXAMPLE);
-    assert_eq!(file.items.len(), 68);
+    assert_eq!(file.items.len(), 70);
     let txns = txns(&file);
 
     // A paycheck: one named side, legs for the other, the last taking the remainder.
@@ -271,19 +299,114 @@ fn a_realistic_file_parses_into_the_expected_shapes() {
     );
 }
 
+/// The properties of a contract, each as its name and the text of its arguments.
+fn properties(file: &File, contract: &Contract, src: &str) -> Vec<(String, Vec<String>)> {
+    let text = |arg: &ExprId| src[file.exprs[*arg].loc.range()].to_string();
+    file[contract.props].iter().map(|prop| (prop.name.0.to_string(), file[prop.args].iter().map(text).collect())).collect()
+}
+
 #[test]
-fn plans_take_their_bounds_before_the_flow_or_after_its_tail() {
+fn a_contract_has_a_schedule_properties_and_a_template() {
     let file = parse_clean(EXAMPLE);
-    let plans: Vec<&Plan> = file.iter::<Plan>().collect();
-    assert_eq!(
-        (plans[0].every, plans[0].on, plans[0].until),
-        (Span::months(1), Some(On::MonthDay(1)), Some(day(2027, 6, 30)))
-    );
-    assert_eq!(plans[1].every, Span::days(14));
-    assert_eq!((plans[2].on, plans[2].from), (Some(On::YearDay { month: 4, day: 15 }), Some(day(2026, 1, 1))));
-    assert_eq!(plans[3].on, Some(On::Weekday(4)));
-    assert_eq!(plans[4].name.map(|name| name.0), Some("paycheck"));
-    assert_eq!(file[plans[4].flow.legs].len(), 2);
+    let contracts: Vec<&Contract> = file.iter().collect();
+    assert_eq!(contracts.len(), 7);
+    let props = |contract: usize| properties(&file, contracts[contract], EXAMPLE);
+    let line = |name: &str, args: &[&str]| (name.to_string(), args.iter().map(|arg| arg.to_string()).collect::<Vec<_>>());
+
+    // The job: a payment, two days a month, a purpose and a description, a template and a match.
+    let job = contracts[0];
+    assert_eq!((job.name.0, job.party.0), ("job", "lumen"));
+    let schedule = job.schedule.unwrap();
+    assert!(matches!(schedule.payment, Some(Payment::Fixed(amount)) if amount.0 == "4_600 USD"));
+    assert_eq!((schedule.cadence, &file[schedule.on]), (Cadence::TwiceMonthly, &[On::MonthDay(15), On::Last][..]));
+    assert_eq!((schedule.direction, schedule.holding.0), (Direction::Into, "checking"));
+    assert!(matches!(clauses(&file, schedule.tail)[..], [ClauseKind::Purpose(_), ClauseKind::Description("gross")]));
+    let legs = &file[job.legs];
+    assert!(matches!(legs[0].amount, Quantity::Percent(_)) && legs.len() == 2);
+    assert_eq!(legs[0].doc.unwrap().lines().collect::<Vec<_>>(), ["Six percent of the gross is deferred."]);
+    assert_eq!(props(0), [line("match", &["50%", "of", "retirement", "up", "to", "6%"])]);
+
+    // The flat's properties, and a loan whose schedule has no amount.
+    assert_eq!(props(1), [line("business", &["12%", "for", "studio"]), line("until", &["2026-08-31"])]);
+    assert!(contracts[2].schedule.is_some_and(|schedule| schedule.payment.is_none()));
+    let loan = ["320_000 USD", "on", "2024-02-20", "at", "5.875%", "over", "30y", "for", "condo"];
+    assert_eq!(props(2), [line("loan", &loan), line("escrow", &["410 USD", "into", "escrow"])]);
+
+    // A lease: a deposit, two properties on one line, a purpose with an object, and a law.
+    let lease = contracts[3];
+    assert_eq!(props(3), [line("deposit", &["2_350 USD"]), line("from", &["2025-07-01", "until", "2026-06-30"])]);
+    let ClauseKind::Purpose(rent) = clauses(&file, lease.schedule.unwrap().tail)[0] else { panic!("a purpose") };
+    assert_eq!((rent.name.0, rent.of.map(|of| of.0)), ("rent", Some("condo")));
+    assert_eq!(file[lease.laws].len(), 1);
+
+    // A day of every year, what a payment covers, a standing order and a fortnight.
+    let insurance = contracts[4];
+    assert_eq!(file[insurance.schedule.unwrap().on], [On::YearDay { month: 3, day: 1 }]);
+    assert_eq!(props(4), [line("covers", &["the", "year"])]);
+    let buy = contracts[5].schedule.unwrap();
+    assert!(matches!(buy.payment, Some(Payment::Buy { unit: Name("VTI"), spend }) if spend.0 == "500 USD"));
+    let gym = contracts[6].schedule.unwrap();
+    assert_eq!((gym.cadence, &file[gym.on]), (Cadence::Every(Span::days(14)), &[On::Weekday(4)][..]));
+}
+
+#[test]
+fn a_contracts_lines_come_in_any_order() {
+    let src = "contract a with p\n  covers 6m\n  retirement 6%\n  5 USD monthly from x\n  from 07-01\n";
+    let (file, diags) = crate::parse(FileId(0), src, YEAR);
+    assert!(diags.is_empty(), "{}", render(src, &diags));
+    let contract: &Contract = file.iter().next().unwrap();
+    assert!(contract.schedule.is_some() && contract.legs.len() == 1 && contract.props.len() == 2);
+    // A short date in a property is completed as anywhere else.
+    assert!(matches!(file.exprs[file[file[contract.props][1].args][0]].kind, ExprKind::Date(d) if d == day(2026, 7, 1)));
+}
+
+#[test]
+fn every_cadence_is_a_span_between_occurrences() {
+    let cadences = ["daily", "weekly", "monthly", "quarterly", "yearly", "every 2w", "every 1y6m"];
+    let months = [0, 0, 1, 3, 12, 0, 18];
+    let days = [1, 7, 0, 0, 0, 14, 0];
+    for (written, (months, days)) in cadences.into_iter().zip(months.into_iter().zip(days)) {
+        let src = format!("contract c with p\n  1 USD {written} from x\n");
+        let file = parse_clean(&src);
+        let contract: &Contract = file.iter().next().unwrap();
+        assert_eq!(contract.schedule.unwrap().cadence, Cadence::Every(Span { months, days }), "{written}");
+    }
+}
+
+#[test]
+fn a_contract_keeps_its_good_lines_and_says_what_is_wrong_with_the_bad() {
+    let src = "contract c with p\n  5 USD monthly from x\n  retirement\n  business 5% for y\n";
+    let (file, diags) = parse(FileId(0), src);
+    assert_eq!(diags.iter().map(|diag| &*diag.code).collect::<Vec<_>>(), ["expected-amount"]);
+    let contract: &Contract = file.iter().next().unwrap();
+    assert!(contract.damaged && contract.schedule.is_some() && contract.props.len() == 1);
+
+    let contract_with = |lines: &str| format!("contract c with p\n{lines}");
+    let one = |lines: &str, code: &str| only_error(&contract_with(lines), code);
+    one("  deposit 5 USD\n", "missing-schedule");
+    one("  5 USD monthly from x\n  weekly from y\n", "duplicate-clause");
+    one("  5 USD monthly on 32 from x\n", "bad-day");
+    one("  5 USD monthly on 02-30 from x\n", "bad-day");
+    one("  5 USD monthly on 15 x\n", "unknown-direction");
+    one("  5 USD monthly from x ^code\n", "expected-end-of-line");
+    one("  5 USD monthly from x for 2025\n", "expected-end-of-line");
+    one("  5 USD every from x\n", "expected-span");
+    one("  5 USD twice from x\n", "expected-keyword");
+    for (written, code, replaced, fix) in [
+        ("montly", "unknown-cadence", "montly", "monthly"),
+        ("monthly on mondey", "unknown-day", "mondey", "monday"),
+    ] {
+        let src = contract_with(&format!("  5 USD {written} from x\n"));
+        assert_eq!(first_fix(&src, &only_error(&src, code)), (replaced, fix));
+    }
+}
+
+#[test]
+fn a_plan_is_a_contract_now() {
+    for src in ["every month on 1 checking -> landlord 2_400 USD\n", "plan paycheck every 2w acme -> 5_200 USD\n  a ...\n"] {
+        let error = only_error(src, "plan-is-a-contract");
+        assert!(error.help[0].text.contains("contract NAME with PARTY"));
+    }
 }
 
 #[test]
@@ -612,8 +735,8 @@ fn purposes_and_codes_have_their_own_marks() {
     assert_eq!(tokens("#groceries"), [Tok::Purpose(Name("groceries"))]);
     assert_eq!(tokens("#a/b-c ^inv:2026.01"), [Tok::Purpose(Name("a/b-c")), Tok::Code(Code("^inv:2026.01"))]);
     assert_eq!(tokens("#repair of"), [Tok::Purpose(Name("repair")), Tok::Name("of")]);
-    // A purpose is a name, so `:` and `.` end it; a code takes both.
-    assert_eq!(tokens("#a:b"), [Tok::Purpose(Name("a")), Tok::Punct(":"), Tok::Name("b")]);
+    // A purpose takes what a code does, and only the model can say it names none.
+    assert_eq!(tokens("#a:b"), [Tok::Purpose(Name("a:b"))]);
     assert_eq!(tokens("#Groceries"), [Tok::Invalid(Malformed::Word)]);
     assert_eq!(tokens("^Inv"), [Tok::Invalid(Malformed::Word)]);
     let src = "2026-01-01 a -> b 5 USD #Food\n";
@@ -783,6 +906,9 @@ fn roots(file: &File) -> Vec<ExprId> {
     let mut out = Vec::new();
     for decl in file.iter::<Decl>() {
         out.extend(file[decl.props].iter().flat_map(|prop| file[prop.args].iter().copied()));
+    }
+    for contract in file.iter::<Contract>() {
+        out.extend(file[contract.props].iter().flat_map(|prop| file[prop.args].iter().copied()));
     }
     for param in file.iter::<Param>() {
         out.extend(file[param.rows].iter().map(|row| row.value));
@@ -1123,6 +1249,10 @@ fn dump(file: &File) -> String {
         });
         leaves.collect::<Vec<_>>().join(" ")
     };
+    let props = |props: Many<Prop>| -> Vec<String> {
+        let each = |prop: &Prop| format!("{:?} {:?}", prop.name, file[prop.args].iter().map(|&arg| expr(arg)).collect::<Vec<_>>());
+        file[props].iter().map(each).collect()
+    };
     let law = |law: &Law| {
         let steps: Vec<String> = file[law.steps].iter().map(|step| format!("{:?}", step.loc)).collect();
         let mut roots = Vec::new();
@@ -1147,7 +1277,15 @@ fn dump(file: &File) -> String {
                 let claims: Vec<String> = file[file[id].claims].iter().map(claim).collect();
                 format!("{} {claims:?}", legs(file[id].lines))
             }
-            ItemKind::Plan(id) => format!("{:?} {:?} {}", file[id].name, file[id].every, flow(&file[id].flow)),
+            ItemKind::Contract(id) => {
+                let Contract { name, party, schedule, props: lines, legs: template, laws, damaged } = &file[id];
+                let schedule = schedule.map(|s| {
+                    let Schedule { at, payment, cadence, direction, holding, .. } = s;
+                    format!("{at:?} {payment:?} {cadence:?} {:?} {direction:?} {holding:?} {}", &file[s.on], tail(s.tail))
+                });
+                let laws: Vec<String> = file[*laws].iter().map(law).collect();
+                format!("{name:?} {party:?} {schedule:?} {:?} {} {laws:?} {damaged}", props(*lines), legs(*template))
+            }
             ItemKind::Code(id) => format!("{:?} {:?}", file[id].pattern, &file[file[id].on]),
             ItemKind::Law(id) => law(&file[id]),
             ItemKind::Param(id) => {
@@ -1157,18 +1295,8 @@ fn dump(file: &File) -> String {
             }
             ItemKind::Decl(id) => {
                 let decl = &file[id];
-                let props = file[decl.props].iter();
-                let props: Vec<String> = props
-                    .map(|prop| {
-                        format!(
-                            "{:?} {:?}",
-                            prop.name,
-                            file[prop.args].iter().map(|&arg| expr(arg)).collect::<Vec<_>>()
-                        )
-                    })
-                    .collect();
                 let laws: Vec<String> = file[decl.laws].iter().map(law).collect();
-                format!("{:?} {:?} {:?} {props:?} {laws:?}", decl.name, decl.alias, decl.kind)
+                format!("{:?} {:?} {:?} {:?} {laws:?}", decl.name, decl.alias, decl.kind, props(decl.props))
             }
         };
         writeln!(out, "{text}").unwrap();

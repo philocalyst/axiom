@@ -332,8 +332,10 @@ tables! {
     endings: Ending<'s>,
     /// [`ItemKind::Opening`]
     openings: Opening<'s>,
-    /// [`ItemKind::Plan`]
-    plans: Plan<'s>,
+    /// [`ItemKind::Contract`]
+    contracts: Contract<'s>,
+    /// The days of schedules: [`Schedule::on`].
+    days: On,
     /// [`ItemKind::Decl`]
     decls: Decl<'s>,
     /// [`ItemKind::Code`]
@@ -352,7 +354,7 @@ tables! {
     selects: Select<'s>,
     /// The clauses of tails: [`Flow::tail`].
     clauses: Clause<'s>,
-    /// The property lines of declarations: [`Decl::props`].
+    /// The property lines of declarations and contracts: [`Decl::props`], [`Contract::props`].
     props: Prop<'s>,
     /// The rows of parameters: [`Param::rows`].
     rows: ParamRow<'s>,
@@ -404,8 +406,8 @@ pub enum ItemKind<'s> {
     Ending(Id<Ending<'s>>),
     /// `opening DATE`
     Opening(Id<Opening<'s>>),
-    /// `every …` or `plan NAME every …`
-    Plan(Id<Plan<'s>>),
+    /// `contract NAME with PARTY`
+    Contract(Id<Contract<'s>>),
     /// `account`, `entity`, `commodity` or `kind`. One line naming several
     /// entities is one `Decl` per entity, all sharing the same properties.
     Decl(Id<Decl<'s>>),
@@ -759,22 +761,80 @@ pub struct Opening<'s> {
     pub claims: Many<Claim<'s>>,
 }
 
-/// `every CADENCE [on DAY] [from DATE] [until DATE|MONTH] FLOW`, or
-/// `plan NAME every …`.
+// ─── Contracts ──────────────────────────────────────────────────────────────
+
+/// `contract NAME with PARTY` and its indented lines: a promise of flows with
+/// one party. Its first line is the schedule; the rest come in any order.
 #[derive(Debug)]
-pub struct Plan<'s> {
-    /// The name of a named plan, which the journal can instantiate.
-    pub name: Option<Name<'s>>,
-    /// `month` is one month, `2w` fourteen days, `quarter` three months.
-    pub every: Span,
-    /// `on DAY`: which day of each period. `None` means the period's own start.
-    pub on: Option<On>,
-    /// `from DATE`: when the plan starts, if it says.
-    pub from: Option<Day>,
-    /// Inclusive. A month bound is normalized to that month's last day.
-    pub until: Option<Day>,
-    /// What happens each time, with its legs.
-    pub flow: Flow<'s>,
+pub struct Contract<'s> {
+    pub name: Name<'s>,
+    /// Who the promise is with.
+    pub party: Name<'s>,
+    /// How often and for how much. `None` when the line is missing or did not
+    /// parse, which its own diagnostic says; the contract is kept all the same,
+    /// so that its occurrences are not errors too.
+    pub schedule: Option<Schedule<'s>>,
+    /// The other lines that are not legs: `from`, `until`, `covers`, `business`,
+    /// `deposit`, `loan`, `escrow` and `match`, which the model reads with the
+    /// properties of other declarations (a party's or a purpose's `business`
+    /// is the same line): `&file[contract.props]`.
+    pub props: Many<Prop<'s>>,
+    /// The template: legs as in a split flow, of which an occurrence
+    /// overrides those of the same end.
+    pub legs: Many<Leg<'s>>,
+    /// The nested laws.
+    pub laws: Many<Law<'s>>,
+    /// A line of its body did not parse and is left out, so what remains is
+    /// not the whole contract: anything that only follows from the missing line
+    /// is not worth another diagnostic.
+    pub damaged: bool,
+}
+
+/// `[AMOUNT | buy UNIT for AMOUNT] CADENCE [on DAY, …] (from | into) NAME
+/// [#purpose [of NAME]] ["description"]`
+#[derive(Clone, Copy, Debug)]
+pub struct Schedule<'s> {
+    /// The whole line.
+    pub at: Loc,
+    /// What each occurrence pays; `None` when the contract's `loan` says.
+    pub payment: Option<Payment<'s>>,
+    pub cadence: Cadence,
+    /// The days of each period: `&file[schedule.on]`. None means the period's own start.
+    pub on: Many<On>,
+    /// Whether the holding pays (`from`) or is paid (`into`).
+    pub direction: Direction,
+    /// An account, or an owner's own hand: the parser cannot tell.
+    pub holding: Name<'s>,
+    /// The purpose and the description, as clauses of a flow: `&file[schedule.tail]`.
+    pub tail: Many<Clause<'s>>,
+}
+
+/// What an occurrence pays.
+#[derive(Clone, Copy, Debug)]
+pub enum Payment<'s> {
+    /// `45 USD`
+    Fixed(Amount<'s>),
+    /// `buy VTI for 500 USD`: what it spends each time is fixed and what it
+    /// buys is not, so the occurrence says (`20 vti-monthly 1.620 VTI`).
+    Buy { unit: Name<'s>, spend: Amount<'s> },
+}
+
+/// How often. `daily` is `every 1d`, `weekly` `every 7d`, `monthly` `every 1m`,
+/// `quarterly` `every 3m` and `yearly` `every 12m`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Cadence {
+    Every(Span),
+    /// `twice monthly`: two days in each month, `on 15, last`.
+    TwiceMonthly,
+}
+
+/// Which way a schedule's money goes, for the holding.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Direction {
+    /// `from checking`: the holding pays.
+    From,
+    /// `into checking`: the holding receives.
+    Into,
 }
 
 /// The day within each period that a contract's occurrence falls on.

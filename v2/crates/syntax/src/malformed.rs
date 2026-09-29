@@ -58,12 +58,8 @@ fn malformed_date(loc: Loc, text: &str) -> Diagnostic {
 /// full: the shorter ones are completed from their file's place. The label
 /// lands on the offending month or day, not the whole date.
 pub(crate) fn not_a_date(loc: Loc, text: &str, (year, month, day): (i32, u32, u32)) -> Diagnostic {
-    // How much of a whole date is left out of what was written.
-    let left_out: u32 = match text.len() {
-        2 => 8,
-        5 => 5,
-        _ => 0,
-    };
+    // The shorter shapes are the end of the whole one, and so are its fields.
+    let left_out = if text.len() > 5 { 0 } else { 10 - text.len() as u32 };
     let field = |from: u32| Loc::new(loc.file, loc.start + from - left_out, loc.start + from - left_out + 2);
     let Some(month_name) = month.checked_sub(1).and_then(|index| MONTHS.get(index as usize)) else {
         return Diagnostic::error("bad-date", format!("`{text}` is not a date: there is no month {month}"))
@@ -74,11 +70,8 @@ pub(crate) fn not_a_date(loc: Loc, text: &str, (year, month, day): (i32, u32, u3
         return Diagnostic::error("bad-date", format!("`{text}` is not a date: days start at 01"))
             .label(field(8), "there is no day 00");
     }
-    let last_day = match text.len() {
-        2 => format!("{last:02}"),
-        5 => format!("{month:02}-{last:02}"),
-        _ => format!("{year:04}-{month:02}-{last:02}"),
-    };
+    let whole = format!("{year:04}-{month:02}-{last:02}");
+    let last_day = &whole[whole.len().saturating_sub(text.len())..];
     Diagnostic::error("bad-date", format!("{month_name} {year} has {last} days"))
         .label(field(8), format!("there is no day {day}"))
         .fix(format!("the last day of {month_name} {year} is `{last_day}`"), loc, last_day)

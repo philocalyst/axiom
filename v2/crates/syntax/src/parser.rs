@@ -36,6 +36,8 @@ pub(crate) enum Scope {
     /// The lines of an `opening`, which say `since` when their parcels were
     /// acquired, and which an asset has with a `basis` and no amount.
     Opening,
+    /// A contract's schedule, which says only its purpose and a description.
+    Schedule,
 }
 
 /// A parsed header line: where the item is, and what documents it.
@@ -254,6 +256,11 @@ impl<'s> Parser<'s> {
 
     pub fn unit(&mut self, code: &'static str, what: &str) -> Parse<Name<'s>> {
         self.take(|tok| if let Tok::Unit(text) = tok { Some(Name(text)) } else { None }, code, what)
+    }
+
+    /// The word `word`, which a line's grammar puts between its parts.
+    pub fn keyword(&mut self, word: &str) -> Parse<()> {
+        self.expect_word(word, "expected-keyword", &format!("`{word}`")).map(drop)
     }
 
     /// A name, where a plain integer also counts: `529` is a number by shape,

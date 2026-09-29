@@ -166,6 +166,9 @@ impl<'s> Parser<'s> {
     pub fn tail(&mut self, mark: usize) -> Parse<Many<Clause<'s>>> {
         loop {
             let token = self.peek();
+            if self.scope == Scope::Schedule && !matches!(token.tok, Tok::Purpose(_) | Tok::Str(_)) {
+                break;
+            }
             let kind = match token.tok {
                 Tok::Purpose(name) => ClauseKind::Purpose(self.purpose(name)?),
                 Tok::Str(text) => self.bump_as(ClauseKind::Description(text)),
