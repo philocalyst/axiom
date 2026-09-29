@@ -165,7 +165,9 @@ impl Scan {
     fn of(text: &[u8]) -> Scan {
         let first_is_digit = text.first().is_some_and(u8::is_ascii_digit);
         let mut scan = Scan { items: 1, dated: usize::from(first_is_digit), heading: None };
-        scan.heading = text.first().filter(|_| first_is_digit).and_then(|_| heading(text));
+        if first_is_digit {
+            scan.heading = heading(text);
+        }
         for newline in memchr_iter(b'\n', text) {
             match text.get(newline + 1) {
                 Some(b'0'..=b'9') => {

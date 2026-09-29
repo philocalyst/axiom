@@ -44,13 +44,22 @@ impl<'s> Parser<'s> {
         if takes_lines {
             statement.body = self.body(line, Scope::Dated(date))?;
         }
-        self.check_claim(&statement, header.loc)?;
+        if matches!(statement.predicate, Predicate::Owes(_)) {
+            self.check_claim(&statement, header.loc)?;
+        }
         self.emit(&header, statement, ItemKind::Statement);
         Ok(())
     }
 
     /// The statement a header line says, without the lines under it.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
     pub fn said(&mut self, date: Day, subject: Subject<'s>, amount: Option<Amount<'s>>) -> Parse<Statement<'s>> {
+        // Most statements of a journal that is kept by contracts say no more than that one was kept.
+        if let (Subject::Name(_), true) = (subject, self.at_eol()) {
+            let predicate = Predicate::Occurrence { amount };
+            return Ok(Statement { date, subject, predicate, until: None, description: None, codes: Many::EMPTY, body: Body::default() });
+        }
         let mut predicate = self.predicate(subject, amount)?;
         let codes = self.mark::<Code>();
         let tail = self.statement_tail(date, &predicate)?;
@@ -70,6 +79,7 @@ impl<'s> Parser<'s> {
 
     /// What follows the subject: an amount already read, or the words and
     /// tokens that say what the line is.
+    #[inline(always)]
     fn predicate(&mut self, subject: Subject<'s>, amount: Option<Amount<'s>>) -> Parse<Predicate<'s>> {
         if let Some(amount) = amount {
             // An amount says what it is by what follows: a cadence makes it terms.
