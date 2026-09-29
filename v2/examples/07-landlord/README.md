@@ -136,8 +136,6 @@ legs), F10 (the deposit is held, not spendable).
 - **A recognition range cannot be cut short.** The loan costs should have been written for 30 years and
   accelerated at payoff. Written that way, the rest would never be deducted; this journal, written after the
   sale, gives the range the loan's actual life.
-- **A place that `holds HOME` refuses basis flows.** `assets/rental/house` cannot say `holds HOME` (the basis
-  flows are dollars: `not-held`), so the account is not restricted to its commodity.
 - **Same-day order still matters.** The half month of depreciation on the day of sale must be journalled before
   the sale: the recapture law reads what has been counted so far.
 - **Amortization is typed.** The split of each mortgage payment is computed outside and written on the

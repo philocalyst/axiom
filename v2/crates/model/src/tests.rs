@@ -708,6 +708,21 @@ account assets/owed : receivable
 }
 
 #[test]
+fn a_place_that_holds_one_commodity_still_takes_a_flow_into_its_basis() {
+    let text = "
+commodity HOME : stock
+account assets/house
+  holds HOME
+2026-04-01 checking -> house.basis 100 USD
+2026-04-02 checking -> house 100 USD
+2026-04-03 house.basis 40 USD -> checking
+";
+    with_book(text, |_, diags| {
+        assert_eq!(codes(diags), ["not-held"], "only the flow that brings dollars into the house: {diags:?}");
+    });
+}
+
+#[test]
 fn a_kind_of_commodity_says_how_its_parcels_are_relieved() {
     let text = "
 kind money : currency

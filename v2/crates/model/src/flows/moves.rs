@@ -463,7 +463,8 @@ impl Elab<'_, '_> {
             );
         }
         for (end, unit) in [(&mv.from, mv.out.unit), (&mv.to, mv.arrive.unit)] {
-            if mv.infer != Infer::All {
+            // A basis end changes what the place's parcels cost, and brings no commodity into or out of it.
+            if mv.infer != Infer::All && !end.basis {
                 kept &= self.check_holds(end, unit);
             }
             kept &= self.check_open(end, day);
