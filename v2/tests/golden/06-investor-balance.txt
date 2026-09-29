@@ -2,7 +2,8 @@ Balances at 2026-01-06
 
   Place                    Balance
   ────────────────────────────────
-  assets              64.4579 VTI
+  assets           282,068.18 USD
+                      64.4579 VTI
                      144.6496 VXUS
                       33.4448 BND
                      493.8271 SCHH
@@ -12,7 +13,6 @@ Balances at 2026-01-06
                      295.5686 NWND
                    0.13000000 BTC
                    6.03718069 ETH
-                   282,068.18 USD
     bank           153,010.86 USD
       checking      69,910.07 USD
       savings       83,100.79 USD
@@ -20,25 +20,25 @@ Balances at 2026-01-06
                    0.95668225 ETH
     espp-cash        8,400.00 USD
     etrade           295.5686 NWND
-    fidelity          64.4579 VTI
+    fidelity         2,738.20 USD
+                      64.4579 VTI
                      106.4467 VXUS
                      493.8271 SCHH
                       16.3264 MSFT
                       19.7153 UNH
                       41.9695 FAST
-                     2,738.20 USD
     retirement     117,733.28 USD
-    schwab            38.2029 VXUS
+    schwab             185.84 USD
+                      38.2029 VXUS
                       33.4448 BND
-                       185.84 USD
     wallet         5.08049844 ETH
   ────────────────────────────────
   equity           255,199.15 USD
     opening        253,220.55 USD
     wash-sale        1,978.60 USD
   ────────────────────────────────
-  expenses         0.00210000 ETH
-                   135,473.05 USD
+  expenses         135,473.05 USD
+                   0.00210000 ETH
     dining           4,929.80 USD
     groceries       10,190.04 USD
     misc             4,081.49 USD

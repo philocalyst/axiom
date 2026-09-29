@@ -1,11 +1,16 @@
-error[place-not-open]: `assets/savings` opens on 2026-03-01
+error[place-not-open]: `assets/savings` opened on 2026-03-01; this flow is 15 days earlier
    ╭─[41-before-opened.ax:11:24]
    │
+ 6 │ account assets/savings : bank
+ 7 │   opened 2026-03-01
+   │   ────────┬────────
+   │           ╰── opened here
+   ⋮
 11 │ 2026-02-14 checking -> savings 500 USD
    │                        ───┬───
-   │                           ╰── this flow is dated 2026-02-14
+   │                           ╰── 15 days before it opened
    │
-   = help: use another account, or change `opened` or `closed`
+   = help: move the flow to 2026-03-01 or later, or change `opened`
 
 ✗ 1 error
 [exit status 1]

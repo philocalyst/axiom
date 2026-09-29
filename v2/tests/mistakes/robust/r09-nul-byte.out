@@ -4,8 +4,6 @@ error[unexpected-character]: unexpected character ' '
 9 │ 2026-01-08 checking -> food 84.20  USD
   │                                  ┬
   │                                  ╰── not part of the language
-  │
-  = help: an amount is a number and its commodity, like `84.20 USD`
 
 ✗ 1 error
 [exit status 1]

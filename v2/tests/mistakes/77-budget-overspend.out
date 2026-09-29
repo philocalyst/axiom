@@ -1,4 +1,4 @@
-warning[law]: law `budget` does not hold for expenses/food
+warning[budget]: expenses/food: 690.00 USD in 2026-01 against a limit of 650.00 USD, over by 40.00 USD
    ╭─[77-budget-overspend.ax:15:1]
    │
  6 │ account expenses/food
@@ -10,9 +10,8 @@ warning[law]: law `budget` does not hold for expenses/food
    │ ─────────────────────┬─────────────────────
    │                      ╰── this flow: 210.00 USD into expenses/food/groceries
    │
-   = note: also at 77-budget-overspend.ax:16
    = help: at most 170.00 USD more can go in this month
 
-2 warnings
-✓ 5 flows · 7 places · 2 laws enforced · net worth 2,250.00 USD
+1 warning
+✓ 5 flows · 5 places · 2 laws enforced · net worth 2,250.00 USD
 [exit status 0]

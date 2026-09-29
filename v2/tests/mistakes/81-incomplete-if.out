@@ -7,15 +7,5 @@ error[incomplete-conditional]: expected `else`, found the end of the line
    │
    = note: a conditional is written `if CONDITION then A else B`
 
-error[unknown-place]: there is no place `food`
-   ╭─[81-incomplete-if.ax:14:24]
-   │
-14 │ 2026-01-08 checking -> food 84.20 USD
-   │                        ──┬─
-   │                          ╰── not a known place
-   │
-   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
-           `expenses` or `equity`, for example `expenses/food`
-
-✗ 2 errors
+✗ 1 error
 [exit status 1]

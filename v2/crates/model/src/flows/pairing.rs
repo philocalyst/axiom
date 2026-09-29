@@ -162,7 +162,9 @@ pub(super) fn split(
                 }
                 Share { header, leg: amount }
             }
-            Leg::Fixed(_, Some(_)) => return Err(SplitError::Priced { at, why: Mismatch::PriceOnTransfer }),
+            Leg::Fixed(_, Some(_)) => {
+                return Err(SplitError::Priced { at, why: Mismatch::PriceOnTransfer });
+            }
             Leg::Fixed(..) if total.is_none() => return Err(SplitError::Mixed { at }),
             Leg::Fixed(..) => {
                 foreign.push(at);
@@ -206,7 +208,9 @@ pub(super) fn split(
         (None, false) if remainder.is_negative() => {
             return Err(SplitError::OverAllocated { total, allocated: allocated_amount });
         }
-        (None, false) => return Err(SplitError::Short { total, allocated: allocated_amount }),
+        (None, false) => {
+            return Err(SplitError::Short { total, allocated: allocated_amount });
+        }
         (Some(&at), true) => return Err(SplitError::Unresolvable { at }),
         (Some(_), false) if remainder <= Qty::ZERO => {
             return Err(SplitError::OverAllocated { total, allocated: allocated_amount });

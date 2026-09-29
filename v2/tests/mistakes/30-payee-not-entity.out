@@ -1,11 +1,12 @@
-error[unknown-entity]: there is no entity `groceries`
+error[unknown-entity]: `groceries` is a place, not an entity, so it cannot be a payee
    ╭─[30-payee-not-entity.ax:15:46]
    │
 15 │ 2026-01-08 checking -> groceries 84.20 USD / groceries
    │                                              ────┬────
-   │                                                  ╰── not a known entity
+   │                                                  ╰── a payee is an entity: a person or a company
    │
-   = note: a payee must be a declared entity, so that it is typed like everything else
+   = note: `groceries` is the place `expenses/food/groceries`
+   = help: drop the payee, or use the entity that stands for this place
 
 ✗ 1 error
 [exit status 1]

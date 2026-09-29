@@ -1,23 +1,22 @@
-error[ambiguous-place]: `checking` could be either of these accounts
-   ╭─[25-ambiguous-suffix.ax:11:12]
+error[ambiguous-place]: `assets/old-bank/checking` makes `checking` ambiguous, and lines still write it
+   ╭─[25-ambiguous-suffix.ax:6:9]
    │
  5 │ account assets/bank/checking : bank
    │         ──────────┬─────────
-   │                   ╰── `assets/bank/checking` is declared here
+   │                   ╰── `assets/bank/checking` was declared before it
  6 │ account assets/old-bank/checking : bank
    │         ────────────┬───────────
-   │                     ╰── `assets/old-bank/checking` is declared here
+   │                     ╰── `assets/old-bank/checking` now also ends `checking`
    ⋮
 11 │ 2026-01-08 checking -> food 84.20 USD
    │            ────┬───
-   │                ╰── which one is meant?
+   │                ╰── `checking` is first written here
    │
-   = help: write `bank/checking` for `assets/bank/checking`
-11 - 2026-01-08 checking -> food 84.20 USD
-11 + 2026-01-08 bank/checking -> food 84.20 USD
-   = help: write `old-bank/checking` for `assets/old-bank/checking`
-11 - 2026-01-08 checking -> food 84.20 USD
-11 + 2026-01-08 old-bank/checking -> food 84.20 USD
+   = note: it is written on 1 line, and none of them is kept
+   = help: keep `checking` meaning `assets/bank/checking` with an alias
+ 5 + account assets/bank/checking as checking : bank
+   = help: or write `bank/checking` for `assets/bank/checking` where it is meant
+   = help: or write `old-bank/checking` for `assets/old-bank/checking` where it is meant
 
 ✗ 1 error
 [exit status 1]

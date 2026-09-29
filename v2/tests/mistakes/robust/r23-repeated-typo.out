@@ -5,12 +5,10 @@ error[unknown-place]: there is no place `grocries`
    │                        ────┬───
    │                            ╰── not a known place
    │
-   = note: also at r23-repeated-typo.ax:11, r23-repeated-typo.ax:12
+   = note: it is written on 3 lines, and none of them is kept
    = help: did you mean `groceries`?
 10 - 2026-01-16 checking -> grocries 10 USD
 10 + 2026-01-16 checking -> groceries 10 USD
-   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
-           `expenses` or `equity`, for example `expenses/grocries`
 
-✗ 3 errors
+✗ 1 error
 [exit status 1]

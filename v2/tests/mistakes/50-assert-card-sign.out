@@ -1,14 +1,20 @@
-error[negative-amount]: amounts carry no sign
-   ╭─[50-assert-card-sign.ax:14:19]
+error[assertion]: liabilities/visa holds 452.00 USD, not -452.00 USD
+   ╭─[50-assert-card-sign.ax:14:1]
    │
+12 │ 2026-01-08 visa -> food 300.00 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── +300.00 USD to expenses/food
+13 │ 2026-01-17 visa -> food 152.00 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── +152.00 USD to expenses/food
 14 │ 2026-01-31 visa = -452.00 USD
-   │                   ┬
-   │                   ╰── remove this `-`
+   │ ──────────────┬──────────────
+   │               ╰── 904.00 USD less than the ledger holds
    │
-   = note: the arrow gives the direction: money moves from the left of `->` to the right
-   = help: remove the sign
-14 - 2026-01-31 visa = -452.00 USD
-14 + 2026-01-31 visa = 452.00 USD
+   = note: the ledger holds 452.00 USD, the opposite of -452.00 USD: the sign may be wrong
+   = help: if the balance is 452.00 USD, write it with its sign: `= 452.00 USD`
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
+14 + 2026-01-31 visa = -452.00 USD !
 
 ✗ 1 error
 [exit status 1]

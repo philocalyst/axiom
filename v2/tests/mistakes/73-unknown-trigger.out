@@ -8,15 +8,5 @@ error[unknown-trigger]: unknown trigger `deposit`
   │
   = note: the triggers are `in`, `out`, `gain` and `spend`
 
-error[unknown-place]: there is no place `food`
-   ╭─[73-unknown-trigger.ax:13:24]
-   │
-13 │ 2026-01-08 checking -> food 84.20 USD
-   │                        ──┬─
-   │                          ╰── not a known place
-   │
-   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
-           `expenses` or `equity`, for example `expenses/food`
-
-✗ 2 errors
+✗ 1 error
 [exit status 1]

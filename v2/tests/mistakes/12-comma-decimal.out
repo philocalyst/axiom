@@ -1,13 +1,14 @@
-error[thousands-comma]: `1.234,…` is not a number: thousands are separated with `_`
-   ╭─[12-comma-decimal.ax:15:44]
+error[european-number]: `1.234,56` looks like a European amount: a comma for decimals
+   ╭─[12-comma-decimal.ax:15:39]
    │
 15 │ 2026-01-02 equity/opening -> checking 1.234,56 USD
-   │                                            ┬
-   │                                            ╰── use `_` here
+   │                                       ────┬───
+   │                                           ╰── read as 1_234.56
    │
-   = help: write `_` between digit groups: `1_000`
+   = note: Axiom writes numbers with `.` for decimals and `_` between groups of digits
+   = help: write `1_234.56`
 15 - 2026-01-02 equity/opening -> checking 1.234,56 USD
-15 + 2026-01-02 equity/opening -> checking 1.234_56 USD
+15 + 2026-01-02 equity/opening -> checking 1_234.56 USD
 
 ✗ 1 error
 [exit status 1]

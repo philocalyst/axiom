@@ -1,12 +1,13 @@
-error[unknown-keyword]: unknown keyword `01/15/2026`
+error[bad-date]: `01/15/2026` is not a date; dates are written `YYYY-MM-DD`
    ╭─[10-date-slashes.ax:15:1]
    │
 15 │ 01/15/2026 checking -> groceries 84.20 USD
    │ ─────┬────
-   │      ╰── a line starts with a date or a keyword
+   │      ╰── read as month/day/year: January 15, 2026
    │
-   = note: the keywords are `account`, `entity`, `commodity`, `kind`, `code`, `param`, `law`,
-           `every`, `sync`, `system`, `use`, `base`, `relaxed`, `layout`
+   = help: write the date year first
+15 - 01/15/2026 checking -> groceries 84.20 USD
+15 + 2026-01-15 checking -> groceries 84.20 USD
 
 ✗ 1 error
 [exit status 1]

@@ -1,4 +1,4 @@
-//! Folder layout as a constraint (LANGUAGE §8).
+//! Folder layout as a constraint (LANGUAGE §10).
 //!
 //! Where a file lives says what it may hold. A `YYYY` folder or `YYYY.ax` file
 //! holds one year, a `MM` folder or file after it (or `YYYY-MM.ax`) holds one
@@ -8,9 +8,9 @@
 use axiom_core::{Day, Diagnostic, Loc};
 use axiom_syntax::{Item, ItemKind};
 
-use crate::catalog::{Catalog, Site};
-use crate::errors::iso;
+use crate::errors::{count, iso};
 use crate::scope::Home;
+use crate::sources::Site;
 
 const MONTHS: [&str; 12] = [
     "January",
@@ -27,15 +27,6 @@ const MONTHS: [&str; 12] = [
     "December",
 ];
 
-/// A path segment, read for what it means.
-#[derive(Clone, Copy)]
-enum Piece<'a> {
-    Plain(&'a str),
-    Year,
-    Month,
-    YearMonth,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Only {
     Anything,
@@ -44,10 +35,21 @@ pub(crate) enum Only {
 }
 
 pub(crate) struct Layout<'a> {
-    pieces: Vec<Piece<'a>>,
-    year: Option<i32>,
-    month: Option<u32>,
+    /// The path's segments, the file's name without its `.ax`.
+    segments: Vec<&'a str>,
+    /// Which segment names the year and which the month (the same one for
+    /// `2026-03`), and what they say.
+    year: Option<(usize, i32)>,
+    month: Option<(usize, u32)>,
     pub only: Only,
+}
+
+/// An item dated outside the file that holds it.
+#[derive(Clone, Copy)]
+pub(crate) struct Misfiled {
+    pub loc: Loc,
+    pub day: Day,
+    pub noun: &'static str,
 }
 
 fn digits(text: &str, count: usize) -> Option<u32> {
@@ -56,59 +58,40 @@ fn digits(text: &str, count: usize) -> Option<u32> {
 
 impl<'a> Layout<'a> {
     pub fn of(path: &'a str) -> Layout<'a> {
-        let mut layout = Layout { pieces: Vec::new(), year: None, month: None, only: Only::Anything };
-        let mut segments: Vec<&str> = path.split('/').collect();
-        let file = segments.pop().unwrap_or_default();
-        let stem = file.strip_suffix(".ax").unwrap_or(file);
-        let mut after_year = false;
-        for segment in segments {
-            layout.only = match segment {
-                "prices" => Only::Prices,
-                "systems" => Only::Systems,
-                _ => layout.only,
-            };
-            after_year = layout.piece(segment, after_year);
-        }
-        match stem.split_once('-') {
-            Some((year, month)) if layout.year.is_none() && digits(year, 4).is_some() && digits(month, 2).is_some() => {
-                layout.year = digits(year, 4).map(|year| year as i32);
-                layout.month = digits(month, 2);
-                layout.pieces.push(Piece::YearMonth);
-            }
-            _ => {
-                layout.piece(stem, after_year);
+        let segments: Vec<&str> = path.strip_suffix(".ax").unwrap_or(path).split('/').collect();
+        let (mut year, mut month) = (None, None);
+        for (at, &segment) in segments.iter().enumerate() {
+            match (segment.split_once('-'), year, month) {
+                (Some((y, m)), None, None) if digits(y, 4).is_some() && digits(m, 2).is_some() => {
+                    (year, month) = (digits(y, 4).map(|y| (at, y as i32)), digits(m, 2).map(|m| (at, m)));
+                }
+                (_, None, _) if digits(segment, 4).is_some() => year = digits(segment, 4).map(|y| (at, y as i32)),
+                (_, Some((year_at, _)), None) if at == year_at + 1 => {
+                    month = digits(segment, 2).filter(|m| (1..=12).contains(m)).map(|m| (at, m));
+                }
+                _ => {}
             }
         }
-        layout
+        let folders = &segments[..segments.len() - 1];
+        let only = match folders.iter().rev().find(|&&segment| segment == "prices" || segment == "systems") {
+            Some(&"prices") => Only::Prices,
+            Some(_) => Only::Systems,
+            None => Only::Anything,
+        };
+        Layout { segments, year, month, only }
     }
 
-    /// Reads one segment; whether it was the year that a month may follow.
-    fn piece(&mut self, segment: &'a str, after_year: bool) -> bool {
-        if let (Some(year), None) = (digits(segment, 4), self.year) {
-            self.year = Some(year as i32);
-            self.pieces.push(Piece::Year);
-            return true;
-        }
-        match digits(segment, 2) {
-            Some(month) if after_year && self.month.is_none() && (1..=12).contains(&month) => {
-                self.month = Some(month);
-                self.pieces.push(Piece::Month);
-            }
-            _ => self.pieces.push(Piece::Plain(segment)),
-        }
-        false
-    }
-
-    fn holds(&self, day: Day) -> bool {
+    /// Whether an item dated `day` belongs in this file.
+    pub fn holds(&self, day: Day) -> bool {
         let (year, month, _) = day.ymd();
-        self.year.is_none_or(|held| held == year) && self.month.is_none_or(|held| held == month)
+        self.year.is_none_or(|(_, held)| held == year) && self.month.is_none_or(|(_, held)| held == month)
     }
 
     /// `March 2026`, `2026`.
     fn describe(&self) -> String {
         match (self.year, self.month) {
-            (Some(year), Some(month)) => format!("{} {year}", MONTHS[month as usize - 1]),
-            (Some(year), None) => year.to_string(),
+            (Some((_, year)), Some((_, month))) => format!("{} {year}", MONTHS[month as usize - 1]),
+            (Some((_, year)), None) => year.to_string(),
             _ => "anything".to_string(),
         }
     }
@@ -117,84 +100,70 @@ impl<'a> Layout<'a> {
     /// swapped for the day's.
     fn path_for(&self, day: Day) -> String {
         let (year, month, _) = day.ymd();
-        let pieces: Vec<String> = self
-            .pieces
-            .iter()
-            .map(|piece| match piece {
-                Piece::Plain(text) => text.to_string(),
-                Piece::Year => format!("{year:04}"),
-                Piece::Month => format!("{month:02}"),
-                Piece::YearMonth => format!("{year:04}-{month:02}"),
-            })
-            .collect();
-        format!("{}.ax", pieces.join("/"))
+        let segment = |(at, text): (usize, &str)| match (self.year, self.month) {
+            (Some((y, _)), Some((m, _))) if y == at && m == at => format!("{year:04}-{month:02}"),
+            (Some((y, _)), _) if y == at => format!("{year:04}"),
+            (_, Some((m, _))) if m == at => format!("{month:02}"),
+            _ => text.to_string(),
+        };
+        format!("{}.ax", self.segments.iter().copied().enumerate().map(segment).collect::<Vec<_>>().join("/"))
+    }
+
+    /// One report for a file's misdated items: the root cause is where the
+    /// file is, not any one line of it.
+    pub fn misfiled(&self, path: &str, items: &[Misfiled]) -> Diagnostic {
+        let first = items[0];
+        let date = |item: &Misfiled| Loc::new(item.loc.file, item.loc.start, item.loc.start + 10);
+        let held = self.describe();
+        let headline = match items.len() {
+            1 => format!("this {} is dated {}, which `{path}` does not hold", first.noun, iso(first.day)),
+            more => format!("`{path}` holds {held}, but {} are dated elsewhere", count(more, "item")),
+        };
+        let mut diagnostic = Diagnostic::error("layout", headline).label(date(&first), format!("outside {held}"));
+        for item in items[1..].iter().take(3) {
+            diagnostic = diagnostic.context(date(item), format!("{} dated {}", item.noun, iso(item.day)));
+        }
+        if items.len() > 4 {
+            diagnostic = diagnostic.note(format!("{} more are dated elsewhere too", items.len() - 4));
+        }
+        diagnostic
+            .note(format!("`{path}` holds {held}, because of where it is"))
+            .help(format!("move it to `{}`, or set `layout free` to ignore folder names", self.path_for(first.day)))
     }
 }
 
 /// The date an item is filed under, and what to call the item.
-fn dated(item: &Item) -> Option<(Day, &'static str)> {
-    match &item.kind {
-        ItemKind::Txn(txn) => Some((txn.date, "transaction")),
-        ItemKind::Assert(assert) => Some((assert.date, "balance assertion")),
-        ItemKind::Event(event) => Some((event.date, "event")),
-        ItemKind::Price(price) => Some((price.date, "price")),
-        _ => None,
-    }
+pub(crate) fn dated(item: &Item, file: &axiom_syntax::File) -> Option<(Day, &'static str)> {
+    Some(match item.kind {
+        ItemKind::Txn(id) => (file[id].date, "transaction"),
+        ItemKind::Assert(id) => (file[id].date, "balance assertion"),
+        ItemKind::Event(id) => (file[id].date, "event"),
+        ItemKind::Price(id) => (file[id].date, "price"),
+        ItemKind::Split(id) => (file[id].date, "split"),
+        ItemKind::Occurrence(id) => (file[id].date, "plan occurrence"),
+        ItemKind::Opening(id) => (file[id].date, "opening"),
+        _ => return None,
+    })
 }
 
-impl Layout<'_> {
-    /// Whether an item dated `day` is filed where its date belongs. Journal
-    /// transactions are checked as they are elaborated.
-    pub fn check_date(&self, path: &str, item: &Item) -> Option<Diagnostic> {
-        let (day, noun) = dated(item)?;
-        if self.holds(day) {
-            return None;
-        }
-        let date = Loc::new(item.loc.file, item.loc.start, item.loc.start + 10);
-        Some(
-            Diagnostic::error("layout", format!("this {noun} is dated {}, which `{path}` does not hold", iso(day)))
-                .label(date, format!("outside {}", self.describe()))
-                .note(format!("`{path}` holds {}, because of where it is", self.describe()))
-                .help(format!("move it to `{}`, or set `layout free` to ignore folder names", self.path_for(day))),
-        )
-    }
-}
-
-/// The rules about what a file may hold, and the dates of everything but
-/// journal transactions.
-pub(crate) fn check(catalog: &Catalog, sites: &[Site], diags: &mut Vec<Diagnostic>) {
-    if catalog.layout_free {
-        return;
-    }
-    let dated_items = catalog
-        .asserts
-        .iter()
-        .map(|written| (written.site, written.item))
-        .chain(catalog.events.iter().map(|written| (written.site, written.item)))
-        .chain(catalog.prices.iter().map(|written| (written.site, written.item)));
-    for (site, item) in dated_items {
-        diags.extend(site.layout.check_date(site.source.path, item));
-    }
+/// The rules about what a file may hold, apart from dates.
+pub(crate) fn check(sites: &[Site], diags: &mut Vec<Diagnostic>) {
     for site in sites.iter().filter(|site| !site.source.embedded) {
+        let items = &site.source.file.items;
         match site.layout.only {
-            Only::Prices => diags.extend(site.source.file.items.iter().filter_map(only_prices)),
-            Only::Systems if site.home == Home::Project => {
-                diags.extend(site.source.file.items.first().map(not_a_system))
+            Only::Prices => {
+                diags.extend(items.iter().filter(|item| !matches!(item.kind, ItemKind::Price(_))).map(only_prices))
             }
+            Only::Systems if site.home == Home::Project => diags.extend(items.first().map(not_a_system)),
             Only::Systems | Only::Anything => {}
         }
     }
 }
 
-fn only_prices(item: &Item) -> Option<Diagnostic> {
-    if matches!(item.kind, ItemKind::Price(_)) {
-        return None;
-    }
-    Some(
-        Diagnostic::error("layout", "files under `prices/` may contain only prices")
-            .label(item.loc, "this is not a price")
-            .help("move it out of `prices/`, or set `layout free`"),
-    )
+fn only_prices(item: &Item) -> Diagnostic {
+    Diagnostic::error("layout", "files under `prices/` may contain only prices")
+        .label(item.loc, "this is not a price")
+        .help("move it out of `prices/`, or set `layout free`")
 }
 
 fn not_a_system(first: &Item) -> Diagnostic {

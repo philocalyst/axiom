@@ -1,16 +1,4 @@
-error[negative-amount]: amounts carry no sign
-  ╭─[r15-assert-negative.ax:8:23]
-  │
-8 │ 2026-01-31 checking = -50 USD
-  │                       ┬
-  │                       ╰── remove this `-`
-  │
-  = note: the arrow gives the direction: money moves from the left of `->` to the right
-  = help: remove the sign
-8 - 2026-01-31 checking = -50 USD
-8 + 2026-01-31 checking = 50 USD
-
-warning[law]: balance below zero
+warning[overdraft]: balance below zero: -50.00 USD against a minimum of 0.00 USD, short by 50.00 USD
    ╭─[r15-assert-negative.ax:7:1]
    │
  7 │ 2026-01-08 checking -> food 150 USD
@@ -20,13 +8,13 @@ warning[law]: balance below zero
    ├─[std.ax:26:10] (built in)
    │
 26 │     warn balance >= empty "balance below zero"
-   │          ───┬────┬───────
-   │             │    ╰── false
+   │          ───┬───
    │             ╰── -50.00 USD
    │
    = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
            usually for a fee. Move money in before the payment clears, or look for a pending payment
            or a missing deposit that explains it.
 
-✗ 1 error · 1 warning
-[exit status 1]
+1 warning
+✓ 2 flows · 3 places · 1 law enforced · net worth -50.00 USD
+[exit status 0]

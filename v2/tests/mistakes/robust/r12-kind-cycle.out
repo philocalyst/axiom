@@ -11,16 +11,5 @@ error[kind-cycle]: kind `a` inherits from itself
   = note: the chain is a -> b -> a
   = help: give one of them a parent outside the loop, such as a root kind like `asset`
 
-error[kind-sort]: kind `a` is an income kind, so it cannot describe the asset account `assets/x`
-  ╭─[r12-kind-cycle.ax:4:20]
-  │
-2 │ kind a : b
-  │      ┬
-  │      ╰── declared here
-3 │ kind b : a
-4 │ account assets/x : a
-  │                    ┬
-  │                    ╰── income kind
-
-✗ 2 errors
+✗ 1 error
 [exit status 1]

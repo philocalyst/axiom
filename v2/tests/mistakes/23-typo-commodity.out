@@ -1,37 +1,14 @@
-error[insufficient-holding]: assets/checking does not hold 84.2 UDS
-   ╭─[23-typo-commodity.ax:15:1]
+error[unknown-commodity]: there is no commodity `UDS`
+   ╭─[23-typo-commodity.ax:15:40]
    │
 15 │ 2026-01-08 checking -> groceries 84.20 UDS
-   │ ─────────────────────┬────────────────────
-   │                      ╰── 84.2 UDS more than assets/checking has
+   │                                        ─┬─
+   │                                         ╰── not a known commodity
    │
-   = note: assets/checking holds 0.0 UDS
-   = help: record the purchase before this flow, or check the quantity; the missing amount is left
-           as a negative balance so the rest of the ledger stays consistent
+   = note: commodities are declared with `commodity UDS`; USD, EUR, GBP… come with `use std`
+   = help: did you mean `USD`?
+15 - 2026-01-08 checking -> groceries 84.20 UDS
+15 + 2026-01-08 checking -> groceries 84.20 USD
 
-error[no-price]: no price for UDS in USD on 2026-01-08
-   ╭─[23-typo-commodity.ax:15:1]
-   │
-15 │ 2026-01-08 checking -> groceries 84.20 UDS
-   │ ─────────────────────┬────────────────────
-   │                      ╰── needed to value 84.2 UDS
-   │
-   = help: add a price line such as `2026-01-08 UDS <price> USD`
-
-error[no-price]: cannot check `overdraft`: no price for UDS in USD on 2026-01-08
-   ╭─[23-typo-commodity.ax:15:1]
-   │
-15 │ 2026-01-08 checking -> groceries 84.20 UDS
-   │ ─────────────────────┬────────────────────
-   │                      ╰── this flow: 84.2 UDS from assets/checking to expenses/food/groceries
-   │
-   ├─[std.ax:26:10] (built in)
-   │
-26 │     warn balance >= empty "balance below zero"
-   │          ───┬───
-   │             ╰── no price for UDS in USD on 2026-01-08
-   │
-   = help: add a price line such as `2026-01-08 UDS <price> USD`
-
-✗ 3 errors
+✗ 1 error
 [exit status 1]

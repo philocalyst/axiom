@@ -1,11 +1,15 @@
-error[expected-commodity]: expected a commodity such as `USD`, found the end of the line
-   ╭─[86-price-missing-unit.ax:14:22]
+error[expected-commodity]: `285.70` has no commodity
+   ╭─[86-price-missing-unit.ax:14:16]
    │
 14 │ 2026-01-31 VTI 285.70
-   │                      ┬
-   │                      ╰── expected a commodity such as `USD`
+   │                ───┬──
+   │                   ╰── which commodity?
    │
-   = help: an amount is a number and its commodity, like `285.70 USD`
+   = note: the amounts in this file are written in USD, VTI
+   = help: write `285.70 USD`
+14 + 2026-01-31 VTI 285.70 USD
+   = help: write `285.70 VTI`
+14 + 2026-01-31 VTI 285.70 VTI
 
 ✗ 1 error
 [exit status 1]

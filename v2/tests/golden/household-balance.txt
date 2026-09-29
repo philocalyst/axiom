@@ -2,13 +2,13 @@ Balances at 2026-03-31
 
   Place                Balance
   ────────────────────────────
-  assets                 2 VTI
-                 77,444.63 USD
+  assets         77,444.63 USD
+                         2 VTI
     bank         26,979.75 USD
       checking   10,332.70 USD
       savings    16,647.05 USD
-    brokerage            2 VTI
-                      1.88 USD
+    brokerage         1.88 USD
+                         2 VTI
     cash             63.00 USD
     college       6,700.00 USD
     retirement   43,700.00 USD

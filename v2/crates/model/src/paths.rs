@@ -12,11 +12,6 @@ pub(crate) fn prefixes(path: &str) -> impl Iterator<Item = &str> {
     path.match_indices('/').map(|(at, _)| &path[..at]).chain(std::iter::once(path))
 }
 
-/// The first segment of `path`.
-pub(crate) fn root_of(path: &str) -> &str {
-    path.split('/').next().unwrap_or(path)
-}
-
 /// Builds the tree of `written` paths and their ancestors. `make` creates the
 /// node for each path. Also returns the id of every path.
 pub(crate) fn build<'s, T>(

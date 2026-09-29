@@ -1,15 +1,15 @@
-error[entity-without-via]: `landlord` has no place to stand for
+error[entity-without-via]: `landlord` is not tied to a place, so a flow cannot end there
    ╭─[27-entity-no-via.ax:12:24]
    │
  9 │ entity landlord : org
    │        ────┬───
-   │            ╰── declared here without `via`
+   │            ╰── declared without `via`
    ⋮
 12 │ 2026-01-01 checking -> landlord 1_800 USD
    │                        ────┬───
    │                            ╰── an entity written where a place is expected stands for its `via` place
    │
-   = help: add `via` to `entity landlord`, for example `via expenses/landlord`
+   = help: name the place its payments belong to: add `via expenses/landlord` to `entity landlord`
 
 ✗ 1 error
 [exit status 1]

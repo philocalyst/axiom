@@ -9,12 +9,14 @@ error[assertion]: assets/checking holds -50.00 USD, not 50.00 USD
    │                  ╰── -150.00 USD to expenses/food
 12 │ 2026-01-31 checking = 50 USD
    │ ──────────────┬─────────────
-   │               ╰── 100.00 USD missing: the ledger holds less than this
+   │               ╰── 100.00 USD more than the ledger holds
    │
-   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+   = note: the ledger holds -50.00 USD, the opposite of 50.00 USD: the sign may be wrong
+   = help: if the balance is -50.00 USD, write it with its sign: `= -50.00 USD`
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 12 + 2026-01-31 checking = 50 USD !
 
-warning[law]: balance below zero
+warning[overdraft]: balance below zero: -50.00 USD against a minimum of 0.00 USD, short by 50.00 USD
    ╭─[84-assert-sign-overdrawn.ax:11:1]
    │
 11 │ 2026-01-08 checking -> food 150 USD
@@ -24,8 +26,7 @@ warning[law]: balance below zero
    ├─[std.ax:26:10] (built in)
    │
 26 │     warn balance >= empty "balance below zero"
-   │          ───┬────┬───────
-   │             │    ╰── false
+   │          ───┬───
    │             ╰── -50.00 USD
    │
    = note: A bank balance below zero is an overdraft: the bank is lending you the difference,

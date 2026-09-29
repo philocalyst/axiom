@@ -1,15 +1,24 @@
 //! Syntax trees to a [`Book`]: names resolved, kinds linked, laws compiled and
 //! type-checked, transactions elaborated into flows.
+//!
+//! | module      | job                                                          |
+//! |-------------|--------------------------------------------------------------|
+//! | `sources`   | which files are systems, the tree of systems, folder layout  |
+//! | `collect`   | declarations sorted out of the items; what needs every source |
+//! | `declare`   | kinds, commodities, entities and places come to exist        |
+//! | `props`     | property lines, read once and applied down the kind chain    |
+//! | `params`    | dated tables                                                 |
+//! | `laws`      | laws compiled and typed, and the order they run in           |
+//! | `rules`     | which laws watch which place, households and residences      |
+//! | `flows`     | the journal elaborated, in parallel, into flows              |
 
 pub mod book;
 pub mod journal;
 pub mod law;
 
-mod args;
-mod catalog;
-mod commodities;
+mod collect;
 mod cx;
-mod entities;
+mod declare;
 mod errors;
 mod flows;
 mod kinds;
@@ -18,31 +27,22 @@ mod layout;
 mod names;
 mod params;
 mod paths;
-mod places;
 mod prices;
 mod props;
-mod read;
 mod resolve;
 mod rules;
 mod scope;
-mod survey;
-mod systems;
+mod sources;
 #[cfg(test)]
 mod tests;
 mod values;
-mod world;
 
 pub use book::*;
 pub use journal::*;
 pub use law::*;
 
-use axiom_core::{Diagnostic, Interner};
+use axiom_core::{Diagnostic, Interner, Set};
 use axiom_syntax::File;
-
-use crate::catalog::Site;
-use crate::read::Read;
-use crate::systems::Systems;
-use crate::world::World;
 
 /// One parsed source.
 pub struct Source<'s> {
@@ -55,27 +55,30 @@ pub struct Source<'s> {
 }
 
 /// Builds the book from every source: the project's files and the embedded
-/// systems. Reports every independent problem it finds.
+/// systems. Reports every independent problem it finds, each once, at the
+/// declaration the user can change.
 pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let mut diags = Vec::new();
     let mut names = Interner::default();
-    let sources = systems::arrange(sources, &mut diags);
-    let (tree, systems, homes) = Systems::declare(&sources, &mut names);
-    let sites: Vec<Site> = sources
-        .iter()
-        .zip(homes)
-        .map(|(&source, home)| Site { home, source, layout: layout::Layout::of(source.path) })
-        .collect();
-    let Read { catalog, survey, diags: read_diags } = read::read(&sites);
-    diags.extend(read_diags);
-    let facts = survey.intern(&mut names);
-    let scopes = systems::scopes(&catalog, &systems, &tree, &mut diags);
-    let mut world = World::declare(names, facts, &catalog, tree, systems, scopes, &mut diags);
-    props::apply(&mut world, &catalog, &mut diags);
-    params::declare(&mut world, &catalog, &mut diags);
-    laws::declare(&mut world, &catalog, &mut diags);
-    rules::govern(&mut world.book);
-    flows::record(&mut world, &catalog, &mut diags);
-    layout::check(&catalog, &sites, &mut diags);
+    let (sites, systems_tree, systems) = sources::arrange(sources, &mut names, &mut diags);
+    let surveyed = collect::survey(&sites, &mut names);
+    diags.extend(surveyed.diags.iter().cloned());
+
+    let entries = &surveyed.entries;
+    let settings = declare::settings(entries, &mut diags);
+    let scopes = declare::scopes(entries, &systems, &systems_tree, &mut diags);
+    let mut world = declare::declare(&surveyed, &settings, names, systems_tree, systems, scopes, &mut diags);
+    let budgets = props::apply(&mut world, entries, &mut diags);
+    params::declare(&mut world, entries, &mut diags);
+    laws::declare(&mut world, &sites, entries, budgets, &mut diags);
+    let rank = laws::rank(&world.book, &mut diags);
+    rules::govern(&mut world.book, &rank);
+    flows::record(&mut world, &sites, entries, &surveyed.journal, surveyed.txns, settings.layout_free, &mut diags);
+    if !settings.layout_free {
+        layout::check(&sites, &mut diags);
+    }
+    // One cause is reported once, however many declarations shared the line.
+    let mut seen = Set::default();
+    diags.retain(|diagnostic| seen.insert((diagnostic.code.clone(), diagnostic.anchor(), diagnostic.message.clone())));
     (world.book, diags)
 }

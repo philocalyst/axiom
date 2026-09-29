@@ -1,16 +1,15 @@
-error[tab-indent]: tabs cannot indent a line
+error[tab-indent]: 2 lines are indented with a tab
    ╭─[01-tab-indent.ax:14:1]
    │
 13 │ 2026-01-15 acme -> 5_000 USD
 14 │ ⇥   savings   500 USD
    │ ──┬─
-   │   ╰── this tab
+   │   ╰── the first, of all of them
    │
    = note: indentation is spaces, so a block's shape looks the same in every editor
-   = note: also at 01-tab-indent.ax:15
    = help: indent with two spaces per tab
 14 - ⇥   savings   500 USD
 14 +   savings   500 USD
 
-✗ 2 errors
+✗ 1 error
 [exit status 1]

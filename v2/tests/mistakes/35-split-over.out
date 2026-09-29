@@ -1,12 +1,11 @@
 error[split-over]: the legs use 5,500.00 USD, but the total is 5,000.00 USD
-   ╭─[35-split-over.ax:13:12]
+   ╭─[35-split-over.ax:13:20]
    │
 13 │ 2026-01-15 acme -> 5_000 USD
-   │            ──┬─
-   │              ╰── a total of 5,000.00 USD
+   │                    ────┬────
+   │                        ╰── a total of 5,000.00 USD
    │
-   = note: nothing is left for the remainder, or the legs already exceed the total
-   = help: lower a leg, or raise the total
+   = help: lower a leg by 500.00 USD, or raise the total to 5,500.00 USD
 
 ✗ 1 error
 [exit status 1]

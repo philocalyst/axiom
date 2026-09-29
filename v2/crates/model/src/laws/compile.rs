@@ -1,36 +1,41 @@
 //! Compiling one law.
 //!
-//! A law's expressions are contiguous in the file's expression arena, in
-//! post-order. The compiler walks them once, front to back, and produces one
-//! node for each, so a node's index is its source node's index minus the law's
-//! first. Children are typed before their parents, and the engine's
-//! power-assert display can show every subexpression under its source.
+//! The expressions of a law are contiguous runs of its file's expression arena,
+//! in post-order. The compiler walks each run once, front to back, and produces
+//! one node for each, so children are typed before their parents and the
+//! engine's power-assert display can show every subexpression under its
+//! source.
 //!
 //! An error poisons its own node and everything built from it, silently, so a
 //! typo is reported once and not again at every operator above it. A law with
 //! any error is dropped whole.
 
-use axiom_core::diag::closest;
 use axiom_core::glob::is_pattern;
 use axiom_core::{Diagnostic, Id, Loc, Sym};
 use axiom_syntax::{
-    self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, Exprs, Name, StepKind as WrittenStep, UnOp,
+    self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep, UnOp,
 };
 
-use super::types::{binary, expected, is_amount, is_test, mismatch, negate, unify};
+use super::types::{binary, expected, is_test, mismatch, negate, unify};
 use super::vars::When;
-use crate::args::list;
 use crate::book::{Entity, Param};
-use crate::errors::article;
+use crate::declare::World;
+use crate::errors::{Word, article, count, list, suggest};
 use crate::law::{
-    Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Step, StepKind, Trigger, Ty, Value, Var, Window,
+    Closing, Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Step, StepKind, Trigger, Ty, Value, Var, Window,
 };
 use crate::params::Shape;
-use crate::resolve::Sought;
 use crate::scope::Home;
-use crate::world::World;
+use crate::values::fits;
 
 const FUNCTIONS: [&str; 8] = ["total", "tally", "min", "max", "abs", "progressive", "value", "date"];
+
+/// The functions whose arguments are all of one type each: what they must be, and what they give.
+const FIXED: [(&str, &[Ty], Func, Ty); 3] = [
+    ("progressive", &[Ty::Schedule, Ty::Amount], Func::Progressive, Ty::Amount),
+    ("value", &[Ty::Amount, Ty::Unit], Func::Value, Ty::Amount),
+    ("date", &[Ty::Num, Ty::Num, Ty::Num], Func::Date, Ty::Day),
+];
 
 /// How the arguments of a call and a name in a pattern are read.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -42,29 +47,6 @@ enum Role {
     ParamBase,
     /// An alternative of `is`: a kind, place, entity or pattern, never a variable.
     Pattern,
-}
-
-/// The type a root expression must have.
-#[derive(Clone, Copy)]
-enum Want {
-    Amount,
-    Day,
-}
-
-impl Want {
-    fn accepts(self, ty: Ty) -> bool {
-        match self {
-            Want::Amount => is_amount(ty),
-            Want::Day => ty == Ty::Day,
-        }
-    }
-
-    fn phrase(self) -> &'static str {
-        match self {
-            Want::Amount => "an amount",
-            Want::Day => "a date",
-        }
-    }
 }
 
 /// Why a node has no type.
@@ -84,8 +66,8 @@ impl From<Diagnostic> for Bad {
 type Check<T> = Result<T, Bad>;
 
 /// Where a law was written, and what it governs.
-pub(crate) struct Site<'a, 's> {
-    pub exprs: &'a Exprs<'s>,
+pub(crate) struct Placement<'a, 's> {
+    pub file: &'a File<'s>,
     pub home: Home,
     pub owner: Owner,
     /// What `self` is in it.
@@ -95,24 +77,22 @@ pub(crate) struct Site<'a, 's> {
 pub(crate) fn compile<'s>(
     world: &mut World<'s>,
     diags: &mut Vec<Diagnostic>,
-    site: &Site<'_, 's>,
+    site: &Placement<'_, 's>,
     law: &ast::Law<'s>,
 ) -> Option<Law> {
-    let (lo, hi) = expression_range(site.exprs, law).unwrap_or((0, 0));
-    let empty = law_roots(law).next().is_none();
-    let law_name = world.book.names.intern(law.name.text);
+    let law_name = world.book.names.intern(law.name.0);
     let mut compiler = Compiler {
         world,
         diags,
-        exprs: site.exprs,
+        file: site.file,
         home: site.home,
         subject: site.subject,
         law_name,
-        lo,
-        next: lo,
+        first: 0,
+        base: 0,
         nodes: Vec::new(),
         poisoned: Vec::new(),
-        roles: if empty { Vec::new() } else { roles(site.exprs, lo, hi) },
+        roles: Vec::new(),
         locals: Vec::new(),
         when: When::of(&law.trigger),
         failed: false,
@@ -120,79 +100,20 @@ pub(crate) fn compile<'s>(
     compiler.law(site, law)
 }
 
-/// The expression roots of a law, in source order.
-fn law_roots(law: &ast::Law) -> impl Iterator<Item = ExprId> {
-    let trigger = match law.trigger {
-        ast::Trigger::By(root) => Some(root),
-        _ => None,
-    };
-    let steps = law.steps.iter().flat_map(|step| match &step.kind {
-        WrittenStep::When(root) | WrittenStep::Let(_, root) => vec![*root],
-        WrittenStep::Require { cond, otherwise, .. } => {
-            let mut roots = vec![*cond];
-            roots.extend(otherwise.iter().flat_map(effect_roots));
-            roots
-        }
-        WrittenStep::Effect(effect) => effect_roots(effect),
-    });
-    trigger.into_iter().chain(steps)
-}
-
-fn effect_roots(effect: &WrittenEffect) -> Vec<ExprId> {
-    match effect {
-        WrittenEffect::Owe { amount, due, .. } => std::iter::once(*amount).chain(*due).collect(),
-        WrittenEffect::Count { amount, .. } => vec![*amount],
-    }
-}
-
-/// The first and last source node of the law's expressions.
-fn expression_range(exprs: &Exprs, law: &ast::Law) -> Option<(usize, usize)> {
-    let first = law_roots(law).map(|root| exprs[root].first.index()).min()?;
-    let last = law_roots(law).map(ExprId::index).max()?;
-    Some((first, last))
-}
-
-/// Which nodes are keywords, param names or `is` alternatives: parents decide,
-/// and children come first, so it is settled before compiling.
-fn roles(exprs: &Exprs, lo: usize, hi: usize) -> Vec<Role> {
-    let mut roles = vec![Role::Normal; hi + 1 - lo];
-    let mut mark = |id: ExprId, role: Role| {
-        if let Some(slot) = id.index().checked_sub(lo).and_then(|at| roles.get_mut(at)) {
-            *slot = role;
-        }
-    };
-    for at in lo..=hi {
-        match &exprs[ExprId(at as u32)].kind {
-            ExprKind::Call(name, args) if name.text == "total" => {
-                args.iter().take(2).for_each(|&arg| mark(arg, Role::Keyword));
-                args.iter().skip(2).for_each(|&arg| mark(arg, Role::Pattern));
-            }
-            ExprKind::Call(name, args) if name.text == "tally" => args.iter().for_each(|&arg| mark(arg, Role::Keyword)),
-            // Arguments of a function that does not exist mean nothing; the
-            // function is the mistake worth reporting.
-            ExprKind::Call(name, args) if !FUNCTIONS.contains(&name.text) => {
-                args.iter().for_each(|&arg| mark(arg, Role::Keyword))
-            }
-            ExprKind::Index(base, _) => mark(*base, Role::ParamBase),
-            ExprKind::Is(_, alternatives) => alternatives.iter().for_each(|&alt| mark(alt, Role::Pattern)),
-            _ => {}
-        }
-    }
-    roles
-}
-
 struct Compiler<'w, 'a, 's> {
     world: &'w mut World<'s>,
     diags: &'w mut Vec<Diagnostic>,
-    exprs: &'a Exprs<'s>,
+    file: &'a File<'s>,
     home: Home,
     subject: Ty,
     law_name: Sym,
-    /// The source index of node 0, and of the next node to compile.
-    lo: usize,
-    next: usize,
+    /// The source index of the first node of the run being compiled, and the
+    /// index the first node of it got.
+    first: usize,
+    base: usize,
     nodes: Vec<Node>,
     poisoned: Vec<bool>,
+    /// The role of each node of the run being compiled.
     roles: Vec<Role>,
     /// `let` bindings in scope, and the node holding each value.
     locals: Vec<(&'s str, NodeId)>,
@@ -201,21 +122,19 @@ struct Compiler<'w, 'a, 's> {
 }
 
 impl<'s> Compiler<'_, '_, 's> {
-    fn law(&mut self, site: &Site<'_, 's>, law: &ast::Law<'s>) -> Option<Law> {
+    fn law(&mut self, site: &Placement<'_, 's>, law: &ast::Law<'s>) -> Option<Law> {
         let trigger = self.trigger(&law.trigger);
         self.when = When::of(&law.trigger);
-        let steps: Vec<Step> = law.steps.iter().filter_map(|step| self.step(step)).collect();
-        if self.failed || steps.len() != law.steps.len() {
+        let written = &self.file[law.steps];
+        let steps: Vec<Step> = written.iter().filter_map(|step| self.step(step)).collect();
+        if self.failed || steps.len() != written.len() {
             return None;
         }
         Some(Law {
             name: self.law_name,
             doc: law.doc.map(|doc| self.world.book.names.intern(doc.0)),
             owner: site.owner,
-            system: match site.home {
-                Home::System(system) => Some(system),
-                Home::Project | Home::Builtin => None,
-            },
+            system: if let Home::System(system) = site.home { Some(system) } else { None },
             trigger: trigger?,
             steps: steps.into(),
             nodes: std::mem::take(&mut self.nodes).into(),
@@ -231,11 +150,9 @@ impl<'s> Compiler<'_, '_, 's> {
             ast::Trigger::Gain => Trigger::Gain,
             ast::Trigger::Spend => Trigger::Spend,
             ast::Trigger::Each(period) => Trigger::Each(period, None),
+            ast::Trigger::Closing { month, day } => Trigger::Each(ast::Period::Year, Some(Closing { month, day })),
             ast::Trigger::Always => Trigger::Always,
-            ast::Trigger::By(root) => {
-                let deadline = self.expression(root, Want::Day)?;
-                Trigger::By(deadline)
-            }
+            ast::Trigger::By(root) => Trigger::By(self.expression(root, Ty::Day)?),
         })
     }
 
@@ -244,9 +161,9 @@ impl<'s> Compiler<'_, '_, 's> {
             WrittenStep::When(root) => StepKind::When(self.condition(*root)?),
             WrittenStep::Let(name, root) => {
                 // Bound even if it failed, so its uses do not report it again.
-                let bound = self.upto(*root);
-                self.locals.push((name.text, bound));
-                StepKind::Let(self.value(*root)?)
+                let bound = self.compile(*root);
+                self.locals.push((name.0, bound));
+                StepKind::Let((!self.poisoned[bound.index()]).then_some(bound)?)
             }
             WrittenStep::Require { cond, otherwise, message, warn } => {
                 let cond = self.condition(*cond)?;
@@ -254,7 +171,7 @@ impl<'s> Compiler<'_, '_, 's> {
                     Some(effect) => Some(self.effect(effect)?),
                     None => None,
                 };
-                let message = message.map(|text| self.world.book.names.intern(text.text));
+                let message = message.map(|text| self.world.book.names.intern(text.0));
                 StepKind::Require { cond, otherwise, message, warn: *warn }
             }
             WrittenStep::Effect(effect) => StepKind::Effect(self.effect(effect)?),
@@ -265,30 +182,25 @@ impl<'s> Compiler<'_, '_, 's> {
     fn effect(&mut self, effect: &WrittenEffect<'s>) -> Option<Effect> {
         match effect {
             WrittenEffect::Owe { amount, to, due, name } => {
-                let amount = self.expression(*amount, Want::Amount)?;
-                let to = self.owed_to(*to);
+                let amount = self.expression(*amount, Ty::Amount)?;
+                let to = self.owed_to(to.0);
                 let due = match due {
-                    Some(due) => Some(self.expression(*due, Want::Day)?),
+                    Some(due) => Some(self.expression(*due, Ty::Day)?),
                     None => None,
                 };
-                let name = name.map_or(self.law_name, |name| self.world.book.names.intern(name.text));
+                let name = name.map_or(self.law_name, |name| self.world.book.names.intern(name.0));
                 Some(Effect::Owe { amount, to: to?, due, name })
             }
             WrittenEffect::Count { amount, name } => {
-                let amount = self.expression(*amount, Want::Amount)?;
-                Some(Effect::Count { amount, name: self.world.book.names.intern(name.text) })
+                let amount = self.expression(*amount, Ty::Amount)?;
+                Some(Effect::Count { amount, name: self.world.book.names.intern(name.0) })
             }
         }
     }
 
-    fn owed_to(&mut self, name: Name<'s>) -> Option<Id<Entity>> {
-        match self.world.entity(self.home, name) {
-            Ok(entity) => Some(entity),
-            Err(diagnostic) => {
-                self.report(diagnostic);
-                None
-            }
-        }
+    fn owed_to(&mut self, name: &'s str) -> Option<Id<Entity>> {
+        let entity = self.world.entity(self.home, Word { text: name, loc: self.file.loc(name) });
+        entity.map_err(|diagnostic| self.report(diagnostic)).ok()
     }
 
     fn report(&mut self, diagnostic: Diagnostic) {
@@ -298,29 +210,65 @@ impl<'s> Compiler<'_, '_, 's> {
 
     // ─── Nodes ──────────────────────────────────────────────────────────────
 
-    /// Compiles everything up to and including `root`, and returns its node.
-    fn upto(&mut self, root: ExprId) -> NodeId {
-        while self.next <= root.index() {
-            self.node(self.next);
-            self.next += 1;
+    /// Compiles the expression at `root`, all of its subtree, and returns its
+    /// node.
+    fn compile(&mut self, root: ExprId) -> NodeId {
+        let subtree = self.file.exprs.subtree(root);
+        (self.first, self.base) = (self.file.exprs[root].first.index(), self.nodes.len());
+        self.roles = self.roles_of(subtree);
+        for (offset, expr) in subtree.iter().enumerate() {
+            self.node(self.first + offset, expr);
         }
-        self.node_id(root)
+        NodeId(self.nodes.len() as u32 - 1)
+    }
+
+    /// Which nodes are keywords, param names or `is` alternatives: parents
+    /// decide, and children come first, so it is settled before compiling.
+    fn roles_of(&self, subtree: &[ast::Expr<'s>]) -> Vec<Role> {
+        let mut roles = vec![Role::Normal; subtree.len()];
+        let mut mark = |id: ExprId, role: Role| {
+            if let Some(slot) = id.index().checked_sub(self.first).and_then(|at| roles.get_mut(at)) {
+                *slot = role;
+            }
+        };
+        for expr in subtree {
+            match expr.kind {
+                ExprKind::Call(name, args) if name.0 == "total" => {
+                    self.file[args].iter().take(2).for_each(|&arg| mark(arg, Role::Keyword));
+                    self.file[args].iter().skip(2).for_each(|&arg| mark(arg, Role::Pattern));
+                }
+                ExprKind::Call(name, args) if name.0 == "tally" => {
+                    self.file[args].iter().for_each(|&arg| mark(arg, Role::Keyword))
+                }
+                // Arguments of a function that does not exist mean nothing; the
+                // function is the mistake worth reporting.
+                ExprKind::Call(name, args) if !FUNCTIONS.contains(&name.0) => {
+                    self.file[args].iter().for_each(|&arg| mark(arg, Role::Keyword))
+                }
+                ExprKind::Index(base, _) => mark(base, Role::ParamBase),
+                ExprKind::Is(_, alternatives) => {
+                    self.file[alternatives].iter().for_each(|&alt| mark(alt, Role::Pattern))
+                }
+                _ => {}
+            }
+        }
+        roles
     }
 
     /// The node of `root`, unless it or something beneath it failed.
     fn value(&mut self, root: ExprId) -> Option<NodeId> {
-        let node = self.upto(root);
+        let node = self.compile(root);
         (!self.poisoned[node.index()]).then_some(node)
     }
 
-    /// A root that must have the type `want`.
-    fn expression(&mut self, root: ExprId, want: Want) -> Option<NodeId> {
+    /// A root that must have the type `want`: an amount or a date.
+    fn expression(&mut self, root: ExprId, want: Ty) -> Option<NodeId> {
         let node = self.value(root)?;
         let found = &self.nodes[node.index()];
-        if want.accepts(found.ty) {
+        if fits(want, found.ty) {
             return Some(node);
         }
-        let diagnostic = expected(want.phrase(), found.ty, found.loc);
+        let diagnostic = expected(&article(want.word()), found.ty, found.loc);
         self.report(diagnostic);
         None
     }
@@ -337,12 +285,12 @@ impl<'s> Compiler<'_, '_, 's> {
         None
     }
 
+    /// The node an expression of the run being compiled became.
     fn node_id(&self, id: ExprId) -> NodeId {
-        NodeId((id.index() - self.lo) as u32)
+        NodeId((self.base + id.index() - self.first) as u32)
     }
 
-    fn node(&mut self, at: usize) {
-        let expr = &self.exprs[ExprId(at as u32)];
+    fn node(&mut self, at: usize, expr: &ast::Expr<'s>) {
         let first = self.node_id(expr.first);
         let (op, ty, ok) = match self.check(at, expr) {
             Ok((op, ty)) => (op, ty, true),
@@ -367,18 +315,21 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn check(&mut self, at: usize, expr: &ast::Expr<'s>) -> Check<(Op, Ty)> {
-        if let Some((value, ty)) = self.world.literal(expr)? {
+        if let Some((value, ty)) = self.world.literal(self.file, expr)? {
             return Ok((Op::Const(value), ty));
         }
-        match &expr.kind {
-            ExprKind::Name(text) => self.name(at, Name { text, loc: expr.loc }),
-            ExprKind::Field(receiver, field) => self.field(*receiver, *field),
-            ExprKind::Index(base, keys) => self.lookup(*base, keys, expr.loc),
-            ExprKind::Call(name, args) => self.call(*name, args, expr.loc),
-            ExprKind::Unary(op, operand) => self.unary(*op, *operand),
-            ExprKind::Binary(op, left, right) => self.binary(*op, *left, *right),
-            ExprKind::Is(subject, alternatives) => self.is(*subject, alternatives),
-            ExprKind::If(condition, then, otherwise) => self.conditional(*condition, *then, *otherwise),
+        let file = self.file;
+        match expr.kind {
+            ExprKind::Name(name) => self.name(at, Word { text: name.0, loc: expr.loc }),
+            ExprKind::Field(receiver, field) => self.field(receiver, Word { text: field.0, loc: file.loc(field.0) }),
+            ExprKind::Index(base, keys) => self.lookup(base, &file[keys], expr.loc),
+            ExprKind::Call(function, args) => {
+                self.call(Word { text: function.0, loc: file.loc(function.0) }, &file[args], expr.loc)
+            }
+            ExprKind::Unary(op, operand) => self.unary(op, operand),
+            ExprKind::Binary(op, left, right) => self.binary(op, left, right),
+            ExprKind::Is(subject, alternatives) => self.is(subject, &file[alternatives]),
+            ExprKind::If(condition, then, otherwise) => self.conditional(condition, then, otherwise),
             ExprKind::Schedule(_) => Err(Diagnostic::error("schedule-position", "a schedule belongs in a param")
                 .label(expr.loc, "write it as a row of a `param`, and look it up here")
                 .into()),
@@ -388,26 +339,24 @@ impl<'s> Compiler<'_, '_, 's> {
 
     // ─── Names ──────────────────────────────────────────────────────────────
 
-    fn name(&mut self, at: usize, name: Name<'s>) -> Check<(Op, Ty)> {
-        match self.roles[at - self.lo] {
+    fn name(&mut self, at: usize, word: Word<'s>) -> Check<(Op, Ty)> {
+        match self.roles[at - self.first] {
             Role::Keyword | Role::ParamBase => {
-                let word = self.world.book.names.intern(name.text);
-                Ok((Op::Const(Value::Name(word)), Ty::Name))
+                let sym = self.world.book.names.intern(word.text);
+                Ok((Op::Const(Value::Name(sym)), Ty::Name))
             }
-            Role::Pattern => self.constant(name),
+            Role::Pattern => self.constant(word),
             Role::Normal => {
-                if let Some(&(_, bound)) = self.locals.iter().rev().find(|(local, _)| *local == name.text) {
+                if let Some(&(_, bound)) = self.locals.iter().rev().find(|(local, _)| *local == word.text) {
                     return self.local(bound);
                 }
-                if let Some(var) = Var::parse(name.text) {
-                    return self.variable(var, name);
+                if let Some(var) = Var::parse(word.text) {
+                    return self.variable(var, word);
                 }
-                match self.world.seek_param(self.home, name) {
-                    Sought::Found(param) => return self.bare_param(param, name),
-                    Sought::Ambiguous(diagnostic) => return Err(diagnostic.into()),
-                    Sought::Missing => {}
+                match self.world.seek_param(self.home, word)? {
+                    Some(param) => self.bare_param(param, word),
+                    None => self.constant(word),
                 }
-                self.constant(name)
             }
         }
     }
@@ -419,62 +368,57 @@ impl<'s> Compiler<'_, '_, 's> {
         Ok((Op::Local(bound), self.nodes[bound.index()].ty))
     }
 
-    fn variable(&self, var: Var, name: Name) -> Check<(Op, Ty)> {
+    fn variable(&self, var: Var, word: Word) -> Check<(Op, Ty)> {
         if var.provided_by(self.when) {
             return Ok((Op::Var(var), var.ty(self.subject)));
         }
-        let mut diagnostic = Diagnostic::error("law-variable", format!("`{}` is not available in this law", name.text));
+        let mut diagnostic = Diagnostic::error("law-variable", format!("`{}` is not available in this law", word.text));
         if self.when == When::Deadline {
             diagnostic = diagnostic
-                .label(name.loc, "not known yet")
+                .label(word.loc, "not known yet")
                 .note("the expression after `by` computes the deadline, so it cannot read what happens at the deadline")
                 .help("it may read `self` and `owner`");
         } else {
             let suppliers: Vec<&str> = var.suppliers().map(When::phrase).collect();
             diagnostic = diagnostic
-                .label(name.loc, format!("this law's trigger does not provide `{}`", name.text))
-                .help(format!("`{}` is provided by {} laws", name.text, suppliers.join(" and ")));
+                .label(word.loc, format!("this law's trigger does not provide `{}`", word.text))
+                .help(format!("`{}` is provided by {} laws", word.text, suppliers.join(" and ")));
         }
         Err(diagnostic.into())
     }
 
     /// A kind, place, entity, or pattern written where a value is expected.
-    fn constant(&mut self, name: Name<'s>) -> Check<(Op, Ty)> {
-        if is_pattern(name.text) {
-            return Ok((Op::Const(Value::Glob(self.world.book.names.intern(name.text))), Ty::Glob));
+    fn constant(&mut self, word: Word<'s>) -> Check<(Op, Ty)> {
+        if is_pattern(word.text) {
+            return Ok((Op::Const(Value::Glob(self.world.book.names.intern(word.text))), Ty::Glob));
         }
-        match self.world.seek_kind(self.home, name) {
-            Sought::Found(kind) => return Ok((Op::Const(Value::Kind(kind)), Ty::Kind)),
-            Sought::Ambiguous(diagnostic) => return Err(diagnostic.into()),
-            Sought::Missing => {}
+        if let Some(kind) = self.world.seek_kind(self.home, word)? {
+            return Ok((Op::Const(Value::Kind(kind)), Ty::Kind));
         }
         // A system knows nothing of the project's places.
-        if self.home == Home::Project {
-            match self.world.seek_place(name) {
-                Sought::Found(place) => return Ok((Op::Const(Value::Place(place)), Ty::Place)),
-                Sought::Ambiguous(diagnostic) => return Err(diagnostic.into()),
-                Sought::Missing => {}
-            }
+        if self.home == Home::Project
+            && let Some(place) = self.world.seek_place(word)?
+        {
+            return Ok((Op::Const(Value::Place(place)), Ty::Place));
         }
-        match self.world.seek_entity(self.home, name) {
-            Sought::Found(entity) => Ok((Op::Const(Value::Entity(entity)), Ty::Entity)),
-            Sought::Ambiguous(diagnostic) => Err(diagnostic.into()),
-            Sought::Missing => Err(self.unknown_constant(name).into()),
+        match self.world.seek_entity(self.home, word)? {
+            Some(entity) => Ok((Op::Const(Value::Entity(entity)), Ty::Entity)),
+            None => Err(self.unknown_constant(word).into()),
         }
     }
 
-    /// Nothing is called `name`. A kind that exists in a system this law's
+    /// Nothing is called `word`. A kind that exists in a system this law's
     /// system does not use is the better explanation, when there is one.
-    fn unknown_constant(&self, name: Name<'s>) -> Diagnostic {
-        match self.world.kind(self.home, name) {
+    fn unknown_constant(&self, word: Word<'s>) -> Diagnostic {
+        match self.world.kind(self.home, word) {
             Err(diagnostic) if !diagnostic.notes.is_empty() => diagnostic,
-            _ => self.unknown_name(name),
+            _ => self.unknown_name(word),
         }
     }
 
-    fn unknown_name(&self, name: Name<'s>) -> Diagnostic {
+    fn unknown_name(&self, word: Word<'s>) -> Diagnostic {
         let mut known: Vec<&str> =
-            Var::words().filter(|word| Var::parse(word).is_some_and(|var| var.provided_by(self.when))).collect();
+            Var::words().filter(|name| Var::parse(name).is_some_and(|var| var.provided_by(self.when))).collect();
         known.extend(self.locals.iter().map(|(local, _)| *local));
         let (names, lookup) = (&self.world.book.names, &self.world.book.lookup);
         let scope = self.world.scopes.of(self.home);
@@ -486,22 +430,20 @@ impl<'s> Compiler<'_, '_, 's> {
         if self.home == Home::Project {
             known.extend(lookup.places.keys(names));
         }
-        let mut diagnostic = Diagnostic::error("unknown-name", format!("`{}` means nothing in this law", name.text))
-            .label(name.loc, "not a variable, param, kind, place or entity here")
+        let diagnostic = Diagnostic::error("unknown-name", format!("`{}` means nothing in this law", word.text))
+            .label(word.loc, "not a variable, param, kind, place or entity here")
             .note("a name in a law is a variable of the trigger (`amount`, `from`, `date`, …), a `let`, a param, or a kind, place or entity");
-        if let Some(near) = closest(name.text, known) {
-            diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), name.loc, near);
-        }
-        diagnostic
+        suggest(diagnostic, word.loc, word.text, known)
     }
 
     // ─── Fields and lookups ─────────────────────────────────────────────────
 
-    fn field(&mut self, receiver: ExprId, field: Name<'s>) -> Check<(Op, Ty)> {
+    fn field(&mut self, receiver: ExprId, field: Word<'s>) -> Check<(Op, Ty)> {
         let (node, ty) = self.child(receiver)?;
-        let word = field.text;
-        let built_in = match (ty, word) {
+        let built_in = match (ty, field.text) {
             (Ty::Place, "balance") => Some((Field::Balance, Ty::Amount)),
+            (Ty::Place, "basis") => Some((Field::Basis, Ty::Amount)),
+            (Ty::Amount | Ty::Empty, "unit") => Some((Field::Unit, Ty::Unit)),
             (Ty::Place | Ty::Entity, "owner") => Some((Field::Owner, Ty::Entity)),
             (Ty::Place | Ty::Entity | Ty::Unit, "kind") => Some((Field::Kind, Ty::Kind)),
             (Ty::Entity, "age") => Some((Field::Age, Ty::Span)),
@@ -517,30 +459,28 @@ impl<'s> Compiler<'_, '_, 's> {
             }
             return Ok((Op::Field(node, field), ty));
         }
-        let sym = self.world.book.names.intern(word);
-        if let Some(has) = self.world.properties.get(ty, sym) {
+        let sym = self.world.book.names.intern(field.text);
+        if let Some(has) = self.world.props.get(ty, sym) {
             return Ok((Op::Field(node, Field::Prop(sym)), has.ty));
         }
         Err(self.unknown_field(ty, field, receiver).into())
     }
 
-    fn unknown_field(&self, ty: Ty, field: Name<'s>, receiver: ExprId) -> Diagnostic {
+    fn unknown_field(&self, ty: Ty, field: Word<'s>, receiver: ExprId) -> Diagnostic {
         let mut valid: Vec<&str> = match ty {
-            Ty::Place => vec!["balance", "owner", "kind"],
+            Ty::Place => vec!["balance", "basis", "owner", "kind"],
             Ty::Entity => vec!["owner", "kind", "age"],
             Ty::Unit => vec!["kind"],
+            Ty::Amount | Ty::Empty => vec!["unit"],
             Ty::Day => vec!["year", "month"],
             _ => Vec::new(),
         };
-        valid.extend(self.world.properties.names(ty).map(|sym| self.world.book.name(sym)));
-        let receiver = &self.exprs[receiver];
+        valid.extend(self.world.props.names(ty).map(|sym| self.world.book.name(sym)));
         let mut diagnostic =
             Diagnostic::error("unknown-field", format!("{} has no `{}`", article(ty.word()), field.text))
                 .label(field.loc, "no such field")
-                .context(receiver.loc, format!("this is {}", article(ty.word())));
-        if let Some(near) = closest(field.text, valid.iter().copied()) {
-            diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), field.loc, near);
-        }
+                .context(self.file.exprs[receiver].loc, format!("this is {}", article(ty.word())));
+        diagnostic = suggest(diagnostic, field.loc, field.text, valid.iter().copied());
         if valid.is_empty() {
             diagnostic.note(format!("{} has no fields", article(ty.word())))
         } else {
@@ -550,35 +490,34 @@ impl<'s> Compiler<'_, '_, 's> {
 
     /// `limit[year]`, `ordinary[year, owner.filing]`
     fn lookup(&mut self, base: ExprId, keys: &[ExprId], loc: Loc) -> Check<(Op, Ty)> {
-        let ExprKind::Name(text) = self.exprs[base].kind else {
+        let ExprKind::Name(name) = self.file.exprs[base].kind else {
             return Err(Diagnostic::error("param-lookup", "only a param can be looked up with `[…]`")
-                .label(self.exprs[base].loc, "this is not a param name")
+                .label(self.file.exprs[base].loc, "this is not a param name")
                 .into());
         };
-        let name = Name { text, loc: self.exprs[base].loc };
-        let param = self.world.seek_param(self.home, name).or_else(|| self.world.missing_param(self.home, name))?;
+        let word = Word { text: name.0, loc: self.file.exprs[base].loc };
+        let param = self.world.seek_param(self.home, word)?.ok_or_else(|| self.world.missing_param(self.home, word))?;
         let keys = self.children(keys)?;
-        self.check_keys(param, name, &keys, loc)?;
+        self.check_keys(param, word, &keys, loc)?;
         Ok((Op::Param(param, keys.into_iter().map(|(node, _)| node).collect()), self.param_ty(param)))
     }
 
     /// `catch-up`: a param looked up at the day the law runs.
-    fn bare_param(&mut self, param: Id<Param>, name: Name<'s>) -> Check<(Op, Ty)> {
+    fn bare_param(&mut self, param: Id<Param>, word: Word<'s>) -> Check<(Op, Ty)> {
         let shape = Shape::of(&self.world.book.params[param].rows[0]);
         if shape != (Shape { timed: true, names: 0 }) {
-            let mut diagnostic = Diagnostic::error("param-lookup", format!("`{}` needs keys", name.text)).label(
-                name.loc,
-                format!("`{}` has {} to look up", name.text, if shape.timed { "a date and names" } else { "names" }),
-            );
-            diagnostic = diagnostic.help(format!("write `{}[year]`, naming each key", name.text));
-            return Err(diagnostic.into());
+            let what = if shape.timed { "a date and names" } else { "names" };
+            return Err(Diagnostic::error("param-lookup", format!("`{}` needs keys", word.text))
+                .label(word.loc, format!("`{}` has {what} to look up", word.text))
+                .help(format!("write `{}[year]`, naming each key", word.text))
+                .into());
         }
         if !Var::Date.provided_by(self.when) {
             return Err(Diagnostic::error(
                 "law-variable",
-                format!("`{}` is looked up at the law's date, which is not known here", name.text),
+                format!("`{}` is looked up at the law's date, which is not known here", word.text),
             )
-            .label(name.loc, "write the day to look up: `[…]`")
+            .label(word.loc, "write the day to look up: `[…]`")
             .into());
         }
         Ok((Op::Param(param, Box::new([])), self.param_ty(param)))
@@ -591,20 +530,13 @@ impl<'s> Compiler<'_, '_, 's> {
         tys.reduce(|a, b| unify(a, b).unwrap_or(a)).unwrap_or(Ty::Empty)
     }
 
-    fn check_keys(&self, param: Id<Param>, name: Name, keys: &[(NodeId, Ty)], loc: Loc) -> Check<()> {
+    fn check_keys(&self, param: Id<Param>, word: Word, keys: &[(NodeId, Ty)], loc: Loc) -> Check<()> {
         let shape = Shape::of(&self.world.book.params[param].rows[0]);
         if keys.len() != shape.keys() {
-            let plural = |n: usize| if n == 1 { "key" } else { "keys" };
+            let takes = count(shape.keys(), "key");
             return Err(Diagnostic::error(
                 "param-lookup",
-                format!(
-                    "`{}` takes {} {}, but {} {} given",
-                    name.text,
-                    shape.keys(),
-                    plural(shape.keys()),
-                    keys.len(),
-                    if keys.len() == 1 { "was" } else { "were" }
-                ),
+                format!("`{}` takes {takes}, not {}", word.text, keys.len()),
             )
             .label(loc, "wrong number of keys")
             .context(self.world.book.params[param].loc, "the param")
@@ -623,7 +555,7 @@ impl<'s> Compiler<'_, '_, 's> {
 
     // ─── Calls ──────────────────────────────────────────────────────────────
 
-    fn call(&mut self, function: Name<'s>, args: &[ExprId], loc: Loc) -> Check<(Op, Ty)> {
+    fn call(&mut self, function: Word<'s>, args: &[ExprId], loc: Loc) -> Check<(Op, Ty)> {
         let typed = self.children(args)?;
         let arity = |low: usize, high: usize| -> Check<()> {
             if (low..=high).contains(&typed.len()) {
@@ -661,34 +593,17 @@ impl<'s> Compiler<'_, '_, 's> {
                 let ty = negate(ty_at(0)).ok_or_else(|| expected("an amount or a number", ty_at(0), arg_loc(0)))?;
                 (Func::Abs, ty)
             }
-            "progressive" => {
-                arity(2, 2)?;
-                if ty_at(0) != Ty::Schedule {
-                    return Err(expected("a schedule", ty_at(0), arg_loc(0)).into());
+            name => {
+                let Some(&(_, wants, func, ty)) = FIXED.iter().find(|entry| entry.0 == name) else {
+                    return Err(self.unknown_function(function).into());
+                };
+                arity(wants.len(), wants.len())?;
+                if let Some((at, &want)) = wants.iter().enumerate().find(|&(at, &want)| !fits(want, ty_at(at))) {
+                    let phrase = if want == Ty::Unit { "a commodity".into() } else { article(want.word()) };
+                    return Err(expected(&phrase, ty_at(at), arg_loc(at)).into());
                 }
-                if !is_amount(ty_at(1)) {
-                    return Err(expected("an amount", ty_at(1), arg_loc(1)).into());
-                }
-                (Func::Progressive, Ty::Amount)
+                (func, ty)
             }
-            "value" => {
-                arity(2, 2)?;
-                if !is_amount(ty_at(0)) {
-                    return Err(expected("an amount", ty_at(0), arg_loc(0)).into());
-                }
-                if ty_at(1) != Ty::Unit {
-                    return Err(expected("a commodity", ty_at(1), arg_loc(1)).into());
-                }
-                (Func::Value, Ty::Amount)
-            }
-            "date" => {
-                arity(3, 3)?;
-                if let Some(at) = (0..3).find(|&at| ty_at(at) != Ty::Num) {
-                    return Err(expected("a number", ty_at(at), arg_loc(at)).into());
-                }
-                (Func::Date, Ty::Day)
-            }
-            _ => return Err(self.unknown_function(function).into()),
         };
         Ok((Op::Call(func, nodes), ty))
     }
@@ -702,13 +617,17 @@ impl<'s> Compiler<'_, '_, 's> {
         let dir = match word(0) {
             "in" => Dir::In,
             "out" => Dir::Out,
-            _ => return Err(self.keyword_error(args[0].0, "total", "`in` or `out`").into()),
+            _ => {
+                return Err(self.keyword_error(args[0].0, "total", "`in` or `out`").into());
+            }
         };
         let window = match word(1) {
             "month" => Window::Month,
             "year" => Window::Year,
             "ever" => Window::Ever,
-            _ => return Err(self.keyword_error(args[1].0, "total", "`month`, `year` or `ever`").into()),
+            _ => {
+                return Err(self.keyword_error(args[1].0, "total", "`month`, `year` or `ever`").into());
+            }
         };
         if let Some(&(node, ty)) = args.get(2)
             && ty != Ty::Kind
@@ -725,30 +644,24 @@ impl<'s> Compiler<'_, '_, 's> {
 
     /// `tally(name)`: the name must be counted by some law.
     fn tally(&mut self, arg: ExprId) -> Check<Func> {
-        let expr = &self.exprs[arg];
-        let ExprKind::Name(text) = expr.kind else {
+        let expr = &self.file.exprs[arg];
+        let ExprKind::Name(name) = expr.kind else {
             return Err(expected("the name of a tally", Ty::Num, expr.loc).into());
         };
-        if !self.world.tallies.contains(text) {
-            let mut diagnostic = Diagnostic::error("unknown-tally", format!("no law counts `{text}`"))
+        if !self.world.tallies.contains(name.0) {
+            let diagnostic = Diagnostic::error("unknown-tally", format!("no law counts `{}`", name.0))
                 .label(expr.loc, "nothing is tallied under this name")
                 .note("`tally(NAME)` reads what `count … as NAME` lines add up");
-            if let Some(near) = closest(text, self.world.tallies.iter().copied()) {
-                diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), expr.loc, near);
-            }
-            return Err(diagnostic.into());
+            return Err(suggest(diagnostic, expr.loc, name.0, self.world.tallies.iter().copied()).into());
         }
-        Ok(Func::Tally(self.world.book.names.intern(text)))
+        Ok(Func::Tally(self.world.book.names.intern(name.0)))
     }
 
-    fn unknown_function(&self, function: Name) -> Diagnostic {
-        let mut diagnostic = Diagnostic::error("unknown-function", format!("there is no function `{}`", function.text))
+    fn unknown_function(&self, function: Word) -> Diagnostic {
+        let diagnostic = Diagnostic::error("unknown-function", format!("there is no function `{}`", function.text))
             .label(function.loc, "not a function")
             .note(format!("the functions are {}", list(&FUNCTIONS)));
-        if let Some(near) = closest(function.text, FUNCTIONS) {
-            diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), function.loc, near);
-        }
-        diagnostic
+        suggest(diagnostic, function.loc, function.text, FUNCTIONS)
     }
 
     // ─── Operators ──────────────────────────────────────────────────────────

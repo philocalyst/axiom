@@ -3,48 +3,116 @@
 //! A place is watched by its own laws and its ancestors' (a budget on
 //! `expenses/food` covers `expenses/food/groceries`), by the laws of its kind
 //! and its kind's ancestors, by the top-level laws of the systems its owner
-//! lives under (dated by residence), and by the project's own top-level laws,
-//! in that order. The engine reads these tables and never searches.
+//! lives under (dated by residence), and by the project's own top-level laws.
+//! Every list is then put in dependency order (see [`crate::laws::rank`]): the
+//! engine reads these tables and never searches.
+//!
+//! A household is governed as one. The top-level laws of the systems it lives
+//! in govern every place it or its members own, with the household as `self`,
+//! so a joint return reads one tally that both paychecks counted into. What is
+//! personal stays with the person: the laws of a kind or of a place run with
+//! the place's owner, and a member who lives somewhere of their own is governed
+//! there as themselves.
 
 use axiom_core::{Day, Groups, Id};
 
-use crate::book::{Book, Entity, Place, Sort};
+use crate::book::{Book, Entity, Place, Sort, System};
 use crate::law::{Law, Owner, Rule, Rules, Subject, Trigger};
 
 /// The span of a rule that has always applied and always will.
 const FOREVER: (Day, Day) = (Day(i32::MIN), Day(i32::MAX));
 
-pub(crate) fn govern(book: &mut Book) {
-    book.rules = Rules::of(book);
+pub(crate) fn govern(book: &mut Book, rank: &[u32]) {
+    book.rules = Rules::of(book, rank);
+}
+
+/// The laws of every system that governs one entity, dated: each system of
+/// every residence's lineage, ancestors first, with residences of one system
+/// merged so that its laws never run twice on a day.
+type Governing = Vec<(Id<System>, Day, Day)>;
+
+fn governing(book: &Book, entity: Id<Entity>) -> Governing {
+    let mut spans: Governing = Vec::new();
+    for residence in book.entities[entity].lives.iter() {
+        spans.extend(book.systems.lineage(residence.system).map(|system| (system, residence.from, residence.until)));
+    }
+    spans.sort_by_key(|&(system, from, _)| (system, from));
+    let mut merged: Governing = Vec::with_capacity(spans.len());
+    for (system, from, until) in spans {
+        match merged.last_mut() {
+            Some((last, _, end)) if *last == system && from.0 <= end.0.saturating_add(1) => *end = (*end).max(until),
+            _ => merged.push((system, from, until)),
+        }
+    }
+    merged
+}
+
+/// What governs each entity as a resident, before ranking.
+struct Residents {
+    governing: Vec<Governing>,
+}
+
+fn always(law: Id<Law>, subject: Subject) -> Rule {
+    Rule { law, subject, from: FOREVER.0, until: FOREVER.1 }
+}
+
+impl Residents {
+    fn of(book: &Book) -> Residents {
+        Residents { governing: book.entities.ids().map(|entity| governing(book, entity)).collect() }
+    }
+
+    /// The top-level laws of the systems `entity` lives under, as the entity,
+    /// except those of systems that `except` lives under as itself.
+    fn rules<'b>(
+        &'b self,
+        book: &'b Book,
+        entity: Id<Entity>,
+        except: Option<Id<Entity>>,
+    ) -> impl Iterator<Item = Rule> + 'b {
+        let own = except.map_or(&[][..], |other| &self.governing[other.index()][..]);
+        let spans = self.governing[entity.index()].iter();
+        spans.filter(move |(system, ..)| !own.iter().any(|(theirs, ..)| theirs == system)).flat_map(
+            move |&(system, from, until)| {
+                let laws = book.systems[system].laws.iter();
+                laws.map(move |&law| Rule { law, subject: Subject::Entity(entity), from, until })
+            },
+        )
+    }
 }
 
 impl Rules {
-    fn of(book: &Book) -> Rules {
+    fn of(book: &Book, rank: &[u32]) -> Rules {
         let written = WrittenIn::of(book);
-        let (mut on_in, mut on_out, mut on_gain, mut always) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let residents = Residents::of(book);
+        let (mut on_in, mut on_out, mut on_gain, mut always_on) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         let mut watching = Vec::new();
         for place in book.places.ids() {
             watching.clear();
-            watching_place(book, &written, place, &mut watching);
+            watching_place(book, &written, &residents, place, &mut watching);
+            watching.sort_by_key(|rule| rank[rule.law.index()]);
             for &rule in &watching {
                 let table = match book.laws[rule.law].trigger {
                     Trigger::In => &mut on_in,
                     Trigger::Out => &mut on_out,
                     Trigger::Gain => &mut on_gain,
-                    Trigger::Always => &mut always,
+                    Trigger::Always => &mut always_on,
                     Trigger::Spend | Trigger::Each(..) | Trigger::By(_) => continue,
                 };
                 table.push((place, rule));
             }
         }
         let places = book.places.len();
+        let mut spending = spending(book, &written);
+        spending.sort_by_key(|(_, rule)| rank[rule.law.index()]);
+        let mut timed = timed(book, &residents);
+        timed.sort_by_key(|rule| rank[rule.law.index()]);
         Rules {
             on_in: Groups::build(places, on_in),
             on_out: Groups::build(places, on_out),
             on_gain: Groups::build(places, on_gain),
-            always: Groups::build(places, always),
-            on_spend: Groups::build(book.entities.len(), spending(book, &written)),
-            timed: timed(book),
+            always: Groups::build(places, always_on),
+            on_spend: Groups::build(book.entities.len(), spending),
+            timed,
         }
     }
 }
@@ -74,12 +142,8 @@ impl WrittenIn {
     }
 }
 
-fn always(law: Id<Law>, subject: Subject) -> Rule {
-    Rule { law, subject, from: FOREVER.0, until: FOREVER.1 }
-}
-
-/// Every rule that watches `place`, in the order the engine fires them.
-fn watching_place(book: &Book, written: &WrittenIn, place: Id<Place>, out: &mut Vec<Rule>) {
+/// Every rule that watches `place`.
+fn watching_place(book: &Book, written: &WrittenIn, residents: &Residents, place: Id<Place>, out: &mut Vec<Rule>) {
     let owner = book.places[place].owner;
     for governing in book.places.lineage(place) {
         out.extend(written.places[governing].iter().map(|&law| always(law, Subject::Place(governing))));
@@ -87,36 +151,15 @@ fn watching_place(book: &Book, written: &WrittenIn, place: Id<Place>, out: &mut 
     for kind in book.kinds.lineage(book.places[place].kind) {
         out.extend(book.kinds[kind].laws.iter().map(|&law| always(law, Subject::Place(place))));
     }
-    residence_rules(book, owner, out);
-    out.extend(written.project.iter().map(|&law| always(law, Subject::Entity(owner))));
-}
-
-/// The top-level laws of `entity`'s jurisdictions, each dated by the residence
-/// that brings it. A jurisdiction includes its ancestors, outermost first, so
-/// `us` counts a wage before `us/ca` reads the tally.
-fn residence_rules(book: &Book, entity: Id<Entity>, out: &mut Vec<Rule>) {
-    for (at, residence) in book.entities[entity].lives.iter().enumerate() {
-        let until = residence_end(book, entity, at);
-        let mut chain: Vec<_> = book.systems.lineage(residence.system).collect();
-        chain.reverse();
-        for system in chain {
-            let dated = book.systems[system].laws.iter().map(|&law| Rule {
-                law,
-                subject: Subject::Entity(entity),
-                from: residence.from,
-                until,
-            });
-            out.extend(dated);
-        }
+    // The owner is governed where it lives, and so is the household it belongs
+    // to: a household is governed as one, so its members' places answer to it.
+    let household = book.entities[owner].member;
+    out.extend(residents.rules(book, owner, None));
+    if let Some(household) = household {
+        out.extend(residents.rules(book, household, Some(owner)));
     }
-}
-
-/// The last day of the residence at `at`: the day before the next begins.
-fn residence_end(book: &Book, entity: Id<Entity>, at: usize) -> Day {
-    match book.entities[entity].lives.get(at + 1) {
-        Some(next) => Day(next.from.0.saturating_sub(1)),
-        None => FOREVER.1,
-    }
+    let resident = household.unwrap_or(owner);
+    out.extend(written.project.iter().map(|&law| always(law, Subject::Entity(resident))));
 }
 
 /// A restricted entity's `on spend` laws: its kind chain's, then its own.
@@ -132,7 +175,7 @@ fn spending(book: &Book, written: &WrittenIn) -> Vec<(Id<Entity>, Rule)> {
 }
 
 /// `each` and `by` laws, once for each subject they govern.
-fn timed(book: &Book) -> Vec<Rule> {
+fn timed(book: &Book, residents: &Residents) -> Vec<Rule> {
     let mut rules = Vec::new();
     let timed_laws = book.laws.iter().filter(|(_, law)| matches!(law.trigger, Trigger::Each(..) | Trigger::By(_)));
     for (id, law) in timed_laws {
@@ -150,19 +193,17 @@ fn timed(book: &Book) -> Vec<Rule> {
                 }
                 Sort::Commodity => {}
             },
-            Owner::System(system) => {
-                for (entity, _) in book.entities.iter() {
-                    let residences = book.entities[entity].lives.iter().enumerate();
-                    for (at, residence) in
-                        residences.filter(|(_, residence)| book.systems.covers(system, residence.system))
-                    {
-                        let until = residence_end(book, entity, at);
-                        rules.push(Rule { law: id, subject: Subject::Entity(entity), from: residence.from, until });
-                    }
+            Owner::System(_) => {
+                for entity in book.entities.ids() {
+                    rules.extend(residents.rules(book, entity, None).filter(|rule| rule.law == id));
                 }
             }
             Owner::Book => {
-                let mut owners: Vec<Id<Entity>> = book.places.values().map(|place| place.owner).collect();
+                let mut owners: Vec<Id<Entity>> = book
+                    .places
+                    .values()
+                    .map(|place| book.entities[place.owner].member.unwrap_or(place.owner))
+                    .collect();
                 owners.sort();
                 owners.dedup();
                 rules.extend(owners.into_iter().map(|owner| always(id, Subject::Entity(owner))));

@@ -5,8 +5,8 @@ use axiom_core::{Diagnostic, Loc, Qty, Ratio};
 
 use super::pairing::{Mismatch, Price, SplitError};
 use crate::book::Amount;
+use crate::declare::World;
 use crate::prices::{implied_rate, rescale};
-use crate::world::World;
 
 /// Where in the source a pairing was written.
 #[derive(Clone, Copy)]
@@ -162,8 +162,14 @@ pub(super) fn split(world: &World, why: SplitError, header: Loc, legs: &[Loc], e
             format!("the legs use {}, but the total is {}", show(allocated), show(total)),
         )
         .label(header, format!("a total of {}", show(total)))
-        .note("nothing is left for the remainder, or the legs already exceed the total")
-        .help("lower a leg, or raise the total"),
+        .help(match allocated.qty > total.qty {
+            true => format!(
+                "lower a leg by {}, or raise the total to {}",
+                show(Amount::new(allocated.qty - total.qty, total.unit)),
+                show(allocated)
+            ),
+            false => "the `...` leg has nothing left: lower another leg, or raise the total".to_string(),
+        }),
         SplitError::Short { total, allocated } => {
             let missing = Amount::new(total.qty - allocated.qty, total.unit);
             Diagnostic::error(

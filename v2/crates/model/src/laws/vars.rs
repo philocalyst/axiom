@@ -27,7 +27,7 @@ impl When {
             Written::Out => When::Out,
             Written::Gain => When::Gain,
             Written::Spend => When::Spend,
-            Written::Each(_) => When::Each,
+            Written::Each(_) | Written::Closing { .. } => When::Each,
             Written::By(_) => When::By,
             Written::Always => When::Always,
         }

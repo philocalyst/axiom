@@ -1,4 +1,4 @@
-error[code-placement]: `#check-1041` may not mark this flow
+error[code-placement]: `#check-1041` may not mark this transaction
    ╭─[40-code-forbidden.ax:18:38]
    │
 14 │ code check-*
@@ -9,7 +9,7 @@ error[code-placement]: `#check-1041` may not mark this flow
    │                                      ─────┬─────
    │                                           ╰── this code
    │
-   = note: it may only mark flows touching `bank`
+   = note: it may only mark transactions touching `bank`
    = help: use the code where the rule allows it, or change the rule
 
 ✗ 1 error

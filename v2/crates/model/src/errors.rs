@@ -1,15 +1,36 @@
-//! The diagnostics most stages share: a name nothing answers to, and a name
-//! several things answer to.
+//! The words diagnostics share: a name nothing answers to, a name several
+//! things answer to, a thing declared twice.
 
 use axiom_core::{Day, Diagnostic, Loc};
-use axiom_syntax::Name;
 
-/// `there is no place `chekcing`` with the closest known name as a fix.
-pub(crate) fn unknown(code: &'static str, noun: &str, name: Name, suggestion: Option<&str>) -> Diagnostic {
-    let diagnostic = Diagnostic::error(code, format!("there is no {noun} `{}`", name.text))
-        .label(name.loc, format!("not a known {noun}"));
+use crate::names::near;
+
+/// A word as written, and where.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Word<'s> {
+    pub text: &'s str,
+    pub loc: Loc,
+}
+
+/// `there is no place `chekcing``, with the closest known name as the fix.
+pub(crate) fn unknown(code: &'static str, noun: &str, word: Word, suggestion: Option<&str>) -> Diagnostic {
+    let diagnostic = Diagnostic::error(code, format!("there is no {noun} `{}`", word.text))
+        .label(word.loc, format!("not a known {noun}"));
     match suggestion {
-        Some(near) => diagnostic.fix(format!("did you mean `{near}`?"), name.loc, near),
+        Some(near) => diagnostic.fix(format!("did you mean `{near}`?"), word.loc, near),
+        None => diagnostic,
+    }
+}
+
+/// `did you mean X?`, as an edit at `loc`, when `candidates` holds a near miss of `word`.
+pub(crate) fn suggest<'a>(
+    diagnostic: Diagnostic,
+    loc: Loc,
+    word: &str,
+    candidates: impl IntoIterator<Item = &'a str>,
+) -> Diagnostic {
+    match near(word, candidates) {
+        Some(near) => diagnostic.fix(format!("did you mean `{near}`?"), loc, near),
         None => diagnostic,
     }
 }
@@ -21,13 +42,24 @@ pub(crate) fn not_used(diagnostic: Diagnostic, noun: &str, name: &str, system: &
         .help(format!("add `use {system}` to bring it into scope"))
 }
 
-/// `entity acme` written twice.
-pub(crate) fn duplicate(noun: &str, name: Name, first: Option<Loc>) -> Diagnostic {
-    let diagnostic = Diagnostic::error("duplicate-declaration", format!("{noun} `{}` is declared twice", name.text))
-        .label(name.loc, "declared again here");
-    match first {
-        Some(loc) => diagnostic.context(loc, "first declared here").help("remove one of the two declarations"),
-        None => diagnostic.note("it is built in").help("remove this declaration"),
+/// `entity acme` written twice. A first declaration in a system the project
+/// uses is a fact of the language, not something to delete.
+pub(crate) fn duplicate(noun: &str, name: Word, first: Option<Loc>, system: Option<&str>) -> Diagnostic {
+    let (text, loc) = (name.text, name.loc);
+    match (first, system) {
+        (Some(first), Some(system)) => {
+            Diagnostic::error("duplicate-declaration", format!("`{text}` is already declared by system `{system}`"))
+                .label(loc, "declared again here")
+                .context(first, "first declared here (built in)")
+                .help(format!("delete this declaration: the {noun} already exists"))
+        }
+        (Some(first), None) => Diagnostic::error("duplicate-declaration", format!("{noun} `{text}` is declared twice"))
+            .label(loc, "declared again here")
+            .context(first, "first declared here")
+            .help("keep the declaration you mean and delete the other"),
+        (None, _) => Diagnostic::error("duplicate-declaration", format!("{noun} `{text}` is built in"))
+            .label(loc, "declared again here")
+            .help("delete this declaration"),
     }
 }
 
@@ -41,16 +73,16 @@ pub(crate) struct Candidate {
     pub write: Option<String>,
 }
 
-pub(crate) fn ambiguous(code: &'static str, plural: &str, name: Name, candidates: &[Candidate]) -> Diagnostic {
+pub(crate) fn ambiguous(code: &'static str, plural: &str, word: Word, candidates: &[Candidate]) -> Diagnostic {
     let which = if candidates.len() == 2 { "either of these" } else { "any of these" };
-    let mut diagnostic = Diagnostic::error(code, format!("`{}` could be {which} {plural}", name.text))
-        .label(name.loc, "which one is meant?");
+    let mut diagnostic = Diagnostic::error(code, format!("`{}` could be {which} {plural}", word.text))
+        .label(word.loc, "which one is meant?");
     for candidate in candidates {
         if let Some(loc) = candidate.declared {
             diagnostic = diagnostic.context(loc, format!("{} is declared here", candidate.is));
         }
         diagnostic = match &candidate.write {
-            Some(write) => diagnostic.fix(format!("write `{write}` for {}", candidate.is), name.loc, write),
+            Some(write) => diagnostic.fix(format!("write `{write}` for {}", candidate.is), word.loc, write),
             None => diagnostic
                 .note(format!("{} cannot be written any other way: rename it to tell them apart", candidate.is)),
         };
@@ -68,4 +100,32 @@ pub(crate) fn article(word: &str) -> String {
 pub(crate) fn iso(day: Day) -> String {
     let (year, month, date) = day.ymd();
     format!("{year:04}-{month:02}-{date:02}")
+}
+
+/// `a, b or c`, each in backticks.
+pub(crate) fn list(words: &[&str]) -> String {
+    match words {
+        [] => String::new(),
+        [only] => format!("`{only}`"),
+        [init @ .., last] => {
+            let init: Vec<String> = init.iter().map(|word| format!("`{word}`")).collect();
+            format!("{} or `{last}`", init.join(", "))
+        }
+    }
+}
+
+/// `a, b and c`, each in backticks.
+pub(crate) fn list_and(words: &[&str]) -> String {
+    match words {
+        [init @ .., last] if !init.is_empty() => {
+            let init: Vec<String> = init.iter().map(|word| format!("`{word}`")).collect();
+            format!("{} and `{last}`", init.join(", "))
+        }
+        _ => list(words),
+    }
+}
+
+/// One count in words: `1 line`, `3 lines`.
+pub(crate) fn count(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }

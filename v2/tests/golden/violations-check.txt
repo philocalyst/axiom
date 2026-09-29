@@ -62,8 +62,6 @@ error[unknown-place]: there is no place `grocries`
     = help: did you mean `groceries`?
 100 - 2026-03-02 checking -> grocries 84.20 USD
 100 + 2026-03-02 checking -> groceries 84.20 USD
-    = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
-            `expenses` or `equity`, for example `expenses/grocries`
 
 error[price-disagrees]: the price does not match the amounts
     ╭─[03-violations.ax:108:52]

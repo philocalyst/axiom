@@ -2,9 +2,9 @@ Balances at 2026-01-05
 
   Place                          Balance
   ──────────────────────────────────────
-  assets                          1 HOME
+  assets                 472,233.88 USD
+                                  1 HOME
                                   1 CRV
-                         472,233.88 USD
     bank                 114,168.01 USD
       joint-checking      36,838.99 USD
       joint-savings       77,329.02 USD
