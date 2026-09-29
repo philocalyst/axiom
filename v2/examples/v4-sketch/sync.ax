@@ -1,0 +1,32 @@
+// ─── Where the journal comes from ───────────────────────────────────────────
+//
+// Sam types almost nothing. Each source is a command whose output Axiom reads:
+// - a record that matches a flow already written (same account and amount,
+//   within three days) is left alone;
+// - one that keeps a contract is written as the occurrence (`01 flat`);
+// - one from Halcyon that mentions INV-2026-01 settles that invoice;
+// - the rest are written as flows with the party each memo names.
+// `axiom sync --dry` shows what would be written. Nothing written is changed.
+
+/// Chase's export of the checking account.
+sync checking
+  run   chase-export checking --since {since}
+  csv   date "Posting Date" "MM/DD/YYYY", amount "Amount", memo "Description", balance "Balance"
+
+/// The card's export shows charges as positive amounts.
+sync visa
+  run   chase-export visa --since {since}
+  csv   date "Transaction Date" "MM/DD/YYYY", amount "Amount" flipped, memo "Description"
+
+/// Quotes for everything held, by year.
+sync prices
+  run   quotes {units} --since {since}
+  into  prices/{year}.ax
+
+/// Invoice codes, as they appear in memos (`INV-2026-01`).
+code inv-*
+  on client
+
+// How parties appear on statements is part of who they are: see `known-as` in
+// parties.ax. A memo nobody is known as is written to `?`, and `check` offers
+// the line that would recognize it.

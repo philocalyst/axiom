@@ -33,7 +33,7 @@ opening 01
 08 phone         // ▸ 45.00 from visa · 27.00 of it the studio's
 09 visa -> amazon 62.40 USD #household "hooks for the hallway"
 
-12 checking -> jo 600 USD due 2026-04-01 "for the car repair"
+12 checking -> jo 600 USD due 04-01 "for the car repair"
                                                     // ▸ lent: jo owes 600.00
 
 15 job           // ▸ lumen, 4,600.00 gross · #wages
@@ -49,12 +49,14 @@ opening 01
 20 vti-monthly 1.620 VTI                            // ▸ 500.00 from checking at 308.64
 22 netflix       // ▸ 15.49 from visa · #fun
 
-24 visa 1_739.13 USD -> laptop / best-buy "the studio's new laptop"
-                                                    // ▸ equipment of studio · 138.09 of it sales tax · expensed (§179)
+24 visa -> best-buy 1_739.13 USD #purchase of laptop "the studio's new laptop"
+                                                    // ▸ the laptop arrives: equipment of studio · 138.09 of it
+                                                    //   sales tax, part of its cost · expensed (§179)
 25 checking -> visa 1_240.18 USD "December's statement"
 
-27 halcyon owes studio 3_800 USD due 30d ^inv-2026-01 #design
-                                                    // ▸ invoiced: halcyon owes 3,800.00, due 2026-02-26
+27 halcyon owes studio due 30d ^inv-2026-01         // ▸ invoiced: halcyon owes 3,800.00, due 2026-02-26
+  3_000 USD #design "brand refresh"
+    800 USD #design "icon set"
 
 30 visa -> safeway 132.77 USD                       // ▸ #groceries · food 216.97 of 900
 

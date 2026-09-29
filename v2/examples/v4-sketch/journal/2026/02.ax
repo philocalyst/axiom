@@ -1,5 +1,6 @@
 // February 2026: an improvement and a repair to the condo, a sale that
-// becomes a wash sale, a dinner in Paris, and a claim settled from each side.
+// becomes a wash sale, a dinner in Paris, a claim settled from each side, and
+// a promotion that changes a contract's terms for a while.
 
 01 flat
 01 gym
@@ -43,6 +44,9 @@
 
 26 halcyon -> checking 3_800 USD ^inv-2026-01       // ▸ settles it: the studio's #design income, on its due day
 27 visa -> trader-joes 96.10 USD
+
+27 gym 120 USD monthly until 04-30 ^promo "spring promotion: half price"
+                                                    // ▸ the gym's terms until 2026-04-30; 240.00 again from May
 
 28 job
   retirement      276.00 USD
