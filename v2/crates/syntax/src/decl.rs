@@ -1,5 +1,5 @@
-//! Declarations and the other block items: `account`, `entity`, `commodity`,
-//! `kind`, `code`, `param`, and `sync`.
+//! Declarations and the other block items: `account`, `entity`, `asset`,
+//! `purpose`, `commodity`, `kind`, `budget`, `code`, `param`, and `sync`.
 //!
 //! A declaration keeps its good lines when one line is bad: dropping it would
 //! turn every later use of what it declares into an error of its own.
@@ -11,10 +11,12 @@ use crate::lex::Tok;
 use crate::lines::Line;
 use crate::parser::{Parse, Parser};
 
+const BUDGET_PERIODS: [(&str, Period); 2] = [("monthly", Period::Month), ("yearly", Period::Year)];
+
 impl<'s> Parser<'s> {
-    /// `account PATH [as ALIAS] [: KIND]`, `entity NAME[, NAME…] [: KIND]`,
-    /// `commodity SYMBOL [: KIND]` or `kind NAME [: PARENT]`, with its indented
-    /// properties and nested laws. Several entities on a line are one
+    /// `account NAME [: KIND [at NAME]]`, `entity NAME[, NAME…] [: KIND]`, `asset`,
+    /// `purpose`, `commodity SYMBOL [: KIND]` or `kind NAME [: PARENT]`, with its
+    /// indented properties and nested laws. Several entities on a line are one
     /// declaration each, all sharing what is written under them.
     pub fn decl(&mut self, line: &mut Line<'s>, what: DeclKind) -> Parse<()> {
         let mut names = vec![match what {
@@ -24,11 +26,9 @@ impl<'s> Parser<'s> {
         while what == DeclKind::Entity && self.eat(",").is_some() {
             names.push(self.name_like("expected-name", "another entity name")?);
         }
-        let alias = match what == DeclKind::Account && self.eat_word("as").is_some() {
-            true => Some(self.name("expected-name", "a short name for the account, like `biz`")?),
-            false => None,
-        };
         let kind = self.eat(":").and_then(|_| self.name_like("expected-kind", "a kind after `:`").ok());
+        let at = if what == DeclKind::Account { self.eat_word("at") } else { None };
+        let at = at.and_then(|_| self.name("expected-name", "the institution it is with, such as `chase`").ok());
         let header = self.keep_header(line);
         let (props, laws) = (self.mark::<Prop>(), self.mark::<Law>());
         let _ = self.children(line, |parser, child| match parser.eat_word("law") {
@@ -37,8 +37,18 @@ impl<'s> Parser<'s> {
         });
         let (props, laws) = (self.since(props), self.since(laws));
         for name in names {
-            self.emit(&header, Decl { what, name, alias, kind, props, laws }, ItemKind::Decl);
+            self.emit(&header, Decl { what, name, kind, at, props, laws }, ItemKind::Decl);
         }
+        Ok(())
+    }
+
+    /// `budget PURPOSE AMOUNT monthly|yearly`
+    pub fn budget(&mut self, line: &mut Line<'s>) -> Parse<()> {
+        let purpose = self.name("expected-name", "the purpose it is for, such as `food`")?;
+        let amount = self.amount()?;
+        let (per, _) = self.choose(&BUDGET_PERIODS, "unknown-period", "budget period")?;
+        let header = self.end_header(line)?;
+        self.emit(&header, Budget { purpose, amount, per }, ItemKind::Budget);
         Ok(())
     }
 

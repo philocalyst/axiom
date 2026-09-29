@@ -3,6 +3,8 @@
 //! parallel parse, and the wording of the most important diagnostics. The rest
 //! is covered by parsing a realistic file end to end.
 
+use std::path::{Path, PathBuf};
+
 use axiom_core::{Day, Dec, Diagnostic, FileId, Span};
 
 use crate::ast::*;
@@ -24,16 +26,27 @@ entity me : person
   born 1990-05-04
   lives us/ca/san-francisco from 2026-01-01
 entity aldi, kroger : grocer
-  via expenses/food
+  purpose groceries
 
-account assets/bank/checking as chk : bank
+account checking : bank at chase
   owner me
   holds USD, EUR
   opened 2020-01-01
-account assets/retirement : 401k
+account joint/savings : deposit
+account retirement : 401k at fidelity
   employer acme
-account expenses/food
-  budget 500 USD monthly
+
+asset condo : rental-home
+  in-service 2024-03-01
+  land 120_000 USD
+
+purpose food
+purpose groceries : food
+  business 50% for studio
+purpose improvement : capital
+  of asset
+budget food 900 USD monthly
+budget groceries 4_000 USD yearly
 
 kind 401k : asset
   deferred
@@ -262,10 +275,52 @@ fn clauses<'f, 's>(file: &'f File<'s>, tail: Many<Clause<'s>>) -> Vec<&'f Clause
 
 // ─── Whole files ────────────────────────────────────────────────────────────
 
+/// The `.ax` files under `dir`, with their paths relative to `root`.
+fn ax_files(root: &Path, dir: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap().flatten() {
+        match entry.path() {
+            path if path.is_dir() => found.extend(ax_files(root, &path)),
+            path if path.extension().is_some_and(|extension| extension == "ax") => {
+                found.push(path.strip_prefix(root).unwrap().to_path_buf())
+            }
+            _ => {}
+        }
+    }
+    found.sort();
+    found
+}
+
+/// The place a project path gives: `journal/2026/03.ax` holds March 2026.
+fn place_of(path: &Path) -> Place {
+    let parts: Vec<&str> = path.iter().map(|part| part.to_str().unwrap()).collect();
+    let number = |part: &str| part.trim_end_matches(".ax").parse::<i32>().ok();
+    match parts[..] {
+        ["journal", year, month] => Place { year: number(year), month: number(month).map(|month| month as u8) },
+        _ => Place::default(),
+    }
+}
+
+/// Every line of the v4 sketch, but the sketch of std, parses without a diagnostic.
+#[test]
+fn the_v4_sketch_parses_clean() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/v4-sketch");
+    let files = ax_files(&root, &root);
+    assert_eq!(files.len(), 10, "{files:?}");
+    let mut items = 0;
+    for path in files.iter().filter(|path| path.file_name().is_some_and(|name| name != "std-sketch.ax")) {
+        let src = std::fs::read_to_string(root.join(path)).unwrap();
+        let (file, diags) = crate::parse(FileId(0), &src, place_of(path));
+        assert!(diags.is_empty(), "{}:\n{}", path.display(), render(&src, &diags));
+        items += file.items.len();
+    }
+    assert!(items > 100, "{items} items");
+}
+
 #[test]
 fn a_realistic_file_parses_into_the_expected_shapes() {
     let file = parse_clean(EXAMPLE);
-    assert_eq!(file.items.len(), 70);
+    assert_eq!(file.items.len(), 76);
     let txns = txns(&file);
 
     // A paycheck: one named side, legs for the other, the last taking the remainder.
@@ -638,12 +693,13 @@ fn splits_and_openings() {
 }
 
 #[test]
-fn declarations_take_aliases_lists_and_several_globs() {
+fn declarations_take_lists_institutions_and_several_globs() {
     let file = parse_clean(EXAMPLE);
     let decls: Vec<&Decl> = file.iter::<Decl>().collect();
     let names: Vec<&str> = decls.iter().map(|decl| decl.name.0).collect();
-    assert_eq!(&names[..6], ["USD", "acme", "me", "aldi", "kroger", "assets/bank/checking"]);
-    assert_eq!(decls[5].alias.map(|alias| alias.0), Some("chk"));
+    assert_eq!(&names[..8], ["USD", "acme", "me", "aldi", "kroger", "checking", "joint/savings", "retirement"]);
+    let institutions: Vec<Option<&str>> = decls[5..8].iter().map(|decl| decl.at.map(|at| at.0)).collect();
+    assert_eq!(institutions, [Some("chase"), None, Some("fidelity")]);
     // Entities on one line share what is written under them.
     assert_eq!(format!("{:?}", decls[3].props), format!("{:?}", decls[4].props));
     assert_eq!(decls[3].kind.map(|kind| kind.0), Some("grocer"));
@@ -654,6 +710,32 @@ fn declarations_take_aliases_lists_and_several_globs() {
     let on: Vec<&str> = file[rules[0].on].iter().map(|glob| glob.0).collect();
     assert_eq!(on, ["expenses/travel/*", "bank", "assets/cash"]);
     assert_eq!(format!("{:?}", rules[0].on), format!("{:?}", rules[1].on));
+}
+
+#[test]
+fn assets_purposes_and_budgets_are_declared() {
+    let file = parse_clean(EXAMPLE);
+    let decls: Vec<&Decl> = file.iter::<Decl>().collect();
+    let of = |what| decls.iter().filter(|decl| decl.what == what).map(|decl| decl.name.0).collect::<Vec<_>>();
+    assert_eq!(of(DeclKind::Asset), ["condo"]);
+    assert_eq!(of(DeclKind::Purpose), ["food", "groceries", "improvement"]);
+    let groceries = decls.iter().find(|decl| decl.name.0 == "groceries" && decl.what == DeclKind::Purpose).unwrap();
+    assert_eq!(groceries.kind.map(|parent| parent.0), Some("food"));
+    assert_eq!(file[groceries.props][0].name.0, "business");
+    let condo = decls.iter().find(|decl| decl.what == DeclKind::Asset).unwrap();
+    assert_eq!((condo.kind.map(|kind| kind.0), file[condo.props].len()), (Some("rental-home"), 2));
+
+    let budgets: Vec<&Budget> = file.iter().collect();
+    assert_eq!((budgets[0].purpose.0, budgets[0].amount.0, budgets[0].per), ("food", "900 USD", Period::Month));
+    assert_eq!((budgets[1].amount.0, budgets[1].per), ("4_000 USD", Period::Year));
+    only_error("budget food 900 USD weekly\n", "unknown-period");
+    only_error("budget food 900\n", "expected-commodity");
+    only_error("budget 900 USD monthly\n", "expected-name");
+
+    // `at` belongs to accounts, and needs an institution.
+    only_error("entity x : person at chase\n", "expected-end-of-line");
+    let (file, diags) = parse(FileId(0), "account x : deposit at\n");
+    assert_eq!((diags.len(), file.iter::<Decl>().count()), (1, 1), "the account stays, without its institution");
 }
 
 #[test]
@@ -1270,6 +1352,7 @@ fn dump(file: &File) -> String {
             ItemKind::Split(id) => format!("{:?}", file[id]),
             ItemKind::Setting(id) => format!("{:?}", file[id]),
             ItemKind::Sync(id) => format!("{:?}", file[id]),
+            ItemKind::Budget(id) => format!("{:?}", file[id]),
             ItemKind::Claim(id) => claim(&file[id]),
             ItemKind::Ending(id) => format!("{:?}", file[id]),
             ItemKind::Occurrence(id) => format!("{:?} {}", file[id].contract, legs(file[id].legs)),
@@ -1296,7 +1379,7 @@ fn dump(file: &File) -> String {
             ItemKind::Decl(id) => {
                 let decl = &file[id];
                 let laws: Vec<String> = file[decl.laws].iter().map(law).collect();
-                format!("{:?} {:?} {:?} {:?} {laws:?}", decl.name, decl.alias, decl.kind, props(decl.props))
+                format!("{:?} {:?} {:?} {:?} {laws:?}", decl.name, decl.at, decl.kind, props(decl.props))
             }
         };
         writeln!(out, "{text}").unwrap();

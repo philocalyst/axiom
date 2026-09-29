@@ -15,9 +15,9 @@ use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported};
 
 #[rustfmt::skip]
-const KEYWORDS: [&str; 15] = [
-    "account", "entity", "commodity", "kind", "contract", "code", "param", "law", "sync", "system", "use", "base",
-    "relaxed", "layout", "opening",
+const KEYWORDS: [&str; 18] = [
+    "account", "entity", "asset", "purpose", "commodity", "kind", "contract", "budget", "code", "param", "law", "sync",
+    "system", "use", "base", "relaxed", "layout", "opening",
 ];
 
 /// Words that start a line inside a block, and what owns such a block. Written
@@ -76,8 +76,11 @@ impl<'s> Parser<'s> {
         match word {
             "account" => self.decl(line, DeclKind::Account),
             "entity" => self.decl(line, DeclKind::Entity),
+            "asset" => self.decl(line, DeclKind::Asset),
+            "purpose" => self.decl(line, DeclKind::Purpose),
             "commodity" => self.decl(line, DeclKind::Commodity),
             "kind" => self.decl(line, DeclKind::Kind),
+            "budget" => self.budget(line),
             "code" => self.code_rule(line),
             "param" => self.param(line),
             "law" => self.law_item(line),

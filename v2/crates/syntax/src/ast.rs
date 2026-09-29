@@ -338,6 +338,8 @@ tables! {
     days: On,
     /// [`ItemKind::Decl`]
     decls: Decl<'s>,
+    /// [`ItemKind::Budget`]
+    budgets: Budget<'s>,
     /// [`ItemKind::Code`]
     rules: CodeRule<'s>,
     /// [`ItemKind::Param`]
@@ -408,9 +410,12 @@ pub enum ItemKind<'s> {
     Opening(Id<Opening<'s>>),
     /// `contract NAME with PARTY`
     Contract(Id<Contract<'s>>),
-    /// `account`, `entity`, `commodity` or `kind`. One line naming several
-    /// entities is one `Decl` per entity, all sharing the same properties.
+    /// `account`, `entity`, `asset`, `purpose`, `commodity` or `kind`. One line
+    /// naming several entities is one `Decl` per entity, all sharing the same
+    /// properties.
     Decl(Id<Decl<'s>>),
+    /// `budget PURPOSE AMOUNT monthly|yearly`
+    Budget(Id<Budget<'s>>),
     /// `code GLOB`. A line with several globs is one rule per glob, all
     /// sharing the same places.
     Code(Id<CodeRule<'s>>),
@@ -852,17 +857,18 @@ pub enum On {
 
 // ─── Declarations ───────────────────────────────────────────────────────────
 
-/// `account|entity|commodity|kind NAME [: KIND]` with indented properties and laws.
+/// `account|entity|asset|purpose|commodity|kind NAME [: KIND]` with indented
+/// properties and laws. (`account NAME : KIND at NAME` is the one with more.)
 #[derive(Debug)]
 pub struct Decl<'s> {
     /// Which keyword introduced it.
     pub what: DeclKind,
-    /// The path, entity, symbol or kind it declares.
+    /// The name, symbol or kind it declares.
     pub name: Name<'s>,
-    /// `account PATH as ALIAS`.
-    pub alias: Option<Name<'s>>,
-    /// After `:`: the kind (or, for `kind`, the parent kind).
+    /// After `:`: the kind (or, for `purpose` and `kind`, the parent).
     pub kind: Option<Name<'s>>,
+    /// `account NAME : KIND at NAME`: the institution the account is with.
+    pub at: Option<Name<'s>>,
     /// The indented property lines: `&file[decl.props]`.
     pub props: Many<Prop<'s>>,
     /// The nested laws.
@@ -872,18 +878,31 @@ pub struct Decl<'s> {
 /// Which keyword introduced a declaration.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum DeclKind {
-    /// `account`: a place that holds value.
+    /// `account`: a position with an institution.
     Account,
-    /// `entity`: a person, business or authority.
+    /// `entity`: an owner or a party.
     Entity,
-    /// `commodity`: a currency, security or asset.
+    /// `asset`: an identified thing.
+    Asset,
+    /// `purpose`: a node of the tree of what flows are for.
+    Purpose,
+    /// `commodity`: a currency or security.
     Commodity,
-    /// `kind`: a class that accounts, entities or commodities belong to.
+    /// `kind`: a class that accounts, entities, assets or commodities belong to.
     Kind,
 }
 
+/// `budget PURPOSE AMOUNT monthly|yearly`: a warning on the purpose's total.
+#[derive(Debug)]
+pub struct Budget<'s> {
+    pub purpose: Name<'s>,
+    pub amount: Amount<'s>,
+    /// The month or year the amount is for.
+    pub per: Period,
+}
+
 /// `NAME ARG*`: arguments are primary expressions, commas skipped.
-/// `has born date`, `budget 500 USD monthly`, `lives us/ca from 2026-01-01`.
+/// `has born date`, `holds USD, EUR`, `lives us/ca from 2026-01-01`.
 #[derive(Debug)]
 pub struct Prop<'s> {
     /// The property's name: `has`, `budget`, `lives`.
