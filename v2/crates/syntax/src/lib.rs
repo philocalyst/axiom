@@ -2,25 +2,23 @@
 //!
 //! Parsing is line-oriented: a column-0 line starts an item and indented lines
 //! belong to it, so each item parses (and recovers) on its own. Lines are found
-//! with `memchr`; dates, digit runs and names are read eight bytes at a time.
+//! with `memchr`, and names are scanned eight bytes at a time.
 //! That independence is also what lets a large file be cut at item boundaries
 //! and its pieces parsed on every core (see [`parse`]).
 //!
 //! | module      | job                                                        |
 //! |-------------|------------------------------------------------------------|
-//! | `ast`       | the tree: small items, tables, typed ranges                |
+//! | `ast`       | the tree: small items, per-piece tables, typed ranges      |
 //! | `lines`     | lines, indentation, comments, `///` blocks                 |
-//! | `lex`       | one line's tokens                                          |
-//! | `cursor`    | two-token lookahead and raw reads over a line              |
+//! | `lex`       | one line's tokens, with two of lookahead                   |
 //! | `parser`    | parser state and the helpers every rule shares             |
-//! | `block`     | indentation blocks and per-line error recovery             |
-//! | `item`      | top-level dispatch and one-line directives                 |
+//! | `structure` | item dispatch, one-line directives, indented blocks        |
 //! | `journal`   | dated entries, openings and plans                          |
-//! | `flow`      | flow headers, ends, legs, tails                            |
-//! | `amount`, `select` | amounts and lot selectors                           |
+//! | `flow`      | flow headers, ends, legs, tails, lot selectors             |
+//! | `amount`    | amounts, and what is said about the ones that are wrong    |
 //! | `decl`, `law` | declarations, params, syncs, laws                        |
 //! | `expr`      | the expression grammar                                     |
-//! | `errors`, `malformed` | diagnostics for what was found instead           |
+//! | `malformed` | diagnostics for words that are not tokens                  |
 
 pub mod ast;
 

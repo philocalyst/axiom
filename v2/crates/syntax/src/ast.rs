@@ -151,10 +151,12 @@ impl<T> Many<T> {
         }
     }
 
+    /// How many nodes are in the run.
     pub fn len(self) -> usize {
         self.len as usize
     }
 
+    /// Whether the run has no nodes.
     pub fn is_empty(self) -> bool {
         self.len == 0
     }
@@ -191,6 +193,7 @@ impl<T> fmt::Debug for Many<T> {
 /// what the items are made of.
 #[derive(Default, Debug)]
 pub struct File<'s> {
+    /// Which file this is, as its locations say.
     pub id: FileId,
     /// The source text. Every [`Name`], [`Code`], [`Amount`] and [`Doc`] is a
     /// slice of it.
@@ -245,7 +248,9 @@ pub(crate) struct Piece<'s> {
 /// A type that lives in one of a piece's [`Tables`], so that a [`Many`] or an
 /// [`Id`] of it can index the [`File`].
 pub trait Stored<'s>: Sized {
+    /// The table of this type in a piece's tables.
     fn table<'t>(tables: &'t Tables<'s>) -> &'t Vec<Self>;
+    /// The same, to add to it while parsing.
     fn table_mut<'t>(tables: &'t mut Tables<'s>) -> &'t mut Vec<Self>;
 }
 
@@ -341,6 +346,7 @@ pub struct Item<'s> {
     /// The header line only, up to the end of its last token: a trailing
     /// comment and the item's block are not part of it.
     pub loc: Loc,
+    /// What the item is, and where its node is.
     pub kind: ItemKind<'s>,
 }
 
@@ -401,6 +407,7 @@ pub enum Setting<'s> {
 pub struct Txn<'s> {
     /// The day value moves.
     pub date: Day,
+    /// What moves, from where to where, and why.
     pub flow: Flow<'s>,
 }
 
@@ -416,6 +423,7 @@ pub struct Flow<'s> {
     pub from: End<'s>,
     /// What arrives: the right of the arrow.
     pub to: End<'s>,
+    /// What the header says about the whole flow, which applies to every leg.
     pub tail: Tail<'s>,
     /// The indented lines under the header: `&file[flow.legs]`.
     pub legs: Many<Leg<'s>>,
@@ -424,7 +432,9 @@ pub struct Flow<'s> {
 /// One side of a header: `checking`, `checking 2_000 USD`, `7 VTI`, or nothing.
 #[derive(Debug)]
 pub struct End<'s> {
+    /// The place, or `None` when the side is left to the legs or to inference.
     pub place: Option<Place<'s>>,
+    /// How much, or `None` when the side states none.
     pub amount: Option<Quantity<'s>>,
 }
 
@@ -460,6 +470,7 @@ pub enum Select<'s> {
     Range(Day, Day, Loc),
     /// Parcels a transaction marked with this code.
     Code(Code<'s>),
+    /// A lot policy, with where it was written: `[fifo]`.
     Policy(Policy, Loc),
     /// `.basis`, always last: what the selectors chose is moved by its basis,
     /// not its quantity. (It is written after the brackets, and costs a
@@ -470,9 +481,13 @@ pub enum Select<'s> {
 /// How parcels are chosen when several could leave.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Policy {
+    /// Oldest parcels first.
     Fifo,
+    /// Newest parcels first.
     Lifo,
+    /// Highest-basis parcels first.
     Hifo,
+    /// Every parcel in proportion to what it holds.
     Prorata,
 }
 
@@ -503,8 +518,11 @@ pub enum Quantity<'s> {
 pub struct Leg<'s> {
     /// The `///` block above it.
     pub doc: Option<Doc<'s>>,
+    /// Where the leg's value goes (or, in an opening, what holds it).
     pub place: Place<'s>,
+    /// How much: fixed, pending, a target balance, or the remainder.
     pub amount: Quantity<'s>,
+    /// The leg's own tail, in addition to the header's.
     pub tail: Tail<'s>,
     /// The whole line, trailing comment excluded.
     pub loc: Loc,
@@ -526,12 +544,16 @@ pub struct Tail<'s> {
 /// The parser rejects a repeated clause, so each kind occurs at most once.
 #[derive(Clone, Copy, Debug)]
 pub struct Clause<'s> {
+    /// Where the clause was written.
     pub at: Loc,
+    /// What it says.
     pub kind: ClauseKind<'s>,
 }
 
+/// What a [`Clause`] says.
 #[derive(Clone, Copy, Debug)]
 pub enum ClauseKind<'s> {
+    /// `#code`: marks the transaction or leg. Any number.
     /// `#code`: marks the transaction or leg. Any number.
     Code(Code<'s>),
     /// `@ 285.70 USD`: the price of one unit of the commodity that arrives.
@@ -573,6 +595,7 @@ pub enum Due {
 /// assertion, its gap) explicitly.
 #[derive(Clone, Copy, Debug)]
 pub struct Waive<'s> {
+    /// The `!`, and the string after it if there is one.
     pub at: Loc,
     /// The string's contents, escapes not yet processed.
     pub reason: Option<&'s str>,
@@ -581,10 +604,13 @@ pub struct Waive<'s> {
 /// `DATE PLACE = [-]AMOUNT [! [STRING] | via PLACE]`, checked at the end of the day.
 #[derive(Debug)]
 pub struct Assert<'s> {
+    /// The day the balance is checked, at its end.
     pub date: Day,
+    /// The place whose balance is stated.
     pub place: Place<'s>,
     /// In the place's display sign. Negative (`= -50 USD`) for an overdraft.
     pub amount: Amount<'s>,
+    /// What becomes of a difference between the statement and the ledger.
     pub gap: Gap<'s>,
 }
 
@@ -602,8 +628,11 @@ pub enum Gap<'s> {
 /// `DATE #code settled|void|returned`
 #[derive(Debug)]
 pub struct Event<'s> {
+    /// The day the state takes effect.
     pub date: Day,
+    /// The code of the flows the event concerns.
     pub code: Code<'s>,
+    /// What became of them.
     pub state: EventState,
     /// Where the state word was written.
     pub state_loc: Loc,
@@ -623,8 +652,11 @@ pub enum EventState {
 /// `DATE UNIT PRICE`: one `unit` costs `price` on that day.
 #[derive(Debug)]
 pub struct Price<'s> {
+    /// The day the price holds.
     pub date: Day,
+    /// The commodity priced.
     pub unit: Name<'s>,
+    /// What one unit costs.
     pub price: Amount<'s>,
 }
 
@@ -632,9 +664,13 @@ pub struct Price<'s> {
 /// multiplied by `numerator / denominator`.
 #[derive(Debug)]
 pub struct Split<'s> {
+    /// The day the split takes effect.
     pub date: Day,
+    /// The commodity split.
     pub unit: Name<'s>,
+    /// The new number of units: `2` in `split 2 for 1`.
     pub numerator: Dec,
+    /// The old number of units: `1` in `split 2 for 1`.
     pub denominator: Dec,
 }
 
@@ -642,7 +678,9 @@ pub struct Split<'s> {
 /// plan happened on `date`.
 #[derive(Debug)]
 pub struct Occurrence<'s> {
+    /// The day the plan happened.
     pub date: Day,
+    /// The plan's name.
     pub plan: Name<'s>,
     /// Replaces the plan's header amount.
     pub amount: Option<Amount<'s>>,
@@ -654,7 +692,9 @@ pub struct Occurrence<'s> {
 /// each line a [`Leg`] with a fixed amount and `basis` and `since` clauses.
 #[derive(Debug)]
 pub struct Opening<'s> {
+    /// The day the balances are stated: they exist from then on.
     pub date: Day,
+    /// One line per holding: `&file[opening.lines]`.
     pub lines: Many<Leg<'s>>,
 }
 
@@ -666,10 +706,13 @@ pub struct Plan<'s> {
     pub name: Option<Name<'s>>,
     /// `month` is one month, `2w` fourteen days, `quarter` three months.
     pub every: Span,
+    /// `on DAY`: which day of each period. `None` means the period's own start.
     pub on: Option<On>,
+    /// `from DATE`: when the plan starts, if it says.
     pub from: Option<Day>,
     /// Inclusive. A month bound is normalized to that month's last day.
     pub until: Option<Day>,
+    /// What happens each time, with its legs.
     pub flow: Flow<'s>,
 }
 
@@ -678,7 +721,7 @@ pub struct Plan<'s> {
 pub enum On {
     /// `on 15`: past the month's end clamps to its last day.
     MonthDay(u8),
-    /// `on 04-15`
+    /// `on 04-15`: that month (1 to 12) and day of every year.
     YearDay { month: u8, day: u8 },
     /// `on monday`: Monday = 0 … Sunday = 6, as [`Day::weekday`].
     Weekday(u8),
@@ -689,7 +732,9 @@ pub enum On {
 /// `account|entity|commodity|kind NAME [: KIND]` with indented properties and laws.
 #[derive(Debug)]
 pub struct Decl<'s> {
+    /// Which keyword introduced it.
     pub what: DeclKind,
+    /// The path, entity, symbol or kind it declares.
     pub name: Name<'s>,
     /// `account PATH as ALIAS`.
     pub alias: Option<Name<'s>>,
@@ -704,9 +749,13 @@ pub struct Decl<'s> {
 /// Which keyword introduced a declaration.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum DeclKind {
+    /// `account`: a place that holds value.
     Account,
+    /// `entity`: a person, business or authority.
     Entity,
+    /// `commodity`: a currency, security or asset.
     Commodity,
+    /// `kind`: a class that accounts, entities or commodities belong to.
     Kind,
 }
 
@@ -714,15 +763,18 @@ pub enum DeclKind {
 /// `has born date`, `budget 500 USD monthly`, `lives us/ca from 2026-01-01`.
 #[derive(Debug)]
 pub struct Prop<'s> {
+    /// The property's name: `has`, `budget`, `lives`.
     pub name: Name<'s>,
     /// The roots of the argument expressions: `&file[prop.args]`.
     pub args: Many<ExprId>,
+    /// The whole line.
     pub loc: Loc,
 }
 
 /// `code GLOB` with indented `on PLACE-GLOB | KIND` lines.
 #[derive(Debug)]
 pub struct CodeRule<'s> {
+    /// The code's name without `#`, or a glob such as `trip-*`.
     pub pattern: Name<'s>,
     /// Every glob and kind of every `on` line: the places the code may mark.
     pub on: Many<Name<'s>>,
@@ -731,15 +783,20 @@ pub struct CodeRule<'s> {
 /// `param NAME` with indented `KEY+ VALUE` rows.
 #[derive(Debug)]
 pub struct Param<'s> {
+    /// The parameter's name.
     pub name: Name<'s>,
+    /// Its rows, in order: `&file[param.rows]`.
     pub rows: Many<ParamRow<'s>>,
 }
 
 /// `KEY+ VALUE`: the value is a schedule or any expression.
 #[derive(Debug)]
 pub struct ParamRow<'s> {
+    /// What the row is looked up by: `&file[row.keys]`.
     pub keys: Many<Key<'s>>,
+    /// The value: an expression, or a [`ExprKind::Schedule`].
     pub value: ExprId,
+    /// The whole line.
     pub loc: Loc,
 }
 
@@ -748,14 +805,18 @@ pub struct ParamRow<'s> {
 pub enum Key<'s> {
     /// Step lookup: the latest year at or before the one asked for.
     Year(i32, Loc),
+    /// An exact date.
     Date(Day, Loc),
+    /// A name: a filing status, a kind.
     Name(Name<'s>),
 }
 
 /// `sync FILE` with an indented `run COMMAND…` line (raw text).
 #[derive(Debug)]
 pub struct Sync<'s> {
+    /// The file to write, as written.
     pub file: Name<'s>,
+    /// The command that produces it, as written.
     pub run: Name<'s>,
 }
 
@@ -766,8 +827,11 @@ pub struct Sync<'s> {
 pub struct Law<'s> {
     /// For a top-level law this is also the [`Item::doc`].
     pub doc: Option<Doc<'s>>,
+    /// The law's name, which its diagnostics carry.
     pub name: Name<'s>,
+    /// What makes it apply.
     pub trigger: Trigger,
+    /// The trigger line.
     pub trigger_loc: Loc,
     /// The steps in order: `&file[law.steps]`. `on in from X | Y` is written
     /// as the trigger and a first step `when from is X | Y`, its expression
@@ -780,55 +844,77 @@ pub struct Law<'s> {
 /// When a law applies.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Trigger {
+    /// `on in`: value arrives in a governed place.
     In,
+    /// `on out`: value leaves a governed place.
     Out,
+    /// `on gain`: parcels leaving a governed place realize a gain.
     Gain,
+    /// `on spend`: money tied to a restricted entity leaves its owner's places.
     Spend,
+    /// `each month` or `each year`: a period of the governed thing ends.
     Each(Period),
     /// `each year closing 04-15`: the year is judged on that day of the next.
     Closing {
+        /// 1 to 12.
         month: u8,
+        /// The day of that month.
         day: u8,
     },
+    /// `by EXPR`: the journal reaches that date.
     By(ExprId),
+    /// `always`: after any change to a governed place.
     Always,
 }
 
 /// The period a law's `each` trigger ends.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Period {
+    /// A calendar month.
     Month,
+    /// A calendar year.
     Year,
 }
 
 /// One line of a law's body after its trigger. Steps run top to bottom.
 #[derive(Debug)]
 pub struct Step<'s> {
+    /// The whole line.
     pub loc: Loc,
+    /// What it does.
     pub kind: StepKind<'s>,
 }
 
+/// What a [`Step`] does.
 #[derive(Debug)]
 pub enum StepKind<'s> {
     /// A filter: the law stops silently when false.
     When(ExprId),
+    /// `let NAME = EXPR`: binds a name for the steps below.
     Let(Name<'s>, ExprId),
     /// `require EXPR [else EFFECT] ["message"]`, or `warn EXPR ["message"]`.
     Require {
+        /// What must hold.
         cond: ExprId,
+        /// `else EFFECT`: what happens when it does not (`require` only).
         otherwise: Option<Effect<'s>>,
+        /// The string after it, contents only.
         message: Option<Name<'s>>,
+        /// `warn`, not `require`: a failure is a warning, not an error.
         warn: bool,
     },
+    /// `owe …` or `count …`.
     Effect(Effect<'s>),
 }
 
 /// What a law does to the world: an obligation, or a tally.
 #[derive(Debug)]
 pub enum Effect<'s> {
-    /// `owe EXPR to ENTITY [by EXPR] [as NAME]`
+    /// `owe EXPR to ENTITY [by EXPR] [as NAME]`: `amount` is owed to the entity
+    /// `to`, due on the day `due` says (none: no due day), and called `name` so
+    /// a later `for` can settle it.
     Owe { amount: ExprId, to: Name<'s>, due: Option<ExprId>, name: Option<Name<'s>> },
-    /// `count EXPR as NAME`
+    /// `count EXPR as NAME`: adds `amount` to the tally `name`.
     Count { amount: ExprId, name: Name<'s> },
 }
 
@@ -863,7 +949,9 @@ pub struct Exprs<'s> {
 /// subtree starts.
 #[derive(Debug)]
 pub struct Expr<'s> {
+    /// What the node is.
     pub kind: ExprKind<'s>,
+    /// Where it was written, operands included.
     pub loc: Loc,
     /// The first node of this expression's subtree.
     pub first: ExprId,
@@ -881,6 +969,7 @@ impl<'s> Exprs<'s> {
         self.parts.iter().map(Vec::len).sum()
     }
 
+    /// Whether the file has no expressions.
     pub fn is_empty(&self) -> bool {
         self.parts.iter().all(Vec::is_empty)
     }
@@ -902,10 +991,13 @@ pub enum ExprKind<'s> {
     Pct(Dec),
     /// `24_500 USD`
     Amount(Amount<'s>),
+    /// `2026-04-15`
     Date(Day),
+    /// `30d`, `2w`, `3m`, `1y`
     Span(Span),
     /// String contents between the quotes, escapes not yet processed.
     Str(&'s str),
+    /// `empty`: the zero of every commodity.
     Empty,
     /// Lowercase identifiers, paths and globs: `year`, `self`, `wages`,
     /// `expenses/food/*`, `401k`.
@@ -914,12 +1006,15 @@ pub enum ExprKind<'s> {
     Unit(Name<'s>),
     /// `#house`
     Code(Code<'s>),
+    /// `self.purpose`: a field of the first.
     Field(ExprId, Name<'s>),
     /// `limit[year]`, `ordinary[year, owner.filing]`: the keys are `&file[keys]`.
     Index(ExprId, Many<ExprId>),
     /// `total(in, year)`, `progressive(ordinary[year], x)`: the arguments.
     Call(Name<'s>, Many<ExprId>),
+    /// `-x`, `not x`.
     Unary(UnOp, ExprId),
+    /// `a + b`: the operator, then the left and right operands.
     Binary(BinOp, ExprId, ExprId),
     /// `x is 401k | ira`: true when `x` matches any alternative.
     Is(ExprId, Many<ExprId>),
@@ -932,31 +1027,47 @@ pub enum ExprKind<'s> {
 /// One row of a schedule: from `threshold` up, tax at `rate`.
 #[derive(Clone, Copy, Debug)]
 pub struct Bracket {
+    /// Where the bracket starts.
     pub threshold: ExprId,
+    /// The marginal rate, a [`ExprKind::Pct`].
     pub rate: ExprId,
 }
 
 /// Prefix operators: `-x` and `not x`.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum UnOp {
+    /// `-x`
     Neg,
+    /// `not x`
     Not,
 }
 
 /// Infix operators, loosest binding first.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum BinOp {
+    /// `or`
     Or,
+    /// `and`
     And,
+    /// `==`
     Eq,
+    /// `!=`
     Ne,
+    /// `<`
     Lt,
+    /// `<=`
     Le,
+    /// `>`
     Gt,
+    /// `>=`
     Ge,
+    /// `+`
     Add,
+    /// `-`
     Sub,
+    /// `*`
     Mul,
+    /// `/`
     Div,
 }
 

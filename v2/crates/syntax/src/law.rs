@@ -134,10 +134,8 @@ impl<'s> Parser<'s> {
             }
             "require" | "warn" => {
                 let cond = self.expression()?;
-                let otherwise = match word == "require" && self.eat_word("else").is_some() {
-                    true => Some(self.effect()?),
-                    false => None,
-                };
+                let otherwise =
+                    if word == "require" { self.eat_word("else").map(|_| self.effect()).transpose()? } else { None };
                 let message = self.take_message();
                 Ok(StepKind::Require { cond, otherwise, message, warn: word == "warn" })
             }
@@ -171,11 +169,8 @@ impl<'s> Parser<'s> {
         }
         self.expect_word("to", "expected-to", "`to` and the entity owed")?;
         let to = self.name("expected-name", "the entity owed, such as `irs`")?;
-        let due = if self.eat_word("by").is_some() { Some(self.expression()?) } else { None };
-        let name = match self.eat_word("as") {
-            Some(_) => Some(self.name("expected-name", "a name for the obligation")?),
-            None => None,
-        };
+        let due = self.eat_word("by").map(|_| self.expression()).transpose()?;
+        let name = self.eat_word("as").map(|_| self.name("expected-name", "a name for the obligation")).transpose()?;
         Ok(Effect::Owe { amount, to, due, name })
     }
 
