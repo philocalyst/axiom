@@ -20,7 +20,7 @@ use axiom_model::{
 
 use crate::Owed;
 use crate::calc::{Calc, progressive};
-use crate::holdings::Holdings;
+use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
 use crate::scope::inside;
 use crate::state::World;
@@ -437,12 +437,12 @@ impl<'a, 's> Machine<'a, 's> {
         match subject {
             Subject::Place(root) => {
                 let sign = book.places[root].class.display_sign();
-                let held = |h: &crate::Holding| Amount::new(Qty(h.qty().0 * sign), h.unit);
+                let held = |h: &Slot| Amount::new(Qty(h.qty.0 * sign), h.unit);
                 let span = root.index()..book.places.end(root).index();
                 self.sum_in_base(holdings.within(span).map(held))
             }
             Subject::Entity(_) => {
-                let held = |h: &crate::Holding| Amount::new(h.qty(), h.unit);
+                let held = |h: &Slot| Amount::new(h.qty, h.unit);
                 self.sum_in_base(holdings.iter().filter(|h| inside(book, subject, h.place)).map(held))
             }
         }

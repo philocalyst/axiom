@@ -10,69 +10,17 @@
 //! source and, once the flow's worth is known, the basis it will carry into the
 //! target.
 
-use axiom_core::{Day, Diagnostic, Id, Qty};
-use axiom_model::{Amount, Book, Class, Entity, Fault, Txn};
+use axiom_core::{Diagnostic, Id, Qty};
+use axiom_model::{Amount, Book, Class, Entity, Fault};
 
 use crate::eval::Realized;
 use crate::explain;
 use crate::fire::Firing;
 use crate::ledger::Ledger;
+use crate::lots::{Origin, Request, Shares, Slice};
 use crate::motion::Motion;
-use crate::relief::{self, Piece, Request, Shares, Source};
 use crate::scope::stays_with_owner;
-use crate::{Gain, Holding, Parcel, show};
-
-/// Part of the value in flight.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Slice {
-    pub qty: Qty,
-    /// Basis relieved with it at the source.
-    pub basis: Qty,
-    pub acquired: Day,
-    pub txn: Id<Txn>,
-    pub tied: Option<Id<Entity>>,
-    pub origin: Origin,
-    /// The basis it carries into the target, set once the flow's worth is known.
-    pub carried: Qty,
-}
-
-/// Where a slice came from.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Origin {
-    /// Plain money: base currency at its face.
-    Plain,
-    /// A parcel with an identity of its own.
-    Lot,
-    /// Nothing gave it: value from an income, equity or liability place, or
-    /// what a sale asked for beyond what was held.
-    Fresh,
-}
-
-impl Slice {
-    fn plain(m: &Motion, piece: &Piece) -> Slice {
-        Slice {
-            qty: piece.qty,
-            basis: piece.basis,
-            acquired: m.day,
-            txn: m.txn,
-            tied: None,
-            origin: Origin::Plain,
-            carried: Qty::ZERO,
-        }
-    }
-
-    fn lot(lot: &Parcel, piece: &Piece) -> Slice {
-        let (acquired, txn, tied) = (lot.acquired, lot.txn, lot.tied);
-        Slice { qty: piece.qty, basis: piece.basis, acquired, txn, tied, origin: Origin::Lot, carried: Qty::ZERO }
-    }
-
-    /// Base currency conjured from nowhere is at its face; anything else has no
-    /// basis of its own.
-    fn fresh(m: &Motion, qty: Qty, base: Id<axiom_model::Commodity>) -> Slice {
-        let basis = if m.out.unit == base { qty } else { Qty::ZERO };
-        Slice { qty, basis, acquired: m.day, txn: m.txn, tied: None, origin: Origin::Fresh, carried: Qty::ZERO }
-    }
-}
+use crate::{Gain, Parcel, show};
 
 /// What becomes of the parcels' identity when they arrive.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -130,79 +78,56 @@ impl<'b, 's> Ledger<'b, 's> {
     }
 
     /// Takes `m.out` from the source, leaving the value in flight in
-    /// `scratch.slices`.
+    /// `scratch.relief.slices`.
     fn relieve(&mut self, m: &Motion) {
         let book = self.book;
-        self.scratch.slices.clear();
-        let source = &book.places[m.from];
+        let (unit, source, now) = (m.out.unit, &book.places[m.from], (m.day, m.txn));
+        let is_base = unit == book.base;
+        self.scratch.relief.slices.clear();
         if source.class != Class::Asset {
-            self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);
-            self.scratch.slices.push(Slice::fresh(m, m.out.qty, book.base));
+            self.world.holdings.credit(m.from, unit, -m.out.qty);
+            self.scratch.relief.slices.push(Slice::fresh(m.out.qty, is_base, now));
             return;
         }
         self.ask_ties(m);
-        let is_base = m.out.unit == book.base;
+        let explain = !self.record.ambiguous.contains(&m.from);
         let request = Request {
             need: m.out.qty,
-            is_base,
+            money: is_base,
             selectors: m.select,
             policy: source.select,
             txns: &book.txns,
             permits: &self.scratch.permits,
+            now,
+            explain,
         };
-        relief::plan(self.world.holdings.get(m.from, m.out.unit), &request, &mut self.scratch.relief);
-        if !self.scratch.relief.ambiguous.is_empty() {
+        self.world.holdings.relieve(m.from, unit, &request, &mut self.scratch.relief);
+        if self.scratch.relief.ambiguous && self.record.ambiguous.insert(m.from) {
             self.report_ambiguity(m);
         }
-        if self.scratch.relief.shortfall > Qty::ZERO && !is_base {
-            self.report_shortfall(m);
+        let shortfall = self.scratch.relief.shortfall;
+        if shortfall > Qty::ZERO && !is_base {
+            self.report_shortfall(m, shortfall);
         }
-        self.take(m);
+        // What arrives must land even when nothing left (`all` of an empty
+        // holding): value never vanishes from a balanced flow.
+        if shortfall > Qty::ZERO || self.scratch.relief.slices.is_empty() {
+            self.scratch.relief.slices.push(Slice::fresh(shortfall, is_base, now));
+        }
     }
 
     fn report_ambiguity(&mut self, m: &Motion) {
         let proceeds = self.proceeds(m);
-        let Some(holding) = self.world.holdings.get(m.from, m.out.unit) else { return };
-        let diagnostic = explain::ambiguous(self.book, m, holding, &self.scratch.relief.ambiguous, proceeds);
+        let diagnostic = explain::ambiguous(self.book, m, &self.scratch.relief.candidates, proceeds);
         self.record.report(diagnostic);
     }
 
-    fn report_shortfall(&mut self, m: &Motion) {
-        let book = self.book;
-        let holding = self.world.holdings.get(m.from, m.out.unit);
-        let held = holding.map_or(Qty::ZERO, Holding::qty);
-        let is_base = m.out.unit == book.base;
-        let admitted = holding.map_or(Qty::ZERO, |h| relief::admitted(h, is_base, m.select, &book.txns));
-        let diagnostic = explain::shortfall(book, m, held, admitted, self.scratch.relief.shortfall);
+    /// A sale of more than the holding has: what it held before, and what the
+    /// selectors let it reach, follow from what is left and what was missing.
+    fn report_shortfall(&mut self, m: &Motion, short: Qty) {
+        let held = self.world.holdings.qty(m.from, m.out.unit) + m.out.qty;
+        let diagnostic = explain::shortfall(self.book, m, held, m.out.qty - short, short);
         self.record.report(diagnostic);
-    }
-
-    /// Removes the planned pieces from the source holding.
-    fn take(&mut self, m: &Motion) {
-        let holding = self.world.holdings.entry(m.from, m.out.unit);
-        let (relief, slices) = (&self.scratch.relief, &mut self.scratch.slices);
-        for piece in &relief.pieces {
-            slices.push(match piece.source {
-                Source::Plain => {
-                    holding.plain -= piece.qty;
-                    Slice::plain(m, piece)
-                }
-                Source::Lot(at) => {
-                    let lot = &mut holding.lots[at];
-                    let slice = Slice::lot(lot, piece);
-                    lot.qty -= piece.qty;
-                    lot.basis -= piece.basis;
-                    slice
-                }
-            });
-        }
-        holding.plain -= relief.shortfall;
-        // What arrives must land even when nothing left (`all` of an empty
-        // holding): value never vanishes from a balanced flow.
-        if relief.shortfall > Qty::ZERO || slices.is_empty() {
-            slices.push(Slice::fresh(m, relief.shortfall, self.book.base));
-        }
-        holding.lots.retain(|lot| !lot.qty.is_zero());
     }
 
     /// Learns, for each entity a parcel at the source is tied to, whether its
@@ -211,8 +136,8 @@ impl<'b, 's> Ledger<'b, 's> {
     fn ask_ties(&mut self, m: &Motion) {
         let book = self.book;
         self.scratch.permits.clear();
-        let Some(holding) = self.world.holdings.get(m.from, m.out.unit) else { return };
-        for entity in holding.lots.iter().filter_map(|lot| lot.tied) {
+        let Some(slot) = self.world.holdings.get(m.from, m.out.unit).filter(|slot| slot.is_tied()) else { return };
+        for entity in slot.holding.lots.iter().filter_map(|lot| lot.tied) {
             if !self.scratch.permits.iter().any(|&(known, _)| known == entity) {
                 self.scratch.permits.push((entity, false));
             }
@@ -231,15 +156,15 @@ impl<'b, 's> Ledger<'b, 's> {
     fn carry_basis(&mut self, m: &Motion) -> Parcels {
         let book = self.book;
         if !restarts_basis(book, m) {
-            for slice in &mut self.scratch.slices {
+            for slice in &mut self.scratch.relief.slices {
                 slice.carried = slice.basis;
             }
             return if m.is_exchange() { Parcels::Start } else { Parcels::Travel };
         }
         let proceeds = self.proceeds(m);
-        let whole: Qty = self.scratch.slices.iter().map(|s| s.qty).sum();
+        let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let mut shares = proceeds.map(|total| Shares::new(total, whole));
-        for slice in &mut self.scratch.slices {
+        for slice in &mut self.scratch.relief.slices {
             slice.carried = match &mut shares {
                 Some(shares) => shares.take(slice.qty),
                 None if slice.origin == Origin::Fresh => Qty::ZERO,
@@ -258,9 +183,9 @@ impl<'b, 's> Ledger<'b, 's> {
     /// relieves both and only the lot's share is a gain.
     fn realize(&mut self, m: &Motion) {
         let book = self.book;
-        let ambiguous = !self.scratch.relief.ambiguous.is_empty();
-        for at in 0..self.scratch.slices.len() {
-            let slice = self.scratch.slices[at];
+        let ambiguous = self.scratch.relief.ambiguous;
+        for at in 0..self.scratch.relief.slices.len() {
+            let slice = self.scratch.relief.slices[at];
             if slice.origin != Origin::Lot {
                 continue;
             }
@@ -294,10 +219,10 @@ impl<'b, 's> Ledger<'b, 's> {
         }
         let stays = stays_with_owner(book, m.from, m.to);
         let restricted = self.restricted_source(m);
-        let whole: Qty = self.scratch.slices.iter().map(|s| s.qty).sum();
+        let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let mut shares = Shares::new(m.arrive.qty, whole);
         let holding = self.world.holdings.entry(m.to, m.arrive.unit);
-        for slice in &self.scratch.slices {
+        for slice in &self.scratch.relief.slices {
             let qty = shares.take(slice.qty);
             let parcel = match parcels {
                 Parcels::Travel => {
@@ -319,9 +244,9 @@ impl<'b, 's> Ledger<'b, 's> {
         if stays_with_owner(book, m.from, m.to) {
             return;
         }
-        for at in 0..self.scratch.slices.len() {
-            let Some(entity) = self.scratch.slices[at].tied else { continue };
-            let slices = &self.scratch.slices;
+        for at in 0..self.scratch.relief.slices.len() {
+            let Some(entity) = self.scratch.relief.slices[at].tied else { continue };
+            let slices = &self.scratch.relief.slices;
             if slices[..at].iter().any(|s| s.tied == Some(entity)) {
                 continue;
             }

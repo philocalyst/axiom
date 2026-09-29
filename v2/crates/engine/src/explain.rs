@@ -18,8 +18,8 @@ use crate::calc::Calc;
 use crate::eval::Context;
 use crate::events::Events;
 use crate::motion::Motion;
-use crate::relief::{Candidate, Source};
-use crate::{Holding, show};
+use crate::lots::Candidate;
+use crate::show;
 
 /// A law's evaluation, frozen at the moment something went wrong.
 pub(crate) struct Frame<'a, 's> {
@@ -335,13 +335,7 @@ pub(crate) fn padded(book: &Book, assert: &Assert, waive: Waive, amount: Amount)
 
 /// Lots that differ, and no rule to choose between them: each candidate, and
 /// the gain the flow would realize if it came from that lot alone.
-pub(crate) fn ambiguous(
-    book: &Book,
-    m: &Motion,
-    holding: &Holding,
-    candidates: &[Candidate],
-    proceeds: Option<Qty>,
-) -> Diagnostic {
+pub(crate) fn ambiguous(book: &Book, m: &Motion, candidates: &[Candidate], proceeds: Option<Qty>) -> Diagnostic {
     let (place, unit) = (show::place(book, m.from), m.out.unit);
     let money = |qty: Qty| book.show(Amount::new(qty, unit)).to_string();
     let base = |qty: Qty| book.show(Amount::new(qty, book.base)).to_string();
@@ -361,17 +355,14 @@ pub(crate) fn ambiguous(
             base(candidate.basis),
             gain.unwrap_or_default()
         );
-        d = match candidate.source {
-            Source::Lot(at) => match book.txns.get(holding.lots[at].txn) {
-                Some(txn) => d.context(txn.loc, text),
-                None => d.note(text),
-            },
-            Source::Plain => d.note(format!("plain money: {}", money(candidate.qty))),
+        d = match candidate.txn.and_then(|id| book.txns.get(id)) {
+            Some(txn) => d.context(txn.loc, text),
+            None => d.note(format!("plain money: {}", money(candidate.qty))),
         };
     }
     let lot = candidates
         .iter()
-        .find(|c| matches!(c.source, Source::Lot(_)))
+        .find(|c| c.txn.is_some())
         .map_or(String::new(), |c| format!("name the lot, `{place}[{}]`, or ", c.acquired));
     d.note("the sale still moves the oldest lot first, so the lines after it stay consistent")
         .help(format!("{lot}a policy, `{place}[fifo]` (or lifo, hifo, prorata), or give the account `select fifo`"))

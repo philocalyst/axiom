@@ -13,10 +13,8 @@ use axiom_core::{Day, Diagnostic, Id, Map, Set};
 use axiom_model::{Book, Commodity, Entity, Fault, Flow, Law, Place, Subject, Value};
 
 use crate::eval::Outcome;
-use crate::holdings::Holdings;
+use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
-use crate::post::Slice;
-use crate::relief::Relief;
 use crate::totals::{Tallies, Totals};
 use crate::{Applied, Effect, Gain, Pad, Violation};
 
@@ -50,6 +48,8 @@ pub(crate) struct Record {
     /// `always` laws currently failing, so a lasting condition is reported
     /// when it starts rather than after every flow.
     pub failing: Set<(Id<Law>, Subject)>,
+    /// Places whose lots were already reported ambiguous: one policy fixes them all.
+    pub ambiguous: Set<Id<Place>>,
     /// Prices already reported missing: `(commodity, day)`.
     pub unpriced: Set<(Id<Commodity>, Day)>,
     /// Faults already reported: `(law, step, kind of fault)`.
@@ -79,6 +79,7 @@ impl Record {
             checks: vec![0; self.checks.len()],
             reconciled: self.reconciled.clone(),
             failing: self.failing.clone(),
+            ambiguous: self.ambiguous.clone(),
             unpriced: self.unpriced.clone(),
             faulted: self.faulted.clone(),
             ..Record::default()
@@ -120,7 +121,6 @@ pub(crate) struct Scratch {
     pub relief: Relief,
     /// Entities parcels are tied to, and whether their laws permit the flow.
     pub permits: Vec<(Id<Entity>, bool)>,
-    pub slices: Vec<Slice>,
 }
 
 impl Clone for Scratch {

@@ -21,7 +21,7 @@ use crate::motion::{Amounts, Motion};
 use crate::scope::display;
 use crate::state::{Record, Scratch, World};
 use crate::timeline::{self, Deadline, Fact, Moment, Sources, Timeline};
-use crate::{Applied, Cause, Holding, Options, Posted, Run, State, explain, infer, relief};
+use crate::{Applied, Cause, Holding, Options, Posted, Run, State, explain, infer};
 
 /// The book's state as of some day. Cheap to clone relative to a replay.
 #[derive(Clone)]
@@ -116,6 +116,7 @@ impl<'b, 's> Ledger<'b, 's> {
     pub fn advance(&mut self, day: Day) {
         self.advance_through(Moment::end_of(day));
         self.clock.day = self.clock.day.max(day);
+        self.world.holdings.tidy();
     }
 
     /// Advances to `flow.day`, then applies a flow the journal does not hold
@@ -135,6 +136,7 @@ impl<'b, 's> Ledger<'b, 's> {
         self.clock.applied += 1;
         let amounts = self.amounts(flow, None);
         self.post(&Motion::new(flow, Cause::Applied(number), day, amounts));
+        self.world.holdings.tidy();
         self.record.since(marks)
     }
 
@@ -145,7 +147,7 @@ impl<'b, 's> Ledger<'b, 's> {
 
     /// Every non-empty holding, by place then commodity.
     pub fn holdings(&self) -> impl Iterator<Item = &Holding> {
-        self.world.holdings.iter().filter(|holding| !holding.is_empty())
+        self.world.holdings.iter().map(|slot| &slot.holding).filter(|holding| !holding.is_empty())
     }
 
     /// Stops and hands over everything recorded along the way.
@@ -227,12 +229,12 @@ impl<'b, 's> Ledger<'b, 's> {
     /// `all`: everything the selected parcels at the source hold.
     fn everything(&self, flow: &Flow, written: Amounts) -> Amounts {
         let book = self.book;
-        let holding = self.world.holdings.get(flow.from, flow.out.unit);
+        let slot = self.world.holdings.get(flow.from, flow.out.unit);
         let qty = if book.places[flow.from].class.holds_parcels() {
             let is_base = flow.out.unit == book.base;
-            holding.map_or(Qty::ZERO, |h| relief::admitted(h, is_base, &flow.select, &book.txns))
+            slot.map_or(Qty::ZERO, |slot| slot.admitted(is_base, &flow.select, &book.txns))
         } else {
-            holding.map_or(Qty::ZERO, |h| h.plain.max(Qty::ZERO))
+            slot.map_or(Qty::ZERO, |slot| slot.plain.max(Qty::ZERO))
         };
         Amounts { out: qty, arrive: if flow.is_exchange() { written.arrive } else { qty } }
     }

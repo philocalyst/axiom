@@ -805,7 +805,7 @@ fn value_is_conserved_over_random_journals() {
             );
             let is_base = holding.unit == usd;
             let alike =
-                |a: &Parcel, b: &Parcel| crate::holdings::identity(a, is_base) == crate::holdings::identity(b, is_base);
+                |a: &Parcel, b: &Parcel| crate::lots::identity(a, is_base) == crate::lots::identity(b, is_base);
             for (at, lot) in holding.lots.iter().enumerate() {
                 assert!(
                     holding.lots[at + 1..].iter().all(|other| !alike(lot, other)),
