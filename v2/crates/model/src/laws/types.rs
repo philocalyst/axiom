@@ -1,0 +1,142 @@
+//! The typing rules of law expressions: which operands an operator accepts,
+//! and what it says when they do not fit.
+//!
+//! These are functions of types only; they know nothing of names or nodes.
+//! The engine implements exactly the combinations accepted here.
+
+use axiom_core::{Diagnostic, Loc};
+use axiom_syntax::BinOp;
+
+use crate::errors::article;
+use crate::law::Ty;
+
+/// The type two branches or operands share. `empty` is the zero of every
+/// amount, so it joins an amount.
+pub(crate) fn unify(a: Ty, b: Ty) -> Option<Ty> {
+    match (a, b) {
+        _ if a == b => Some(a),
+        (Ty::Amount, Ty::Empty) | (Ty::Empty, Ty::Amount) => Some(Ty::Amount),
+        _ => None,
+    }
+}
+
+pub(crate) fn is_amount(ty: Ty) -> bool {
+    matches!(ty, Ty::Amount | Ty::Empty)
+}
+
+fn is_ordered(ty: Ty) -> bool {
+    matches!(ty, Ty::Amount | Ty::Empty | Ty::Num | Ty::Day | Ty::Span)
+}
+
+/// What `left op right` is, if the operator accepts those operands.
+pub(crate) fn binary(op: BinOp, left: Ty, right: Ty) -> Option<Ty> {
+    use BinOp::*;
+    match op {
+        Or | And => (left == Ty::Bool && right == Ty::Bool).then_some(Ty::Bool),
+        Eq | Ne => unify(left, right).map(|_| Ty::Bool),
+        Lt | Le | Gt | Ge => unify(left, right).filter(|&shared| is_ordered(shared)).map(|_| Ty::Bool),
+        Add | Sub => match (left, right) {
+            (Ty::Num, Ty::Num) => Some(Ty::Num),
+            (Ty::Span, Ty::Span) => Some(Ty::Span),
+            (Ty::Day, Ty::Span) => Some(Ty::Day),
+            (Ty::Day, Ty::Day) if op == Sub => Some(Ty::Span),
+            (a, b) if is_amount(a) && is_amount(b) => unify(a, b),
+            _ => None,
+        },
+        Mul => match (left, right) {
+            (Ty::Num, Ty::Num) => Some(Ty::Num),
+            (amount, Ty::Num) | (Ty::Num, amount) if is_amount(amount) => Some(amount),
+            _ => None,
+        },
+        Div => match (left, right) {
+            (Ty::Num, Ty::Num) => Some(Ty::Num),
+            (a, b) if is_amount(a) && is_amount(b) => Some(Ty::Num),
+            (amount, Ty::Num) if is_amount(amount) => Some(amount),
+            _ => None,
+        },
+    }
+}
+
+/// Whether a `-x` is allowed, and what it is.
+pub(crate) fn negate(ty: Ty) -> Option<Ty> {
+    matches!(ty, Ty::Amount | Ty::Empty | Ty::Num).then_some(ty)
+}
+
+/// Whether `left is right` can be asked: a place, entity or commodity against a
+/// kind, place, entity or pattern; a kind against a kind; a flow against a code.
+pub(crate) fn is_test(left: Ty, alternative: Ty) -> bool {
+    match left {
+        Ty::Place | Ty::Entity | Ty::Unit => {
+            matches!(alternative, Ty::Kind | Ty::Place | Ty::Entity | Ty::Glob | Ty::Unit)
+        }
+        Ty::Kind => alternative == Ty::Kind,
+        Ty::Flow => matches!(alternative, Ty::Code | Ty::Glob),
+        _ => false,
+    }
+}
+
+/// `an amount`, `a date`.
+fn a(ty: Ty) -> String {
+    article(ty.word())
+}
+
+/// Why `left op right` does not type.
+pub(crate) fn mismatch(op: BinOp, left: (Ty, Loc), right: (Ty, Loc)) -> Diagnostic {
+    let (l, r) = (a(left.0), a(right.0));
+    let (message, rule) = match op {
+        BinOp::Add => {
+            (format!("cannot add {r} to {l}"), "`+` adds two amounts, two numbers or two spans, or a span to a date")
+        }
+        BinOp::Sub => (
+            format!("cannot subtract {r} from {l}"),
+            "`-` subtracts two amounts, two numbers or two spans, a span from a date, or a date from a date",
+        ),
+        BinOp::Mul => (format!("cannot multiply {l} by {r}"), "`*` multiplies two numbers, or an amount by a number"),
+        BinOp::Div => (
+            format!("cannot divide {l} by {r}"),
+            "`/` divides an amount by a number, or by another amount to give a number",
+        ),
+        BinOp::Eq | BinOp::Ne => (
+            format!("cannot compare {l} with {r}"),
+            "`==` and `!=` compare two values of one type; `empty` is the zero of any amount",
+        ),
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+            (format!("cannot compare {l} with {r}"), "`<` and its kin compare two amounts, numbers, dates or spans")
+        }
+        BinOp::And | BinOp::Or => (
+            format!(
+                "`{}` needs true-or-false values, but this side is {}",
+                op.symbol(),
+                if left.0 == Ty::Bool { &r } else { &l }
+            ),
+            "`and` and `or` join conditions, such as `amount > 0 USD`",
+        ),
+    };
+    Diagnostic::error("type-mismatch", message)
+        .label(right.1, format!("this is {r}"))
+        .context(left.1, format!("this is {l}"))
+        .note(rule)
+}
+
+/// `expected a condition, but this is an amount`
+pub(crate) fn expected(what: &str, found: Ty, loc: Loc) -> Diagnostic {
+    Diagnostic::error("type-mismatch", format!("expected {what}, but this is {}", a(found)))
+        .label(loc, format!("this is {}", a(found)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arithmetic_follows_the_rules_of_amounts() {
+        assert_eq!(binary(BinOp::Add, Ty::Amount, Ty::Empty), Some(Ty::Amount));
+        assert_eq!(binary(BinOp::Mul, Ty::Num, Ty::Amount), Some(Ty::Amount));
+        assert_eq!(binary(BinOp::Div, Ty::Amount, Ty::Amount), Some(Ty::Num));
+        assert_eq!(binary(BinOp::Sub, Ty::Day, Ty::Day), Some(Ty::Span));
+        assert_eq!(binary(BinOp::Add, Ty::Day, Ty::Amount), None);
+        assert_eq!(binary(BinOp::Mul, Ty::Amount, Ty::Amount), None);
+        assert_eq!(binary(BinOp::Lt, Ty::Amount, Ty::Empty), Some(Ty::Bool));
+        assert_eq!(binary(BinOp::Lt, Ty::Place, Ty::Place), None);
+    }
+}
