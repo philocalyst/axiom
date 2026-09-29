@@ -7,7 +7,7 @@ use axiom_engine::Run;
 use axiom_model::{Class, End, Flow, Period, Place};
 
 use crate::calendar::Periods;
-use crate::history::{Posting, moves_quantity, postings};
+use crate::history::{Posting, postings};
 use crate::lens::Lens;
 use crate::places::category;
 
@@ -54,8 +54,8 @@ impl Variable {
 /// nobody paid), so it is not spending.
 fn spending<'a>(lens: Lens<'a, '_>, posting: &Posting) -> impl Iterator<Item = (Id<Place>, Qty)> + 'a {
     let flow = posting.flow;
-    let paid = moves_quantity(flow, End::From).then(|| posting.arrive_in_base(lens)).flatten();
-    let refund = moves_quantity(flow, End::To).then(|| posting.out_in_base(lens).map(|qty| -qty)).flatten();
+    let paid = flow.moves_quantity(End::From).then(|| posting.arrive_in_base(lens)).flatten();
+    let refund = flow.moves_quantity(End::To).then(|| posting.out_in_base(lens).map(|qty| -qty)).flatten();
     [(flow.to, paid), (flow.from, refund)]
         .into_iter()
         .filter(move |&(place, _)| lens.book.places[place].class == Class::Expense && lens.owns(place))

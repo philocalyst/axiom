@@ -485,6 +485,11 @@ fn due_basis_and_basis_ends_are_kept() {
         );
         assert_eq!(flows[3].terms().basis_end, Some(crate::End::To));
         assert_eq!(flows[4].terms().basis_end, Some(crate::End::From));
+        // Quantity crosses every end but the basis one.
+        let crosses = |flow: &crate::Flow| [flow.moves_quantity(crate::End::From), flow.moves_quantity(crate::End::To)];
+        assert_eq!(crosses(flows[0]), [true, true]);
+        assert_eq!(crosses(flows[3]), [true, false]);
+        assert_eq!(crosses(flows[4]), [false, true]);
     });
 }
 

@@ -78,7 +78,7 @@ impl<'a> Posting<'a> {
             End::From => Amount::new(-self.posted.out, self.flow.out.unit),
             End::To => self.arrive(),
         };
-        if moves_quantity(self.flow, end) { Change::Moved(amount) } else { Change::Rebased(amount) }
+        if self.flow.moves_quantity(end) { Change::Moved(amount) } else { Change::Rebased(amount) }
     }
 
     /// What happened at `place`: once for each end of the flow that is there.
@@ -105,13 +105,6 @@ pub enum Change {
     /// The end is `PLACE.basis`: the place holds what it held, and the basis of
     /// its parcels rose (positive) or fell (negative) by this much.
     Rebased(Amount),
-}
-
-/// Whether quantity crosses `end` of `flow`. At a `PLACE.basis` end none does:
-/// the flow changes what the place's parcels cost, and nothing arrives there
-/// or leaves it. Every view that reads a flow as money asks this first.
-pub fn moves_quantity(flow: &Flow, end: End) -> bool {
-    flow.terms().basis_end != Some(end)
 }
 
 /// A pad, seen as the flow it stands for: from its counter place into the

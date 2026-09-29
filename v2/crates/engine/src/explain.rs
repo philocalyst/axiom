@@ -517,7 +517,8 @@ pub(crate) fn mismatch(
         let flow = &book.flows[id];
         let (moved, inflow) = if flow.to == assert.place { (flow.arrive, true) } else { (flow.out, false) };
         let state = events.state(id, flow);
-        if moved.unit != unit {
+        let end = if inflow { End::To } else { End::From };
+        if moved.unit != unit || !flow.moves_quantity(end) {
             continue;
         }
         // Signed the way the assertion is written: `+` raises the shown balance.

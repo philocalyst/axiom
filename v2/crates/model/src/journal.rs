@@ -50,6 +50,13 @@ impl Flow {
     pub fn terms(&self) -> &Terms {
         self.terms.as_deref().unwrap_or(&Terms::NONE)
     }
+
+    /// Whether quantity crosses `end`. At a `PLACE.basis` end none does: the
+    /// flow changes what the place's parcels cost, and nothing arrives there or
+    /// leaves it. Everything that reads a flow as money asks this first.
+    pub fn moves_quantity(&self, end: End) -> bool {
+        self.terms().basis_end != Some(end)
+    }
 }
 
 /// An inclusive range of days over which a flow is recognized.

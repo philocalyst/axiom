@@ -303,6 +303,53 @@ fn a_tally_is_read_for_the_year_asked_and_for_this_one_without_asking() {
     });
 }
 
+// ─── A basis flow moves no quantity ─────────────────────────────────────────
+
+/// A place that holds shares and money, and an improvement to the shares' basis
+/// between a payment of an amount to solve and the assertion that solves it.
+const REBASED: &str = "\
+base USD
+commodity USD
+  precision 2
+commodity UNH
+
+account assets/broker
+account assets/checking
+account income/discount
+
+opening 2025-01-01
+  broker 10 UNH basis 1_000 USD since 2024-01-01
+  checking 5_000 USD
+
+2025-02-01 checking -> broker ? USD
+2025-02-15 income/discount -> broker[2024-01-01].basis 100 USD
+2025-03-01 broker = 500 USD
+";
+
+/// The 100.00 USD went into the shares' basis and no money arrived, so the
+/// payment before it is the whole 500.00 USD the assertion says the place holds.
+#[test]
+fn an_amount_to_solve_is_not_short_by_a_flow_that_only_changed_a_basis() {
+    with_run(REBASED, day(2025, 6, 1), |book, run| {
+        let errors: Vec<_> = run.diagnostics.iter().filter(|d| d.is_error()).map(|d| &d.message).collect();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(holding(book, run, "assets/broker", "USD").map(|h| h.qty()), Some(axiom_core::Qty(500_00)));
+    });
+}
+
+/// An assertion that fails after a basis flow does not count that flow among the flows that moved
+/// the balance it checks.
+#[test]
+fn a_failed_assertion_does_not_list_a_flow_that_only_changed_a_basis() {
+    let text = REBASED.replace("broker ? USD", "broker 300 USD");
+    with_run(&text, day(2025, 6, 1), |_, run| {
+        let assertion = run.diagnostics.iter().find(|d| &*d.code == "assertion").expect("the assertion fails");
+        let listed: Vec<_> = assertion.labels.iter().map(|label| label.text.as_str()).collect();
+        assert!(listed.iter().all(|text| !text.contains("income/discount")), "{listed:?}");
+        assert!(listed.iter().any(|text| text.contains("from assets/checking")), "{listed:?}");
+    });
+}
+
 // ─── Which parcel of a currency is spent ────────────────────────────────────
 
 /// Two purchases of euros on different days, and half of what they made spent, in an account that says nothing
