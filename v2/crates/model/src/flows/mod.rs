@@ -92,7 +92,7 @@ pub(crate) fn record<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) {
     records::code_rules(world, entries, diags);
-    world.book.syncs = records::syncs(world, entries);
+    world.book.sources = records::sources(world, entries);
     let mut misses = Vec::new();
     let (plans, plan_txns) = build_plans(world, entries, txns, &mut misses, diags);
 

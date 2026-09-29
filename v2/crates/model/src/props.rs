@@ -443,7 +443,8 @@ impl<'a, 's> Args<'_, 'a, 's> {
     fn declared(&mut self, has: Has) -> Result<Assign, Diagnostic> {
         let id = self.next_id("a value")?;
         let (value, _) = self.world.constant(self.home, self.file, id, Some(has.ty))?;
-        Ok(Assign::Prop(Prop { name: has.name, value, loc: Some(self.line.loc) }))
+        // v3 bridge: a property holds from the beginning; statements that change one come with the v4 model.
+        Ok(Assign::Prop(Prop { name: has.name, value, since: Day::MIN, loc: Some(self.line.loc) }))
     }
 }
 

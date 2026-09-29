@@ -14,7 +14,7 @@ use axiom_core::calendar;
 use axiom_core::day::days_in_month;
 use axiom_core::{Day, Days, Groups, Id, Loc, Period, Ratio, Span, Sym};
 
-use crate::book::{Amount, Asset, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System};
+use crate::book::{Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System};
 use crate::journal::Object;
 
 pub use axiom_syntax::BinOp;
@@ -27,6 +27,9 @@ pub struct Law {
     /// are scoped here.
     pub system: Option<Id<System>>,
     pub trigger: Trigger,
+    /// The `budget` item that reports through this law: its cap reads the
+    /// budget's limits and `carries` rather than a constant.
+    pub budget: Option<Id<Budget>>,
     pub steps: Box<[Step]>,
     pub nodes: Box<[Node]>,
     pub loc: Loc,

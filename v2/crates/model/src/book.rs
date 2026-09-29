@@ -6,14 +6,14 @@
 //! place under that one", "is this kind a 401k", and "does this jurisdiction
 //! include that one" are all interval tests.
 
-use axiom_core::day::days_in_month;
-use axiom_core::{Arena, Day, Days, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Tree};
+use axiom_core::{Arena, Day, Days, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Timeline, Tree, calendar};
 
 use crate::journal::{Assert, Event, Flow, Plan, Prices, Split, Txn};
 use crate::law::{Law, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
 
-pub use axiom_syntax::{EventState, On, Period, Policy};
+pub use axiom_core::{Cadence, On, Period};
+pub use axiom_syntax::{EventState, Policy};
 
 pub struct Book<'s> {
     pub names: Interner<'s>,
@@ -38,6 +38,8 @@ pub struct Book<'s> {
 
     pub laws: Arena<Law>,
     pub rules: Rules,
+    /// `budget food 900 USD monthly`, one per budgeted purpose.
+    pub budgets: Arena<Budget>,
     pub params: Arena<Param>,
     pub schedules: Arena<Schedule>,
     pub codes: Vec<CodeRule>,
@@ -58,7 +60,8 @@ pub struct Book<'s> {
     /// v3's plans. The v3 model still fills it; the v4 model leaves it empty,
     /// and it is deleted once nothing reads it.
     pub plans: Arena<Plan>,
-    pub syncs: Vec<SyncSpec>,
+    /// The `sync` declarations: where facts from outside come from.
+    pub sources: Vec<Source>,
     /// How names are found. [`build`](crate::build) fills it; in a book made by
     /// hand it is empty, and `Book::place` and its siblings find nothing.
     pub lookup: Lookup,
@@ -224,6 +227,9 @@ pub struct Place {
     pub liquidity: Option<Span>,
     pub opened: Option<Day>,
     pub closed: Option<Day>,
+    /// `known-as "TRADER JOE*"`: globs matched against statement memos, in any
+    /// case (LANGUAGE §13).
+    pub known_as: Box<[Sym]>,
     /// Own properties first, then defaults inherited from the kind chain.
     pub props: Props,
     pub doc: Option<Sym>,
@@ -258,7 +264,7 @@ pub struct Entity {
     pub place: Option<Id<Place>>,
     /// Resolved from the kind chain: money from this entity stays tied to it.
     pub restricted: bool,
-    /// Jurisdictions, sorted by start day. They may overlap.
+    /// Jurisdictions, sorted by first day. They may overlap.
     pub lives: Box<[Residence]>,
     /// `member household`: the household this person belongs to, which is
     /// governed in their place by the systems it lives in.
@@ -267,6 +273,9 @@ pub struct Entity {
     pub owner: Option<Id<Entity>>,
     /// `of studio` on a client: what it pays is that owner's.
     pub client_of: Option<Id<Entity>>,
+    /// `known-as "TRADER JOE*"`: globs matched against statement memos, in any
+    /// case (LANGUAGE §13).
+    pub known_as: Box<[Sym]>,
     pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
@@ -349,11 +358,24 @@ pub struct Has {
 
 pub type Props = Box<[Prop]>;
 
+/// A property's value from a day: a declaration's, or a statement's
+/// (`06-15 me lives us/ny`, `07-01 flat business 20% for studio`). A thing's
+/// props are sorted by name, then `since`; `until` adds a row that restores
+/// the value before.
 #[derive(Clone, Copy, Debug)]
 pub struct Prop {
     pub name: Sym,
     pub value: Value,
+    /// `Day::MIN` for a declaration's.
+    pub since: Day,
     pub loc: Option<Loc>,
+}
+
+/// The row of `name` in force on `day`: the latest that has begun, the first
+/// written where two begin together.
+pub fn prop(props: &[Prop], name: Sym, day: Day) -> Option<&Prop> {
+    let begun = props.iter().filter(|prop| prop.name == name && prop.since <= day);
+    begun.reduce(|best, prop| if prop.since > best.since { prop } else { best })
 }
 
 /// A unit of account: `USD`, `VTI`, `BTC`, `HOUSE`.
@@ -452,76 +474,87 @@ pub struct Contract {
     pub party: Id<Entity>,
     /// Whose promise: the owner of the holding it pays from or into.
     pub owner: Id<Entity>,
-    pub schedule: Recur,
-    /// One occurrence, as the contract writes it: flows of mode `Planned`
-    /// dated `schedule.from`. An occurrence in the journal re-dates a copy,
-    /// with the journal's overrides.
-    pub template: Box<[Flow]>,
+    /// `from … until …`, cut short by `ends` or extended by a statement: the
+    /// days anything is expected at all.
+    pub days: Days,
+    /// What the contract says, from each day on: the declaration's terms, then
+    /// each statement's (LANGUAGE §5).
+    pub terms: Timeline<Terms>,
     /// `buy VTI for 500 USD`: occurrences say how much was bought.
     pub buys: Option<Id<Commodity>>,
-    /// `covers 1y`: each occurrence is recognized over this span from its day.
-    pub covers: Option<Span>,
-    pub shares: Box<[Share]>,
     /// `deposit 2_350 USD`: a claim the party holds, and money held for it,
-    /// from `schedule.from` to `schedule.until`.
+    /// over `days`.
     pub deposit: Option<Amount>,
     pub loan: Option<Loan>,
-    /// `escrow 410 USD into escrow`: added to each occurrence.
-    pub escrow: Option<(Amount, Id<Place>)>,
     /// `match 50% of retirement up to 6%`.
     pub matching: Option<Match>,
-    /// `DATE NAME ends`: nothing is expected after this day.
-    pub ended: Option<(Day, Loc)>,
+    /// `DATE NAME ends`: the statement that cut `days` short.
+    pub ended: Option<Loc>,
     pub laws: Box<[Id<Law>]>,
     pub doc: Option<Sym>,
     pub loc: Loc,
 }
 
-/// When a contract's occurrences fall due.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Recur {
-    /// `monthly` is one month, `twice monthly` is `Twice`, `every 2w` 14 days.
+/// What a contract says for a while.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Terms {
+    /// `monthly` is one month, `twice monthly` is `TwiceMonthly`, `every 2w` 14 days.
     pub every: Cadence,
-    pub on: Option<On>,
-    pub from: Day,
-    pub until: Option<Day>,
+    /// `on 15, last`: the days of the period each occurrence lands on.
+    pub on: Box<[On]>,
+    /// Occurrences step from here: the contract's first day, or the day a
+    /// statement changed the cadence.
+    pub anchor: Day,
+    /// One occurrence's flows, dated `anchor`. An occurrence re-dates a copy,
+    /// with the journal's overrides. Empty while waived: nothing is expected.
+    pub template: Box<[Flow]>,
+    /// `about`: each occurrence states its own amount; the template's is the
+    /// forecast's estimate, and promises do not compare amounts.
+    pub estimate: bool,
+    /// `covers 1y`: each occurrence is recognized over this span from its day.
+    pub covers: Option<Span>,
+    pub shares: Box<[Share]>,
+    /// `escrow 410 USD into escrow`: added to each occurrence.
+    pub escrow: Option<(Amount, Id<Place>)>,
+    /// A loan's yearly rate while these terms hold.
+    pub rate: Option<Ratio>,
+    /// The statement that set these terms; `None` for the declaration's.
+    pub change: Option<Change>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Cadence {
-    Every(Span),
-    /// Twice a month, on two days (`on 15, last`).
-    Twice,
-}
-
-impl Contract {
-    /// The days occurrences fall due in `from..=until`, bounded by the
-    /// schedule, `until` and `ended`.
-    pub fn due_days(&self, from: Day, until: Day) -> Vec<Day> {
-        let Recur { every, on, from: start, until: stop } = self.schedule;
-        // v3 bridge: v3's `On` names one day, so `Twice` waits for the v4 syntax, which can name two.
-        let Cadence::Every(every) = every else { return Vec::new() };
-        if every == Span::default() {
-            return Vec::new();
-        }
-        let last = [stop, self.ended.map(|(day, _)| day)].into_iter().flatten().fold(until, Ord::min);
-        // Steps are taken from the start, never from the previous day, so a
-        // month-end clamp does not drag every later month with it.
-        let nth = |step: i32| land(start.add(Span { months: every.months * step, days: every.days * step }), on);
-        (0..).map(nth).take_while(|&day| day <= last).filter(|&day| day >= from.max(start)).collect()
+impl Terms {
+    /// Nothing is expected while these terms hold (`waived`).
+    pub fn is_waived(&self) -> bool {
+        self.template.is_empty()
     }
 }
 
-/// Moves `base` to the day its period asks for.
-fn land(base: Day, on: Option<On>) -> Day {
-    let (year, month, _) = base.ymd();
-    let clamped = |month: u32, day: u8| Day::from_ymd(year, month, u32::from(day).min(days_in_month(year, month)));
-    match on {
-        None => base,
-        Some(On::MonthDay(day)) => clamped(month, day).unwrap_or(base),
-        Some(On::Last) => base.month_end(),
-        Some(On::YearDay { month, day }) => clamped(u32::from(month).clamp(1, 12), day).unwrap_or(base),
-        Some(On::Weekday(weekday)) => base.add_days(((u32::from(weekday) + 7 - base.weekday()) % 7) as i32),
+/// A statement that changed something from a day (LANGUAGE §3): kept with
+/// what it set, so `why` and diagnostics can point at it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Change {
+    /// The days it holds, as written: from its day, or through its `until`.
+    pub days: Days,
+    pub description: Option<Sym>,
+    /// The code that names it, so a later statement can extend or release it.
+    pub code: Option<Sym>,
+    pub loc: Loc,
+}
+
+impl Contract {
+    /// The days occurrences fall due in `within`, in order: each stretch of
+    /// terms steps on its own schedule, waived ones expect nothing, and nothing
+    /// is due outside the contract's `days`. Either it or `within` must end.
+    pub fn due_days(&self, within: Days) -> Vec<Day> {
+        let Some(within) = within.intersect(self.days) else { return Vec::new() };
+        let stretches = self.terms.within(within).filter(|(_, terms)| !terms.is_waived());
+        let due = stretches.filter_map(|(stretch, terms)| Some((stretch.intersect(within)?, terms)));
+        due.flat_map(|(days, terms)| calendar::due(terms.every, &terms.on, terms.anchor, days)).collect()
+    }
+
+    /// The terms in force on `day`.
+    pub fn terms_on(&self, day: Day) -> &Terms {
+        self.terms.at(day)
     }
 }
 
@@ -530,8 +563,6 @@ fn land(base: Day, on: Option<On>) -> Day {
 pub struct Loan {
     pub principal: Amount,
     pub on: Day,
-    /// Yearly, as a fraction.
-    pub rate: Ratio,
     pub term: Span,
     /// The asset it financed: interest is `#interest of` it.
     pub asset: Option<Id<Asset>>,
@@ -546,6 +577,34 @@ pub struct Match {
     pub into: Id<Place>,
     /// Of the gross.
     pub up_to: Ratio,
+}
+
+/// `budget food 900 USD monthly [carries]` (LANGUAGE §4): a warning when the
+/// purpose's total for a window passes the limit in force in it.
+pub struct Budget {
+    pub purpose: Id<Purpose>,
+    pub period: Period,
+    /// The declaration's limit, then each `DATE budget …` statement's.
+    pub limits: Timeline<Limit>,
+    /// Judged on the total since it began against its limits summed through
+    /// the window: an unspent month lends to the next, an overspent one borrows.
+    pub carries: bool,
+    /// The law that reports it (`warn total(window) <= limit`), so violations,
+    /// headroom and `why` treat a budget as every other cap. Its `Law::budget`
+    /// points back here.
+    pub law: Id<Law>,
+    pub loc: Loc,
+}
+
+/// What a budget allows in a window.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Limit {
+    Amount(Amount),
+    /// `10% of #income`: that share of another purpose's total, same window.
+    Share {
+        rate: Ratio,
+        of: Id<Purpose>,
+    },
 }
 
 /// A body of kinds, params and laws: `us`, `us/ca`, `us/401k`. Children
@@ -603,11 +662,65 @@ pub enum CodeScope {
     Kind(Id<Kind>),
 }
 
-/// `sync FILE` / `run COMMAND`
-pub struct SyncSpec {
-    pub file: Sym,
+/// `sync NAME` (LANGUAGE §13): a command whose output Axiom reads, and where
+/// what it recognizes goes. Not the [`crate::Source`] that `build` takes, a
+/// parsed file.
+#[derive(Clone, Copy, Debug)]
+pub struct Source {
+    pub name: Sym,
+    /// The command, with `{since}`, `{today}`, `{units}` and `{year}` unexpanded.
     pub run: Sym,
+    pub sink: Sink,
+    pub doc: Option<Sym>,
     pub loc: Loc,
+}
+
+/// Where a source's facts go.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Sink {
+    /// A sync named after an account: its records, reconciled into the
+    /// journal. `csv: None` means the command prints Axiom.
+    Feed { account: Id<Place>, csv: Option<Csv> },
+    /// `into PATH`: Axiom text, merged into that file (`{year}` splits it).
+    File(Sym),
+    /// `into param NAME`: rows merged into that param.
+    Param(Id<Param>),
+    /// Neither: Axiom statements (invoices, bills) into the journal.
+    Journal,
+}
+
+/// How the columns of a statement export read.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Csv {
+    pub date: Column,
+    /// `"MM/DD/YYYY"`; ISO when absent.
+    pub date_format: Option<Sym>,
+    pub amount: Money,
+    pub memo: Option<Column>,
+    pub balance: Option<Column>,
+    pub pending: Option<Column>,
+}
+
+/// How an export writes what moved.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Money {
+    /// Money into the account is positive, unless the export is `flipped`.
+    Signed {
+        column: Column,
+        flipped: bool,
+    },
+    Split {
+        debit: Column,
+        credit: Column,
+    },
+}
+
+/// A column of an export.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Column {
+    Header(Sym),
+    /// 1-based, as written.
+    Index(u16),
 }
 
 /// A quantity of one commodity. 16 bytes, `Copy`.

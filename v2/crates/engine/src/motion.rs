@@ -6,7 +6,7 @@
 //! `Motion`, so exactly one code path moves value.
 
 use axiom_core::{Day, Days, Id, Loc, Qty, Sym};
-use axiom_model::{Amount, Assert, Book, Class, End, Entity, Flow, Mode, Place, Select, Terms, Txn, Waive};
+use axiom_model::{Amount, Assert, Book, Class, Detail, End, Entity, Flow, Mode, Place, Select, Txn, Waive};
 
 use crate::Cause;
 
@@ -39,9 +39,9 @@ pub(crate) enum Moves {
 }
 
 impl Moves {
-    fn of(book: &Book, terms: &Terms, from: Id<Place>, to: Id<Place>) -> Moves {
+    fn of(book: &Book, detail: &Detail, from: Id<Place>, to: Id<Place>) -> Moves {
         let market = book.entities[book.roots.market].place;
-        match terms.basis_end {
+        match detail.basis_end {
             Some(end) => Moves::Basis(end),
             None if book.places[to].class == Class::Asset && Some(from) == market => Moves::Growth,
             None if book.places[from].class == Class::Asset && Some(to) == market => Moves::Loss,
@@ -75,7 +75,7 @@ pub(crate) struct Motion<'f> {
     pub payee: Option<Id<Entity>>,
     pub select: &'f [Select],
     pub codes: &'f [Sym],
-    pub terms: &'f Terms,
+    pub detail: &'f Detail,
     pub moves: Moves,
     /// An `opening` line: value moves, but no law sees it and no total counts it.
     pub opening: bool,
@@ -100,8 +100,8 @@ impl<'f> Motion<'f> {
             payee: flow.payee,
             select: &flow.select,
             codes: &flow.codes,
-            terms: flow.terms(),
-            moves: Moves::of(book, flow.terms(), flow.from, flow.to),
+            detail: flow.detail(),
+            moves: Moves::of(book, flow.detail(), flow.from, flow.to),
             opening: flow.mode == Mode::Opening,
             waive: flow.waive,
             loc: flow.loc,
@@ -132,8 +132,8 @@ impl<'f> Motion<'f> {
             payee: None,
             select: &[],
             codes: &[],
-            terms: &Terms::NONE,
-            moves: Moves::of(book, &Terms::NONE, from, to),
+            detail: &Detail::NONE,
+            moves: Moves::of(book, &Detail::NONE, from, to),
             opening: false,
             waive,
             loc: assert.loc,

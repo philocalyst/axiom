@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 
 use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, FileId};
-use axiom_model::Book;
+use axiom_model::{Book, Sink};
 
 use crate::Outcome;
 use crate::project::Sources;
@@ -66,8 +66,15 @@ impl Failure {
 /// Runs the declared syncs (only those for `wanted` files, if any are named)
 /// and reports each.
 pub fn execute(book: &Book, wanted: &[&str], root: &Path, terminal: Terminal) -> Result<Outcome, Diagnostic> {
-    let declared =
-        book.syncs.iter().map(|sync| Job { file: book.name(sync.file), command: book.name(sync.run) }).collect();
+    // Only a source that merges into a file runs here; the other sinks wait for the sync crate.
+    let declared = book
+        .sources
+        .iter()
+        .filter_map(|source| match source.sink {
+            Sink::File(file) => Some(Job { file: book.name(file), command: book.name(source.run) }),
+            _ => None,
+        })
+        .collect();
     let jobs = choose(declared, wanted)?;
     let results = run_all(&jobs, root, TIMEOUT, terminal);
     Ok(report(&jobs, &results, terminal))

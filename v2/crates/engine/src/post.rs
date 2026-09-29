@@ -123,7 +123,7 @@ impl<'b, 's> Ledger<'b, 's> {
             policy: source.select.or(book.commodities[unit].select),
             txns: &book.txns,
             permits: &self.scratch.permits,
-            spender: m.terms.spender,
+            spender: m.detail.spender,
             now,
             explain: !self.record.ambiguous.contains(&m.from),
         };
@@ -162,7 +162,7 @@ impl<'b, 's> Ledger<'b, 's> {
                 self.scratch.permits.push((entity, false));
             }
         }
-        if stays_with_owner(m) || m.terms.spender.is_some() {
+        if stays_with_owner(m) || m.detail.spender.is_some() {
             return;
         }
         for at in 0..self.scratch.permits.len() {
@@ -179,11 +179,11 @@ impl<'b, 's> Ledger<'b, 's> {
         // Value from outside takes the target's arrival rule; a market's growth has no basis.
         let unbased = m.target.basis == Basis::Zero || m.moves == Moves::Growth;
         // What was fetched matters to what a sale realizes, and to a basis nobody stated.
-        let priced = restarts && (m.source.class == Class::Asset || (m.terms.basis.is_none() && !unbased));
+        let priced = restarts && (m.source.class == Class::Asset || (m.detail.basis.is_none() && !unbased));
         let proceeds = if priced { self.proceeds(m) } else { None };
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let (mut worth, mut fixed) =
-            (proceeds.map(|p| Shares::new(p, whole)), m.terms.basis.map(|b| Shares::new(b, whole)));
+            (proceeds.map(|p| Shares::new(p, whole)), m.detail.basis.map(|b| Shares::new(b, whole)));
         for slice in &mut self.scratch.relief.slices {
             slice.worth = worth.as_mut().map_or(Qty::ZERO, |shares| shares.take(slice.qty));
             let stated = fixed.as_mut().map(|shares| shares.take(slice.qty));
@@ -222,7 +222,7 @@ impl<'b, 's> Ledger<'b, 's> {
             let part = shares.take(slice.qty);
             match sold {
                 true => slice.worth -= part,
-                false if m.terms.basis.is_none() => slice.carried += part,
+                false if m.detail.basis.is_none() => slice.carried += part,
                 false => {}
             }
         }
@@ -230,7 +230,7 @@ impl<'b, 's> Ledger<'b, 's> {
 
     /// What the exchange's fee legs cost it, in the base currency.
     fn exchange_cost(&mut self, m: &Motion) -> Qty {
-        m.terms.cost.and_then(|cost| self.base_value(m, cost)).unwrap_or(Qty::ZERO)
+        m.detail.cost.and_then(|cost| self.base_value(m, cost)).unwrap_or(Qty::ZERO)
     }
 
     /// What the parcels that leave realize against their basis: what they
@@ -294,8 +294,8 @@ impl<'b, 's> Ledger<'b, 's> {
         // `for` an entity ties what arrives to it; `for` the owner (or its household) unties it.
         let owner = m.target.owner;
         let hold =
-            m.terms.hold.map(|entity| Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e)));
-        let (money, since) = (is_money(book, m.to, m.arrive.unit), m.terms.since.unwrap_or(m.day));
+            m.detail.hold.map(|entity| Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e)));
+        let (money, since) = (is_money(book, m.to, m.arrive.unit), m.detail.since.unwrap_or(m.day));
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let mut shares = Shares::new(m.arrive.qty, whole);
         let slot = self.world.holdings.entry(m.to, m.arrive.unit);

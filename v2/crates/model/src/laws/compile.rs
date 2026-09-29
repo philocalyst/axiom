@@ -136,6 +136,7 @@ impl<'s> Compiler<'_, '_, 's> {
             owner: site.owner,
             system: if let Home::System(system) = site.home { Some(system) } else { None },
             trigger: trigger?,
+            budget: None,
             steps: steps.into(),
             nodes: std::mem::take(&mut self.nodes).into(),
             loc: law.loc,

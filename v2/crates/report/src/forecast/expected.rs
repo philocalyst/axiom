@@ -281,7 +281,7 @@ opening 2026-01-01
             let whose = crate::lens::Whose::default();
             let found = expected(Lens::new(book, &whose, run.today), run);
             assert_eq!(found.len(), 1, "the depreciation is a habit");
-            assert_eq!(found[0].template.terms().basis_end, Some(End::From));
+            assert_eq!(found[0].template.detail().basis_end, Some(End::From));
         });
     }
 }

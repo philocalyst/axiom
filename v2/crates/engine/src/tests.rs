@@ -1066,7 +1066,7 @@ fn an_opening_moves_value_but_no_law_sees_it_and_it_starts_no_period() {
     let (shares, day) = (f.vti(10), date(2024, 12, 31));
     let opening = f.exchange(day, equity, shares, brokerage, shares);
     f.opening(opening);
-    f.terms(opening, Terms { basis: Some(Qty(700_00)), since: Some(Day(date(2023, 6, 15))), ..Terms::default() });
+    f.detail(opening, Detail { basis: Some(Qty(700_00)), since: Some(Day(date(2023, 6, 15))), ..Detail::default() });
     f.flow(date(2025, 3, 1), equity, checking, 1_000_00);
     f.buy(date(2025, 3, 10), 300_00, 1);
     let book = f.book();
@@ -1116,14 +1116,14 @@ fn a_stated_basis_and_a_hold_override_what_the_route_says() {
     let household = f.household;
     f.flow(1, salary, checking, 2_000_00);
     let gift = f.flow(2, salary, retirement, 6_000_00);
-    f.terms(gift, Terms { basis: Some(Qty(6_000_00)), ..Terms::default() });
+    f.detail(gift, Detail { basis: Some(Qty(6_000_00)), ..Detail::default() });
     f.flow(3, salary, retirement, 100_00);
     let set_aside = f.flow(4, checking, savings, 500_00);
-    f.terms(set_aside, Terms { hold: Some(grant), ..Terms::default() });
+    f.detail(set_aside, Detail { hold: Some(grant), ..Detail::default() });
     let mine = f.flow(5, savings, cash, 200_00);
-    f.terms(mine, Terms { hold: Some(me), ..Terms::default() });
+    f.detail(mine, Detail { hold: Some(me), ..Detail::default() });
     let family = f.flow(6, savings, cash, 100_00);
-    f.terms(family, Terms { hold: Some(household), ..Terms::default() });
+    f.detail(family, Detail { hold: Some(household), ..Detail::default() });
     let book = f.book();
     let run = run(&book, options());
     let usd = book.base;
@@ -1145,9 +1145,9 @@ fn basis_flows_change_basis_and_move_no_quantity_and_realize_nothing() {
     f.flow(1, equity, checking, 5_000_00);
     f.buy(2, 1_000_00, 10);
     let improvement = f.flow(3, checking, brokerage, 200_00);
-    f.terms(improvement, Terms { basis_end: Some(End::To), ..Terms::default() });
+    f.detail(improvement, Detail { basis_end: Some(End::To), ..Detail::default() });
     let depreciation = f.flow(4, brokerage, food, 50_00);
-    f.terms(depreciation, Terms { basis_end: Some(End::From), ..Terms::default() });
+    f.detail(depreciation, Detail { basis_end: Some(End::From), ..Detail::default() });
     let book = f.book();
     let run = run(&book, options());
     assert_eq!(
@@ -1165,7 +1165,7 @@ fn a_basis_flow_into_a_place_that_holds_nothing_is_an_error_not_a_panic() {
     let (equity, checking, savings) = (f.equity, f.checking, f.savings);
     f.flow(1, equity, checking, 100_00);
     let improvement = f.flow(2, checking, savings, 50_00);
-    f.terms(improvement, Terms { basis_end: Some(End::To), ..Terms::default() });
+    f.detail(improvement, Detail { basis_end: Some(End::To), ..Detail::default() });
     let book = f.book();
     let run = run(&book, options());
     assert_eq!(diagnostic(&run, "no-basis").message, "assets/savings holds nothing to carry a change of basis");

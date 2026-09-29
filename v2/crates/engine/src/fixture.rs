@@ -67,6 +67,7 @@ impl Fixture {
             member: None,
             owner: None,
             client_of: None,
+            known_as: Box::new([]),
             props: Box::new([]),
             doc: None,
             loc: None,
@@ -93,6 +94,7 @@ impl Fixture {
             liquidity: None,
             opened: None,
             closed: None,
+            known_as: Box::new([]),
             props: Box::new([]),
             doc: None,
             loc: None,
@@ -271,7 +273,7 @@ impl Fixture {
             codes: Box::new([]),
             loc,
             waive: None,
-            terms: None,
+            detail: None,
         };
         self.flows.push(flow);
         id
@@ -295,9 +297,9 @@ impl Fixture {
         self.flows[id.index()].recognized = span(from, until);
     }
 
-    /// Gives a flow terms.
-    pub fn terms(&mut self, id: Id<Flow>, terms: Terms) {
-        self.flows[id.index()].terms = Some(Box::new(terms));
+    /// Gives a flow detail.
+    pub fn detail(&mut self, id: Id<Flow>, detail: Detail) {
+        self.flows[id.index()].detail = Some(Box::new(detail));
     }
 
     /// Makes a flow an `opening` line.
@@ -344,7 +346,7 @@ impl Fixture {
 
     /// The flow made a claim, due on `due`, against `payee`.
     pub fn claim(&mut self, id: Id<Flow>, due: i32, payee: Id<Entity>) {
-        self.terms(id, Terms { due: Some(Day(due)), ..Terms::default() });
+        self.detail(id, Detail { due: Some(Day(due)), ..Detail::default() });
         self.flows[id.index()].payee = Some(payee);
     }
 
@@ -461,6 +463,7 @@ impl Fixture {
             contracts: Arena::new(),
             laws: self.laws,
             rules,
+            budgets: Arena::new(),
             params: Arena::new(),
             schedules: Arena::new(),
             codes: Vec::new(),
@@ -472,7 +475,7 @@ impl Fixture {
             prices: Prices::default(),
             splits: self.splits,
             plans: Arena::new(),
-            syncs: Vec::new(),
+            sources: Vec::new(),
             lookup: Default::default(),
         }
     }
@@ -594,6 +597,7 @@ impl LawBuilder {
             owner: Owner::Kind(Id::new(0)),
             system: None,
             trigger: self.trigger,
+            budget: None,
             steps: self.steps.into(),
             nodes: self.nodes.into(),
             loc: Loc::new(FileId(1), 0, 1000),

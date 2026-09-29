@@ -129,6 +129,7 @@ impl Cast {
             member: matches!(name, "me" | "jordan").then(|| Id::new(2)),
             owner: None,
             client_of: None,
+            known_as: Box::default(),
             props: Box::default(),
             doc: None,
             loc: None,
@@ -157,6 +158,7 @@ impl Cast {
             liquidity: (path == "assets/retirement").then_some(Span::months(1)),
             opened: None,
             closed: None,
+            known_as: Box::default(),
             props: Box::default(),
             doc: None,
             loc: (!path.starts_with("assets/vault")).then(|| line(1)),
@@ -319,7 +321,7 @@ fn journal(cast: &mut Cast) -> Journal {
             codes,
             loc: line(row),
             waive: None,
-            terms: due.map(|due| Box::new(Terms { due: Some(due), ..Terms::default() })),
+            detail: due.map(|due| Box::new(Detail { due: Some(due), ..Detail::default() })),
         });
         journal.posted.push(Posted { out: Qty(cents), arrive: Qty(cents), state });
     }
@@ -348,7 +350,7 @@ fn rent_plan(cast: &Cast) -> Plan {
         codes: Box::default(),
         loc: line(60),
         waive: None,
-        terms: None,
+        detail: None,
     };
     Plan {
         name: None,
@@ -376,6 +378,7 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
         owner,
         system: None,
         trigger: Trigger::In,
+        budget: None,
         steps: Box::new([Step {
             loc: line(80),
             kind: StepKind::Require { cond: NodeId(2), otherwise: None, message: None, warn },
@@ -401,6 +404,7 @@ fn early_withdrawal(cast: &mut Cast) -> Law {
         owner: Owner::Place(cast.id("assets/retirement")),
         system: None,
         trigger: Trigger::Out,
+        budget: None,
         steps: Box::new([Step { loc: line(85), kind: StepKind::Effect(owe) }]),
         nodes: nodes.into(),
         loc: line(85),
@@ -425,6 +429,7 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
         owner: Owner::System(cast.us),
         system: Some(cast.us),
         trigger: Trigger::In,
+        budget: None,
         steps: Box::default(),
         nodes: Box::default(),
         loc: line(90),
@@ -574,6 +579,7 @@ pub(crate) fn household() -> Household {
         contracts: Arena::new(),
         laws: records.laws,
         rules,
+        budgets: Arena::new(),
         params: Arena::new(),
         schedules: Arena::new(),
         codes: Vec::new(),
@@ -586,7 +592,7 @@ pub(crate) fn household() -> Household {
         lookup: Default::default(),
         splits: Vec::new(),
         plans,
-        syncs: Vec::new(),
+        sources: Vec::new(),
     };
     let run = Run {
         today: day(2026, 3, 31),

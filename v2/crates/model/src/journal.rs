@@ -6,7 +6,7 @@ use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Span, Sym};
 use crate::book::{Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose};
 
 /// Value moving once, from one place to another. Balanced by construction.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Flow {
     /// The day value moves: balances, relief and settlement follow it.
     pub day: Day,
@@ -47,7 +47,7 @@ pub struct Flow {
     pub waive: Option<Waive>,
     /// What few flows say about the parcels they move. Boxed: most flows say
     /// nothing, and a flow is copied into every place that reads the journal.
-    pub terms: Option<Box<Terms>>,
+    pub detail: Option<Box<Detail>>,
 }
 
 impl Flow {
@@ -55,16 +55,16 @@ impl Flow {
         self.out.unit != self.arrive.unit
     }
 
-    /// The flow's terms, or the terms of a flow that says nothing.
-    pub fn terms(&self) -> &Terms {
-        self.terms.as_deref().unwrap_or(&Terms::NONE)
+    /// The flow's detail, or the detail of a flow that says nothing.
+    pub fn detail(&self) -> &Detail {
+        self.detail.as_deref().unwrap_or(&Detail::NONE)
     }
 
     /// Whether quantity crosses `end`. At a `PLACE.basis` end none does: the
     /// flow changes what the place's parcels cost, and nothing arrives there or
     /// leaves it. Everything that reads a flow as money asks this first.
     pub fn moves_quantity(&self, end: End) -> bool {
-        self.terms().basis_end != Some(end)
+        self.detail().basis_end != Some(end)
     }
 }
 
@@ -91,6 +91,8 @@ pub enum Provenance {
     /// On the leg or its header: the flow's own line says where.
     Written,
     Contract(Id<Contract>),
+    /// The party's own `#purpose` (`entity corner-store #groceries`).
+    Entity(Id<Entity>),
     /// The kind of the party at the flow's other end.
     Party(Id<Kind>),
     /// The kind of the commodity paying, in party position.
@@ -130,6 +132,13 @@ pub enum Derivation {
     PassThrough,
     /// A contract deposit or a missing occurrence: a claim.
     Claim(Id<Contract>),
+    /// `for PARTY` on a payment: the party owes it, and the payment is its,
+    /// passed through the owner.
+    PaidFor(Id<Entity>),
+    /// `^code waived` on a claim: what remained of it is forgiven.
+    WriteOff,
+    /// `DATE ASSET ends`: the asset leaves the owners for nothing.
+    Disposal(Id<Asset>),
 }
 
 /// What declared a share, so `why` can point at its line.
@@ -142,7 +151,7 @@ pub enum Sharer {
 
 /// What a flow says about the parcels it moves, beyond how many.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
-pub struct Terms {
+pub struct Detail {
     /// `basis 3_000 USD`: the total basis the arriving parcels take, in
     /// base-currency quanta, overriding the target kind's arrival rule.
     pub basis: Option<Qty>,
@@ -172,13 +181,13 @@ pub struct Terms {
     pub due: Option<Day>,
 }
 
-impl Terms {
-    pub const NONE: Terms =
-        Terms { basis: None, hold: None, basis_end: None, since: None, spender: None, cost: None, due: None };
+impl Detail {
+    pub const NONE: Detail =
+        Detail { basis: None, hold: None, basis_end: None, since: None, spender: None, cost: None, due: None };
 
-    /// The same terms `days` later: a due day goes with the flow that carries it.
-    pub fn moved(&self, days: i32) -> Terms {
-        Terms { due: self.due.map(|due| due.add_days(days)), ..self.clone() }
+    /// The same detail `days` later: a due day goes with the flow that carries it.
+    pub fn moved(&self, days: i32) -> Detail {
+        Detail { due: self.due.map(|due| due.add_days(days)), ..self.clone() }
     }
 }
 
@@ -246,7 +255,7 @@ pub struct Txn {
     pub loc: Loc,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Waive {
     pub loc: Loc,
     pub reason: Option<Sym>,
