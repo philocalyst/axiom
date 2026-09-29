@@ -159,16 +159,21 @@ impl Frame<'_, '_> {
         atoms
     }
 
-    /// Up to three flows before this one that built what a limit counted.
+    /// Up to three flows before this one that built what a limit counted. A
+    /// window read as it opened had no flow to fire it: the latest to reach it.
     fn contributors(&self, reads: Reads) -> Vec<Id<Flow>> {
         let (book, ctx) = (self.book, self.ctx);
-        let Cause::Flow(current) = ctx.cause else { return Vec::new() };
+        let current = match ctx.cause {
+            Cause::Flow(id) => Some(id),
+            _ if ctx.checking => None,
+            _ => return Vec::new(),
+        };
         let window = reads.window(ctx);
         let mut found: Vec<Id<Flow>> = match reads {
             Reads::Tally(name) => {
                 let of_name = self.effects.iter().rev().filter(|e| e.owner == ctx.owner && e.name == name);
                 let counted = of_name.filter(|e| has(window, e.day)).filter_map(|e| match e.cause {
-                    Cause::Flow(id) if id != current => Some(id),
+                    Cause::Flow(id) if Some(id) != current => Some(id),
                     _ => None,
                 });
                 counted.take(3).collect()
@@ -176,7 +181,10 @@ impl Frame<'_, '_> {
             Reads::Total(dir, _) => {
                 let Subject::Place(place) = ctx.subject else { return Vec::new() };
                 let flows = &book.touching[place];
-                let before = flows.partition_point(|&id| id < current);
+                let before = match current {
+                    Some(current) => flows.partition_point(|&id| id < current),
+                    None => flows.partition_point(|&id| book.flows[id].day <= ctx.day),
+                };
                 let crosses = |flow: &Flow| {
                     let (here, there) = if dir == Dir::In { (flow.to, flow.from) } else { (flow.from, flow.to) };
                     book.places.covers(place, here) && !book.places.covers(place, there)

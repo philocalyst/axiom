@@ -17,7 +17,7 @@ use axiom_model::{Book, Cap, Commodity, End, Flow, Infer, Place};
 
 use crate::eval::Env;
 use crate::events::{self, Events};
-use crate::fire;
+use crate::fire::{self, Readers};
 use crate::motion::{Amounts, Motion};
 use crate::scope::{display, is_money};
 use crate::state::{Record, Scratch, World};
@@ -45,6 +45,8 @@ pub(crate) struct Solved {
     pub repeats: bool,
     /// By law id: the laws that are one cap on a total in the base currency.
     pub caps: Vec<Option<Cap>>,
+    /// The laws to read as a window opens with value already recognized into it.
+    pub readers: Readers,
     /// The first day of each place and commodity whose balance depends on an
     /// amount that could not be solved, and the flow to blame.
     pub unsolved: Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>,
@@ -85,7 +87,8 @@ impl<'b, 's> Ledger<'b, 's> {
         for (key, first) in unsolved {
             blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
-        let solved = Solved { events, deadlines, repeats: fire::repeats(book), caps: fire::caps(book), unsolved: blocked };
+        let (repeats, caps, readers) = (fire::repeats(book), fire::caps(book), fire::readers(book));
+        let solved = Solved { events, deadlines, repeats, caps, readers, unsolved: blocked };
         let timeline = Timeline::new(&solved.sources(book));
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
         Ledger {
@@ -130,6 +133,7 @@ impl<'b, 's> Ledger<'b, 's> {
     pub fn advance(&mut self, day: Day) {
         self.advance_through(Moment::end_of(day));
         self.clock.day = self.clock.day.max(day);
+        self.enter(day);
         self.world.holdings.tidy();
     }
 
@@ -145,6 +149,7 @@ impl<'b, 's> Ledger<'b, 's> {
         let day = flow.day.max(self.clock.day);
         self.advance_through(Moment::after_flows(day));
         self.clock.day = day;
+        self.enter(day);
         let marks = self.record.marks();
         let number = self.clock.applied;
         self.clock.applied += 1;
@@ -220,6 +225,7 @@ impl<'b, 's> Ledger<'b, 's> {
             let Some(moment) = self.clock.timeline.peek().filter(|&moment| moment <= limit) else { return };
             self.clock.timeline.consume(moment, &self.solved.sources(self.book));
             self.clock.day = moment.day;
+            self.enter(moment.day);
             self.step(moment);
         }
     }

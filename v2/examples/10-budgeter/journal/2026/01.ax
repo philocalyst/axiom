@@ -35,7 +35,7 @@
 2026-01-20 #check-1029 void
 2026-01-20 visa -> subscriptions 2.99 USD / apple
 
-/// The new term's policy fee, 12.00 USD, on the card. (The first flow of 2026 into the insurance envelope: see README, the yearly budget.)
+/// The new term's policy fee, 12.00 USD, on the card.
 2026-01-20 visa -> insurance 12 USD / progressive
 2026-01-21 visa -> transport 23.90 USD / rideshare
 2026-01-22 checking -> visa 1_023.83 USD

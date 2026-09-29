@@ -36,7 +36,8 @@ outputs/          every command, run with --today 2026-02-14
   other 40.00 (a two-source split); the trip fund gets 250.00 USD a month.
 - **Yearly bills are spread where they belong.** The premium is paid in December `for 2026`, so the
   yearly envelope of 2026 sees it (1,140.00 USD, then a 12.00 USD policy fee: 1,152.00 of 1,200.00 USD,
-  room 48.00), and 2025's sees nothing. The 139.00 USD Prime membership, paid on November 3, is written
+  room 48.00), and 2025's sees nothing. The envelope counts the premium on its own, 1,140.00 of 1,200.00 USD,
+  before the fee or any other flow lands in 2026. The 139.00 USD Prime membership, paid on November 3, is written
   `2025-11-03..2026-11-02` and recognized a little each day: the subscriptions envelope sees 10.66 USD of it
   in November (28 days of 365), not a 139.00 USD spike that broke the month and warned five times.
 - **Gaps in knowledge.** The ATM amounts are `checking -> wallet ? USD`, solved from the checking
@@ -101,9 +102,6 @@ in part (a warning per breach, not one per flow after it, and the yearly bill no
 
 ## Still open
 
-- **A flow recognized for next year is missing from a yearly budget until another one lands in that year.**
-  The premium alone shows 0.00 USD in 2025 and in 2026; the 12.00 USD policy fee in January is what makes the 2026
-  window appear with 1,152.00 USD.
 - **"Can I afford 3,000 USD in June?" is still two forecasts and a subtraction.** The Net worth column moves by the
   whole trip and Committed by half of it, and the forecast does not project the monthly deposits into the funds.
 - **No rollover.** A budget starts at zero each month, so a bill that is not monthly still needs its own envelope.

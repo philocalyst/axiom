@@ -929,11 +929,16 @@ fn a_spread_flow_counts_in_each_month_it_touches_as_the_fold_reaches_it() {
     let book = f.book();
     let run = run(&book, until(2026, 3, 1));
     let [violation] = run.violations[..] else { panic!("one violation: {:?}", run.violations) };
-    assert_eq!(violation.day, Day(date(2026, 1, 5)), "nothing in December: only 11.83 of it belongs there");
+    assert_eq!(violation.day, Day(date(2026, 1, 1)), "nothing in December: only 11.83 of it belongs there");
+    assert_eq!(violation.cause, Cause::Time, "January opened already over: no flow crossed the line");
     let d = &run.diagnostics[violation.diagnostic as usize];
-    assert_eq!(d.message, "expenses/food: 31.56 USD in 2026-01 against a limit of 30.00 USD, over by 1.56 USD");
+    assert_eq!(d.message, "expenses/food: 30.56 USD in 2026-01 against a limit of 30.00 USD, over by 0.56 USD");
     let counted: Vec<_> = run.headroom.iter().map(|h| (h.from.ymd().1, h.counted.qty.0, h.limit.qty.0)).collect();
-    assert_eq!(counted, [(12, 11_83, 30_00), (1, 31_56, 30_00)], "the last reading of each month's window");
+    assert_eq!(
+        counted,
+        [(12, 11_83, 30_00), (1, 31_56, 30_00), (2, 27_61, 30_00)],
+        "the last reading of each month's window, February's with no flow in it"
+    );
 }
 
 #[test]

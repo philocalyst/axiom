@@ -57,6 +57,9 @@ pub(crate) struct Occasion<'a> {
     /// Rules whose subject contains both ends of the flow do not fire: value
     /// moved around inside the subject neither entered nor left it.
     pub skip_internal: bool,
+    /// Only limits are read: what a comparison counted is recorded, and a
+    /// broken one is reported, but nothing is counted into a tally or owed.
+    pub checking: bool,
 }
 
 impl<'a> Occasion<'a> {
@@ -71,6 +74,7 @@ impl<'a> Occasion<'a> {
             amount: None,
             realized: None,
             skip_internal: false,
+            checking: false,
         }
     }
 
@@ -86,7 +90,14 @@ impl<'a> Occasion<'a> {
             amount: None,
             realized: None,
             skip_internal: false,
+            checking: false,
         }
+    }
+
+    /// A window that some flow recognized value into ahead of time, entered on
+    /// `day`: the laws about its total are read as no flow will make them.
+    pub fn window(day: Day, period: Recognition) -> Occasion<'static> {
+        Occasion { checking: true, ..Occasion::time(day, period) }
     }
 
     /// The day whose window totals are read: the day a flow moved, or the last
