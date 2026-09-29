@@ -1353,6 +1353,7 @@ fn a_v3_book_fits_the_v4_types() {
         let roots = book.roots;
         assert_eq!(book.name(book.entities[roots.market].path), "market");
         assert_eq!(book.entities[roots.market].place, book.place("income/market").ok());
+        assert!(book.entity("market").is_err(), "no line names the market entity: `market` is the place");
         assert_eq!(book.name(book.kinds[roots.thing].name), "thing");
         let purposes = [roots.income, roots.spending, roots.capital].map(|root| book.name(book.purposes[root].name));
         assert_eq!(purposes, ["income", "spending", "capital"]);

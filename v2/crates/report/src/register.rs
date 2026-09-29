@@ -49,7 +49,7 @@ pub fn view<'s>(
 pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Day>, to: Option<Day>) -> Section<'s> {
     let steps = steps(book, run, place, to.unwrap_or(run.today));
     let split = from.map_or(0, |from| steps.partition_point(|step| step.day < from));
-    let sign = book.places[place].class.display_sign();
+    let sign = book.v3_root(place).display_sign();
     let shown = |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));
 
     let columns = [

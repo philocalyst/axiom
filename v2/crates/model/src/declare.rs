@@ -434,8 +434,13 @@ fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, cx: &mut Cx<'_, 's>) -
     if tree[me].loc.is_none() {
         tree[me].kind = person_or_root(kinds, cx);
     }
-    let things: Vec<_> = tree.iter().map(|(id, entity)| (id, cx.names.name(entity.path), homes[id.index()])).collect();
-    Entities { index: Scoped::build(cx.names, things), tree, me, market: by_path["market"], declared }
+    // v3 bridge: the market entity is the place `income/market` under another name, and no line names it: `market`
+    // in a flow, a law or `why` has always meant the place, or the kind. Only a declaration makes it findable.
+    let market = by_path["market"];
+    let findable = |&(id, entity): &(Id<Entity>, &Entity)| id != market || entity.loc.is_some();
+    let things: Vec<_> =
+        tree.iter().filter(findable).map(|(id, entity)| (id, cx.names.name(entity.path), homes[id.index()])).collect();
+    Entities { index: Scoped::build(cx.names, things), tree, me, market, declared }
 }
 
 /// `me` is a `person` when the standard kinds are in scope.

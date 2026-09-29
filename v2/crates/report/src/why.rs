@@ -137,14 +137,14 @@ pub(crate) fn explain<'s>(book: &Book<'s>, run: &Run, whose: &Whose, found: Foun
 
 /// A name is a place if it can be one, else an entity, a system, a law, or
 /// something a law tallied or owed. An ambiguous place is an error, not a
-/// reason to look on. An entity that only stands in for its `via` place is
+/// reason to look on. An entity that only stands in for its place is
 /// asked about as the entity: its own laws and ties are what was wanted.
 fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diagnostic> {
     let entity = book.entity(text).ok();
     match book.place(text) {
         Ok(place) => {
             return Ok(match entity {
-                Some(entity) if book.entities[entity].via == Some(place) => Found::Entity(entity),
+                Some(entity) if book.entities[entity].place == Some(place) => Found::Entity(entity),
                 _ => Found::Place(place),
             });
         }
@@ -265,6 +265,7 @@ fn trigger_words(trigger: Trigger) -> Cow<'static, str> {
         Trigger::Out => "on out".into(),
         Trigger::Gain => "on gain".into(),
         Trigger::Spend => "on spend".into(),
+        Trigger::Flow => "on flow".into(),
         Trigger::Each(Period::Month, _) => "each month".into(),
         Trigger::Each(Period::Year, None) => "each year".into(),
         Trigger::Each(Period::Year, Some(Closing { month, day })) => {

@@ -663,7 +663,8 @@ impl<'s> Book<'s> {
         }
     }
 
-    // v3 bridge: deleted with the v3 model, whose places all sit under a path root.
+    // v3 bridge: deleted with the v3 model, whose places all sit under a path root. So are the callers that read
+    // `v3_root(place).display_sign()`, where the class `Outside` would show income and equity the wrong way round.
     /// The root of `place`'s path: which of v3's five sides of the books it is on.
     pub fn v3_root(&self, place: Id<Place>) -> PathRoot {
         PathRoot::of(self.name(self.places[place].path)).expect("every v3 place sits under a path root")

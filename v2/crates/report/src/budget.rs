@@ -9,12 +9,12 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Ratio};
 use axiom_engine::{Headroom, Run};
-use axiom_model::{Amount, Book, Class, Law, Period, Place, Subject};
+use axiom_model::{Amount, Book, Law, Period, Place, Subject};
 
 use crate::calendar::Periods;
 use crate::headroom::{current, period, window_words};
 use crate::lens::Whose;
-use crate::places::path;
+use crate::places::{Side, path, v3_side};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>, by: Period) -> Report<'s> {
@@ -71,7 +71,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>, by: 
 fn envelope(book: &Book, reading: &Headroom) -> Option<Id<Place>> {
     let Subject::Place(place) = reading.subject else { return None };
     let is_budget = book.name(book.laws[reading.law].name) == "budget";
-    let on_expenses = period(reading).is_some() && book.places[place].class == Class::Expense;
+    let on_expenses = period(reading).is_some() && v3_side(book, place) == Some(Side::Spending);
     (reading.warn && (is_budget || on_expenses)).then_some(place)
 }
 

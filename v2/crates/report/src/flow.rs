@@ -9,13 +9,13 @@ use std::iter;
 
 use axiom_core::{Day, Id, Qty};
 use axiom_engine::Run;
-use axiom_model::{Book, Class, Period, Place};
+use axiom_model::{Book, Period, Place};
 
 use crate::apportion::Apportion;
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
 use crate::lens::{Lens, Whose};
-use crate::places::{depth, leaf};
+use crate::places::{Side, depth, leaf, v3_side};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// How many periods to show when the window is not given.
@@ -98,10 +98,10 @@ fn statement_sign(book: &Book, place: Id<Place>) -> Option<i64> {
     if place == book.roots.unknown {
         return Some(1);
     }
-    match book.places[place].class {
-        Class::Income => Some(-1),
-        Class::Expense => Some(1),
-        Class::Asset | Class::Liability | Class::Equity => None,
+    match v3_side(book, place) {
+        Some(Side::Income) => Some(-1),
+        Some(Side::Spending) => Some(1),
+        None => None,
     }
 }
 
@@ -157,12 +157,12 @@ impl Statement {
         let total = (self.periods.len() > 1).then(|| Column::right("Total"));
         let mut section = Section::new(iter::once(Column::left("Place")).chain(periods).chain(total));
 
-        let gains = Derived { label: "realized gains ≈", class: "income", values: &self.gains, style: Style::Muted };
+        let gains = Derived { label: "realized gains ≈", side: "income", values: &self.gains, style: Style::Muted };
         let unexplained = self.grid.subtree(book, book.roots.unknown);
         let unexplained =
-            Derived { label: "unexplained (?)", class: "spending", values: &unexplained, style: Style::Normal };
-        let income = self.class_rows(book, &mut section, Class::Income, &gains);
-        let spending = self.class_rows(book, &mut section, Class::Expense, &unexplained);
+            Derived { label: "unexplained (?)", side: "spending", values: &unexplained, style: Style::Normal };
+        let income = self.side_rows(book, &mut section, Side::Income, &gains);
+        let spending = self.side_rows(book, &mut section, Side::Spending, &unexplained);
         // Spending that vanished into `?` is still spending.
         let net: Vec<Qty> = income.iter().zip(&spending).map(|(&earned, &spent)| earned - spent).collect();
         let cells = net
@@ -187,11 +187,11 @@ impl Statement {
         section
     }
 
-    /// The rows of one class's tree, then its derived line; returns the class total.
-    fn class_rows<'s>(&self, book: &Book<'s>, section: &mut Section<'s>, class: Class, derived: &Derived) -> Vec<Qty> {
+    /// The rows of one side's tree, then its derived line; returns the side's total.
+    fn side_rows<'s>(&self, book: &Book<'s>, section: &mut Section<'s>, side: Side, derived: &Derived) -> Vec<Qty> {
         let has_derived = !is_zero(derived.values);
         let mut total = derived.values.to_vec();
-        for root in book.places.roots().filter(|&root| book.places[root].class == class) {
+        for root in book.places.roots().filter(|&root| v3_side(book, root) == Some(side)) {
             for place in book.places.subtree(root) {
                 let values = self.grid.subtree(book, place);
                 if place == root {
@@ -206,7 +206,7 @@ impl Statement {
         }
         if has_derived {
             section.push(self.row(book, Cell::text(derived.label), 1, derived.values, derived.style));
-            section.push(self.row(book, Cell::text(format!("Total {}", derived.class)), 0, &total, Style::Total));
+            section.push(self.row(book, Cell::text(format!("Total {}", derived.side)), 0, &total, Style::Total));
         }
         total
     }
@@ -218,11 +218,11 @@ impl Statement {
     }
 }
 
-/// A line the journal never wrote, added to a class: gains, or unexplained value.
+/// A line the journal never wrote, added to a side: gains, or unexplained value.
 struct Derived<'a> {
     label: &'static str,
-    /// What the class is called in its total: `Total income`.
-    class: &'static str,
+    /// What the side is called in its total: `Total income`.
+    side: &'static str,
     values: &'a [Qty],
     style: Style,
 }

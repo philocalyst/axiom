@@ -4,12 +4,12 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Id, Qty};
 use axiom_engine::Run;
-use axiom_model::{Class, End, Flow, Period, Place};
+use axiom_model::{End, Flow, Period, Place};
 
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
 use crate::lens::Lens;
-use crate::places::category;
+use crate::places::{Side, category, v3_side};
 
 /// What each top-level expense category cost in each full month of history,
 /// leaving out the flows that plans and habits already project. This is the
@@ -58,7 +58,7 @@ fn spending<'a>(lens: Lens<'a, '_>, posting: &Posting) -> impl Iterator<Item = (
     let refund = flow.moves_quantity(End::To).then(|| posting.out_in_base(lens).map(|qty| -qty)).flatten();
     [(flow.to, paid), (flow.from, refund)]
         .into_iter()
-        .filter(move |&(place, _)| lens.book.places[place].class == Class::Expense && lens.owns(place))
+        .filter(move |&(place, _)| v3_side(lens.book, place) == Some(Side::Spending) && lens.owns(place))
         .filter_map(|(place, qty)| Some((place, qty?)))
 }
 

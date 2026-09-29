@@ -476,7 +476,10 @@ impl<'s> Compiler<'_, '_, 's> {
             Ty::Day => vec!["year", "month"],
             _ => Vec::new(),
         };
-        valid.extend(self.world.props.names(ty).map(|sym| self.world.book.name(sym)));
+        // In the order of the alphabet, not of the hash of their symbols, which every new name the book interns shuffles.
+        let mut declared: Vec<&str> = self.world.props.names(ty).map(|sym| self.world.book.name(sym)).collect();
+        declared.sort_unstable();
+        valid.extend(declared);
         let mut diagnostic =
             Diagnostic::error("unknown-field", format!("{} has no `{}`", article(ty.word()), field.text))
                 .label(field.loc, "no such field")

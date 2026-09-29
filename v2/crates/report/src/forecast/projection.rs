@@ -70,7 +70,7 @@ fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
         .is_some_and(|name| place.props.iter().any(|prop| prop.name == name && matches!(prop.value, Value::Day(_))));
     match lens.liquidity(holding.place, holding.unit) {
         Some(Liquidity::Cash) => lens.free(holding),
-        _ if place.class == Class::Liability && !has_term => holding.qty(),
+        _ if place.class == Class::Debt && !has_term => holding.qty(),
         _ => Qty::ZERO,
     }
 }
@@ -80,7 +80,7 @@ fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
 fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
     let mut basket = Basket::default();
     let on_sheet = |holding: &&Holding| {
-        lens.owns(holding.place) && matches!(lens.book.places[holding.place].class, Class::Asset | Class::Liability)
+        lens.owns(holding.place) && matches!(lens.book.places[holding.place].class, Class::Asset | Class::Debt)
     };
     for holding in ledger.holdings().filter(on_sheet) {
         basket.add(holding.unit, Held { qty: pick(holding), booked: Qty::ZERO });
@@ -99,7 +99,7 @@ fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
         leaves && matches!(lens.liquidity(flow.from, flow.out.unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
     let room = if held_back {
         Some(ledger.balance(flow.from, flow.out.unit))
-    } else if arrives && lens.book.places[flow.to].class == Class::Liability {
+    } else if arrives && lens.book.places[flow.to].class == Class::Debt {
         Some(-ledger.balance(flow.to, flow.arrive.unit))
     } else {
         None

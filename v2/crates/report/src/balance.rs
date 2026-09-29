@@ -82,7 +82,7 @@ impl NetWorth {
             }
             basket.value(lens, class)
         };
-        let (assets, liabilities) = (side(Class::Asset), side(Class::Liability));
+        let (assets, liabilities) = (side(Class::Asset), side(Class::Debt));
         NetWorth {
             assets: assets.total,
             liabilities: liabilities.total,
@@ -193,11 +193,11 @@ fn push_place<'s>(
     let book = lens.book;
     let baskets: Vec<Basket> =
         (0..snapshots.days().len()).map(|column| snapshots.subtree(book, column, place)).collect();
-    let class = book.places[place].class;
+    let (class, sign) = (book.places[place].class, book.v3_root(place).display_sign());
     let lines = if value {
-        market_lines(lens, class, snapshots.days(), &baskets)
+        market_lines(lens, class, sign, snapshots.days(), &baskets)
     } else {
-        native_lines(book, class.display_sign(), &baskets)
+        native_lines(book, sign, &baskets)
     };
     let unpriced = lines.iter().filter(|line| line.style == Style::Muted).count();
     let is_root = depth(book, place) == 0;
@@ -230,8 +230,8 @@ fn native_lines<'s>(book: &Book<'s>, sign: i64, baskets: &[Basket]) -> Vec<Line<
 
 /// One line valuing everything priceable in the base currency, then a muted
 /// line for each commodity that has no price.
-fn market_lines<'s>(lens: Lens<'_, 's>, class: Class, days: &[Day], baskets: &[Basket]) -> Vec<Line<'s>> {
-    let (book, sign) = (lens.book, class.display_sign());
+fn market_lines<'s>(lens: Lens<'_, 's>, class: Class, sign: i64, days: &[Day], baskets: &[Basket]) -> Vec<Line<'s>> {
+    let book = lens.book;
     let valued: Vec<Valued> =
         baskets.iter().zip(days).map(|(basket, &day)| basket.value(lens.on(day), class)).collect();
     let mut lines = Vec::new();

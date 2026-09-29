@@ -4,14 +4,14 @@
 //! diagnostic they cause points somewhere meaningful.
 
 use axiom_core::{Day, Id};
-use axiom_model::{Amount, Flow, Infer, Mode, Place, Recognition};
+use axiom_model::{Amount, Flow, Infer, Mode, Origin, Place, Recognition};
 
-/// A `Planned` flow on `day`, as `template` says it: the same ends, payee and
-/// terms (what it is `for`, the basis it takes, a basis end), and its
-/// recognition period and due day moved along with the day, so a plan that pays
-/// `for 2026` each January means 2027 the next time, and an invoice a plan
-/// sends falls due a month after each one. It carries no codes: those link
-/// real events.
+/// A `Planned` flow on `day`, as `template` says it: the same ends, payee,
+/// purpose, description and terms (what it is `for`, the basis it takes, a
+/// basis end), and its recognition period and due day moved along with the
+/// day, so a plan that pays `for 2026` each January means 2027 the next time,
+/// and an invoice a plan sends falls due a month after each one. It carries no
+/// codes: those link real events.
 pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
     let shift = day.0 - template.day.0;
     let recognized = Recognition {
@@ -21,6 +21,8 @@ pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
     Flow {
         recognized,
         payee: template.payee,
+        purpose: template.purpose,
+        description: template.description,
         select: template.select.clone(),
         terms: template.terms.as_ref().map(|terms| Box::new(terms.moved(shift))),
         ..hypothetical(template, day, template.from, template.to, out, arrive)
@@ -42,6 +44,11 @@ pub fn hypothetical(borrowing: &Flow, day: Day, from: Id<Place>, to: Id<Place>, 
         infer: Infer::Known,
         txn: borrowing.txn,
         payee: None,
+        // v3 bridge: it is whoever's the borrowed flow was, which nothing reads.
+        owner: borrowing.owner,
+        purpose: None,
+        description: None,
+        origin: Origin::Written,
         select: Box::default(),
         codes: Box::default(),
         loc: borrowing.loc,

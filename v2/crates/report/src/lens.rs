@@ -44,6 +44,7 @@ impl Whose {
         self.includes(match subject {
             Subject::Place(place) => book.places[place].owner,
             Subject::Entity(entity) => entity,
+            Subject::Asset(asset) => book.assets[asset].owner,
         })
     }
 }
@@ -147,7 +148,7 @@ fn rounded(exact: i128) -> Option<Qty> {
 /// Assets and liabilities are worth what they fetch today; income, expenses
 /// and equity are past events, worth what they were on their own days.
 pub fn on_balance_sheet(class: Class) -> bool {
-    matches!(class, Class::Asset | Class::Liability)
+    matches!(class, Class::Asset | Class::Debt)
 }
 
 /// Quantities of several commodities: what a place, or a whole subtree, holds.

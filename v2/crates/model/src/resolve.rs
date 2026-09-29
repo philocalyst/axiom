@@ -191,11 +191,6 @@ impl<'s> World<'s> {
         let mut taken = Map::default();
         for name in entities.names.keys(&book.names) {
             let Found::One(entity) = entities.find(&book.names, scope, name) else { continue };
-            // v3 bridge: the market entity is the place `income/market` under another name, and a line that writes
-            // `market` has always meant the place.
-            if entity == book.roots.market {
-                continue;
-            }
             let Some(place) = book.entities[entity].place else { continue };
             let accounts = book.lookup.places.candidates(&book.names, name);
             if !accounts.is_empty() {

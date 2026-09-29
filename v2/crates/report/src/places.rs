@@ -1,7 +1,7 @@
 //! Questions views ask about places.
 
 use axiom_core::Id;
-use axiom_model::{Book, End, Flow, Place};
+use axiom_model::{Book, End, Flow, PathRoot, Place};
 
 
 /// A place's full path.
@@ -35,11 +35,27 @@ pub fn depth(book: &Book, place: Id<Place>) -> usize {
     book.places.depth(place) as usize
 }
 
-/// Whether the place is a class root: `assets`, `expenses`, … Roots group
-/// their class; nobody declares them.
+/// Whether the place is a path root: `assets`, `expenses`, … Roots group
+/// their places; nobody declares them.
 pub fn is_class_root(book: &Book, place: Id<Place>) -> bool {
-    let place = &book.places[place];
-    book.name(place.path) == place.class.root()
+    book.name(book.places[place].path) == book.v3_root(place).path()
+}
+
+// v3 bridge: the report lane replaces `Side` and `v3_side` with purposes.
+/// Which side of the income statement a place is on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Side {
+    Income,
+    Spending,
+}
+
+/// The side the path root a place sits under puts it on, if it is on one.
+pub fn v3_side(book: &Book, place: Id<Place>) -> Option<Side> {
+    match book.v3_root(place) {
+        PathRoot::Income => Some(Side::Income),
+        PathRoot::Expenses => Some(Side::Spending),
+        PathRoot::Assets | PathRoot::Liabilities | PathRoot::Equity => None,
+    }
 }
 
 /// The top-level category a place belongs to: the child of its class root

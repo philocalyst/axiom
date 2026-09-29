@@ -450,6 +450,7 @@ impl Elab<'_, '_> {
             txn: Id::new(self.txn),
             payee: tail.payee,
             owner,
+            // v3 bridge: no v3 line says what a flow is for, and a plan's flows are written like any other.
             purpose: None,
             description: None,
             origin: Origin::Written,
