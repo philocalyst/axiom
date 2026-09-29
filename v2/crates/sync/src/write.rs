@@ -193,13 +193,21 @@ fn date_of(line: &str, ctx: Context) -> Option<Day> {
     ctx.complete(token.split("..").next()?)
 }
 
+/// The items that have a day, in day order and, within a day, file order: what
+/// [`place`] looks a day up in.
+fn by_day(items: &[Item]) -> Vec<&Item> {
+    let mut dated: Vec<&Item> = items.iter().filter(|item| item.day.is_some()).collect();
+    dated.sort_by_key(|item| item.day);
+    dated
+}
+
 /// The line to insert `day` before, and the context there: after the last item
 /// that is not later, or before the first that is, whichever lets the date be
 /// shorter. A file with nothing to go by takes `fallback`.
-fn place(items: &[Item], day: Day, fallback: (usize, Context)) -> (usize, Context) {
-    let dated = || items.iter().filter(|item| item.day.is_some());
-    let after = dated().take_while(|item| item.day <= Some(day)).last();
-    let before = dated().find(|item| item.day > Some(day));
+fn place(dated: &[&Item], day: Day, fallback: (usize, Context)) -> (usize, Context) {
+    let cut = dated.partition_point(|item| item.day <= Some(day));
+    let after = cut.checked_sub(1).map(|last| dated[last]);
+    let before = dated.get(cut).copied();
     match (after, before) {
         (Some(after), Some(before)) if before.ctx.shorten(day).len() < after.ctx.shorten(day).len() => {
             (before.start, before.ctx)
@@ -234,9 +242,10 @@ fn splice(lines: &[&str], mut groups: BTreeMap<usize, Vec<(Day, usize, String)>>
 fn insert_items(text: &str, path: &str, adds: &[(Day, &str)]) -> String {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let (items, last) = scan(&lines, Context::of_path(path));
+    let dated = by_day(&items);
     let mut groups: BTreeMap<usize, Vec<(Day, usize, String)>> = BTreeMap::new();
     for (order, &(day, body)) in adds.iter().enumerate() {
-        let (at, ctx) = place(&items, day, (lines.len(), last));
+        let (at, ctx) = place(&dated, day, (lines.len(), last));
         groups.entry(at).or_default().push((day, order, format!("{} {body}", ctx.shorten(day))));
     }
     splice(&lines, groups)
@@ -301,9 +310,10 @@ pub fn row_keys(text: &str, param: &str) -> Option<Vec<(Day, String)>> {
 fn insert_rows(text: &str, param: &str, rows: &[(Day, &str)]) -> Option<String> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let block = block(&lines, param)?;
+    let dated = by_day(&block.rows);
     let mut groups: BTreeMap<usize, Vec<(Day, usize, String)>> = BTreeMap::new();
     for (order, &(since, row)) in rows.iter().enumerate() {
-        let (at, _) = place(&block.rows, since, (block.end, Context::default()));
+        let (at, _) = place(&dated, since, (block.end, Context::default()));
         groups.entry(at).or_default().push((since, order, format!("{}{row}", block.indent)));
     }
     Some(splice(&lines, groups))
@@ -478,6 +488,30 @@ mod tests {
         assert_eq!(insert_rows("param empty\n", "empty", &rows).unwrap(), "param empty\n  2025 315.6\n  2027 325.0\n");
         let keys = row_keys("param limit\n  2026 single 0 USD 10%\n  2026-07 joint 5\n", "limit").unwrap();
         assert_eq!(keys, [(day("2026-01-01"), "single".to_string()), (day("2026-07-01"), "joint".to_string())]);
+    }
+
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "timings are for release builds")]
+    fn a_hundred_thousand_lines_into_a_file_of_two_hundred_thousand() {
+        let first = day("2016-01-01");
+        let mut text = String::new();
+        for at in 0..200_000 {
+            text += &format!("{} visa -> shop 1 USD\n", first.add_days(at / 55));
+        }
+        let adds: Vec<(Day, String)> = (0..100_000)
+            .map(|at| (first.add_days((at * 7 % 3650) as i32), format!("visa -> new-{at} 2 USD")))
+            .collect();
+        let inserts: Vec<Insert> = adds
+            .iter()
+            .map(|(day, body)| Insert { path: "journal.ax".into(), day: *day, form: Form::Item(body.clone()) })
+            .collect();
+        let started = std::time::Instant::now();
+        let out = apply(&text, "journal.ax", &inserts.iter().collect::<Vec<_>>());
+        eprintln!("100,000 lines into 200,000 in {:?}", started.elapsed());
+        assert_eq!(out.lines().count(), 300_000);
+        assert!(started.elapsed().as_millis() < 1000, "{:?}", started.elapsed());
+        let dates: Vec<&str> = out.lines().map(|line| line.split(' ').next().unwrap()).collect();
+        assert!(dates.windows(2).all(|pair| pair[0] <= pair[1]), "the file is still in day order");
     }
 
     #[test]

@@ -662,4 +662,22 @@ mod tests {
             let _ = csv.records(text, FileId(0), USD);
         }
     }
+
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "timings are for release builds")]
+    fn a_million_rows() {
+        let csv = named("Posting Date", "MM/DD/YYYY", "Amount", "Description");
+        let mut text = String::from("Posting Date,Description,Amount,Balance\n");
+        for row in 0..1_000_000u32 {
+            let (month, day) = (row % 12 + 1, row % 28 + 1);
+            let quoted = if row % 5 == 0 { "\"TRADER JOE'S, #634 \"\"SF\"\"\"" } else { "SHELL OIL 5741" };
+            text += &format!("{month:02}/{day:02}/2026,{quoted},-{}.{:02},\"1,234.56\"\n", row % 900, row % 100);
+        }
+        let started = std::time::Instant::now();
+        let (records, problems) = csv.records(&text, FileId(0), USD);
+        let took = started.elapsed();
+        eprintln!("read {} rows ({} MB) in {took:?}", records.len(), text.len() >> 20);
+        assert!(problems.is_empty() && records.len() == 1_000_000);
+        assert!(took.as_millis() < 1500, "{took:?}");
+    }
 }

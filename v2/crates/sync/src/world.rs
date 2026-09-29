@@ -438,4 +438,53 @@ mod tests {
             "a tie in what is written is not in the way"
         );
     }
+
+    #[test]
+    #[cfg_attr(debug_assertions, ignore = "timings are for release builds")]
+    fn a_statement_of_a_hundred_thousand_records_against_an_account_of_a_million_flows() {
+        let mut seed = 11u64;
+        let mut next = |bound: u64| {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % bound
+        };
+        let names: Vec<String> = (0..100).map(|n| format!("merchant-{n}")).collect();
+        let patterns: Vec<String> = (0..100).map(|n| format!("\"SHOP {n:03}\"")).collect();
+        let known = names.iter().zip(&patterns).map(|(name, pattern)| Known {
+            name: Box::leak(name.clone().into_boxed_str()),
+            account: false,
+            patterns: vec![Box::leak(pattern.clone().into_boxed_str())],
+        });
+        let mut world = world(known.collect());
+        let first = day("2016-01-01");
+        let account = world.accounts.entry("checking").or_default();
+        account.flows = (0..1_000_000)
+            .map(|_| Existing {
+                day: first.add_days(next(3650) as i32),
+                qty: Qty(-(next(50_000) as i64) - 1),
+                settle: None,
+            })
+            .collect();
+        let mut text = String::new();
+        for at in 0..100_000 {
+            // A fifth are on the book already, a few days off; the rest are new.
+            let (day, cents) = match at % 5 {
+                0 => {
+                    let known = account.flows[next(1_000_000) as usize];
+                    (known.day.add_days(next(3) as i32), known.qty.0)
+                }
+                _ => (first.add_days(next(3650) as i32), -(next(50_000) as i64) - 1),
+            };
+            let (whole, fraction) = (cents.abs() / 100, cents.abs() % 100);
+            text += &format!("{day},-{whole}.{fraction:02},POS PURCHASE SHOP {:03} SAN FRANCISCO,,\n", next(120));
+        }
+        let started = std::time::Instant::now();
+        let lines = world.feed(&feed(), &text).unwrap_or_else(|problems| panic!("{}", problems[0].message));
+        eprintln!(
+            "a statement of 100,000 records against 1,000,000 flows: {} lines in {:?}",
+            lines.len(),
+            started.elapsed()
+        );
+        assert!(started.elapsed().as_millis() < 1000, "{:?}", started.elapsed());
+        assert!(lines.len() > 70_000 && lines.len() < 85_000, "{}", lines.len());
+    }
 }
