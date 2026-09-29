@@ -383,7 +383,8 @@ fn a_years_budget_reads_every_month_so_far_even_those_nothing_touched() {
 
 // ─── Looking ahead to the day a return closes ───────────────────────────────
 
-/// An account whose withdrawals count as income, and a return that taxes the
+/// An account whose withdrawals count as income (it has only its opening
+/// balance: no flow of the journal touches it), and a return that taxes the
 /// year's income on April 15 of the next.
 const IRA: &str = "\
 base USD
@@ -411,7 +412,6 @@ law return
   owe tally(income) * 20% to treasury as income-tax
 
 2026-01-05 income/salary -> checking 100 USD
-2026-01-06 checking -> ira 100 USD
 ";
 
 /// Drawing the account down in June makes income in 2026, and the 2026 return
@@ -425,7 +425,7 @@ fn available_runs_the_books_to_the_day_the_return_closes_to_price_a_withdrawal()
             report.sections.iter().find(|s| s.heading.as_deref() == Some("What it would take to reach the rest"));
         assert_eq!(
             lines(reach.unwrap())[0],
-            "assets/ira | 30d | 10,100.00 USD | 2,020.00 USD | 8,080.00 USD | driven by income-tax 2,020.00 USD"
+            "assets/ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD"
         );
     });
 }
