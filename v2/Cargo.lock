@@ -12,6 +12,7 @@ dependencies = [
  "axiom-report",
  "axiom-syntax",
  "axiom-systems",
+ "memchr",
 ]
 
 [[package]]

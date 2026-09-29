@@ -31,17 +31,29 @@ use crate::project::Sources;
 use crate::render::Renderer;
 use crate::style::{ColorChoice, Terminal};
 
-/// What a command produced: text for standard output, and whether it found
-/// errors.
+/// What a command produced. The answer goes to standard output and the
+/// diagnostics to standard error, so `axiom balance > out.txt` holds only the
+/// balances.
 pub struct Outcome {
-    pub text: String,
+    pub answer: String,
+    pub diagnostics: String,
+    /// The ledger has errors.
     pub failed: bool,
 }
 
 impl Outcome {
-    pub fn ok(text: String) -> Outcome {
-        Outcome { text, failed: false }
+    pub fn ok(answer: String) -> Outcome {
+        Outcome { answer, diagnostics: String::new(), failed: false }
     }
+}
+
+/// Where each kind of output goes, and how it may be drawn there.
+#[derive(Clone, Copy)]
+pub struct Terminals {
+    /// Standard output: answers.
+    pub out: Terminal,
+    /// Standard error: diagnostics.
+    pub err: Terminal,
 }
 
 fn main() -> ExitCode {
@@ -50,11 +62,13 @@ fn main() -> ExitCode {
         Ok(invocation) => invocation,
         Err(usage) => return refuse(&usage, ColorChoice::Auto),
     };
-    let terminal = Terminal::detect(invocation.global.color, &io::stdout());
-    match commands::run(&invocation, terminal) {
+    let color = invocation.global.color;
+    let terminals = Terminals { out: Terminal::detect(color, &io::stdout()), err: Terminal::detect(color, &io::stderr()) };
+    match commands::run(&invocation, terminals) {
         Ok(outcome) => {
             // A closed pipe (`axiom balance | head`) is the reader's choice, not a failure.
-            let _ = io::stdout().write_all(outcome.text.as_bytes());
+            let _ = io::stderr().write_all(outcome.diagnostics.as_bytes());
+            let _ = io::stdout().write_all(outcome.answer.as_bytes());
             if outcome.failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
         }
         Err(problem) => refuse(&problem, invocation.global.color),

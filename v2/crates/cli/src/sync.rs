@@ -215,7 +215,7 @@ fn report(jobs: &[Job], results: &[Result<usize, Failure>], terminal: Terminal) 
             text.push_str(&failure.details(terminal));
         }
     }
-    Outcome { text, failed: results.iter().any(Result::is_err) }
+    Outcome { answer: text, diagnostics: String::new(), failed: results.iter().any(Result::is_err) }
 }
 
 impl Failure {
@@ -317,9 +317,9 @@ mod tests {
 
         let outcome = report(&jobs, &results, Terminal::plain(100));
         assert!(outcome.failed);
-        assert!(outcome.text.starts_with("✗ prices.ax  the output is not valid Axiom ("), "{}", outcome.text);
-        assert!(outcome.text.contains("[prices.ax:1:"), "{}", outcome.text);
-        assert!(outcome.text.contains("this is not axiom"), "{}", outcome.text);
+        assert!(outcome.answer.starts_with("✗ prices.ax  the output is not valid Axiom ("), "{}", outcome.answer);
+        assert!(outcome.answer.contains("[prices.ax:1:"), "{}", outcome.answer);
+        assert!(outcome.answer.contains("this is not axiom"), "{}", outcome.answer);
     }
 
     #[test]
@@ -386,7 +386,7 @@ mod tests {
         let outcome = report(&jobs, &results, Terminal::plain(100));
         assert!(outcome.failed);
         assert_eq!(
-            outcome.text,
+            outcome.answer,
             "\
 ✓ prices/2026.ax  312 items written
 ✗ statements.ax   the command failed (exit status: 3)

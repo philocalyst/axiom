@@ -185,10 +185,7 @@ impl Sources {
 
     /// Parses every file, in parallel, into what the model builds from.
     pub fn parse(&self) -> (Vec<Source<'_>>, Vec<Diagnostic>) {
-        // `par::map` returns values that outlive the item it was handed only if
-        // the item is itself a reference, so it maps over references.
-        let files: Vec<&SourceFile> = self.files.iter().collect();
-        let parsed = par::map(&files, |&file| axiom_syntax::parse(file.id, &file.text));
+        let parsed = par::map_each(&self.files, |file| axiom_syntax::parse(file.id, &file.text));
         let mut diagnostics = Vec::new();
         let sources = self
             .files
@@ -216,6 +213,11 @@ mod tests {
         sources.files.iter().map(|file| (&*file.path, file.embedded)).collect()
     }
 
+    /// The project's own files, without the embedded systems every project gets.
+    fn own(sources: &Sources) -> Vec<&str> {
+        sources.files.iter().filter(|file| !file.embedded).map(|file| &*file.path).collect()
+    }
+
     #[test]
     fn finds_the_root_from_below_and_lists_files_in_path_order() {
         let dir = TempDir::new("root");
@@ -230,8 +232,7 @@ mod tests {
         let project = Project::find(&dir.path().join("journal/2026")).unwrap();
         assert_eq!(project.root, fs::canonicalize(dir.path()).unwrap());
         let sources = project.load().unwrap();
-        let paths: Vec<_> = texts(&sources).into_iter().map(|(path, _)| path).collect();
-        assert_eq!(paths, ["axiom.ax", "journal/2026/01.ax", "journal/2026/02.ax", "journal/2026.ax"]);
+        assert_eq!(own(&sources), ["axiom.ax", "journal/2026/01.ax", "journal/2026/02.ax", "journal/2026.ax"]);
     }
 
     #[test]
@@ -247,8 +248,7 @@ mod tests {
         symlink(dir.path(), dir.path().join("shared/loop/back")).unwrap();
 
         let sources = Project::find(dir.path()).unwrap().load().unwrap();
-        let paths: Vec<_> = texts(&sources).into_iter().map(|(path, _)| path).collect();
-        assert_eq!(paths, ["axiom.ax", "linked.ax", "shared/loop/inner.ax", "shared/prices.ax"]);
+        assert_eq!(own(&sources), ["axiom.ax", "linked.ax", "shared/loop/inner.ax", "shared/prices.ax"]);
     }
 
     #[test]
@@ -257,7 +257,7 @@ mod tests {
         dir.write("first-steps.ax", "2026-01-01 a -> b 1 USD\n");
 
         let project = Project::find(&dir.path().join("first-steps.ax")).unwrap();
-        assert_eq!(texts(&project.load().unwrap()), [("first-steps.ax", false)]);
+        assert_eq!(own(&project.load().unwrap()), ["first-steps.ax"]);
 
         let error = Project::find(dir.path()).err().unwrap();
         assert!(error.message.contains("no axiom.ax"), "{}", error.message);
