@@ -29,6 +29,8 @@ pub struct Flow {
     pub codes: Box<[Sym]>,
     /// The leg, or the header for a flow without legs.
     pub loc: Loc,
+    /// The leg carries its own `!`, on top of any the transaction has.
+    pub waived: bool,
 }
 
 impl Flow {
@@ -56,7 +58,10 @@ pub enum Infer {
     Unknown,
     /// `= 5_000 USD`: whatever makes this end's place hold `balance` after
     /// the flow.
-    Target { end: End, balance: Qty },
+    Target {
+        end: End,
+        balance: Qty,
+    },
     /// `all`: everything the selected parcels at `from` hold.
     All,
 }
@@ -100,6 +105,9 @@ pub struct Waive {
 pub struct Assert {
     pub day: Day,
     pub place: Id<Place>,
+    /// As written, in the place's display sign (`Class::display_sign`):
+    /// `visa = 1_234.56 USD` says 1,234.56 is owed, and is stored positive.
+    /// The engine applies the sign when it compares with the balance.
     pub amount: Amount,
     /// `!`: an unexplained gap becomes an explicit flow from `unknown`.
     pub pad: Option<Waive>,
@@ -130,7 +138,7 @@ pub struct Plan {
 #[derive(Default)]
 pub struct Prices {
     /// Sorted by `(unit, quote, day)`.
-    quotes: Vec<Quote>,
+    pub(crate) quotes: Vec<Quote>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -147,20 +155,6 @@ pub struct Quote {
 }
 
 impl Prices {
-    /// Sorts `quotes`. On the same pair and day, written prices beat implied
-    /// ones and later declarations beat earlier ones.
-    pub fn new(quotes: Vec<Quote>) -> Prices {
-        let _ = quotes;
-        todo!("lane B")
-    }
-
-    /// Whole `quote` units per whole `unit` on `day`: the latest quote at or
-    /// before it, used directly, inverted, or through `via` (the base).
-    pub fn rate(&self, unit: Id<Commodity>, quote: Id<Commodity>, day: Day, via: Id<Commodity>) -> Option<Ratio> {
-        let _ = (unit, quote, day, via);
-        todo!("lane B")
-    }
-
     pub fn quotes(&self) -> &[Quote] {
         &self.quotes
     }

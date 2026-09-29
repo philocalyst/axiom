@@ -6,10 +6,11 @@
 //! place under that one", "is this kind a 401k", and "does this jurisdiction
 //! include that one" are all interval tests.
 
-use axiom_core::{Arena, Day, Groups, Id, Interner, Loc, Qty, Ratio, Span, Sym, Tree};
+use axiom_core::{Arena, Day, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Tree};
 
 use crate::journal::{Assert, Event, Flow, Plan, Prices, Txn};
 use crate::law::{Law, Rules, Ty, Value};
+use crate::names::{Names, Scoped};
 
 pub use axiom_syntax::{EventState, On, Period, Policy};
 
@@ -46,6 +47,21 @@ pub struct Book<'s> {
     pub prices: Prices,
     pub plans: Vec<Plan>,
     pub syncs: Vec<SyncSpec>,
+    /// How names are found. [`build`](crate::build) fills it; in a book made by
+    /// hand it is empty, and `Book::place` and its siblings find nothing.
+    pub lookup: Lookup,
+}
+
+/// Every way of finding a thing by name: each name and each of its `/`
+/// suffixes, mapped to what they may mean.
+#[derive(Default)]
+pub struct Lookup {
+    pub(crate) places: Names<Place>,
+    pub(crate) entities: Scoped<Entity>,
+    pub(crate) kinds: Scoped<Kind>,
+    pub(crate) params: Scoped<Param>,
+    pub(crate) laws: Names<Law>,
+    pub(crate) commodities: Map<Sym, Id<Commodity>>,
 }
 
 /// Built-in things every book has.
@@ -150,6 +166,7 @@ pub struct Residence {
 }
 
 /// What something is: `bank`, `401k`, `stock`, `grant`, `person`.
+#[derive(Clone)]
 pub struct Kind {
     pub name: Sym,
     pub sort: Sort,
@@ -176,6 +193,21 @@ pub enum Sort {
     Place(Class),
     Commodity,
     Entity,
+}
+
+impl Sort {
+    /// The word for a kind of this sort: `asset`, `expense`, `commodity`, …
+    pub fn noun(self) -> &'static str {
+        match self {
+            Sort::Place(Class::Asset) => "asset",
+            Sort::Place(Class::Liability) => "liability",
+            Sort::Place(Class::Income) => "income",
+            Sort::Place(Class::Expense) => "expense",
+            Sort::Place(Class::Equity) => "equity",
+            Sort::Commodity => "commodity",
+            Sort::Entity => "entity",
+        }
+    }
 }
 
 /// A declared property: `has beneficiary entity`.
@@ -290,12 +322,21 @@ impl Amount {
 }
 
 /// Why a written name did not resolve.
-#[derive(Debug)]
 pub enum Miss<T> {
     /// Nothing by that name; perhaps the closest name was meant.
     Unknown { suggestion: Option<Sym> },
     /// Several things end with that suffix.
     Ambiguous(Box<[Id<T>]>),
+}
+
+// Written out because deriving would demand `T: Debug` of the marker type.
+impl<T> std::fmt::Debug for Miss<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Miss::Unknown { suggestion } => f.debug_struct("Unknown").field("suggestion", suggestion).finish(),
+            Miss::Ambiguous(ids) => f.debug_tuple("Ambiguous").field(ids).finish(),
+        }
+    }
 }
 
 impl<'s> Book<'s> {
@@ -304,29 +345,34 @@ impl<'s> Book<'s> {
     }
 
     /// A place by full path or unique suffix (`checking`), or an entity's `via`.
+    /// A place wins over an entity of the same name.
     pub fn place(&self, text: &str) -> Result<Id<Place>, Miss<Place>> {
-        let _ = text;
-        todo!("lane B")
+        let miss = match self.lookup.places.resolve(&self.names, text, |_| true) {
+            Err(miss @ Miss::Unknown { .. }) => miss,
+            found => return found,
+        };
+        match self.entity(text) {
+            Ok(entity) => self.entities[entity].via.ok_or(miss),
+            Err(_) => Err(miss),
+        }
     }
 
     pub fn entity(&self, text: &str) -> Result<Id<Entity>, Miss<Entity>> {
-        let _ = text;
-        todo!("lane B")
+        self.lookup.entities.names.resolve(&self.names, text, |_| true)
     }
 
     pub fn commodity(&self, symbol: &str) -> Option<Id<Commodity>> {
-        let _ = symbol;
-        todo!("lane B")
+        self.names.get(symbol).and_then(|sym| self.lookup.commodities.get(&sym).copied())
     }
 
+    /// A kind by name (`401k`), qualified by its system (`us/401k/401k`), or by
+    /// a system named after it (`us/401k`).
     pub fn kind(&self, text: &str) -> Result<Id<Kind>, Miss<Kind>> {
-        let _ = text;
-        todo!("lane B")
+        crate::kinds::find(&self.lookup.kinds, &self.names, &self.systems, text, |_| true)
     }
 
     pub fn law(&self, name: &str) -> Result<Id<Law>, Miss<Law>> {
-        let _ = name;
-        todo!("lane B")
+        self.lookup.laws.resolve(&self.names, name, |_| true)
     }
 
     /// Whether `kind` is `ancestor` or inherits from it.
@@ -337,8 +383,12 @@ impl<'s> Book<'s> {
     /// `amount` in `unit` at the latest prices on or before `day`, rounded to
     /// `unit`'s precision. `None` without a price path.
     pub fn convert(&self, amount: Amount, unit: Id<Commodity>, day: Day) -> Option<Amount> {
-        let _ = (amount, unit, day);
-        todo!("lane B")
+        if amount.unit == unit {
+            return Some(amount);
+        }
+        let rate = self.prices.rate(amount.unit, unit, day, self.base)?;
+        let (from, to) = (self.commodities[amount.unit].scale, self.commodities[unit].scale);
+        Some(Amount::new(crate::prices::rescale(amount.qty, from, to, rate)?, unit))
     }
 
     /// `1,234.56 USD`

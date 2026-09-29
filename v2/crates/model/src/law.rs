@@ -47,6 +47,9 @@ pub enum Owner {
     Entity(Id<Entity>),
     /// A system's top-level law: governs its residents and all they own.
     System(Id<System>),
+    /// A law written at the top level of a project file: governs every place
+    /// in the book, with the place's owner as `self`.
+    Book,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -61,19 +64,27 @@ pub enum Trigger {
     Always,
 }
 
+#[derive(Debug)]
 pub struct Step {
     pub loc: Loc,
     pub kind: StepKind,
 }
 
+#[derive(Debug)]
 pub enum StepKind {
     When(NodeId),
     /// The bound value is the node's; later nodes read it with [`Op::Local`].
     Let(NodeId),
-    Require { cond: NodeId, otherwise: Option<Effect>, message: Option<Sym>, warn: bool },
+    Require {
+        cond: NodeId,
+        otherwise: Option<Effect>,
+        message: Option<Sym>,
+        warn: bool,
+    },
     Effect(Effect),
 }
 
+#[derive(Debug)]
 pub enum Effect {
     /// An obligation from the subject's owner to `to`, due by `due` (default:
     /// the triggering day). `name` defaults to the law's name.
@@ -92,6 +103,7 @@ impl NodeId {
     }
 }
 
+#[derive(Debug)]
 pub struct Node {
     pub op: Op,
     /// Statically checked: evaluation never meets a type it did not expect.
@@ -101,6 +113,7 @@ pub struct Node {
     pub first: NodeId,
 }
 
+#[derive(Debug)]
 pub enum Op {
     /// A literal, or a name resolved at compile time. Arguments folded into a
     /// [`Func`] (`in`, `year` in `total(in, year)`) stay as constants.
@@ -109,7 +122,8 @@ pub enum Op {
     /// The value bound by a `let`.
     Local(NodeId),
     Field(NodeId, Field),
-    /// `limit[year]`: a param looked up by the key nodes.
+    /// `limit[year]`: a param looked up by the key nodes. No keys, as for a
+    /// bare `catch-up`, means the row in force on the day the law runs.
     Param(Id<Param>, Box<[NodeId]>),
     Call(Func, Box<[NodeId]>),
     Neg(NodeId),
@@ -266,7 +280,10 @@ pub enum Value {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fault {
-    NoPrice { unit: Id<Commodity>, quote: Id<Commodity> },
+    NoPrice {
+        unit: Id<Commodity>,
+        quote: Id<Commodity>,
+    },
     /// A property the subject never set and whose kind gives no default.
     Unset(Sym),
     /// No param row at or before the day asked for, or no row for the names.
