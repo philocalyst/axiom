@@ -12,7 +12,9 @@
 
 use axiom_core::glob::is_pattern;
 use axiom_core::{Diagnostic, Id, Loc, Sym};
-use axiom_syntax::{self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep, UnOp};
+use axiom_syntax::{
+    self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep, UnOp,
+};
 
 use super::types::{binary, expected, is_amount, is_test, mismatch, negate, unify};
 use super::vars::When;
@@ -266,7 +268,9 @@ impl<'s> Compiler<'_, '_, 's> {
                     self.file[args].iter().for_each(|&arg| mark(arg, Role::Keyword))
                 }
                 ExprKind::Index(base, _) => mark(base, Role::ParamBase),
-                ExprKind::Is(_, alternatives) => self.file[alternatives].iter().for_each(|&alt| mark(alt, Role::Pattern)),
+                ExprKind::Is(_, alternatives) => {
+                    self.file[alternatives].iter().for_each(|&alt| mark(alt, Role::Pattern))
+                }
                 _ => {}
             }
         }
@@ -671,13 +675,17 @@ impl<'s> Compiler<'_, '_, 's> {
         let dir = match word(0) {
             "in" => Dir::In,
             "out" => Dir::Out,
-            _ => return Err(self.keyword_error(args[0].0, "total", "`in` or `out`").into()),
+            _ => {
+                return Err(self.keyword_error(args[0].0, "total", "`in` or `out`").into());
+            }
         };
         let window = match word(1) {
             "month" => Window::Month,
             "year" => Window::Year,
             "ever" => Window::Ever,
-            _ => return Err(self.keyword_error(args[1].0, "total", "`month`, `year` or `ever`").into()),
+            _ => {
+                return Err(self.keyword_error(args[1].0, "total", "`month`, `year` or `ever`").into());
+            }
         };
         if let Some(&(node, ty)) = args.get(2)
             && ty != Ty::Kind

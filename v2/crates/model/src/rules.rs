@@ -199,8 +199,11 @@ fn timed(book: &Book, residents: &Residents) -> Vec<Rule> {
                 }
             }
             Owner::Book => {
-                let mut owners: Vec<Id<Entity>> =
-                    book.places.values().map(|place| book.entities[place.owner].member.unwrap_or(place.owner)).collect();
+                let mut owners: Vec<Id<Entity>> = book
+                    .places
+                    .values()
+                    .map(|place| book.entities[place.owner].member.unwrap_or(place.owner))
+                    .collect();
                 owners.sort();
                 owners.dedup();
                 rules.extend(owners.into_iter().map(|owner| always(id, Subject::Entity(owner))));

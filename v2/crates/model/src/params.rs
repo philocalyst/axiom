@@ -37,7 +37,9 @@ impl Shape {
 
 pub(crate) fn declare<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], diags: &mut Vec<Diagnostic>) {
     for entry in entries {
-        let Entry::Param(written) = entry else { continue };
+        let Entry::Param(written) = entry else {
+            continue;
+        };
         let (file, home) = (written.file(), written.home());
         let system = if let Home::System(system) = home { Some(system) } else { None };
         let name = written.node.name.0;
@@ -121,7 +123,9 @@ fn one_row<'s>(
                 .label(loc, "move it before the names"));
         }
         since =
-            Some(day.ok_or_else(|| Diagnostic::error("param-key", "this year does not exist").label(loc, "out of range"))?);
+            Some(day.ok_or_else(|| {
+                Diagnostic::error("param-key", "this year does not exist").label(loc, "out of range")
+            })?);
     }
     let (value, _) = world.constant(home, file, row.value, None)?;
     Ok(ParamRow { since, names: names.into(), value, loc: row.loc })

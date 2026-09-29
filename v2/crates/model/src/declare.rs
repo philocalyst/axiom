@@ -63,7 +63,9 @@ pub(crate) struct Settings<'s> {
 pub(crate) fn settings<'s>(entries: &[Entry<'_, 's>], diags: &mut Vec<Diagnostic>) -> Settings<'s> {
     let mut settings = Settings { base: None, relaxed: false, layout_free: false };
     for entry in entries {
-        let Entry::Setting(site, setting) = entry else { continue };
+        let Entry::Setting(site, setting) = entry else {
+            continue;
+        };
         match *setting {
             Setting::Base(name) => {
                 let word = Word { text: name.0, loc: site.source.file.loc(name.0) };
@@ -88,7 +90,12 @@ pub(crate) fn settings<'s>(entries: &[Entry<'_, 's>], diags: &mut Vec<Diagnostic
 
 /// What each home has brought into scope: its `use` lines, the system of every
 /// `lives` line (which implies a `use`), and `std` for everyone.
-pub(crate) fn scopes(entries: &[Entry], systems: &SystemIndex, tree: &Tree<crate::book::System>, diags: &mut Vec<Diagnostic>) -> Scopes {
+pub(crate) fn scopes(
+    entries: &[Entry],
+    systems: &SystemIndex,
+    tree: &Tree<crate::book::System>,
+    diags: &mut Vec<Diagnostic>,
+) -> Scopes {
     let mut used: Vec<(Home, Id<crate::book::System>)> = Vec::new();
     for entry in entries {
         match entry {
@@ -185,7 +192,15 @@ pub(crate) fn declare<'a, 's>(
         entities: entities.declared,
         places: places.declared,
     };
-    World { book, scopes, systems, props: PropTable::default(), declared, tallies: Set::default(), ordinal: places.ordinal }
+    World {
+        book,
+        scopes,
+        systems,
+        props: PropTable::default(),
+        declared,
+        tallies: Set::default(),
+        ordinal: places.ordinal,
+    }
 }
 
 // ─── Commodities ────────────────────────────────────────────────────────────
@@ -204,7 +219,14 @@ impl Commodities {
         names.get(symbol).and_then(|sym| self.by_symbol.get(&sym).copied())
     }
 
-    fn add<'s>(&mut self, names: &mut Interner<'s>, symbol: &'s str, scale: u8, kind: Id<Kind>, home: Home) -> Id<Commodity> {
+    fn add<'s>(
+        &mut self,
+        names: &mut Interner<'s>,
+        symbol: &'s str,
+        scale: u8,
+        kind: Id<Kind>,
+        home: Home,
+    ) -> Id<Commodity> {
         let symbol = names.intern(symbol);
         let commodity = Commodity {
             symbol,
@@ -227,7 +249,11 @@ impl Commodities {
     fn typo_of<'a>(&self, names: &'a Interner, symbol: &str) -> Option<&'a str> {
         let limit = (symbol.len() / 3).max(1);
         let known = self.by_symbol.keys().map(|&sym| names.name(sym));
-        known.map(|other| (edits(symbol, other), other)).filter(|&(distance, _)| distance <= limit).min().map(|(_, other)| other)
+        known
+            .map(|other| (edits(symbol, other), other))
+            .filter(|&(distance, _)| distance <= limit)
+            .min()
+            .map(|(_, other)| other)
     }
 }
 
@@ -280,7 +306,13 @@ fn commodities<'s>(
 
 /// The book's base currency: the one `base` says, or else the one currency
 /// the journal uses.
-fn base<'s>(table: &mut Commodities, settings: &Settings<'s>, units: &[Seen<'s>], kinds: &Kinds, cx: &mut Cx<'_, 's>) -> Id<Commodity> {
+fn base<'s>(
+    table: &mut Commodities,
+    settings: &Settings<'s>,
+    units: &[Seen<'s>],
+    kinds: &Kinds,
+    cx: &mut Cx<'_, 's>,
+) -> Id<Commodity> {
     let root = kinds.roots.commodity();
     if let Some(word) = settings.base {
         if let Some(id) = table.find(cx.names, word.text) {
@@ -297,8 +329,11 @@ fn base<'s>(table: &mut Commodities, settings: &Settings<'s>, units: &[Seen<'s>]
         let mut chain = kinds.tree.lineage(table.arena[id].kind);
         chain.any(|kind| Some(kinds.tree[kind].name) == currency)
     };
-    let used: Vec<(&Seen, Id<Commodity>)> =
-        units.iter().filter(|unit| unit.journal).filter_map(|unit| Some((unit, table.find(cx.names, unit.symbol)?))).collect();
+    let used: Vec<(&Seen, Id<Commodity>)> = units
+        .iter()
+        .filter(|unit| unit.journal)
+        .filter_map(|unit| Some((unit, table.find(cx.names, unit.symbol)?)))
+        .collect();
     let currencies: Vec<_> = used.iter().copied().filter(|&(_, id)| is_currency(id)).collect();
     let candidates = if currencies.is_empty() { used } else { currencies };
     match candidates.as_slice() {
@@ -404,7 +439,13 @@ struct Places {
 /// accounts add to them, and so does any full path under a class root that is
 /// written anywhere: writing `expenses/food/snacks` opens it, unless it is one
 /// letter from a declared place, which is a typo and is left unopened.
-fn places<'s>(entries: &[Entry<'_, 's>], opened: &[&'s str], kinds: &Kinds, entities: &Entities, cx: &mut Cx<'_, 's>) -> Places {
+fn places<'s>(
+    entries: &[Entry<'_, 's>],
+    opened: &[&'s str],
+    kinds: &Kinds,
+    entities: &Entities,
+    cx: &mut Cx<'_, 's>,
+) -> Places {
     let accounts: Vec<Written<_>> = decls(entries, DeclKind::Account).collect();
     // An account outside every class root has no class, so it cannot exist.
     let valid: Vec<bool> = accounts.iter().map(|written| root_is_valid(written, cx)).collect();
@@ -415,7 +456,8 @@ fn places<'s>(entries: &[Entry<'_, 's>], opened: &[&'s str], kinds: &Kinds, enti
         .chain(accounts.iter().zip(&valid).filter(|&(_, &ok)| ok).map(|(written, _)| written.node.name.0))
         .collect();
     let declared_set: Set<&str> = declared_paths.iter().copied().collect();
-    let opens = opened.iter().copied().filter(|path| declared_set.contains(path) || !typo_of_place(path, &declared_paths));
+    let opens =
+        opened.iter().copied().filter(|path| declared_set.contains(path) || !typo_of_place(path, &declared_paths));
     let (mut tree, by_path) = paths::build(declared_paths.iter().copied().chain(opens), |path| {
         let class = class_of(path).expect("only paths under a class root are written");
         Place {
@@ -466,9 +508,12 @@ fn places<'s>(entries: &[Entry<'_, 's>], opened: &[&'s str], kinds: &Kinds, enti
                     let loc = file.loc(alias.0);
                     let named = cx.names.name(tree[first].path);
                     cx.diags.push(
-                        Diagnostic::error("duplicate-declaration", format!("`{}` is already the alias of `{named}`", alias.0))
-                            .label(loc, "an alias names one account")
-                            .help("choose another alias"),
+                        Diagnostic::error(
+                            "duplicate-declaration",
+                            format!("`{}` is already the alias of `{named}`", alias.0),
+                        )
+                        .label(loc, "an alias names one account")
+                        .help("choose another alias"),
                     );
                 }
                 None => {

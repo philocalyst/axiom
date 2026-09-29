@@ -14,7 +14,7 @@ use crate::journal::{Assert, Gap, Quote, Split, Waive};
 use crate::scope::Home;
 
 /// A settlement event, before its code is checked against the flows.
-pub(super) struct RawEvent<'s> {
+pub(crate) struct RawEvent<'s> {
     pub day: Day,
     pub code: &'s str,
     pub code_loc: axiom_core::Loc,
@@ -39,14 +39,15 @@ impl<'s> Elab<'_, 's> {
         };
         let gap = match assert.gap {
             ast::Gap::Refused => Some(Gap::Refused),
-            ast::Gap::Waived(waive) => {
-                Some(Gap::Unexplained(Waive { loc: waive.at, reason: waive.reason.map(|reason| self.world.sym(reason)) }))
-            }
-            ast::Gap::Via(name) => {
-                self.end_of(name.0).map(|end| Gap::Via { place: end, loc: self.file.loc(name.0) })
-            }
+            ast::Gap::Waived(waive) => Some(Gap::Unexplained(Waive {
+                loc: waive.at,
+                reason: waive.reason.map(|reason| self.world.sym(reason)),
+            })),
+            ast::Gap::Via(name) => self.end_of(name.0).map(|end| Gap::Via { place: end, loc: self.file.loc(name.0) }),
         };
-        let (Some(place), Some(stated), Some(gap)) = (place, stated, gap) else { return };
+        let (Some(place), Some(stated), Some(gap)) = (place, stated, gap) else {
+            return;
+        };
         let amount = stated.unwrap_or_else(|| zero_of(self.world, place));
         self.sink.asserts.push(Assert { day: assert.date, place, amount, gap, loc: item.loc });
     }
@@ -85,7 +86,9 @@ impl<'s> Elab<'_, 's> {
             );
         };
         let (unit, quote) = (self.commodity(price.unit.0), self.commodity(quote.0));
-        let (Some(unit), Some(quote)) = (unit, quote) else { return };
+        let (Some(unit), Some(quote)) = (unit, quote) else {
+            return;
+        };
         let (unit_loc, price_loc) = (self.file.loc(price.unit.0), self.file.loc(&price.price));
         match price.price.num().to_ratio().filter(|rate| !rate.is_zero()) {
             Some(_) if unit == quote => self.sink.diags.push(
@@ -96,20 +99,20 @@ impl<'s> Elab<'_, 's> {
             Some(rate) => {
                 self.sink.quotes.push(Quote { unit, quote, day: price.date, rate, implied: false, loc: item.loc })
             }
-            None => self.sink.diags.push(
-                Diagnostic::error("price-zero", "a price is more than nothing").label(price_loc, "this price"),
-            ),
+            None => self
+                .sink
+                .diags
+                .push(Diagnostic::error("price-zero", "a price is more than nothing").label(price_loc, "this price")),
         }
     }
 
     /// `2026-05-22 FAST split 2 for 1`
     pub fn split_line(&mut self, item: &Item<'s>, split: &ast::Split<'s>) {
         let unit = self.commodity(split.unit.0);
-        let ratio = split.numerator.to_ratio().zip(split.denominator.to_ratio()).and_then(|(new, old)| new.checked_div(old));
+        let ratio =
+            split.numerator.to_ratio().zip(split.denominator.to_ratio()).and_then(|(new, old)| new.checked_div(old));
         match (unit, ratio) {
-            (Some(unit), Some(ratio)) => {
-                self.sink.splits.push(Split { day: split.date, unit, ratio, loc: item.loc })
-            }
+            (Some(unit), Some(ratio)) => self.sink.splits.push(Split { day: split.date, unit, ratio, loc: item.loc }),
             (Some(_), None) => self.sink.diags.push(
                 Diagnostic::error("bad-split", "this split is too large to count exactly")
                     .label(item.loc, "the ratio does not fit")
@@ -133,7 +136,9 @@ fn zero_of(world: &World, place: Id<Place>) -> Amount {
 /// a system the project does not use never applies.
 pub(super) fn code_rules<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], diags: &mut Vec<Diagnostic>) {
     for entry in entries {
-        let Entry::Code(written) = entry else { continue };
+        let Entry::Code(written) = entry else {
+            continue;
+        };
         let (file, rule) = (written.file(), written.node);
         let mut scopes = Vec::new();
         for name in &file[rule.on] {

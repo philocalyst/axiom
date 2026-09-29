@@ -143,8 +143,15 @@ fn cycles(after: &[Vec<usize>], stuck: &[usize]) -> Vec<Vec<usize>> {
         }
     }
     let n = after.len();
-    let mut walk =
-        Walk { after, index: vec![None; n], low: vec![0; n], on_stack: vec![false; n], stack: Vec::new(), found: Vec::new(), next: 0 };
+    let mut walk = Walk {
+        after,
+        index: vec![None; n],
+        low: vec![0; n],
+        on_stack: vec![false; n],
+        stack: Vec::new(),
+        found: Vec::new(),
+        next: 0,
+    };
     for &law in stuck {
         if walk.index[law].is_none() {
             walk.visit(law);
@@ -171,7 +178,9 @@ fn cycle_diagnostic(book: &Book, members: &[usize], reads: &[Vec<Sym>], writes: 
         });
         let law = &book.laws.as_slice()[at];
         let text = match waits {
-            Some((tally, writer)) => format!("`{}` reads `{}`, which `{}` counts", name(at), book.name(tally), name(writer)),
+            Some((tally, writer)) => {
+                format!("`{}` reads `{}`, which `{}` counts", name(at), book.name(tally), name(writer))
+            }
             None => format!("`{}` is part of the loop", name(at)),
         };
         diagnostic = if n == 0 { diagnostic.label(law.loc, text) } else { diagnostic.context(law.loc, text) };

@@ -42,7 +42,10 @@ enum Total {
     /// Whatever the legs sum to.
     Sum,
     Stated(Amount),
-    Exchange { own: Amount, total: Amount },
+    Exchange {
+        own: Amount,
+        total: Amount,
+    },
 }
 
 impl Elab<'_, '_> {
@@ -73,7 +76,16 @@ impl Elab<'_, '_> {
         )
     }
 
-    fn move_between(&self, from: &Placed, to: &Placed, amounts: (Amount, Amount), infer: Infer, pending: bool, tail: Tail, loc: axiom_core::Loc) -> Move {
+    fn move_between(
+        &self,
+        from: &Placed,
+        to: &Placed,
+        amounts: (Amount, Amount),
+        infer: Infer,
+        pending: bool,
+        tail: Tail,
+        loc: axiom_core::Loc,
+    ) -> Move {
         Move { from: from.clone(), to: to.clone(), out: amounts.0, arrive: amounts.1, infer, pending, tail, loc }
     }
 
@@ -176,7 +188,10 @@ impl Elab<'_, '_> {
             (Some(Stated::Fixed(amount)), Some(Stated::Unknown(unit))) => Some(one_unknown(amount, unit, false)),
             _ => self.fail(
                 Diagnostic::error("unknown-exchange", "both amounts of an exchange cannot be inferred")
-                    .label(at.flow, "the two commodities differ, and neither side states an amount to solve the other from")
+                    .label(
+                        at.flow,
+                        "the two commodities differ, and neither side states an amount to solve the other from",
+                    )
                     .help("state one side's amount, or both amounts"),
             ),
         }
@@ -186,7 +201,8 @@ impl Elab<'_, '_> {
 
     /// The header names one place; the legs are the other side.
     fn split(&mut self, shape: &Shape, named: &Placed, named_is_from: bool) -> Option<Moves> {
-        let (own, other) = if named_is_from { (shape.from.slot, shape.to.slot) } else { (shape.to.slot, shape.from.slot) };
+        let (own, other) =
+            if named_is_from { (shape.from.slot, shape.to.slot) } else { (shape.to.slot, shape.from.slot) };
         let total = self.split_total(own, other, shape.loc);
         let mut kept = if named_is_from { Some(()) } else { self.refuse_selectors(named) };
         for leg in shape.legs.iter().filter(|_| named_is_from) {
@@ -228,7 +244,9 @@ impl Elab<'_, '_> {
         };
         let pending = own.into_iter().chain(other).any(|slot| slot.pending);
         let moves = match total {
-            Total::Exchange { own, total } => self.exchange(shape, named, named_is_from, (own, total), &shares, pending),
+            Total::Exchange { own, total } => {
+                self.exchange(shape, named, named_is_from, (own, total), &shares, pending)
+            }
             _ => shape
                 .legs
                 .iter()
@@ -264,7 +282,14 @@ impl Elab<'_, '_> {
                 (Some(own), Some(total)) if own.qty == total.qty => Some(Total::Stated(total)),
                 (Some(own), Some(total)) => self.fail(
                     Diagnostic::error("amounts-differ", "the two sides of this split state different amounts")
-                        .label(loc, format!("{} on one side, {} on the other", self.world.book.show(own), self.world.book.show(total)))
+                        .label(
+                            loc,
+                            format!(
+                                "{} on one side, {} on the other",
+                                self.world.book.show(own),
+                                self.world.book.show(total)
+                            ),
+                        )
                         .help("state the total once, or state both in different commodities to make it an exchange"),
                 ),
                 (None, _) => not_a_total(self, own),
@@ -274,14 +299,24 @@ impl Elab<'_, '_> {
     }
 
     /// One leg of a split, as a flow between the named place and the leg's own.
-    fn leg_move(&self, shape: &Shape, leg: &Leg, share: Share, named: &Placed, named_is_from: bool, pending: bool) -> Move {
+    fn leg_move(
+        &self,
+        shape: &Shape,
+        leg: &Leg,
+        share: Share,
+        named: &Placed,
+        named_is_from: bool,
+        pending: bool,
+    ) -> Move {
         let (from, to, out, arrive) = match named_is_from {
             true => (named, &leg.placed, share.header, share.leg),
             false => (&leg.placed, named, share.leg, share.header),
         };
         let infer = match leg.slot.stated {
             Stated::Unknown(_) => Infer::Unknown,
-            Stated::Target(target) => Infer::Target { end: if named_is_from { End::To } else { End::From }, balance: target.qty },
+            Stated::Target(target) => {
+                Infer::Target { end: if named_is_from { End::To } else { End::From }, balance: target.qty }
+            }
             Stated::All(_) => Infer::All,
             Stated::Fixed(_) | Stated::Rest => Infer::Known,
         };
@@ -321,7 +356,15 @@ impl Elab<'_, '_> {
                 true => (&head.placed, &leg.placed, (share.header, share.leg)),
                 false => (&leg.placed, &head.placed, (share.leg, share.header)),
             };
-            moves.push(self.move_between(from, to, amounts, Infer::Known, pending || leg.slot.pending, leg_tail, leg.loc));
+            moves.push(self.move_between(
+                from,
+                to,
+                amounts,
+                Infer::Known,
+                pending || leg.slot.pending,
+                leg_tail,
+                leg.loc,
+            ));
         }
         let (from, to, amounts) = match named_is_from {
             true => (named, &head.placed, (own, total)),
@@ -396,7 +439,9 @@ impl Elab<'_, '_> {
     fn check_holds(&mut self, end: &Placed, unit: Id<Commodity>) -> bool {
         let world = self.world;
         let place = &world.book.places[end.end.place];
-        let Some(holds) = &place.holds else { return true };
+        let Some(holds) = &place.holds else {
+            return true;
+        };
         if holds.contains(&unit) {
             return true;
         }
@@ -419,7 +464,9 @@ impl Elab<'_, '_> {
             (_, Some(closed)) if day > closed => Some(("place-closed", format!("`{name}` closed on {}", iso(closed)))),
             _ => None,
         };
-        let Some((code, message)) = fault else { return true };
+        let Some((code, message)) = fault else {
+            return true;
+        };
         self.sink.diags.push(
             Diagnostic::error(code, message)
                 .label(end.loc, format!("this flow is dated {}", iso(day)))
@@ -443,7 +490,9 @@ impl Elab<'_, '_> {
         for &(code, loc) in &self.coded {
             let text = book.name(code);
             for rule in book.codes.iter().filter(|rule| glob(book.name(rule.pattern), text)) {
-                if flows.iter().any(|flow| touches(rule, flow.from) || touches(rule, flow.to)) || reported.contains(&(code, loc)) {
+                if flows.iter().any(|flow| touches(rule, flow.from) || touches(rule, flow.to))
+                    || reported.contains(&(code, loc))
+                {
                     continue;
                 }
                 reported.push((code, loc));

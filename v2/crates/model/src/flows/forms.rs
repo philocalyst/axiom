@@ -151,7 +151,9 @@ impl<'a, 's> Elab<'a, 's> {
                 moves = None;
                 continue;
             };
-            let Stated::Fixed(amount) = line.slot.stated else { continue };
+            let Stated::Fixed(amount) = line.slot.stated else {
+                continue;
+            };
             if line.placed.basis || !line.placed.select.is_empty() {
                 self.sink.diags.push(
                     Diagnostic::error("opening-place", "an opening line says what a whole place holds")
@@ -161,12 +163,26 @@ impl<'a, 's> Elab<'a, 's> {
                 moves = None;
                 continue;
             }
-            let equity = Placed { end: End { place: source, entity: None }, loc: line.placed.loc, select: Vec::new(), basis: false };
+            let equity = Placed {
+                end: End { place: source, entity: None },
+                loc: line.placed.loc,
+                select: Vec::new(),
+                basis: false,
+            };
             // A liability, income or equity place is shown by what it owes or
             // has earned, so the value flows out of it into the opening equity.
             let from_equity = self.world.book.places[line.placed.end.place].class.display_sign() > 0;
             let (from, to) = if from_equity { (equity, line.placed) } else { (line.placed, equity) };
-            let mv = Move { from, to, out: amount, arrive: amount, infer: Infer::Known, pending: false, tail: line.tail, loc: line.loc };
+            let mv = Move {
+                from,
+                to,
+                out: amount,
+                arrive: amount,
+                infer: Infer::Known,
+                pending: false,
+                tail: line.tail,
+                loc: line.loc,
+            };
             if let Some(moves) = moves.as_mut() {
                 moves.push(mv);
             }

@@ -462,7 +462,9 @@ impl<'a, 's> Args<'_, 'a, 's> {
     /// `has employer entity`
     fn has(&mut self) -> Result<Assign, Diagnostic> {
         let name = self.take("a property name")?;
-        let ExprKind::Name(text) = name.kind else { return Err(self.wrong(name, "a property name")) };
+        let ExprKind::Name(text) = name.kind else {
+            return Err(self.wrong(name, "a property name"));
+        };
         let word = self.take("a type")?;
         let ty = match word.kind {
             ExprKind::Name(written) => TYPES.iter().find(|ty| ty.0 == written.0).map(|ty| ty.1),
@@ -533,7 +535,14 @@ impl<'a, 's> Args<'_, 'a, 's> {
 
 /// Which property a line is: one of the language's for something it describes,
 /// or one a kind declared. `targets` say what the line is under.
-fn classify(world: &World, file: &File, targets: &[Target], has: &[Has], line: &Line, kind: Id<Kind>) -> Result<Which, Diagnostic> {
+fn classify(
+    world: &World,
+    file: &File,
+    targets: &[Target],
+    has: &[Has],
+    line: &Line,
+    kind: Id<Kind>,
+) -> Result<Which, Diagnostic> {
     let word = line.name.0;
     if let Some((which, _)) = builtin(word).filter(|(_, on)| targets.iter().any(|target| on.contains(target))) {
         return Ok(Which::Builtin(which));
@@ -546,23 +555,34 @@ fn classify(world: &World, file: &File, targets: &[Target], has: &[Has], line: &
 }
 
 /// `benificiary` is not a property of an account of kind `529`.
-fn unknown_property(world: &World, loc: Loc, targets: &[Target], kind: Id<Kind>, has: &[Has], word: &str) -> Diagnostic {
+fn unknown_property(
+    world: &World,
+    loc: Loc,
+    targets: &[Target],
+    kind: Id<Kind>,
+    has: &[Has],
+    word: &str,
+) -> Diagnostic {
     let kind_name = world.book.name(world.book.kinds[kind].name);
-    let mut valid: Vec<&str> =
-        BUILTINS.iter().filter(|entry| targets.iter().any(|target| entry.2.contains(target))).map(|entry| entry.1).collect();
+    let mut valid: Vec<&str> = BUILTINS
+        .iter()
+        .filter(|entry| targets.iter().any(|target| entry.2.contains(target)))
+        .map(|entry| entry.1)
+        .collect();
     valid.extend(has.iter().map(|has| world.book.name(has.name)));
     let of = match targets[0] {
         Target::Kind => format!("kind `{kind_name}`"),
         target => format!("{} of kind `{kind_name}`", article(target.noun())),
     };
-    let mut diagnostic =
-        Diagnostic::error("unknown-property", format!("`{word}` is not a property of {of}")).label(loc, "no such property");
+    let mut diagnostic = Diagnostic::error("unknown-property", format!("`{word}` is not a property of {of}"))
+        .label(loc, "no such property");
     if let Some(near) = near(word, valid.iter().copied()) {
         diagnostic = diagnostic.fix(format!("did you mean `{near}`?"), loc, near);
     }
     if let Some((_, owners)) = builtin(word) {
         let owners: Vec<String> = owners.iter().map(|owner| format!("{}s", owner.noun())).collect();
-        diagnostic = diagnostic.note(format!("`{word}` describes {}, not {}", owners.join(" and "), article(targets[0].noun())));
+        diagnostic =
+            diagnostic.note(format!("`{word}` describes {}, not {}", owners.join(" and "), article(targets[0].noun())));
     }
     diagnostic.note(format!("its properties are {}", list(&valid)))
 }
@@ -642,7 +662,12 @@ pub(crate) fn apply<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], diags:
 
 /// Reads the kinds of one sort, parents first, and returns what each hands
 /// down to its instances.
-fn kinds<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], target: Target, diags: &mut Vec<Diagnostic>) -> Vec<Vec<Assign>> {
+fn kinds<'s>(
+    world: &mut World<'s>,
+    entries: &[Entry<'_, 's>],
+    target: Target,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<Vec<Assign>> {
     let ids: Vec<Id<Kind>> =
         world.book.kinds.ids().filter(|&id| Target::of(world.book.kinds[id].sort) == target).collect();
     let declared = world.declared.kinds.clone();
@@ -651,7 +676,7 @@ fn kinds<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], target: Target, d
     // lines, then the ones it inherits.
     for &id in &ids {
         let mut own = Vec::new();
-        for w in written.get(&id) {
+        if let Some(w) = written.get(&id) {
             let file = w.file();
             for line in file[w.node.props].iter().filter(|line| line.name.0 == "has") {
                 let mut args = Args { world, file, ids: &file[line.args], line, home: w.home(), next: 0 };
@@ -690,7 +715,12 @@ fn kinds<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], target: Target, d
     defaults
 }
 
-fn commodities<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], defaults: &[Vec<Assign>], diags: &mut Vec<Diagnostic>) {
+fn commodities<'s>(
+    world: &mut World<'s>,
+    entries: &[Entry<'_, 's>],
+    defaults: &[Vec<Assign>],
+    diags: &mut Vec<Diagnostic>,
+) {
     let written = first_of(decls(entries, DeclKind::Commodity), world.declared.commodities.iter().map(|&id| Some(id)));
     for id in world.book.commodities.ids().collect::<Vec<_>>() {
         let kind = world.book.commodities[id].kind;
@@ -704,7 +734,12 @@ fn commodities<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], defaults: &
     }
 }
 
-fn entities<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], defaults: &[Vec<Assign>], diags: &mut Vec<Diagnostic>) {
+fn entities<'s>(
+    world: &mut World<'s>,
+    entries: &[Entry<'_, 's>],
+    defaults: &[Vec<Assign>],
+    diags: &mut Vec<Diagnostic>,
+) {
     let written = first_of(decls(entries, DeclKind::Entity), world.declared.entities.iter().map(|&id| Some(id)));
     for id in world.book.entities.ids().collect::<Vec<_>>() {
         let kind = world.book.entities[id].kind;
@@ -788,7 +823,11 @@ fn disagreement(first: Has, again: Has, family: Ty, name: &str) -> Diagnostic {
     let noun = family.word();
     let mut diagnostic = Diagnostic::error(
         "property-type",
-        format!("`{name}` is declared as {} here, but as {} elsewhere", article(again.ty.word()), article(first.ty.word())),
+        format!(
+            "`{name}` is declared as {} here, but as {} elsewhere",
+            article(again.ty.word()),
+            article(first.ty.word())
+        ),
     );
     if let Some(loc) = again.loc {
         diagnostic = diagnostic.label(loc, format!("{} here", again.ty.word()));

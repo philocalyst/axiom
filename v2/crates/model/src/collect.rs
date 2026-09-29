@@ -123,7 +123,9 @@ pub(crate) fn class_of(path: &str) -> Option<Class> {
 
 /// The decimals an amount needs: `84.20` needs one.
 pub(crate) fn places_of(amount: Amount) -> u8 {
-    let Some(dot) = amount.bytes().position(|byte| byte == b'.') else { return 0 };
+    let Some(dot) = amount.bytes().position(|byte| byte == b'.') else {
+        return 0;
+    };
     let fraction = &amount.as_bytes()[dot + 1..];
     let digits = fraction.iter().position(|byte| !byte.is_ascii_digit()).unwrap_or(fraction.len());
     fraction[..digits].iter().rposition(|&byte| byte != b'0').map_or(0, |last| last as u8 + 1)
@@ -157,7 +159,14 @@ pub(crate) fn survey<'a, 's>(sites: &'a [Site<'a, 's>], names: &mut Interner<'s>
     for text in merged.texts {
         names.intern(text);
     }
-    Surveyed { entries: merged.entries, units: merged.units, paths: merged.paths, journal, txns: first_txn, diags: merged.diags }
+    Surveyed {
+        entries: merged.entries,
+        units: merged.units,
+        paths: merged.paths,
+        journal,
+        txns: first_txn,
+        diags: merged.diags,
+    }
 }
 
 impl<'a, 's> Survey<'a, 's> {

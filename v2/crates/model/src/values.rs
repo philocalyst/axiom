@@ -4,7 +4,6 @@ use axiom_core::{Diagnostic, Id, Loc, Qty, Ratio};
 use axiom_syntax::{Bracket as WrittenBracket, Expr, ExprId, ExprKind, File, Many};
 
 use crate::book::{Bracket, Commodity, Schedule};
-use crate::collect::class_of;
 use crate::declare::World;
 use crate::errors::{Word, article};
 use crate::law::{Ty, Value};
@@ -152,7 +151,12 @@ impl<'s> World<'s> {
 
     /// `0 USD 10% | 12_400 USD 12% | …`: marginal brackets, ascending from zero,
     /// all in one commodity.
-    pub fn schedule(&mut self, file: &File<'s>, rows: Many<WrittenBracket>, loc: Loc) -> Result<Id<Schedule>, Diagnostic> {
+    pub fn schedule(
+        &mut self,
+        file: &File<'s>,
+        rows: Many<WrittenBracket>,
+        loc: Loc,
+    ) -> Result<Id<Schedule>, Diagnostic> {
         let mut unit = None;
         let mut brackets: Vec<Bracket> = Vec::with_capacity(rows.len());
         for row in &file[rows] {
@@ -173,7 +177,12 @@ impl<'s> World<'s> {
     }
 
     /// Where a bracket starts: `empty`, or an amount in the schedule's commodity.
-    fn threshold(&mut self, file: &File<'s>, from: &Expr<'s>, unit: &mut Option<Id<Commodity>>) -> Result<Qty, Diagnostic> {
+    fn threshold(
+        &mut self,
+        file: &File<'s>,
+        from: &Expr<'s>,
+        unit: &mut Option<Id<Commodity>>,
+    ) -> Result<Qty, Diagnostic> {
         match self.literal(file, from)? {
             Some((Value::Empty, _)) => Ok(Qty::ZERO),
             Some((Value::Amount(amount), _)) => {
@@ -206,9 +215,4 @@ fn broken_rule(before: &[Bracket], from: Qty) -> Option<&'static str> {
         Some(last) if from <= last.from => Some("brackets ascend"),
         _ => None,
     }
-}
-
-/// Whether a written name is a full path that opens a place.
-pub(crate) fn is_full_path(text: &str) -> bool {
-    class_of(text).is_some()
 }

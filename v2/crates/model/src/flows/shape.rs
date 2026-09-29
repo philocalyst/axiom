@@ -12,7 +12,6 @@ use axiom_syntax::{self as ast, ClauseKind, Due, File, For, Quantity};
 use super::Sink;
 use crate::book::{Amount, Commodity, Entity};
 use crate::declare::World;
-use crate::errors::Word;
 use crate::journal::{Select, Waive};
 use crate::resolve::{Cause, End};
 use crate::scope::Home;
@@ -134,10 +133,6 @@ pub(super) struct Elab<'a, 's> {
 impl<'a, 's> Elab<'a, 's> {
     pub fn new(world: &'a World<'s>, file: &'a File<'s>, sink: &'a mut Sink<'s>, txn: u32) -> Elab<'a, 's> {
         Elab { world, file, sink, unit: None, txn, coded: Vec::new() }
-    }
-
-    pub fn word(&self, text: &'s str) -> Word<'s> {
-        Word { text, loc: self.file.loc(text) }
     }
 
     /// Records the diagnostic and gives nothing.
@@ -334,7 +329,8 @@ impl<'a, 's> Elab<'a, 's> {
 
     /// One indented line: a place, how much, and its own tail.
     pub fn leg(&mut self, leg: &ast::Leg<'s>) -> Option<Leg> {
-        let (placed, slot, tail) = (self.place(&leg.place), self.quantity(&leg.amount, leg.loc), self.tail(&leg.tail, true));
+        let (placed, slot, tail) =
+            (self.place(&leg.place), self.quantity(&leg.amount, leg.loc), self.tail(&leg.tail, true));
         Some(Leg { placed: placed?, slot: slot?, tail: tail?, loc: leg.loc })
     }
 

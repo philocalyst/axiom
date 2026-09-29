@@ -16,8 +16,8 @@ mod vars;
 use axiom_core::{Diagnostic, Id, Set};
 use axiom_syntax::{self as ast, BinOp, DeclKind, Trigger as Written};
 
-pub(crate) use self::order::rank;
 use self::compile::{Site, compile};
+pub(crate) use self::order::rank;
 use crate::book::{Kind, Sort, System};
 use crate::collect::Entry;
 use crate::declare::World;
@@ -26,7 +26,12 @@ use crate::names::Rank;
 use crate::props::Budget;
 use crate::scope::Home;
 
-pub(crate) fn declare<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], budgets: Vec<Budget>, diags: &mut Vec<Diagnostic>) {
+pub(crate) fn declare<'s>(
+    world: &mut World<'s>,
+    entries: &[Entry<'_, 's>],
+    budgets: Vec<Budget>,
+    diags: &mut Vec<Diagnostic>,
+) {
     world.tallies = counted(entries);
     let mut written: [usize; 4] = [0; 4];
     let mut seen: Set<(DeclKind, usize)> = Set::default();

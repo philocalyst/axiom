@@ -5,8 +5,8 @@ use axiom_core::{Diagnostic, Loc, Qty, Ratio};
 
 use super::pairing::{Mismatch, Price, SplitError};
 use crate::book::Amount;
-use crate::prices::{implied_rate, rescale};
 use crate::declare::World;
+use crate::prices::{implied_rate, rescale};
 
 /// Where in the source a pairing was written.
 #[derive(Clone, Copy)]

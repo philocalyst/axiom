@@ -99,7 +99,8 @@ pub(crate) fn arrange<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) -> (Vec<Site<'a, 's>>, Tree<System>, SystemIndex<'s>) {
     let kept = arranged(sources, diags);
-    let written: Map<&str, &Source> = kept.iter().filter_map(|&source| defined_by(source).map(|path| (path, source))).collect();
+    let written: Map<&str, &Source> =
+        kept.iter().filter_map(|&source| defined_by(source).map(|path| (path, source))).collect();
     let (tree, by_path) = paths::build(written.keys().copied(), |path| {
         let source = written.get(path);
         System {

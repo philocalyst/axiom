@@ -38,12 +38,10 @@ pub(crate) fn duplicate(noun: &str, name: Word, first: Option<Loc>, system: Opti
                 .context(first, "first declared here (built in)")
                 .help(format!("delete this declaration: the {noun} already exists"))
         }
-        (Some(first), None) => {
-            Diagnostic::error("duplicate-declaration", format!("{noun} `{text}` is declared twice"))
-                .label(loc, "declared again here")
-                .context(first, "first declared here")
-                .help("keep the declaration you mean and delete the other")
-        }
+        (Some(first), None) => Diagnostic::error("duplicate-declaration", format!("{noun} `{text}` is declared twice"))
+            .label(loc, "declared again here")
+            .context(first, "first declared here")
+            .help("keep the declaration you mean and delete the other"),
         (None, _) => Diagnostic::error("duplicate-declaration", format!("{noun} `{text}` is built in"))
             .label(loc, "declared again here")
             .help("delete this declaration"),

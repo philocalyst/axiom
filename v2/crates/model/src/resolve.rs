@@ -79,7 +79,10 @@ impl<'s> World<'s> {
     fn explain_commodity(&self, word: Word) -> Diagnostic {
         let symbols = self.book.commodities.values().map(|commodity| self.book.name(commodity.symbol));
         let diagnostic = unknown("unknown-commodity", "commodity", word, near(word.text, symbols));
-        diagnostic.note(format!("commodities are declared with `commodity {}`; USD, EUR, GBP… come with `use std`", word.text))
+        diagnostic.note(format!(
+            "commodities are declared with `commodity {}`; USD, EUR, GBP… come with `use std`",
+            word.text
+        ))
     }
 
     /// `number` of the commodity `unit`, in its quanta.
@@ -138,7 +141,8 @@ impl<'s> World<'s> {
 
     fn ambiguous_entity(&self, word: Word, ids: &[Id<Entity>]) -> Diagnostic {
         let entities = &self.book.entities;
-        let candidates = self.candidates(&self.book.lookup.entities.names, ids, |id| entities[id].path, |id| entities[id].loc);
+        let candidates =
+            self.candidates(&self.book.lookup.entities.names, ids, |id| entities[id].path, |id| entities[id].loc);
         ambiguous("ambiguous-entity", "entities", word, &candidates)
     }
 
@@ -178,7 +182,7 @@ impl<'s> World<'s> {
     }
 
     pub fn place(&self, word: Word) -> Result<Id<Place>, Diagnostic> {
-        self.seek_place(word).or_else(|| self.explain_unknown_place(word, 1, false))
+        self.seek_place(word).or_else(|| self.explain_unknown_place(word, false))
     }
 
     /// A place written as one end of a flow: a place, `?`, or an entity, which
@@ -188,7 +192,9 @@ impl<'s> World<'s> {
             return Ok(End { place: self.book.roots.unknown, entity: None });
         }
         match self.book.lookup.places.find(&self.book.names, text, |_| true) {
-            Found::One(place) => return Ok(End { place, entity: None }),
+            Found::One(place) => {
+                return Ok(End { place, entity: None });
+            }
             Found::Several(_) => return Err(Cause::AmbiguousPlace),
             Found::Nothing => {}
         }
@@ -203,16 +209,11 @@ impl<'s> World<'s> {
         }
     }
 
-    /// [`Self::find_end`] with its diagnostic.
-    pub fn end(&self, word: Word) -> Result<End, Diagnostic> {
-        self.find_end(word.text).map_err(|cause| self.explain(cause, word, 1))
-    }
-
     /// The diagnostic for a name that resolved to nothing usable, written
     /// `uses` times, first at `word`.
     pub fn explain(&self, cause: Cause, word: Word, uses: usize) -> Diagnostic {
         let mut diagnostic = match cause {
-            Cause::Place => self.explain_unknown_place(word, uses, true),
+            Cause::Place => self.explain_unknown_place(word, true),
             Cause::AmbiguousPlace => self.explain_ambiguous_place(word),
             Cause::Entity => self.explain_unknown_entity(word),
             Cause::AmbiguousEntity => match self.seek_entity(Home::Project, word) {
@@ -229,7 +230,7 @@ impl<'s> World<'s> {
         diagnostic
     }
 
-    fn explain_unknown_place(&self, word: Word, _uses: usize, also_entities: bool) -> Diagnostic {
+    fn explain_unknown_place(&self, word: Word, also_entities: bool) -> Diagnostic {
         let (places, entities, names) = (&self.book.lookup.places, &self.book.lookup.entities.names, &self.book.names);
         let known = places.keys(names);
         let closest = match also_entities {
@@ -303,10 +304,13 @@ impl<'s> World<'s> {
         diagnostic = diagnostic.note("a payee must be a declared entity, so that it is typed like everything else");
         if let Sought::Found(place) = self.seek_place(word) {
             let path = self.book.name(self.book.places[place].path);
-            diagnostic = Diagnostic::error("unknown-entity", format!("`{}` is a place, not an entity, so it cannot be a payee", word.text))
-                .label(word.loc, "a payee is an entity: a person or a company")
-                .note(format!("`{}` is the place `{path}`", word.text))
-                .help("drop the payee, or use the entity that stands for this place");
+            diagnostic = Diagnostic::error(
+                "unknown-entity",
+                format!("`{}` is a place, not an entity, so it cannot be a payee", word.text),
+            )
+            .label(word.loc, "a payee is an entity: a person or a company")
+            .note(format!("`{}` is the place `{path}`", word.text))
+            .help("drop the payee, or use the entity that stands for this place");
         }
         diagnostic
     }
@@ -316,10 +320,15 @@ impl<'s> World<'s> {
             Sought::Found(entity) => Some(&self.book.entities[entity]),
             _ => None,
         };
-        let mut diagnostic =
-            Diagnostic::error("entity-without-via", format!("`{}` is not tied to a place, so a flow cannot end there", word.text))
-                .label(word.loc, "an entity written where a place is expected stands for its `via` place")
-                .help(format!("name the place its payments belong to: add `via expenses/{}` to `entity {}`", word.text, word.text));
+        let mut diagnostic = Diagnostic::error(
+            "entity-without-via",
+            format!("`{}` is not tied to a place, so a flow cannot end there", word.text),
+        )
+        .label(word.loc, "an entity written where a place is expected stands for its `via` place")
+        .help(format!(
+            "name the place its payments belong to: add `via expenses/{}` to `entity {}`",
+            word.text, word.text
+        ));
         if let Some(loc) = entity.and_then(|entity| entity.loc) {
             diagnostic = diagnostic.context(loc, "declared without `via`");
         }

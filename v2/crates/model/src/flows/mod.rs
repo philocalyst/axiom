@@ -147,7 +147,9 @@ fn build_plans<'s>(
     let mut plans = Plans { by_name: Map::default(), built: Vec::new(), names: Vec::new() };
     let mut made = Vec::new();
     let shared: &World = world;
-    for (at, written) in entries.iter().filter_map(|entry| if let Entry::Plan(w) = entry { Some(w) } else { None }).enumerate() {
+    for (at, written) in
+        entries.iter().filter_map(|entry| if let Entry::Plan(w) = entry { Some(w) } else { None }).enumerate()
+    {
         let (file, plan) = (written.file(), written.node);
         let mut sink = Sink::default();
         let mut elab = Elab::new(shared, file, &mut sink, journal_txns + at as u32);
@@ -157,7 +159,12 @@ fn build_plans<'s>(
         misses.append(&mut sink.misses);
         if let Some(name) = plan.name {
             match plans.by_name.insert(name.0, at) {
-                Some(_) => diags.push(crate::errors::duplicate("plan", Word { text: name.0, loc: file.loc(name.0) }, None, None)),
+                Some(_) => diags.push(crate::errors::duplicate(
+                    "plan",
+                    Word { text: name.0, loc: file.loc(name.0) },
+                    None,
+                    None,
+                )),
                 None => {}
             }
         }
@@ -197,7 +204,9 @@ fn build_plans<'s>(
 fn in_day_order(sinks: &[Sink]) -> bool {
     let mut last = None;
     for sink in sinks {
-        let (Some(first), Some(end)) = (sink.txns.first(), sink.txns.last()) else { continue };
+        let (Some(first), Some(end)) = (sink.txns.first(), sink.txns.last()) else {
+            continue;
+        };
         if sink.unordered || last.is_some_and(|last| last > first.day) {
             return false;
         }
@@ -268,7 +277,12 @@ fn explain_misses<'s>(world: &World<'s>, plans: &Plans<'s>, misses: Vec<(Cause, 
         let (loc, uses) = groups[&(cause, text)];
         let word = Word { text, loc };
         match cause {
-            Cause::Plan => unknown("unknown-plan", "plan", word, near(text, plans.names.iter().copied().filter(|name| !name.is_empty()))),
+            Cause::Plan => unknown(
+                "unknown-plan",
+                "plan",
+                word,
+                near(text, plans.names.iter().copied().filter(|name| !name.is_empty())),
+            ),
             cause => world.explain(cause, word, uses),
         }
     };
@@ -315,9 +329,10 @@ fn check_events(world: &World, raw: Vec<RawEvent>, diags: &mut Vec<Diagnostic>) 
         let code = book.names.get(event.code).filter(|code| written.contains_key(code));
         let Some(code) = code else {
             let known = written.keys().map(|&code| book.name(code));
-            let mut diagnostic = Diagnostic::error("unknown-code", format!("no transaction is marked `#{}`", event.code))
-                .label(event.code_loc, "nothing carries this code")
-                .note("an event names the transaction it changes by its code");
+            let mut diagnostic =
+                Diagnostic::error("unknown-code", format!("no transaction is marked `#{}`", event.code))
+                    .label(event.code_loc, "nothing carries this code")
+                    .note("an event names the transaction it changes by its code");
             if let Some(near) = near(event.code, known) {
                 diagnostic = diagnostic.fix(format!("did you mean `#{near}`?"), event.code_loc, format!("#{near}"));
             }
@@ -339,7 +354,10 @@ fn check_events(world: &World, raw: Vec<RawEvent>, diags: &mut Vec<Diagnostic>) 
                 )
                 .label(event.code_loc, format!("{} on {}", state_word(event.state), crate::errors::iso(event.day)))
                 .context(flow, format!("written on {}", crate::errors::iso(day)))
-                .help(format!("an event happens on or after the flow it changes: date it {} or later", crate::errors::iso(day))),
+                .help(format!(
+                    "an event happens on or after the flow it changes: date it {} or later",
+                    crate::errors::iso(day)
+                )),
             );
             continue;
         }

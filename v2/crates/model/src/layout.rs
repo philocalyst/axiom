@@ -181,7 +181,9 @@ pub(crate) fn check(sites: &[Site], diags: &mut Vec<Diagnostic>) {
     for site in sites.iter().filter(|site| !site.source.embedded) {
         let items = &site.source.file.items;
         match site.layout.only {
-            Only::Prices => diags.extend(items.iter().filter(|item| !matches!(item.kind, ItemKind::Price(_))).map(only_prices)),
+            Only::Prices => {
+                diags.extend(items.iter().filter(|item| !matches!(item.kind, ItemKind::Price(_))).map(only_prices))
+            }
             Only::Systems if site.home == Home::Project => diags.extend(items.first().map(not_a_system)),
             Only::Systems | Only::Anything => {}
         }
