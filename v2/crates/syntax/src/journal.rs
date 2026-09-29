@@ -1,42 +1,20 @@
-//! Journal items: everything that starts with a date, `opening` blocks, and
-//! plans, which are transactions that repeat.
+//! Journal items: everything that starts with a date, and `opening` blocks.
 
-use axiom_core::day::days_in_month;
-use axiom_core::{Day, Dec, Diagnostic, Loc, Span};
+use axiom_core::{Day, Dec, Diagnostic, Loc};
 
 use crate::ast::*;
+use crate::dates::empty_range;
 use crate::lex::Tok;
 use crate::lines::Line;
-use crate::parser::{Parse, Parser};
+use crate::parser::{Parse, Parser, Scope};
 
 const EVENT_STATES: [(&str, EventState); 3] =
     [("settled", EventState::Settled), ("void", EventState::Void), ("returned", EventState::Returned)];
 
-const CADENCES: [(&str, Span); 5] = [
-    ("day", Span::days(1)),
-    ("week", Span::days(7)),
-    ("month", Span::months(1)),
-    ("quarter", Span::months(3)),
-    ("year", Span::months(12)),
-];
-
-const WEEKDAYS: [(&str, u8); 7] =
-    [("monday", 0), ("tuesday", 1), ("wednesday", 2), ("thursday", 3), ("friday", 4), ("saturday", 5), ("sunday", 6)];
-
-/// The optional clauses of a plan header, and where each was written so a
-/// repeat can point back at it.
-#[derive(Default)]
-struct Bounds<'s> {
-    on: Option<On>,
-    from: Option<Day>,
-    until: Option<Day>,
-    seen: Vec<(&'s str, Loc)>,
-}
-
 impl<'s> Parser<'s> {
     /// A line that began with a date. What follows it says which kind of entry
-    /// it is: a `#code` is an event, a commodity a price or split, anything
-    /// else a flow, an assertion, or an occurrence of a plan.
+    /// it is: a `^code` is an event, a commodity a price or split, anything
+    /// else a flow, an assertion, a claim, or a contract's occurrence or end.
     pub fn journal_entry(&mut self, line: &mut Line<'s>, date: Day) -> Parse<()> {
         match self.tok() {
             Tok::Code(code) => {
@@ -46,21 +24,33 @@ impl<'s> Parser<'s> {
                 self.emit(&header, Event { date, code, state, state_loc }, ItemKind::Event);
                 Ok(())
             }
-            Tok::Unit(_) => self.price_or_split(line, date),
+            Tok::Purpose(_) => Err(self.hash_code(self.peek().loc)),
+            // A commodity that starts a flow is a party: `VTI -> fidelity 198.12 USD`.
+            Tok::Unit(_) if self.lexer.peek_second().tok != Tok::Punct("->") => self.price_or_split(line, date),
             _ => self.transaction(line, date),
         }
     }
 
-    /// `[..DATE] FROM`, then what follows it: `=` makes an assertion, the end
-    /// of the line an occurrence of a plan, anything else a flow. Reading the
-    /// first end before deciding is what lets one pass tell them apart.
+    /// `[..DATE] FROM`, then what follows it: `=` makes an assertion, `owes` a
+    /// claim, `ends` the end of a contract, the end of the line an occurrence of
+    /// one, anything else a flow. Reading the first end before deciding is what
+    /// lets one pass tell them apart.
     fn transaction(&mut self, line: &mut Line<'s>, date: Day) -> Parse<()> {
         let clauses = self.mark::<Clause>();
         let spread = self.spread(line, date)?;
-        let from = self.end()?;
-        if !spread && from.amount.is_none() && self.at("=") {
-            if let Some(place) = from.place {
-                return self.assertion(line, date, place);
+        let from = self.side()?;
+        // What is left of a contract's name: no amount to speak of, and no lots.
+        if let (false, Some(end), None) = (spread, &from.end, &from.amount) {
+            match self.tok() {
+                Tok::Punct("=") => return self.assertion(line, date, *end),
+                Tok::Name("owes") if end.select.is_empty() => {
+                    let claim = self.claim(date, end.name)?;
+                    let header = self.end_header(line)?;
+                    self.emit(&header, claim, ItemKind::Claim);
+                    return Ok(());
+                }
+                Tok::Name("ends") if end.select.is_empty() => return self.ending(line, date, end.name),
+                _ => {}
             }
         }
         let amount = match from.amount {
@@ -68,9 +58,9 @@ impl<'s> Parser<'s> {
             Some(Quantity::Fixed(amount)) => Some(Some(amount)),
             Some(_) => None,
         };
-        if let (false, true, Some(place), Some(amount)) = (spread, self.at_eol(), &from.place, amount) {
-            if place.select.is_empty() {
-                return self.occurrence(line, date, place.name, amount);
+        if let (false, true, Some(end), Some(amount)) = (spread, self.at_eol(), &from.end, amount) {
+            if end.select.is_empty() {
+                return self.occurrence(line, date, end.name, amount);
             }
         }
         let (mut flow, arrow) = self.flow_head(from, clauses)?;
@@ -94,45 +84,71 @@ impl<'s> Parser<'s> {
         Ok(true)
     }
 
-    /// `DATE PLACE = [-]AMOUNT [! [STRING] | via PLACE]`.
-    fn assertion(&mut self, line: &mut Line<'s>, date: Day, place: Place<'s>) -> Parse<()> {
+    /// `DATE END = [-]AMOUNT [! [STRING] | via NAME]`.
+    fn assertion(&mut self, line: &mut Line<'s>, date: Day, end: End<'s>) -> Parse<()> {
         self.bump();
         let amount = self.signed_amount()?;
         let gap = match self.tok() {
             Tok::Punct("!") => Gap::Waived(self.waiver()?),
             Tok::Name("via") => {
                 self.bump();
-                Gap::Via(self.name("expected-place", "the place the difference goes to, like `income/market`")?)
+                Gap::Via(self.name("expected-name", "who the difference is with, like `market`")?)
             }
             _ => Gap::Refused,
         };
         let header = self.end_header(line)?;
-        self.emit(&header, Assert { date, place, amount, gap }, ItemKind::Assert);
+        self.emit(&header, Assert { date, end, amount, gap }, ItemKind::Assert);
         Ok(())
     }
 
-    /// `DATE PLAN [AMOUNT]` with override legs below.
-    fn occurrence(&mut self, line: &mut Line<'s>, date: Day, plan: Name<'s>, amount: Option<Amount<'s>>) -> Parse<()> {
+    /// `owes CREDITOR AMOUNT TAIL` after the debtor: a dated claim, or a line of an opening.
+    fn claim(&mut self, date: Day, debtor: Name<'s>) -> Parse<Claim<'s>> {
+        self.bump();
+        let creditor = self.name("expected-name", "the party or owner it is owed to")?;
+        let amount = self.amount()?;
+        Ok(Claim { date, debtor, creditor, amount, tail: self.tail(self.mark::<Clause>())? })
+    }
+
+    /// `DATE CONTRACT [AMOUNT]` with override legs below.
+    fn occurrence(&mut self, line: &mut Line<'s>, date: Day, name: Name<'s>, amount: Option<Amount<'s>>) -> Parse<()> {
         let header = self.end_header(line)?;
         let legs = self.legs(line, |parser, leg_line| parser.leg(leg_line).map(drop))?;
-        self.emit(&header, Occurrence { date, plan, amount, legs }, ItemKind::Occurrence);
+        self.emit(&header, Occurrence { date, contract: name, amount, legs }, ItemKind::Occurrence);
         Ok(())
     }
 
-    /// `opening DATE` and its lines `PLACE [SELECTOR] AMOUNT [basis AMOUNT] [since DATE]`.
-    pub fn opening(&mut self, line: &mut Line<'s>) -> Parse<()> {
-        let date = self.date("the day the balances are stated, like `2024-12-31`")?;
+    /// `DATE CONTRACT ends`
+    fn ending(&mut self, line: &mut Line<'s>, date: Day, contract: Name<'s>) -> Parse<()> {
+        self.bump();
         let header = self.end_header(line)?;
-        self.opening = true;
-        let lines = self.legs(line, |parser, opening_line| {
-            let leg = parser.leg(opening_line)?;
-            match parser.get(leg).amount {
-                Quantity::Fixed(_) => Ok(()),
-                _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),
-            }
+        self.emit(&header, Ending { date, contract }, ItemKind::Ending);
+        Ok(())
+    }
+
+    /// `opening DATE` and its lines `END [SELECTOR] AMOUNT [basis AMOUNT] [since DATE]`,
+    /// `ASSET basis AMOUNT [since DATE]` and `DEBTOR owes CREDITOR AMOUNT TAIL`.
+    pub fn opening(&mut self, line: &mut Line<'s>) -> Parse<()> {
+        let date = self.item_date("the day the balances are stated, like `2024-12-31`")?;
+        let header = self.end_header(line)?;
+        let claims = self.mark::<Claim>();
+        let lines = self.in_scope(Scope::Opening, |parser| {
+            parser.legs(line, |parser, opening_line| {
+                if let (Tok::Name(debtor), Tok::Name("owes")) = (parser.tok(), parser.lexer.peek_second().tok) {
+                    parser.bump();
+                    let claim = parser.claim(date, Name(debtor))?;
+                    parser.expect_eol()?;
+                    parser.push(claim);
+                    return Ok(());
+                }
+                let leg = parser.leg(opening_line)?;
+                match parser.get(leg).amount {
+                    Quantity::Fixed(_) | Quantity::Whole => Ok(()),
+                    _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),
+                }
+            })
         });
-        self.opening = false;
-        self.emit(&header, Opening { date, lines: lines? }, ItemKind::Opening);
+        let claims = self.since(claims);
+        self.emit(&header, Opening { date, lines: lines?, claims }, ItemKind::Opening);
         Ok(())
     }
 
@@ -165,120 +181,10 @@ impl<'s> Parser<'s> {
         self.bump();
         Ok(count)
     }
-
-    // ─── Plans ──────────────────────────────────────────────────────────────
-
-    /// `every CADENCE [on DAY] [from DATE] [until DATE|MONTH] FLOW`, where the
-    /// bounds may equally follow the flow's tail; `name` is that of a named plan.
-    pub fn plan(&mut self, line: &mut Line<'s>, name: Option<Name<'s>>) -> Parse<()> {
-        let every = match self.tok() {
-            Tok::Span(span) => self.bump_as(span),
-            _ => self.choose(&CADENCES, "unknown-cadence", "cadence")?.0,
-        };
-        let mut bounds = Bounds::default();
-        self.plan_bounds(&mut bounds)?;
-        let from = self.end()?;
-        let (mut flow, arrow) = self.flow_head(from, self.mark::<Clause>())?;
-        self.plan_bounds(&mut bounds)?;
-        let header = self.end_header(line)?;
-        self.flow_legs(line, &mut flow, arrow)?;
-        let Bounds { on, from, until, .. } = bounds;
-        self.emit(&header, Plan { name, every, on, from, until, flow }, ItemKind::Plan);
-        Ok(())
-    }
-
-    /// `plan NAME every …`
-    pub fn named_plan(&mut self, line: &mut Line<'s>) -> Parse<()> {
-        let name = self.name("expected-name", "a plan name")?;
-        self.expect_word("every", "expected-every", "`every` and how often the plan happens, like `every 2w`")?;
-        self.plan(line, Some(name))
-    }
-
-    /// The bounds `on DAY`, `from DATE` and `until DATE|MONTH`, each at most
-    /// once and in any order.
-    fn plan_bounds(&mut self, bounds: &mut Bounds<'s>) -> Parse<()> {
-        while let Tok::Name(word @ ("on" | "from" | "until")) = self.tok() {
-            let keyword = self.bump().loc;
-            if let Some(&(_, first)) = bounds.seen.iter().find(|(seen, _)| *seen == word) {
-                return Err(self.duplicate(&format!("`{word}` clause"), keyword, first));
-            }
-            bounds.seen.push((word, keyword));
-            match word {
-                "on" => bounds.on = Some(self.plan_day()?),
-                "from" => bounds.from = Some(self.date("the day the plan starts, like `2026-01-01`")?),
-                _ => bounds.until = Some(self.until_day()?),
-            }
-        }
-        Ok(())
-    }
-
-    /// `DATE`, or `MONTH` meaning that month's last day.
-    fn until_day(&mut self) -> Parse<Day> {
-        let pick = |tok| match tok {
-            Tok::Date(day) => Some(day),
-            Tok::Month(first) => Some(first.month_end()),
-            _ => None,
-        };
-        self.take(pick, "expected-date", "a date or month, like `2027-06`")
-    }
-
-    /// The day within each period: `15`, `04-15`, or `monday`.
-    fn plan_day(&mut self) -> Parse<On> {
-        let token = self.peek();
-        let written = self.text(token.loc);
-        match token.tok {
-            Tok::Number(_) => {
-                self.bump();
-                match written.parse::<u8>() {
-                    Ok(day @ 1..=31) => Ok(On::MonthDay(day)),
-                    _ => self.fail(not_a_day(token.loc, written)),
-                }
-            }
-            Tok::Name(word) => match month_and_day(word) {
-                Some((month, day)) if valid_year_day(month, day) => {
-                    self.bump();
-                    Ok(On::YearDay { month, day })
-                }
-                Some(_) => self.fail(not_a_day(token.loc, word)),
-                None => self.choose(&WEEKDAYS, "unknown-day", "weekday").map(|(weekday, _)| On::Weekday(weekday)),
-            },
-            _ => Err(self.expected("expected-day", "a day: `15`, `04-15` or a weekday")),
-        }
-    }
-}
-
-/// `04-15` as (4, 15), when the word is two two-digit numbers around a dash.
-pub(crate) fn month_and_day(word: &str) -> Option<(u8, u8)> {
-    let (month, day) = word.split_once('-')?;
-    let two_digits = |part: &str| if part.len() == 2 { part.parse::<u8>().ok() } else { None };
-    Some((two_digits(month)?, two_digits(day)?))
-}
-
-/// Whether the month has that day in some year: a leap year admits `02-29`.
-pub(crate) fn valid_year_day(month: u8, day: u8) -> bool {
-    (1..=12).contains(&month) && (1..=days_in_month(2024, month.into())).contains(&day.into())
-}
-
-pub(crate) fn not_a_day(loc: Loc, written: &str) -> Diagnostic {
-    Diagnostic::error("bad-day", format!("`{written}` is not a day of the month or year"))
-        .label(loc, "no such day")
-        .help("write a day of the month (`on 15`), a month and day (`on 04-15`), or a weekday (`on monday`)")
 }
 
 fn opening_needs_amount(leg: Loc) -> Diagnostic {
     Diagnostic::error("opening-amount", "an opening line says how much a place holds")
         .label(leg, "no amount here")
         .help("write the balance the statement shows: `checking 10_000 USD`")
-}
-
-/// A range whose end comes before its start, with the bounds swapped as a fix.
-pub(crate) fn empty_range(loc: Loc, written: &str, first: Day, last: Day) -> Diagnostic {
-    let days = first.0 - last.0;
-    let s = if days == 1 { "" } else { "s" };
-    let message = format!("this range ends on {last}, {days} day{s} before it starts on {first}");
-    let diag = Diagnostic::error("empty-range", message).label(loc, "a range runs from the earlier day to the later");
-    match written.split_once("..") {
-        Some((start, end)) => diag.fix("swap the bounds", loc, format!("{end}..{start}")),
-        None => diag,
-    }
 }

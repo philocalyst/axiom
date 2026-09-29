@@ -1,5 +1,5 @@
-//! Declarations and the other block items: `account`, `entity`, `commodity`,
-//! `kind`, `code`, `param`, and `sync`.
+//! Declarations and the other block items: `account`, `entity`, `asset`,
+//! `purpose`, `commodity`, `kind`, `budget`, `code`, `param`, and `sync`.
 //!
 //! A declaration keeps its good lines when one line is bad: dropping it would
 //! turn every later use of what it declares into an error of its own.
@@ -11,10 +11,15 @@ use crate::lex::Tok;
 use crate::lines::Line;
 use crate::parser::{Parse, Parser};
 
+const BUDGET_PERIODS: [(&str, Period); 2] = [("monthly", Period::Month), ("yearly", Period::Year)];
+
+/// Where v3's chart put the accounts that v4 has no accounts for.
+const CHART_ROOTS: [&str; 3] = ["income/", "expenses/", "equity/"];
+
 impl<'s> Parser<'s> {
-    /// `account PATH [as ALIAS] [: KIND]`, `entity NAME[, NAME…] [: KIND]`,
-    /// `commodity SYMBOL [: KIND]` or `kind NAME [: PARENT]`, with its indented
-    /// properties and nested laws. Several entities on a line are one
+    /// `account NAME [: KIND [at NAME]]`, `entity NAME[, NAME…] [: KIND]`, `asset`,
+    /// `purpose`, `commodity SYMBOL [: KIND]` or `kind NAME [: PARENT]`, with its
+    /// indented properties and nested laws. Several entities on a line are one
     /// declaration each, all sharing what is written under them.
     pub fn decl(&mut self, line: &mut Line<'s>, what: DeclKind) -> Parse<()> {
         let mut names = vec![match what {
@@ -24,11 +29,13 @@ impl<'s> Parser<'s> {
         while what == DeclKind::Entity && self.eat(",").is_some() {
             names.push(self.name_like("expected-name", "another entity name")?);
         }
-        let alias = match what == DeclKind::Account && self.eat_word("as").is_some() {
-            true => Some(self.name("expected-name", "a short name for the account, like `biz`")?),
-            false => None,
-        };
+        if what == DeclKind::Account && CHART_ROOTS.iter().any(|root| names[0].starts_with(root)) {
+            let note = chart_account(self.loc_of(&names[0]), names[0].0);
+            self.diags.push(note);
+        }
         let kind = self.eat(":").and_then(|_| self.name_like("expected-kind", "a kind after `:`").ok());
+        let at = if what == DeclKind::Account { self.eat_word("at") } else { None };
+        let at = at.and_then(|_| self.name("expected-name", "the institution it is with, such as `chase`").ok());
         let header = self.keep_header(line);
         let (props, laws) = (self.mark::<Prop>(), self.mark::<Law>());
         let _ = self.children(line, |parser, child| match parser.eat_word("law") {
@@ -37,13 +44,23 @@ impl<'s> Parser<'s> {
         });
         let (props, laws) = (self.since(props), self.since(laws));
         for name in names {
-            self.emit(&header, Decl { what, name, alias, kind, props, laws }, ItemKind::Decl);
+            self.emit(&header, Decl { what, name, kind, at, props, laws }, ItemKind::Decl);
         }
         Ok(())
     }
 
+    /// `budget PURPOSE AMOUNT monthly|yearly`
+    pub fn budget(&mut self, line: &mut Line<'s>) -> Parse<()> {
+        let purpose = self.name("expected-name", "the purpose it is for, such as `food`")?;
+        let amount = self.amount()?;
+        let (per, _) = self.choose(&BUDGET_PERIODS, "unknown-period", "budget period")?;
+        let header = self.end_header(line)?;
+        self.emit(&header, Budget { purpose, amount, per }, ItemKind::Budget);
+        Ok(())
+    }
+
     /// `NAME ARG*`: arguments are primary expressions, commas optional.
-    fn property(&mut self, line: &Line<'s>) -> Parse<()> {
+    pub fn property(&mut self, line: &Line<'s>) -> Parse<()> {
         let name = self.name("expected-property", "a property name")?;
         let start = self.roots.len();
         while !self.at_eol() {
@@ -89,10 +106,10 @@ impl<'s> Parser<'s> {
         let token = self.peek();
         match token.tok {
             Tok::Punct("*") => Ok(self.bump_as(Name(self.text(token.loc)))),
-            Tok::Code(code) => {
-                let name = code.name();
-                let diag = Diagnostic::error("hash-in-pattern", "code patterns are written without `#`")
-                    .label(token.loc, "remove the `#`")
+            Tok::Code(_) | Tok::Purpose(_) => {
+                let (mark, name) = self.text(token.loc).split_at(1);
+                let diag = Diagnostic::error("mark-in-pattern", format!("code patterns are written without `{mark}`"))
+                    .label(token.loc, format!("remove the `{mark}`"))
                     .fix(format!("write `{name}`"), token.loc, name);
                 self.fail(diag)
             }
@@ -206,6 +223,15 @@ impl<'s> Parser<'s> {
         self.emit(&header, Sync { file, run }, ItemKind::Sync);
         Ok(())
     }
+}
+
+/// An account under one of [`CHART_ROOTS`]. Whether it is a chart account is for the
+/// model to judge, so this is only a note.
+fn chart_account(loc: Loc, name: &str) -> Diagnostic {
+    let message = format!("`{name}` is a v3 chart account: v4 has no income, expense or equity accounts");
+    Diagnostic::info("chart-account", message)
+        .label(loc, "what a flow is for is its purpose, and whom it is with is its party")
+        .help("declare the party (`entity lumen : employer`), and write `#purpose` where its kind does not say")
 }
 
 fn abbreviated_schedule(loc: Loc) -> Diagnostic {

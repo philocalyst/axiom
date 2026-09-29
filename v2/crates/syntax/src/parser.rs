@@ -13,7 +13,7 @@
 use std::ops::Range;
 
 use axiom_core::diag::closest;
-use axiom_core::{Day, Diagnostic, FileId, Id, Loc};
+use axiom_core::{Diagnostic, FileId, Id, Loc};
 
 use crate::ast::*;
 use crate::ast::{PIECE_SHIFT, Piece, local, locate};
@@ -27,6 +27,19 @@ pub(crate) struct Reported;
 
 pub(crate) type Parse<T> = Result<T, Reported>;
 
+/// Where a leg or a header's tail is written, which says what it may add to
+/// the common clauses.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Scope {
+    /// A flow, its legs, an occurrence's overrides or a contract's template.
+    Flow,
+    /// The lines of an `opening`, which say `since` when their parcels were
+    /// acquired, and which an asset has with a `basis` and no amount.
+    Opening,
+    /// A contract's schedule, which says only its purpose and a description.
+    Schedule,
+}
+
 /// A parsed header line: where the item is, and what documents it.
 pub(crate) struct Header<'s> {
     pub loc: Loc,
@@ -36,6 +49,8 @@ pub(crate) struct Header<'s> {
 pub(crate) struct Parser<'s> {
     pub src: &'s str,
     pub id: FileId,
+    /// What the file's place lets its dates leave out.
+    pub place: Place,
     /// What has been parsed: the items, the expressions, and the tables.
     pub items: Vec<Item<'s>>,
     pub exprs: Vec<Expr<'s>>,
@@ -51,8 +66,8 @@ pub(crate) struct Parser<'s> {
     /// The expression roots of the lists being read. Lists nest (a call inside
     /// an argument), so each is collected here and moved to its table whole.
     pub roots: Vec<ExprId>,
-    /// Whether the block being read is an `opening`, whose lines may say `since`.
-    pub opening: bool,
+    /// Where the tails being read are written: what else they may say.
+    pub scope: Scope,
     /// The commodities the file writes, for the amount that names none. Found
     /// when first needed.
     pub units: Option<Vec<&'s str>>,
@@ -60,11 +75,12 @@ pub(crate) struct Parser<'s> {
 
 impl<'s> Parser<'s> {
     /// A parser for `src[range]`, which starts at the start of a line and is
-    /// piece number `piece` of the file.
-    pub fn new(id: FileId, src: &'s str, range: Range<usize>, piece: usize) -> Parser<'s> {
+    /// piece number `piece` of the file, which is in `place`.
+    pub fn new(id: FileId, src: &'s str, range: Range<usize>, piece: usize, place: Place) -> Parser<'s> {
         Parser {
             src,
             id,
+            place,
             items: Vec::new(),
             exprs: Vec::new(),
             t: Tables::default(),
@@ -74,7 +90,7 @@ impl<'s> Parser<'s> {
             depth: 0,
             diags: Vec::new(),
             roots: Vec::new(),
-            opening: false,
+            scope: Scope::Flow,
             units: None,
         }
     }
@@ -189,6 +205,14 @@ impl<'s> Parser<'s> {
         value
     }
 
+    /// Reads with the tails being in `scope`.
+    pub fn in_scope<T>(&mut self, scope: Scope, read: impl FnOnce(&mut Self) -> T) -> T {
+        let outer = std::mem::replace(&mut self.scope, scope);
+        let parsed = read(self);
+        self.scope = outer;
+        parsed
+    }
+
     /// Consumes the token, then reads what it introduces.
     pub fn then<T>(&mut self, read: impl FnOnce(&mut Self) -> Parse<T>) -> Parse<T> {
         self.bump();
@@ -234,8 +258,9 @@ impl<'s> Parser<'s> {
         self.take(|tok| if let Tok::Unit(text) = tok { Some(Name(text)) } else { None }, code, what)
     }
 
-    pub fn date(&mut self, what: &str) -> Parse<Day> {
-        self.take(|tok| if let Tok::Date(day) = tok { Some(day) } else { None }, "expected-date", what)
+    /// The word `word`, which a line's grammar puts between its parts.
+    pub fn keyword(&mut self, word: &str) -> Parse<()> {
+        self.expect_word(word, "expected-keyword", &format!("`{word}`")).map(drop)
     }
 
     /// A name, where a plain integer also counts: `529` is a number by shape,

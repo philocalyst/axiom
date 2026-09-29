@@ -15,20 +15,22 @@ use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported};
 
 #[rustfmt::skip]
-const KEYWORDS: [&str; 16] = [
-    "account", "entity", "commodity", "kind", "code", "param", "law", "every", "plan", "sync", "system", "use",
-    "base", "relaxed", "layout", "opening",
+const KEYWORDS: [&str; 18] = [
+    "account", "entity", "asset", "purpose", "commodity", "kind", "contract", "budget", "code", "param", "law", "sync",
+    "system", "use", "base", "relaxed", "layout", "opening",
 ];
 
 /// Words that start a line inside a block, and what owns such a block. Written
 /// at column 0 they are a block's line whose block was forgotten.
-const BLOCK_WORDS: [(&str, &str); 9] = [
+const BLOCK_WORDS: [(&str, &str); 11] = [
     ("when", "law"),
     ("let", "law"),
     ("require", "law"),
     ("warn", "law"),
     ("owe", "law"),
     ("count", "law"),
+    ("consume", "law"),
+    ("carry", "law"),
     ("always", "law"),
     ("each", "law"),
     ("run", "sync"),
@@ -64,6 +66,10 @@ impl<'s> Parser<'s> {
                 self.bump();
                 self.journal_entry(line, date)
             }
+            Tok::MonthDay(..) | Tok::Number(_) => {
+                let date = self.item_date("a date or a keyword")?;
+                self.journal_entry(line, date)
+            }
             Tok::Name(word) => {
                 self.bump();
                 self.keyword_item(line, token, word, first)
@@ -76,13 +82,16 @@ impl<'s> Parser<'s> {
         match word {
             "account" => self.decl(line, DeclKind::Account),
             "entity" => self.decl(line, DeclKind::Entity),
+            "asset" => self.decl(line, DeclKind::Asset),
+            "purpose" => self.decl(line, DeclKind::Purpose),
             "commodity" => self.decl(line, DeclKind::Commodity),
             "kind" => self.decl(line, DeclKind::Kind),
+            "budget" => self.budget(line),
             "code" => self.code_rule(line),
             "param" => self.param(line),
             "law" => self.law_item(line),
-            "every" => self.plan(line, None),
-            "plan" => self.named_plan(line),
+            "contract" => self.contract(line),
+            "every" | "plan" => self.fail(plan_is_a_contract(keyword.loc, word)),
             "opening" => self.opening(line),
             "sync" => self.sync(line),
             "system" | "use" | "base" | "relaxed" | "layout" => self.setting(line, keyword, word, first),
@@ -117,7 +126,8 @@ impl<'s> Parser<'s> {
         let diag = Diagnostic::error("unknown-keyword", format!("unknown keyword `{word}`"))
             .label(keyword.loc, "a line starts with a date or a keyword");
         let indent = self.point(line.start as u32);
-        let looks_like_leg = matches!(self.tok(), Tok::Number(_) | Tok::Punct("..." | "=" | "(" | "?"));
+        let looks_like_leg =
+            matches!(self.tok(), Tok::Number(_) | Tok::Percent(_) | Tok::Punct("..." | "=" | "(" | "?"));
         let near = closest(word, KEYWORDS);
         let diag = if let Some(near) = near {
             diag.fix(format!("did you mean `{near}`?"), keyword.loc, near)
@@ -242,6 +252,14 @@ impl<'s> Parser<'s> {
             self.diags.push(diag);
         }
     }
+}
+
+/// v3's `every …` and `plan NAME every …`.
+fn plan_is_a_contract(loc: Loc, word: &str) -> Diagnostic {
+    Diagnostic::error("plan-is-a-contract", format!("`{word}` is gone: what repeats is a contract"))
+        .label(loc, "a promise of flows, with a name and a party")
+        .note("a contract states its schedule once, and the journal records each time it is kept")
+        .help("write `contract NAME with PARTY` and, indented, `45 USD monthly on 8 from visa`; then `08 NAME` says it")
 }
 
 fn system_not_first(loc: Loc) -> Diagnostic {

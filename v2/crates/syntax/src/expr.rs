@@ -146,9 +146,14 @@ impl<'s> Parser<'s> {
             Tok::Number(num) => self.number(token, num),
             Tok::Percent(num) => self.leaf(token, ExprKind::Pct(num)),
             Tok::Date(day) => self.leaf(token, ExprKind::Date(day)),
+            Tok::MonthDay(..) => {
+                let (first, day) = (self.next_expr(), self.date("a date")?);
+                Ok(self.node(ExprKind::Date(day), token.loc, first))
+            }
             Tok::Span(span) => self.leaf(token, ExprKind::Span(span)),
             Tok::Str(text) => self.leaf(token, ExprKind::Str(text)),
             Tok::Unit(text) => self.leaf(token, ExprKind::Unit(Name(text))),
+            Tok::Purpose(name) => self.leaf(token, ExprKind::Purpose(name)),
             Tok::Code(code) => self.leaf(token, ExprKind::Code(code)),
             Tok::Name("empty") => self.leaf(token, ExprKind::Empty),
             Tok::Name("if") => self.conditional(),
@@ -242,17 +247,23 @@ impl<'s> Parser<'s> {
         self.fail(diag)
     }
 
-    /// The right side of `is`: `wages`, `401k | ira`, `#house`, `self.purpose`.
+    /// The right side of `is`: `wages`, `401k | ira`, `#groceries`, `^inv-12`,
+    /// `self.purpose`, and a purpose with its object: `repair of self`.
     pub fn alternatives(&mut self) -> Parse<Many<ExprId>> {
         let start = self.roots.len();
         loop {
             // An alternative is a name even when it is spelled like a number:
             // kinds such as `529` are written the same way as the number 529.
             let token = self.peek();
-            let alternative = match self.integer_name(token) {
+            let mut alternative = match self.integer_name(token) {
                 Some(name) => self.leaf(token, ExprKind::Name(name)),
                 None => self.primary(),
             }?;
+            if self.eat_word("of").is_some() {
+                let (first, object) = (self.expr(alternative).first, self.primary()?);
+                let loc = self.loc_from(token.loc.start as usize);
+                alternative = self.node(ExprKind::Of(alternative, object), loc, first);
+            }
             self.roots.push(alternative);
             if self.eat("|").is_none() {
                 return Ok(self.roots_since(start));

@@ -58,12 +58,13 @@ use axiom_core::{Day, Dec, FileId, Id, Loc, Span};
 // ─── Text ───────────────────────────────────────────────────────────────────
 
 /// A written name, path, glob or commodity: the slice of the source it is.
-/// Places, entities, kinds and properties are lowercase (`assets/bank/checking`,
-/// `trader-joes`, `expenses/food/*`); commodities are uppercase (`USD`).
+/// Accounts, owners, parties, assets, purposes, kinds and properties are
+/// lowercase (`checking`, `trader-joes`, `joint/savings`, `food/*`);
+/// commodities are uppercase (`USD`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Name<'s>(pub &'s str);
 
-/// A written `#code`, `#` included. Its location covers the `#` too.
+/// A written `^code`, `^` included. Its location covers the `^` too.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Code<'s>(pub &'s str);
 
@@ -85,7 +86,7 @@ macro_rules! written {
 written!(Name, Code, Doc, Amount);
 
 impl<'s> Code<'s> {
-    /// The code without its `#`: `check-1041`.
+    /// The code without its `^`: `check-1041`.
     pub fn name(self) -> &'s str {
         &self.0[1..]
     }
@@ -123,6 +124,19 @@ impl<'s> Amount<'s> {
     pub fn unit(self) -> Option<Name<'s>> {
         self.0.bytes().rposition(is_blank).map(|blank| Name(&self.0[blank + 1..]))
     }
+}
+
+/// What a file's place in its project says of the dates written in it (§10): a
+/// file in `journal/2026/03.ax` holds March 2026, so its items may be dated
+/// `15`. The tree holds whole days, so nothing after the parser sees the
+/// difference. The default, where nothing is given, is a file that writes every
+/// date in full: the one for files outside `YYYY` folders, and under `layout free`.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct Place {
+    /// The year the file holds.
+    pub year: Option<i32>,
+    /// The month of that year, when the file holds one.
+    pub month: Option<u8>,
 }
 
 // ─── Where a node is ────────────────────────────────────────────────────────
@@ -311,14 +325,22 @@ tables! {
     prices: Price<'s>,
     /// [`ItemKind::Split`]
     splits: Split<'s>,
+    /// [`ItemKind::Claim`], and the claims of openings.
+    claims: Claim<'s>,
     /// [`ItemKind::Occurrence`]
     occurrences: Occurrence<'s>,
+    /// [`ItemKind::Ending`]
+    endings: Ending<'s>,
     /// [`ItemKind::Opening`]
     openings: Opening<'s>,
-    /// [`ItemKind::Plan`]
-    plans: Plan<'s>,
+    /// [`ItemKind::Contract`]
+    contracts: Contract<'s>,
+    /// The days of schedules: [`Schedule::on`].
+    days: On,
     /// [`ItemKind::Decl`]
     decls: Decl<'s>,
+    /// [`ItemKind::Budget`]
+    budgets: Budget<'s>,
     /// [`ItemKind::Code`]
     rules: CodeRule<'s>,
     /// [`ItemKind::Param`]
@@ -331,11 +353,11 @@ tables! {
     laws: Law<'s>,
     /// The legs of flows, occurrences and openings: [`Flow::legs`].
     legs: Leg<'s>,
-    /// The selectors of places: [`Place::select`].
+    /// The selectors of ends: [`End::select`].
     selects: Select<'s>,
-    /// The clauses of tails: [`Tail::clauses`].
+    /// The clauses of tails: [`Flow::tail`].
     clauses: Clause<'s>,
-    /// The property lines of declarations: [`Decl::props`].
+    /// The property lines of declarations and contracts: [`Decl::props`], [`Contract::props`].
     props: Prop<'s>,
     /// The rows of parameters: [`Param::rows`].
     rows: ParamRow<'s>,
@@ -371,23 +393,30 @@ pub struct Item<'s> {
 pub enum ItemKind<'s> {
     /// `DATE FLOW`
     Txn(Id<Txn<'s>>),
-    /// `DATE PLACE = AMOUNT`
+    /// `DATE END = AMOUNT`
     Assert(Id<Assert<'s>>),
-    /// `DATE #code settled|void|returned`
+    /// `DATE ^code settled|void|returned`
     Event(Id<Event<'s>>),
     /// `DATE UNIT AMOUNT`
     Price(Id<Price<'s>>),
     /// `DATE UNIT split N for M`
     Split(Id<Split<'s>>),
-    /// `DATE PLAN [AMOUNT]`: one occurrence of a named plan.
+    /// `DATE DEBTOR owes CREDITOR AMOUNT`
+    Claim(Id<Claim<'s>>),
+    /// `DATE NAME [AMOUNT]`: one occurrence of a contract.
     Occurrence(Id<Occurrence<'s>>),
+    /// `DATE NAME ends`
+    Ending(Id<Ending<'s>>),
     /// `opening DATE`
     Opening(Id<Opening<'s>>),
-    /// `every …` or `plan NAME every …`
-    Plan(Id<Plan<'s>>),
-    /// `account`, `entity`, `commodity` or `kind`. One line naming several
-    /// entities is one `Decl` per entity, all sharing the same properties.
+    /// `contract NAME with PARTY`
+    Contract(Id<Contract<'s>>),
+    /// `account`, `entity`, `asset`, `purpose`, `commodity` or `kind`. One line
+    /// naming several entities is one `Decl` per entity, all sharing the same
+    /// properties.
     Decl(Id<Decl<'s>>),
+    /// `budget PURPOSE AMOUNT monthly|yearly`
+    Budget(Id<Budget<'s>>),
     /// `code GLOB`. A line with several globs is one rule per glob, all
     /// sharing the same places.
     Code(Id<CodeRule<'s>>),
@@ -427,50 +456,44 @@ pub struct Txn<'s> {
     pub flow: Flow<'s>,
 }
 
-/// `SOURCE -> TARGET TAIL` with optional indented legs: what a transaction and
-/// a plan both say.
+/// `SOURCE -> TARGET TAIL` with optional indented legs.
 ///
-/// When both sides name a place there are no legs. When exactly one side does,
+/// When both sides name an end there are no legs. When exactly one side does,
 /// the legs are the other side (a "one side split"), and the header may state
-/// an amount on either or both sides: `house 1 HOME -> 431_500 USD`.
+/// an amount on either or both sides: `house 1 HOME -> 431_500 USD`. With no
+/// legs, a source and both amounts are an exchange that stays at the source:
+/// `fidelity 20 VTI -> 5_940 USD`.
 #[derive(Debug)]
 pub struct Flow<'s> {
     /// What leaves: the left of the arrow.
-    pub from: End<'s>,
+    pub from: Side<'s>,
     /// What arrives: the right of the arrow.
-    pub to: End<'s>,
-    /// What the header says about the whole flow, which applies to every leg.
-    pub tail: Tail<'s>,
+    pub to: Side<'s>,
+    /// What the header says about the whole flow, which applies to every leg:
+    /// `&file[flow.tail]`. A `DATE..DATE` spread is the clause `for DATE..DATE`.
+    pub tail: Many<Clause<'s>>,
     /// The indented lines under the header: `&file[flow.legs]`.
     pub legs: Many<Leg<'s>>,
 }
 
 /// One side of a header: `checking`, `checking 2_000 USD`, `7 VTI`, or nothing.
 #[derive(Debug)]
-pub struct End<'s> {
-    /// The place, or `None` when the side is left to the legs or to inference.
-    pub place: Option<Place<'s>>,
+pub struct Side<'s> {
+    /// The end, or `None` when the side is left to the legs or to inference.
+    pub end: Option<End<'s>>,
     /// How much, or `None` when the side states none.
     pub amount: Option<Quantity<'s>>,
 }
 
-/// A place as written: `brokerage[fifo, 2024]`, `house[#roof].basis`.
-#[derive(Debug)]
-pub struct Place<'s> {
-    /// A path, a unique suffix of one, an alias, an entity, or `?` (the
-    /// unknown place).
+/// One end of a flow as written: `brokerage[fifo, 2024]`, `trader-joes`, `VTI`.
+/// The parser cannot tell an account, an owner, a party or an asset apart: all
+/// are names. A commodity in party position (`VTI -> fidelity 198.12 USD`, a
+/// fund that pays) is a name in capitals, and `?` is the unknown party.
+#[derive(Clone, Copy, Debug)]
+pub struct End<'s> {
     pub name: Name<'s>,
-    /// Which parcels of the place the flow addresses, and whether it moves
-    /// their quantity or their basis: `&file[place.select]`.
+    /// Which parcels of it the flow addresses: `&file[end.select]`.
     pub select: Many<Select<'s>>,
-}
-
-impl<'s> Place<'s> {
-    /// Whether the flow moves the basis of the place's parcels rather than
-    /// their quantity: the place is written `PLACE.basis`.
-    pub fn is_basis(&self, file: &File<'s>) -> bool {
-        matches!(file[self.select].last(), Some(Select::Basis))
-    }
 }
 
 /// A lot selector. Days, months and years are normalized to inclusive ranges.
@@ -483,10 +506,6 @@ pub enum Select<'s> {
     Code(Code<'s>),
     /// A lot policy, with where it was written: `[fifo]`.
     Policy(Policy, Loc),
-    /// `.basis`, always last: what the selectors chose is moved by its basis,
-    /// not its quantity. (It is written after the brackets, and costs a
-    /// selector instead of a flag on every place.)
-    Basis,
 }
 
 /// How parcels are chosen when several could leave.
@@ -510,8 +529,8 @@ pub enum Quantity<'s> {
     /// `(350 USD)`: written, not yet real. The amount's location excludes the
     /// parentheses.
     Pending(Amount<'s>),
-    /// `= 5_000 USD` (legs only): whatever makes the place's balance equal
-    /// this after the flow.
+    /// `= 5_000 USD` (legs only): whatever makes the end's balance equal this
+    /// after the flow.
     Target(Amount<'s>),
     /// `? USD`: inferred from surrounding balance assertions. The commodity.
     Unknown(Name<'s>),
@@ -520,39 +539,36 @@ pub enum Quantity<'s> {
     All(Option<Name<'s>>),
     /// `...` (legs only): whatever balances the transaction.
     Rest,
+    /// `6%` (legs only): that share of the header's amount, or in a contract of
+    /// what each occurrence pays.
+    Percent(Dec),
+    /// No amount at all (opening lines only): the thing itself, an asset held
+    /// at its `basis`.
+    Whole,
 }
 
-/// An indented line under a flow: `retirement 800 USD #pretax`. Also a line of
-/// an [`Opening`] (`house 1 HOME basis 540_000 USD since 2023-06-15`) and an
-/// override under a plan [`Occurrence`].
+/// An indented line under a flow: `retirement 800 USD ^pretax`. The same line
+/// is a leg of an occurrence's overrides, of a contract's template, and of an
+/// [`Opening`] (`fidelity 210 VTI basis 48_300 USD since 2021-06-01`).
 #[derive(Debug)]
 pub struct Leg<'s> {
     /// The `///` block above it.
     pub doc: Option<Doc<'s>>,
     /// Where the leg's value goes (or, in an opening, what holds it).
-    pub place: Place<'s>,
-    /// How much: fixed, pending, a target balance, or the remainder.
+    pub end: End<'s>,
+    /// How much: fixed, pending, a target balance, a share, or the remainder.
     pub amount: Quantity<'s>,
     /// The leg's own tail, in addition to the header's.
-    pub tail: Tail<'s>,
+    pub tail: Many<Clause<'s>>,
     /// The whole line, trailing comment excluded.
     pub loc: Loc,
 }
 
-/// What may follow a header's or leg's amounts, in any order:
-/// `/ payee #code for 2025 due 30d basis 3_000 USD @ 285.70 USD ! "reason"`.
-/// A header's tail applies to every leg.
-#[derive(Debug, Default)]
-pub struct Tail<'s> {
-    /// `/ payee`: a declared entity.
-    pub payee: Option<Name<'s>>,
-    /// The rest, in the order written: `&file[tail.clauses]`. A `DATE..DATE`
-    /// spread is the `for` clause `for DATE..DATE`.
-    pub clauses: Many<Clause<'s>>,
-}
-
-/// One clause of a [`Tail`], and where it was written (keyword through value).
-/// The parser rejects a repeated clause, so each kind occurs at most once.
+/// One clause of a tail, and where it was written (keyword through value). A
+/// tail is what may follow a header's or leg's amounts, in any order:
+/// `/ paypal #repair of condo "sink" ^inv-12 for 2025 due 30d basis 3_000 USD @ 2 USD !`.
+/// A header's tail applies to every leg. The parser rejects a repeated clause,
+/// except a code, so no other kind occurs twice.
 #[derive(Clone, Copy, Debug)]
 pub struct Clause<'s> {
     /// Where the clause was written.
@@ -564,9 +580,15 @@ pub struct Clause<'s> {
 /// What a [`Clause`] says.
 #[derive(Clone, Copy, Debug)]
 pub enum ClauseKind<'s> {
-    /// `#code`: marks the transaction or leg. Any number.
-    /// `#code`: marks the transaction or leg. Any number.
+    /// `#groceries`, `#repair of condo`: what the flow is for.
+    Purpose(Purpose<'s>),
+    /// `"food for the routine"`: the contents, escapes not yet processed. It
+    /// says why in words and means nothing to the book.
+    Description(&'s str),
+    /// `^inv-12`: marks the flow or leg so that others can refer to it. Any number.
     Code(Code<'s>),
+    /// `/ etsy-seller`: the party a payment through another is really for.
+    Party(Name<'s>),
     /// `@ 285.70 USD`: the price of one unit of the commodity that arrives.
     Price(Amount<'s>),
     /// `for WHAT`
@@ -581,11 +603,18 @@ pub enum ClauseKind<'s> {
     Waive(Waive<'s>),
 }
 
+/// `#NAME [of THING]`: what a flow is for, and what it is for it to have.
+#[derive(Clone, Copy, Debug)]
+pub struct Purpose<'s> {
+    /// The purpose, without its `#`.
+    pub name: Name<'s>,
+    /// `of condo`: the thing a purpose takes as its object (`#improvement`).
+    pub of: Option<Name<'s>>,
+}
+
 /// What a flow is on account of.
 #[derive(Clone, Copy, Debug)]
 pub enum For<'s> {
-    /// `for #inv-12`: settles the claim the code marks.
-    Code(Code<'s>),
     /// `for 2025`, `for 2026-03`, `for 2026-03-15`, `for 2026-01-01..2026-12-31`:
     /// the period the flow is recognized over, as first and last day.
     Period(Day, Day),
@@ -612,14 +641,14 @@ pub struct Waive<'s> {
     pub reason: Option<&'s str>,
 }
 
-/// `DATE PLACE = [-]AMOUNT [! [STRING] | via PLACE]`, checked at the end of the day.
+/// `DATE END = [-]AMOUNT [! [STRING] | via NAME]`, checked at the end of the day.
 #[derive(Debug)]
 pub struct Assert<'s> {
     /// The day the balance is checked, at its end.
     pub date: Day,
-    /// The place whose balance is stated.
-    pub place: Place<'s>,
-    /// In the place's display sign. Negative (`= -50 USD`) for an overdraft.
+    /// Whose balance is stated: an account, an owner or a contract (a loan's).
+    pub end: End<'s>,
+    /// In the end's display sign. Negative (`= -50 USD`) for an overdraft.
     pub amount: Amount<'s>,
     /// What becomes of a difference between the statement and the ledger.
     pub gap: Gap<'s>,
@@ -630,13 +659,13 @@ pub struct Assert<'s> {
 pub enum Gap<'s> {
     /// Nowhere: a difference is an error.
     Refused,
-    /// `!`: an explicit flow from `equity/unknown`.
+    /// `!`: accepted as unexplained.
     Waived(Waive<'s>),
-    /// `via PLACE`: a flow from or to that place.
+    /// `via market`: a flow with that party, or a revaluation by the market.
     Via(Name<'s>),
 }
 
-/// `DATE #code settled|void|returned`
+/// `DATE ^code settled|void|returned`
 #[derive(Debug)]
 pub struct Event<'s> {
     /// The day the state takes effect.
@@ -649,7 +678,7 @@ pub struct Event<'s> {
     pub state_loc: Loc,
 }
 
-/// What a `DATE #code STATE` line does to the flows carrying that code.
+/// What a `DATE ^code STATE` line does to the flows carrying that code.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum EventState {
     /// Pending becomes actual on this day.
@@ -685,53 +714,143 @@ pub struct Split<'s> {
     pub denominator: Dec,
 }
 
-/// `DATE PLAN [AMOUNT]` with optional override legs: the journal says the named
-/// plan happened on `date`.
+/// `DATE NAME [AMOUNT]` with optional override legs: the journal says the named
+/// contract was kept on `date`, in the flow it writes in full, but for what
+/// this line changes.
 #[derive(Debug)]
 pub struct Occurrence<'s> {
-    /// The day the plan happened.
+    /// The day the contract was kept.
     pub date: Day,
-    /// The plan's name.
-    pub plan: Name<'s>,
-    /// Replaces the plan's header amount.
+    /// The contract's name.
+    pub contract: Name<'s>,
+    /// Replaces the contract's amount, or for a `buy` is what was bought.
     pub amount: Option<Amount<'s>>,
-    /// Replace the plan's legs of the same place.
+    /// Replace the template's legs of the same end.
     pub legs: Many<Leg<'s>>,
 }
 
-/// `opening DATE` and its indented lines: holdings that exist from that day,
-/// each line a [`Leg`] with a fixed amount and `basis` and `since` clauses.
+/// `DATE NAME ends`: the contract expects nothing more.
+#[derive(Debug)]
+pub struct Ending<'s> {
+    /// The day the contract ended.
+    pub date: Day,
+    /// The contract's name.
+    pub contract: Name<'s>,
+}
+
+/// `DEBTOR owes CREDITOR AMOUNT TAIL`: value that one of them is to move to
+/// the other, and has not. Which of them is an owner is for the model to say.
+/// The same line, dated with its opening's date, is a claim already open.
+#[derive(Debug)]
+pub struct Claim<'s> {
+    /// The day the claim arises.
+    pub date: Day,
+    /// Who is to pay.
+    pub debtor: Name<'s>,
+    /// Who is to be paid.
+    pub creditor: Name<'s>,
+    /// How much.
+    pub amount: Amount<'s>,
+    /// `due 30d`, `^inv-12`, `#design`: the tail of a flow.
+    pub tail: Many<Clause<'s>>,
+}
+
+/// `opening DATE` and its indented lines: what the owners hold from that day.
+/// Each line is a [`Leg`] with a fixed amount, or an asset's `basis`, and
+/// `basis` and `since` clauses; or a claim that is already open.
 #[derive(Debug)]
 pub struct Opening<'s> {
     /// The day the balances are stated: they exist from then on.
     pub date: Day,
     /// One line per holding: `&file[opening.lines]`.
     pub lines: Many<Leg<'s>>,
+    /// One line per open claim: `&file[opening.claims]`.
+    pub claims: Many<Claim<'s>>,
 }
 
-/// `every CADENCE [on DAY] [from DATE] [until DATE|MONTH] FLOW`, or
-/// `plan NAME every …`.
+// ─── Contracts ──────────────────────────────────────────────────────────────
+
+/// `contract NAME with PARTY` and its indented lines: a promise of flows with
+/// one party. Its first line is the schedule; the rest come in any order.
 #[derive(Debug)]
-pub struct Plan<'s> {
-    /// The name of a named plan, which the journal can instantiate.
-    pub name: Option<Name<'s>>,
-    /// `month` is one month, `2w` fourteen days, `quarter` three months.
-    pub every: Span,
-    /// `on DAY`: which day of each period. `None` means the period's own start.
-    pub on: Option<On>,
-    /// `from DATE`: when the plan starts, if it says.
-    pub from: Option<Day>,
-    /// Inclusive. A month bound is normalized to that month's last day.
-    pub until: Option<Day>,
-    /// What happens each time, with its legs.
-    pub flow: Flow<'s>,
+pub struct Contract<'s> {
+    pub name: Name<'s>,
+    /// Who the promise is with.
+    pub party: Name<'s>,
+    /// How often and for how much. `None` when the line is missing or did not
+    /// parse, which its own diagnostic says; the contract is kept all the same,
+    /// so that its occurrences are not errors too.
+    pub schedule: Option<Schedule<'s>>,
+    /// The other lines that are not legs: `from`, `until`, `covers`, `business`,
+    /// `deposit`, `loan`, `escrow` and `match`, which the model reads with the
+    /// properties of other declarations (a party's or a purpose's `business`
+    /// is the same line): `&file[contract.props]`.
+    pub props: Many<Prop<'s>>,
+    /// The template: legs as in a split flow, of which an occurrence
+    /// overrides those of the same end.
+    pub legs: Many<Leg<'s>>,
+    /// The nested laws.
+    pub laws: Many<Law<'s>>,
+    /// A line of its body did not parse and is left out, so what remains is
+    /// not the whole contract: anything that only follows from the missing line
+    /// is not worth another diagnostic.
+    pub damaged: bool,
 }
 
-/// The day within each period a plan falls on.
+/// `[AMOUNT | buy UNIT for AMOUNT] CADENCE [on DAY, …] (from | into) NAME
+/// [#purpose [of NAME]] ["description"]`
+#[derive(Clone, Copy, Debug)]
+pub struct Schedule<'s> {
+    /// The whole line.
+    pub at: Loc,
+    /// What each occurrence pays; `None` when the contract's `loan` says.
+    pub payment: Option<Payment<'s>>,
+    pub cadence: Cadence,
+    /// The days of each period: `&file[schedule.on]`. None means the period's own start.
+    pub on: Many<On>,
+    /// Whether the holding pays (`from`) or is paid (`into`).
+    pub direction: Direction,
+    /// An account, or an owner's own hand: the parser cannot tell.
+    pub holding: Name<'s>,
+    /// The purpose and the description, as clauses of a flow: `&file[schedule.tail]`.
+    pub tail: Many<Clause<'s>>,
+}
+
+/// What an occurrence pays.
+#[derive(Clone, Copy, Debug)]
+pub enum Payment<'s> {
+    /// `45 USD`
+    Fixed(Amount<'s>),
+    /// `buy VTI for 500 USD`: what it spends each time is fixed and what it
+    /// buys is not, so the occurrence says (`20 vti-monthly 1.620 VTI`).
+    Buy { unit: Name<'s>, spend: Amount<'s> },
+}
+
+/// How often. `daily` is `every 1d`, `weekly` `every 7d`, `monthly` `every 1m`,
+/// `quarterly` `every 3m` and `yearly` `every 12m`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Cadence {
+    Every(Span),
+    /// `twice monthly`: two days in each month, `on 15, last`.
+    TwiceMonthly,
+}
+
+/// Which way a schedule's money goes, for the holding.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Direction {
+    /// `from checking`: the holding pays.
+    From,
+    /// `into checking`: the holding receives.
+    Into,
+}
+
+/// The day within each period that a contract's occurrence falls on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum On {
     /// `on 15`: past the month's end clamps to its last day.
     MonthDay(u8),
+    /// `on last`: the month's last day.
+    Last,
     /// `on 04-15`: that month (1 to 12) and day of every year.
     YearDay { month: u8, day: u8 },
     /// `on monday`: Monday = 0 … Sunday = 6, as [`Day::weekday`].
@@ -740,17 +859,18 @@ pub enum On {
 
 // ─── Declarations ───────────────────────────────────────────────────────────
 
-/// `account|entity|commodity|kind NAME [: KIND]` with indented properties and laws.
+/// `account|entity|asset|purpose|commodity|kind NAME [: KIND]` with indented
+/// properties and laws. (`account NAME : KIND at NAME` is the one with more.)
 #[derive(Debug)]
 pub struct Decl<'s> {
     /// Which keyword introduced it.
     pub what: DeclKind,
-    /// The path, entity, symbol or kind it declares.
+    /// The name, symbol or kind it declares.
     pub name: Name<'s>,
-    /// `account PATH as ALIAS`.
-    pub alias: Option<Name<'s>>,
-    /// After `:`: the kind (or, for `kind`, the parent kind).
+    /// After `:`: the kind (or, for `purpose` and `kind`, the parent).
     pub kind: Option<Name<'s>>,
+    /// `account NAME : KIND at NAME`: the institution the account is with.
+    pub at: Option<Name<'s>>,
     /// The indented property lines: `&file[decl.props]`.
     pub props: Many<Prop<'s>>,
     /// The nested laws.
@@ -760,18 +880,31 @@ pub struct Decl<'s> {
 /// Which keyword introduced a declaration.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum DeclKind {
-    /// `account`: a place that holds value.
+    /// `account`: a position with an institution.
     Account,
-    /// `entity`: a person, business or authority.
+    /// `entity`: an owner or a party.
     Entity,
-    /// `commodity`: a currency, security or asset.
+    /// `asset`: an identified thing.
+    Asset,
+    /// `purpose`: a node of the tree of what flows are for.
+    Purpose,
+    /// `commodity`: a currency or security.
     Commodity,
-    /// `kind`: a class that accounts, entities or commodities belong to.
+    /// `kind`: a class that accounts, entities, assets or commodities belong to.
     Kind,
 }
 
+/// `budget PURPOSE AMOUNT monthly|yearly`: a warning on the purpose's total.
+#[derive(Debug)]
+pub struct Budget<'s> {
+    pub purpose: Name<'s>,
+    pub amount: Amount<'s>,
+    /// The month or year the amount is for.
+    pub per: Period,
+}
+
 /// `NAME ARG*`: arguments are primary expressions, commas skipped.
-/// `has born date`, `budget 500 USD monthly`, `lives us/ca from 2026-01-01`.
+/// `has born date`, `holds USD, EUR`, `lives us/ca from 2026-01-01`.
 #[derive(Debug)]
 pub struct Prop<'s> {
     /// The property's name: `has`, `budget`, `lives`.
@@ -859,14 +992,17 @@ pub struct Law<'s> {
 /// When a law applies.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Trigger {
-    /// `on in`: value arrives in a governed place.
+    /// `on in`: value arrives at the governed thing.
     In,
-    /// `on out`: value leaves a governed place.
+    /// `on out`: value leaves it.
     Out,
-    /// `on gain`: parcels leaving a governed place realize a gain.
+    /// `on gain`: parcels leaving it realize a gain.
     Gain,
-    /// `on spend`: money tied to a restricted entity leaves its owner's places.
+    /// `on spend`: money tied to a restricted entity leaves its owner.
     Spend,
+    /// `on flow`: a flow of the governed purpose (under an asset, one whose
+    /// purpose is `of` it).
+    Flow,
     /// `each month` or `each year`: a period of the governed thing ends.
     Each(Period),
     /// `each year closing 04-15`: the year is judged on that day of the next.
@@ -878,7 +1014,7 @@ pub enum Trigger {
     },
     /// `by EXPR`: the journal reaches that date.
     By(ExprId),
-    /// `always`: after any change to a governed place.
+    /// `always`: after any change to the governed thing.
     Always,
 }
 
@@ -922,7 +1058,7 @@ pub enum StepKind<'s> {
     Effect(Effect<'s>),
 }
 
-/// What a law does to the world: an obligation, or a tally.
+/// What a law does to the world: an obligation, a tally, or a basis.
 #[derive(Debug)]
 pub enum Effect<'s> {
     /// `owe EXPR to ENTITY [by EXPR] [as NAME]`: `amount` is owed to the entity
@@ -931,6 +1067,13 @@ pub enum Effect<'s> {
     Owe { amount: ExprId, to: Name<'s>, due: Option<ExprId>, name: Option<Name<'s>> },
     /// `count EXPR as NAME`: adds `amount` to the tally `name`.
     Count { amount: ExprId, name: Name<'s> },
+    /// `consume EXPR`: lowers the basis of the governed asset (or its part)
+    /// by `amount`: depreciation, depletion.
+    Consume(ExprId),
+    /// `carry EXPR to UNIT within SPAN`: holds a disallowed loss and adds it to
+    /// the basis of the nearest acquisition of `to` within `within`, before or
+    /// after (a wash sale).
+    Carry { amount: ExprId, to: Name<'s>, within: Span },
 }
 
 // ─── Expressions ────────────────────────────────────────────────────────────
@@ -1024,7 +1167,9 @@ pub enum ExprKind<'s> {
     Name(Name<'s>),
     /// `USD`
     Unit(Name<'s>),
-    /// `#house`
+    /// `#groceries`
+    Purpose(Name<'s>),
+    /// `^inv-12`
     Code(Code<'s>),
     /// `self.purpose`: a field of the first.
     Field(ExprId, Name<'s>),
@@ -1038,6 +1183,8 @@ pub enum ExprKind<'s> {
     Binary(BinOp, ExprId, ExprId),
     /// `x is 401k | ira`: true when `x` matches any alternative.
     Is(ExprId, Many<ExprId>),
+    /// `repair of self`, in an alternative of `is`: a purpose, and the object it takes.
+    Of(ExprId, ExprId),
     /// `if c then a else b`
     If(ExprId, ExprId, ExprId),
     /// `0 USD 10% | 12_400 USD 12% | …`: thresholds and marginal rates.
