@@ -19,17 +19,18 @@ kind 401k : tax-deferred
   liquidity 5d
   has employer entity
 
-  /// Elective deferrals are capped for each person and calendar year
-  /// (IRC §402(g)), with a catch-up from age 50 and a larger one from 60
-  /// through 63 (IRC §414(v)). This payment took the year's deferrals over the
-  /// cap. Ask payroll to lower the deferral. Any excess must also be returned
+  /// Elective deferrals are capped for each person and calendar year, across
+  /// every plan they hold (IRC §402(g)), with a catch-up from age 50 and a
+  /// larger one from 60 through 63 (IRC §414(v)). Employer contributions do not
+  /// count. This payment took the year's deferrals over the cap. Ask payroll to lower the deferral. Any excess must also be returned
   /// by the plan before April 15 of the next year, or it is taxed twice
   /// (IRC §402(g)(2)).
   law deferral-limit
     on in
     when from is wages
-    let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[date] else if owner.age >= 50y then catch-up[date] else empty
-    require total(in, year) <= limit[date] + extra "401(k) deferrals over the yearly limit"
+    count amount as elective-deferrals
+    let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[year] else if owner.age >= 50y then catch-up[year] else empty
+    require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearly limit"
 
   /// A deferral is pay you chose not to receive, so it is not taxed this year
   /// (IRC §402(e)(3)). The wages law counted it as pay; this law counts it as

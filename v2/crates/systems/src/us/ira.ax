@@ -26,13 +26,14 @@ kind ira : tax-deferred
   /// Contributions to IRAs are capped for each person and calendar year, with
   /// a catch-up from age 50 (IRC §219(b)(5)). This deposit took the year over
   /// the cap. The limit is shared between a person's traditional and Roth IRAs,
-  /// so count both. Withdraw the excess and its earnings before the tax filing
+  /// which is why it is counted per person rather than per account. Withdraw the excess and its earnings before the tax filing
   /// deadline, or it is charged 6% for every year it stays (IRC §4973).
   law contribution-limit
     on in
     when not from is income | tax-deferred
-    let extra = if owner.age >= 50y then catch-up[date] else empty
-    require total(in, year) <= limit[date] + extra "IRA contributions over the yearly limit"
+    count amount as ira-contributions
+    let extra = if owner.age >= 50y then catch-up[year] else empty
+    require tally(ira-contributions) <= limit[year] + extra "IRA contributions over the yearly limit"
 
   /// Money taken out before age 59½ carries an additional 10% tax on the part
   /// that is taxable (IRC §72(t)). This withdrawal is priced at that 10%. If an

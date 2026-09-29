@@ -813,20 +813,29 @@ lanes share.
   day, per place, and added to every ancestor. A flow whose both ends lie in
   the subject's subtree does not count as entering or leaving it, and does not
   fire the subject's `on in`/`on out` laws.
-- Tallies are keyed by `(owner, year, name, system)`. `tally(name)` in a law of
-  system S sums tallies whose system is S, an ancestor of S, or a descendant of
-  S (two interval tests on the system tree), plus project-level tallies. So
-  `us` sees what `us/401k` counted, `us/ca` sees `us`, and `us/ny` sees
-  neither `us/ca` nor its descendants.
+- Tallies are keyed by `(owner, year, name)`: one namespace per person-year,
+  so a tally is a line on that person's year. Systems name their lines by
+  convention (`wages`, `agi`, `federal-withheld`, `ca-withheld`, …).
+  `Effect::system` still records which system counted a line, for grouping.
+  Per-person limits are tallies, not window totals: `count amount as
+  elective-deferrals` then `require tally(elective-deferrals) <= limit[year]`
+  is exactly IRC §402(g) (across every plan a person holds, employer match
+  excluded), which `total(in, year)` on one account cannot express.
+- `year` and `month` are available in every law context, from the context day.
 - Param keys: a year `2026` means "since 2026-01-01"; a date key means since
   that day. A lookup with a number `N` asks for N-01-01; with a date, that day.
   The latest row at or before wins, among rows whose name keys match.
 - **Plain money** is base currency, in an asset place, with basis equal to its
-  face and no tie. It is one signed integer (`Holding::plain`). Everything else
-  is a `Parcel` in `Holding::lots`. Non-plain parcels merge only when
-  `(acquired, txn, tied)` are equal (their basis adds).
-- **Relief** at an asset place: (1) apply selectors; (2) order by colors: if
-  the flow is one a tied entity's `on spend` laws permit, its tied parcels go
+  face and no tie. It is one signed integer (`Holding::plain`) and it never
+  realizes: its gain is zero by definition, so it produces no `Gain` and fires
+  no `on gain` law. Everything else is a `Parcel` in `Holding::lots`.
+- **Merging is interchangeability.** Lots merge exactly when they are
+  interchangeable: for the base currency, the same tie and the same basis per
+  unit (so a 401k's zero-basis deferrals are one lot); for other commodities,
+  the same `(acquired, txn, tied)` (each purchase stays its own lot).
+- **Relief** at an asset place (plain money is a candidate too): (1) apply
+  selectors; (2) order by colors: if the flow is one a tied entity's `on
+  spend` laws permit, its tied parcels go
   first, otherwise plain and untied parcels go first and tied ones last; (3)
   apply the policy (selector, else place, else kind chain). Candidates are
   *interchangeable* when they agree on basis per unit and tie, and, for
@@ -851,3 +860,7 @@ lanes share.
 - `budget 500 USD monthly` on an account compiles to a place law
   `on in` + `warn total(in, month) <= 500 USD`, named `budget`, with every node
   located at the property.
+- Assertions are written in the place's display sign: `visa = 1_234.56 USD`
+  means 1,234.56 is owed.
+- A project may declare `entity me : person` to set the built-in `me`'s kind
+  and properties.

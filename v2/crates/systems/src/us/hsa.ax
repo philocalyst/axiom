@@ -31,8 +31,9 @@ kind hsa : tax-deferred
   law contribution-limit
     on in
     when not from is interest | dividends | gains | tax-deferred
-    let extra = if owner.age >= 55y then catch-up[date] else empty
-    require total(in, year) <= limit[date, self.coverage] + extra "HSA contributions over the yearly limit"
+    count amount as hsa-contributions
+    let extra = if owner.age >= 55y then catch-up[year] else empty
+    require tally(hsa-contributions) <= limit[year, self.coverage] + extra "HSA contributions over the yearly limit"
 
   /// A contribution from pay is not taxed this year (IRC §125, §223(e)). The
   /// wages law counted it as pay; this law counts it as deferred and takes it

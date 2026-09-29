@@ -62,9 +62,9 @@ account assets/college : 529-plan
 // 2. A 401(k) over-contribution.
 //
 // expect: error[deferral-limit]: 401(k) deferrals over the yearly limit
-//   The flow is `acme -> retirement 26_000 USD`, and total(in, year) is
-//   26_000.00 USD against limit[date] + extra = 24_500.00 USD (a 37-year-old has
-//   no catch-up). Over by 1_500.00 USD.
+//   The flow is `acme -> retirement 26_000 USD`, and tally(elective-deferrals)
+//   is 26_000.00 USD against limit[year] + extra = 24_500.00 USD (a 37-year-old
+//   has no catch-up). Over by 1_500.00 USD.
 //   note: the law's doc comment, from us/401k
 //   help: a deferral of 24_500.00 USD or less satisfies it
 2026-01-30 acme -> retirement 26_000 USD

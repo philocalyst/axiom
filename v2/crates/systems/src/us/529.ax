@@ -33,7 +33,7 @@ kind 529-plan : tax-deferred
   law gift-exclusion
     on in
     when not from is income | tax-deferred
-    warn total(in, year) <= gift-exclusion[date] "529 contributions over the annual gift exclusion"
+    warn total(in, year) <= gift-exclusion[year] "529 contributions over the annual gift exclusion"
 
   /// The earnings in a withdrawal that did not pay a qualified education
   /// expense are taxable income (IRC §529(c)(3)(A)), counted here as a
