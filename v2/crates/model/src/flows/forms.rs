@@ -49,11 +49,12 @@ impl<'a, 's> Elab<'a, 's> {
         let first = self.sink.flows.len();
         let payee = header.and_then(|header| header.payee).or(moves.as_ref().and_then(|moves| moves.counterparty));
         if let Some(mut moves) = moves {
-            for mv in moves.moves.drain(..) {
+            for mv in &moves.moves {
                 if let Some(flow) = self.flow(mv, day, mode) {
                     self.sink.flows.push(flow);
                 }
             }
+            moves.moves.clear();
             self.spare = moves.moves;
         }
         if !self.coded.is_empty() {

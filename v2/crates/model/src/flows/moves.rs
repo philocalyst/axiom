@@ -357,8 +357,8 @@ impl Elab<'_, '_> {
     // ─── Flows ──────────────────────────────────────────────────────────────
 
     /// The flow a move makes on `day`, if it keeps the rules every flow keeps.
-    pub fn flow(&mut self, mv: Move, day: Day, mode: Mode) -> Option<Flow> {
-        self.check(&mv, day)?;
+    pub fn flow(&mut self, mv: &Move, day: Day, mode: Mode) -> Option<Flow> {
+        self.check(mv, day)?;
         let mode = if mv.pending && mode == Mode::Actual { Mode::Pending } else { mode };
         let tail = &mv.tail;
         let mut select = if mv.to.basis { mv.to.select.clone() } else { mv.from.select.clone() };
