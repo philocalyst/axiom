@@ -1,0 +1,13 @@
+// April 2026.
+
+01 mortgage                                                   // ▸ 2,937.45: #interest of triplex 1,551.58 · principal 515.87 · escrow 870.00
+01 lease-b                                                    // ▸ 1,850.00 from the tenant into pm-trust · - 148.00 #management (8%)
+10 pm-trust -> checking 5_029.88 USD                          // ▸ the PM's monthly disbursement: last month's collections, net of its fee and of what it spent
+10 common-electric
+12 checking -> pm-trust 9_500 USD                             // ▸ the owner tops up the PM's account for unit C's work: a transfer
+13 pm-trust -> ace-painting 1_400.00 USD #repair of unit-c "repaint after move-out"
+14 pm-trust -> floors-plus 8_700.00 USD #improvement of unit-c    // the work of one week
+  2_300.00 USD #improvement of unit-c "new refrigerator and range"   // ✎ 03b1: the same purpose on the header and on an item
+  6_400.00 USD #improvement of unit-c "luxury vinyl plank, replacing the carpet"
+28 pm-trust -> elm-pm 1_025.00 USD #leasing-fee "placement of tenant for unit C: half of the first month"
+30 pm-trust = 1_927.00 USD

@@ -1,0 +1,69 @@
+/// Loomfield & Field LLC: a Seattle design agency with about 30 clients, owned 60/40
+/// by two partners, two employees, one 1099 illustrator and three company cards.
+/// January to June 2026.
+///
+/// Written against LANGUAGE v4 the way a careful user would. Not runnable.
+/// Marks in comments, each explained in FINDINGS.md under the same number:
+///   ✗ cannot say: what I needed, and what I wrote instead
+///   ✎ says it badly
+///   ? the spec is unclear or contradicts itself
+///   ⇄ what sync would need to write the line with no typing
+/// `▸` is what Axiom would infer or derive, as in the v4 sketch.
+base USD
+use us
+use us/wa                       // B&O tax, retail sales tax on advertising services, PFML, WA Cares
+use us/partnership              // ✗ 01a1: no such system yet, and the language cannot write it (see below)
+
+/// Ines Moreau, who keeps this book. `me` is her.
+entity me : person
+  born    1987-09-02
+  filing  single
+  lives   us/wa/seattle
+
+/// Theo Okafor, her partner in the agency, 40%.
+entity theo : person
+  born    1985-02-19
+  filing  single
+  lives   us/wa/seattle
+
+kind llc : entity
+  taxed   partnership            // ▸ its profit reaches the partners' returns, in shares (§4 does not say how)
+
+/// The agency. Accrual books, so that an invoice is income the day it is sent
+/// and a write-off means something.
+entity loomfield : llc
+  owner   me                     // ✗ 01a1: 60% me, 40% theo. `owner` takes one entity (§4), so Theo owns nothing here.
+  books   accrual                // ? 01c1: `books` is in §7's text but not in §4's property table
+  lives   us/wa/seattle          // ▸ WA laws govern it: B&O, sales tax, payroll
+
+// What the agency's money is for. std has `income` and `spending`; these are the leaves this book needs.
+purpose design            : income
+purpose retainer          : design
+purpose print-production  : income
+purpose reimbursed-costs  : income          // ✎ 01b1: a cost re-billed at cost is income and spending at once
+purpose late-fees         : income
+purpose bad-debt          : spending
+purpose contract-labor    : spending
+purpose software          : spending
+purpose rent              : spending
+purpose payroll-tax       : spending
+purpose b-and-o           : spending
+purpose distribution                        // ✗ 01a2: an owner-to-owner flow is neither income nor spending: a fourth root?
+purpose sales-tax-collected                 // ✗ 01a3: nor is this: money passing through, owed to the state
+purpose withholding                         //          nor this
+purpose accounting        : spending
+purpose office            : spending
+purpose travel            : spending
+purpose meals             : spending
+purpose marketing         : spending
+purpose fees              : spending
+
+kind accountant  : org
+  purpose accounting
+kind insurer     : org
+  purpose insurance                         // ✎ 01b7: premiums out, claim payouts in; one purpose serves one direction
+kind airline     : merchant
+  purpose travel
+kind rideshare   : merchant
+  purpose travel
+kind processor-balance : asset               // what a processor holds for you until it pays out

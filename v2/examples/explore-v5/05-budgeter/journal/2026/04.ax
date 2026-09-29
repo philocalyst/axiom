@@ -1,0 +1,29 @@
+// April 2026.
+
+01 rent
+01 gym
+01 auto                                                         // ▸ 612.00 from checking · #insurance, 102.00 a month for six months
+03 phone
+03 boots
+04 card -> king-soopers 83.20 USD
+08 irs -> checking 1_140.00 USD for 2025                                        // ▸ the 2025 refund
+  savings   500.00 USD for travel                                              // ▸ a windfall assigned at the door
+  savings   300.00 USD for car
+  checking  ...                                                                // ▸ 340.00
+09 internet
+11 card -> trader-joes 57.45 USD
+12 electric 79.30 USD
+14 gas 40.10 USD
+15 job
+17 boots                                                        // ▸ the last: the loan is paid
+18 savings -> discount-tire 420.00 USD #car "four tires"        // ▸ from the `car` envelope: tied money spent on what it was set aside for
+19 card -> chipotle 24.10 USD #dining
+20 ben -> venmo 1_109.80 USD "rent + power, gas, wifi"
+21 cleo -> venmo 1_109.80 USD "rent + power, gas, wifi"
+22 netflix
+22 card -> king-soopers 96.10 USD
+24 venmo -> checking 2_219.60 USD
+26 card -> blue-bottle 11.75 USD #dining
+29 card -> sprouts 49.25 USD
+30 job
+30 chase -> card 8.25 USD #rebate "cash back, 2% of 412.34"

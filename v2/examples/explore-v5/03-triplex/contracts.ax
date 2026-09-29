@@ -1,0 +1,55 @@
+// ─── What Marta has agreed to ───────────────────────────────────────────────
+
+/// 374,400 USD at 5.25% over thirty years, first payment 2022-10-01. Interest is the building's; the asset's
+/// shares decide whose it is.
+contract mortgage with first-federal
+  loan 374_400 USD on 2022-08-12 at 5.25% over 30y for triplex
+  monthly on 1 from checking                   // ▸ 2,067.45 of principal and interest
+  escrow 870 USD into escrow                   // 7,840 property tax and 2,600 insurance, over twelve
+
+contract property-tax with monroe-county
+  about 3_920.00 USD yearly on 01-31, 07-31 from escrow #property-tax of triplex   // ✎ 03b2: as elsewhere, a list of dates
+
+contract insurance with state-farm
+  2_600 USD yearly on 06-01 from escrow #insurance of triplex
+  covers 1y                                    // ? 03c3: `covers the year` or `covers 1y`? here it is from 06-01 for twelve months
+
+/// The building's water and sewer: quarterly, and in Marta's name. The tenants repay their shares.
+contract water with rochester-water
+  about 600 USD quarterly on 02-10 from checking #utilities of triplex     // ✎ 03b2: `quarterly on 02-10` also fixes the month
+  // ✗ 03a4: what the tenants repay is a claim on them: 32.81% and 31.25% of each bill, added to the next rent.
+  // It is computed by hand and written as an item on their rent (journal/2026/03.ax).
+
+contract common-electric with national-grid
+  about 46 USD monthly on 20 from checking #utilities of triplex
+
+// ── The leases, all through the manager ─────────────────────────────────────
+// The rent is paid to the manager, who keeps 8% of it: an item on every occurrence, so the receipt says
+// what arrived, and the fee is `- 8%`.
+
+contract lease-b with tenant-b
+  1_850 USD monthly on 1 into pm-trust #rent of unit-b
+  - 8% #management via elm-pm
+  deposit 1_850 USD                            // ? 03c4: held where? §5's `deposit` names no holding; this one is the manager's
+  from 2025-07-01 until 2026-06-30
+
+contract lease-c with tenant-c
+  1_950 USD monthly on 1 into pm-trust #rent of unit-c
+  - 8% #management via elm-pm
+  deposit 1_950 USD
+  from 2025-09-01 until 2026-08-31
+
+/// A new tenant for unit C, from mid-May, with the first full month free.
+contract lease-c2 with tenant-c2
+  2_050 USD monthly on 1 into pm-trust #rent of unit-c
+  - 8% #management via elm-pm
+  deposit 2_050 USD
+  from 2026-05-15 until 2027-05-31
+
+// ✗ 03a3: the leases charge 5% of the rent as a late fee after five days. A late fee is a term of the lease and
+// the amount follows from it (5% of 1,850.00), yet `check` only says the rent is late and the fee is typed.
+// ✗ 03a7: the first month of lease-c2 is 05-15 to 05-31: 17 of 31 days, written as an amount on its occurrence.
+
+// ── What the manager charges besides its 8% ─────────────────────────────────
+// A leasing fee of half a month's rent when it places a tenant, and a hundred dollars to renew one. Neither
+// recurs on a schedule: they are flows, typed from its statement.

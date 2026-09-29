@@ -1,0 +1,26 @@
+// March 2026.
+
+01 rent
+01 gym
+02 card -> king-soopers 88.40 USD
+03 phone
+06 card -> nordstrom-rack 60.00 USD #clothing "boots: the 60 down"
+06 boots -> nordstrom-rack 180.00 USD #clothing "boots: Klarna pays the rest"       // ▸ the loan draws to the shop: spent today (240.00 with the 60.00 down)
+09 internet
+09 card -> trader-joes 51.70 USD
+12 electric 87.60 USD
+14 gas 61.30 USD
+14 spotify                                                      // ▸ 129.00 from card · recognized over the year
+15 job
+16 card -> tacos-el-jefe 32.80 USD #dining
+20 ben -> venmo 1_119.63 USD "rent + power, gas, wifi"
+20 card -> king-soopers 94.15 USD
+20 boots                                                        // ▸ 60.00 from checking: the first of three, no interest
+20 card -> gc-target 90.00 USD "Target gift card at Costco, 100.00 face"        // ✗ 05a4: worth 100.00, cost 90.00: the 10.00 has nowhere to be written
+21 cleo -> venmo 1_119.63 USD "rent + power, gas, wifi"
+22 netflix
+24 venmo -> checking 2_239.26 USD
+28 card -> sprouts 45.90 USD
+28 ^promo until 2026-06-30 "extended: a retention offer"        // ▸ the internet stays 60.00 through June
+31 job
+31 chase -> card 11.85 USD #rebate "cash back, 2% of 592.44"

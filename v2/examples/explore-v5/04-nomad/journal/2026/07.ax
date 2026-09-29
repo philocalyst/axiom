@@ -1,0 +1,19 @@
+// July 2026.
+
+01 lisbon-rent
+02 cowork
+03 staking 0.001457 ETH
+08 github
+08 notion
+08 internet
+10 staking 0.001457 ETH
+12 nordlicht-retainer
+14 cloudflare
+15 brightside-retainer
+16 visa -> apple-zurich 3_648.61 USD #purchase of laptop ^laptop-buy "MacBook Pro 14: CHF 3,290.00"  // ▸ 273.39 of VAT inside it, part of its cost · expensed in 2026     // ⇄ 04d1
+16 visa -> chase 109.46 USD #fees "foreign transaction fee, 3%"
+17 staking 0.001464 ETH
+20 edp
+20 health
+24 staking 0.001464 ETH
+31 staking 0.001466 ETH

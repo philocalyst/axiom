@@ -1,0 +1,26 @@
+// June 2026.
+
+01 rent
+01 gym
+02 card -> king-soopers 87.10 USD
+03 phone
+08 card -> trader-joes 53.85 USD
+09 internet
+10 nyt ends "cancelled"                                                        // ▸ nothing more is expected
+10 nyt -> card 67.12 USD ^nyt-2026 "pro rata refund, 8 of 12 months"            // ✗ 05a5: a refund of the unused part of what was prepaid: the recognition should stop today
+12 electric 101.50 USD
+13 card -> sushi-den 84.60 USD #dining
+14 gas 21.40 USD
+15 job
+18 delta-miles 25_000 MILES -> delta 312.00 USD #travel "award flight, DEN to SEA"       // ✗ 05a2: a disposal of miles at basis 0: a gain of 312.00 USD?
+  + 5.60 USD #fees "taxes and fees"                                               // ▸ paid from the card
+19 savings -> marriott 640.00 USD #travel "three nights in Seattle"  // ▸ from the `travel` envelope
+20 ben -> venmo 1_110.96 USD "rent + power, gas, wifi"
+20 card -> king-soopers 91.45 USD
+21 cleo -> venmo 1_110.96 USD "rent + power, gas, wifi"
+22 netflix
+24 venmo -> checking 2_221.92 USD
+24 card -> chipotle 19.90 USD #dining
+29 card -> sprouts 46.70 USD
+30 job
+30 chase -> card 8.14 USD #rebate "cash back, 2% of 406.97"

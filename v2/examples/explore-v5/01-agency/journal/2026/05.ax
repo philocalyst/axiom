@@ -1,0 +1,79 @@
+// May 2026.
+
+01 hollis-foods -> operating 3_751.90 USD ^inv-2026-0013
+01 studio-rent                                                  // ▸ 3,800.00 #rent
+01 google                                                       // ▸ 84.00 from card-me
+02 meridian-law -> operating 3_276.25 USD ^inv-2026-0008        // ▸ settles it
+03 slack                                                        // ▸ 87.50 from card-theo
+03 figma                                                        // ▸ 45.00 from card-maya
+05 quill-press owes loomfield due 30d ^inv-2026-0018
+  3_600.00 USD #design "cover series"
+  372.60 USD #sales-tax-collected for wa-dor "10.35% of 3,600.00"
+05 driftwood -> operating 79.45 USD ^inv-2026-0006-lf
+05 ravi-monthly                                                 // ▸ 2,400.00 #contract-labor
+05 card-theo -> uber 36.75 USD
+07 kestrel-retainer                                             // ▸ 1,200.00 #retainer
+07 card-me -> delta 486.20 USD "Austin, the design conference"
+08 northwind-retainer                                           // ▸ 4,500.00 #retainer
+08 juniper-books -> operating 3_200.15 USD ^inv-2026-0014
+09 pinecrest-retainer                                           // ▸ 3,089.80: 2,800.00 #retainer · 289.80 sales tax for wa-dor
+09 notion                                                       // ▸ 48.00 from card-maya
+10 vantage-retainer                                             // ▸ 1,986.30: 1,800.00 #retainer · 186.30 sales tax for wa-dor
+11 brightwell-retainer                                          // ▸ 1,655.25: 1,500.00 #retainer · 155.25 sales tax for wa-dor
+12 summit-retainer                                              // ▸ 2,758.75: 2,500.00 #retainer · 258.75 sales tax for wa-dor
+12 oakline owes loomfield due 30d ^inv-2026-0019
+  6_400.00 USD #design "wayfinding"
+  662.40 USD #sales-tax-collected for wa-dor "10.35% of 6,400.00"
+12 adobe                                                        // ▸ 359.97 from card-me
+13 card-maya -> lyft 22.85 USD
+14 halcyon-retainer                                             // ▸ 3,531.20: 3,200.00 #retainer · 331.20 sales tax for wa-dor
+14 card-theo -> costco 212.30 USD for theo "a household run on the wrong card"  // ✗ 01a2: paid for theo, an owner
+14 onepassword                                                  // ▸ 39.95 from card-me
+15 orchard-retainer                                             // ▸ 1,000.00 #retainer · exempt
+15 eftps                                                        // ▸ settles ^eftps-2026-04: 3,936.50 to irs
+16 harbor-retainer                                              // ▸ 2,427.70: 2,200.00 #retainer · 227.70 sales tax for wa-dor
+18 ^inv-2026-0009 waived "written off: Sable Hotels filed for chapter 7"  // ✗ 01a9: not `#bad-debt`; and the 388.12 of tax in it is recoverable from wa-dor
+19 lattice-retainer                                             // ▸ 2,207.00: 2,000.00 #retainer · 207.00 sales tax for wa-dor
+19 redwood-realty owes loomfield due 30d ^inv-2026-0020
+  4_250.00 USD #design "listing templates"
+  439.88 USD #sales-tax-collected for wa-dor "10.35% of 4,250.00"
+20 elm-street-dental -> stripe-bal 3_531.20 USD ^inv-2026-0015 via stripe  // ▸ settles the invoice · arrives net of the fee
+  - 102.70 USD #fees "Stripe 2.9% + 0.30"
+20 cpa                                                          // ▸ 650.00 #accounting
+20 github                                                       // ▸ 84.00 from card-theo
+21 card-me -> whole-foods 88.30 USD #meals "client lunch"
+22 stripe-bal -> operating 3_428.50 USD                         // the weekly payout
+22 quickbooks                                                   // ▸ 90.00 from card-me
+24 card-maya -> amazon 64.10 USD #office "colour checker"
+25 wa-excise 3_308.70 USD                                       // ▸ April, for 2026-04      // ✗ 01a8: `for last month`
+  2_815.20 USD #sales-tax-collected "collected in April"
+  493.50 USD #b-and-o "1.75% of 28,200.00"
+25 operating -> card-me 721.16 USD
+25 operating -> card-theo 303.40 USD
+25 operating -> card-maya 134.20 USD
+26 blue-heron owes loomfield due 30d ^inv-2026-0021
+  3_100.00 USD #design "brand audit"
+  320.85 USD #sales-tax-collected for wa-dor "10.35% of 3,100.00"
+26 reserve-fill 3_000.00 USD                                    // ▸ operating -> reserve
+27 card-theo -> amazon 129.99 USD #office "webcam and light"
+28 plover-outdoors -> operating 4_400.00 USD ^inv-2026-0016
+28 draw-me                                                      // ▸ 8,400.00 to my-checking · #distribution
+28 draw-theo                                                    // ▸ 5,600.00 to theo-checking · #distribution
+30 theo-checking -> operating 212.30 USD "his personal charge"
+31 payroll-maya                                                 // ▸ 5,228.15 net of 6,500.00 gross
+31 payroll-daniel                                               // ▸ 6,264.80 net of 8,000.00 gross
+31 loomfield owes irs 3_936.50 USD due 06-15 ^eftps-2026-05
+  694.00 USD #wages of maya "income tax withheld"
+  1_024.00 USD #wages of daniel "income tax withheld"
+  497.25 USD #wages of maya "employee FICA"
+  612.00 USD #wages of daniel "employee FICA"
+  1_109.25 USD #payroll-tax "employer FICA"
+31 loomfield owes wa-esd 353.80 USD due 07-31 ^esd-2026-05
+  80.60 USD #wages of maya "WA Cares and PFML withheld"
+  99.20 USD #wages of daniel "WA Cares and PFML withheld"
+  174.00 USD #payroll-tax "SUTA, 1.2% of 14,500.00"
+
+31 operating        = 61_950.79 USD
+31 card-me          = 1_148.42 USD        // owed, as the statement shows it
+31 card-theo        = 550.54 USD          // owed, as the statement shows it
+31 card-maya        = 179.95 USD          // owed, as the statement shows it

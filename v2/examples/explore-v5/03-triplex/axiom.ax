@@ -1,0 +1,37 @@
+/// Marta Kowalski lives in unit A of a three-unit building in Rochester and rents units B and C
+/// through a property manager. January to September 2026.
+///
+/// Not runnable; written against LANGUAGE v4. Marks: ✗ cannot say · ✎ says it badly ·
+/// ? the spec is unclear · ⇄ what sync would need. Numbers are explained in FINDINGS.md.
+base USD
+use us
+use us/ny
+use us/rental                   // depreciation, rental income and expenses, as in the v4 sketch
+
+entity me : person
+  born    1979-05-30
+  filing  single
+  lives   us/ny
+
+/// Each rented unit is a business of Marta's, so that a share of a shared bill can be borne by it and its
+/// income and costs are its own: the return has a line for each rental.
+///
+/// ✗ 03a1: this is the wrong abstraction and it is the only one the spec has. A unit is not an owner. It is
+/// a *part of a thing*, with a share of it. What the spec cannot say is "this bill is about the building,
+/// and 32.81% of it is unit B's": the units below are owners so that `business N% for OWNER` can carry the
+/// share, and (separately) assets so that each can be depreciated.
+kind rental-business : entity
+  taxed   schedule-e             // ▸ its income and costs reach Marta's return  (? 03c2: how? §6 does not say)
+entity rental-b : rental-business
+  owner   me
+entity rental-c : rental-business
+  owner   me
+
+// What Marta's money is for, beyond std.
+purpose leasing-fee     : spending
+purpose management      : spending
+purpose cleaning        : spending
+purpose late-fees       : income
+purpose utilities       : spending
+purpose property-tax    : spending
+purpose interest        : spending

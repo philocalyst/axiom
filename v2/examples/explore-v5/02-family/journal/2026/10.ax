@@ -1,0 +1,22 @@
+// October 2026.
+
+01 mortgage-2                                                 // ▸ 3,465.38: #interest of home 2,242.94 · principal 520.44 · escrow 702.00
+01 nyc-lease
+02 joint-visa -> whole-foods 118.90 USD
+06 retirement-lumen -> retirement-harbor 115_470.25 USD "direct rollover"  // ▸ tax-deferred to tax-deferred: not a distribution
+10 me owes nyu-langone 2_950.00 USD due 30d #medical ^bill-nyu-1003
+  24_800.00 USD "delivery, two nights, anesthesia"
+  - 13_100.00 USD "insurer's contractual adjustment"           // ✗ 02a13: `-` items are for flows (§2); statements show only positive ones
+  - 8_750.00 USD "insurer paid"
+12 electricity-ca
+14 car-loan                                                   // ▸ 560.20: #interest of car2 128.23 · principal 431.97
+14 electricity-ny
+14 joint-visa -> target 214.76 USD
+15 job-jamie
+15 job-harbor
+20 grandma -> 529-noa 5_000.00 USD "for Noa"                  // ▸ a gift, after tax: basis is its cost   // gift-exclusion counts 5,000.00 for Noa
+25 hsa -> nyu-langone 1_500.00 USD ^bill-nyu-1003             // ▸ qualified: paid straight to a provider; settles 1,500.00 of 2,950.00
+29 joint-visa -> trader-joes 97.36 USD
+31 job-jamie
+31 hsa-employer
+31 job-harbor

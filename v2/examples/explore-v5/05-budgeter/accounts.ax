@@ -1,0 +1,30 @@
+// ─── Where the money sits ───────────────────────────────────────────────────
+
+account checking   : deposit at cu-of-colorado
+account savings    : deposit at cu-of-colorado         // the envelopes live here, tied `for` their entity
+
+/// A flat 2% back on everything. The card statement credits it once a month.
+account card       : card at chase
+  cash-back 2%                                         // ✗ 05a1: a rule of the account kind: the credit is derived from what is spent
+                                                       //   (and Chase's statement also shows it: a flow "written again by hand")
+
+/// Delta's card: 1 mile a dollar, 2 on Delta.
+account delta-card : card at amex
+  earns 1 MILES per 1 USD                              // ✗ 05a1: and 2 per dollar on #travel with delta; nothing says either
+
+account venmo      : wallet at venmo
+  holds USD
+
+/// Miles are held with the airline, like shares with a broker. They have no market, no basis (they are a rebate,
+/// not a purchase), and they expire.
+commodity MILES : loyalty
+  name "Delta SkyMiles"
+  precision 0
+account delta-miles : loyalty-program at delta
+  holds MILES
+  // ✗ 05a2: `kind loyalty` should say "realizes nothing": redeeming 25,000 MILES for a 312.00 USD flight is
+  // not a capital gain of 312.00 USD, and `us` counts every gain on a non-currency commodity (§8: `on gain`).
+
+/// A Target gift card: a balance with a merchant.
+account gc-target  : gift-card at target
+  holds USD

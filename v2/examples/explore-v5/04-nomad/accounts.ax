@@ -1,0 +1,31 @@
+// ─── Where the money sits ───────────────────────────────────────────────────
+
+account chase-checking : deposit at chase                // US, in USD
+account visa           : card at chase                   // a US card that charges 3% on foreign purchases
+
+/// Wise: one account, a balance in each currency it holds. Nothing here is a lot to choose from:
+/// a euro is spent oldest first (std: `currency` is FIFO).
+account wise-bal : multi-currency at wise
+  holds EUR, GBP, USD
+
+account millennium     : deposit at millennium-bcp       // Lisbon, opened 2026-03-05: rent and utilities
+  holds EUR
+  opened 2026-03-05
+account stripe-bal     : processor-balance at stripe     // what Stripe holds until it pays out
+account paypal-bal     : processor-balance at paypal
+  holds USD, EUR
+
+// Crypto
+account kraken-stake   : exchange at kraken              // ETH bonded there, earning rewards
+  holds ETH, USD
+account metamask       : wallet                          // a self-custody wallet: ETH and USDC
+  holds ETH, USDC
+
+// ✗ 04a3: each of these but chase-checking and visa is a *foreign* account for the FBAR (10,000 USD in
+// aggregate at any time in the year, and FinCEN wants the highest balance of each). `kind foreign-account`
+// and one `always` law could say it, and the highest balance is a running maximum, which §6 still cannot
+// keep except as a tally hack (FINDINGS F28, still open in v4).
+
+kind equipment : thing
+asset laptop : equipment
+  // arrives 2026-07-16 in Zurich
