@@ -94,7 +94,7 @@ fn applies(book: &Book, rule: &Rule, on: &Occasion) -> bool {
 
 impl<'b, 's> Ledger<'b, 's> {
     /// Runs every rule in `rules` that applies to this occasion, in order.
-    pub(crate) fn fire(&mut self, rules: &[Rule], on: Occasion) {
+    pub(crate) fn fire(&mut self, rules: &[Rule], on: &Occasion) {
         let (book, mut done) = (self.book, Vec::new());
         for rule in rules.iter().filter(|rule| applies(book, rule, &on)) {
             // A law that two rules bring to one subject runs once.
@@ -128,7 +128,7 @@ impl<'b, 's> Ledger<'b, 's> {
     pub(crate) fn deadline(&mut self, at: usize) {
         let due = self.solved.deadlines[at];
         let rule = &self.book.rules.timed[due.rule];
-        self.fire(std::slice::from_ref(rule), Occasion::time(due.day, due.period));
+        self.fire(std::slice::from_ref(rule), &Occasion::time(due.day, due.period));
     }
 
     pub(crate) fn evaluate(&mut self, law: Id<Law>, ctx: &Context) -> bool {

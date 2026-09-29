@@ -65,7 +65,7 @@ impl<'b, 's> Ledger<'b, 's> {
         }
         if watched {
             self.count(m);
-            self.fire(&book.rules.on_out[m.from], Occasion { amount: Some(m.out), skip_internal: true, ..on });
+            self.fire(&book.rules.on_out[m.from], &Occasion { amount: Some(m.out), skip_internal: true, ..on });
         }
         if m.source.class.holds_parcels() || m.target.class.holds_parcels() || m.moves != Moves::Value {
             self.relieve(m);
@@ -78,11 +78,11 @@ impl<'b, 's> Ledger<'b, 's> {
             self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
         }
         if watched {
-            self.fire(&book.rules.on_in[m.to], Occasion { amount: Some(m.arrive), skip_internal: true, ..on });
+            self.fire(&book.rules.on_in[m.to], &Occasion { amount: Some(m.arrive), skip_internal: true, ..on });
             self.fire_spend(m);
-            self.fire(&book.rules.always[m.from], on);
+            self.fire(&book.rules.always[m.from], &on);
             if m.to != m.from {
-                self.fire(&book.rules.always[m.to], on);
+                self.fire(&book.rules.always[m.to], &on);
             }
         }
     }
@@ -230,7 +230,7 @@ impl<'b, 's> Ledger<'b, 's> {
                 realized: Some(realized),
                 ..Occasion::flow(m)
             };
-            self.fire(&book.rules.on_gain[m.from], on);
+            self.fire(&book.rules.on_gain[m.from], &on);
         }
     }
 
@@ -309,7 +309,7 @@ impl<'b, 's> Ledger<'b, 's> {
             }
             let spent: Qty = slices.iter().filter(|s| s.tied == Some(entity)).map(|s| s.qty).sum();
             let on = Occasion { amount: Some(Amount::new(spent, m.out.unit)), ..Occasion::flow(m) };
-            self.fire(&book.rules.on_spend[entity], on);
+            self.fire(&book.rules.on_spend[entity], &on);
         }
     }
 
