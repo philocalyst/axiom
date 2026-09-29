@@ -955,3 +955,42 @@ the other lanes land.
 - **`gains` lists what realized something.** Money leaving at its own basis
   (a grant spent, a deposit returned) is not a disposal.
 - **`available` treats a priced violation as a cost, not a block.**
+
+### Wave 2 and after, as it landed
+
+| lane | merged | what it bought |
+|---|---|---|
+| model | a0add06 | the model rebuilt on the flat AST: one-pass survey, ranked names, a table of property readers, parallel elaboration, law order by dataflow, households, overlapping residences, and nothing accepted silently |
+| systems and examples | 4bb599a | std with claims, escrow, personal use, households, envelopes; `us` as one return with slots and closing laws; examples 02 and 04–10 rewritten on v3, every figure re-derived by `examples/verify/` |
+| report fixes | 6ff1493 | basis flows are not money; gaps name their counter place; views run to the return's closing day; tests from `.ax` source |
+| performance | 634bcb3 | a quarter fewer instructions, the same bytes out; `check` at 1M flows in about 0.8 s |
+
+Sizes now: 20.4k non-test lines. The model is 6.8k, report 3.8k, engine 3.9k,
+syntax 3.1k, cli 1.75k and core 1.2k. That is far from the 11k first
+aimed at. Every lane was asked for a smaller formulation, and none was found
+that keeps the features. It remains a quarter of v1's 71k, and it covers much
+more of the language.
+
+Also decided along the way:
+- **A system's missing year is one diagnostic:** "`us/401k` has no figures
+  for 2023: its figures start in 2024".
+- **Missing data is reported once per missing thing** (a price, one
+  property of one holder, a system's year), at the holder's declaration.
+- **Lanes sign commits with their own harness's attribution.**
+
+**Open, in lane F2:**
+- envelope relief;
+- next-year recognition in headroom;
+- an entity shadowed by a place's leaf;
+- selling costs in gains;
+- leg payees and dues on claims;
+- currency FIFO;
+- `holds` with basis flows;
+- household counts from kind laws;
+- same-day closing order;
+- `tally(x, year - 1)`.
+
+**Open, not assigned:**
+- cutting a recognition range short (B13);
+- a parallel fold of independent owners (P9);
+- smaller `Flow` and `Txn` (page faults are about a quarter of CPU at 1M).
