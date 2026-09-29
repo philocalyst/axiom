@@ -1,14 +1,18 @@
-//! `why PLACE`: what it holds and how, which laws govern it, what touched it lately.
+//! `why PLACE`: what it holds and how, how close it is to every limit, which
+//! laws govern it, what touched it lately.
 
 use std::collections::BTreeMap;
 
 use axiom_core::{Id, Qty};
 use axiom_engine::{Holding, Run};
-use axiom_model::{Amount, Book, Commodity, Place, Rule, Subject};
+use axiom_model::{Amount, Book, Commodity, Law, Place, Rule, Subject};
 
-use super::{doc_lines, governs, trigger_words};
+use super::laws_table;
+use crate::headroom::{latest, readings};
+use crate::limits;
 use crate::places::path;
 use crate::register;
+use crate::table::plural;
 use crate::{Cell, Column, Report, Row, Section};
 
 /// How many recent flows to show.
@@ -17,10 +21,25 @@ const RECENT: usize = 8;
 pub fn report<'s>(book: &Book<'s>, run: &Run, place: Id<Place>) -> Report<'s> {
     let held: Vec<&Holding> = run.holdings.iter().filter(|holding| book.places.covers(place, holding.place)).collect();
     let recent_from = book.touching[place].iter().rev().nth(RECENT - 1).map(|&flow| book.flows[flow].day);
+
+    // A limit is about this place when it measures it, or a place around it, or one within it.
+    let all = readings(book, run, run.today);
+    let about = |subject: Subject| matches!(subject, Subject::Place(other) if book.places.covers(other, place) || book.places.covers(place, other));
+    let limits = limits::section(book, latest(all.iter().filter(|reading| about(reading.subject)))).headed("Limits");
+
+    let (governing, elsewhere) = governing(book, run, place);
+    let mut laws = laws_table(book, &governing);
+    if elsewhere > 0 {
+        laws.note(format!(
+            "{} not in force today: their residence has ended, or has not begun.",
+            plural(elsewhere, "law")
+        ));
+    }
     Report::new(format!("Why {}", path(book, place)))
         .with(composition(book, &held))
         .with(parcels(book, &held))
-        .with(laws(book, place))
+        .with(limits)
+        .with(laws)
         .with(register::section(book, run, place, recent_from, None).headed("Recent flows"))
 }
 
@@ -76,39 +95,17 @@ fn parcels<'s>(book: &Book<'s>, held: &[&Holding]) -> Section<'s> {
     section
 }
 
-/// The laws that govern the place, resolved once by the model: its own and
-/// its ancestors', its kind's, and its owner's jurisdictions'.
-fn laws<'s>(book: &Book<'s>, place: Id<Place>) -> Section<'s> {
+/// The laws in force on the place today, resolved once by the model (its own
+/// and its ancestors', its kind's, its owner's jurisdictions'), and how many
+/// more are written for it that today is outside.
+fn governing(book: &Book, run: &Run, place: Id<Place>) -> (Vec<Id<Law>>, usize) {
     let rules = &book.rules;
     let watching =
         [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always].into_iter().flat_map(|table| table[place].iter());
     let timed = rules.timed.iter().filter(|rule| rule.subject == Subject::Place(place));
-    let mut governing: Vec<&Rule> = Vec::new();
-    for rule in watching.chain(timed) {
-        if !governing.iter().any(|seen| seen.law == rule.law) {
-            governing.push(rule);
-        }
-    }
-
-    let columns = [
-        Column::left("Law"),
-        Column::left("When"),
-        Column::left("Governs"),
-        Column::left("Explains"),
-        Column::left("Written"),
-    ];
-    let mut section = Section::new(columns).headed("Governed by");
-    for rule in governing {
-        let law = &book.laws[rule.law];
-        let explains = law.doc.and_then(|doc| doc_lines(book.name(doc)).next()).map_or(Cell::Blank, Cell::text);
-        let cells = [
-            Cell::text(book.name(law.name)),
-            Cell::text(trigger_words(law.trigger)),
-            Cell::text(governs(book, law.owner)),
-            explains,
-            Cell::Source(law.loc),
-        ];
-        section.push(Row::new(cells));
-    }
-    section
+    let (now, later): (Vec<&Rule>, Vec<&Rule>) =
+        watching.chain(timed).partition(|rule| (rule.from..=rule.until).contains(&run.today));
+    let laws: Vec<Id<Law>> = now.iter().map(|rule| rule.law).collect();
+    let elsewhere = later.iter().filter(|rule| !laws.contains(&rule.law)).count();
+    (laws, elsewhere)
 }

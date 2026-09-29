@@ -10,63 +10,34 @@ use axiom_model::On;
 /// A rhythm needs at least this many occurrences to be believed.
 const MIN_OCCURRENCES: usize = 3;
 
-/// How often a recurring flow comes.
+/// How often a recurring flow comes: a calendar step, and the typical gap in
+/// days that snaps to it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Cadence {
-    Weekly,
-    Biweekly,
-    Monthly,
-    Quarterly,
-    Yearly,
+pub struct Cadence {
+    /// Whole months where the rhythm is monthly, so the 31st does not drift.
+    pub every: Span,
+    days: i32,
+    word: &'static str,
 }
 
+const WEEKLY: Cadence = Cadence { every: Span::days(7), days: 7, word: "weekly" };
+const BIWEEKLY: Cadence = Cadence { every: Span::days(14), days: 14, word: "every 2 weeks" };
+const MONTHLY: Cadence = Cadence { every: Span::months(1), days: 30, word: "monthly" };
+const QUARTERLY: Cadence = Cadence { every: Span::months(3), days: 91, word: "quarterly" };
+const YEARLY: Cadence = Cadence { every: Span::months(12), days: 365, word: "yearly" };
+const CADENCES: [Cadence; 5] = [WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, YEARLY];
+
 impl Cadence {
-    const ALL: [Cadence; 5] =
-        [Cadence::Weekly, Cadence::Biweekly, Cadence::Monthly, Cadence::Quarterly, Cadence::Yearly];
-
-    /// A typical gap between occurrences, in days.
-    fn days(self) -> i32 {
-        match self {
-            Cadence::Weekly => 7,
-            Cadence::Biweekly => 14,
-            Cadence::Monthly => 30,
-            Cadence::Quarterly => 91,
-            Cadence::Yearly => 365,
-        }
-    }
-
-    /// The calendar step: whole months where the rhythm is monthly, so the
-    /// 31st does not drift.
-    pub fn every(self) -> Span {
-        match self {
-            Cadence::Weekly => Span::days(7),
-            Cadence::Biweekly => Span::days(14),
-            Cadence::Monthly => Span::months(1),
-            Cadence::Quarterly => Span::months(3),
-            Cadence::Yearly => Span::months(12),
-        }
-    }
-
-    fn word(self) -> &'static str {
-        match self {
-            Cadence::Weekly => "weekly",
-            Cadence::Biweekly => "every 2 weeks",
-            Cadence::Monthly => "monthly",
-            Cadence::Quarterly => "quarterly",
-            Cadence::Yearly => "yearly",
-        }
-    }
-
     /// The cadence a typical gap belongs to: within 15% of its length.
     fn snap(gap: i32) -> Option<Cadence> {
-        Cadence::ALL.into_iter().find(|cadence| (gap - cadence.days()).abs() * 100 <= cadence.days() * 15)
+        CADENCES.into_iter().find(|cadence| (gap - cadence.days).abs() * 100 <= cadence.days * 15)
     }
 }
 
 /// A step between occurrences, in words: `monthly`, `every 3d`.
 pub fn describe(every: Span) -> Cow<'static, str> {
-    match Cadence::ALL.into_iter().find(|cadence| cadence.every() == every) {
-        Some(cadence) => cadence.word().into(),
+    match CADENCES.into_iter().find(|cadence| cadence.every == every) {
+        Some(cadence) => cadence.word.into(),
         None => format!("every {every}").into(),
     }
 }
@@ -85,7 +56,7 @@ pub struct Recurrence {
 impl Recurrence {
     /// Where the rhythm continues after the last occurrence.
     pub fn schedule(&self) -> Schedule {
-        Schedule { anchor: self.last, every: self.cadence.every(), on: self.on, until: None }
+        Schedule { anchor: self.last, every: self.cadence.every, on: self.on, until: None }
     }
 }
 
@@ -100,28 +71,26 @@ pub fn detect(occurrences: &[(Day, Qty)], today: Day) -> Option<Recurrence> {
     let typical = median(&gaps);
     let cadence = Cadence::snap(typical)?;
     let deviations: Vec<i32> = gaps.iter().map(|gap| (gap - typical).abs()).collect();
-    if median(&deviations) > (cadence.days() / 10).max(1) {
+    if median(&deviations) > (cadence.days / 10).max(1) {
         return None;
     }
 
     let last = occurrences.last()?.0;
     // Within one and a half cadences of today.
-    if i64::from(today.0 - last.0) * 2 > i64::from(cadence.days()) * 3 {
+    if i64::from(today.0 - last.0) * 2 > i64::from(cadence.days) * 3 {
         return None;
     }
     let amounts: Vec<Qty> = occurrences.iter().map(|&(_, amount)| amount).collect();
-    let on = match cadence {
-        Cadence::Monthly | Cadence::Quarterly => {
-            let days_of_month: Vec<u32> = occurrences.iter().map(|&(day, _)| day.ymd().2).collect();
-            Some(On::MonthDay(median(&days_of_month) as u8))
-        }
-        Cadence::Weekly | Cadence::Biweekly | Cadence::Yearly => None,
-    };
+    let by_month = matches!(cadence.every.months, 1 | 3);
+    let on = by_month.then(|| {
+        let days_of_month: Vec<u32> = occurrences.iter().map(|&(day, _)| day.ymd().2).collect();
+        On::MonthDay(median(&days_of_month) as u8)
+    });
     Some(Recurrence { cadence, amount: median(&amounts), last, on })
 }
 
 /// The middle value; of two middles, the upper, so it is one actually seen.
-fn median<T: Ord + Copy>(values: &[T]) -> T {
+pub fn median<T: Ord + Copy>(values: &[T]) -> T {
     let mut sorted = values.to_vec();
     sorted.sort_unstable();
     sorted[sorted.len() / 2]
@@ -201,7 +170,7 @@ mod tests {
         let rent =
             series(&[day(2026, 1, 1), day(2026, 2, 1), day(2026, 3, 1), day(2026, 4, 1), day(2026, 5, 1)], 1_800_00);
         let found = detect(&rent, day(2026, 5, 20)).expect("rent recurs");
-        assert_eq!((found.cadence, found.amount, found.last), (Cadence::Monthly, Qty(1_800_00), day(2026, 5, 1)));
+        assert_eq!((found.cadence, found.amount, found.last), (MONTHLY, Qty(1_800_00), day(2026, 5, 1)));
         assert_eq!(found.on, Some(On::MonthDay(1)));
         // Next comes June 1st, then July 1st.
         assert_eq!(found.schedule().days(day(2026, 5, 20), day(2026, 7, 31)), [day(2026, 6, 1), day(2026, 7, 1)]);
@@ -226,7 +195,7 @@ mod tests {
             (day(2026, 2, 20), Qty(60_00)),
         ];
         let found = detect(&bill, day(2026, 3, 1)).expect("biweekly");
-        assert_eq!((found.cadence, found.amount), (Cadence::Biweekly, Qty(60_00)));
+        assert_eq!((found.cadence, found.amount), (BIWEEKLY, Qty(60_00)));
     }
 
     #[test]

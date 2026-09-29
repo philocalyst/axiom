@@ -1,4 +1,4 @@
-//! Running the forecast: expected flows, folded through a clone of the ledger.
+//! Running the forecast: expected flows, folded through a ledger.
 //!
 //! The projection is a real fold, not arithmetic beside one. Every expected
 //! flow is applied to the ledger in date order, so laws run on the future
@@ -8,85 +8,11 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Ratio};
-use axiom_engine::{Ledger, Options, Run};
-use axiom_model::{Amount, Book, Class, Commodity, Flow, Place, Recognition};
+use axiom_engine::{Holding, Ledger, Options};
+use axiom_model::{Book, Class, Commodity, Flow, Place, Value};
 
-use super::habits::Habits;
-use super::recurrence::Schedule;
-use crate::places::is_liquid;
-use crate::synth::planned;
-use crate::value::Valuer;
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Origin {
-    /// Written as `every …`.
-    Plan,
-    /// Found in the journal's history, seen this many times.
-    Habit { occurrences: usize },
-}
-
-/// A flow that will happen again and again.
-pub struct Expectation<'b> {
-    pub origin: Origin,
-    pub schedule: Schedule,
-    /// Where it goes, and through whom.
-    pub template: &'b Flow,
-    pub out: Amount,
-    pub arrive: Amount,
-}
-
-impl Expectation<'_> {
-    /// Its occurrences after `after`, up to `horizon`, as flows to apply.
-    pub fn flows(&self, after: Day, horizon: Day) -> Vec<Flow> {
-        // A plan over a date range keeps its width.
-        let width = self.template.recognized.until.0 - self.template.recognized.from.0;
-        let occurrences = self.schedule.days(after, horizon);
-        occurrences
-            .into_iter()
-            .map(|day| Flow {
-                recognized: Recognition { from: day, until: day.add_days(width) },
-                ..planned(self.template, day, self.out, self.arrive)
-            })
-            .collect()
-    }
-}
-
-/// One expectation per flow of each plan.
-pub fn from_plans<'b>(book: &'b Book) -> Vec<Expectation<'b>> {
-    book.plans
-        .values()
-        .flat_map(|plan| {
-            plan.template.iter().map(move |flow| Expectation {
-                origin: Origin::Plan,
-                schedule: Schedule {
-                    anchor: plan.from.unwrap_or(flow.day),
-                    every: plan.every,
-                    on: plan.on,
-                    until: plan.until,
-                },
-                template: flow,
-                out: flow.out,
-                arrive: flow.arrive,
-            })
-        })
-        .collect()
-}
-
-/// One expectation per habit found in history.
-pub fn from_habits<'b>(book: &'b Book, habits: &Habits) -> Vec<Expectation<'b>> {
-    let expectations = habits.found.iter().map(|habit| {
-        let template = &book.flows[habit.template];
-        let amount = habit.recurrence.amount;
-        Expectation {
-            origin: Origin::Habit { occurrences: habit.occurrences },
-            schedule: habit.recurrence.schedule(),
-            template,
-            out: Amount::new(amount, template.out.unit),
-            arrive: Amount::new(amount, template.arrive.unit),
-        }
-    });
-    expectations.collect()
-}
+use crate::history::Held;
+use crate::lens::{Basket, Lens, Liquidity};
 
 /// A liquid place that goes below zero.
 pub struct Overdraft {
@@ -96,53 +22,105 @@ pub struct Overdraft {
 }
 
 /// What running the expected flows produced.
-pub struct Trace {
-    /// Liquid net worth in the base currency at each checkpoint.
+pub struct Trace<'b, 's> {
+    /// Everything the ledger recorded, history and projection alike.
+    pub ledger: Ledger<'b, 's>,
+    /// Money in hand less the debts that fall due, at each checkpoint.
     pub liquid: Vec<Qty>,
-    /// Everything recorded along the way: obligations, violations.
-    pub run: Run,
+    /// Everything owned less everything owed, at each checkpoint, with
+    /// commodities grown by their models.
+    pub worth: Vec<Qty>,
     pub overdrafts: Vec<Overdraft>,
 }
 
 /// Applies `flows` (in date order) to a ledger standing at `today`, reading
-/// the liquid position at each checkpoint. Laws with deadlines fire all the
-/// way to the last checkpoint.
-pub fn project(book: &Book, today: Day, flows: Vec<Flow>, checkpoints: &[Day]) -> Trace {
+/// the position at each checkpoint. Laws with deadlines fire all the way to
+/// the last checkpoint.
+pub fn project<'b, 's>(lens: Lens<'b, 's>, today: Day, flows: Vec<Flow>, checkpoints: &[Day]) -> Trace<'b, 's> {
+    let book = lens.book;
     let horizon = checkpoints.last().copied().unwrap_or(today);
     let mut ledger = Ledger::new(book, Options { today: horizon, relaxed: book.relaxed });
     ledger.advance(today);
 
-    let (growth, valuer) = (Growth::new(book), Valuer::new(book, today));
+    let growth = Growth::new(book);
     let mut overdrawn: BTreeMap<Id<Place>, Overdraft> = BTreeMap::new();
-    let mut liquid = Vec::with_capacity(checkpoints.len());
+    let (mut liquid, mut worth) = (Vec::new(), Vec::new());
     let mut coming = flows.into_iter().peekable();
     for &checkpoint in checkpoints {
         while let Some(flow) = coming.next_if(|flow| flow.day <= checkpoint) {
+            let Some(flow) = within_means(lens, &ledger, flow) else { continue };
             ledger.apply(&flow);
-            note_overdrafts(book, &ledger, &flow, &mut overdrawn);
+            note_overdrafts(lens, &ledger, &flow, &mut overdrawn);
         }
         ledger.advance(checkpoint);
         let months = checkpoint.since(today).months;
-        let worth = ledger.holdings().filter(|holding| counts_toward_liquid_net_worth(book, holding.place));
-        let worth = worth.filter_map(|holding| {
-            let worth = valuer.qty(Amount::new(holding.qty(), holding.unit))?;
-            Some(growth.apply(holding.unit, worth, months))
-        });
-        liquid.push(worth.sum());
+        let position = |pick: &dyn Fn(&Holding) -> Qty| grown(lens, &growth, months, &ledger, pick);
+        liquid.push(position(&|holding| in_hand_or_owed(lens, holding)));
+        worth.push(position(&|holding| holding.qty()));
     }
-    Trace { liquid, run: ledger.finish(), overdrafts: overdrawn.into_values().collect() }
+    Trace { ledger, liquid, worth, overdrafts: overdrawn.into_values().collect() }
 }
 
-/// Liquid net worth is what can be spent, less everything owed. Debts count
-/// whole, so paying one down is neutral, and money charged to a card is spent
-/// the day it is charged rather than the day the card is paid.
-fn counts_toward_liquid_net_worth(book: &Book, place: Id<Place>) -> bool {
-    is_liquid(book, place) || book.places[place].class == Class::Liability
+/// What a holding adds to what can be spent: its free money, less what is
+/// owed on debts with no term (a card, a tab). A loan with a term is paid by
+/// the payments the projection already makes.
+fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
+    let place = &lens.book.places[holding.place];
+    match lens.liquidity(holding.place, holding.unit) {
+        Some(Liquidity::Cash) => lens.free(holding),
+        _ if place.class == Class::Liability && !has_term(lens.book, place) => holding.qty(),
+        _ => Qty::ZERO,
+    }
+}
+
+/// Whether a debt has a term (`maturity 2050-01-01`).
+fn has_term(book: &Book, place: &Place) -> bool {
+    let maturity = book.names.get("maturity");
+    maturity.is_some_and(|name| place.props.iter().any(|prop| prop.name == name && matches!(prop.value, Value::Day(_))))
+}
+
+/// What the lens's owners hold on the balance sheet, as `pick` counts it,
+/// at today's prices with every commodity grown `months` ahead.
+fn grown(lens: Lens, growth: &Growth, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
+    let mut basket = Basket::default();
+    let on_sheet = ledger.holdings().filter(|holding| {
+        lens.owns(holding.place) && matches!(lens.book.places[holding.place].class, Class::Asset | Class::Liability)
+    });
+    for holding in on_sheet {
+        basket.add(holding.unit, Held { qty: pick(holding), booked: Qty::ZERO });
+    }
+    let worth = basket.amounts().filter_map(|amount| Some(growth.apply(amount.unit, lens.value(amount)?, months)));
+    worth.sum()
+}
+
+/// A flow that cannot move more than its ends hold: what leaves an account
+/// that is not cash is limited by what it holds, and a payment into a debt by
+/// what is owed. `None` when there is nothing to move.
+fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
+    let book = lens.book;
+    let held_back = matches!(lens.liquidity(flow.from, flow.out.unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
+    let room = if held_back {
+        Some(ledger.balance(flow.from, flow.out.unit))
+    } else if book.places[flow.to].class == Class::Liability {
+        Some(-ledger.balance(flow.to, flow.arrive.unit))
+    } else {
+        None
+    };
+    match room {
+        Some(room) if !flow.is_exchange() && room < flow.out.qty => (room > Qty::ZERO).then(|| {
+            (flow.out.qty, flow.arrive.qty) = (room, room);
+            flow
+        }),
+        _ => Some(flow),
+    }
 }
 
 /// Records where a flow left a liquid place below zero.
-fn note_overdrafts(book: &Book, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
-    for place in [flow.from, flow.to].into_iter().filter(|&place| is_liquid(book, place)) {
+fn note_overdrafts(lens: Lens, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
+    let book = lens.book;
+    for place in
+        [flow.from, flow.to].into_iter().filter(|&place| lens.liquidity(place, book.base) == Some(Liquidity::Cash))
+    {
         let balance = ledger.balance(place, book.base);
         if balance.is_negative() {
             let overdraft = overdrawn.entry(place).or_insert(Overdraft { place, first: flow.day, lowest: balance });

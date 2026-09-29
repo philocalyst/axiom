@@ -37,6 +37,13 @@ impl<'s> Section<'s> {
         Section { heading: None, columns: columns.into_iter().collect(), rows: Vec::new(), notes: Vec::new() }
     }
 
+    /// A section that is only prose.
+    pub fn note_only(note: impl Into<String>) -> Section<'s> {
+        let mut section = Section::new([]);
+        section.note(note);
+        section
+    }
+
     pub fn headed(mut self, heading: impl Into<String>) -> Section<'s> {
         self.heading = Some(heading.into());
         self
@@ -55,6 +62,13 @@ impl<'s> Section<'s> {
 impl<'s> Row<'s> {
     pub fn new(cells: impl IntoIterator<Item = Cell<'s>>) -> Row<'s> {
         Row { depth: 0, style: Style::Normal, cells: cells.into_iter().collect() }
+    }
+
+    /// The leading cells, padded with blanks to `columns`.
+    pub fn padded(cells: impl IntoIterator<Item = Cell<'s>>, columns: usize) -> Row<'s> {
+        let mut cells: Vec<Cell> = cells.into_iter().collect();
+        cells.resize_with(columns, || Cell::Blank);
+        Row::new(cells)
     }
 
     pub fn depth(mut self, depth: usize) -> Row<'s> {
@@ -89,9 +103,29 @@ impl<'s> Cell<'s> {
     }
 }
 
+/// `1 time`, `2 times`.
+pub fn plural(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+}
+
 /// The first line of a diagnostic's message: enough for a table cell.
 pub fn headline(message: &str) -> &str {
     message.lines().next().unwrap_or_default()
+}
+
+/// A doc block as plain lines: the `///` markers and one space of indent
+/// removed (a doc that is already plain passes through).
+pub fn doc_lines(doc: &str) -> impl Iterator<Item = &str> {
+    doc.lines().map(|line| {
+        let line = line.trim_start();
+        let line = line.strip_prefix("///").unwrap_or(line);
+        line.strip_prefix(' ').unwrap_or(line)
+    })
+}
+
+/// The first line of a doc comment, which says what the item is.
+pub fn doc_headline<'s>(book: &Book<'s>, doc: Option<Sym>) -> Option<&'s str> {
+    doc.and_then(|doc| doc_lines(book.name(doc)).next())
 }
 
 /// `#house`, `#check-1041`: codes as they are written.

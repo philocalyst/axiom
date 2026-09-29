@@ -1,29 +1,31 @@
 //! `forecast`: where the books are heading.
 //!
 //! Plans, the rhythms history shows, obligations coming due, and growth
-//! models are run forward through a clone of the ledger, so the laws judge the
+//! models are run forward through a fork of the ledger, so the laws judge the
 //! future the way they judge the past. Variable spending, which nobody planned,
 //! is bootstrapped from history into bands around that committed path.
 
 mod bands;
-mod habits;
+mod expected;
 mod projection;
 mod recurrence;
+mod variable;
 
 use std::iter;
 
 use axiom_core::day::days_in_month;
-use axiom_core::{Day, Id, Map, Qty, Set, Span};
-use axiom_engine::{Effect, Run, Violation};
-use axiom_model::{Amount, Book, Entity, Flow, Law, Period, Place, Subject};
+use axiom_core::{Day, Id, Map, Qty, Span};
+use axiom_engine::{Effect, Violation};
+use axiom_model::{Amount, Book, Flow, Law, Period, Subject};
 
 use self::bands::{Bands, Share};
-use self::habits::{Habits, Variable};
-use self::projection::{Expectation, Origin, Trace};
+use self::expected::{Expectation, Origin, expected};
+use self::projection::{Trace, project};
+use self::variable::Variable;
 use crate::calendar::Periods;
+use crate::lens::{Lens, Whose};
 use crate::places::{path, route};
-use crate::table::headline;
-use crate::value::Valuer;
+use crate::table::{headline, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// A fixed seed: the same books always give the same bands.
@@ -32,28 +34,24 @@ const SEED: u64 = 0x5EED_0A11_CE00_0001;
 /// Bootstrapping needs a past to draw from.
 const MIN_HISTORY_MONTHS: usize = 3;
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, until: Option<Day>, paths: u32) -> Report<'s> {
+pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: Option<Day>, paths: u32) -> Report<'s> {
     let today = run.today;
     let until = until.unwrap_or_else(|| today.add(Span::months(12))).max(today);
+    let lens = Lens::new(book, whose, today);
 
-    let mut expected = projection::from_plans(book);
-    let planned: Set<(Id<Place>, Id<Place>)> =
-        expected.iter().map(|plan| (plan.template.from, plan.template.to)).collect();
-    let habits = Habits::infer(book, run, &planned);
-    expected.extend(projection::from_habits(book, &habits));
-
+    let expected = expected(lens, run);
     let mut flows: Vec<Flow> = expected.iter().flat_map(|expectation| expectation.flows(today, until)).collect();
     flows.sort_by_key(|flow| flow.day);
     let checkpoints = checkpoints(today, until);
-    let trace = projection::project(book, today, flows, &checkpoints);
+    let trace = project(lens, today, flows, &checkpoints);
 
-    let due = coming_due(&trace.run, book.roots.me, today);
-    let committed = committed(book, &checkpoints, &trace, &due);
+    let due = coming_due(&trace, whose, today);
+    let committed = committed(lens, &checkpoints, &trace.liquid, &due);
     let variable =
-        Variable::from_history(book, run, |flow| planned.contains(&(flow.from, flow.to)) || habits.explains(flow));
+        Variable::from_history(lens, run, |flow| expected.iter().any(|expectation| expectation.covers(flow)));
     let bands = simulate(&checkpoints, &committed, &variable, paths);
 
-    let mut outlook = outlook_section(book, &checkpoints, &committed, bands.as_ref());
+    let mut outlook = outlook_section(book, &checkpoints, &committed, &trace.worth, bands.as_ref());
     for note in method_notes(book, bands.as_ref(), variable.months, paths) {
         outlook.note(note);
     }
@@ -73,25 +71,22 @@ fn checkpoints(today: Day, until: Day) -> Vec<Day> {
     days
 }
 
-/// Obligations of `owner` falling due after `today`, soonest first.
-fn coming_due(run: &Run, owner: Id<Entity>, today: Day) -> Vec<&Effect> {
-    let mut due: Vec<&Effect> = run
-        .effects
-        .iter()
-        .filter(|effect| effect.owner == owner && effect.owe.is_some_and(|owed| owed.due > today))
-        .collect();
+/// Obligations of the lens's owners falling due after `today`, soonest first.
+fn coming_due<'t>(trace: &'t Trace, whose: &Whose, today: Day) -> Vec<&'t Effect> {
+    let owed = |effect: &&Effect| whose.includes(effect.owner) && effect.owe.is_some_and(|owed| owed.due > today);
+    let mut due: Vec<&Effect> = trace.ledger.recorded().effects.iter().filter(owed).collect();
     due.sort_by_key(|effect| effect.owe.map(|owed| owed.due));
     due
 }
 
 /// The liquid position at each checkpoint, less obligations already due.
-fn committed(book: &Book, checkpoints: &[Day], trace: &Trace, due: &[&Effect]) -> Vec<Qty> {
-    let valuer = Valuer::new(book, checkpoints[0]);
+fn committed(lens: Lens, checkpoints: &[Day], liquid: &[Qty], due: &[&Effect]) -> Vec<Qty> {
+    let lens = lens.on(checkpoints[0]);
     let owed_by = |day: Day| -> Qty {
         let paid = due.iter().filter(|effect| effect.owe.is_some_and(|owed| owed.due <= day));
-        paid.filter_map(|effect| valuer.qty(effect.amount)).sum()
+        paid.filter_map(|effect| lens.value(effect.amount)).sum()
     };
-    checkpoints.iter().zip(&trace.liquid).map(|(&day, &liquid)| liquid - owed_by(day)).collect()
+    checkpoints.iter().zip(liquid).map(|(&day, &liquid)| liquid - owed_by(day)).collect()
 }
 
 /// Bands for every checkpoint after today, if there is a past to draw on.
@@ -117,8 +112,9 @@ fn simulate(checkpoints: &[Day], committed: &[Qty], variable: &Variable, paths: 
 /// How the outlook was worked out, in plain words.
 fn method_notes(book: &Book, bands: Option<&Bands>, history_months: usize, paths: u32) -> [String; 2] {
     let committed = format!(
-        "Committed: liquid assets less debts, in {}, after plans, recurring flows found in history, growth models and \
-         obligations as they fall due. Variable spending is not in it.",
+        "Committed: money in hand, less what is owed on debts with no term and on obligations as they fall due, in {}, \
+         after plans, recurring flows found in history and what they can still give. Investments and property are net \
+         worth, not liquid. Variable spending is not in it.",
         book.name(book.commodities[book.base].symbol)
     );
     let spread = match bands {
@@ -134,14 +130,20 @@ fn method_notes(book: &Book, bands: Option<&Bands>, history_months: usize, paths
     [committed, spread]
 }
 
-fn outlook_section<'s>(book: &Book<'s>, checkpoints: &[Day], committed: &[Qty], bands: Option<&Bands>) -> Section<'s> {
-    let mut columns = vec![Column::left("Month end"), Column::right("Committed")];
+fn outlook_section<'s>(
+    book: &Book<'s>,
+    checkpoints: &[Day],
+    committed: &[Qty],
+    worth: &[Qty],
+    bands: Option<&Bands>,
+) -> Section<'s> {
+    let mut columns = vec![Column::left("Month end"), Column::right("Committed"), Column::right("Net worth")];
     if bands.is_some() {
         columns.extend(["p10", "p50", "p90"].map(Column::right));
     }
     let mut section = Section::new(columns).headed("Liquid net worth");
-    for (index, (&day, &qty)) in checkpoints.iter().zip(committed).enumerate() {
-        let mut cells = vec![Cell::Day(day), Cell::base(book, qty)];
+    for (index, ((&day, &qty), &worth)) in checkpoints.iter().zip(committed).zip(worth).enumerate() {
+        let mut cells = vec![Cell::Day(day), Cell::base(book, qty), Cell::base(book, worth)];
         if let Some(bands) = bands {
             // The first checkpoint is today: nothing has been spent yet.
             let spread = match index.checked_sub(1) {
@@ -155,6 +157,8 @@ fn outlook_section<'s>(book: &Book<'s>, checkpoints: &[Day], committed: &[Qty], 
     section
 }
 
+/// One row for each thing that recurs, soonest first: a paycheck's legs are one
+/// row, shown under its biggest leg with what all of them come to.
 fn expected_section<'s>(book: &Book<'s>, expected: &[Expectation], today: Day, until: Day) -> Section<'s> {
     let columns = [
         Column::left("Expected"),
@@ -164,23 +168,32 @@ fn expected_section<'s>(book: &Book<'s>, expected: &[Expectation], today: Day, u
         Column::left("Source"),
     ];
     let mut section = Section::new(columns).headed("What recurs");
-    for expectation in expected {
-        let flow = expectation.template;
+    let mut rows = Vec::new();
+    for legs in expected.chunk_by(|a, b| a.group() == b.group()) {
+        let Some(main) = legs.iter().max_by_key(|leg| leg.out.qty.abs()) else { continue };
+        let flow = main.template;
         let payee = flow.payee.map(|entity| format!(" ({})", book.name(book.entities[entity].path)));
-        let what = format!("{}{}", route(book, flow), payee.unwrap_or_default());
-        let next = expectation.schedule.days(today, until).first().copied();
-        let source = match expectation.origin {
-            Origin::Plan => "plan".to_string(),
+        let more = (legs.len() > 1).then(|| format!(", and {}", plural(legs.len() - 1, "more leg")));
+        let what = format!("{}{}{}", route(book, flow), payee.unwrap_or_default(), more.unwrap_or_default());
+        let total = legs.iter().filter(|leg| leg.out.unit == main.out.unit).map(|leg| leg.out.qty).sum();
+        let next = legs.iter().filter_map(|leg| leg.schedule.days(today, until).first().copied()).min();
+        let source = match main.origin {
+            Origin::Plan(_) => "plan".to_string(),
             Origin::Habit { occurrences } => format!("seen {occurrences} times"),
         };
         let cells = [
             Cell::text(what),
-            Cell::text(recurrence::describe(expectation.schedule.every)),
-            Cell::amount(book, expectation.out),
+            Cell::text(recurrence::describe(main.schedule.every)),
+            Cell::amount(book, Amount::new(total, main.out.unit)),
             next.map_or(Cell::Blank, Cell::Day),
             Cell::text(source),
         ];
-        section.push(Row::new(cells));
+        rows.push((next, Row::new(cells)));
+    }
+    // Soonest first.
+    rows.sort_by_key(|&(next, _)| next);
+    for (_, row) in rows {
+        section.push(row);
     }
     if section.rows.is_empty() {
         section.note(
@@ -208,13 +221,14 @@ fn owed_section<'s>(book: &Book<'s>, due: &[&Effect]) -> Section<'s> {
 
 /// Laws the projection breaks, and places it overdraws, by date.
 fn problems_section<'s>(book: &Book<'s>, trace: &Trace, today: Day) -> Section<'s> {
+    let recorded = trace.ledger.recorded();
     let mut repeats: Map<(Id<Law>, Subject), (usize, &Violation)> = Map::default();
-    for violation in trace.run.violations.iter().filter(|violation| violation.day > today) {
+    for violation in recorded.violations.iter().filter(|violation| violation.day > today) {
         repeats.entry((violation.law, violation.subject)).or_insert((0, violation)).0 += 1;
     }
     let mut problems: Vec<(Day, String, Style)> = Vec::new();
     for (count, first) in repeats.into_values() {
-        let message = &trace.run.diagnostics[first.diagnostic as usize].message;
+        let message = &recorded.diagnostics[first.diagnostic as usize].message;
         let more = if count > 1 { format!(" (and {} more)", count - 1) } else { String::new() };
         let text = format!("{}: {}{more}", book.name(book.laws[first.law].name), headline(message));
         problems.push((first.day, text, if first.waived { Style::Muted } else { Style::Alert }));

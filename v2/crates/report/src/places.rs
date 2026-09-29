@@ -1,7 +1,7 @@
 //! Questions views ask about places.
 
-use axiom_core::{Id, Span};
-use axiom_model::{Book, Class, Flow, Place};
+use axiom_core::Id;
+use axiom_model::{Book, Flow, Place};
 
 /// A place's full path.
 pub fn path<'s>(book: &Book<'s>, place: Id<Place>) -> &'s str {
@@ -27,14 +27,6 @@ pub fn leaf<'s>(book: &Book<'s>, place: Id<Place>) -> &'s str {
 /// A place's indentation in a tree table.
 pub fn depth(book: &Book, place: Id<Place>) -> usize {
     book.places.depth(place) as usize
-}
-
-/// Whether money in the place can be spent now: an asset with no liquidity
-/// span (or a zero one) that is not deferred. Money that realizes something
-/// when it leaves is not spendable as it stands, whatever its span says.
-pub fn is_liquid(book: &Book, place: Id<Place>) -> bool {
-    let place = &book.places[place];
-    place.class == Class::Asset && !place.deferred && place.liquidity.is_none_or(|span| span == Span::default())
 }
 
 /// Whether the place is a class root: `assets`, `expenses`, … Roots group
