@@ -6,7 +6,6 @@ error[layout]: files under `prices/` may contain only prices
   │                   ╰── this is not a price
   │
   = help: move it out of `prices/`, or set `layout free`
-──╯
 
 ✗ 1 error
 [exit status 1]

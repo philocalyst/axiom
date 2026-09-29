@@ -6,7 +6,6 @@ error[empty-amount]: `empty` is the zero of any commodity, and a flow needs a co
   │                               ╰── write the amount with its commodity
   │
   = help: as in `84.20 USD`
-──╯
 
 error[zero-flow]: a flow moves value, and this amount is zero
    ╭─[r14-zero-flow.ax:10:29]
@@ -16,7 +15,6 @@ error[zero-flow]: a flow moves value, and this amount is zero
    │                               ╰── moves nothing
    │
    = help: remove it, or state what actually moved
-───╯
 
 ✗ 2 errors
 [exit status 1]

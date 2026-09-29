@@ -13,10 +13,11 @@ error[ambiguous-place]: `checking` could be either of these accounts
    │                ╰── which one is meant?
    │
    = help: write `bank/checking` for `assets/bank/checking`
+11 - 2026-01-08 checking -> food 84.20 USD
 11 + 2026-01-08 bank/checking -> food 84.20 USD
    = help: write `old-bank/checking` for `assets/old-bank/checking`
+11 - 2026-01-08 checking -> food 84.20 USD
 11 + 2026-01-08 old-bank/checking -> food 84.20 USD
-───╯
 
 ✗ 1 error
 [exit status 1]

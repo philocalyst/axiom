@@ -6,7 +6,6 @@ error[law-variable]: `gain` is not available in this law
    │            ╰── this law's trigger does not provide `gain`
    │
    = help: `gain` is provided by `on gain` laws
-───╯
 
 ✗ 1 error
 [exit status 1]

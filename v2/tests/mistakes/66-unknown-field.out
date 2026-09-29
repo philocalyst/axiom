@@ -8,8 +8,8 @@ error[unknown-field]: an entity has no `aeg`
    │
    = note: it has `owner`, `kind`, `age`, `until`, `filing`, `purpose` or `born`
    = help: did you mean `age`?
+17 -     require owner.aeg >= 18y "owner is a minor"
 17 +     require owner.age >= 18y "owner is a minor"
-───╯
 
 ✗ 1 error
 [exit status 1]

@@ -10,8 +10,8 @@ error[unexpected-indent]: this line is indented further than the lines above it
    │           ╰── indented 4 spaces, where the block uses 2
    │
    = help: align it with the block
+16 -     checking  ...
 16 +   checking  ...
-───╯
 
 ✗ 1 error
 [exit status 1]

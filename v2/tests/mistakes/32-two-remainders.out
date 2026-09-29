@@ -10,7 +10,6 @@ error[two-remainders]: only one leg can take the remainder
    │         ╰── a second `...`
    │
    = help: give one of the legs an amount
-───╯
 
 ✗ 1 error
 [exit status 1]

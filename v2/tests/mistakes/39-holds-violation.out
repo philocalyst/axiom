@@ -7,7 +7,6 @@ error[not-held]: `assets/wallet` does not hold USD
    │
    = note: it holds `BTC`
    = help: change what the account holds, or use another account
-───╯
 
 ✗ 1 error
 [exit status 1]

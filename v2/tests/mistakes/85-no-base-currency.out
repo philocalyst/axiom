@@ -6,7 +6,6 @@ error[no-price]: no price for EUR in USD on 2025-12-31
    │                         ╰── needed to value 500.00 EUR
    │
    = help: add a price line such as `2025-12-31 EUR <price> USD`
-───╯
 
 error[no-price]: cannot check `overdraft`: no price for EUR in USD on 2025-12-31
    ╭─[85-no-base-currency.ax:10:1]
@@ -15,14 +14,13 @@ error[no-price]: cannot check `overdraft`: no price for EUR in USD on 2025-12-31
    │ ────────────────────────┬────────────────────────
    │                         ╰── this flow: 500.00 EUR from equity/opening to assets/euro-account
    │
-   ├─[std.ax:26:10]
+   ├─[std.ax:26:10] (built in)
    │
 26 │     warn balance >= empty "balance below zero"
    │          ───┬───
    │             ╰── no price for EUR in USD on 2025-12-31
    │
    = help: add a price line such as `2025-12-31 EUR <price> USD`
-───╯
 
 ✗ 2 errors
 [exit status 1]

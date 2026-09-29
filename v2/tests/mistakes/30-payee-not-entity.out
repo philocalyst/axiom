@@ -6,7 +6,6 @@ error[unknown-entity]: there is no entity `groceries`
    │                                                  ╰── not a known entity
    │
    = note: a payee must be a declared entity, so that it is typed like everything else
-───╯
 
 ✗ 1 error
 [exit status 1]

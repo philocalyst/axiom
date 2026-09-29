@@ -9,7 +9,6 @@ error[insufficient-holding]: assets/brokerage does not hold 3 VTI
    = note: the selectors match 0 VTI of it
    = help: record the purchase before this flow, or check the quantity; the missing amount is left
            as a negative balance so the rest of the ledger stays consistent
-───╯
 
 ✗ 1 error
 [exit status 1]

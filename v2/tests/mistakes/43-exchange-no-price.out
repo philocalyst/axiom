@@ -8,7 +8,6 @@ error[insufficient-holding]: assets/checking does not hold 7 VTI
    = note: assets/checking holds 0 VTI
    = help: record the purchase before this flow, or check the quantity; the missing amount is left
            as a negative balance so the rest of the ledger stays consistent
-───╯
 
 error[no-price]: cannot check `overdraft`: no price for VTI in USD on 2026-01-22
    ╭─[43-exchange-no-price.ax:13:1]
@@ -17,14 +16,13 @@ error[no-price]: cannot check `overdraft`: no price for VTI in USD on 2026-01-22
    │ ───────────────────┬──────────────────
    │                    ╰── this flow: 7 VTI from assets/checking to assets/brokerage
    │
-   ├─[std.ax:26:10]
+   ├─[std.ax:26:10] (built in)
    │
 26 │     warn balance >= empty "balance below zero"
    │          ───┬───
    │             ╰── no price for VTI in USD on 2026-01-22
    │
    = help: add a price line such as `2026-01-22 VTI <price> USD`
-───╯
 
 ✗ 2 errors
 [exit status 1]

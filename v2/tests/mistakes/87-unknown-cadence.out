@@ -6,7 +6,6 @@ error[unknown-cadence]: unknown cadence `fortnight`
    │           ╰── not a known cadence
    │
    = note: the cadences are `day`, `week`, `month`, `quarter` and `year`
-───╯
 
 ✗ 1 error
 [exit status 1]

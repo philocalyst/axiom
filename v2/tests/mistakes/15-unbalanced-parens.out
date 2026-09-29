@@ -5,8 +5,6 @@ error[unclosed-delimiter]: expected `)`, found `"food is over budget"`
    │          ┬                            ──────────┬──────────
    │          │                                      ╰── expected `)`
    │          ╰── this `(` is never closed
-   │
-───╯
 
 error[unknown-place]: there is no place `food`
    ╭─[15-unbalanced-parens.ax:13:24]
@@ -17,7 +15,6 @@ error[unknown-place]: there is no place `food`
    │
    = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
            `expenses` or `equity`, for example `expenses/food`
-───╯
 
 ✗ 2 errors
 [exit status 1]

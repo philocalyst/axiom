@@ -7,7 +7,6 @@ error[type-mismatch]: cannot add a date to an amount
    │                  ╰── this is an amount
    │
    = note: `+` adds two amounts, two numbers or two spans, or a span to a date
-───╯
 
 ✗ 1 error
 [exit status 1]

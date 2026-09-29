@@ -4,8 +4,6 @@ error[expected-end-of-line]: expected the end of the line, found `)`
 10 │     warn (total(in, month)) <= 650 USD) "food is over budget"
    │                                       ┬
    │                                       ╰── expected the end of the line
-   │
-───╯
 
 error[unknown-place]: there is no place `food`
    ╭─[83-extra-close-paren.ax:13:24]
@@ -16,7 +14,6 @@ error[unknown-place]: there is no place `food`
    │
    = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
            `expenses` or `equity`, for example `expenses/food`
-───╯
 
 ✗ 2 errors
 [exit status 1]

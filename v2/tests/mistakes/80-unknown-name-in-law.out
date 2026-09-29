@@ -8,8 +8,8 @@ error[unknown-name]: `balanse` means nothing in this law
    = note: a name in a law is a variable of the trigger (`amount`, `from`, `date`, …), a `let`, a
            param, or a kind, place or entity
    = help: did you mean `balance`?
+10 -     require balanse >= empty "food cannot be negative"
 10 +     require balance >= empty "food cannot be negative"
-───╯
 
 ✗ 1 error
 [exit status 1]

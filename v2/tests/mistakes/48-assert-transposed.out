@@ -20,7 +20,6 @@ error[assertion]: assets/checking holds 3,015.80 USD, not 3,051.80 USD
    │
    = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
 21 + 2026-01-31 checking = 3_051.80 USD !
-───╯
 
 ✗ 1 error
 [exit status 1]

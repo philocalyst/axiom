@@ -6,7 +6,6 @@ error[expected-commodity]: expected a commodity such as `USD`, found the end of 
    │                                       ╰── expected a commodity such as `USD`
    │
    = help: an amount is a number and its commodity, like `84.20 USD`
-───╯
 
 ✗ 1 error
 [exit status 1]

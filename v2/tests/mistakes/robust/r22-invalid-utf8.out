@@ -1,2 +1,3 @@
-error: cannot read r22-invalid-utf8.ax: stream did not contain valid UTF-8
+error[not-utf8]: cannot read r22-invalid-utf8.ax: line 9 is not valid UTF-8
+  = help: save the file as UTF-8
 [exit status 2]

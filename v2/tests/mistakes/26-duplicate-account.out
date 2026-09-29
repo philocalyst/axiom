@@ -10,7 +10,6 @@ error[duplicate-declaration]: account `assets/checking` is declared twice
   │                ╰── declared again here
   │
   = help: remove one of the two declarations
-──╯
 
 ✗ 1 error
 [exit status 1]

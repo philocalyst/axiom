@@ -6,7 +6,6 @@ error[unknown-function]: there is no function `sum`
    │           ╰── not a function
    │
    = note: the functions are `total`, `tally`, `min`, `max`, `abs`, `progressive`, `value` or `date`
-───╯
 
 ✗ 1 error
 [exit status 1]

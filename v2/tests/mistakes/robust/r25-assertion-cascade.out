@@ -17,7 +17,6 @@ error[assertion]: assets/checking holds 3,915.80 USD, not 3,900.72 USD
    │
    = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
 19 + 2026-01-31 checking = 3_900.72 USD !
-───╯
 
 error[assertion]: assets/checking holds 6,824.70 USD, not 6,809.62 USD
    ╭─[r25-assertion-cascade.ax:23:1]
@@ -45,7 +44,6 @@ error[assertion]: assets/checking holds 6,824.70 USD, not 6,809.62 USD
    │
    = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
 23 + 2026-02-28 checking = 6_809.62 USD !
-───╯
 
 error[assertion]: assets/checking holds 9,747.35 USD, not 9,732.27 USD
    ╭─[r25-assertion-cascade.ax:27:1]
@@ -80,7 +78,6 @@ error[assertion]: assets/checking holds 9,747.35 USD, not 9,732.27 USD
    │
    = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
 27 + 2026-03-31 checking = 9_732.27 USD !
-───╯
 
 error[assertion]: assets/checking holds 12,659.35 USD, not 12,644.27 USD
    ╭─[r25-assertion-cascade.ax:31:1]
@@ -119,7 +116,6 @@ error[assertion]: assets/checking holds 12,659.35 USD, not 12,644.27 USD
    = note: 1 earlier flows since the start of the book are not shown
    = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
 31 + 2026-04-30 checking = 12_644.27 USD !
-───╯
 
 error[assertion]: assets/checking holds 15,589.45 USD, not 15,574.37 USD
    ╭─[r25-assertion-cascade.ax:35:1]
@@ -158,7 +154,6 @@ error[assertion]: assets/checking holds 15,589.45 USD, not 15,574.37 USD
    = note: 3 earlier flows since the start of the book are not shown
    = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
 35 + 2026-05-31 checking = 15_574.37 USD !
-───╯
 
 error[assertion]: assets/checking holds 18,494.20 USD, not 18,479.12 USD
    ╭─[r25-assertion-cascade.ax:39:1]
@@ -197,7 +192,6 @@ error[assertion]: assets/checking holds 18,494.20 USD, not 18,479.12 USD
    = note: 5 earlier flows since the start of the book are not shown
    = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
 39 + 2026-06-30 checking = 18_479.12 USD !
-───╯
 
 ✗ 6 errors
 [exit status 1]

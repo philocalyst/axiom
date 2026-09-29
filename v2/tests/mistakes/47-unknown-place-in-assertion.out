@@ -6,10 +6,10 @@ error[unknown-place]: there is no place `chekcing`
    │                ╰── not a known place
    │
    = help: did you mean `checking`?
+11 - 2026-01-31 chekcing = 915.80 USD
 11 + 2026-01-31 checking = 915.80 USD
    = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
            `expenses` or `equity`, for example `expenses/chekcing`
-───╯
 
 ✗ 1 error
 [exit status 1]

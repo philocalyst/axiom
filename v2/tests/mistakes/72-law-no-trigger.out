@@ -8,7 +8,6 @@ error[missing-trigger]: this law has no trigger
   │
   = help: start the body with a trigger: `on in|out|gain|spend`, `each month|year`, `by DATE` or
           `always`
-──╯
 
 error[unknown-place]: there is no place `food`
    ╭─[72-law-no-trigger.ax:12:24]
@@ -19,7 +18,6 @@ error[unknown-place]: there is no place `food`
    │
    = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
            `expenses` or `equity`, for example `expenses/food`
-───╯
 
 ✗ 2 errors
 [exit status 1]

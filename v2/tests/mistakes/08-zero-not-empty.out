@@ -7,8 +7,8 @@ error[bare-zero]: a bare `0` has no commodity; write `empty`
    │
    = note: `empty` is the zero of every commodity, so it needs no unit
    = help: write `empty`
+14 - 2026-01-31 visa = 0
 14 + 2026-01-31 visa = empty
-───╯
 
 ✗ 1 error
 [exit status 1]

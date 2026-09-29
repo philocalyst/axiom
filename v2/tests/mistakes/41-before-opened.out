@@ -6,7 +6,6 @@ error[place-not-open]: `assets/savings` opens on 2026-03-01
    │                           ╰── this flow is dated 2026-02-14
    │
    = help: use another account, or change `opened` or `closed`
-───╯
 
 ✗ 1 error
 [exit status 1]

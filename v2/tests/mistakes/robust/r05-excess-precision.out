@@ -6,7 +6,6 @@ error[amount-precision]: `0.000000001 USD` has more decimals than USD allows
   │                                    ╰── USD counts 2 decimal places
   │
   = help: round it, or declare `commodity USD` with `precision 9`
-──╯
 
 ✗ 1 error
 [exit status 1]

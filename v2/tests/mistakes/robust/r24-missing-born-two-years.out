@@ -6,17 +6,16 @@ error[unset-property]: cannot check `deferral-limit`: `born` is not set
    │   ─────────┬─────────
    │            ╰── this flow: 800.00 USD into assets/retirement
    │
-   ├─[us/401k.ax:33:56]
+   ├─[us/401k.ax:33:56] (built in)
    │
-33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearly limit"
+33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
    │                                                        ──┬──
    │                                                          ╰── `born` is not set
    │
    = help: give it a value where the thing is declared: `born …`
-───╯
 
 error[unset-property]: cannot check `required-minimum-distribution`: `born` is not set
-   ╭─[us/401k.ax:73:3]
+   ╭─[us/401k.ax:73:3] (built in)
    │
 73 │   law required-minimum-distribution
    │   ────────────────┬────────────────
@@ -27,7 +26,6 @@ error[unset-property]: cannot check `required-minimum-distribution`: `born` is n
    │              ╰── `born` is not set
    │
    = help: give it a value where the thing is declared: `born …`
-───╯
 
 ✗ 2 errors
 [exit status 1]

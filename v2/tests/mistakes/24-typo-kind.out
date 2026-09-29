@@ -6,8 +6,8 @@ error[unknown-kind]: there is no kind `bnk`
   │                            ╰── not a known kind
   │
   = help: did you mean `bank`?
+5 - account assets/checking : bnk
 5 + account assets/checking : bank
-──╯
 
 ✗ 1 error
 [exit status 1]
