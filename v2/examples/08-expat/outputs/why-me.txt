@@ -18,7 +18,7 @@ Governed by
   Law                   When       Explains                                                                   Written
   ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Limits
-    fbar                each year  FBAR: the highest values of the year, account by account, added up. Each…  accounts.ax:171
+    fbar                each year  FBAR: the highest values of the year, account by account, added up. Each…  accounts.ax:190
   ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Prices
     federal-income-tax  each year  Federal income tax for the year (IRC §1), figured from the tallies above.  us.ax:351

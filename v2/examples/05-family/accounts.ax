@@ -169,6 +169,9 @@ account expenses/taxes/payroll
 /// account is the household's so that what it counts lands in the joint return.
 account expenses/taxes/sdi
   owner family
+  /// California SDI is a state tax: it counts into the state and local taxes the return itemizes, up to the cap.
+  ///
+  /// To fix: the payment must arrive at this account, which the household owns, to reach the joint return.
   law itemize-sdi
     on in
     count amount as salt
@@ -177,6 +180,9 @@ account expenses/taxes/sdi
 /// tax paid in 2025, deductible in 2025 whatever year it was for.
 account expenses/taxes/state-prior
   owner family
+  /// The balance paid in April for last year's California return is state tax paid this year, itemized this year.
+  ///
+  /// To fix: pay it to this account, not to `taxes/state`, which is the current year's withholding.
   law itemize-state
     on in
     count amount as salt

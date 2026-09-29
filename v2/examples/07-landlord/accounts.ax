@@ -75,6 +75,9 @@ account income/salary         : wages
 
 /// Everything under here is a rental expense on Schedule E. One law covers it.
 account expenses/rental
+  /// What arrives under this account is a rental expense on Schedule E, counted when it is recognized.
+  ///
+  /// To fix: an expense that is not the rental's belongs outside this subtree.
   law deductible
     on in
     count amount as rental-expenses
@@ -93,6 +96,9 @@ account expenses/rental/repairs
 /// Depreciation is a flow out of the house's basis, with no cash behind it. What
 /// arrives here is counted, because the sale needs the total.
 account expenses/rental/depreciation
+  /// Depreciation taken is counted so that the sale can add back what it brought down.
+  ///
+  /// To fix: depreciation is a flow out of `house.basis` into this account; a year missing from it is not recaptured.
   law count-depreciation
     on in
     count amount as depreciation

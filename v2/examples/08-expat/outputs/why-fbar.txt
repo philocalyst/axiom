@@ -6,11 +6,14 @@ Why fbar
   ─────────────────────────────────
   When      each year
   Governs   everything in this book
-  Written   accounts.ax:171
+  Written   accounts.ax:190
   Ran       1 time
   Recorded  1 violation, 1 effect
   · FBAR: the highest values of the year, account by account, added up. Each
   · value is at the rate of the day, where the Treasury uses one year-end rate.
+  ·
+  · To fix: file FinCEN 114 by April 15 listing each foreign account's highest balance (the tallies
+  · `fbar-girokonto` and the others in `axiom tax`).
 
 Recent violations
   Date        Violation                                                                                                                                      From

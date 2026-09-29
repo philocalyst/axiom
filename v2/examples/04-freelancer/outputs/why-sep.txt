@@ -21,7 +21,7 @@ Governed by
   Law                   When       Explains                                                        Written
   ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Limits
-    contribution-limit  each year  A SEP-IRA takes at most 20% of net earnings after half of the…  accounts.ax:28
+    contribution-limit  each year  A SEP-IRA takes at most 20% of net earnings after half of the…  accounts.ax:31
   · 13 more laws only count, into adjustments, distributions, dividends, interest,
     investment-income, itemized, long-term-gains, payments, pretax, salt, sep-contributions,
     short-term-gains, total-income, wages.

@@ -13,6 +13,9 @@ kind sep-ira : tax-deferred
 
   /// Contributions from a bank account are what the return caps and deducts.
   /// Growth reaches the account through `market` and is not a contribution.
+  ///
+  /// To fix: money that reaches the account from anywhere else (a gift, the market) is not a contribution;
+  /// deposit from a bank account.
   law count-contributions
     on in
     when from is asset
@@ -97,6 +100,9 @@ account equity/odometer
 ///
 /// To fix: an expense that is not for the business belongs outside this subtree.
 account expenses/business
+  /// What arrives under this account is a business expense, counted when it is recognized.
+  ///
+  /// To fix: an expense that is not for the business belongs outside this subtree.
   law deductible
     on in
     count amount as business-expenses
@@ -123,6 +129,9 @@ account expenses/bad-debt
 
 /// Client meals: half deductible.
 account expenses/meals
+  /// Only half of a client meal is deductible (IRC §274(n)).
+  ///
+  /// To fix: a meal that is not with a client is not a business expense: book it under food.
   law half-deductible
     on in
     count amount * 50% as business-expenses
@@ -130,6 +139,9 @@ account expenses/meals
 /// Business miles at the standard rate: the deduction is what the miles are
 /// worth in dollars on the day.
 account expenses/mileage
+  /// Miles are deducted at the standard rate: what they are worth in dollars on the day (IRC §162).
+  ///
+  /// To fix: the miles need a price for the day: add a `MI` price line to the price file.
   law standard-mileage
     on in
     count value(amount, USD) as business-expenses
@@ -137,6 +149,9 @@ account expenses/mileage
 /// The share of the home used for work (150 of 1,000 sq ft) applies to every
 /// cost of the home.
 account expenses/home
+  /// The share of the home used for work applies to every cost of the home (IRC §280A).
+  ///
+  /// To fix: the share is the `office-share` param of the year; change it in tax.ax.
   law home-office
     on in
     count amount * office-share[year] as business-expenses
@@ -148,6 +163,9 @@ account expenses/home/insurance
 
 /// The phone is 60% business.
 account expenses/phone
+  /// The phone is 60% for the business, so only that share is deductible.
+  ///
+  /// To fix: change the share here if the business use changes.
   law phone-share
     on in
     count amount * 60% as business-expenses
@@ -155,6 +173,9 @@ account expenses/phone
 /// Health insurance premiums: an adjustment to income (IRC §162(l)), not a
 /// business expense.
 account expenses/health-insurance
+  /// A self-employed person deducts health insurance premiums from income, not as a business expense (IRC §162(l)).
+  ///
+  /// To fix: premiums must be paid to this account to count.
   law self-employed-health
     on in
     count amount as health-premiums

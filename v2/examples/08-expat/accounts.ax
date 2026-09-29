@@ -34,6 +34,10 @@ account liabilities/student-loan : loan
 /// The current account (Girokonto): salary arrives here and rent leaves.
 account assets/de/girokonto : bank
   holds EUR
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
   law fbar-max
     always
     let v = value(balance, USD)
@@ -42,6 +46,10 @@ account assets/de/girokonto : bank
 /// A high-interest savings account (Tagesgeld).
 account assets/de/tagesgeld : bank
   holds EUR
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
   law fbar-max
     always
     let v = value(balance, USD)
@@ -52,6 +60,10 @@ account assets/de/tagesgeld : bank
 account assets/de/kaution : bank
   holds EUR
   liquidity 700d
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
   law fbar-max
     always
     let v = value(balance, USD)
@@ -60,6 +72,10 @@ account assets/de/kaution : bank
 /// A Wise account in pounds, for the trip. It is a foreign account too.
 account assets/uk/wise : bank
   holds GBP
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
   law fbar-max
     always
     let v = value(balance, USD)
@@ -168,6 +184,9 @@ entity ryanair : org
 
 /// FBAR: the highest values of the year, account by account, added up. Each
 /// value is at the rate of the day, where the Treasury uses one year-end rate.
+///
+/// To fix: file FinCEN 114 by April 15 listing each foreign account's highest balance (the tallies
+/// `fbar-girokonto` and the others in `axiom tax`).
 law fbar
   each year
   let total = tally(fbar-girokonto) + tally(fbar-tagesgeld) + tally(fbar-kaution) + tally(fbar-wise)
