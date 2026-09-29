@@ -138,10 +138,6 @@ impl Window {
         std::iter::successors(Some(first), move |window| (window.days.last() < days.last()).then(|| window.following()))
     }
 
-    pub fn period(self) -> Period {
-        self.period
-    }
-
     pub fn days(self) -> Days {
         self.days
     }
@@ -361,8 +357,9 @@ mod tests {
     #[test]
     fn a_window_is_found_from_exactly_its_days() {
         let march = days(day(2026, 3, 1), day(2026, 3, 31));
-        assert_eq!(Window::exactly(march).map(|w| w.period()), Some(Period::Month));
-        assert_eq!(Window::exactly(days(day(2026, 1, 1), day(2026, 12, 31))).map(|w| w.period()), Some(Period::Year));
+        assert_eq!(Window::exactly(march), Some(Window::containing(Period::Month, day(2026, 3, 9))));
+        let year = days(day(2026, 1, 1), day(2026, 12, 31));
+        assert_eq!(Window::exactly(year), Some(Window::containing(Period::Year, day(2026, 7, 4))));
         assert_eq!(Window::exactly(days(day(2026, 3, 2), day(2026, 3, 31))), None);
         assert_eq!(Window::exactly(Days::ALWAYS), None);
     }
