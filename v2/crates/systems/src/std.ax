@@ -13,11 +13,16 @@ system std
 
 // ─── Places: assets ─────────────────────────────────────────────────────────
 
-/// Physical cash and money held outside any institution.
+/// Physical cash and money held outside any institution. Money in another
+/// currency is spent oldest first: cash is not an investment, so nothing asks
+/// which lot a euro came from.
 kind cash : asset
+  select fifo
 
-/// A checking, savings or money-market account.
+/// A checking, savings or money-market account. Money in another currency is
+/// spent oldest first: a euro spent on groceries is not a sale of a lot.
 kind bank : asset
+  select fifo
   /// A bank balance below zero is an overdraft: the bank is lending you the
   /// difference, usually for a fee.
   ///

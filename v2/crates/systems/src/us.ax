@@ -174,8 +174,9 @@ law count-dividends
 
 /// A gain on something held for a year or less is taxed as ordinary income
 /// (IRC §1222). A tax-deferred account realizes no gains of its own: what
-/// leaves it is counted by the law for distributions. A loss on something you
-/// keep for your own use is not deductible (IRC §165(c)).
+/// leaves it is counted by the law for distributions, and foreign currency
+/// by the one for currency gains. A loss on something you keep for your own use
+/// is not deductible (IRC §165(c)).
 ///
 /// To fix: if the sale was not a disposal, move the holding between your own
 /// accounts instead of out of them.
@@ -183,6 +184,7 @@ law count-short-term-gains
   on gain
   when gain != empty
   when held <= 1y
+  when amount.unit == USD or not amount.unit is currency
   when not from is tax-deferred
   when gain > empty or not from is personal-use
   count gain as short-term-gains
@@ -199,10 +201,28 @@ law count-long-term-gains
   on gain
   when gain != empty
   when held > 1y
+  when amount.unit == USD or not amount.unit is currency
   when not from is tax-deferred
   when gain > empty or not from is personal-use
   let excluded = if from is home and held >= 2y then min(gain, home-exclusion[year, owner.filing]) else empty
   count gain - excluded as long-term-gains
+
+/// Money in another currency is cash, not an investment: spending a euro is not
+/// a sale of a lot (dollars are the base currency and are not concerned). Converting or spending it realizes a gain against the dollars
+/// it cost, and a personal transaction's gain of 200 USD or less is not income
+/// (IRC §988(e)); above that the whole gain is ordinary income. A loss on personal
+/// currency is not deductible. The test is per disposal of one parcel, so a
+/// conversion that relieves several parcels is judged parcel by parcel.
+///
+/// To fix: this law only reads gains on units of a `currency` commodity. If the
+/// asset is not money, declare its commodity with another kind.
+law count-currency-gains
+  on gain
+  when amount.unit is currency
+  when amount.unit != USD
+  when not from is tax-deferred
+  when gain > 200 USD
+  count gain as short-term-gains
 
 /// What comes out of a tax-deferred account is income in the year it comes out
 /// (IRC §402(a), §408(d), §529(c)(3), §223(f)): the part that was never taxed,

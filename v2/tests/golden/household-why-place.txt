@@ -24,7 +24,7 @@ Governed by
   Prices
     nonqualified-penalty  on gain  A withdrawal that did not pay a qualified education expense owes an…         us/529.ax:54
     transfer-tax          on gain  Selling real property in San Francisco owes the city a transfer tax on the…  us/ca/san-francisco.ax:36
-  · 12 more laws only count, into adjustments, ca-withheld, distributions, dividends, interest,
+  · 13 more laws only count, into adjustments, ca-withheld, distributions, dividends, interest,
     investment-income, itemized, long-term-gains, payments, pretax, salt, short-term-gains,
     total-income, wages.
 

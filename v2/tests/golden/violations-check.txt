@@ -86,9 +86,9 @@ error[purpose]: grant money spent outside its purpose
     │ ──────────────────┬─────────────────
     │                   ╰── this flow: 300.00 USD of restricted money leaving assets/bank/project
     │
-    ├─[std.ax:196:13] (built in)
+    ├─[std.ax:201:13] (built in)
     │
-196 │     require to is self.purpose "grant money spent outside its purpose"
+201 │     require to is self.purpose "grant money spent outside its purpose"
     │             ─┬    ──────┬─────
     │              │          ╰── education
     │              ╰── expenses/dining
@@ -98,13 +98,13 @@ error[purpose]: grant money spent outside its purpose
             the grant.
 
 error[deadline]: grant money left unspent at the deadline
-    ╭─[std.ax:202:3] (built in)
+    ╭─[std.ax:207:3] (built in)
     │
-202 │   law deadline
+207 │   law deadline
     │   ──────┬─────
     │         ╰── checked for scholarship on 2026-12-31
-203 │     by self.until
-204 │     require remaining == empty "grant money left unspent at the deadline"
+208 │     by self.until
+209 │     require remaining == empty "grant money left unspent at the deadline"
     │             ────┬────
     │                 ╰── 900.00 USD
     │
