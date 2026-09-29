@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use axiom_core::{Day, Map, Qty};
 use axiom_sync::{
-    Account, Amounts, Column, Csv, DateFormat, Due, Env, Existing, Failure, Feed, Kind, Known, Layout, Recognizer, Sink,
+    Account, Amounts, Column, Csv, DateFormat, Due, Env, Existing, Failure, Feed, Format, Input, Kind, Known, Layout, Recognizer, Sink,
     Source, Unit, World, sync,
 };
 
@@ -109,13 +109,13 @@ fn sources<'a>(order: &[&str]) -> Vec<Source<'a>> {
     let first = Day::from_ymd(2026, 1, 1).unwrap();
     let feed = |name: &'static str, csv: Csv| Source {
         name,
-        run: if name == "checking" {
+        input: Input::Run(if name == "checking" {
             "printf '%s' {since} > since-checking.txt; cat feeds/checking.csv"
         } else {
             "cat feeds/visa.csv"
-        },
+        }),
         since: first,
-        kind: Kind::Feed(Feed { account: name, unit: USD, csv }),
+        kind: Kind::Feed(Feed { account: name, unit: USD, format: Format::Csv(csv) }),
     };
     order.iter().map(|&name| if name == "checking" { feed("checking", checking_csv()) } else { feed("visa", visa_csv()) }).collect()
 }
@@ -292,6 +292,58 @@ fn axiom_sync_diff(project: &Project, written: &[(String, String)]) -> String {
         .collect()
 }
 
+const QFX: &str = "OFXHEADER:100\nDATA:OFXSGML\n\n<OFX>\n<BANKMSGSRSV1><STMTTRNRS><STMTRS>\n<BANKTRANLIST>\n\
+<STMTTRN>\n<TRNTYPE>DEBIT\n<DTPOSTED>20260105120000[-5:EST]\n<TRNAMT>-84.20\n<FITID>1\n<NAME>TRADER JOE'S #634\n<MEMO>SAN FRANCISCO CA\n</STMTTRN>\n\
+<STMTTRN>\n<TRNTYPE>CHECK\n<DTPOSTED>20260106\n<TRNAMT>-350.00\n<FITID>2\n<CHECKNUM>1041\n<NAME>BAY PLUMBING &amp; HEATING\n</STMTTRN>\n\
+<STMTTRN>\n<TRNTYPE>CREDIT\n<DTPOSTED>20260108\n<TRNAMT>3800.00\n<FITID>3\n<NAME>HALCYON PAYMENT\n</STMTTRN>\n\
+</BANKTRANLIST>\n<LEDGERBAL><BALAMT>3162.55\n<DTASOF>20260112120000\n</LEDGERBAL>\n</STMTRS></STMTTRNRS></BANKMSGSRSV1>\n</OFX>\n";
+
+#[test]
+fn a_drop_folder_is_read_where_it_lies() {
+    let mut project = Project::new(
+        "drop",
+        &[
+            ("axiom.ax", ""),
+            ("journal/2026/01.ax", JANUARY),
+            ("imports/chase/2026-01.qfx", QFX),
+            ("imports/chase/notes.txt", "not a statement"),
+        ],
+    );
+    let source = |pattern| Source {
+        name: "checking",
+        input: Input::Read(pattern),
+        since: Day(0),
+        kind: Kind::Feed(Feed { account: "checking", unit: USD, format: Format::Ofx }),
+    };
+    let root = project.root.clone();
+    let env = Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
+    let sync_once = |project: &Project, pattern: &'static str| {
+        let mut world = book(&project.files, known(true));
+        let read = |path: &str| project.read(path);
+        let outcome = sync(&mut world, &[source(pattern)], &env, &read);
+        let labels: Vec<_> = outcome.sources.iter().map(|(label, result)| (label.clone(), result.as_ref().ok().copied())).collect();
+        (labels, outcome.changes.into_iter().map(|change| (change.path, change.after)).collect::<Vec<_>>())
+    };
+
+    let (labels, written) = sync_once(&project, "imports/chase/*.qfx");
+    assert_eq!(labels, [("imports/chase/2026-01.qfx".to_string(), Some(4))]);
+    let expected = JANUARY.replace(
+        "06 visa -> trader-joes 84.20 USD\n",
+        "05 checking -> trader-joes 84.20 USD\n\
+06 visa -> trader-joes 84.20 USD\n\
+06 checking -> ? 350 USD \"BAY PLUMBING & HEATING CHECK 1041\"\n\
+08 halcyon -> checking 3_800 USD\n\
+12 checking = 3_162.55 USD\n",
+    );
+    assert_eq!(written, [("journal/2026/01.ax".to_string(), expected.clone())]);
+
+    project.write("journal/2026/01.ax", &expected);
+    assert!(sync_once(&project, "imports/chase/*.qfx").1.is_empty(), "reading a file again writes nothing");
+    assert_eq!(sync_once(&project, "imports/nobody/*.qfx").0, [("checking".to_string(), Some(0))], "an empty drop folder is nothing to do");
+    let (labels, _) = sync_once(&project, "../secrets/*.qfx");
+    assert_eq!(labels, [("checking".to_string(), None)], "a pattern cannot leave the project");
+}
+
 #[test]
 fn invoices_and_prices_are_merged_by_their_sinks() {
     let mut project = Project::new(
@@ -305,8 +357,8 @@ fn invoices_and_prices_are_merged_by_their_sinks() {
         ],
     );
     let sources = [
-        Source { name: "invoices", run: "cat invoicing.txt", since: Day(0), kind: Kind::Sink(Sink::Journal) },
-        Source { name: "prices", run: "cat quotes.txt", since: Day(0), kind: Kind::Sink(Sink::File("prices/{year}.ax")) },
+        Source { name: "invoices", input: Input::Run("cat invoicing.txt"), since: Day(0), kind: Kind::Sink(Sink::Journal) },
+        Source { name: "prices", input: Input::Run("cat quotes.txt"), since: Day(0), kind: Kind::Sink(Sink::File("prices/{year}.ax")) },
     ];
     let files = project.files.clone();
     let mut world = book(&files, known(true));

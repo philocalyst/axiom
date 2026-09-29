@@ -6,11 +6,12 @@ use std::borrow::Cow;
 use std::fmt;
 
 use axiom_core::diag::closest;
-use axiom_core::num::{Dec, DecError};
-use axiom_core::{Day, Diagnostic, FileId, Loc, Qty};
+
+use axiom_core::{Day, Diagnostic, FileId, Qty};
 use memchr::{memchr, memchr2};
 
-use crate::{Record, Unit};
+use crate::amount::amount;
+use crate::{Record, Span, Unit};
 
 /// A bad column usually fails every row alike; after this many problems the
 /// rest of the export is not read.
@@ -162,13 +163,6 @@ fn number(bytes: &[u8], at: &mut usize, min: usize, max: usize) -> Option<u32> {
     Some(value)
 }
 
-/// A range of the file, for a label.
-#[derive(Clone, Copy)]
-struct Span {
-    start: usize,
-    end: usize,
-}
-
 /// One cell: its text with the quotes taken off, and its place in the file.
 struct Field<'t> {
     text: Cow<'t, str>,
@@ -277,10 +271,9 @@ impl<'t> Reader<'t> {
     }
 }
 
-
 /// A problem in a row of the export, pointing at the cell.
 fn problem(file: FileId, row: usize, code: &'static str, headline: String, span: Span, label: impl Into<String>) -> Diagnostic {
-    let loc = Loc::new(file, span.start as u32, span.end.max(span.start + 1) as u32);
+    let loc = span.loc(file);
     Diagnostic::error(code, format!("row {row}: {headline}")).label(loc, label)
 }
 
@@ -446,7 +439,7 @@ impl Csv {
         let balance = cells.balance.map(|at| money(row, at, unit)).transpose()?.flatten();
         let pending = cells.pending.and_then(|at| row.fields.get(at.index)).is_some_and(|field| is_pending(&field.text));
         let memo = row.cell(cells.memo)?;
-        let at = Loc::new(row.file, memo.span.start as u32, memo.span.end.max(memo.span.start + 1) as u32);
+        let at = memo.span.loc(row.file);
         Ok(Record { day, qty, memo: memo.text.clone(), balance, pending, at })
     }
 
@@ -483,128 +476,15 @@ fn no_amount(row: &Row, at: At) -> Diagnostic {
 /// The amount in a cell, if it holds one.
 fn money(row: &Row, at: At, unit: Unit) -> Result<Option<Qty>, Diagnostic> {
     let field = row.cell(at)?;
-    amount(&field.text, unit.scale).map_err(|why| why.report(row, field, at.column, unit))
+    amount(&field.text, unit.scale).map_err(|why| {
+        let label = format!("in the {} column", at.column.shown());
+        why.diagnostic(&format!("row {}", row.number), field.span.loc(row.file), label, &field.text, unit)
+    })
 }
 
 /// What an export's own "pending" says: a flag or a status word.
 fn is_pending(cell: &str) -> bool {
     ["pending", "true", "yes", "y", "1", "p"].iter().any(|word| cell.trim().eq_ignore_ascii_case(word))
-}
-
-/// Why a cell is not an amount.
-enum Why {
-    Malformed { comma_decimal: bool },
-    Precision,
-    Range,
-}
-
-impl Why {
-    fn report(self, row: &Row, field: &Field, column: &Column, unit: Unit) -> Diagnostic {
-        let label = format!("in the {} column", column.shown());
-        let text = field.text.trim();
-        match self {
-            Why::Malformed { comma_decimal } => {
-                let error = row.error("bad-amount", format!("`{text}` is not an amount"), field.span, label);
-                match comma_decimal {
-                    true => error
-                        .note("a comma reads as a thousands separator, so `12,50` is not twelve and a half")
-                        .help("ask the bank for an export that writes the decimal mark as a point"),
-                    false => error,
-                }
-            }
-            Why::Precision => {
-                let headline = format!("`{text}` has more decimal places than {} keeps", unit.name);
-                let error = row.error("bad-amount", headline, field.span, label);
-                error.note(format!("{} is counted to {} decimal places", unit.name, unit.scale))
-            }
-            Why::Range => row.error("bad-amount", format!("`{text}` is too large to be an amount"), field.span, label),
-        }
-    }
-}
-
-/// `-1,234.56`, `(12.00)`, `$12`, `-$12`: a leading currency sign, thousands
-/// separators, and parentheses or a minus for negatives. `None` for an empty
-/// cell.
-fn amount(cell: &str, scale: u8) -> Result<Option<Qty>, Why> {
-    if cell.trim().is_empty() {
-        return Ok(None);
-    }
-    let (negative, number) = sign(cell);
-    let digits = Digits::of(number)?;
-    let dec = Dec::parse(digits.as_bytes()).ok_or(Why::Range)?;
-    let qty = dec.to_qty(scale).map_err(|why| match why {
-        DecError::Inexact => Why::Precision,
-        DecError::Range => Why::Range,
-    })?;
-    Ok(Some(if negative { -qty } else { qty }))
-}
-
-/// Whether the cell says negative, and the number without its sign: a minus or
-/// parentheses make it so, and a currency sign is only decoration.
-fn sign(cell: &str) -> (bool, &str) {
-    let cell = cell.trim();
-    let (mut negative, mut rest) = match cell.strip_prefix('(').and_then(|inner| inner.strip_suffix(')')) {
-        Some(inner) => (true, inner),
-        None => (false, cell),
-    };
-    while let Some(sign) = rest.chars().next().filter(|c| "-+$€£¥ ".contains(*c)) {
-        negative |= sign == '-';
-        rest = &rest[sign.len_utf8()..];
-    }
-    (negative, rest)
-}
-
-/// A number's digits and its point, with the thousands separators taken out.
-struct Digits {
-    bytes: [u8; 40],
-    len: usize,
-}
-
-impl Digits {
-    /// `1,234.5` as `1234.5`; a comma that is not between thousands is refused.
-    fn of(number: &str) -> Result<Digits, Why> {
-        let (whole, fraction) = number.split_once('.').unwrap_or((number, ""));
-        let grouped = whole.contains(',');
-        let group_ok = |(at, group): (usize, &str)| {
-            let size = match (grouped, at) {
-                (false, _) => true,
-                (true, 0) => (1..=3).contains(&group.len()),
-                (true, _) => group.len() == 3,
-            };
-            size && group.bytes().all(|b| b.is_ascii_digit())
-        };
-        let sound = whole.split(',').enumerate().all(group_ok)
-            && fraction.bytes().all(|b| b.is_ascii_digit())
-            && !(whole.is_empty() && fraction.is_empty());
-        if !sound {
-            let tail = whole.rsplit_once(',').map_or(0, |(_, tail)| tail.len());
-            return Err(Why::Malformed { comma_decimal: fraction.is_empty() && matches!(tail, 1 | 2) });
-        }
-        let mut digits = Digits { bytes: [0; 40], len: 0 };
-        if whole.is_empty() {
-            digits.push(b'0')?;
-        }
-        for byte in whole.bytes().filter(|&byte| byte != b',') {
-            digits.push(byte)?;
-        }
-        if !fraction.is_empty() {
-            digits.push(b'.')?;
-            for byte in fraction.bytes() {
-                digits.push(byte)?;
-            }
-        }
-        Ok(digits)
-    }
-
-    fn push(&mut self, byte: u8) -> Result<(), Why> {
-        *self.bytes.get_mut(self.len).ok_or(Why::Range)? = byte;
-        self.len += 1;
-        Ok(())
-    }
-
-    fn as_bytes(&self) -> &[u8] {
-        &self.bytes[..self.len]
-    }
 }
 
 #[cfg(test)]
@@ -682,25 +562,6 @@ mod tests {
         assert_eq!(DateFormat::new("D.M.YYYY").unwrap().to_string(), "D.M.YYYY");
     }
 
-    #[test]
-    fn amounts_as_banks_write_them() {
-        let qty = |text: &str| amount(text, 2).ok().flatten().map(|q| q.0);
-        assert_eq!(qty("1,234.56"), Some(123_456));
-        assert_eq!(qty("(12.00)"), Some(-1200));
-        assert_eq!(qty("$12"), Some(1200));
-        assert_eq!(qty("-$12.50"), Some(-1250));
-        assert_eq!(qty("$-12.50"), Some(-1250));
-        assert_eq!(qty("+ 7.5"), Some(750));
-        assert_eq!(qty(".5"), Some(50));
-        assert_eq!(qty("1,234,567"), Some(123_456_700));
-        assert_eq!(amount("", 2).ok(), Some(None));
-        for bad in ["12,5", "1,23.00", "12.3.4", "abc", "$", "1 000", "1.234,56"] {
-            assert!(matches!(amount(bad, 2), Err(Why::Malformed { .. })), "{bad}");
-        }
-        assert!(matches!(amount("0.005", 2), Err(Why::Precision)));
-        assert!(matches!(amount("9".repeat(30).as_str(), 2), Err(Why::Range)));
-        assert!(matches!(amount("12,50", 2), Err(Why::Malformed { comma_decimal: true })));
-    }
 
     #[test]
     fn debit_and_credit_columns() {

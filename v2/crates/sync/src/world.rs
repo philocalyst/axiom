@@ -6,7 +6,7 @@ use std::fmt::Write;
 use axiom_core::num::POW10;
 use axiom_core::{Day, Diagnostic, FileId, Map, Qty};
 
-use crate::csv::Csv;
+use crate::statement::{Format, Statement};
 use crate::promise::{Due, keep};
 use crate::recognize::{Reading, Recognizer, Tie, Who};
 use crate::reconcile::{Existing, reconcile};
@@ -44,7 +44,7 @@ pub struct World<'a> {
 pub struct Feed<'a> {
     pub account: &'a str,
     pub unit: Unit<'a>,
-    pub csv: Csv,
+    pub format: Format,
 }
 
 /// A line to write, and what it moves.
@@ -67,7 +67,7 @@ impl<'a> World<'a> {
     /// The inserts that bring the book up to a statement, or what is wrong with
     /// it. Nothing is changed unless all of it can be read.
     pub fn feed(&mut self, feed: &Feed<'a>, text: &str) -> Result<Vec<Insert>, Vec<Diagnostic>> {
-        let (mut records, mut problems) = feed.csv.records(text, FileId(0), feed.unit);
+        let (Statement { mut records, closing }, mut problems) = feed.format.read(text, FileId(0), feed.unit);
         // Stable, so that a day's records keep the export's order.
         records.sort_by_key(|record| record.day);
         let readings = self.recognizer.read_all(&records);
@@ -77,7 +77,7 @@ impl<'a> World<'a> {
         if !problems.is_empty() {
             return Err(problems);
         }
-        let (lines, asserted) = self.plan(feed, &records, &readings);
+        let (lines, asserted) = self.plan(feed, &records, closing, &readings);
         for line in &lines {
             for &(name, qty) in &line.moved {
                 self.accounts.entry(name).or_default().flows.push(Existing { day: line.day, qty, settle: None });
@@ -91,7 +91,7 @@ impl<'a> World<'a> {
     }
 
     /// The lines a statement adds, and the day it is asserted on, if it is.
-    fn plan(&self, feed: &Feed<'a>, records: &[Record], readings: &[Reading<'a>]) -> (Vec<Line<'a>>, Option<Day>) {
+    fn plan(&self, feed: &Feed<'a>, records: &[Record], closing: Option<(Day, Qty)>, readings: &[Reading<'a>]) -> (Vec<Line<'a>>, Option<Day>) {
         let account = self.accounts.get(feed.account);
         let flows = account.map_or(&[][..], |account| &account.flows);
         let matched = reconcile(records, flows);
@@ -129,7 +129,7 @@ impl<'a> World<'a> {
                 lines.push(Line { day: record.day, body: flow_text(feed, record, other, code.as_deref()), moved });
             }
         }
-        let closing = closing(records).filter(|(day, _)| account.is_none_or(|account| !account.asserted.contains(day)));
+        let closing = closing.or_else(|| closing_of(records)).filter(|(day, _)| account.is_none_or(|account| !account.asserted.contains(day)));
         if let Some((day, balance)) = closing {
             let shown = if balance.is_negative() { format!("-{}", money(balance.abs(), feed.unit)) } else { money(balance, feed.unit) };
             lines.push(Line { day, body: format!("{} = {shown}", feed.account), moved: vec![] });
@@ -199,7 +199,7 @@ pub fn money(qty: Qty, unit: Unit) -> String {
 /// the day's posted records agree on it. Records can come in either order, so
 /// the closing balance is the one that the day's opening balance plus
 /// everything the day moved leads to.
-fn closing(records: &[Record]) -> Option<(Day, Qty)> {
+fn closing_of(records: &[Record]) -> Option<(Day, Qty)> {
     let day = records.iter().rev().find(|record| !record.pending && record.balance.is_some())?.day;
     let today: Vec<(Qty, Qty)> = records
         .iter()
@@ -215,4 +215,137 @@ fn closing(records: &[Record]) -> Option<(Day, Qty)> {
     closings.sort();
     closings.dedup();
     (closings.len() == 1).then(|| (day, closings[0]))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::csv::{Amounts, Column, Csv, DateFormat};
+    use crate::recognize::Known;
+
+    use super::*;
+
+    const USD: Unit = Unit { name: "USD", scale: 2 };
+
+    fn day(text: &str) -> Day {
+        Day::parse(text.as_bytes()).unwrap()
+    }
+
+    /// Rows are `date,amount,memo,balance,pending`, with no header.
+    fn feed() -> Feed<'static> {
+        let at = Column::Index;
+        let csv = Csv {
+            date: at(1),
+            format: DateFormat::new("YYYY-MM-DD").unwrap(),
+            amount: Amounts::Signed { column: at(2), flipped: false },
+            memo: at(3),
+            balance: Some(at(4)),
+            pending: Some(at(5)),
+        };
+        Feed { account: "checking", unit: USD, format: Format::Csv(csv) }
+    }
+
+    fn world(known: Vec<Known<'static>>) -> World<'static> {
+        let codes = ["code:(\"inv-\" digit+ \"-\" digit+)"];
+        World {
+            recognizer: Recognizer::new(known, &codes).unwrap(),
+            layout: Layout::new(["journal/2026/01.ax"]),
+            accounts: Map::default(),
+            dues: Vec::new(),
+            claims: Map::default(),
+        }
+    }
+
+    fn party(name: &'static str, pattern: &'static str) -> Known<'static> {
+        Known { name, account: false, patterns: vec![pattern] }
+    }
+
+    /// The lines a statement adds, dated as they are written.
+    fn written(world: &mut World<'static>, text: &str) -> Vec<String> {
+        let inserts = world.feed(&feed(), text).unwrap_or_else(|problems| panic!("{}", problems[0].message));
+        inserts.iter().map(|insert| match &insert.form {
+            Form::Item(body) => format!("{} {body}", insert.day.to_string().split_at(8).1),
+            Form::Row { .. } => unreachable!("a statement adds journal lines"),
+        }).collect()
+    }
+
+    #[test]
+    fn a_pending_record_is_written_in_parentheses_and_settled_when_it_posts() {
+        let mut world = world(vec![]);
+        let pending = "2026-01-05,-12.50,CORNER STORE,,pending\n2026-01-05,-3.00,COFFEE,,pending\n";
+        assert_eq!(
+            written(&mut world, pending),
+            [
+                "05 checking -> ? (12.50 USD) ^pending-20260105-1 \"CORNER STORE\"",
+                "05 checking -> ? (3 USD) ^pending-20260105-2 \"COFFEE\"",
+            ]
+        );
+        // The book now has the flow, still pending, with its code; the bank posts it a day later.
+        let mut world = self::world(vec![]);
+        let account = world.accounts.entry("checking").or_default();
+        account.flows.push(Existing { day: day("2026-01-05"), qty: Qty(-1250), settle: Some("pending-20260105-1") });
+        account.flows.push(Existing { day: day("2026-01-05"), qty: Qty(-300), settle: None });
+        let posted = "2026-01-06,-12.50,CORNER STORE 1234,,\n2026-01-06,-3.00,COFFEE,,\n";
+        assert_eq!(written(&mut world, posted), ["06 ^pending-20260105-1 settled"], "the flow with no code has nothing to say");
+    }
+
+    #[test]
+    fn an_invoice_code_finds_its_party_and_only_its_partys_codes_are_carried() {
+        let mut world = world(vec![party("halcyon", "\"HALCYON\"")]);
+        world.claims.insert("inv-2026-01", "halcyon");
+        world.claims.insert("inv-2026-09", "northwind");
+        let text = "2026-01-08,3800.00,WIRE FROM SOMEONE PAYING INV-2026-01,,\n\
+                    2026-01-09,100.00,HALCYON RE INV-2026-09,,\n\
+                    2026-01-10,5.00,INV-2026-77 UNKNOWN,,\n";
+        assert_eq!(
+            written(&mut world, text),
+            [
+                "08 halcyon -> checking 3_800 USD ^inv-2026-01",
+                "09 halcyon -> checking 100 USD",
+                "10 ? -> checking 5 USD \"INV-2026-77 UNKNOWN\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn an_occurrence_that_differs_says_so_and_a_pending_one_waits() {
+        let mut world = world(vec![party("mint", "\"MINT MOBILE\"")]);
+        let due = |on: &str| Due { contract: "phone", party: "mint", account: "checking", day: day(on), qty: Qty(-4500), window: 15 };
+        world.dues = vec![due("2026-01-08"), due("2026-02-08")];
+        let text = "2026-01-09,-47.30,MINT MOBILE,,\n2026-02-08,-45.00,MINT MOBILE,,pending\n";
+        assert_eq!(written(&mut world, text), ["09 phone 47.30 USD", "08 checking -> mint (45 USD) ^pending-20260208-1"]);
+        let mut world = self::world(vec![party("mint", "\"MINT MOBILE\"")]);
+        world.dues = vec![due("2026-01-08")];
+        assert_eq!(written(&mut world, "2026-01-08,-45.00,MINT MOBILE,,\n"), ["08 phone"]);
+    }
+
+    #[test]
+    fn a_statement_ends_in_an_assertion_however_its_days_are_ordered() {
+        let asserted = |text: &str| written(&mut world(vec![]), text).into_iter().filter(|line| line.contains(" = ")).collect::<Vec<_>>();
+        let oldest_first = "2026-01-05,-10.00,A,90.00,\n2026-01-06,-5.00,B,85.00,\n2026-01-06,-1.00,C,84.00,\n";
+        let newest_first = "2026-01-06,-1.00,C,84.00,\n2026-01-06,-5.00,B,85.00,\n2026-01-05,-10.00,A,90.00,\n";
+        assert_eq!(asserted(oldest_first), ["06 checking = 84 USD"]);
+        assert_eq!(asserted(newest_first), ["06 checking = 84 USD"]);
+        assert_eq!(asserted("2026-01-06,-1.00,C,-84.00,\n"), ["06 checking = -84 USD"]);
+        assert!(asserted("2026-01-06,-5.00,B,85.00,\n2026-01-06,-1.00,C,50.00,\n").is_empty(), "balances that do not add up are no assertion");
+        assert!(asserted("2026-01-06,-5.00,B,,\n").is_empty());
+        let mut world = world(vec![]);
+        world.accounts.entry("checking").or_default().asserted.push(day("2026-01-06"));
+        assert!(written(&mut world, oldest_first).iter().all(|line| !line.contains(" = ")), "one assertion to a day");
+    }
+
+    #[test]
+    fn a_memo_nobody_is_known_as_is_a_description_that_reads_back() {
+        let mut world = world(vec![]);
+        let lines = written(&mut world, "2026-01-05,-9.99,\"  SQ   *CAFE \"\"LUNA\"\" \\ ETC \",,\n2026-01-05,0.00,NOTHING MOVED,,\n");
+        assert_eq!(lines, ["05 checking -> ? 9.99 USD \"SQ *CAFE \\\"LUNA\\\" \\\\ ETC\""]);
+    }
+
+    #[test]
+    fn two_memos_that_tie_are_an_error_naming_both_and_nothing_is_written() {
+        let mut world = world(vec![party("shell-oil", "\"SHELL\""), party("shell-station", "\"SHELL\" any*")]);
+        let problems = world.feed(&feed(), "2026-01-05,-9.99,SHELL 1234,,\n").err().expect("refused");
+        assert_eq!(problems[0].message, "`SHELL 1234` is known as both shell-oil and shell-station");
+        assert!(problems[0].help[0].text.contains("longer match wins"));
+        assert!(world.accounts.is_empty(), "nothing is remembered from a source that failed");
+    }
 }
