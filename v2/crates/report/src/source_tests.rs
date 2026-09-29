@@ -430,6 +430,58 @@ fn available_runs_the_books_to_the_day_the_return_closes_to_price_a_withdrawal()
     });
 }
 
+/// The IRA again, with a return that is figured on the last day of the year it
+/// judges, the day the withdrawal below is made.
+const YEAR_END_RETURN: &str = "\
+base USD
+commodity USD
+  precision 2
+
+kind retirement : asset
+  liquidity 30d
+  law count-withdrawals
+    on out
+    count amount as income
+
+entity treasury
+
+account assets/checking
+account assets/ira : retirement
+account income/salary
+
+opening 2026-01-01
+  checking 1_000 USD
+  ira      10_000 USD
+
+law return
+  each year
+  owe tally(income) * 20% to treasury as income-tax
+
+2026-01-05 income/salary -> checking 100 USD
+";
+
+/// What is drawn on the day a year ends is a fact of that day, and the law that
+/// figures the year on that day comes after it: the withdrawal is priced with the
+/// tax it makes, as it is on any other day of the year.
+#[test]
+fn a_withdrawal_on_the_last_day_of_the_year_is_taxed_by_the_law_that_closes_the_year() {
+    for today in [day(2026, 6, 1), day(2026, 12, 31)] {
+        with_run(YEAR_END_RETURN, today, |book, run| {
+            let report = crate::report(book, run, &Query::Available { at: None }, None).unwrap();
+            let reach = report
+                .sections
+                .iter()
+                .find(|s| s.heading.as_deref() == Some("What it would take to reach the rest"))
+                .unwrap();
+            assert_eq!(
+                lines(reach)[0],
+                "assets/ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD",
+                "on {today}"
+            );
+        });
+    }
+}
+
 /// A salary each month, taxed by a return that closes in April 2027.
 const SALARY: &str = "\
 base USD

@@ -190,6 +190,80 @@ opening 2025-01-01
     });
 }
 
+// ─── The facts of a closing day come before the closing ─────────────────────
+
+/// A year's payments toward an estimate, judged by a law that closes the year on
+/// January 15.
+const CLOSING: &str = "\
+base USD
+commodity USD
+  precision 2
+
+account assets/checking
+account expenses/estimated
+  law paid
+    on in
+    count amount as paid
+
+law close
+  each year closing 01-15
+  require tally(paid) <= 120 USD \"over the estimate\"
+
+opening 2025-01-01
+  checking 1_000 USD
+
+2025-06-01 checking -> estimated 100 USD for 2025
+";
+
+/// The last payment is dated on the closing day, and written after the flow of a later day.
+#[test]
+fn a_payment_dated_on_the_closing_day_counts_wherever_the_journal_writes_it() {
+    let text = format!(
+        "{CLOSING}2026-03-01 checking -> estimated 10 USD\n2026-01-15 checking -> estimated 50 USD for 2025\n"
+    );
+    with_run(&text, day(2026, 3, 31), |_, run| {
+        let said = run.violations.iter().map(|v| run.diagnostics[v.diagnostic as usize].message.as_str());
+        let messages: Vec<_> = said.collect();
+        assert_eq!(messages.len(), 1, "{messages:?}");
+        assert!(messages[0].contains("150.00 USD in 2025 against a limit of 120.00 USD"), "{}", messages[0]);
+    });
+}
+
+/// The journal's 100.00 USD payment, as a 50.00 USD one on the closing day that the journal does not hold.
+fn payment_on_the_closing_day(book: &Book) -> axiom_model::Flow {
+    let mut flow = book.flows[axiom_core::Id::new(1)].clone();
+    flow.day = day(2026, 1, 15);
+    flow.out.qty = axiom_core::Qty(50_00);
+    flow.arrive = flow.out;
+    flow
+}
+
+/// A withdrawal, or a planned payment, made on the day a year closes is a fact
+/// of that day: it comes before the closing when the ledger stops short of it.
+#[test]
+fn a_flow_applied_on_a_day_whose_closings_are_still_to_come_is_counted_by_them() {
+    with_book(CLOSING, |book| {
+        let mut ledger = crate::Ledger::new(book, Options { today: day(2026, 1, 15), relaxed: false });
+        ledger.advance_to_closing(day(2026, 1, 15));
+        ledger.apply(&payment_on_the_closing_day(book));
+        ledger.advance(day(2026, 1, 15));
+        assert_eq!(ledger.recorded().violations.len(), 1);
+    });
+}
+
+/// Once the day is closed a flow dated on it is late for its closings, like a
+/// journal flow written after them would be: the fold does not travel back.
+#[test]
+fn a_flow_applied_on_a_day_already_closed_is_late_for_its_closings() {
+    with_book(CLOSING, |book| {
+        let mut ledger = crate::Ledger::new(book, Options { today: day(2026, 1, 15), relaxed: false });
+        ledger.advance(day(2026, 1, 15));
+        ledger.apply(&payment_on_the_closing_day(book));
+        ledger.advance(day(2026, 12, 31));
+        assert!(ledger.recorded().violations.is_empty());
+    });
+}
+
 // ─── Which parcel of a currency is spent ────────────────────────────────────
 
 /// Two purchases of euros on different days, and half of what they made spent, in an account that says nothing

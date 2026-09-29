@@ -14,6 +14,12 @@
 //!    closes this day (a month's last day, December 31, or an `each year
 //!    closing` law's closing day), in rule order.
 //!
+//! So everything that happens on a day comes before that day's closings: a
+//! payment dated on the closing day counts, wherever the journal writes it. A
+//! flow applied to a ledger (planned, or a withdrawal asked about) is one more
+//! fact of its day, placed after the journal's flows, and comes before the
+//! closings while the ledger has not closed the day.
+//!
 //! Prices are not moments: a price lookup asks for "the latest quote on or
 //! before the day", so a price is in force from its own day for everything
 //! that day.
@@ -57,6 +63,11 @@ impl Moment {
     /// applied on `day` takes its place.
     pub fn after_flows(day: Day) -> Moment {
         Moment { day, fact: Fact::Flow(Id::new(u32::MAX)) }
+    }
+
+    /// After everything the journal holds for `day`, before its closings.
+    pub fn before_closings(day: Day) -> Moment {
+        Moment { day, fact: Fact::Assert(u32::MAX) }
     }
 
     pub const LAST: Moment = Moment { day: Day(i32::MAX), fact: Fact::Deadline(u32::MAX) };
