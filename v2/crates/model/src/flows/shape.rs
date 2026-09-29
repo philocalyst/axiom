@@ -113,7 +113,9 @@ pub(super) struct Shape {
     pub to: Side,
     pub tail: Tail,
     pub legs: Vec<Leg>,
+    /// The header line, and the arrow in it.
     pub loc: Loc,
+    pub arrow: Loc,
 }
 
 /// One elaborator for a run of items: it reads the world and writes its sink.
@@ -341,6 +343,25 @@ impl<'a, 's> Elab<'a, 's> {
         let (from, to, tail) = (self.side(&flow.from, loc), self.side(&flow.to, loc), self.tail(&flow.tail, false));
         let legs: Vec<Option<Leg>> = self.file[flow.legs].iter().map(|leg| self.leg(leg)).collect();
         let legs: Option<Vec<Leg>> = legs.into_iter().collect();
-        Some(Shape { from: from?, to: to?, tail: tail?, legs: legs?, loc })
+        Some(Shape { from: from?, to: to?, tail: tail?, legs: legs?, loc, arrow: self.arrow(loc) })
+    }
+
+    /// Where the `->` is in a header, which is the first one there: no name or
+    /// amount contains it. A header that spells it another way is pointed at
+    /// whole.
+    fn arrow(&self, header: Loc) -> Loc {
+        let text = &self.file.src[header.range()];
+        match text.find("->") {
+            Some(at) => Loc::new(header.file, header.start + at as u32, header.start + at as u32 + 2),
+            None => header,
+        }
+    }
+
+    /// A place as its author wrote it, when it was written in this file.
+    pub fn written(&self, placed: &Placed) -> String {
+        match placed.loc.file == self.file.id {
+            true => self.file.src[placed.loc.range()].to_string(),
+            false => self.world.book.name(self.world.book.places[placed.end.place].path).to_string(),
+        }
     }
 }

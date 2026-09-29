@@ -92,8 +92,8 @@ impl Elab<'_, '_> {
         }
         selectors?;
         let price = shape.tail.price;
-        let (from_path, to_path) = (self.path(from).to_string(), self.path(to).to_string());
-        let at = Written { flow: shape.loc, price: price.map(|price| price.loc), from: &from_path, to: &to_path };
+        let (from_text, to_text) = (self.written(from), self.written(to));
+        let at = Written { flow: shape.arrow, price: price.map(|price| price.loc), from: &from_text, to: &to_text };
         let (out, arrive, infer, pending) = self.settle(shape.from.slot, shape.to.slot, price, at)?;
         let counterparty = to.end.entity.or(from.end.entity);
         let tail = Tail { payee: shape.tail.payee.or(counterparty), ..shape.tail.clone() };

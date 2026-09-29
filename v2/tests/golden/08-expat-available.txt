@@ -13,11 +13,11 @@ What you can spend
 
 What it would take to reach the rest
   Holding                           Liquid in          Value           Cost            Net  Because
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   assets/de/kaution (3,600.00 EUR)  700d        4,234.68 USD                  4,234.68 USD
-  assets/retirement/us-401k         5d         66,600.00 USD  12,482.00 USD  54,118.00 USD  driven by early-withdrawal-penalty 6,660.00 USD, federal-income-tax 5,822.00 USD
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today               70,834.68 USD  12,482.00 USD  58,352.68 USD
+  assets/retirement/us-401k         5d         66,600.00 USD  14,737.57 USD  51,862.43 USD  driven by early-withdrawal-penalty 6,660.00 USD, federal-income-tax 5,822.00 USD, ca-income-tax 2,255.57 USD
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today               70,834.68 USD  14,737.57 USD  56,097.11 USD
   · Each line withdraws the whole holding into assets/bank/us-savings on 2026-01-06 and runs the
     year out through the laws. Cost is what they would then owe beyond what they already will:
     penalties, and the tax on any income it creates.

@@ -13,13 +13,13 @@ Balances at 2026-02-10
     retirement           29,353.79 USD
       sep                29,353.79 USD
   ────────────────────────────────────
-  equity                       880 MI
-                         34,456.56 USD
+  equity                 34,456.56 USD
+                               880 MI
     odometer                   880 MI
     opening              34,456.56 USD
   ────────────────────────────────────
-  expenses                     880 MI
-                         61,052.64 USD
+  expenses               61,052.64 USD
+                               880 MI
     bad-debt              3,800.00 USD
     business              9,164.87 USD
       education             948.00 USD

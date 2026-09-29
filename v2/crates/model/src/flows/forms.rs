@@ -95,7 +95,7 @@ impl<'a, 's> Elab<'a, 's> {
             return self.finish(item, occurrence.date, Mode::Actual, None, None, None);
         };
         let mut shape = template.clone();
-        shape.loc = item.loc;
+        (shape.loc, shape.arrow) = (item.loc, item.loc);
         shape.legs.iter_mut().for_each(|leg| leg.loc = item.loc);
         let mut whole = true;
         if let Some(amount) = occurrence.amount {
