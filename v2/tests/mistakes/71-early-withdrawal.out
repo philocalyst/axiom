@@ -1,22 +1,22 @@
-note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, due 2026-02-02
+note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, due 2027-04-15
    ╭─[71-early-withdrawal.ax:20:1]
    │
 20 │ 2026-02-02 retirement -> checking 10_000 USD
    │ ──────────────────────┬─────────────────────
    │                       ╰── this flow: a gain of 10,000.00 USD on 10,000.00 USD
    │
-   ├─[us/401k.ax:64:13] (built in)
+   ├─[us/401k.ax:54:13] (built in)
    │
-64 │     require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "401(k…
+54 │     require owner.age >= 59y6m else owe 10% * gain to irs by date(year + 1, 4, 15) as early-w…
    │             ────┬────
    │                 ╰── 37y9m21d
    │
    = note: Money taken out before age 59½ carries an additional 10% tax on top of the income tax
-           (IRC §72(t)). This withdrawal is priced at that 10%. If an exception applies (disability,
-           separation from service at 55 or later, substantially equal payments, and others in
-           §72(t)(2)), keep the withdrawal and mark it `!` with the reason.
-   = help: if an exception applies, keep the flow and mark it `!` with the reason
+           (IRC §72(t)). This withdrawal is priced at that 10%.
+   = help: if an exception applies (disability, separation from service at 55 or later,
+           substantially equal payments, and others in §72(t)(2)), keep the withdrawal and mark it
+           `!` with the reason.
 
 1 priced
-✓ 2 flows · 3 places · 4 laws enforced · net worth 40,000.00 USD
+✓ 2 flows · 3 places · 9 laws enforced · net worth 40,000.00 USD
 [exit status 0]

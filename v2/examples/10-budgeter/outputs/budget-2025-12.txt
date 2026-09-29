@@ -1,17 +1,17 @@
 $ axiom budget 2025-12 --today 2026-02-14
 
-Budgets for 2025-12-01
+Budgets for 2025-12
 
-  Place                   Law     Window          Spent         Limit        Left     Used
+  Place                   Law     Window        Spent         Limit          Left     Used
   ────────────────────────────────────────────────────────────────────────────────────────
-  expenses/clothing       budget  2025-12     43.23 USD     80.00 USD   36.77 USD   54.04%
-  expenses/dining         budget  2025-12    160.00 USD    150.00 USD  -10.00 USD  106.67%
-  expenses/fun            budget  2025-12    107.06 USD    120.00 USD   12.94 USD   89.22%
-  expenses/gifts          budget  2025       460.60 USD    500.00 USD   39.40 USD   92.12%
-  expenses/groceries      budget  2025-12    240.50 USD    350.00 USD  109.50 USD   68.71%
-  expenses/insurance      budget  2025     1,140.00 USD  1,200.00 USD   60.00 USD      95%
-  expenses/medical        budget  2025        42.40 USD    400.00 USD  357.60 USD    10.6%
-  expenses/personal-care  budget  2025-12     35.00 USD     40.00 USD    5.00 USD    87.5%
-  expenses/subscriptions  budget  2025-12     53.46 USD     90.00 USD   36.54 USD    59.4%
-  expenses/transport      budget  2025-12     84.06 USD    120.00 USD   35.94 USD   70.05%
-  expenses/utilities      budget  2025-12     61.84 USD    100.00 USD   38.16 USD   61.84%
+  expenses/clothing       budget  2025-12   43.23 USD     80.00 USD     36.77 USD   54.04%
+  expenses/dining         budget  2025-12  160.00 USD    150.00 USD    -10.00 USD  106.67%
+  expenses/fun            budget  2025-12  107.06 USD    120.00 USD     12.94 USD   89.22%
+  expenses/gifts          budget  2025     460.60 USD    500.00 USD     39.40 USD   92.12%
+  expenses/groceries      budget  2025-12  240.50 USD    350.00 USD    109.50 USD   68.71%
+  expenses/insurance      budget  2025       0.00 USD  1,200.00 USD  1,200.00 USD       0%
+  expenses/medical        budget  2025      42.40 USD    400.00 USD    357.60 USD    10.6%
+  expenses/personal-care  budget  2025-12   35.00 USD     40.00 USD      5.00 USD    87.5%
+  expenses/subscriptions  budget  2025-12   65.27 USD     90.00 USD     24.73 USD   72.52%
+  expenses/transport      budget  2025-12   84.06 USD    120.00 USD     35.94 USD   70.05%
+  expenses/utilities      budget  2025-12   61.84 USD    100.00 USD     38.16 USD   61.84%

@@ -17,18 +17,21 @@
 2025-02-24 checking -> misc 190.98 USD
 2025-02-28 income/salary -> 14_000.00 USD
   retirement          1_958.33 USD   // 401(k) deferral
-  espp-cash           1_400.00 USD   // ESPP contribution, after tax
+  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
   taxes/federal       2_650.00 USD
   taxes/payroll       1_071.00 USD   // Social Security and Medicare
   checking            ...
-2025-02-28 dividends -> fidelity 7.58 USD
+2025-02-28 dividends -> fidelity 75.53 USD
 2025-02-28 interest -> savings 333.44 USD
-2025-02-28 interest -> fidelity 150.02 USD
-2025-02-28 checking = 12_328.43 USD
+2025-02-28 interest -> fidelity 151.47 USD
+2025-02-28 checking = 12_328.44 USD
 2025-02-28 savings = 100_364.26 USD
 2025-02-28 espp-cash = 2_800.01 USD
-2025-02-28 fidelity = 32.146 VTI
-2025-02-28 fidelity = 24.3264 MSFT
+2025-02-28 fidelity = 62.236 VTI
+2025-02-28 fidelity = 36.3264 MSFT
 2025-02-28 fidelity = 14.9072 UNH
+2025-02-28 fidelity = 50.9847 FAST
+2025-02-28 fidelity = 333.4448 BND
+2025-02-28 fidelity = 38.2029 VXUS
 2025-02-28 etrade = 187.4775 NWND
 2025-02-28 coinbase = 0.3 BTC

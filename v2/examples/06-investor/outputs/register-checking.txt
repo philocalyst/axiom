@@ -1,164 +1,20 @@
-$ axiom register checking --today 2026-01-06
+$ axiom register checking --from 2025-12-01 --today 2026-04-16
 
 Register: assets/bank/checking
 
-  Date        With                 Payee     Note          Amount        Balance
-  ──────────────────────────────────────────────────────────────────────────────
-  2024-09-01  equity/opening                        14,620.55 USD  14,620.55 USD
-  2024-09-01  expenses/rent        landlord         -2,650.00 USD  11,970.55 USD
-  2024-09-02  assets/bank/savings                   15,000.00 USD  26,970.55 USD
-  2024-09-05  assets/fidelity                       -1,499.99 USD  25,470.56 USD
-  2024-09-09  expenses/utilities                      -173.47 USD  25,297.09 USD
-  2024-09-12  expenses/groceries                      -387.95 USD  24,909.14 USD
-  2024-09-16  expenses/dining                         -286.11 USD  24,623.03 USD
-  2024-09-18  assets/fidelity                       -2,500.00 USD  22,123.03 USD
-  2024-09-18  assets/fidelity                       -2,500.00 USD  19,623.03 USD
-  2024-09-20  expenses/groceries                      -247.09 USD  19,375.94 USD
-  2024-09-24  expenses/misc                           -120.16 USD  19,255.78 USD
-  2024-09-30  income/salary                          6,920.67 USD  26,176.45 USD
-  2024-10-01  expenses/rent        landlord         -2,650.00 USD  23,526.45 USD
-  2024-10-05  assets/fidelity                       -1,499.98 USD  22,026.47 USD
-  2024-10-08  assets/fidelity                       -6,299.97 USD  15,726.50 USD
-  2024-10-09  expenses/utilities                      -163.03 USD  15,563.47 USD
-  2024-10-12  expenses/groceries                      -324.65 USD  15,238.82 USD
-  2024-10-14  assets/coinbase                      -13,013.66 USD   2,225.16 USD
-  2024-10-16  expenses/dining                         -357.53 USD   1,867.63 USD
-  2024-10-20  expenses/groceries                      -267.17 USD   1,600.46 USD
-  2024-10-24  expenses/misc                           -397.25 USD   1,203.21 USD
-  2024-10-31  income/salary                          6,920.67 USD   8,123.88 USD
-  2024-11-01  expenses/rent        landlord         -2,650.00 USD   5,473.88 USD
-  2024-11-02  assets/bank/savings                   20,000.00 USD  25,473.88 USD
-  2024-11-05  assets/fidelity                       -1,499.98 USD  23,973.90 USD
-  2024-11-09  expenses/utilities                      -131.82 USD  23,842.08 USD
-  2024-11-12  expenses/groceries                      -384.34 USD  23,457.74 USD
-  2024-11-16  expenses/dining                         -349.75 USD  23,107.99 USD
-  2024-11-20  expenses/groceries                      -274.52 USD  22,833.47 USD
-  2024-11-24  expenses/misc                           -313.79 USD  22,519.68 USD
-  2024-11-30  income/salary                          6,920.67 USD  29,440.35 USD
-  2024-12-01  expenses/rent        landlord         -2,650.00 USD  26,790.35 USD
-  2024-12-05  assets/fidelity                       -1,499.98 USD  25,290.37 USD
-  2024-12-09  expenses/utilities                      -164.56 USD  25,125.81 USD
-  2024-12-10  assets/fidelity                       -4,090.00 USD  21,035.81 USD
-  2024-12-12  expenses/groceries                      -274.74 USD  20,761.07 USD
-  2024-12-16  expenses/dining                         -303.94 USD  20,457.13 USD
-  2024-12-20  expenses/groceries                      -344.92 USD  20,112.21 USD
-  2024-12-24  expenses/misc                           -215.59 USD  19,896.62 USD
-  2024-12-31  income/salary                          6,920.67 USD  26,817.29 USD
-  2025-01-01  expenses/rent        landlord         -2,650.00 USD  24,167.29 USD
-  2025-01-05  assets/fidelity                       -1,499.99 USD  22,667.30 USD
-  2025-01-09  expenses/utilities                      -174.27 USD  22,493.03 USD
-  2025-01-12  expenses/groceries                      -363.42 USD  22,129.61 USD
-  2025-01-14  assets/fidelity                       -7,599.99 USD  14,529.62 USD
-  2025-01-16  expenses/dining                         -379.51 USD  14,150.11 USD
-  2025-01-20  expenses/groceries                      -260.40 USD  13,889.71 USD
-  2025-01-20  assets/coinbase                       -9,856.66 USD   4,033.05 USD
-  2025-01-24  expenses/misc                           -153.53 USD   3,879.52 USD
-  2025-01-31  income/salary                          6,920.67 USD  10,800.19 USD
-  2025-02-01  expenses/rent        landlord         -2,650.00 USD   8,150.19 USD
-  2025-02-02  assets/bank/savings                   15,000.00 USD  23,150.19 USD
-  2025-02-04  assets/fidelity                       -3,999.96 USD  19,150.23 USD
-  2025-02-05  assets/fidelity                       -1,499.97 USD  17,650.26 USD
-  2025-02-09  expenses/utilities                      -174.02 USD  17,476.24 USD
-  2025-02-12  expenses/groceries                      -384.86 USD  17,091.38 USD
-  2025-02-16  expenses/dining                         -275.76 USD  16,815.62 USD
-  2025-02-20  expenses/groceries                      -216.88 USD  16,598.74 USD
-  2025-02-20  assets/fidelity                      -11,000.00 USD   5,598.74 USD
-  2025-02-24  expenses/misc                           -190.98 USD   5,407.76 USD
-  2025-02-28  income/salary                          6,920.67 USD  12,328.43 USD
-  2025-03-01  expenses/rent        landlord         -2,650.00 USD   9,678.43 USD
-  2025-03-02  assets/bank/savings                   15,000.00 USD  24,678.43 USD
-  2025-03-05  assets/fidelity                       -1,500.00 USD  23,178.43 USD
-  2025-03-09  expenses/utilities                      -160.79 USD  23,017.64 USD
-  2025-03-11  assets/fidelity                       -4,699.97 USD  18,317.67 USD
-  2025-03-12  expenses/groceries                      -292.41 USD  18,025.26 USD
-  2025-03-12  assets/fidelity                       -2,499.99 USD  15,525.27 USD
-  2025-03-16  expenses/dining                         -407.36 USD  15,117.91 USD
-  2025-03-20  expenses/groceries                      -305.94 USD  14,811.97 USD
-  2025-03-24  expenses/misc                           -192.31 USD  14,619.66 USD
-  2025-03-31  income/salary                          6,920.67 USD  21,540.33 USD
-  2025-04-01  expenses/rent        landlord         -2,650.00 USD  18,890.33 USD
-  2025-04-02  assets/bank/savings                    5,000.00 USD  23,890.33 USD
-  2025-04-05  assets/fidelity                       -1,499.99 USD  22,390.34 USD
-  2025-04-09  expenses/utilities                      -162.43 USD  22,227.91 USD
-  2025-04-12  expenses/groceries                      -304.87 USD  21,923.04 USD
-  2025-04-16  expenses/dining                         -402.51 USD  21,520.53 USD
-  2025-04-20  expenses/groceries                      -363.71 USD  21,156.82 USD
-  2025-04-24  expenses/misc                           -305.27 USD  20,851.55 USD
-  2025-04-30  income/salary                          6,920.67 USD  27,772.22 USD
-  2025-05-01  expenses/rent        landlord         -2,650.00 USD  25,122.22 USD
-  2025-05-05  assets/fidelity                       -1,500.00 USD  23,622.22 USD
-  2025-05-09  expenses/utilities                      -165.83 USD  23,456.39 USD
-  2025-05-12  expenses/groceries                      -384.99 USD  23,071.40 USD
-  2025-05-16  expenses/dining                         -413.86 USD  22,657.54 USD
-  2025-05-20  expenses/groceries                      -205.12 USD  22,452.42 USD
-  2025-05-24  expenses/misc                           -250.10 USD  22,202.32 USD
-  2025-05-27  assets/fidelity                        4,650.45 USD  26,852.77 USD
-  2025-05-31  income/salary                          6,920.67 USD  33,773.44 USD
-  2025-06-01  expenses/rent        landlord         -2,650.00 USD  31,123.44 USD
-  2025-06-05  assets/fidelity                       -1,499.98 USD  29,623.46 USD
-  2025-06-09  expenses/utilities                      -134.35 USD  29,489.11 USD
-  2025-06-10  assets/fidelity                       -3,022.10 USD  26,467.01 USD
-  2025-06-12  expenses/groceries                      -346.05 USD  26,120.96 USD
-  2025-06-16  expenses/dining                         -183.32 USD  25,937.64 USD
-  2025-06-16  assets/fidelity                       -2,499.99 USD  23,437.65 USD
-  2025-06-20  expenses/groceries                      -358.41 USD  23,079.24 USD
-  2025-06-24  expenses/misc                           -309.09 USD  22,770.15 USD
-  2025-06-30  income/salary                          6,920.67 USD  29,690.82 USD
-  2025-07-01  expenses/rent        landlord         -2,650.00 USD  27,040.82 USD
-  2025-07-05  assets/fidelity                       -1,500.00 USD  25,540.82 USD
-  2025-07-09  expenses/utilities                      -163.02 USD  25,377.80 USD
-  2025-07-12  expenses/groceries                      -296.21 USD  25,081.59 USD
-  2025-07-16  expenses/dining                         -211.02 USD  24,870.57 USD
-  2025-07-20  expenses/groceries                      -287.07 USD  24,583.50 USD
-  2025-07-24  expenses/misc                           -169.72 USD  24,413.78 USD
-  2025-07-31  income/salary                          6,920.67 USD  31,334.45 USD
-  2025-08-01  expenses/rent        landlord         -2,650.00 USD  28,684.45 USD
-  2025-08-05  assets/fidelity                       -1,499.99 USD  27,184.46 USD
-  2025-08-09  expenses/utilities                      -179.24 USD  27,005.22 USD
-  2025-08-12  expenses/groceries                      -365.68 USD  26,639.54 USD
-  2025-08-16  expenses/dining                         -163.26 USD  26,476.28 USD
-  2025-08-20  expenses/groceries                      -340.05 USD  26,136.23 USD
-  2025-08-24  expenses/misc                           -126.14 USD  26,010.09 USD
-  2025-08-31  income/salary                          6,920.67 USD  32,930.76 USD
-  2025-09-01  expenses/rent        landlord         -2,650.00 USD  30,280.76 USD
-  2025-09-02  assets/fidelity                        2,748.60 USD  33,029.36 USD
-  2025-09-05  assets/fidelity                       -1,499.99 USD  31,529.37 USD
-  2025-09-09  expenses/utilities                      -182.36 USD  31,347.01 USD
-  2025-09-12  expenses/groceries                      -351.65 USD  30,995.36 USD
-  2025-09-15  assets/etrade                         16,704.87 USD  47,700.23 USD
-  2025-09-16  expenses/dining                         -239.59 USD  47,460.64 USD
-  2025-09-16  assets/fidelity                       -2,500.00 USD  44,960.64 USD
-  2025-09-20  expenses/groceries                      -267.93 USD  44,692.71 USD
-  2025-09-24  expenses/misc                           -260.10 USD  44,432.61 USD
-  2025-09-30  income/salary                          6,920.67 USD  51,353.28 USD
-  2025-10-01  expenses/rent        landlord         -2,650.00 USD  48,703.28 USD
-  2025-10-05  assets/fidelity                       -1,499.98 USD  47,203.30 USD
-  2025-10-09  expenses/utilities                      -189.99 USD  47,013.31 USD
-  2025-10-10  assets/fidelity                        3,252.30 USD  50,265.61 USD
-  2025-10-12  expenses/groceries                      -249.69 USD  50,015.92 USD
-  2025-10-16  expenses/dining                         -269.95 USD  49,745.97 USD
-  2025-10-20  expenses/groceries                      -334.34 USD  49,411.63 USD
-  2025-10-24  expenses/misc                           -263.20 USD  49,148.43 USD
-  2025-10-31  income/salary                          6,920.67 USD  56,069.10 USD
-  2025-11-01  expenses/rent        landlord         -2,650.00 USD  53,419.10 USD
-  2025-11-05  assets/fidelity                       -1,499.97 USD  51,919.13 USD
-  2025-11-06  assets/fidelity                        4,147.52 USD  56,066.65 USD
-  2025-11-09  expenses/utilities                      -129.62 USD  55,937.03 USD
-  2025-11-12  expenses/groceries                      -416.27 USD  55,520.76 USD
-  2025-11-16  expenses/dining                         -391.99 USD  55,128.77 USD
-  2025-11-20  expenses/groceries                      -320.64 USD  54,808.13 USD
-  2025-11-24  expenses/misc                           -440.22 USD  54,367.91 USD
-  2025-11-30  income/salary                          6,920.67 USD  61,288.58 USD
-  2025-12-01  expenses/rent        landlord         -2,650.00 USD  58,638.58 USD
-  2025-12-02  assets/coinbase                        1,825.72 USD  60,464.30 USD
-  2025-12-04  assets/fidelity                        2,649.12 USD  63,113.42 USD
-  2025-12-05  assets/fidelity                       -1,499.98 USD  61,613.44 USD
-  2025-12-09  expenses/utilities                      -176.50 USD  61,436.94 USD
-  2025-12-09  assets/wallet                          3,027.21 USD  64,464.15 USD
-  2025-12-12  expenses/groceries                      -383.30 USD  64,080.85 USD
-  2025-12-16  expenses/dining                         -294.34 USD  63,786.51 USD
-  2025-12-16  assets/fidelity                       10,261.70 USD  74,048.21 USD
-  2025-12-16  assets/fidelity                      -10,400.00 USD  63,648.21 USD
-  2025-12-20  expenses/groceries                      -284.77 USD  63,363.44 USD
-  2025-12-24  expenses/misc                           -374.04 USD  62,989.40 USD
-  2025-12-31  income/salary                          6,920.67 USD  69,910.07 USD
+  Date        With                Payee     Note          Amount        Balance
+  ─────────────────────────────────────────────────────────────────────────────
+  2025-12-01  opening balance                                     75,932.59 USD
+  2025-12-01  expenses/rent       landlord         -2,650.00 USD  73,282.59 USD
+  2025-12-02  assets/coinbase                       1,825.72 USD  75,108.31 USD
+  2025-12-04  assets/fidelity                       2,649.12 USD  77,757.43 USD
+  2025-12-05  assets/fidelity                      -1,499.98 USD  76,257.45 USD
+  2025-12-09  expenses/utilities                     -176.50 USD  76,080.95 USD
+  2025-12-09  assets/wallet                         3,027.21 USD  79,108.16 USD
+  2025-12-12  expenses/groceries                     -383.30 USD  78,724.86 USD
+  2025-12-16  expenses/dining                        -294.34 USD  78,430.52 USD
+  2025-12-16  assets/fidelity                      10,261.70 USD  88,692.22 USD
+  2025-12-16  assets/fidelity                     -10,400.00 USD  78,292.22 USD
+  2025-12-20  expenses/groceries                     -284.77 USD  78,007.45 USD
+  2025-12-24  expenses/misc                          -374.04 USD  77,633.41 USD
+  2025-12-31  income/salary                         6,920.67 USD  84,554.08 USD

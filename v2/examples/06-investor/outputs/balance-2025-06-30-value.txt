@@ -1,46 +1,47 @@
-$ axiom balance --value --at 2025-06-30 --today 2026-01-06
+$ axiom balance --value --at 2025-06-30 --today 2026-04-16
 
 Balances at 2025-06-30
 
   Place               Value (USD)
   ───────────────────────────────
-  assets           362,661.64 USD
-    bank           111,148.81 USD
-      checking      29,690.82 USD
+  assets           410,066.54 USD
+    bank           111,148.82 USD
+      checking      29,690.83 USD
       savings       81,457.99 USD
     coinbase        18,393.87 USD
-    etrade          51,171.31 USD
-    fidelity        55,942.77 USD
+    etrade          58,812.68 USD
+    fidelity        73,444.50 USD
     retirement     105,983.30 USD
-    schwab           5,273.70 USD
+    schwab          27,535.50 USD
     wallet          14,747.87 USD
   ───────────────────────────────
   equity           255,199.15 USD
     opening        253,220.55 USD
     wash-sale        1,978.60 USD
   ───────────────────────────────
-  expenses          84,168.50 USD
+  expenses          84,167.01 USD
     dining           3,359.65 USD
     groceries        6,292.44 USD
     misc             2,448.07 USD
-    network-fees         5.14 USD
+    network-fees         3.65 USD
     rent            26,500.00 USD
     taxes           43,958.63 USD
       federal       32,325.29 USD
       payroll       11,633.34 USD
     utilities        1,604.57 USD
   ───────────────────────────────
-  income           179,115.33 USD
-    dividends          307.85 USD
+  income           179,923.79 USD
+    dividends        1,104.83 USD
     espp-discount    7,641.37 USD
-    interest         4,643.08 USD
+    interest         4,654.56 USD
     rsu             26,478.60 USD
     salary         140,000.00 USD
     staking             44.43 USD
+  · 3 flows have no price on their day and are not counted in the value.
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       362,661.63 USD
+  Assets       410,066.54 USD
   Liabilities        0.00 USD
   ───────────────────────────
-  Net worth    362,661.63 USD
+  Net worth    410,066.54 USD

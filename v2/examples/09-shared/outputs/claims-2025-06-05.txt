@@ -1,0 +1,12 @@
+$ axiom claims --today 2025-06-05
+
+Claims on 2025-06-05
+
+Owed to you
+  Counterparty        What                                                                                                                                                        Left  Made        Age    Due         Status
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/owed/by-ben  #rent-2025-06                                                                                                                                         550.00 USD  2025-06-01  4d     2025-06-08  in 3d
+  lantern-owes        #expense-2025-06 · The Lantern asked me to buy an apron and a tablet stand (bar-supply). I paid on my card and filed an expense report: it is not…    138.50 USD  2025-06-02  3d     2025-07-15  in 40d
+  riley               #loan-riley · A loan to a friend: 2,000.00 USD for a security deposit, to be paid back 250.00 USD a month from May 15, so the last…                 1,750.00 USD  2025-04-10  1m26d  2025-12-15  in 193d
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                                                                                                                                                                   2,438.50 USD

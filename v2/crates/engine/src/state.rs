@@ -94,8 +94,11 @@ pub(crate) enum Missing {
     /// A property of one entity or place (`filing` on `me`), or of whatever
     /// a law read it from when that is neither.
     Property(Option<Subject>, Sym),
-    /// Rows of a param for the day asked.
+    /// Rows of a project's param for the day asked.
     Row(Id<Param>),
+    /// A system's figures for a year: every table a system ships starts in
+    /// some year, and a journal older than that lacks them all at once.
+    Figures(i32),
     /// Arithmetic that failed, per law and step.
     Arithmetic(Id<Law>, u32),
 }

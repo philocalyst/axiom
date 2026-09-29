@@ -1,20 +1,20 @@
-$ axiom check --today 2026-01-06
+$ axiom check --today 2026-04-16
 
-✓ 307 flows · 44 places · 18 laws enforced · net worth 110,425.84 USD
-warning[law]: foreign accounts passed 10,000 USD: file FinCEN 114 (FBAR) by April 15
-    ╭─[accounts.ax:169:1]
+warning[fbar]: foreign accounts passed 10,000 USD: file FinCEN 114 (FBAR) by April 15: 38,927.16 USD against a limit of 10,000.00 USD, over by 28,927.16 USD
+    ╭─[accounts.ax:190:1]
     │
-169 │ law fbar
+190 │ law fbar
     │ ────┬───
     │     ╰── checked for me on 2025-12-31
     ⋮
-173 │   warn total <= 10_000 USD "foreign accounts passed 10,000 USD: file FinCEN 114 (FBAR) by April 15"
-    │        ──┬──────┬─────────
-    │          │      ╰── false
-    │          ╰── 38,927.15 USD
+194 │   warn total <= 10_000 USD "foreign accounts passed 10,000 USD: file FinCEN 114 (FBAR) by Ap…
+    │        ──┬──
+    │          ╰── 38,927.16 USD
     │
     = note: FBAR: the highest values of the year, account by account, added up. Each value is at the
             rate of the day, where the Treasury uses one year-end rate.
-────╯
+    = help: file FinCEN 114 by April 15 listing each foreign account's highest balance (the tallies
+            `fbar-girokonto` and the others in `axiom tax`).
 
 1 warning
+✓ 310 flows · 37 places · 25 laws enforced · net worth 113,626.85 USD

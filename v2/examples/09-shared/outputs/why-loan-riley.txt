@@ -1,0 +1,15 @@
+$ axiom why #loan-riley --today 2026-04-16
+
+Why #loan-riley
+
+Flows
+  Date        Flow                                               Amount  State   From
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-04-10  assets/bank/checking → assets/owed/by-riley  2,000.00 USD  actual  journal/2025/04.ax:30
+  2025-05-15  assets/owed/by-riley → assets/bank/checking    250.00 USD  actual  journal/2025/05.ax:31
+  2025-06-16  assets/owed/by-riley → assets/bank/checking    250.00 USD  actual  journal/2025/06.ax:40
+  2025-07-15  assets/owed/by-riley → assets/bank/checking    250.00 USD  actual  journal/2025/07.ax:38
+  2025-08-15  assets/owed/by-riley → assets/bank/checking    250.00 USD  actual  journal/2025/08.ax:27
+  2025-11-17  assets/owed/by-riley → assets/bank/checking    500.00 USD  actual  journal/2025/11.ax:35
+  2025-12-15  assets/owed/by-riley → assets/bank/checking    250.00 USD  actual  journal/2025/12.ax:28
+  2025-12-24  assets/owed/by-riley → expenses/gifts          200.00 USD  actual  journal/2025/12.ax:43

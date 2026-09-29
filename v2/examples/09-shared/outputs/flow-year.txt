@@ -1,17 +1,16 @@
-$ axiom flow --by year --today 2026-01-06
+$ axiom flow --by year --today 2026-04-16
 
 Income and spending
 
   Place                      2025      2026          Total
   ────────────────────────────────────────────────────────
-  income            47,461.64 USD            47,461.64 USD
+  income            47,323.14 USD            47,323.14 USD
     donations        1,187.50 USD             1,187.50 USD
     grants           5,942.75 USD             5,942.75 USD
-    reimbursements     138.50 USD               138.50 USD
     tips             9,110.47 USD             9,110.47 USD
     wages           31,082.42 USD            31,082.42 USD
   ────────────────────────────────────────────────────────
-  expenses          34,309.99 USD            34,309.99 USD
+  expenses          34,467.19 USD            34,467.19 USD
     car              4,585.00 USD             4,585.00 USD
     clothing           535.80 USD               535.80 USD
     dining             905.78 USD               905.78 USD
@@ -33,8 +32,8 @@ Income and spending
       federal        3,854.21 USD             3,854.21 USD
       payroll        2,377.80 USD             2,377.80 USD
     transport           55.25 USD                55.25 USD
+    travel             295.70 USD               295.70 USD
     utilities          580.60 USD               580.60 USD
     volunteer-food      84.50 USD                84.50 USD
-    work-supplies      138.50 USD               138.50 USD
   ────────────────────────────────────────────────────────
-  Net               13,151.65 USD  0.00 USD  13,151.65 USD
+  Net               12,855.95 USD  0.00 USD  12,855.95 USD

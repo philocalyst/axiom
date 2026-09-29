@@ -16,13 +16,13 @@
 2025-03-25 visa -> groceries 90.18 USD
 2025-03-31 acme -> 10_416.67 USD
   us-401k                 625.00 USD   // 6% pre-tax
-  taxes/federal           1_790.00 USD
-  taxes/state             736.00 USD
+  taxes/federal           1_180.00 USD
+  taxes/state             470.00 USD
   taxes/payroll           796.87 USD   // Social Security and Medicare
   taxes/sdi               125.00 USD   // California SDI
   us-checking             ...
 2025-03-31 interest -> us-savings 145.56 USD
 2025-03-31 visa = 886.34 USD
-2025-03-31 us-checking = 23_138.47 USD
+2025-03-31 us-checking = 25_766.47 USD
 2025-03-31 us-savings = 41_735.17 USD
 2025-03-31 student-loan = 30_209.41 USD

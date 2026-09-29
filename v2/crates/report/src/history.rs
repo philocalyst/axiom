@@ -181,11 +181,13 @@ impl Snapshots {
                 }
             }
         }
-        // A pad is a flow from `unknown`: the gap it accepted, and its mirror.
+        // A pad is a flow from its counter place (`unknown`, or the `via`
+        // place): the gap it accepted, and its mirror. One after the last day
+        // asked for changes none of them.
         for pad in &run.pads {
             let lo = snapshots.column_from(pad.day);
-            for (place, sign) in [(pad.place, 1), (book.roots.unknown, -1)] {
-                if lens.owns(place) {
+            for (place, sign) in [(pad.place, 1), (pad.counter, -1)] {
+                if lo < snapshots.days.len() && lens.owns(place) {
                     let held = snapshots.booked(lens.on(pad.day), place, pad.amount, valued, sign);
                     snapshots.change(lo..snapshots.days.len(), place, pad.amount.unit, held);
                 }

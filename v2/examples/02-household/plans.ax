@@ -1,9 +1,20 @@
 // What has not happened yet.
 //
-// Plans exist only in forecasts; they never touch the journal. `axiom forecast`
-// also projects what repeats in the journal by itself (the rent, the paycheck,
-// the 529 and savings transfers), from its cadence and amount. So a plan is for
-// what history cannot say: a bill that comes once a year, a trip, a bonus.
+// Plans exist only in forecasts until the journal says they happened. `axiom forecast`
+// also projects what repeats in the journal by itself (the rent, the 529 and savings
+// transfers), from its cadence and amount. So a plan is for what history cannot say: a
+// bill that comes once a year, a trip, a bonus. A plan with a name is also a template:
+// `2026-02-13 paycheck` in the journal is one occurrence of it, written in full.
+
+/// The monthly paycheck, 8,000 USD before tax: 800 USD deferred into the 401(k), the
+/// withholding, and the rest to checking. January's is written out in the journal;
+/// the next ones are just its name.
+plan paycheck every month on 13 from 2026-02-13 acme -> 8_000 USD
+  retirement       800 USD
+  taxes/federal    880 USD
+  taxes/state      370 USD
+  taxes/payroll    612 USD
+  checking         ...
 
 /// Fall tuition is due in mid-August. The 529 plan pays part of it directly.
 every year on 08-15 from 2026-08-15 checking -> state-u 3_600 USD

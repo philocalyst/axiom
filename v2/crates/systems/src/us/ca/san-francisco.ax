@@ -30,9 +30,12 @@ entity sf : government
 ///
 /// This is charged per lot sold, so a property held as several lots is taxed
 /// lot by lot.
+///
+/// To fix: the rate is the city's; if the sale price was recorded wrongly,
+/// correct the sale, and the tax follows.
 law transfer-tax
   on gain
-  when from is property
+  when from is property | home
   // verify: the three rates against the Assessor-Recorder's current table.
   let rate = if proceeds <= 250_000 USD then 0.5% else if proceeds < 1_000_000 USD then 0.68% else 0.75%
   owe rate * proceeds to sf as transfer-tax

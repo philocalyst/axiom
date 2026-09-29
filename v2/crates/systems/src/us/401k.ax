@@ -1,10 +1,15 @@
 /// United States 401(k) retirement plans.
 ///
 /// A 401(k) is a tax-deferred account. Pay that goes in as a pre-tax deferral
-/// arrives with no basis, so all of it, and all of its growth, is taxable when
-/// it comes out. This system caps what goes in each year, counts what comes
-/// out as income, prices a withdrawal before age 59½, and warns when a
-/// required distribution is missed.
+/// arrives with no basis (`basis zero`), so all of it, and all of its growth, is
+/// taxable when it comes out. This system caps what goes in each year, prices a
+/// withdrawal before age 59½, and warns when a required distribution is missed.
+/// `us` counts what comes out as income, and takes what went in out of pay.
+///
+/// A market gain or loss reaches the account through a place of kind `market`
+/// (`2026-03-31 retirement = 24_600 USD via market`). That is a revaluation,
+/// not a withdrawal: it changes what the account holds, costs no penalty and
+/// counts as no income.
 ///
 /// The figures are community-maintained data. Verify them against the IRS
 /// (irs.gov, the yearly "COLA" notice) before relying on them, and correct
@@ -16,15 +21,19 @@ use us
 
 /// An employer-sponsored retirement plan (IRC §401(k)).
 kind 401k : tax-deferred
+  basis zero
   liquidity 5d
   has employer entity
 
   /// Elective deferrals are capped for each person and calendar year, across
   /// every plan they hold (IRC §402(g)), with a catch-up from age 50 and a
   /// larger one from 60 through 63 (IRC §414(v)). Employer contributions do not
-  /// count. This payment took the year's deferrals over the cap. Ask payroll to lower the deferral. Any excess must also be returned
-  /// by the plan before April 15 of the next year, or it is taxed twice
-  /// (IRC §402(g)(2)).
+  /// count. This payment took the year's deferrals over the cap. Any excess must
+  /// also be returned by the plan before April 15 of the next year, or it is
+  /// taxed twice (IRC §402(g)(2)).
+  ///
+  /// To fix: ask payroll to lower the deferral, and have the plan return the
+  /// excess.
   law deferral-limit
     on in
     when from is wages
@@ -32,44 +41,26 @@ kind 401k : tax-deferred
     let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[year] else if owner.age >= 50y then catch-up[year] else empty
     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearly limit"
 
-  /// A deferral is pay you chose not to receive, so it is not taxed this year
-  /// (IRC §402(e)(3)). The wages law counted it as pay; this law counts it as
-  /// deferred and takes it back out of `agi`. Roth deferrals are not modelled.
-  law pretax-deferral
-    on in
-    when from is wages
-    count amount as pretax
-    count -amount as agi
-
-  /// Money that comes out of a 401(k) is ordinary income in the year it comes
-  /// out (IRC §402(a)): deferrals and their growth were never taxed. It is
-  /// counted as a distribution. A rollover into another tax-deferred account
-  /// is not one.
-  law count-distributions
-    on gain
-    when gain > empty
-    when not to is tax-deferred
-    count gain as distributions
-    count gain as agi
-
   /// Money taken out before age 59½ carries an additional 10% tax on top of
-  /// the income tax (IRC §72(t)). This withdrawal is priced at that 10%. If an
-  /// exception applies (disability, separation from service at 55 or later,
-  /// substantially equal payments, and others in §72(t)(2)), keep the
+  /// the income tax (IRC §72(t)). This withdrawal is priced at that 10%.
+  ///
+  /// To fix: if an exception applies (disability, separation from service at 55
+  /// or later, substantially equal payments, and others in §72(t)(2)), keep the
   /// withdrawal and mark it `!` with the reason.
   law early-withdrawal
     on gain
     when gain > empty
-    when not to is tax-deferred
-    require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "401(k) withdrawal before age 59½"
+    when not to is market | tax-deferred
+    require owner.age >= 59y6m else owe 10% * gain to irs by date(year + 1, 4, 15) as early-withdrawal-penalty "401(k) withdrawal before age 59½"
 
   /// From age 73, an owner must take a minimum distribution from a 401(k)
   /// every year (IRC §401(a)(9)). It is the balance at the end of the previous
   /// year divided by a divisor from the IRS Uniform Lifetime Table (Pub. 590-B),
-  /// 26.5 at age 73. Nothing came out this year. Take the distribution before
-  /// December 31, or the shortfall is taxed at 25% (IRC §4974). The first one
-  /// may wait until April 1 of the following year. Owners born in 1960 or later
-  /// start at 75.
+  /// 26.5 at age 73. Nothing came out this year. The first one may wait until
+  /// April 1 of the following year, and owners born in 1960 or later start at 75.
+  ///
+  /// To fix: take the distribution before December 31, or the shortfall is
+  /// taxed at 25% (IRC §4974).
   law required-minimum-distribution
     each year
     when owner.age >= 73y

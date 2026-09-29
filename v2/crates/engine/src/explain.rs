@@ -15,8 +15,8 @@
 
 use axiom_core::{Day, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym};
 use axiom_model::{
-    Amount, Assert, BinOp, Book, Commodity, Dir, Effect as Consequence, End, Fault, Flow, Func, Law, NodeId, Op, Place,
-    StepKind, Subject, Trigger, Value, Var, Waive, Window,
+    Amount, Assert, BinOp, Book, Commodity, Dir, Effect as Consequence, End, Fault, Flow, Func, Law, NodeId, Op, Param,
+    Place, StepKind, Subject, System, Trigger, Value, Var, Waive, Window,
 };
 
 use crate::calc::Calc;
@@ -341,9 +341,34 @@ pub(crate) fn faulted(f: &Frame, fault: Fault, origin: Option<usize>, holder: Op
         let d = read.into_iter().fold(d, |d, (loc, _)| d.context(loc, format!("`{law}` reads it here")));
         return d.help(format!("add a `{name} …` line under the declaration of `{thing}`"));
     }
+    if let Fault::NoRow(param) = fault
+        && let Some(system) = book.params[param].system
+    {
+        return missing_figures(f, param, system, (cause, text));
+    }
     let d = Diagnostic::error(code, format!("cannot check `{law}`: {what}")).label(cause, text);
     let d = read.into_iter().fold(d, |d, (loc, what)| d.context(loc, what));
     help.into_iter().fold(d, Diagnostic::help)
+}
+
+/// A system's table has no row for the year a law asked about: the journal
+/// is older than the figures the system ships. Every law that needs a figure
+/// of that year is skipped, and this is said once.
+fn missing_figures(f: &Frame, param: Id<Param>, system: Id<System>, (cause, text): (Loc, String)) -> Diagnostic {
+    let (book, year) = (f.book, f.ctx.over.from.year());
+    let (param, system) = (&book.params[param], book.name(book.systems[system].path));
+    let first = param.rows.iter().filter_map(|row| row.since).min().map(|day| day.year());
+    let starts = first.map_or(String::new(), |first| format!(": its figures start in {first}"));
+    let d = Diagnostic::error("no-param-row", format!("`{system}` has no figures for {year}{starts}"))
+        .label(cause, text)
+        .context(param.loc, format!("`{}` has no row for {year}", book.name(param.name)));
+    d.note(format!("every law that needs a {year} figure is skipped, and this is reported once"))
+        .help(match first {
+            Some(first) => format!(
+                "start the journal in {first}, or add {year} rows: copy the system's file into `systems/` and write them there"
+            ),
+            None => "add rows to the param: copy the system's file into `systems/` and write them there".to_owned(),
+        })
 }
 
 /// Where the value that could not be computed first appeared: the earliest

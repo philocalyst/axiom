@@ -1,0 +1,10 @@
+$ axiom why trip-fund --today 2026-02-14
+
+Why trip-fund
+
+Held for it
+  Place                      Amount  Since       From
+  ────────────────────────────────────────────────────────────────────
+  assets/bank/savings  1,500.00 USD  2025-09-06  journal/2025/09.ax:30
+  ────────────────────────────────────────────────────────────────────
+  Remaining            1,500.00 USD

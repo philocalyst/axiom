@@ -1,23 +1,23 @@
-Balances at 2026-01-06
+Balances at 2026-04-16
 
   Place                             Balance
   ─────────────────────────────────────────
-  assets                     100,764.69 USD
-                              31,563.76 EUR
-    bank                      34,164.69 USD
-      us-checking             15,604.75 USD
+  assets                     103,965.69 USD
+                              31,563.77 EUR
+    bank                      37,365.69 USD
+      us-checking             18,805.75 USD
       us-savings              18,559.94 USD
-    de                        31,563.76 EUR
+    de                        31,563.77 EUR
       girokonto                7,481.00 EUR
       kaution                  3,600.00 EUR
-      tagesgeld               20,482.76 EUR
+      tagesgeld               20,482.77 EUR
     retirement                66,600.00 USD
       us-401k                 66,600.00 USD
   ─────────────────────────────────────────
   equity                      90,165.96 USD
     opening                   90,165.96 USD
   ─────────────────────────────────────────
-  expenses                    51,445.74 USD
+  expenses                    48,244.74 USD
                               24,356.33 EUR
                                1,258.21 GBP
     conference                   165.00 GBP
@@ -39,16 +39,16 @@ Balances at 2026-01-06
                                   43.20 GBP
     sightseeing                   27.50 GBP
     subscriptions                320.88 USD
-    taxes                     20,687.22 USD
+    taxes                     17,486.22 USD
                               12,465.45 EUR
       de                      12,465.45 EUR
         kapitalertragsteuer       53.25 EUR
         lohnsteuer             5,430.00 EUR
         sozialabgaben          6,982.20 EUR
-      federal                 10,740.00 USD
+      federal                  8,920.00 USD
       payroll                  4,781.22 USD
       sdi                        750.00 USD
-      state                    4,416.00 USD
+      state                    3,035.00 USD
     transit                      348.00 EUR
                                   95.80 GBP
     transport                    365.57 USD
@@ -70,7 +70,7 @@ Balances at 2026-01-06
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       137,893.14 USD
+  Assets       141,094.15 USD
   Liabilities   27,467.30 USD
   ───────────────────────────
-  Net worth    110,425.84 USD
+  Net worth    113,626.85 USD

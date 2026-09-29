@@ -1,47 +1,41 @@
-$ axiom flow --today 2026-02-10
+$ axiom flow --today 2026-04-16
 
 Income and spending
 
-  Place                    2025-03        2025-04       2025-05       2025-06        2025-07       2025-08       2025-09       2025-10       2025-11       2025-12        2026-01     2026-02          Total
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  income              8,337.00 USD   3,218.18 USD  6,020.49 USD  8,495.59 USD  10,620.52 USD  9,428.01 USD  8,406.52 USD  9,128.48 USD  6,337.88 USD  6,537.57 USD   3,555.73 USD              80,085.97 USD
-    design            8,700.00 USD   3,200.00 USD  6,000.00 USD  7,000.00 USD  10,600.00 USD  9,400.00 USD  7,400.00 USD  9,100.00 USD  6,300.00 USD  5,800.00 USD   3,200.00 USD              76,700.00 USD
-    growth             -385.35 USD                               1,477.38 USD                                 984.57 USD                                607.81 USD     319.38 USD               3,003.79 USD
-    interest             22.35 USD      18.18 USD     20.49 USD     18.21 USD      20.52 USD     28.01 USD     21.95 USD     28.48 USD     37.88 USD     42.36 USD      36.35 USD                 294.78 USD
-    rewards                                                                                                                                              87.40 USD                                 87.40 USD
-    realized gains ≈    385.35 USD                                                                                                                                                                385.35 USD
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Total income        8,722.35 USD   3,218.18 USD  6,020.49 USD  8,495.59 USD  10,620.52 USD  9,428.01 USD  8,406.52 USD  9,128.48 USD  6,337.88 USD  6,537.57 USD   3,555.73 USD              80,471.32 USD
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  expenses            6,085.28 USD   5,971.34 USD  4,946.29 USD  6,566.67 USD   3,349.40 USD  3,280.85 USD  5,748.53 USD  3,363.99 USD  3,329.04 USD  7,143.27 USD   5,567.75 USD   13.47 USD  55,365.88 USD
-    bad-debt                                                                                                                                          3,800.00 USD                              3,800.00 USD
-    business          3,194.43 USD     513.15 USD  1,907.39 USD  1,172.65 USD     189.62 USD    229.19 USD    343.30 USD    388.06 USD    316.65 USD    298.18 USD     207.96 USD   13.47 USD   8,774.05 USD
-      education                        249.00 USD    699.00 USD                                                                                                                                   948.00 USD
-      equipment       2,499.00 USD                                 649.00 USD                                                                                                                   3,148.00 USD
-      fees              505.80 USD      15.00 USD                   96.50 USD                                               180.10 USD     15.00 USD     90.20 USD                                902.60 USD
-      fonts                                                        240.00 USD                                                                                                                     240.00 USD
-      hosting                                                                                    39.56 USD     17.75 USD     18.35 USD     17.75 USD     18.35 USD      18.34 USD    5.92 USD     136.02 USD
-      insurance          66.25 USD      64.11 USD     66.24 USD     64.11 USD      66.25 USD     66.25 USD     64.11 USD     66.24 USD     64.11 USD     66.25 USD      66.25 USD    4.27 USD     724.44 USD
-      printing                          62.00 USD                                                             138.40 USD                   96.75 USD                                              297.15 USD
-      software          123.38 USD     123.04 USD    123.37 USD    123.04 USD     123.37 USD    123.38 USD    123.04 USD    123.37 USD    123.04 USD    123.38 USD     123.37 USD    3.28 USD   1,359.06 USD
-      travel                                       1,018.78 USD                                                                                                                                 1,018.78 USD
-    food                383.36 USD     572.85 USD    482.61 USD    486.81 USD     505.89 USD    545.77 USD    552.97 USD    431.14 USD    444.27 USD    538.10 USD     453.80 USD               5,397.57 USD
-      dining            100.55 USD     132.24 USD     72.39 USD    126.23 USD      89.62 USD    113.75 USD     95.96 USD     97.62 USD     74.97 USD    105.97 USD     106.26 USD               1,115.56 USD
-      groceries         282.81 USD     440.61 USD    410.22 USD    360.58 USD     416.27 USD    432.02 USD    457.01 USD    333.52 USD    369.30 USD    432.13 USD     347.54 USD               4,282.01 USD
-    health-insurance    412.00 USD     412.00 USD    412.00 USD    412.00 USD     412.00 USD    412.00 USD    412.00 USD    412.00 USD    412.00 USD    412.00 USD     425.00 USD               4,545.00 USD
-    home              1,923.10 USD   1,911.30 USD  1,904.75 USD  1,907.60 USD   1,915.40 USD  1,918.85 USD  1,912.20 USD  1,916.90 USD  1,936.15 USD  1,953.30 USD   1,948.20 USD              21,147.75 USD
-      insurance          22.00 USD      22.00 USD     22.00 USD     22.00 USD      22.00 USD     22.00 USD     22.00 USD     22.00 USD     22.00 USD     22.00 USD      22.00 USD                 242.00 USD
-      internet           80.00 USD      80.00 USD     80.00 USD     80.00 USD      80.00 USD     80.00 USD     80.00 USD     80.00 USD     80.00 USD     80.00 USD      80.00 USD                 880.00 USD
-      rent            1,750.00 USD   1,750.00 USD  1,750.00 USD  1,750.00 USD   1,750.00 USD  1,750.00 USD  1,750.00 USD  1,750.00 USD  1,750.00 USD  1,750.00 USD   1,750.00 USD              19,250.00 USD
-      utilities          71.10 USD      59.30 USD     52.75 USD     55.60 USD      63.40 USD     66.85 USD     60.20 USD     64.90 USD     84.15 USD    101.30 USD      96.20 USD                 775.75 USD
-    meals                54.80 USD                    96.30 USD                   118.60 USD                                 32.10 USD     61.45 USD                                              363.25 USD
-    mileage              15.40 USD      62.30 USD     31.50 USD     70.70 USD      83.30 USD     70.70 USD     33.60 USD     66.50 USD     56.70 USD     42.00 USD      31.90 USD                 564.60 USD
-    phone                64.00 USD      64.00 USD     64.00 USD     64.00 USD      64.00 USD     64.00 USD     64.00 USD     64.00 USD     64.00 USD     64.00 USD      64.00 USD                 704.00 USD
-    taxes                            2,400.00 USD                2,400.00 USD                               2,400.00 USD                                             2,400.00 USD               9,600.00 USD
-      federal                        2,400.00 USD                2,400.00 USD                               2,400.00 USD                                             2,400.00 USD               9,600.00 USD
-    transport            38.19 USD      35.74 USD     47.74 USD     52.91 USD      60.59 USD     40.34 USD     30.46 USD     53.29 USD     37.82 USD     35.69 USD      36.89 USD                 469.66 USD
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Net                 2,637.07 USD  -2,753.16 USD  1,074.20 USD  1,928.92 USD   7,271.12 USD  6,147.16 USD  2,657.99 USD  5,764.49 USD  3,008.84 USD   -605.70 USD  -2,012.02 USD  -13.47 USD  25,105.44 USD
-  · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
-    them.
+  Place                    2025-05       2025-06        2025-07       2025-08       2025-09       2025-10       2025-11        2025-12       2026-01       2026-02       2026-03        2026-04          Total
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  income              6,020.49 USD  7,018.21 USD  10,620.52 USD  9,428.01 USD  7,421.95 USD  9,128.48 USD  6,337.88 USD   5,929.76 USD  3,236.35 USD  8,038.71 USD  9,244.35 USD   3,200.00 USD  85,624.71 USD
+    design            6,000.00 USD  7,000.00 USD  10,600.00 USD  9,400.00 USD  7,400.00 USD  9,100.00 USD  6,300.00 USD   5,800.00 USD  3,200.00 USD  8,000.00 USD  9,200.00 USD   3,200.00 USD  85,200.00 USD
+    interest             20.49 USD     18.21 USD      20.52 USD     28.01 USD     21.95 USD     28.48 USD     37.88 USD      42.36 USD     36.35 USD     38.71 USD     44.35 USD                    337.31 USD
+    rewards                                                                                                                  87.40 USD                                                               87.40 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  expenses            5,268.96 USD  6,894.37 USD   3,681.71 USD  3,604.85 USD  6,089.02 USD  3,681.55 USD  3,658.51 USD   7,440.81 USD  3,194.05 USD  3,193.68 USD  3,310.43 USD   5,682.34 USD  55,700.28 USD
+    bad-debt                                                                                                              3,800.00 USD                                                            3,800.00 USD
+    business          1,907.39 USD  1,172.65 USD     189.62 USD    229.19 USD    343.30 USD    388.06 USD    316.65 USD     238.19 USD    209.11 USD    280.49 USD    351.35 USD     114.07 USD   5,740.07 USD
+      education         699.00 USD                                                                                                                                                                  699.00 USD
+      equipment                       649.00 USD                                                                                                                                                    649.00 USD
+      fees                             96.50 USD                                               180.10 USD     15.00 USD      90.20 USD                                139.50 USD                    521.30 USD
+      fonts                           240.00 USD                                                                                                                                                    240.00 USD
+      hosting                                                       39.56 USD     17.75 USD     18.35 USD     17.75 USD      18.35 USD     18.34 USD     16.57 USD     18.35 USD       9.47 USD     174.49 USD
+      insurance          66.24 USD     64.11 USD      66.25 USD     66.25 USD     64.11 USD     66.24 USD     64.11 USD      66.25 USD     66.25 USD     62.11 USD     68.97 USD      35.59 USD     756.48 USD
+      printing                                                                   138.40 USD                   96.75 USD                                  84.20 USD                                  319.35 USD
+      software          123.37 USD    123.04 USD     123.37 USD    123.38 USD    123.04 USD    123.37 USD    123.04 USD      63.39 USD    124.52 USD    117.61 USD    124.53 USD      69.01 USD   1,361.67 USD
+      travel          1,018.78 USD                                                                                                                                                                1,018.78 USD
+    food                482.61 USD    486.81 USD     505.89 USD    545.77 USD    552.97 USD    431.14 USD    444.27 USD     538.10 USD    453.80 USD    426.73 USD    417.86 USD     252.14 USD   5,538.09 USD
+      dining             72.39 USD    126.23 USD      89.62 USD    113.75 USD     95.96 USD     97.62 USD     74.97 USD     105.97 USD    106.26 USD    102.88 USD     66.23 USD      73.02 USD   1,124.90 USD
+      groceries         410.22 USD    360.58 USD     416.27 USD    432.02 USD    457.01 USD    333.52 USD    369.30 USD     432.13 USD    347.54 USD    323.85 USD    351.63 USD     179.12 USD   4,413.19 USD
+    health-insurance    412.00 USD    412.00 USD     412.00 USD    412.00 USD    412.00 USD    412.00 USD    412.00 USD     412.00 USD    425.00 USD    425.00 USD    425.00 USD     425.00 USD   4,996.00 USD
+    home              1,904.75 USD  1,907.60 USD   1,915.40 USD  1,918.85 USD  1,912.20 USD  1,916.90 USD  1,936.15 USD   1,953.30 USD  1,948.20 USD  1,940.45 USD  1,923.10 USD   1,852.00 USD  23,028.90 USD
+      insurance          22.00 USD     22.00 USD      22.00 USD     22.00 USD     22.00 USD     22.00 USD     22.00 USD      22.00 USD     22.00 USD     22.00 USD     22.00 USD      22.00 USD     264.00 USD
+      internet           80.00 USD     80.00 USD      80.00 USD     80.00 USD     80.00 USD     80.00 USD     80.00 USD      80.00 USD     80.00 USD     80.00 USD     80.00 USD      80.00 USD     960.00 USD
+      rent            1,750.00 USD  1,750.00 USD   1,750.00 USD  1,750.00 USD  1,750.00 USD  1,750.00 USD  1,750.00 USD   1,750.00 USD  1,750.00 USD  1,750.00 USD  1,750.00 USD   1,750.00 USD  21,000.00 USD
+      utilities          52.75 USD     55.60 USD      63.40 USD     66.85 USD     60.20 USD     64.90 USD     84.15 USD     101.30 USD     96.20 USD     88.45 USD     71.10 USD                    804.90 USD
+    meals                96.30 USD                   118.60 USD                                 32.10 USD     61.45 USD                                                47.30 USD                    355.75 USD
+    mileage              31.50 USD     70.70 USD      83.30 USD     70.70 USD     33.60 USD     66.50 USD     56.70 USD      42.00 USD     31.90 USD                   28.28 USD                    515.18 USD
+    phone                64.00 USD     64.00 USD      64.00 USD     64.00 USD     64.00 USD     64.00 USD     64.00 USD      64.00 USD     64.00 USD     64.00 USD     64.00 USD                    704.00 USD
+    taxes               331.24 USD  2,720.55 USD     331.22 USD    331.24 USD  2,720.55 USD    331.23 USD    320.54 USD     331.24 USD                                             3,000.00 USD  10,417.81 USD
+      federal           331.24 USD  2,720.55 USD     331.22 USD    331.24 USD  2,720.55 USD    331.23 USD    320.54 USD     331.24 USD                                             3,000.00 USD  10,417.81 USD
+    transport            39.17 USD     60.06 USD      61.68 USD     33.10 USD     50.40 USD     39.62 USD     46.75 USD      61.98 USD     62.04 USD     57.01 USD     53.54 USD      39.13 USD     604.48 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Net                   751.53 USD    123.84 USD   6,938.81 USD  5,823.16 USD  1,332.93 USD  5,446.93 USD  2,679.37 USD  -1,511.05 USD     42.30 USD  4,845.03 USD  5,933.92 USD  -2,482.34 USD  29,924.43 USD
   · Flows written over a date range are recognized a little each day across the periods they cover.

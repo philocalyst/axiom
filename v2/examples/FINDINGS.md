@@ -21,6 +21,42 @@ differs from its date*. Around those gaps sit silent wrong numbers in the shippe
 `us` system and in `forecast` and `available` (F03, F04, F08, F10 to F13), several
 of which are fixable in a few lines of Axiom today.
 
+## Status after the v3 rework
+
+Examples 04 to 10 were rewritten against v3 and the systems (`std`, `us` and what is under it) with them; each
+example's README says which items it now demonstrates as fixed and which are still open, with the numbers
+checked by an independent script in `examples/verify/`. The text below this section is the original report
+(v2, before the rework): its repros no longer run as written, and its `wishes.ax.txt` files are gone.
+
+| # | Status | Where |
+|---|---|---|
+| F01 basis by route | fixed | 05 (a gift at cost by the kind), 06 (ESPP and wash adjustments as basis flows), 07 (roof, depreciation) |
+| F02 stock split | fixed | 06 (`FAST split 2 for 1`) |
+| F03 market loss taxed | fixed | 05 (`via market`) |
+| F04 losses do not net | fixed | 06 (netting across terms, NIIT) |
+| F05 one owner, per-place tallies | fixed for households | 05 (one joint return, each spouse's own limit) |
+| F06 claims | fixed | 04 (invoices), 07 (mortgage, deposits, bills), 09 (roommates, loan, trip, reimbursement) |
+| F07 payment for a year | fixed | 04 (estimates), 08 (`for 2024` and `for 2025`) |
+| F08 law order | fixed | 04, 05 (dataflow order; no fork of `us`) |
+| F09 part-year and overlapping residence | fixed | 08 (California files for the part year) |
+| F10 `available` | partly | held, coming in and foreign cash are right (05, 06, 07, 08, 09); the tax on money drawn and a mortgage against a house are not netted |
+| F11 plan deletes a recurrence | fixed | 05 |
+| F12 forecast liquid net worth | fixed | 05 |
+| F13 forecast past its reason | partly | 07 (`until`); 09 still projects a loan repayment past the balance |
+| F14 foreign currency | fixed | 08 (cash, no lots, no gain under 200 USD, `@` states a rate) |
+| F15 `!` and priced violations | fixed for the price | 05 (the reimbursement still counts as income) |
+| F16 self-imposed restrictions | fixed | 10 (envelopes) |
+| F17 opening balances | fixed | 05, 06, 08 (`opening` with `basis` and `since`) |
+| F18 spreads (prepaid, annual, depreciation) | fixed | 04, 07, 10 (`for PERIOD`, ranges, basis flows) |
+| F19 slots and totals in `us` | fixed | every project (`adjustments`, `itemized`, `credits`, `payments`, booked refunds) |
+| F21 owner scope in reports | open | 09 (the collective's money is in `available` and `flow`) |
+| F23 same-day order | open | 07 (the half month of depreciation before the sale) |
+| F24 personal-use property | fixed | 05 (loss not deductible, §121) |
+| F25 closing statement, `all X` | fixed | 06 (`all VXUS`), 07 (the sale) |
+| F26 budgets | partly | 10 (one warning per breach, the yearly bill spread); no rollover |
+| F27 windowed laws | partly | 09 (a loan needs no monthly law); still no calendar windows |
+| F28 running maximum, days abroad | open | 08 |
+
 ## How this was done
 
 | Project | Who and when | What it stresses | Journal lines | Checked against |

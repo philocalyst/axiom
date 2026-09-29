@@ -1,0 +1,31 @@
+$ axiom budget 2026 --today 2026-02-14
+
+Budgets for 2026
+
+  Place                   Law     Window          Spent         Limit        Left    Used
+  ───────────────────────────────────────────────────────────────────────────────────────
+  expenses/clothing       budget  2026-01      0.00 USD     80.00 USD   80.00 USD      0%
+  expenses/dining         budget  2026       180.45 USD    300.00 USD  119.55 USD  60.15%
+                                  2026-01    130.19 USD    150.00 USD   19.81 USD  86.79%
+                                  2026-02     50.26 USD    150.00 USD   99.74 USD  33.51%
+  expenses/fun            budget  2026       132.09 USD    240.00 USD  107.91 USD  55.04%
+                                  2026-01    103.09 USD    120.00 USD   16.91 USD  85.91%
+                                  2026-02     29.00 USD    120.00 USD   91.00 USD  24.17%
+  expenses/gifts          budget  2026         0.00 USD    500.00 USD  500.00 USD      0%
+  expenses/groceries      budget  2026       378.87 USD    700.00 USD  321.13 USD  54.12%
+                                  2026-01    228.52 USD    350.00 USD  121.48 USD  65.29%
+                                  2026-02    150.35 USD    350.00 USD  199.65 USD  42.96%
+  expenses/insurance      budget  2026     1,152.00 USD  1,200.00 USD   48.00 USD     96%
+  expenses/medical        budget  2026         0.00 USD    400.00 USD  400.00 USD      0%
+  expenses/personal-care  budget  2026        35.00 USD     80.00 USD   45.00 USD  43.75%
+                                  2026-01      0.00 USD     40.00 USD   40.00 USD      0%
+                                  2026-02     35.00 USD     40.00 USD    5.00 USD   87.5%
+  expenses/subscriptions  budget  2026       103.41 USD    180.00 USD   76.59 USD  57.45%
+                                  2026-01     65.26 USD     90.00 USD   24.74 USD  72.51%
+                                  2026-02     38.15 USD     90.00 USD   51.85 USD  42.39%
+  expenses/transport      budget  2026       149.59 USD    240.00 USD   90.41 USD  62.33%
+                                  2026-01     86.05 USD    120.00 USD   33.95 USD  71.71%
+                                  2026-02     63.54 USD    120.00 USD   56.46 USD  52.95%
+  expenses/utilities      budget  2026       123.68 USD    200.00 USD   76.32 USD  61.84%
+                                  2026-01     61.84 USD    100.00 USD   38.16 USD  61.84%
+                                  2026-02     61.84 USD    100.00 USD   38.16 USD  61.84%

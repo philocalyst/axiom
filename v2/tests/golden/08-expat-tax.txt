@@ -4,42 +4,58 @@ Counted
   Tally                           Amount  From
   ─────────────────────────────────────────────────────────────
   project
+    student-interest        1,333.42 USD  12 sources
     fbar-girokonto          9,444.90 USD  journal/2025/06.ax:27
     fbar-kaution            4,223.52 USD  journal/2025/06.ax:38
-    fbar-tagesgeld         24,093.87 USD  4 sources
+    fbar-tagesgeld         24,093.88 USD  4 sources
     fbar-wise               1,164.86 USD  journal/2025/10.ax:8
-    fbar-aggregate         38,927.15 USD  period end
+    fbar-aggregate         38,927.16 USD  period end
+    adjustments            38,898.00 USD  2 sources
+  ─────────────────────────────────────────────────────────────
+  de
+    foreign-tax-paid        6,357.40 USD  12 sources
   ─────────────────────────────────────────────────────────────
   us
     wages                 100,064.60 USD  54 sources
-    agi                    60,271.81 USD  190 sources
-    federal-withheld       10,740.00 USD  6 sources
+    total-income           97,809.05 USD  84 sources
+    pretax                  3,750.00 USD  6 sources
+    payments                8,280.00 USD  7 sources
     interest                1,494.45 USD  24 sources
-    short-term-gains           27.34 USD  105 sources
-    taxable-income         44,521.81 USD  period end
-    income-tax              5,104.12 USD  period end
+    investment-income       1,494.45 USD  24 sources
+    itemized                2,820.00 USD  period end
+    deductions             15,750.00 USD  period end
+    agi                    58,911.05 USD  period end
+    taxable-income         43,161.05 USD  period end
+    income-tax              4,940.83 USD  period end
+    total-tax               8,404.39 USD  period end
   ─────────────────────────────────────────────────────────────
     us/401k
       elective-deferrals    3,750.00 USD  6 sources
-      pretax                3,750.00 USD  6 sources
   ─────────────────────────────────────────────────────────────
     us/abroad
       foreign-earned       37,564.58 USD  18 sources
       feie-excluded        37,564.58 USD  period end
-  ─────────────────────────────────────────────────────────────
-      us/abroad/de
-        foreign-tax-paid    6,357.40 USD  12 sources
+      other-taxes           3,463.56 USD  period end
+      feie-stacking-tax     3,463.56 USD  period end
   ─────────────────────────────────────────────────────────────
     us/ca
-      ca-withheld           4,416.00 USD  6 sources
-      ca-taxable-income    54,565.81 USD  period end
-      ca-income-tax         1,808.84 USD  period end
+      ca-withheld           2,820.00 USD  6 sources
+      salt                  2,820.00 USD  6 sources
+      ca-taxable-income    53,205.05 USD  period end
+      ca-income-tax         1,727.19 USD  period end
 
 Owed
-  Owed                   To   Due               Amount  From
+  Owed                  To   Due                Amount  From
   ────────────────────────────────────────────────────────────────
-    us/abroad
-      feie-stacking-tax  irs  2026-04-15  3,599.64 USD  period end
+  us
+    federal-income-tax  irs  2026-04-15     124.39 USD  period end
   ────────────────────────────────────────────────────────────────
-  Total owed                              3,599.64 USD
+    Total us                                124.39 USD
+  ────────────────────────────────────────────────────────────────
+    us/ca
+      ca-income-tax     ftb  2026-04-15  -1,092.81 USD  period end
+  ────────────────────────────────────────────────────────────────
+      Total us/ca                        -1,092.81 USD
+  ────────────────────────────────────────────────────────────────
+  Total owed                               -968.42 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

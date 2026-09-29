@@ -1,26 +1,24 @@
-$ axiom register etrade --today 2026-01-06
+$ axiom register etrade --from 2025-01-01 --today 2026-04-16
 
 Register: assets/etrade
 
-  Date        With                    Payee      Note         Amount         Balance
-  ──────────────────────────────────────────────────────────────────────────────────
-  2024-11-15  income/rsu              northwind         60.0000 NWND    60.0000 NWND
-  2024-11-15  expenses/taxes/federal                   -13.2000 NWND    46.8000 NWND
-  2024-11-15  expenses/taxes/payroll                    -1.1445 NWND    45.6555 NWND
-  2024-12-31  assets/espp-cash                         9,799.99 USD    9,799.99 USD
-  2024-12-31  income/espp-discount                     4,315.92 USD   14,115.91 USD
-  2025-02-15  income/rsu              northwind         60.0000 NWND   105.6555 NWND
-  2025-02-15  expenses/taxes/federal                   -13.2001 NWND    92.4554 NWND
-  2025-02-15  expenses/taxes/payroll                    -4.0578 NWND    88.3976 NWND
-  2025-05-15  income/rsu              northwind         60.0000 NWND   148.3976 NWND
-  2025-05-15  expenses/taxes/federal                   -13.2000 NWND   135.1976 NWND
-  2025-05-15  expenses/taxes/payroll                    -0.8701 NWND   134.3275 NWND
-  2025-06-30  assets/espp-cash                         8,400.01 USD   22,515.92 USD
-  2025-06-30  income/espp-discount                     3,325.45 USD   25,841.37 USD
-  2025-08-15  income/rsu              northwind         60.0000 NWND   194.3275 NWND
-  2025-08-15  expenses/taxes/federal                   -13.2000 NWND   181.1275 NWND
-  2025-08-15  expenses/taxes/payroll                    -0.8701 NWND   180.2574 NWND
-  2025-09-15  assets/bank/checking                     -99.0799 NWND    81.1775 NWND
-  2025-11-15  income/rsu              northwind         60.0000 NWND   141.1775 NWND
-  2025-11-15  expenses/taxes/federal                   -13.2001 NWND   127.9774 NWND
-  2025-11-15  expenses/taxes/payroll                    -0.8701 NWND   127.1073 NWND
+  Date        With                    Payee      Note         Amount        Balance
+  ─────────────────────────────────────────────────────────────────────────────────
+  2025-01-01  opening balance                                         4,315.92 USD
+  ─────────────────────────────────────────────────────────────────────────────────
+  2025-01-01  opening balance                                         144.7354 NWND
+  2025-02-15  income/rsu              northwind         60.0000 NWND  204.7354 NWND
+  2025-02-15  expenses/taxes/federal                   -13.2001 NWND  191.5353 NWND
+  2025-02-15  expenses/taxes/payroll                    -4.0578 NWND  187.4775 NWND
+  2025-05-15  income/rsu              northwind         60.0000 NWND  247.4775 NWND
+  2025-05-15  expenses/taxes/federal                   -13.2000 NWND  234.2775 NWND
+  2025-05-15  expenses/taxes/payroll                    -0.8701 NWND  233.4074 NWND
+  2025-06-30  assets/espp-cash                          69.3814 NWND  302.7888 NWND
+  2025-06-30  income/espp-discount                     3,325.45 USD   7,641.37 USD
+  2025-08-15  income/rsu              northwind         60.0000 NWND  362.7888 NWND
+  2025-08-15  expenses/taxes/federal                   -13.2000 NWND  349.5888 NWND
+  2025-08-15  expenses/taxes/payroll                    -0.8701 NWND  348.7187 NWND
+  2025-09-15  assets/bank/checking                     -99.0799 NWND  249.6388 NWND
+  2025-11-15  income/rsu              northwind         60.0000 NWND  309.6388 NWND
+  2025-11-15  expenses/taxes/federal                   -13.2001 NWND  296.4387 NWND
+  2025-11-15  expenses/taxes/payroll                    -0.8701 NWND  295.5686 NWND

@@ -1,40 +1,46 @@
-Balances at 2026-01-06
+Balances at 2026-04-16
 
   Place                    Balance
   ────────────────────────────────
-  assets           282,068.18 USD
-                      64.4579 VTI
+  assets           297,655.00 USD
+                      94.8886 VTI
                      144.6496 VXUS
-                      33.4448 BND
+                     133.4448 BND
                      493.8271 SCHH
-                      16.3264 MSFT
+                      28.3264 MSFT
                       19.7153 UNH
-                      41.9695 FAST
+                      41.9694 FAST
                      295.5686 NWND
                    0.13000000 BTC
                    6.03718069 ETH
-    bank           153,010.86 USD
-      checking      69,910.07 USD
+    bank           167,654.87 USD
+      checking      84,554.08 USD
       savings       83,100.79 USD
     coinbase       0.13000000 BTC
                    0.95668225 ETH
     espp-cash        8,400.00 USD
     etrade           295.5686 NWND
-    fidelity         2,738.20 USD
-                      64.4579 VTI
+    fidelity         3,228.01 USD
+                      94.8886 VTI
                      106.4467 VXUS
                      493.8271 SCHH
-                      16.3264 MSFT
+                      28.3264 MSFT
                       19.7153 UNH
-                      41.9695 FAST
+                      41.9694 FAST
     retirement     117,733.28 USD
-    schwab             185.84 USD
+    schwab             638.84 USD
                       38.2029 VXUS
-                      33.4448 BND
+                     133.4448 BND
     wallet         5.08049844 ETH
   ────────────────────────────────
   equity           255,199.15 USD
+                      30.0000 VTI
+                     300.0000 BND
+                      12.0000 MSFT
     opening        253,220.55 USD
+                      30.0000 VTI
+                     300.0000 BND
+                      12.0000 MSFT
     wash-sale        1,978.60 USD
   ────────────────────────────────
   expenses         135,473.05 USD
@@ -49,17 +55,17 @@ Balances at 2026-01-06
       payroll       18,366.15 USD
     utilities        2,625.30 USD
   ────────────────────────────────
-  income           287,778.23 USD
-    dividends          556.21 USD
+  income           288,850.80 USD
+    dividends        1,606.44 USD
     espp-discount    7,641.37 USD
-    interest         7,679.65 USD
+    interest         7,701.99 USD
     rsu             47,637.60 USD
     salary         224,000.00 USD
     staking            263.40 USD
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       430,872.38 USD
+  Assets       469,860.96 USD
   Liabilities        0.00 USD
   ───────────────────────────
-  Net worth    430,872.38 USD
+  Net worth    469,860.96 USD

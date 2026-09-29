@@ -1,3 +1,10 @@
-Claims on 2026-02-10
+Claims on 2026-04-16
 
-  · Nothing is owed either way. A flow with `due` into a receivable place makes one.
+Owed to you
+  Counterparty  What                                                                                          Left  Made        Age    Due         Status
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  northpeak     #inv-2025-n3 · Spring line concepts. Open since December.                             2,600.00 USD  2025-12-01  4m15d  2025-12-31  overdue 106d
+  orbit-labs    #inv-2026-o1 · Annual report. Due 2026-04-09 and still open: `axiom check` says so.   6,000.00 USD  2026-03-10  1m6d   2026-04-09  overdue 7d
+  brightwave    #inv-2026-b04 · The April retainer, not yet due.                                      3,200.00 USD  2026-04-01  15d    2026-05-01  in 15d
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                                                                                              11,800.00 USD

@@ -2,15 +2,17 @@
 ///
 /// Everyone who `lives us/ca` pays California tax on top of federal tax. This
 /// system reads `agi` from the federal tallies (California starts from federal
-/// adjusted gross income), subtracts the California standard deduction and
-/// taxes the rest on the state brackets. Tax withheld or paid to California
-/// during the year is credited.
+/// adjusted gross income, the same tally), subtracts the California standard
+/// deduction and taxes the rest on the state brackets. Tax withheld or paid to
+/// California is credited to the year it is `for`, and what is left is owed by
+/// April 15.
 ///
 /// Simplified on purpose: it leaves out itemized deductions, credits, the
 /// California differences from federal income (an HSA is taxed here, for one),
-/// the state disability insurance payroll tax and the 1% Mental Health Services
-/// Tax on taxable income over 1,000,000 USD (R&TC §17043). Only the `single`
-/// and `joint` filing statuses have figures.
+/// the state disability insurance payroll tax, the 1% Mental Health Services
+/// Tax on taxable income over 1,000,000 USD (R&TC §17043), and the taxing of a
+/// part-year resident on only the part of the year (the whole year's income is
+/// taxed). Only the `single` and `joint` filing statuses have figures.
 ///
 /// SAMPLE DATA. The figures are community-maintained and were written from the
 /// published tables, not checked against the Franchise Tax Board. Verify them
@@ -30,27 +32,33 @@ entity ftb : government
 kind ca-tax : expense
 
 
-/// Tax withheld from pay, or paid in installments, is credited against the
-/// tax owed to California for the year. Send money to a place of kind
-/// `ca-tax`, or let a paycheck leg do it.
-law credit-ca-withholding
+/// Tax withheld from pay, or paid in installments, is credited against the tax
+/// owed to California for the year the payment is `for`. It is also a state
+/// tax paid, which the federal return itemizes up to a cap.
+///
+/// To fix: send the payment to a place of kind `ca-tax`, and say what year it is
+/// for with `for 2025`.
+law credit-ca-payments
   on in
   when to is ca-tax
   count amount as ca-withheld
+  count amount as salt
 
 /// California personal income tax for the year (R&TC §17041), on federal
 /// adjusted gross income less the state standard deduction. Long-term gains
-/// are taxed as ordinary income here. Tax already withheld or paid is credited,
-/// and the rest is owed by April 15 of the next year (Form 540). A refund is
-/// not booked.
+/// are taxed as ordinary income here. What was paid by the end of the year is
+/// set against it, and the rest is owed by April 15 (Form 540). When more was
+/// paid than is due, the amount is negative: a refund.
+///
+/// To fix: the brackets depend on `filing`: set `filing single` or `filing joint`
+/// on the person or household that lives here.
 law state-income-tax
-  each year
+  each year closing 04-15
   let taxable = max(tally(agi) - deduction[year, owner.filing], empty)
-  let liability = progressive(brackets[year, owner.filing], taxable)
   count taxable as ca-taxable-income
+  let liability = progressive(brackets[year, owner.filing], taxable)
   count liability as ca-income-tax
-  owe max(liability - tally(ca-withheld), empty) to ftb by date(year + 1, 4, 15) as ca-income-tax
-
+  owe liability - tally(ca-withheld) to ftb by date(year + 1, 4, 15) as ca-income-tax
 
 // The marginal rate above each threshold (R&TC §17041), indexed every year.
 // The FTB publishes the next year's figures in the autumn; until a row for a

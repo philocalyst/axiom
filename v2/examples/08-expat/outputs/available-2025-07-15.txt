@@ -1,53 +1,25 @@
-$ axiom available --at 2025-07-15 --today 2026-01-06
+$ axiom available --today 2025-07-15
 
 Available on 2025-07-15
 
 What you can spend
-  Liquid now                        Amount
-  ────────────────────────────────────────
-  Money in liquid places     34,113.09 USD
-    assets/bank/us-checking  15,938.17 USD
-    assets/bank/us-savings   18,174.92 USD
-  ────────────────────────────────────────
-  Available to spend         34,113.09 USD
+  In hand                                       Amount
+  ────────────────────────────────────────────────────
+  Money in hand                          65,465.25 USD
+    assets/bank/us-checking              20,339.17 USD
+    assets/bank/us-savings               18,174.92 USD
+    assets/de/girokonto (2,754.35 EUR)    3,215.15 USD
+    assets/de/tagesgeld (20,334.11 EUR)  23,736.01 USD
+  ────────────────────────────────────────────────────
+  Available to spend                     65,465.25 USD
 
 What it would take to reach the rest
-  Holding                                                Liquid in          Value          Costs            Net
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/de/girokonto (2,754.35 EUR)                     now         3,215.15 USD       2.48 USD   3,212.67 USD
-    counts 24.83 USD as agi
-    feie-stacking-tax, owed to irs by 2026-04-15                                        2.48 USD
-    counts 24.83 USD as short-term-gains
-    counts 24.83 USD as taxable-income
-    counts 2.98 USD as income-tax
-    realizes a gain of 3.59 USD
-  assets/de/kaution (3,600.00 EUR)                       700d        4,202.28 USD       0.47 USD   4,201.81 USD
-    counts 4.68 USD as agi
-    feie-stacking-tax, owed to irs by 2026-04-15                                        0.47 USD
-    counts 4.68 USD as short-term-gains
-    counts 4.68 USD as taxable-income
-    counts 0.56 USD as income-tax
-    realizes a gain of 4.68 USD
-  assets/de/tagesgeld (20,334.10 EUR)                    now        23,735.99 USD     -26.41 USD  23,762.40 USD
-    counts -357.88 USD as fbar-tagesgeld
-    counts -357.88 USD as fbar-aggregate
-    counts -264.01 USD as agi
-    feie-stacking-tax, owed to irs by 2026-04-15                                      -26.41 USD
-    counts -264.01 USD as short-term-gains
-    counts -264.01 USD as taxable-income
-    counts -31.68 USD as income-tax
-    realizes a gain of -264.01 USD
-  assets/retirement/us-401k                              5d         66,600.00 USD  16,582.84 USD  50,017.16 USD
-    counts 66,600.00 USD as agi
-    feie-stacking-tax, owed to irs by 2026-04-15                                    1,146.61 USD
-    federal-income-tax, owed to irs by 2026-04-15                                   8,776.23 USD
-    counts 66,600.00 USD as taxable-income
-    counts 14,412.11 USD as income-tax
-    counts 66,600.00 USD as distributions
-    early-withdrawal-penalty, owed to irs by 2025-07-15                             6,660.00 USD
-    realizes a gain of 66,600.00 USD
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today                                    97,753.42 USD  16,559.38 USD  81,194.04 USD
-  · Each line withdraws the whole holding into assets/bank/us-savings on 2025-07-15 and runs the
-    year out through the laws. Costs are what they would owe because of it, as if the year ended
-    today: penalties, and the tax on any income it creates.
+  Holding                           Liquid in          Value          Cost            Net  Because
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/de/kaution (3,600.00 EUR)  700d        4,202.28 USD                 4,202.28 USD
+  assets/retirement/us-401k         5d         66,600.00 USD  6,660.00 USD  59,940.00 USD  driven by early-withdrawal-penalty 6,660.00 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today               70,802.28 USD  6,660.00 USD  64,142.28 USD
+  · Each line withdraws the whole holding into assets/bank/us-checking on 2025-07-15 and runs the
+    year out through the laws. Cost is what they would then owe beyond what they already will:
+    penalties, and the tax on any income it creates.

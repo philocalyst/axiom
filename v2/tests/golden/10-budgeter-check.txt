@@ -9,82 +9,66 @@ warning[budget]: expenses/fun: 297.01 USD in 2025-10 against a limit of 120.00 U
    │ ───────────────────────┬───────────────────────
    │                        ╰── this flow: 240.00 USD into expenses/fun
    │
-   ├─[accounts.ax:62:3]
+   ├─[accounts.ax:63:3]
    │
-61 │ account expenses/fun
-62 │   budget 120 USD monthly
+62 │ account expenses/fun
+63 │   budget 120 USD monthly
    │   ───────────┬──────────
    │              ╰── 297.01 USD
    │
    = help: at most 62.99 USD more can go in this month
 
-warning[budget]: expenses/subscriptions: 139.00 USD in 2025-11 against a limit of 90.00 USD, over by 49.00 USD
-   ╭─[journal/2025/11.ax:7:1]
-   │
- 7 │ 2025-11-03 visa -> subscriptions 139 USD / amazon-prime
-   │ ───────────────────────────┬───────────────────────────
-   │                            ╰── this flow: 139.00 USD into expenses/subscriptions
-   │
-   ├─[accounts.ax:65:3]
-   │
-64 │ account expenses/subscriptions
-65 │   budget 90 USD monthly
-   │   ──────────┬──────────
-   │             ╰── 139.00 USD
-   │
-   = help: at most 90.00 USD more can go in this month
-
 warning[budget]: expenses/dining: 163.17 USD in 2025-11 against a limit of 150.00 USD, over by 13.17 USD
-   ╭─[journal/2025/11.ax:58:1]
+   ╭─[journal/2025/11.ax:59:1]
    │
-43 │ 2025-11-16 visa -> dining 27.79 USD
+44 │ 2025-11-16 visa -> dining 27.79 USD
    │ ─────────────────┬─────────────────
    │                  ╰── 2025-11-16: 27.79 USD from liabilities/visa to expenses/dining
    ⋮
-48 │ 2025-11-23 visa -> dining 36.42 USD
+49 │ 2025-11-23 visa -> dining 36.42 USD
    │ ─────────────────┬─────────────────
    │                  ╰── 2025-11-23: 36.42 USD from liabilities/visa to expenses/dining
-49 │ 2025-11-24 visa -> fun 32.71 USD
-50 │ 2025-11-24 wallet -> dining 9.21 USD
+50 │ 2025-11-24 visa -> fun 32.71 USD
+51 │ 2025-11-24 wallet -> dining 9.21 USD
    │ ──────────────────┬─────────────────
    │                   ╰── 2025-11-24: 9.21 USD from assets/cash/wallet to expenses/dining
    ⋮
-58 │ 2025-11-28 visa -> dining 18.83 USD
+59 │ 2025-11-28 visa -> dining 18.83 USD
    │ ─────────────────┬─────────────────
    │                  ╰── this flow: 18.83 USD into expenses/dining
    │
-   ├─[accounts.ax:55:3]
+   ├─[accounts.ax:56:3]
    │
-54 │ account expenses/dining
-55 │   budget 150 USD monthly
+55 │ account expenses/dining
+56 │   budget 150 USD monthly
    │   ───────────┬──────────
    │              ╰── 163.17 USD
    │
    = help: at most 5.66 USD more can go in this month
 
 warning[budget]: expenses/dining: 160.00 USD in 2025-12 against a limit of 150.00 USD, over by 10.00 USD
-   ╭─[journal/2025/12.ax:59:1]
+   ╭─[journal/2025/12.ax:60:1]
    │
-39 │ 2025-12-16 visa -> dining 32.76 USD
+40 │ 2025-12-16 visa -> dining 32.76 USD
    │ ─────────────────┬─────────────────
    │                  ╰── 2025-12-16: 32.76 USD from liabilities/visa to expenses/dining
    ⋮
-49 │ 2025-12-23 visa -> dining 45.56 USD
+50 │ 2025-12-23 visa -> dining 45.56 USD
    │ ─────────────────┬─────────────────
    │                  ╰── 2025-12-23: 45.56 USD from liabilities/visa to expenses/dining
-50 │ 2025-12-24 visa -> fun 52.88 USD
-51 │ 2025-12-24 wallet -> dining 8.36 USD
+51 │ 2025-12-24 visa -> fun 52.88 USD
+52 │ 2025-12-24 wallet -> dining 8.36 USD
    │ ──────────────────┬─────────────────
    │                   ╰── 2025-12-24: 8.36 USD from assets/cash/wallet to expenses/dining
    ⋮
-59 │ 2025-12-28 visa -> dining 14.47 USD
+60 │ 2025-12-28 visa -> dining 14.47 USD
    │ ─────────────────┬─────────────────
    │                  ╰── this flow: 14.47 USD into expenses/dining
    │
-   ├─[accounts.ax:55:3]
+   ├─[accounts.ax:56:3]
    │
-54 │ account expenses/dining
-55 │   budget 150 USD monthly
+55 │ account expenses/dining
+56 │   budget 150 USD monthly
    │   ───────────┬──────────
    │              ╰── 160.00 USD
    │
@@ -98,11 +82,11 @@ note[pad]: accepted a gap on assets/bank/checking
    │                   ╰── 27.60 USD moved out of assets/bank/checking into unknown
 
 note[pad]: accepted a gap on assets/cash/wallet
-   ╭─[journal/2025/12.ax:65:1]
+   ╭─[journal/2025/12.ax:64:1]
    │
-65 │ 2025-12-31 wallet = 57.22 USD !
+64 │ 2025-12-31 wallet = 57.22 USD !
    │ ───────────────┬───────────────
    │                ╰── 14.00 USD moved out of assets/cash/wallet into unknown
 
-4 warnings · 2 waived
-✓ 250 flows · 32 places · 15 laws enforced · net worth 10,665.04 USD
+3 warnings · 2 waived
+✓ 251 flows · 29 places · 15 laws enforced · net worth 10,653.04 USD

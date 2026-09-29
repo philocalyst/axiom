@@ -1,19 +1,26 @@
-$ axiom available --at 2025-06-05 --today 2026-01-06
+$ axiom available --today 2025-06-05
 
 Available on 2025-06-05
 
 What you can spend
-  Liquid now                                Amount
+  In hand                                   Amount
   ────────────────────────────────────────────────
-  Money in liquid places             16,734.10 USD
+  Money in hand                      14,434.10 USD
     assets/bank/checking              3,747.21 USD
     assets/bank/collective-checking   4,790.05 USD
     assets/bank/savings               5,200.00 USD
     assets/cash/collective-cash         109.00 USD
     assets/cash/wallet                  587.84 USD
-    assets/loans/riley                1,750.00 USD
-    assets/roommates/ben                550.00 USD
-  Tied to restricted entities        -2,172.25 USD
-    tied to riverfront               -2,172.25 USD
+  Held for others                    -2,172.25 USD
+    held for riverfront              -2,172.25 USD
   ────────────────────────────────────────────────
-  Available to spend                 14,561.85 USD
+  Available to spend                 12,261.85 USD
+
+Coming in
+  Counterparty        What                                                                                                                                                        Left  Made        Age    Due         Status
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/owed/by-ben  #rent-2025-06                                                                                                                                         550.00 USD  2025-06-01  4d     2025-06-08  in 3d
+  lantern-owes        #expense-2025-06 · The Lantern asked me to buy an apron and a tablet stand (bar-supply). I paid on my card and filed an expense report: it is not…    138.50 USD  2025-06-02  3d     2025-07-15  in 40d
+  riley               #loan-riley · A loan to a friend: 2,000.00 USD for a security deposit, to be paid back 250.00 USD a month from May 15, so the last…                 1,750.00 USD  2025-04-10  1m26d  2025-12-15  in 193d
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                                                                                                                                                                   2,438.50 USD

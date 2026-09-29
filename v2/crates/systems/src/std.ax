@@ -13,14 +13,21 @@ system std
 
 // ─── Places: assets ─────────────────────────────────────────────────────────
 
-/// Physical cash and money held outside any institution.
+/// Physical cash and money held outside any institution. Money in another
+/// currency is spent oldest first: cash is not an investment, so nothing asks
+/// which lot a euro came from.
 kind cash : asset
+  select fifo
 
-/// A checking, savings or money-market account.
+/// A checking, savings or money-market account. Money in another currency is
+/// spent oldest first: a euro spent on groceries is not a sale of a lot.
 kind bank : asset
+  select fifo
   /// A bank balance below zero is an overdraft: the bank is lending you the
-  /// difference, usually for a fee. Move money in before the payment clears, or
-  /// look for a pending payment or a missing deposit that explains it.
+  /// difference, usually for a fee.
+  ///
+  /// To fix: move money in before the payment clears, or look for a pending
+  /// payment or a missing deposit that explains it.
   law overdraft
     always
     warn balance >= empty "balance below zero"
@@ -30,11 +37,27 @@ kind bank : asset
 kind broker : asset
   select fifo
 
-/// Land, a house or a share of one.
+/// Land, a house or a share of one: a home, or a rental.
 kind property : asset
 
+/// Things kept for your own use rather than for profit. A gain on one is
+/// income; a loss on one is not a deduction.
+kind personal-use : asset
+
 /// A car, a boat, anything with a title.
-kind vehicle : asset
+kind vehicle : personal-use
+
+/// Money owed to you: an invoice you sent, a loan to a friend, a deposit you
+/// paid. A flow into it that says `due` is one claim, kept apart from the
+/// others, and a flow `for` its `#code` settles it. What it holds is coming
+/// in, never money to spend.
+kind receivable : asset
+  claim
+
+/// Money a servicer holds for you to pay taxes and insurance on your home. It
+/// is yours and it is not spendable: it leaves only by paying those bills.
+kind escrow : asset
+  liquidity 365d
 
 
 // ─── Places: liabilities ────────────────────────────────────────────────────
@@ -42,15 +65,21 @@ kind vehicle : asset
 /// Revolving credit. Spending goes in, payments come out of a bank account.
 kind credit-card : liability
 
+/// Money you owe on a bill: what a flow out of it (the bill) says is due, and
+/// what a flow into it (the payment) settles, `for` the bill's `#code`.
+kind payable : liability
+  claim
+
 /// Money borrowed for a term.
 kind loan : liability
   has rate     percent
   has maturity date
 
-  /// A loan is repaid in full by its maturity date. This failed because the
-  /// journal has reached that date with a balance still owed. Record the
-  /// missing payments, or, if the term was extended, update `maturity` on the
-  /// account.
+  /// A loan is repaid in full by its maturity date. The journal has reached
+  /// that date with a balance still owed.
+  ///
+  /// To fix: record the missing payments, or, if the term was extended, update
+  /// `maturity` on the account.
   law payoff
     by self.maturity
     require self.balance == empty "balance still owed at maturity"
@@ -118,10 +147,25 @@ kind good : commodity
 
 // ─── Entities ───────────────────────────────────────────────────────────────
 
-/// A human being.
-kind person : entity
-  has born   date
-  has filing name
+/// Someone whose tax is figured, alone or together. `filing` says how, and
+/// `children` is how many qualifying children there are to claim.
+kind taxpayer : entity
+  has filing   name
+  has children number
+  children     0
+
+/// A human being. Alone, a person files as `single` unless they say otherwise.
+kind person : taxpayer
+  has born date
+  filing single
+
+/// People who share money and file one return: its members `member` it. It
+/// owns what they hold together, lives where they live, and is governed as one,
+/// so its members' pay counts into one return, and it files `joint`. What is
+/// personal stays with the person: a 401(k)'s yearly limit, the age that opens
+/// a withdrawal.
+kind household : taxpayer
+  filing joint
 
 /// Anyone who is not a person: a company, a school, a landlord.
 kind org : entity
@@ -132,6 +176,13 @@ kind employer : org
 /// A body that governs and taxes.
 kind government : org
 
+/// Money you set aside for something: an emergency fund, a trip, a tax
+/// vault. A flow that says `for` it ties what arrives to it. That money is not
+/// available to spend, and spending it is a flow `for` you again, or a payment
+/// straight out of the envelope.
+kind envelope : entity
+  restricted
+
 /// Money given for a stated purpose, until a stated day. Money from a grant
 /// stays tied to it after it lands in your account, and may only be spent on
 /// what the grant names.
@@ -141,15 +192,18 @@ kind grant : entity
   has until  date
 
   /// Grant money may only be spent on what the grant names. This payment went
-  /// somewhere else. Pay it from another account, or, if the funder agreed to
-  /// the change, update `purpose` on the grant.
+  /// somewhere else.
+  ///
+  /// To fix: pay it from another account, or, if the funder agreed to the
+  /// change, update `purpose` on the grant.
   law purpose
     on spend
     require to is self.purpose "grant money spent outside its purpose"
 
-  /// A grant ends on its `until` date, and unspent money is owed back. Spend
-  /// what is left on the grant's purpose before the deadline, or ask the funder
-  /// for an extension and move `until`.
+  /// A grant ends on its `until` date, and unspent money is owed back.
+  ///
+  /// To fix: spend what is left on the grant's purpose before the deadline, or
+  /// ask the funder for an extension and move `until`.
   law deadline
     by self.until
     require remaining == empty "grant money left unspent at the deadline"

@@ -1,0 +1,37 @@
+$ axiom why foreign-earned --today 2026-04-16
+
+Why foreign-earned
+
+Effects
+  Date        Effect          Owner        Amount  Owed to  From
+  ───────────────────────────────────────────────────────────────────────────────
+  2025-09-30  foreign-earned  me     1,059.85 USD           journal/2025/09.ax:26
+  2025-09-30  foreign-earned  me     1,362.81 USD           journal/2025/09.ax:27
+  2025-09-30  foreign-earned  me     3,901.29 USD           journal/2025/09.ax:28
+  2025-10-31  foreign-earned  me     1,040.48 USD           journal/2025/10.ax:59
+  2025-10-31  foreign-earned  me     1,337.91 USD           journal/2025/10.ax:60
+  2025-10-31  foreign-earned  me     3,830.00 USD           journal/2025/10.ax:61
+  2025-11-28  foreign-earned  me     1,050.89 USD           journal/2025/11.ax:26
+  2025-11-28  foreign-earned  me     1,351.29 USD           journal/2025/11.ax:27
+  2025-11-28  foreign-earned  me     3,868.31 USD           journal/2025/11.ax:28
+  2025-12-19  foreign-earned  me     1,056.50 USD           journal/2025/12.ax:20
+  2025-12-19  foreign-earned  me     1,358.50 USD           journal/2025/12.ax:21
+  2025-12-19  foreign-earned  me     3,888.96 USD           journal/2025/12.ax:22
+  · 6 earlier effects not shown.
+
+Flows behind it
+  Date        Flow                                                      Amount  State   From
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-09-30  income/salary-de → expenses/taxes/de/lohnsteuer       905.00 EUR  actual  journal/2025/09.ax:26
+  2025-09-30  income/salary-de → expenses/taxes/de/sozialabgaben  1,163.70 EUR  actual  journal/2025/09.ax:27
+  2025-09-30  income/salary-de → assets/de/girokonto              3,331.30 EUR  actual  journal/2025/09.ax:28
+  2025-10-31  income/salary-de → expenses/taxes/de/lohnsteuer       905.00 EUR  actual  journal/2025/10.ax:59
+  2025-10-31  income/salary-de → expenses/taxes/de/sozialabgaben  1,163.70 EUR  actual  journal/2025/10.ax:60
+  2025-10-31  income/salary-de → assets/de/girokonto              3,331.30 EUR  actual  journal/2025/10.ax:61
+  2025-11-28  income/salary-de → expenses/taxes/de/lohnsteuer       905.00 EUR  actual  journal/2025/11.ax:26
+  2025-11-28  income/salary-de → expenses/taxes/de/sozialabgaben  1,163.70 EUR  actual  journal/2025/11.ax:27
+  2025-11-28  income/salary-de → assets/de/girokonto              3,331.30 EUR  actual  journal/2025/11.ax:28
+  2025-12-19  income/salary-de → expenses/taxes/de/lohnsteuer       905.00 EUR  actual  journal/2025/12.ax:20
+  2025-12-19  income/salary-de → expenses/taxes/de/sozialabgaben  1,163.70 EUR  actual  journal/2025/12.ax:21
+  2025-12-19  income/salary-de → assets/de/girokonto              3,331.30 EUR  actual  journal/2025/12.ax:22
+  · 6 earlier flows not shown.

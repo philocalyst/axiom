@@ -10,25 +10,33 @@
 2025-05-15 etrade 0.8701 NWND -> taxes/payroll 128.99 USD   // sold to cover: FICA
 2025-05-16 checking -> dining 413.86 USD
 2025-05-20 checking -> groceries 205.12 USD
+
+/// Fastenal splits 2-for-1: every parcel doubles in quantity and keeps its cost and its day. Prices
+/// before this day stay in the old units.
+2025-05-22 FAST split 2 for 1
 2025-05-24 checking -> misc 250.10 USD
 
 /// Selling the January UNH lot at a loss.
 2025-05-27 fidelity[2025-01-14] 14.9072 UNH -> checking 4_650.45 USD
-2025-05-28 dividends -> schwab 7.58 USD
+2025-05-28 dividends -> schwab 75.53 USD
 2025-05-31 income/salary -> 14_000.00 USD
   retirement          1_958.33 USD   // 401(k) deferral
-  espp-cash           1_400.00 USD   // ESPP contribution, after tax
+  espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
   taxes/federal       2_650.00 USD
   taxes/payroll       1_071.00 USD   // Social Security and Medicare
   checking            ...
 2025-05-31 interest -> savings 269.73 USD
-2025-05-31 interest -> fidelity 188.86 USD
-2025-05-31 checking = 33_773.44 USD
+2025-05-31 interest -> fidelity 190.43 USD
+2025-05-31 checking = 33_773.45 USD
 2025-05-31 savings = 81_187.37 USD
 2025-05-31 espp-cash = 7_000.01 USD
-2025-05-31 fidelity = 48.5131 VTI
-2025-05-31 fidelity = 24.3264 MSFT
+2025-05-31 fidelity = 78.6978 VTI
+2025-05-31 fidelity = 36.3264 MSFT
 2025-05-31 fidelity = 9.7153 UNH
+2025-05-31 fidelity = 101.9694 FAST
+2025-05-31 fidelity = 37.7871 VXUS
+2025-05-31 schwab = 333.4448 BND
+2025-05-31 schwab = 38.2029 VXUS
 2025-05-31 etrade = 233.4074 NWND
 2025-05-31 coinbase = 0.15 BTC
 2025-05-31 coinbase = 0.95668225 ETH

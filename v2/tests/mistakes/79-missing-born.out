@@ -10,9 +10,9 @@ error[unset-property]: `born` is not set on `me`, so `deferral-limit` cannot be 
    │   ─────────┬─────────
    │            ╰── this flow: 800.00 USD into assets/retirement
    │
-   ├─[us/401k.ax:32:20] (built in)
+   ├─[us/401k.ax:41:20] (built in)
    │
-32 │     let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[year] else if ow…
+41 │     let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[year] else if own…
    │                    ────┬────
    │                        ╰── `deferral-limit` reads it here
    │

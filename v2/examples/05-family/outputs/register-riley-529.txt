@@ -1,27 +1,26 @@
-$ axiom register riley-529 --today 2026-01-05
+$ axiom register riley-529 --from 2025-01-01 --today 2026-04-16
 
 Register: assets/education/riley-529
 
-  Date        With                        Payee            Note                 Amount        Balance
-  ───────────────────────────────────────────────────────────────────────────────────────────────────
-  2024-12-31  assets/bank/joint-checking                                 19,850.00 USD  19,850.00 USD
-  2024-12-31  equity/opening                                              4,750.00 USD  24,600.00 USD
-  2025-01-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  24,850.00 USD
-  2025-02-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  25,100.00 USD
-  2025-03-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  25,350.00 USD
-  2025-03-31  income/growth                                                 101.40 USD  25,451.40 USD
-  2025-04-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  25,701.40 USD
-  2025-05-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  25,951.40 USD
-  2025-05-16  income/gifts                grandma                         3,000.00 USD  28,951.40 USD
-  2025-06-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  29,201.40 USD
-  2025-06-30  income/growth                                               2,365.31 USD  31,566.71 USD
-  2025-07-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  31,816.71 USD
-  2025-08-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  32,066.71 USD
-  2025-08-20  expenses/tuition            st-annes-school                -4,800.00 USD  27,266.71 USD
-  2025-09-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  27,516.71 USD
-  2025-09-30  income/growth                                               1,540.94 USD  29,057.65 USD
-  2025-10-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  29,307.65 USD
-  2025-10-15  assets/bank/joint-checking                                 -1,500.00 USD  27,807.65 USD
-  2025-11-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  28,057.65 USD
-  2025-12-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  28,307.65 USD
-  2025-12-31  income/growth                                                 594.46 USD  28,902.11 USD
+  Date        With                        Payee            Note                                     Amount        Balance
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-01-01  opening balance                                                                               24,600.00 USD
+  2025-01-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  24,850.00 USD
+  2025-02-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  25,100.00 USD
+  2025-03-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  25,350.00 USD
+  2025-03-31  equity/unknown                               unexplained gap, accepted with !     101.40 USD  25,451.40 USD
+  2025-04-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  25,701.40 USD
+  2025-05-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  25,951.40 USD
+  2025-05-16  income/gifts                grandma                                             3,000.00 USD  28,951.40 USD
+  2025-06-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  29,201.40 USD
+  2025-06-30  equity/unknown                               unexplained gap, accepted with !   2,365.31 USD  31,566.71 USD
+  2025-07-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  31,816.71 USD
+  2025-08-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  32,066.71 USD
+  2025-08-20  expenses/tuition            st-annes-school                                    -4,800.00 USD  27,266.71 USD
+  2025-09-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  27,516.71 USD
+  2025-09-30  equity/unknown                               unexplained gap, accepted with !   1,540.94 USD  29,057.65 USD
+  2025-10-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  29,307.65 USD
+  2025-10-15  assets/bank/joint-checking                                                     -1,500.00 USD  27,807.65 USD
+  2025-11-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  28,057.65 USD
+  2025-12-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  28,307.65 USD
+  2025-12-31  equity/unknown                               unexplained gap, accepted with !     594.46 USD  28,902.11 USD

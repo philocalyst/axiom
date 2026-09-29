@@ -1,0 +1,23 @@
+$ axiom why qbi-deduction --today 2026-04-16
+
+Why qbi-deduction
+
+  Law       qbi-deduction
+  ─────────────────────────────────
+  When      each year
+  Governs   everything in this book
+  Written   tax.ax:44
+  Ran       1 time
+  Recorded  0 violations, 1 effect
+  · The qualified business income deduction is 20% of the business's income after
+  · what is attributable to it (half of self-employment tax, health premiums, the
+  · SEP-IRA), limited to 20% of taxable income before it (IRC §199A). It is added
+  · to the deduction `us` took.
+  ·
+  · To fix: the deduction cannot exceed a fifth of taxable income; a lower
+  · deduction means less income before it.
+
+Recent effects
+  Date        Effect      Owner        Amount  Owed to  From
+  ────────────────────────────────────────────────────────────────
+  2025-12-31  deductions  me     5,718.47 USD           period end

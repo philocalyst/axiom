@@ -1,7 +1,12 @@
-// Where the money is, in three currencies, and who is paid. The foreign account
-// reporting check is the running-maximum trick described below.
+// Where the money is, in three currencies, and who is paid. Euros and pounds are
+// cash here: they are declared in `std` as currencies, so spending them realizes
+// no capital gain, and `available` counts them. The foreign account reporting
+// check is the running-maximum trick described below.
 
 // ─── United States ──────────────────────────────────────────────────────────
+
+/// Interest paid on a student loan, which `tax.ax` deducts up to a limit.
+kind student-loan-interest : expense
 
 account assets/bank/us-checking : bank
 account assets/bank/us-savings  : bank
@@ -29,7 +34,10 @@ account liabilities/student-loan : loan
 /// The current account (Girokonto): salary arrives here and rent leaves.
 account assets/de/girokonto : bank
   holds EUR
-  select fifo
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
   law fbar-max
     always
     let v = value(balance, USD)
@@ -38,7 +46,10 @@ account assets/de/girokonto : bank
 /// A high-interest savings account (Tagesgeld).
 account assets/de/tagesgeld : bank
   holds EUR
-  select fifo
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
   law fbar-max
     always
     let v = value(balance, USD)
@@ -49,6 +60,10 @@ account assets/de/tagesgeld : bank
 account assets/de/kaution : bank
   holds EUR
   liquidity 700d
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
   law fbar-max
     always
     let v = value(balance, USD)
@@ -57,7 +72,10 @@ account assets/de/kaution : bank
 /// A Wise account in pounds, for the trip. It is a foreign account too.
 account assets/uk/wise : bank
   holds GBP
-  select fifo
+  /// Keeps the highest value in dollars this account reached in the year, at the rate of the day,
+  /// in a tally the yearly check below adds up (FinCEN 114 lists each account's highest balance).
+  ///
+  /// To fix: a rate is missing when the value cannot be computed: add a price line for the day.
   law fbar-max
     always
     let v = value(balance, USD)
@@ -70,7 +88,6 @@ account income/salary-us : wages
 account income/salary-de : foreign-wages
 account income/interest    : interest
 account income/interest-de : interest
-account equity/opening
 
 
 // ─── Expenses ───────────────────────────────────────────────────────────────
@@ -91,7 +108,8 @@ account expenses/phone
 account expenses/travel
 account expenses/conference
 account expenses/sightseeing
-account expenses/loan-interest
+/// Interest on the student loan: the servicer's statement splits each payment. `tax.ax` counts it.
+account expenses/loan-interest : student-loan-interest
 
 /// What conversions and card fees cost. Written by hand: a conversion with a
 /// spread, not a fee, has no line here.
@@ -166,6 +184,9 @@ entity ryanair : org
 
 /// FBAR: the highest values of the year, account by account, added up. Each
 /// value is at the rate of the day, where the Treasury uses one year-end rate.
+///
+/// To fix: file FinCEN 114 by April 15 listing each foreign account's highest balance (the tallies
+/// `fbar-girokonto` and the others in `axiom tax`).
 law fbar
   each year
   let total = tally(fbar-girokonto) + tally(fbar-tagesgeld) + tally(fbar-kaution) + tally(fbar-wise)

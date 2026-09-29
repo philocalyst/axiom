@@ -2,8 +2,7 @@ Register: assets/bank/checking
 
   Date        With                 Payee        Note                                     Amount        Balance
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  2025-12-31  equity/opening                                                      15,500.00 USD  15,500.00 USD
-  2025-12-31  assets/college                                                      -6,300.00 USD   9,200.00 USD
+  2025-12-31  equity/opening                                                       9,200.00 USD   9,200.00 USD
   2026-01-01  expenses/rent        landlord                                       -2,850.00 USD   6,350.00 USD
   2026-01-01  expenses/insurance   insurer                                          -600.00 USD   5,750.00 USD
   2026-01-05  assets/college                                                        -300.00 USD   5,450.00 USD

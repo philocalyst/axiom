@@ -1,6 +1,18 @@
 $ axiom why budget --today 2026-02-14
 
-error[ambiguous-law]: `budget` could be `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`
-  = help: write more of the law's path
+`budget` is written in 11 places
 
-✗ 1 error
+  Law     System   Written         Governs                                           Explains
+  ───────────────────────────────────────────────────────────────────────────────────────────
+  budget  project  accounts.ax:69  expenses/clothing and everything beneath it
+  budget  project  accounts.ax:56  expenses/dining and everything beneath it
+  budget  project  accounts.ax:63  expenses/fun and everything beneath it
+  budget  project  accounts.ax:80  expenses/gifts and everything beneath it
+  budget  project  accounts.ax:53  expenses/groceries and everything beneath it
+  budget  project  accounts.ax:83  expenses/insurance and everything beneath it
+  budget  project  accounts.ax:86  expenses/medical and everything beneath it
+  budget  project  accounts.ax:72  expenses/personal-care and everything beneath it
+  budget  project  accounts.ax:66  expenses/subscriptions and everything beneath it
+  budget  project  accounts.ax:59  expenses/transport and everything beneath it
+  budget  project  accounts.ax:75  expenses/utilities and everything beneath it
+  · Ask about the one you mean with `axiom why FILE:LINE`, using the location in Written.

@@ -1,0 +1,36 @@
+$ axiom tax 2025 --today 2026-04-16
+
+Taxes 2025 for me
+
+Counted
+  Tally                          Amount  From
+  ────────────────────────────────────────────────────────────
+  project
+    rental-expenses       42,065.24 USD  46 sources
+    depreciation          10,178.48 USD  12 sources
+    rental-income         24,725.00 USD  12 sources
+    recaptured            10,178.48 USD  journal/2025/12.ax:25
+    short-term-gains      10,178.48 USD  journal/2025/12.ax:25
+    rental-net           -17,340.24 USD  period end
+  ────────────────────────────────────────────────────────────
+  us
+    wages                 96,000.00 USD  36 sources
+    total-income          78,659.76 USD  37 sources
+    payments              14,580.00 USD  12 sources
+    long-term-gains       13,481.25 USD  2 sources
+    deductions            15,750.00 USD  period end
+    net-long-term-gains   13,481.25 USD  period end
+    investment-income     23,659.73 USD  period end
+    agi                  102,319.49 USD  period end
+    taxable-income        86,569.49 USD  period end
+    income-tax            13,015.59 USD  period end
+    total-tax             13,015.59 USD  period end
+
+Owed
+  Owed                  To   Due                Amount  From
+  ────────────────────────────────────────────────────────────────
+  us
+    federal-income-tax  irs  2026-04-15  -1,564.41 USD  period end
+  ────────────────────────────────────────────────────────────────
+  Total owed                             -1,564.41 USD
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

@@ -1,0 +1,37 @@
+$ axiom tax 2025 --today 2026-04-16
+
+Taxes 2025 for me
+
+Counted
+  Tally                       Amount  From
+  ───────────────────────────────────────────────
+  project
+    business-expenses  13,471.01 USD  165 sources
+    health-premiums     4,944.00 USD  12 sources
+    adjustments        17,276.76 USD  17 sources
+    gross-receipts     74,800.00 USD  27 sources
+    sep-contributions   8,000.00 USD  4 sources
+    net-profit         61,328.99 USD  period end
+    se-tax              8,665.51 USD  period end
+    other-taxes         8,665.51 USD  period end
+    se-deduction        4,332.76 USD  period end
+  ───────────────────────────────────────────────
+  us
+    interest              290.12 USD  12 sources
+    total-income       61,619.11 USD  13 sources
+    investment-income     290.12 USD  12 sources
+    payments           11,100.00 USD  5 sources
+    deductions         21,468.47 USD  2 sources
+    agi                44,342.35 USD  period end
+    taxable-income     22,873.88 USD  period end
+    income-tax          2,506.37 USD  period end
+    total-tax          11,171.88 USD  period end
+
+Owed
+  Owed                  To   Due            Amount  From
+  ────────────────────────────────────────────────────────────
+  us
+    federal-income-tax  irs  2026-04-15  71.88 USD  period end
+  ────────────────────────────────────────────────────────────
+  Total owed                             71.88 USD
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

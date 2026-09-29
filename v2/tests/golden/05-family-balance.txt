@@ -1,72 +1,76 @@
-Balances at 2026-01-05
+Balances at 2026-04-16
 
-  Place                          Balance
-  ──────────────────────────────────────
-  assets                 472,233.88 USD
-                                  1 HOME
-                                  1 CRV
-    bank                 114,168.01 USD
-      joint-checking      36,838.99 USD
-      joint-savings       77,329.02 USD
-    dcfsa                    416.74 USD
-    education             28,902.11 USD
-      riley-529           28,902.11 USD
-    escrow                 1,440.00 USD
-    house                         1 HOME
-    hsa                   13,544.20 USD
-    retirement           313,762.82 USD
-      alex-401k          193,133.41 USD
-      jordan-401k        120,629.41 USD
-    vehicle                       1 CRV
-      crv                         1 CRV
-  ──────────────────────────────────────
-  equity                 468,260.90 USD
-    opening              468,260.90 USD
-  ──────────────────────────────────────
-  expenses               154,709.02 USD
-    auto                   3,278.94 USD
-      insurance            1,148.00 USD
-      loan-interest          998.46 USD
-      repairs              1,132.48 USD
-    charity                3,900.00 USD
-    childcare             16,760.00 USD
-    food                  12,214.59 USD
-      dining               3,047.85 USD
-      groceries            9,166.74 USD
-    fuel                   1,404.18 USD
-    health-premium         5,100.00 USD
-    housing               32,357.32 USD
-      home-insurance       1,800.00 USD
-      mortgage-interest   24,077.32 USD
-      property-tax         6,480.00 USD
-    kids                   2,440.97 USD
-    medical                1,251.35 USD
-    shopping               3,886.53 USD
-    subscriptions            455.76 USD
-    taxes                 59,719.25 USD
-      federal             27,594.00 USD
-      payroll             17,697.50 USD
-      sdi                  2,776.15 USD
-      state               11,239.60 USD
-      state-prior            412.00 USD
-    travel                 2,026.70 USD
-    tuition                5,150.00 USD
-    utilities              4,763.43 USD
-  ──────────────────────────────────────
-  income                 306,811.37 USD
-    alex-salary          150,000.00 USD
-    employer-hsa           1,000.00 USD
-    employer-match         8,923.18 USD
-    gifts                  3,000.00 USD
-    growth                43,820.94 USD
-    interest               2,479.02 USD
-    jordan-salary         97,440.07 USD
-    rewards                  148.16 USD
-  ──────────────────────────────────────
-  liabilities            425,770.63 USD
-    car-loan              16,976.91 USD
-    card                   2,101.70 USD
-    mortgage             406,692.02 USD
+  Place                           Balance
+  ───────────────────────────────────────
+  assets                  472,233.88 USD
+                                   1 HOME
+                                   1 CRV
+    bank                  114,168.01 USD
+      joint-checking       36,838.99 USD
+      joint-savings        77,329.02 USD
+    dcfsa                     416.74 USD
+    education              28,902.11 USD
+      riley-529            28,902.11 USD
+    escrow                  1,440.00 USD
+    house                          1 HOME
+    hsa                    13,544.20 USD
+    retirement            313,762.82 USD
+      alex-401k           193,133.41 USD
+      jordan-401k         120,629.41 USD
+    vehicle                        1 CRV
+      crv                          1 CRV
+  ───────────────────────────────────────
+  equity                 -105,639.10 USD
+                                   1 HOME
+                                   1 CRV
+    opening              -105,639.10 USD
+                                   1 HOME
+                                   1 CRV
+  ───────────────────────────────────────
+  expenses                154,709.02 USD
+    auto                    3,278.94 USD
+      insurance             1,148.00 USD
+      loan-interest           998.46 USD
+      repairs               1,132.48 USD
+    charity                 3,900.00 USD
+    childcare              16,760.00 USD
+    food                   12,214.59 USD
+      dining                3,047.85 USD
+      groceries             9,166.74 USD
+    fuel                    1,404.18 USD
+    health-premium          5,100.00 USD
+    housing                32,357.32 USD
+      home-insurance        1,800.00 USD
+      mortgage-interest    24,077.32 USD
+      property-tax          6,480.00 USD
+    kids                    2,440.97 USD
+    medical                 1,251.35 USD
+    shopping                3,886.53 USD
+    subscriptions             455.76 USD
+    taxes                  59,719.25 USD
+      federal              27,594.00 USD
+      payroll              17,697.50 USD
+      sdi                   2,776.15 USD
+      state                11,239.60 USD
+      state-prior             412.00 USD
+    travel                  2,026.70 USD
+    tuition                 5,150.00 USD
+    utilities               4,763.43 USD
+  ───────────────────────────────────────
+  income                  306,811.37 USD
+    alex-salary           150,000.00 USD
+    employer-hsa            1,000.00 USD
+    employer-match          8,923.18 USD
+    gifts                   3,000.00 USD
+    interest                2,479.02 USD
+    jordan-salary          97,440.07 USD
+    market                 43,820.94 USD
+    rewards                   148.16 USD
+  ───────────────────────────────────────
+  liabilities             425,770.63 USD
+    car-loan               16,976.91 USD
+    card                    2,101.70 USD
+    mortgage              406,692.02 USD
 
   Net worth         Value (USD)
   ─────────────────────────────

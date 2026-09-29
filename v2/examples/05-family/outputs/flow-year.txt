@@ -1,21 +1,20 @@
-$ axiom flow --by year --today 2026-01-05
+$ axiom flow --by year --today 2026-04-16
 
 Income and spending
 
   Place                      2024            2025      2026           Total
   ─────────────────────────────────────────────────────────────────────────
-  income                           306,811.37 USD            306,811.37 USD
+  income                           262,990.43 USD            262,990.43 USD
     alex-salary                    150,000.00 USD            150,000.00 USD
     employer-hsa                     1,000.00 USD              1,000.00 USD
     employer-match                   8,923.18 USD              8,923.18 USD
     gifts                            3,000.00 USD              3,000.00 USD
-    growth                          43,820.94 USD             43,820.94 USD
     interest                         2,479.02 USD              2,479.02 USD
     jordan-salary                   97,440.07 USD             97,440.07 USD
     rewards                            148.16 USD                148.16 USD
-    realized gains ≈                12,205.19 USD             12,205.19 USD
+    realized gains ≈                 7,307.81 USD              7,307.81 USD
   ─────────────────────────────────────────────────────────────────────────
-  Total income                     319,016.56 USD            319,016.56 USD
+  Total income                     270,298.24 USD            270,298.24 USD
   ─────────────────────────────────────────────────────────────────────────
   expenses                         154,709.02 USD            154,709.02 USD
     auto                             3,278.94 USD              3,278.94 USD
@@ -47,6 +46,6 @@ Income and spending
     tuition                          5,150.00 USD              5,150.00 USD
     utilities                        4,763.43 USD              4,763.43 USD
   ─────────────────────────────────────────────────────────────────────────
-  Net                    0.00 USD  164,307.54 USD  0.00 USD  164,307.54 USD
+  Net                    0.00 USD  115,589.22 USD  0.00 USD  115,589.22 USD
   · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
     them.

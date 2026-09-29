@@ -1,0 +1,35 @@
+$ axiom why student-interest --today 2026-04-16
+
+Why student-interest
+
+Effects
+  Date        Effect            Owner      Amount  Owed to  From
+  ───────────────────────────────────────────────────────────────────────────────
+  2025-01-05  student-interest  me     117.48 USD           journal/2025/01.ax:19
+  2025-02-05  student-interest  me     116.34 USD           journal/2025/02.ax:5
+  2025-03-05  student-interest  me     115.19 USD           journal/2025/03.ax:5
+  2025-04-05  student-interest  me     114.04 USD           journal/2025/04.ax:5
+  2025-05-05  student-interest  me     112.89 USD           journal/2025/05.ax:5
+  2025-06-05  student-interest  me     111.73 USD           journal/2025/06.ax:5
+  2025-07-05  student-interest  me     110.56 USD           journal/2025/07.ax:9
+  2025-08-05  student-interest  me     109.39 USD           journal/2025/08.ax:6
+  2025-09-05  student-interest  me     108.22 USD           journal/2025/09.ax:6
+  2025-10-05  student-interest  me     107.04 USD           journal/2025/10.ax:11
+  2025-11-05  student-interest  me     105.86 USD           journal/2025/11.ax:6
+  2025-12-05  student-interest  me     104.68 USD           journal/2025/12.ax:6
+
+Flows behind it
+  Date        Flow                                                  Amount  State   From
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-01-05  assets/bank/us-checking → expenses/loan-interest  117.48 USD  actual  journal/2025/01.ax:19
+  2025-02-05  assets/bank/us-checking → expenses/loan-interest  116.34 USD  actual  journal/2025/02.ax:5
+  2025-03-05  assets/bank/us-checking → expenses/loan-interest  115.19 USD  actual  journal/2025/03.ax:5
+  2025-04-05  assets/bank/us-checking → expenses/loan-interest  114.04 USD  actual  journal/2025/04.ax:5
+  2025-05-05  assets/bank/us-checking → expenses/loan-interest  112.89 USD  actual  journal/2025/05.ax:5
+  2025-06-05  assets/bank/us-checking → expenses/loan-interest  111.73 USD  actual  journal/2025/06.ax:5
+  2025-07-05  assets/bank/us-checking → expenses/loan-interest  110.56 USD  actual  journal/2025/07.ax:9
+  2025-08-05  assets/bank/us-checking → expenses/loan-interest  109.39 USD  actual  journal/2025/08.ax:6
+  2025-09-05  assets/bank/us-checking → expenses/loan-interest  108.22 USD  actual  journal/2025/09.ax:6
+  2025-10-05  assets/bank/us-checking → expenses/loan-interest  107.04 USD  actual  journal/2025/10.ax:11
+  2025-11-05  assets/bank/us-checking → expenses/loan-interest  105.86 USD  actual  journal/2025/11.ax:6
+  2025-12-05  assets/bank/us-checking → expenses/loan-interest  104.68 USD  actual  journal/2025/12.ax:6

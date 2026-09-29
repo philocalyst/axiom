@@ -1,0 +1,53 @@
+$ axiom register by-ben --from 2025-05-25 --today 2026-04-16
+
+Register: assets/owed/by-ben
+
+  Date        With                  Payee  Note                    Amount       Balance
+  ─────────────────────────────────────────────────────────────────────────────────────
+  2025-05-25  opening balance                                                 89.74 USD
+  2025-05-31  assets/bank/checking  ben    #shared-2025-05     -89.74 USD      0.00 USD
+  2025-06-01  assets/bank/checking  ben    #rent-2025-06     1,050.00 USD  1,050.00 USD
+  2025-06-02  assets/bank/checking  ben    #rent-2025-06      -500.00 USD    550.00 USD
+  2025-06-07  liabilities/visa      ben    #shared-2025-06      34.32 USD    584.32 USD
+  2025-06-09  assets/bank/checking  ben    #shared-2025-06      23.33 USD    607.65 USD
+  2025-06-21  liabilities/visa      ben    #shared-2025-06      19.35 USD    627.00 USD
+  2025-06-30  assets/bank/checking  ben    #shared-2025-06     -77.00 USD    550.00 USD
+  2025-07-01  assets/bank/checking  ben    #rent-2025-07     1,050.00 USD  1,600.00 USD
+  2025-07-02  assets/bank/checking  ben    #rent-2025-07    -1,050.00 USD    550.00 USD
+  2025-07-07  liabilities/visa      ben    #shared-2025-07      22.09 USD    572.09 USD
+  2025-07-08  assets/bank/checking  ben    #rent-2025-06      -550.00 USD     22.09 USD
+  2025-07-09  assets/bank/checking  ben    #shared-2025-07      23.33 USD     45.42 USD
+  2025-07-21  liabilities/visa      ben    #shared-2025-07      24.80 USD     70.22 USD
+  2025-07-31  assets/bank/checking  ben    #shared-2025-07     -70.22 USD      0.00 USD
+  2025-08-01  assets/bank/checking  ben    #rent-2025-08     1,050.00 USD  1,050.00 USD
+  2025-08-02  assets/bank/checking  ben    #rent-2025-08    -1,050.00 USD      0.00 USD
+  2025-08-07  liabilities/visa      ben    #shared-2025-08      25.98 USD     25.98 USD
+  2025-08-09  assets/bank/checking  ben    #shared-2025-08      23.33 USD     49.31 USD
+  2025-08-16  liabilities/visa      ben    #trip-2025-08       295.70 USD    345.01 USD
+  2025-08-21  liabilities/visa      ben    #shared-2025-08      39.43 USD    384.44 USD
+  2025-08-24  assets/bank/checking  ben    #trip-2025-08      -295.70 USD     88.74 USD
+  2025-08-31  assets/bank/checking  ben    #shared-2025-08     -88.74 USD      0.00 USD
+  2025-09-01  assets/bank/checking  ben    #rent-2025-09     1,050.00 USD  1,050.00 USD
+  2025-09-02  assets/bank/checking  ben    #rent-2025-09    -1,050.00 USD      0.00 USD
+  2025-09-07  liabilities/visa      ben    #shared-2025-09      26.91 USD     26.91 USD
+  2025-09-09  assets/bank/checking  ben    #shared-2025-09      23.33 USD     50.24 USD
+  2025-09-21  liabilities/visa      ben    #shared-2025-09      26.36 USD     76.60 USD
+  2025-09-30  assets/bank/checking  ben    #shared-2025-09     -76.60 USD      0.00 USD
+  2025-10-01  assets/bank/checking  ben    #rent-2025-10     1,050.00 USD  1,050.00 USD
+  2025-10-02  assets/bank/checking  ben    #rent-2025-10    -1,050.00 USD      0.00 USD
+  2025-10-07  liabilities/visa      ben    #shared-2025-10      32.10 USD     32.10 USD
+  2025-10-09  assets/bank/checking  ben    #shared-2025-10      23.33 USD     55.43 USD
+  2025-10-21  liabilities/visa      ben    #shared-2025-10      20.69 USD     76.12 USD
+  2025-10-31  assets/bank/checking  ben    #shared-2025-10     -76.12 USD      0.00 USD
+  2025-11-01  assets/bank/checking  ben    #rent-2025-11     1,050.00 USD  1,050.00 USD
+  2025-11-02  assets/bank/checking  ben    #rent-2025-11    -1,050.00 USD      0.00 USD
+  2025-11-07  liabilities/visa      ben    #shared-2025-11      28.74 USD     28.74 USD
+  2025-11-09  assets/bank/checking  ben    #shared-2025-11      23.33 USD     52.07 USD
+  2025-11-21  liabilities/visa      ben    #shared-2025-11      33.16 USD     85.23 USD
+  2025-11-30  assets/bank/checking  ben    #shared-2025-11     -85.23 USD      0.00 USD
+  2025-12-01  assets/bank/checking  ben    #rent-2025-12     1,050.00 USD  1,050.00 USD
+  2025-12-02  assets/bank/checking  ben    #rent-2025-12    -1,050.00 USD      0.00 USD
+  2025-12-07  liabilities/visa      ben    #shared-2025-12      29.91 USD     29.91 USD
+  2025-12-09  assets/bank/checking  ben    #shared-2025-12      23.33 USD     53.24 USD
+  2025-12-21  liabilities/visa      ben    #shared-2025-12      27.87 USD     81.11 USD
+  2026-01-03  assets/bank/checking  ben    #shared-2025-12     -81.11 USD      0.00 USD

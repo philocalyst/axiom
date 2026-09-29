@@ -1,0 +1,20 @@
+$ axiom register espp-cash --from 2025-01-01 --today 2026-04-16
+
+Register: assets/espp-cash
+
+  Date        With             Payee  Note         Amount       Balance
+  ─────────────────────────────────────────────────────────────────────
+  2025-01-01  opening balance                                  0.01 USD
+  2025-01-31  income/salary                  1,400.00 USD  1,400.01 USD
+  2025-02-28  income/salary                  1,400.00 USD  2,800.01 USD
+  2025-03-31  income/salary                  1,400.00 USD  4,200.01 USD
+  2025-04-30  income/salary                  1,400.00 USD  5,600.01 USD
+  2025-05-31  income/salary                  1,400.00 USD  7,000.01 USD
+  2025-06-30  income/salary                  1,400.00 USD  8,400.01 USD
+  2025-06-30  assets/etrade                 -8,400.01 USD      0.00 USD
+  2025-07-31  income/salary                  1,400.00 USD  1,400.00 USD
+  2025-08-31  income/salary                  1,400.00 USD  2,800.00 USD
+  2025-09-30  income/salary                  1,400.00 USD  4,200.00 USD
+  2025-10-31  income/salary                  1,400.00 USD  5,600.00 USD
+  2025-11-30  income/salary                  1,400.00 USD  7,000.00 USD
+  2025-12-31  income/salary                  1,400.00 USD  8,400.00 USD

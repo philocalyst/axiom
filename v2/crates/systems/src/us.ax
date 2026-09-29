@@ -1,29 +1,51 @@
 /// United States federal income tax.
 ///
 /// Everyone who `lives us` is under these laws, and so is everything they own.
-/// The laws below watch value arrive and leave, and count what the Internal
-/// Revenue Code calls income into named tallies. At the end of each year one
-/// law turns the tallies into tax, using the brackets below.
+/// A household is governed as one: its members' pay, gains and withholding
+/// count into one return, and a household that files `joint` is taxed on the
+/// sum. The laws below watch value arrive and leave and count what the
+/// Internal Revenue Code calls income into named tallies. The return closes on
+/// April 15 of the next year, and on that day the laws that figure it run: what
+/// the journal recognizes for the year by then counts, so an installment paid in
+/// January for the year before, or an IRA contribution made before the deadline,
+/// is part of it.
 ///
 /// The tallies are the lines of `axiom tax`, and they are the shared vocabulary
-/// of every system under `us`. A system for a particular kind of account adds
-/// to them; a state reads them:
+/// of every system under `us`. A system for a kind of account adds to them, a
+/// state reads them, and a project counts into the ones marked *slot* to bring
+/// a deduction, a credit or a tax this system does not know. The order laws run
+/// in follows what they read, so no file name changes a tax bill:
 ///
-///   wages              gross pay, before anything is deferred
-///   pretax             wages that were deferred and are not taxed this year
-///   interest           interest earned outside a tax-deferred account
-///   dividends          dividends earned outside a tax-deferred account
-///   short-term-gains   gains on things held a year or less
-///   long-term-gains    gains on things held longer than a year
-///   distributions      taxable money that came out of a tax-deferred account
-///   agi                adjusted gross income: the running sum of the above
-///   federal-withheld   tax already paid to the IRS, by an employer or by you
+///   wages                 gross pay, before anything is deferred
+///   pretax                pay deferred or set aside before tax, taken back out
+///   interest              interest earned outside a tax-deferred account
+///   dividends             dividends paid outside a tax-deferred account
+///   short-term-gains      gains on things held a year or less
+///   long-term-gains       gains on things held longer than a year
+///   distributions         taxable money that came out of a tax-deferred account
+///   total-income          the sum of those, gains netted (Form 1040, line 9)
+///   adjustments           slot: deductions above the line, taken from income
+///   agi                   adjusted gross income: total income less adjustments
+///   itemized              slot: itemized deductions, against the standard one
+///   deductions            slot: the larger of the two, and any other deduction
+///   taxable-income        agi less deductions
+///   income-tax            the tax on it, on the ordinary and gains brackets
+///   other-taxes           slot: taxes added to income tax (net investment
+///                         income tax, self-employment tax)
+///   credits               slot: what reduces the tax itself
+///   total-tax             income tax and other taxes, less credits
+///   payments              tax already paid: withheld from pay, or estimated
+///                         `for` the year
 ///
-/// Simplified on purpose: this is the standard deduction and the ordinary and
-/// capital-gains brackets, nothing else. It leaves out itemized deductions,
-/// credits, payroll tax, the net investment income tax and the alternative
-/// minimum tax, and treats every dividend as ordinary. Only the `single` and
-/// `joint` filing statuses have figures.
+/// What is owed is the total tax less the payments, and it is owed by April 15
+/// of the next year. When more was paid than is due the amount is negative: the
+/// IRS owes you a refund, and the report shows it as a negative amount owed.
+///
+/// Simplified on purpose. It has the standard deduction, itemizing, the child
+/// tax credit and the net investment income tax, but not payroll tax, the
+/// alternative minimum tax, phase-outs of deductions and credits, or carrying
+/// a capital loss into the next year. Only the `single` and `joint` filing
+/// statuses have figures.
 ///
 /// The figures are community-maintained data. Verify them against the IRS
 /// (irs.gov, "Revenue Procedures" for each year) before relying on them, and
@@ -38,12 +60,58 @@ use std
 /// An account whose growth is not taxed while it stays inside: a 401(k), an
 /// IRA, a 529 plan, an HSA. Tax falls due when value leaves for an account
 /// that is not tax-deferred, so the laws of each kind decide what it costs.
+///
+/// What comes out is income unless it pays what the account is for: `pays`
+/// names the kind of place that may take it tax-free (a 529 pays `education`, an
+/// HSA `medical`). A kind that taxes what comes out by its own rules, as a Roth
+/// IRA does, says `taxed-by-kind true`.
 kind tax-deferred : asset
   deferred
+  has pays          kind
+  has taxed-by-kind bool
+  has deductible    bool
+  pays              tax-deferred
+  taxed-by-kind     false
+  deductible        false
+
+  /// Money paid into an account whose contributions are deductible (a
+  /// traditional IRA, an HSA, a SEP-IRA), from money that was taxed already, comes
+  /// off income (IRC §219, §223(a), §404(h)). A payroll contribution was never
+  /// taxed, so it is not deducted twice. The income limits on deducting an IRA
+  /// contribution are not modelled. It counts for the account's owner: a person's
+  /// own return, so on a joint return hold a deductible account in the household's
+  /// name for its deduction to reach it.
+  ///
+  /// To fix: a contribution that is not deductible (Form 8606) is written with
+  /// `basis` for its full amount, and marked `#nondeductible`.
+  law deduct-contributions
+    on in
+    when self.deductible
+    when from is asset and not from is tax-deferred
+    when not flow is #nondeductible
+    count amount as adjustments
 
 /// Income tax withheld from pay, or paid to the IRS directly. Every arrival
-/// counts as federal tax already paid.
+/// counts as tax already paid for the year it is `for`.
 kind federal-tax : expense
+
+/// Health premiums, commuter benefits and anything else taken from pay before
+/// tax (IRC §125). Pay counts whole, and what goes here comes back out of it.
+kind pretax-benefit : expense
+
+/// Interest on a loan secured by your home (IRC §163(h)): itemized.
+kind mortgage-interest : expense
+
+/// Tax on the home, paid to the county or from escrow (IRC §164): itemized,
+/// with state income tax, up to a cap.
+kind property-tax : expense
+
+/// Gifts to a charity (IRC §170): itemized.
+kind charity : expense
+
+/// Your main home, held for your own use. A loss on it is not deductible, and
+/// part of a gain on it is excluded when it is sold (IRC §121).
+kind home : personal-use
 
 /// The Internal Revenue Service.
 entity irs : government
@@ -53,89 +121,248 @@ entity irs : government
 
 /// Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a
 /// place of kind `wages` counts, wherever it lands: in checking, in a 401(k)
-/// or in withholding. So the total is the gross pay on the pay stub, and the
-/// account that took a pre-tax deferral takes it back out of `agi`.
+/// or in withholding, so the total is the gross pay on the pay stub.
+///
+/// To fix: if an arrival is not pay, book it under a place that is not of kind
+/// `wages`.
 law count-wages
   on in
   when from is wages
   count amount as wages
-  count amount as agi
+  count amount as total-income
+
+/// Pay that goes into a tax-deferred account, or to a pre-tax benefit, is pay
+/// you chose not to receive, so it is not taxed this year (IRC §125,
+/// §402(e)(3)). The wages law counted it as pay; this law counts it as
+/// deferred and takes it back out of income. Roth deferrals are not modelled.
+///
+/// To fix: pay that was taxed already is not pre-tax: send it from an account,
+/// not from the paycheck.
+law exclude-pretax
+  on in
+  when from is wages
+  when to is tax-deferred | pretax-benefit
+  count amount as pretax
+  count -amount as total-income
 
 /// Interest is ordinary income in the year it is earned (IRC §61(a)(4)),
 /// except inside a tax-deferred account, which is taxed when money leaves it.
+///
+/// To fix: if it is not income, book it under a place that is not of kind
+/// `interest`.
 law count-interest
   on in
   when from is interest
   when not to is tax-deferred
   count amount as interest
-  count amount as agi
+  count amount as total-income
+  count amount as investment-income
 
 /// Dividends are income in the year they are paid (IRC §61(a)(7)), except
 /// inside a tax-deferred account. All dividends are treated as ordinary; a
 /// qualified dividend would be taxed at the lower capital-gains rates.
+///
+/// To fix: if it is not a dividend, book it under a place that is not of kind
+/// `dividends`.
 law count-dividends
   on in
   when from is dividends
   when not to is tax-deferred
   count amount as dividends
-  count amount as agi
+  count amount as total-income
+  count amount as investment-income
 
 /// A gain on something held for a year or less is taxed as ordinary income
 /// (IRC §1222). A tax-deferred account realizes no gains of its own: what
-/// leaves it is counted by the laws of its kind.
+/// leaves it is counted by the law for distributions, and foreign currency
+/// by the one for currency gains. A loss on something you keep for your own use
+/// is not deductible (IRC §165(c)).
+///
+/// To fix: if the sale was not a disposal, move the holding between your own
+/// accounts instead of out of them.
 law count-short-term-gains
   on gain
   when gain != empty
   when held <= 1y
+  when amount.unit == USD or not amount.unit is currency
   when not from is tax-deferred
+  when gain > empty or not from is personal-use
   count gain as short-term-gains
-  count gain as agi
 
 /// A gain on something held for more than a year is taxed at the lower
-/// capital-gains rates (IRC §1(h)). A loss lowers `agi` the same way; the
-/// yearly cap of 3,000 USD on deducting net losses is not modelled.
+/// capital-gains rates (IRC §1(h)), and a loss offsets other gains and up to
+/// 3,000 USD of other income (IRC §1211). The sale of a home held two years or
+/// more excludes the first 250,000 USD of gain, or 500,000 USD on a joint return
+/// (IRC §121). Only how long it was held is tested, not that you lived there.
+///
+/// To fix: if the sale was not a disposal, move the holding between your own
+/// accounts instead of out of them.
 law count-long-term-gains
   on gain
   when gain != empty
   when held > 1y
+  when amount.unit == USD or not amount.unit is currency
   when not from is tax-deferred
-  count gain as long-term-gains
-  count gain as agi
+  when gain > empty or not from is personal-use
+  let excluded = if from is home and held >= 2y then min(gain, home-exclusion[year, owner.filing]) else empty
+  count gain - excluded as long-term-gains
 
-/// Tax withheld from pay, or paid in installments, is credited against the
-/// tax owed for the year. Send money to a place of kind `federal-tax`, or let
-/// a paycheck leg do it.
-law credit-withholding
+/// Money in another currency is cash, not an investment: spending a euro is not
+/// a sale of a lot (dollars are the base currency and are not concerned). Converting or spending it realizes a gain against the dollars
+/// it cost, and a personal transaction's gain of 200 USD or less is not income
+/// (IRC §988(e)); above that the whole gain is ordinary income. A loss on personal
+/// currency is not deductible. The test is per disposal of one parcel, so a
+/// conversion that relieves several parcels is judged parcel by parcel.
+///
+/// To fix: this law only reads gains on units of a `currency` commodity. If the
+/// asset is not money, declare its commodity with another kind.
+law count-currency-gains
+  on gain
+  when amount.unit is currency
+  when amount.unit != USD
+  when not from is tax-deferred
+  when gain > 200 USD
+  count gain as short-term-gains
+
+/// What comes out of a tax-deferred account is income in the year it comes out
+/// (IRC §402(a), §408(d), §529(c)(3), §223(f)): the part that was never taxed,
+/// which is the gain over what was put in. Paying what the account is for
+/// (`pays`), or moving the money to another tax-deferred account, is not a
+/// distribution, and neither is the market changing what the account is worth.
+///
+/// To fix: pay the expense straight from the account, or, if this is a
+/// reimbursement, mark the withdrawal `!` with the reason, which waives the
+/// penalty but not this income.
+law count-distributions
+  on gain
+  when from is tax-deferred
+  when gain > empty
+  when not from.taxed-by-kind
+  when not to is market | tax-deferred | from.pays
+  count gain as distributions
+  count gain as total-income
+
+/// Tax withheld from pay, or paid in installments, is credited against the tax
+/// owed for the year the payment is `for`, so one made in January for the year
+/// before counts for that year.
+///
+/// To fix: send the payment to a place of kind `federal-tax`, and say what year
+/// it is for with `for 2025`.
+law count-payments
   on in
   when to is federal-tax
-  count amount as federal-withheld
+  count amount as payments
 
 
-// ─── The tax itself ─────────────────────────────────────────────────────────
+// ─── Itemizing ──────────────────────────────────────────────────────────────
+
+/// Mortgage interest and gifts to charity are itemized deductions.
+///
+/// To fix: book the payment under a place of kind `mortgage-interest` or
+/// `charity`, or count what a project knows into `itemized`.
+law itemize-interest-and-gifts
+  on in
+  when to is mortgage-interest | charity
+  count amount as itemized
+
+/// Property tax is a state and local tax. So is state income tax, which the
+/// state systems count when it is withheld or paid.
+///
+/// To fix: book the payment under a place of kind `property-tax`.
+law count-property-tax
+  on in
+  when to is property-tax
+  count amount as salt
+
+/// State and local taxes are deducted only up to a cap (IRC §164(b)(6)).
+///
+/// To fix: the cap is a fact of the year, not a choice: itemize by other means
+/// or take the standard deduction.
+law cap-salt
+  each year closing 04-15
+  count min(tally(salt), salt-cap[year, owner.filing]) as itemized
+
+
+// ─── The return ─────────────────────────────────────────────────────────────
+
+/// Gains and losses are netted before they are taxed (IRC §1222): a loss of one
+/// term first offsets the gain of the other, and only what is left counts. A
+/// net loss reduces income by at most 3,000 USD, and the rest is not carried
+/// into the next year here. Adjusted gross income is total income less the
+/// adjustments projects and systems counted.
+///
+/// To fix: to change what counts, change what was counted: `axiom why agi`
+/// lists every flow and law behind it.
+law adjusted-gross-income
+  each year closing 04-15
+  let short = tally(short-term-gains)
+  let long = tally(long-term-gains)
+  let short-net = max(short + min(long, empty), empty)
+  let long-net = max(long + min(short, empty), empty)
+  let loss = min(max(-(short + long), empty), capital-loss-limit[year])
+  count long-net as net-long-term-gains
+  count short-net + long-net as investment-income
+  count tally(total-income) + short-net + long-net - loss - tally(adjustments) as agi
+
+/// The deduction is the larger of the standard deduction for the filing status
+/// and what was itemized (IRC §63). A project adds another deduction, such as
+/// the qualified business income deduction, by counting it into `deductions`.
+///
+/// To fix: set `filing` on the person or household, and count itemized amounts
+/// into `itemized`.
+law standard-or-itemized
+  each year closing 04-15
+  count max(standard-deduction[year, owner.filing], tally(itemized)) as deductions
+
+/// A credit for each qualifying child under 17 (IRC §24). Set `children` on the
+/// person or household. The phase-out above 200,000 USD of income (400,000 USD
+/// joint) and the refundable limit are not modelled: the credit is treated as
+/// reducing the tax whole.
+///
+/// To fix: `children` counts children, and does not age: change it when a child
+/// turns 17.
+law child-tax-credit
+  each year closing 04-15
+  count child-credit[year] * owner.children as credits
+
+/// The net investment income tax is 3.8% of net investment income, or of the
+/// income above a threshold if that is less (IRC §1411). Interest, dividends
+/// and net gains count; a project counts rent or anything else passive into
+/// `investment-income`.
+///
+/// To fix: income above the threshold is what triggers it: adjustments and
+/// deductions lower it, and nothing else does.
+law net-investment-income-tax
+  each year closing 04-15
+  let excess = max(tally(agi) - investment-threshold[year, owner.filing], empty)
+  count 3.8% * min(tally(investment-income), excess) as other-taxes
 
 /// Federal income tax for the year (IRC §1), figured from the tallies above.
 ///
-/// Ordinary income is `agi` without long-term gains. It is reduced by the
-/// standard deduction and taxed on the ordinary brackets. Long-term gains are
-/// stacked on top of it and taxed on the capital-gains brackets. Tax already
-/// withheld or paid is credited, and the rest is owed by April 15 of the next
-/// year (Form 1040). A refund, when more was withheld than owed, is not booked.
+/// Ordinary income is adjusted gross income without net long-term gains. It is
+/// reduced by the deductions and taxed on the ordinary brackets. Long-term
+/// gains are stacked on top of it and taxed on the capital-gains brackets. Other
+/// taxes are added, and credits taken off, to give the total tax. What was paid
+/// for the year is set against it, and the rest is owed by April 15 (Form 1040).
+/// When more was paid than is due, the amount is negative: a refund.
 ///
-/// The brackets depend on `filing`, so set `filing single` or `filing joint`
-/// on the person who lives here.
+/// To fix: the brackets depend on `filing`: set `filing single` or `filing joint`
+/// on the person or household that lives here.
 law federal-income-tax
-  each year
-  let deduction = standard-deduction[year, owner.filing]
-  let ordinary-income = tally(agi) - tally(long-term-gains)
+  each year closing 04-15
+  let deduction = tally(deductions)
+  let ordinary-income = tally(agi) - tally(net-long-term-gains)
   let taxable = max(tally(agi) - deduction, empty)
   let taxable-ordinary = min(max(ordinary-income - deduction, empty), taxable)
   let ordinary-tax = progressive(ordinary[year, owner.filing], taxable-ordinary)
   let tax-through-gains = progressive(capital-gains[year, owner.filing], taxable)
   let tax-below-gains = progressive(capital-gains[year, owner.filing], taxable-ordinary)
   let liability = ordinary-tax + tax-through-gains - tax-below-gains
+  let total = liability + tally(other-taxes) - tally(credits)
   count taxable as taxable-income
   count liability as income-tax
-  owe max(liability - tally(federal-withheld), empty) to irs by date(year + 1, 4, 15) as federal-income-tax
+  count total as total-tax
+  owe total - tally(payments) to irs by date(year + 1, 4, 15) as federal-income-tax
 
 
 // ─── Figures ────────────────────────────────────────────────────────────────
@@ -171,3 +398,34 @@ param standard-deduction
   2025 joint  31_500 USD
   2026 single 16_100 USD
   2026 joint  32_200 USD
+
+// The cap on the state and local tax deduction (IRC §164(b)(6)), raised by
+// Public Law 119-21 from 2025. Its phase-down above 500,000 USD is not modelled.
+// verify: the 2026 figure.
+param salt-cap
+  2024 single 10_000 USD
+  2024 joint  10_000 USD
+  2025 single 40_000 USD
+  2025 joint  40_000 USD
+  2026 single 40_400 USD
+  2026 joint  40_400 USD
+
+// The child tax credit per child (IRC §24), raised by Public Law 119-21.
+param child-credit
+  2024 2_000 USD
+  2025 2_200 USD
+  2026 2_200 USD
+
+// The gain on a home that is excluded from tax (IRC §121).
+param home-exclusion
+  2024 single 250_000 USD
+  2024 joint  500_000 USD
+
+// The most a net capital loss lowers other income in a year (IRC §1211(b)).
+param capital-loss-limit
+  2024 3_000 USD
+
+// Where net investment income tax starts (IRC §1411(b)). Not indexed.
+param investment-threshold
+  2024 single 200_000 USD
+  2024 joint  250_000 USD

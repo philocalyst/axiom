@@ -1,0 +1,26 @@
+$ axiom why me --today 2026-04-16
+
+Why me
+
+Places
+  Place                              Holds
+  ────────────────────────────────────────
+  assets/bank/us-checking    18,805.75 USD
+  assets/bank/us-savings     18,559.94 USD
+  assets/de/girokonto         7,481.00 EUR
+  assets/de/kaution           3,600.00 EUR
+  assets/de/tagesgeld        20,482.77 EUR
+  assets/retirement/us-401k  66,600.00 USD
+  liabilities/student-loan   27,413.82 USD
+  liabilities/visa               53.48 USD
+
+Governed by
+  Law                   When       Explains                                                                   Written
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Limits
+    fbar                each year  FBAR: the highest values of the year, account by account, added up. Each…  accounts.ax:190
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Prices
+    federal-income-tax  each year  Federal income tax for the year (IRC §1), figured from the tallies above.  us.ax:351
+  · 7 more laws only count, into adjustments, agi, credits, deductions, feie-excluded,
+    feie-stacking-tax, investment-income, itemized, net-long-term-gains, other-taxes.

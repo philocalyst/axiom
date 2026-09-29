@@ -1,0 +1,21 @@
+$ axiom register by-cleo --from 2025-10-20 --today 2026-04-16
+
+Register: assets/owed/by-cleo
+
+  Date        With                  Payee  Note                    Amount       Balance
+  ─────────────────────────────────────────────────────────────────────────────────────
+  2025-10-20  opening balance                                                 55.43 USD
+  2025-10-21  liabilities/visa      cleo   #shared-2025-10      20.69 USD     76.12 USD
+  2025-10-31  assets/bank/checking  cleo   #shared-2025-10     -76.12 USD      0.00 USD
+  2025-11-01  assets/bank/checking  cleo   #rent-2025-11     1,050.00 USD  1,050.00 USD
+  2025-11-05  assets/bank/checking  cleo   #rent-2025-11    -1,000.00 USD     50.00 USD
+  2025-11-07  liabilities/visa      cleo   #shared-2025-11      28.74 USD     78.74 USD
+  2025-11-09  assets/bank/checking  cleo   #shared-2025-11      23.33 USD    102.07 USD
+  2025-11-21  liabilities/visa      cleo   #shared-2025-11      33.16 USD    135.23 USD
+  2025-11-30  assets/bank/checking  cleo   #shared-2025-11     -85.23 USD     50.00 USD
+  2025-12-01  assets/bank/checking  cleo   #rent-2025-12     1,050.00 USD  1,100.00 USD
+  2025-12-05  assets/bank/checking  cleo   #rent-2025-12    -1,050.00 USD     50.00 USD
+  2025-12-07  liabilities/visa      cleo   #shared-2025-12      29.91 USD     79.91 USD
+  2025-12-09  assets/bank/checking  cleo   #shared-2025-12      23.33 USD    103.24 USD
+  2025-12-21  liabilities/visa      cleo   #shared-2025-12      27.87 USD    131.11 USD
+  2026-01-05  assets/bank/checking  cleo   #shared-2025-12     -81.11 USD     50.00 USD

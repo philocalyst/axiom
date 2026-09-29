@@ -1,41 +1,41 @@
-2025-07-01 checking -> 3_150.00 USD / landlord
-  rent                    1_050.00 USD
-  roommates/ben           1_050.00 USD
-  roommates/cleo          1_050.00 USD
-2025-07-02 ben -> checking 1_050 USD #rent-2025-07
+2025-07-01 checking -> 3_150.00 USD #rent-2025-07 due 2025-07-08
+  rent                    1_050.00 USD / landlord
+  ben                     1_050.00 USD
+  cleo                    1_050.00 USD
+2025-07-02 ben -> checking 1_050.00 USD for #rent-2025-07
 2025-07-03 checking -> car 128 USD / progressive
 2025-07-03 income/donations -> collective-checking 40 USD
 
 /// Reimbursing the treasurer for the hose (receipt #14). The money leaves for my personal account, not for a garden supply.
 2025-07-03 collective-checking -> checking 129.99 USD
-2025-07-05 cleo -> checking 1050 USD #rent-2025-07
+2025-07-05 cleo -> checking 1_050.00 USD for #rent-2025-07
 2025-07-06 income/tips -> wallet 237.09 USD
 2025-07-06 wallet -> dining 19.75 USD
-2025-07-07 visa -> 66.27 USD
+2025-07-07 visa -> 66.27 USD #shared-2025-07 due 2025-08-21
   groceries               22.09 USD
-  roommates/ben           22.09 USD
-  roommates/cleo          22.09 USD
+  ben                     22.09 USD
+  cleo                    22.09 USD
 
 /// Ben catches up on June.
-2025-07-08 ben -> checking 550 USD #rent-2025-06
+2025-07-08 ben -> checking 550 USD for #rent-2025-06
 2025-07-08 visa -> phone 45 USD / mint-mobile
-2025-07-09 checking -> 69.99 USD / fiberco
-  utilities               23.33 USD
-  roommates/ben           23.33 USD
-  roommates/cleo          23.33 USD
+2025-07-09 checking -> 69.99 USD #shared-2025-07 due 2025-08-23
+  utilities               23.33 USD / fiberco
+  ben                     23.33 USD
+  cleo                    23.33 USD
 2025-07-11 lantern -> 1_381.73 USD   // 1_073.00 wages + 308.73 card tips
   taxes/federal           171.33 USD
   taxes/payroll           105.70 USD
   checking                ...
 
 /// The reimbursement arrives with the July 11 pay.
-2025-07-11 #reimb-2025-06 settled
-2025-07-12 roommates/ben -> utilities 47.53 USD / power-co   // my third of 142.60
+2025-07-11 lantern-owes -> checking 138.50 USD for #expense-2025-06
+2025-07-12 owed-to-ben -> utilities 47.53 USD #power-2025-07 due 2025-08-11   // my third of 142.60, from power-co
 2025-07-12 checking -> car 330.50 USD / carmax-finance
 2025-07-13 income/tips -> wallet 228.12 USD
 2025-07-13 wallet -> dining 11.65 USD
 2025-07-14 visa -> dining 49.58 USD
-2025-07-15 riley -> checking 250 USD #loan-riley
+2025-07-15 riley -> checking 250 USD for #loan-riley
 2025-07-15 checking -> health 189.40 USD / marketplace-plan
 2025-07-17 visa -> groceries 67.53 USD / farmers-market
 2025-07-18 wallet -> transport 7.36 USD
@@ -44,10 +44,10 @@
 /// Fencing against the deer.
 2025-07-19 collective-checking -> fencing 640.00 USD / northside-lumber
 2025-07-20 income/tips -> wallet 150.35 USD
-2025-07-21 visa -> 74.41 USD
+2025-07-21 visa -> 74.41 USD #shared-2025-07 due 2025-09-04
   groceries               24.81 USD
-  roommates/ben           24.80 USD
-  roommates/cleo          24.80 USD
+  ben                     24.80 USD
+  cleo                    24.80 USD
 2025-07-22 checking -> visa 698.47 USD
 2025-07-24 wallet -> checking 700 USD
 2025-07-25 lantern -> 1_422.07 USD   // 1_036.00 wages + 386.07 card tips
@@ -56,16 +56,19 @@
   checking                ...
 
 /// Cleo's Costco run, 142.15 USD, for all three of us: my third is what I owe her.
-2025-07-26 roommates/cleo -> groceries 47.38 USD / costco
+2025-07-26 owed-to-cleo -> groceries 47.38 USD #costco-2025-07 due 2025-08-25   // costco
 2025-07-26 visa -> clothing 68.36 USD
 2025-07-27 income/tips -> wallet 261.56 USD
 2025-07-27 wallet -> dining 12.94 USD
 2025-07-28 checking -> savings 700 USD
-2025-07-31 checking -> roommates/ben 527.31 USD
-
-2025-07-31 cleo -> checking 22.84 USD
-2025-07-31 roommates/ben = 0.00 USD
-2025-07-31 roommates/cleo = 0.00 USD
+2025-07-31 ben -> checking 70.22 USD for #shared-2025-07
+2025-07-31 cleo -> checking 70.22 USD for #shared-2025-07
+2025-07-31 checking -> owed-to-ben 47.53 USD for #power-2025-07
+2025-07-31 checking -> owed-to-cleo 47.38 USD for #costco-2025-07
+2025-07-31 by-ben = 0.00 USD
+2025-07-31 by-cleo = 0.00 USD
+2025-07-31 owed-to-ben = 0.00 USD
+2025-07-31 owed-to-cleo = 0.00 USD
 2025-07-31 visa = 399.31 USD
 2025-07-31 checking = 6_378.46 USD
 2025-07-31 savings = 6_600.00 USD

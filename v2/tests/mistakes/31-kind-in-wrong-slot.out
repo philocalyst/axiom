@@ -1,15 +1,15 @@
 error[kind-sort]: kind `fund` is a commodity kind, so it cannot describe the asset account `assets/brokerage`
-   ╭─[31-kind-in-wrong-slot.ax:8:28]
-   │
- 8 │ account assets/brokerage : fund
-   │                            ──┬─
-   │                              ╰── commodity kind
-   │
-   ├─[std.ax:99:6] (built in)
-   │
-99 │ kind fund : security
-   │      ──┬─
-   │        ╰── declared here
+    ╭─[31-kind-in-wrong-slot.ax:8:28]
+    │
+  8 │ account assets/brokerage : fund
+    │                            ──┬─
+    │                              ╰── commodity kind
+    │
+    ├─[std.ax:128:6] (built in)
+    │
+128 │ kind fund : security
+    │      ──┬─
+    │        ╰── declared here
 
 ✗ 1 error
 [exit status 1]

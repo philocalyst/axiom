@@ -1,83 +1,39 @@
-$ axiom available --today 2026-01-06
+$ axiom available --today 2026-04-16
 
-Available on 2026-01-06
+Available on 2026-04-16
 
 What you can spend
-  Liquid now                      Amount
+  In hand                         Amount
   ──────────────────────────────────────
-  Money in liquid places  164,334.90 USD
-    assets/bank/checking   69,910.07 USD
+  Money in hand           179,921.72 USD
+    assets/bank/checking   84,554.08 USD
     assets/bank/savings    83,100.79 USD
     assets/espp-cash        8,400.00 USD
-    assets/fidelity         2,738.20 USD
-    assets/schwab             185.84 USD
+    assets/fidelity         3,228.01 USD
+    assets/schwab             638.84 USD
+  Held for others          -8,400.00 USD
+    held for espp          -8,400.00 USD
   ──────────────────────────────────────
-  Available to spend      164,334.90 USD
+  Available to spend      171,521.72 USD
 
 What it would take to reach the rest
-  Holding                                                Liquid in           Value          Costs             Net
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/coinbase (0.13 BTC)                             1d          11,848.89 USD                  11,848.89 USD
-    counts 40.18 USD as agi
-    counts -742.13 USD as short-term-gains
-    counts 782.31 USD as long-term-gains
-    realizes a gain of 40.18 USD
-  assets/coinbase (0.95668225 ETH)                       1d           2,963.94 USD                   2,963.94 USD
-    counts 1,277.45 USD as agi
-    counts 1,277.45 USD as short-term-gains
-    realizes a gain of 1,277.45 USD
-  assets/etrade (295.5686 NWND)                          1d          56,453.60 USD                  56,453.60 USD
-    counts 7,397.21 USD as agi
-    counts 7,397.21 USD as short-term-gains
-    realizes a gain of 7,397.21 USD
-  assets/fidelity (64.4579 VTI)                          2d          21,516.05 USD                  21,516.05 USD
-    counts 2,631.34 USD as agi
-    counts 1,782.06 USD as short-term-gains
-    counts 849.28 USD as long-term-gains
-    realizes a gain of 2,631.34 USD
-  assets/fidelity (106.4467 VXUS)                        2d           8,462.51 USD                   8,462.51 USD
-    counts 962.53 USD as agi
-    counts 962.53 USD as short-term-gains
-    realizes a gain of 962.53 USD
-  assets/fidelity (493.8271 SCHH)                        2d          10,320.99 USD                  10,320.99 USD
-    counts -79.01 USD as agi
-    counts -79.01 USD as short-term-gains
-    realizes a gain of -79.01 USD
-  assets/fidelity (16.3264 MSFT)                         1d           7,901.98 USD                   7,901.98 USD
-    counts 1,042.05 USD as agi
-    counts 682.89 USD as short-term-gains
-    counts 359.16 USD as long-term-gains
-    realizes a gain of 1,042.05 USD
-  assets/fidelity (19.7153 UNH)                          1d           6,305.15 USD                   6,305.15 USD
-    counts -3,395.52 USD as agi
-    counts -3,395.52 USD as short-term-gains
-    realizes a gain of -3,395.52 USD
-  assets/fidelity (41.9695 FAST)                         1d           1,766.92 USD                   1,766.92 USD
-    counts 83.52 USD as agi
-    counts 83.52 USD as long-term-gains
-    realizes a gain of 83.52 USD
-  assets/retirement                                      5d         117,733.28 USD  28,844.65 USD   88,888.63 USD
-    counts 117,733.28 USD as agi
-    federal-income-tax, owed to irs by 2027-04-15                                   17,071.32 USD
-    counts 101,633.28 USD as taxable-income
-    counts 17,071.32 USD as income-tax
-    counts 117,733.28 USD as distributions
-    early-withdrawal-penalty, owed to irs by 2026-01-06                             11,773.33 USD
-    realizes a gain of 117,733.28 USD
-  assets/schwab (38.2029 VXUS)                           2d           3,037.13 USD                   3,037.13 USD
-    counts 537.13 USD as agi
-    counts 537.13 USD as long-term-gains
-    realizes a gain of 537.13 USD
-  assets/schwab (33.4448 BND)                            2d           2,486.96 USD                   2,486.96 USD
-    counts -13.04 USD as agi
-    counts -13.04 USD as long-term-gains
-    realizes a gain of -13.04 USD
-  assets/wallet (5.08049844 ETH)                         1d          15,740.10 USD                  15,740.10 USD
-    counts 6,666.11 USD as agi
-    counts 6,666.11 USD as short-term-gains
-    realizes a gain of 6,666.11 USD
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today                                    266,537.50 USD  28,844.65 USD  237,692.85 USD
-  · Each line withdraws the whole holding into assets/bank/savings on 2026-01-06 and runs the year
-    out through the laws. Costs are what they would owe because of it, as if the year ended today:
-    penalties, and the tax on any income it creates.
+  Holding                           Liquid in           Value           Cost             Net  Because
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/coinbase (0.13 BTC)        1d          11,848.89 USD                  11,848.89 USD
+  assets/coinbase (0.95668225 ETH)  1d           2,963.94 USD                   2,963.94 USD
+  assets/etrade (295.5686 NWND)     1d          56,453.60 USD                  56,453.60 USD
+  assets/fidelity (94.8886 VTI)     2d          31,673.81 USD                  31,673.81 USD
+  assets/fidelity (106.4467 VXUS)   2d           8,462.51 USD                   8,462.51 USD
+  assets/fidelity (493.8271 SCHH)   2d          10,320.99 USD                  10,320.99 USD
+  assets/fidelity (28.3264 MSFT)    1d          13,709.98 USD                  13,709.98 USD
+  assets/fidelity (19.7153 UNH)     1d           6,305.15 USD                   6,305.15 USD
+  assets/fidelity (41.9694 FAST)    1d           1,766.91 USD                   1,766.91 USD
+  assets/retirement                 5d         117,733.28 USD  11,773.33 USD  105,959.95 USD  driven by early-withdrawal-penalty 11,773.33 USD
+  assets/schwab (38.2029 VXUS)      2d           3,037.13 USD                   3,037.13 USD
+  assets/schwab (133.4448 BND)      2d           9,922.96 USD                   9,922.96 USD
+  assets/wallet (5.08049844 ETH)    1d          15,740.10 USD                  15,740.10 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today               289,939.25 USD  11,773.33 USD  278,165.92 USD
+  · Each line withdraws the whole holding into assets/bank/checking on 2026-04-16 and runs the year
+    out through the laws. Cost is what they would then owe beyond what they already will: penalties,
+    and the tax on any income it creates.

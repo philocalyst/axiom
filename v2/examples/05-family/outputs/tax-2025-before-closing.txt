@@ -1,0 +1,45 @@
+$ axiom tax 2025 --today 2026-01-05
+
+Taxes 2025
+
+Counted
+  Tally                           Amount  From
+  ───────────────────────────────────────────────────
+  family · us
+    itemized               27,977.32 USD  25 sources
+    wages                 247,440.07 USD  378 sources
+    total-income          213,985.67 USD  516 sources
+    pretax                 36,946.36 USD  123 sources
+    payments               27,594.00 USD  51 sources
+    interest                2,479.02 USD  12 sources
+    investment-income       2,479.02 USD  12 sources
+    distributions           1,012.94 USD  3 sources
+  ───────────────────────────────────────────────────
+    family · us/529
+      529-contributions     6,000.00 USD  13 sources
+  ───────────────────────────────────────────────────
+    family · us/ca
+      ca-withheld          11,239.60 USD  51 sources
+      salt                 20,907.75 USD  105 sources
+  ───────────────────────────────────────────────────
+    jordan · us/401k
+      elective-deferrals    5,846.36 USD  26 sources
+  ───────────────────────────────────────────────────
+  me · project
+    dcfsa-contributions     5,000.00 USD  24 sources
+  ───────────────────────────────────────────────────
+    me · us/401k
+      elective-deferrals   15,000.00 USD  25 sources
+  ───────────────────────────────────────────────────
+    me · us/hsa
+      hsa-contributions     7,000.00 USD  25 sources
+
+Owed
+  Owed                                    To   Due            Amount  From
+  ─────────────────────────────────────────────────────────────────────────────
+    family · us/529
+      nonqualified-529-penalty (penalty)  irs  2026-04-15  39.29 USD  2 sources
+  ─────────────────────────────────────────────────────────────────────────────
+  Total owed                                               39.29 USD
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
+  · A penalty is the price of a violated law: it is owed instead of the law failing.

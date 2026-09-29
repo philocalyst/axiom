@@ -1,123 +1,39 @@
-$ axiom check --today 2026-02-10
+$ axiom check --today 2026-04-16
 
-✓ 403 flows · 46 places · 21 laws enforced · net worth 64,421.58 USD
-warning[law]: law `budget` does not hold for expenses/business/software
-    ╭─[journal/2025/02.ax:21:1]
-    │
- 21 │ 2025-02-12..2026-02-11 business-card -> software 119.88 USD / dropbox
-    │ ──────────────────────────────────┬──────────────────────────────────
-    │                                   ╰── this flow: 119.88 USD into expenses/business/software
-    │
-    ├─[accounts.ax:110:3]
-    │
-109 │ account expenses/business/software
-110 │   budget 130 USD monthly
-    │   ───────────┬──────────
-    │              ╰── 197.07 USD
-    │
-    = help: at most 52.81 USD more can go in this month
-────╯
+warning[overdue]: northpeak still owes 2,600.00 USD, 106 days past its due day 2025-12-31
+  ╭─[journal/2025/12.ax:4:1]
+  │
+4 │ 2025-12-01 design -> northpeak 2_600 USD #inv-2025-n3 due 30d
+  │ ──────────────────────────────┬──────────────────────────────
+  │                               ╰── claimed on 2025-12-01, due 2025-12-31
+  │
+  = note: open for 4m15d since it was made
+  = help: if it has been paid, record the payment `for` the claim's code
 
-warning[law]: law `budget` does not hold for expenses/business/software
-    ╭─[journal/2025/02.ax:27:1]
-    │
- 27 │ 2025-02-14 business-card -> software 15 USD / figma
-    │ ─────────────────────────┬─────────────────────────
-    │                          ╰── this flow: 15.00 USD into expenses/business/software
-    │
-    ├─[accounts.ax:110:3]
-    │
-109 │ account expenses/business/software
-110 │   budget 130 USD monthly
-    │   ───────────┬──────────
-    │              ╰── 212.07 USD
-    │
-    = help: nothing more can go in this month: it is already 67.07 USD over
-────╯
-
-warning[law]: law `budget` does not hold for expenses/business/software
-    ╭─[journal/2025/02.ax:35:1]
-    │
- 35 │ 2025-02-22 business-card -> software 21 USD / freshbooks
-    │ ────────────────────────────┬───────────────────────────
-    │                             ╰── this flow: 21.00 USD into expenses/business/software
-    │
-    ├─[accounts.ax:110:3]
-    │
-109 │ account expenses/business/software
-110 │   budget 130 USD monthly
-    │   ───────────┬──────────
-    │              ╰── 233.07 USD
-    │
-    = help: nothing more can go in this month: it is already 82.07 USD over
-────╯
-
-warning[law]: law `budget` does not hold for expenses/food
-    ╭─[journal/2025/04.ax:37:1]
-    │
- 37 │ 2025-04-27 personal-checking -> groceries 127.58 USD / trader-joes
-    │ ─────────────────────────────────┬────────────────────────────────
-    │                                  ╰── this flow: 127.58 USD into expenses/food/groceries
-    │
-    ├─[accounts.ax:165:3]
-    │
-164 │ account expenses/food
-165 │   budget 550 USD monthly
-    │   ───────────┬──────────
-    │              ╰── 572.85 USD
-    │
-    = help: at most 104.73 USD more can go in this month
-────╯
-
-warning[law]: law `budget` does not hold for expenses/food
-    ╭─[journal/2025/09.ax:36:1]
-    │
- 36 │ 2025-09-27 personal-checking -> groceries 120.15 USD / trader-joes
-    │ ─────────────────────────────────┬────────────────────────────────
-    │                                  ╰── this flow: 120.15 USD into expenses/food/groceries
-    │
-    ├─[accounts.ax:165:3]
-    │
-164 │ account expenses/food
-165 │   budget 550 USD monthly
-    │   ───────────┬──────────
-    │              ╰── 552.97 USD
-    │
-    = help: at most 117.18 USD more can go in this month
-────╯
-
-warning[law]: estimated tax: second installment short
-   ╭─[tax.ax:62:1]
+warning[overdue]: orbit-labs still owes 6,000.00 USD, 7 days past its due day 2026-04-09
+   ╭─[journal/2026/03.ax:13:1]
    │
-62 │ law estimate-2-2025
+13 │ 2026-03-10 design -> orbit-labs 6_000 USD #inv-2026-o1 due 30d
+   │ ───────────────────────────────┬──────────────────────────────
+   │                                ╰── claimed on 2026-03-10, due 2026-04-09
+   │
+   = note: open for 1m6d since it was made
+   = help: if it has been paid, record the payment `for` the claim's code
+
+warning[estimate-2-2025]: estimated tax: second installment short: 2,400.00 USD in 2025 against a minimum of 4,600.00 USD, short by 2,200.00 USD
+   ╭─[tax.ax:71:1]
+   │
+71 │ law estimate-2-2025
    │ ─────────┬─────────
    │          ╰── checked for me on 2025-06-16
-63 │   by 2025-06-16
-64 │   warn tally(federal-withheld) >= prior-year-tax[2025] * 50% "estimated tax: second installment short"
-   │        ───────────┬──────────────┬──────────┬──┬────────────
-   │                   │              │          │  ╰── 4,600.00 USD
-   │                   │              │          ╰── 9,200.00 USD
-   │                   │              ╰── false
-   │                   ╰── 2,400.00 USD
+72 │   by 2025-06-16
+73 │   warn tally(payments) >= prior-year-tax[2025] * 50% "estimated tax: second installment shor…
+   │        ───────┬───────    ─────────────┬────────────
+   │               │                        ╰── 4,600.00 USD
+   │               ╰── 2,400.00 USD
    │
    = note: Second installment. June 15 2025 fell on a Sunday, so it was due Monday the 16th.
-───╯
+   = help: pay the installment `for` the year to a place of kind `federal-tax`.
 
-warning[law]: estimated tax: fourth installment short
-   ╭─[tax.ax:72:1]
-   │
-72 │ law estimate-4-2025
-   │ ─────────┬─────────
-   │          ╰── checked for me on 2026-01-15
-73 │   by 2026-01-15
-74 │   warn tally(federal-withheld) >= prior-year-tax[2025] * 100% "estimated tax: fourth installment short"
-   │        ───────────┬───────────────┬─────────┬──┬─────────────
-   │                   │               │         │  ╰── 9,200.00 USD
-   │                   │               │         ╰── 9,200.00 USD
-   │                   │               ╰── false
-   │                   ╰── 2,400.00 USD
-   │
-   = note: Fourth installment, due January 15 2026.
-───╯
-
-7 warnings
+3 warnings
+✓ 470 flows · 37 places · 28 laws enforced · net worth 70,222.47 USD

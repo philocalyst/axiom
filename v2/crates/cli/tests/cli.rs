@@ -126,3 +126,16 @@ fn a_file_that_is_not_utf8_is_named_with_its_line() {
     assert!(problem.starts_with("error[not-utf8]: cannot read prices.ax: line 2 is not valid UTF-8"), "{problem}");
     let _ = fs::remove_dir_all(folder);
 }
+
+#[test]
+fn a_balance_before_an_accepted_gap_does_not_see_it() {
+    let folder = empty_folder("gap-after-day");
+    let book = "base USD\nuse std\naccount assets/cash : cash\nopening 2025-01-01\n  cash 100 USD\n2025-06-30 cash = 90 USD !\n";
+    fs::write(folder.join("axiom.ax"), book).expect("write project");
+    let project = folder.to_str().expect("a UTF-8 path");
+    let before = run(&["-C", project, "--today", "2025-12-31", "balance", "--at", "2025-03-01"]);
+    assert_eq!(before.status.code(), Some(0), "{}", text(&before.stderr));
+    assert!(text(&before.stdout).contains("100.00 USD"), "{}", text(&before.stdout));
+    let after = run(&["-C", project, "--today", "2025-12-31", "balance", "--at", "2025-07-01"]);
+    assert!(text(&after.stdout).contains("90.00 USD"), "{}", text(&after.stdout));
+}

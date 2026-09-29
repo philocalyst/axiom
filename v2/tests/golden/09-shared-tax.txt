@@ -1,16 +1,23 @@
 Taxes 2025 for me
 
 Counted
-  Tally                      Amount  From
-  ──────────────────────────────────────────────
+  Tally                    Amount  From
+  ────────────────────────────────────────────
   us
-    wages             40,192.89 USD  110 sources
-    agi               40,192.89 USD  110 sources
-    federal-withheld   3,854.21 USD  22 sources
-    taxable-income    24,442.89 USD  period end
-    income-tax         2,694.65 USD  period end
+    wages           40,192.89 USD  110 sources
+    total-income    40,192.89 USD  110 sources
+    payments         3,854.21 USD  22 sources
+    agi             40,192.89 USD  period end
+    deductions      15,750.00 USD  period end
+    taxable-income  24,442.89 USD  period end
+    income-tax       2,694.65 USD  period end
+    total-tax        2,694.65 USD  period end
 
 Owed
-  Owed  To  Due  Amount  From
-  ───────────────────────────
+  Owed                  To   Due                Amount  From
+  ────────────────────────────────────────────────────────────────
+  us
+    federal-income-tax  irs  2026-04-15  -1,159.56 USD  period end
+  ────────────────────────────────────────────────────────────────
+  Total owed                             -1,159.56 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

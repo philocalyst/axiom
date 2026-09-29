@@ -1,4 +1,4 @@
-error[no-param-row]: cannot check `deferral-limit`: `limit` has no row for 2023-01-13
+error[no-param-row]: `us/401k` has no figures for 2023: its figures start in 2024
    ╭─[67-no-param-row.ax:20:3]
    │
 19 │ 2023-01-13 acme -> 6_000 USD
@@ -6,39 +6,15 @@ error[no-param-row]: cannot check `deferral-limit`: `limit` has no row for 2023-
    │   ─────────┬─────────
    │            ╰── this flow: 800.00 USD into assets/retirement
    │
-   ├─[us/401k.ax:33:42] (built in)
+   ├─[us/401k.ax:73:7] (built in)
    │
-33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
-   │                                          ─────┬─────
-   │                                               ╰── `limit` has no row for 2023-01-13
+73 │ param limit
+   │       ──┬──
+   │         ╰── `limit` has no row for 2023
    │
-   = help: add a row to `param limit` that starts on or before that day
+   = note: every law that needs a 2023 figure is skipped, and this is reported once
+   = help: start the journal in 2024, or add 2023 rows: copy the system's file into `systems/` and
+           write them there
 
-error[no-param-row]: cannot check `federal-income-tax`: `standard-deduction` has no row for 2023-12-31
-    ╭─[us.ax:126:1] (built in)
-    │
-126 │ law federal-income-tax
-    │ ───────────┬──────────
-    │            ╰── checked for me on 2023-12-31
-127 │   each year
-128 │   let deduction = standard-deduction[year, owner.filing]
-    │                   ───────────────────┬──────────────────
-    │                                      ╰── `standard-deduction` has no row for 2023-12-31
-    │
-    = help: add a row to `param standard-deduction` that starts on or before that day
-
-error[no-param-row]: cannot check `federal-income-tax`: `ordinary` has no row for 2023-12-31
-    ╭─[us.ax:126:1] (built in)
-    │
-126 │ law federal-income-tax
-    │ ───────────┬──────────
-    │            ╰── checked for me on 2023-12-31
-    ⋮
-132 │   let ordinary-tax = progressive(ordinary[year, owner.filing], taxable-ordinary)
-    │                                  ──────────────┬─────────────
-    │                                                ╰── `ordinary` has no row for 2023-12-31
-    │
-    = help: add a row to `param ordinary` that starts on or before that day
-
-✗ 3 errors
+✗ 1 error
 [exit status 1]

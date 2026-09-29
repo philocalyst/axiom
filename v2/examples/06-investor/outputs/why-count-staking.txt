@@ -1,4 +1,4 @@
-$ axiom why count-staking --today 2026-01-06
+$ axiom why count-staking --today 2026-04-16
 
 Why count-staking
 
@@ -6,20 +6,27 @@ Why count-staking
   ──────────────────────────────────
   When      on in
   Governs   everything in this book
-  Written   tax.ax:5
+  Written   tax.ax:9
   Ran       8 times
   Recorded  0 violations, 16 effects
   · Staking rewards are ordinary income at their value on the day they arrive
   · (Rev. Rul. 2023-14), and the reward's basis is that same value.
+  ·
+  · To fix: if a coin arrives that is not a reward, book it from another place.
 
 Recent effects
-  Date        Effect           Amount  Owed to  From
-  ──────────────────────────────────────────────────────────────────
-  2025-09-01  other-income  43.28 USD           journal/2025/09.ax:2
-  2025-09-01  agi           43.28 USD           journal/2025/09.ax:2
-  2025-10-01  other-income  39.40 USD           journal/2025/10.ax:2
-  2025-10-01  agi           39.40 USD           journal/2025/10.ax:2
-  2025-11-01  other-income  45.56 USD           journal/2025/11.ax:2
-  2025-11-01  agi           45.56 USD           journal/2025/11.ax:2
-  2025-12-01  other-income  31.08 USD           journal/2025/12.ax:2
-  2025-12-01  agi           31.08 USD           journal/2025/12.ax:2
+  Date        Effect        Owner     Amount  Owed to  From
+  ─────────────────────────────────────────────────────────────────────────
+  2025-07-01  staking       me     23.68 USD           journal/2025/07.ax:2
+  2025-07-01  total-income  me     23.68 USD           journal/2025/07.ax:2
+  2025-08-01  staking       me     35.97 USD           journal/2025/08.ax:2
+  2025-08-01  total-income  me     35.97 USD           journal/2025/08.ax:2
+  2025-09-01  staking       me     43.28 USD           journal/2025/09.ax:2
+  2025-09-01  total-income  me     43.28 USD           journal/2025/09.ax:2
+  2025-10-01  staking       me     39.40 USD           journal/2025/10.ax:2
+  2025-10-01  total-income  me     39.40 USD           journal/2025/10.ax:2
+  2025-11-01  staking       me     45.56 USD           journal/2025/11.ax:2
+  2025-11-01  total-income  me     45.56 USD           journal/2025/11.ax:2
+  2025-12-01  staking       me     31.08 USD           journal/2025/12.ax:2
+  2025-12-01  total-income  me     31.08 USD           journal/2025/12.ax:2
+  · 4 earlier effects not shown.

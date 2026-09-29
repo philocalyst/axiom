@@ -14,34 +14,35 @@ account assets/cash/wallet : cash
 /// One card for everything, paid in full on the 22nd.
 account liabilities/visa : credit-card
 
-// The funds are money set aside for a bill that comes later. They live in the
-// same bank, but they are not for spending on a Tuesday. Axiom cannot say that:
-// only money that came from someone else can be restricted, so each fund is
-// given `liquidity 1d`, which keeps it out of "available to spend" and lists it
-// under "what it would take to reach the rest". See FINDINGS.md.
+// The funds are money set aside for a bill that comes later. They live in one savings
+// account, each deposit tied to the envelope it is for (`for car-fund`): the money is not
+// available to spend, spending it is a payment straight out of the envelope
+// (`car-fund -> car-repair`), and `axiom available` lists what is held for each.
+
+/// Everything set aside: the emergency fund and the funds for the car, the insurance and the trip.
+account assets/bank/savings : bank
 
 /// The emergency fund. Untouched.
-account assets/funds/emergency : bank
-  liquidity 1d
+entity emergency-fund : envelope
+  via assets/bank/savings
 
 /// 100.00 USD a month, then spent on the car.
-account assets/funds/car-fund : bank
-  liquidity 1d
+entity car-fund : envelope
+  via assets/bank/savings
 
 /// 100.00 USD a month toward the yearly premium.
-account assets/funds/insurance-fund : bank
-  liquidity 1d
+entity insurance-fund : envelope
+  via assets/bank/savings
 
 /// 250.00 USD a month toward the June trip.
-account assets/funds/trip-fund : bank
-  liquidity 1d
+entity trip-fund : envelope
+  via assets/bank/savings
 
 
 // ─── Income and equity ──────────────────────────────────────────────────────
 
 account income/salary    : wages
 account income/freelance
-account equity/opening
 
 
 // ─── Envelopes ──────────────────────────────────────────────────────────────
@@ -91,7 +92,8 @@ account expenses/phone
 account expenses/car
 account expenses/car-repair
 account expenses/student-loan
-account expenses/health
+/// The health premium comes out of pay before tax (a cafeteria plan): a place of kind `pretax-benefit` takes it out of income.
+account expenses/health : pretax-benefit
 account expenses/fees
 
 /// The June trip. No envelope of its own: the trip fund pays for it.
@@ -173,3 +175,8 @@ code check-*
 /// A deposit number ties a deposit to the day it bounces.
 code deposit-*
   on bank
+
+/// Each deposit into the savings account carries the code of its envelope, and a payment out of an envelope
+/// names it: `savings[#car] -> car-repair ...` takes the parcels that code marked.
+code car insurance trip emergency
+  on assets/bank/savings

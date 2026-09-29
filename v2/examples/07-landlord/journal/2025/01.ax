@@ -1,25 +1,22 @@
 2025-01-01 checking -> own-rent 1_950 USD / oak-street
 
 /// Landlord policy for the year, paid in full.
-2025-01-06 rental-checking -> insurance 1_560 USD / landlord-policy
+2025-01-06 rental-bank -> insurance 1_560 USD / landlord-policy
 2025-01-08 checking -> groceries 178.86 USD
 2025-01-15 checking -> groceries 138.10 USD
 2025-01-19 checking -> dining 200.66 USD
 2025-01-22 checking -> living 223.18 USD
 
-/// The day job: monthly pay, before and after tax.
-2025-01-28 income/salary -> 8_000.00 USD
-  taxes/federal       1_215.00 USD
-  taxes/payroll       612.00 USD
-  checking            ...
+/// The day job: one occurrence of the `paycheck` plan a month.
+2025-01-28 paycheck
 
-/// Depreciation is a deduction with no cash: 27.5 years straight line on the building (80% of the price; the land is not depreciable), half a month in the month placed in service (mid-month convention).
-2025-01-31 acc-dep-house -> depreciation 456.79 USD
-
-/// The loan costs are spread over the 30 years: 3,120.00 USD / 360 months.
-2025-01-31 loan-costs -> amortization 8.67 USD
+/// Depreciation is a deduction with no cash: a flow out of the house's basis. The first month is a half month
+/// (mid-month convention); the plan says 913.58 USD, the whole month.
+2025-01-31 depreciation 456.79 USD
 2025-01-31 mortgage = 279_000 USD
-2025-01-31 rental-checking = 4_747.70 USD
+2025-01-31 rental-bank = 4_747.70 USD
 2025-01-31 checking = 23_482.20 USD
-2025-01-31 deposit-account = 0.00 USD
+2025-01-31 deposit-bank = 0.00 USD
+2025-01-31 house = 1 HOME
+2025-01-31 deposits = 0.00 USD
 // Listed for rent on January 15. Nothing is earned before a tenant signs.

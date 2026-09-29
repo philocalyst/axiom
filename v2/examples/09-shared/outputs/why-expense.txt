@@ -1,0 +1,9 @@
+$ axiom why #expense-2025-06 --today 2026-04-16
+
+Why #expense-2025-06
+
+Flows
+  Date        Flow                                               Amount  State   From
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-06-02  liabilities/visa → assets/owed/by-lantern      138.50 USD  actual  journal/2025/06.ax:12
+  2025-07-11  assets/owed/by-lantern → assets/bank/checking  138.50 USD  actual  journal/2025/07.ax:32

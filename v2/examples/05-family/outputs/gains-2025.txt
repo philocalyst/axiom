@@ -1,0 +1,27 @@
+$ axiom gains 2025 --today 2026-04-16
+
+Gains realized in 2025
+
+  Sold             Acquired        Quantity  From                             Proceeds         Basis          Gain  Term
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-02-05       2025-01-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-02-12       2024-12-31    184.00 USD  assets/hsa                     184.00 USD      0.00 USD    184.00 USD
+  2025-03-05       2025-02-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-04-05       2025-03-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-05-05       2025-04-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-06-05       2025-05-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-07-05       2025-06-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-08-05       2025-07-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-08-20       2019-01-01  3,682.32 USD  assets/education/riley-529   3,682.32 USD  2,971.30 USD    711.02 USD
+  2025-08-20       2025-03-31    369.24 USD  assets/education/riley-529     369.24 USD      0.00 USD    369.24 USD
+  2025-08-27       2024-12-31     97.35 USD  assets/hsa                      97.35 USD      0.00 USD     97.35 USD
+  2025-09-05       2025-08-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-09-30       2024-12-31    350.00 USD  assets/hsa                     350.00 USD      0.00 USD    350.00 USD
+  2025-10-05       2025-09-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-10-15       2019-01-01  1,070.59 USD  assets/education/riley-529   1,070.59 USD    863.87 USD    206.72 USD
+  2025-10-15       2025-03-31    186.22 USD  assets/education/riley-529     186.22 USD      0.00 USD    186.22 USD
+  2025-11-05       2024-12-31    620.00 USD  assets/hsa                     620.00 USD      0.00 USD    620.00 USD
+  2025-11-05       2025-10-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  2025-12-05       2025-11-15    416.66 USD  assets/dcfsa                   416.66 USD      0.00 USD    416.66 USD
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Money withdrawn                                                        11,142.98 USD  3,835.17 USD  7,307.81 USD

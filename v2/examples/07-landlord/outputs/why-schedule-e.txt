@@ -1,4 +1,4 @@
-$ axiom why schedule-e --today 2026-01-06
+$ axiom why schedule-e --today 2026-04-16
 
 Why schedule-e
 
@@ -6,17 +6,19 @@ Why schedule-e
   ─────────────────────────────────
   When      each year
   Governs   everything in this book
-  Written   tax.ax:12
+  Written   tax.ax:17
   Ran       2 times
   Recorded  0 violations, 4 effects
   · Schedule E: rents received less everything under expenses/rental. A loss
-  · offsets other income up to 25,000 USD (IRC §469(i)), and the loss on paper,
+  · offsets other income up to 25,000 USD (IRC §469(i)), and a loss on paper,
   · because of depreciation and interest, is common in the first year.
+  ·
+  · To fix: `axiom why rental-net` lists the rents and the expenses behind it.
 
 Recent effects
-  Date        Effect              Amount  Owed to  From
-  ───────────────────────────────────────────────────────────
-  2024-12-31  rental-net     -722.30 USD           period end
-  2024-12-31  agi            -722.30 USD           period end
-  2025-12-31  rental-net  -17,456.10 USD           period end
-  2025-12-31  agi         -17,456.10 USD           period end
+  Date        Effect        Owner          Amount  Owed to  From
+  ────────────────────────────────────────────────────────────────────
+  2024-12-31  rental-net    me        -838.16 USD           period end
+  2024-12-31  total-income  me        -838.16 USD           period end
+  2025-12-31  rental-net    me     -17,340.24 USD           period end
+  2025-12-31  total-income  me     -17,340.24 USD           period end

@@ -4,10 +4,10 @@
 2026-01-03 checking -> utilities 61.84 USD / power-co
 2026-01-04 visa -> dining 20.72 USD
 2026-01-05 visa -> groceries 48.27 USD / kroger
-2026-01-06 checking -> car-fund 100 USD
-2026-01-06 checking -> insurance-fund 100 USD
-2026-01-06 checking -> trip-fund 250 USD
-2026-01-06 checking -> emergency 100 USD
+2026-01-06 checking -> savings 100 USD #car for car-fund
+2026-01-06 checking -> savings 100 USD #insurance for insurance-fund
+2026-01-06 checking -> savings 250 USD #trip for trip-fund
+2026-01-06 checking -> savings 100 USD #emergency for emergency-fund
 2026-01-08 visa -> phone 40 USD / mint-mobile
 2026-01-08 checking = 4_765.03 USD
 2026-01-09 studio -> 2_307.69 USD
@@ -28,11 +28,15 @@
 2026-01-15 visa -> fun 35.96 USD
 
 /// New brake pads and rotors, 486.25 USD, paid from the car fund: what I saved 100.00 USD a month for.
-2026-01-15 car-fund -> car-repair 486.25 USD / kwik-brakes
+/// The deposits carry the code #car, and the payment takes the parcels that code marked: what was tied to the car fund.
+2026-01-15 savings[#car] -> car-repair 486.25 USD / kwik-brakes
 2026-01-16 visa -> dining 28.16 USD
 2026-01-19 visa -> groceries 58.55 USD / trader-joes
 2026-01-20 #check-1029 void
 2026-01-20 visa -> subscriptions 2.99 USD / apple
+
+/// The new term's policy fee, 12.00 USD, on the card. (The first flow of 2026 into the insurance envelope: see README, the yearly budget.)
+2026-01-20 visa -> insurance 12 USD / progressive
 2026-01-21 visa -> transport 23.90 USD / rideshare
 2026-01-22 checking -> visa 1_023.83 USD
 2026-01-23 studio -> 2_307.69 USD
@@ -46,9 +50,6 @@
 2026-01-26 visa -> subscriptions 22.99 USD / adobe
 2026-01-27 visa -> groceries 54.65 USD / trader-joes
 2026-01-28 visa -> dining 19.23 USD
-2026-01-31 visa = 549.86 USD
+2026-01-31 visa = 561.86 USD
 2026-01-31 checking = 6_876.10 USD
-2026-01-31 car-fund = 13.75 USD
-2026-01-31 insurance-fund = 100.00 USD
-2026-01-31 trip-fund = 1_250.00 USD
-2026-01-31 emergency = 2_900.00 USD
+2026-01-31 savings = 4_263.75 USD

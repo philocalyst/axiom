@@ -1,23 +1,25 @@
-$ axiom why recapture --today 2026-01-06
+$ axiom why recapture --today 2026-04-16
 
 Why recapture
 
   Law       recapture
   ─────────────────────────────────
   When      on gain
-  Governs   every depreciable
-  Written   accounts.ax:18
-  Ran       2 times
-  Recorded  0 violations, 4 effects
+  Governs   every rental-property
+  Written   accounts.ax:22
+  Ran       1 time
+  Recorded  0 violations, 3 effects
   · Selling depreciable property brings back the depreciation taken (IRC §1250):
-  · the gain the sale realizes is measured from cost, and the tax gain from cost
-  · less depreciation, so the depreciation is added back. It is taxed as
-  · ordinary income (at most 25%, and this person's rate is lower).
+  · the part of the gain that the depreciation made is taxed as ordinary income
+  · (at most 25%; this owner's rate is lower), the rest as a long-term gain. `us`
+  · counted all of the gain as long-term, so this moves that part across.
+  ·
+  · To fix: the depreciation is what the flows out of `house.basis` counted. If a
+  · year of it is missing, the sale taxes too little of the gain as ordinary income.
 
 Recent effects
-  Date        Effect                   Amount  Owed to  From
-  ───────────────────────────────────────────────────────────────────────────
-  2025-12-29  short-term-gains  10,049.38 USD           journal/2025/12.ax:24
-  2025-12-29  agi               10,049.38 USD           journal/2025/12.ax:24
-  2025-12-29  short-term-gains     129.10 USD           journal/2025/12.ax:25
-  2025-12-29  agi                  129.10 USD           journal/2025/12.ax:25
+  Date        Effect            Owner          Amount  Owed to  From
+  ───────────────────────────────────────────────────────────────────────────────────
+  2025-12-29  recaptured        me      10,178.48 USD           journal/2025/12.ax:25
+  2025-12-29  short-term-gains  me      10,178.48 USD           journal/2025/12.ax:25
+  2025-12-29  long-term-gains   me     -10,178.48 USD           journal/2025/12.ax:25

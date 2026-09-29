@@ -1,0 +1,40 @@
+$ axiom tax 2025 --today 2026-01-06
+
+Taxes 2025 for me
+
+Counted
+  Tally                           Amount  From
+  ─────────────────────────────────────────────────────────────
+  project
+    student-interest        1,333.42 USD  12 sources
+    fbar-girokonto          9,444.90 USD  journal/2025/06.ax:27
+    fbar-kaution            4,223.52 USD  journal/2025/06.ax:38
+    fbar-tagesgeld         24,093.88 USD  4 sources
+    fbar-wise               1,164.86 USD  journal/2025/10.ax:8
+    fbar-aggregate         38,927.16 USD  period end
+  ─────────────────────────────────────────────────────────────
+  de
+    foreign-tax-paid        6,357.40 USD  12 sources
+  ─────────────────────────────────────────────────────────────
+  us
+    wages                 100,064.60 USD  54 sources
+    total-income           97,809.05 USD  84 sources
+    pretax                  3,750.00 USD  6 sources
+    payments                8,280.00 USD  7 sources
+    interest                1,494.45 USD  24 sources
+    investment-income       1,494.45 USD  24 sources
+  ─────────────────────────────────────────────────────────────
+    us/401k
+      elective-deferrals    3,750.00 USD  6 sources
+  ─────────────────────────────────────────────────────────────
+    us/abroad
+      foreign-earned       37,564.58 USD  18 sources
+  ─────────────────────────────────────────────────────────────
+    us/ca
+      ca-withheld           2,820.00 USD  6 sources
+      salt                  2,820.00 USD  6 sources
+
+Owed
+  Owed  To  Due  Amount  From
+  ───────────────────────────
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

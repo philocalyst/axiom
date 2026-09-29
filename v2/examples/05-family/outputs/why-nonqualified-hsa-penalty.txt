@@ -1,18 +1,25 @@
-$ axiom why nonqualified-hsa-penalty --today 2026-01-05
+$ axiom why nonqualified-hsa-penalty --today 2026-04-16
 
 Why nonqualified-hsa-penalty
 
-Effects
-  Date        Owner      Amount  Owed to            From
-  ───────────────────────────────────────────────────────────────────────
-  2025-11-05  me     124.00 USD  irs by 2025-11-05  journal/2025/11.ax:15
+  Law       nonqualified-hsa-penalty
+  ──────────────────────────────────
+  When      on gain
+  Governs   every hsa
+  Written   us/hsa.ax:54
+  Ran       4 times
+  Recorded  1 violation, 0 effects
+  · A withdrawal that did not pay a qualified medical expense owes an
+  · additional 20% of what is taxable, unless the owner is 65 or older
+  · (IRC §223(f)(4)). This withdrawal went somewhere other than a place of kind
+  · `medical`, so it is priced at that 20%.
+  ·
+  · To fix: to reimburse yourself for an expense the account should have paid,
+  · which the IRS allows with your receipts, or when an exception applies
+  · (death or disability), keep the withdrawal and mark it `!` with the
+  · reason.
 
-Flows behind it
-  Date        Flow                                         Amount  From
-  ──────────────────────────────────────────────────────────────────────────────────────
-  2025-11-05  assets/hsa → assets/bank/joint-checking  620.00 USD  journal/2025/11.ax:15
-
-Gains realized
-  Date        Sold from     Proceeds     Basis        Gain  Held since
-  ────────────────────────────────────────────────────────────────────
-  2025-11-05  assets/hsa  620.00 USD  0.00 USD  620.00 USD  2024-12-31
+Recent violations
+  Date        Violation                                                            From
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-11-05  waived: 124.00 USD would be owed to irs as nonqualified-hsa-penalty  journal/2025/11.ax:15

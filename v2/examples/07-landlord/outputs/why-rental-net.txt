@@ -1,0 +1,10 @@
+$ axiom why rental-net --today 2026-04-16
+
+Why rental-net
+
+Effects
+  Date        Effect      Owner          Amount  Owed to  From
+  ──────────────────────────────────────────────────────────────────
+  2024-12-31  rental-net  me        -838.16 USD           period end
+  2025-12-31  rental-net  me     -17,340.24 USD           period end
+  · Effects from a period ending were computed from the tallies counted during it.

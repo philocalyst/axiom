@@ -1,0 +1,30 @@
+// What Dana's return has that `us` does not count on its own: the interest on the
+// student loan. It counts into a line `us` reads (`adjustments`), so no copy of `us`
+// is needed and no file name matters: `us` runs after the laws that count into
+// what it reads.
+//
+// Simplified on purpose: the deduction phases out between 80,000 and 95,000 USD of
+// income for a single filer; Dana's income is below it, so it is not modelled.
+
+/// Interest paid on a student loan is deductible up to 2,500 USD a year (IRC
+/// §221). It comes off income before AGI, as an adjustment.
+///
+/// To fix: the interest must be paid to a place of kind `student-loan-interest`;
+/// `axiom why student-interest` lists what was counted.
+law student-interest-deduction
+  each year closing 04-15
+  count min(tally(student-interest), student-loan-interest-limit[year]) as adjustments
+
+/// Interest on a student loan, counted when it is paid.
+///
+/// To fix: pay the interest leg of the loan payment to an expense place of kind
+/// `student-loan-interest`, and the principal leg to the loan.
+law count-student-interest
+  on in
+  when to is student-loan-interest
+  count amount as student-interest
+
+// The most a year's student loan interest can take off income (IRC §221(b)).
+param student-loan-interest-limit
+  2025 2_500 USD
+  2026 2_500 USD

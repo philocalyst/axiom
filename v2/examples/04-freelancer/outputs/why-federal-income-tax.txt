@@ -1,4 +1,4 @@
-$ axiom why federal-income-tax --today 2026-02-10
+$ axiom why federal-income-tax --today 2026-04-16
 
 Why federal-income-tax
 
@@ -6,23 +6,25 @@ Why federal-income-tax
   ────────────────────────────────────────────────────
   When      each year
   Governs   everyone living under us, and all they own
-  Written   us.ax:126
-  Ran       1 times
-  Recorded  0 violations, 3 effects
+  Written   us.ax:351
+  Ran       1 time
+  Recorded  0 violations, 4 effects
   · Federal income tax for the year (IRC §1), figured from the tallies above.
   ·
-  · Ordinary income is `agi` without long-term gains. It is reduced by the
-  · standard deduction and taxed on the ordinary brackets. Long-term gains are
-  · stacked on top of it and taxed on the capital-gains brackets. Tax already
-  · withheld or paid is credited, and the rest is owed by April 15 of the next
-  · year (Form 1040). A refund, when more was withheld than owed, is not booked.
+  · Ordinary income is adjusted gross income without net long-term gains. It is
+  · reduced by the deductions and taxed on the ordinary brackets. Long-term
+  · gains are stacked on top of it and taxed on the capital-gains brackets. Other
+  · taxes are added, and credits taken off, to give the total tax. What was paid
+  · for the year is set against it, and the rest is owed by April 15 (Form 1040).
+  · When more was paid than is due, the amount is negative: a refund.
   ·
-  · The brackets depend on `filing`, so set `filing single` or `filing joint`
-  · on the person who lives here.
+  · To fix: the brackets depend on `filing`: set `filing single` or `filing joint`
+  · on the person or household that lives here.
 
 Recent effects
-  Date        Effect                     Amount  Owed to            From
-  ────────────────────────────────────────────────────────────────────────────
-  2025-12-31  taxable-income      24,580.29 USD                     period end
-  2025-12-31  income-tax           2,711.13 USD                     period end
-  2025-12-31  federal-income-tax   2,711.13 USD  irs by 2026-04-15  period end
+  Date        Effect              Owner         Amount  Owed to            From
+  ───────────────────────────────────────────────────────────────────────────────────
+  2025-12-31  taxable-income      me     22,873.88 USD                     period end
+  2025-12-31  income-tax          me      2,506.37 USD                     period end
+  2025-12-31  total-tax           me     11,171.88 USD                     period end
+  2025-12-31  federal-income-tax  me         71.88 USD  irs by 2026-04-15  period end

@@ -1,8 +1,21 @@
-$ axiom register house --today 2026-01-06
+$ axiom register house --today 2026-04-16
 
 Register: assets/rental/house
 
-  Date        With                         Payee     Note   Amount  Balance
-  ─────────────────────────────────────────────────────────────────────────
-  2024-12-18  assets/bank/rental-checking  title-co         1 HOME   1 HOME
-  2025-12-29  assets/bank/rental-checking                  -1 HOME   0 HOME
+  Date        With                          Payee           Note               Amount         Balance
+  ───────────────────────────────────────────────────────────────────────────────────────────────────
+  2024-12-18  assets/bank/rental-bank       title-co                           1 HOME          1 HOME
+  2025-01-31  expenses/rental/depreciation                               -456.79 USD     -456.79 USD
+  2025-02-28  expenses/rental/depreciation                               -913.58 USD   -1,370.37 USD
+  2025-03-31  expenses/rental/depreciation                               -913.58 USD   -2,283.95 USD
+  2025-04-30  expenses/rental/depreciation                               -913.58 USD   -3,197.53 USD
+  2025-05-31  expenses/rental/depreciation                               -913.58 USD   -4,111.11 USD
+  2025-06-30  expenses/rental/depreciation                               -913.58 USD   -5,024.69 USD
+  2025-07-31  expenses/rental/depreciation                               -913.58 USD   -5,938.27 USD
+  2025-08-31  expenses/rental/depreciation                               -913.58 USD   -6,851.85 USD
+  2025-09-15  liabilities/bills             summit-roofing  #inv-roof  14,200.00 USD    7,348.15 USD
+  2025-09-30  expenses/rental/depreciation                               -935.10 USD    6,413.05 USD
+  2025-10-31  expenses/rental/depreciation                               -956.61 USD    5,456.44 USD
+  2025-11-30  expenses/rental/depreciation                               -956.61 USD    4,499.83 USD
+  2025-12-29  expenses/rental/depreciation                               -478.31 USD    4,021.52 USD
+  2025-12-29  assets/bank/rental-bank                                         -1 HOME          0 HOME

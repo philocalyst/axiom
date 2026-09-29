@@ -26,8 +26,8 @@ What recurs
   ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
   assets/bank/checking → expenses/rent (landlord)               monthly  2,850.00 USD  2026-04-01  seen 3 times
   liabilities/visa → expenses/food/groceries (trader-joes)      weekly     118.40 USD  2026-04-02  seen 10 times
-  assets/bank/checking → assets/college                         monthly    300.00 USD  2026-04-05  seen 4 times
-  income/salary → assets/bank/checking (acme), and 4 more legs  monthly  8,000.00 USD  2026-04-13  seen 3 times
+  assets/bank/checking → assets/college                         monthly    300.00 USD  2026-04-05  seen 3 times
+  income/salary → assets/bank/checking (acme), and 4 more legs  monthly  8,000.00 USD  2026-04-13  plan
   assets/bank/checking → assets/bank/savings                    monthly    500.00 USD  2026-04-20  seen 3 times
   income/interest → assets/bank/savings                         monthly     49.73 USD  2026-04-30  seen 3 times
   assets/bank/checking → expenses/travel                        yearly   2,200.00 USD  2026-07-10  plan
@@ -35,6 +35,11 @@ What recurs
   assets/college → expenses/tuition (state-u)                   yearly   1,200.00 USD  2026-08-20  plan
   income/salary → assets/bank/checking (acme), and 4 more legs  yearly   4,000.00 USD  2026-12-15  plan
   assets/bank/checking → expenses/insurance (insurer)           yearly     630.00 USD  2027-01-01  plan
+
+Obligations coming due
+  Due         Obligation                To      Amount
+  ────────────────────────────────────────────────────
+  2027-04-15  nonqualified-529-penalty  irs  34.94 USD
 
 Problems ahead
   Date  Problem

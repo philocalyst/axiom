@@ -11,7 +11,7 @@ California and San Francisco laws into force.
 ```text
 axiom.ax                the root: base currency, the systems in use, me
 accounts.ax             commodities, accounts, people and companies, a code rule
-journal/2025/12.ax      opening balances, dated 2025-12-31
+journal/2025/12.ax      opening balances, dated 2025-12-31 (an `opening` block: statements, not flows)
 journal/2026/01.ax      January
 journal/2026/02.ax      February
 journal/2026/03.ax      March
@@ -53,9 +53,9 @@ No errors. Three things are reported, none of them a failure:
   budget of 650.00 USD, over by 31.00 USD. It crosses the line on the last
   grocery run.
 - **A priced violation** on 2026-03-25, the 529 withdrawal to checking. It did
-  not pay for school, so `nonqualified-penalty` resolves it to a loss: about
-  34.94 USD owed to the IRS, which is 10% of 349.37 USD in earnings. The same
-  earnings count as income.
+  not pay for school, so `nonqualified-529-penalty` resolves it to a loss: about
+  34.94 USD owed to the IRS with the year's return (due 2027-04-15), which is
+  10% of 349.37 USD in earnings. The same earnings count as income.
 - **A waived gap** on 2026-03-31. The wallet should hold 77.50 USD and holds
   63.00 USD. The 14.50 USD difference is booked from `unknown`, and reported
   because it was waived and never hidden.
@@ -63,7 +63,7 @@ No errors. Three things are reported, none of them a failure:
 The 529 withdrawal into `tuition` on 2026-02-20 reports nothing: it is
 qualified, and the 290.11 USD of earnings in it are not taxed. All 21
 assertions reconcile, and no account overdraws. The summary line reads
-about `68 flows`, and net worth is about 77,597.73 USD.
+about `67 flows`, and net worth is about 77,597.73 USD.
 
 ### `axiom balance`
 
@@ -96,41 +96,47 @@ The tallies for the year so far, under `us`:
 
 ```text
 wages               24,000.00 USD
+total-income        22,098.30 USD    the sum of the lines below it, less what was deferred
 pretax               2,400.00 USD    the 401(k) deferrals, taken back out of income
+payments             2,640.00 USD    withheld from pay, credited against the year's tax
 interest               147.05 USD
-dividends                1.88 USD
 short-term-gains       141.55 USD    the March sale: 128.80 from January's lot, 12.75 from February's
 distributions          349.37 USD    the earnings in the non-qualified 529 withdrawal
-agi                 22,239.85 USD
-federal-withheld     2,640.00 USD
+dividends                1.88 USD
 ```
 
-California's `ca-withheld` is 1,110.00 USD. The 529 penalty of about 34.94 USD
-is owed as `nonqualified-529-penalty`. The scholarship does not appear in
-the tallies: no law counts it, because scholarship money spent on tuition is
-not taxable income (IRC §117).
+The short-term gains join `total-income` at the year's end, when `agi` is
+figured: 22,098.30 + 141.55 = 22,239.85 USD. California's `ca-withheld` is
+1,110.00 USD. The 529 penalty of about 34.94 USD is owed as
+`nonqualified-529-penalty`. The scholarship does not appear in the tallies: no
+law counts it, because scholarship money spent on tuition is not taxable income
+(IRC §117).
 
-The `federal-income-tax` and `state-income-tax` obligations are worked out when
-the year ends, and `axiom forecast` projects them. On these figures, with the
-plans, the year comes to roughly 11,200 USD of federal tax and 4,400 USD of
-California tax. More than that was withheld in both cases, a small refund that
-Axiom does not book.
+The `federal-income-tax` and `ca-income-tax` obligations are worked out when
+the year's return closes, on April 15 of the next year, and `axiom forecast`
+projects them once its horizon reaches that day. On these figures, with the
+plans, the year comes to 11,209.23 USD of federal tax and 4,379.11 USD of
+California tax. More was withheld in both cases (11,440 USD and 4,849 USD), so
+`axiom forecast --until 2027-05-01` lists two refunds due 2027-04-15: -230.77 USD
+federal and -469.89 USD California. A refund is an obligation with a negative
+amount.
 
 ### `axiom forecast`
 
 It runs the journal forward with three kinds of input:
 
 - what repeats in the journal, found by cadence and amount: the rent on the
-  1st, the paycheck and its withholding, the 529 and savings transfers, and
-  the utility bill;
-- the plans in `plans.ax`: the July trip, fall tuition in August and the 529
-  payment beside it, the year-end bonus, and the renewal on 2027-01-01;
+  1st, the 529 and savings transfers, and the utility bill;
+- the plans in `plans.ax`: the paycheck and its withholding (a named plan: the
+  journal writes `2026-02-13 paycheck` and the plan writes the split out), the July
+  trip, fall tuition in August and the 529 payment beside it, the year-end bonus, and
+  the renewal on 2027-01-01;
 - what the laws say is owed.
 
 The same laws run on the projection, so the 401(k) deferral limit is checked
 against the projected paychecks: 800 USD a month and 400 USD from the bonus
 comes to 10,000 USD for the year, well inside 24,500 USD.
 
-Try changing all three `retirement 800 USD` legs to `2_400 USD` and run the
-forecast again. The projected deferrals should pass the 24,500 USD limit with
+Try changing the `retirement 800 USD` leg of January's paycheck and of the plan to
+`2_400 USD` and run the forecast again. The projected deferrals should pass the 24,500 USD limit with
 the November paycheck, and the forecast should say so before it happens.

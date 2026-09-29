@@ -1,0 +1,22 @@
+/// The April retainer, not yet due.
+2026-04-01 design -> brightwave 3_200 USD #inv-2026-b04 due 30d
+2026-04-01 business-card -> software 7.20 USD / google
+2026-04-01 personal-checking -> landlord 1_750 USD
+2026-04-01 personal-checking -> bluecross 425 USD
+2026-04-03 business-card -> software 10 USD / notion
+2026-04-03 business-checking -> personal-checking 2_950 USD // owner's draw
+2026-04-05 personal-checking -> statefarm 22 USD
+2026-04-05 personal-checking -> groceries 70.75 USD / trader-joes
+2026-04-08 personal-checking -> dining 73.02 USD
+2026-04-10 brightwave -> business-checking 3_200 USD for #inv-2026-b03
+2026-04-10 business-checking -> tax-vault 640 USD for vault
+2026-04-10 personal-checking -> transport 39.13 USD
+
+/// Most of what the 2025 return will owe, paid before it closes.
+2026-04-10 tax-vault -> federal 1_500 USD / irs #balance-2025 for 2025
+2026-04-12 personal-checking -> comcast 80 USD
+2026-04-12 personal-checking -> groceries 108.37 USD / safeway
+2026-04-14 business-card -> software 15 USD / figma
+
+/// Estimated tax, first quarter of 2026.
+2026-04-14 tax-vault -> federal 3_000 USD / irs #q1-2026

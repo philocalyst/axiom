@@ -1,40 +1,37 @@
-$ axiom flow --today 2026-01-06
+$ axiom flow --today 2026-04-16
 
 Income and spending
 
-  Place                  2025-03       2025-04       2025-05       2025-06       2025-07       2025-08       2025-09       2025-10       2025-11       2025-12   2026-01          Total
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  income            9,937.61 USD  3,728.45 USD  5,771.84 USD  3,876.69 USD  3,720.92 USD  3,918.10 USD  3,830.65 USD  5,155.15 USD  3,826.74 USD  3,695.49 USD            47,461.64 USD
-    donations          60.00 USD    100.00 USD    712.50 USD     45.00 USD     40.00 USD     45.00 USD     75.00 USD     40.00 USD     25.00 USD     45.00 USD             1,187.50 USD
-    grants          6,000.00 USD                                                                                        -57.25 USD                                         5,942.75 USD
-    reimbursements                                              138.50 USD                                                                                                   138.50 USD
-    tips            1,040.81 USD    820.22 USD    862.18 USD    869.75 USD    877.12 USD  1,009.25 USD    812.81 USD    847.44 USD  1,094.34 USD    876.55 USD             9,110.47 USD
-    wages           2,836.80 USD  2,808.23 USD  4,197.16 USD  2,823.44 USD  2,803.80 USD  2,863.85 USD  2,942.84 USD  4,324.96 USD  2,707.40 USD  2,773.94 USD            31,082.42 USD
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  expenses          3,946.21 USD  4,289.17 USD  4,082.61 USD  4,183.45 USD  3,375.53 USD  2,914.55 USD  2,647.84 USD  3,313.97 USD  2,617.33 USD  2,939.33 USD            34,309.99 USD
-    car               458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD             4,585.00 USD
-    clothing           28.35 USD     27.36 USD     87.25 USD     71.67 USD     68.36 USD     96.86 USD     20.44 USD     31.99 USD     18.07 USD     85.45 USD               535.80 USD
-    dining            101.73 USD     91.66 USD     81.92 USD     95.19 USD     93.92 USD     92.14 USD     96.59 USD     81.81 USD     88.07 USD     82.75 USD               905.78 USD
-    entertainment      34.15 USD     32.41 USD     78.55 USD     61.13 USD     28.16 USD     44.85 USD     29.37 USD     82.91 USD     65.55 USD     79.39 USD               536.47 USD
-    garden          1,280.00 USD  1,561.35 USD    986.40 USD  1,354.99 USD    640.00 USD    148.20 USD                  250.00 USD                                         6,220.94 USD
-      fencing                                                                 640.00 USD                                                                                     640.00 USD
-      irrigation                                  986.40 USD                                                                                                                 986.40 USD
-      lumber                      1,148.75 USD                                                                                                                             1,148.75 USD
-      seeds                         412.60 USD                                                                                                                               412.60 USD
-      soil          1,280.00 USD                                                                                        250.00 USD                                         1,530.00 USD
-      tools                                                   1,354.99 USD                                                                                                 1,354.99 USD
-      water                                                                                 148.20 USD                                                                       148.20 USD
-    gifts                                                                                                                                           200.00 USD               200.00 USD
-    groceries         132.40 USD    217.54 USD    126.23 USD     94.14 USD    161.81 USD    132.61 USD    100.61 USD    204.10 USD     99.47 USD    122.23 USD             1,391.14 USD
-    health            189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD             1,894.00 USD
-    phone              45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD               450.00 USD
-    rent            1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD            10,500.00 USD
-    taxes             568.78 USD    563.05 USD    841.53 USD    566.11 USD    562.16 USD    574.20 USD    590.03 USD    867.15 USD    542.83 USD    556.17 USD             6,232.01 USD
-      federal         351.76 USD    348.22 USD    520.45 USD    350.11 USD    347.67 USD    355.12 USD    364.91 USD    536.29 USD    335.71 USD    343.97 USD             3,854.21 USD
-      payroll         217.02 USD    214.83 USD    321.08 USD    216.00 USD    214.49 USD    219.08 USD    225.12 USD    330.86 USD    207.12 USD    212.20 USD             2,377.80 USD
-    transport           5.10 USD      5.84 USD      8.63 USD      3.39 USD      7.36 USD      6.49 USD      4.10 USD      4.85 USD      6.28 USD      3.21 USD                55.25 USD
-    utilities          52.80 USD     47.06 USD     44.70 USD     55.43 USD     70.86 USD     76.30 USD     63.80 USD     48.26 USD     54.16 USD     67.23 USD               580.60 USD
-    volunteer-food                                 84.50 USD                                                                                                                  84.50 USD
-    work-supplies                                               138.50 USD                                                                                                   138.50 USD
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Net               5,991.40 USD   -560.72 USD  1,689.23 USD   -306.76 USD    345.39 USD  1,003.55 USD  1,182.81 USD  1,841.18 USD  1,209.41 USD    756.16 USD  0.00 USD  13,151.65 USD
+  Place                  2025-05       2025-06       2025-07       2025-08       2025-09       2025-10       2025-11       2025-12   2026-01   2026-02   2026-03   2026-04          Total
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  income            5,771.84 USD  3,738.19 USD  3,720.92 USD  3,918.10 USD  3,830.65 USD  5,155.15 USD  3,826.74 USD  3,695.49 USD                                          33,657.08 USD
+    donations         712.50 USD     45.00 USD     40.00 USD     45.00 USD     75.00 USD     40.00 USD     25.00 USD     45.00 USD                                           1,027.50 USD
+    grants                                                                                  -57.25 USD                                                                         -57.25 USD
+    tips              862.18 USD    869.75 USD    877.12 USD  1,009.25 USD    812.81 USD    847.44 USD  1,094.34 USD    876.55 USD                                           7,249.44 USD
+    wages           4,197.16 USD  2,823.44 USD  2,803.80 USD  2,863.85 USD  2,942.84 USD  4,324.96 USD  2,707.40 USD  2,773.94 USD                                          25,437.39 USD
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  expenses          4,082.61 USD  4,044.95 USD  3,375.53 USD  3,210.25 USD  2,647.84 USD  3,313.97 USD  2,617.33 USD  2,939.33 USD                                          26,231.81 USD
+    car               458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD    458.50 USD                                           3,668.00 USD
+    clothing           87.25 USD     71.67 USD     68.36 USD     96.86 USD     20.44 USD     31.99 USD     18.07 USD     85.45 USD                                             480.09 USD
+    dining             81.92 USD     95.19 USD     93.92 USD     92.14 USD     96.59 USD     81.81 USD     88.07 USD     82.75 USD                                             712.39 USD
+    entertainment      78.55 USD     61.13 USD     28.16 USD     44.85 USD     29.37 USD     82.91 USD     65.55 USD     79.39 USD                                             469.91 USD
+    garden            986.40 USD  1,354.99 USD    640.00 USD    148.20 USD                  250.00 USD                                                                       3,379.59 USD
+      fencing                                     640.00 USD                                                                                                                   640.00 USD
+      irrigation      986.40 USD                                                                                                                                               986.40 USD
+      soil                                                                                  250.00 USD                                                                         250.00 USD
+      tools                       1,354.99 USD                                                                                                                               1,354.99 USD
+      water                                                     148.20 USD                                                                                                     148.20 USD
+    gifts                                                                                                               200.00 USD                                             200.00 USD
+    groceries         126.23 USD     94.14 USD    161.81 USD    132.61 USD    100.61 USD    204.10 USD     99.47 USD    122.23 USD                                           1,041.20 USD
+    health            189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD    189.40 USD                                           1,515.20 USD
+    phone              45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD     45.00 USD                                             360.00 USD
+    rent            1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD  1,050.00 USD                                           8,400.00 USD
+    taxes             841.53 USD    566.11 USD    562.16 USD    574.20 USD    590.03 USD    867.15 USD    542.83 USD    556.17 USD                                           5,100.18 USD
+      federal         520.45 USD    350.11 USD    347.67 USD    355.12 USD    364.91 USD    536.29 USD    335.71 USD    343.97 USD                                           3,154.23 USD
+      payroll         321.08 USD    216.00 USD    214.49 USD    219.08 USD    225.12 USD    330.86 USD    207.12 USD    212.20 USD                                           1,945.95 USD
+    transport           8.63 USD      3.39 USD      7.36 USD      6.49 USD      4.10 USD      4.85 USD      6.28 USD      3.21 USD                                              44.31 USD
+    travel                                                      295.70 USD                                                                                                     295.70 USD
+    utilities          44.70 USD     55.43 USD     70.86 USD     76.30 USD     63.80 USD     48.26 USD     54.16 USD     67.23 USD                                             480.74 USD
+    volunteer-food     84.50 USD                                                                                                                                                84.50 USD
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Net               1,689.23 USD   -306.76 USD    345.39 USD    707.85 USD  1,182.81 USD  1,841.18 USD  1,209.41 USD    756.16 USD  0.00 USD  0.00 USD  0.00 USD  0.00 USD   7,425.27 USD

@@ -1,4 +1,4 @@
-$ axiom why etrade --today 2026-01-06
+$ axiom why etrade --today 2026-04-16
 
 Why assets/etrade
 
@@ -12,34 +12,28 @@ Parcels
   ──────────────────────────────────────────────────────────────────────────────────────
   assets/etrade  46.1872 NWND   7,276.33 USD  2025-02-15           journal/2025/02.ax:9
   assets/etrade  60.0000 NWND   8,895.60 USD  2025-05-15           journal/2025/05.ax:8
-  assets/etrade  69.3814 NWND  11,725.46 USD  2025-06-30           journal/2025/06.ax:35
+  assets/etrade  69.3814 NWND  11,725.46 USD  2025-06-30           journal/2025/06.ax:33
   assets/etrade  60.0000 NWND  10,108.20 USD  2025-08-15           journal/2025/08.ax:6
   assets/etrade  60.0000 NWND  11,050.80 USD  2025-11-15           journal/2025/11.ax:9
 
 Governed by
-  Law                     When     Governs                                     Explains                                                                    Written
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  count-wages             on in    everyone living under us, and all they own  Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a   us.ax:58
-  count-interest          on in    everyone living under us, and all they own  Interest is ordinary income in the year it is earned (IRC §61(a)(4)),       us.ax:66
-  count-dividends         on in    everyone living under us, and all they own  Dividends are income in the year they are paid (IRC §61(a)(7)), except      us.ax:76
-  credit-withholding      on in    everyone living under us, and all they own  Tax withheld from pay, or paid in installments, is credited against the     us.ax:108
-  count-staking           on in    everything in this book                     Staking rewards are ordinary income at their value on the day they arrive   tax.ax:5
-  disallow-wash-loss      on in    everything in this book                     A wash sale (IRC §1091): a loss on a sale is disallowed when substantially  tax.ax:17
-  count-short-term-gains  on gain  everyone living under us, and all they own  A gain on something held for a year or less is taxed as ordinary income     us.ax:86
-  count-long-term-gains   on gain  everyone living under us, and all they own  A gain on something held for more than a year is taxed at the lower         us.ax:97
+  Law  When  Explains  Written
+  ────────────────────────────
+  · 13 more laws only count, into distributions, dividends, interest, investment-income, itemized,
+    long-term-gains, payments, pretax, salt, short-term-gains, staking, total-income, wages.
 
 Recent flows
-  Date        With                    Payee      Note         Amount         Balance
-  ──────────────────────────────────────────────────────────────────────────────────
-  2025-06-30  opening balance                                          134.3275 NWND
-  ──────────────────────────────────────────────────────────────────────────────────
-  2025-06-30  opening balance                                         14,115.91 USD
-  2025-06-30  assets/espp-cash                         8,400.01 USD   22,515.92 USD
-  2025-06-30  income/espp-discount                     3,325.45 USD   25,841.37 USD
-  2025-08-15  income/rsu              northwind         60.0000 NWND   194.3275 NWND
-  2025-08-15  expenses/taxes/federal                   -13.2000 NWND   181.1275 NWND
-  2025-08-15  expenses/taxes/payroll                    -0.8701 NWND   180.2574 NWND
-  2025-09-15  assets/bank/checking                     -99.0799 NWND    81.1775 NWND
-  2025-11-15  income/rsu              northwind         60.0000 NWND   141.1775 NWND
-  2025-11-15  expenses/taxes/federal                   -13.2001 NWND   127.9774 NWND
-  2025-11-15  expenses/taxes/payroll                    -0.8701 NWND   127.1073 NWND
+  Date        With                    Payee      Note         Amount        Balance
+  ─────────────────────────────────────────────────────────────────────────────────
+  2025-06-30  opening balance                                         4,315.92 USD
+  ─────────────────────────────────────────────────────────────────────────────────
+  2025-06-30  opening balance                                         233.4074 NWND
+  2025-06-30  assets/espp-cash                          69.3814 NWND  302.7888 NWND
+  2025-06-30  income/espp-discount                     3,325.45 USD   7,641.37 USD
+  2025-08-15  income/rsu              northwind         60.0000 NWND  362.7888 NWND
+  2025-08-15  expenses/taxes/federal                   -13.2000 NWND  349.5888 NWND
+  2025-08-15  expenses/taxes/payroll                    -0.8701 NWND  348.7187 NWND
+  2025-09-15  assets/bank/checking                     -99.0799 NWND  249.6388 NWND
+  2025-11-15  income/rsu              northwind         60.0000 NWND  309.6388 NWND
+  2025-11-15  expenses/taxes/federal                   -13.2001 NWND  296.4387 NWND
+  2025-11-15  expenses/taxes/payroll                    -0.8701 NWND  295.5686 NWND

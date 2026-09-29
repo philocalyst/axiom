@@ -1,0 +1,10 @@
+$ axiom why #dep-a --today 2026-04-16
+
+Why #dep-a
+
+Flows
+  Date        Flow                                                    Amount  State   From
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-02-01  liabilities/deposits → assets/bank/deposit-bank   2,400.00 USD  actual  journal/2025/02.ax:3
+  2025-09-12  assets/bank/deposit-bank → liabilities/deposits   2,050.00 USD  actual  journal/2025/09.ax:21
+  2025-09-12  income/forfeited-deposits → liabilities/deposits    350.00 USD  actual  journal/2025/09.ax:22

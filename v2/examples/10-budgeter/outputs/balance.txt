@@ -2,55 +2,51 @@ $ axiom balance --today 2026-02-14
 
 Balances at 2026-02-14
 
-  Place                     Balance
-  ─────────────────────────────────
-  assets              11,492.32 USD
-    bank               6,597.01 USD
-      checking         6,597.01 USD
-    cash                  81.56 USD
-      wallet              81.56 USD
-    funds              4,813.75 USD
-      car-fund           113.75 USD
-      emergency        3,000.00 USD
-      insurance-fund     200.00 USD
-      trip-fund        1,500.00 USD
-  ─────────────────────────────────
-  equity               4,951.30 USD
-    opening            4,987.10 USD
-    unknown              -35.80 USD
-  ─────────────────────────────────
-  expenses            21,978.54 USD
-    car                1,712.40 USD
-    car-repair           486.25 USD
-    clothing             115.12 USD
-    dining               758.63 USD
-    fees                  12.00 USD
-    fun                  758.22 USD
-    gifts                460.60 USD
-    groceries          1,421.37 USD
-    health               720.00 USD
-    insurance          1,140.00 USD
-    medical               42.40 USD
-    personal-care        105.00 USD
-    phone                240.00 USD
-    rent               6,900.00 USD
-    student-loan         950.00 USD
-    subscriptions        469.76 USD
-    taxes              4,830.48 USD
-      federal          2,712.00 USD
-      payroll          2,118.48 USD
-    transport            485.27 USD
-    utilities            371.04 USD
-  ─────────────────────────────────
-  income              27,692.28 USD
-    salary            27,692.28 USD
-  ─────────────────────────────────
-  liabilities            827.28 USD
-    visa                 827.28 USD
+  Place                  Balance
+  ──────────────────────────────
+  assets           11,492.32 USD
+    bank           11,410.76 USD
+      checking      6,597.01 USD
+      savings       4,813.75 USD
+    cash               81.56 USD
+      wallet           81.56 USD
+  ──────────────────────────────
+  equity            4,951.30 USD
+    opening         4,987.10 USD
+    unknown           -35.80 USD
+  ──────────────────────────────
+  expenses         21,990.54 USD
+    car             1,712.40 USD
+    car-repair        486.25 USD
+    clothing          115.12 USD
+    dining            758.63 USD
+    fees               12.00 USD
+    fun               758.22 USD
+    gifts             460.60 USD
+    groceries       1,421.37 USD
+    health            720.00 USD
+    insurance       1,152.00 USD
+    medical            42.40 USD
+    personal-care     105.00 USD
+    phone             240.00 USD
+    rent            6,900.00 USD
+    student-loan      950.00 USD
+    subscriptions     469.76 USD
+    taxes           4,830.48 USD
+      federal       2,712.00 USD
+      payroll       2,118.48 USD
+    transport         485.27 USD
+    utilities         371.04 USD
+  ──────────────────────────────
+  income           27,692.28 USD
+    salary         27,692.28 USD
+  ──────────────────────────────
+  liabilities         839.28 USD
+    visa              839.28 USD
 
   Net worth      Value (USD)
   ──────────────────────────
   Assets       11,492.32 USD
-  Liabilities     827.28 USD
+  Liabilities     839.28 USD
   ──────────────────────────
-  Net worth    10,665.04 USD
+  Net worth    10,653.04 USD

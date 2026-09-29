@@ -13,7 +13,8 @@
 2026-01-11 visa -> dining 46.80 USD
 
 /// A paycheck: one source, several targets. The last leg is whatever is left,
-/// and `retirement` is a pre-tax deferral into the 401(k).
+/// and `retirement` is a pre-tax deferral into the 401(k). The next ones are the
+/// plan `paycheck` (plans.ax), which repeats this split, so the journal says only its name.
 2026-01-15 acme -> 8_000 USD
   retirement       800 USD
   taxes/federal    880 USD

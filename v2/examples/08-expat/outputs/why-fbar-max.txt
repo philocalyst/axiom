@@ -1,6 +1,0 @@
-$ axiom why fbar-max --today 2026-01-06
-
-error[ambiguous-law]: `fbar-max` could be `fbar-max`, `fbar-max`, `fbar-max`, `fbar-max`
-  = help: write more of the law's path
-
-✗ 1 error

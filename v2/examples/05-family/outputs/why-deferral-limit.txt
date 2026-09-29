@@ -1,0 +1,37 @@
+$ axiom why deferral-limit --today 2026-04-16
+
+Why deferral-limit
+
+  Law       deferral-limit
+  ──────────────────────────────────
+  When      on in
+  Governs   every 401k
+  Written   us/401k.ax:37
+  Ran       51 times
+  Recorded  0 violations, 51 effects
+  · Elective deferrals are capped for each person and calendar year, across
+  · every plan they hold (IRC §402(g)), with a catch-up from age 50 and a
+  · larger one from 60 through 63 (IRC §414(v)). Employer contributions do not
+  · count. This payment took the year's deferrals over the cap. Any excess must
+  · also be returned by the plan before April 15 of the next year, or it is
+  · taxed twice (IRC §402(g)(2)).
+  ·
+  · To fix: ask payroll to lower the deferral, and have the plan return the
+  · excess.
+
+Recent effects
+  Date        Effect              Owner       Amount  Owed to  From
+  ──────────────────────────────────────────────────────────────────────────────────
+  2025-10-10  elective-deferrals  jordan  228.18 USD           journal/2025/10.ax:20
+  2025-10-15  elective-deferrals  me      575.00 USD           journal/2025/10.ax:33
+  2025-10-24  elective-deferrals  jordan  228.18 USD           journal/2025/10.ax:60
+  2025-10-31  elective-deferrals  me      575.00 USD           journal/2025/10.ax:73
+  2025-11-07  elective-deferrals  jordan  228.18 USD           journal/2025/11.ax:20
+  2025-11-15  elective-deferrals  me      575.00 USD           journal/2025/11.ax:40
+  2025-11-21  elective-deferrals  jordan  228.18 USD           journal/2025/11.ax:56
+  2025-11-30  elective-deferrals  me      575.00 USD           journal/2025/11.ax:75
+  2025-12-05  elective-deferrals  jordan  228.18 USD           journal/2025/12.ax:10
+  2025-12-15  elective-deferrals  me      575.00 USD           journal/2025/12.ax:36
+  2025-12-19  elective-deferrals  jordan  228.18 USD           journal/2025/12.ax:50
+  2025-12-31  elective-deferrals  me      575.00 USD           journal/2025/12.ax:72
+  · 39 earlier effects not shown.

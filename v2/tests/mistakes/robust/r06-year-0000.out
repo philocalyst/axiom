@@ -5,15 +5,16 @@ warning[overdraft]: balance below zero: -84.20 USD against a minimum of 0.00 USD
    │ ──────────────────┬──────────────────
    │                   ╰── this flow: 84.20 USD from assets/checking to expenses/food
    │
-   ├─[std.ax:26:10] (built in)
+   ├─[std.ax:33:10] (built in)
    │
-26 │     warn balance >= empty "balance below zero"
+33 │     warn balance >= empty "balance below zero"
    │          ───┬───
    │             ╰── -84.20 USD
    │
    = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
-           usually for a fee. Move money in before the payment clears, or look for a pending payment
-           or a missing deposit that explains it.
+           usually for a fee.
+   = help: move money in before the payment clears, or look for a pending payment or a missing
+           deposit that explains it.
 
 1 warning
 ✓ 3 flows · 3 places · 1 law enforced · net worth 915.80 USD

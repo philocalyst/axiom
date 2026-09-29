@@ -1,11 +1,9 @@
-Available on 2026-01-06
+Available on 2026-04-16
 
 What you can spend
   In hand                         Amount
   ──────────────────────────────────────
   Money in hand           173,866.60 USD
     assets/bank/checking  173,866.60 USD
-  Held for others            -350.00 USD
-    held for tenant-a        -350.00 USD
   ──────────────────────────────────────
-  Available to spend      173,516.60 USD
+  Available to spend      173,866.60 USD

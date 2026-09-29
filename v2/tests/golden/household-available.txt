@@ -13,12 +13,12 @@ What you can spend
 
 What it would take to reach the rest
   Holding                         Liquid in          Value          Cost            Net  Because
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   assets/brokerage (2 VTI)        2d            605.10 USD                   605.10 USD
   assets/college                  5d          6,700.00 USD    156.05 USD   6,543.95 USD  driven by nonqualified-529-penalty 156.05 USD
-  assets/retirement               5d         43,700.00 USD  8,555.54 USD  35,144.46 USD  driven by early-withdrawal-penalty 4,370.00 USD, federal-income-tax 3,092.78 USD, ca-income-tax 1,092.76 USD
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today             51,005.10 USD  8,711.59 USD  42,293.51 USD
+  assets/retirement               5d         43,700.00 USD  4,370.00 USD  39,330.00 USD  driven by early-withdrawal-penalty 4,370.00 USD
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today             51,005.10 USD  4,526.05 USD  46,479.05 USD
   · Each line withdraws the whole holding into assets/bank/savings on 2026-03-31 and runs the year
     out through the laws. Cost is what they would then owe beyond what they already will: penalties,
     and the tax on any income it creates.

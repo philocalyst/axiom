@@ -1,18 +1,18 @@
-// Balances carried over from the spreadsheet this ledger replaces. They are
-// dated the last day of 2025, so none of it counts toward 2026 contribution
-// limits.
+// Balances carried over from the spreadsheet this ledger replaces. An opening
+// is a statement, not a flow: no law sees it, it counts toward no yearly limit,
+// and each line can say what it cost and since when.
 
-2025-12-31 opening -> checking 15_500 USD
-2025-12-31 opening -> savings 15_000 USD
+opening 2025-12-31
+  checking     9_200 USD
+  savings     15_000 USD
 
-// Pre-tax money: it arrives in a tax-deferred account with no basis.
-2025-12-31 opening -> retirement 41_300 USD
+  // Pre-tax money: a 401(k) arrives with no basis, so all of it is taxable when
+  // it comes out. The kind says so; nothing here does.
+  retirement  41_300 USD
 
-// The 529 was opened in 2019. What was put in is its basis, so it comes from a
-// bank account and keeps its value as basis. The growth since then comes from
-// nowhere and has none.
-2025-12-31 checking -> college 6_300 USD
-2025-12-31 opening -> college 2_200 USD
+  // The 529 was opened in 2019. What was put in, 6,300 USD, is its basis; the
+  // growth since then, 2,200 USD, has none.
+  college      8_500 USD  basis 6_300 USD
 
 2025-12-31 checking = 9_200 USD
 2025-12-31 savings = 15_000 USD

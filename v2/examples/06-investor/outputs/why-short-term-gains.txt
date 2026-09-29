@@ -1,69 +1,61 @@
-$ axiom why short-term-gains --today 2026-01-06
+$ axiom why short-term-gains --today 2026-04-16
 
 Why short-term-gains
 
 Effects
-  Date        Owner         Amount  Owed to  From
-  ────────────────────────────────────────────────────────────────
-  2025-02-15  me        290.78 USD           journal/2025/02.ax:10
-  2025-02-15  me         89.39 USD           journal/2025/02.ax:11
-  2025-04-08  me      2,503.40 USD           journal/2025/04.ax:6
-  2025-04-10  me         -0.05 USD           journal/2025/04.ax:11
-  2025-05-15  me        168.30 USD           journal/2025/05.ax:9
-  2025-05-15  me         11.08 USD           journal/2025/05.ax:10
-  2025-05-27  me     -2,949.54 USD           journal/2025/05.ax:16
-  2025-06-10  me      1,978.60 USD           journal/2025/06.ax:11
-  2025-08-15  me        435.07 USD           journal/2025/08.ax:7
-  2025-08-15  me         28.66 USD           journal/2025/08.ax:8
-  2025-09-02  me        342.00 USD           journal/2025/09.ax:3
-  2025-09-15  me      2,588.96 USD           journal/2025/09.ax:10
-  2025-11-15  me         12.53 USD           journal/2025/11.ax:10
-  2025-11-15  me        344.78 USD           journal/2025/11.ax:10
-  2025-11-15  me         23.16 USD           journal/2025/11.ax:11
-  2025-12-04  me         10.49 USD           journal/2025/12.ax:8
-  2025-12-04  me         25.38 USD           journal/2025/12.ax:8
-  2025-12-09  me      1,264.35 USD           journal/2025/12.ax:13
-  2025-12-16  me       -738.30 USD           journal/2025/12.ax:19
+  Date        Effect            Owner        Amount  Owed to  From
+  ─────────────────────────────────────────────────────────────────────────────────
+  2025-06-10  short-term-gains  me     1,978.60 USD           journal/2025/06.ax:11
+  2025-08-15  short-term-gains  me       435.07 USD           journal/2025/08.ax:7
+  2025-08-15  short-term-gains  me        28.66 USD           journal/2025/08.ax:8
+  2025-09-02  short-term-gains  me       342.00 USD           journal/2025/09.ax:3
+  2025-09-15  short-term-gains  me     2,588.96 USD           journal/2025/09.ax:10
+  2025-11-15  short-term-gains  me        12.53 USD           journal/2025/11.ax:10
+  2025-11-15  short-term-gains  me       344.78 USD           journal/2025/11.ax:10
+  2025-11-15  short-term-gains  me        23.16 USD           journal/2025/11.ax:11
+  2025-12-04  short-term-gains  me        10.49 USD           journal/2025/12.ax:8
+  2025-12-04  short-term-gains  me        25.38 USD           journal/2025/12.ax:8
+  2025-12-09  short-term-gains  me     1,264.35 USD           journal/2025/12.ax:13
+  2025-12-16  short-term-gains  me      -738.30 USD           journal/2025/12.ax:19
+  · 7 earlier effects not shown.
 
 Flows behind it
-  Date        Flow                                             Amount  From
-  ──────────────────────────────────────────────────────────────────────────────────────────
-  2025-02-15  assets/etrade → expenses/taxes/federal     13.2001 NWND  journal/2025/02.ax:10
-  2025-02-15  assets/etrade → expenses/taxes/payroll      4.0578 NWND  journal/2025/02.ax:11
-  2025-04-08  assets/coinbase → assets/coinbase       0.15000000 BTC   journal/2025/04.ax:6
-  2025-04-10  assets/wallet → expenses/network-fees   0.00210000 ETH   journal/2025/04.ax:11
-  2025-05-15  assets/etrade → expenses/taxes/federal     13.2000 NWND  journal/2025/05.ax:9
-  2025-05-15  assets/etrade → expenses/taxes/payroll      0.8701 NWND  journal/2025/05.ax:10
-  2025-05-27  assets/fidelity → assets/bank/checking     14.9072 UNH   journal/2025/05.ax:16
-  2025-06-10  equity/wash-sale → assets/fidelity        1,978.60 USD   journal/2025/06.ax:11
-  2025-08-15  assets/etrade → expenses/taxes/federal     13.2000 NWND  journal/2025/08.ax:7
-  2025-08-15  assets/etrade → expenses/taxes/payroll      0.8701 NWND  journal/2025/08.ax:8
-  2025-09-02  assets/fidelity → assets/bank/checking     60.0000 FAST  journal/2025/09.ax:3
-  2025-09-15  assets/etrade → assets/bank/checking       99.0799 NWND  journal/2025/09.ax:10
-  2025-11-15  assets/etrade → expenses/taxes/federal     13.2001 NWND  journal/2025/11.ax:10
-  2025-11-15  assets/etrade → expenses/taxes/payroll      0.8701 NWND  journal/2025/11.ax:11
-  2025-12-04  assets/fidelity → assets/bank/checking      8.0000 VTI   journal/2025/12.ax:8
-  2025-12-09  assets/wallet → assets/bank/checking    1.00000000 ETH   journal/2025/12.ax:13
-  2025-12-16  assets/fidelity → assets/bank/checking    120.0480 VNQ   journal/2025/12.ax:19
+  Date        Flow                                             Amount  State   From
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-05-15  assets/etrade → expenses/taxes/payroll      0.8701 NWND  actual  journal/2025/05.ax:10
+  2025-05-27  assets/fidelity → assets/bank/checking     14.9072 UNH   actual  journal/2025/05.ax:20
+  2025-06-10  equity/wash-sale → assets/fidelity        1,978.60 USD   actual  journal/2025/06.ax:11
+  2025-08-15  assets/etrade → expenses/taxes/federal     13.2000 NWND  actual  journal/2025/08.ax:7
+  2025-08-15  assets/etrade → expenses/taxes/payroll      0.8701 NWND  actual  journal/2025/08.ax:8
+  2025-09-02  assets/fidelity → assets/bank/checking     60.0000 FAST  actual  journal/2025/09.ax:3
+  2025-09-15  assets/etrade → assets/bank/checking       99.0799 NWND  actual  journal/2025/09.ax:10
+  2025-11-15  assets/etrade → expenses/taxes/federal     13.2001 NWND  actual  journal/2025/11.ax:10
+  2025-11-15  assets/etrade → expenses/taxes/payroll      0.8701 NWND  actual  journal/2025/11.ax:11
+  2025-12-04  assets/fidelity → assets/bank/checking      8.0000 VTI   actual  journal/2025/12.ax:8
+  2025-12-09  assets/wallet → assets/bank/checking    1.00000000 ETH   actual  journal/2025/12.ax:13
+  2025-12-16  assets/fidelity → assets/bank/checking    120.0480 VNQ   actual  journal/2025/12.ax:19
+  · 5 earlier flows not shown.
 
 Gains realized
-  Date        Sold from             Proceeds          Basis           Gain  Held since
-  ────────────────────────────────────────────────────────────────────────────────────
-  2025-02-15  assets/etrade     2,079.53 USD   1,788.75 USD     290.78 USD  2024-11-15
-  2025-02-15  assets/etrade       639.26 USD     549.87 USD      89.39 USD  2024-11-15
-  2025-04-08  assets/coinbase  12,263.64 USD   9,760.24 USD   2,503.40 USD  2024-10-14
-  2025-04-10  assets/wallet         3.65 USD       3.70 USD      -0.05 USD  2025-04-08
-  2025-05-15  assets/etrade     1,957.03 USD   1,788.73 USD     168.30 USD  2024-11-15
-  2025-05-15  assets/etrade       128.99 USD     117.91 USD      11.08 USD  2024-11-15
-  2025-05-27  assets/fidelity   4,650.45 USD   7,599.99 USD  -2,949.54 USD  2025-01-14
-  2025-08-15  assets/etrade     2,223.80 USD   1,788.73 USD     435.07 USD  2024-11-15
-  2025-08-15  assets/etrade       146.57 USD     117.91 USD      28.66 USD  2024-11-15
-  2025-09-02  assets/fidelity   2,748.60 USD   2,406.60 USD     342.00 USD  2024-12-10
-  2025-09-15  assets/etrade    16,704.87 USD  14,115.91 USD   2,588.96 USD  2024-12-31
-  2025-11-15  assets/etrade        47.41 USD      34.88 USD      12.53 USD  2024-11-15
-  2025-11-15  assets/etrade     2,383.77 USD   2,038.99 USD     344.78 USD  2025-02-15
-  2025-11-15  assets/etrade       160.24 USD     137.08 USD      23.16 USD  2025-02-15
-  2025-12-04  assets/fidelity   1,510.46 USD   1,499.97 USD      10.49 USD  2025-11-05
-  2025-12-04  assets/fidelity   1,138.66 USD   1,113.28 USD      25.38 USD  2025-10-05
-  2025-12-09  assets/wallet     3,027.21 USD   1,762.86 USD   1,264.35 USD  2025-04-08
-  2025-12-16  assets/fidelity  10,261.70 USD  11,000.00 USD    -738.30 USD  2025-02-20
+  Sold        Acquired           Quantity  From                  Proceeds          Basis           Gain  Term
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-02-15  2024-11-15     13.2001 NWND  assets/etrade     2,079.53 USD   1,788.75 USD     290.78 USD  short
+  2025-02-15  2024-11-15      4.0578 NWND  assets/etrade       639.26 USD     549.87 USD      89.39 USD  short
+  2025-04-08  2024-10-14  0.15000000 BTC   assets/coinbase  12,263.64 USD   9,760.24 USD   2,503.40 USD  short
+  2025-04-10  2025-04-08  0.00210000 ETH   assets/wallet         3.65 USD       3.70 USD      -0.05 USD  short
+  2025-05-15  2024-11-15     13.2000 NWND  assets/etrade     1,957.03 USD   1,788.73 USD     168.30 USD  short
+  2025-05-15  2024-11-15      0.8701 NWND  assets/etrade       128.99 USD     117.91 USD      11.08 USD  short
+  2025-05-27  2025-01-14     14.9072 UNH   assets/fidelity   4,650.45 USD   7,599.99 USD  -2,949.54 USD  short
+  2025-08-15  2024-11-15     13.2000 NWND  assets/etrade     2,223.80 USD   1,788.73 USD     435.07 USD  short
+  2025-08-15  2024-11-15      0.8701 NWND  assets/etrade       146.57 USD     117.91 USD      28.66 USD  short
+  2025-09-02  2024-12-10     60.0000 FAST  assets/fidelity   2,748.60 USD   2,406.60 USD     342.00 USD  short
+  2025-09-15  2024-12-31     99.0799 NWND  assets/etrade    16,704.87 USD  14,115.91 USD   2,588.96 USD  short
+  2025-11-15  2024-11-15      0.2574 NWND  assets/etrade        47.41 USD      34.88 USD      12.53 USD  short
+  2025-11-15  2025-02-15     12.9427 NWND  assets/etrade     2,383.77 USD   2,038.99 USD     344.78 USD  short
+  2025-11-15  2025-02-15      0.8701 NWND  assets/etrade       160.24 USD     137.08 USD      23.16 USD  short
+  2025-12-04  2025-10-05      3.4386 VTI   assets/fidelity   1,138.66 USD   1,113.28 USD      25.38 USD  short
+  2025-12-04  2025-11-05      4.5614 VTI   assets/fidelity   1,510.46 USD   1,499.97 USD      10.49 USD  short
+  2025-12-09  2025-04-08  1.00000000 ETH   assets/wallet     3,027.21 USD   1,762.86 USD   1,264.35 USD  short
+  2025-12-16  2025-02-20    120.0480 VNQ   assets/fidelity  10,261.70 USD  11,000.00 USD    -738.30 USD  short
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Short-term                                                62,075.84 USD  57,625.40 USD   4,450.44 USD

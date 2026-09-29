@@ -1,4 +1,4 @@
-$ axiom register wise --today 2026-01-06
+$ axiom register wise --today 2026-04-16
 
 Register: assets/uk/wise
 

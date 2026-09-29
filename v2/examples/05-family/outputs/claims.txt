@@ -1,0 +1,5 @@
+$ axiom claims --today 2026-04-16
+
+Claims on 2026-04-16
+
+  · Nothing is owed either way. A flow with `due` into a receivable place makes one.

@@ -11,9 +11,9 @@ error[deferral-limit]: 401(k) deferrals over the yearly limit: 27,000.00 USD in 
    │   ──────────────┬─────────────
    │                 ╰── this flow: 12,000.00 USD into assets/retirement-newco
    │
-   ├─[us/401k.ax:33:13] (built in)
+   ├─[us/401k.ax:42:13] (built in)
    │
-33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
+42 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearl…
    │             ────────────┬────────────    ─────────┬─────────
    │                         │                         ╰── 24,500.00 USD
    │                         ╰── 27,000.00 USD
@@ -21,9 +21,10 @@ error[deferral-limit]: 401(k) deferrals over the yearly limit: 27,000.00 USD in 
    = note: Elective deferrals are capped for each person and calendar year, across every plan they
            hold (IRC §402(g)), with a catch-up from age 50 and a larger one from 60 through 63 (IRC
            §414(v)). Employer contributions do not count. This payment took the year's deferrals
-           over the cap. Ask payroll to lower the deferral. Any excess must also be returned by the
-           plan before April 15 of the next year, or it is taxed twice (IRC §402(g)(2)).
+           over the cap. Any excess must also be returned by the plan before April 15 of the next
+           year, or it is taxed twice (IRC §402(g)(2)).
    = help: at most 9,500.00 USD more can count toward `elective-deferrals` this year
+   = help: ask payroll to lower the deferral, and have the plan return the excess.
 
 ✗ 1 error
 [exit status 1]

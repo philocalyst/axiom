@@ -1,0 +1,12 @@
+$ axiom limits 2025 --today 2026-04-16
+
+Limits in 2025
+
+  Who     Limit                                            Window         Counted            Cap      Room left    Used
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  me      contribution-limit on assets/dcfsa               2025      5,000.00 USD   5,000.00 USD       0.00 USD    100%
+  me      contribution-limit on assets/hsa                 2025      7,000.00 USD   8,550.00 USD   1,550.00 USD  81.87%
+  me      budget on expenses/food                          2025-12     930.59 USD   1,300.00 USD     369.41 USD  71.58%
+  me      deferral-limit on assets/retirement/alex-401k    2025     15,000.00 USD  23,500.00 USD   8,500.00 USD  63.83%
+  family  gift-exclusion on assets/education/riley-529     2025      6,000.00 USD  19,000.00 USD  13,000.00 USD  31.58%
+  jordan  deferral-limit on assets/retirement/jordan-401k  2025      5,846.36 USD  23,500.00 USD  17,653.64 USD  24.88%

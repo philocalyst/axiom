@@ -1,0 +1,35 @@
+$ axiom gains 2025 --today 2026-04-16
+
+Gains realized in 2025
+
+  Sold        Acquired           Quantity  From                  Proceeds          Basis           Gain  Term
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-02-15  2024-11-15     13.2001 NWND  assets/etrade     2,079.53 USD   1,788.75 USD     290.78 USD  short
+  2025-02-15  2024-11-15      4.0578 NWND  assets/etrade       639.26 USD     549.87 USD      89.39 USD  short
+  2025-04-08  2024-10-14  0.15000000 BTC   assets/coinbase  12,263.64 USD   9,760.24 USD   2,503.40 USD  short
+  2025-04-10  2025-04-08  0.00210000 ETH   assets/wallet         3.65 USD       3.70 USD      -0.05 USD  short
+  2025-05-15  2024-11-15     13.2000 NWND  assets/etrade     1,957.03 USD   1,788.73 USD     168.30 USD  short
+  2025-05-15  2024-11-15      0.8701 NWND  assets/etrade       128.99 USD     117.91 USD      11.08 USD  short
+  2025-05-27  2025-01-14     14.9072 UNH   assets/fidelity   4,650.45 USD   7,599.99 USD  -2,949.54 USD  short
+  2025-08-15  2024-11-15     13.2000 NWND  assets/etrade     2,223.80 USD   1,788.73 USD     435.07 USD  short
+  2025-08-15  2024-11-15      0.8701 NWND  assets/etrade       146.57 USD     117.91 USD      28.66 USD  short
+  2025-09-02  2024-12-10     60.0000 FAST  assets/fidelity   2,748.60 USD   2,406.60 USD     342.00 USD  short
+  2025-09-15  2024-12-31     99.0799 NWND  assets/etrade    16,704.87 USD  14,115.91 USD   2,588.96 USD  short
+  2025-11-15  2024-11-15      0.2574 NWND  assets/etrade        47.41 USD      34.88 USD      12.53 USD  short
+  2025-11-15  2025-02-15     12.9427 NWND  assets/etrade     2,383.77 USD   2,038.99 USD     344.78 USD  short
+  2025-11-15  2025-02-15      0.8701 NWND  assets/etrade       160.24 USD     137.08 USD      23.16 USD  short
+  2025-12-04  2025-10-05      3.4386 VTI   assets/fidelity   1,138.66 USD   1,113.28 USD      25.38 USD  short
+  2025-12-04  2025-11-05      4.5614 VTI   assets/fidelity   1,510.46 USD   1,499.97 USD      10.49 USD  short
+  2025-12-09  2025-04-08  1.00000000 ETH   assets/wallet     3,027.21 USD   1,762.86 USD   1,264.35 USD  short
+  2025-12-16  2025-02-20    120.0480 VNQ   assets/fidelity  10,261.70 USD  11,000.00 USD    -738.30 USD  short
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Short-term                                                62,075.84 USD  57,625.40 USD   4,450.44 USD
+  2025-08-19  2021-08-11    200.0000 BND   assets/schwab    14,644.00 USD  17,000.00 USD  -2,356.00 USD  long
+  2025-10-10  2024-09-05      4.5160 VTI   assets/fidelity   1,468.74 USD   1,212.86 USD     255.88 USD  long
+  2025-10-10  2024-10-05      5.4840 VTI   assets/fidelity   1,783.56 USD   1,499.98 USD     283.58 USD  long
+  2025-11-06  2024-10-08      8.0000 MSFT  assets/fidelity   4,147.52 USD   3,440.00 USD     707.52 USD  long
+  2025-12-02  2024-10-14  0.02000000 BTC   assets/coinbase   1,825.72 USD   1,301.37 USD     524.35 USD  long
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Long-term                                                 23,869.54 USD  24,454.21 USD    -584.67 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                                                     85,945.38 USD  82,079.61 USD   3,865.77 USD

@@ -79,18 +79,14 @@
   joint-checking      ...
 2025-06-30 employer-match -> alex-401k 230 USD / acme
 2025-06-30 interest -> joint-savings 201.25 USD
-2025-06-30 growth -> alex-401k 12_717.67 USD
-2025-06-30 growth -> jordan-401k 8_058.21 USD
-2025-06-30 growth -> riley-529 2_365.31 USD
-2025-06-30 growth -> hsa 90.51 USD
+2025-06-30 alex-401k = 169_725.90 USD via market
+2025-06-30 jordan-401k = 107_542.25 USD via market
+2025-06-30 riley-529 = 31_566.71 USD via market
+2025-06-30 hsa = 11_404.40 USD via market
 2025-06-30 mortgage = 409_602.14 USD
 2025-06-30 car-loan = 20_130.22 USD
 2025-06-30 card = 3_202.31 USD
 2025-06-30 joint-checking = 26_022.49 USD
 2025-06-30 joint-savings = 59_104.92 USD
 2025-06-30 escrow = 480.00 USD
-2025-06-30 hsa = 11_404.40 USD
 2025-06-30 dcfsa = 416.66 USD
-2025-06-30 alex-401k = 169_725.90 USD
-2025-06-30 jordan-401k = 107_542.25 USD
-2025-06-30 riley-529 = 31_566.71 USD

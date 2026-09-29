@@ -6,8 +6,8 @@ error[unknown-property]: `employr` is not a property of an account of kind `401k
    │   ───┬───
    │      ╰── no such property
    │
-   = note: its properties are `owner`, `holds`, `select`, `opened`, `closed`, `budget`, `liquidity`
-           or `employer`
+   = note: its properties are `owner`, `holds`, `select`, `opened`, `closed`, `budget`, `liquidity`,
+           `employer`, `pays`, `taxed-by-kind` or `deductible`
    = help: did you mean `employer`?
 12 -   employr acme
 12 +   employer acme

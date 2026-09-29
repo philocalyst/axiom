@@ -1,0 +1,7 @@
+$ axiom budget 2025-05 --today 2026-04-16
+
+Budgets for 2025-05
+
+  Place          Law     Window          Spent         Limit        Left    Used
+  ──────────────────────────────────────────────────────────────────────────────
+  expenses/food  budget  2025-05  1,023.40 USD  1,300.00 USD  276.60 USD  78.72%

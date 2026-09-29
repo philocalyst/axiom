@@ -279,6 +279,7 @@ impl<'b, 's> Ledger<'b, 's> {
         let missing = match fault {
             Fault::NoPrice { unit, quote } => Missing::Price(unit, quote),
             Fault::Unset(name) => Missing::Property(holder, name),
+            Fault::NoRow(param) if book.params[param].system.is_some() => Missing::Figures(ctx.over.from.year()),
             Fault::NoRow(param) => Missing::Row(param),
             Fault::DivideByZero | Fault::Overflow => Missing::Arithmetic(rule.law, step as u32),
         };

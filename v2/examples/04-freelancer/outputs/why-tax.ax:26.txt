@@ -1,7 +1,0 @@
-$ axiom why tax.ax:26 --today 2026-02-10
-
-Why this line
-
-  On this line              Source
-  ───────────────────────────────────
-  law self-employment-year  tax.ax:26

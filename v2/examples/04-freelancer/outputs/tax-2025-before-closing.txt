@@ -1,0 +1,24 @@
+$ axiom tax 2025 --today 2026-02-10
+
+Taxes 2025 for me
+
+Counted
+  Tally                       Amount  From
+  ───────────────────────────────────────────────
+  project
+    business-expenses  13,471.01 USD  165 sources
+    health-premiums     4,944.00 USD  12 sources
+    adjustments        12,944.00 USD  16 sources
+    gross-receipts     74,800.00 USD  27 sources
+    sep-contributions   8,000.00 USD  4 sources
+  ───────────────────────────────────────────────
+  us
+    interest              290.12 USD  12 sources
+    total-income          290.12 USD  12 sources
+    investment-income     290.12 USD  12 sources
+    payments           11,100.00 USD  5 sources
+
+Owed
+  Owed  To  Due  Amount  From
+  ───────────────────────────
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

@@ -1,20 +1,26 @@
-$ axiom available --at 2025-05-01 --today 2026-01-06
+$ axiom available --today 2025-05-01
 
 Available on 2025-05-01
 
 What you can spend
-  Liquid now                                Amount
+  In hand                                   Amount
   ────────────────────────────────────────────────
-  Money in liquid places             14,915.98 USD
+  Money in hand                      10,815.98 USD
     assets/bank/checking                730.08 USD
     assets/bank/collective-checking   5,160.95 USD
     assets/bank/savings               4,500.00 USD
     assets/cash/collective-cash          96.50 USD
     assets/cash/wallet                  328.45 USD
-    assets/loans/riley                2,000.00 USD
-    assets/roommates/ben              1,050.00 USD
-    assets/roommates/cleo             1,050.00 USD
-  Tied to restricted entities        -3,158.65 USD
-    tied to riverfront               -3,158.65 USD
+  Held for others                    -3,158.65 USD
+    held for riverfront              -3,158.65 USD
   ────────────────────────────────────────────────
-  Available to spend                 11,757.33 USD
+  Available to spend                  7,657.33 USD
+
+Coming in
+  Counterparty         What                                                                                                                                         Left  Made        Age  Due         Status
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/owed/by-ben   #rent-2025-05                                                                                                                        1,050.00 USD  2025-05-01  0d   2025-05-08  in 7d
+  assets/owed/by-cleo  #rent-2025-05                                                                                                                        1,050.00 USD  2025-05-01  0d   2025-05-08  in 7d
+  riley                #loan-riley · A loan to a friend: 2,000.00 USD for a security deposit, to be paid back 250.00 USD a month from May 15, so the last…  2,000.00 USD  2025-04-10  21d  2025-12-15  in 228d
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                                                                                                                                                     4,100.00 USD
