@@ -9,7 +9,7 @@ with (`cargo build --release`, `axiom 0.3.0`), colourless, `--today 2026-06-30`.
 |---|---|
 | 99 mistakes, each one realistic error in a single-file or small directory project | `NN-name.ax` and `NN-name/` |
 | the captured output of `axiom check` on each (stdout and stderr, then the exit status) | `NN-name.out` |
-| 24 robustness probes (must not panic or hang) | `robust/rNN-*.ax`, `robust/rNN-*.out` |
+| 25 robustness probes (must not panic or hang; three of error multiplicity) | `robust/rNN-*.ax`, `robust/rNN-*.out` |
 | 16 "constraint surfacing" probes | `constraints.sh`, `constraints.out` |
 | the runner that regenerates every `.out` | `run.sh` |
 | this audit | `REPORT.md` |
@@ -51,7 +51,7 @@ edit the tool would draw, as the renderer already does for its `did you mean` he
 1. The **lexer and parser are excellent** at *isolated* mistakes (tabs, dates, `$`, `usd`, `0`, glued amounts): most get a precise span and a correct edit. The few weak ones are tokens the lexer splits differently from a human (`=>`, `→`, `01/15/2026`), and one suggested edit that **changes the amount** (`1.234,56` → `1.234_56`).
 2. **Error recovery is the systemic failure**: a declaration that fails to parse is dropped, and each later use becomes an `unknown-place` (seven cases). Several model/engine errors also multiply (three errors for one missing `filing`, four for one missing table, two for one missing price).
 3. **Five inputs are silently accepted and change the books**: an undeclared commodity, a typo inside a full account path, a settlement dated before its flow, a backwards date range (a payment vanishes), a missing `base`. These are the top defect, more than any wording problem.
-4. **Assertion failures state the gap but never explain it**, and the first help is `!` (accept the gap). No transposition, reversal, sign or missed-transaction reasoning; an overdrawn balance cannot be asserted at all.
+4. **Assertion failures state the gap but never explain it**, and the first help is `!` (accept the gap). No transposition, reversal, sign or missed-transaction reasoning; an overdrawn balance cannot be asserted at all; and one missed transaction makes *every later assertion* fail (60 errors, 242 KB, on a five-year ledger).
 5. **Laws from the built-in systems are reported in the built-in files**, in implementation words ("cannot check `deferral-limit`: `born` is not set"), pointing the user at `us/401k.ax` instead of at their own `entity me`.
 6. **Constraints are hard to see**: `check` hides priced violations (a 1,000 USD 401(k) penalty prints `✓`); no command shows a limit with the amount used and the room left; reports refuse to run while any error stands.
 
@@ -495,8 +495,8 @@ defects in the whole corpus, because the typo does not error at all.
 `expenses/dinning`".
 **Verdict.** The suggestion is right. The second help is noise when a near miss exists
 and, worse, its example (`expenses/dinning`) is invented from the first root, not from
-the nearest place (`expenses/food/dining`). Only one candidate is offered; there are
-two other places with `food` in them.
+the nearest place (`expenses/food/dining`). Only one candidate is offered, though `groceries`
+is the other plausible place in the same subtree.
 **Ideal.**
 ```text
 error[unknown-place]: there is no place `dinning`
@@ -800,8 +800,8 @@ error[split-short]: the legs add up to 4,800.00 USD, but the paycheck is 5,000.0
    │   ──────────┬────────
    │             ╰── legs: 800.00 + 4,000.00 = 4,800.00 USD; 200.00 USD is unassigned
    │
-   = help: give the 200.00 USD a home: add a leg
-16 +   expenses/taxes  200 USD
+   = help: give the 200.00 USD a home, for example another leg
+16 +   savings   200 USD
    = help: or let one leg take the remainder
 16 +   checking  ...
 ```
@@ -1124,18 +1124,20 @@ Today the diagnostic states the gap and lists every flow since the last assertio
 does not attempt the four explanations that account for nearly every real gap: a
 **transposition** (the gap is divisible by 9), a **reversed flow** (the gap is twice a
 flow), a **missed transaction** (the gap is a plausible amount), and a **sign** error.
-It also offers `!` (accept the gap) as its only help.
+It also offers `!` (accept the gap) as its only help. And a gap, once opened, is
+inherited by every later assertion of the place: each fails again with the same amount and
+re-explains it from the start of the book (`robust/r25`: one missed purchase, six errors; the
+10k benchmark project gives 60 errors and 242 KB).
 
 ### 48 assert-transposed — grade C
 **Mistake.** The statement says 3,015.80 USD; the assertion transposes two digits
 (`3_051.80`).
 **Actual** (`48-assert-transposed.out`): `assertion`: "assets/checking holds 3,015.80 USD, not
 3,051.80 USD", every flow since the opening listed with its signed amount, label "36.00 USD
-missing: the ledger holds less than this" (the wording is backwards: the *assertion* is 36.00
-higher than the ledger), help "if the gap is a genuine externality … accept it explicitly"
-with `!` appended.
-**Verdict.** Numbers right; direction of the label wrong; the suggested edit hides a
-typo behind an accepted gap: the *worst* first help.
+missing: the ledger holds less than this", help "if the gap is a genuine externality …
+accept it explicitly" with `!` appended.
+**Verdict.** Numbers and direction are right; but the suggested edit hides a typo behind
+an accepted gap: the *worst* first help. ("Missing" also reads as a transaction to record.)
 **Ideal.**
 ```text
 error[assertion]: checking holds 3,015.80 USD on 2026-01-31, not the 3,051.80 USD you wrote
@@ -1698,7 +1700,7 @@ error[grant-purpose]: 1,200.00 USD of the scholarship pays rent, and it may only
 **Mistake.** A 10,000.00 USD withdrawal from a 401(k) at age 37.
 **Actual** (`71-early-withdrawal.out`): `✓ 2 flows · 4 places · 4 laws enforced · net worth 40,000.00 USD`.
 No diagnostic, no notice. (The cost, a 1,000.00 USD penalty and 10,000.00 USD of income, is
-only visible in `axiom tax 2026`; see §10.)
+only visible in `axiom tax 2026`; see §11.)
 **Verdict.** "Priced, not failed" is the right semantics, but `check` is where a user
 looks, and a quiet check reads as approval. The README of the household example says
 `check` reports these; the golden output does not.
@@ -2280,7 +2282,7 @@ error[layout]: `journal/2026-02.ax` holds February 2026, and this flow is dated 
 
 ## 10. Robustness probes (`robust/`)
 
-24 inputs (22 that are not plausible mistakes but must never crash or hang, and two probes of
+25 inputs (22 that are not plausible mistakes but must never crash or hang, and three probes of
 error multiplicity). **No panic, no hang, no crash in any of them** (each finishes in about 5 ms).
 
 | probe | input | result |
@@ -2308,6 +2310,7 @@ error multiplicity). **No panic, no hang, no crash in any of them** (each finish
 | r21 | 1 KB of binary | `cannot read … stream did not contain valid UTF-8`, exit 2 |
 | r22 | invalid UTF-8 in a comment | same |
 | r23 | the same typo (`grocries`) used 3 times | **3 identical `unknown-place` errors**, each with two `help:`s: one root cause, N errors |
+| r25 | one missed 15.08 USD purchase in January; six monthly assertions | **6 errors for one root cause**: the gap is inherited by every later assertion, so each fails again with the same amount, and each explains it from "the start of the book" (the window never resets: `SHOWN = 8` flows drawn, "N earlier flows … are not shown"). Deleting one line from the 10k benchmark project gives **60 errors (242 KB)**; from the 100k project, **96 errors (399 KB)** |
 | r24 | `born` missing; paychecks in 2025 and 2026 | 2 errors (`deferral-limit`, then `required-minimum-distribution` in `us/401k.ax:73`): deduplicated per law, not per root cause |
 
 Findings from the probes: **unbounded snippet width** (r07), **non-ASCII rejected without
@@ -2419,7 +2422,10 @@ Ranked by (damage of the current behaviour) × (how many cases it touches).
    needs an error or, for "opens a place", a warning that names the nearest declared
    place. *This is the top item because the failure is invisible in a system whose
    whole purpose is to be right.*
-2. **One root cause, one diagnostic.** A declaration that fails to parse is dropped,
+2. **One root cause, one diagnostic.** One missed purchase makes *every later month-end
+   assertion* fail with the same gap (`robust/r25`: 6 errors; 60 errors and 242 KB on the 10k
+   benchmark project, 96 errors on the 100k one), and each error formats every flow since the
+   start of the book to draw the last 8 (`explain::mismatch`). A declaration that fails to parse is dropped,
    so every use of it is an `unknown-place` (14, 15, 19, 72, 73, 81, 83: seven cases,
    and one error per *use* in a real file). Pairing failures cascade (43, 56), one
    missing property fires three errors (78), one missing table four (67), one missing
@@ -2435,6 +2441,8 @@ Ranked by (damage of the current behaviour) × (how many cases it touches).
    *sign error* (gap = 2 × balance, 84), a *wrong commodity* (58), a *missed
    transaction* (49). Offer "correct the number" before `!`, and let assertions be
    written negative (84: at present an overdrawn balance cannot be asserted at all).
+   After a failed assertion, carry the gap forward and stay silent while it does not
+   change; report only a *new* gap, with only the flows since the last checkpoint (r25).
 5. **Point into the user's file and say what to add.** `unset-property` and
    `no-param-row` are reported inside `us.ax`/`us/401k.ax` (67, 78, 79): the user must
    go read a file they did not write. Report at the `entity`/`account` that lacks the

@@ -1,0 +1,10 @@
+# Generated projects and scratch output. `run.sh` writes to $AXIOM_BENCH_DIR
+# (default: $TMPDIR/axiom-bench), outside the repository; these lines keep them
+# out of git if someone points it inside the tree.
+/generated/
+/work/
+/tmp/
+/perf/*.data
+/perf/*.out
+__pycache__/
+*.pyc

@@ -12,11 +12,15 @@ axiom=../../target/release/axiom
 [ -x "$axiom" ] || (cd ../.. && cargo build --release -q)
 today=2026-06-30
 
+here=$(pwd -P)
+
 case_out() {
     name=$1
     shift
     timeout 60 "$axiom" "$@" --today "$today" --color never > "$name.out" 2>&1
     status=$?
+    # absolute paths in messages (`no axiom.ax in /home/…`) would make the output machine-specific
+    sed "s|$here|<mistakes>|g" "$name.out" > "$name.out.tmp" && mv "$name.out.tmp" "$name.out"
     printf '[exit status %s]\n' "$status" >> "$name.out"
 }
 
