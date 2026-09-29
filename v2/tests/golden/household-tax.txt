@@ -1,0 +1,31 @@
+Taxes 2026 for me
+
+Counted
+  Tally                          Amount  From
+  ────────────────────────────────────────────────────────────
+  us
+    wages                 24,000.00 USD  15 sources
+    federal-withheld       2,640.00 USD  3 sources
+    interest                 147.05 USD  3 sources
+    short-term-gains         141.55 USD  2 sources
+    dividends                  1.88 USD  journal/2026/03.ax:37
+  ────────────────────────────────────────────────────────────
+    us/401k
+      elective-deferrals   2,400.00 USD  3 sources
+      pretax               2,400.00 USD  3 sources
+      agi                 22,239.85 USD  25 sources
+  ────────────────────────────────────────────────────────────
+    us/529
+      distributions          349.37 USD  journal/2026/03.ax:34
+  ────────────────────────────────────────────────────────────
+    us/ca
+      ca-withheld          1,110.00 USD  3 sources
+
+Owed
+  Owed                          To   Due            Amount  From
+  ───────────────────────────────────────────────────────────────────────────────
+    us/529
+      nonqualified-529-penalty  irs  2026-03-25  34.94 USD  journal/2026/03.ax:34
+  ───────────────────────────────────────────────────────────────────────────────
+  Total owed                                     34.94 USD
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

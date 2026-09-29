@@ -1,0 +1,32 @@
+Register: assets/bank/checking
+
+  Date        With                 Payee        Note                                     Amount        Balance
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-12-31  equity/opening                                                      15,500.00 USD  15,500.00 USD
+  2025-12-31  assets/college                                                      -6,300.00 USD   9,200.00 USD
+  2026-01-01  expenses/rent        landlord                                       -2,850.00 USD   6,350.00 USD
+  2026-01-01  expenses/insurance   insurer                                          -600.00 USD   5,750.00 USD
+  2026-01-05  assets/college                                                        -300.00 USD   5,450.00 USD
+  2026-01-15  income/salary        acme                                            5,338.00 USD  10,788.00 USD
+  2026-01-16  expenses/utilities   utility                                          -118.40 USD  10,669.60 USD
+  2026-01-20  assets/bank/savings                                                   -500.00 USD  10,169.60 USD
+  2026-01-22  assets/brokerage                                                    -1,999.90 USD   8,169.70 USD
+  2026-02-01  expenses/rent        landlord                                       -2,850.00 USD   5,319.70 USD
+  2026-02-02  income/grants        scholarship                                     1,200.00 USD   6,519.70 USD
+  2026-02-03  liabilities/visa                                                      -461.50 USD   6,058.20 USD
+  2026-02-05  assets/college                                                        -300.00 USD   5,758.20 USD
+  2026-02-05  expenses/home        plumber      #check-1041 · settled 2026-02-12    -350.00 USD   5,408.20 USD
+  2026-02-10  assets/cash                                                           -100.00 USD   5,308.20 USD
+  2026-02-13  income/salary        acme                                            5,338.00 USD  10,646.20 USD
+  2026-02-16  expenses/tuition     state-u                                        -3,600.00 USD   7,046.20 USD
+  2026-02-18  assets/brokerage                                                      -874.05 USD   6,172.15 USD
+  2026-02-20  assets/bank/savings                                                   -500.00 USD   5,672.15 USD
+  2026-02-20  expenses/utilities   utility                                          -121.75 USD   5,550.40 USD
+  2026-03-01  expenses/rent        landlord                                       -2,850.00 USD   2,700.40 USD
+  2026-03-03  liabilities/visa                                                      -722.20 USD   1,978.20 USD
+  2026-03-05  assets/college                                                        -300.00 USD   1,678.20 USD
+  2026-03-13  income/salary        acme                                            5,338.00 USD   7,016.20 USD
+  2026-03-16  expenses/utilities   utility                                          -116.30 USD   6,899.90 USD
+  2026-03-20  assets/brokerage                                                     2,432.80 USD   9,332.70 USD
+  2026-03-20  assets/bank/savings                                                   -500.00 USD   8,832.70 USD
+  2026-03-25  assets/college                                                       1,500.00 USD  10,332.70 USD

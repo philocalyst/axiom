@@ -1,0 +1,37 @@
+Why assets/college
+
+Composition
+  Holds      Quantity   Plain money  Parcels
+  ──────────────────────────────────────────
+  USD    6,700.00 USD  5,139.48 USD        1
+
+Parcels
+  Place               Quantity     Basis  Acquired    Tied to  From
+  ──────────────────────────────────────────────────────────────────────────────────
+  assets/college  1,560.52 USD  0.00 USD  2025-12-31           journal/2025/12.ax:15
+
+Governed by
+  Law                     When     Governs                                                      Explains                                                                    Written
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  gift-exclusion          on in    every 529-plan                                               Contributions above the annual gift-tax exclusion count as a gift to the    us/529.ax:33
+  count-wages             on in    everyone living under us, and all they own                   Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a   us.ax:58
+  count-interest          on in    everyone living under us, and all they own                   Interest is ordinary income in the year it is earned (IRC §61(a)(4)),       us.ax:66
+  count-dividends         on in    everyone living under us, and all they own                   Dividends are income in the year they are paid (IRC §61(a)(7)), except      us.ax:76
+  credit-withholding      on in    everyone living under us, and all they own                   Tax withheld from pay, or paid in installments, is credited against the     us.ax:108
+  credit-ca-withholding   on in    everyone living under us/ca, and all they own                Tax withheld from pay, or paid in installments, is credited against the     us/ca.ax:36
+  nonqualified-income     on gain  every 529-plan                                               The earnings in a withdrawal that did not pay a qualified education         us/529.ax:42
+  nonqualified-penalty    on gain  every 529-plan                                               A withdrawal that did not pay a qualified education expense owes an         us/529.ax:56
+  count-short-term-gains  on gain  everyone living under us, and all they own                   A gain on something held for a year or less is taxed as ordinary income     us.ax:86
+  count-long-term-gains   on gain  everyone living under us, and all they own                   A gain on something held for more than a year is taxed at the lower         us.ax:97
+  transfer-tax            on gain  everyone living under us/ca/san-francisco, and all they own  Selling real property in San Francisco owes the city a transfer tax on the  us/ca/san-francisco.ax:33
+
+Recent flows
+  Date        With                  Payee    Note         Amount       Balance
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-31  assets/bank/checking                  6,300.00 USD  6,300.00 USD
+  2025-12-31  equity/opening                        2,200.00 USD  8,500.00 USD
+  2026-01-05  assets/bank/checking                    300.00 USD  8,800.00 USD
+  2026-02-05  assets/bank/checking                    300.00 USD  9,100.00 USD
+  2026-02-20  expenses/tuition      state-u        -1,200.00 USD  7,900.00 USD
+  2026-03-05  assets/bank/checking                    300.00 USD  8,200.00 USD
+  2026-03-25  assets/bank/checking                 -1,500.00 USD  6,700.00 USD

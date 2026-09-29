@@ -1,0 +1,49 @@
+Available on 2026-03-31
+
+What you can spend
+  Liquid now                     Amount
+  ─────────────────────────────────────
+  Money in liquid places  27,044.63 USD
+    assets/bank/checking  10,332.70 USD
+    assets/bank/savings   16,647.05 USD
+    assets/brokerage           1.88 USD
+    assets/cash               63.00 USD
+  ─────────────────────────────────────
+  Available to spend      27,044.63 USD
+
+What it would take to reach the rest
+  Holding                                                Liquid in          Value         Costs            Net
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/brokerage (2 VTI)                               2d            605.10 USD                   605.10 USD
+    counts 22.40 USD as agi
+    counts 22.40 USD as short-term-gains
+    counts 22.40 USD as taxable-income
+    counts 2.24 USD as income-tax
+    counts 22.40 USD as ca-taxable-income
+    counts 0.44 USD as ca-income-tax
+    realizes a gain of 22.40 USD
+  assets/college                                         5d          6,700.00 USD    156.05 USD   6,543.95 USD
+    counts 1,560.52 USD as agi
+    counts 1,560.52 USD as taxable-income
+    counts 156.06 USD as income-tax
+    counts 1,560.52 USD as ca-taxable-income
+    counts 31.21 USD as ca-income-tax
+    counts 1,560.52 USD as distributions
+    nonqualified-529-penalty, owed to irs by 2026-03-31                              156.05 USD
+    realizes a gain of 1,560.52 USD
+  assets/retirement                                      5d         43,700.00 USD  8,555.54 USD  35,144.46 USD
+    counts 43,700.00 USD as agi
+    federal-income-tax, owed to irs by 2027-04-15                                  3,092.78 USD
+    counts 43,700.00 USD as taxable-income
+    counts 5,118.80 USD as income-tax
+    counts 43,700.00 USD as ca-taxable-income
+    counts 1,982.87 USD as ca-income-tax
+    ca-income-tax, owed to ftb by 2027-04-15                                       1,092.76 USD
+    counts 43,700.00 USD as distributions
+    early-withdrawal-penalty, owed to irs by 2026-03-31                            4,370.00 USD
+    realizes a gain of 43,700.00 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today                                    51,005.10 USD  8,711.59 USD  42,293.51 USD
+  · Each line withdraws the whole holding into assets/bank/savings on 2026-03-31 and runs the year
+    out through the laws. Costs are what they would owe because of it, as if the year ended today:
+    penalties, and the tax on any income it creates.

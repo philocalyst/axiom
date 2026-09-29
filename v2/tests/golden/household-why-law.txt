@@ -1,0 +1,14 @@
+Why budget
+
+  Law       budget
+  ─────────────────────────────────────────────────
+  When      on in
+  Governs   expenses/food and everything beneath it
+  Written   accounts.ax:60
+  Ran       18 times
+  Recorded  1 violations, 0 effects
+
+Recent violations
+  Date        Violation                                     From
+  ───────────────────────────────────────────────────────────────────────────────
+  2026-02-25  law `budget` does not hold for expenses/food  journal/2026/02.ax:57

@@ -1,0 +1,11 @@
+Why #check-1041
+
+Flows
+  Date        Flow                                      Amount  State               From
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  2026-02-05  assets/bank/checking → expenses/home  350.00 USD  settled 2026-02-12  journal/2026/02.ax:18
+
+Events
+  Date        Event    From
+  ──────────────────────────────────────────
+  2026-02-12  settled  journal/2026/02.ax:30

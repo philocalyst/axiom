@@ -1,0 +1,28 @@
+warning[law]: law `budget` does not hold for expenses/food
+   ╭─[journal/2026/02.ax:57:1]
+   │
+57 │ 2026-02-25 visa -> groceries 128.10 USD / trader-joes
+   │ ──────────────────────────┬──────────────────────────
+   │                           ╰── this flow: 128.10 USD into expenses/food/groceries
+   │
+   ├─[accounts.ax:60:3]
+   │
+59 │ account expenses/food
+60 │   budget 650 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 681.00 USD
+   │
+   = help: at most 97.10 USD more can go in this month
+───╯
+
+note[pad]: accepted a gap on assets/cash
+   ╭─[journal/2026/03.ax:42:1]
+   │
+42 │ 2026-03-31 cash = 63.00 USD !
+   │ ──────────────┬──────────────
+   │               ╰── 14.50 USD moved out of assets/cash into unknown
+   │
+───╯
+
+1 warning
+✓ 68 flows · 28 places · 16 laws enforced · net worth 77,597.73 USD

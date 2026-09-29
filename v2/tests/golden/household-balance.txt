@@ -1,0 +1,50 @@
+Balances at 2026-03-31
+
+  Place                Balance
+  ────────────────────────────
+  assets                 2 VTI
+  ────────────────────────────
+                 77,444.63 USD
+    bank         26,979.75 USD
+      checking   10,332.70 USD
+      savings    16,647.05 USD
+    brokerage            2 VTI
+                      1.88 USD
+    cash             63.00 USD
+    college       6,700.00 USD
+    retirement   43,700.00 USD
+  ────────────────────────────
+  equity         73,985.50 USD
+    opening      74,000.00 USD
+    unknown         -14.50 USD
+  ────────────────────────────
+  expenses       21,900.65 USD
+    food          1,578.50 USD
+      dining        446.60 USD
+      groceries   1,131.90 USD
+    home            350.00 USD
+    insurance       600.00 USD
+    rent          8,550.00 USD
+    taxes         5,586.00 USD
+      federal     2,640.00 USD
+      payroll     1,836.00 USD
+      state       1,110.00 USD
+    transport        79.70 USD
+    tuition       4,800.00 USD
+    utilities       356.45 USD
+  ────────────────────────────
+  income         25,348.93 USD
+    dividends         1.88 USD
+    grants        1,200.00 USD
+    interest        147.05 USD
+    salary       24,000.00 USD
+  ────────────────────────────
+  liabilities       452.00 USD
+    visa            452.00 USD
+
+  Net worth      Value (USD)
+  ──────────────────────────
+  Assets       78,049.73 USD
+  Liabilities     452.00 USD
+  ──────────────────────────
+  Net worth    77,597.73 USD
