@@ -5,7 +5,7 @@
 //! laws and rules are added by the test. Flows must be added in day order (the
 //! book's contract), and `book()` assembles the tables the engine reads.
 
-use axiom_core::{Arena, Day, FileId, Groups, Id, Interner, Loc, Qty, Sym, Tree};
+use axiom_core::{Arena, Day, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Sym, Tree};
 use axiom_model::*;
 
 pub(crate) const FAR_PAST: Day = Day(i32::MIN);
@@ -17,6 +17,7 @@ pub(crate) struct Fixture {
     pub vti: Id<Commodity>,
     pub me: Id<Entity>,
     pub grant: Id<Entity>,
+    pub household: Id<Entity>,
     pub assets: Id<Place>,
     pub checking: Id<Place>,
     pub savings: Id<Place>,
@@ -30,6 +31,8 @@ pub(crate) struct Fixture {
     pub unknown: Id<Place>,
     pub opening: Id<Place>,
     pub card: Id<Place>,
+    /// A place of the market kind: revaluations come from and go to it.
+    pub market: Id<Place>,
     pub places: Tree<Place>,
     entities: Tree<Entity>,
     commodities: Arena<Commodity>,
@@ -37,6 +40,7 @@ pub(crate) struct Fixture {
     pub txns: Vec<Txn>,
     pub asserts: Vec<Assert>,
     pub events: Vec<Event>,
+    pub splits: Vec<Split>,
     pub laws: Arena<Law>,
     pub on_in: Vec<(Id<Place>, Rule)>,
     pub on_out: Vec<(Id<Place>, Rule)>,
@@ -61,8 +65,12 @@ impl Fixture {
             doc: None,
             loc: None,
         };
-        let people = vec![entity(names.intern("me"), false), entity(names.intern("nsf-grant"), true)];
-        let (entities, ids) = Tree::build(people, &[None, None]).expect("no cycles");
+        let people = vec![
+            entity(names.intern("me"), false),
+            entity(names.intern("nsf-grant"), true),
+            entity(names.intern("household"), false),
+        ];
+        let (entities, ids) = Tree::build(people, &[None, None, None]).expect("no cycles");
         let me = ids[0];
         let place = |path: Sym, class| Place {
             path,
@@ -82,7 +90,7 @@ impl Fixture {
             doc: None,
             loc: None,
         };
-        let spec: [(&'static str, Class, Option<usize>); 16] = [
+        let spec: [(&'static str, Class, Option<usize>); 17] = [
             ("assets", Class::Asset, None),
             ("assets/checking", Class::Asset, Some(0)),
             ("assets/savings", Class::Asset, Some(0)),
@@ -99,12 +107,14 @@ impl Fixture {
             ("equity/unknown", Class::Equity, Some(11)),
             ("liabilities", Class::Liability, None),
             ("liabilities/card", Class::Liability, Some(14)),
+            ("income/market", Class::Income, Some(6)),
         ];
         let items = spec.iter().map(|&(path, class, _)| place(names.intern(path), class)).collect();
         let parents: Vec<_> = spec.iter().map(|&(.., parent)| parent).collect();
         let (mut places, p) = Tree::build(items, &parents).expect("no cycles");
         places[p[5]].deferred = true;
         places[p[5]].basis = Basis::Zero;
+        places[p[16]].kind = Id::new(1);
         let mut commodities = Arena::new();
         let usd = commodities.push(commodity(names.intern("USD"), 2));
         let vti = commodities.push(commodity(names.intern("VTI"), 0));
@@ -114,6 +124,7 @@ impl Fixture {
             vti,
             me,
             grant: ids[1],
+            household: ids[2],
             assets: p[0],
             checking: p[1],
             savings: p[2],
@@ -127,6 +138,7 @@ impl Fixture {
             unknown: p[13],
             opening: p[12],
             card: p[15],
+            market: p[16],
             places,
             entities,
             commodities,
@@ -134,6 +146,7 @@ impl Fixture {
             txns: Vec::new(),
             asserts: Vec::new(),
             events: Vec::new(),
+            splits: Vec::new(),
             laws: Arena::new(),
             on_in: Vec::new(),
             on_out: Vec::new(),
@@ -265,6 +278,74 @@ impl Fixture {
         self.asserts.last_mut().expect("an assertion to pad").gap = Gap::Unexplained(Waive { loc, reason: None });
     }
 
+    /// Recognizes a flow over a range of days.
+    pub fn recognize(&mut self, id: Id<Flow>, from: i32, until: i32) {
+        self.flows[id.index()].recognized = Recognition { from: Day(from), until: Day(until) };
+    }
+
+    /// Gives a flow terms.
+    pub fn terms(&mut self, id: Id<Flow>, terms: Terms) {
+        self.flows[id.index()].terms = Some(Box::new(terms));
+    }
+
+    /// Makes a flow an `opening` line.
+    pub fn opening(&mut self, id: Id<Flow>) {
+        self.flows[id.index()].mode = Mode::Opening;
+    }
+
+    /// A flow's `!`, on its own leg.
+    pub fn waive(&mut self, id: Id<Flow>) {
+        let loc = Loc::new(FileId(0), 70_000 + id.index() as u32 * 10, 70_001 + id.index() as u32 * 10);
+        self.flows[id.index()].waive = Some(Waive { loc, reason: None });
+    }
+
+    /// Asserts a balance of shares of VTI.
+    pub fn assert_vti(&mut self, day: i32, place: Id<Place>, shares: i64) {
+        let amount = self.vti(shares);
+        let loc =
+            Loc::new(FileId(0), 55_000 + self.asserts.len() as u32 * 100, 55_050 + self.asserts.len() as u32 * 100);
+        self.asserts.push(Assert { day: Day(day), place, amount, gap: Gap::Refused, loc });
+    }
+
+    /// Marks the last assertion `via` a place.
+    pub fn via_last(&mut self, counter: Id<Place>) {
+        let loc = self.asserts.last().expect("an assertion to book").loc;
+        self.asserts.last_mut().expect("an assertion to book").gap = Gap::Via { place: counter, loc };
+    }
+
+    /// `DAY UNIT split NEW for OLD`.
+    pub fn split(&mut self, day: i32, unit: Id<Commodity>, new: i64, old: i64) {
+        let loc = Loc::new(FileId(0), 80_000 + self.splits.len() as u32 * 10, 80_005 + self.splits.len() as u32 * 10);
+        self.splits.push(Split {
+            day: Day(day),
+            unit,
+            ratio: Ratio::new(new as i128, old as i128).expect("a ratio"),
+            loc,
+        });
+    }
+
+    /// Makes `me` a member of the household.
+    pub fn join_household(&mut self) {
+        let (household, me) = (self.household, self.me);
+        self.entities[me].member = Some(household);
+    }
+
+    /// The flow's transaction made a claim, due on `due`, against `payee`.
+    pub fn claim(&mut self, id: Id<Flow>, due: i32, payee: Id<Entity>) {
+        let txn = self.flows[id.index()].txn;
+        self.txns[txn.index()].due = Some(Day(due));
+        self.txns[txn.index()].payee = Some(payee);
+        self.flows[id.index()].payee = Some(payee);
+    }
+
+    /// Marks a flow's transaction with `code`, which is what lot selectors read.
+    pub fn mark_txn(&mut self, id: Id<Flow>, code: &'static str) {
+        let code = self.sym(code);
+        let txn = self.flows[id.index()].txn;
+        self.txns[txn.index()].codes = Box::new([code]);
+        self.flows[id.index()].codes = Box::new([code]);
+    }
+
     /// Marks a flow with `code`.
     pub fn mark(&mut self, id: Id<Flow>, code: &'static str) {
         let code = self.sym(code);
@@ -367,7 +448,7 @@ impl Fixture {
             asserts: self.asserts,
             events: self.events,
             prices: Prices::default(),
-            splits: Vec::new(),
+            splits: self.splits,
             plans: Arena::new(),
             syncs: Vec::new(),
             lookup: Default::default(),
@@ -433,6 +514,12 @@ impl LawBuilder {
     pub fn is(&mut self, left: NodeId, alternatives: &[NodeId]) -> NodeId {
         let first = self.nodes[left.index()].first;
         self.node(Op::Is(left, alternatives.into()), Ty::Bool, Some(first))
+    }
+
+    /// `base.field`
+    pub fn field(&mut self, base: NodeId, field: Field, ty: Ty) -> NodeId {
+        let first = self.nodes[base.index()].first;
+        self.node(Op::Field(base, field), ty, Some(first))
     }
 
     pub fn call(&mut self, func: Func, args: &[NodeId], ty: Ty) -> NodeId {

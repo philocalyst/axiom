@@ -32,7 +32,8 @@ impl<'b, 's> Ledger<'b, 's> {
         let gap = assert.amount.qty - shown;
         let last = self.record.checkpoints.get(&(place, unit)).copied().unwrap_or_default();
         let now = Checkpoint { day: Some(assert.day), gap, unsolved_said: last.unsolved_said };
-        let blame = self.solved.unsolved.get(&(place, unit)).filter(|&&(day, _)| day <= assert.day).map(|&(_, flow)| flow);
+        let blame =
+            self.solved.unsolved.get(&(place, unit)).filter(|&&(day, _)| day <= assert.day).map(|&(_, flow)| flow);
         let now = match (assert.gap, gap.is_zero()) {
             (_, true) => now,
             (Gap::Refused, false) => match blame.filter(|_| !last.unsolved_said) {
@@ -42,8 +43,16 @@ impl<'b, 's> Ledger<'b, 's> {
                 }
                 None if gap == last.gap => now,
                 None => {
-                    let others: Vec<_> = self.world.holdings.of(place).map(|slot| (slot.unit, display(book, place, slot.qty))).collect();
-                    let report = explain::mismatch(book, &self.solved.events, assert, (shown, gap - last.gap), last.day, &others);
+                    let others: Vec<_> =
+                        self.world.holdings.of(place).map(|slot| (slot.unit, display(book, place, slot.qty))).collect();
+                    let report = explain::mismatch(
+                        book,
+                        &self.solved.events,
+                        assert,
+                        (shown, gap - last.gap),
+                        last.day,
+                        &others,
+                    );
                     self.record.report(report);
                     now
                 }

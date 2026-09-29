@@ -62,13 +62,31 @@ pub(crate) struct Occasion<'a> {
 impl<'a> Occasion<'a> {
     pub fn flow(m: &'a Motion<'a>) -> Occasion<'a> {
         let (over, span) = (m.recognized, Recognition::on(m.day));
-        Occasion { day: m.day, over, span, cause: m.cause, motion: Some(m), amount: None, realized: None, skip_internal: false }
+        Occasion {
+            day: m.day,
+            over,
+            span,
+            cause: m.cause,
+            motion: Some(m),
+            amount: None,
+            realized: None,
+            skip_internal: false,
+        }
     }
 
     /// A period ending, or a deadline passing, on `day`.
     pub fn time(day: Day, period: Recognition) -> Occasion<'static> {
         let over = Recognition::on(period.until);
-        Occasion { day, over, span: period, cause: Cause::Time, motion: None, amount: None, realized: None, skip_internal: false }
+        Occasion {
+            day,
+            over,
+            span: period,
+            cause: Cause::Time,
+            motion: None,
+            amount: None,
+            realized: None,
+            skip_internal: false,
+        }
     }
 
     /// The day whose window totals are read: the day a flow moved, or the last
@@ -217,7 +235,8 @@ impl<'a, 's> Machine<'a, 's> {
 
     /// Notes what a comparison of amounts compared: the counted side and its limit.
     fn read(&mut self, step: u32, cond: NodeId) {
-        let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), left, right) = self.law.nodes[cond.index()].op
+        let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), left, right) =
+            self.law.nodes[cond.index()].op
         else {
             return;
         };

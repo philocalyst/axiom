@@ -255,7 +255,10 @@ impl Slot {
         let (start, end) = if money {
             (self.first, lots.len())
         } else {
-            (lots.partition_point(|lot| lot.acquired < parcel.acquired), lots.partition_point(|lot| lot.acquired <= parcel.acquired))
+            (
+                lots.partition_point(|lot| lot.acquired < parcel.acquired),
+                lots.partition_point(|lot| lot.acquired <= parcel.acquired),
+            )
         };
         let same = lots[start..end].iter().position(|lot| !lot.qty.is_zero() && identity(lot, money) == kind);
         if let Some(found) = same {
@@ -299,7 +302,11 @@ impl Slot {
             }
             Source::Lot(at) => {
                 let lot = &mut self.holding.lots[at];
-                let basis = if qty == lot.qty { lot.basis } else { lot.basis.share(qty, lot.qty).expect("a part of a basis fits") };
+                let basis = if qty == lot.qty {
+                    lot.basis
+                } else {
+                    lot.basis.share(qty, lot.qty).expect("a part of a basis fits")
+                };
                 let slice = Slice { tied: lot.tied, ..Slice::new(qty, basis, Origin::Lot, (lot.acquired, lot.txn)) };
                 lot.qty -= qty;
                 lot.basis -= basis;
@@ -374,7 +381,9 @@ impl Slot {
             }
             match (policy, colour) {
                 (Some(Policy::Hifo), 1) => self.take_dearest(&mut left, req, out),
-                (Some(Policy::Hifo), _) => self.take_priciest(&mut left, |lot| rank(lot.tied, req.permits) == colour, req, out),
+                (Some(Policy::Hifo), _) => {
+                    self.take_priciest(&mut left, |lot| rank(lot.tied, req.permits) == colour, req, out)
+                }
                 _ => self.take_run(&mut left, lifo, of_colour, req, out),
             }
             if plain_here && lifo {
@@ -393,12 +402,23 @@ impl Slot {
     }
 
     /// The lots `keep` admits, from the front or from the back, until `left` is covered.
-    fn take_run(&mut self, left: &mut Qty, lifo: bool, keep: impl Fn(&Parcel) -> bool, req: &Request, out: &mut Relief) {
+    fn take_run(
+        &mut self,
+        left: &mut Qty,
+        lifo: bool,
+        keep: impl Fn(&Parcel) -> bool,
+        req: &Request,
+        out: &mut Relief,
+    ) {
         let live = |lot: &Parcel| !lot.qty.is_zero() && keep(lot);
         let mut at = if lifo { self.holding.lots.len() } else { self.first };
         while !left.is_zero() {
             let lots = &self.holding.lots;
-            let found = if lifo { lots[..at].iter().rposition(live) } else { lots[at..].iter().position(live).map(|found| at + found) };
+            let found = if lifo {
+                lots[..at].iter().rposition(live)
+            } else {
+                lots[at..].iter().position(live).map(|found| at + found)
+            };
             let Some(found) = found else { return };
             let qty = self.holding.lots[found].qty.min(*left);
             self.take(Source::Lot(found), qty, req, out);
@@ -829,7 +849,10 @@ mod tests {
         let txns = Arena::new();
         let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
         let now = (Day(1_000), Id::new(0));
-        slot.relieve(&Request { need: Qty(need), money, selectors, policy, txns: &txns, permits, now, explain: true }, &mut relief);
+        slot.relieve(
+            &Request { need: Qty(need), money, selectors, policy, txns: &txns, permits, now, explain: true },
+            &mut relief,
+        );
         relief
     }
 
@@ -860,12 +883,18 @@ mod tests {
     fn base_lots_merge_when_tie_and_basis_per_unit_agree() {
         let mut slot = Slot::new(Id::new(0), Id::new(0), NONE);
         let entity = Id::new(9);
-        for (qty, basis, acquired, tied) in
-            [(100, 0, 5, None), (250, 0, 900, None), (10, 5, 6, None), (20, 10, 7, None), (30, 30, 8, Some(entity)), (5, 5, 9, Some(entity))]
-        {
+        for (qty, basis, acquired, tied) in [
+            (100, 0, 5, None),
+            (250, 0, 900, None),
+            (10, 5, 6, None),
+            (20, 10, 7, None),
+            (30, 30, 8, Some(entity)),
+            (5, 5, 9, Some(entity)),
+        ] {
             slot.land(Parcel { tied, ..lot(qty, basis, acquired) }, true);
         }
-        let lots: Vec<_> = slot.holding.lots.iter().map(|l| (l.qty.0, l.basis.0, l.acquired.0, l.tied.is_some())).collect();
+        let lots: Vec<_> =
+            slot.holding.lots.iter().map(|l| (l.qty.0, l.basis.0, l.acquired.0, l.tied.is_some())).collect();
         // Zero-basis money is one lot, half-basis money another, tied money a third; each keeps its first day.
         assert_eq!(lots, [(350, 0, 5, false), (30, 15, 6, false), (35, 35, 8, true)]);
     }
@@ -877,7 +906,8 @@ mod tests {
         held.entry(Id::new(0), Id::new(5)).credit(Qty(1));
         held.entry(Id::new(0), Id::new(2)).credit(Qty(1));
         held.entry(Id::new(0), Id::new(2)).land(lot(4, 4, 0), true);
-        let order: Vec<_> = held.iter().map(|s| (s.place.index(), s.unit.index(), s.plain.0, s.lots.capacity())).collect();
+        let order: Vec<_> =
+            held.iter().map(|s| (s.place.index(), s.unit.index(), s.plain.0, s.lots.capacity())).collect();
         assert_eq!(order, [(0, 2, 5, 0), (0, 5, 1, 0), (2, 1, 7, 0)]);
     }
 
@@ -923,8 +953,17 @@ mod tests {
         assert_eq!(taken(&relieve(&mut held, 4, &hifo)), [(4, 800)]);
         held.land(lot(5, 5_000, 3), false);
         assert_eq!(taken(&relieve(&mut held, 6, &hifo)), [(5, 5_000), (1, 200)]);
-        assert!(held.rebase(Qty(9_000), &Selection { selectors: &[], txns: &Arena::new() }, false, (Day(9), Id::new(0))));
-        assert_eq!(taken(&relieve(&mut held, 1, &hifo)), [(1, 800)], "the lot that gained basis is now dearer per unit");
+        assert!(held.rebase(
+            Qty(9_000),
+            &Selection { selectors: &[], txns: &Arena::new() },
+            false,
+            (Day(9), Id::new(0))
+        ));
+        assert_eq!(
+            taken(&relieve(&mut held, 1, &hifo)),
+            [(1, 800)],
+            "the lot that gained basis is now dearer per unit"
+        );
     }
 
     #[test]
@@ -936,7 +975,11 @@ mod tests {
         assert_eq!(lots(&held), [(1, 10)]);
         assert_eq!(held.holding.lots.len(), 3, "the back was trimmed; the front is a cursor, not a removal");
         held.land(lot(2, 20, 0), false);
-        assert_eq!(taken(&relieve(&mut held, 3, &fifo)), [(2, 20), (1, 10)], "an older lot arrives ahead of the cursor");
+        assert_eq!(
+            taken(&relieve(&mut held, 3, &fifo)),
+            [(2, 20), (1, 10)],
+            "an older lot arrives ahead of the cursor"
+        );
     }
 
     #[test]
@@ -1023,7 +1066,8 @@ mod tests {
             (dice.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 33) % below
         };
         for policy in [Policy::Fifo, Policy::Lifo, Policy::Hifo] {
-            let (mut fast, mut slow) = (Slot::new(Id::new(0), Id::new(1), NONE), Slot::new(Id::new(0), Id::new(1), NONE));
+            let (mut fast, mut slow) =
+                (Slot::new(Id::new(0), Id::new(1), NONE), Slot::new(Id::new(0), Id::new(1), NONE));
             for step in 0..600 {
                 if roll(3) < 2 {
                     let (day, qty) = (step / 3 + roll(3) as i32, 1 + roll(9) as i64);
@@ -1042,7 +1086,11 @@ mod tests {
                     let (a, b) = (relieve(&mut fast, need, &fast_asks), relieve(&mut slow, need, &slow_asks));
                     assert_eq!((taken(&a), a.shortfall), (taken(&b), b.shortfall), "{policy:?} step {step}");
                 }
-                assert_eq!((fast.qty, lots(&fast), fast.ties), (slow.qty, lots(&slow), slow.ties), "{policy:?} step {step}");
+                assert_eq!(
+                    (fast.qty, lots(&fast), fast.ties),
+                    (slow.qty, lots(&slow), slow.ties),
+                    "{policy:?} step {step}"
+                );
             }
         }
     }

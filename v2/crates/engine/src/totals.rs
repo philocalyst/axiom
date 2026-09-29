@@ -181,7 +181,11 @@ impl Windows {
             Window::Year => &self.year,
         };
         // A window nothing was counted into yet holds only what was recognized ahead of it.
-        let mut flowed = if has(rolling.days, day) { rolling.flowed } else { Rolling::of(window_of(window, day), &self.ahead).flowed };
+        let mut flowed = if has(rolling.days, day) {
+            rolling.flowed
+        } else {
+            Rolling::of(window_of(window, day), &self.ahead).flowed
+        };
         *flowed.side(dir)
     }
 }
@@ -200,8 +204,12 @@ pub(crate) struct Totals {
 impl Totals {
     pub fn new(book: &Book) -> Totals {
         let n = book.places.len() + book.entities.len();
-        let mut totals =
-            Totals { places: book.places.len(), watched: vec![false; n], any_watched: false, windows: vec![Windows::NONE; n] };
+        let mut totals = Totals {
+            places: book.places.len(),
+            watched: vec![false; n],
+            any_watched: false,
+            windows: vec![Windows::NONE; n],
+        };
         let rules = &book.rules;
         let all = [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always].into_iter().flat_map(|g| g.values());
         for rule in all.chain(rules.on_spend.values()).chain(&rules.timed) {
@@ -324,10 +332,18 @@ mod tests {
         windows.add(day(2025, 12, 21), Dir::In, Qty(5_00), Recognition::on(day(2025, 12, 21)));
         let read = |windows: &Windows, window, d| windows.read(Dir::In, window, d).0;
         assert_eq!(read(&windows, Window::Month, day(2025, 12, 31)), 5_00 + 11_83);
-        assert_eq!(read(&windows, Window::Month, day(2026, 1, 20)), 30_56, "January is empty so far: only what was recognized ahead of it");
+        assert_eq!(
+            read(&windows, Window::Month, day(2026, 1, 20)),
+            30_56,
+            "January is empty so far: only what was recognized ahead of it"
+        );
         assert_eq!(read(&windows, Window::Year, day(2026, 3, 1)), 58_17);
         windows.add(day(2026, 1, 5), Dir::In, Qty(1_00), Recognition::on(day(2026, 1, 5)));
-        assert_eq!(read(&windows, Window::Month, day(2026, 1, 20)), 31_56, "the accrual joined the month that rolled in");
+        assert_eq!(
+            read(&windows, Window::Month, day(2026, 1, 20)),
+            31_56,
+            "the accrual joined the month that rolled in"
+        );
         assert_eq!(read(&windows, Window::Year, day(2025, 12, 31)), 16_83, "the year that just closed stays readable");
         assert_eq!(read(&windows, Window::Year, day(2026, 6, 1)), 59_17);
         assert_eq!(read(&windows, Window::Ever, day(2026, 1, 20)), 76_00);
@@ -336,7 +352,12 @@ mod tests {
     #[test]
     fn a_flow_recognized_entirely_in_a_closed_window_counts_in_no_current_one() {
         let mut windows = Windows::NONE;
-        windows.add(day(2026, 1, 15), Dir::Out, Qty(3_000_00), Recognition { from: day(2025, 1, 1), until: day(2025, 12, 31) });
+        windows.add(
+            day(2026, 1, 15),
+            Dir::Out,
+            Qty(3_000_00),
+            Recognition { from: day(2025, 1, 1), until: day(2025, 12, 31) },
+        );
         assert_eq!(windows.read(Dir::Out, Window::Year, day(2026, 1, 15)), Qty::ZERO);
         assert_eq!(windows.read(Dir::Out, Window::Ever, day(2026, 1, 15)), Qty(3_000_00));
     }

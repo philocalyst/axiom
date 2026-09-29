@@ -169,11 +169,14 @@ impl<'b, 's> Ledger<'b, 's> {
     /// their identity on arrival.
     fn price(&mut self, m: &Motion) -> bool {
         let restarts = restarts_basis(m);
-        let proceeds = if restarts { self.proceeds(m) } else { None };
-        let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
-        let (mut worth, mut fixed) = (proceeds.map(|p| Shares::new(p, whole)), m.terms.basis.map(|b| Shares::new(b, whole)));
         // Value from outside takes the target's arrival rule; a market's growth has no basis.
         let unbased = m.target.basis == Basis::Zero || m.moves == Moves::Growth;
+        // What was fetched matters to what a sale realizes, and to a basis nobody stated.
+        let priced = restarts && (m.source.class == Class::Asset || (m.terms.basis.is_none() && !unbased));
+        let proceeds = if priced { self.proceeds(m) } else { None };
+        let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
+        let (mut worth, mut fixed) =
+            (proceeds.map(|p| Shares::new(p, whole)), m.terms.basis.map(|b| Shares::new(b, whole)));
         for slice in &mut self.scratch.relief.slices {
             slice.worth = worth.as_mut().map_or(Qty::ZERO, |shares| shares.take(slice.qty));
             let stated = fixed.as_mut().map(|shares| shares.take(slice.qty));
@@ -218,8 +221,13 @@ impl<'b, 's> Ledger<'b, 's> {
             };
             self.record.gains.push(row);
             let held = m.day.since(slice.acquired);
-            let realized = Realized { gain: slice.worth - slice.basis, proceeds: slice.worth, basis: slice.basis, held };
-            let on = Occasion { amount: Some(Amount::new(slice.qty, m.out.unit)), realized: Some(realized), ..Occasion::flow(m) };
+            let realized =
+                Realized { gain: slice.worth - slice.basis, proceeds: slice.worth, basis: slice.basis, held };
+            let on = Occasion {
+                amount: Some(Amount::new(slice.qty, m.out.unit)),
+                realized: Some(realized),
+                ..Occasion::flow(m)
+            };
             self.fire(&book.rules.on_gain[m.from], on);
         }
     }
@@ -240,7 +248,8 @@ impl<'b, 's> Ledger<'b, 's> {
         let (stays, restricted) = (stays_with_owner(m), self.restricted_source(m));
         // `for` an entity ties what arrives to it; `for` the owner (or its household) unties it.
         let owner = m.target.owner;
-        let hold = m.terms.hold.map(|entity| Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e)));
+        let hold =
+            m.terms.hold.map(|entity| Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e)));
         let (money, since) = (is_money(book, m.to, m.arrive.unit), m.terms.since.unwrap_or(m.day));
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let mut shares = Shares::new(m.arrive.qty, whole);
@@ -249,7 +258,13 @@ impl<'b, 's> Ledger<'b, 's> {
             let qty = shares.take(slice.qty);
             let kept = if keeps || (stays && slice.origin != Origin::Fresh) { slice.tied } else { restricted };
             let parcel = match keeps {
-                true => Parcel { qty, basis: slice.carried, acquired: slice.acquired, txn: slice.txn, tied: hold.unwrap_or(kept) },
+                true => Parcel {
+                    qty,
+                    basis: slice.carried,
+                    acquired: slice.acquired,
+                    txn: slice.txn,
+                    tied: hold.unwrap_or(kept),
+                },
                 false => Parcel { qty, basis: slice.carried, acquired: since, txn: m.txn, tied: hold.unwrap_or(kept) },
             };
             slot.land(parcel, money);
@@ -277,7 +292,8 @@ impl<'b, 's> Ledger<'b, 's> {
         let held: Qty = self.world.holdings.of(place).map(|slot| slot.basis(is_money(book, place, slot.unit))).sum();
         let moved = if sign > 0 { amount } else { amount.min(held) };
         let money = |unit| is_money(book, place, unit);
-        let carried = moved.is_zero() || self.world.holdings.rebase(place, Qty(moved.0 * sign), &selection, money, (m.day, m.txn));
+        let carried = moved.is_zero()
+            || self.world.holdings.rebase(place, Qty(moved.0 * sign), &selection, money, (m.day, m.txn));
         if !carried || moved < amount {
             let diagnostic = explain::basis_shortfall(book, m, place, held, amount, carried);
             self.record.report(diagnostic);

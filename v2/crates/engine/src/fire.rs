@@ -13,7 +13,9 @@
 use std::mem::discriminant;
 
 use axiom_core::{Day, Id, Sym};
-use axiom_model::{Amount, Book, Dir, Entity, Fault, Func, Law, NodeId, Op, Period, Recognition, Rule, StepKind, Trigger, Window};
+use axiom_model::{
+    Amount, Book, Dir, Entity, Fault, Func, Law, NodeId, Op, Period, Recognition, Rule, StepKind, Trigger, Window,
+};
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
 use crate::explain::{self, Frame, Waiver};
@@ -93,11 +95,9 @@ impl<'b, 's> Ledger<'b, 's> {
         let on = Occasion { amount: Some(m.out), ..Occasion::flow(m) };
         book.rules.on_spend[entity].iter().filter(|rule| applies(book, rule, &on)).all(|rule| {
             self.evaluate(rule.law, &Context::new(rule.subject, owner_of(book, rule.subject), &on));
-            let holds = !self
-                .scratch
-                .outcomes
-                .iter()
-                .any(|o| matches!(o, Outcome::Broken { warn: false, .. } | Outcome::Priced { .. } | Outcome::Faulted { .. }));
+            let holds = !self.scratch.outcomes.iter().any(|o| {
+                matches!(o, Outcome::Broken { warn: false, .. } | Outcome::Priced { .. } | Outcome::Faulted { .. })
+            });
             self.scratch.outcomes.clear();
             holds
         })
@@ -110,7 +110,9 @@ impl<'b, 's> Ledger<'b, 's> {
         for rule in &book.rules.timed {
             let period = match book.laws[rule.law].trigger {
                 Trigger::Each(Period::Month, _) => Recognition { from: day.month_start(), until: day },
-                Trigger::Each(Period::Year, None) if day == day.year_end() => Recognition { from: day.year_start(), until: day },
+                Trigger::Each(Period::Year, None) if day == day.year_end() => {
+                    Recognition { from: day.year_start(), until: day }
+                }
                 _ => continue,
             };
             self.run_timed(rule, Occasion::time(day, period));
@@ -171,7 +173,18 @@ impl<'b, 's> Ledger<'b, 's> {
     /// and the year a report finds an obligation under, is that day's.
     fn effect(&self, rule: &Rule, ctx: &Context, day: Day, name: Sym, amount: Amount) -> Effect {
         let law = &self.book.laws[rule.law];
-        Effect { law: rule.law, subject: rule.subject, owner: ctx.owner, system: law.system, day, name, amount, owe: None, cause: ctx.cause, priced: false }
+        Effect {
+            law: rule.law,
+            subject: rule.subject,
+            owner: ctx.owner,
+            system: law.system,
+            day,
+            name,
+            amount,
+            owe: None,
+            cause: ctx.cause,
+            priced: false,
+        }
     }
 
     /// The last reading of a limit in its window: updated in place while the
@@ -237,7 +250,16 @@ impl<'b, 's> Ledger<'b, 's> {
         let diagnostic = explain::broken(&frame, step as usize, warn, waiver);
         let diagnostic = self.record.report(diagnostic);
         let (day, subject) = (ctx.day, rule.subject);
-        let violation = Violation { law: rule.law, subject, day, cause: ctx.cause, warn, waived: waiver.is_some(), priced: false, diagnostic };
+        let violation = Violation {
+            law: rule.law,
+            subject,
+            day,
+            cause: ctx.cause,
+            warn,
+            waived: waiver.is_some(),
+            priced: false,
+            diagnostic,
+        };
         self.record.violations.push(violation);
     }
 
@@ -253,11 +275,20 @@ impl<'b, 's> Ledger<'b, 's> {
         let diagnostic = explain::priced(&frame, step as usize, (name, amount, owed), waive);
         let diagnostic = self.record.report(diagnostic);
         let (day, subject) = (ctx.day, rule.subject);
-        let violation =
-            Violation { law: rule.law, subject, day, cause: ctx.cause, warn: false, waived: waive.is_some(), priced: true, diagnostic };
+        let violation = Violation {
+            law: rule.law,
+            subject,
+            day,
+            cause: ctx.cause,
+            warn: false,
+            waived: waive.is_some(),
+            priced: true,
+            diagnostic,
+        };
         self.record.violations.push(violation);
         if waive.is_none() {
-            let effect = Effect { owe: Some(owed), priced: true, ..self.effect(rule, ctx, ctx.over.from, name, amount) };
+            let effect =
+                Effect { owe: Some(owed), priced: true, ..self.effect(rule, ctx, ctx.over.from, name, amount) };
             self.record.effects.push(effect);
         }
     }
@@ -268,7 +299,13 @@ impl<'b, 's> Ledger<'b, 's> {
         if !self.record.faulted.insert((rule.law, step as u32, discriminant(&fault))) {
             return;
         }
-        let frame = Frame { book: self.book, law: &self.book.laws[rule.law], ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let frame = Frame {
+            book: self.book,
+            law: &self.book.laws[rule.law],
+            ctx,
+            values: &self.scratch.values,
+            effects: &self.record.effects,
+        };
         let diagnostic = explain::faulted(&frame, step, fault);
         self.record.report(diagnostic);
     }

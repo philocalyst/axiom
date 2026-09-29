@@ -67,10 +67,15 @@ impl Moment {
 /// nothing, so the laws that close periods begin with the first real fact.
 pub(crate) fn start(book: &Book, events: &Events) -> Option<Day> {
     let real = |(id, flow): (Id<Flow>, &Flow)| {
-        (flow.mode != Mode::Opening && matches!(events.state(id, flow), State::Actual | State::Returned(_))).then_some(flow.day)
+        (flow.mode != Mode::Opening && matches!(events.state(id, flow), State::Actual | State::Returned(_)))
+            .then_some(flow.day)
     };
     let flow = book.flows.iter().find_map(real);
-    let others = [book.asserts.first().map(|a| a.day), events.changes.first().map(|&(day, _)| day), book.splits.first().map(|s| s.day)];
+    let others = [
+        book.asserts.first().map(|a| a.day),
+        events.changes.first().map(|&(day, _)| day),
+        book.splits.first().map(|s| s.day),
+    ];
     others.into_iter().chain([flow]).flatten().min()
 }
 
@@ -118,8 +123,12 @@ pub(crate) fn deadlines(env: Env, horizon: Day, first: Option<Day>, values: &mut
             Trigger::Each(Period::Year, Some(closing)) => {
                 let years = first.map_or(0..0, |first| first.year()..horizon.year() + 1);
                 for year in years {
-                    let period = Recognition { from: Day::from_ymd(year, 1, 1).unwrap_or(horizon), until: Day::from_ymd(year, 12, 31).unwrap_or(horizon) };
-                    let closes = Day::from_ymd(year + 1, closing.month.into(), closing.day.into()).unwrap_or(period.until.add_days(1).month_end());
+                    let period = Recognition {
+                        from: Day::from_ymd(year, 1, 1).unwrap_or(horizon),
+                        until: Day::from_ymd(year, 12, 31).unwrap_or(horizon),
+                    };
+                    let closes = Day::from_ymd(year + 1, closing.month.into(), closing.day.into())
+                        .unwrap_or(period.until.add_days(1).month_end());
                     if closes <= horizon && rule.from <= period.until && period.from <= rule.until {
                         due.push(Deadline { day: closes, rule: rule_index, period });
                     }
@@ -171,7 +180,8 @@ impl Timeline {
     /// At the start. Period ends begin with the month of `first_period`, the
     /// first fact that starts one: before it there is nothing to close.
     pub fn new(s: &Sources, first_period: Option<Day>) -> Timeline {
-        let mut timeline = Timeline { split: 0, flow: 0, change: 0, assert: 0, deadline: 0, period: None, heads: [None; 6] };
+        let mut timeline =
+            Timeline { split: 0, flow: 0, change: 0, assert: 0, deadline: 0, period: None, heads: [None; 6] };
         timeline.skip_unreal(s);
         for stream in [Stream::Split, Stream::Flow, Stream::Change, Stream::Assert, Stream::Deadline] {
             timeline.refresh(stream, s);
@@ -220,7 +230,9 @@ impl Timeline {
 
     fn refresh(&mut self, stream: Stream, s: &Sources) {
         self.heads[stream as usize] = match stream {
-            Stream::Split => s.book.splits.get(self.split).map(|sp| Moment { day: sp.day, fact: Fact::Split(self.split as u32) }),
+            Stream::Split => {
+                s.book.splits.get(self.split).map(|sp| Moment { day: sp.day, fact: Fact::Split(self.split as u32) })
+            }
             Stream::Flow => {
                 let id = Id::new(self.flow as u32);
                 s.book.flows.get(id).map(|flow| Moment { day: flow.day, fact: Fact::Flow(id) })

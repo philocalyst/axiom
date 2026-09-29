@@ -148,7 +148,17 @@ impl<'f> Motion<'f> {
     pub fn reversed(&self) -> Motion<'f> {
         let (from, to) = (self.to, self.from);
         let (source, target) = (self.target, self.source);
-        Motion { from, to, source, target, out: self.arrive, arrive: self.out, select: &[], moves: self.moves.reversed(), ..*self }
+        Motion {
+            from,
+            to,
+            source,
+            target,
+            out: self.arrive,
+            arrive: self.out,
+            select: &[],
+            moves: self.moves.reversed(),
+            ..*self
+        }
     }
 
     pub fn is_exchange(&self) -> bool {

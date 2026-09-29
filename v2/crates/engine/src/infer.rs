@@ -60,7 +60,8 @@ pub(crate) fn solve(book: &Book, events: &Events) -> Solution {
         }
     }
     let unsolved: Vec<Id<Flow>> = unknown.into_iter().filter(|id| !solved.contains_key(id)).collect();
-    let problems = unsolved.iter().map(|&id| cannot_infer(book, id, stuck.get(&id).map_or(&[][..], Vec::as_slice))).collect();
+    let problems =
+        unsolved.iter().map(|&id| cannot_infer(book, id, stuck.get(&id).map_or(&[][..], Vec::as_slice))).collect();
     Solution { amounts: solved, unsolved, problems }
 }
 

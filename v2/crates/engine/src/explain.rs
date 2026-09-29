@@ -95,7 +95,8 @@ impl Frame<'_, '_> {
 
     /// The comparison a step failed on, when it compares amounts.
     fn bound(&self, cond: NodeId) -> Option<Bound> {
-        let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), l, r) = self.law.nodes[cond.index()].op else {
+        let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), l, r) = self.law.nodes[cond.index()].op
+        else {
             return None;
         };
         let (counted, limit) = match (self.values[l.index()], self.values[r.index()]) {
@@ -115,7 +116,9 @@ impl Frame<'_, '_> {
     fn operands(&self, cond: NodeId) -> Vec<(Loc, String)> {
         let nodes = &self.law.nodes;
         let at = match nodes[cond.index()].op {
-            Op::Bin(BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne, l, r) => vec![l.index(), r.index()],
+            Op::Bin(BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne, l, r) => {
+                vec![l.index(), r.index()]
+            }
             _ => self.law.range(cond).collect(),
         };
         let unit = at.iter().find_map(|&i| if let Value::Amount(a) = self.values[i] { Some(a.unit) } else { None });
@@ -139,11 +142,18 @@ impl Frame<'_, '_> {
         let window = reads.window(ctx);
         let mut found: Vec<Id<Flow>> = match reads {
             Reads::Tally(name) => {
-                let counted = |e: &&Effect| e.owner == ctx.owner && e.name == name && window.from <= e.day && e.day <= window.until;
-                self.effects.iter().rev().filter(counted).filter_map(|e| match e.cause {
-                    Cause::Flow(id) if id != current => Some(id),
-                    _ => None,
-                }).collect()
+                let counted = |e: &&Effect| {
+                    e.owner == ctx.owner && e.name == name && window.from <= e.day && e.day <= window.until
+                };
+                self.effects
+                    .iter()
+                    .rev()
+                    .filter(counted)
+                    .filter_map(|e| match e.cause {
+                        Cause::Flow(id) if id != current => Some(id),
+                        _ => None,
+                    })
+                    .collect()
             }
             Reads::Total(dir, _) => {
                 let Subject::Place(place) = ctx.subject else { return Vec::new() };
@@ -207,7 +217,9 @@ pub(crate) fn broken(f: &Frame, step: usize, warn: bool, waiver: Option<Waiver>)
             format!("{lead}: {}", fact(f, bound, reads))
         }
         (Some(message), None) => message,
-        (None, None) => what.clone().unwrap_or_else(|| format!("{} is not satisfied by {}", f.book.name(f.law.name), show::subject(f.book, f.ctx.subject))),
+        (None, None) => what.clone().unwrap_or_else(|| {
+            format!("{} is not satisfied by {}", f.book.name(f.law.name), show::subject(f.book, f.ctx.subject))
+        }),
     };
     let severity = if warn { Severity::Warning } else { Severity::Error };
     let mut d = Diagnostic::new(severity, f.book.name(f.law.name).to_owned(), headline);
@@ -252,14 +264,21 @@ fn accepted(d: Diagnostic, f: &Frame, waiver: Option<Waiver>) -> Diagnostic {
                 None => d,
             }
         }
-        Some(Waiver::Relaxed) => d.note("shown as a warning because the book is `relaxed`").relaxed().disposed(Disposition::Waived),
+        Some(Waiver::Relaxed) => {
+            d.note("shown as a warning because the book is `relaxed`").relaxed().disposed(Disposition::Waived)
+        }
         None => d,
     }
 }
 
 /// A `require … else owe …` that failed: not an error, a price. It says what
 /// is owed, to whom and by when, and why.
-pub(crate) fn priced(f: &Frame, step: usize, (name, amount, owed): (Sym, Amount, Owed), waive: Option<Waive>) -> Diagnostic {
+pub(crate) fn priced(
+    f: &Frame,
+    step: usize,
+    (name, amount, owed): (Sym, Amount, Owed),
+    waive: Option<Waive>,
+) -> Diagnostic {
     let StepKind::Require { cond, .. } = f.law.steps[step].kind else { unreachable!("only a require prices") };
     let who = f.book.name(f.book.entities[owed.to].path);
     let headline = format!("{} owed to {who} by {}: {}", f.money(amount), owed.due, f.book.name(name));
@@ -431,7 +450,8 @@ pub(crate) fn mismatch(
     since: Option<Day>,
     others: &[(Id<Commodity>, Qty)],
 ) -> Diagnostic {
-    let (place, unit, day, stated) = (show::place(book, assert.place), assert.amount.unit, assert.day, assert.amount.qty);
+    let (place, unit, day, stated) =
+        (show::place(book, assert.place), assert.amount.unit, assert.day, assert.amount.qty);
     let money = |qty: Qty| book.show(Amount::new(qty, unit)).to_string();
     let sign = book.places[assert.place].class.display_sign();
 
@@ -484,7 +504,10 @@ pub(crate) fn mismatch(
     };
     let mut d = Diagnostic::error("assertion", headline).label(assert.loc, label);
     if !carried.is_zero() {
-        d = d.note(format!("the {} gap reported at an earlier assertion is carried; only what is new is explained here", money(carried.abs())));
+        d = d.note(format!(
+            "the {} gap reported at an earlier assertion is carried; only what is new is explained here",
+            money(carried.abs())
+        ));
     }
 
     let hidden = real.len().saturating_sub(SHOWN);
@@ -507,9 +530,12 @@ pub(crate) fn mismatch(
         Suspect::Backwards(id) => {
             let flow = &book.flows[id];
             let (from, to) = (show::place(book, flow.from), show::place(book, flow.to));
-            d.note(format!("the gap is exactly twice this flow (2 × {}): it is probably written backwards", money(Qty(new.0.abs() / 2))))
-                .context(flow.loc, "probably written the wrong way round")
-                .help(format!("write it the other way: `{to} -> {from}`"))
+            d.note(format!(
+                "the gap is exactly twice this flow (2 × {}): it is probably written backwards",
+                money(Qty(new.0.abs() / 2))
+            ))
+            .context(flow.loc, "probably written the wrong way round")
+            .help(format!("write it the other way: `{to} -> {from}`"))
         }
         Suspect::Swapped => d
             .note(format!("{} and {} differ only by two neighbouring digits swapped", money(held), money(stated)))
@@ -522,11 +548,18 @@ pub(crate) fn mismatch(
             d.help(format!("assert in {symbol}: {shown}"))
         }
         Suspect::Missing => d
-            .note(format!("{} is neither twice a flow nor a transposition: most likely a flow is missing", money(new.abs())))
+            .note(format!(
+                "{} is neither twice a flow nor a transposition: most likely a flow is missing",
+                money(new.abs())
+            ))
             .help("record the missing flow"),
     };
     let end = assert.loc.end;
-    d.fix("or accept the gap: it is booked from `equity/unknown` and shown in every report", Loc::new(assert.loc.file, end, end), " !")
+    d.fix(
+        "or accept the gap: it is booked from `equity/unknown` and shown in every report",
+        Loc::new(assert.loc.file, end, end),
+        " !",
+    )
 }
 
 /// An assertion that cannot be judged because a flow it depends on has an
@@ -548,7 +581,9 @@ pub(crate) fn padded(book: &Book, assert: &Assert, waive: Waive, amount: Amount)
     } else {
         format!("{moved} moved out of {place} into unknown")
     };
-    let mut d = Diagnostic::info("pad", format!("accepted a gap on {place}")).label(assert.loc, what).disposed(Disposition::Waived);
+    let mut d = Diagnostic::info("pad", format!("accepted a gap on {place}"))
+        .label(assert.loc, what)
+        .disposed(Disposition::Waived);
     if let Some(reason) = waive.reason {
         d = d.note(format!("accepted because: {}", book.name(reason)));
     }
@@ -630,7 +665,14 @@ pub(crate) fn shortfall(book: &Book, m: &Motion, held: Qty, admitted: Qty, short
 /// A flow into or out of `PLACE.basis` that the place cannot carry: it holds
 /// no parcel to take the basis (`carried` is false), or less basis than the
 /// flow takes off.
-pub(crate) fn basis_shortfall(book: &Book, m: &Motion, place: Id<Place>, held: Qty, amount: Qty, carried: bool) -> Diagnostic {
+pub(crate) fn basis_shortfall(
+    book: &Book,
+    m: &Motion,
+    place: Id<Place>,
+    held: Qty,
+    amount: Qty,
+    carried: bool,
+) -> Diagnostic {
     let (name, base) = (show::place(book, place), |qty: Qty| book.show(Amount::new(qty, book.base)).to_string());
     let what = if carried {
         format!("{name} has {} of basis, and this flow takes {} off", base(held), base(amount))
@@ -643,7 +685,13 @@ pub(crate) fn basis_shortfall(book: &Book, m: &Motion, place: Id<Place>, held: Q
 }
 
 /// A claim still open past its day: who owes what, and for how long.
-pub(crate) fn overdue(book: &Book, place: Id<Place>, unit: Id<Commodity>, lot: &Parcel, today: Day) -> Option<Diagnostic> {
+pub(crate) fn overdue(
+    book: &Book,
+    place: Id<Place>,
+    unit: Id<Commodity>,
+    lot: &Parcel,
+    today: Day,
+) -> Option<Diagnostic> {
     let txn = book.txns.get(lot.txn)?;
     let due = txn.due.filter(|&due| due <= today)?;
     let who = txn.payee.map_or_else(|| show::place(book, place), |entity| book.name(book.entities[entity].path));

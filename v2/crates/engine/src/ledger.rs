@@ -90,7 +90,8 @@ impl<'b, 's> Ledger<'b, 's> {
         for (key, first) in unsolved {
             blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
-        let solved = Solved { events, deadlines, horizon, reads: fire::reads(book).into_iter().collect(), unsolved: blocked };
+        let solved =
+            Solved { events, deadlines, horizon, reads: fire::reads(book).into_iter().collect(), unsolved: blocked };
         let periodic = book.rules.timed.iter().any(|rule| matches!(book.laws[rule.law].trigger, Trigger::Each(..)));
         let timeline = Timeline::new(&solved.sources(book), start.filter(|_| periodic));
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
