@@ -131,11 +131,21 @@ is to write two transactions.
   leg in another commodity receives the remainder as its cost (a purchase with a
   fee leg). Two such legs need `@` prices.
 - A leg into an expense place during an exchange is a cost of that exchange
-  (e.g. a trading fee). It is still recorded as an expense.
+  (e.g. a trading fee, a seller's costs): a sale realizes that much less, and
+  what a purchase buys costs that much more (its basis takes it, unless the flow
+  states a `basis`). It is still recorded as an expense. With several exchanges in
+  one statement the costs are shared out by what each exchanged.
 
 **Places and entities.** A place may be written as any unique suffix of its path,
 or by its alias (§5). An *entity* in place position resolves to its `via` place
-and becomes the payee. `?` as a place is the built-in `equity/unknown`.
+and becomes the payee. An entity that has the name wins over a place whose path
+only ends with it (`lantern -> 1_440 USD` names the employer, not
+`assets/owed/lantern`), and when the place is not the entity's own `via` the name
+is reported once as ambiguous, offering the place its longer suffix; a full path
+or an alias still names the place. An entity as the *source* of a payment out of
+an asset place also says whose money it is: `car-fund -> car-repair 150 USD`
+spends the parcels tied to `car-fund`, then untied money, and never another
+entity's. `?` as a place is the built-in `equity/unknown`.
 Undeclared places are an error, unless written as a full path under one of the
 roots `assets`, `liabilities`, `income`, `expenses`, or `equity`, which opens
 them; a full path that is a near miss of a declared place is an error with the
@@ -145,8 +155,10 @@ suggestion instead.
 than its quantity. A flow into it pays money and raises the basis of the place's
 parcels (a capital improvement, a wash-sale adjustment); a flow out of it lowers
 their basis and recognizes the amount at the target (depreciation). Quantities do
-not change. Selectors narrow which parcels: `house[#roof].basis`. The basis is
-spread over the chosen parcels in proportion to their quantity.
+not change, so a house that `holds HOME` still takes an improvement, and the
+money is never counted as held by the place. Selectors narrow which parcels:
+`house[#roof].basis`. The basis is spread over the chosen parcels in proportion
+to their quantity.
 
 **Dates.** A transaction has the day money moves and the period it belongs to.
 `DATE..DATE` pays on the first day and recognizes the flow evenly per day over
@@ -159,7 +171,8 @@ payment day. Folder layout (§10) constrains the payment day.
 **Tail.** Header tails apply to every leg; a leg's own tail adds to it and
 overrides it.
 
-- `/ payee` names a declared entity.
+- `/ payee` names a declared entity. A leg's own payee, or the entity written as
+  its place, is that leg's counterparty; a leg with neither takes the header's.
 - `#codes` mark the transaction (a leg's codes mark that leg). They select lots
   later and link flows.
 - `for` says what the flow is on account of:
@@ -173,8 +186,9 @@ overrides it.
     `for` the owner itself (`for me`) unties them. An envelope or a sinking fund
     is an entity of a restricted kind (§8).
 - `due WHEN` makes the flow a *claim* due on a date, or a span after the payment
-  day (`due 30d`). A claim that is still open after its due day is reported by
-  `check` and listed by `claims`.
+  day (`due 30d`). A leg's own `due` overrides the header's, so each leg of a split
+  is a claim on its own debtor, due on its own day. A claim that is still open
+  after its due day is reported by `check` and listed by `claims`.
 - `basis AMOUNT` is the total basis the arriving parcels take, overriding the
   kind's arrival rule (§8): a gift into a 529 plan that is not a contribution
   of pre-tax money, a nondeductible IRA contribution.
@@ -344,7 +358,9 @@ govern it and every place it or its members own, with the household as `self`,
 so a joint return reads one `tally(agi)` that both paychecks counted into.
 A member keeps what is personal: the laws of the kinds of the places they own
 (a 401(k)'s deferral limit, an early-withdrawal penalty) run with that person as
-the owner, and count into that person's tallies.
+the owner, and count into that person's tallies. What they count is a line of the
+household's year too: a limit reads only the person's own line, and the joint
+return reads the household's, which both members counted into.
 
 Residences may overlap and have ends: a citizen abroad `lives us` and
 `lives de from 2025-07-01`; a move is `lives us/ca until 2025-06-30`. A path
@@ -426,6 +442,14 @@ An `each year closing 04-15` law runs for 2025 on 2026-04-15, and what the
 journal recognizes `for 2025` up to that day counts: a fourth estimated tax
 payment made in January is part of the year it pays for.
 
+Within a day, everything that happens comes before what closes the day: a payment
+dated on a closing day counts, wherever the journal writes it, and so does a
+planned or hypothetical flow of that day (`available` on the last day of a year
+prices a withdrawal with the year-end tax it makes). The flows of one day run in
+the order the journal writes them, so a law that reads what has been counted so
+far sees only what came before its flow: the half month of depreciation on the
+day of a sale is written before the sale.
+
 *Governed*:
 
 - A law in a place kind governs every place of that kind.
@@ -453,13 +477,20 @@ Effects:
 - `warn` is a warning. Budgets are warnings.
 - A violated law is reported once per subject and window (the month or year of
   the total it reads, or until it holds again for `always`), at the flow that
-  crossed the line.
+  crossed the line. A window that value was recognized into ahead of time (a
+  premium paid in December `for` the next year, a cost spread over months) is
+  read as it opens: its headroom counts that value, and a limit it breaks alone
+  is reported once, on the window's first day.
 - `owe` creates an obligation from `self`'s owner to an entity, due by a date
   (default: the flow's date). It is named for reports.
 - `count` adds to a named tally, keyed by owner and year: one namespace per
   person- (or household-) year, so a tally is a line on that year. A per-person
   limit is a count followed by a `require` on the tally.
-- `tally(NAME)` reads that line for the owner in the current year.
+- `tally(NAME)` reads that line for the owner in the current year, and
+  `tally(NAME, YEAR)` the line of another (a year, or a date in it):
+  `tally(loss-carried, year - 1)` is what the year before handed on. A reading of
+  another year is settled, so it has no headroom; the law still runs after every
+  law that counts into the tally.
 
 Every `require` and `warn` that compares two amounts records its *headroom*:
 what was counted and what it is compared against, per subject and window. That
@@ -497,7 +528,7 @@ side's commodity on the flow's date, or fails with a missing-price error.
 - Functions:
   - `total(in|out, month|year|ever)`: governed-subtree flow total recognized in
     this window, including the current flow.
-  - `tally(name)`, `min(a, b)`, `max(a, b)`, `abs(a)`.
+  - `tally(name[, year])`, `min(a, b)`, `max(a, b)`, `abs(a)`.
   - `progressive(schedule, x)`: tax on `x` under marginal brackets.
   - `value(x, UNIT)`, `date(y, m, d)`.
   - `remaining`: money still tied to `self`, a restricted entity.
@@ -523,11 +554,12 @@ transaction that made them, so each invoice or loan stays its own claim.
   and ties all travel with them, unless the flow says `for` (which re-ties).
 - **Relief** is choosing which parcels leave. Ties go first, then the lot
   policy. Selectors (`[2024]`, `[#house]`, `[2026-01-22]`) and `for #code`
-  restrict the candidates. The policy comes from the selector, then the place,
-  then the kind chain; `currency` kinds are FIFO. If parcels differ and no
-  policy applies, the flow is *ambiguous*. The error lists every candidate with
-  the gain each would realize, and quantities still move FIFO so everything
-  downstream stays consistent.
+  restrict the candidates. The policy comes from the selector, then the place
+  (its own, or its kind's), then the commodity's kind chain. `std` says
+  `select fifo` once, on `currency`, so a currency is FIFO unless something
+  nearer says otherwise. If parcels differ and no policy applies, the flow is
+  *ambiguous*. The error lists every candidate with the gain each would realize,
+  and quantities still move FIFO so everything downstream stays consistent.
 - **Realization** happens when parcels change commodity, leave the owner's asset
   places, or leave a `deferred` place for a non-deferred one. Then
   `gain = proceeds − basis`, and `on gain` laws fire, one per parcel relieved.
@@ -566,11 +598,11 @@ entity acme : org
 
 A claim's age is its parcel's acquisition day, its counterparty the payee (or
 the entity written in place position), and its due day the `due` of the flow
-that made it. `axiom claims` lists what is open, `check` warns on what is past
-due, `available` counts claims as coming in (never as money to spend), and
-`forecast` expects them on their due days. What you owe others is the same
-thing seen from the other side: a place of kind `payable` (a liability) whose
-flows carry `due`.
+that made it: each leg of a split is a claim of its own. `axiom claims` lists
+what is open, `check` warns on what is past due, `available` counts claims as
+coming in (never as money to spend), and `forecast` expects them on their due
+days. What you owe others is the same thing seen from the other side: a place of
+kind `payable` (a liability) whose flows carry `due`.
 
 ## 10. Projects and layout
 
