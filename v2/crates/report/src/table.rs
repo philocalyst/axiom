@@ -7,7 +7,6 @@ use axiom_engine::{Cause, Owed, Pad};
 use axiom_model::{Amount, Book};
 
 use crate::places::path;
-
 use crate::{Align, Cell, Column, Report, Row, Section, Style};
 
 impl Column {

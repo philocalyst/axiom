@@ -39,7 +39,7 @@ checked by an independent script in `examples/verify/`. The text below this sect
 | F07 payment for a year | fixed | 04 (estimates), 08 (`for 2024` and `for 2025`) |
 | F08 law order | fixed | 04, 05 (dataflow order; no fork of `us`) |
 | F09 part-year and overlapping residence | fixed | 08 (California files for the part year) |
-| F10 `available` | partly | held, coming in and foreign cash are right (05, 06, 07, 08, 09); the tax on money drawn and a mortgage against a house are not netted |
+| F10 `available` | partly | held, coming in, foreign cash and the tax on money drawn (the books run on to the day the return closes) are right (04 to 09); a mortgage against a house is not netted, and a withdrawal is priced against the year so far |
 | F11 plan deletes a recurrence | fixed | 05 |
 | F12 forecast liquid net worth | fixed | 05 |
 | F13 forecast past its reason | partly | 07 (`until`); 09 still projects a loan repayment past the balance |

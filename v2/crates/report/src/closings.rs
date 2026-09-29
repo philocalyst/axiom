@@ -18,10 +18,9 @@ fn rules<'b>(book: &'b Book) -> impl Iterator<Item = (&'b Rule, Closing)> {
 }
 
 /// The day to run the books to so that what happens in `day`'s year is judged:
-/// the end of that year, or the last day a closing law judges it, if later.
+/// the last day a closing law judges it (in the next year), else its end.
 pub fn judged_through(book: &Book, day: Day) -> Day {
-    let year_end = day.year_end();
-    days_for(book, day.year(), |_| true).last().map_or(year_end, |&closes| closes.max(year_end))
+    days_for(book, day.year(), |_| true).last().copied().unwrap_or(day.year_end())
 }
 
 /// The first day after `day` on which a closing law judges a year.

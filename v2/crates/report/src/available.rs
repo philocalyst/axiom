@@ -6,9 +6,9 @@
 //! a month. For everything else the question is asked of the laws: draw the
 //! whole holding down into a cash place, on a fork of the ledger, and see what
 //! the laws would then owe once the year is judged (its end, or the day its
-//! return closes) beyond what they already will. A 401k's penalty, the income it creates and the tax on that income
-//! all come out of the rules of the 401k's own system, with no special case
-//! here. Liquidity is derived from law.
+//! return closes) beyond what they already will. A 401k's penalty, the income
+//! it creates and the tax on that income all come out of the rules of the
+//! 401k's own system, with no special case here. Liquidity is derived from law.
 
 use std::collections::BTreeMap;
 

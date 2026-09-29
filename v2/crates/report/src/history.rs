@@ -228,7 +228,10 @@ impl Snapshots {
             for end in [End::From, End::To] {
                 let place = posting.place(end);
                 // A basis end moves no quantity, and so no money.
-                if let (true, Change::Moved(amount)) = (lo < hi && lens.owns(place), posting.change(end)) {
+                if lo < hi
+                    && lens.owns(place)
+                    && let Change::Moved(amount) = posting.change(end)
+                {
                     let held = snapshots.held(lens.on(posting.flow.day), place, amount, valued);
                     snapshots.change(lo..hi, place, amount.unit, held);
                 }

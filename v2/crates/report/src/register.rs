@@ -162,8 +162,7 @@ fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec
         })
     });
     let pads = run.pads.iter().flat_map(|pad| {
-        let [(asserted, _), (counter, _)] = pad_ends(pad);
-        let with = if asserted == place { counter } else { asserted };
+        let with = if pad.place == place { pad.counter } else { pad.place };
         let here = pad_ends(pad).into_iter().filter(move |&(at, _)| at == place);
         here.map(move |(_, moved)| Step {
             day: pad.day,

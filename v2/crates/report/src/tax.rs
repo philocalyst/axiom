@@ -71,15 +71,16 @@ fn pending_closings(book: &Book, run: &Run, whose: &Whose, year: i32) -> Vec<Day
 
 /// Why a year has no return yet: the days its closing laws will judge it.
 fn not_closed(year: i32, closes: &[Day]) -> String {
-    let (return_, closes_, owes) = match closes {
-        [_] => ("return", "closes", "it owes"),
-        _ => ("returns", "close", "they owe"),
-    };
     let days: Vec<String> = closes.iter().map(Day::to_string).collect();
-    format!(
-        "The {year} {return_} {closes_} on {}; what {owes} is not figured yet; the tallies are counted so far.",
-        days.join(" and ")
-    )
+    let days = days.join(" and ");
+    match closes {
+        [_] => format!(
+            "The {year} return closes on {days}; what it owes is not figured yet; the tallies are counted so far."
+        ),
+        _ => format!(
+            "The {year} returns close on {days}; what they owe is not figured yet; the tallies are counted so far."
+        ),
+    }
 }
 
 /// Everything counted or owed under one name. A tally is one line on a
