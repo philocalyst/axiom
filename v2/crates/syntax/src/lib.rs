@@ -24,7 +24,7 @@
 //! | `expr`      | the expression grammar                                     |
 //! | `malformed` | diagnostics for words that are not tokens                  |
 
-pub mod ast;
+mod ast;
 
 mod amount;
 mod contract;

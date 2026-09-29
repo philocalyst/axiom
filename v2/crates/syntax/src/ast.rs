@@ -249,13 +249,23 @@ pub(crate) struct Piece<'s> {
     pub tables: Tables<'s>,
 }
 
-/// A type that lives in one of a piece's [`Tables`], so that a [`Many`] or a
-/// [`Ref`] of it can index the [`File`].
-pub trait Stored<'s>: Sized {
-    /// The table of this type in a piece's tables.
-    fn table<'t>(tables: &'t Tables<'s>) -> &'t Vec<Self>;
-    /// The same, to add to it while parsing.
-    fn table_mut<'t>(tables: &'t mut Tables<'s>) -> &'t mut Vec<Self>;
+/// A type that lives in one of a piece's tables, so that a [`Many`] or a
+/// [`Ref`] of it can index the [`File`]. Sealed: the tree's own nodes are the
+/// only ones, and only the parser adds to the tables.
+pub trait Stored<'s>: Sized + Table<'s> {}
+
+/// Where a [`Stored`] type is kept. Nothing outside this crate can name it.
+pub(crate) use table::Table;
+
+mod table {
+    use super::Tables;
+
+    pub trait Table<'s>: Sized {
+        /// The table of this type in a piece's tables.
+        fn table<'t>(tables: &'t Tables<'s>) -> &'t Vec<Self>;
+        /// The same, to add to it while parsing.
+        fn table_mut<'t>(tables: &'t mut Tables<'s>) -> &'t mut Vec<Self>;
+    }
 }
 
 impl<'s, T: Stored<'s>> Index<Many<T>> for File<'s> {
@@ -281,10 +291,13 @@ macro_rules! tables {
             $($(#[$doc])* pub(crate) $field: Vec<$ty>,)+
         }
 
-        $(impl<'s> Stored<'s> for $ty {
-            fn table<'t>(tables: &'t Tables<'s>) -> &'t Vec<Self> { &tables.$field }
-            fn table_mut<'t>(tables: &'t mut Tables<'s>) -> &'t mut Vec<Self> { &mut tables.$field }
-        })+
+        $(
+            impl<'s> Table<'s> for $ty {
+                fn table<'t>(tables: &'t Tables<'s>) -> &'t Vec<Self> { &tables.$field }
+                fn table_mut<'t>(tables: &'t mut Tables<'s>) -> &'t mut Vec<Self> { &mut tables.$field }
+            }
+            impl<'s> Stored<'s> for $ty {}
+        )+
     };
 }
 
