@@ -37,9 +37,9 @@ entity tidewater : client
 entity elm-street-dental : client
   known-as "ELM ST DENTAL*"
 
-// ✎ 01b3: a list declaration shares every property, so the eight clients that differ are declared alone and
-// the list is cut into six pieces.
-// ⇄ 01d1: none of the other 22 says how it appears on a statement. sync can recognize "ASHGROVE DESIGN CO ACH"
+// ✎ 01b3: a list declaration shares every property, so the nine clients that differ are declared alone and
+// the other twenty-one are cut into four lists: thirteen declarations for thirty clients.
+// ⇄ 01d1: none of the other 27 says how it appears on a statement. sync can recognize "ASHGROVE DESIGN CO ACH"
 // only if the name itself is the default pattern (`ashgrove*`, hyphens as spaces, any case).
 
 /// People on payroll. What money to one is: wages, of that person.
@@ -68,8 +68,8 @@ entity ravi : contractor                    // Ravi Shah, illustrator
 // Vendors
 kind software-vendor : org
   purpose software
-entity figma, adobe, slack, notion, github, google-workspace, onepassword, quickbooks : software-vendor
-entity onepassword
+entity figma, adobe, slack, notion, github, google-workspace, quickbooks : software-vendor
+entity onepassword : software-vendor
   known-as "1PASSWORD*", "AGILEBITS*"
 entity pike-workspace : landlord            // the studio's desks and a meeting room
   known-as "PIKE PLACE WORKSPACE*"
