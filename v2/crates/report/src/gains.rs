@@ -47,8 +47,10 @@ impl Term {
 pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) -> Report<'s> {
     let year = year.unwrap_or_else(|| run.today.year());
     let lens = Lens::new(book, whose, run.today);
+    // Money leaving at its own basis (a grant spent, a deposit returned) realized nothing.
+    let realized = |gain: &&Gain| gain.unit != book.base || gain.proceeds != gain.basis;
     let disposals: Vec<&Gain> =
-        run.gains.iter().filter(|gain| gain.day.year() == year && lens.owns(gain.from)).collect();
+        run.gains.iter().filter(|gain| gain.day.year() == year && lens.owns(gain.from)).filter(realized).collect();
     let mut table = section(book, &disposals);
     if table.rows.is_empty() {
         table.note(format!("Nothing was sold in {year}."));
