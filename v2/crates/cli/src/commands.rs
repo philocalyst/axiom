@@ -9,8 +9,8 @@ use axiom_engine::{Options, Run};
 use axiom_model::Book;
 use axiom_report::{Query, Summary};
 
-use crate::args::{Action, Command, Global, Invocation};
-use crate::project::Project;
+use crate::args::{Command, Invocation};
+use crate::project::{Project, Sources};
 use crate::render::{Renderer, Tally};
 use crate::style::{Ink, Line};
 use crate::text::plural;
@@ -19,15 +19,13 @@ use crate::{Outcome, Terminals, help, sync, table};
 /// Runs the command. An `Err` means there was nothing to run it on: the
 /// project could not be found or read.
 pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Diagnostic> {
-    match &invocation.command {
-        Command::Help => Ok(Outcome::ok(help::screen(terminals.out))),
-        Command::Version => Ok(Outcome::ok(help::version())),
-        Command::Project(action) => run_action(&invocation.global, action, terminals),
+    let Invocation { command, .. } = invocation;
+    match command {
+        Command::Help => return Ok(Outcome::ok(help::screen(terminals.out))),
+        Command::Version => return Ok(Outcome::ok(help::version())),
+        _ => {}
     }
-}
-
-fn run_action(global: &Global, action: &Action, terminals: Terminals) -> Result<Outcome, Diagnostic> {
-    let project = Project::find(global.project.unwrap_or(Path::new(".")))?;
+    let project = Project::find(invocation.project.unwrap_or(Path::new(".")))?;
     let sources = project.load()?;
     let (parsed, mut diagnostics) = sources.parse();
     let (book, built) = axiom_model::build(&parsed);
@@ -35,19 +33,20 @@ fn run_action(global: &Global, action: &Action, terminals: Terminals) -> Result<
     drop(parsed);
     diagnostics.extend(built);
 
-    let options = Options { today: global.today.unwrap_or_else(system_today), relaxed: global.relaxed };
-    let renderer = Renderer::new(&sources, terminals.err);
-    match action {
-        Action::Sync { files } => sync::execute(&book, files, &project.root, terminals.out),
-        Action::Check => {
-            let run = axiom_engine::run(&book, options);
-            Ok(Session::new(&book, &run, &diagnostics, renderer, terminals).check())
-        }
-        Action::Report(query, whose) => {
-            let run = axiom_engine::run(&book, options);
-            Ok(Session::new(&book, &run, &diagnostics, renderer, terminals).report(query, *whose, global.relaxed))
-        }
+    if let Command::Sync(files) = command {
+        return sync::execute(&book, files, &project.root, terminals.out);
     }
+    let options = Options { today: invocation.today.unwrap_or_else(system_today), relaxed: invocation.relaxed };
+    let run = axiom_engine::run(&book, options);
+    let session = Session {
+        book: &book,
+        run: &run,
+        sources: &sources,
+        diagnostics: diagnostics.iter().chain(&run.diagnostics).collect(),
+        terminals,
+        all: invocation.all,
+    };
+    Ok(if let Command::Report(query, whose) = command { session.report(query, *whose) } else { session.check() })
 }
 
 /// The current day, by the system clock, in UTC.
@@ -60,75 +59,60 @@ fn system_today() -> Day {
 struct Session<'a, 's> {
     book: &'a Book<'s>,
     run: &'a Run,
+    sources: &'a Sources,
     /// From parsing, building, and running.
     diagnostics: Vec<&'a Diagnostic>,
-    renderer: Renderer<'a>,
     terminals: Terminals,
+    /// Show every diagnostic, however many.
+    all: bool,
 }
 
-impl<'a, 's> Session<'a, 's> {
-    fn new(
-        book: &'a Book<'s>,
-        run: &'a Run,
-        earlier: &'a [Diagnostic],
-        renderer: Renderer<'a>,
-        terminals: Terminals,
-    ) -> Session<'a, 's> {
-        let diagnostics = earlier.iter().chain(&run.diagnostics).collect();
-        Session { book, run, diagnostics, renderer, terminals }
-    }
-
+impl Session<'_, '_> {
     /// Every diagnostic; and if none is an error, the book in one line.
-    fn check(mut self) -> Outcome {
-        let found = std::mem::take(&mut self.diagnostics);
-        let (diagnostics, tally) = self.show(&found);
+    fn check(&self) -> Outcome {
+        let (diagnostics, tally) = self.show(&self.diagnostics);
         if tally.errors > 0 {
             return Outcome { answer: String::new(), diagnostics, failed: true };
         }
         let summary = axiom_report::summary(self.book, self.run);
-        let answer = summary_line(self.book, &summary).render(self.terminals.out.painter) + "\n";
+        let answer = self.terminals.out.painter.paint(&[summary_line(self.book, &summary)]);
         Outcome { answer, diagnostics, failed: false }
     }
 
-    /// The errors, and unless there are any (and `relaxed` does not say to
-    /// carry on regardless) the report.
-    fn report(mut self, query: &Query, whose: Option<&str>, relaxed: bool) -> Outcome {
-        let errors: Vec<&Diagnostic> =
-            self.diagnostics.iter().copied().filter(|diagnostic| diagnostic.is_error()).collect();
-        let (mut diagnostics, tally) = self.show(&errors);
-        if tally.errors > 0 && !relaxed {
-            return Outcome { answer: String::new(), diagnostics, failed: true };
+    /// The errors, and the report. A report runs whatever the book's errors, so
+    /// that a reader can investigate them; it says at its head what it rests on.
+    fn report(&self, query: &Query, whose: Option<&str>) -> Outcome {
+        let result = axiom_report::report(self.book, self.run, &self.pinpoint(query), whose);
+        let mut shown: Vec<&Diagnostic> = self.diagnostics.iter().copied().filter(|found| found.is_error()).collect();
+        shown.extend(result.as_ref().err());
+        let (diagnostics, tally) = self.show(&shown);
+        let Ok(report) = result else { return Outcome { answer: String::new(), diagnostics, failed: true } };
+        let mut answer = table::render(&report, self.terminals.out, self.sources);
+        if tally.errors > 0 {
+            let caveat = format!(
+                "rests on a book with {} (`axiom check` lists them): what they touch may be wrong",
+                plural(tally.errors, "error")
+            );
+            let mut line = Line::text("✗ ", Ink::RED.bold());
+            line.push(&caveat, Ink::DIM);
+            answer.insert_str(0, &self.terminals.out.painter.paint(&[line, Line::new()]));
         }
-        let query = self.pinpoint(query);
-        match axiom_report::report(self.book, self.run, &query, whose) {
-            Ok(report) => {
-                let answer = table::render(&report, self.terminals.out, self.renderer.locator());
-                Outcome { answer, diagnostics, failed: tally.errors > 0 }
-            }
-            Err(refusal) => {
-                diagnostics.push_str(&self.show(&[&refusal]).0);
-                Outcome { answer: String::new(), diagnostics, failed: true }
-            }
-        }
+        Outcome { answer, diagnostics, failed: tally.errors > 0 }
     }
 
     /// `why journal/2026/01.ax:14` asks about a line, which only the sources
     /// can find; any other query goes to the report as it is.
-    fn pinpoint<'q>(&mut self, query: &Query<'q>) -> Query<'q> {
+    fn pinpoint<'q>(&self, query: &Query<'q>) -> Query<'q> {
         let Query::Why { target } = query else { return query.clone() };
-        let line = target.rsplit_once(':').and_then(|(path, number)| {
-            self.renderer.locator().line(path, number.parse().ok()?)
-        });
+        let line = target.rsplit_once(':').and_then(|(path, number)| self.sources.locate(path, number.parse().ok()?));
         line.map_or_else(|| query.clone(), |loc| Query::Line { loc })
     }
 
     /// The diagnostics, and after them how many of each there were.
-    fn show(&mut self, diagnostics: &[&Diagnostic]) -> (String, Tally) {
-        let mut text = self.renderer.diagnostics(diagnostics);
-        let tally = Tally::of(diagnostics);
+    fn show(&self, diagnostics: &[&Diagnostic]) -> (String, Tally) {
+        let (mut text, tally) = Renderer::new(self.sources, self.terminals.err).present(diagnostics, self.all);
         if let Some(line) = tally.line() {
-            text.push_str(&line.render(self.terminals.err.painter));
-            text.push('\n');
+            text += &self.terminals.err.painter.paint(&[line]);
         }
         (text, tally)
     }
@@ -143,15 +127,9 @@ fn summary_line(book: &Book, summary: &Summary) -> Line {
         format!("net worth {}", book.show(summary.net_worth)),
     ];
     let mut line = Line::text("✓ ", Ink::GREEN.bold());
-    for (at, fact) in facts.iter().enumerate() {
-        if at > 0 {
-            line.push(" · ", Ink::DIM);
-        }
-        line.push(fact, Ink::PLAIN);
-    }
+    line.push(&facts.join(" · "), Ink::PLAIN);
     if summary.unpriced > 0 {
-        line.push(" · ", Ink::DIM);
-        line.push(&format!("{} unpriced", plural(summary.unpriced, "holding")), Ink::YELLOW);
+        line.push(&format!(" · {} unpriced", plural(summary.unpriced, "holding")), Ink::YELLOW);
     }
     line
 }

@@ -5,7 +5,6 @@
 //! suggestions and the help screen all read them. Parsing is by hand, and
 //! everything it returns borrows the argument strings.
 
-use std::ops::RangeInclusive;
 use std::path::Path;
 
 use axiom_core::diag::closest;
@@ -25,6 +24,8 @@ pub enum Opt {
     Relaxed,
     Today,
     Color,
+    All,
+    For,
     Help,
     Version,
     At,
@@ -35,7 +36,6 @@ pub enum Opt {
     By,
     Until,
     Paths,
-    Entity,
 }
 
 /// An option, as parsing and the help screen see it.
@@ -66,12 +66,14 @@ const fn option(opt: Opt, long: &'static str, value: Option<&'static str>, about
 
 /// Every option, the ones for every command first.
 pub const OPTIONS: &[OptionSpec] = &[
-    option(Opt::Project, "project", Some("PATH"), "the project: a folder with an axiom.ax above it")
-        .short('C')
-        .everywhere(),
+    option(Opt::Project, "project", Some("PATH"), "the project folder, or one .ax file").short('C').everywhere(),
     option(Opt::Relaxed, "relaxed", None, "law violations become warnings").everywhere(),
     option(Opt::Today, "today", Some("DATE"), "treat this as today (default: the system date)").everywhere(),
     option(Opt::Color, "color", Some("WHEN"), "auto, always, or never").everywhere(),
+    option(Opt::All, "all", None, "show every diagnostic, however many").everywhere(),
+    option(Opt::For, "for", Some("ENTITY"), "whose money (default: everyone's; a household has its members')")
+        .everywhere(),
+    option(Opt::For, "entity", Some("NAME"), "the old name of --for").everywhere(),
     option(Opt::Help, "help", None, "show this screen").short('h').everywhere(),
     option(Opt::Version, "version", None, "show the version").short('V').everywhere(),
     option(Opt::At, "at", Some("DATE"), "as of this day"),
@@ -82,7 +84,6 @@ pub const OPTIONS: &[OptionSpec] = &[
     option(Opt::By, "by", Some("month|year"), "the length of a period (default: month)"),
     option(Opt::Until, "until", Some("DATE"), "run the forecast up to this day"),
     option(Opt::Paths, "paths", Some("N"), "how many Monte Carlo paths (default: 1000)"),
-    option(Opt::Entity, "entity", Some("NAME"), "whose taxes to show"),
 ];
 
 /// What a command does, for dispatch after parsing.
@@ -94,29 +95,43 @@ enum Verb {
     Flow,
     Available,
     Budget,
+    Limits,
+    Claims,
     Tax,
+    Gains,
     Lots,
     Forecast,
     Why,
     Sync,
 }
 
-/// How many operands a command takes.
+/// What operands a command takes, and what to call them.
 #[derive(Clone, Copy)]
-enum Arity {
+pub enum Operands {
     None,
-    Optional,
-    One,
-    Any,
+    Optional(&'static str),
+    One(&'static str),
+    Any(&'static str),
 }
 
-impl Arity {
-    fn range(self) -> RangeInclusive<usize> {
+impl Operands {
+    /// The fewest and the most there may be.
+    fn count(self) -> (usize, usize) {
         match self {
-            Arity::None => 0..=0,
-            Arity::Optional => 0..=1,
-            Arity::One => 1..=1,
-            Arity::Any => 0..=usize::MAX,
+            Operands::None => (0, 0),
+            Operands::Optional(_) => (0, 1),
+            Operands::One(_) => (1, 1),
+            Operands::Any(_) => (0, usize::MAX),
+        }
+    }
+
+    /// As usage shows them: `[GLOB…]`, `PLACE`.
+    pub fn usage(self) -> String {
+        match self {
+            Operands::None => String::new(),
+            Operands::Optional(name) => format!("[{name}]"),
+            Operands::One(name) => name.to_string(),
+            Operands::Any(name) => format!("[{name}…]"),
         }
     }
 }
@@ -125,68 +140,65 @@ impl Arity {
 pub struct CommandSpec {
     verb: Verb,
     pub name: &'static str,
-    /// The operands as usage shows them: `[GLOB…]`, `PLACE`.
-    pub operands: &'static str,
-    pub about: &'static str,
+    pub operands: Operands,
     /// The options besides the global ones.
     pub options: &'static [Opt],
-    arity: Arity,
+    pub about: &'static str,
 }
 
 const fn command(
     verb: Verb,
     name: &'static str,
-    operands: &'static str,
-    arity: Arity,
+    operands: Operands,
     options: &'static [Opt],
     about: &'static str,
 ) -> CommandSpec {
-    CommandSpec { verb, name, operands, about, options, arity }
+    CommandSpec { verb, name, operands, options, about }
 }
 
 /// Every command, in the order the help screen lists them.
 pub const COMMANDS: &[CommandSpec] = &[
-    command(Verb::Check, "check", "[PATH]", Arity::Optional, &[], "diagnostics, then a one-line summary"),
-    command(Verb::Balance, "balance", "[GLOB…]", Arity::Any, &[Opt::At, Opt::Value, Opt::Monthly], "assets and debts"),
-    command(Verb::Register, "register", "PLACE", Arity::One, &[Opt::From, Opt::To], "a place's flows, running balance"),
-    command(Verb::Flow, "flow", "", Arity::None, &[Opt::By, Opt::From, Opt::To], "income and spending"),
-    command(Verb::Available, "available", "", Arity::None, &[Opt::At], "what you can spend, and what more costs"),
-    command(Verb::Budget, "budget", "[MONTH]", Arity::Optional, &[], "spending against each budget"),
-    command(Verb::Tax, "tax", "[YEAR]", Arity::Optional, &[Opt::Entity], "what you owe, line by line"),
-    command(Verb::Lots, "lots", "[PLACE]", Arity::Optional, &[], "what you hold: cost, value, and gain"),
-    command(Verb::Forecast, "forecast", "", Arity::None, &[Opt::Until, Opt::Paths], "where the money is heading"),
-    command(Verb::Why, "why", "TARGET", Arity::One, &[], "a place, #code, law, tax line, or file:line"),
-    command(Verb::Sync, "sync", "[FILE…]", Arity::Any, &[], "run the sync scripts, keep what they print"),
+    command(Verb::Check, "check", Operands::Optional("PATH"), &[], "diagnostics, then a one-line summary"),
+    command(Verb::Balance, "balance", Operands::Any("GLOB"), &[Opt::At, Opt::Value, Opt::Monthly], "assets and debts"),
+    command(
+        Verb::Register,
+        "register",
+        Operands::One("PLACE"),
+        &[Opt::From, Opt::To],
+        "a place's flows, running balance",
+    ),
+    command(Verb::Flow, "flow", Operands::None, &[Opt::By, Opt::From, Opt::To], "income and spending"),
+    command(Verb::Available, "available", Operands::None, &[Opt::At], "what you can spend, and what more costs"),
+    command(Verb::Budget, "budget", Operands::Optional("MONTH|YEAR"), &[], "spending against each budget"),
+    command(Verb::Limits, "limits", Operands::Optional("YEAR"), &[], "every cap and budget: counted, limit, room left"),
+    command(Verb::Claims, "claims", Operands::None, &[Opt::At], "what is owed to you and by you, and how old"),
+    command(Verb::Tax, "tax", Operands::Optional("YEAR"), &[], "what you owe, line by line"),
+    command(Verb::Gains, "gains", Operands::Optional("YEAR"), &[], "each disposal: acquired, sold, proceeds, gain"),
+    command(Verb::Lots, "lots", Operands::Optional("PLACE"), &[Opt::At], "what you hold: cost, value, and gain"),
+    command(Verb::Forecast, "forecast", Operands::None, &[Opt::Until, Opt::Paths], "where the money is heading"),
+    command(Verb::Why, "why", Operands::One("TARGET"), &[], "a place, entity, system, #code, law, tax line, file:line"),
+    command(Verb::Sync, "sync", Operands::Any("FILE"), &[], "run the sync scripts, keep what they print"),
 ];
 
-/// What was asked for.
+/// What was asked for: the options every command shares, and the command.
 pub struct Invocation<'a> {
-    pub global: Global<'a>,
-    pub command: Command<'a>,
-}
-
-/// Options every command shares.
-pub struct Global<'a> {
     pub relaxed: bool,
     /// `None`: the system date.
     pub today: Option<Day>,
     pub color: ColorChoice,
     /// `None`: the current folder.
     pub project: Option<&'a Path>,
+    /// Every diagnostic is shown, however many.
+    pub all: bool,
+    pub command: Command<'a>,
 }
 
-/// What to do.
+/// What to do. All but the first two work on a project.
 pub enum Command<'a> {
     Help,
     Version,
-    /// Everything else works on a project.
-    Project(Action<'a>),
-}
-
-/// A command that works on a project.
-pub enum Action<'a> {
     Check,
-    Sync { files: Vec<&'a str> },
+    Sync(Vec<&'a str>),
     /// A view, about the money of an entity (`--for`) or of everyone.
     Report(Query<'a>, Option<&'a str>),
 }
@@ -195,25 +207,24 @@ pub enum Action<'a> {
 /// with a suggestion where a typo can be guessed.
 pub fn parse(args: &[String]) -> Result<Invocation<'_>, Diagnostic> {
     let (operands, values) = split(args)?;
-    let mut global = Global {
+    let colors = [("auto", ColorChoice::Auto), ("always", ColorChoice::Always), ("never", ColorChoice::Never)];
+    let mut asked = Invocation {
         relaxed: values.has(Opt::Relaxed),
         today: values.day(Opt::Today)?,
-        color: values
-            .choice(
-                Opt::Color,
-                &[("auto", ColorChoice::Auto), ("always", ColorChoice::Always), ("never", ColorChoice::Never)],
-            )?
-            .unwrap_or(ColorChoice::Auto),
+        color: values.choice(Opt::Color, &colors)?.unwrap_or(ColorChoice::Auto),
         project: values.text(Opt::Project).map(Path::new),
+        all: values.has(Opt::All),
+        // Until a command is found, it is help that is asked for.
+        command: Command::Help,
     };
-    if values.has(Opt::Help) {
-        return Ok(Invocation { global, command: Command::Help });
-    }
-    if values.has(Opt::Version) {
-        return Ok(Invocation { global, command: Command::Version });
-    }
-    let Some((&name, operands)) = operands.split_first().filter(|(name, _)| **name != "help") else {
-        return Ok(Invocation { global, command: Command::Help });
+    // `--help` and `--version` come before any command, and no command at all
+    // is a request for help.
+    let flagged = values.has(Opt::Help) || values.has(Opt::Version);
+    let Some((&name, operands)) = operands.split_first().filter(|(name, _)| !flagged && **name != "help") else {
+        if values.has(Opt::Version) && !values.has(Opt::Help) {
+            asked.command = Command::Version;
+        }
+        return Ok(asked);
     };
     let spec = command_named(name)?;
     check_options(spec, &values)?;
@@ -221,46 +232,48 @@ pub fn parse(args: &[String]) -> Result<Invocation<'_>, Diagnostic> {
     if spec.verb == Verb::Check
         && let Some(&path) = operands.first()
     {
-        if global.project.is_some() {
+        if asked.project.is_some() {
             return Err(usage("the project is given twice, by `-C` and by the path").help("give one or the other"));
         }
-        global.project = Some(Path::new(path));
+        asked.project = Some(Path::new(path));
     }
-    let action = build(spec, operands, &values)?;
-    Ok(Invocation { global, command: Command::Project(action) })
+    asked.command = build(spec, operands, &values)?;
+    Ok(asked)
 }
 
 /// Fills a command's query from its operands and options.
-fn build<'a>(spec: &CommandSpec, operands: &[&'a str], values: &Values<'a>) -> Result<Action<'a>, Diagnostic> {
+fn build<'a>(spec: &CommandSpec, operands: &[&'a str], values: &Values<'a>) -> Result<Command<'a>, Diagnostic> {
+    // (The variant `From` hides the trait of that name, which nothing here uses.)
+    use Opt::*;
     // The arity was checked, so a command that needs an operand has one.
     let first = operands.first().copied();
-    let required = first.unwrap_or_default();
+    let (day, has) = (|opt| values.day(opt), |opt| values.has(opt));
+    let year = || first.map(parse_year).transpose();
+    let periods = [("month", Period::Month), ("year", Period::Year)];
     let query = match spec.verb {
-        Verb::Check => return Ok(Action::Check),
-        Verb::Sync => return Ok(Action::Sync { files: operands.to_vec() }),
-        Verb::Balance => Query::Balance {
-            globs: operands.to_vec(),
-            at: values.day(Opt::At)?,
-            value: values.has(Opt::Value),
-            monthly: values.has(Opt::Monthly),
-        },
-        Verb::Register => Query::Register { place: required, from: values.day(Opt::From)?, to: values.day(Opt::To)? },
-        Verb::Flow => Query::Flow {
-            by: values.choice(Opt::By, &[("month", Period::Month), ("year", Period::Year)])?.unwrap_or(Period::Month),
-            from: values.day(Opt::From)?,
-            to: values.day(Opt::To)?,
-        },
-        Verb::Available => Query::Available { at: values.day(Opt::At)? },
-        Verb::Budget => Query::Budget { at: first.map(parse_month).transpose()?, by: Period::Month },
-        Verb::Tax => Query::Tax { year: first.map(parse_year).transpose()? },
-        Verb::Lots => Query::Lots { place: first, at: None },
-        Verb::Forecast => Query::Forecast {
-            until: values.day(Opt::Until)?,
-            paths: values.number(Opt::Paths)?.unwrap_or(DEFAULT_PATHS),
-        },
-        Verb::Why => Query::Why { target: required },
+        Verb::Check => return Ok(Command::Check),
+        Verb::Sync => return Ok(Command::Sync(operands.to_vec())),
+        Verb::Balance => {
+            Query::Balance { globs: operands.to_vec(), at: day(At)?, value: has(Value), monthly: has(Monthly) }
+        }
+        Verb::Register => Query::Register { place: first.unwrap_or_default(), from: day(From)?, to: day(To)? },
+        Verb::Flow => {
+            Query::Flow { by: values.choice(By, &periods)?.unwrap_or(Period::Month), from: day(From)?, to: day(To)? }
+        }
+        Verb::Available => Query::Available { at: day(At)? },
+        Verb::Budget => {
+            let (at, by) = first.map(parse_budget).transpose()?.unzip();
+            Query::Budget { at, by: by.unwrap_or(Period::Month) }
+        }
+        Verb::Limits => Query::Limits { year: year()? },
+        Verb::Claims => Query::Claims { at: day(At)? },
+        Verb::Tax => Query::Tax { year: year()? },
+        Verb::Gains => Query::Gains { year: year()? },
+        Verb::Lots => Query::Lots { place: first, at: day(At)? },
+        Verb::Forecast => Query::Forecast { until: day(Until)?, paths: values.number(Paths)?.unwrap_or(DEFAULT_PATHS) },
+        Verb::Why => Query::Why { target: first.unwrap_or_default() },
     };
-    Ok(Action::Report(query, values.text(Opt::Entity)))
+    Ok(Command::Report(query, values.text(For)))
 }
 
 fn usage(message: impl Into<String>) -> Diagnostic {
@@ -280,10 +293,10 @@ struct Values<'a>(Vec<Given<'a>>);
 
 impl<'a> Values<'a> {
     fn has(&self, opt: Opt) -> bool {
-        self.0.iter().any(|given| given.spec.opt == opt)
+        self.last(opt).is_some()
     }
 
-    /// The value of the last time `opt` was given, which wins.
+    /// The last time `opt` was given, which wins.
     fn last(&self, opt: Opt) -> Option<&Given<'a>> {
         self.0.iter().rfind(|given| given.spec.opt == opt)
     }
@@ -292,15 +305,11 @@ impl<'a> Values<'a> {
         self.last(opt).and_then(|given| given.value)
     }
 
-    /// The value of `opt` as `parse` reads it; `expected` says what it should have been.
-    fn parsed<T>(
-        &self,
-        opt: Opt,
-        expected: &str,
-        parse: impl FnOnce(&str) -> Option<T>,
-    ) -> Result<Option<T>, Diagnostic> {
+    /// The value of `opt` as `read` reads it; `want` says what it should have been.
+    fn parsed<T>(&self, opt: Opt, want: &str, read: impl FnOnce(&str) -> Option<T>) -> Result<Option<T>, Diagnostic> {
         let Some(given) = self.last(opt) else { return Ok(None) };
-        parse(given.value.unwrap_or_default()).map(Some).ok_or_else(|| invalid(given, expected))
+        let text = given.value.unwrap_or_default();
+        read(text).map(Some).ok_or_else(|| usage(format!("`--{}` expects {want}, not `{text}`", given.spec.long)))
     }
 
     fn day(&self, opt: Opt) -> Result<Option<Day>, Diagnostic> {
@@ -322,10 +331,6 @@ impl<'a> Values<'a> {
             }
         })
     }
-}
-
-fn invalid(given: &Given, expected: &str) -> Diagnostic {
-    usage(format!("`--{}` expects {expected}, not `{}`", given.spec.long, given.value.unwrap_or_default()))
 }
 
 /// Sorts the arguments into operands and options. An option is `--long`,
@@ -366,16 +371,14 @@ fn find_option(flag: &str) -> Result<(&'static OptionSpec, Option<&str>), Diagno
             OPTIONS.iter().find(|spec| spec.short == letter).map(|spec| (spec, attached))
         }
     };
-    found.ok_or_else(|| unknown_option(flag))
-}
-
-fn unknown_option(flag: &str) -> Diagnostic {
-    let error = usage(format!("unknown option `-{flag}`"));
-    let name = flag.strip_prefix('-').and_then(|long| long.split('=').next()).unwrap_or(flag);
-    match closest(name, OPTIONS.iter().map(|spec| spec.long)) {
-        Some(near) => error.help(format!("did you mean `--{near}`?")),
-        None => error,
-    }
+    found.ok_or_else(|| {
+        let error = usage(format!("unknown option `-{flag}`"));
+        let name = flag.strip_prefix('-').and_then(|long| long.split('=').next()).unwrap_or(flag);
+        match closest(name, OPTIONS.iter().map(|spec| spec.long)) {
+            Some(near) => error.help(format!("did you mean `--{near}`?")),
+            None => error,
+        }
+    })
 }
 
 fn command_named(name: &str) -> Result<&'static CommandSpec, Diagnostic> {
@@ -388,36 +391,40 @@ fn command_named(name: &str) -> Result<&'static CommandSpec, Diagnostic> {
     })
 }
 
+/// The commands that list `option`, as an error or the help screen names them.
+pub fn takers(option: &OptionSpec) -> String {
+    let takers = COMMANDS.iter().filter(|command| command.options.contains(&option.opt));
+    takers.map(|command| command.name).collect::<Vec<_>>().join(", ")
+}
+
 fn check_options(spec: &CommandSpec, values: &Values) -> Result<(), Diagnostic> {
-    let Some(stray) = values.0.iter().find(|given| !given.spec.global && !spec.options.contains(&given.spec.opt))
-    else {
-        return Ok(());
-    };
-    let owners: Vec<&str> =
-        COMMANDS.iter().filter(|other| other.options.contains(&stray.spec.opt)).map(|other| other.name).collect();
-    Err(usage(format!("`axiom {}` has no option `--{}`", spec.name, stray.spec.long)).help(format!(
-        "`--{}` belongs to {}",
-        stray.spec.long,
-        owners.join(", ")
-    )))
+    let stray =
+        values.0.iter().map(|given| given.spec).find(|option| !option.global && !spec.options.contains(&option.opt));
+    let Some(stray) = stray else { return Ok(()) };
+    let error = usage(format!("`axiom {}` has no option `--{}`", spec.name, stray.long));
+    Err(error.help(format!("`--{}` belongs to {}", stray.long, takers(stray))))
 }
 
 fn check_operands(spec: &CommandSpec, operands: &[&str]) -> Result<(), Diagnostic> {
-    let range = spec.arity.range();
-    let message = match operands.get(*range.end()) {
+    let (fewest, most) = spec.operands.count();
+    let usage_line = spec.operands.usage();
+    let message = match operands.get(most) {
         Some(extra) => format!("`axiom {}` was given an unexpected `{extra}`", spec.name),
-        None if operands.len() < *range.start() => format!("`axiom {}` needs {}", spec.name, spec.operands),
+        None if operands.len() < fewest => format!("`axiom {}` needs {usage_line}", spec.name),
         None => return Ok(()),
     };
-    Err(usage(message).help(format!("usage: axiom {} {}", spec.name, spec.operands)))
+    Err(usage(message).help(format!("usage: axiom {} {usage_line}", spec.name)))
 }
 
-/// `2026-03`: the first day of that month.
-fn parse_month(text: &str) -> Result<Day, Diagnostic> {
-    let month = text.split_once('-').filter(|(year, month)| year.len() == 4 && month.len() == 2);
-    month
-        .and_then(|(year, month)| Day::from_ymd(year.parse().ok()?, month.parse().ok()?, 1))
-        .ok_or_else(|| usage(format!("expected a month like 2026-03, not `{text}`")))
+/// `2026-03`, a month, or `2026`, a year: the first day of it, and which.
+fn parse_budget(text: &str) -> Result<(Day, Period), Diagnostic> {
+    let (year, month, period) = match text.split_once('-') {
+        Some((year, month)) if month.len() == 2 => (year, month, Period::Month),
+        _ => (text, "01", Period::Year),
+    };
+    let day = (year.len() == 4).then(|| Day::from_ymd(year.parse().ok()?, month.parse().ok()?, 1)).flatten();
+    day.map(|day| (day, period))
+        .ok_or_else(|| usage(format!("expected a month like 2026-03 or a year like 2026, not `{text}`")))
 }
 
 fn parse_year(text: &str) -> Result<i32, Diagnostic> {
@@ -435,11 +442,18 @@ mod tests {
         // The arguments must outlive the invocation; leaking them in a test is fine.
         let args: &'static [String] =
             Box::leak(words.iter().map(|word| word.to_string()).collect::<Vec<_>>().into_boxed_slice());
-        parse(args).map(|invocation| (invocation.command, invocation.global.relaxed))
+        parse(args).map(|invocation| (invocation.command, invocation.relaxed))
     }
 
     fn error_of(words: &[&str]) -> Diagnostic {
         parse_words(words).err().expect("a usage error")
+    }
+
+    fn query_of(words: &[&str]) -> (Query<'static>, Option<&'static str>) {
+        match parse_words(words).unwrap().0 {
+            Command::Report(query, whose) => (query, whose),
+            _ => panic!("a report"),
+        }
     }
 
     fn day(text: &str) -> Day {
@@ -451,7 +465,7 @@ mod tests {
         let words = ["balance", "assets/*", "--at", "2026-03-31", "--value", "--monthly", "--relaxed", "expenses"];
         let (command, relaxed) = parse_words(&words).unwrap();
         assert!(relaxed);
-        let Command::Project(Action::Report(Query::Balance { globs, at, value, monthly }, _)) = command else {
+        let Command::Report(Query::Balance { globs, at, value, monthly }, _) = command else {
             panic!("a balance query")
         };
         assert_eq!((globs, at, value, monthly), (vec!["assets/*", "expenses"], Some(day("2026-03-31")), true, true));
@@ -459,46 +473,57 @@ mod tests {
 
     #[test]
     fn options_may_be_attached_and_may_come_first() {
-        let (command, _) = parse_words(&["--color=never", "forecast", "--paths=50", "--until", "2027-01-01"]).unwrap();
-        let Command::Project(Action::Report(Query::Forecast { until, paths }, _)) = command else { panic!("a forecast") };
+        let (Query::Forecast { until, paths }, _) =
+            query_of(&["--color=never", "forecast", "--paths=50", "--until", "2027-01-01"])
+        else {
+            panic!("a forecast")
+        };
         assert_eq!((until, paths), (Some(day("2027-01-01")), 50));
 
         let args = ["-C", "ledger", "check"].map(String::from);
         let invocation = parse(&args).unwrap();
-        assert_eq!(invocation.global.project, Some(Path::new("ledger")));
+        assert_eq!(invocation.project, Some(Path::new("ledger")));
         let args = ["-Cledger", "--color", "always", "help"].map(String::from);
         let invocation = parse(&args).unwrap();
-        assert_eq!(
-            (invocation.global.project, invocation.global.color),
-            (Some(Path::new("ledger")), ColorChoice::Always)
-        );
+        assert_eq!((invocation.project, invocation.color), (Some(Path::new("ledger")), ColorChoice::Always));
     }
 
     #[test]
     fn defaults() {
         let (command, relaxed) = parse_words(&["flow"]).unwrap();
         assert!(!relaxed);
-        assert!(matches!(
-            command,
-            Command::Project(Action::Report(Query::Flow { by: Period::Month, from: None, to: None }, None))
-        ));
-        assert!(matches!(
-            parse_words(&["tax", "2026"]).unwrap().0,
-            Command::Project(Action::Report(Query::Tax { year: Some(2026) }, None))
-        ));
-        assert!(matches!(
-            parse_words(&["budget", "2026-03"]).unwrap().0,
-            Command::Project(Action::Report(Query::Budget { at: Some(_), .. }, None))
-        ));
+        assert!(matches!(command, Command::Report(Query::Flow { by: Period::Month, from: None, to: None }, None)));
         assert!(matches!(parse_words(&[]).unwrap().0, Command::Help));
         assert!(matches!(parse_words(&["balance", "--help"]).unwrap().0, Command::Help));
         assert!(matches!(parse_words(&["-V"]).unwrap().0, Command::Version));
     }
 
     #[test]
+    fn every_report_takes_its_operands_and_whose_money() {
+        assert!(matches!(query_of(&["tax", "2026"]).0, Query::Tax { year: Some(2026) }));
+        assert!(matches!(query_of(&["limits", "2026"]).0, Query::Limits { year: Some(2026) }));
+        assert!(matches!(query_of(&["gains", "2025"]).0, Query::Gains { year: Some(2025) }));
+        assert!(matches!(query_of(&["claims", "--at", "2026-06-01"]).0, Query::Claims { at: Some(_) }));
+        let (lots, whose) = query_of(&["lots", "brokerage", "--at", "2026-06-01", "--for", "me"]);
+        assert!(matches!(lots, Query::Lots { place: Some("brokerage"), at: Some(_) }));
+        assert_eq!(whose, Some("me"));
+        // `--entity` is the name `--for` had.
+        assert_eq!(query_of(&["tax", "--entity", "jordan"]).1, Some("jordan"));
+    }
+
+    #[test]
+    fn a_budget_is_for_a_month_or_for_a_year() {
+        let (month, _) = query_of(&["budget", "2026-03"]);
+        assert!(matches!(month, Query::Budget { at: Some(at), by: Period::Month } if at == day("2026-03-01")));
+        let (year, _) = query_of(&["budget", "2026"]);
+        assert!(matches!(year, Query::Budget { at: Some(at), by: Period::Year } if at == day("2026-01-01")));
+        assert!(matches!(query_of(&["budget"]).0, Query::Budget { at: None, by: Period::Month }));
+    }
+
+    #[test]
     fn check_takes_the_project_as_an_operand() {
         let args = ["check", "ledger"].map(String::from);
-        assert_eq!(parse(&args).unwrap().global.project, Some(Path::new("ledger")));
+        assert_eq!(parse(&args).unwrap().project, Some(Path::new("ledger")));
         let args = ["check", "ledger", "-C", "other"].map(String::from);
         assert!(parse(&args).err().unwrap().message.contains("twice"));
     }
@@ -511,6 +536,7 @@ mod tests {
         assert_eq!(error_of(&["balance", "--montly"]).help[0].text, "did you mean `--monthly`?");
         assert_eq!(error_of(&["flow", "--by", "mnth"]).help[0].text, "did you mean `month`?");
         assert_eq!(error_of(&["--colour"]).help[0].text, "did you mean `--color`?");
+        assert_eq!(error_of(&["lmits"]).help[0].text, "did you mean `limits`?");
         assert_eq!(error_of(&["zzzzzz"]).help[0].text, "`axiom help` lists the commands");
     }
 
@@ -523,7 +549,10 @@ mod tests {
             error_of(&["forecast", "--paths", "0"]).message,
             "`--paths` expects a positive whole number, not `0`"
         );
-        assert_eq!(error_of(&["budget", "March"]).message, "expected a month like 2026-03, not `March`");
+        assert_eq!(
+            error_of(&["budget", "March"]).message,
+            "expected a month like 2026-03 or a year like 2026, not `March`"
+        );
         assert_eq!(error_of(&["tax", "26"]).message, "expected a year like 2026, not `26`");
         let error = error_of(&["check", "--monthly"]);
         assert_eq!(error.message, "`axiom check` has no option `--monthly`");

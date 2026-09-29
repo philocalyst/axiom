@@ -1,169 +1,167 @@
 //! Diagnostics, drawn.
 //!
 //! A [`Diagnostic`] says what is wrong, where, and what to do. The renderer
-//! turns it into the shape compilers at their best have: the offending lines,
-//! marks under exactly the right columns, the source of the rule that was broken,
-//! and advice, with an edit shown where there is one.
+//! turns it into the shape compilers at their best have: the offending lines in
+//! the reader's own file, the other end of a conflict under its own header,
+//! marks under exactly the right columns, facts, and advice with the edit shown
+//! as a diff where there is one.
 //!
-//! The work is split by what varies. [`source`] finds lines and columns,
-//! [`labels`] arranges the marks under one line, [`snippet`] lays out one file's
-//! lines, and [`page`] draws the frame around them. This module gathers them for
-//! each diagnostic and orders and counts the lot.
+//! The work is split by what varies. [`labels`] arranges the marks under one
+//! line, [`snippet`] lays out one file's rows (labelled lines, or an edit), and
+//! [`page`] draws the frame around them. [`findings`] decides what to show of
+//! many diagnostics; this module gathers the rest for each one.
 
+mod findings;
 mod labels;
 mod page;
 mod snippet;
-mod source;
 
-use axiom_core::diag::{Diagnostic, FileId, Help, Label, Severity};
+use axiom_core::diag::{Diagnostic, Help, Label, Loc, Severity};
 
+pub use self::findings::Tally;
+use self::findings::{SHOWN, arrange};
 use self::page::Page;
-use self::snippet::{Row, Snippet};
-pub use self::source::Locator;
-use crate::project::Sources;
+use self::snippet::Panel;
+use crate::project::{SourceFile, Sources};
 use crate::style::{Ink, Line, Terminal};
 use crate::text::plural;
 
-/// The inks a diagnostic draws its labels in.
-#[derive(Clone, Copy)]
-struct Inks {
-    /// The cause: red for an error, yellow for a warning, cyan for a note.
-    primary: Ink,
-    /// Everything else the reader may need to see.
-    secondary: Ink,
-}
-
-impl Inks {
-    fn of(severity: Severity) -> Inks {
-        let primary = match severity {
-            Severity::Error => Ink::RED,
-            Severity::Warning => Ink::YELLOW,
-            Severity::Note => Ink::CYAN,
-        };
-        Inks { primary: primary.bold(), secondary: Ink::BLUE }
-    }
-}
-
-/// How many errors and warnings there are.
-#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub struct Tally {
-    pub errors: usize,
-    pub warnings: usize,
-}
-
-impl Tally {
-    pub fn of(diagnostics: &[&Diagnostic]) -> Tally {
-        let count = |severity| diagnostics.iter().filter(|diagnostic| diagnostic.severity == severity).count();
-        Tally { errors: count(Severity::Error), warnings: count(Severity::Warning) }
-    }
-
-    /// `✗ 2 errors, 1 warning`; nothing at all when there is nothing to count.
-    pub fn line(self) -> Option<Line> {
-        if self.errors == 0 {
-            return (self.warnings > 0).then(|| Line::text(&plural(self.warnings, "warning"), Ink::YELLOW));
-        }
-        let mut line = Line::text(&format!("✗ {}", plural(self.errors, "error")), Ink::RED.bold());
-        if self.warnings > 0 {
-            line.push(", ", Ink::DIM);
-            line.push(&plural(self.warnings, "warning"), Ink::YELLOW);
-        }
-        Some(line)
-    }
-}
+/// How many of the other places a repeated diagnostic occurs at are named.
+const NAMED: usize = 4;
 
 /// Draws diagnostics against the sources they point into.
 pub struct Renderer<'a> {
-    locator: Locator<'a>,
+    sources: &'a Sources,
     terminal: Terminal,
 }
 
 impl<'a> Renderer<'a> {
     /// A renderer for diagnostics that point into `sources`.
     pub fn new(sources: &'a Sources, terminal: Terminal) -> Renderer<'a> {
-        Renderer { locator: Locator::new(sources), terminal }
+        Renderer { sources, terminal }
     }
 
-    /// Where things are in the sources, for anything else that needs to say.
-    pub fn locator(&mut self) -> &mut Locator<'a> {
-        &mut self.locator
+    /// The diagnostics as a reader wants them, each followed by a blank line:
+    /// errors first, each kind in source order, and those that say the same
+    /// thing once, naming where else. Unless `all` is asked for, no more than
+    /// [`SHOWN`] are drawn, and the rest are counted. Also how many of every
+    /// kind there were, drawn or not.
+    pub fn present(&self, diagnostics: &[&Diagnostic], all: bool) -> (String, Tally) {
+        let groups = arrange(diagnostics, |diagnostic| self.lead(diagnostic));
+        let shown = if all { groups.len() } else { groups.len().min(SHOWN) };
+        let mut text = String::new();
+        for group in &groups[..shown] {
+            let mut first = group[0].clone();
+            first.notes.extend(self.also(group[0], &group[1..]));
+            text += &(self.diagnostic(&first) + "\n");
+        }
+        let hidden: Vec<&Diagnostic> = groups[shown..].iter().flatten().copied().collect();
+        if !hidden.is_empty() {
+            let counts = Tally::of(hidden.iter().copied()).counts();
+            let counted = if counts.is_empty() { String::new() } else { format!(" ({counts})") };
+            let note =
+                format!("… {} not shown{counted}; `--all` shows every one", plural(hidden.len(), "more diagnostic"));
+            text += &self.terminal.painter.paint(&[Line::text(&note, Ink::DIM), Line::new()]);
+        }
+        (text, Tally::of(diagnostics.iter().copied()))
     }
 
-    /// Every diagnostic in file and source order, each followed by a blank
-    /// line. Diagnostics that point nowhere come last.
-    pub fn diagnostics(&mut self, diagnostics: &[&Diagnostic]) -> String {
-        let mut ordered = diagnostics.to_vec();
-        ordered.sort_by_key(|diagnostic| {
-            diagnostic.anchor().map_or((true, FileId(0), 0), |loc| (false, loc.file, loc.start))
-        });
-        ordered.into_iter().map(|diagnostic| self.diagnostic(diagnostic) + "\n").collect()
+    /// Where a diagnostic is read from: its primary label in a file the reader
+    /// can edit, else any label in one, else wherever it is anchored (a built-in
+    /// source, when the fault is in the reader's file but the rule is not).
+    fn lead(&self, diagnostic: &Diagnostic) -> Option<Loc> {
+        let editable = |label: &&Label| self.sources.get(label.loc.file).is_some_and(|file| !file.embedded);
+        let mut labels = diagnostic.labels.iter().filter(editable);
+        let label = labels.clone().find(|label| label.primary).or_else(|| labels.next());
+        label.map(|label| label.loc).or_else(|| diagnostic.anchor())
+    }
+
+    /// What to say of the repeats of a diagnostic: `also at a.ax:11, a.ax:12,
+    /// … (296 more)`. They come in source order, so a place named twice is
+    /// named once.
+    fn also(&self, first: &Diagnostic, repeats: &[&Diagnostic]) -> Option<String> {
+        let place = |diagnostic: &Diagnostic| self.sources.describe(self.lead(diagnostic)?);
+        let own = place(first);
+        let mut elsewhere: Vec<String> = repeats.iter().filter_map(|repeat| place(repeat)).collect();
+        elsewhere.retain(|place| Some(place) != own.as_ref());
+        elsewhere.dedup();
+        let named = elsewhere.len().min(NAMED);
+        let (more, places) = (repeats.len() - named, elsewhere[..named].join(", "));
+        (!repeats.is_empty()).then(|| match (named, more) {
+            (0, _) => format!("{more} more like this"),
+            (_, 0) => format!("also at {places}"),
+            _ => format!("also at {places}, … ({more} more)"),
+        })
     }
 
     /// One diagnostic, each line ending in a newline.
-    pub fn diagnostic(&mut self, diagnostic: &Diagnostic) -> String {
-        let inks = Inks::of(diagnostic.severity);
-        let snippets = self.snippets(diagnostic, inks);
-        let fixes: Vec<Vec<Row>> = diagnostic.help.iter().map(|help| self.fix_rows(help)).collect();
-        let rows = snippets.iter().flat_map(|snippet| &snippet.rows).chain(fixes.iter().flatten());
+    pub fn diagnostic(&self, diagnostic: &Diagnostic) -> String {
+        let (word, ink) = match diagnostic.severity {
+            Severity::Error => ("error", Ink::RED),
+            Severity::Warning => ("warning", Ink::YELLOW),
+            Severity::Note => ("note", Ink::CYAN),
+        };
+        let panels = self.panels(diagnostic, ink.bold());
+        let fixes: Vec<Option<Panel>> = diagnostic.help.iter().map(|help| self.fix(help)).collect();
+        let rows = panels.iter().chain(fixes.iter().flatten()).flat_map(|panel| &panel.rows);
         let widest = rows.filter_map(|row| row.gutter.number()).max();
         let page = Page { gutter: widest.map_or(1, |number| number.to_string().len()), width: self.terminal.width };
 
-        let mut lines = vec![header(diagnostic, inks)];
-        for (at, snippet) in snippets.iter().enumerate() {
-            lines.push(page.frame(at == 0, snippet));
+        let mut lines = vec![header(diagnostic, word, ink.bold())];
+        for (at, panel) in panels.iter().enumerate() {
+            lines.push(page.frame(at == 0, panel));
             lines.push(page.bar());
-            lines.extend(snippet.rows.iter().map(|row| page.row(row)));
+            lines.extend(panel.rows.iter().map(|row| page.row(row)));
             lines.push(page.bar());
         }
-        lines.extend(diagnostic.notes.iter().flat_map(|note| page.remark("note", Ink::BOLD, note)));
-        for (help, rows) in diagnostic.help.iter().zip(&fixes) {
+        let remarks: Vec<Line> =
+            diagnostic.notes.iter().flat_map(|note| page.remark("note", Ink::BOLD, note)).collect();
+        if remarks.is_empty() && diagnostic.help.is_empty() && !panels.is_empty() {
+            lines.pop();
+        }
+        lines.extend(remarks);
+        for (help, fix) in diagnostic.help.iter().zip(&fixes) {
             lines.extend(page.remark("help", Ink::GREEN.bold(), &help.text));
-            lines.extend(rows.iter().map(|row| page.row(row)));
+            let Some(panel) = fix else { continue };
+            if !panels.iter().any(|shown| shown.file.id == panel.file.id) {
+                lines.push(page.frame(panels.is_empty(), panel));
+            }
+            lines.extend(panel.rows.iter().map(|row| page.row(row)));
         }
-        if !snippets.is_empty() {
-            lines.push(page.closer());
-        }
-        lines.iter().map(|line| line.render(self.terminal.painter) + "\n").collect()
+        self.terminal.painter.paint(&lines)
     }
 
-    /// One snippet per file the labels point into: the anchor's file first, the
-    /// others in file order. A label in a file that was never loaded has nothing
-    /// to show, and is left out.
-    fn snippets(&mut self, diagnostic: &Diagnostic, inks: Inks) -> Vec<Snippet<'a>> {
-        let anchor = diagnostic.anchor().map(|loc| loc.file);
-        let mut files: Vec<FileId> = diagnostic.labels.iter().map(|label| label.loc.file).collect();
-        files.sort_by_key(|&file| (Some(file) != anchor, file));
-        files.dedup();
-        let sources = self.locator.sources;
-        let mut snippets = Vec::new();
-        for id in files {
-            let Some(file) = sources.get(id) else { continue };
-            let labels: Vec<&Label> = diagnostic.labels.iter().filter(|label| label.loc.file == id).collect();
-            snippets.push(snippet::snippet(file, self.locator.index(file), &labels, inks));
-        }
-        snippets
+    /// One panel per file the labels point into: those in files the reader can
+    /// edit first, the diagnostic's own file before the others, built-in sources
+    /// last. A label in a file that was never loaded has nothing to show, and is
+    /// left out.
+    fn panels(&self, diagnostic: &Diagnostic, primary: Ink) -> Vec<Panel<'a>> {
+        let lead = self.lead(diagnostic).map(|loc| loc.file);
+        let mut files: Vec<&SourceFile> =
+            diagnostic.labels.iter().filter_map(|label| self.sources.get(label.loc.file)).collect();
+        files.sort_by_key(|file| (file.embedded, Some(file.id) != lead, file.id));
+        files.dedup_by_key(|file| file.id);
+        let panel = |file: &'a SourceFile| {
+            let labels: Vec<&Label> = diagnostic.labels.iter().filter(|label| label.loc.file == file.id).collect();
+            snippet::snippet(file, &labels, primary, self.terminal.width)
+        };
+        files.into_iter().map(panel).collect()
     }
 
-    /// The edit a help carries, shown as the lines it would leave.
-    fn fix_rows(&mut self, help: &Help) -> Vec<Row> {
-        let Some((loc, replacement)) = &help.edit else { return Vec::new() };
-        let Some(file) = self.locator.sources.get(loc.file) else { return Vec::new() };
-        snippet::edited_lines(file, self.locator.index(file), *loc, replacement)
+    /// The edit a help carries, drawn as a diff.
+    fn fix(&self, help: &Help) -> Option<Panel<'a>> {
+        let (loc, replacement) = help.edit.as_ref()?;
+        Some(snippet::edit(self.sources.get(loc.file)?, *loc, replacement))
     }
 }
 
 /// `error[code]: message`. A diagnostic without a code has no brackets.
-fn header(diagnostic: &Diagnostic, inks: Inks) -> Line {
-    let word = match diagnostic.severity {
-        Severity::Error => "error",
-        Severity::Warning => "warning",
-        Severity::Note => "note",
-    };
-    let mut line = Line::text(word, inks.primary);
+fn header(diagnostic: &Diagnostic, word: &str, ink: Ink) -> Line {
+    let mut line = Line::text(word, ink);
     if !diagnostic.code.is_empty() {
-        line.push(&format!("[{}]", diagnostic.code), inks.primary);
+        line.push(&format!("[{}]", diagnostic.code), ink);
     }
-    line.push(": ", Ink::BOLD);
-    line.push(&diagnostic.message, Ink::BOLD);
+    line.push(&format!(": {}", diagnostic.message), Ink::BOLD);
     line
 }
 

@@ -16,8 +16,8 @@
 use axiom_core::{Qty, Ratio};
 use axiom_report::{Align, Cell, Column, Report, Row, Section, Style};
 
-use crate::render::Locator;
-use crate::style::{Color, Ink, Line, Terminal};
+use crate::project::Sources;
+use crate::style::{Ink, Line, Terminal};
 use crate::text::wrap;
 
 /// Columns before every table row.
@@ -30,22 +30,22 @@ const DEPTH: usize = 2;
 const MIN_NOTE_WIDTH: usize = 20;
 
 /// Draws a report: its title, then each section with its table and notes.
-pub fn render(report: &Report, terminal: Terminal, locator: &mut Locator) -> String {
+pub fn render(report: &Report, terminal: Terminal, sources: &Sources) -> String {
     let mut lines = vec![Line::text(&report.title, Ink::BOLD)];
     for section in &report.sections {
         lines.push(Line::new());
-        lines.extend(section_lines(section, terminal.width, locator));
+        lines.extend(section_lines(section, terminal.width, sources));
     }
-    lines.iter().map(|line| line.render(terminal.painter) + "\n").collect()
+    terminal.painter.paint(&lines)
 }
 
-fn section_lines(section: &Section, width: usize, locator: &mut Locator) -> Vec<Line> {
+fn section_lines(section: &Section, width: usize, sources: &Sources) -> Vec<Line> {
     let mut lines = Vec::new();
     if let Some(heading) = &section.heading {
         lines.push(Line::text(heading, Ink::BOLD));
     }
     if !section.columns.is_empty() {
-        lines.extend(table_lines(section, locator));
+        lines.extend(table_lines(section, sources));
     }
     let room = width.saturating_sub(INDENT + 2).max(MIN_NOTE_WIDTH);
     for note in &section.notes {
@@ -62,11 +62,11 @@ fn section_lines(section: &Section, width: usize, locator: &mut Locator) -> Vec<
 }
 
 /// The column titles, a rule, and the rows, with a rule above each total.
-fn table_lines(section: &Section, locator: &mut Locator) -> Vec<Line> {
+fn table_lines(section: &Section, sources: &Sources) -> Vec<Line> {
     let units = unit_widths(section);
     let titles: Vec<Line> = section.columns.iter().map(|column| Line::text(&column.title, Ink::DIM)).collect();
     let rows: Vec<Vec<Line>> =
-        section.rows.iter().map(|row| row_cells(row, &section.columns, &units, locator)).collect();
+        section.rows.iter().map(|row| row_cells(row, &section.columns, &units, sources)).collect();
     let widths: Vec<usize> = (0..section.columns.len())
         .map(|at| titles[at].width().max(rows.iter().map(|cells| cells[at].width()).max().unwrap_or(0)))
         .collect();
@@ -107,7 +107,7 @@ fn assemble(cells: Vec<Line>, widths: &[usize], columns: &[Column]) -> Line {
 
 /// One line per column: the row's cell, in the row's style, and for the first
 /// column indented to the row's depth.
-fn row_cells(row: &Row, columns: &[Column], units: &[usize], locator: &mut Locator) -> Vec<Line> {
+fn row_cells(row: &Row, columns: &[Column], units: &[usize], sources: &Sources) -> Vec<Line> {
     let ink = match row.style {
         Style::Normal => Ink::PLAIN,
         Style::Total => Ink::BOLD,
@@ -115,7 +115,7 @@ fn row_cells(row: &Row, columns: &[Column], units: &[usize], locator: &mut Locat
         Style::Alert => Ink::RED,
     };
     let mut cells: Vec<Line> = (0..columns.len())
-        .map(|at| row.cells.get(at).map_or(Line::new(), |cell| cell_line(cell, ink, units[at], locator)))
+        .map(|at| row.cells.get(at).map_or(Line::new(), |cell| cell_line(cell, ink, units[at], sources)))
         .collect();
     if let Some(first) = cells.first_mut() {
         first.right_align(first.width() + DEPTH * usize::from(row.depth));
@@ -135,18 +135,18 @@ fn unit_widths(section: &Section) -> Vec<usize> {
         .collect()
 }
 
-fn cell_line(cell: &Cell, ink: Ink, unit_width: usize, locator: &mut Locator) -> Line {
+fn cell_line(cell: &Cell, ink: Ink, unit_width: usize, sources: &Sources) -> Line {
     match cell {
         Cell::Blank => Line::new(),
         Cell::Text(text) => Line::text(text, ink),
         Cell::Day(day) => Line::text(&day.to_string(), ink),
         Cell::Percent(ratio) => Line::text(&percent(*ratio), ink),
         Cell::Amount { qty, scale, unit } => {
-            let ink = if qty.is_negative() { ink.colored(Color::Red) } else { ink };
+            let ink = if qty.is_negative() { ink.colored(Ink::RED) } else { ink };
             let padding = unit_width.saturating_sub(unit.chars().count());
             Line::text(&format!("{} {unit}{}", qty.show(*scale), " ".repeat(padding)), ink)
         }
-        Cell::Source(loc) => Line::text(&locator.describe(*loc).unwrap_or_default(), Ink::DIM),
+        Cell::Source(loc) => Line::text(&sources.describe(*loc).unwrap_or_default(), Ink::DIM),
     }
 }
 
@@ -209,7 +209,7 @@ mod tests {
         };
         let report = Report { title: "Balances at 2026-03-31".to_string(), sections: vec![section] };
         assert_eq!(
-            render(&report, Terminal::plain(80), &mut Locator::new(&Sources::default())),
+            render(&report, Terminal::plain(80), &Sources::default()),
             "\
 Balances at 2026-03-31
 

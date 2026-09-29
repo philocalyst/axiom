@@ -13,7 +13,6 @@ warning[law]: law `budget` does not hold for expenses/food
    │              ╰── 681.00 USD
    │
    = help: at most 97.10 USD more can go in this month
-───╯
 
 note[pad]: accepted a gap on assets/cash
    ╭─[journal/2026/03.ax:42:1]
@@ -21,8 +20,6 @@ note[pad]: accepted a gap on assets/cash
 42 │ 2026-03-31 cash = 63.00 USD !
    │ ──────────────┬──────────────
    │               ╰── 14.50 USD moved out of assets/cash into unknown
-   │
-───╯
 
 1 warning
 ✓ 68 flows · 29 places · 16 laws enforced · net worth 77,597.73 USD

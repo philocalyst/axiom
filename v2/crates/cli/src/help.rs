@@ -1,6 +1,6 @@
 //! The usage screen, drawn from the command and option tables.
 
-use crate::args::{COMMANDS, OPTIONS, OptionSpec};
+use crate::args::{COMMANDS, CommandSpec, OPTIONS, OptionSpec, takers};
 use crate::style::{Ink, Line, Terminal};
 
 const TAGLINE: &str = "A typed plain-text ledger: what you own, what you owe, what you can spend.";
@@ -15,46 +15,39 @@ pub fn version() -> String {
 
 /// The usage screen: what `axiom help` prints.
 pub fn screen(terminal: Terminal) -> String {
+    let options = |chosen: bool| OPTIONS.iter().filter(move |spec| spec.global != chosen).map(option_row).collect();
+    let sections = [
+        ("COMMANDS", COMMANDS.iter().map(command_row).collect()),
+        ("COMMAND OPTIONS", options(true)),
+        ("GLOBAL OPTIONS", options(false)),
+    ];
     let mut lines = vec![
         Line::text(&format!("axiom {}", env!("CARGO_PKG_VERSION")), Ink::BOLD),
         Line::text(TAGLINE, Ink::DIM),
         Line::new(),
+        Line::text("USAGE", Ink::BOLD),
+        Line::text("  axiom [OPTIONS] <COMMAND>", Ink::PLAIN),
     ];
-    lines.push(Line::text("USAGE", Ink::BOLD));
-    lines.push(Line::text("  axiom [OPTIONS] <COMMAND>", Ink::PLAIN));
-    lines.push(Line::new());
-    lines.push(Line::text("COMMANDS", Ink::BOLD));
-    lines.extend(table(
-        COMMANDS
-            .iter()
-            .map(|spec| {
-                [
-                    (spec.name.to_string(), Ink::CYAN.bold()),
-                    (spec.operands.to_string(), Ink::DIM),
-                    (spec.about.to_string(), Ink::PLAIN),
-                ]
-            })
-            .collect(),
-    ));
-    lines.push(Line::new());
-    lines.push(Line::text("COMMAND OPTIONS", Ink::BOLD));
-    lines.extend(table(OPTIONS.iter().filter(|spec| !spec.global).map(option_row).collect()));
-    lines.push(Line::new());
-    lines.push(Line::text("GLOBAL OPTIONS", Ink::BOLD));
-    lines.extend(table(OPTIONS.iter().filter(|spec| spec.global).map(option_row).collect()));
-    lines.iter().map(|line| line.render(terminal.painter) + "\n").collect()
+    for (heading, rows) in sections {
+        lines.extend([Line::new(), Line::text(heading, Ink::BOLD)]);
+        lines.extend(table(rows));
+    }
+    terminal.painter.paint(&lines)
 }
 
-/// `-C, --project PATH`, what it does, and which commands take it.
+/// `balance  [GLOB…]  assets and debts`
+fn command_row(spec: &CommandSpec) -> [(String, Ink); 3] {
+    [(spec.name.to_string(), Ink::CYAN.bold()), (spec.operands.usage(), Ink::DIM), (spec.about.to_string(), Ink::PLAIN)]
+}
+
+/// `-C, --project PATH`, what it does, and which commands take it if not all.
 fn option_row(spec: &OptionSpec) -> [(String, Ink); 3] {
     let short = spec.short.map_or_else(|| "    ".to_string(), |letter| format!("-{letter}, "));
     let value = spec.value.map_or_else(String::new, |name| format!(" {name}"));
-    let owners: Vec<&str> =
-        COMMANDS.iter().filter(|command| command.options.contains(&spec.opt)).map(|command| command.name).collect();
     [
         (format!("{short}--{}{value}", spec.long), Ink::CYAN.bold()),
         (spec.about.to_string(), Ink::PLAIN),
-        (owners.join(", "), Ink::DIM),
+        (takers(spec), Ink::DIM),
     ]
 }
 

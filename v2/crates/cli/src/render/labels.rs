@@ -16,6 +16,7 @@ use axiom_core::Set;
 use crate::style::{Ink, Line};
 
 /// A label on a single line, in display columns.
+#[derive(Clone, Copy)]
 pub struct LineLabel<'a> {
     /// The first column underlined.
     pub start: usize,

@@ -9,8 +9,8 @@ error[unknown-property]: `benificiary` is not a property of an account of kind `
    = note: its properties are `owner`, `holds`, `select`, `opened`, `closed`, `budget`, `liquidity`
            or `beneficiary`
    = help: did you mean `beneficiary`?
+55 -   benificiary me
 55 +   beneficiary me
-───╯
 
 error[law]: 401(k) deferrals over the yearly limit
    ╭─[03-violations.ax:70:1]
@@ -19,9 +19,9 @@ error[law]: 401(k) deferrals over the yearly limit
    │ ────────────────────┬───────────────────
    │                     ╰── this flow: 26,000.00 USD into assets/retirement
    │
-   ├─[us/401k.ax:33:13]
+   ├─[us/401k.ax:33:13] (built in)
    │
-33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearly limit"
+33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
    │             ────────────┬───────────┬─────────┬──┬─┬─────┬──
    │                         │           │         │  │ │     ╰── empty
    │                         │           │         │  │ ╰── 24,500.00 USD
@@ -36,7 +36,6 @@ error[law]: 401(k) deferrals over the yearly limit
            over the cap. Ask payroll to lower the deferral. Any excess must also be returned by the
            plan before April 15 of the next year, or it is taxed twice (IRC §402(g)(2)).
    = help: at most 24,500.00 USD more can count toward `elective-deferrals` this year
-───╯
 
 error[ambiguous-lots]: ambiguous lot: assets/wallet holds 2 lots that differ and no policy applies
    ╭─[03-violations.ax:94:1]
@@ -55,7 +54,6 @@ error[ambiguous-lots]: ambiguous lot: assets/wallet holds 2 lots that differ and
    = note: the sale still moves the oldest lot first, so the lines after it stay consistent
    = help: name the lot, `assets/wallet[2026-02-10]`, or a policy, `assets/wallet[fifo]` (or lifo,
            hifo, prorata), or give the account `select fifo`
-───╯
 
 error[unknown-place]: there is no place `grocries`
     ╭─[03-violations.ax:100:24]
@@ -65,10 +63,10 @@ error[unknown-place]: there is no place `grocries`
     │                            ╰── not a known place
     │
     = help: did you mean `groceries`?
+100 - 2026-03-02 checking -> grocries 84.20 USD
 100 + 2026-03-02 checking -> groceries 84.20 USD
     = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
             `expenses` or `equity`, for example `expenses/grocries`
-────╯
 
 error[price-disagrees]: the price does not match the amounts
     ╭─[03-violations.ax:108:52]
@@ -84,7 +82,6 @@ error[price-disagrees]: the price does not match the amounts
               checking -> 1_000.00 USD
                 brokerage 4 VTI @ 285.70 USD
                 expenses/fees 142.80 USD
-────╯
 
 error[law]: grant money spent outside its purpose
     ╭─[03-violations.ax:121:1]
@@ -93,7 +90,7 @@ error[law]: grant money spent outside its purpose
     │ ──────────────────┬─────────────────
     │                   ╰── this flow: 300.00 USD of restricted money leaving assets/bank/project
     │
-    ├─[std.ax:148:13]
+    ├─[std.ax:148:13] (built in)
     │
 148 │     require to is self.purpose "grant money spent outside its purpose"
     │             ─┬──────┬─┬─┬─────
@@ -105,10 +102,9 @@ error[law]: grant money spent outside its purpose
     = note: Grant money may only be spent on what the grant names. This payment went somewhere else.
             Pay it from another account, or, if the funder agreed to the change, update `purpose` on
             the grant.
-────╯
 
 error[law]: grant money left unspent at the deadline
-    ╭─[std.ax:153:3]
+    ╭─[std.ax:153:3] (built in)
     │
 153 │   law deadline
     │   ──────┬─────
@@ -122,6 +118,5 @@ error[law]: grant money left unspent at the deadline
     = note: A grant ends on its `until` date, and unspent money is owed back. Spend what is left on
             the grant's purpose before the deadline, or ask the funder for an extension and move
             `until`.
-────╯
 
 ✗ 7 errors
