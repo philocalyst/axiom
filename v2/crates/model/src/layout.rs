@@ -27,15 +27,6 @@ const MONTHS: [&str; 12] = [
     "December",
 ];
 
-/// A path segment, read for what it means.
-#[derive(Clone, Copy)]
-enum Piece<'a> {
-    Plain(&'a str),
-    Year,
-    Month,
-    YearMonth,
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Only {
     Anything,
@@ -44,9 +35,12 @@ pub(crate) enum Only {
 }
 
 pub(crate) struct Layout<'a> {
-    pieces: Vec<Piece<'a>>,
-    year: Option<i32>,
-    month: Option<u32>,
+    /// The path's segments, the file's name without its `.ax`.
+    segments: Vec<&'a str>,
+    /// Which segment names the year and which the month (the same one for
+    /// `2026-03`), and what they say.
+    year: Option<(usize, i32)>,
+    month: Option<(usize, u32)>,
     pub only: Only,
 }
 
@@ -64,60 +58,40 @@ fn digits(text: &str, count: usize) -> Option<u32> {
 
 impl<'a> Layout<'a> {
     pub fn of(path: &'a str) -> Layout<'a> {
-        let mut layout = Layout { pieces: Vec::new(), year: None, month: None, only: Only::Anything };
-        let mut segments: Vec<&str> = path.split('/').collect();
-        let file = segments.pop().unwrap_or_default();
-        let stem = file.strip_suffix(".ax").unwrap_or(file);
-        let mut after_year = false;
-        for segment in segments {
-            layout.only = match segment {
-                "prices" => Only::Prices,
-                "systems" => Only::Systems,
-                _ => layout.only,
-            };
-            after_year = layout.piece(segment, after_year);
-        }
-        match stem.split_once('-') {
-            Some((year, month)) if layout.year.is_none() && digits(year, 4).is_some() && digits(month, 2).is_some() => {
-                layout.year = digits(year, 4).map(|year| year as i32);
-                layout.month = digits(month, 2);
-                layout.pieces.push(Piece::YearMonth);
-            }
-            _ => {
-                layout.piece(stem, after_year);
+        let segments: Vec<&str> = path.strip_suffix(".ax").unwrap_or(path).split('/').collect();
+        let (mut year, mut month) = (None, None);
+        for (at, &segment) in segments.iter().enumerate() {
+            match (segment.split_once('-'), year, month) {
+                (Some((y, m)), None, None) if digits(y, 4).is_some() && digits(m, 2).is_some() => {
+                    (year, month) = (digits(y, 4).map(|y| (at, y as i32)), digits(m, 2).map(|m| (at, m)));
+                }
+                (_, None, _) if digits(segment, 4).is_some() => year = digits(segment, 4).map(|y| (at, y as i32)),
+                (_, Some((year_at, _)), None) if at == year_at + 1 => {
+                    month = digits(segment, 2).filter(|m| (1..=12).contains(m)).map(|m| (at, m));
+                }
+                _ => {}
             }
         }
-        layout
-    }
-
-    /// Reads one segment; whether it was the year that a month may follow.
-    fn piece(&mut self, segment: &'a str, after_year: bool) -> bool {
-        if let (Some(year), None) = (digits(segment, 4), self.year) {
-            self.year = Some(year as i32);
-            self.pieces.push(Piece::Year);
-            return true;
-        }
-        match digits(segment, 2) {
-            Some(month) if after_year && self.month.is_none() && (1..=12).contains(&month) => {
-                self.month = Some(month);
-                self.pieces.push(Piece::Month);
-            }
-            _ => self.pieces.push(Piece::Plain(segment)),
-        }
-        false
+        let folders = &segments[..segments.len() - 1];
+        let only = match folders.iter().rev().find(|&&segment| segment == "prices" || segment == "systems") {
+            Some(&"prices") => Only::Prices,
+            Some(_) => Only::Systems,
+            None => Only::Anything,
+        };
+        Layout { segments, year, month, only }
     }
 
     /// Whether an item dated `day` belongs in this file.
     pub fn holds(&self, day: Day) -> bool {
         let (year, month, _) = day.ymd();
-        self.year.is_none_or(|held| held == year) && self.month.is_none_or(|held| held == month)
+        self.year.is_none_or(|(_, held)| held == year) && self.month.is_none_or(|(_, held)| held == month)
     }
 
     /// `March 2026`, `2026`.
     fn describe(&self) -> String {
         match (self.year, self.month) {
-            (Some(year), Some(month)) => format!("{} {year}", MONTHS[month as usize - 1]),
-            (Some(year), None) => year.to_string(),
+            (Some((_, year)), Some((_, month))) => format!("{} {year}", MONTHS[month as usize - 1]),
+            (Some((_, year)), None) => year.to_string(),
             _ => "anything".to_string(),
         }
     }
@@ -126,17 +100,13 @@ impl<'a> Layout<'a> {
     /// swapped for the day's.
     fn path_for(&self, day: Day) -> String {
         let (year, month, _) = day.ymd();
-        let pieces: Vec<String> = self
-            .pieces
-            .iter()
-            .map(|piece| match piece {
-                Piece::Plain(text) => text.to_string(),
-                Piece::Year => format!("{year:04}"),
-                Piece::Month => format!("{month:02}"),
-                Piece::YearMonth => format!("{year:04}-{month:02}"),
-            })
-            .collect();
-        format!("{}.ax", pieces.join("/"))
+        let segment = |(at, text): (usize, &str)| match (self.year, self.month) {
+            (Some((y, _)), Some((m, _))) if y == at && m == at => format!("{year:04}-{month:02}"),
+            (Some((y, _)), _) if y == at => format!("{year:04}"),
+            (_, Some((m, _))) if m == at => format!("{month:02}"),
+            _ => text.to_string(),
+        };
+        format!("{}.ax", self.segments.iter().copied().enumerate().map(segment).collect::<Vec<_>>().join("/"))
     }
 
     /// One report for a file's misdated items: the root cause is where the
