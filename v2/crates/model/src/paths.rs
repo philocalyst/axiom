@@ -19,10 +19,12 @@ pub(crate) fn build<'s, T>(
     mut make: impl FnMut(&'s str) -> T,
 ) -> (Tree<T>, Map<&'s str, Id<T>>) {
     let mut seen = Set::default();
-    let mut paths: Vec<&str> = written.into_iter().flat_map(prefixes).filter(|&path| seen.insert(path)).collect();
+    let mut paths: Vec<&'s str> = written.into_iter().flat_map(prefixes).filter(|&path| seen.insert(path)).collect();
     // Comparing segment by segment keeps `bank` before `bank-x`, which a plain
-    // string comparison would put after `bank/checking`.
-    paths.sort_unstable_by(|a, b| a.split('/').cmp(b.split('/')));
+    // string comparison would put after `bank/checking`: read `/` as the
+    // smallest byte, and the two agree.
+    let key = |path: &'s str| path.bytes().map(|byte| if byte == b'/' { 0 } else { byte });
+    paths.sort_unstable_by(|a, b| key(a).cmp(key(b)));
 
     let position: Map<&str, usize> = paths.iter().enumerate().map(|(at, &path)| (path, at)).collect();
     let parents: Vec<Option<usize>> =

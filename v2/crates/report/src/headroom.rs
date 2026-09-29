@@ -7,7 +7,7 @@
 use axiom_core::day::days_in_month;
 use axiom_core::{Day, Id, Map, Qty, Ratio, Set};
 use axiom_engine::{Headroom, Run};
-use axiom_model::{Amount, BinOp, Book, Func, Law, Op, Period, StepKind, Subject, Value, Window};
+use axiom_model::{Amount, BinOp, Book, Law, Op, Period, StepKind, Subject, Window};
 
 use crate::calendar::Periods;
 
@@ -23,10 +23,11 @@ pub fn current(book: &Book, run: &Run, from: Day, to: Day) -> Vec<Headroom> {
     let (months, years) = (Periods::covering(Period::Month, from, to), Periods::covering(Period::Year, from, to));
     let rules = book.rules.on_in.values().iter().chain(book.rules.on_out.values());
     for rule in rules {
-        let (Subject::Place(place), Some((step, window, limit))) = (rule.subject, budget(&book.laws[rule.law])) else {
-            continue;
-        };
-        let windows = match window {
+        let law = &book.laws[rule.law];
+        let (Subject::Place(place), Some(cap)) = (rule.subject, law.cap()) else { continue };
+        let (step, limit) = (0, cap.limit);
+        let warn = matches!(law.steps[0].kind, StepKind::Require { warn: true, .. });
+        let windows = match cap.window {
             Window::Month => &months,
             Window::Year => &years,
             Window::Ever => continue,
@@ -47,27 +48,12 @@ pub fn current(book: &Book, run: &Run, from: Day, to: Day) -> Vec<Headroom> {
                     counted,
                     limit,
                     day,
-                    warn: true,
+                    warn,
                 });
             }
         }
     }
     readings
-}
-
-/// A budget's step: `warn total(DIR, month|year) <= LIMIT` with the limit
-/// written out, as `budget 500 USD monthly` makes it.
-fn budget(law: &Law) -> Option<(u32, Window, Amount)> {
-    law.steps.iter().enumerate().find_map(|(index, step)| {
-        let StepKind::Require { cond, warn: true, .. } = step.kind else { return None };
-        let Op::Bin(BinOp::Le | BinOp::Lt, total, limit) = law.nodes[cond.index()].op else { return None };
-        match (&law.nodes[total.index()].op, &law.nodes[limit.index()].op) {
-            (Op::Call(Func::Total(_, window), _), Op::Const(Value::Amount(limit))) => {
-                Some((index as u32, *window, *limit))
-            }
-            _ => None,
-        }
-    })
 }
 
 /// The latest window of each limit (per law, step and subject) among `readings`.

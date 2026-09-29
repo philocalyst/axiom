@@ -34,6 +34,33 @@ impl Law {
     pub fn range(&self, root: NodeId) -> std::ops::RangeInclusive<usize> {
         self.nodes[root.index()].first.index()..=root.index()
     }
+
+    /// The cap this law is, if all it says is that a flow total stays under a
+    /// written limit: `warn total(in, month) <= 500 USD`, which is what
+    /// `budget 500 USD monthly` means. A total is read straight from the
+    /// ledger, so a cap that holds takes no evaluating.
+    pub fn cap(&self) -> Option<Cap> {
+        let [Step { kind: StepKind::Require { cond, otherwise: None, .. }, .. }] = &*self.steps else { return None };
+        let Op::Bin(cmp @ (BinOp::Le | BinOp::Lt), total, limit) = self.nodes[cond.index()].op else { return None };
+        match (&self.nodes[total.index()].op, &self.nodes[limit.index()].op) {
+            // A kind among the arguments widens the total to every place of that kind.
+            (Op::Call(Func::Total(dir, window), args), Op::Const(Value::Amount(limit)))
+                if args.iter().all(|arg| self.nodes[arg.index()].ty != Ty::Kind) =>
+            {
+                Some(Cap { dir: *dir, window: *window, limit: *limit, strict: cmp == BinOp::Lt })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// `total(dir, window) <= limit`, or `<` when `strict`: see [`Law::cap`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Cap {
+    pub dir: Dir,
+    pub window: Window,
+    pub limit: Amount,
+    pub strict: bool,
 }
 
 /// Where a law was written, which decides what it governs.

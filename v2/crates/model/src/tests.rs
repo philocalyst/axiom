@@ -716,6 +716,38 @@ law counts
 }
 
 #[test]
+fn only_a_law_that_is_one_cap_on_a_total_is_a_cap() {
+    let text = "
+law yearly
+  on in
+  warn total(in, year) < 9_000 USD
+
+law filtered
+  on in
+  when amount > 1 USD
+  warn total(in, month) <= 500 USD
+
+law priced
+  on in
+  require total(in, month) <= 500 USD else owe 5 USD to acme
+
+law computed
+  on in
+  warn total(in, month) <= 400 USD + 100 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let cap = |name: &str| book.law(name).ok().and_then(|id| book.laws[id].cap());
+        let yearly = cap("yearly").expect("a cap");
+        assert_eq!((yearly.dir, yearly.window, yearly.strict), (crate::Dir::In, crate::Window::Year, true));
+        assert_eq!(book.show(yearly.limit).to_string(), "9,000 USD");
+        for other in ["filtered", "priced", "computed"] {
+            assert!(cap(other).is_none(), "{other} says more than a cap");
+        }
+    });
+}
+
+#[test]
 fn laws_that_need_each_other_are_a_cycle_naming_both() {
     let text = "
 law first

@@ -9,10 +9,10 @@
 //! visits days in order, so nothing is ever recomputed.
 
 use axiom_core::day::days_in_month;
-use axiom_core::{Day, Id, Map, Qty, Sym};
+use axiom_core::{Day, Groups, Id, Map, Qty, Sym};
 use axiom_model::{Book, Dir, Entity, Func, Law, NodeId, Op, Place, Recognition, Subject, Ty, Window};
 
-use crate::scope::departures;
+use crate::scope::{containing, inside};
 
 /// Whether `day` lies within the inclusive range.
 pub(crate) fn has(range: Recognition, day: Day) -> bool {
@@ -139,7 +139,11 @@ impl Windows {
         ahead: Vec::new(),
     };
 
-    /// Moves the current windows on to the ones containing `day`.
+    /// Moves the current windows on to the ones containing `day`. Once a month
+    /// or year, and kept out of line so that its calendar arithmetic is not
+    /// worked out ahead of time on every flow.
+    #[cold]
+    #[inline(never)]
     fn roll(&mut self, day: Day) {
         if !has(self.month.days, day) {
             self.month = Rolling::of(window_of(Window::Month, day), &self.ahead);
@@ -197,7 +201,9 @@ impl Windows {
 pub(crate) struct Totals {
     places: usize,
     watched: Vec<bool>,
-    any_watched: bool,
+    /// The watched subjects each place lies within: the only ones a flow at
+    /// that place can enter or leave, found once instead of on every flow.
+    through: Groups<Place, Subject>,
     windows: Vec<Windows>,
 }
 
@@ -207,7 +213,7 @@ impl Totals {
         let mut totals = Totals {
             places: book.places.len(),
             watched: vec![false; n],
-            any_watched: false,
+            through: Groups::default(),
             windows: vec![Windows::NONE; n],
         };
         let rules = &book.rules;
@@ -215,33 +221,22 @@ impl Totals {
         for rule in all.chain(rules.on_spend.values()).chain(&rules.timed) {
             match reads_total(&book.laws[rule.law]) {
                 None => {}
-                Some(false) => totals.watch(totals.slot(rule.subject)),
+                Some(false) => totals.watched[slot(totals.places, rule.subject)] = true,
                 // A kind-wide total reads every place of that kind.
-                Some(true) => (0..totals.places).for_each(|slot| totals.watch(slot)),
+                Some(true) => totals.watched[..totals.places].fill(true),
             }
         }
+        let places = (0..book.places.len() as u32).map(Id::new);
+        let within = places.flat_map(|place| containing(book, place).map(move |subject| (place, subject)));
+        let watched = within.filter(|&(_, subject)| totals.watched[slot(totals.places, subject)]);
+        totals.through = Groups::build(book.places.len(), watched);
         totals
-    }
-
-    fn watch(&mut self, slot: usize) {
-        self.watched[slot] = true;
-        self.any_watched = true;
-    }
-
-    fn slot(&self, subject: Subject) -> usize {
-        match subject {
-            Subject::Place(place) => place.index(),
-            Subject::Entity(entity) => self.places + entity.index(),
-        }
     }
 
     /// Whether a flow from `from` to `to` leaves, and whether it enters, any
     /// subject a law reads: only then is its value worth computing.
     pub fn watched_sides(&self, book: &Book, from: Id<Place>, to: Id<Place>) -> (bool, bool) {
-        if !self.any_watched {
-            return (false, false);
-        }
-        let watches = |here, there| departures(book, here, there).any(|subject| self.watched[self.slot(subject)]);
+        let watches = |here, there| self.through[here].iter().any(|&subject| !inside(book, subject, there));
         (watches(from, to), watches(to, from))
     }
 
@@ -260,18 +255,23 @@ impl Totals {
         let sides = [(Dir::Out, from, to, out), (Dir::In, to, from, arrive)];
         for (dir, here, there, value) in sides {
             let Some(value) = value else { continue };
-            for subject in departures(book, here, there) {
-                let at = self.slot(subject);
-                if self.watched[at] {
-                    self.windows[at].add(day, dir, value, over);
-                }
+            for &subject in self.through[here].iter().filter(|&&subject| !inside(book, subject, there)) {
+                self.windows[slot(self.places, subject)].add(day, dir, value, over);
             }
         }
     }
 
     /// What entered or left `subject` in the window containing `day`.
     pub fn read(&self, subject: Subject, dir: Dir, window: Window, day: Day) -> Qty {
-        self.windows[self.slot(subject)].read(dir, window, day)
+        self.windows[slot(self.places, subject)].read(dir, window, day)
+    }
+}
+
+/// Where a subject's totals are kept: places first, then entities.
+fn slot(places: usize, subject: Subject) -> usize {
+    match subject {
+        Subject::Place(place) => place.index(),
+        Subject::Entity(entity) => places + entity.index(),
     }
 }
 

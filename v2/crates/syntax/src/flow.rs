@@ -47,6 +47,8 @@ impl<'s> Parser<'s> {
     }
 
     /// One header end: `checking`, `checking 2_000 USD`, `7 VTI`, or nothing.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
     pub fn end(&mut self) -> Parse<End<'s>> {
         let is_place = match self.tok() {
             Tok::Name(word) => !matches!(word, "all" | "empty"),
@@ -104,7 +106,7 @@ impl<'s> Parser<'s> {
             self.selector()?;
         }
         // `.basis` must touch what it qualifies, and so is no other token.
-        let basis = matches!((self.tok(), self.lexer.peek_second().tok), (Tok::Punct("."), Tok::Name("basis")));
+        let basis = self.at(".") && matches!(self.lexer.peek_second().tok, Tok::Name("basis"));
         if basis && self.peek().loc.start == self.lexer.prev_end() {
             self.bump();
             self.bump();
@@ -114,6 +116,8 @@ impl<'s> Parser<'s> {
     }
 
     /// `84.20 USD`, `empty`, `(350 USD)`, `? USD`, or `all [UNIT]`.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
     fn quantity(&mut self) -> Parse<Quantity<'s>> {
         match self.tok() {
             Tok::Punct("(") => {

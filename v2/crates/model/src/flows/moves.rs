@@ -8,7 +8,7 @@
 //! one leg's place, and the others are paid to or from it.
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Diagnostic, Id, Loc};
+use axiom_core::{Day, Diagnostic, Id, Loc, Sym};
 
 use super::faults::{self, Written};
 use super::pairing::{self, Share};
@@ -32,6 +32,8 @@ pub(super) struct Move {
 impl Move {
     /// A flow from `from` to `to`, with what leaves and what arrives, whether
     /// its quantity is known and whether it is pending, and what its tail says.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
     pub fn between(
         from: &Placed,
         to: &Placed,
@@ -117,7 +119,9 @@ impl Elab<'_, '_> {
         let counterparty = to.end.entity.or(from.end.entity);
         let tail = Tail { payee: shape.tail.payee.or(counterparty), ..shape.tail.clone() };
         let mv = Move::between(from, to, (out, arrive), (infer, pending), tail, shape.loc);
-        Some(Moves { moves: vec![mv], counterparty })
+        let mut moves = std::mem::take(&mut self.spare);
+        moves.push(mv);
+        Some(Moves { moves, counterparty })
     }
 
     /// The quantities of a flow whose two sides state what they state.
@@ -355,12 +359,16 @@ impl Elab<'_, '_> {
     // ─── Flows ──────────────────────────────────────────────────────────────
 
     /// The flow a move makes on `day`, if it keeps the rules every flow keeps.
-    pub fn flow(&mut self, mv: Move, day: Day, mode: Mode) -> Option<Flow> {
-        self.check(&mv, day)?;
+    pub fn flow(&mut self, mv: &Move, day: Day, mode: Mode) -> Option<Flow> {
+        self.check(mv, day)?;
         let mode = if mv.pending && mode == Mode::Actual { Mode::Pending } else { mode };
         let tail = &mv.tail;
         let mut select = if mv.to.basis { mv.to.select.clone() } else { mv.from.select.clone() };
         select.extend(tail.settles.map(crate::journal::Select::Code));
+        let codes: Box<[Sym]> = match tail.codes.is_empty() {
+            true => Box::default(),
+            false => tail.codes.iter().map(|&(code, _)| code).collect(),
+        };
         let basis_end = match (mv.from.basis, mv.to.basis) {
             (true, _) => Some(End::From),
             (_, true) => Some(End::To),
@@ -381,7 +389,7 @@ impl Elab<'_, '_> {
             txn: Id::new(self.txn),
             payee: tail.payee,
             select: select.into(),
-            codes: tail.codes.iter().map(|&(code, _)| code).collect(),
+            codes,
             loc: mv.loc,
             waive: tail.waive,
             terms,

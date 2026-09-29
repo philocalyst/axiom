@@ -10,6 +10,7 @@ use axiom_core::{Day, Diagnostic, Id, Loc, Qty, Ratio, Sym};
 use axiom_syntax::{self as ast, ClauseKind, Due, File, For, Quantity};
 
 use super::Sink;
+use super::moves::Move;
 use crate::book::{Amount, Commodity, Entity};
 use crate::declare::World;
 use crate::journal::{Select, Waive};
@@ -128,11 +129,13 @@ pub(super) struct Elab<'a, 's> {
     pub txn: u32,
     /// The codes the transaction writes, for its code rules.
     pub coded: Vec<(Sym, Loc)>,
+    /// The room the last transaction's moves used, kept for the next one's.
+    pub spare: Vec<Move>,
 }
 
 impl<'a, 's> Elab<'a, 's> {
     pub fn new(world: &'a World<'s>, file: &'a File<'s>, sink: &'a mut Sink<'s>, txn: u32) -> Elab<'a, 's> {
-        Elab { world, file, sink, unit: None, txn, coded: Vec::new() }
+        Elab { world, file, sink, unit: None, txn, coded: Vec::new(), spare: Vec::new() }
     }
 
     /// Records the diagnostic and gives nothing.
@@ -199,6 +202,8 @@ impl<'a, 's> Elab<'a, 's> {
         Some(Placed { end, loc: self.file.loc(text), select, basis: place.is_basis(self.file) })
     }
 
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
     pub fn amount(&mut self, amount: ast::Amount<'s>) -> Option<Amount> {
         let loc = self.file.loc(&amount);
         let Some(unit) = amount.unit() else {
@@ -214,6 +219,8 @@ impl<'a, 's> Elab<'a, 's> {
     }
 
     /// An amount a flow moves: more than nothing.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
     fn positive(&mut self, amount: ast::Amount<'s>) -> Option<Stated> {
         let resolved = self.amount(amount)?;
         if resolved.qty.is_zero() {
@@ -228,6 +235,8 @@ impl<'a, 's> Elab<'a, 's> {
 
     /// `fallback` is where to point for `...` and `all`, which have no text of
     /// their own.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
     pub fn quantity(&mut self, quantity: &Quantity<'s>, fallback: Loc) -> Option<Slot> {
         let file = self.file;
         let (stated, pending, loc) = match *quantity {
@@ -262,6 +271,8 @@ impl<'a, 's> Elab<'a, 's> {
 
     /// What follows a header or leg. A `due` belongs to the transaction, so it
     /// is refused on a leg.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
     pub fn tail(&mut self, tail: &ast::Tail<'s>, on_leg: bool) -> Option<Tail> {
         let mut resolved = Tail::default();
         let mut whole = true;
@@ -325,6 +336,8 @@ impl<'a, 's> Elab<'a, 's> {
 
     // ─── Shapes ─────────────────────────────────────────────────────────────
 
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
     fn side(&mut self, end: &ast::End<'s>, loc: Loc) -> Option<Side> {
         let placed = end.place.as_ref().map(|place| self.place(place));
         let slot = end.amount.as_ref().map(|quantity| self.quantity(quantity, loc));
@@ -353,8 +366,8 @@ impl<'a, 's> Elab<'a, 's> {
     /// amount contains one. A header that spells it another way is pointed at
     /// whole.
     fn arrow(&self, header: Loc) -> Loc {
-        let text = &self.file.src[header.range()];
-        match text.find('>').filter(|&at| at > 0 && text.as_bytes()[at - 1] == b'-') {
+        let text = &self.file.src.as_bytes()[header.range()];
+        match memchr::memchr(b'>', text).filter(|&at| at > 0 && text[at - 1] == b'-') {
             Some(at) => Loc::new(header.file, header.start + at as u32 - 1, header.start + at as u32 + 1),
             None => header,
         }

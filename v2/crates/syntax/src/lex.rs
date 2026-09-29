@@ -1,12 +1,14 @@
 //! Tokens: the words, numbers, dates and punctuation of one line.
 //!
 //! Nothing is copied: names, commodities, codes and strings are slices of the
-//! source, and dates and numbers are converted by the SWAR parsers in
-//! `axiom-core`. Names, by far the commonest token, are scanned eight bytes at
-//! a time. A token that is not a token (`2026-02-30`, `$50`) is kept as
-//! [`Tok::Invalid`] so the parser can explain it in the context where it turned
-//! up. The lexer looks two tokens ahead, which is enough to tell `? USD` (an
-//! unknown amount) from `?` (a place), and a year from the number after it.
+//! source, and dates and numbers are converted by the parsers in `axiom-core`.
+//! The three commonest words (a path, a plain number, a commodity) have a
+//! fast path that reads them in one pass; everything odd about a word is left
+//! to the general path, which classifies it byte by byte. A token that is not a
+//! token (`2026-02-30`, `$50`) is kept as [`Tok::Invalid`] so the parser can
+//! explain it in the context where it turned up. The lexer can look two tokens
+//! ahead, which is enough to tell `? USD` (an unknown amount) from `?` (a
+//! place), and a year from the number after it.
 
 use axiom_core::{Day, Dec, FileId, Loc, Span};
 use memchr::memchr2;
@@ -88,8 +90,10 @@ pub(crate) struct Lexer<'s> {
     /// The end of the last token scanned: where `Eol` is reported, so a missing
     /// token is pointed at just after the last thing written.
     last_end: usize,
-    /// The next token and the one after it. Once the line ends, both are `Eol`.
-    ahead: [Token<'s>; 2],
+    /// The next token, and the one after it once something has asked for it.
+    /// Once the line ends, every token is `Eol`.
+    next: Token<'s>,
+    after: Option<Token<'s>>,
     /// The end of the last token consumed.
     prev_end: u32,
 }
@@ -99,30 +103,42 @@ impl<'s> Lexer<'s> {
     /// files up front.
     pub fn new(src: &'s str, file: FileId) -> Lexer<'s> {
         let eol = Token { tok: Tok::Eol, loc: Loc::default() };
-        Lexer { src, bytes: &[], file, pos: 0, body: 0, last_end: 0, ahead: [eol; 2], prev_end: 0 }
+        Lexer { src, bytes: &[], file, pos: 0, body: 0, last_end: 0, next: eol, after: None, prev_end: 0 }
     }
 
     /// Starts over on the line `src[body..end]`.
     pub fn load(&mut self, body: usize, end: usize) {
         self.bytes = &self.src.as_bytes()[..end];
         (self.pos, self.body, self.last_end, self.prev_end) = (body, body, body, body as u32);
-        self.ahead = [self.scan_token(), self.scan_token()];
+        self.restart();
+    }
+
+    /// Scans the first token from `pos`.
+    fn restart(&mut self) {
+        (self.next, self.after) = (self.scan_token(), None);
     }
 
     pub fn peek(&self) -> Token<'s> {
-        self.ahead[0]
+        self.next
     }
 
-    pub fn peek_second(&self) -> Token<'s> {
-        self.ahead[1]
+    pub fn peek_second(&mut self) -> Token<'s> {
+        if let Some(token) = self.after {
+            return token;
+        }
+        if matches!(self.next.tok, Tok::Eol) {
+            return self.next;
+        }
+        let token = self.scan_token();
+        *self.after.insert(token)
     }
 
     /// Consumes the next token. The line's end is never consumed: asking for
     /// more keeps returning it.
     pub fn bump(&mut self) -> Token<'s> {
-        let token = self.ahead[0];
+        let token = self.next;
         if !matches!(token.tok, Tok::Eol) {
-            self.ahead = [self.ahead[1], self.scan_token()];
+            self.next = self.after.take().unwrap_or_else(|| self.scan_token());
             self.prev_end = token.loc.end;
         }
         token
@@ -154,18 +170,23 @@ impl<'s> Lexer<'s> {
     /// Takes `src[start..end]` as raw text and lexes on from its end.
     fn resume(&mut self, start: usize, end: usize) -> Name<'s> {
         (self.pos, self.body, self.last_end, self.prev_end) = (end, end, end, end as u32);
-        self.ahead = [self.scan_token(), self.scan_token()];
+        self.restart();
         Name(&self.src[start..end])
     }
 
     fn scan_token(&mut self) -> Token<'s> {
-        let blanks = self.bytes[self.pos..].iter().take_while(|&&b| b == b' ' || b == b'\t').count();
-        let start = self.pos + blanks;
+        let bytes = self.bytes;
+        let mut start = self.pos;
+        while let Some(b' ' | b'\t') = bytes.get(start) {
+            start += 1;
+        }
         // `//` starts a comment only at the start of the line or after
         // whitespace: a path never contains `//`, and `a//b` is not a comment.
-        let comment = self.bytes[start..].starts_with(b"//") && (start == self.body || blanks > 0);
-        let Some(&first) = self.bytes.get(start).filter(|_| !comment) else {
-            self.pos = self.bytes.len();
+        let comment = |first: u8| {
+            first == b'/' && bytes[start..].starts_with(b"//") && (start == self.body || start > self.pos)
+        };
+        let Some(&first) = bytes.get(start).filter(|&&first| !comment(first)) else {
+            self.pos = bytes.len();
             return Token { tok: Tok::Eol, loc: self.loc(self.last_end, self.last_end) };
         };
         let tok = match first {
@@ -175,7 +196,7 @@ impl<'s> Lexer<'s> {
             b'#' => self.code(start),
             b'"' => self.string(start),
             // A star touching a word is a glob (`*-trip`); alone it multiplies.
-            b'*' if self.bytes.get(start + 1).is_some_and(|&b| CLASS[b as usize] != 0) => self.odd_name(start),
+            b'*' if bytes.get(start + 1).is_some_and(|&b| CLASS[b as usize] != 0) => self.odd_name(start),
             _ => self.punctuation(start),
         };
         self.last_end = self.pos;
@@ -192,18 +213,20 @@ impl<'s> Lexer<'s> {
     /// name. Anything odd (an uppercase letter or `?` in the word) is left to
     /// [`Lexer::odd_name`].
     fn name(&mut self, start: usize) -> Tok<'s> {
+        let bytes = self.bytes;
         let mut end = start;
         loop {
-            end += name_run(&self.bytes[end..]);
-            if self.bytes[end - 1] == b'-' && self.bytes.get(end) == Some(&b'>') {
-                end -= 1;
-                break;
+            while bytes.get(end).is_some_and(|&b| PLAIN[b as usize]) {
+                end += 1;
             }
-            match (self.bytes.get(end), self.bytes.get(end + 1)) {
+            match (bytes.get(end), bytes.get(end + 1)) {
                 (Some(b'/'), Some(&next)) if CLASS[next as usize] != 0 => end += 1,
                 (Some(&b), _) if CLASS[b as usize] != 0 => return self.odd_name(start),
                 _ => break,
             }
+        }
+        if bytes[end - 1] == b'-' && bytes.get(end) == Some(&b'>') {
+            end -= 1;
         }
         self.pos = end;
         Tok::Name(&self.src[start..end])
@@ -244,8 +267,14 @@ impl<'s> Lexer<'s> {
     /// Words that start with a digit: date, month, number, percent, span, or
     /// (`401k`) a name, decided by the shape of the whole word.
     fn digit_word(&mut self, start: usize) -> Tok<'s> {
-        // By far the commonest word that starts with a digit is a date, read
-        // in one SWAR parse.
+        // Dates, months and their misspellings have a `-` after the year, which
+        // no plain number has.
+        if self.bytes.get(start + 4) != Some(&b'-')
+            && let Some(number) = self.plain_number(start)
+        {
+            return number;
+        }
+        // The commonest of the rest is a date, read in one SWAR parse.
         let date = self.bytes.get(start..start + 10).filter(|chunk| chunk[4] == b'-').and_then(Day::parse);
         let ends_here = self.bytes.get(start + 10).is_none_or(|&b| CLASS[b as usize] == 0 && b != b'/');
         if let Some(day) = date.filter(|_| ends_here) {
@@ -258,6 +287,24 @@ impl<'s> Lexer<'s> {
         }
         self.pos = end;
         classify_digit_word(&self.src[start..end])
+    }
+
+    /// A number or percent that is a word on its own: digits, perhaps a
+    /// fraction, and then nothing that would make it a longer word.
+    fn plain_number(&mut self, start: usize) -> Option<Tok<'s>> {
+        let (number, len) = Dec::prefix(&self.bytes[start..])?;
+        let end = start + len;
+        match self.bytes.get(end) {
+            Some(&b) if CLASS[b as usize] != 0 || b == b'/' => None,
+            Some(b'%') => {
+                self.pos = end + 1;
+                Some(Tok::Percent(number))
+            }
+            _ => {
+                self.pos = end;
+                Some(Tok::Number(number))
+            }
+        }
     }
 
     /// A number or percent. A point belongs to the number only when digits
@@ -285,6 +332,13 @@ impl<'s> Lexer<'s> {
     }
 
     fn unit(&mut self, start: usize) -> Tok<'s> {
+        // Capitals and then nothing that would make it a longer word: `USD`.
+        let capitals = self.bytes[start..].iter().take_while(|byte| byte.is_ascii_uppercase()).count();
+        let end = start + capitals;
+        if self.bytes.get(end).is_none_or(|&b| CLASS[b as usize] == 0 && !matches!(b, b'.' | b'/')) {
+            self.pos = end;
+            return Tok::Unit(&self.src[start..end]);
+        }
         let Word { mut end, mut classes } = self.scan_word(start);
         // `BRK.B`: a dot joins the parts of a commodity when a letter or digit
         // follows it.
@@ -417,65 +471,22 @@ static CLASS: [u8; 256] = {
     table
 };
 
+/// The bytes of a plain name, `[a-z0-9_*-]`: what `/` joins into a path, and
+/// the only bytes the fast path for names has to look at.
+static PLAIN: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut byte = 0;
+    while byte < 256 {
+        table[byte] = matches!(byte as u8, b'0'..=b'9' | b'a'..=b'z' | b'_' | b'*' | b'-');
+        byte += 1;
+    }
+    table
+};
+
 /// A scanned word: where it ends, and the union of its bytes' classes.
 struct Word {
     end: usize,
     classes: u8,
-}
-
-// ─── Eight bytes at a time ──────────────────────────────────────────────────
-
-const ONES: u64 = 0x0101_0101_0101_0101;
-const LOW7: u64 = 0x7f7f_7f7f_7f7f_7f7f;
-const HIGH: u64 = 0x8080_8080_8080_8080;
-
-/// The length of the run of bytes in `[a-z0-9_*-]` at the start of `bytes`:
-/// the first byte outside the set, found eight bytes at a time.
-pub(crate) fn name_run(bytes: &[u8]) -> usize {
-    let mut at = 0;
-    loop {
-        let outside = !name_bytes(load(bytes, at)) & HIGH;
-        if outside != 0 {
-            return (at + (outside.trailing_zeros() / 8) as usize).min(bytes.len());
-        }
-        at += 8;
-    }
-}
-
-/// The eight bytes at `at`, little-endian, zero-filled past the end: zero is
-/// outside every set here, so the end of the line ends a run.
-fn load(bytes: &[u8], at: usize) -> u64 {
-    let rest = bytes.get(at..).unwrap_or_default();
-    if let Some(chunk) = rest.first_chunk::<8>() {
-        return u64::from_le_bytes(*chunk);
-    }
-    let mut chunk = [0; 8];
-    let len = rest.len().min(8);
-    chunk[..len].copy_from_slice(&rest[..len]);
-    u64::from_le_bytes(chunk)
-}
-
-/// The high bit of each byte of `word` that is in `[a-z0-9_*-]`.
-fn name_bytes(word: u64) -> u64 {
-    in_range(word, b'a', b'z')
-        | in_range(word, b'0', b'9')
-        | equals(word, b'_')
-        | equals(word, b'*')
-        | equals(word, b'-')
-}
-
-/// The high bit of each byte of `word` in `lo..=hi`. Clearing the high bits
-/// first lets each byte add its offsets without carrying into the next.
-fn in_range(word: u64, lo: u8, hi: u8) -> u64 {
-    let low = word & LOW7;
-    (low + ONES * (0x80 - lo as u64)) & !(low + ONES * (0x7f - hi as u64)) & !word & HIGH
-}
-
-/// The high bit of each byte of `word` equal to `byte`: an exact zero-byte test
-/// on `word ^ byte`.
-fn equals(word: u64, byte: u8) -> u64 {
-    let diff = word ^ (ONES * byte as u64);
-    !(((diff & LOW7) + LOW7) | diff | LOW7)
 }
 
 // ─── Words that start with a digit ──────────────────────────────────────────

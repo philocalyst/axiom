@@ -293,10 +293,36 @@ pub enum DecError {
 impl Dec {
     pub const ZERO: Dec = Dec { mantissa: 0, scale: 0 };
 
-    /// Parses `digits[.digits]`, ignoring `_` separators. Eight-digit runs are
-    /// folded in one SWAR step; everything else goes a digit at a time. `None`
-    /// for anything else, or for more digits than a mantissa holds.
+    /// Parses `digits[.digits]`, ignoring `_` separators. `None` for anything
+    /// else, or for more digits than a mantissa holds.
     pub fn parse(text: &[u8]) -> Option<Dec> {
+        match Dec::prefix(text) {
+            Some((dec, len)) if len == text.len() => Some(dec),
+            _ => Dec::separated(text),
+        }
+    }
+
+    /// The number a text starts with, if it is the commonest kind: digits and
+    /// perhaps a point and more digits (`84.20`), with no separators. Also how
+    /// many bytes it takes. Eighteen digits cannot overflow, so nothing is
+    /// checked; a longer run is left to [`Dec::parse`].
+    pub fn prefix(text: &[u8]) -> Option<(Dec, usize)> {
+        let (whole, mantissa) = digit_run(text, 0, 0);
+        if whole == 0 {
+            return None;
+        }
+        let (end, mantissa) = match text[whole..] {
+            [b'.', next, ..] if next.is_ascii_digit() => digit_run(text, whole + 1, mantissa),
+            _ => (whole, mantissa),
+        };
+        let point = usize::from(end > whole);
+        (end - point <= 18).then_some((Dec { mantissa, scale: end.saturating_sub(whole + 1) as u8 }, end))
+    }
+
+    /// Any number: `_` separators, long runs, and everything that is not one.
+    /// Eight-digit runs are folded in one SWAR step; the rest goes a digit at a
+    /// time, checking for overflow.
+    fn separated(text: &[u8]) -> Option<Dec> {
         let (mut mantissa, mut scale, mut seen, mut dot) = (0i64, 0u8, false, false);
         let mut rest = text;
         while let Some((&b, tail)) = rest.split_first() {
@@ -342,6 +368,11 @@ impl Dec {
 
     /// This value in quanta of a commodity with `scale` decimal places.
     pub fn to_qty(self, scale: u8) -> Result<Qty, DecError> {
+        // Amounts are nearly always written to the commodity's own precision.
+        if scale == self.scale {
+            let fits = self.mantissa.unsigned_abs() <= Qty::LIMIT as u64;
+            return if fits { Ok(Qty(self.mantissa)) } else { Err(DecError::Range) };
+        }
         let mantissa = self.mantissa as i128;
         let value = if scale >= self.scale {
             let p = POW10.get((scale - self.scale) as usize).ok_or(DecError::Range)?;
@@ -362,6 +393,17 @@ impl Dec {
     pub fn to_ratio(self) -> Option<Ratio> {
         Ratio::new(self.mantissa as i128, *POW10.get(self.scale as usize)?)
     }
+}
+
+/// Where the run of digits starting at `from` ends, and `mantissa` with those
+/// digits appended (wrapping: the caller refuses runs too long to fit).
+fn digit_run(text: &[u8], from: usize, mut mantissa: i64) -> (usize, i64) {
+    let mut at = from;
+    while let Some(&b) = text.get(at).filter(|b| b.is_ascii_digit()) {
+        mantissa = mantissa.wrapping_mul(10).wrapping_add((b - b'0') as i64);
+        at += 1;
+    }
+    (at, mantissa)
 }
 
 fn all_digits(chunk: &[u8; 8]) -> bool {

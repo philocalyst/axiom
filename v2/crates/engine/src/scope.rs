@@ -33,14 +33,13 @@ pub(crate) fn inside(book: &Book, subject: Subject, place: Id<Place>) -> bool {
     }
 }
 
-/// The subjects a flow from `from` to `to` leaves: every subject containing
-/// `from` but not `to`. Entering is leaving read backwards:
-/// `departures(book, to, from)`.
-pub(crate) fn departures<'a>(book: &'a Book, from: Id<Place>, to: Id<Place>) -> impl Iterator<Item = Subject> + 'a {
-    let place = &book.places[from];
-    let places = book.places.lineage(from).map(Subject::Place);
-    let owners = (place.class == Class::Asset).then(|| owners(book, place.owner)).into_iter().flatten();
-    places.chain(owners.map(Subject::Entity)).filter(move |&s| !inside(book, s, to))
+/// Every subject `place` lies within: it and its ancestors, and, for an asset
+/// place, the entities that own what its owner owns.
+pub(crate) fn containing<'a>(book: &'a Book, place: Id<Place>) -> impl Iterator<Item = Subject> + 'a {
+    let this = &book.places[place];
+    let places = book.places.lineage(place).map(Subject::Place);
+    let owners = (this.class == Class::Asset).then(|| owners(book, this.owner)).into_iter().flatten();
+    places.chain(owners.map(Subject::Entity))
 }
 
 /// Who a subject belongs to: a place's owner; an entity is its own.

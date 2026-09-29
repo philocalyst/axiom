@@ -101,20 +101,27 @@ impl<'s> Doc<'s> {
     }
 }
 
+/// The blanks that may separate a number from its commodity.
+fn is_blank(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t')
+}
+
 impl<'s> Amount<'s> {
     /// The written number, sign included. The parser has validated it, so this
     /// cannot fail; `empty` is zero.
     pub fn num(self) -> Dec {
-        let number = self.split([' ', '\t']).next().unwrap_or_default();
-        match number.strip_prefix('-') {
-            Some(unsigned) => Dec::parse(unsigned.as_bytes()).unwrap_or_default().neg(),
-            None => Dec::parse(number.as_bytes()).unwrap_or_default(),
-        }
+        let (negative, text) = match self.0.strip_prefix('-') {
+            Some(unsigned) => (true, unsigned),
+            None => (false, self.0),
+        };
+        let number = text.bytes().position(is_blank).map_or(text, |end| &text[..end]);
+        let dec = Dec::parse(number.as_bytes()).unwrap_or_default();
+        if negative { dec.neg() } else { dec }
     }
 
     /// The commodity, or `None` for `empty`, the zero of every commodity.
     pub fn unit(self) -> Option<Name<'s>> {
-        self.0.rsplit_once([' ', '\t']).map(|(_, unit)| Name(unit))
+        self.0.bytes().rposition(is_blank).map(|blank| Name(&self.0[blank + 1..]))
     }
 }
 
@@ -210,7 +217,16 @@ impl<'s> File<'s> {
     /// A file made of its pieces, in order.
     pub(crate) fn new(id: FileId, src: &'s str, pieces: Vec<Piece<'s>>) -> File<'s> {
         let mut file = File { id, src, ..File::default() };
-        file.items.reserve_exact(pieces.iter().map(|piece| piece.items.len()).sum());
+        let total: usize = pieces.iter().map(|piece| piece.items.len()).sum();
+        // The first piece's items are the file's to start with: nearly every
+        // file is one piece, and its items are never copied.
+        let mut pieces = pieces.into_iter();
+        if let Some(first) = pieces.next() {
+            file.items = first.items;
+            file.exprs.parts.push(first.exprs);
+            file.tables.push(first.tables);
+        }
+        file.items.reserve_exact(total - file.items.len());
         for mut piece in pieces {
             file.items.append(&mut piece.items);
             file.exprs.parts.push(piece.exprs);
@@ -450,11 +466,6 @@ pub struct Place<'s> {
 }
 
 impl<'s> Place<'s> {
-    /// Whether this is `?`, the place for money whose other end is not known.
-    pub fn is_unknown(&self) -> bool {
-        self.name.0 == "?"
-    }
-
     /// Whether the flow moves the basis of the place's parcels rather than
     /// their quantity: the place is written `PLACE.basis`.
     pub fn is_basis(&self, file: &File<'s>) -> bool {

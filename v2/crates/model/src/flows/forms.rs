@@ -47,16 +47,21 @@ impl<'a, 's> Elab<'a, 's> {
         let world = self.world;
         let (diags, misses) = (self.sink.diags.len(), self.sink.misses.len());
         let first = self.sink.flows.len();
-        let empty = Tail::default();
-        let header = header.unwrap_or(&empty);
-        let payee = header.payee.or(moves.as_ref().and_then(|moves| moves.counterparty));
-        for mv in moves.into_iter().flat_map(|moves| moves.moves) {
-            let flow = self.flow(mv, day, mode);
-            self.sink.flows.extend(flow);
+        let payee = header.and_then(|header| header.payee).or(moves.as_ref().and_then(|moves| moves.counterparty));
+        if let Some(mut moves) = moves {
+            for mv in &moves.moves {
+                if let Some(flow) = self.flow(mv, day, mode) {
+                    self.sink.flows.push(flow);
+                }
+            }
+            moves.moves.clear();
+            self.spare = moves.moves;
         }
-        let flows = std::mem::take(&mut self.sink.flows);
-        self.check_codes(&flows[first..]);
-        self.sink.flows = flows;
+        if !self.coded.is_empty() {
+            let flows = std::mem::take(&mut self.sink.flows);
+            self.check_codes(&flows[first..]);
+            self.sink.flows = flows;
+        }
         let made = &self.sink.flows[first..];
         if diags != self.sink.diags.len() || misses != self.sink.misses.len() || made.is_empty() {
             self.sink.flows.truncate(first);
@@ -69,9 +74,9 @@ impl<'a, 's> Elab<'a, 's> {
             first: Id::new(first as u32),
             len: (self.sink.flows.len() - first) as u32,
             payee,
-            codes: header.codes.iter().map(|&(code, _)| code).collect(),
-            waive: header.waive,
-            due: header.due.map(|due| match due {
+            codes: header.map_or_else(Box::default, |header| header.codes.iter().map(|&(code, _)| code).collect()),
+            waive: header.and_then(|header| header.waive),
+            due: header.and_then(|header| header.due).map(|due| match due {
                 ast::Due::On(day) => day,
                 ast::Due::After(span) => day.add(span),
             }),

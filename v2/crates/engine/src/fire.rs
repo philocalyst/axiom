@@ -12,7 +12,7 @@
 
 use axiom_core::{Day, Diagnostic, Id, Set, Sym};
 use axiom_model::{
-    Amount, Book, Dir, Entity, Fault, Func, Law, NodeId, Op, Recognition, Rule, StepKind, Trigger, Window,
+    Amount, Book, Cap, Dir, Entity, Fault, Func, Law, NodeId, Op, Recognition, Rule, StepKind, Trigger, Window,
 };
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
@@ -79,6 +79,12 @@ pub(crate) fn repeats(book: &Book) -> bool {
     })
 }
 
+/// The laws that are one cap on a total (see [`Law::cap`]) in the base currency, by law id.
+pub(crate) fn caps(book: &Book) -> Vec<Option<Cap>> {
+    let cap = |law: &Law| law.cap().filter(|cap| cap.limit.unit == book.base && law.trigger != Trigger::Always);
+    book.laws.values().map(cap).collect()
+}
+
 /// Whether the rule is in force for some day of the occasion.
 fn applies(book: &Book, rule: &Rule, on: &Occasion) -> bool {
     let internal = on.skip_internal
@@ -88,7 +94,7 @@ fn applies(book: &Book, rule: &Rule, on: &Occasion) -> bool {
 
 impl<'b, 's> Ledger<'b, 's> {
     /// Runs every rule in `rules` that applies to this occasion, in order.
-    pub(crate) fn fire(&mut self, rules: &[Rule], on: Occasion) {
+    pub(crate) fn fire(&mut self, rules: &[Rule], on: &Occasion) {
         let (book, mut done) = (self.book, Vec::new());
         for rule in rules.iter().filter(|rule| applies(book, rule, &on)) {
             // A law that two rules bring to one subject runs once.
@@ -122,7 +128,7 @@ impl<'b, 's> Ledger<'b, 's> {
     pub(crate) fn deadline(&mut self, at: usize) {
         let due = self.solved.deadlines[at];
         let rule = &self.book.rules.timed[due.rule];
-        self.fire(std::slice::from_ref(rule), Occasion::time(due.day, due.period));
+        self.fire(std::slice::from_ref(rule), &Occasion::time(due.day, due.period));
     }
 
     pub(crate) fn evaluate(&mut self, law: Id<Law>, ctx: &Context) -> bool {
@@ -130,7 +136,26 @@ impl<'b, 's> Ledger<'b, 's> {
         eval::run(env, &self.book.laws[law], ctx, &mut self.scratch.values, &mut self.scratch.outcomes)
     }
 
+    /// Reads a cap that holds without evaluating it: the total in its window
+    /// against the limit is all the law compares. Returns whether it held; a
+    /// cap that is broken is evaluated in full, which explains why.
+    fn within(&mut self, rule: &Rule, ctx: &Context, cap: Cap) -> bool {
+        let read = self.world.totals.read(rule.subject, cap.dir, cap.window, ctx.anchor());
+        let counted = Amount::new(read, self.book.base);
+        let holds = if cap.strict { counted.qty < cap.limit.qty } else { counted.qty <= cap.limit.qty };
+        if holds {
+            self.record.checks[rule.law.index()] += 1;
+            self.read(rule, ctx, 0, counted, cap.limit);
+        }
+        holds
+    }
+
     fn enforce(&mut self, rule: &Rule, ctx: &Context) {
+        if let Some(cap) = self.solved.caps[rule.law.index()]
+            && self.within(rule, ctx, cap)
+        {
+            return;
+        }
         let (book, law) = (self.book, &self.book.laws[rule.law]);
         if self.evaluate(rule.law, ctx) {
             self.record.checks[rule.law.index()] += 1;
