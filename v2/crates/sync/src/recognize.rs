@@ -150,7 +150,10 @@ pub struct Recognizer<'a> {
 impl<'a> Recognizer<'a> {
     pub fn new(known: Vec<Known<'a>>, codes: &[&'a str]) -> Result<Recognizer<'a>, Vec<BadPattern<'a>>> {
         let (mut patterns, mut compiled, mut bad) = (Vec::new(), Vec::new(), Vec::new());
-        let owned = known.iter().enumerate().flat_map(|(owner, entry)| entry.patterns.iter().map(move |&source| (Some(owner), entry.name, source)));
+        let owned = known
+            .iter()
+            .enumerate()
+            .flat_map(|(owner, entry)| entry.patterns.iter().map(move |&source| (Some(owner), entry.name, source)));
         for (owner, name, source) in owned.chain(codes.iter().map(|&source| (None, "code", source))) {
             match (Peg::new(source), owner) {
                 (Ok(peg), Some(owner)) => patterns.push(Pattern { owner, source, peg }),
@@ -172,9 +175,9 @@ impl<'a> Recognizer<'a> {
     }
 
     /// Reads every record's memo, in parallel.
-    pub fn read_all(&self, records: &[Record]) -> Vec<Reading<'a>> {
-        let chunks: Vec<&[Record]> = records.chunks(CHUNK).collect();
-        let read = |chunk: &&[Record]| {
+    pub fn read_all(&self, records: &[&Record]) -> Vec<Reading<'a>> {
+        let chunks: Vec<&[&Record]> = records.chunks(CHUNK).collect();
+        let read = |chunk: &&[&Record]| {
             let mut scratch = Scratch::default();
             chunk.iter().map(|record| self.read(&record.memo, &mut scratch)).collect::<Vec<_>>()
         };
@@ -195,7 +198,8 @@ impl<'a> Recognizer<'a> {
         for at in 0..hay.len() {
             let mut try_pattern = |pattern: usize| {
                 let peg = &self.patterns[pattern].peg;
-                if let Some(found) = peg.matches_at(hay, at, run) {
+                // A match of nothing says nothing about who it was.
+                if let Some(found) = peg.matches_at(hay, at, run).filter(|found| found.end > found.start) {
                     hits.push(Hit { pattern, found, payee: peg.capture("payee", run) });
                 }
             };
@@ -220,7 +224,9 @@ impl<'a> Recognizer<'a> {
         let inside_a_payee = |hit: &Hit| {
             hits.iter().any(|other| {
                 let payee = other.payee.filter(|_| !self.known[self.owner(other)].account);
-                payee.is_some_and(|(start, end)| self.owner(other) != self.owner(hit) && start <= hit.found.start && hit.found.end <= end)
+                payee.is_some_and(|(start, end)| {
+                    self.owner(other) != self.owner(hit) && start <= hit.found.start && hit.found.end <= end
+                })
             })
         };
         let mut best_of_each: Vec<&Hit> = Vec::new();
@@ -298,7 +304,8 @@ mod tests {
 
     fn who(memo: &str) -> (Option<&'static str>, Option<&'static str>) {
         let reading = recognizer().read(memo, &mut Scratch::default());
-        let found = reading.who.unwrap_or_else(|tie| panic!("{memo}: a tie between {:?} and {:?}", tie.first.0, tie.second.0));
+        let found =
+            reading.who.unwrap_or_else(|tie| panic!("{memo}: a tie between {:?} and {:?}", tie.first.0, tie.second.0));
         (found.who.map(|who| who.name), found.via)
     }
 
@@ -354,7 +361,13 @@ mod tests {
         let known = vec![party("trader-joes", &["\"TRADER JOE\" digt+"])];
         let bad = Recognizer::new(known, &["\"ok\"", "oops"]).err().expect("refused");
         let shown: Vec<_> = bad.iter().map(|bad| (bad.owner, bad.pattern, bad.error.message.as_str())).collect();
-        assert_eq!(shown, [("trader-joes", "\"TRADER JOE\" digt+", "`digt` is not a class"), ("code", "oops", "`oops` is not a class")]);
+        assert_eq!(
+            shown,
+            [
+                ("trader-joes", "\"TRADER JOE\" digt+", "`digt` is not a class"),
+                ("code", "oops", "`oops` is not a class")
+            ]
+        );
     }
 
     #[test]
@@ -362,7 +375,8 @@ mod tests {
     fn a_million_memos_against_two_hundred_patterns() {
         let names: Vec<String> = (0..200).map(|n| format!("merchant-{n}")).collect();
         let sources: Vec<String> = (0..200).map(|n| format!("\"SHOP {n:03} \" any+ / \"MRCH{n:03}\"")).collect();
-        let known = names.iter().zip(&sources).map(|(name, source)| Known { name, account: false, patterns: vec![source] });
+        let known =
+            names.iter().zip(&sources).map(|(name, source)| Known { name, account: false, patterns: vec![source] });
         let recognizer = Recognizer::new(known.collect(), &["code:(\"inv-\" digit+)"]).unwrap();
         let mut seed = 7u64;
         let mut next = |bound: u64| {
@@ -377,11 +391,18 @@ mod tests {
                     2 => format!("CHECKCARD {:04} NOBODY IN PARTICULAR {}", next(9999), next(99_999)),
                     _ => format!("TRANSFER TO SOMEWHERE ELSE {}", next(99_999)),
                 };
-                Record { day: axiom_core::Day(0), qty: axiom_core::Qty(0), memo: memo.into(), balance: None, pending: false, at: axiom_core::Loc::default() }
+                Record {
+                    day: axiom_core::Day(0),
+                    qty: axiom_core::Qty(0),
+                    memo: memo.into(),
+                    balance: None,
+                    pending: false,
+                    at: axiom_core::Loc::default(),
+                }
             })
             .collect();
         let started = std::time::Instant::now();
-        let read = recognizer.read_all(&records);
+        let read = recognizer.read_all(&records.iter().collect::<Vec<_>>());
         let took = started.elapsed();
         let known = read.iter().filter(|reading| reading.who.as_ref().is_ok_and(|found| found.who.is_some())).count();
         eprintln!("read {} memos against {} patterns in {took:?}: {known} recognized", records.len(), sources.len());
@@ -403,7 +424,7 @@ mod tests {
             })
             .collect();
         let recognizer = recognizer();
-        let read = recognizer.read_all(&records);
+        let read = recognizer.read_all(&records.iter().collect::<Vec<_>>());
         let mut scratch = Scratch::default();
         for (record, reading) in records.iter().zip(&read) {
             let alone = recognizer.read(&record.memo, &mut scratch);

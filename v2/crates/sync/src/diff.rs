@@ -58,13 +58,15 @@ fn hunks(lines: &[Line]) -> Vec<(usize, usize)> {
 }
 
 fn hunk(lines: &[Line], start: usize, end: usize) -> String {
-    let count = |keep: fn(&Line) -> bool, range: std::ops::Range<usize>| lines[range].iter().filter(|line| keep(line)).count();
+    let count =
+        |keep: fn(&Line) -> bool, range: std::ops::Range<usize>| lines[range].iter().filter(|line| keep(line)).count();
     let in_old = |line: &Line| !matches!(line, Line::Added(_));
     let in_new = |line: &Line| !matches!(line, Line::Removed(_));
     let (old_before, new_before) = (count(in_old, 0..start), count(in_new, 0..start));
     let (old_len, new_len) = (count(in_old, start..end), count(in_new, start..end));
     let first = |before: usize, len: usize| if len == 0 { before } else { before + 1 };
-    let mut text = format!("@@ -{},{old_len} +{},{new_len} @@\n", first(old_before, old_len), first(new_before, new_len));
+    let mut text =
+        format!("@@ -{},{old_len} +{},{new_len} @@\n", first(old_before, old_len), first(new_before, new_len));
     for line in &lines[start..end] {
         let (mark, shown) = match line {
             Line::Same(shown) => (' ', shown),
@@ -115,7 +117,10 @@ mod tests {
         let before = "a\nb\nc\nd\ne\nf\ng\nh\n";
         let after = "a\nX\nb\nc\nd\ne\nf\ng\nY\nh\n";
         assert_eq!(change(Some(before), after).diff().matches("@@").count(), 2, "one hunk, two markers");
-        assert_eq!(change(None, "01 flat\n").diff(), "--- /dev/null\n+++ b/journal/2026/03.ax\n@@ -0,0 +1,1 @@\n+01 flat\n");
+        assert_eq!(
+            change(None, "01 flat\n").diff(),
+            "--- /dev/null\n+++ b/journal/2026/03.ax\n@@ -0,0 +1,1 @@\n+01 flat\n"
+        );
         assert_eq!(change(Some("a\n"), "a\n").diff(), "");
     }
 }

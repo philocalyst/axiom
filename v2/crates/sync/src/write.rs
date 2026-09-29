@@ -34,7 +34,8 @@ impl Context {
     /// The day a written date means here, if it is one: `2026-01-15`, `01-15`
     /// where the year is known, `15` where the month is too.
     fn complete(self, token: &str) -> Option<Day> {
-        let number = |text: &str| text.bytes().all(|byte| byte.is_ascii_digit()).then(|| text.parse::<u32>().ok()).flatten();
+        let number =
+            |text: &str| text.bytes().all(|byte| byte.is_ascii_digit()).then(|| text.parse::<u32>().ok()).flatten();
         match token.len() {
             10 => Day::parse(token.as_bytes()),
             5 => {
@@ -67,7 +68,9 @@ enum Named {
 fn named(part: &str) -> Option<Named> {
     let digits = |text: &str, length: usize| text.len() == length && text.bytes().all(|byte| byte.is_ascii_digit());
     match part.split_once('-') {
-        Some((year, month)) if digits(year, 4) && digits(month, 2) => Some(Named::YearMonth(year.parse().ok()?, month.parse().ok()?)),
+        Some((year, month)) if digits(year, 4) && digits(month, 2) => {
+            Some(Named::YearMonth(year.parse().ok()?, month.parse().ok()?))
+        }
         None if digits(part, 4) => Some(Named::Year(part.parse().ok()?)),
         None if digits(part, 2) => part.parse().ok().filter(|month| (1..=12).contains(month)).map(Named::Month),
         _ => None,
@@ -90,7 +93,9 @@ fn stamp(path: &str) -> Option<Stamp> {
         found = match (named(part), found) {
             (Some(Named::Year(year)), _) => Some(Stamp { year, month: None, own: at + 1 == parts.len() }),
             (Some(Named::YearMonth(year, month)), _) => Some(Stamp { year, month: Some(month), own: true }),
-            (Some(Named::Month(month)), Some(Stamp { month: None, year, own })) => Some(Stamp { year, month: Some(month), own }),
+            (Some(Named::Month(month)), Some(Stamp { month: None, year, own })) => {
+                Some(Stamp { year, month: Some(month), own })
+            }
             (_, found) => found,
         };
     }
@@ -196,7 +201,9 @@ fn place(items: &[Item], day: Day, fallback: (usize, Context)) -> (usize, Contex
     let after = dated().take_while(|item| item.day <= Some(day)).last();
     let before = dated().find(|item| item.day > Some(day));
     match (after, before) {
-        (Some(after), Some(before)) if before.ctx.shorten(day).len() < after.ctx.shorten(day).len() => (before.start, before.ctx),
+        (Some(after), Some(before)) if before.ctx.shorten(day).len() < after.ctx.shorten(day).len() => {
+            (before.start, before.ctx)
+        }
         (Some(after), _) => (after.end, after.ctx),
         (None, Some(before)) => (before.start, before.ctx),
         (None, None) => fallback,
@@ -404,7 +411,11 @@ mod tests {
     #[test]
     fn new_lines_go_in_day_order_after_the_last_of_their_day() {
         let path = "journal/2026/03.ax";
-        let out = write(path, MARCH, &[("2026-03-05", "visa -> a 1 USD"), ("2026-03-07", "visa -> b 2 USD"), ("2026-03-31", "visa -> c 3 USD")]);
+        let out = write(
+            path,
+            MARCH,
+            &[("2026-03-05", "visa -> a 1 USD"), ("2026-03-07", "visa -> b 2 USD"), ("2026-03-31", "visa -> c 3 USD")],
+        );
         let expected = MARCH
             .replace("05 phone\n", "05 phone\n05 visa -> a 1 USD\n07 visa -> b 2 USD\n")
             .replace("31 checking = 8_828.87 USD\n", "31 checking = 8_828.87 USD\n31 visa -> c 3 USD\n");
@@ -413,7 +424,8 @@ mod tests {
 
     #[test]
     fn an_item_stays_whole_and_what_is_written_is_never_reformatted() {
-        let out = write("journal/2026/03.ax", MARCH, &[("2026-03-10", "visa -> a 1 USD"), ("2026-03-02", "visa -> b 2 USD")]);
+        let out =
+            write("journal/2026/03.ax", MARCH, &[("2026-03-10", "visa -> a 1 USD"), ("2026-03-02", "visa -> b 2 USD")]);
         let without_new = out.replace("10 visa -> a 1 USD\n", "").replace("02 visa -> b 2 USD\n", "");
         assert_eq!(without_new, MARCH, "every line that was there is there, as it was");
         assert!(out.contains("  checking ...\n10 visa -> a 1 USD\n"), "{out}");
@@ -434,7 +446,11 @@ mod tests {
     #[test]
     fn headings_give_short_dates_their_year_and_month() {
         let text = "2025\n12-30 a\n\n2026-01\n05 b\n\n2026-02\n03 c\n";
-        let out = write("journal.ax", text, &[("2026-01-20", "x"), ("2026-02-10", "y"), ("2026-03-01", "z"), ("2025-12-31", "w")]);
+        let out = write(
+            "journal.ax",
+            text,
+            &[("2026-01-20", "x"), ("2026-02-10", "y"), ("2026-03-01", "z"), ("2025-12-31", "w")],
+        );
         assert_eq!(out, "2025\n12-30 a\n12-31 w\n\n2026-01\n05 b\n20 x\n\n2026-02\n03 c\n10 y\n03-01 z\n");
     }
 

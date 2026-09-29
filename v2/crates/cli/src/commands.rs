@@ -33,8 +33,9 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     drop(parsed);
     diagnostics.extend(built);
 
-    if let Command::Sync(files) = command {
-        return sync::execute(&book, files, &project.root, terminals.out);
+    if let Command::Sync(names, dry) = command {
+        let today = invocation.today.unwrap_or_else(system_today);
+        return sync::execute(&book, names, *dry, &sources, &project.root, today, terminals.out);
     }
     let options = Options { today: invocation.today.unwrap_or_else(system_today), relaxed: invocation.relaxed };
     let run = axiom_engine::run(&book, options);

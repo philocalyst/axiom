@@ -79,7 +79,8 @@ fn run(command: &str, root: &Path, timeout: Duration) -> Result<String, Failed> 
         let stderr = String::from_utf8_lossy(&fs::read(&scratch.stderr).unwrap_or_default()).trim().to_string();
         return Err(Failed { summary: format!("the command failed ({status})"), stderr });
     }
-    fs::read_to_string(&scratch.stdout).map_err(|_| Failed::new("the command printed something that is not text (UTF-8)"))
+    fs::read_to_string(&scratch.stdout)
+        .map_err(|_| Failed::new("the command printed something that is not text (UTF-8)"))
 }
 
 /// Where a command's output lands while it runs; removed when dropped, whatever
@@ -118,7 +119,8 @@ mod tests {
     #[test]
     fn placeholders_are_filled_in() {
         let (since, today) = (Day::parse(b"2026-03-01").unwrap(), Day::parse(b"2026-03-31").unwrap());
-        let command = substitute("quotes {units} --since {since} --until {today} {since}", since, today, &["VTI", "VXUS"]);
+        let command =
+            substitute("quotes {units} --since {since} --until {today} {since}", since, today, &["VTI", "VXUS"]);
         assert_eq!(command, "quotes VTI VXUS --since 2026-03-01 --until 2026-03-31 2026-03-01");
         assert_eq!(substitute("echo {a,b} {year}", since, today, &[]), "echo {a,b} {year}");
     }
@@ -137,7 +139,10 @@ mod tests {
     fn a_failing_command_shows_what_it_said_and_a_lot_of_output_does_not_stall_it() {
         let root = std::env::temp_dir();
         let failed = run_one("echo partial; echo 'no network' >&2; exit 3", &root, LONG).unwrap_err();
-        assert_eq!((failed.summary.as_str(), failed.stderr.as_str()), ("the command failed (exit status: 3)", "no network"));
+        assert_eq!(
+            (failed.summary.as_str(), failed.stderr.as_str()),
+            ("the command failed (exit status: 3)", "no network")
+        );
         let big = run_one("head -c 5000000 /dev/zero | tr '\\0' x", &root, LONG).unwrap();
         assert_eq!(big.len(), 5_000_000);
         let unreadable = run_one("printf '\\377\\376'", &root, LONG).unwrap_err();

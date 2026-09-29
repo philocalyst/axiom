@@ -3,7 +3,7 @@
 //! already there (the same day and subject, the same row key) is kept as
 //! written, and the rest is added in order.
 
-use axiom_core::{Diagnostic, Day, FileId, Loc, Map};
+use axiom_core::{Day, Diagnostic, FileId, Loc, Map};
 
 use crate::write::{Context, Item, Layout, row_key, row_keys, scan};
 use crate::{Form, Insert};
@@ -28,10 +28,14 @@ pub fn merge(
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     match sink {
         Sink::Journal => items(output, |day| layout.file_for(day), read),
-        Sink::File(pattern) => items(output, |day| {
-            let (year, month, _) = day.ymd();
-            pattern.replace("{year}", &format!("{year:04}")).replace("{month}", &format!("{month:02}"))
-        }, read),
+        Sink::File(pattern) => items(
+            output,
+            |day| {
+                let (year, month, _) = day.ymd();
+                pattern.replace("{year}", &format!("{year:04}")).replace("{month}", &format!("{month:02}"))
+            },
+            read,
+        ),
         Sink::Param { name, path } => rows(name, path, output, read),
     }
 }
@@ -51,11 +55,16 @@ fn items(
             let start: usize = lines[..item.head].iter().map(|line| line.len()).sum();
             let loc = Loc::new(FileId(0), start as u32, (start + lines[item.head].trim_end().len()) as u32);
             let headline = "the output has a line that does not start with a date".to_string();
-            problems.push(Diagnostic::error("undated-line", headline).label(loc, "expected a date such as 2026-03-05").help("print full dates: sync files each line by its day"));
+            problems.push(
+                Diagnostic::error("undated-line", headline)
+                    .label(loc, "expected a date such as 2026-03-05")
+                    .help("print full dates: sync files each line by its day"),
+            );
             continue;
         };
         let path = path_of(day);
-        let there = present.entry(path.clone()).or_insert_with(|| subjects_in(read(&path).as_deref().unwrap_or(""), &path));
+        let there =
+            present.entry(path.clone()).or_insert_with(|| subjects_in(read(&path).as_deref().unwrap_or(""), &path));
         match there.get_mut(&(day, subject(&lines, item))) {
             Some(count) if *count > 0 => *count -= 1,
             _ => inserts.push(Insert { path, day, form: Form::Item(body(&lines, item)) }),
@@ -109,7 +118,10 @@ fn rows(
     read: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     let existing = read(path).and_then(|text| row_keys(&text, name)).ok_or_else(|| {
-        vec![Diagnostic::error("no-such-param", format!("`param {name}` is not declared in {path}")).help(format!("declare it there: `param {name}`"))]
+        vec![
+            Diagnostic::error("no-such-param", format!("`param {name}` is not declared in {path}"))
+                .help(format!("declare it there: `param {name}`")),
+        ]
     })?;
     let mut present: Map<(Day, String), usize> = Map::default();
     for key in existing {
@@ -126,12 +138,18 @@ fn rows(
         let Some(key) = row_key(row) else {
             let loc = Loc::new(FileId(0), at as u32, (at + line.trim_end().len()) as u32);
             let headline = "the output has a row that does not start with a year or a date".to_string();
-            problems.push(Diagnostic::error("bad-row", headline).label(loc, "expected `2026`, `2026-03` or `2026-03-05` here"));
+            problems.push(
+                Diagnostic::error("bad-row", headline).label(loc, "expected `2026`, `2026-03` or `2026-03-05` here"),
+            );
             continue;
         };
         match present.get_mut(&key) {
             Some(count) if *count > 0 => *count -= 1,
-            _ => inserts.push(Insert { path: path.to_string(), day: key.0, form: Form::Row { param: name.to_string(), text: row.to_string() } }),
+            _ => inserts.push(Insert {
+                path: path.to_string(),
+                day: key.0,
+                form: Form::Row { param: name.to_string(), text: row.to_string() },
+            }),
         }
     }
     if problems.is_empty() { Ok(inserts) } else { Err(problems) }
@@ -168,8 +186,17 @@ mod tests {
         assert_eq!(
             written,
             [
-                ("journal/2026/03.ax".to_string(), format!("{march}").replace("30 me -> pge 9 USD\n", "27 halcyon owes studio 500 USD due 30d ^inv-2026-02\n30 me -> pge 9 USD\n")),
-                ("journal/2026/04.ax".to_string(), "02 northwind owes studio 900 USD due 30d ^inv-2026-03\n".to_string()),
+                (
+                    "journal/2026/03.ax".to_string(),
+                    format!("{march}").replace(
+                        "30 me -> pge 9 USD\n",
+                        "27 halcyon owes studio 500 USD due 30d ^inv-2026-02\n30 me -> pge 9 USD\n"
+                    )
+                ),
+                (
+                    "journal/2026/04.ax".to_string(),
+                    "02 northwind owes studio 900 USD due 30d ^inv-2026-03\n".to_string()
+                ),
             ]
         );
         let again: Vec<(String, String)> = written.iter().map(|(path, text)| (path.clone(), text.clone())).collect();
@@ -190,7 +217,8 @@ mod tests {
     #[test]
     fn a_file_with_a_year_in_its_path_splits_the_output_by_year() {
         let prices = "2026-12-30 VTI 280.14 USD\n2027-01-02 VTI 301 USD\n2026-12-30 BND 71.2 USD\n";
-        let written = merged(Sink::File("prices/{year}.ax"), prices, &[("prices/2026.ax", "12-30 VTI 280.14 USD\n")]).unwrap();
+        let written =
+            merged(Sink::File("prices/{year}.ax"), prices, &[("prices/2026.ax", "12-30 VTI 280.14 USD\n")]).unwrap();
         assert_eq!(
             written,
             [
@@ -215,10 +243,14 @@ mod tests {
         let file = "param cpi\n  2025 315.6\n  2026 320.9\n";
         let sink = Sink::Param { name: "cpi", path: "params.ax" };
         let written = merged(sink, "// the index\n2025 999\n2026-07 322.1\n\n", &[("params.ax", file)]).unwrap();
-        assert_eq!(written, [("params.ax".to_string(), "param cpi\n  2025 315.6\n  2026 320.9\n  2026-07 322.1\n".to_string())]);
+        assert_eq!(
+            written,
+            [("params.ax".to_string(), "param cpi\n  2025 315.6\n  2026 320.9\n  2026-07 322.1\n".to_string())]
+        );
         let problems = merged(sink, "soon 3\n", &[("params.ax", file)]).err().unwrap();
         assert_eq!(problems[0].message, "the output has a row that does not start with a year or a date");
-        let problems = merged(Sink::Param { name: "gone", path: "params.ax" }, "2026 1\n", &[("params.ax", file)]).err().unwrap();
+        let problems =
+            merged(Sink::Param { name: "gone", path: "params.ax" }, "2026 1\n", &[("params.ax", file)]).err().unwrap();
         assert_eq!(problems[0].message, "`param gone` is not declared in params.ax");
     }
 }

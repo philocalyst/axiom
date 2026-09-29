@@ -35,7 +35,13 @@ fn tags(text: &str) -> impl Iterator<Item = Tag<'_>> {
         let (closing, name) = raw.strip_prefix('/').map_or((false, raw), |name| (true, name));
         let (all, value) = (&text[close + 1..next], text[close + 1..next].trim());
         let start = close + 1 + all.len() - all.trim_start().len();
-        Some(Tag { name, closing, at: Span { start: open, end: close + 1 }, value, span: Span { start, end: start + value.len() } })
+        Some(Tag {
+            name,
+            closing,
+            at: Span { start: open, end: close + 1 },
+            value,
+            span: Span { start, end: start + value.len() },
+        })
     })
 }
 
@@ -84,18 +90,25 @@ pub fn read<'t>(text: &'t str, file: FileId, unit: Unit) -> (Statement<'t>, Vec<
     }
     if !saw_ofx {
         let whole = Span { start: 0, end: text.len().min(1) };
-        problems.push(Diagnostic::error("not-ofx", "this is not an OFX or QFX statement: it has no <OFX>").label(whole.loc(file), "the file starts here"));
+        problems.push(
+            Diagnostic::error("not-ofx", "this is not an OFX or QFX statement: it has no <OFX>")
+                .label(whole.loc(file), "the file starts here"),
+        );
     }
     let closing = ledger.0.and_then(|balance| {
         let parsed = amount(balance.value, unit.scale).ok().flatten();
         if parsed.is_none() {
             let place = "the ledger balance";
             let problem = amount(balance.value, unit.scale).err();
-            problems.extend(problem.map(|why| why.diagnostic(place, balance.span.loc(file), "in BALAMT".into(), balance.value, unit)));
+            problems.extend(
+                problem
+                    .map(|why| why.diagnostic(place, balance.span.loc(file), "in BALAMT".into(), balance.value, unit)),
+            );
         }
         // A card statement gives what is owed as negative; an assertion states it as positive.
         let qty = parsed.map(|qty| if card { -qty } else { qty })?;
-        let day = ledger.1.and_then(|asof| date(asof.value)).or_else(|| records.iter().map(|record| record.day).max())?;
+        let day =
+            ledger.1.and_then(|asof| date(asof.value)).or_else(|| records.iter().map(|record| record.day).max())?;
         Some((day, qty))
     });
     (Statement { records, closing }, problems)
@@ -106,12 +119,15 @@ impl<'t> Transaction<'t> {
         let place = format!("transaction {number}");
         let whole = self.at.unwrap_or(Span { start: 0, end: 1 });
         let missing = |what: &str| {
-            Diagnostic::error("missing-tag", format!("{place}: it has no {what}")).label(whole.loc(file), "this transaction")
+            Diagnostic::error("missing-tag", format!("{place}: it has no {what}"))
+                .label(whole.loc(file), "this transaction")
         };
         let posted = self.posted.ok_or_else(|| missing("DTPOSTED"))?;
         let day = date(posted.value).ok_or_else(|| {
             let headline = format!("{place}: `{}` is not a date", posted.value);
-            Diagnostic::error("bad-date", headline).label(posted.span.loc(file), "in DTPOSTED").help("OFX writes dates as YYYYMMDD")
+            Diagnostic::error("bad-date", headline)
+                .label(posted.span.loc(file), "in DTPOSTED")
+                .help("OFX writes dates as YYYYMMDD")
         })?;
         let paid = self.amount.ok_or_else(|| missing("TRNAMT"))?;
         let qty = amount(paid.value, unit.scale)
@@ -119,10 +135,13 @@ impl<'t> Transaction<'t> {
             .ok_or_else(|| missing("TRNAMT"))?;
         // What a person would call the memo: the payee, what was said of it, and a check's number.
         let check = self.check.map(|tag| format!("CHECK {}", tag.value));
-        let words: Vec<&str> = [self.name, self.memo].into_iter().flatten().map(|tag| tag.value).filter(|text| !text.is_empty()).collect();
+        let words: Vec<&str> =
+            [self.name, self.memo].into_iter().flatten().map(|tag| tag.value).filter(|text| !text.is_empty()).collect();
         let memo = match (words.as_slice(), check) {
             ([only], None) => decode(only),
-            (words, check) => Cow::Owned(words.iter().map(|word| decode(word).into_owned()).chain(check).collect::<Vec<_>>().join(" ")),
+            (words, check) => Cow::Owned(
+                words.iter().map(|word| decode(word).into_owned()).chain(check).collect::<Vec<_>>().join(" "),
+            ),
         };
         let at = self.name.or(self.memo).map_or(whole, |tag| tag.span).loc(file);
         Ok(Record { day, qty, memo, balance: None, pending: false, at })
@@ -131,7 +150,9 @@ impl<'t> Transaction<'t> {
 
 /// `YYYYMMDD`, and anything after it: a time and a zone that a day does not need.
 fn date(text: &str) -> Option<Day> {
-    let part = |from: usize, to: usize| text.get(from..to)?.bytes().all(|b| b.is_ascii_digit()).then(|| text[from..to].parse::<u32>().ok()).flatten();
+    let part = |from: usize, to: usize| {
+        text.get(from..to)?.bytes().all(|b| b.is_ascii_digit()).then(|| text[from..to].parse::<u32>().ok()).flatten()
+    };
     Day::from_ymd(part(0, 4)? as i32, part(4, 6)?, part(6, 8)?)
 }
 
@@ -162,7 +183,8 @@ mod tests {
     fn a_version_1_statement_is_its_transactions_and_its_ledger_balance() {
         let (statement, problems) = read(CHECKING, FileId(0), USD);
         assert!(problems.is_empty(), "{problems:?}");
-        let shown: Vec<_> = statement.records.iter().map(|r| (r.day.to_string(), r.qty.0, r.memo.to_string())).collect();
+        let shown: Vec<_> =
+            statement.records.iter().map(|r| (r.day.to_string(), r.qty.0, r.memo.to_string())).collect();
         assert_eq!(
             shown,
             [
@@ -171,7 +193,10 @@ mod tests {
                 ("2026-01-08".to_string(), 380_000, "HALCYON PAYMENT".to_string()),
             ]
         );
-        assert_eq!(statement.closing.map(|(day, qty)| (day.to_string(), qty.0)), Some(("2026-01-12".to_string(), 316_255)));
+        assert_eq!(
+            statement.closing.map(|(day, qty)| (day.to_string(), qty.0)),
+            Some(("2026-01-12".to_string(), 316_255))
+        );
     }
 
     #[test]
@@ -182,7 +207,10 @@ mod tests {
         let (statement, problems) = read(text, FileId(0), USD);
         assert!(problems.is_empty(), "{problems:?}");
         assert_eq!(statement.records[0].qty.0, -8420);
-        assert_eq!(statement.closing.map(|(day, qty)| (day.to_string(), qty.0)), Some(("2026-01-07".to_string(), 132_438)));
+        assert_eq!(
+            statement.closing.map(|(day, qty)| (day.to_string(), qty.0)),
+            Some(("2026-01-07".to_string(), 132_438))
+        );
     }
 
     #[test]

@@ -62,10 +62,16 @@ pub struct DateFormat(Vec<Part>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Part {
-    Year { digits: usize },
+    Year {
+        digits: usize,
+    },
     /// `MM` is exactly two digits, `M` one or two.
-    Month { min: usize },
-    Day { min: usize },
+    Month {
+        min: usize,
+    },
+    Day {
+        min: usize,
+    },
     Literal(char),
 }
 
@@ -272,7 +278,14 @@ impl<'t> Reader<'t> {
 }
 
 /// A problem in a row of the export, pointing at the cell.
-fn problem(file: FileId, row: usize, code: &'static str, headline: String, span: Span, label: impl Into<String>) -> Diagnostic {
+fn problem(
+    file: FileId,
+    row: usize,
+    code: &'static str,
+    headline: String,
+    span: Span,
+    label: impl Into<String>,
+) -> Diagnostic {
     let loc = span.loc(file);
     Diagnostic::error(code, format!("row {row}: {headline}")).label(loc, label)
 }
@@ -298,7 +311,8 @@ impl<'r, 't> Row<'r, 't> {
     fn cell(&self, at: At) -> Result<&'r Field<'t>, Diagnostic> {
         self.fields.get(at.index).ok_or_else(|| {
             let end = self.fields.last().map_or(0, |field| field.span.end);
-            let headline = format!("has {} columns, but {} is number {}", self.fields.len(), at.column.shown(), at.index + 1);
+            let headline =
+                format!("has {} columns, but {} is number {}", self.fields.len(), at.column.shown(), at.index + 1);
             self.error("short-row", headline, Span { start: end, end }, "the row ends here")
         })
     }
@@ -311,7 +325,9 @@ impl<'r, 't> Row<'r, 't> {
     /// Where `column` is, reading this row as the header.
     fn find<'c>(&self, column: &'c Column) -> Result<At<'c>, Diagnostic> {
         let index = match column {
-            Column::Index(0) => return Err(self.error("bad-column", "columns are counted from 1".into(), self.whole(), "this row")),
+            Column::Index(0) => {
+                return Err(self.error("bad-column", "columns are counted from 1".into(), self.whole(), "this row"));
+            }
             Column::Index(index) => index - 1,
             Column::Name(name) => self
                 .fields
@@ -437,7 +453,8 @@ impl Csv {
             }
         };
         let balance = cells.balance.map(|at| money(row, at, unit)).transpose()?.flatten();
-        let pending = cells.pending.and_then(|at| row.fields.get(at.index)).is_some_and(|field| is_pending(&field.text));
+        let pending =
+            cells.pending.and_then(|at| row.fields.get(at.index)).is_some_and(|field| is_pending(&field.text));
         let memo = row.cell(cells.memo)?;
         let at = memo.span.loc(row.file);
         Ok(Record { day, qty, memo: memo.text.clone(), balance, pending, at })
@@ -449,7 +466,9 @@ impl Csv {
             let headline = format!("`{}` is not a date written {}", field.text, self.format);
             let error = row.error("bad-date", headline, field.span, format!("in the {} column", at.column.shown()));
             match self.format.swapped().read(&field.text) {
-                Some(_) => error.help(format!("if the day comes first, write the pattern as \"{}\"", self.format.swapped())),
+                Some(_) => {
+                    error.help(format!("if the day comes first, write the pattern as \"{}\"", self.format.swapped()))
+                }
                 None => error,
             }
         })
@@ -515,7 +534,8 @@ mod tests {
                     01/05/2026,\"TRADER JOE'S, #634 \"\"SF\"\"\",-84.20,\"8,915.80\"\r\n\
                     \r\n\
                     01/06/2026 , plain memo ,\"1,000.00\",9915.80\r\n";
-        let (records, problems) = named("Posting Date", "MM/DD/YYYY", "Amount", "Description").records(text, FileId(0), USD);
+        let (records, problems) =
+            named("Posting Date", "MM/DD/YYYY", "Amount", "Description").records(text, FileId(0), USD);
         assert!(problems.is_empty(), "{problems:?}");
         let read: Vec<_> = records.iter().map(|r| (r.day, r.qty.0, r.memo.as_ref(), r.balance.map(|b| b.0))).collect();
         assert_eq!(
@@ -541,7 +561,11 @@ mod tests {
         for text in ["date,status,memo,amount\n2026-01-05,pending,Coffee,4.50\n", "2026-01-05,Pending,Coffee,4.50"] {
             let (records, problems) = csv.records(text, FileId(0), USD);
             assert!(problems.is_empty(), "{problems:?}");
-            assert_eq!((records[0].qty.0, records[0].pending, records[0].memo.as_ref()), (-450, true, "Coffee"), "{text}");
+            assert_eq!(
+                (records[0].qty.0, records[0].pending, records[0].memo.as_ref()),
+                (-450, true, "Coffee"),
+                "{text}"
+            );
         }
     }
 
@@ -562,7 +586,6 @@ mod tests {
         assert_eq!(DateFormat::new("D.M.YYYY").unwrap().to_string(), "D.M.YYYY");
     }
 
-
     #[test]
     fn debit_and_credit_columns() {
         let name = |text: &str| Column::Name(text.into());
@@ -574,7 +597,8 @@ mod tests {
             balance: None,
             pending: None,
         };
-        let text = "Date,Memo,Debit,Credit\n2026-01-05,rent,2900.00,\n2026-01-06,pay,,3054.70\n2026-01-07,both,1.00,2.00\n";
+        let text =
+            "Date,Memo,Debit,Credit\n2026-01-05,rent,2900.00,\n2026-01-06,pay,,3054.70\n2026-01-07,both,1.00,2.00\n";
         let (records, problems) = csv.records(text, FileId(0), USD);
         assert_eq!(records.iter().map(|r| r.qty.0).collect::<Vec<_>>(), [-290_000, 305_470]);
         assert_eq!(problems.len(), 1);
@@ -611,7 +635,8 @@ mod tests {
     #[test]
     fn a_missing_column_says_what_the_export_has() {
         let csv = named("Posting Dat", "MM/DD/YYYY", "Amount", "Description");
-        let (records, problems) = csv.records("Posting Date,Description,Amount,Balance\n01/05/2026,a,1.00,1\n", FileId(0), USD);
+        let (records, problems) =
+            csv.records("Posting Date,Description,Amount,Balance\n01/05/2026,a,1.00,1\n", FileId(0), USD);
         assert!(records.is_empty());
         assert_eq!(problems.len(), 1, "one root cause, one problem");
         assert_eq!(problems[0].message, "row 1: the export has no column \"Posting Dat\"");
@@ -631,7 +656,9 @@ mod tests {
     #[test]
     fn garbage_never_panics() {
         let csv = named("A", "YYYY-MM-DD", "B", "C");
-        for text in ["", "\n\n", "\"", "A,B,C\n\"", ",,,\n,,", "A,B,C\n\u{0}\u{1},\u{ff}", "\u{feff}", "A\n,\"\"\"\"\"\n"] {
+        for text in
+            ["", "\n\n", "\"", "A,B,C\n\"", ",,,\n,,", "A,B,C\n\u{0}\u{1},\u{ff}", "\u{feff}", "A\n,\"\"\"\"\"\n"]
+        {
             let _ = csv.records(text, FileId(0), USD);
         }
     }

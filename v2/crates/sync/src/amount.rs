@@ -15,7 +15,8 @@ pub enum Why {
 impl Why {
     /// The problem, in `place` (`row 3`): `text` is at `at`, and `label` says what it is.
     pub fn diagnostic(self, place: &str, at: Loc, label: String, text: &str, unit: Unit) -> Diagnostic {
-        let error = |headline: String| Diagnostic::error("bad-amount", format!("{place}: {headline}")).label(at, label.clone());
+        let error =
+            |headline: String| Diagnostic::error("bad-amount", format!("{place}: {headline}")).label(at, label.clone());
         match self {
             Why::Malformed { comma_decimal } => {
                 let error = error(format!("`{text}` is not an amount"));

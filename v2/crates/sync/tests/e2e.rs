@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use axiom_core::{Day, Map, Qty};
 use axiom_sync::{
-    Account, Amounts, Column, Csv, DateFormat, Due, Env, Existing, Failure, Feed, Format, Input, Kind, Known, Layout, Recognizer, Sink,
-    Source, Unit, World, sync,
+    Account, Amounts, Column, Csv, DateFormat, Due, Env, Existing, Failure, Feed, Format, Input, Kind, Known, Layout,
+    Recognizer, Sink, Source, Unit, World, sync,
 };
 
 const USD: Unit = Unit { name: "USD", scale: 2 };
@@ -117,7 +117,10 @@ fn sources<'a>(order: &[&str]) -> Vec<Source<'a>> {
         since: first,
         kind: Kind::Feed(Feed { account: name, unit: USD, format: Format::Csv(csv) }),
     };
-    order.iter().map(|&name| if name == "checking" { feed("checking", checking_csv()) } else { feed("visa", visa_csv()) }).collect()
+    order
+        .iter()
+        .map(|&name| if name == "checking" { feed("checking", checking_csv()) } else { feed("visa", visa_csv()) })
+        .collect()
 }
 
 /// What the book says, as far as this fixture needs it: read back out of the
@@ -134,14 +137,20 @@ fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World
     for text in files.values() {
         for line in text.lines() {
             let words: Vec<&str> = line.split_whitespace().collect();
-            let Some(of_month) = words.first().and_then(|word| word.parse::<u32>().ok()).filter(|_| !line.starts_with(' ')) else {
+            let Some(of_month) =
+                words.first().and_then(|word| word.parse::<u32>().ok()).filter(|_| !line.starts_with(' '))
+            else {
                 continue;
             };
             let day = Day::from_ymd(2026, 1, of_month).unwrap();
             let account = |name: &str| ["checking", "visa"].into_iter().find(|account| *account == name);
             let mut flow = |name: &str, qty: i64| {
                 if let Some(account) = account(name) {
-                    world.accounts.entry(account).or_default().flows.push(Existing { day, qty: Qty(qty), settle: None });
+                    world.accounts.entry(account).or_default().flows.push(Existing {
+                        day,
+                        qty: Qty(qty),
+                        settle: None,
+                    });
                 }
             };
             match words.as_slice() {
@@ -149,8 +158,12 @@ fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World
                     rent_kept = true;
                     flow("checking", -290_000);
                 }
-                [_, name, "=", ..] => world.accounts.entry(account(name).unwrap()).or_insert_with(Account::default).asserted.push(day),
-                [_, party, "owes", ..] => claims.push((words.iter().find(|w| w.starts_with('^')).unwrap()[1..].to_string(), *party)),
+                [_, name, "=", ..] => {
+                    world.accounts.entry(account(name).unwrap()).or_insert_with(Account::default).asserted.push(day)
+                }
+                [_, party, "owes", ..] => {
+                    claims.push((words.iter().find(|w| w.starts_with('^')).unwrap()[1..].to_string(), *party))
+                }
                 [_, from, "->", to, amount, ..] => {
                     let cents = amount.replace('_', "");
                     let (whole, fraction) = cents.split_once('.').unwrap_or((&cents, "00"));
@@ -166,13 +179,23 @@ fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World
     let open = |code: &str| !paid.iter().any(|paid| paid == code);
     for (code, party) in &claims {
         if open(code) {
-            let code: &str = files.values().find_map(|text| text.find(&format!("^{code}")).map(|at| &text[at + 1..at + 1 + code.len()])).unwrap();
+            let code: &str = files
+                .values()
+                .find_map(|text| text.find(&format!("^{code}")).map(|at| &text[at + 1..at + 1 + code.len()]))
+                .unwrap();
             world.claims.insert(code, party);
         }
     }
     if !rent_kept {
         let day = Day::from_ymd(2026, 1, 1).unwrap();
-        world.dues.push(Due { contract: "flat", party: "greystar", account: "checking", day, qty: Qty(-290_000), window: 15 });
+        world.dues.push(Due {
+            contract: "flat",
+            party: "greystar",
+            account: "checking",
+            day,
+            qty: Qty(-290_000),
+            window: 15,
+        });
     }
     world
 }
@@ -186,7 +209,11 @@ fn known<'a>(recognizes_visa_from_checking: bool) -> Vec<Known<'a>> {
         party("amazon", "\"AMAZON\""),
     ];
     let account = |name: &'a str, pattern: &'a str| Known { name, account: true, patterns: vec![pattern] };
-    known.push(if recognizes_visa_from_checking { account("visa", "\"CHASE CREDIT CRD AUTOPAY\"") } else { account("checking", "\"PAYMENT THANK YOU\"") });
+    known.push(if recognizes_visa_from_checking {
+        account("visa", "\"CHASE CREDIT CRD AUTOPAY\"")
+    } else {
+        account("checking", "\"PAYMENT THANK YOU\"")
+    });
     known
 }
 
@@ -194,14 +221,21 @@ fn known<'a>(recognizes_visa_from_checking: bool) -> Vec<Known<'a>> {
 fn run(project: &Project, order: &[&str], visa_is_known_on_checking: bool) -> Vec<(String, String)> {
     let mut world = book(&project.files, known(visa_is_known_on_checking));
     let sources = sources(order);
-    let env = Env { root: &project.root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &["USD"], timeout: Duration::from_secs(60) };
+    let env = Env {
+        root: &project.root,
+        today: Day::from_ymd(2026, 1, 31).unwrap(),
+        units: &["USD"],
+        timeout: Duration::from_secs(60),
+    };
     let read = |path: &str| project.read(path);
     let outcome = sync(&mut world, &sources, &env, &read);
     for (name, result) in &outcome.sources {
         if let Err(failure) = result {
             let why = match failure {
                 Failure::Command(failed) => failed.summary.clone(),
-                Failure::Output { problems, .. } => problems.iter().map(|p| p.message.clone()).collect::<Vec<_>>().join("; "),
+                Failure::Output { problems, .. } => {
+                    problems.iter().map(|p| p.message.clone()).collect::<Vec<_>>().join("; ")
+                }
             };
             panic!("{name} failed: {why}");
         }
@@ -242,7 +276,11 @@ fn a_book_is_brought_up_to_its_statements_and_a_second_sync_writes_nothing() {
     let mut project = project("twice");
     let written = run(&project, &["checking", "visa"], true);
     assert_eq!(written, [("journal/2026/01.ax".to_string(), SYNCED.to_string())]);
-    assert_eq!(fs::read_to_string(project.root.join("since-checking.txt")).unwrap(), "2026-01-01", "{{since}} is filled in");
+    assert_eq!(
+        fs::read_to_string(project.root.join("since-checking.txt")).unwrap(),
+        "2026-01-01",
+        "{{since}} is filled in"
+    );
 
     project.write("journal/2026/01.ax", SYNCED);
     assert!(run(&project, &["checking", "visa"], true).is_empty(), "the second sync writes nothing");
@@ -266,11 +304,19 @@ fn a_dry_run_shows_the_diff_and_what_fails_writes_nothing() {
     let written = run(&project, &["checking", "visa"], true);
     let diff = axiom_sync_diff(&project, &written);
     assert!(diff.starts_with("--- a/journal/2026/01.ax\n+++ b/journal/2026/01.ax\n@@ "), "{diff}");
-    assert!(diff.contains("+03 flat\n") && diff.contains("+12 checking -> ? 40 USD \"SQ *MYSTERY VENDOR 4411\"\n"), "{diff}");
+    assert!(
+        diff.contains("+03 flat\n") && diff.contains("+12 checking -> ? 40 USD \"SQ *MYSTERY VENDOR 4411\"\n"),
+        "{diff}"
+    );
 
     project.write("feeds/checking.csv", "Posting Date,Description,Amount,Balance\n13/45/2026,x,1.00,1\n");
     let mut world = book(&project.files, known(true));
-    let env = Env { root: &project.root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
+    let env = Env {
+        root: &project.root,
+        today: Day::from_ymd(2026, 1, 31).unwrap(),
+        units: &[],
+        timeout: Duration::from_secs(60),
+    };
     let read = |path: &str| project.read(path);
     let outcome = sync(&mut world, &sources(&["checking", "visa"]), &env, &read);
     let Err(Failure::Output { problems, .. }) = &outcome.sources[0].1 else { panic!("the bad row is refused") };
@@ -316,12 +362,14 @@ fn a_drop_folder_is_read_where_it_lies() {
         kind: Kind::Feed(Feed { account: "checking", unit: USD, format: Format::Ofx }),
     };
     let root = project.root.clone();
-    let env = Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
+    let env =
+        Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
     let sync_once = |project: &Project, pattern: &'static str| {
         let mut world = book(&project.files, known(true));
         let read = |path: &str| project.read(path);
         let outcome = sync(&mut world, &[source(pattern)], &env, &read);
-        let labels: Vec<_> = outcome.sources.iter().map(|(label, result)| (label.clone(), result.as_ref().ok().copied())).collect();
+        let labels: Vec<_> =
+            outcome.sources.iter().map(|(label, result)| (label.clone(), result.as_ref().ok().copied())).collect();
         (labels, outcome.changes.into_iter().map(|change| (change.path, change.after)).collect::<Vec<_>>())
     };
 
@@ -339,7 +387,11 @@ fn a_drop_folder_is_read_where_it_lies() {
 
     project.write("journal/2026/01.ax", &expected);
     assert!(sync_once(&project, "imports/chase/*.qfx").1.is_empty(), "reading a file again writes nothing");
-    assert_eq!(sync_once(&project, "imports/nobody/*.qfx").0, [("checking".to_string(), Some(0))], "an empty drop folder is nothing to do");
+    assert_eq!(
+        sync_once(&project, "imports/nobody/*.qfx").0,
+        [("checking".to_string(), Some(0))],
+        "an empty drop folder is nothing to do"
+    );
     let (labels, _) = sync_once(&project, "../secrets/*.qfx");
     assert_eq!(labels, [("checking".to_string(), None)], "a pattern cannot leave the project");
 }
@@ -352,23 +404,41 @@ fn invoices_and_prices_are_merged_by_their_sinks() {
             ("axiom.ax", ""),
             ("journal/2026/01.ax", JANUARY),
             ("prices/2026.ax", "01-05 VTI 280.14 USD\n"),
-            ("invoicing.txt", "2026-01-27 halcyon owes studio 900 USD due 30d ^inv-2026-02\n2026-01-02 halcyon owes studio 3_800 USD due 30d ^inv-2026-01\n"),
+            (
+                "invoicing.txt",
+                "2026-01-27 halcyon owes studio 900 USD due 30d ^inv-2026-02\n2026-01-02 halcyon owes studio 3_800 USD due 30d ^inv-2026-01\n",
+            ),
             ("quotes.txt", "2026-01-05 VTI 280.14 USD\n2026-01-06 VTI 281.02 USD\n"),
         ],
     );
     let sources = [
-        Source { name: "invoices", input: Input::Run("cat invoicing.txt"), since: Day(0), kind: Kind::Sink(Sink::Journal) },
-        Source { name: "prices", input: Input::Run("cat quotes.txt"), since: Day(0), kind: Kind::Sink(Sink::File("prices/{year}.ax")) },
+        Source {
+            name: "invoices",
+            input: Input::Run("cat invoicing.txt"),
+            since: Day(0),
+            kind: Kind::Sink(Sink::Journal),
+        },
+        Source {
+            name: "prices",
+            input: Input::Run("cat quotes.txt"),
+            since: Day(0),
+            kind: Kind::Sink(Sink::File("prices/{year}.ax")),
+        },
     ];
     let files = project.files.clone();
     let mut world = book(&files, known(true));
     let root = project.root.clone();
-    let env = Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
+    let env =
+        Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
     let read = |path: &str| project.read(path);
     let outcome = sync(&mut world, &sources, &env, &read);
-    let written: BTreeMap<_, _> = outcome.changes.iter().map(|change| (change.path.as_str(), change.after.as_str())).collect();
+    let written: BTreeMap<_, _> =
+        outcome.changes.iter().map(|change| (change.path.as_str(), change.after.as_str())).collect();
     assert_eq!(written["prices/2026.ax"], "01-05 VTI 280.14 USD\n01-06 VTI 281.02 USD\n");
-    assert_eq!(written["journal/2026/01.ax"], JANUARY.to_string() + "27 halcyon owes studio 900 USD due 30d ^inv-2026-02\n");
+    assert_eq!(
+        written["journal/2026/01.ax"],
+        JANUARY.to_string() + "27 halcyon owes studio 900 USD due 30d ^inv-2026-02\n"
+    );
     for change in &outcome.changes {
         project.write(&change.path, &change.after);
     }

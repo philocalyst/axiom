@@ -150,7 +150,8 @@ fn files(root: &Path, pattern: &str, name: &str) -> Vec<(String, Result<String, 
     found.retain(|path| root.join(path).is_file());
     found.sort();
     let read = |path: String| {
-        let text = fs::read_to_string(root.join(&path)).map_err(|error| Failed { summary: format!("could not read {path}: {error}"), stderr: String::new() });
+        let text = fs::read_to_string(root.join(&path))
+            .map_err(|error| Failed { summary: format!("could not read {path}: {error}"), stderr: String::new() });
         (path, text)
     };
     found.into_iter().map(read).collect()

@@ -15,6 +15,10 @@ use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Loc};
 use memchr::memmem;
 
+/// Groups nest no deeper than this: a pattern is read by recursion, and it is
+/// the ledger's, which may be anything.
+const MAX_DEPTH: usize = 32;
+
 /// What is wrong with a pattern's text, and where in it.
 #[derive(Clone, Debug)]
 pub struct PatternError {
@@ -81,8 +85,15 @@ enum Node {
     Class(Class),
     Sequence(Box<[u32]>),
     Choice(Box<[u32]>),
-    Repeat { body: u32, min: u32, max: u32 },
-    Capture { name: u32, body: u32 },
+    Repeat {
+        body: u32,
+        min: u32,
+        max: u32,
+    },
+    Capture {
+        name: u32,
+        body: u32,
+    },
 }
 
 /// A compiled pattern.
@@ -115,7 +126,7 @@ pub struct Found {
 
 impl Peg {
     pub fn new(text: &str) -> Result<Peg, PatternError> {
-        let mut parser = Parser { text, at: 0, nodes: Vec::new(), names: Vec::new() };
+        let mut parser = Parser { text, at: 0, depth: 0, nodes: Vec::new(), names: Vec::new() };
         let root = parser.choice()?;
         parser.skip_space();
         if parser.at < text.len() {
@@ -139,7 +150,8 @@ impl Peg {
             Node::Capture { body, .. } => self.starts_of(*body),
             Node::Repeat { body, min, .. } if *min > 0 => self.starts_of(*body),
             Node::Choice(alternatives) => {
-                let each: Option<Vec<_>> = alternatives.iter().map(|&alternative| self.starts_of(alternative)).collect();
+                let each: Option<Vec<_>> =
+                    alternatives.iter().map(|&alternative| self.starts_of(alternative)).collect();
                 each.map(|each| each.concat())
             }
             Node::Class(_) | Node::Repeat { .. } => None,
@@ -196,7 +208,9 @@ impl Peg {
             }),
             Node::Class(class) => class.step(hay, at),
             Node::Sequence(children) => children.iter().try_fold(at, |at, &child| self.step(child, hay, at, run)),
-            Node::Choice(alternatives) => alternatives.iter().find_map(|&alternative| self.step(alternative, hay, at, run)),
+            Node::Choice(alternatives) => {
+                alternatives.iter().find_map(|&alternative| self.step(alternative, hay, at, run))
+            }
             Node::Repeat { body, min, max } => {
                 let (mut end, mut count) = (at, 0);
                 while count < *max {
@@ -208,7 +222,9 @@ impl Peg {
                 }
                 (count >= *min).then_some(end)
             }
-            Node::Capture { name, body } => self.step(*body, hay, at, run).inspect(|&end| run.captures.push((*name, at, end))),
+            Node::Capture { name, body } => {
+                self.step(*body, hay, at, run).inspect(|&end| run.captures.push((*name, at, end)))
+            }
         };
         if ended.is_none() {
             run.literal = literal;
@@ -222,6 +238,8 @@ impl Peg {
 struct Parser<'t> {
     text: &'t str,
     at: usize,
+    /// How many groups deep the parser is.
+    depth: usize,
     nodes: Vec<Node>,
     names: Vec<String>,
 }
@@ -277,7 +295,10 @@ impl Parser<'_> {
     /// An atom, with the name it captures under and the repeat that follows it.
     fn item(&mut self) -> Result<u32, PatternError> {
         self.skip_space();
-        let word = self.text[self.at..].split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')).next().unwrap_or("");
+        let word = self.text[self.at..]
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+            .next()
+            .unwrap_or("");
         let name = self.text[self.at + word.len()..].starts_with(':').then_some(word).filter(|word| !word.is_empty());
         if let Some(name) = name {
             self.at += name.len() + 1;
@@ -305,8 +326,13 @@ impl Parser<'_> {
         match self.peek() {
             Some('"') => self.literal(),
             Some('(') => {
-                self.at += 1;
+                let open = self.error(1, format!("groups nest at most {MAX_DEPTH} deep"));
+                if self.depth == MAX_DEPTH {
+                    return Err(open);
+                }
+                (self.at, self.depth) = (self.at + 1, self.depth + 1);
                 let inner = self.choice()?;
+                self.depth -= 1;
                 match self.peek() {
                     Some(')') => {
                         self.at += 1;
@@ -377,11 +403,8 @@ mod tests {
         let mut run = Run::default();
         let found = peg.find(&hay, 0, &mut run)?;
         let text = |(start, end): (usize, usize)| String::from_utf8_lossy(&hay[start..end]).into_owned();
-        let captures = peg
-            .names
-            .iter()
-            .filter_map(|name| Some((name.clone(), text(peg.capture(name, &run)?))))
-            .collect();
+        let captures =
+            peg.names.iter().filter_map(|name| Some((name.clone(), text(peg.capture(name, &run)?)))).collect();
         Some((text((found.start, found.end)), found.literal, captures))
     }
 
@@ -392,7 +415,10 @@ mod tests {
     #[test]
     fn literals_sequences_and_classes() {
         assert_eq!(matched("\"trader joe\"", "POS TRADER JOE'S #634").as_deref(), Some("trader joe"));
-        assert_eq!(matched("\"INV-\" digit+ \"-\" digit+", "PAYMENT INV-2026-01 THANKS").as_deref(), Some("inv-2026-01"));
+        assert_eq!(
+            matched("\"INV-\" digit+ \"-\" digit+", "PAYMENT INV-2026-01 THANKS").as_deref(),
+            Some("inv-2026-01")
+        );
         assert_eq!(matched("\"inv-\" digit+", "inv-x"), None);
         assert_eq!(matched("\"sq *bl\" letter \"e bottle\"", "SQ *BLUE BOTTLE 12").as_deref(), Some("sq *blue bottle"));
         assert_eq!(matched("\"a\" space* \"b\"", "A  \t B").as_deref(), Some("a  \t b"));
@@ -424,11 +450,15 @@ mod tests {
     fn a_pattern_says_which_literals_a_match_begins_with() {
         let starts = |pattern: &str| {
             let peg = Peg::new(pattern).unwrap();
-            peg.starts().map(|starts| starts.iter().map(|start| String::from_utf8(start.clone()).unwrap()).collect::<Vec<_>>())
+            peg.starts()
+                .map(|starts| starts.iter().map(|start| String::from_utf8(start.clone()).unwrap()).collect::<Vec<_>>())
         };
         assert_eq!(starts("\"PAYPAL\" \" *\" payee:(any+)"), Some(vec!["paypal".to_string()]));
         assert_eq!(starts("code:(\"inv-\" digit+)"), Some(vec!["inv-".to_string()]));
-        assert_eq!(starts("\"a\" digit / (\"b\" / \"c\")+ \"d\""), Some(vec!["a".to_string(), "b".to_string(), "c".to_string()]));
+        assert_eq!(
+            starts("\"a\" digit / (\"b\" / \"c\")+ \"d\""),
+            Some(vec!["a".to_string(), "b".to_string(), "c".to_string()])
+        );
         assert_eq!(starts("digit+ \"-\""), None);
         assert_eq!(starts("\"a\" / digit"), None, "one way to begin with anything is enough");
         assert_eq!(starts("(\"a\"?)  \"b\""), None, "an optional start may be skipped");
@@ -452,8 +482,14 @@ mod tests {
         assert_eq!(bad("\"a\" /").message, "the pattern ends where something was expected");
         assert_eq!(bad("\"a\" $").message, "expected a literal, a class or `(`, not `$`");
         assert_eq!(bad("").message, "the pattern ends where something was expected");
+        let deep = format!("{}\"a\"{}", "(".repeat(1000), ")".repeat(1000));
+        assert_eq!(bad(&deep).message, "groups nest at most 32 deep");
+        assert!(Peg::new(&format!("{}\"a\"{}", "(".repeat(32), ")".repeat(32))).is_ok());
         let at = Loc::new(axiom_core::FileId(2), 100, 110);
         let diagnostic = bad("\"a\" digt+").diagnostic(at);
-        assert_eq!(diagnostic.anchor().map(|loc| (loc.file, loc.start, loc.end)), Some((axiom_core::FileId(2), 104, 108)));
+        assert_eq!(
+            diagnostic.anchor().map(|loc| (loc.file, loc.start, loc.end)),
+            Some((axiom_core::FileId(2), 104, 108))
+        );
     }
 }

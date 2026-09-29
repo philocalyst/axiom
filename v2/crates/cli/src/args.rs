@@ -36,6 +36,7 @@ pub enum Opt {
     By,
     Until,
     Paths,
+    Dry,
 }
 
 /// An option, as parsing and the help screen see it.
@@ -84,6 +85,7 @@ pub const OPTIONS: &[OptionSpec] = &[
     option(Opt::By, "by", Some("month|year"), "the length of a period (default: month)"),
     option(Opt::Until, "until", Some("DATE"), "run the forecast up to this day"),
     option(Opt::Paths, "paths", Some("N"), "how many Monte Carlo paths (default: 1000)"),
+    option(Opt::Dry, "dry", None, "show what would be written, as a diff, and write nothing"),
 ];
 
 /// What a command does, for dispatch after parsing.
@@ -177,7 +179,13 @@ pub const COMMANDS: &[CommandSpec] = &[
     command(Verb::Lots, "lots", Operands::Optional("PLACE"), &[Opt::At], "what you hold: cost, value, and gain"),
     command(Verb::Forecast, "forecast", Operands::None, &[Opt::Until, Opt::Paths], "where the money is heading"),
     command(Verb::Why, "why", Operands::One("TARGET"), &[], "a place, entity, system, #code, law, tax line, file:line"),
-    command(Verb::Sync, "sync", Operands::Any("FILE"), &[], "run the sync scripts, keep what they print"),
+    command(
+        Verb::Sync,
+        "sync",
+        Operands::Any("NAME"),
+        &[Opt::Dry],
+        "bring in what is new: statements, invoices, prices",
+    ),
 ];
 
 /// What was asked for: the options every command shares, and the command.
@@ -198,7 +206,8 @@ pub enum Command<'a> {
     Help,
     Version,
     Check,
-    Sync(Vec<&'a str>),
+    /// The sources asked for (all, if none), and whether to only show the diff.
+    Sync(Vec<&'a str>, bool),
     /// A view, about the money of an entity (`--for`) or of everyone.
     Report(Query<'a>, Option<&'a str>),
 }
@@ -252,7 +261,7 @@ fn build<'a>(spec: &CommandSpec, operands: &[&'a str], values: &Values<'a>) -> R
     let periods = [("month", Period::Month), ("year", Period::Year)];
     let query = match spec.verb {
         Verb::Check => return Ok(Command::Check),
-        Verb::Sync => return Ok(Command::Sync(operands.to_vec())),
+        Verb::Sync => return Ok(Command::Sync(operands.to_vec(), values.has(Dry))),
         Verb::Balance => {
             Query::Balance { globs: operands.to_vec(), at: day(At)?, value: has(Value), monthly: has(Monthly) }
         }

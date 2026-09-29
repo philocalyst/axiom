@@ -1,27 +1,15 @@
-//! `axiom sync`: run the scripts a project declares, and keep what they print
-//! if it is valid Axiom.
-//!
-//! ```text
-//! sync prices/2026.ax
-//!   run ./scripts/quotes.py VTI BND
-//! ```
-//!
-//! Each script runs as `sh -c COMMAND` in the project root, all at once. Its
-//! output goes straight to a scratch file beside the destination, so a script
-//! that prints a great deal cannot stall on a full pipe, one that hangs can be
-//! killed, and a valid result is put in place with one atomic rename. The
-//! destination is never touched unless the output parses.
+//! `axiom sync`: the sources a project declares, run by the `sync` crate.
+//! What they would write is shown as a diff (`--dry`), or written file by file,
+//! each only if it still parses.
 
-use std::fs::{self, File};
-use std::io;
-use std::path::{Component, Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::fs;
+use std::path::{Component, Path};
+use std::time::Duration;
 
 use axiom_core::diag::closest;
-use axiom_core::{Diagnostic, FileId};
+use axiom_core::{Day, Diagnostic, FileId};
 use axiom_model::Book;
+use axiom_sync::{Change, Env, Failure, Input, Kind, Layout, Recognizer, Sink, Source, World, sync};
 
 use crate::Outcome;
 use crate::project::Sources;
@@ -29,194 +17,204 @@ use crate::render::Renderer;
 use crate::style::{Ink, Line, Terminal};
 use crate::text::plural;
 
-/// How long a script may run before it is killed.
+/// How long a command may run before it is killed.
 const TIMEOUT: Duration = Duration::from_secs(60);
 
-/// How often a running script is checked on.
-const POLL: Duration = Duration::from_millis(20);
-
-/// A script's stderr is shown up to this many lines when it fails.
+/// A failed command's stderr is shown up to this many lines.
 const STDERR_LINES: usize = 10;
 
-/// One `sync FILE` with its `run COMMAND`.
-struct Job<'a> {
-    file: &'a str,
+/// One declared `sync`: what it is called, and the command that feeds it.
+struct Declared<'a> {
+    name: &'a str,
     command: &'a str,
 }
 
-/// Why a file was not written: a line saying so, and what backs it up, drawn
-/// (what the script said, or what is wrong with what it printed).
-struct Failure {
-    summary: String,
-    details: String,
-}
-
-impl Failure {
-    fn new(summary: String) -> Failure {
-        Failure { summary, details: String::new() }
-    }
-
-    /// Something went wrong with the file system or the process, while `doing`
-    /// what the sentence "could not …" completes.
-    fn io(doing: &'static str) -> impl FnOnce(io::Error) -> Failure {
-        move |error| Failure::new(format!("could not {doing}: {error}"))
-    }
-}
-
-/// Runs the declared syncs (only those for `wanted` files, if any are named)
-/// and reports each.
-pub fn execute(book: &Book, wanted: &[&str], root: &Path, terminal: Terminal) -> Result<Outcome, Diagnostic> {
+/// Runs the declared syncs (only those for `wanted` names, if any are given) and
+/// reports each.
+pub fn execute(
+    book: &Book,
+    wanted: &[&str],
+    dry: bool,
+    files: &Sources,
+    root: &Path,
+    today: Day,
+    terminal: Terminal,
+) -> Result<Outcome, Diagnostic> {
     let declared =
-        book.syncs.iter().map(|sync| Job { file: book.name(sync.file), command: book.name(sync.run) }).collect();
-    let jobs = choose(declared, wanted)?;
-    let results = run_all(&jobs, root, TIMEOUT, terminal);
-    Ok(report(&jobs, &results, terminal))
+        book.syncs.iter().map(|sync| Declared { name: book.name(sync.file), command: book.name(sync.run) }).collect();
+    let chosen = choose(declared, wanted)?;
+    let first = book.flows.values().map(|flow| flow.day).min().unwrap_or(today);
+    let sources: Vec<Source> = chosen
+        .iter()
+        .map(|sync| Source {
+            name: sync.name,
+            input: Input::Run(sync.command),
+            since: first,
+            kind: Kind::Sink(Sink::File(sync.name)),
+        })
+        .collect();
+    let held: Vec<&str> = book
+        .commodities
+        .iter()
+        .filter(|(id, _)| *id != book.base && !book.assets.values().any(|asset| asset.unit == *id))
+        .map(|(_, commodity)| book.name(commodity.symbol))
+        .collect();
+    let paths: Vec<&str> =
+        (0..).map_while(|id| files.get(FileId(id))).filter(|file| !file.embedded).map(|file| &*file.path).collect();
+    let mut world = World {
+        recognizer: Recognizer::new(Vec::new(), &[]).unwrap_or_else(|_| unreachable!("no patterns, none can be wrong")),
+        layout: Layout::new(paths),
+        accounts: Default::default(),
+        dues: Vec::new(),
+        claims: Default::default(),
+    };
+    let env = Env { root, today, units: &held, timeout: TIMEOUT };
+    let read = |path: &str| {
+        files.find(path).map(|file| file.text.to_string()).or_else(|| fs::read_to_string(root.join(path)).ok())
+    };
+    let outcome = sync(&mut world, &sources, &env, &read);
+    Ok(report(&outcome.sources, &outcome.changes, dry, root, terminal))
 }
 
-/// The declared jobs for the `wanted` files, or all of them if none are named.
-fn choose<'a>(jobs: Vec<Job<'a>>, wanted: &[&str]) -> Result<Vec<Job<'a>>, Diagnostic> {
+/// The declared syncs for the `wanted` names, or all of them if none are named.
+fn choose<'a>(declared: Vec<Declared<'a>>, wanted: &[&str]) -> Result<Vec<Declared<'a>>, Diagnostic> {
     let same = |declared: &str, name: &str| declared.trim_start_matches("./") == name.trim_start_matches("./");
-    if let Some(unknown) = wanted.iter().find(|&&name| !jobs.iter().any(|job| same(job.file, name))) {
+    if let Some(unknown) = wanted.iter().find(|&&name| !declared.iter().any(|sync| same(sync.name, name))) {
         let error = Diagnostic::error("", format!("no sync is declared for `{unknown}`"));
-        return Err(match closest(unknown, jobs.iter().map(|job| job.file)) {
+        return Err(match closest(unknown, declared.iter().map(|sync| sync.name)) {
             Some(near) => error.help(format!("did you mean `{near}`?")),
             None => error,
         });
     }
-    Ok(jobs.into_iter().filter(|job| wanted.is_empty() || wanted.iter().any(|&name| same(job.file, name))).collect())
+    Ok(declared
+        .into_iter()
+        .filter(|sync| wanted.is_empty() || wanted.iter().any(|&name| same(sync.name, name)))
+        .collect())
 }
 
-/// Every job at once, each result in the order of `jobs`. `Ok` is how many
-/// items were written.
-fn run_all(jobs: &[Job], root: &Path, timeout: Duration, terminal: Terminal) -> Vec<Result<usize, Failure>> {
-    thread::scope(|scope| {
-        let start = |job| scope.spawn(move || sync_file(job, root, timeout, terminal));
-        let workers: Vec<_> = jobs.iter().map(start).collect();
-        workers
-            .into_iter()
-            .map(|worker| worker.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
-            .collect()
-    })
-}
-
-fn sync_file(job: &Job, root: &Path, timeout: Duration, terminal: Terminal) -> Result<usize, Failure> {
-    let target = destination(root, job.file)?;
-    let scratch = Scratch::beside(&target).map_err(Failure::io("prepare the folder"))?;
-    let status = execute_script(job.command, root, &scratch, timeout)?;
-    if !status.success() {
-        return Err(Failure { summary: format!("the command failed ({status})"), details: scratch.stderr(terminal) });
-    }
-    let text = fs::read_to_string(&scratch.stdout).map_err(Failure::io("read the output"))?;
-    let (file, diagnostics) = axiom_syntax::parse(FileId(0), &text);
-    let items = file.items.len();
-    drop(file);
-    if diagnostics.iter().any(Diagnostic::is_error) {
-        let sources = Sources::single(job.file.to_string(), text);
-        let (shown, tally) = Renderer::new(&sources, terminal).present(&diagnostics.iter().collect::<Vec<_>>(), false);
-        let summary = format!("the output is not valid Axiom ({})", plural(tally.errors, "error"));
-        return Err(Failure { summary, details: format!("\n{shown}") });
-    }
-    fs::rename(&scratch.stdout, &target).map_err(Failure::io("write the file"))?;
-    Ok(items)
-}
-
-/// Where `file` goes: inside the project, and no way out of it.
-fn destination(root: &Path, file: &str) -> Result<PathBuf, Failure> {
-    let relative = Path::new(file);
-    let stays_inside = relative.components().all(|part| matches!(part, Component::Normal(_)));
-    if file.is_empty() || !stays_inside {
-        return Err(Failure::new("the file must be inside the project".to_string()));
-    }
-    Ok(root.join(relative))
-}
-
-/// Runs `command` to completion, or kills it once `timeout` has passed.
-fn execute_script(command: &str, root: &Path, scratch: &Scratch, timeout: Duration) -> Result<ExitStatus, Failure> {
-    let stdout = File::create(&scratch.stdout).map_err(Failure::io("keep the output"))?;
-    let stderr = File::create(&scratch.stderr).map_err(Failure::io("keep the output"))?;
-    let mut child = Command::new("sh")
-        .args(["-c", command])
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(stdout)
-        .stderr(stderr)
-        .spawn()
-        .map_err(Failure::io("start the command"))?;
-    let started = Instant::now();
-    loop {
-        if let Some(status) = child.try_wait().map_err(Failure::io("wait for the command"))? {
-            return Ok(status);
-        }
-        if started.elapsed() >= timeout {
-            // Killing an already-finished child is not an error worth reporting.
-            let _ = child.kill();
-            let _ = child.wait();
-            let limit = plural(timeout.as_secs() as usize, "second");
-            return Err(Failure::new(format!("the command took more than {limit} to finish")));
-        }
-        thread::sleep(POLL);
-    }
-}
-
-/// Where a script's output lands while it runs, next to the file it is for so
-/// that moving it into place is a rename within one folder. Removed when
-/// dropped, whatever became of the script.
-struct Scratch {
-    stdout: PathBuf,
-    stderr: PathBuf,
-}
-
-impl Scratch {
-    fn beside(target: &Path) -> io::Result<Scratch> {
-        let folder = target.parent().unwrap_or(Path::new("."));
-        fs::create_dir_all(folder)?;
-        let name = target.file_name().unwrap_or_default().to_string_lossy();
-        Ok(Scratch {
-            stdout: folder.join(format!(".{name}.sync-out")),
-            stderr: folder.join(format!(".{name}.sync-err")),
-        })
-    }
-
-    /// What the script said on stderr, indented, cut to a few lines, and drawn.
-    fn stderr(&self, terminal: Terminal) -> String {
-        let bytes = fs::read(&self.stderr).unwrap_or_default();
-        let said = String::from_utf8_lossy(&bytes);
-        let mut lines: Vec<String> = said.trim().lines().take(STDERR_LINES).map(|line| format!("    {line}")).collect();
-        let more = said.trim().lines().count().saturating_sub(STDERR_LINES);
-        if more > 0 {
-            lines.push(format!("    … and {} more", plural(more, "line")));
-        }
-        terminal.painter.paint(&lines.iter().map(|line| Line::text(line, Ink::DIM)).collect::<Vec<_>>())
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.stdout);
-        let _ = fs::remove_file(&self.stderr);
-    }
-}
-
-/// One line per file, `✓` or `✗`, and under a failure what it has to say.
-fn report(jobs: &[Job], results: &[Result<usize, Failure>], terminal: Terminal) -> Outcome {
-    if jobs.is_empty() {
+/// One line per source, `✓` or `✗`, and under a failure what it has to say; then
+/// each file's diff, or that it was written.
+fn report(
+    sources: &[(String, Result<usize, Failure>)],
+    changes: &[Change],
+    dry: bool,
+    root: &Path,
+    terminal: Terminal,
+) -> Outcome {
+    if sources.is_empty() {
         return Outcome::ok(terminal.painter.paint(&[Line::text("no sync is declared in this project", Ink::DIM)]));
     }
-    let width = jobs.iter().map(|job| job.file.chars().count()).max().unwrap_or(0);
+    let paint = |lines: &[Line]| terminal.painter.paint(lines);
+    let width = sources.iter().map(|(name, _)| name.chars().count()).max().unwrap_or(0);
     let mut text = String::new();
-    for (job, result) in jobs.iter().zip(results) {
+    let mut failed = false;
+    for (name, result) in sources {
         let (mark, ink) = if result.is_ok() { ("✓ ", Ink::GREEN) } else { ("✗ ", Ink::RED) };
         let mut line = Line::text(mark, ink.bold());
-        line.push(job.file, Ink::BOLD);
+        line.push(name, Ink::BOLD);
         line.pad_to(2 + width + 2);
         match result {
-            Ok(items) => line.push(&format!("{} written", plural(*items, "item")), Ink::PLAIN),
-            Err(failure) => line.push(&failure.summary, Ink::RED),
+            Ok(0) => line.push("nothing new", Ink::DIM),
+            Ok(added) => line.push(&format!("{} added", plural(*added, "line")), Ink::PLAIN),
+            Err(failure) => line.push(&failure_summary(failure), Ink::RED),
         }
-        text += &terminal.painter.paint(&[line]);
-        text += result.as_ref().err().map_or("", |failure| &failure.details);
+        text += &paint(&[line]);
+        if let Err(failure) = result {
+            failed = true;
+            text += &failure_details(name, failure, terminal);
+        }
     }
-    Outcome { answer: text, diagnostics: String::new(), failed: results.iter().any(Result::is_err) }
+    for change in changes.iter().filter(|change| !change.diff().is_empty()) {
+        if dry {
+            text += &paint(&[Line::new()]);
+            text += &diff_lines(&change.diff(), terminal);
+        } else {
+            match write(change, root, terminal) {
+                Ok(()) => text += &paint(&[Line::text(&format!("wrote {}", change.path), Ink::DIM)]),
+                Err(refusal) => {
+                    failed = true;
+                    text += &refusal;
+                }
+            }
+        }
+    }
+    Outcome { answer: text, diagnostics: String::new(), failed }
+}
+
+fn failure_summary(failure: &Failure) -> String {
+    match failure {
+        Failure::Command(failed) => failed.summary.clone(),
+        Failure::Output { problems, .. } => {
+            let errors = problems.iter().filter(|problem| problem.is_error()).count();
+            format!("what it gave is not usable ({})", plural(errors, "problem"))
+        }
+    }
+}
+
+/// What backs up a failure: what the command said, or the problems in what it
+/// gave, drawn against it.
+fn failure_details(name: &str, failure: &Failure, terminal: Terminal) -> String {
+    match failure {
+        Failure::Command(failed) => {
+            let said: Vec<&str> = failed.stderr.lines().collect();
+            let mut lines: Vec<Line> =
+                said.iter().take(STDERR_LINES).map(|line| Line::text(&format!("    {line}"), Ink::DIM)).collect();
+            if said.len() > STDERR_LINES {
+                lines.push(Line::text(
+                    &format!("    … and {} more", plural(said.len() - STDERR_LINES, "line")),
+                    Ink::DIM,
+                ));
+            }
+            terminal.painter.paint(&lines)
+        }
+        Failure::Output { text, problems } => {
+            let sources = Sources::single(name.to_string(), text.clone());
+            let shown = Renderer::new(&sources, terminal).present(&problems.iter().collect::<Vec<_>>(), false).0;
+            format!("\n{shown}")
+        }
+    }
+}
+
+/// A unified diff, additions in green.
+fn diff_lines(diff: &str, terminal: Terminal) -> String {
+    let ink = |line: &str| match line.chars().next() {
+        Some('+') if !line.starts_with("+++") => Ink::GREEN,
+        Some('-') if !line.starts_with("---") => Ink::RED,
+        Some('@') => Ink::CYAN,
+        _ => Ink::PLAIN,
+    };
+    terminal.painter.paint(&diff.lines().map(|line| Line::text(line, ink(line))).collect::<Vec<_>>())
+}
+
+/// Puts the change in place: inside the project, and only if what results still
+/// parses. What is refused is drawn.
+fn write(change: &Change, root: &Path, terminal: Terminal) -> Result<(), String> {
+    let refuse = |why: String, details: String| {
+        let mut line = Line::text("✗ ", Ink::RED.bold());
+        line.push(&change.path, Ink::BOLD);
+        line.push(&format!("  {why}"), Ink::RED);
+        Err(terminal.painter.paint(&[line]) + &details)
+    };
+    let inside = Path::new(&change.path).components().all(|part| matches!(part, Component::Normal(_)));
+    if change.path.is_empty() || !inside {
+        return refuse("the file must be inside the project".into(), String::new());
+    }
+    let (_, problems) = axiom_syntax::parse(FileId(0), &change.after);
+    if problems.iter().any(Diagnostic::is_error) {
+        let sources = Sources::single(change.path.clone(), change.after.clone());
+        let shown = Renderer::new(&sources, terminal).present(&problems.iter().collect::<Vec<_>>(), false).0;
+        let errors = problems.iter().filter(|problem| problem.is_error()).count();
+        return refuse(format!("it would not parse ({})", plural(errors, "error")), format!("\n{shown}"));
+    }
+    let target = root.join(&change.path);
+    let put = || -> std::io::Result<()> {
+        fs::create_dir_all(target.parent().unwrap_or(root))?;
+        // Written beside the file and renamed, so that it is there whole or not at all.
+        let scratch = target.with_extension("ax.sync-tmp");
+        fs::write(&scratch, &change.after)?;
+        fs::rename(&scratch, &target)
+    };
+    put().or_else(|error| refuse(format!("could not be written: {error}"), String::new()))
 }
 
 #[cfg(test)]
@@ -224,147 +222,153 @@ mod tests {
     use super::*;
     use crate::testing::TempDir;
 
-    fn job<'a>(file: &'a str, command: &'a str) -> Job<'a> {
-        Job { file, command }
+    fn declared<'a>(name: &'a str, command: &'a str) -> Declared<'a> {
+        Declared { name, command }
     }
 
-    fn run(jobs: &[Job], root: &Path, timeout: Duration) -> Vec<Result<usize, Failure>> {
-        run_all(jobs, root, timeout, Terminal::plain(100))
+    /// The source, run in `dir`: what `axiom sync` would report and write.
+    fn run(dir: &TempDir, sources: &[Source], dry: bool) -> Outcome {
+        let mut world = World {
+            recognizer: Recognizer::new(Vec::new(), &[]).unwrap(),
+            layout: Layout::new(["prices/2026.ax"]),
+            accounts: Default::default(),
+            dues: Vec::new(),
+            claims: Default::default(),
+        };
+        let env = Env { root: dir.path(), today: Day(20_000), units: &[], timeout: TIMEOUT };
+        let read = |path: &str| fs::read_to_string(dir.path().join(path)).ok();
+        let outcome = sync(&mut world, sources, &env, &read);
+        report(&outcome.sources, &outcome.changes, dry, dir.path(), Terminal::plain(100))
     }
 
-    fn summary(result: &Result<usize, Failure>) -> &str {
-        &result.as_ref().err().expect("a failure").summary
+    fn feeding<'a>(file: &'a str, command: &'a str) -> Source<'a> {
+        Source { name: file, input: Input::Run(command), since: Day(0), kind: Kind::Sink(Sink::File(file)) }
     }
 
-    fn files_in(dir: &TempDir) -> Vec<String> {
-        let mut names: Vec<String> = fs::read_dir(dir.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        names.sort();
-        names
-    }
-
-    #[test]
-    fn a_destination_stays_inside_the_project() {
-        let root = Path::new("/project");
-        assert_eq!(destination(root, "prices/2026.ax").ok(), Some(PathBuf::from("/project/prices/2026.ax")));
-        for outside in ["../x.ax", "/etc/x.ax", "a/../../x.ax", ""] {
-            let refused = destination(root, outside).err().expect("refused");
-            assert_eq!(refused.summary, "the file must be inside the project", "{outside:?}");
-        }
-    }
+    const PRINT: &str = "printf '2026-01-01 checking -> food 4 USD\\n2026-01-02 checking -> food 5 USD\\n'";
 
     #[test]
-    fn valid_output_replaces_the_file() {
-        let dir = TempDir::new("sync-writes");
-        dir.write("prices/2026.ax", "old\n");
-        let script = "printf '2026-01-01 checking -> food 4 USD\\n2026-01-02 checking -> food 5 USD\\n'";
-        let results = run(&[job("prices/2026.ax", script)], dir.path(), TIMEOUT);
-        assert!(matches!(results[0], Ok(2)));
-        let written = fs::read_to_string(dir.path().join("prices/2026.ax")).unwrap();
-        assert_eq!(written, "2026-01-01 checking -> food 4 USD\n2026-01-02 checking -> food 5 USD\n");
-        assert_eq!(files_in(&dir), ["prices"]);
+    fn the_output_is_merged_into_the_file_and_a_second_sync_writes_nothing() {
+        let dir = TempDir::new("sync-merges");
+        dir.write("prices.ax", "2026-01-01 checking -> food 4 USD\n");
+        let outcome = run(&dir, &[feeding("prices.ax", PRINT)], false);
+        assert!(!outcome.failed, "{}", outcome.answer);
+        assert_eq!(outcome.answer, "✓ prices.ax  1 line added\nwrote prices.ax\n");
+        assert_eq!(
+            fs::read_to_string(dir.path().join("prices.ax")).unwrap(),
+            "2026-01-01 checking -> food 4 USD\n2026-01-02 checking -> food 5 USD\n"
+        );
+        let again = run(&dir, &[feeding("prices.ax", PRINT)], false);
+        assert_eq!(again.answer, "✓ prices.ax  nothing new\n");
     }
 
     #[test]
     fn a_new_file_in_a_new_folder_is_created() {
         let dir = TempDir::new("sync-creates");
-        let results = run(&[job("a/b/new.ax", "printf '2026-01-01 checking -> food 4 USD\\n'")], dir.path(), TIMEOUT);
-        assert!(matches!(results[0], Ok(1)));
-        assert!(dir.path().join("a/b/new.ax").is_file());
+        let outcome = run(&dir, &[feeding("a/b/new.ax", PRINT)], false);
+        assert!(!outcome.failed, "{}", outcome.answer);
+        assert_eq!(
+            fs::read_to_string(dir.path().join("a/b/new.ax")).unwrap(),
+            "2026-01-01 checking -> food 4 USD\n2026-01-02 checking -> food 5 USD\n"
+        );
     }
 
     #[test]
-    fn output_that_does_not_parse_is_shown_against_what_was_printed_and_not_written() {
+    fn a_dry_run_shows_the_diff_and_writes_nothing() {
+        let dir = TempDir::new("sync-dry");
+        let outcome = run(&dir, &[feeding("prices.ax", PRINT)], true);
+        assert_eq!(
+            outcome.answer,
+            "✓ prices.ax  2 lines added\n\n--- /dev/null\n+++ b/prices.ax\n@@ -0,0 +1,2 @@\n+2026-01-01 checking -> food 4 USD\n+2026-01-02 checking -> food 5 USD\n"
+        );
+        assert!(!dir.path().join("prices.ax").exists());
+    }
+
+    #[test]
+    fn output_that_does_not_read_is_shown_against_what_was_printed_and_nothing_is_written() {
         let dir = TempDir::new("sync-invalid");
         dir.write("prices.ax", "old\n");
-        let jobs = [job("prices.ax", "printf 'this is not axiom\\n'")];
-        let results = run(&jobs, dir.path(), TIMEOUT);
-        assert!(summary(&results[0]).starts_with("the output is not valid Axiom ("));
-        assert_eq!(fs::read_to_string(dir.path().join("prices.ax")).unwrap(), "old\n");
-        assert_eq!(files_in(&dir), ["prices.ax"]);
-
-        let outcome = report(&jobs, &results, Terminal::plain(100));
+        let outcome = run(&dir, &[feeding("prices.ax", "printf 'this is not axiom\\n'")], false);
         assert!(outcome.failed);
-        assert!(outcome.answer.starts_with("✗ prices.ax  the output is not valid Axiom ("), "{}", outcome.answer);
-        assert!(outcome.answer.contains("[prices.ax:1:"), "{}", outcome.answer);
-        assert!(outcome.answer.contains("this is not axiom"), "{}", outcome.answer);
+        assert!(
+            outcome.answer.starts_with("✗ prices.ax  what it gave is not usable (1 problem)\n"),
+            "{}",
+            outcome.answer
+        );
+        assert!(outcome.answer.contains("the output has a line that does not start with a date"), "{}", outcome.answer);
+        assert!(
+            outcome.answer.contains("[prices.ax:1:") && outcome.answer.contains("this is not axiom"),
+            "{}",
+            outcome.answer
+        );
+        assert_eq!(fs::read_to_string(dir.path().join("prices.ax")).unwrap(), "old\n");
     }
 
     #[test]
-    fn a_failing_script_leaves_the_file_and_the_folder_as_they_were() {
+    fn a_result_that_would_not_parse_is_refused_and_a_file_outside_the_project_too() {
+        let dir = TempDir::new("sync-refused");
+        dir.write("prices.ax", "2026-01-01 checking -> food 4 USD\n");
+        // The printed line reads on its own, but not under the file's own text.
+        let outcome = run(
+            &dir,
+            &[feeding("prices.ax", "printf '2026-01-02 this is nonsense\\n'"), feeding("../x.ax", PRINT)],
+            false,
+        );
+        assert!(outcome.failed);
+        assert!(outcome.answer.contains("✗ prices.ax  it would not parse (1 error)"), "{}", outcome.answer);
+        assert!(outcome.answer.contains("✗ ../x.ax  the file must be inside the project"), "{}", outcome.answer);
+        assert_eq!(fs::read_to_string(dir.path().join("prices.ax")).unwrap(), "2026-01-01 checking -> food 4 USD\n");
+        assert!(!dir.path().parent().unwrap().join("x.ax").exists());
+    }
+
+    #[test]
+    fn a_failing_command_shows_what_it_said_and_leaves_the_folder_as_it_was() {
         let dir = TempDir::new("sync-fails");
         dir.write("prices.ax", "old\n");
-        let results = run(&[job("prices.ax", "echo partial; echo 'no network' >&2; exit 3")], dir.path(), TIMEOUT);
-        let Err(failure) = &results[0] else { panic!("the script fails") };
-        assert_eq!(
-            (failure.summary.as_str(), failure.details.as_str()),
-            ("the command failed (exit status: 3)", "    no network\n")
-        );
+        let outcome = run(&dir, &[feeding("prices.ax", "echo partial; echo 'no network' >&2; exit 3")], false);
+        assert!(outcome.failed);
+        assert_eq!(outcome.answer, "✗ prices.ax  the command failed (exit status: 3)\n    no network\n");
         assert_eq!(fs::read_to_string(dir.path().join("prices.ax")).unwrap(), "old\n");
-        assert_eq!(files_in(&dir), ["prices.ax"]);
+        let mut names: Vec<_> = fs::read_dir(dir.path()).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+        names.sort();
+        assert_eq!(names, ["prices.ax"]);
     }
 
     #[test]
-    fn a_script_that_hangs_is_killed() {
-        let dir = TempDir::new("sync-hangs");
-        let started = Instant::now();
-        let results = run(&[job("out.ax", "sleep 30")], dir.path(), Duration::from_millis(200));
-        assert!(summary(&results[0]).starts_with("the command took more than"));
-        assert!(started.elapsed() < Duration::from_secs(10));
-        assert!(files_in(&dir).is_empty());
-    }
-
-    #[test]
-    fn scripts_run_together_in_the_project_root() {
-        let dir = TempDir::new("sync-parallel");
-        let mut jobs: Vec<Job> = (0..4).map(|_| job("out.ax", "sleep 0.5; exit 1")).collect();
-        jobs.push(job("where.ax", "pwd > cwd.txt; exit 1"));
-        let started = Instant::now();
-        let results = run(&jobs, dir.path(), TIMEOUT);
-        assert_eq!(results.len(), 5);
-        assert!(
-            started.elapsed() < Duration::from_millis(1800),
-            "four half-second scripts took {:?}",
-            started.elapsed()
-        );
-        let cwd = fs::read_to_string(dir.path().join("cwd.txt")).unwrap();
-        assert_eq!(fs::canonicalize(cwd.trim()).unwrap(), fs::canonicalize(dir.path()).unwrap());
-    }
-
-    #[test]
-    fn a_named_file_selects_its_job_and_a_near_miss_is_suggested() {
-        let declared = || vec![job("prices/2026.ax", "a"), job("statements.ax", "b")];
-        let names = |jobs: Vec<Job>| jobs.iter().map(|job| job.file.to_string()).collect::<Vec<_>>();
-        assert_eq!(names(choose(declared(), &[]).unwrap()), ["prices/2026.ax", "statements.ax"]);
-        assert_eq!(names(choose(declared(), &["./statements.ax"]).unwrap()), ["statements.ax"]);
-        let error = choose(declared(), &["statments.ax"]).err().unwrap();
+    fn a_named_source_selects_its_job_and_a_near_miss_is_suggested() {
+        let all = || vec![declared("prices/2026.ax", "a"), declared("statements.ax", "b")];
+        let names = |chosen: Vec<Declared>| chosen.iter().map(|sync| sync.name.to_string()).collect::<Vec<_>>();
+        assert_eq!(names(choose(all(), &[]).unwrap()), ["prices/2026.ax", "statements.ax"]);
+        assert_eq!(names(choose(all(), &["./statements.ax"]).unwrap()), ["statements.ax"]);
+        let error = choose(all(), &["statments.ax"]).err().unwrap();
         assert_eq!(error.message, "no sync is declared for `statments.ax`");
         assert_eq!(error.help[0].text, "did you mean `statements.ax`?");
     }
 
     #[test]
-    fn the_report_says_what_became_of_each_file() {
-        let jobs = [job("prices/2026.ax", ""), job("statements.ax", ""), job("elsewhere.ax", ""), job("slow.ax", "")];
-        let failed = |summary: &str, details: &str| Err(Failure { summary: summary.into(), details: details.into() });
-        let results = vec![
-            Ok(312),
-            failed("the command failed (exit status: 3)", "    login expired\n    see `axiom help`\n"),
-            failed("the file must be inside the project", ""),
-            failed("the command took more than 60 seconds to finish", ""),
+    fn the_report_says_what_became_of_each_source() {
+        use axiom_sync::Failed;
+        let failed = |summary: &str, stderr: &str| {
+            Err(Failure::Command(Failed { summary: summary.into(), stderr: stderr.into() }))
+        };
+        let sources = vec![
+            ("prices/2026.ax".to_string(), Ok(312)),
+            (
+                "statements.ax".to_string(),
+                failed("the command failed (exit status: 3)", "login expired\nsee `axiom help`"),
+            ),
+            ("checking".to_string(), Ok(0)),
         ];
-        let outcome = report(&jobs, &results, Terminal::plain(100));
+        let outcome = report(&sources, &[], false, Path::new("."), Terminal::plain(100));
         assert!(outcome.failed);
         assert_eq!(
             outcome.answer,
             "\
-✓ prices/2026.ax  312 items written
+✓ prices/2026.ax  312 lines added
 ✗ statements.ax   the command failed (exit status: 3)
     login expired
     see `axiom help`
-✗ elsewhere.ax    the file must be inside the project
-✗ slow.ax         the command took more than 60 seconds to finish
+✓ checking        nothing new
 "
         );
     }
