@@ -259,7 +259,7 @@ fn plan_is_a_contract(loc: Loc, word: &str) -> Diagnostic {
     Diagnostic::error("plan-is-a-contract", format!("`{word}` is gone: what repeats is a contract"))
         .label(loc, "a promise of flows, with a name and a party")
         .note("a contract states its schedule once, and the journal records each time it is kept")
-        .help("write `contract NAME with PARTY` and, indented, `45 USD monthly on 8 from visa`; then `08 NAME` kept")
+        .help("write `contract NAME with PARTY` and, indented, `45 USD monthly on 8 from visa`; then `08 NAME` says it")
 }
 
 fn system_not_first(loc: Loc) -> Diagnostic {
