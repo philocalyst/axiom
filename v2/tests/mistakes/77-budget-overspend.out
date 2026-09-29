@@ -29,5 +29,5 @@ warning[law]: law `budget` does not hold for expenses/food
 ───╯
 
 2 warnings
-✓ 5 flows · 6 places · 2 laws enforced · net worth 2,250.00 USD
+✓ 5 flows · 7 places · 2 laws enforced · net worth 2,250.00 USD
 [exit status 0]

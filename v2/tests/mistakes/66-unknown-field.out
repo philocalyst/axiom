@@ -6,7 +6,7 @@ error[unknown-field]: an entity has no `aeg`
    │               │    ╰── no such field
    │               ╰── this is an entity
    │
-   = note: it has `owner`, `kind`, `age`, `until`, `purpose`, `filing` or `born`
+   = note: it has `owner`, `kind`, `age`, `until`, `filing`, `purpose` or `born`
    = help: did you mean `age`?
 17 +     require owner.age >= 18y "owner is a minor"
 ───╯
