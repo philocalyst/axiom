@@ -9,9 +9,9 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Ratio};
 use axiom_engine::{Holding, Ledger, Options};
-use axiom_model::{Book, Class, Commodity, Flow, Place, Value};
+use axiom_model::{Book, Class, Commodity, End, Flow, Place, Value};
 
-use crate::history::Held;
+use crate::history::{Held, moves_quantity};
 use crate::lens::{Basket, Lens, Liquidity};
 
 /// A cash place that goes below zero.
@@ -92,10 +92,14 @@ fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qt
 /// that is not cash is limited by what it holds, and a payment into a debt by
 /// what is owed. `None` when there is nothing to move.
 fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
-    let held_back = matches!(lens.liquidity(flow.from, flow.out.unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
+    // A basis end moves no quantity, so there is none for it to run out of.
+    let leaves = moves_quantity(&flow, End::From);
+    let arrives = moves_quantity(&flow, End::To);
+    let held_back =
+        leaves && matches!(lens.liquidity(flow.from, flow.out.unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
     let room = if held_back {
         Some(ledger.balance(flow.from, flow.out.unit))
-    } else if lens.book.places[flow.to].class == Class::Liability {
+    } else if arrives && lens.book.places[flow.to].class == Class::Liability {
         Some(-ledger.balance(flow.to, flow.arrive.unit))
     } else {
         None

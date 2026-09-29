@@ -14,13 +14,13 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Span, Sym, par};
 use axiom_engine::{Effect, Holding, Ledger, Options, Run};
-use axiom_model::{Amount, Book, Class, Entity, Flow, Place};
+use axiom_model::{Amount, Book, Class, Entity, Place};
 
 use crate::claims::{self, Claim};
 use crate::history::{Held, postings};
 use crate::lens::{Basket, Lens, Liquidity, Whose};
 use crate::places::path;
-use crate::synth::planned;
+use crate::synth::hypothetical;
 use crate::table::{headline, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
@@ -212,19 +212,15 @@ impl<'h> Reach<'h> {
         let Some(to) = to else { return reach };
         // The hypothetical flow borrows a real one's transaction and source line.
         let Some(&template) = book.touching[holding.place].last() else { return reach };
-        let flow = Flow {
-            from: holding.place,
-            to,
-            payee: None,
-            select: Box::default(),
-            ..planned(&book.flows[template], lens.day, held, Amount::new(cash_in, book.base))
-        };
+        let flow =
+            hypothetical(&book.flows[template], lens.day, holding.place, to, held, Amount::new(cash_in, book.base));
 
         let mut fork = ledger.fork();
         let applied = fork.apply(&flow);
         fork.advance(horizon);
         let recorded = fork.recorded();
-        let mut forbidden = recorded.violations[applied.violations].iter().filter(|v| !v.warn && !v.waived && !v.priced);
+        let mut forbidden =
+            recorded.violations[applied.violations].iter().filter(|v| !v.warn && !v.waived && !v.priced);
         if let Some(violation) = forbidden.next() {
             let message = &recorded.diagnostics[violation.diagnostic as usize].message;
             (reach.blocked, reach.because) = (true, format!("blocked: {}", headline(message)));

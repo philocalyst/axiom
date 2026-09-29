@@ -130,7 +130,5 @@ window).
 - **One law per due date.** `by` names one day and `closing` fires once a year, so
   Q1-Q3 of each year is one law each. 2025's are written; 2026's are not, and
   nothing warns that they are missing (F27).
-- **Plans drop `for`.** A plan's `for 2026` is not carried into the forecast, so
-  the January installment is planned in December (`plans.ax`).
 - **Cash or accrual is not a property of the person.** The cash method is a law on
   the receivable account.

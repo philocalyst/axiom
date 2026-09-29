@@ -7,8 +7,8 @@ use axiom_core::{Day, FileId};
 use axiom_engine::{Options, Run};
 use axiom_model::{Book, Source};
 
-use crate::tests::{lines, show};
 use crate::Query;
+use crate::tests::{lines, show};
 
 fn day(y: i32, m: u32, d: u32) -> Day {
     Day::from_ymd(y, m, d).unwrap()
@@ -16,7 +16,7 @@ fn day(y: i32, m: u32, d: u32) -> Day {
 
 /// Compiles `text` as a project of one file, runs it through `today`, and
 /// hands the book and the run to `then`. The book must have no errors.
-fn with_run<R>(text: &str, today: Day, then: impl FnOnce(&Book, &Run) -> R) -> R {
+pub(crate) fn with_run<R>(text: &str, today: Day, then: impl FnOnce(&Book, &Run) -> R) -> R {
     let (file, parsed) = axiom_syntax::parse(FileId(0), text);
     assert!(parsed.is_empty(), "the source does not parse: {parsed:?}");
     let (book, built) = axiom_model::build(&[Source { path: "axiom.ax", file, embedded: false }]);
@@ -138,6 +138,129 @@ law audit
     });
 }
 
+// ─── Plans ──────────────────────────────────────────────────────────────────
+
+/// Three plans that say more than where the money goes: a premium paid each
+/// January for the year, a savings deposit held for an envelope, and a
+/// depreciation that changes basis.
+const PLANS: &str = "\
+base USD
+commodity USD
+  precision 2
+commodity HOME
+
+kind envelope : entity
+  restricted
+
+entity car-fund : envelope
+
+account assets/checking
+account assets/savings
+account assets/house
+account expenses/insurance
+account expenses/depreciation
+
+plan premium every year from 2026-01-15 checking -> insurance 1_200 USD for 2026
+plan deposit every month on 1 from 2026-01-01 checking -> savings 100 USD for car-fund basis 90 USD
+plan depreciation every month on 28 from 2026-01-28 house.basis -> depreciation 300 USD
+";
+
+#[test]
+fn a_planned_occurrence_keeps_the_terms_of_its_template_and_moves_its_period_along() {
+    with_run(PLANS, day(2026, 3, 1), |book, _| {
+        let template = |plan: usize| &book.plans.values().nth(plan).unwrap().template[0];
+        let usd = |flow: &axiom_model::Flow| flow.out;
+
+        let premium = template(0);
+        assert_eq!((premium.recognized.from, premium.recognized.until), (day(2026, 1, 1), day(2026, 12, 31)));
+        let next = crate::synth::planned(premium, day(2027, 1, 15), usd(premium), usd(premium));
+        assert_eq!(next.day, day(2027, 1, 15));
+        assert_eq!((next.recognized.from, next.recognized.until), (day(2027, 1, 1), day(2027, 12, 31)));
+
+        let deposit = template(1);
+        let next = crate::synth::planned(deposit, day(2026, 5, 1), usd(deposit), usd(deposit));
+        assert_eq!(next.terms, deposit.terms);
+        assert!(
+            next.terms().hold.is_some() && next.terms().basis.is_some(),
+            "held for the envelope, at 90 USD of basis"
+        );
+
+        let depreciation = template(2);
+        let next = crate::synth::planned(depreciation, day(2026, 5, 28), usd(depreciation), usd(depreciation));
+        assert_eq!(next.terms().basis_end, Some(axiom_model::End::From));
+        assert_eq!(crate::places::route(book, &next), "assets/house.basis → expenses/depreciation");
+    });
+}
+
+/// A plan of depreciation, and the law that recaptures what it took.
+const DEPRECIATING: &str = "\
+base USD
+commodity USD
+  precision 2
+commodity HOME
+  precision 0
+
+kind property : asset
+  liquidity 90d
+
+entity treasury
+
+account assets/house : property
+account assets/checking
+account income/salary
+account expenses/depreciation
+
+opening 2026-01-01
+  house 1 HOME basis 120_000 USD
+  checking 5_000 USD
+
+plan depreciation every month on 28 from 2026-01-28 house.basis -> depreciation 300 USD
+
+law count-depreciation
+  on in
+  when to is expenses/depreciation
+  count amount as depreciation
+
+law recapture
+  each year
+  owe tally(depreciation) * 25% to treasury as recapture
+
+2026-01-05 income/salary -> checking 100 USD
+";
+
+/// The plan lowers the house's basis and recognizes the expense: the laws see
+/// ten months of depreciation, and no money leaves the house, which holds none.
+#[test]
+fn the_forecast_runs_a_plan_that_changes_basis_as_one_that_moves_no_money() {
+    with_run(DEPRECIATING, day(2026, 3, 15), |book, run| {
+        let forecast = Query::Forecast { until: Some(day(2026, 12, 31)), paths: 1 };
+        let report = crate::report(book, run, &forecast, None).unwrap();
+        let section = |heading: &str| report.sections.iter().find(|s| s.heading.as_deref() == Some(heading)).unwrap();
+        let outlook = lines(section("Liquid net worth"));
+        assert_eq!(outlook[0], "2026-03-15 | 5,100.00 USD | 5,100.00 USD");
+        assert_eq!(
+            outlook.last().unwrap(),
+            "2026-12-31 | 4,350.00 USD | 5,100.00 USD",
+            "5,100 less the 750 recaptured"
+        );
+        assert_eq!(lines(section("Obligations coming due")), ["2026-12-31 | recapture | treasury | 750.00 USD"]);
+        assert!(lines(section("Problems ahead")).is_empty(), "the house is not overdrawn");
+    });
+}
+
+/// A withdrawal that `available` invents is not a plan: it says nothing about
+/// period, envelope or basis, whatever the flow it borrows its line from said.
+#[test]
+fn a_hypothetical_flow_borrows_only_the_transaction_and_the_line() {
+    with_run(PLANS, day(2026, 3, 1), |book, _| {
+        let deposit = &book.plans.values().nth(1).unwrap().template[0];
+        let flow =
+            crate::synth::hypothetical(deposit, day(2026, 4, 2), deposit.to, deposit.from, deposit.out, deposit.out);
+        assert_eq!((flow.txn, flow.loc), (deposit.txn, deposit.loc));
+        assert_eq!((flow.terms, flow.recognized.from, flow.recognized.until), (None, day(2026, 4, 2), day(2026, 4, 2)));
+    });
+}
+
 // ─── Taxes before the return closes ─────────────────────────────────────────
 
 /// A tally counted as the year goes, and a tax figured from it on April 15 of
@@ -210,7 +333,10 @@ fn tax_with_one_return_closed_and_one_not_totals_what_is_owed_so_far() {
                 "=Total owed so far |  |  | 200.00 USD |",
             ]
         );
-        assert_eq!(owed.notes[0], "The 2026 return closes on 2027-06-15; what it owes is not figured yet; the tallies are counted so far.");
+        assert_eq!(
+            owed.notes[0],
+            "The 2026 return closes on 2027-06-15; what it owes is not figured yet; the tallies are counted so far."
+        );
     });
 }
 
