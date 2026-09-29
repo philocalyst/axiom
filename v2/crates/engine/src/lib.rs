@@ -281,6 +281,15 @@ pub struct Pad {
     pub day: Day,
 }
 
+/// A ledger's records so far, borrowed: what [`Ledger::recorded`] returns.
+#[derive(Clone, Copy)]
+pub struct Recorded<'a> {
+    pub gains: &'a [Gain],
+    pub effects: &'a [Effect],
+    pub violations: &'a [Violation],
+    pub diagnostics: &'a [Diagnostic],
+}
+
 /// What one applied flow caused: ranges into the ledger's records. The
 /// diagnostic range covers everything reported while applying it, including
 /// the diagnostics behind its violations.

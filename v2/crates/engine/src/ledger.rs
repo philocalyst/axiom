@@ -21,7 +21,7 @@ use crate::motion::{Amounts, Motion};
 use crate::scope::display;
 use crate::state::{Record, Scratch, World};
 use crate::timeline::{self, Deadline, Fact, Moment, Sources, Timeline};
-use crate::{Applied, Cause, Holding, Options, Posted, Run, State, explain, infer, relief};
+use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain, infer, relief};
 
 /// The book's state as of some day. Cheap to clone relative to a replay.
 #[derive(Clone)]
@@ -146,6 +146,20 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Every non-empty holding, by place then commodity.
     pub fn holdings(&self) -> impl Iterator<Item = &Holding> {
         self.world.holdings.iter().filter(|holding| !holding.is_empty())
+    }
+
+    /// What has been recorded since this ledger began, or was forked: the
+    /// vectors an [`Applied`] range indexes. Reading a fork's own records
+    /// costs what they hold, where [`finish`](Ledger::finish) costs the size
+    /// of the journal.
+    pub fn recorded(&self) -> Recorded<'_> {
+        let record = &self.record;
+        Recorded {
+            gains: &record.gains,
+            effects: &record.effects,
+            violations: &record.violations,
+            diagnostics: &record.diagnostics,
+        }
     }
 
     /// Stops and hands over everything recorded along the way.
