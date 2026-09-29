@@ -104,7 +104,7 @@ impl<'s> Parser<'s> {
             self.selector()?;
         }
         // `.basis` must touch what it qualifies, and so is no other token.
-        let basis = matches!((self.tok(), self.lexer.peek_second().tok), (Tok::Punct("."), Tok::Name("basis")));
+        let basis = self.at(".") && matches!(self.lexer.peek_second().tok, Tok::Name("basis"));
         if basis && self.peek().loc.start == self.lexer.prev_end() {
             self.bump();
             self.bump();
