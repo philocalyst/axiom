@@ -149,15 +149,18 @@ kind taxpayer : entity
   has children number
   children     0
 
-/// A human being.
+/// A human being. Alone, a person files as `single` unless they say otherwise.
 kind person : taxpayer
   has born date
+  filing single
 
 /// People who share money and file one return: its members `member` it. It
 /// owns what they hold together, lives where they live, and is governed as one,
-/// so its members' pay counts into one return. What is personal stays with the
-/// person: a 401(k)'s yearly limit, the age that opens a withdrawal.
+/// so its members' pay counts into one return, and it files `joint`. What is
+/// personal stays with the person: a 401(k)'s yearly limit, the age that opens
+/// a withdrawal.
 kind household : taxpayer
+  filing joint
 
 /// Anyone who is not a person: a company, a school, a landlord.
 kind org : entity

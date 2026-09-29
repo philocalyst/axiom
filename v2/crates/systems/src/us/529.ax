@@ -1,14 +1,16 @@
 /// United States 529 college savings plans.
 ///
 /// A 529 plan is a tax-deferred account funded with after-tax money. What was
-/// put in is its basis, and the growth is untaxed while it stays inside, and
+/// put in is its basis (`basis cost`, whether it was your own money or a gift
+/// from a grandparent), and the growth is untaxed while it stays inside, and
 /// untaxed when it comes out to pay a qualified education expense. Anything
 /// else that comes out has its earnings taxed and a 10% tax added.
 ///
 /// A withdrawal relieves contributions and earnings pro rata, so its earnings
 /// are the plan's earnings in the same proportion (Form 1099-Q). Spend from a
 /// plan straight into a place of kind `education`, and the withdrawal is
-/// qualified.
+/// qualified. Growth reaches the plan through a place of kind `market`, and is
+/// never counted as a contribution.
 ///
 /// The figures are community-maintained data. Verify them against the IRS
 /// (irs.gov, Rev. Proc. for the annual gift-tax exclusion) before relying on
@@ -20,42 +22,39 @@ use us
 
 /// A 529 qualified tuition program (IRC §529).
 kind 529-plan : tax-deferred
+  basis cost
   select prorata
   liquidity 5d
+  pays education
   has beneficiary entity
 
   /// Contributions above the annual gift-tax exclusion count as a gift to the
   /// beneficiary, which may need a gift-tax return (Form 709, IRC §2503(b)).
-  /// This deposit took the year's contributions over the exclusion. A gift of
-  /// up to five years of the exclusion may be made at once by electing to
-  /// spread it (IRC §529(c)(2)(B)); if you have, this warning can be waived
-  /// with `!`.
+  /// This deposit took the year's contributions over the exclusion. What
+  /// counts is money paid in, yours or a relative's, and not the market's
+  /// growth or a transfer from another plan.
+  ///
+  /// To fix: a gift of up to five years of the exclusion may be made at once by
+  /// electing to spread it (IRC §529(c)(2)(B)); if you have, mark the deposit
+  /// `!`.
   law gift-exclusion
     on in
-    when not from is income | tax-deferred
-    warn total(in, year) <= gift-exclusion[year] "529 contributions over the annual gift exclusion"
-
-  /// The earnings in a withdrawal that did not pay a qualified education
-  /// expense are taxable income (IRC §529(c)(3)(A)), counted here as a
-  /// distribution. Paying an education place straight from the plan, or moving
-  /// the money to another 529 plan, is qualified.
-  law nonqualified-income
-    on gain
-    when gain > empty
-    when not to is education | 529-plan
-    count gain as distributions
-    count gain as agi
+    when not from is market | tax-deferred
+    count amount as 529-contributions
+    warn tally(529-contributions) <= gift-exclusion[year] "529 contributions over the annual gift exclusion"
 
   /// A withdrawal that did not pay a qualified education expense owes an
   /// additional 10% of its earnings (IRC §529(c)(6), §530(d)(4)). This
   /// withdrawal went somewhere other than a place of kind `education`, so it is
-  /// priced at that 10%. To reimburse yourself for something the plan should
-  /// have paid, or when an exception applies (a scholarship, a death or
-  /// disability of the beneficiary), keep the withdrawal and mark it `!` with
-  /// the reason.
+  /// priced at that 10%, and its earnings count as income.
+  ///
+  /// To fix: to reimburse yourself for something the plan should have paid, or
+  /// when an exception applies (a scholarship, a death or disability of the
+  /// beneficiary), keep the withdrawal and mark it `!` with the reason.
   law nonqualified-penalty
     on gain
     when gain > empty
+    when not to is market
     require to is education | 529-plan else owe 10% * gain to irs as nonqualified-529-penalty "529 withdrawal that did not pay an education expense"
 
 

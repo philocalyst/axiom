@@ -5,7 +5,8 @@
 /// `us/ny/nyc`. The city taxes the same base as the state: federal adjusted
 /// gross income, less the New York standard deduction (declared by `us/ny`,
 /// which this system includes). Tax withheld or paid to the city during the
-/// year is credited.
+/// year is credited to the year it is `for`, and what is left is owed by April
+/// 15.
 ///
 /// Simplified on purpose: it leaves out credits and the city's part-year
 /// resident rules. Only the `single` and `joint` filing statuses have figures.
@@ -28,25 +29,33 @@ entity nyc-dof : government
 kind nyc-tax : expense
 
 
-/// Tax withheld from pay, or paid in installments, is credited against the
-/// city tax owed for the year. Send money to a place of kind `nyc-tax`, or let
-/// a paycheck leg do it.
-law credit-nyc-withholding
+/// Tax withheld from pay, or paid in installments, is credited against the city
+/// tax owed for the year the payment is `for`. It is also a local tax paid,
+/// which the federal return itemizes up to a cap.
+///
+/// To fix: send the payment to a place of kind `nyc-tax`, and say what year it is
+/// for with `for 2025`.
+law credit-nyc-payments
   on in
   when to is nyc-tax
   count amount as nyc-withheld
+  count amount as salt
+  when date > date(year, 12, 31)
+  owe -amount to nyc-dof by date(year + 1, 4, 15) as paid-after-year-end
 
 /// New York City resident income tax for the year (Administrative Code §11-1701),
-/// on the same taxable income as the state. Tax already withheld or paid is
-/// credited, and the rest is owed by April 15 of the next year (Form IT-201).
-/// A refund is not booked.
+/// on the same taxable income as the state. What was paid by the end of the
+/// year is set against it, and the rest is owed by April 15 (Form IT-201). When
+/// more was paid than is due, the amount is negative: a refund.
+///
+/// To fix: the brackets depend on `filing`: set `filing single` or `filing joint`
+/// on the person or household that lives here.
 law city-income-tax
   each year
   let taxable = max(tally(agi) - deduction[year, owner.filing], empty)
   let liability = progressive(brackets[year, owner.filing], taxable)
   count liability as nyc-income-tax
-  owe max(liability - tally(nyc-withheld), empty) to nyc-dof by date(year + 1, 4, 15) as nyc-income-tax
-
+  owe liability - tally(nyc-withheld) to nyc-dof by date(year + 1, 4, 15) as nyc-income-tax
 
 // The marginal rate above each threshold. They have not changed in years, so
 // the 2024 rows apply to every later year until a new row is written.

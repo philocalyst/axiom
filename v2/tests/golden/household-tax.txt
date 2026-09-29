@@ -5,21 +5,24 @@ Counted
   ────────────────────────────────────────────────────────────
   us
     wages                 24,000.00 USD  15 sources
-    agi                   22,239.85 USD  25 sources
-    federal-withheld       2,640.00 USD  3 sources
+    total-income          22,098.30 USD  23 sources
+    pretax                 2,400.00 USD  3 sources
+    payments               2,640.00 USD  3 sources
     interest                 147.05 USD  3 sources
+    investment-income        148.93 USD  4 sources
     short-term-gains         141.55 USD  2 sources
+    distributions            349.37 USD  journal/2026/03.ax:34
     dividends                  1.88 USD  journal/2026/03.ax:37
   ────────────────────────────────────────────────────────────
     us/401k
       elective-deferrals   2,400.00 USD  3 sources
-      pretax               2,400.00 USD  3 sources
   ────────────────────────────────────────────────────────────
     us/529
-      distributions          349.37 USD  journal/2026/03.ax:34
+      529-contributions      900.00 USD  3 sources
   ────────────────────────────────────────────────────────────
     us/ca
       ca-withheld          1,110.00 USD  3 sources
+      salt                 1,110.00 USD  3 sources
 
 Owed
   Owed                                    To   Due            Amount  From

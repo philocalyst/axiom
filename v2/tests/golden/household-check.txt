@@ -19,20 +19,20 @@ note[nonqualified-penalty]: 34.94 USD owed to irs as nonqualified-529-penalty, d
    │
 34 │ 2026-03-25 college -> checking 1_500 USD
    │ ────────────────────┬───────────────────
-   │                     ╰── this flow: a gain of 349.37 USD on 349.37 USD
+   │                     ╰── this flow: a gain of 349.37 USD on 1,349.84 USD
    │
-   ├─[us/529.ax:59:13] (built in)
+   ├─[us/529.ax:58:13] (built in)
    │
-59 │     require to is education | 529-plan else owe 10% * gain to irs as nonqualified-529-penalty…
+58 │     require to is education | 529-plan else owe 10% * gain to irs as nonqualified-529-penalty…
    │             ─┬
    │              ╰── assets/bank/checking
    │
    = note: A withdrawal that did not pay a qualified education expense owes an additional 10% of its
            earnings (IRC §529(c)(6), §530(d)(4)). This withdrawal went somewhere other than a place
-           of kind `education`, so it is priced at that 10%. To reimburse yourself for something the
-           plan should have paid, or when an exception applies (a scholarship, a death or disability
-           of the beneficiary), keep the withdrawal and mark it `!` with the reason.
-   = help: if an exception applies, keep the flow and mark it `!` with the reason
+           of kind `education`, so it is priced at that 10%, and its earnings count as income.
+   = help: to reimburse yourself for something the plan should have paid, or when an exception
+           applies (a scholarship, a death or disability of the beneficiary), keep the withdrawal
+           and mark it `!` with the reason.
 
 note[pad]: accepted a gap on assets/cash
    ╭─[journal/2026/03.ax:42:1]
@@ -42,4 +42,4 @@ note[pad]: accepted a gap on assets/cash
    │               ╰── 14.50 USD moved out of assets/cash into unknown
 
 1 warning · 1 priced · 1 waived
-✓ 68 flows · 26 places · 16 laws enforced · net worth 77,597.73 USD
+✓ 67 flows · 26 places · 19 laws enforced · net worth 77,597.73 USD
