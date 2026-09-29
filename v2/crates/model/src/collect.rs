@@ -61,8 +61,6 @@ pub(crate) enum Entry<'a, 's> {
 #[derive(Clone, Copy)]
 pub(crate) struct Run<'a, 's> {
     pub site: &'a Site<'a, 's>,
-    /// The index in the source of the run's first item.
-    pub first: usize,
     pub items: &'a [Item<'s>],
 }
 
@@ -159,10 +157,7 @@ pub(crate) fn survey<'a, 's>(sites: &'a [Site<'a, 's>], names: &mut Interner<'s>
     const RUN: usize = 4096;
     let runs: Vec<Run> = sites
         .iter()
-        .flat_map(|site| {
-            let chunks = site.source.file.items.chunks(RUN).enumerate();
-            chunks.map(move |(at, items)| Run { site, first: at * RUN, items })
-        })
+        .flat_map(|site| site.source.file.items.chunks(RUN).map(move |items| Run { site, items }))
         .collect();
     let (declared, facts) =
         par::join(|| par::map_each(&runs, Declared::of), || par::map_each(sites, |site| Facts::of(&site.source.file)));
@@ -188,8 +183,8 @@ impl<'a, 's> Declared<'a, 's> {
     fn of(run: &Run<'a, 's>) -> Declared<'a, 's> {
         let (site, file) = (run.site, &run.site.source.file);
         let mut found = Declared::default();
-        for (offset, item) in run.items.iter().enumerate() {
-            if let Err(misplaced) = placement(site, run.first + offset, item) {
+        for item in run.items {
+            if let Err(misplaced) = placement(site, item) {
                 found.diags.push(misplaced);
                 continue;
             }
@@ -331,16 +326,11 @@ impl<'s> Facts<'s> {
 
 /// Whether an item belongs where it was written: a system declares kinds,
 /// entities, commodities, params, codes and laws, and nothing else.
-fn placement(site: &Site, at: usize, item: &Item) -> Result<(), Diagnostic> {
+fn placement(site: &Site, item: &Item) -> Result<(), Diagnostic> {
     let file = &site.source.file;
     let in_system = matches!(site.home, Home::System(_));
     let (belongs, what) = match item.kind {
         ItemKind::Setting(id) => match file[id] {
-            Setting::System(_) if at > 0 => {
-                return Err(Diagnostic::error("system-position", "a system must be the first item of its file")
-                    .label(item.loc, "this file's first item is something else")
-                    .help("move `system` to the top, or remove it to make this a project file"));
-            }
             Setting::System(_) | Setting::Use(_) => (true, ""),
             _ => (!in_system, "a project setting"),
         },

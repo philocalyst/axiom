@@ -107,7 +107,7 @@ pub(crate) fn arrange<'a, 's>(
             path: names.intern(path),
             laws: Box::default(),
             doc: source.and_then(|source| source.file.items[0].doc).map(|doc| names.intern(doc.0)),
-            loc: source.map(|source| source.file.loc(path)),
+            loc: source.and_then(|source| defined_by(source).map(|text| source.file.loc(text))),
         }
     });
     let sites = kept

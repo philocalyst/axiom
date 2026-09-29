@@ -1059,3 +1059,100 @@ account assets/wallet
         assert!(book.flows.is_empty());
     });
 }
+
+/// Each way of being refused, the smallest text that does it, and the one code
+/// it must be reported under: exactly once, with the primary label in the
+/// project's own file.
+const REFUSALS: [(&str, &str); 44] = [
+    ("account-root", "account nonsense/x\n"),
+    ("all-target", "2026-01-05 checking ->\n  savings all USD\n"),
+    ("all-unknown", "2026-01-05 checking all USD -> savings ? USD\n"),
+    ("basis-both", "2026-01-05 checking.basis -> savings.basis 5 USD\n"),
+    ("call-keyword", "law l\n  on in\n  require total(sideways, month) <= 5 USD\n"),
+    ("closed-before-opened", "account assets/odd\n  opened 2026-05-01\n  closed 2026-01-01\n"),
+    ("duplicate-base", "base EUR\n"),
+    ("duplicate-row", "param p\n  2026 5 USD\n  2026 6 USD\n"),
+    ("kind-parent", "kind orphan\n"),
+    ("law-trigger", "law l\n  on spend\n  require amount <= 5 USD\n"),
+    ("missing-amount", "2026-01-05 checking -> savings\n"),
+    ("not-constant", "param p\n  2026 5 USD + 1 USD\n"),
+    ("opening-place", "opening 2026-01-01\n  checking[fifo] 5 USD\n"),
+    ("param-key-order", "param p\n  single 2026 5 USD\n"),
+    ("param-lookup", "law l\n  on in\n  require limit[2026, 2026] <= 5 USD\nparam limit\n  2026 5 USD\n"),
+    ("param-shape", "param p\n  2026 5 USD\n  2026 single 6 USD\n"),
+    ("param-type", "param p\n  2026 5 USD\n  2027 6%\n"),
+    ("price-inferred", "2026-01-05 checking ? USD -> brokerage 3 VTI @ 300 USD\n"),
+    ("price-needs-two", "2026-01-05 checking -> savings 5 USD @ 3 USD\n"),
+    ("price-on-transfer", "2026-01-05 checking 5 USD -> savings 5 USD @ 1 USD\n"),
+    ("price-self", "2026-01-05 USD 1 USD\n"),
+    ("price-unit", "2026-01-05 checking 5 USD -> brokerage 3 VTI @ 3 EUR\n"),
+    ("price-vanishes", "commodity USD\n  precision 2\n2026-01-05 checking -> brokerage 1 VTI @ 0.001 USD\n"),
+    ("property-type", "account assets/odd\n  opened yes\n"),
+    ("reserved-property", "kind x : asset\n  has balance date\n"),
+    ("residence-order", "entity someone\n  lives std from 2026-01-01 until 2025-01-01\n"),
+    ("schedule-order", "param p\n  2026 0 USD 10% | 0 USD 12%\n"),
+    ("schedule-threshold", "param p\n  2026 5 10%\n"),
+    ("schedule-unit", "param p\n  2026 0 USD 10% | 100 EUR 12%\n"),
+    ("selector-target", "2026-01-05 checking -> savings[fifo] 5 USD\n"),
+    ("split-commodity", "2026-01-05 acme ->\n  checking ...\n"),
+    ("split-inferred", "2026-01-05 acme -> 100 USD\n  checking ...\n  savings ? USD\n"),
+    ("split-price", "2026-01-05 acme -> 100 USD\n  checking 5 USD\n  brokerage 2 VTI\n  brokerage 3 VXUS\n"),
+    ("split-rest", "2026-01-05 acme -> 100 USD\n  checking ...\n  brokerage 2 VTI\n"),
+    (
+        "split-rest",
+        "plan p every 2w from 2026-01-02 acme -> 100 USD\n  savings 40 USD\n  checking ...\n2026-01-16 p\n  savings ...\n",
+    ),
+    ("split-total", "2026-01-05 acme -> ? USD\n  checking ...\n"),
+    ("unknown-exchange", "2026-01-05 checking ? USD -> brokerage ? VTI\n"),
+    ("empty-amount", "2026-01-05 checking -> savings empty\n"),
+    ("zero-flow", "2026-01-05 checking -> savings 0 USD\n"),
+    ("price-zero", "2026-01-05 checking -> brokerage 3 VTI @ 0 USD\n"),
+    ("amount-precision", "commodity USD\n  precision 2\n2026-01-05 checking -> savings 1.005 USD\n"),
+    ("unknown-code", "2026-01-05 #nothing settled\n"),
+    ("bad-split", "2026-01-05 VTI split 99999999999999999 for 0.00000000000000001\n"),
+    ("amount-range", "commodity USD\n  precision 2\n2026-01-05 checking -> savings 99999999999999999 USD\n"),
+];
+
+#[test]
+fn every_refusal_is_reported_once_under_its_own_code_at_the_users_line() {
+    let mut wrong = Vec::new();
+    for (code, text) in REFUSALS {
+        let text = format!("{ACCOUNTS}\n{text}");
+        let parsed = [("std.ax", STD, true), ("axiom.ax", text.as_str(), false)].map(|(path, text, embedded)| {
+            let (file, syntax) = parse(FileId(1 - embedded as u16), text);
+            (Source { path, file, embedded }, syntax)
+        });
+        if let Some(syntax) = parsed.iter().flat_map(|(_, syntax)| syntax).next() {
+            wrong.push(format!("{code}: the parser stops it first, as {}", syntax.code));
+            continue;
+        }
+        let sources: Vec<_> = parsed.into_iter().map(|(source, _)| source).collect();
+        let (_, diags) = build(&sources);
+        let found = codes(&diags);
+        let project =
+            |diagnostic: &Diagnostic| diagnostic.labels.iter().find(|label| label.primary).map(|l| l.loc.file);
+        if found != [code] {
+            wrong.push(format!("{code}: reported as {found:?}"));
+        } else if project(&diags[0]) != Some(FileId(1)) {
+            wrong.push(format!("{code}: not at a line of the project"));
+        }
+    }
+    assert!(wrong.is_empty(), "\n{}", wrong.join("\n"));
+}
+
+#[test]
+fn a_system_may_only_hold_what_systems_hold_and_is_defined_once() {
+    let bank = "account assets/bank : bank\n";
+    let cases: [(&str, &[(&str, &str)]); 3] = [
+        ("system-item", &[("systems/a.ax", "system a\naccount assets/x\n"), ("axiom.ax", bank)]),
+        ("duplicate-system", &[("systems/a.ax", "system a\n"), ("systems/b.ax", "system a\n"), ("axiom.ax", bank)]),
+        ("law-position", &[("axiom.ax", "commodity X\n  law l\n    on in\n    require amount <= 5 USD\n")]),
+    ];
+    for (code, files) in cases {
+        with_files(files, |_, diags| {
+            assert_eq!(codes(diags), [code], "{diags:?}");
+            let primary = diags[0].labels.iter().find(|label| label.primary).unwrap();
+            assert_ne!(primary.loc.file, FileId(0), "{code}: the built-in std is never the primary");
+        });
+    }
+}
