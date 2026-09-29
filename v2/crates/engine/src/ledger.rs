@@ -235,6 +235,10 @@ impl<'b, 's> Ledger<'b, 's> {
             violations: record.violations,
             headroom,
             pads: record.pads,
+            // v3 bridge: the v3 fold keeps no assets, promises or adjustments.
+            assets: Vec::new(),
+            promises: Vec::new(),
+            adjustments: Vec::new(),
             checks: record.checks.into(),
             diagnostics: record.diagnostics,
         }

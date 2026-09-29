@@ -13,6 +13,7 @@
 use axiom_core::{Id, Qty};
 use axiom_model::{Book, Class, Entity, Place, Subject};
 
+use crate::eval::V3;
 use crate::motion::{Motion, Moves};
 
 /// The entities that own what `owner` owns: itself, what it belongs to in the
@@ -30,6 +31,7 @@ pub(crate) fn inside(book: &Book, subject: Subject, place: Id<Place>) -> bool {
             let place = &book.places[place];
             place.class == Class::Asset && owners(book, place.owner).any(|owner| owner == root)
         }
+        Subject::Asset(_) => unreachable!("{V3}"),
     }
 }
 
@@ -47,6 +49,7 @@ pub(crate) fn owner_of(book: &Book, subject: Subject) -> Id<Entity> {
     match subject {
         Subject::Place(place) => book.places[place].owner,
         Subject::Entity(entity) => entity,
+        Subject::Asset(asset) => book.assets[asset].owner,
     }
 }
 
@@ -55,7 +58,7 @@ pub(crate) fn owner_of(book: &Book, subject: Subject) -> Id<Entity> {
 /// equity are flipped, and flipping twice is the identity, so this converts
 /// both ways.
 pub(crate) fn display(book: &Book, place: Id<Place>, qty: Qty) -> Qty {
-    Qty(qty.0 * book.places[place].class.display_sign())
+    Qty(qty.0 * book.v3_root(place).display_sign())
 }
 
 /// Whether `unit` in `place` is money: base currency that is not a claim.

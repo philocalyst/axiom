@@ -181,6 +181,10 @@ struct Machine<'a, 's> {
 
 const TYPED: &str = "the model type-checks operands";
 
+/// v3 bridge: the v3 model compiles no law of an asset, and none that consumes
+/// or carries basis, so the v3 fold never meets them.
+pub(crate) const V3: &str = "the v3 model compiles no asset laws";
+
 impl<'a, 's> Machine<'a, 's> {
     fn book(&self) -> &'a Book<'s> {
         self.env.book
@@ -279,6 +283,7 @@ impl<'a, 's> Machine<'a, 's> {
                 };
                 self.out.push(Outcome::Owe { name, amount, owed: Owed { to, due } });
             }
+            Consequence::Consume { .. } | Consequence::Carry { .. } => unreachable!("{V3}"),
         }
     }
 
@@ -366,6 +371,7 @@ impl<'a, 's> Machine<'a, 's> {
             Var::Subject => match ctx.subject {
                 Subject::Place(place) => Value::Place(place),
                 Subject::Entity(entity) => Value::Entity(entity),
+                Subject::Asset(asset) => Value::Asset(asset),
             },
             Var::Owner => Value::Entity(ctx.owner),
             Var::Gain => realized(|r| r.gain),
@@ -375,6 +381,8 @@ impl<'a, 's> Machine<'a, 's> {
             Var::Balance => self.balance(ctx.subject),
             Var::Remaining => self.remaining(),
             Var::Flow => Value::Flow,
+            // v3 bridge: no v3 trigger says what a flow is for.
+            Var::Purpose | Var::Description => Value::Empty,
         }
     }
 
@@ -507,6 +515,7 @@ impl<'a, 's> Machine<'a, 's> {
                 _ => unreachable!("{TYPED}"),
             },
             Func::Date => civil_date(arg(0), arg(1), arg(2)).map_or_else(Value::Fault, Value::Day),
+            Func::StraightLine => unreachable!("{V3}"),
         }
     }
 
@@ -556,6 +565,7 @@ impl<'a, 's> Machine<'a, 's> {
         let span = match subject {
             Subject::Place(root) => root.index()..book.places.end(root).index(),
             Subject::Entity(_) => 0..book.places.len(),
+            Subject::Asset(_) => unreachable!("{V3}"),
         };
         holdings.within(span).filter(move |slot| inside(book, subject, slot.place))
     }
@@ -564,8 +574,9 @@ impl<'a, 's> Machine<'a, 's> {
     /// what is owed, as an assertion writes it. An entity's is natural.
     fn sign(&self, subject: Subject) -> i64 {
         match subject {
-            Subject::Place(place) => self.book().places[place].class.display_sign(),
+            Subject::Place(place) => self.book().v3_root(place).display_sign(),
             Subject::Entity(_) => 1,
+            Subject::Asset(_) => unreachable!("{V3}"),
         }
     }
 

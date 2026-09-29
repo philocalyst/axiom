@@ -41,12 +41,12 @@ pub(crate) enum Moves {
 }
 
 impl Moves {
-    fn of(book: &Book, terms: &Terms, source: &Place, target: &Place) -> Moves {
-        let market = |place: &Place| book.is_a(place.kind, book.roots.market);
+    fn of(book: &Book, terms: &Terms, from: Id<Place>, to: Id<Place>) -> Moves {
+        let market = book.entities[book.roots.market].place;
         match terms.basis_end {
             Some(end) => Moves::Basis(end),
-            None if target.class == Class::Asset && source.class == Class::Income && market(source) => Moves::Growth,
-            None if source.class == Class::Asset && target.class == Class::Income && market(target) => Moves::Loss,
+            None if book.places[to].class == Class::Asset && Some(from) == market => Moves::Growth,
+            None if book.places[from].class == Class::Asset && Some(to) == market => Moves::Loss,
             None => Moves::Value,
         }
     }
@@ -103,7 +103,7 @@ impl<'f> Motion<'f> {
             select: &flow.select,
             codes: &flow.codes,
             terms: flow.terms(),
-            moves: Moves::of(book, flow.terms(), source, target),
+            moves: Moves::of(book, flow.terms(), flow.from, flow.to),
             opening: flow.mode == Mode::Opening,
             waive: flow.waive,
             loc: flow.loc,
@@ -135,7 +135,7 @@ impl<'f> Motion<'f> {
             select: &[],
             codes: &[],
             terms: &Terms::NONE,
-            moves: Moves::of(book, &Terms::NONE, source, target),
+            moves: Moves::of(book, &Terms::NONE, from, to),
             opening: false,
             waive,
             loc: assert.loc,

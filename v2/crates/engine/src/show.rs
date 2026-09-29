@@ -20,6 +20,8 @@ pub(crate) fn value(book: &Book, day: Day, value: Value) -> String {
         Value::Entity(e) => book.name(book.entities[e].path).into(),
         Value::Kind(k) => book.name(book.kinds[k].name).into(),
         Value::Unit(u) => book.name(book.commodities[u].symbol).into(),
+        Value::Purpose(p, _) => format!("#{}", book.name(book.purposes[p].name)),
+        Value::Asset(a) => book.name(book.assets[a].name).into(),
         Value::Schedule(_) => "a schedule".into(),
         Value::Flow => "this flow".into(),
         Value::Fault(f) => format!("no value ({})", fault(book, f, day).0),
@@ -34,14 +36,16 @@ pub(crate) fn subject<'a>(book: &Book<'a>, subject: Subject) -> &'a str {
     match subject {
         Subject::Place(p) => place(book, p),
         Subject::Entity(e) => book.name(book.entities[e].path),
+        Subject::Asset(a) => book.name(book.assets[a].name),
     }
 }
 
-/// A subject as a sortable key: places, then entities, each by id.
+/// A subject as a sortable key: places, then entities, then assets, each by id.
 pub(crate) fn subject_key(subject: Subject) -> (u8, usize) {
     match subject {
         Subject::Place(place) => (0, place.index()),
         Subject::Entity(entity) => (1, entity.index()),
+        Subject::Asset(asset) => (2, asset.index()),
     }
 }
 

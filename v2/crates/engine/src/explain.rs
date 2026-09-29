@@ -340,6 +340,7 @@ pub(crate) fn faulted(f: &Frame, fault: Fault, origin: Option<usize>, holder: Op
         let declared = match holder {
             Subject::Place(place) => book.places[place].loc,
             Subject::Entity(entity) => book.entities[entity].loc,
+            Subject::Asset(asset) => Some(book.assets[asset].loc),
         };
         let d = Diagnostic::error(code, format!("`{name}` is not set on `{thing}`, so `{law}` cannot be checked"));
         let d = match declared {
@@ -386,7 +387,12 @@ pub(crate) fn first_fault(f: &Frame, step: usize) -> Option<usize> {
     let root = match &f.law.steps[step].kind {
         StepKind::When(root) | StepKind::Let(root) => *root,
         StepKind::Require { cond, .. } => *cond,
-        StepKind::Effect(Consequence::Owe { amount, .. } | Consequence::Count { amount, .. }) => *amount,
+        StepKind::Effect(
+            Consequence::Owe { amount, .. }
+            | Consequence::Count { amount, .. }
+            | Consequence::Consume { amount }
+            | Consequence::Carry { amount, .. },
+        ) => *amount,
     };
     origin(f, root)
 }
@@ -504,7 +510,7 @@ pub(crate) fn mismatch(
     let (place, unit, day, stated) =
         (show::place(book, assert.place), assert.amount.unit, assert.day, assert.amount.qty);
     let money = |qty: Qty| book.show(Amount::new(qty, unit)).to_string();
-    let sign = book.places[assert.place].class.display_sign();
+    let sign = book.v3_root(assert.place).display_sign();
 
     // The flows since the last checkpoint that moved this commodity, as the assertion reads them.
     let flows = &book.touching[assert.place];
