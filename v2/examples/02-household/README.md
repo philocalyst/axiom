@@ -126,16 +126,17 @@ amount.
 It runs the journal forward with three kinds of input:
 
 - what repeats in the journal, found by cadence and amount: the rent on the
-  1st, the paycheck and its withholding, the 529 and savings transfers, and
-  the utility bill;
-- the plans in `plans.ax`: the July trip, fall tuition in August and the 529
-  payment beside it, the year-end bonus, and the renewal on 2027-01-01;
+  1st, the 529 and savings transfers, and the utility bill;
+- the plans in `plans.ax`: the paycheck and its withholding (a named plan: the
+  journal writes `2026-02-13 paycheck` and the plan writes the split out), the July
+  trip, fall tuition in August and the 529 payment beside it, the year-end bonus, and
+  the renewal on 2027-01-01;
 - what the laws say is owed.
 
 The same laws run on the projection, so the 401(k) deferral limit is checked
 against the projected paychecks: 800 USD a month and 400 USD from the bonus
 comes to 10,000 USD for the year, well inside 24,500 USD.
 
-Try changing all three `retirement 800 USD` legs to `2_400 USD` and run the
-forecast again. The projected deferrals should pass the 24,500 USD limit with
+Try changing the `retirement 800 USD` leg of January's paycheck and of the plan to
+`2_400 USD` and run the forecast again. The projected deferrals should pass the 24,500 USD limit with
 the November paycheck, and the forecast should say so before it happens.

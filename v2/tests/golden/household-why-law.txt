@@ -11,4 +11,4 @@ Why budget
 Recent violations
   Date        Violation                                                                              From
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  2026-02-25  expenses/food: 681.00 USD in 2026-02 against a limit of 650.00 USD, over by 31.00 USD  journal/2026/02.ax:57
+  2026-02-25  expenses/food: 681.00 USD in 2026-02 against a limit of 650.00 USD, over by 31.00 USD  journal/2026/02.ax:53

@@ -11,8 +11,8 @@ Counted
     interest                 147.05 USD  3 sources
     investment-income        148.93 USD  4 sources
     short-term-gains         141.55 USD  2 sources
-    distributions            349.37 USD  journal/2026/03.ax:34
-    dividends                  1.88 USD  journal/2026/03.ax:37
+    distributions            349.37 USD  journal/2026/03.ax:29
+    dividends                  1.88 USD  journal/2026/03.ax:32
   ────────────────────────────────────────────────────────────
     us/401k
       elective-deferrals   2,400.00 USD  3 sources
@@ -28,7 +28,7 @@ Owed
   Owed                                    To   Due            Amount  From
   ─────────────────────────────────────────────────────────────────────────────────────────
     us/529
-      nonqualified-529-penalty (penalty)  irs  2027-04-15  34.94 USD  journal/2026/03.ax:34
+      nonqualified-529-penalty (penalty)  irs  2027-04-15  34.94 USD  journal/2026/03.ax:29
   ─────────────────────────────────────────────────────────────────────────────────────────
   Total owed                                               34.94 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

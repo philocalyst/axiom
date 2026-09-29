@@ -29,12 +29,8 @@
 /// The plumber cashed the check. The check becomes real on this day.
 2026-02-12 #check-1041 settled
 
-2026-02-13 acme -> 8_000 USD
-  retirement       800 USD
-  taxes/federal    880 USD
-  taxes/state      370 USD
-  taxes/payroll    612 USD
-  checking         ...
+/// The paycheck again: an occurrence of the plan of that name (plans.ax), which writes the split out in full.
+2026-02-13 paycheck
 
 2026-02-14 visa -> dining 74.20 USD
 2026-02-14 checking = 10_646.20 USD
