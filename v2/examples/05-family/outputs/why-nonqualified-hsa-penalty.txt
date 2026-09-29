@@ -1,18 +1,6 @@
-$ axiom why nonqualified-hsa-penalty --today 2026-01-05
+$ axiom why nonqualified-hsa-penalty --today 2026-04-16
 
-Why nonqualified-hsa-penalty
+error[unknown-target]: no place, entity, system, #code, law or tax line named `nonqualified-hsa-penalty`
+  = help: did you mean `nonqualified-529-penalty`?
 
-Effects
-  Date        Owner      Amount  Owed to            From
-  ───────────────────────────────────────────────────────────────────────
-  2025-11-05  me     124.00 USD  irs by 2025-11-05  journal/2025/11.ax:15
-
-Flows behind it
-  Date        Flow                                         Amount  From
-  ──────────────────────────────────────────────────────────────────────────────────────
-  2025-11-05  assets/hsa → assets/bank/joint-checking  620.00 USD  journal/2025/11.ax:15
-
-Gains realized
-  Date        Sold from     Proceeds     Basis        Gain  Held since
-  ────────────────────────────────────────────────────────────────────
-  2025-11-05  assets/hsa  620.00 USD  0.00 USD  620.00 USD  2024-12-31
+✗ 1 error

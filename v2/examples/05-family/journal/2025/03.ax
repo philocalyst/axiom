@@ -89,18 +89,16 @@
   joint-checking      ...
 2025-03-31 employer-match -> alex-401k 230 USD / acme
 2025-03-31 interest -> joint-savings 170.70 USD
-2025-03-31 alex-401k -> growth 2_631.77 USD
-2025-03-31 jordan-401k -> growth 1_685.99 USD
-2025-03-31 growth -> riley-529 101.40 USD
-2025-03-31 growth -> hsa 77.89 USD
+
+/// Quarterly statements say what each account is worth. The gap is the market's: a revaluation via market, never a withdrawal. March fell.
+2025-03-31 alex-401k = 152_178.23 USD via market
+2025-03-31 jordan-401k = 97_490.18 USD via market
+2025-03-31 riley-529 = 25_451.40 USD via market
+2025-03-31 hsa = 9_813.89 USD via market
 2025-03-31 mortgage = 411_025.53 USD
 2025-03-31 car-loan = 21_678.20 USD
 2025-03-31 card = 1_937.78 USD
 2025-03-31 joint-checking = 23_072.46 USD
 2025-03-31 joint-savings = 50_131.79 USD
 2025-03-31 escrow = 3_450.00 USD
-2025-03-31 hsa = 9_813.89 USD
 2025-03-31 dcfsa = 416.66 USD
-2025-03-31 alex-401k = 152_178.23 USD
-2025-03-31 jordan-401k = 97_490.18 USD
-2025-03-31 riley-529 = 25_451.40 USD

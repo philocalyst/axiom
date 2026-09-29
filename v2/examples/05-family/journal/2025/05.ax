@@ -48,7 +48,7 @@
 2025-05-15 employer-match -> alex-401k 230 USD / acme
 2025-05-16 card -> utilities 128.10 USD / pge
 
-/// Grandma's birthday gift to Riley's 529, sent straight to the plan.
+/// Grandma's birthday gift to Riley's 529, sent straight to the plan. It arrives from an income place, but a 529 takes what comes in at cost (the kind says so), so the gift is basis, not earnings.
 2025-05-16 gifts -> riley-529 3_000 USD / grandma
 2025-05-17 card -> groceries 250.25 USD / costco
 2025-05-18 card -> utilities 142.50 USD / verizon
@@ -88,5 +88,5 @@
 2025-05-31 joint-checking = 24_855.77 USD
 2025-05-31 joint-savings = 56_103.67 USD
 2025-05-31 escrow = 1_590.00 USD
-2025-05-31 hsa = 10_813.89 USD
 2025-05-31 dcfsa = 416.66 USD
+2025-05-31 hsa = 10_813.89 USD

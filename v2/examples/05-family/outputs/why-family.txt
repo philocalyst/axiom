@@ -1,0 +1,29 @@
+$ axiom why family --today 2026-04-16
+
+Why family
+
+Places
+  Place                                    Holds
+  ──────────────────────────────────────────────
+  assets/bank/joint-checking      36,838.99 USD
+  assets/bank/joint-savings       77,329.02 USD
+  assets/dcfsa                       416.74 USD
+  assets/education/riley-529      28,902.11 USD
+  assets/escrow                    1,440.00 USD
+  assets/house                            1 HOME
+  assets/hsa                      13,544.20 USD
+  assets/retirement/alex-401k    193,133.41 USD
+  assets/retirement/jordan-401k  120,629.41 USD
+  assets/vehicle/crv                      1 CRV
+  liabilities/car-loan            16,976.91 USD
+  liabilities/card                 2,101.70 USD
+  liabilities/mortgage           406,692.02 USD
+
+Governed by
+  Law                   When       Explains                                                                   Written
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Prices
+    federal-income-tax  each year  Federal income tax for the year (IRC §1), figured from the tallies above.  us.ax:331
+    state-income-tax    each year  California personal income tax for the year (R&TC §17041), on federal…     us/ca.ax:55
+  · 5 more laws only count, into agi, credits, deductions, investment-income, itemized,
+    net-long-term-gains, other-taxes.

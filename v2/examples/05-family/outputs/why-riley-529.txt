@@ -1,40 +1,46 @@
-$ axiom why riley-529 --today 2026-01-05
+$ axiom why riley-529 --today 2026-04-16
 
 Why assets/education/riley-529
 
 Composition
-  Holds       Quantity    Plain money  Parcels
-  ────────────────────────────────────────────
-  USD    28,902.11 USD  18,602.82 USD        1
+  Holds       Quantity   Plain money  Parcels
+  ───────────────────────────────────────────
+  USD    28,902.11 USD  5,008.37 USD        2
 
 Parcels
-  Place                            Quantity     Basis  Acquired    Tied to  From
-  ───────────────────────────────────────────────────────────────────────────────────────────────
-  assets/education/riley-529  10,299.29 USD  0.00 USD  2024-12-31           journal/2024/12.ax:13
+  Place                            Quantity          Basis  Acquired    Tied to  From
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/education/riley-529  19,847.09 USD  16,014.83 USD  2019-01-01           journal/2024/12.ax:3
+  assets/education/riley-529   4,046.65 USD       0.00 USD  2025-03-31           journal/2025/03.ax:20
+
+Limits
+  Who     Limit                                         Window       Counted            Cap      Room left    Used
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  family  gift-exclusion on assets/education/riley-529  2025    6,000.00 USD  19,000.00 USD  13,000.00 USD  31.58%
 
 Governed by
-  Law                     When     Governs                                        Explains                                                                   Written
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  gift-exclusion          on in    every 529-plan                                 Contributions above the annual gift-tax exclusion count as a gift to the   us/529.ax:33
-  count-wages             on in    everyone living under us, and all they own     Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a  systems/us.ax:62
-  count-interest          on in    everyone living under us, and all they own     Interest is ordinary income in the year it is earned (IRC §61(a)(4)),      systems/us.ax:70
-  count-dividends         on in    everyone living under us, and all they own     Dividends are income in the year they are paid (IRC §61(a)(7)), except     systems/us.ax:80
-  credit-withholding      on in    everyone living under us, and all they own     Tax withheld from pay, or paid in installments, is credited against the    systems/us.ax:112
-  credit-ca-withholding   on in    everyone living under us/ca, and all they own  Tax withheld from pay, or paid in installments, is credited against the    us/ca.ax:36
-  nonqualified-income     on gain  every 529-plan                                 The earnings in a withdrawal that did not pay a qualified education        us/529.ax:42
-  nonqualified-penalty    on gain  every 529-plan                                 A withdrawal that did not pay a qualified education expense owes an        us/529.ax:56
-  count-short-term-gains  on gain  everyone living under us, and all they own     A gain on something held for a year or less is taxed as ordinary income    systems/us.ax:90
-  count-long-term-gains   on gain  everyone living under us, and all they own     A gain on something held for more than a year is taxed at the lower        systems/us.ax:101
+  Law                     When     Explains                                                                   Written
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Limits
+    gift-exclusion        on in    Contributions above the annual gift-tax exclusion count as a gift to the…  us/529.ax:40
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Prices
+    nonqualified-penalty  on gain  A withdrawal that did not pay a qualified education expense owes an…       us/529.ax:54
+  · 12 more laws only count, into adjustments, ca-withheld, distributions, dividends, interest,
+    investment-income, itemized, long-term-gains, payments, pretax, salt, short-term-gains,
+    total-income, wages.
 
 Recent flows
-  Date        With                        Payee            Note                 Amount        Balance
-  ───────────────────────────────────────────────────────────────────────────────────────────────────
-  2025-08-20  opening balance                                                           32,066.71 USD
-  2025-08-20  expenses/tuition            st-annes-school                -4,800.00 USD  27,266.71 USD
-  2025-09-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  27,516.71 USD
-  2025-09-30  income/growth                                               1,540.94 USD  29,057.65 USD
-  2025-10-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  29,307.65 USD
-  2025-10-15  assets/bank/joint-checking                                 -1,500.00 USD  27,807.65 USD
-  2025-11-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  28,057.65 USD
-  2025-12-08  assets/bank/joint-checking                   #529-monthly     250.00 USD  28,307.65 USD
-  2025-12-31  income/growth                                                 594.46 USD  28,902.11 USD
+  Date        With                        Payee            Note                                     Amount        Balance
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-07-08  opening balance                                                                               31,566.71 USD
+  2025-07-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  31,816.71 USD
+  2025-08-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  32,066.71 USD
+  2025-08-20  expenses/tuition            st-annes-school                                    -4,800.00 USD  27,266.71 USD
+  2025-09-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  27,516.71 USD
+  2025-09-30  equity/unknown                               unexplained gap, accepted with !   1,540.94 USD  29,057.65 USD
+  2025-10-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  29,307.65 USD
+  2025-10-15  assets/bank/joint-checking                                                     -1,500.00 USD  27,807.65 USD
+  2025-11-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  28,057.65 USD
+  2025-12-08  assets/bank/joint-checking                   #529-monthly                         250.00 USD  28,307.65 USD
+  2025-12-31  equity/unknown                               unexplained gap, accepted with !     594.46 USD  28,902.11 USD

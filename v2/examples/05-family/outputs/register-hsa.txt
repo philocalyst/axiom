@@ -1,40 +1,40 @@
-$ axiom register hsa --today 2026-01-05
+$ axiom register hsa --from 2025-01-01 --today 2026-04-16
 
 Register: assets/hsa
 
-  Date        With                        Payee      Note        Amount        Balance
-  ────────────────────────────────────────────────────────────────────────────────────
-  2024-12-31  equity/opening                               7,420.00 USD   7,420.00 USD
-  2025-01-15  income/alex-salary          acme               250.00 USD   7,670.00 USD
-  2025-01-15  income/employer-hsa         acme             1,000.00 USD   8,670.00 USD
-  2025-01-31  income/alex-salary          acme               250.00 USD   8,920.00 USD
-  2025-02-12  expenses/medical            dr-chen           -184.00 USD   8,736.00 USD
-  2025-02-15  income/alex-salary          acme               250.00 USD   8,986.00 USD
-  2025-02-28  income/alex-salary          acme               250.00 USD   9,236.00 USD
-  2025-03-15  income/alex-salary          acme               250.00 USD   9,486.00 USD
-  2025-03-31  income/alex-salary          acme               250.00 USD   9,736.00 USD
-  2025-03-31  income/growth                                   77.89 USD   9,813.89 USD
-  2025-04-15  income/alex-salary          acme               250.00 USD  10,063.89 USD
-  2025-04-30  income/alex-salary          acme               250.00 USD  10,313.89 USD
-  2025-05-15  income/alex-salary          acme               250.00 USD  10,563.89 USD
-  2025-05-31  income/alex-salary          acme               250.00 USD  10,813.89 USD
-  2025-06-15  income/alex-salary          acme               250.00 USD  11,063.89 USD
-  2025-06-30  income/alex-salary          acme               250.00 USD  11,313.89 USD
-  2025-06-30  income/growth                                   90.51 USD  11,404.40 USD
-  2025-07-15  income/alex-salary          acme               250.00 USD  11,654.40 USD
-  2025-07-31  income/alex-salary          acme               250.00 USD  11,904.40 USD
-  2025-08-15  income/alex-salary          acme               250.00 USD  12,154.40 USD
-  2025-08-27  expenses/medical            cvs                -97.35 USD  12,057.05 USD
-  2025-08-31  income/alex-salary          acme               250.00 USD  12,307.05 USD
-  2025-09-15  income/alex-salary          acme               250.00 USD  12,557.05 USD
-  2025-09-30  income/alex-salary          acme               250.00 USD  12,807.05 USD
-  2025-09-30  expenses/medical            er-clinic         -350.00 USD  12,457.05 USD
-  2025-09-30  income/growth                                   99.66 USD  12,556.71 USD
-  2025-10-15  income/alex-salary          acme               250.00 USD  12,806.71 USD
-  2025-10-31  income/alex-salary          acme               250.00 USD  13,056.71 USD
-  2025-11-05  assets/bank/joint-checking                    -620.00 USD  12,436.71 USD
-  2025-11-15  income/alex-salary          acme               250.00 USD  12,686.71 USD
-  2025-11-30  income/alex-salary          acme               250.00 USD  12,936.71 USD
-  2025-12-15  income/alex-salary          acme               250.00 USD  13,186.71 USD
-  2025-12-31  income/alex-salary          acme               250.00 USD  13,436.71 USD
-  2025-12-31  income/growth                                  107.49 USD  13,544.20 USD
+  Date        With                        Payee      Note                                    Amount        Balance
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-01-01  opening balance                                                                         7,420.00 USD
+  2025-01-15  income/alex-salary          acme                                           250.00 USD   7,670.00 USD
+  2025-01-15  income/employer-hsa         acme                                         1,000.00 USD   8,670.00 USD
+  2025-01-31  income/alex-salary          acme                                           250.00 USD   8,920.00 USD
+  2025-02-12  expenses/medical            dr-chen                                       -184.00 USD   8,736.00 USD
+  2025-02-15  income/alex-salary          acme                                           250.00 USD   8,986.00 USD
+  2025-02-28  income/alex-salary          acme                                           250.00 USD   9,236.00 USD
+  2025-03-15  income/alex-salary          acme                                           250.00 USD   9,486.00 USD
+  2025-03-31  income/alex-salary          acme                                           250.00 USD   9,736.00 USD
+  2025-03-31  equity/unknown                         unexplained gap, accepted with !     77.89 USD   9,813.89 USD
+  2025-04-15  income/alex-salary          acme                                           250.00 USD  10,063.89 USD
+  2025-04-30  income/alex-salary          acme                                           250.00 USD  10,313.89 USD
+  2025-05-15  income/alex-salary          acme                                           250.00 USD  10,563.89 USD
+  2025-05-31  income/alex-salary          acme                                           250.00 USD  10,813.89 USD
+  2025-06-15  income/alex-salary          acme                                           250.00 USD  11,063.89 USD
+  2025-06-30  income/alex-salary          acme                                           250.00 USD  11,313.89 USD
+  2025-06-30  equity/unknown                         unexplained gap, accepted with !     90.51 USD  11,404.40 USD
+  2025-07-15  income/alex-salary          acme                                           250.00 USD  11,654.40 USD
+  2025-07-31  income/alex-salary          acme                                           250.00 USD  11,904.40 USD
+  2025-08-15  income/alex-salary          acme                                           250.00 USD  12,154.40 USD
+  2025-08-27  expenses/medical            cvs                                            -97.35 USD  12,057.05 USD
+  2025-08-31  income/alex-salary          acme                                           250.00 USD  12,307.05 USD
+  2025-09-15  income/alex-salary          acme                                           250.00 USD  12,557.05 USD
+  2025-09-30  income/alex-salary          acme                                           250.00 USD  12,807.05 USD
+  2025-09-30  expenses/medical            er-clinic                                     -350.00 USD  12,457.05 USD
+  2025-09-30  equity/unknown                         unexplained gap, accepted with !     99.66 USD  12,556.71 USD
+  2025-10-15  income/alex-salary          acme                                           250.00 USD  12,806.71 USD
+  2025-10-31  income/alex-salary          acme                                           250.00 USD  13,056.71 USD
+  2025-11-05  assets/bank/joint-checking                                                -620.00 USD  12,436.71 USD
+  2025-11-15  income/alex-salary          acme                                           250.00 USD  12,686.71 USD
+  2025-11-30  income/alex-salary          acme                                           250.00 USD  12,936.71 USD
+  2025-12-15  income/alex-salary          acme                                           250.00 USD  13,186.71 USD
+  2025-12-31  income/alex-salary          acme                                           250.00 USD  13,436.71 USD
+  2025-12-31  equity/unknown                         unexplained gap, accepted with !    107.49 USD  13,544.20 USD

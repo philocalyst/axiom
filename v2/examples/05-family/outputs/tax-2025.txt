@@ -1,3 +1,5 @@
+$ axiom tax 2025 --today 2026-04-16
+
 Taxes 2025
 
 Counted

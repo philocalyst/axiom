@@ -9,25 +9,29 @@ use std
 use us/401k
 use us/529
 use us/hsa
+use us/ca
 
-/// Alex, 37, the primary taxpayer. Everything the household shares is owned by
-/// `me`, because Axiom has one owner per place and one tax return per owner; see
-/// README.md. `children` is read by laws.ax for the child tax credit.
-entity me : taxpayer
-  born     1988-02-10
+/// The household: what the two of them share. It files one joint return, lives in
+/// California, and has one child to claim. Its members' pay counts into that one
+/// return, and `filing joint` means the joint brackets apply to the sum.
+entity family : household
   filing   joint
   children 1
   lives    us/ca
 
-/// Jordan, 37. Owns only a 401(k), so the 401(k) deferral limit is Jordan's own.
-/// Everything else in Jordan's paycheck lands in places `me` owns, which is how
-/// the joint return sees one income (see README.md).
-entity jordan : taxpayer
-  born     1987-06-21
-  filing   joint
-  children 0
-  lives    us/ca
+/// Alex, 37, the primary taxpayer, and `me`: every place that does not say
+/// otherwise is Alex's, and belongs to the household through them.
+entity me : person
+  born   1988-02-10
+  member family
 
-/// Riley, five, the 529 plan's beneficiary and the dependent.
+/// Jordan, 37. Keeps their own 401(k) and its yearly limit; their pay counts into
+/// the household's return like Alex's.
+entity jordan : person
+  born   1987-06-21
+  member family
+
+/// Riley, five, the 529 plan's beneficiary and the child on the return.
 entity riley : person
-  born     2019-08-22
+  born   2019-08-22
+  member family
