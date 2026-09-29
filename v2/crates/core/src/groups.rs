@@ -52,6 +52,12 @@ impl<K, V> Groups<K, V> {
     }
 }
 
+impl<K, V: Clone> Clone for Groups<K, V> {
+    fn clone(&self) -> Groups<K, V> {
+        Groups { starts: self.starts.clone(), values: self.values.clone(), of: std::marker::PhantomData }
+    }
+}
+
 impl<K, V> Default for Groups<K, V> {
     fn default() -> Groups<K, V> {
         Groups { starts: vec![0], values: Vec::new(), of: std::marker::PhantomData }
