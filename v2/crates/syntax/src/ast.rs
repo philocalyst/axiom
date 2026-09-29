@@ -324,8 +324,12 @@ tables! {
     prices: Price<'s>,
     /// [`ItemKind::Split`]
     splits: Split<'s>,
+    /// [`ItemKind::Claim`], and the claims of openings.
+    claims: Claim<'s>,
     /// [`ItemKind::Occurrence`]
     occurrences: Occurrence<'s>,
+    /// [`ItemKind::Ending`]
+    endings: Ending<'s>,
     /// [`ItemKind::Opening`]
     openings: Opening<'s>,
     /// [`ItemKind::Plan`]
@@ -384,16 +388,20 @@ pub struct Item<'s> {
 pub enum ItemKind<'s> {
     /// `DATE FLOW`
     Txn(Id<Txn<'s>>),
-    /// `DATE PLACE = AMOUNT`
+    /// `DATE END = AMOUNT`
     Assert(Id<Assert<'s>>),
-    /// `DATE #code settled|void|returned`
+    /// `DATE ^code settled|void|returned`
     Event(Id<Event<'s>>),
     /// `DATE UNIT AMOUNT`
     Price(Id<Price<'s>>),
     /// `DATE UNIT split N for M`
     Split(Id<Split<'s>>),
-    /// `DATE PLAN [AMOUNT]`: one occurrence of a named plan.
+    /// `DATE DEBTOR owes CREDITOR AMOUNT`
+    Claim(Id<Claim<'s>>),
+    /// `DATE NAME [AMOUNT]`: one occurrence of a contract.
     Occurrence(Id<Occurrence<'s>>),
+    /// `DATE NAME ends`
+    Ending(Id<Ending<'s>>),
     /// `opening DATE`
     Opening(Id<Opening<'s>>),
     /// `every …` or `plan NAME every …`
@@ -624,14 +632,14 @@ pub struct Waive<'s> {
     pub reason: Option<&'s str>,
 }
 
-/// `DATE PLACE = [-]AMOUNT [! [STRING] | via PLACE]`, checked at the end of the day.
+/// `DATE END = [-]AMOUNT [! [STRING] | via NAME]`, checked at the end of the day.
 #[derive(Debug)]
 pub struct Assert<'s> {
     /// The day the balance is checked, at its end.
     pub date: Day,
-    /// The place whose balance is stated.
+    /// Whose balance is stated: an account, an owner or a contract (a loan's).
     pub end: End<'s>,
-    /// In the place's display sign. Negative (`= -50 USD`) for an overdraft.
+    /// In the end's display sign. Negative (`= -50 USD`) for an overdraft.
     pub amount: Amount<'s>,
     /// What becomes of a difference between the statement and the ledger.
     pub gap: Gap<'s>,
@@ -642,13 +650,13 @@ pub struct Assert<'s> {
 pub enum Gap<'s> {
     /// Nowhere: a difference is an error.
     Refused,
-    /// `!`: an explicit flow from `equity/unknown`.
+    /// `!`: accepted as unexplained.
     Waived(Waive<'s>),
-    /// `via PLACE`: a flow from or to that place.
+    /// `via market`: a flow with that party, or a revaluation by the market.
     Via(Name<'s>),
 }
 
-/// `DATE #code settled|void|returned`
+/// `DATE ^code settled|void|returned`
 #[derive(Debug)]
 pub struct Event<'s> {
     /// The day the state takes effect.
@@ -661,7 +669,7 @@ pub struct Event<'s> {
     pub state_loc: Loc,
 }
 
-/// What a `DATE #code STATE` line does to the flows carrying that code.
+/// What a `DATE ^code STATE` line does to the flows carrying that code.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum EventState {
     /// Pending becomes actual on this day.
@@ -697,28 +705,58 @@ pub struct Split<'s> {
     pub denominator: Dec,
 }
 
-/// `DATE PLAN [AMOUNT]` with optional override legs: the journal says the named
-/// plan happened on `date`.
+/// `DATE NAME [AMOUNT]` with optional override legs: the journal says the named
+/// contract was kept on `date`, in the flow it writes in full, but for what
+/// this line changes.
 #[derive(Debug)]
 pub struct Occurrence<'s> {
-    /// The day the plan happened.
+    /// The day the contract was kept.
     pub date: Day,
-    /// The plan's name.
-    pub plan: Name<'s>,
-    /// Replaces the plan's header amount.
+    /// The contract's name.
+    pub contract: Name<'s>,
+    /// Replaces the contract's amount, or for a `buy` is what was bought.
     pub amount: Option<Amount<'s>>,
-    /// Replace the plan's legs of the same place.
+    /// Replace the template's legs of the same end.
     pub legs: Many<Leg<'s>>,
 }
 
-/// `opening DATE` and its indented lines: holdings that exist from that day,
-/// each line a [`Leg`] with a fixed amount and `basis` and `since` clauses.
+/// `DATE NAME ends`: the contract expects nothing more.
+#[derive(Debug)]
+pub struct Ending<'s> {
+    /// The day the contract ended.
+    pub date: Day,
+    /// The contract's name.
+    pub contract: Name<'s>,
+}
+
+/// `DEBTOR owes CREDITOR AMOUNT TAIL`: value that one of them is to move to
+/// the other, and has not. Which of them is an owner is for the model to say.
+/// The same line, dated with its opening's date, is a claim already open.
+#[derive(Debug)]
+pub struct Claim<'s> {
+    /// The day the claim arises.
+    pub date: Day,
+    /// Who is to pay.
+    pub debtor: Name<'s>,
+    /// Who is to be paid.
+    pub creditor: Name<'s>,
+    /// How much.
+    pub amount: Amount<'s>,
+    /// `due 30d`, `^inv-12`, `#design`: the tail of a flow.
+    pub tail: Many<Clause<'s>>,
+}
+
+/// `opening DATE` and its indented lines: what the owners hold from that day.
+/// Each line is a [`Leg`] with a fixed amount, or an asset's `basis`, and
+/// `basis` and `since` clauses; or a claim that is already open.
 #[derive(Debug)]
 pub struct Opening<'s> {
     /// The day the balances are stated: they exist from then on.
     pub date: Day,
     /// One line per holding: `&file[opening.lines]`.
     pub lines: Many<Leg<'s>>,
+    /// One line per open claim: `&file[opening.claims]`.
+    pub claims: Many<Claim<'s>>,
 }
 
 /// `every CADENCE [on DAY] [from DATE] [until DATE|MONTH] FLOW`, or
@@ -739,11 +777,13 @@ pub struct Plan<'s> {
     pub flow: Flow<'s>,
 }
 
-/// The day within each period a plan falls on.
+/// The day within each period that a contract's occurrence falls on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum On {
     /// `on 15`: past the month's end clamps to its last day.
     MonthDay(u8),
+    /// `on last`: the month's last day.
+    Last,
     /// `on 04-15`: that month (1 to 12) and day of every year.
     YearDay { month: u8, day: u8 },
     /// `on monday`: Monday = 0 … Sunday = 6, as [`Day::weekday`].

@@ -125,8 +125,12 @@ law fourth-payment
 2026-01-31 lumen -> 4_600 USD
   retirement     6%
   checking       ...
+2026-01-27 halcyon owes studio 3_800 USD due 30d ^inv-2026-01 #design
+2026-02-04 me owes pge 142.50 USD due 2026-02-20 "a bill"
+2026-03-10 netflix ends
 
 opening 2024-12-31
+  jo owes me    600 USD due 2026-04-01
   checking      10_000 USD
   college       24_600 USD   basis 19_850 USD
   house         1 HOME       basis 540_000 USD   since 2023-06-15
@@ -233,7 +237,7 @@ fn clauses<'f, 's>(file: &'f File<'s>, tail: Many<Clause<'s>>) -> Vec<&'f Clause
 #[test]
 fn a_realistic_file_parses_into_the_expected_shapes() {
     let file = parse_clean(EXAMPLE);
-    assert_eq!(file.items.len(), 65);
+    assert_eq!(file.items.len(), 68);
     let txns = txns(&file);
 
     // A paycheck: one named side, legs for the other, the last taking the remainder.
@@ -441,15 +445,44 @@ fn a_header_may_state_both_amounts_while_naming_one_end() {
 }
 
 #[test]
-fn a_dated_name_is_a_plan_occurrence_unless_it_asserts_or_flows() {
+fn a_dated_name_is_a_contract_occurrence_unless_it_asserts_flows_or_ends() {
     let file = parse_clean(
         "2026-01-16 paycheck\n2026-03-13 paycheck 5_900 USD\n  taxes 950 USD\n2026-01-31 paycheck = 5 USD\n",
     );
     let ItemKind::Occurrence(first) = file.items[0].kind else { panic!("an occurrence") };
     let ItemKind::Occurrence(second) = file.items[1].kind else { panic!("an occurrence") };
-    assert_eq!((file[first].plan.0, file[first].amount, file[first].legs.len()), ("paycheck", None, 0));
+    assert_eq!((file[first].contract.0, file[first].amount, file[first].legs.len()), ("paycheck", None, 0));
     assert_eq!((file[second].amount.map(|amount| amount.0), file[second].legs.len()), (Some("5_900 USD"), 1));
     assert!(matches!(file.items[2].kind, ItemKind::Assert(_)));
+
+    // A commodity amount is what was bought, and a contract may end.
+    let file = parse_clean("2026-01-20 vti-monthly 1.620 VTI\n2026-03-10 netflix ends\n");
+    let ItemKind::Occurrence(bought) = file.items[0].kind else { panic!("an occurrence") };
+    assert_eq!(file[bought].amount.map(|amount| amount.0), Some("1.620 VTI"));
+    let ItemKind::Ending(ended) = file.items[1].kind else { panic!("an ending") };
+    assert_eq!((file[ended].contract.0, file[ended].date), ("netflix", day(2026, 3, 10)));
+    only_error("2026-03-10 netflix ends soon\n", "expected-end-of-line");
+    only_error("2026-03-10 netflix[fifo] ends\n", "expected-arrow");
+}
+
+#[test]
+fn a_claim_says_who_owes_whom_and_is_flow_shaped() {
+    let file = parse_clean(EXAMPLE);
+    let claims: Vec<&Claim> = file.iter().collect();
+    assert_eq!(claims.len(), 3, "two dated claims, and the one an opening states");
+    let invoice = claims[0];
+    assert_eq!((invoice.debtor.0, invoice.creditor.0, invoice.amount.0), ("halcyon", "studio", "3_800 USD"));
+    let kinds = clauses(&file, invoice.tail);
+    assert!(matches!(kinds[..], [ClauseKind::Due(Due::After(_)), ClauseKind::Code(_), ClauseKind::Purpose(_)]));
+    assert_eq!((claims[1].debtor.0, claims[1].creditor.0), ("me", "pge"));
+    assert!(matches!(clauses(&file, claims[1].tail)[..], [ClauseKind::Due(Due::On(_)), ClauseKind::Description("a bill")]));
+    assert_eq!((claims[2].debtor.0, claims[2].date), ("jo", day(2024, 12, 31)));
+
+    only_error("2026-01-27 halcyon owes 3_800 USD\n", "expected-name");
+    only_error("2026-01-27 halcyon owes studio\n", "expected-amount");
+    only_error("opening 2026-01-01\n  jo owes me 600 USD\n  jo owes me\n", "expected-amount");
+    // A claim takes no legs.
+    only_error("2026-01-27 halcyon owes studio 3_800 USD\n  checking ...\n", "unexpected-indent");
 }
 
 #[test]
@@ -1074,8 +1107,12 @@ fn dump(file: &File) -> String {
         };
         file[legs].iter().map(each).collect::<Vec<_>>().join("; ")
     };
+    let claim = |claim: &Claim| {
+        let Claim { date, debtor, creditor, amount, .. } = claim;
+        format!("{date:?} {debtor:?} {creditor:?} {amount:?} {}", tail(claim.tail))
+    };
     let flow = |flow: &Flow| {
-        let side = |side: &Side| format!("{:?} {:?}", side.end.as_ref().map(end), side.amount);
+        let side =|side: &Side| format!("{:?} {:?}", side.end.as_ref().map(end), side.amount);
         format!("{} -> {} {} [{}]", side(&flow.from), side(&flow.to), tail(flow.tail), legs(flow.legs))
     };
     let expr = |root: ExprId| {
@@ -1103,8 +1140,13 @@ fn dump(file: &File) -> String {
             ItemKind::Split(id) => format!("{:?}", file[id]),
             ItemKind::Setting(id) => format!("{:?}", file[id]),
             ItemKind::Sync(id) => format!("{:?}", file[id]),
-            ItemKind::Occurrence(id) => format!("{:?} {}", file[id].plan, legs(file[id].legs)),
-            ItemKind::Opening(id) => legs(file[id].lines),
+            ItemKind::Claim(id) => claim(&file[id]),
+            ItemKind::Ending(id) => format!("{:?}", file[id]),
+            ItemKind::Occurrence(id) => format!("{:?} {}", file[id].contract, legs(file[id].legs)),
+            ItemKind::Opening(id) => {
+                let claims: Vec<String> = file[file[id].claims].iter().map(claim).collect();
+                format!("{} {claims:?}", legs(file[id].lines))
+            }
             ItemKind::Plan(id) => format!("{:?} {:?} {}", file[id].name, file[id].every, flow(&file[id].flow)),
             ItemKind::Code(id) => format!("{:?} {:?}", file[id].pattern, &file[file[id].on]),
             ItemKind::Law(id) => law(&file[id]),

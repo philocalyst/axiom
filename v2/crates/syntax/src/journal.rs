@@ -35,8 +35,8 @@ struct Bounds<'s> {
 
 impl<'s> Parser<'s> {
     /// A line that began with a date. What follows it says which kind of entry
-    /// it is: a `#code` is an event, a commodity a price or split, anything
-    /// else a flow, an assertion, or an occurrence of a plan.
+    /// it is: a `^code` is an event, a commodity a price or split, anything
+    /// else a flow, an assertion, a claim, or a contract's occurrence or end.
     pub fn journal_entry(&mut self, line: &mut Line<'s>, date: Day) -> Parse<()> {
         match self.tok() {
             Tok::Code(code) => {
@@ -52,16 +52,21 @@ impl<'s> Parser<'s> {
         }
     }
 
-    /// `[..DATE] FROM`, then what follows it: `=` makes an assertion, the end
-    /// of the line an occurrence of a plan, anything else a flow. Reading the
-    /// first end before deciding is what lets one pass tell them apart.
+    /// `[..DATE] FROM`, then what follows it: `=` makes an assertion, `owes` a
+    /// claim, `ends` the end of a contract, the end of the line an occurrence of
+    /// one, anything else a flow. Reading the first end before deciding is what
+    /// lets one pass tell them apart.
     fn transaction(&mut self, line: &mut Line<'s>, date: Day) -> Parse<()> {
         let clauses = self.mark::<Clause>();
         let spread = self.spread(line, date)?;
         let from = self.side()?;
-        if !spread && from.amount.is_none() && self.at("=") {
-            if let Some(end) = from.end {
-                return self.assertion(line, date, end);
+        // What is left of a contract's name: no amount to speak of, and no lots.
+        if let (false, Some(end), None) = (spread, from.end, from.amount) {
+            match self.tok() {
+                Tok::Punct("=") => return self.assertion(line, date, end),
+                Tok::Name("owes") if end.select.is_empty() => return self.claim_item(line, date, end.name),
+                Tok::Name("ends") if end.select.is_empty() => return self.ending(line, date, end.name),
+                _ => {}
             }
         }
         let amount = match from.amount {
@@ -95,7 +100,7 @@ impl<'s> Parser<'s> {
         Ok(true)
     }
 
-    /// `DATE PLACE = [-]AMOUNT [! [STRING] | via PLACE]`.
+    /// `DATE END = [-]AMOUNT [! [STRING] | via NAME]`.
     fn assertion(&mut self, line: &mut Line<'s>, date: Day, end: End<'s>) -> Parse<()> {
         self.bump();
         let amount = self.signed_amount()?;
@@ -103,7 +108,7 @@ impl<'s> Parser<'s> {
             Tok::Punct("!") => Gap::Waived(self.waiver()?),
             Tok::Name("via") => {
                 self.bump();
-                Gap::Via(self.name("expected-place", "the place the difference goes to, like `income/market`")?)
+                Gap::Via(self.name("expected-name", "who the difference is with, like `market`")?)
             }
             _ => Gap::Refused,
         };
@@ -112,20 +117,53 @@ impl<'s> Parser<'s> {
         Ok(())
     }
 
-    /// `DATE PLAN [AMOUNT]` with override legs below.
-    fn occurrence(&mut self, line: &mut Line<'s>, date: Day, plan: Name<'s>, amount: Option<Amount<'s>>) -> Parse<()> {
+    /// `DATE DEBTOR owes CREDITOR AMOUNT TAIL`, the debtor already read.
+    fn claim_item(&mut self, line: &mut Line<'s>, date: Day, debtor: Name<'s>) -> Parse<()> {
+        let claim = self.claim(date, debtor)?;
         let header = self.end_header(line)?;
-        let legs = self.legs(line, |parser, leg_line| parser.leg(leg_line).map(drop))?;
-        self.emit(&header, Occurrence { date, plan, amount, legs }, ItemKind::Occurrence);
+        self.emit(&header, claim, ItemKind::Claim);
         Ok(())
     }
 
-    /// `opening DATE` and its lines `PLACE [SELECTOR] AMOUNT [basis AMOUNT] [since DATE]`.
+    /// `owes CREDITOR AMOUNT TAIL`, which is also a line of an opening.
+    fn claim(&mut self, date: Day, debtor: Name<'s>) -> Parse<Claim<'s>> {
+        self.bump();
+        let creditor = self.name("expected-name", "the party or owner it is owed to")?;
+        let amount = self.amount()?;
+        Ok(Claim { date, debtor, creditor, amount, tail: self.tail(self.mark::<Clause>())? })
+    }
+
+    /// `DATE CONTRACT [AMOUNT]` with override legs below.
+    fn occurrence(&mut self, line: &mut Line<'s>, date: Day, name: Name<'s>, amount: Option<Amount<'s>>) -> Parse<()> {
+        let header = self.end_header(line)?;
+        let legs = self.legs(line, |parser, leg_line| parser.leg(leg_line).map(drop))?;
+        self.emit(&header, Occurrence { date, contract: name, amount, legs }, ItemKind::Occurrence);
+        Ok(())
+    }
+
+    /// `DATE CONTRACT ends`
+    fn ending(&mut self, line: &mut Line<'s>, date: Day, contract: Name<'s>) -> Parse<()> {
+        self.bump();
+        let header = self.end_header(line)?;
+        self.emit(&header, Ending { date, contract }, ItemKind::Ending);
+        Ok(())
+    }
+
+    /// `opening DATE` and its lines `END [SELECTOR] AMOUNT [basis AMOUNT] [since DATE]`,
+    /// `ASSET basis AMOUNT [since DATE]` and `DEBTOR owes CREDITOR AMOUNT TAIL`.
     pub fn opening(&mut self, line: &mut Line<'s>) -> Parse<()> {
         let date = self.item_date("the day the balances are stated, like `2024-12-31`")?;
         let header = self.end_header(line)?;
+        let claims = self.mark::<Claim>();
         let lines = self.in_scope(Scope::Opening, |parser| {
             parser.legs(line, |parser, opening_line| {
+                if let (Tok::Name(debtor), Tok::Name("owes")) = (parser.tok(), parser.lexer.peek_second().tok) {
+                    parser.bump();
+                    let claim = parser.claim(date, Name(debtor))?;
+                    parser.expect_eol()?;
+                    parser.push(claim);
+                    return Ok(());
+                }
                 let leg = parser.leg(opening_line)?;
                 match parser.get(leg).amount {
                     Quantity::Fixed(_) | Quantity::Whole => Ok(()),
@@ -133,7 +171,8 @@ impl<'s> Parser<'s> {
                 }
             })
         });
-        self.emit(&header, Opening { date, lines: lines? }, ItemKind::Opening);
+        let claims = self.since(claims);
+        self.emit(&header, Opening { date, lines: lines?, claims }, ItemKind::Opening);
         Ok(())
     }
 

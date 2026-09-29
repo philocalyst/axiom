@@ -170,7 +170,7 @@ impl<'s> Parser<'s> {
                 Tok::Purpose(name) => ClauseKind::Purpose(self.purpose(name)?),
                 Tok::Str(text) => self.bump_as(ClauseKind::Description(text)),
                 Tok::Code(code) => self.bump_as(ClauseKind::Code(code)),
-                Tok::Punct("/") => ClauseKind::Party(self.then(|p| p.name("expected-party", "a party, like `paypal`"))?),
+                Tok::Punct("/") => ClauseKind::Party(self.then(|p| p.name("expected-party", "a party"))?),
                 Tok::Punct("@") => ClauseKind::Price(self.then(Self::measured)?),
                 Tok::Punct("!") => ClauseKind::Waive(self.waiver()?),
                 Tok::Name("for") => ClauseKind::For(self.then(|p| p.for_what(token.loc))?),
