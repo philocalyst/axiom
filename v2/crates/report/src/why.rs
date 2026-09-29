@@ -20,7 +20,8 @@ use std::borrow::Cow;
 use axiom_core::{Diagnostic, Id, Sym};
 use axiom_engine::{Effect, Run, State};
 use axiom_model::{
-    Book, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place, StepKind, System, Trigger,
+    Book, Closing, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place, StepKind, System,
+    Trigger,
 };
 
 use crate::history::Posting;
@@ -258,15 +259,18 @@ fn event_words(state: EventState) -> &'static str {
 }
 
 /// When a law fires, in the words it is written with.
-fn trigger_words(trigger: Trigger) -> &'static str {
+fn trigger_words(trigger: Trigger) -> Cow<'static, str> {
     match trigger {
-        Trigger::In => "on in",
-        Trigger::Out => "on out",
-        Trigger::Gain => "on gain",
-        Trigger::Spend => "on spend",
-        Trigger::Each(Period::Month, _) => "each month",
-        Trigger::Each(Period::Year, _) => "each year",
-        Trigger::By(_) => "by a date",
-        Trigger::Always => "always",
+        Trigger::In => "on in".into(),
+        Trigger::Out => "on out".into(),
+        Trigger::Gain => "on gain".into(),
+        Trigger::Spend => "on spend".into(),
+        Trigger::Each(Period::Month, _) => "each month".into(),
+        Trigger::Each(Period::Year, None) => "each year".into(),
+        Trigger::Each(Period::Year, Some(Closing { month, day })) => {
+            format!("each year closing {month:02}-{day:02}").into()
+        }
+        Trigger::By(_) => "by a date".into(),
+        Trigger::Always => "always".into(),
     }
 }

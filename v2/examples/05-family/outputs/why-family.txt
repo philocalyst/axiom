@@ -20,10 +20,10 @@ Places
   liabilities/mortgage           406,692.02 USD
 
 Governed by
-  Law                   When       Explains                                                                   Written
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Law                   When                     Explains                                                                   Written
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Prices
-    federal-income-tax  each year  Federal income tax for the year (IRC §1), figured from the tallies above.  us.ax:351
-    state-income-tax    each year  California personal income tax for the year (R&TC §17041), on federal…     us/ca.ax:55
+    federal-income-tax  each year closing 04-15  Federal income tax for the year (IRC §1), figured from the tallies above.  us.ax:351
+    state-income-tax    each year closing 04-15  California personal income tax for the year (R&TC §17041), on federal…     us/ca.ax:55
   · 5 more laws only count, into agi, credits, deductions, investment-income, itemized,
     net-long-term-gains, other-taxes.

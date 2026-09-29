@@ -4,7 +4,7 @@ Why qbi-deduction
 
   Law       qbi-deduction
   ─────────────────────────────────
-  When      each year
+  When      each year closing 04-15
   Governs   everything in this book
   Written   tax.ax:44
   Ran       1 time

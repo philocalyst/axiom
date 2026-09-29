@@ -108,6 +108,36 @@ opening 2025-01-01
     });
 }
 
+// ─── Laws ───────────────────────────────────────────────────────────────────
+
+#[test]
+fn why_a_law_says_the_day_a_closing_law_judges_the_year() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+
+account assets/checking
+
+/// Figures the year's return.
+law return
+  each year closing 04-15
+  count 1 USD as returns
+
+law audit
+  each year
+  count 1 USD as audits
+";
+    with_run(source, day(2026, 6, 1), |book, run| {
+        let when = |law| {
+            let report = crate::report(book, run, &Query::Why { target: law }, None).unwrap();
+            lines(&report.sections[0]).into_iter().find(|row| row.starts_with("When")).unwrap()
+        };
+        assert_eq!(when("return"), "When | each year closing 04-15");
+        assert_eq!(when("audit"), "When | each year");
+    });
+}
+
 // ─── Accepted gaps ──────────────────────────────────────────────────────────
 
 /// One gap of each kind: a revaluation, a gap accepted as unexplained, and a

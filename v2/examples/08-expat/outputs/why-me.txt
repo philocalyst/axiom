@@ -15,12 +15,12 @@ Places
   liabilities/visa               53.48 USD
 
 Governed by
-  Law                   When       Explains                                                                   Written
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Law                   When                     Explains                                                                   Written
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Limits
-    fbar                each year  FBAR: the highest values of the year, account by account, added up. Each…  accounts.ax:190
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    fbar                each year                FBAR: the highest values of the year, account by account, added up. Each…  accounts.ax:190
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Prices
-    federal-income-tax  each year  Federal income tax for the year (IRC §1), figured from the tallies above.  us.ax:351
+    federal-income-tax  each year closing 04-15  Federal income tax for the year (IRC §1), figured from the tallies above.  us.ax:351
   · 7 more laws only count, into adjustments, agi, credits, deductions, feie-excluded,
     feie-stacking-tax, investment-income, itemized, net-long-term-gains, other-taxes.

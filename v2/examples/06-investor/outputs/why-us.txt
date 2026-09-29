@@ -5,77 +5,77 @@ Why us
   · Lives here: me.
 
 Laws
-  Law                                                                                When       Counted for residents                                                                                                        Written
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  deduct-contributions                                                               on in                                                                                                                                   us.ax:87
+  Law                                                                                When                     Counted for residents                                                                                                        Written
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  deduct-contributions                                                               on in                                                                                                                                                 us.ax:87
     Money paid into an account whose contributions are deductible (a…
-  count-wages                                                                        on in      wages 279,278.97 USD · total-income 279,278.97 USD                                                                           us.ax:128
+  count-wages                                                                        on in                    wages 279,278.97 USD · total-income 279,278.97 USD                                                                           us.ax:128
     Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a…
-  exclude-pretax                                                                     on in      total-income -31,333.28 USD · pretax 31,333.28 USD                                                                           us.ax:141
+  exclude-pretax                                                                     on in                    total-income -31,333.28 USD · pretax 31,333.28 USD                                                                           us.ax:141
     Pay that goes into a tax-deferred account, or to a pre-tax benefit, is pay…
-  count-interest                                                                     on in      interest 7,701.99 USD · total-income 7,701.99 USD · investment-income 7,701.99 USD                                           us.ax:153
+  count-interest                                                                     on in                    interest 7,701.99 USD · total-income 7,701.99 USD · investment-income 7,701.99 USD                                           us.ax:153
     Interest is ordinary income in the year it is earned (IRC §61(a)(4)),…
-  count-dividends                                                                    on in      dividends 1,606.44 USD · total-income 1,606.44 USD · investment-income 1,606.44 USD                                          us.ax:167
+  count-dividends                                                                    on in                    dividends 1,606.44 USD · total-income 1,606.44 USD · investment-income 1,606.44 USD                                          us.ax:167
     Dividends are income in the year they are paid (IRC §61(a)(7)), except…
-  count-short-term-gains                                                             on gain    short-term-gains 4,450.44 USD                                                                                                us.ax:183
+  count-short-term-gains                                                             on gain                  short-term-gains 4,450.44 USD                                                                                                us.ax:183
     A gain on something held for a year or less is taxed as ordinary income…
-  count-long-term-gains                                                              on gain    long-term-gains -584.67 USD                                                                                                  us.ax:200
+  count-long-term-gains                                                              on gain                  long-term-gains -584.67 USD                                                                                                  us.ax:200
     A gain on something held for more than a year is taxed at the lower…
-  count-currency-gains                                                               on gain                                                                                                                                 us.ax:219
+  count-currency-gains                                                               on gain                                                                                                                                               us.ax:219
     Money in another currency is cash, not an investment: spending a euro is not…
-  count-distributions                                                                on gain                                                                                                                                 us.ax:236
+  count-distributions                                                                on gain                                                                                                                                               us.ax:236
     What comes out of a tax-deferred account is income in the year it comes out…
-  count-payments                                                                     on in      payments 52,880.27 USD                                                                                                       us.ax:251
+  count-payments                                                                     on in                    payments 52,880.27 USD                                                                                                       us.ax:251
     Tax withheld from pay, or paid in installments, is credited against the tax…
-  itemize-interest-and-gifts                                                         on in                                                                                                                                   us.ax:263
+  itemize-interest-and-gifts                                                         on in                                                                                                                                                 us.ax:263
     Mortgage interest and gifts to charity are itemized deductions.
-  count-property-tax                                                                 on in                                                                                                                                   us.ax:272
+  count-property-tax                                                                 on in                                                                                                                                                 us.ax:272
     Property tax is a state and local tax. So is state income tax, which the…
-  cap-salt                                                                           each year                                                                                                                               us.ax:281
+  cap-salt                                                                           each year closing 04-15                                                                                                                               us.ax:281
     State and local taxes are deducted only up to a cap (IRC §164(b)(6)).
-  adjusted-gross-income                                                              each year  investment-income 5,844.37 USD · agi 263,361.89 USD                                                                          us.ax:296
+  adjusted-gross-income                                                              each year closing 04-15  investment-income 5,844.37 USD · agi 263,361.89 USD                                                                          us.ax:296
     Gains and losses are netted before they are taxed (IRC §1222): a loss of one…
-  standard-or-itemized                                                               each year  deductions 30,350.00 USD                                                                                                     us.ax:313
+  standard-or-itemized                                                               each year closing 04-15  deductions 30,350.00 USD                                                                                                     us.ax:313
     The deduction is the larger of the standard deduction for the filing status…
-  child-tax-credit                                                                   each year                                                                                                                               us.ax:324
+  child-tax-credit                                                                   each year closing 04-15                                                                                                                               us.ax:324
     A credit for each qualifying child under 17 (IRC §24). Set `children` on the…
-  net-investment-income-tax                                                          each year  other-taxes 19.26 USD                                                                                                        us.ax:335
+  net-investment-income-tax                                                          each year closing 04-15  other-taxes 19.26 USD                                                                                                        us.ax:335
     The net investment income tax is 3.8% of net investment income, or of the…
-  federal-income-tax                                                                 each year  owes federal-income-tax -10,003.26 USD · taxable-income 233,011.89 USD · income-tax 42,857.75 USD · total-tax 42,877.01 USD  us.ax:351
+  federal-income-tax                                                                 each year closing 04-15  owes federal-income-tax -10,003.26 USD · taxable-income 233,011.89 USD · income-tax 42,857.75 USD · total-tax 42,877.01 USD  us.ax:351
     Federal income tax for the year (IRC §1), figured from the tallies above.
-  deferral-limit                                                                     on in      elective-deferrals 31,333.28 USD                                                                                             us/401k.ax:37
+  deferral-limit                                                                     on in                    elective-deferrals 31,333.28 USD                                                                                             us/401k.ax:37
     Elective deferrals are capped for each person and calendar year, across…
-  early-withdrawal                                                                   on gain                                                                                                                                 us/401k.ax:50
+  early-withdrawal                                                                   on gain                                                                                                                                               us/401k.ax:50
     Money taken out before age 59½ carries an additional 10% tax on top of…
-  required-minimum-distribution                                                      each year                                                                                                                               us/401k.ax:64
+  required-minimum-distribution                                                      each year                                                                                                                                             us/401k.ax:64
     From age 73, an owner must take a minimum distribution from a 401(k)…
-  gift-exclusion                                                                     on in                                                                                                                                   us/529.ax:40
+  gift-exclusion                                                                     on in                                                                                                                                                 us/529.ax:40
     Contributions above the annual gift-tax exclusion count as a gift to the…
-  nonqualified-529-penalty                                                           on gain                                                                                                                                 us/529.ax:54
+  nonqualified-529-penalty                                                           on gain                                                                                                                                               us/529.ax:54
     A withdrawal that did not pay a qualified education expense owes an…
-  credit-ca-payments                                                                 on in                                                                                                                                   us/ca.ax:41
+  credit-ca-payments                                                                 on in                                                                                                                                                 us/ca.ax:41
     Tax withheld from pay, or paid in installments, is credited against the tax…
-  state-income-tax                                                                   each year                                                                                                                               us/ca.ax:55
+  state-income-tax                                                                   each year closing 04-15                                                                                                                               us/ca.ax:55
     California personal income tax for the year (R&TC §17041), on federal…
-  transfer-tax                                                                       on gain                                                                                                                                 us/ca/san-francisco.ax:36
+  transfer-tax                                                                       on gain                                                                                                                                               us/ca/san-francisco.ax:36
     Selling real property in San Francisco owes the city a transfer tax on the…
-  contribution-limit                                                                 on in                                                                                                                                   us/hsa.ax:38
+  contribution-limit                                                                 on in                                                                                                                                                 us/hsa.ax:38
     Contributions to an HSA are capped for each person and calendar year,…
-  nonqualified-hsa-penalty                                                           on gain                                                                                                                                 us/hsa.ax:54
+  nonqualified-hsa-penalty                                                           on gain                                                                                                                                               us/hsa.ax:54
     A withdrawal that did not pay a qualified medical expense owes an…
-  contribution-limit                                                                 on in                                                                                                                                   us/ira.ax:37
+  contribution-limit                                                                 on in                                                                                                                                                 us/ira.ax:37
     Contributions to IRAs are capped for each person and calendar year, with…
-  early-withdrawal                                                                   on gain                                                                                                                                 us/ira.ax:50
+  early-withdrawal                                                                   on gain                                                                                                                                               us/ira.ax:50
     Money taken out before age 59½ carries an additional 10% tax on the part…
-  required-minimum-distribution                                                      each year                                                                                                                               us/ira.ax:72
+  required-minimum-distribution                                                      each year                                                                                                                                             us/ira.ax:72
     From age 73, an owner must take a minimum distribution from a traditional…
-  count-taxable-earnings                                                             on gain                                                                                                                                 us/ira.ax:99
+  count-taxable-earnings                                                             on gain                                                                                                                                               us/ira.ax:99
     A Roth withdrawal is tax-free when it is qualified (IRC §408A(d)(2)): the…
-  credit-ny-payments                                                                 on in                                                                                                                                   us/ny.ax:39
+  credit-ny-payments                                                                 on in                                                                                                                                                 us/ny.ax:39
     Tax withheld from pay, or paid in installments, is credited against the tax…
-  state-income-tax                                                                   each year                                                                                                                               us/ny.ax:53
+  state-income-tax                                                                   each year closing 04-15                                                                                                                               us/ny.ax:53
     New York State income tax for the year (Tax Law §601), on federal adjusted…
-  credit-nyc-payments                                                                on in                                                                                                                                   us/ny/nyc.ax:38
+  credit-nyc-payments                                                                on in                                                                                                                                                 us/ny/nyc.ax:38
     Tax withheld from pay, or paid in installments, is credited against the city…
-  city-income-tax                                                                    each year                                                                                                                               us/ny/nyc.ax:51
+  city-income-tax                                                                    each year closing 04-15                                                                                                                               us/ny/nyc.ax:51
     New York City resident income tax for the year (Administrative Code §11-1701),…

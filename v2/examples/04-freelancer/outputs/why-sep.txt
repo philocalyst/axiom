@@ -18,10 +18,10 @@ Limits
   me   contribution-limit on assets/retirement/sep  2025    8,000.00 USD  11,399.25 USD  3,399.25 USD  70.18%
 
 Governed by
-  Law                   When       Explains                                                        Written
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Law                   When                     Explains                                                        Written
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Limits
-    contribution-limit  each year  A SEP-IRA takes at most 20% of net earnings after half of the…  accounts.ax:31
+    contribution-limit  each year closing 04-15  A SEP-IRA takes at most 20% of net earnings after half of the…  accounts.ax:31
   · 13 more laws only count, into adjustments, distributions, dividends, interest,
     investment-income, itemized, long-term-gains, payments, pretax, salt, sep-contributions,
     short-term-gains, total-income, wages.
