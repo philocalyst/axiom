@@ -3,6 +3,8 @@
 //!
 //! The lexer only sorts a bad word into a category. Here each category gets the
 //! message a person needs: what is wrong, where exactly, and how to write it.
+//! A word can be as long as its line, so messages show a clip of it, and a
+//! word too long to be a slip of the pen gets no edit.
 
 use axiom_core::day::days_in_month;
 use axiom_core::{Day, Diagnostic, Loc};
@@ -15,11 +17,23 @@ const MONTHS: [&str; 12] = [
     "July", "August", "September", "October", "November", "December",
 ];
 
+/// The longest word an edit is offered for.
+const MENDABLE: usize = 64;
+
+/// The first `max` characters of `text`, then `…` if there were more.
+pub(crate) fn clip(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        Some((cut, _)) => format!("{}…", &text[..cut]),
+        None => text.to_string(),
+    }
+}
+
 /// The diagnostic for a malformed token whose source text is `text` at `loc`.
 pub(crate) fn diagnose(kind: Malformed, loc: Loc, text: &str) -> Diagnostic {
     match kind {
         Malformed::Date => not_a_date(loc, text),
         Malformed::LooseDate => unpadded_date(loc, text),
+        Malformed::SlashDate => slash_date(loc, text),
         Malformed::Number => bad_number(loc, text),
         Malformed::GluedAmount => glued_amount(loc, text),
         Malformed::UnterminatedString => unterminated_string(loc),
@@ -72,8 +86,44 @@ fn unpadded_date(loc: Loc, text: &str) -> Diagnostic {
     if on_calendar { diag.fix(format!("write `{padded}`"), loc, padded) } else { diag }
 }
 
+/// `01/15/2026`, `15/01/2026`, `2026/01/15`. When the year is last, the day
+/// and month can be told apart only if one of them cannot be a month; Axiom
+/// never guesses between two readings.
+fn slash_date(loc: Loc, text: &str) -> Diagnostic {
+    let mut parts = text.split('/').map(|part| (part.len(), part.parse::<u32>().unwrap_or_default()));
+    let (Some((width, a)), Some((_, b)), Some((_, c))) = (parts.next(), parts.next(), parts.next()) else {
+        return bad_number(loc, text);
+    };
+    // As (year, month, day): year first, or the year last with the month first or second.
+    let readings = if width == 4 { [Some((a, b, c)), None] } else { [Some((c, a, b)), Some((c, b, a))] };
+    let mut valid = readings.into_iter().flatten().filter(|&(y, m, d)| Day::from_ymd(y as i32, m, d).is_some());
+    let first = valid.next();
+    let second = valid.next().filter(|&other| Some(other) != first);
+    let diag = Diagnostic::error("bad-date", format!("`{text}` is not a date; dates are written `YYYY-MM-DD`"));
+    match (first, second) {
+        (Some((y, m, d)), None) => {
+            let order = match () {
+                _ if width == 4 => "year/month/day",
+                _ if Some((y, m, d)) == readings[0] => "month/day/year",
+                _ => "day/month/year",
+            };
+            diag.label(loc, format!("read as {order}: {} {d}, {y}", MONTHS[m as usize - 1])).fix(
+                "write the date year first",
+                loc,
+                format!("{y:04}-{m:02}-{d:02}"),
+            )
+        }
+        (Some((y, m, d)), Some(_)) => diag.label(loc, "month first or day first?").note(format!(
+            "`{text}` could be {} {d}, {y} or the other way round, so Axiom never guesses",
+            MONTHS[m as usize - 1]
+        )),
+        _ => diag.label(loc, "not a date on the calendar"),
+    }
+}
+
 fn bad_number(loc: Loc, text: &str) -> Diagnostic {
-    let diag = Diagnostic::error("bad-number", format!("`{text}` is not a valid number")).label(loc, "not a number");
+    let diag = Diagnostic::error("bad-number", format!("`{}` is not a valid number", clip(text, 40)))
+        .label(loc, "not a number");
     if text.contains('_') {
         diag.note("`_` separates groups of digits and must sit between two digits: `1_000_000`")
     } else {
@@ -83,19 +133,26 @@ fn bad_number(loc: Loc, text: &str) -> Diagnostic {
 
 /// `50USD`: the commodity needs a space.
 fn glued_amount(loc: Loc, text: &str) -> Diagnostic {
-    let diag =
-        Diagnostic::error("glued-amount", format!("`{text}` needs a space between the number and its commodity"))
-            .label(loc, "number and commodity run together");
-    let Some(split) = text.find(|c: char| c.is_ascii_uppercase()) else { return diag };
+    let diag = Diagnostic::error(
+        "glued-amount",
+        format!("`{}` needs a space between the number and its commodity", clip(text, 40)),
+    )
+    .label(loc, "number and commodity run together");
+    let Some(split) = text.find(|c: char| c.is_ascii_uppercase()).filter(|_| text.len() <= MENDABLE) else {
+        return diag;
+    };
     let spaced = format!("{} {}", &text[..split], &text[split..]);
     diag.fix(format!("amounts are written `{spaced}`"), loc, spaced)
 }
 
 fn unterminated_string(loc: Loc) -> Diagnostic {
     let quote = Loc::new(loc.file, loc.start, loc.start + 1);
-    Diagnostic::error("unterminated-string", "this string is never closed")
-        .label(quote, "the string starts here")
-        .help("a string ends with a closing `\"` on the same line")
+    let end = Loc::new(loc.file, loc.end, loc.end);
+    Diagnostic::error("unterminated-string", "this string is never closed").label(quote, "the string starts here").fix(
+        "close it at the end of the line",
+        end,
+        "\"",
+    )
 }
 
 fn bad_escape(loc: Loc, text: &str, at: u32) -> Diagnostic {
@@ -124,10 +181,16 @@ fn currency_symbol(loc: Loc, text: &str) -> Diagnostic {
         )
         .label(loc, "write the commodity, like `50 USD`");
     }
-    Diagnostic::error("currency-symbol", format!("amounts are written `{digits} {code}`, not `{text}`"))
-        .label(loc, "a currency symbol")
-        .note("the commodity comes after the number and is spelled out, so `$` and `CAD` cannot be confused")
-        .fix(format!("write `{digits} {code}`"), loc, format!("{digits} {code}"))
+    let diag = Diagnostic::error(
+        "currency-symbol",
+        format!("amounts are written `{} {code}`, not `{}`", clip(digits, 40), clip(text, 40)),
+    )
+    .label(loc, "a currency symbol")
+    .note("the commodity comes after the number and is spelled out, so `$` and `CAD` cannot be confused");
+    match text.len() <= MENDABLE {
+        true => diag.fix(format!("write `{digits} {code}`"), loc, format!("{digits} {code}")),
+        false => diag,
+    }
 }
 
 fn bad_code(loc: Loc) -> Diagnostic {
@@ -138,20 +201,21 @@ fn bad_code(loc: Loc) -> Diagnostic {
 
 /// A word that mixes cases, or uses characters names and commodities lack.
 fn mixed_case(loc: Loc, text: &str) -> Diagnostic {
+    let mendable = text.len() <= MENDABLE;
     if let Some(code) = text.strip_prefix('#') {
+        let diag = Diagnostic::error("mixed-case", format!("codes are lowercase, but `{}` is not", clip(text, 40)))
+            .label(loc, "uppercase in a code");
         let lower = format!("#{}", code.to_ascii_lowercase());
-        return Diagnostic::error("mixed-case", format!("codes are lowercase, but `{text}` is not"))
-            .label(loc, "uppercase in a code")
-            .fix(format!("write `{lower}`"), loc, lower);
+        return if mendable { diag.fix(format!("write `{lower}`"), loc, lower) } else { diag };
     }
-    let mut diag = Diagnostic::error("mixed-case", format!("`{text}` is neither a name nor a commodity"))
+    let mut diag = Diagnostic::error("mixed-case", format!("`{}` is neither a name nor a commodity", clip(text, 40)))
         .label(loc, "names are lowercase and commodities are uppercase");
     let lower = text.to_ascii_lowercase();
     let upper = text.to_ascii_uppercase();
-    if lower.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'*' | b'?' | b'/')) {
+    if mendable && lower.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'*' | b'?' | b'/')) {
         diag = diag.fix(format!("as a place or entity, write `{lower}`"), loc, lower);
     }
-    if upper.bytes().all(|b| matches!(b, b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.')) {
+    if mendable && upper.bytes().all(|b| matches!(b, b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.')) {
         diag = diag.fix(format!("as a commodity, write `{upper}`"), loc, upper);
     }
     diag

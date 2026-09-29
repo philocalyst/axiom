@@ -1,9 +1,10 @@
 //! Laws: a trigger, then steps that run top to bottom.
 
 use axiom_core::diag::closest;
-use axiom_core::{Diagnostic, Loc};
+use axiom_core::{Diagnostic, Id, Loc};
 
-use crate::ast::{Effect, Item, ItemKind, Law, Name, Period, Step, StepKind, Trigger};
+use crate::ast::*;
+use crate::journal::{month_and_day, not_a_day, valid_year_day};
 use crate::lex::{Tok, Token};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported};
@@ -22,55 +23,104 @@ type Triggered = Option<(Trigger, Loc)>;
 impl<'s> Parser<'s> {
     /// A top-level `law`, documented by the `///` block above it. The doc is on
     /// the item and on the law, so a reader needs only one of them.
-    pub fn law_item(&mut self, line: &mut Line<'s>) -> Parse<Item<'s>> {
-        let law = self.law(line)?;
-        Ok(Item { doc: law.doc, loc: law.loc, kind: ItemKind::Law(law) })
+    pub fn law_item(&mut self, line: &mut Line<'s>) -> Parse<()> {
+        let id = self.law(line)?;
+        let law = self.get(id);
+        self.items.push(Item { doc: law.doc, loc: law.loc, kind: ItemKind::Law(id) });
+        Ok(())
     }
 
-    /// The rest of `law NAME`, after the keyword, and its body.
-    pub fn law(&mut self, line: &mut Line<'s>) -> Parse<Law<'s>> {
+    /// The rest of `law NAME`, after the keyword, and its body. A law keeps its
+    /// good steps when one is bad; without a trigger it is nothing.
+    pub fn law(&mut self, line: &mut Line<'s>) -> Parse<Id<Law<'s>>> {
         let name = self.name("expected-name", "a law name")?;
         let header = self.end_header(line)?;
         let mut trigger: Triggered = None;
-        let mut steps = Vec::new();
-        self.children(line, |parser, child| parser.law_line(child, &mut trigger, &mut steps))?;
+        let mark = self.mark::<Step>();
+        let children = self.children(line, |parser, child| parser.law_line(child, &mut trigger, mark));
         let Some((trigger, trigger_loc)) = trigger else {
-            return self.fail(missing_trigger(header.loc));
+            return Err(if children.is_err() { Reported } else { self.report(missing_trigger(header.loc)) });
         };
-        Ok(Law { doc: header.doc, name, trigger, trigger_loc, steps, loc: header.loc })
+        let steps = self.since(mark);
+        Ok(self.push(Law { doc: header.doc, name, trigger, trigger_loc, steps, loc: header.loc }))
     }
 
-    fn law_line(&mut self, line: &Line<'s>, trigger: &mut Triggered, steps: &mut Vec<Step<'s>>) -> Parse<()> {
-        let keyword = self.cursor.peek();
+    /// One line of a law's body: its trigger, or a step. `mark` is where the
+    /// law's steps begin, so a trigger can tell whether it comes too late.
+    fn law_line(&mut self, line: &Line<'s>, trigger: &mut Triggered, mark: usize) -> Parse<()> {
+        let keyword = self.peek();
         let Tok::Name(word) = keyword.tok else {
             return Err(self.expected("expected-step", "a trigger or a step such as `require`"));
         };
-        self.cursor.bump();
+        self.bump();
         if !TRIGGER_WORDS.contains(&word) {
             let kind = self.step(keyword, word)?;
             self.expect_eol()?;
-            steps.push(Step { loc: self.loc_from(line.body), kind });
+            self.push(Step { loc: self.loc_from(line.body), kind });
             return Ok(());
         }
-        let parsed = self.trigger(word)?;
+        let (parsed, filter) = self.trigger(word)?;
         self.expect_eol()?;
         let loc = self.loc_from(line.body);
         match trigger {
             Some((_, first)) => self.fail(second_trigger(loc, *first)),
-            None if !steps.is_empty() => self.fail(late_trigger(loc)),
+            None if self.mark::<Step>() > mark => self.fail(late_trigger(loc)),
             None => {
                 *trigger = Some((parsed, loc));
+                self.t.steps.extend(filter);
                 Ok(())
             }
         }
     }
 
-    fn trigger(&mut self, word: &str) -> Parse<Trigger> {
+    /// The trigger a line names, and the step it implies: `on in from wages |
+    /// bonus` is `on in` with the first step `when from is wages | bonus`,
+    /// its nodes located at what was written.
+    fn trigger(&mut self, word: &str) -> Parse<(Trigger, Option<Step<'s>>)> {
         match word {
-            "on" => self.choose(&ON_TRIGGERS, "unknown-trigger", "trigger").map(|(trigger, _)| trigger),
-            "each" => self.choose(&PERIODS, "unknown-period", "period").map(|(period, _)| Trigger::Each(period)),
-            "by" => self.expression().map(Trigger::By),
-            _ => Ok(Trigger::Always),
+            "on" => {
+                let (trigger, _) = self.choose(&ON_TRIGGERS, "unknown-trigger", "trigger")?;
+                Ok((trigger, self.trigger_filter()?))
+            }
+            "each" => {
+                let (period, _) = self.choose(&PERIODS, "unknown-period", "period")?;
+                match period == Period::Year && self.eat_word("closing").is_some() {
+                    true => self.closing_day().map(|(month, day)| (Trigger::Closing { month, day }, None)),
+                    false => Ok((Trigger::Each(period), None)),
+                }
+            }
+            "by" => Ok((Trigger::By(self.expression()?), None)),
+            _ => Ok((Trigger::Always, None)),
+        }
+    }
+
+    /// `from X | Y` or `to X | Y` after an `on` trigger: the filter `when from
+    /// is X | Y`.
+    fn trigger_filter(&mut self) -> Parse<Option<Step<'s>>> {
+        let Tok::Name("from" | "to") = self.tok() else { return Ok(None) };
+        let end = self.bump().loc;
+        let first = self.next_expr();
+        let subject = self.node(ExprKind::Name(Name(self.text(end))), end, first);
+        let alternatives = self.alternatives()?;
+        let loc = self.loc_from(end.start as usize);
+        let filter = self.node(ExprKind::Is(subject, alternatives), loc, first);
+        Ok(Some(Step { loc, kind: StepKind::When(filter) }))
+    }
+
+    /// The day an `each year closing` law judges the year: `04-15`.
+    fn closing_day(&mut self) -> Parse<(u8, u8)> {
+        let token = self.peek();
+        let day = match token.tok {
+            Tok::Name(word) => month_and_day(word).map(|day| (day, word)),
+            _ => None,
+        };
+        let Some(((month, day), word)) = day else {
+            return Err(self.expected("expected-day", "the day the year is judged, as month and day: `04-15`"));
+        };
+        self.bump();
+        match valid_year_day(month, day) {
+            true => Ok((month, day)),
+            false => self.fail(not_a_day(token.loc, word)),
         }
     }
 
@@ -79,61 +129,49 @@ impl<'s> Parser<'s> {
             "when" => self.expression().map(StepKind::When),
             "let" => {
                 let name = self.name("expected-name", "a name to bind")?;
-                self.expect(Tok::Eq, "expected-equals", "`=` and the value to bind")?;
+                self.expect("=", "expected-equals", "`=` and the value to bind")?;
                 Ok(StepKind::Let(name, self.expression()?))
             }
-            "require" | "warn" => self.requirement(word == "warn"),
-            "owe" => self.owe().map(StepKind::Effect),
-            "count" => self.count().map(StepKind::Effect),
+            "require" | "warn" => {
+                let cond = self.expression()?;
+                let otherwise =
+                    if word == "require" { self.eat_word("else").map(|_| self.effect()).transpose()? } else { None };
+                let message = self.take_message();
+                Ok(StepKind::Require { cond, otherwise, message, warn: word == "warn" })
+            }
+            "owe" | "count" => self.effect_after(word).map(StepKind::Effect),
             _ => Err(self.unknown_step(keyword, word)),
         }
     }
 
-    /// `require EXPR [else EFFECT] [STRING]` or `warn EXPR [STRING]`.
-    fn requirement(&mut self, warn: bool) -> Parse<StepKind<'s>> {
-        let cond = self.expression()?;
-        let otherwise = if !warn && self.eat_word("else").is_some() { Some(self.effect()?) } else { None };
-        let message = self.message();
-        Ok(StepKind::Require { cond, otherwise, message, warn })
+    fn take_message(&mut self) -> Option<Name<'s>> {
+        let Tok::Str(text) = self.tok() else { return None };
+        Some(self.bump_as(Name(text)))
     }
 
-    fn message(&mut self) -> Option<Name<'s>> {
-        let token = self.cursor.peek();
-        let Tok::Str(text) = token.tok else { return None };
-        self.cursor.bump();
-        Some(Name { text, loc: token.loc })
-    }
-
+    /// `owe EXPR to …` or `count EXPR as …`, after `else`.
     fn effect(&mut self) -> Parse<Effect<'s>> {
-        if self.eat_word("owe").is_some() {
-            self.owe()
-        } else if self.eat_word("count").is_some() {
-            self.count()
-        } else {
-            Err(self.expected("expected-effect", "an effect: `owe` or `count`"))
+        let word = ["owe", "count"].into_iter().find(|word| self.eat_word(word).is_some());
+        match word {
+            Some(word) => self.effect_after(word),
+            None => Err(self.expected("expected-effect", "an effect: `owe` or `count`")),
         }
     }
 
-    /// `EXPR to ENTITY [by EXPR] [as NAME]`, after `owe`.
-    fn owe(&mut self) -> Parse<Effect<'s>> {
+    /// What follows `owe` or `count`: `EXPR to ENTITY [by EXPR] [as NAME]`, or
+    /// `EXPR as NAME`.
+    fn effect_after(&mut self, word: &str) -> Parse<Effect<'s>> {
         let amount = self.expression()?;
+        if word == "count" {
+            self.expect_word("as", "expected-as", "`as` and the tally's name")?;
+            let name = self.name("expected-name", "the tally's name, such as `wages`")?;
+            return Ok(Effect::Count { amount, name });
+        }
         self.expect_word("to", "expected-to", "`to` and the entity owed")?;
         let to = self.name("expected-name", "the entity owed, such as `irs`")?;
-        let due = if self.eat_word("by").is_some() { Some(self.expression()?) } else { None };
-        let name = if self.eat_word("as").is_some() {
-            Some(self.name("expected-name", "a name for the obligation")?)
-        } else {
-            None
-        };
+        let due = self.eat_word("by").map(|_| self.expression()).transpose()?;
+        let name = self.eat_word("as").map(|_| self.name("expected-name", "a name for the obligation")).transpose()?;
         Ok(Effect::Owe { amount, to, due, name })
-    }
-
-    /// `EXPR as NAME`, after `count`.
-    fn count(&mut self) -> Parse<Effect<'s>> {
-        let amount = self.expression()?;
-        self.expect_word("as", "expected-as", "`as` and the tally's name")?;
-        let name = self.name("expected-name", "the tally's name, such as `wages`")?;
-        Ok(Effect::Count { amount, name })
     }
 
     fn unknown_step(&mut self, keyword: Token<'s>, word: &str) -> Reported {
