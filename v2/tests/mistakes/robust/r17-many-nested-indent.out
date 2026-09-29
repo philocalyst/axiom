@@ -5,8 +5,6 @@ error[expected-amount]: expected an amount such as `50 USD`, found the end of th
 10 │   x
    │    ┬
    │    ╰── expected an amount such as `50 USD`
-   │
-───╯
 
 error[unexpected-indent]: this line is indented further than the lines above it
    ╭─[r17-many-nested-indent.ax:11:5]
@@ -20,8 +18,8 @@ error[unexpected-indent]: this line is indented further than the lines above it
    │     ╰── indented 4 spaces, where the block uses 2
    │
    = help: align it with the block
+11 -     x
 11 +   x
-───╯
 
 ✗ 2 errors
 [exit status 1]

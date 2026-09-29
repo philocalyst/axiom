@@ -7,7 +7,6 @@ error[type-mismatch]: cannot compare an amount with a number
    │                  ╰── this is an amount
    │
    = note: `<` and its kin compare two amounts, numbers, dates or spans
-───╯
 
 ✗ 1 error
 [exit status 1]

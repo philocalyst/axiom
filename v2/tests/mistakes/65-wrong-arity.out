@@ -4,8 +4,6 @@ error[call-arity]: `total` takes 2 or 3 arguments, but 1 were given
 10 │     warn total(month) <= 650 USD "food is over budget"
    │          ──────┬─────
    │                ╰── wrong number of arguments
-   │
-───╯
 
 ✗ 1 error
 [exit status 1]

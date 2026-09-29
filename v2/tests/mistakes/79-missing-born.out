@@ -6,14 +6,13 @@ error[unset-property]: cannot check `deferral-limit`: `born` is not set
    │   ─────────┬─────────
    │            ╰── this flow: 800.00 USD into assets/retirement
    │
-   ├─[us/401k.ax:33:56]
+   ├─[us/401k.ax:33:56] (built in)
    │
-33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearly limit"
+33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
    │                                                        ──┬──
    │                                                          ╰── `born` is not set
    │
    = help: give it a value where the thing is declared: `born …`
-───╯
 
 ✗ 1 error
 [exit status 1]

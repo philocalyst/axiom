@@ -7,10 +7,10 @@ error[unknown-place]: there is no place `taxes/federl`
    │         ╰── not a known place
    │
    = help: did you mean `taxes/federal`?
+15 -   taxes/federl  900 USD
 15 +   taxes/federal  900 USD
    = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
            `expenses` or `equity`, for example `expenses/federl`
-───╯
 
 ✗ 1 error
 [exit status 1]

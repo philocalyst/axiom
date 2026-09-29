@@ -8,7 +8,6 @@ error[amounts-differ]: the two sides state different amounts
    = note: a transfer keeps its amount: value is never created or lost between the two places
    = help: if the difference is a fee or a rounding, write it as its own leg, or state the amount
            once
-───╯
 
 ✗ 1 error
 [exit status 1]

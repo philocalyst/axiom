@@ -62,8 +62,9 @@ fn main() -> ExitCode {
         Ok(invocation) => invocation,
         Err(usage) => return refuse(&usage, ColorChoice::Auto),
     };
-    let color = invocation.global.color;
-    let terminals = Terminals { out: Terminal::detect(color, &io::stdout()), err: Terminal::detect(color, &io::stderr()) };
+    let color = invocation.color;
+    let terminals =
+        Terminals { out: Terminal::detect(color, &io::stdout()), err: Terminal::detect(color, &io::stderr()) };
     match commands::run(&invocation, terminals) {
         Ok(outcome) => {
             // A closed pipe (`axiom balance | head`) is the reader's choice, not a failure.
@@ -71,7 +72,7 @@ fn main() -> ExitCode {
             let _ = io::stdout().write_all(outcome.answer.as_bytes());
             if outcome.failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
         }
-        Err(problem) => refuse(&problem, invocation.global.color),
+        Err(problem) => refuse(&problem, invocation.color),
     }
 }
 

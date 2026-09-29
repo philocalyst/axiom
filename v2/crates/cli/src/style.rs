@@ -11,6 +11,10 @@ use std::io::IsTerminal;
 /// How many columns a tab takes, in source lines and in the marks under them.
 pub const TAB_WIDTH: usize = 4;
 
+/// What a tab is drawn as, in its first column: a tab that shows as spaces
+/// cannot be told from the spaces it was mistaken for.
+const TAB_MARK: char = '⇥';
+
 /// The width to wrap at when the terminal's is unknown.
 const DEFAULT_WIDTH: usize = 100;
 
@@ -18,48 +22,29 @@ const DEFAULT_WIDTH: usize = 100;
 /// is ignored.
 const MIN_WIDTH: usize = 40;
 
-/// The colours in use. `Default` is the terminal's own.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Color {
-    Default,
-    Red,
-    Green,
-    Yellow,
-    Blue,
-    Cyan,
-}
-
-impl Color {
-    fn code(self) -> Option<&'static str> {
-        match self {
-            Color::Default => None,
-            Color::Red => Some("31"),
-            Color::Green => Some("32"),
-            Color::Yellow => Some("33"),
-            // Bright, because plain blue is unreadable on many dark themes.
-            Color::Blue => Some("94"),
-            Color::Cyan => Some("36"),
-        }
-    }
-}
-
-/// How a run of text looks: a colour, and whether it is bold or dim.
+/// How a run of text looks: a colour (an SGR code), and whether it is bold or
+/// dim.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Ink {
-    color: Color,
+    color: Option<u8>,
     bold: bool,
     dim: bool,
 }
 
 impl Ink {
-    pub const PLAIN: Ink = Ink { color: Color::Default, bold: false, dim: false };
+    pub const PLAIN: Ink = Ink { color: None, bold: false, dim: false };
     pub const BOLD: Ink = Ink::PLAIN.bold();
     pub const DIM: Ink = Ink::PLAIN.dim();
-    pub const RED: Ink = Ink::PLAIN.colored(Color::Red);
-    pub const GREEN: Ink = Ink::PLAIN.colored(Color::Green);
-    pub const YELLOW: Ink = Ink::PLAIN.colored(Color::Yellow);
-    pub const BLUE: Ink = Ink::PLAIN.colored(Color::Blue);
-    pub const CYAN: Ink = Ink::PLAIN.colored(Color::Cyan);
+    pub const RED: Ink = Ink::color(31);
+    pub const GREEN: Ink = Ink::color(32);
+    pub const YELLOW: Ink = Ink::color(33);
+    /// Bright, because plain blue is unreadable on many dark themes.
+    pub const BLUE: Ink = Ink::color(94);
+    pub const CYAN: Ink = Ink::color(36);
+
+    const fn color(code: u8) -> Ink {
+        Ink { color: Some(code), ..Ink::PLAIN }
+    }
 
     /// The same ink, in bold.
     pub const fn bold(self) -> Ink {
@@ -71,9 +56,9 @@ impl Ink {
         Ink { dim: true, ..self }
     }
 
-    /// The same ink in another colour.
-    pub const fn colored(self, color: Color) -> Ink {
-        Ink { color, ..self }
+    /// The same ink in the colour of `other`.
+    pub const fn colored(self, other: Ink) -> Ink {
+        Ink { color: other.color, ..self }
     }
 }
 
@@ -85,17 +70,6 @@ pub enum ColorChoice {
     Never,
 }
 
-impl ColorChoice {
-    /// `auto` colours a terminal unless `NO_COLOR` asks for none.
-    pub fn enabled(self, is_terminal: bool, no_color: bool) -> bool {
-        match self {
-            ColorChoice::Auto => is_terminal && !no_color,
-            ColorChoice::Always => true,
-            ColorChoice::Never => false,
-        }
-    }
-}
-
 /// Turns styled lines into text.
 #[derive(Clone, Copy, Debug)]
 pub struct Painter {
@@ -103,18 +77,20 @@ pub struct Painter {
 }
 
 impl Painter {
+    /// The lines as text, each ending in a newline.
+    pub fn paint(self, lines: &[Line]) -> String {
+        lines.iter().map(|line| line.render(self) + "\n").collect()
+    }
+
     /// Appends `text` to `out`, in `ink` if colour is on.
     fn write(self, out: &mut String, ink: Ink, text: &str) {
         if !self.enabled || ink == Ink::PLAIN {
             out.push_str(text);
             return;
         }
-        let codes = [ink.bold.then_some("1"), ink.dim.then_some("2"), ink.color.code()];
-        out.push_str("\x1b[");
-        out.push_str(&codes.into_iter().flatten().collect::<Vec<_>>().join(";"));
-        out.push('m');
-        out.push_str(text);
-        out.push_str("\x1b[0m");
+        let codes = [ink.bold.then_some(1), ink.dim.then_some(2), ink.color].into_iter().flatten();
+        let codes: Vec<String> = codes.map(|code| code.to_string()).collect();
+        out.push_str(&format!("\x1b[{}m{text}\x1b[0m", codes.join(";")));
     }
 }
 
@@ -134,7 +110,12 @@ impl Terminal {
         let no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
         let columns = std::env::var("COLUMNS").ok().and_then(|value| value.parse::<usize>().ok());
         let width = columns.filter(|&columns| is_terminal && columns >= MIN_WIDTH).unwrap_or(DEFAULT_WIDTH);
-        Terminal { painter: Painter { enabled: choice.enabled(is_terminal, no_color) }, width }
+        let enabled = match choice {
+            ColorChoice::Auto => is_terminal && !no_color,
+            ColorChoice::Always => true,
+            ColorChoice::Never => false,
+        };
+        Terminal { painter: Painter { enabled }, width }
     }
 
     /// No colour, whatever the stream.
@@ -148,6 +129,21 @@ impl Terminal {
     pub fn colored(width: usize) -> Terminal {
         Terminal { painter: Painter { enabled: true }, width }
     }
+}
+
+/// One character per column: a tab is [`TAB_MARK`] and spaces up to
+/// [`TAB_WIDTH`], and any other control character is a space. So a column is a
+/// character whatever the text holds, a stray newline cannot break a layout,
+/// and text from a file cannot smuggle escape sequences to the terminal.
+fn columns(text: &str) -> impl Iterator<Item = char> + '_ {
+    text.chars().flat_map(|ch| {
+        let width = if ch == '\t' { TAB_WIDTH } else { 1 };
+        (0..width).map(move |at| match ch {
+            '\t' if at == 0 => TAB_MARK,
+            ch if ch.is_control() => ' ',
+            ch => ch,
+        })
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -180,18 +176,16 @@ impl Line {
         self.cells.len()
     }
 
-    /// Appends `text`. A tab becomes [`TAB_WIDTH`] spaces and any other control
-    /// character a space, so that one character is always one column, a stray
-    /// newline cannot break a layout, and text from a file cannot smuggle escape
-    /// sequences to the terminal.
+    /// Appends `text`, one cell per column (see [`columns`]).
     pub fn push(&mut self, text: &str, ink: Ink) {
-        for ch in text.chars() {
-            match ch {
-                '\t' => self.cells.extend(std::iter::repeat_n(Cell { ch: ' ', ink }, TAB_WIDTH)),
-                ch if ch.is_control() => self.cells.push(Cell { ch: ' ', ink }),
-                ch => self.cells.push(Cell { ch, ink }),
-            }
-        }
+        self.cells.extend(columns(text).map(|ch| Cell { ch, ink }));
+    }
+
+    /// The columns `from..to` of `text`, without laying out what is outside
+    /// them: a line of two megabytes has no business being copied whole.
+    pub fn excerpt(text: &str, from: usize, to: usize, ink: Ink) -> Line {
+        let cells = columns(text).skip(from).take(to.saturating_sub(from)).map(|ch| Cell { ch, ink });
+        Line { cells: cells.collect() }
     }
 
     /// Writes `text` starting at `column`, over whatever is there and padding
@@ -217,11 +211,6 @@ impl Line {
     /// Adds `other` after the last column.
     pub fn append(&mut self, other: &Line) {
         self.cells.extend_from_slice(&other.cells);
-    }
-
-    /// The character at `column`, if there is one.
-    pub fn glyph_at(&self, column: usize) -> Option<char> {
-        self.cells.get(column).map(|cell| cell.ch)
     }
 
     /// The line as text, with no trailing spaces.
@@ -261,14 +250,14 @@ mod tests {
     fn tabs_and_control_characters_keep_columns_honest() {
         let line = Line::text("\ta\r\nb", Ink::PLAIN);
         assert_eq!(line.width(), TAB_WIDTH + 4);
+        assert_eq!(Line::text("a\tb", Ink::PLAIN).render(Terminal::plain(80).painter), "a⇥   b");
     }
 
     #[test]
-    fn colour_choice() {
-        assert!(ColorChoice::Auto.enabled(true, false));
-        assert!(!ColorChoice::Auto.enabled(true, true));
-        assert!(!ColorChoice::Auto.enabled(false, false));
-        assert!(ColorChoice::Always.enabled(false, true));
-        assert!(!ColorChoice::Never.enabled(true, false));
+    fn an_excerpt_takes_the_columns_asked_for() {
+        let plain = Terminal::plain(80).painter;
+        assert_eq!(Line::excerpt("hello world", 3, 8, Ink::PLAIN).render(plain), "lo wo");
+        assert_eq!(Line::excerpt("a\tb", 1, 3, Ink::PLAIN).render(plain), "⇥");
+        assert_eq!(Line::excerpt("short", 9, 20, Ink::PLAIN).width(), 0);
     }
 }

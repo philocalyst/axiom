@@ -1,16 +1,19 @@
 //! The frame around a diagnostic: the gutter of line numbers, the corners that
-//! open and close it, and the `= note:` lines under it.
+//! open each file's panel, and the `= note:` lines under them.
 //!
 //! ```text
 //!    ╭─[journal/2026/11.ax:4:3]
 //!    │
 //!  4 │   retirement   2_600 USD
 //!    │
+//!    ├─[us/401k.ax:12:11] (built in)
+//!    │
+//! 12 │   require total(in, year) <= limit[year]
+//!    │
 //!    = note: Elective deferrals are capped per calendar year.
-//! ───╯
 //! ```
 
-use super::snippet::{Gutter, Row, Snippet};
+use super::snippet::{Gutter, Panel, Row};
 use crate::style::{Ink, Line};
 use crate::text::wrap;
 
@@ -34,20 +37,26 @@ impl Page {
         self.gutter + 1
     }
 
-    /// `╭─[path:line:col]` for a diagnostic's first file, `├─[…]` for the rest.
-    pub fn frame(&self, first: bool, snippet: &Snippet) -> Line {
+    /// `╭─[path:line:col]` for a diagnostic's first file, `├─[…]` for the rest;
+    /// a source shipped with Axiom says so, since its reader cannot edit it.
+    pub fn frame(&self, first: bool, panel: &Panel) -> Line {
         let mut line = Line::new();
         line.put(self.spine(), if first { "╭─[" } else { "├─[" }, FRAME);
-        line.push(&format!("{}:{}:{}", snippet.path, snippet.lead.line, snippet.lead.column), Ink::PLAIN);
+        line.push(&format!("{}:{}:{}", panel.file.path, panel.lead.line, panel.lead.column), Ink::PLAIN);
         line.push("]", FRAME);
+        if panel.file.embedded {
+            line.push(" (built in)", Ink::DIM);
+        }
         line
     }
 
-    /// A row with its gutter: `12 │ code`, `   │ marks`, `   ⋮`, or `12 + edit`.
+    /// A row with its gutter: `12 │ code`, `   │ marks`, `   ⋮`, `12 - old` or
+    /// `12 + new`.
     pub fn row(&self, row: &Row) -> Line {
         let (number, mark, ink) = match row.gutter {
             Gutter::Number(number) => (Some(number), "│", FRAME),
             Gutter::Added(number) => (Some(number), "+", Ink::GREEN.bold()),
+            Gutter::Removed(number) => (Some(number), "-", Ink::RED.bold()),
             Gutter::Bar => (None, "│", FRAME),
             Gutter::Gap => (None, "⋮", FRAME),
         };
@@ -62,7 +71,7 @@ impl Page {
         line
     }
 
-    /// An empty `│` row, to give a snippet room.
+    /// An empty `│` row, to give a panel room.
     pub fn bar(&self) -> Line {
         self.row(&Row { gutter: Gutter::Bar, content: Line::new() })
     }
@@ -85,10 +94,5 @@ impl Page {
                 line
             })
             .collect()
-    }
-
-    /// `───╯`, under the spine.
-    pub fn closer(&self) -> Line {
-        Line::text(&format!("{}╯", "─".repeat(self.spine())), FRAME)
     }
 }

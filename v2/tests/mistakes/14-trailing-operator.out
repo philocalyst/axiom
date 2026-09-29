@@ -4,8 +4,6 @@ error[expected-expression]: expected an expression, found the end of the line
 10 │     warn total(in, month) <= 650 USD +
    │                                       ┬
    │                                       ╰── expected an expression
-   │
-───╯
 
 error[unknown-place]: there is no place `food`
    ╭─[14-trailing-operator.ax:13:24]
@@ -16,7 +14,6 @@ error[unknown-place]: there is no place `food`
    │
    = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
            `expenses` or `equity`, for example `expenses/food`
-───╯
 
 ✗ 2 errors
 [exit status 1]

@@ -6,7 +6,6 @@ error[unterminated-string]: this string is never closed
    │                                              ╰── the string starts here
    │
    = help: a string ends with a closing `"` on the same line
-───╯
 
 ✗ 1 error
 [exit status 1]

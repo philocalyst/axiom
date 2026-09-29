@@ -7,7 +7,6 @@ error[self-flow]: `assets/checking` cannot pay itself
   │                ╰── the source
   │
   = help: a flow moves value between two places, or between two commodities of one
-──╯
 
 ✗ 1 error
 [exit status 1]

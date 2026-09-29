@@ -44,26 +44,23 @@ struct Job<'a> {
     command: &'a str,
 }
 
-/// Why a file was not written.
-enum Failure {
-    /// The declared path leaves the project.
-    Outside,
+/// Why a file was not written: a line saying so, and what backs it up, drawn
+/// (what the script said, or what is wrong with what it printed).
+struct Failure {
+    summary: String,
+    details: String,
+}
+
+impl Failure {
+    fn new(summary: String) -> Failure {
+        Failure { summary, details: String::new() }
+    }
+
     /// Something went wrong with the file system or the process, while `doing`
     /// what the sentence "could not …" completes.
-    Io {
-        doing: &'static str,
-        error: io::Error,
-    },
-    Exited {
-        status: ExitStatus,
-        stderr: String,
-    },
-    TimedOut(Duration),
-    /// What the script printed is not valid Axiom.
-    Invalid {
-        sources: Sources,
-        diagnostics: Vec<Diagnostic>,
-    },
+    fn io(doing: &'static str) -> impl FnOnce(io::Error) -> Failure {
+        move |error| Failure::new(format!("could not {doing}: {error}"))
+    }
 }
 
 /// Runs the declared syncs (only those for `wanted` files, if any are named)
@@ -72,7 +69,7 @@ pub fn execute(book: &Book, wanted: &[&str], root: &Path, terminal: Terminal) ->
     let declared =
         book.syncs.iter().map(|sync| Job { file: book.name(sync.file), command: book.name(sync.run) }).collect();
     let jobs = choose(declared, wanted)?;
-    let results = run_all(&jobs, root, TIMEOUT);
+    let results = run_all(&jobs, root, TIMEOUT, terminal);
     Ok(report(&jobs, &results, terminal))
 }
 
@@ -91,9 +88,10 @@ fn choose<'a>(jobs: Vec<Job<'a>>, wanted: &[&str]) -> Result<Vec<Job<'a>>, Diagn
 
 /// Every job at once, each result in the order of `jobs`. `Ok` is how many
 /// items were written.
-fn run_all(jobs: &[Job], root: &Path, timeout: Duration) -> Vec<Result<usize, Failure>> {
+fn run_all(jobs: &[Job], root: &Path, timeout: Duration, terminal: Terminal) -> Vec<Result<usize, Failure>> {
     thread::scope(|scope| {
-        let workers: Vec<_> = jobs.iter().map(|job| scope.spawn(move || sync_file(job, root, timeout))).collect();
+        let start = |job| scope.spawn(move || sync_file(job, root, timeout, terminal));
+        let workers: Vec<_> = jobs.iter().map(start).collect();
         workers
             .into_iter()
             .map(|worker| worker.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic)))
@@ -101,26 +99,25 @@ fn run_all(jobs: &[Job], root: &Path, timeout: Duration) -> Vec<Result<usize, Fa
     })
 }
 
-fn sync_file(job: &Job, root: &Path, timeout: Duration) -> Result<usize, Failure> {
+fn sync_file(job: &Job, root: &Path, timeout: Duration, terminal: Terminal) -> Result<usize, Failure> {
     let target = destination(root, job.file)?;
-    let scratch = Scratch::beside(&target).map_err(io_error("prepare the folder"))?;
+    let scratch = Scratch::beside(&target).map_err(Failure::io("prepare the folder"))?;
     let status = execute_script(job.command, root, &scratch, timeout)?;
     if !status.success() {
-        return Err(Failure::Exited { status, stderr: scratch.stderr() });
+        return Err(Failure { summary: format!("the command failed ({status})"), details: scratch.stderr(terminal) });
     }
-    let text = fs::read_to_string(&scratch.stdout).map_err(io_error("read the output"))?;
+    let text = fs::read_to_string(&scratch.stdout).map_err(Failure::io("read the output"))?;
     let (file, diagnostics) = axiom_syntax::parse(FileId(0), &text);
     let items = file.items.len();
     drop(file);
     if diagnostics.iter().any(Diagnostic::is_error) {
-        return Err(Failure::Invalid { sources: Sources::single(job.file.to_string(), text), diagnostics });
+        let sources = Sources::single(job.file.to_string(), text);
+        let (shown, tally) = Renderer::new(&sources, terminal).present(&diagnostics.iter().collect::<Vec<_>>(), false);
+        let summary = format!("the output is not valid Axiom ({})", plural(tally.errors, "error"));
+        return Err(Failure { summary, details: format!("\n{shown}") });
     }
-    fs::rename(&scratch.stdout, &target).map_err(io_error("write the file"))?;
+    fs::rename(&scratch.stdout, &target).map_err(Failure::io("write the file"))?;
     Ok(items)
-}
-
-fn io_error(doing: &'static str) -> impl FnOnce(io::Error) -> Failure {
-    move |error| Failure::Io { doing, error }
 }
 
 /// Where `file` goes: inside the project, and no way out of it.
@@ -128,15 +125,15 @@ fn destination(root: &Path, file: &str) -> Result<PathBuf, Failure> {
     let relative = Path::new(file);
     let stays_inside = relative.components().all(|part| matches!(part, Component::Normal(_)));
     if file.is_empty() || !stays_inside {
-        return Err(Failure::Outside);
+        return Err(Failure::new("the file must be inside the project".to_string()));
     }
     Ok(root.join(relative))
 }
 
 /// Runs `command` to completion, or kills it once `timeout` has passed.
 fn execute_script(command: &str, root: &Path, scratch: &Scratch, timeout: Duration) -> Result<ExitStatus, Failure> {
-    let stdout = File::create(&scratch.stdout).map_err(io_error("keep the output"))?;
-    let stderr = File::create(&scratch.stderr).map_err(io_error("keep the output"))?;
+    let stdout = File::create(&scratch.stdout).map_err(Failure::io("keep the output"))?;
+    let stderr = File::create(&scratch.stderr).map_err(Failure::io("keep the output"))?;
     let mut child = Command::new("sh")
         .args(["-c", command])
         .current_dir(root)
@@ -144,17 +141,18 @@ fn execute_script(command: &str, root: &Path, scratch: &Scratch, timeout: Durati
         .stdout(stdout)
         .stderr(stderr)
         .spawn()
-        .map_err(io_error("start the command"))?;
+        .map_err(Failure::io("start the command"))?;
     let started = Instant::now();
     loop {
-        if let Some(status) = child.try_wait().map_err(io_error("wait for the command"))? {
+        if let Some(status) = child.try_wait().map_err(Failure::io("wait for the command"))? {
             return Ok(status);
         }
         if started.elapsed() >= timeout {
             // Killing an already-finished child is not an error worth reporting.
             let _ = child.kill();
             let _ = child.wait();
-            return Err(Failure::TimedOut(timeout));
+            let limit = plural(timeout.as_secs() as usize, "second");
+            return Err(Failure::new(format!("the command took more than {limit} to finish")));
         }
         thread::sleep(POLL);
     }
@@ -179,8 +177,16 @@ impl Scratch {
         })
     }
 
-    fn stderr(&self) -> String {
-        fs::read(&self.stderr).map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string()).unwrap_or_default()
+    /// What the script said on stderr, indented, cut to a few lines, and drawn.
+    fn stderr(&self, terminal: Terminal) -> String {
+        let bytes = fs::read(&self.stderr).unwrap_or_default();
+        let said = String::from_utf8_lossy(&bytes);
+        let mut lines: Vec<String> = said.trim().lines().take(STDERR_LINES).map(|line| format!("    {line}")).collect();
+        let more = said.trim().lines().count().saturating_sub(STDERR_LINES);
+        if more > 0 {
+            lines.push(format!("    … and {} more", plural(more, "line")));
+        }
+        terminal.painter.paint(&lines.iter().map(|line| Line::text(line, Ink::DIM)).collect::<Vec<_>>())
     }
 }
 
@@ -194,9 +200,7 @@ impl Drop for Scratch {
 /// One line per file, `✓` or `✗`, and under a failure what it has to say.
 fn report(jobs: &[Job], results: &[Result<usize, Failure>], terminal: Terminal) -> Outcome {
     if jobs.is_empty() {
-        return Outcome::ok(
-            Line::text("no sync is declared in this project", Ink::DIM).render(terminal.painter) + "\n",
-        );
+        return Outcome::ok(terminal.painter.paint(&[Line::text("no sync is declared in this project", Ink::DIM)]));
     }
     let width = jobs.iter().map(|job| job.file.chars().count()).max().unwrap_or(0);
     let mut text = String::new();
@@ -207,63 +211,29 @@ fn report(jobs: &[Job], results: &[Result<usize, Failure>], terminal: Terminal) 
         line.pad_to(2 + width + 2);
         match result {
             Ok(items) => line.push(&format!("{} written", plural(*items, "item")), Ink::PLAIN),
-            Err(failure) => line.push(&failure.summary(), Ink::RED),
+            Err(failure) => line.push(&failure.summary, Ink::RED),
         }
-        text.push_str(&line.render(terminal.painter));
-        text.push('\n');
-        if let Err(failure) = result {
-            text.push_str(&failure.details(terminal));
-        }
+        text += &terminal.painter.paint(&[line]);
+        text += result.as_ref().err().map_or("", |failure| &failure.details);
     }
     Outcome { answer: text, diagnostics: String::new(), failed: results.iter().any(Result::is_err) }
 }
 
-impl Failure {
-    fn summary(&self) -> String {
-        match self {
-            Failure::Outside => "the file must be inside the project".to_string(),
-            Failure::Io { doing, error } => format!("could not {doing}: {error}"),
-            Failure::Exited { status, .. } => format!("the command failed ({status})"),
-            Failure::TimedOut(limit) => {
-                format!("the command took more than {} to finish", plural(limit.as_secs() as usize, "second"))
-            }
-            Failure::Invalid { diagnostics, .. } => format!(
-                "the output is not valid Axiom ({})",
-                plural(diagnostics.iter().filter(|found| found.is_error()).count(), "error")
-            ),
-        }
-    }
-
-    /// What the script said, or what is wrong with what it printed.
-    fn details(&self, terminal: Terminal) -> String {
-        match self {
-            Failure::Exited { stderr, .. } => {
-                let shown = stderr.lines().take(STDERR_LINES);
-                let more = stderr.lines().count().saturating_sub(STDERR_LINES);
-                let mut lines: Vec<String> = shown.map(|line| format!("    {line}")).collect();
-                if more > 0 {
-                    lines.push(format!("    … and {} more", plural(more, "line")));
-                }
-                lines.iter().map(|line| Line::text(line, Ink::DIM).render(terminal.painter) + "\n").collect()
-            }
-            Failure::Invalid { sources, diagnostics } => {
-                let found: Vec<&Diagnostic> = diagnostics.iter().collect();
-                format!("\n{}", Renderer::new(sources, terminal).diagnostics(&found))
-            }
-            Failure::Outside | Failure::Io { .. } | Failure::TimedOut(_) => String::new(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use std::os::unix::process::ExitStatusExt;
-
     use super::*;
     use crate::testing::TempDir;
 
     fn job<'a>(file: &'a str, command: &'a str) -> Job<'a> {
         Job { file, command }
+    }
+
+    fn run(jobs: &[Job], root: &Path, timeout: Duration) -> Vec<Result<usize, Failure>> {
+        run_all(jobs, root, timeout, Terminal::plain(100))
+    }
+
+    fn summary(result: &Result<usize, Failure>) -> &str {
+        &result.as_ref().err().expect("a failure").summary
     }
 
     fn files_in(dir: &TempDir) -> Vec<String> {
@@ -280,7 +250,8 @@ mod tests {
         let root = Path::new("/project");
         assert_eq!(destination(root, "prices/2026.ax").ok(), Some(PathBuf::from("/project/prices/2026.ax")));
         for outside in ["../x.ax", "/etc/x.ax", "a/../../x.ax", ""] {
-            assert!(matches!(destination(root, outside), Err(Failure::Outside)), "{outside:?}");
+            let refused = destination(root, outside).err().expect("refused");
+            assert_eq!(refused.summary, "the file must be inside the project", "{outside:?}");
         }
     }
 
@@ -289,7 +260,7 @@ mod tests {
         let dir = TempDir::new("sync-writes");
         dir.write("prices/2026.ax", "old\n");
         let script = "printf '2026-01-01 checking -> food 4 USD\\n2026-01-02 checking -> food 5 USD\\n'";
-        let results = run_all(&[job("prices/2026.ax", script)], dir.path(), TIMEOUT);
+        let results = run(&[job("prices/2026.ax", script)], dir.path(), TIMEOUT);
         assert!(matches!(results[0], Ok(2)));
         let written = fs::read_to_string(dir.path().join("prices/2026.ax")).unwrap();
         assert_eq!(written, "2026-01-01 checking -> food 4 USD\n2026-01-02 checking -> food 5 USD\n");
@@ -299,8 +270,7 @@ mod tests {
     #[test]
     fn a_new_file_in_a_new_folder_is_created() {
         let dir = TempDir::new("sync-creates");
-        let results =
-            run_all(&[job("a/b/new.ax", "printf '2026-01-01 checking -> food 4 USD\\n'")], dir.path(), TIMEOUT);
+        let results = run(&[job("a/b/new.ax", "printf '2026-01-01 checking -> food 4 USD\\n'")], dir.path(), TIMEOUT);
         assert!(matches!(results[0], Ok(1)));
         assert!(dir.path().join("a/b/new.ax").is_file());
     }
@@ -310,8 +280,8 @@ mod tests {
         let dir = TempDir::new("sync-invalid");
         dir.write("prices.ax", "old\n");
         let jobs = [job("prices.ax", "printf 'this is not axiom\\n'")];
-        let results = run_all(&jobs, dir.path(), TIMEOUT);
-        assert!(matches!(results[0], Err(Failure::Invalid { .. })));
+        let results = run(&jobs, dir.path(), TIMEOUT);
+        assert!(summary(&results[0]).starts_with("the output is not valid Axiom ("));
         assert_eq!(fs::read_to_string(dir.path().join("prices.ax")).unwrap(), "old\n");
         assert_eq!(files_in(&dir), ["prices.ax"]);
 
@@ -326,9 +296,12 @@ mod tests {
     fn a_failing_script_leaves_the_file_and_the_folder_as_they_were() {
         let dir = TempDir::new("sync-fails");
         dir.write("prices.ax", "old\n");
-        let results = run_all(&[job("prices.ax", "echo partial; echo 'no network' >&2; exit 3")], dir.path(), TIMEOUT);
-        let Err(Failure::Exited { status, stderr }) = &results[0] else { panic!("the script fails") };
-        assert_eq!((status.code(), stderr.as_str()), (Some(3), "no network"));
+        let results = run(&[job("prices.ax", "echo partial; echo 'no network' >&2; exit 3")], dir.path(), TIMEOUT);
+        let Err(failure) = &results[0] else { panic!("the script fails") };
+        assert_eq!(
+            (failure.summary.as_str(), failure.details.as_str()),
+            ("the command failed (exit status: 3)", "    no network\n")
+        );
         assert_eq!(fs::read_to_string(dir.path().join("prices.ax")).unwrap(), "old\n");
         assert_eq!(files_in(&dir), ["prices.ax"]);
     }
@@ -337,8 +310,8 @@ mod tests {
     fn a_script_that_hangs_is_killed() {
         let dir = TempDir::new("sync-hangs");
         let started = Instant::now();
-        let results = run_all(&[job("out.ax", "sleep 30")], dir.path(), Duration::from_millis(200));
-        assert!(matches!(results[0], Err(Failure::TimedOut(_))));
+        let results = run(&[job("out.ax", "sleep 30")], dir.path(), Duration::from_millis(200));
+        assert!(summary(&results[0]).starts_with("the command took more than"));
         assert!(started.elapsed() < Duration::from_secs(10));
         assert!(files_in(&dir).is_empty());
     }
@@ -349,7 +322,7 @@ mod tests {
         let mut jobs: Vec<Job> = (0..4).map(|_| job("out.ax", "sleep 0.5; exit 1")).collect();
         jobs.push(job("where.ax", "pwd > cwd.txt; exit 1"));
         let started = Instant::now();
-        let results = run_all(&jobs, dir.path(), TIMEOUT);
+        let results = run(&jobs, dir.path(), TIMEOUT);
         assert_eq!(results.len(), 5);
         assert!(
             started.elapsed() < Duration::from_millis(1800),
@@ -374,14 +347,12 @@ mod tests {
     #[test]
     fn the_report_says_what_became_of_each_file() {
         let jobs = [job("prices/2026.ax", ""), job("statements.ax", ""), job("elsewhere.ax", ""), job("slow.ax", "")];
+        let failed = |summary: &str, details: &str| Err(Failure { summary: summary.into(), details: details.into() });
         let results = vec![
             Ok(312),
-            Err(Failure::Exited {
-                status: ExitStatus::from_raw(3 << 8),
-                stderr: "login expired\nsee `axiom help`".to_string(),
-            }),
-            Err(Failure::Outside),
-            Err(Failure::TimedOut(TIMEOUT)),
+            failed("the command failed (exit status: 3)", "    login expired\n    see `axiom help`\n"),
+            failed("the file must be inside the project", ""),
+            failed("the command took more than 60 seconds to finish", ""),
         ];
         let outcome = report(&jobs, &results, Terminal::plain(100));
         assert!(outcome.failed);

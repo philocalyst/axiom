@@ -5,18 +5,8 @@ error[amount-range]: this amount is too large to count exactly
   │                                       ─────────────┬────────────
   │                                                    ╰── beyond 100,000,000,000,000,000 quanta
   │
+  = note: also at r13-sum-overflow.ax:10
   = help: a single amount stays below that; use a coarser unit
-──╯
-
-error[amount-range]: this amount is too large to count exactly
-   ╭─[r13-sum-overflow.ax:10:39]
-   │
-10 │ 2026-01-09 equity/opening -> checking 90_000_000_000_000_000 USD
-   │                                       ─────────────┬────────────
-   │                                                    ╰── beyond 100,000,000,000,000,000 quanta
-   │
-   = help: a single amount stays below that; use a coarser unit
-───╯
 
 ✗ 2 errors
 [exit status 1]

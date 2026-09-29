@@ -7,8 +7,8 @@ error[negative-amount]: amounts carry no sign
    │
    = note: the arrow gives the direction: money moves from the left of `->` to the right
    = help: remove the sign
+16 - 2026-01-19 checking -> groceries -12.00 USD
 16 + 2026-01-19 checking -> groceries 12.00 USD
-───╯
 
 ✗ 1 error
 [exit status 1]

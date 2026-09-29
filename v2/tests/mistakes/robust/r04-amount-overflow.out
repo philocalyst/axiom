@@ -6,7 +6,6 @@ error[bad-number]: `99999999999999999999` is not a valid number
   │                                       ╰── not a number
   │
   = note: this number has more digits than an amount can hold
-──╯
 
 ✗ 1 error
 [exit status 1]

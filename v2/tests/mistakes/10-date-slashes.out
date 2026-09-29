@@ -7,7 +7,6 @@ error[unknown-keyword]: unknown keyword `01/15/2026`
    │
    = note: the keywords are `account`, `entity`, `commodity`, `kind`, `code`, `param`, `law`,
            `every`, `sync`, `system`, `use`, `base`, `relaxed`, `layout`
-───╯
 
 ✗ 1 error
 [exit status 1]

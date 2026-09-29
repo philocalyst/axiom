@@ -148,7 +148,6 @@ warning[law]: law `budget` does not hold for expenses/food
    │              ╰── 681.00 USD
    │
    = help: at most 97.10 USD more can go in this month
-───╯
 
 note[pad]: accepted a gap on assets/cash
    ╭─[journal/2026/03.ax:42:1]
@@ -156,16 +155,14 @@ note[pad]: accepted a gap on assets/cash
 42 │ 2026-03-31 cash = 63.00 USD !
    │ ──────────────┬──────────────
    │               ╰── 14.50 USD moved out of assets/cash into unknown
-   │
-───╯
 
 1 warning
-✓ 68 flows · 28 places · 16 laws enforced · net worth 77,597.73 USD
+✓ 68 flows · 29 places · 16 laws enforced · net worth 77,597.73 USD
 [exit status 0]
 
 ══ 7. A priced violation of the 401(k): check says nothing
 $ axiom check 71-early-withdrawal.ax --today 2026-06-30
-✓ 2 flows · 4 places · 4 laws enforced · net worth 40,000.00 USD
+✓ 2 flows · 5 places · 4 laws enforced · net worth 40,000.00 USD
 [exit status 0]
 
 ══ 8. ...the cost is only visible in tax
@@ -207,9 +204,9 @@ error[law]: 401(k) deferrals over the yearly limit
    │   ──────────────┬─────────────
    │                 ╰── this flow: 12,000.00 USD into assets/retirement-newco
    │
-   ├─[us/401k.ax:33:13]
+   ├─[us/401k.ax:33:13] (built in)
    │
-33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearly limit"
+33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
    │             ────────────┬───────────┬─────────┬──┬─┬─────┬──
    │                         │           │         │  │ │     ╰── empty
    │                         │           │         │  │ ╰── 24,500.00 USD
@@ -224,9 +221,41 @@ error[law]: 401(k) deferrals over the yearly limit
            over the cap. Ask payroll to lower the deferral. Any excess must also be returned by the
            plan before April 15 of the next year, or it is taxed twice (IRC §402(g)(2)).
    = help: at most 9,500.00 USD more can count toward `elective-deferrals` this year
-───╯
 
 ✗ 1 error
+✗ rests on a book with 1 error (`axiom check` lists them): what they touch may be wrong
+
+Why assets/retirement
+
+Composition
+  Holds       Quantity  Plain money  Parcels
+  ──────────────────────────────────────────
+  USD    15,000.00 USD                     1
+
+Parcels
+  Place                   Quantity     Basis  Acquired    Tied to  From
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  assets/retirement  15,000.00 USD  0.00 USD  2026-05-29           69-401k-two-employers.ax:26
+
+Governed by
+  Law                            When       Governs                                     Explains                                                                   Written
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  deferral-limit                 on in      every 401k                                  Elective deferrals are capped for each person and calendar year, across    us/401k.ax:28
+  pretax-deferral                on in      every 401k                                  A deferral is pay you chose not to receive, so it is not taxed this year   us/401k.ax:38
+  count-wages                    on in      everyone living under us, and all they own  Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a  us.ax:58
+  count-interest                 on in      everyone living under us, and all they own  Interest is ordinary income in the year it is earned (IRC §61(a)(4)),      us.ax:66
+  count-dividends                on in      everyone living under us, and all they own  Dividends are income in the year they are paid (IRC §61(a)(7)), except     us.ax:76
+  credit-withholding             on in      everyone living under us, and all they own  Tax withheld from pay, or paid in installments, is credited against the    us.ax:108
+  count-distributions            on gain    every 401k                                  Money that comes out of a 401(k) is ordinary income in the year it comes   us/401k.ax:48
+  early-withdrawal               on gain    every 401k                                  Money taken out before age 59½ carries an additional 10% tax on top of     us/401k.ax:60
+  count-short-term-gains         on gain    everyone living under us, and all they own  A gain on something held for a year or less is taxed as ordinary income    us.ax:86
+  count-long-term-gains          on gain    everyone living under us, and all they own  A gain on something held for more than a year is taxed at the lower        us.ax:97
+  required-minimum-distribution  each year  every 401k                                  From age 73, an owner must take a minimum distribution from a 401(k)       us/401k.ax:73
+
+Recent flows
+  Date        With           Payee  Note         Amount        Balance
+  ────────────────────────────────────────────────────────────────────
+  2026-05-29  income/salary  acme         15,000.00 USD  15,000.00 USD
 [exit status 1]
 
 ══ 11. ...unless --relaxed, which the refusal does not mention

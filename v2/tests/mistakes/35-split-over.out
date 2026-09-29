@@ -7,7 +7,6 @@ error[split-over]: the legs use 5,500.00 USD, but the total is 5,000.00 USD
    │
    = note: nothing is left for the remainder, or the legs already exceed the total
    = help: lower a leg, or raise the total
-───╯
 
 ✗ 1 error
 [exit status 1]

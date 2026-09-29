@@ -6,7 +6,6 @@ error[unexpected-character]: unexpected character ' '
   │                                  ╰── not part of the language
   │
   = help: an amount is a number and its commodity, like `84.20 USD`
-──╯
 
 ✗ 1 error
 [exit status 1]

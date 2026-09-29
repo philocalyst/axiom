@@ -1,3 +1,4 @@
-error: no axiom.ax in <mistakes>/97-no-root or any folder above it
-  = help: run axiom inside a project, or give it a .ax file
+error[no-project]: no axiom.ax in <mistakes>/97-no-root or any folder above it
+  = help: create an `axiom.ax` (it may be empty) in the folder that holds your ledger
+  = help: or point at one file on its own: `axiom -C FILE.ax check`
 [exit status 2]

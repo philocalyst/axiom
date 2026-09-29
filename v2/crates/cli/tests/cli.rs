@@ -31,9 +31,22 @@ fn help_lists_the_commands_and_exits_cleanly() {
     let output = run(&["help"]);
     assert_eq!(output.status.code(), Some(0));
     let screen = text(&output.stdout);
-    for command in
-        ["check", "balance", "register", "flow", "available", "budget", "tax", "lots", "forecast", "why", "sync"]
-    {
+    for command in [
+        "check",
+        "balance",
+        "register",
+        "flow",
+        "available",
+        "budget",
+        "limits",
+        "claims",
+        "tax",
+        "gains",
+        "lots",
+        "forecast",
+        "why",
+        "sync",
+    ] {
         assert!(screen.contains(command), "{command} is missing from\n{screen}");
     }
     assert!(!screen.contains('\x1b'), "a pipe gets no colour");
@@ -59,7 +72,7 @@ fn colour_is_only_added_when_asked_for() {
     let plain = text(&run(&["--color", "never", "help"]).stdout);
     assert!(!plain.contains('\x1b'));
     let outside = axiom(&["--color=always", "check"]).current_dir(empty_folder("colour")).output().expect("axiom runs");
-    assert!(text(&outside.stderr).starts_with("\x1b[1;31merror\x1b[0m"), "{:?}", text(&outside.stderr));
+    assert!(text(&outside.stderr).starts_with("\x1b[1;31merror[no-project]\x1b[0m"), "{:?}", text(&outside.stderr));
 }
 
 #[test]
@@ -68,8 +81,8 @@ fn outside_a_project_there_is_nothing_to_run_on() {
     let output = axiom(&["check"]).current_dir(&folder).output().expect("axiom runs");
     assert_eq!(output.status.code(), Some(2));
     let message = text(&output.stderr);
-    assert!(message.starts_with("error: no axiom.ax in "), "{message}");
-    assert!(message.contains("run axiom inside a project"), "{message}");
+    assert!(message.starts_with("error[no-project]: no axiom.ax in "), "{message}");
+    assert!(message.contains("create an `axiom.ax`"), "{message}");
     let _ = fs::remove_dir_all(folder);
 }
 
@@ -77,5 +90,39 @@ fn outside_a_project_there_is_nothing_to_run_on() {
 fn a_missing_path_is_reported_not_panicked() {
     let output = run(&["check", "/no/such/place"]);
     assert_eq!(output.status.code(), Some(2));
-    assert!(text(&output.stderr).starts_with("error: cannot open /no/such/place"));
+    assert!(text(&output.stderr).starts_with("error[unreadable]: cannot open /no/such/place"));
+}
+
+/// A project with a journal that has one typo in it.
+fn project_with_a_typo(name: &str) -> PathBuf {
+    let folder = empty_folder(name);
+    let setup = "base USD\nuse std\naccount assets/checking : bank\naccount expenses/food\n";
+    fs::write(folder.join("axiom.ax"), setup).unwrap();
+    let journal = "2026-01-02 income/salary -> checking 1_000 USD\n2026-01-08 checking -> food 84.20 USD\n2026-01-09 checking -> fod 5 USD\n";
+    fs::write(folder.join("journal.ax"), journal).unwrap();
+    folder
+}
+
+#[test]
+fn a_report_runs_on_a_book_with_errors_and_says_what_it_rests_on() {
+    let folder = project_with_a_typo("report-anyway");
+    let output = axiom(&["balance", "--today", "2026-02-01"]).current_dir(&folder).output().expect("axiom runs");
+    assert_eq!(output.status.code(), Some(1));
+    let (answer, problems) = (text(&output.stdout), text(&output.stderr));
+    assert!(problems.starts_with("error[unknown-place]: there is no place `fod`"), "{problems}");
+    assert!(problems.ends_with("✗ 1 error\n"), "{problems}");
+    assert!(answer.starts_with("✗ rests on a book with 1 error"), "{answer}");
+    assert!(answer.contains("Balances at"), "{answer}");
+    let _ = fs::remove_dir_all(folder);
+}
+
+#[test]
+fn a_file_that_is_not_utf8_is_named_with_its_line() {
+    let folder = project_with_a_typo("not-utf8");
+    fs::write(folder.join("prices.ax"), b"2026-01-01 VTI 285.70 USD\n2026-01-02 \xff\n").unwrap();
+    let output = axiom(&["check"]).current_dir(&folder).output().expect("axiom runs");
+    assert_eq!(output.status.code(), Some(2));
+    let problem = text(&output.stderr);
+    assert!(problem.starts_with("error[not-utf8]: cannot read prices.ax: line 2 is not valid UTF-8"), "{problem}");
+    let _ = fs::remove_dir_all(folder);
 }

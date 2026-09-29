@@ -10,7 +10,6 @@ error[repeated-event]: `#check-1041` already has an event
    │              ╰── a flow takes one event; this second one is ignored for the flow below
    │
    = help: if a settled payment later bounces, write a new flow that reverses it
-───╯
 
 ✗ 1 error
 [exit status 1]

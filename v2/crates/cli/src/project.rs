@@ -10,8 +10,9 @@ use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
-use axiom_core::{Diagnostic, FileId, par};
+use axiom_core::{Diagnostic, FileId, Loc, par};
 use axiom_model::Source;
 
 /// The file that marks a project's root.
@@ -32,49 +33,54 @@ impl Project {
     /// The project around `start`: the nearest folder at or above it with an
     /// `axiom.ax`. A `.ax` file with no such folder above it is a project alone.
     pub fn find(start: &Path) -> Result<Project, Diagnostic> {
-        let start =
-            fs::canonicalize(start).map_err(|error| failure(format!("cannot open {}: {error}", start.display())))?;
-        if start.is_file() {
-            return Project::around_file(start);
+        let start = fs::canonicalize(start)
+            .map_err(|error| failure("unreadable", format!("cannot open {}: {error}", start.display())))?;
+        let alone = start.is_file();
+        if alone && start.extension() != Some(OsStr::new(EXTENSION)) {
+            return Err(failure("no-project", format!("{} is not a folder or a .{EXTENSION} file", start.display())));
         }
-        match marker_above(&start) {
+        let folder = if alone { start.parent().unwrap_or(&start) } else { &start };
+        match marker_above(folder) {
             Some(root) => Ok(Project { root, only: None }),
-            None => Err(failure(format!("no {MARKER} in {} or any folder above it", start.display()))
-                .help("run axiom inside a project, or give it a .ax file")),
+            None if alone => Ok(Project { root: folder.to_path_buf(), only: Some(start.clone()) }),
+            None => Err(failure("no-project", format!("no {MARKER} in {} or any folder above it", start.display()))
+                .help(format!("create an `{MARKER}` (it may be empty) in the folder that holds your ledger"))
+                .help("or point at one file on its own: `axiom -C FILE.ax check`")),
         }
-    }
-
-    fn around_file(file: PathBuf) -> Result<Project, Diagnostic> {
-        if file.extension() != Some(OsStr::new(EXTENSION)) {
-            return Err(failure(format!("{} is not a folder or a .{EXTENSION} file", file.display())));
-        }
-        let folder = file.parent().unwrap_or(Path::new("/")).to_path_buf();
-        Ok(match marker_above(&folder) {
-            Some(root) => Project { root, only: None },
-            None => Project { root: folder, only: Some(file) },
-        })
     }
 
     /// Reads every source of the project, and the systems that come with it.
+    /// The files are read, and checked to be UTF-8, by every core at once.
     pub fn load(&self) -> Result<Sources, Diagnostic> {
         let relative = match &self.only {
             Some(file) => file.file_name().map(PathBuf::from).into_iter().collect(),
             None => self.find_sources()?,
         };
-        let mut texts = Vec::with_capacity(relative.len());
-        for path in relative {
-            let shown = display(&path);
-            let text = fs::read_to_string(self.root.join(&path))
-                .map_err(|error| failure(format!("cannot read {shown}: {error}")))?;
-            texts.push((shown, text));
-        }
-        Sources::assemble(texts, axiom_systems::SYSTEMS)
+        let texts = par::map_each(&relative, |path| self.read(path));
+        let files = relative.iter().map(|path| display(path)).zip(texts);
+        Sources::assemble(
+            files.map(|(path, text)| Ok((path, text?))).collect::<Result<_, _>>()?,
+            axiom_systems::SYSTEMS,
+        )
+    }
+
+    /// The text of the file at `relative`.
+    fn read(&self, relative: &Path) -> Result<String, Diagnostic> {
+        let shown = display(relative);
+        let bytes = fs::read(self.root.join(relative))
+            .map_err(|error| failure("unreadable", format!("cannot read {shown}: {error}")))?;
+        String::from_utf8(bytes).map_err(|error| {
+            let before = &error.as_bytes()[..error.utf8_error().valid_up_to()];
+            let line = 1 + memchr::memchr_iter(b'\n', before).count();
+            failure("not-utf8", format!("cannot read {shown}: line {line} is not valid UTF-8"))
+                .help("save the file as UTF-8")
+        })
     }
 
     fn find_sources(&self) -> Result<Vec<PathBuf>, Diagnostic> {
         let mut found = Vec::new();
         collect(&self.root, Path::new(""), &mut found)
-            .map_err(|error| failure(format!("cannot list {}: {error}", self.root.display())))?;
+            .map_err(|error| failure("unreadable", format!("cannot list {}: {error}", self.root.display())))?;
         // Path order compares folder by folder, so a folder's files stay
         // together and declaration order is the same on every machine.
         found.sort();
@@ -88,8 +94,8 @@ fn marker_above(folder: &Path) -> Option<PathBuf> {
 
 /// Adds every `.ax` file under `root/relative` to `found`, as paths relative to
 /// `root`. Hidden entries and `target/` are skipped. A link to a file counts as
-/// the file; a link to a folder is not followed, since it could lead around in
-/// circles.
+/// the file (a dangling one is nothing); a link to a folder is not followed,
+/// since it could lead around in circles.
 fn collect(root: &Path, relative: &Path, found: &mut Vec<PathBuf>) -> io::Result<()> {
     for entry in fs::read_dir(root.join(relative))? {
         let entry = entry?;
@@ -101,17 +107,13 @@ fn collect(root: &Path, relative: &Path, found: &mut Vec<PathBuf>) -> io::Result
         let kind = entry.file_type()?;
         if kind.is_dir() {
             collect(root, &path, found)?;
-        } else if path.extension() == Some(OsStr::new(EXTENSION)) && is_file(&entry, kind) {
+        } else if path.extension() == Some(OsStr::new(EXTENSION))
+            && fs::metadata(entry.path()).is_ok_and(|m| m.is_file())
+        {
             found.push(path);
         }
     }
     Ok(())
-}
-
-/// Whether `entry`, of type `kind`, is a file or a link to one. A dangling link
-/// is neither.
-fn is_file(entry: &fs::DirEntry, kind: fs::FileType) -> bool {
-    kind.is_file() || (kind.is_symlink() && fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_file()))
 }
 
 /// `journal/2026/01.ax`, with `/` on every platform.
@@ -120,8 +122,8 @@ fn display(path: &Path) -> String {
     parts.join("/")
 }
 
-fn failure(message: String) -> Diagnostic {
-    Diagnostic::error("", message)
+fn failure(code: &'static str, message: String) -> Diagnostic {
+    Diagnostic::error(code, message)
 }
 
 /// One source text and where it came from.
@@ -133,6 +135,43 @@ pub struct SourceFile {
     pub text: Cow<'static, str>,
     /// Shipped with Axiom rather than found in the project.
     pub embedded: bool,
+    /// The byte at which each line starts, found when something first points
+    /// into the file.
+    starts: OnceLock<Vec<usize>>,
+}
+
+impl SourceFile {
+    fn new(id: FileId, path: Cow<'static, str>, text: Cow<'static, str>, embedded: bool) -> SourceFile {
+        SourceFile { id, path, text, embedded, starts: OnceLock::new() }
+    }
+
+    fn starts(&self) -> &[usize] {
+        self.starts.get_or_init(|| {
+            let newlines = memchr::memchr_iter(b'\n', self.text.as_bytes()).map(|at| at + 1);
+            std::iter::once(0).chain(newlines).collect()
+        })
+    }
+
+    /// How many lines the text has.
+    pub fn lines(&self) -> usize {
+        self.starts().len()
+    }
+
+    /// The line (counting from 0) that holds byte `offset`. An offset past the
+    /// end belongs to the last line.
+    pub fn line_of(&self, offset: usize) -> usize {
+        self.starts().partition_point(|&start| start <= offset) - 1
+    }
+
+    /// Where `line` starts. A line past the end starts at the end.
+    pub fn line_start(&self, line: usize) -> usize {
+        self.starts().get(line).copied().unwrap_or(self.text.len())
+    }
+
+    /// The text of `line`, without its line ending.
+    pub fn line(&self, line: usize) -> &str {
+        self.text[self.line_start(line)..self.line_start(line + 1)].trim_end_matches(['\n', '\r'])
+    }
 }
 
 /// Every source text of a run. The syntax tree, the book and every diagnostic
@@ -145,7 +184,7 @@ pub struct Sources {
 impl Sources {
     /// One text that is not on disk: what a `sync` command printed.
     pub fn single(path: String, text: String) -> Sources {
-        let file = SourceFile { id: FileId(0), path: Cow::Owned(path), text: Cow::Owned(text), embedded: false };
+        let file = SourceFile::new(FileId(0), Cow::Owned(path), Cow::Owned(text), false);
         Sources { files: vec![file] }
     }
 
@@ -156,26 +195,26 @@ impl Sources {
         systems: &'static [(&'static str, &'static str)],
     ) -> Result<Sources, Diagnostic> {
         let inherited: Vec<_> = systems.iter().filter(|(path, _)| !overridden(&project, path)).collect();
+        let limit = usize::from(u16::MAX) + 1;
+        if project.len() + inherited.len() > limit {
+            return Err(failure("too-many-files", format!("too many source files: at most {limit} are supported")));
+        }
         let own = project.into_iter().map(|(path, text)| (Cow::Owned(path), Cow::Owned(text), false));
         let embedded = inherited.into_iter().map(|&(path, text)| (Cow::Borrowed(path), Cow::Borrowed(text), true));
         let files = own
             .chain(embedded)
             .enumerate()
-            .map(|(index, (path, text, embedded))| {
-                let id = u16::try_from(index).map(FileId).map_err(|_| {
-                    failure(format!("too many source files: at most {} are supported", usize::from(u16::MAX) + 1))
-                })?;
-                Ok(SourceFile { id, path, text, embedded })
-            })
-            .collect::<Result<_, _>>()?;
+            .map(|(index, (path, text, embedded))| SourceFile::new(FileId(index as u16), path, text, embedded))
+            .collect();
         Ok(Sources { files })
     }
 
-    /// Texts that are not on disk, as project files in the order given.
+    /// Texts that are not on disk, as project files in the order given, and
+    /// then `systems` as the embedded ones.
     #[cfg(test)]
-    pub fn in_memory(files: &[(&str, &str)]) -> Sources {
+    pub fn in_memory(files: &[(&str, &str)], systems: &'static [(&'static str, &'static str)]) -> Sources {
         let texts = files.iter().map(|&(path, text)| (path.to_string(), text.to_string())).collect();
-        Sources::assemble(texts, &[]).expect("a handful of files")
+        Sources::assemble(texts, systems).expect("a handful of files")
     }
 
     /// The source with this id, if there is one.
@@ -186,6 +225,20 @@ impl Sources {
     /// The source at `path`, as `axiom why` or a diagnostic shows it.
     pub fn find(&self, path: &str) -> Option<&SourceFile> {
         self.files.iter().find(|file| file.path == path)
+    }
+
+    /// `journal/2026/01.ax:14`: what `axiom why` accepts back.
+    pub fn describe(&self, loc: Loc) -> Option<String> {
+        let file = self.get(loc.file)?;
+        Some(format!("{}:{}", file.path, file.line_of(loc.start as usize) + 1))
+    }
+
+    /// The bytes of line `number` (counted from 1) of the file at `path`.
+    pub fn locate(&self, path: &str, number: usize) -> Option<Loc> {
+        let file = self.find(path)?;
+        let line = number.checked_sub(1).filter(|&line| line < file.lines())?;
+        let start = file.line_start(line);
+        Some(Loc::new(file.id, start as u32, (start + file.line(line).len()) as u32))
     }
 
     /// Parses every file, in parallel, into what the model builds from.
@@ -281,5 +334,26 @@ mod tests {
         assert_eq!(texts(&sources), [("systems/us.ax", false), ("journal.ax", false), ("us/401k.ax", true)]);
         assert_eq!(sources.get(FileId(2)).map(|file| file.id), Some(FileId(2)));
         assert!(sources.get(FileId(3)).is_none());
+    }
+
+    #[test]
+    fn lines_and_offsets() {
+        let sources = Sources::in_memory(&[("a.ax", "ab\ncd\r\n\nlast")], &[]);
+        let file = sources.get(FileId(0)).unwrap();
+        assert_eq!([0, 2, 3, 5, 6, 7, 8, 100].map(|at| file.line_of(at)), [0, 0, 1, 1, 1, 2, 3, 3]);
+        assert_eq!((file.line(1), file.line(2), file.line(3), file.line(9)), ("cd", "", "last", ""));
+        assert_eq!(file.lines(), 4);
+        // A final newline starts an empty line.
+        let sources = Sources::in_memory(&[("b.ax", "a\n")], &[]);
+        assert_eq!(sources.get(FileId(0)).unwrap().lines(), 2);
+    }
+
+    #[test]
+    fn a_line_is_described_and_found_again() {
+        let sources = Sources::in_memory(&[("journal/2026/01.ax", "one\ntwo\n")], &[]);
+        let two = sources.locate("journal/2026/01.ax", 2).unwrap();
+        assert_eq!((two.start, two.end), (4, 7));
+        assert_eq!(sources.describe(two).as_deref(), Some("journal/2026/01.ax:2"));
+        assert!(sources.locate("journal/2026/01.ax", 4).is_none() && sources.locate("nowhere.ax", 1).is_none());
     }
 }

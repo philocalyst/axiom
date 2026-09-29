@@ -6,8 +6,8 @@ error[unknown-keyword]: unknown keyword `acount`
   │    ╰── a line starts with a date or a keyword
   │
   = help: did you mean `account`?
+5 - acount assets/checking : bank
 5 + account assets/checking : bank
-──╯
 
 error[unknown-place]: there is no place `checking`
   ╭─[19-unknown-keyword.ax:9:30]
@@ -16,20 +16,9 @@ error[unknown-place]: there is no place `checking`
   │                              ────┬───
   │                                  ╰── not a known place
   │
+  = note: also at 19-unknown-keyword.ax:10
   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
           `expenses` or `equity`, for example `expenses/checking`
-──╯
-
-error[unknown-place]: there is no place `checking`
-   ╭─[19-unknown-keyword.ax:10:12]
-   │
-10 │ 2026-01-18 checking -> food 84.20 USD
-   │            ────┬───
-   │                ╰── not a known place
-   │
-   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
-           `expenses` or `equity`, for example `expenses/checking`
-───╯
 
 ✗ 3 errors
 [exit status 1]

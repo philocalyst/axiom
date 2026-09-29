@@ -16,7 +16,6 @@ error[assertion]: liabilities/visa holds 652.00 USD, not 252.00 USD
    │
    = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
 15 + 2026-01-31 visa = 252.00 USD !
-───╯
 
 ✗ 1 error
 [exit status 1]

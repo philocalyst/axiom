@@ -5,16 +5,7 @@ error[unexpected-character]: unexpected character 'é'
   │                   ┬
   │                   ╰── not part of the language
   │
-──╯
-
-error[unexpected-character]: unexpected character 'é'
-  ╭─[r08-unicode-name.ax:5:15]
-  │
-5 │ 2026-01-08 café -> food 84.20 USD
-  │               ┬
-  │               ╰── not part of the language
-  │
-──╯
+  = note: also at r08-unicode-name.ax:5
 
 ✗ 2 errors
 [exit status 1]

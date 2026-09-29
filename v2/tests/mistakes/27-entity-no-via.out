@@ -10,7 +10,6 @@ error[entity-without-via]: `landlord` has no place to stand for
    │                            ╰── an entity written where a place is expected stands for its `via` place
    │
    = help: add `via` to `entity landlord`, for example `via expenses/landlord`
-───╯
 
 ✗ 1 error
 [exit status 1]

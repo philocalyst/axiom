@@ -12,7 +12,6 @@ error[price-disagrees]: the price does not match the amounts
              checking -> 2_000.00 USD
                brokerage 7 VTI @ 285.70 USD
                expenses/fees 0.10 USD
-───╯
 
 ✗ 1 error
 [exit status 1]

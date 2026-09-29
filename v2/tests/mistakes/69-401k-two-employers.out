@@ -6,9 +6,9 @@ error[law]: 401(k) deferrals over the yearly limit
    │   ──────────────┬─────────────
    │                 ╰── this flow: 12,000.00 USD into assets/retirement-newco
    │
-   ├─[us/401k.ax:33:13]
+   ├─[us/401k.ax:33:13] (built in)
    │
-33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearly limit"
+33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
    │             ────────────┬───────────┬─────────┬──┬─┬─────┬──
    │                         │           │         │  │ │     ╰── empty
    │                         │           │         │  │ ╰── 24,500.00 USD
@@ -23,7 +23,6 @@ error[law]: 401(k) deferrals over the yearly limit
            over the cap. Ask payroll to lower the deferral. Any excess must also be returned by the
            plan before April 15 of the next year, or it is taxed twice (IRC §402(g)(2)).
    = help: at most 9,500.00 USD more can count toward `elective-deferrals` this year
-───╯
 
 ✗ 1 error
 [exit status 1]

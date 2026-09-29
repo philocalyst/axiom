@@ -8,7 +8,6 @@ error[type-mismatch]: cannot test an amount against a kind
    │
    = note: `is` tests a place, entity or commodity against a kind, a place, an entity or a pattern,
            and a flow against a `#code`
-───╯
 
 ✗ 1 error
 [exit status 1]

@@ -1,34 +1,37 @@
-//! One file's share of a diagnostic: the source lines it points at, the marks
-//! under them, and the margin that joins the two ends of a label spanning lines.
+//! One file's share of a diagnostic, as rows: the source lines its labels point
+//! at with the marks under them, or the lines an edit would change.
 //!
 //! ```text
-//! 15 │ ╭─▶ 2026-01-15 acme -> 5_200 USD
-//! 16 │ │     retirement   800 USD
-//! 17 │ ├─▶   checking     ...
-//!    │ │
-//!    │ ╰── the legs add up to more than the header
+//! 15 │ 2026-01-15 acme -> 5_200 USD
+//!    │            ──┬─
+//!    │              ╰── acme pays
+//! 16 │   retirement   800 USD
 //! ```
+//!
+//! A label that spans several lines is marked on each of them, with its text
+//! under the last, so one layout serves every label.
 
-use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 
 use axiom_core::Loc;
 use axiom_core::diag::Label;
 
-use super::Inks;
 use super::labels::{LineLabel, annotate};
-use super::source::{LineIndex, clamp, columns_before};
 use crate::project::SourceFile;
 use crate::style::{Ink, Line, TAB_WIDTH};
 
-/// A label spanning more lines than this shows only its first and last.
+/// A label spanning more lines than this is marked only on its first and last.
 const SHOWN_SPAN: usize = 8;
 
-/// One file's labelled lines, ready to be framed.
-pub struct Snippet<'a> {
-    pub path: &'a str,
-    /// Where the snippet's main label begins.
+/// The fewest columns of a source line worth showing, however narrow the
+/// terminal claims to be.
+const MIN_ROOM: usize = 30;
+
+/// One file's rows, ready to be framed.
+pub struct Panel<'a> {
+    pub file: &'a SourceFile,
+    /// Where the panel's main label begins.
     pub lead: Position,
     pub rows: Vec<Row>,
 }
@@ -51,8 +54,10 @@ pub struct Row {
 pub enum Gutter {
     /// A source line, numbered from 1.
     Number(usize),
-    /// A line as it would read after a suggested edit.
+    /// A line as a suggested edit would leave it.
     Added(usize),
+    /// A line a suggested edit takes away or rewrites.
+    Removed(usize),
     /// Marks under a source line.
     Bar,
     /// Lines left out.
@@ -63,151 +68,149 @@ impl Gutter {
     /// The line number a row carries, if it carries one.
     pub fn number(self) -> Option<usize> {
         match self {
-            Gutter::Number(number) | Gutter::Added(number) => Some(number),
+            Gutter::Number(number) | Gutter::Added(number) | Gutter::Removed(number) => Some(number),
             Gutter::Bar | Gutter::Gap => None,
         }
     }
 }
 
-/// A label whose ends are on different lines. Each gets a margin column.
-struct Multi<'a> {
-    first: usize,
-    last: usize,
-    column: usize,
-    text: &'a str,
-    ink: Ink,
-}
-
-impl Multi<'_> {
-    /// Whether the label's bar runs on below `line`. Its own text hangs below
-    /// its last line, after the tails of the labels to its right, so while
-    /// those are printed (`pending` is the column being printed) it is still
-    /// open there.
-    fn is_open_below(&self, line: usize, pending: usize) -> bool {
-        self.first <= line
-            && (line < self.last || (line == self.last && !self.text.is_empty() && self.column < pending))
-    }
-}
-
-/// Lays out the `labels` that fall in `file`. There is at least one.
-pub fn snippet<'a>(file: &'a SourceFile, index: &LineIndex, labels: &[&Label], inks: Inks) -> Snippet<'a> {
-    let mut layout = Layout { text: &file.text, index, singles: BTreeMap::new(), multis: Vec::new() };
+/// Lays out the `labels` that fall in `file`, with source lines drawn no wider
+/// than `width`. There is at least one label.
+pub fn snippet<'a>(file: &'a SourceFile, labels: &[&Label], primary: Ink, width: usize) -> Panel<'a> {
+    let room = width.saturating_sub(file.lines().to_string().len() + 5).max(MIN_ROOM);
+    let mut layout = Layout { file, room, marks: BTreeMap::new() };
     for label in labels {
-        layout.place(label, inks);
+        layout.place(label, primary);
     }
-    layout.number_margin_columns();
     let lead = labels.iter().find(|label| label.primary).or_else(|| labels.iter().min_by_key(|label| label.loc.start));
     let lead = lead.map_or(Position { line: 1, column: 1 }, |label| layout.position(layout.span(label).0));
-    Snippet { path: &file.path, lead, rows: layout.rows() }
+    Panel { file, lead, rows: layout.rows() }
 }
 
-/// The lines an edit would leave: the text before `loc` and after it, around
-/// the replacement, which is highlighted. A replacement of several lines makes
-/// several rows.
-pub fn edited_lines(file: &SourceFile, index: &LineIndex, loc: Loc, replacement: &str) -> Vec<Row> {
+/// An edit as a diff: the lines it takes away, then the lines it puts in their
+/// place. What both versions share above and below is left out, so adding a
+/// line shows only that line, and a line that ends up blank is not drawn.
+pub fn edit<'a>(file: &'a SourceFile, loc: Loc, replacement: &str) -> Panel<'a> {
     let text: &str = &file.text;
     let start = clamp(text, loc.start as usize);
     let end = clamp(text, loc.end as usize).max(start);
-    let (first, last) = (index.line_of(start), index.line_of(end));
-    let before = &text[index.start(first, text)..start];
-    let last_line_end = index.start(last, text) + index.line(last, text).len();
-    let after = &text[end..last_line_end.max(end)];
+    let (first, last) = (file.line_of(start), file.line_of(end));
+    let head = &text[file.line_start(first)..start];
+    let tail = &text[end..(file.line_start(last) + file.line(last).len()).max(end)];
 
-    let mut rows = Vec::new();
-    let mut current = Line::text(before, Ink::PLAIN);
-    for (at, piece) in replacement.split('\n').enumerate() {
-        if at > 0 {
-            rows.push(Row { gutter: Gutter::Added(first + at), content: std::mem::take(&mut current) });
-        }
-        current.push(piece, Ink::GREEN.bold());
-    }
-    current.push(after, Ink::PLAIN);
-    rows.push(Row { gutter: Gutter::Added(first + rows.len() + 1), content: current });
-    rows
+    let removed = &text[start..end];
+    let (before, after) = (format!("{head}{removed}{tail}"), format!("{head}{replacement}{tail}"));
+    let old = split(&before, head.len()..head.len() + removed.len(), Ink::RED.bold());
+    let new = split(&after, head.len()..head.len() + replacement.len(), Ink::GREEN.bold());
+    let top = old.iter().zip(&new).take_while(|(a, b)| a.0 == b.0).count();
+    let bottom = old[top..].iter().rev().zip(new[top..].iter().rev()).take_while(|(a, b)| a.0 == b.0).count();
+
+    // An insertion takes nothing away, so there is nothing to strike out.
+    let mut rows = if removed.is_empty() { Vec::new() } else { changed(old, top, bottom, first, Gutter::Removed) };
+    rows.extend(changed(new, top, bottom, first, Gutter::Added));
+    let column = columns_before(file.line(first), head.len(), 1) + 1;
+    Panel { file, lead: Position { line: first + 1, column }, rows }
+}
+
+/// `full` as lines, each with its text and drawn with what lies in `marked`
+/// in `ink`.
+fn split(full: &str, marked: Range<usize>, ink: Ink) -> Vec<(&str, Line)> {
+    let mut offset = 0;
+    full.split('\n')
+        .map(|piece| {
+            let cut = |at: usize| at.clamp(offset, offset + piece.len()) - offset;
+            let (from, to) = (cut(marked.start), cut(marked.end));
+            let mut line = Line::text(&piece[..from], Ink::PLAIN);
+            line.push(&piece[from..to], ink);
+            line.push(&piece[to..], Ink::PLAIN);
+            offset += piece.len() + 1;
+            (piece, line)
+        })
+        .collect()
+}
+
+/// The rows for the lines of `all` between the `top` and `bottom` ones that
+/// did not change, numbered from `first`. A blank line is not worth a row.
+fn changed(all: Vec<(&str, Line)>, top: usize, bottom: usize, first: usize, gutter: fn(usize) -> Gutter) -> Vec<Row> {
+    let end = all.len() - bottom;
+    all.into_iter()
+        .enumerate()
+        .take(end)
+        .skip(top)
+        .filter(|(_, (piece, _))| !piece.trim().is_empty())
+        .map(|(at, (_, content))| Row { gutter: gutter(first + at + 1), content })
+        .collect()
 }
 
 struct Layout<'a> {
-    text: &'a str,
-    index: &'a LineIndex,
-    /// Labels within one line, by line.
-    singles: BTreeMap<usize, Vec<LineLabel<'a>>>,
-    multis: Vec<Multi<'a>>,
+    file: &'a SourceFile,
+    /// The most columns of a source line that are shown.
+    room: usize,
+    /// The marks on each line.
+    marks: BTreeMap<usize, Vec<LineLabel<'a>>>,
 }
 
 impl<'a> Layout<'a> {
-    fn line(&self, line: usize) -> &'a str {
-        self.index.line(line, self.text)
-    }
-
     fn position(&self, offset: usize) -> Position {
-        let offset = offset.min(self.text.len());
-        let line = self.index.line_of(offset);
-        let column = columns_before(self.line(line), offset - self.index.start(line, self.text), 1) + 1;
+        let line = self.file.line_of(offset);
+        let column = columns_before(self.file.line(line), offset - self.file.line_start(line), 1) + 1;
         Position { line: line + 1, column }
     }
 
-    /// The label's bytes without the whitespace around them: a span often takes
-    /// in the indentation before it or the line ending after it. A span of
+    /// The bytes `start..end` without the whitespace around them: a span often
+    /// takes in the indentation before it or the line ending after it. A span of
     /// nothing but whitespace is kept as it is, to point at the gap.
-    fn span(&self, label: &Label) -> (usize, usize) {
-        let bytes = self.text.as_bytes();
-        let start = (label.loc.start as usize).min(bytes.len());
-        let end = (label.loc.end as usize).clamp(start, bytes.len());
-        let inside = &bytes[start..end];
+    fn trim(&self, start: usize, end: usize) -> (usize, usize) {
+        let bytes = self.file.text.as_bytes();
+        let start = start.min(bytes.len());
+        let inside = &bytes[start..end.clamp(start, bytes.len())];
         let solid = |byte: &u8| !byte.is_ascii_whitespace();
         match (inside.iter().position(solid), inside.iter().rposition(solid)) {
             (Some(first), Some(last)) => (start + first, start + last + 1),
-            _ => (start, end),
+            _ => (start, start + inside.len()),
         }
     }
 
-    fn place(&mut self, label: &'a Label, inks: Inks) {
+    fn span(&self, label: &Label) -> (usize, usize) {
+        self.trim(label.loc.start as usize, label.loc.end as usize)
+    }
+
+    /// Marks `label` on every line it covers, its text hanging from the last.
+    fn place(&mut self, label: &'a Label, primary: Ink) {
         let (start, end) = self.span(label);
-        let first = self.index.line_of(start);
-        let last = self.index.line_of(end.max(start + 1) - 1);
-        let ink = if label.primary { inks.primary } else { inks.secondary };
-        if first != last {
-            self.multis.push(Multi { first, last, column: 0, text: &label.text, ink });
-            return;
+        let (first, last) = (self.file.line_of(start), self.file.line_of(end.max(start + 1) - 1));
+        let ink = if label.primary { primary } else { Ink::BLUE };
+        let covered: Vec<usize> = if last - first > SHOWN_SPAN { vec![first, last] } else { (first..=last).collect() };
+        for line in covered {
+            let text = self.file.line(line);
+            if first != last && text.trim().is_empty() {
+                continue;
+            }
+            let origin = self.file.line_start(line);
+            let (from, to) = self.trim(start.max(origin), end.min(origin + text.len()));
+            let from = columns_before(text, from - origin, TAB_WIDTH);
+            // An empty span still gets one column, so there is something to point at.
+            let to = columns_before(text, to - origin, TAB_WIDTH).max(from + 1);
+            let words = if line == last { label.text.as_str() } else { "" };
+            self.marks.entry(line).or_default().push(LineLabel {
+                start: from,
+                end: to,
+                text: words,
+                primary: label.primary,
+                ink,
+            });
         }
-        let origin = self.index.start(first, self.text);
-        let line = self.line(first);
-        let from = columns_before(line, start - origin, TAB_WIDTH);
-        // An empty span still gets one column, so there is something to point at.
-        let to = columns_before(line, end - origin, TAB_WIDTH).max(from + 1);
-        let placed = LineLabel { start: from, end: to, text: &label.text, primary: label.primary, ink };
-        self.singles.entry(first).or_default().push(placed);
-    }
-
-    /// Outer labels go left of the labels nested inside them.
-    fn number_margin_columns(&mut self) {
-        self.multis.sort_by_key(|multi| (multi.first, Reverse(multi.last)));
-        for (column, multi) in self.multis.iter_mut().enumerate() {
-            multi.column = column;
-        }
-    }
-
-    /// Room for a bar per multi-line label, then `─▶` and a space.
-    fn margin_width(&self) -> usize {
-        if self.multis.is_empty() { 0 } else { self.multis.len() + 3 }
     }
 
     // ─── Which lines ────────────────────────────────────────────────────────
 
-    /// Every labelled line, the heading a labelled line is indented under, and
-    /// a line that is all that separates two shown ones.
+    /// Every marked line, the heading a marked line is indented under, and a
+    /// line that is all that separates two shown ones.
     fn shown_lines(&self) -> Vec<usize> {
         let mut shown = BTreeSet::new();
-        for &line in self.singles.keys() {
+        for &line in self.marks.keys() {
             shown.extend(self.heading_above(line));
             shown.insert(line);
-        }
-        for multi in &self.multis {
-            shown.extend(self.heading_above(multi.first));
-            shown.extend([multi.first, multi.last]);
-            if multi.last - multi.first <= SHOWN_SPAN {
-                shown.extend(multi.first..=multi.last);
-            }
         }
         let bridges: Vec<usize> = shown
             .iter()
@@ -224,7 +227,7 @@ impl<'a> Layout<'a> {
     /// part of.
     fn heading_above(&self, line: usize) -> Option<usize> {
         let above = line.checked_sub(1)?;
-        let (this, heading) = (self.line(line), self.line(above));
+        let (this, heading) = (self.file.line(line), self.file.line(above));
         let indent = |text: &str| text.len() - text.trim_start().len();
         (!heading.trim().is_empty() && indent(heading) < indent(this)).then_some(above)
     }
@@ -235,8 +238,8 @@ impl<'a> Layout<'a> {
         let mut rows = Vec::new();
         let mut previous: Option<usize> = None;
         for line in self.shown_lines() {
-            if let Some(above) = previous.filter(|&above| line > above + 1) {
-                rows.push(Row { gutter: Gutter::Gap, content: self.verticals(above, 0) });
+            if previous.is_some_and(|above| line > above + 1) {
+                rows.push(Row { gutter: Gutter::Gap, content: Line::new() });
             }
             rows.extend(self.line_rows(line));
             previous = Some(line);
@@ -244,90 +247,72 @@ impl<'a> Layout<'a> {
         rows
     }
 
-    /// A source line, the marks under it, and the text of the multi-line
-    /// labels that end on it.
+    /// A source line, cut to what fits around its marks (`…` shows where), and
+    /// the marks under it.
     fn line_rows(&self, line: usize) -> Vec<Row> {
-        let mut code = self.code_margin(line);
-        code.push(self.line(line), Ink::PLAIN);
+        let text = self.file.line(line);
+        let marks = self.marks.get(&line).map_or(&[][..], Vec::as_slice);
+        let width = columns_before(text, text.len(), TAB_WIDTH);
+        // A mark may point just past the end of the line: at where something is missing.
+        let focus = focus_of(marks);
+        let shown = window(width.max(focus.end), focus, self.room);
+        let lead = usize::from(shown.start > 0);
+
+        let mut code = Line::new();
+        if lead > 0 {
+            code.push("…", Ink::DIM);
+        }
+        code.append(&Line::excerpt(text, shown.start, shown.end, Ink::PLAIN));
+        if shown.end < width {
+            code.push("…", Ink::DIM);
+        }
+        let in_view = |mark: &&LineLabel| mark.start < shown.end && mark.end > shown.start;
+        let moved: Vec<LineLabel> = marks
+            .iter()
+            .filter(in_view)
+            .map(|mark| LineLabel {
+                start: mark.start.max(shown.start) + lead - shown.start,
+                end: mark.end.min(shown.end) + lead - shown.start,
+                ..*mark
+            })
+            .collect();
         let mut rows = vec![Row { gutter: Gutter::Number(line + 1), content: code }];
-        for marks in self.singles.get(&line).map(|labels| annotate(labels)).unwrap_or_default() {
-            let mut content = self.verticals(line, usize::MAX);
-            content.append(&marks);
-            rows.push(Row { gutter: Gutter::Bar, content });
+        if !moved.is_empty() {
+            rows.extend(annotate(&moved).into_iter().map(|content| Row { gutter: Gutter::Bar, content }));
         }
-        rows.extend(self.tails(line));
         rows
-    }
-
-    /// The text of every multi-line label that ends on `line`, rightmost first
-    /// so no bar has to cross another label's text.
-    fn tails(&self, line: usize) -> Vec<Row> {
-        let mut ending: Vec<&Multi> =
-            self.multis.iter().filter(|multi| multi.last == line && !multi.text.is_empty()).collect();
-        if ending.is_empty() {
-            return Vec::new();
-        }
-        ending.sort_by_key(|multi| Reverse(multi.column));
-        let spacer = Row { gutter: Gutter::Bar, content: self.verticals(line, usize::MAX) };
-        let tails = ending.into_iter().map(|multi| Row { gutter: Gutter::Bar, content: self.tail(multi, line) });
-        std::iter::once(spacer).chain(tails).collect()
-    }
-
-    fn tail(&self, multi: &Multi, line: usize) -> Line {
-        let mut row = self.verticals(line, multi.column);
-        row.put(multi.column, "╰", multi.ink);
-        dash(&mut row, multi.column + 1..self.margin_width() - 1, multi.ink);
-        row.pad_to(self.margin_width());
-        row.push(multi.text, Ink::PLAIN);
-        row
-    }
-
-    // ─── Margins ────────────────────────────────────────────────────────────
-
-    fn blank_margin(&self) -> Line {
-        let mut margin = Line::new();
-        margin.pad_to(self.margin_width());
-        margin
-    }
-
-    /// The margin beside marks and gaps below `line`.
-    fn verticals(&self, line: usize, pending: usize) -> Line {
-        let mut margin = self.blank_margin();
-        for multi in self.multis.iter().filter(|multi| multi.is_open_below(line, pending)) {
-            margin.put(multi.column, "│", multi.ink);
-        }
-        margin
-    }
-
-    /// The margin beside a source line: bars through the labels that span it,
-    /// and an arrow into the line where one begins or ends.
-    fn code_margin(&self, line: usize) -> Line {
-        let mut margin = self.blank_margin();
-        for multi in self.multis.iter().filter(|multi| multi.first < line && line < multi.last) {
-            margin.put(multi.column, "│", multi.ink);
-        }
-        for multi in &self.multis {
-            if multi.first == line {
-                self.arrow(&mut margin, multi, "╭");
-            } else if multi.last == line {
-                self.arrow(&mut margin, multi, if multi.text.is_empty() { "╰" } else { "├" });
-            }
-        }
-        margin
-    }
-
-    fn arrow(&self, margin: &mut Line, multi: &Multi, corner: &str) {
-        let tip = self.margin_width() - 2;
-        margin.put(multi.column, corner, multi.ink);
-        dash(margin, multi.column + 1..tip, multi.ink);
-        margin.put(tip, "▶", multi.ink);
     }
 }
 
-/// Draws `─` over `columns`, as `┼` where it crosses a bar.
-fn dash(margin: &mut Line, columns: Range<usize>, ink: Ink) {
-    for column in columns {
-        let glyph = if margin.glyph_at(column) == Some('│') { "┼" } else { "─" };
-        margin.put(column, glyph, ink);
+/// The columns the reader must see: those of the primary marks, or of all of
+/// them if none is primary.
+fn focus_of(marks: &[LineLabel]) -> Range<usize> {
+    let any_primary = marks.iter().any(|mark| mark.primary);
+    let chosen = || marks.iter().filter(move |mark| mark.primary || !any_primary);
+    let start = chosen().map(|mark| mark.start).min().unwrap_or(0);
+    start..chosen().map(|mark| mark.end).max().unwrap_or(0)
+}
+
+/// Which of the `width` columns of a line to show when only `room` fit: from
+/// its start if the `focus` is in view from there, else with about as much
+/// before the focus as after.
+fn window(width: usize, focus: Range<usize>, room: usize) -> Range<usize> {
+    if width <= room {
+        return 0..width;
     }
+    let before = room.saturating_sub(focus.len()) / 2;
+    let start = if focus.end <= room { 0 } else { focus.start.saturating_sub(before).min(width - room) };
+    start..start + room
+}
+
+/// How many columns the part of `line` before byte `offset` takes, counting a
+/// tab as `tab` columns and every other character as one. An `offset` inside a
+/// character counts that character, and one past the end counts the whole line.
+fn columns_before(line: &str, offset: usize, tab: usize) -> usize {
+    line.char_indices().take_while(|&(at, _)| at < offset).map(|(_, ch)| if ch == '\t' { tab } else { 1 }).sum()
+}
+
+/// The nearest character boundary at or before `offset`, and never past the end.
+fn clamp(text: &str, offset: usize) -> usize {
+    (0..=offset.min(text.len())).rev().find(|&at| text.is_char_boundary(at)).unwrap_or(0)
 }

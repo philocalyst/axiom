@@ -6,8 +6,8 @@ error[bad-date]: `2026-1-5` is not a date
    │     ╰── dates are written `YYYY-MM-DD`, two digits each for month and day
    │
    = help: write `2026-01-05`
+15 - 2026-1-5 checking -> groceries 84.20 USD
 15 + 2026-01-05 checking -> groceries 84.20 USD
-───╯
 
 ✗ 1 error
 [exit status 1]

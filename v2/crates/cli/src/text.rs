@@ -21,19 +21,14 @@ pub fn wrap(text: &str, width: usize) -> Vec<String> {
             continue;
         }
         let mut line = String::new();
-        let mut used = 0;
         for word in paragraph.split_whitespace() {
-            let length = word.chars().count();
-            if used > 0 && used + 1 + length > width {
+            if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
                 lines.push(std::mem::take(&mut line));
-                used = 0;
             }
-            if used > 0 {
+            if !line.is_empty() {
                 line.push(' ');
-                used += 1;
             }
             line.push_str(word);
-            used += length;
         }
         lines.push(line);
     }

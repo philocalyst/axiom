@@ -8,7 +8,6 @@ error[insufficient-holding]: assets/checking does not hold 84.2 UDS
    = note: assets/checking holds 0.0 UDS
    = help: record the purchase before this flow, or check the quantity; the missing amount is left
            as a negative balance so the rest of the ledger stays consistent
-───╯
 
 error[no-price]: no price for UDS in USD on 2026-01-08
    ╭─[23-typo-commodity.ax:15:1]
@@ -18,7 +17,6 @@ error[no-price]: no price for UDS in USD on 2026-01-08
    │                      ╰── needed to value 84.2 UDS
    │
    = help: add a price line such as `2026-01-08 UDS <price> USD`
-───╯
 
 error[no-price]: cannot check `overdraft`: no price for UDS in USD on 2026-01-08
    ╭─[23-typo-commodity.ax:15:1]
@@ -27,14 +25,13 @@ error[no-price]: cannot check `overdraft`: no price for UDS in USD on 2026-01-08
    │ ─────────────────────┬────────────────────
    │                      ╰── this flow: 84.2 UDS from assets/checking to expenses/food/groceries
    │
-   ├─[std.ax:26:10]
+   ├─[std.ax:26:10] (built in)
    │
 26 │     warn balance >= empty "balance below zero"
    │          ───┬───
    │             ╰── no price for UDS in USD on 2026-01-08
    │
    = help: add a price line such as `2026-01-08 UDS <price> USD`
-───╯
 
 ✗ 3 errors
 [exit status 1]

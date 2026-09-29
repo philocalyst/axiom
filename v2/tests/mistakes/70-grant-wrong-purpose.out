@@ -5,7 +5,7 @@ error[law]: grant money spent outside its purpose
     │ ────────────────────┬────────────────────
     │                     ╰── this flow: 1,200.00 USD of restricted money leaving assets/checking
     │
-    ├─[std.ax:148:13]
+    ├─[std.ax:148:13] (built in)
     │
 148 │     require to is self.purpose "grant money spent outside its purpose"
     │             ─┬──────┬─┬─┬─────
@@ -17,7 +17,6 @@ error[law]: grant money spent outside its purpose
     = note: Grant money may only be spent on what the grant names. This payment went somewhere else.
             Pay it from another account, or, if the funder agreed to the change, update `purpose` on
             the grant.
-────╯
 
 ✗ 1 error
 [exit status 1]

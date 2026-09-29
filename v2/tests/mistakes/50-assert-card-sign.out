@@ -7,8 +7,8 @@ error[negative-amount]: amounts carry no sign
    │
    = note: the arrow gives the direction: money moves from the left of `->` to the right
    = help: remove the sign
+14 - 2026-01-31 visa = -452.00 USD
 14 + 2026-01-31 visa = 452.00 USD
-───╯
 
 ✗ 1 error
 [exit status 1]

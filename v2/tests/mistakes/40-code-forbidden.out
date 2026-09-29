@@ -11,7 +11,6 @@ error[code-placement]: `#check-1041` may not mark this flow
    │
    = note: it may only mark flows touching `bank`
    = help: use the code where the rule allows it, or change the rule
-───╯
 
 ✗ 1 error
 [exit status 1]
