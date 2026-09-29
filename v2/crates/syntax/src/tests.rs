@@ -861,6 +861,11 @@ fn a_line_that_names_no_end_is_an_item_of_the_flow_above_it() {
     assert_eq!((flow.body.legs.len(), flow.body.items.len()), (2, 1));
     // An item has an amount, and its tail is a flow's.
     only_error("2026-03-14 a -> b 5 USD\n  + #fees\n", "expected-amount");
+    // An amount first and then an end is a leg written backwards.
+    let src = "2026-03-14 lumen -> 4_600 USD\n  800 USD retirement\n  checking ...\n";
+    assert_eq!(first_fix(src, &only_error(src, "item-with-end")), ("800 USD retirement", "retirement 800 USD"));
+    let src = "2026-03-14 lumen -> 4_600 USD\n  - 800 USD retirement\n";
+    assert!(only_error(src, "item-with-end").help.is_empty());
     only_error("2026-03-14 a -> b 5 USD\n  - - 5 USD\n", "negative-amount");
 }
 

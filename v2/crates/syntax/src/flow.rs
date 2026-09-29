@@ -200,9 +200,28 @@ impl<'s> Parser<'s> {
             _ => ItemAmount::Fixed(self.amount()?),
         };
         let tail = self.tail(scope, self.mark::<Clause>())?;
+        if let Tok::Name(end) = self.tok() {
+            return Err(self.item_with_end(line.body, end, sign == Sign::Carve && matches!(amount, ItemAmount::Fixed(_))));
+        }
         self.expect_eol()?;
         let loc = self.loc_from(line.body);
         Ok(self.push(LineItem { doc, sign, amount, tail, loc }))
+    }
+
+    /// An item that is followed by an end: `800 USD retirement`, which a leg
+    /// writes the other way round. The end is the next token; the item started
+    /// at `start`, and the fix, when the item is a plain amount, swaps them.
+    fn item_with_end(&mut self, start: usize, end: &str, plain: bool) -> Reported {
+        let name = self.bump().loc;
+        let amount = self.src[start..name.start as usize].trim_end();
+        let diag = Diagnostic::error("item-with-end", format!("`{end}` is an end, and an item names none"))
+            .label(name, "a line that starts with an amount is an item of the flow above it")
+            .note("a leg names its end first, then says how much: `retirement 800 USD`");
+        let whole = Loc::new(self.id, start as u32, name.end);
+        self.report(match plain {
+            true => diag.fix(format!("write `{end} {amount}`"), whole, format!("{end} {amount}")),
+            false => diag,
+        })
     }
 
     /// `[#PURPOSE [of NAME]] [STRING] CODE* [via PARTY] [for WHAT] [due WHEN]
