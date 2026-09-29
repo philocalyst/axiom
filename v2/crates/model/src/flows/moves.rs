@@ -252,17 +252,34 @@ impl Elab<'_, '_> {
             }
         };
         let pending = own.into_iter().chain(other).any(|slot| slot.pending);
-        let moves = match total {
+        // A closing statement: what the named place gives up or takes is exchanged for the whole total through
+        // one leg's place, and the other legs are paid to or from it. The proceeds are then exactly what the
+        // header says, however the legs allocate them.
+        let exchange = match total {
             Total::Exchange { own, total } => {
-                self.exchange(shape, named, named_is_from, (own, total), &shares, pending)
+                let rest = shape.legs.iter().position(|leg| matches!(leg.slot.stated, Stated::Rest));
+                let principal = rest.or_else(|| shares.iter().position(|share| share.leg.unit == total.unit));
+                principal.map(|at| (at, Share { header: own, leg: total }))
             }
-            _ => shape
-                .legs
-                .iter()
-                .zip(&shares)
-                .map(|(leg, share)| self.leg_move(shape, leg, *share, named, named_is_from, pending))
-                .collect(),
+            _ => None,
         };
+        let mut moves: Vec<Move> = Vec::with_capacity(shape.legs.len());
+        for (at, (leg, share)) in shape.legs.iter().zip(&shares).enumerate() {
+            let (hub, share) = match exchange {
+                Some((principal, exchanged)) if at == principal => (named, exchanged),
+                Some((principal, _)) => (&shape.legs[principal].placed, *share),
+                None => (named, *share),
+            };
+            moves.push(self.leg_move(shape, leg, share, hub, named_is_from, pending));
+        }
+        if let Some((principal, _)) = exchange {
+            // Paying into the exchange comes first, and paying out of it last.
+            let exchanged = moves.remove(principal);
+            match named_is_from {
+                true => moves.insert(0, exchanged),
+                false => moves.push(exchanged),
+            }
+        }
         Some(Moves { moves, counterparty: named.end.entity })
     }
 
@@ -307,19 +324,20 @@ impl Elab<'_, '_> {
         }
     }
 
-    /// One leg of a split, as a flow between the named place and the leg's own.
+    /// One leg of a split, as a flow between the `hub` (the named place, or
+    /// where a closing statement's proceeds land) and the leg's own place.
     fn leg_move(
         &self,
         shape: &Shape,
         leg: &Leg,
         share: Share,
-        named: &Placed,
+        hub: &Placed,
         named_is_from: bool,
         pending: bool,
     ) -> Move {
         let (from, to, out, arrive) = match named_is_from {
-            true => (named, &leg.placed, share.header, share.leg),
-            false => (&leg.placed, named, share.leg, share.header),
+            true => (hub, &leg.placed, share.header, share.leg),
+            false => (&leg.placed, hub, share.leg, share.header),
         };
         let infer = match leg.slot.stated {
             Stated::Unknown(_) => Infer::Unknown,
@@ -330,61 +348,8 @@ impl Elab<'_, '_> {
             Stated::Fixed(_) | Stated::Rest => Infer::Known,
         };
         let mut tail = shape.tail.over(&leg.tail);
-        tail.payee = tail.payee.or(leg.placed.end.entity).or(named.end.entity);
+        tail.payee = tail.payee.or(leg.placed.end.entity).or(hub.end.entity);
         Move::between(from, to, (out, arrive), (infer, pending || leg.slot.pending), tail, leg.loc)
-    }
-
-    /// A closing statement: what the named place gives up or takes is exchanged
-    /// for the whole total through one leg's place, and the other legs are paid
-    /// to or from it. The proceeds are then exactly what the header says, however
-    /// the legs allocate them.
-    fn exchange(
-        &self,
-        shape: &Shape,
-        named: &Placed,
-        named_is_from: bool,
-        (own, total): (Amount, Amount),
-        shares: &[Share],
-        pending: bool,
-    ) -> Vec<Move> {
-        let principal = shape
-            .legs
-            .iter()
-            .position(|leg| matches!(leg.slot.stated, Stated::Rest))
-            .or_else(|| shares.iter().position(|share| share.leg.unit == total.unit))
-            .unwrap_or(0);
-        let head = &shape.legs[principal];
-        let mut tail = shape.tail.over(&head.tail);
-        tail.payee = tail.payee.or(head.placed.end.entity).or(named.end.entity);
-        let mut moves = Vec::with_capacity(shape.legs.len());
-        let others = shape.legs.iter().zip(shares).enumerate().filter(|&(at, _)| at != principal);
-        for (_, (leg, share)) in others {
-            let mut leg_tail = shape.tail.over(&leg.tail);
-            leg_tail.payee = leg_tail.payee.or(leg.placed.end.entity);
-            let (from, to, amounts) = match named_is_from {
-                true => (&head.placed, &leg.placed, (share.header, share.leg)),
-                false => (&leg.placed, &head.placed, (share.leg, share.header)),
-            };
-            moves.push(Move::between(
-                from,
-                to,
-                amounts,
-                (Infer::Known, pending || leg.slot.pending),
-                leg_tail,
-                leg.loc,
-            ));
-        }
-        let (from, to, amounts) = match named_is_from {
-            true => (named, &head.placed, (own, total)),
-            false => (&head.placed, named, (total, own)),
-        };
-        let exchange = Move::between(from, to, amounts, (Infer::Known, pending || head.slot.pending), tail, head.loc);
-        // Paying into the exchange comes first, and paying out of it last.
-        match named_is_from {
-            true => moves.insert(0, exchange),
-            false => moves.push(exchange),
-        }
-        moves
     }
 
     // ─── Flows ──────────────────────────────────────────────────────────────
