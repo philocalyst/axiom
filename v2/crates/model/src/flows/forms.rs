@@ -48,10 +48,13 @@ impl<'a, 's> Elab<'a, 's> {
         let (diags, misses) = (self.sink.diags.len(), self.sink.misses.len());
         let first = self.sink.flows.len();
         let payee = header.and_then(|header| header.payee).or(moves.as_ref().and_then(|moves| moves.counterparty));
-        for mv in moves.into_iter().flat_map(|moves| moves.moves) {
-            if let Some(flow) = self.flow(mv, day, mode) {
-                self.sink.flows.push(flow);
+        if let Some(mut moves) = moves {
+            for mv in moves.moves.drain(..) {
+                if let Some(flow) = self.flow(mv, day, mode) {
+                    self.sink.flows.push(flow);
+                }
             }
+            self.spare = moves.moves;
         }
         if !self.coded.is_empty() {
             let flows = std::mem::take(&mut self.sink.flows);

@@ -10,6 +10,7 @@ use axiom_core::{Day, Diagnostic, Id, Loc, Qty, Ratio, Sym};
 use axiom_syntax::{self as ast, ClauseKind, Due, File, For, Quantity};
 
 use super::Sink;
+use super::moves::Move;
 use crate::book::{Amount, Commodity, Entity};
 use crate::declare::World;
 use crate::journal::{Select, Waive};
@@ -128,11 +129,13 @@ pub(super) struct Elab<'a, 's> {
     pub txn: u32,
     /// The codes the transaction writes, for its code rules.
     pub coded: Vec<(Sym, Loc)>,
+    /// The room the last transaction's moves used, kept for the next one's.
+    pub spare: Vec<Move>,
 }
 
 impl<'a, 's> Elab<'a, 's> {
     pub fn new(world: &'a World<'s>, file: &'a File<'s>, sink: &'a mut Sink<'s>, txn: u32) -> Elab<'a, 's> {
-        Elab { world, file, sink, unit: None, txn, coded: Vec::new() }
+        Elab { world, file, sink, unit: None, txn, coded: Vec::new(), spare: Vec::new() }
     }
 
     /// Records the diagnostic and gives nothing.

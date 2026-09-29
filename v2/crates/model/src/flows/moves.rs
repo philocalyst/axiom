@@ -117,7 +117,9 @@ impl Elab<'_, '_> {
         let counterparty = to.end.entity.or(from.end.entity);
         let tail = Tail { payee: shape.tail.payee.or(counterparty), ..shape.tail.clone() };
         let mv = Move::between(from, to, (out, arrive), (infer, pending), tail, shape.loc);
-        Some(Moves { moves: vec![mv], counterparty })
+        let mut moves = std::mem::take(&mut self.spare);
+        moves.push(mv);
+        Some(Moves { moves, counterparty })
     }
 
     /// The quantities of a flow whose two sides state what they state.
