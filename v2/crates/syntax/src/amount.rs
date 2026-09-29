@@ -11,6 +11,7 @@ const SURVEY: usize = 1 << 20;
 
 impl<'s> Parser<'s> {
     /// `NUMBER COMMODITY`, or `empty`.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     pub fn amount(&mut self) -> Parse<Amount<'s>> {
         let token = self.peek();
@@ -29,6 +30,7 @@ impl<'s> Parser<'s> {
     }
 
     /// `NUMBER COMMODITY`: a quantity of something. Prices are always this.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     pub fn measured(&mut self) -> Parse<Amount<'s>> {
         let token = self.peek();

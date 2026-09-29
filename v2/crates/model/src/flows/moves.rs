@@ -32,6 +32,7 @@ pub(super) struct Move {
 impl Move {
     /// A flow from `from` to `to`, with what leaves and what arrives, whether
     /// its quantity is known and whether it is pending, and what its tail says.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     pub fn between(
         from: &Placed,

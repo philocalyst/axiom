@@ -202,6 +202,7 @@ impl<'a, 's> Elab<'a, 's> {
         Some(Placed { end, loc: self.file.loc(text), select, basis: place.is_basis(self.file) })
     }
 
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     pub fn amount(&mut self, amount: ast::Amount<'s>) -> Option<Amount> {
         let loc = self.file.loc(&amount);
@@ -218,6 +219,7 @@ impl<'a, 's> Elab<'a, 's> {
     }
 
     /// An amount a flow moves: more than nothing.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     fn positive(&mut self, amount: ast::Amount<'s>) -> Option<Stated> {
         let resolved = self.amount(amount)?;
@@ -233,6 +235,7 @@ impl<'a, 's> Elab<'a, 's> {
 
     /// `fallback` is where to point for `...` and `all`, which have no text of
     /// their own.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     pub fn quantity(&mut self, quantity: &Quantity<'s>, fallback: Loc) -> Option<Slot> {
         let file = self.file;
@@ -268,6 +271,7 @@ impl<'a, 's> Elab<'a, 's> {
 
     /// What follows a header or leg. A `due` belongs to the transaction, so it
     /// is refused on a leg.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     pub fn tail(&mut self, tail: &ast::Tail<'s>, on_leg: bool) -> Option<Tail> {
         let mut resolved = Tail::default();
@@ -332,6 +336,7 @@ impl<'a, 's> Elab<'a, 's> {
 
     // ─── Shapes ─────────────────────────────────────────────────────────────
 
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     fn side(&mut self, end: &ast::End<'s>, loc: Loc) -> Option<Side> {
         let placed = end.place.as_ref().map(|place| self.place(place));

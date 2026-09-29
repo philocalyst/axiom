@@ -47,6 +47,7 @@ impl<'s> Parser<'s> {
     }
 
     /// One header end: `checking`, `checking 2_000 USD`, `7 VTI`, or nothing.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     pub fn end(&mut self) -> Parse<End<'s>> {
         let is_place = match self.tok() {
@@ -115,6 +116,7 @@ impl<'s> Parser<'s> {
     }
 
     /// `84.20 USD`, `empty`, `(350 USD)`, `? USD`, or `all [UNIT]`.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
     fn quantity(&mut self) -> Parse<Quantity<'s>> {
         match self.tok() {
