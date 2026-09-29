@@ -1,14 +1,10 @@
-$ axiom why riverfront --today 2026-01-06
+$ axiom why riverfront --today 2026-04-16
 
-Why income/grants
+Why riverfront
 
-Composition
-  Holds       Quantity    Plain money  Parcels
-  ────────────────────────────────────────────
-  USD    -5,942.75 USD  -5,942.75 USD
-
-Recent flows
-  Date        With                             Payee       Note         Amount        Balance
-  ───────────────────────────────────────────────────────────────────────────────────────────
-  2025-03-15  assets/bank/collective-checking  riverfront        -6,000.00 USD  -6,000.00 USD
-  2025-10-28  assets/bank/collective-checking  riverfront            57.25 USD  -5,942.75 USD
+Governed by
+  Law         When       Explains                                                                   Written
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Limits
+    purpose   on spend   Grant money may only be spent on what the grant names. This payment went…  std.ax:199
+    deadline  by a date  A grant ends on its `until` date, and unspent money is owed back.          std.ax:207

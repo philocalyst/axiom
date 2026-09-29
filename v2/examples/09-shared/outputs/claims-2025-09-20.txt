@@ -1,0 +1,22 @@
+$ axiom claims --today 2025-09-20
+
+Claims on 2025-09-20
+
+Owed to you
+  Counterparty         What                                                                                                                                                          Left  Made        Age    Due         Status
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/owed/by-cleo  #trip-2025-08 · A weekend at a cabin with Ben, Cleo and Riley: the cabin, gas and food, 1,182.80 USD on my card. Four ways: my share is an expense,…     95.70 USD  2025-08-16  1m4d   2025-09-15  overdue 5d
+  assets/owed/by-ben   #shared-2025-09                                                                                                                                          26.91 USD  2025-09-07  13d    2025-10-22  in 32d
+  assets/owed/by-cleo  #shared-2025-09                                                                                                                                          26.91 USD  2025-09-07  13d    2025-10-22  in 32d
+  assets/owed/by-ben   #shared-2025-09                                                                                                                                          23.33 USD  2025-09-09  11d    2025-10-24  in 34d
+  assets/owed/by-cleo  #shared-2025-09                                                                                                                                          23.33 USD  2025-09-09  11d    2025-10-24  in 34d
+  riley                #loan-riley · A loan to a friend: 2,000.00 USD for a security deposit, to be paid back 250.00 USD a month from May 15, so the last…                   1,000.00 USD  2025-04-10  5m10d  2025-12-15  in 86d
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                                                                                                                                                                      1,196.18 USD
+
+Owed by you
+  Counterparty             What                 Left  Made        Age  Due         Status
+  ───────────────────────────────────────────────────────────────────────────────────────
+  liabilities/owed-to-ben  #power-2025-09  40.47 USD  2025-09-12  8d   2025-10-12  in 22d
+  ───────────────────────────────────────────────────────────────────────────────────────
+  Total                                    40.47 USD

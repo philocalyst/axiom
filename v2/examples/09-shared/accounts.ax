@@ -2,29 +2,12 @@
 
 // ─── Kinds ──────────────────────────────────────────────────────────────────
 
-/// What a person owes me (a positive balance) or what I owe them (a negative
-/// one). One place per person, netted, the way an expense-splitting app shows it.
-kind iou : asset
-
-/// Money lent to a friend, paid back on a rhythm. A month with no repayment
-/// while something is still owed is worth a warning.
-kind personal-loan : asset
-  has expected amount
-
-  /// The friend agreed to pay back `expected` every month. This month passed with
-  /// less than that coming in while a balance is still owed. Ask them, or move
-  /// the agreement: change `expected` on the account.
-  law repayment
-    each month
-    when self.balance > empty
-    warn total(out, month) >= self.expected "no repayment this month"
+/// A friend or a roommate. What they owe Alex is a claim on the place their entity points
+/// to (a `receivable`), and what Alex owes them is a claim of theirs (a `payable`).
+kind friend : entity
 
 /// What a garden grant may pay for.
 kind garden : expense
-
-/// Pay that is not wages: a reimbursement of something I bought for work. It
-/// arrives as income to the books and cancels the expense; it is not taxable.
-kind reimbursement : income
 
 
 // ─── Me: money ──────────────────────────────────────────────────────────────
@@ -39,17 +22,32 @@ account assets/cash/wallet : cash
 account liabilities/visa : credit-card
 
 
-// ─── The flat and the friend ────────────────────────────────────────────────
+// ─── What people owe me, and what I owe them ────────────────────────────────
+//
+// A flow into a `receivable` with `due` makes a claim, and each is kept apart from the
+// others by the flow that made it: a month's rent share, a bill's share, a loan, a trip.
+// A payment `for #code` settles the claim the code marked, in part or in full. `axiom
+// claims` lists what is still open, how old it is and when it fell due, and none of it
+// counts as money to spend.
 
-/// Ben. Positive: Ben owes me. Negative: I owe Ben.
-account assets/roommates/ben : iou
+/// Ben: his thirds of the rent and the shared bills, and his share of the trip.
+account assets/owed/by-ben : receivable
 
-/// Cleo.
-account assets/roommates/cleo : iou
+/// Cleo: the same.
+account assets/owed/by-cleo : receivable
 
-/// The 2,000.00 USD lent to Riley on 2025-04-10, 250.00 USD a month expected.
-account assets/loans/riley : personal-loan
-  expected 250 USD
+/// Riley: the loan, and a share of the trip.
+account assets/owed/by-riley : receivable
+
+/// The Lantern: what I bought for the job and am waiting to be paid back for. It is not income
+/// when it arrives: it settles the claim.
+account assets/owed/by-lantern : receivable
+
+/// Ben pays the electricity, in his name: my third is what I owe him.
+account liabilities/owed-to-ben : payable
+
+/// Cleo's Costco runs: my third is what I owe her.
+account liabilities/owed-to-cleo : payable
 
 
 // ─── Income ─────────────────────────────────────────────────────────────────
@@ -60,9 +58,6 @@ account income/wages : wages
 /// Cash tips: taxable income when received (IRC §61), reported to the employer
 /// monthly and to the IRS on the return.
 account income/tips : wages
-
-account income/reimbursements : reimbursement
-account equity/opening
 
 
 // ─── Expenses ───────────────────────────────────────────────────────────────
@@ -78,10 +73,7 @@ account expenses/health
 account expenses/entertainment
 account expenses/clothing
 account expenses/gifts
-
-/// What I bought for the job and will be paid back for. The reimbursement, when
-/// it arrives, cancels it.
-account expenses/work-supplies
+account expenses/travel
 
 account expenses/taxes/federal : federal-tax
 account expenses/taxes/payroll
@@ -142,43 +134,35 @@ entity riverfront : grant
 entity lantern : employer
   via income/wages
 
-/// The Lantern paying back what I bought for it: not wages.
-entity lantern-reimbursement : org
-  via income/reimbursements
+/// The Lantern, as the one that owes me for what I bought for it.
+entity lantern-owes : org
+  via assets/owed/by-lantern
 
-/// Ben and Cleo, my roommates. A payment from one of them reduces what they owe.
-entity ben : person
-  via assets/roommates/ben
-entity cleo : person
-  via assets/roommates/cleo
-
-/// A friend, Riley: the loan is an asset, and a repayment comes from `riley`.
-entity riley : person
-  via assets/loans/riley
+/// Ben and Cleo, my roommates, and Riley, a friend: each is a place people owe me on.
+entity ben : friend
+  via assets/owed/by-ben
+entity cleo : friend
+  via assets/owed/by-cleo
+entity riley : friend
+  via assets/owed/by-riley
 
 entity landlord : org
   via expenses/rent
-entity fiberco : org
+entity fiberco, power-co : org
   via expenses/utilities
-entity power-co : org
-  via expenses/utilities
-entity costco : org
+entity costco, farmers-market : org
   via expenses/groceries
-entity farmers-market : org
-  via expenses/groceries
-entity bar-supply : org
-  via expenses/work-supplies
 entity mint-mobile : org
   via expenses/phone
-entity progressive : org
-  via expenses/car
-entity carmax-finance : org
+entity progressive, carmax-finance : org
   via expenses/car
 entity marketplace-plan : org
   via expenses/health
+entity mountain-cabins : org
+  via expenses/travel
 entity pizza-place : org
   via expenses/volunteer-food
-entity hardware-hank : org
+entity hardware-hank, shed-co : org
   via expenses/garden/tools
 entity water-dept : org
   via expenses/garden/water
@@ -190,23 +174,18 @@ entity northside-lumber : org
   via expenses/garden/lumber
 entity drip-depot : org
   via expenses/garden/irrigation
-entity shed-co : org
-  via expenses/garden/tools
 
 
 // ─── Codes ──────────────────────────────────────────────────────────────────
 
-/// A month's rent share ties a payment to the month it is for.
-code rent-*
-  on iou
+/// A month's rent share, a month's small shared bills (groceries and internet), a bill in
+/// someone else's name, a loan and a trip: each code ties a payment to what it settles.
+code rent-* shared-* trip-* loan-*
+  on receivable
 
-code loan-*
-  on personal-loan
+code power-* costco-*
+  on payable
 
+/// Something bought for the job and waiting to be paid back.
 code expense-*
-  on expenses/work-supplies
-
-/// The reimbursement is a different flow from the purchase and settles on its own day,
-/// so it needs its own code: the code that settles a flow cannot also mark an actual one.
-code reimb-*
-  on reimbursement
+  on receivable

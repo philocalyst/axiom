@@ -1,18 +1,17 @@
-/// Balances at the start of March, from the bank apps and the wallet.
-2025-03-01 opening -> checking 5_218.44 USD
-2025-03-01 opening -> savings 3_100 USD
-2025-03-01 opening -> wallet 240 USD
-2025-03-01 visa -> opening 412.66 USD
+/// Balances at the start of March, from the bank apps and the wallet, and what the collective's account held.
+opening 2025-03-01
+  checking              5_218.44 USD
+  savings               3_100.00 USD
+  wallet                240.00 USD
+  collective-checking   1_842.30 USD
+  collective-cash       96.50 USD
+  visa                  412.66 USD
 
-/// The garden collective's account, in its own name, with what the plant sales and members left in it.
-2025-03-01 opening -> collective-checking 1_842.30 USD
-2025-03-01 opening -> collective-cash 96.50 USD
-
-/// Rent is 3,150.00 USD for the flat, paid by me from checking. My third is an expense; Ben's and Cleo's thirds are what they owe me.
-2025-03-01 checking -> 3_150.00 USD / landlord
-  rent                    1_050.00 USD
-  roommates/ben           1_050.00 USD
-  roommates/cleo          1_050.00 USD
+/// Rent is 3,150.00 USD for the flat, paid by me from checking. My third is an expense; Ben's and Cleo's thirds are claims on them, due in a week, and each payment is `for` the month's code.
+2025-03-01 checking -> 3_150.00 USD #rent-2025-03 due 2025-03-08
+  rent                    1_050.00 USD / landlord
+  ben                     1_050.00 USD
+  cleo                    1_050.00 USD
 2025-03-01 checking = 2_068.44 USD
 2025-03-01 savings = 3_100.00 USD
 2025-03-01 wallet = 240.00 USD
@@ -22,9 +21,9 @@
 
 /// Cash tips, counted on Sunday night: taxable income when received, reported to the employer monthly.
 2025-03-02 income/tips -> wallet 163.14 USD
-2025-03-02 ben -> checking 1_050 USD #rent-2025-03
+2025-03-02 ben -> checking 1_050.00 USD for #rent-2025-03
 2025-03-03 checking -> car 128 USD / progressive
-2025-03-04 cleo -> checking 1050 USD #rent-2025-03
+2025-03-04 cleo -> checking 1_050.00 USD for #rent-2025-03
 2025-03-06 wallet -> dining 8.74 USD
 
 /// The Lantern: hourly wages plus card tips, paid every second Friday.
@@ -34,22 +33,23 @@
   checking                ...
 
 /// Shared groceries on my card: split three ways.
-2025-03-07 visa -> 85.05 USD
+2025-03-07 visa -> 85.05 USD #shared-2025-03 due 2025-04-21
   groceries               28.35 USD
-  roommates/ben           28.35 USD
-  roommates/cleo          28.35 USD
+  ben                     28.35 USD
+  cleo                    28.35 USD
 2025-03-08 visa -> phone 45 USD / mint-mobile
 2025-03-09 income/tips -> wallet 233.07 USD
 
-/// Internet, 69.99 USD, in my name.
-2025-03-09 checking -> 69.99 USD / fiberco
-  utilities               23.33 USD
-  roommates/ben           23.33 USD
-  roommates/cleo          23.33 USD
+/// Internet, 69.99 USD, in my name, split three ways. The month's small bills all carry one code (`#shared-2025-03`): Ben and Cleo pay them at month end with one flow `for` it.
+2025-03-09 checking -> 69.99 USD #shared-2025-03 due 2025-04-23
+  utilities               23.33 USD / fiberco
+  ben                     23.33 USD
+  cleo                    23.33 USD
 2025-03-09 income/donations -> collective-checking 60 USD
 
-/// Electricity is in Ben's name: he pays the bill and I owe him my third. Nothing moves in my bank.
-2025-03-12 roommates/ben -> utilities 29.47 USD / power-co   // my third of 88.40
+/// Electricity is in Ben's name: he pays the bill and I owe him my third, a payable due in a month. Nothing moves in my bank until I pay it.
+/// There is no `/ power-co` payee here: on a payable the payee is the counterparty, and the one owed is Ben.
+2025-03-12 owed-to-ben -> utilities 29.47 USD #power-2025-03 due 2025-04-11   // my third of 88.40, from power-co
 2025-03-12 checking -> car 330.50 USD / carmax-finance
 2025-03-13 wallet -> dining 8.53 USD
 2025-03-14 visa -> dining 74.73 USD
@@ -65,10 +65,10 @@
   taxes/federal           173.17 USD
   taxes/payroll           106.84 USD
   checking                ...
-2025-03-21 visa -> 73.54 USD
+2025-03-21 visa -> 73.54 USD #shared-2025-03 due 2025-05-05
   groceries               24.52 USD
-  roommates/ben           24.51 USD
-  roommates/cleo          24.51 USD
+  ben                     24.51 USD
+  cleo                    24.51 USD
 
 /// Compost and soil for the new beds.
 2025-03-22 collective-checking -> soil 1_280.00 USD / bayview-soil
@@ -84,12 +84,14 @@
 2025-03-28 checking -> savings 700 USD
 2025-03-30 income/tips -> wallet 130.54 USD
 
-/// Settling with Ben: 46.72 USD, what the app says they owe me.
-2025-03-31 ben -> checking 46.72 USD
-
-2025-03-31 cleo -> checking 76.19 USD
-2025-03-31 roommates/ben = 0.00 USD
-2025-03-31 roommates/cleo = 0.00 USD
+/// Month end: the small shared bills are paid `for` their code, one flow each. I pay what I owe Ben and Cleo the same way.
+2025-03-31 ben -> checking 76.19 USD for #shared-2025-03
+2025-03-31 cleo -> checking 76.19 USD for #shared-2025-03
+2025-03-31 checking -> owed-to-ben 29.47 USD for #power-2025-03
+2025-03-31 by-ben = 0.00 USD
+2025-03-31 by-cleo = 0.00 USD
+2025-03-31 owed-to-ben = 0.00 USD
+2025-03-31 owed-to-cleo = 0.00 USD
 2025-03-31 visa = 420.35 USD
 2025-03-31 checking = 5_678.82 USD
 2025-03-31 savings = 3_800.00 USD

@@ -1,0 +1,10 @@
+$ axiom balance assets/owed/* --today 2026-04-16
+
+Balances at 2026-04-16
+
+  Place           Balance
+  ───────────────────────
+  assets
+    owed
+      by-cleo   50.00 USD
+      by-riley  50.00 USD

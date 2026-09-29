@@ -1,42 +1,50 @@
-2025-08-01 checking -> 3_150.00 USD / landlord
-  rent                    1_050.00 USD
-  roommates/ben           1_050.00 USD
-  roommates/cleo          1_050.00 USD
-2025-08-02 ben -> checking 1_050 USD #rent-2025-08
+2025-08-01 checking -> 3_150.00 USD #rent-2025-08 due 2025-08-08
+  rent                    1_050.00 USD / landlord
+  ben                     1_050.00 USD
+  cleo                    1_050.00 USD
+2025-08-02 ben -> checking 1_050.00 USD for #rent-2025-08
 2025-08-03 income/tips -> wallet 230.75 USD
 2025-08-03 checking -> car 128 USD / progressive
 2025-08-06 wallet -> dining 7.07 USD
-2025-08-07 visa -> 77.95 USD
+2025-08-07 visa -> 77.95 USD #shared-2025-08 due 2025-09-21
   groceries               25.99 USD
-  roommates/ben           25.98 USD
-  roommates/cleo          25.98 USD
+  ben                     25.98 USD
+  cleo                    25.98 USD
 2025-08-08 lantern -> 1_430.62 USD   // 999.00 wages + 431.62 card tips
   taxes/federal           177.40 USD
   taxes/payroll           109.44 USD
   checking                ...
 2025-08-08 visa -> phone 45 USD / mint-mobile
-2025-08-09 checking -> 69.99 USD / fiberco
-  utilities               23.33 USD
-  roommates/ben           23.33 USD
-  roommates/cleo          23.33 USD
+2025-08-09 checking -> 69.99 USD #shared-2025-08 due 2025-09-23
+  utilities               23.33 USD / fiberco
+  ben                     23.33 USD
+  cleo                    23.33 USD
 2025-08-10 income/tips -> wallet 135.77 USD
-2025-08-12 roommates/ben -> utilities 52.97 USD / power-co   // my third of 158.90
+2025-08-12 owed-to-ben -> utilities 52.97 USD #power-2025-08 due 2025-09-11   // my third of 158.90, from power-co
 2025-08-12 checking -> car 330.50 USD / carmax-finance
 2025-08-13 wallet -> dining 19.72 USD
 2025-08-14 visa -> dining 55.37 USD
-2025-08-15 riley -> checking 250 USD #loan-riley
+2025-08-15 riley -> checking 250 USD for #loan-riley
 2025-08-15 checking -> health 189.40 USD / marketplace-plan
+
+/// A weekend at a cabin with Ben, Cleo and Riley: the cabin, gas and food, 1,182.80 USD on my card. Four ways: my share is an expense,
+/// and each of the others owes 295.70 USD by September 15 (a claim on each, marked `#trip-2025-08`).
+2025-08-16 visa -> 1_182.80 USD #trip-2025-08 due 2025-09-15
+  travel                  295.70 USD / mountain-cabins
+  ben                     295.70 USD
+  cleo                    295.70 USD
+  riley                   295.70 USD
 2025-08-17 income/tips -> wallet 167.80 USD
 2025-08-17 visa -> groceries 67.19 USD / farmers-market
 2025-08-18 wallet -> transport 6.49 USD
 
-/// Cleo is two weeks late in August.
-2025-08-19 cleo -> checking 1050 USD #rent-2025-08
+/// Cleo is two weeks late in August: the claim is overdue for eleven days.
+2025-08-19 cleo -> checking 1_050.00 USD for #rent-2025-08
 2025-08-19 visa -> entertainment 44.85 USD
-2025-08-21 visa -> 118.29 USD
+2025-08-21 visa -> 118.29 USD #shared-2025-08 due 2025-10-05
   groceries               39.43 USD
-  roommates/ben           39.43 USD
-  roommates/cleo          39.43 USD
+  ben                     39.43 USD
+  cleo                    39.43 USD
 2025-08-22 lantern -> 1_433.23 USD   // 999.00 wages + 434.23 card tips
   taxes/federal           177.72 USD
   taxes/payroll           109.64 USD
@@ -44,6 +52,7 @@
 2025-08-22 income/donations -> collective-checking 45 USD
 2025-08-22 checking -> visa 399.31 USD
 2025-08-24 income/tips -> wallet 225.65 USD
+2025-08-24 ben -> checking 295.70 USD for #trip-2025-08
 2025-08-24 wallet -> checking 1_000 USD
 2025-08-26 visa -> clothing 96.86 USD
 2025-08-27 wallet -> dining 9.98 USD
@@ -52,14 +61,15 @@
 /// The garden's water for the summer.
 2025-08-30 collective-checking -> water 148.20 USD / water-dept
 2025-08-31 income/tips -> wallet 249.28 USD
-
-2025-08-31 ben -> checking 35.77 USD
-
-2025-08-31 cleo -> checking 88.74 USD
-2025-08-31 roommates/ben = 0.00 USD
-2025-08-31 roommates/cleo = 0.00 USD
-2025-08-31 visa = 505.51 USD
-2025-08-31 checking = 7_175.42 USD
+2025-08-31 ben -> checking 88.74 USD for #shared-2025-08
+2025-08-31 cleo -> checking 88.74 USD for #shared-2025-08
+2025-08-31 checking -> owed-to-ben 52.97 USD for #power-2025-08
+2025-08-31 by-ben = 0.00 USD
+2025-08-31 by-cleo = 295.70 USD
+2025-08-31 owed-to-ben = 0.00 USD
+2025-08-31 owed-to-cleo = 0.00 USD
+2025-08-31 visa = 1_688.31 USD
+2025-08-31 checking = 7_471.12 USD
 2025-08-31 savings = 7_300.00 USD
 2025-08-31 collective-checking = 2_776.86 USD
 

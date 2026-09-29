@@ -1,28 +1,26 @@
-$ axiom balance --today 2026-01-06
+$ axiom balance --today 2026-04-16
 
-Balances at 2026-01-06
+Balances at 2026-04-16
 
   Place                          Balance
   ──────────────────────────────────────
-  assets                   23,718.59 USD
-    bank                   22,872.56 USD
-      checking             10,117.95 USD
+  assets                   23,422.89 USD
+    bank                   22,780.41 USD
+      checking             10,025.80 USD
       collective-checking   2,654.61 USD
       savings              10,100.00 USD
     cash                      542.48 USD
       collective-cash         109.00 USD
       wallet                  433.48 USD
-    loans                      50.00 USD
-      riley                    50.00 USD
-    roommates                 253.55 USD
-      ben                      37.21 USD
-      cleo                    216.34 USD
+    owed                      100.00 USD
+      by-cleo                  50.00 USD
+      by-riley                 50.00 USD
   ──────────────────────────────────────
   equity                   10,061.58 USD
     opening                10,084.58 USD
     unknown                   -23.00 USD
   ──────────────────────────────────────
-  expenses                 34,309.99 USD
+  expenses                 34,467.19 USD
     car                     4,585.00 USD
     clothing                  535.80 USD
     dining                    905.78 USD
@@ -44,14 +42,13 @@ Balances at 2026-01-06
       federal               3,854.21 USD
       payroll               2,377.80 USD
     transport                  55.25 USD
+    travel                    295.70 USD
     utilities                 580.60 USD
     volunteer-food             84.50 USD
-    work-supplies             138.50 USD
   ──────────────────────────────────────
-  income                   47,461.64 USD
+  income                   47,323.14 USD
     donations               1,187.50 USD
     grants                  5,942.75 USD
-    reimbursements            138.50 USD
     tips                    9,110.47 USD
     wages                  31,082.42 USD
   ──────────────────────────────────────
@@ -60,7 +57,7 @@ Balances at 2026-01-06
 
   Net worth      Value (USD)
   ──────────────────────────
-  Assets       23,718.59 USD
+  Assets       23,422.89 USD
   Liabilities     505.36 USD
   ──────────────────────────
-  Net worth    23,213.23 USD
+  Net worth    22,917.53 USD

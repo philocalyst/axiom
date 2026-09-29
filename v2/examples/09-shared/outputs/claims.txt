@@ -1,18 +1,8 @@
-Available on 2026-04-16
+$ axiom claims --today 2026-04-16
 
-What you can spend
-  In hand                                   Amount
-  ────────────────────────────────────────────────
-  Money in hand                      23,322.89 USD
-    assets/bank/checking             10,025.80 USD
-    assets/bank/collective-checking   2,654.61 USD
-    assets/bank/savings              10,100.00 USD
-    assets/cash/collective-cash         109.00 USD
-    assets/cash/wallet                  433.48 USD
-  ────────────────────────────────────────────────
-  Available to spend                 23,322.89 USD
+Claims on 2026-04-16
 
-Coming in
+Owed to you
   Counterparty         What                                                                                                                                       Left  Made        Age    Due         Status
   ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   assets/owed/by-cleo  #rent-2025-11                                                                                                                         50.00 USD  2025-11-01  5m15d  2025-11-08  overdue 159d

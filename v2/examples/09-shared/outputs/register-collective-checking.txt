@@ -1,4 +1,4 @@
-$ axiom register collective-checking --today 2026-01-06
+$ axiom register collective-checking --today 2026-04-16
 
 Register: assets/bank/collective-checking
 

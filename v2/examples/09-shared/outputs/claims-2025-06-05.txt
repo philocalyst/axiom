@@ -1,22 +1,8 @@
-$ axiom available --today 2025-06-05
+$ axiom claims --today 2025-06-05
 
-Available on 2025-06-05
+Claims on 2025-06-05
 
-What you can spend
-  In hand                                   Amount
-  ────────────────────────────────────────────────
-  Money in hand                      14,434.10 USD
-    assets/bank/checking              3,747.21 USD
-    assets/bank/collective-checking   4,790.05 USD
-    assets/bank/savings               5,200.00 USD
-    assets/cash/collective-cash         109.00 USD
-    assets/cash/wallet                  587.84 USD
-  Held for others                    -2,172.25 USD
-    held for riverfront              -2,172.25 USD
-  ────────────────────────────────────────────────
-  Available to spend                 12,261.85 USD
-
-Coming in
+Owed to you
   Counterparty        What                                                                                                                                                        Left  Made        Age    Due         Status
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   assets/owed/by-ben  #rent-2025-06                                                                                                                                         550.00 USD  2025-06-01  4d     2025-06-08  in 3d

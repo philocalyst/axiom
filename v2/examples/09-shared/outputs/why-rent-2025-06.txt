@@ -1,0 +1,13 @@
+$ axiom why #rent-2025-06 --today 2026-04-16
+
+Why #rent-2025-06
+
+Flows
+  Date        Flow                                              Amount  State   From
+  ───────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-06-01  assets/bank/checking → expenses/rent        1,050.00 USD  actual  journal/2025/06.ax:3
+  2025-06-01  assets/bank/checking → assets/owed/by-ben   1,050.00 USD  actual  journal/2025/06.ax:4
+  2025-06-01  assets/bank/checking → assets/owed/by-cleo  1,050.00 USD  actual  journal/2025/06.ax:5
+  2025-06-02  assets/owed/by-ben → assets/bank/checking     500.00 USD  actual  journal/2025/06.ax:8
+  2025-06-05  assets/owed/by-cleo → assets/bank/checking  1,050.00 USD  actual  journal/2025/06.ax:14
+  2025-07-08  assets/owed/by-ben → assets/bank/checking     550.00 USD  actual  journal/2025/07.ax:20
