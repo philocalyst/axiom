@@ -5,7 +5,7 @@
 //! backwards) all become a `Motion`, so exactly one code path moves value.
 
 use axiom_core::{Day, Id, Loc, Qty, Sym};
-use axiom_model::{Amount, Entity, Flow, Place, Select, Txn};
+use axiom_model::{Amount, Entity, Flow, Place, Select, Txn, Waive};
 
 use crate::Cause;
 
@@ -34,6 +34,7 @@ pub(crate) struct Motion<'f> {
     pub payee: Option<Id<Entity>>,
     pub select: &'f [Select],
     pub codes: &'f [Sym],
+    pub waive: Option<Waive>,
     pub loc: Loc,
 }
 
@@ -50,6 +51,7 @@ impl<'f> Motion<'f> {
             payee: flow.payee,
             select: &flow.select,
             codes: &flow.codes,
+            waive: flow.waive,
             loc: flow.loc,
         }
     }

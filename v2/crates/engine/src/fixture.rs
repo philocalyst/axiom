@@ -226,6 +226,7 @@ impl Fixture {
             select: Box::new([]),
             codes: Box::new([]),
             loc,
+            waive: None,
         };
         self.flows.push(flow);
         id
@@ -343,6 +344,7 @@ impl Fixture {
             prices: Prices::default(),
             plans: Vec::new(),
             syncs: Vec::new(),
+            lookup: Default::default(),
         }
     }
 }

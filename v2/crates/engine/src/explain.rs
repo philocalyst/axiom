@@ -33,7 +33,7 @@ pub(crate) struct Frame<'a, 's> {
 /// Why a violation is not an error.
 #[derive(Clone, Copy)]
 pub(crate) enum Waiver {
-    /// `!` on the transaction.
+    /// `!` on the flow's leg or transaction.
     Marked(Waive),
     /// The book or the command line is `relaxed`.
     Relaxed,

@@ -101,5 +101,6 @@ fn governs<'s>(book: &Book<'s>, owner: Owner) -> String {
         Owner::System(system) => {
             format!("everyone living under {}, and all they own", book.name(book.systems[system].path))
         }
+        Owner::Book => "everything in this book".to_string(),
     }
 }

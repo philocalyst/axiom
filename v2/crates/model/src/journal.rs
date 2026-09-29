@@ -29,8 +29,9 @@ pub struct Flow {
     pub codes: Box<[Sym]>,
     /// The leg, or the header for a flow without legs.
     pub loc: Loc,
-    /// The leg carries its own `!`, on top of any the transaction has.
-    pub waived: bool,
+    /// The `!` that covers this flow: its leg's own, else the transaction's.
+    /// Law violations it raises are accepted and reported.
+    pub waive: Option<Waive>,
 }
 
 impl Flow {

@@ -232,6 +232,7 @@ fn journal(cast: &mut Cast) -> Journal {
             select: Box::default(),
             codes: if state == State::Pending { Box::new([check]) } else { Box::default() },
             loc: line(row),
+            waive: None,
         });
         journal.posted.push(Posted { out: Qty(cents), arrive: Qty(cents), state });
     }
@@ -255,6 +256,7 @@ fn rent_plan(cast: &Cast) -> Plan {
         select: Box::default(),
         codes: Box::default(),
         loc: line(60),
+        waive: None,
     };
     Plan {
         every: Span::months(1),
@@ -417,6 +419,7 @@ pub(crate) fn household() -> Household {
         asserts: Vec::new(),
         events: Vec::new(),
         prices: Prices::default(),
+        lookup: Default::default(),
         plans,
         syncs: Vec::new(),
     };

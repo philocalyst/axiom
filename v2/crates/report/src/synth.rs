@@ -23,5 +23,6 @@ pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
         select: template.select.clone(),
         codes: Box::default(),
         loc: template.loc,
+        waive: None,
     }
 }

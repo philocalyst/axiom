@@ -183,8 +183,7 @@ impl<'b, 's> Ledger<'b, 's> {
         if law.trigger == Trigger::Always && !self.record.failing.insert((rule.law, rule.subject)) {
             return;
         }
-        let marked = ctx.motion.and_then(|m| book.txns.get(m.txn)).and_then(|txn| txn.waive);
-        let waiver = match marked {
+        let waiver = match ctx.motion.and_then(|m| m.waive) {
             Some(waive) => Some(Waiver::Marked(waive)),
             None if self.options.relaxed || book.relaxed => Some(Waiver::Relaxed),
             None => None,

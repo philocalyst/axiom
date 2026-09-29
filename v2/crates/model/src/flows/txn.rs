@@ -579,7 +579,7 @@ impl<'s> Elaborator<'_, 's> {
             select: mv.select.into(),
             codes: header.codes.iter().chain(&mv.tail.codes).map(|&(code, _)| code).collect(),
             loc: mv.loc,
-            waived: mv.tail.waive.is_some(),
+            waive: mv.tail.waive.or(header.waive),
         }
     }
 

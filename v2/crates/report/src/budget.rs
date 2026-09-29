@@ -64,7 +64,7 @@ fn budgets(book: &Book) -> Vec<Budget> {
             Owner::Kind(kind) => {
                 book.places.iter().filter(|(_, place)| book.is_a(place.kind, kind)).map(|(id, _)| id).collect()
             }
-            Owner::Entity(_) | Owner::System(_) => Vec::new(),
+            Owner::Entity(_) | Owner::System(_) | Owner::Book => Vec::new(),
         };
         found.extend(subjects.into_iter().map(|subject| Budget { law: law_id, subject, dir, window, limit }));
     }

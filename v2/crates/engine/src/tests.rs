@@ -205,8 +205,8 @@ fn a_waived_transaction_or_a_relaxed_book_demotes_the_error() {
     let (salary, retirement) = (f.salary, f.retirement);
     deferral_limit(&mut f);
     let over = f.flow(20, salary, retirement, 25_000_00);
-    let loc = f.txns[over.index()].loc;
-    f.txns[over.index()].waive = Some(Waive { loc, reason: None });
+    let loc = f.flows[over.index()].loc;
+    f.flows[over.index()].waive = Some(Waive { loc, reason: None });
     let book = f.book();
     let run = run(&book, options());
     assert!(run.violations[0].waived);
