@@ -151,7 +151,7 @@ fn views<'s>(book: &Book<'s>, run: &Run, whose: &Whose, query: &Query) -> Result
         Query::Available { at } => Ok(available::view(book, run, whose, *at)),
         Query::Budget { at, by } => Ok(budget::view(book, run, whose, *at, *by)),
         Query::Limits { year } => Ok(limits::view(book, run, whose, *year)),
-        Query::Claims { at } => claims::view(book, run, whose, *at),
+        Query::Claims { at } => Ok(claims::view(book, run, whose, *at)),
         Query::Tax { year } => Ok(tax::view(book, run, whose, *year)),
         Query::Gains { year } => Ok(gains::view(book, run, whose, *year)),
         Query::Lots { place, at } => lots::view(book, run, whose, *place, *at),

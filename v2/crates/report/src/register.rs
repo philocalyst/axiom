@@ -11,7 +11,7 @@ use axiom_engine::{Run, State};
 use axiom_model::{Amount, Book, Commodity, Place};
 
 use crate::history::Posting;
-use crate::lens::{Lens, Whose};
+use crate::lens::Whose;
 use crate::places::path;
 use crate::resolve;
 use crate::table::code_labels;
@@ -26,15 +26,17 @@ pub fn view<'s>(
     to: Option<Day>,
 ) -> Result<Report<'s>, Diagnostic> {
     let place = resolve::place(book, place)?;
-    let mut section = section(book, run, place, from, to);
-    if !Lens::new(book, whose, run.today).owns(place) {
-        section.note(format!(
+    // A place is somebody's: another owner's register is not part of whose money this is.
+    let owner = book.places[place].owner;
+    let register = match whose.includes(owner) {
+        true => section(book, run, place, from, to),
+        false => Section::note_only(format!(
             "{} belongs to {}, whose money this is not.",
             path(book, place),
-            book.name(book.entities[book.places[place].owner].path)
-        ));
-    }
-    Ok(Report::new(format!("Register: {}", path(book, place))).with(section))
+            book.name(book.entities[owner].path)
+        )),
+    };
+    Ok(Report::new(format!("Register: {}", path(book, place))).with(register))
 }
 
 /// The flows touching `place` from `from` to `to` (default: everything up to

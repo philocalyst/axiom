@@ -27,7 +27,7 @@ impl Variable {
     pub fn from_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
         let book = lens.book;
         let none = Variable { categories: Vec::new(), months: 0 };
-        let first_spent = postings(book, run).find(|posting| !spending(lens, posting).is_empty());
+        let first_spent = postings(book, run).find(|posting| spending(lens, posting).next().is_some());
         let Some(first) = first_spent.map(|posting| posting.flow.day) else { return none };
         let last_full_month = run.today.month_start().add_days(-1);
         if first > last_full_month {
@@ -50,13 +50,11 @@ impl Variable {
 
 /// What a flow spent in the expense places it touches, in the base currency:
 /// money into one counts, and a refund out of one takes it back.
-fn spending(lens: Lens, posting: &Posting) -> Vec<(Id<Place>, Qty)> {
-    let book = lens.book;
+fn spending<'a>(lens: Lens<'a, '_>, posting: &Posting) -> impl Iterator<Item = (Id<Place>, Qty)> + 'a {
     let into = (posting.flow.to, posting.arrive_in_base(lens));
     let refunded = (posting.flow.from, posting.out_in_base(lens).map(|qty| -qty));
     [into, refunded]
         .into_iter()
-        .filter(|&(place, _)| book.places[place].class == Class::Expense && lens.owns(place))
+        .filter(move |&(place, _)| lens.book.places[place].class == Class::Expense && lens.owns(place))
         .filter_map(|(place, qty)| Some((place, qty?)))
-        .collect()
 }

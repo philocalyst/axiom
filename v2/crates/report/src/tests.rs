@@ -10,6 +10,7 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Arena, Day, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Span, Sym, Tree};
 use axiom_engine::{Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
+use axiom_model::Effect as Consequence;
 use axiom_model::*;
 
 use crate::lens::Whose;
@@ -31,7 +32,7 @@ pub(crate) struct Household {
 }
 
 impl Household {
-    fn place(&self, path: &str) -> Id<Place> {
+    pub(crate) fn place(&self, path: &str) -> Id<Place> {
         let named = |(_, place): &(Id<Place>, &Place)| self.book.name(place.path) == path;
         self.book.places.iter().find(named).map(|(id, _)| id).expect("a place in the fixture")
     }
@@ -366,6 +367,28 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
     }
 }
 
+/// `on out`, `owe amount * 10% to irs as early-withdrawal`: leaving the retirement account costs a tenth.
+fn early_withdrawal(cast: &mut Cast) -> Law {
+    let node = |op, ty, first| Node { op, ty, loc: line(85), first: NodeId(first) };
+    let nodes = vec![
+        node(Op::Var(Var::Amount), Ty::Amount, 0),
+        node(Op::Const(Value::Num(Ratio::percent(10, 0).unwrap())), Ty::Num, 1),
+        node(Op::Bin(BinOp::Mul, NodeId(0), NodeId(1)), Ty::Amount, 0),
+    ];
+    let owe =
+        Consequence::Owe { amount: NodeId(2), to: cast.irs, due: None, name: cast.names.intern("early-withdrawal") };
+    Law {
+        name: cast.names.intern("early-withdrawal"),
+        doc: None,
+        owner: Owner::Place(cast.id("assets/retirement")),
+        system: None,
+        trigger: Trigger::Out,
+        steps: Box::new([Step { loc: line(85), kind: StepKind::Effect(owe) }]),
+        nodes: nodes.into(),
+        loc: line(85),
+    }
+}
+
 /// What the laws and the engine recorded.
 struct Records {
     laws: Arena<Law>,
@@ -392,6 +415,7 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
     let retirement = Owner::Place(cast.id("assets/retirement"));
     laws.push(limit_law(cast, "deferral-limit", retirement, BinOp::Le, false));
     laws.push(limit_law(cast, "overdraft", Owner::Place(cast.id("assets/bank/checking")), BinOp::Ge, true));
+    laws.push(early_withdrawal(cast));
 
     // Names are one namespace per person-year: both systems add to `agi`.
     let (me, irs, usd) = (cast.me, cast.irs, cast.usd);
@@ -494,8 +518,11 @@ pub(crate) fn household() -> Household {
         Rule { law: Id::new(2), subject: Subject::Place(retirement), from: Day(i32::MIN), until: day(2025, 12, 31) };
     let in_force =
         Rule { law: Id::new(3), subject: Subject::Place(retirement), from: Day(i32::MIN), until: Day(i32::MAX) };
+    let penalty =
+        Rule { law: Id::new(4), subject: Subject::Place(retirement), from: Day(i32::MIN), until: Day(i32::MAX) };
     let rules = Rules {
         on_in: Groups::build(cast.places.len(), [(food, budget_rule), (retirement, lapsed), (retirement, in_force)]),
+        on_out: Groups::build(cast.places.len(), [(retirement, penalty)]),
         ..Rules::default()
     };
     let touching =
@@ -937,8 +964,8 @@ fn claims_list_what_is_owed_with_its_age_and_what_is_overdue() {
     assert_eq!(
         lines(&report.sections[0]),
         [
-            "!acme | #inv-12 · The March design invoice. | 3,000.00 USD | 2026-03-02 | 29d | 2026-03-20 | overdue 11d | @13",
-            "=Total |  | 3,000.00 USD |  |  |  |  |"
+            "!acme | #inv-12 · The March design invoice. | 3,000.00 USD | 2026-03-02 | 29d | 2026-03-20 | overdue 11d",
+            "=Total |  | 3,000.00 USD |  |  |  |"
         ]
     );
 }
@@ -997,10 +1024,16 @@ fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed()
     assert!(
         limits[0].contains("deferral-limit on assets/retirement | 2026 | 2,400.00 USD | 24,000.00 USD | 21,600.00 USD")
     );
-    // The rule that lapsed at the end of 2025 is not governing: the one in force is listed under limits.
+    // The rule that lapsed at the end of 2025 is not governing: the one in force is a limit, and
+    // the law that prices leaving the account is a price.
     assert_eq!(
         lines(&report.sections[3]),
-        ["=Limits |  |  |", "  overdraft | on in | The overdraft law says what it says. | @80"]
+        [
+            "=Limits |  |  |",
+            "  overdraft | on in | The overdraft law says what it says. | @80",
+            "=Prices |  |  |",
+            "  early-withdrawal | on out |  | @85"
+        ]
     );
     assert!(report.sections[3].notes[0].starts_with("1 law not in force today"));
 }
@@ -1015,10 +1048,8 @@ fn why_an_entity_shows_its_places_ties_and_claims() {
     let claims = client.sections.iter().find(|section| section.heading.as_deref() == Some("Claims with it")).unwrap();
     assert!(lines(claims)[0].starts_with("!acme | #inv-12"));
     let jordan = house.why(Found::Entity(house.entity("jordan")));
-    assert_eq!(
-        lines(&jordan.sections[0]),
-        ["assets/bank/jordan-checking | 4,300.00 USD", "income/jordan-pay | 3,000.00 USD"]
-    );
+    // What is held, not what was earned: the statement of income and spending is `flow`.
+    assert_eq!(lines(&jordan.sections[0]), ["assets/bank/jordan-checking | 4,300.00 USD"]);
 }
 
 #[test]
@@ -1112,11 +1143,22 @@ fn a_plan_that_says_the_same_as_a_habit_replaces_it_and_one_that_does_not_adds_t
     assert_eq!(rows.iter().filter(|row| row.contains("income/salary")).count(), 2);
 }
 
+/// `12,555.80 USD` in cents.
+fn cents(amount: &str) -> i64 {
+    amount.trim_end_matches(" USD").replace([',', '.'], "").parse().unwrap()
+}
+
 #[test]
 fn a_repayment_stops_at_what_is_owed() {
     let mut house = household();
     house.run.today = day(2026, 4, 15);
-    // 500 a month back from the client against 3,000 still owed: six payments and no more.
+    let last = |house: &Household| {
+        let committed = outlook(house, day(2026, 12, 31)).remove(0);
+        cents(committed.last().unwrap().split(" | ").nth(1).unwrap())
+    };
+    let before = last(&house);
+    // 10,000 a month back from the client against 3,000 still owed: one payment, cut to what is
+    // left, and nothing after it. Jordan's account, which it lands in, is cash.
     let mut back = clone_plan(&house.book.plans[Id::new(0)]);
     (back.template[0].from, back.template[0].to) =
         (house.place("assets/owed/clients"), house.place("assets/bank/jordan-checking"));
@@ -1126,9 +1168,7 @@ fn a_repayment_stops_at_what_is_owed() {
     back.from = Some(day(2026, 5, 3));
     back.until = None;
     house.book.plans.push(back);
-    let problems = outlook(&house, day(2026, 12, 31)).pop().unwrap();
-    // The claim holds 3,000: the first 10,000 payment is cut to what is left, and nothing overdraws.
-    assert!(!problems.iter().any(|row| row.contains("clients")), "{problems:?}");
+    assert_eq!(last(&house) - before, 300_000);
 }
 
 #[test]
@@ -1148,9 +1188,16 @@ fn available_subtracts_what_is_pending_and_lists_what_is_slower() {
             "=Available to spend | 12,905.80 USD",
         ]
     );
-    // The retirement account has a month's liquidity and no laws to penalize it.
+    // The retirement account has a month's liquidity and a law that prices leaving it: a tenth, and
+    // nothing else drives it. The card money in checking is cash and is not a candidate at all.
     let reach = lines(report.sections.last().unwrap());
-    assert_eq!(reach[0], "assets/retirement | 1m | 1,000.00 USD |  | 1,000.00 USD |");
+    assert_eq!(
+        reach,
+        [
+            "assets/retirement | 1m | 1,000.00 USD | 100.00 USD | 900.00 USD | driven by early-withdrawal 100.00 USD",
+            "=If everything were drawn today |  | 1,000.00 USD | 100.00 USD | 900.00 USD |"
+        ]
+    );
 }
 
 #[test]
@@ -1170,4 +1217,38 @@ fn clone_plan(plan: &Plan) -> Plan {
         template: plan.template.clone(),
         loc: plan.loc,
     }
+}
+
+#[test]
+fn claims_and_registers_are_about_whose_money_they_are() {
+    let house = household();
+    let claims = house.report_for(Query::Claims { at: None }, Some("jordan")).unwrap();
+    assert!(claims.sections[0].rows.is_empty(), "the invoice is the first person's");
+    let me = house.entity("me");
+    let mine = crate::views(&house.book, &house.run, &Whose::of(&house.book, me), &Query::Claims { at: None }).unwrap();
+    assert_eq!(mine.sections[0].rows.len(), 2);
+}
+
+#[test]
+fn tax_lines_are_kept_apart_by_person_when_several_have_them() {
+    let mut house = household();
+    let jordan = house.entity("jordan");
+    let mut theirs = house.run.effects[0];
+    (theirs.owner, theirs.subject) = (jordan, Subject::Entity(jordan));
+    house.run.effects.push(theirs);
+    let text = table(&house, Query::Tax { year: None });
+    assert!(text.starts_with("# Taxes 2026\n"), "no single person to name: {text}");
+    assert!(text.contains("=me · us |  |") && text.contains("=jordan · us |  |"), "{text}");
+    // Asked about one person, the title says whose it is.
+    let one = show(&house.report_for(Query::Tax { year: None }, Some("jordan")).unwrap());
+    assert!(one.starts_with("# Taxes 2026 for jordan\n"), "{one}");
+}
+
+#[test]
+fn a_window_of_all_time_is_named_and_never_panics() {
+    let mut house = household().with_headroom();
+    house.run.headroom[0].from = Day(i32::MIN);
+    house.run.headroom[0].until = Day(i32::MAX);
+    let report = house.report(Query::Limits { year: Some(2026) });
+    assert!(lines(&report.sections[0]).iter().any(|row| row.contains("| ever |")));
 }

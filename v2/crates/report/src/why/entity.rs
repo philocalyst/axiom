@@ -11,7 +11,7 @@ use axiom_model::{Amount, Book, Entity, Law, Subject};
 
 use super::laws_table;
 use crate::claims;
-use crate::lens::{Lens, Whose};
+use crate::lens::{Lens, Whose, on_balance_sheet};
 use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
@@ -21,7 +21,11 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> 
     let lens = Lens::new(book, &scope, run.today);
 
     let mut places = Section::new([Column::left("Place"), Column::right("Holds")]).headed("Places");
-    for holding in run.holdings.iter().filter(|holding| lens.owns(holding.place)) {
+    for holding in run
+        .holdings
+        .iter()
+        .filter(|holding| lens.owns(holding.place) && on_balance_sheet(book.places[holding.place].class))
+    {
         let sign = book.places[holding.place].class.display_sign();
         let held = Amount::new(Qty(holding.qty().0 * sign), holding.unit);
         places.push(Row::new([Cell::text(path(book, holding.place)), Cell::amount(book, held)]));

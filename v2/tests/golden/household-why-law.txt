@@ -6,7 +6,7 @@ Why budget
   Governs   expenses/food and everything beneath it
   Written   accounts.ax:60
   Ran       18 times
-  Recorded  1 violations, 0 effects
+  Recorded  1 violation, 0 effects
 
 Recent violations
   Date        Violation                                     From

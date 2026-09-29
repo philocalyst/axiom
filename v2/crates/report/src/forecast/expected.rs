@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Map, Qty};
 use axiom_engine::Run;
-use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Plan, Recognition};
+use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Plan, Recognition, Txn};
 
 use super::recurrence::{Schedule, detect, median};
 use crate::history::{Posting, postings};
@@ -93,7 +93,7 @@ pub fn expected<'b>(lens: Lens<'b, '_>, run: &Run) -> Vec<Expectation<'b>> {
 /// goes on from its latest occurrence, in the flows that occurrence wrote (a
 /// raise, a changed leg); otherwise from its own template.
 fn from_plans<'b>(book: &'b Book, run: &Run, today: Day) -> Vec<Expectation<'b>> {
-    let mut latest: Map<Id<Plan>, (Day, Id<axiom_model::Txn>)> = Map::default();
+    let mut latest: Map<Id<Plan>, (Day, Id<Txn>)> = Map::default();
     for (id, txn) in book.txns.iter().filter(|(_, txn)| txn.day <= today) {
         if let Some(plan) = txn.plan {
             let slot = latest.entry(plan).or_insert((txn.day, id));
@@ -102,35 +102,22 @@ fn from_plans<'b>(book: &'b Book, run: &Run, today: Day) -> Vec<Expectation<'b>>
     }
     let mut found = Vec::new();
     for (id, plan) in book.plans.iter() {
-        let schedule = |anchor: Day| Schedule { anchor, every: plan.every, on: plan.on, until: plan.until };
-        match latest.get(&id) {
+        // What each flow moves, and the day the schedule is counted from.
+        let (legs, anchor): (Vec<(&Flow, Amount, Amount)>, Option<Day>) = match latest.get(&id) {
             Some(&(day, txn)) => {
                 let txn = &book.txns[txn];
-                for flow in txn.first.index()..txn.first.index() + txn.len as usize {
-                    let (flow, posted) = (&book.flows[Id::new(flow as u32)], &run.posted[flow]);
-                    let (out, arrive) =
-                        (Amount::new(posted.out, flow.out.unit), Amount::new(posted.arrive, flow.arrive.unit));
-                    found.push(Expectation {
-                        origin: Origin::Plan(id),
-                        schedule: schedule(day),
-                        template: flow,
-                        out,
-                        arrive,
-                    });
-                }
+                let flows = (txn.first.index()..txn.first.index() + txn.len as usize).map(|at| {
+                    let (flow, posted) = (&book.flows[Id::new(at as u32)], &run.posted[at]);
+                    (flow, Amount::new(posted.out, flow.out.unit), Amount::new(posted.arrive, flow.arrive.unit))
+                });
+                (flows.collect(), Some(day))
             }
-            None => {
-                for flow in plan.template.iter() {
-                    let anchor = plan.from.unwrap_or(flow.day);
-                    found.push(Expectation {
-                        origin: Origin::Plan(id),
-                        schedule: schedule(anchor),
-                        template: flow,
-                        out: flow.out,
-                        arrive: flow.arrive,
-                    });
-                }
-            }
+            None => (plan.template.iter().map(|flow| (flow, flow.out, flow.arrive)).collect(), plan.from),
+        };
+        for (template, out, arrive) in legs {
+            let schedule =
+                Schedule { anchor: anchor.unwrap_or(template.day), every: plan.every, on: plan.on, until: plan.until };
+            found.push(Expectation { origin: Origin::Plan(id), schedule, template, out, arrive });
         }
     }
     found
@@ -198,25 +185,79 @@ fn spread(series: &[(Day, Qty)]) -> i64 {
 /// nothing, and nothing else has touched it for two periods (a loan repaid, a
 /// prepaid cost used up, a claim settled).
 fn has_ended(book: &Book, run: &Run, habit: &Expectation) -> bool {
-    let every = habit.schedule.every;
+    let (every, flow) = (habit.schedule.every, habit.template);
     let since = run.today.add_days(-2 * (every.months * 31 + every.days));
-    let flow = habit.template;
-    let unit_of = |place: Id<Place>| if place == flow.from { flow.out.unit } else { flow.arrive.unit };
-    [flow.from, flow.to]
-        .into_iter()
-        .filter(|&place| matches!(book.places[place].class, Class::Asset | Class::Liability))
-        .any(|place| {
-            let at = run.holdings.partition_point(|held| (held.place, held.unit) < (place, unit_of(place)));
-            let empty = run
-                .holdings
-                .get(at)
-                .is_none_or(|held| (held.place, held.unit) != (place, unit_of(place)) || held.qty().is_zero());
-            let others =
-                book.touching[place].iter().rev().map(|&id| &book.flows[id]).take_while(|other| other.day >= since);
-            empty
-                && others
-                    .filter(|other| (other.from, other.to, other.payee) != (flow.from, flow.to, flow.payee))
-                    .count()
-                    == 0
-        })
+    let held = |place, unit| {
+        let found = run.holdings.binary_search_by_key(&(place, unit), |holding| (holding.place, holding.unit));
+        found.map_or(Qty::ZERO, |at| run.holdings[at].qty())
+    };
+    let ends = [(flow.from, flow.out.unit), (flow.to, flow.arrive.unit)];
+    ends.into_iter().filter(|&(place, _)| matches!(book.places[place].class, Class::Asset | Class::Liability)).any(
+        |(place, unit)| {
+            let recent = book.touching[place].iter().rev().map(|&id| &book.flows[id]);
+            let mut others = recent.take_while(|other| other.day >= since);
+            held(place, unit).is_zero()
+                && !others.any(|other| (other.from, other.to, other.payee) != (flow.from, flow.to, flow.payee))
+        },
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use axiom_engine::Posted;
+    use axiom_engine::State;
+    use axiom_model::Mode;
+
+    use super::*;
+    use crate::tests::household;
+
+    fn day(y: i32, m: u32, d: u32) -> Day {
+        Day::from_ymd(y, m, d).unwrap()
+    }
+
+    /// Four monthly purchases of shares with dollars: a fixed 1,500 buys a different number each time.
+    #[test]
+    fn a_standing_order_is_learned_from_the_side_that_does_not_vary() {
+        let house = household();
+        let (usd, shares) = (house.book.base, Id::new(1));
+        let template = house.book.flows.iter().next().unwrap().0;
+        let buys: Vec<(Flow, Posted)> = [(1, 5_250), (2, 5_310), (3, 5_120), (4, 5_400)]
+            .map(|(month, quanta)| {
+                let mut flow = house.book.flows[template].clone();
+                flow.day = day(2026, month, 3);
+                flow.mode = Mode::Actual;
+                flow.arrive.unit = shares;
+                (flow, Posted { out: Qty(150_000), arrive: Qty(quanta), state: State::Actual })
+            })
+            .into();
+        let group: Vec<Posting> = buys.iter().map(|(flow, posted)| Posting { id: template, flow, posted }).collect();
+        // The last buy fetched 5.400 shares for 1,500.00: the projection buys the same 1,500.00
+        // at that price, not the median share count at some other cost.
+        let habit = habit(&house.book, &group, day(2026, 4, 20)).expect("a monthly standing order");
+        assert_eq!((habit.out, habit.arrive), (Amount::new(Qty(150_000), usd), Amount::new(Qty(5_400), shares)));
+        assert_eq!(habit.schedule.every, axiom_core::Span::months(1));
+    }
+
+    /// The client's claim is settled and nothing else touches it: what came out of it is over.
+    #[test]
+    fn a_habit_ends_when_the_account_it_draws_on_has_run_dry() {
+        let mut house = household();
+        house.run.today = day(2026, 9, 1);
+        let (clients, owed) = (house.place("assets/owed/clients"), house.book.flows.iter().nth(15).unwrap().0);
+        let template = &house.book.flows[owed];
+        assert_eq!(template.from, clients);
+        let habit = Expectation {
+            origin: Origin::Habit { occurrences: 3 },
+            schedule: Schedule { anchor: day(2026, 3, 26), every: axiom_core::Span::months(1), on: None, until: None },
+            template,
+            out: template.out,
+            arrive: template.arrive,
+        };
+        assert!(!has_ended(&house.book, &house.run, &habit), "3,000 is still owed");
+        house.run.holdings.retain(|holding| holding.place != clients);
+        assert!(has_ended(&house.book, &house.run, &habit), "settled, and quiet for two months");
+        // Recent activity elsewhere on the account keeps it alive.
+        house.run.today = day(2026, 4, 10);
+        assert!(!has_ended(&house.book, &house.run, &habit), "an invoice was written on it this month");
+    }
 }

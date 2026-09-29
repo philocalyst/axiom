@@ -7,6 +7,7 @@
 
 use std::borrow::Cow;
 
+use axiom_core::day::days_in_month;
 use axiom_core::{Day, Id, Map, Qty, Ratio};
 use axiom_engine::{Headroom, Run};
 use axiom_model::{Amount, BinOp, Book, Dir, Func, Law, Op, Owner, Period, Place, StepKind, Subject, Value, Window};
@@ -58,23 +59,28 @@ pub fn used(reading: &Headroom) -> Option<Ratio> {
 
 /// The calendar month or year the reading's window is exactly, if it is one.
 pub fn period(reading: &Headroom) -> Option<Period> {
-    let (from, until) = (reading.from, reading.until);
-    if from == from.month_start() && until == from.month_end() {
+    let (year, month, _) = reading.from.ymd();
+    let window = |first: u32, last: u32| {
+        let (from, until) = (Day::from_ymd(year, first, 1), Day::from_ymd(year, last, days_in_month(year, last)));
+        (from, until) == (Some(reading.from), Some(reading.until))
+    };
+    if window(month, month) {
         Some(Period::Month)
-    } else if from == from.year_start() && until == from.year_end() {
+    } else if window(1, 12) {
         Some(Period::Year)
     } else {
         None
     }
 }
 
-/// `2026-03`, `2026`, `on 2026-03-31`, or the range itself.
+/// `2026-03`, `2026`, `on 2026-03-31`, `ever`, or the range itself.
 pub fn window_words(reading: &Headroom) -> String {
     let (year, month, _) = reading.from.ymd();
     match period(reading) {
         Some(Period::Month) => format!("{year:04}-{month:02}"),
         Some(Period::Year) => format!("{year:04}"),
         None if reading.from == reading.until => format!("on {}", reading.from),
+        None if (reading.from.0, reading.until.0) == (i32::MIN, i32::MAX) => "ever".to_string(),
         None => format!("{}..{}", reading.from, reading.until),
     }
 }

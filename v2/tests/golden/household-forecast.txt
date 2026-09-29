@@ -1,45 +1,42 @@
 Forecast to 2027-03-31
 
 Liquid net worth
-  Month end        Committed
-  ──────────────────────────
-  2026-03-31   27,197.73 USD
-  2026-04-30   23,505.46 USD
-  2026-05-31   19,931.59 USD
-  2026-06-30   16,357.72 USD
-  2026-07-31   10,465.45 USD
-  2026-08-31    3,291.58 USD
-  2026-09-30     -282.29 USD
-  2026-10-31   -3,974.56 USD
-  2026-11-30   -7,548.43 USD
-  2026-12-31   -9,235.70 USD
-  2027-01-31  -13,439.57 USD
-  2027-02-28  -17,013.44 USD
-  2027-03-31  -20,587.31 USD
-  · Committed: liquid assets less debts, in USD, after plans, recurring flows found in history,
-    growth models and obligations as they fall due. Variable spending is not in it.
+  Month end       Committed       Net worth
+  ─────────────────────────────────────────
+  2026-03-31  26,592.63 USD   77,597.73 USD
+  2026-04-30  28,238.36 USD   80,343.46 USD
+  2026-05-31  30,002.49 USD   83,207.59 USD
+  2026-06-30  31,766.62 USD   86,071.72 USD
+  2026-07-31  31,212.35 USD   86,617.45 USD
+  2026-08-31  29,376.48 USD   84,681.58 USD
+  2026-09-30  31,140.61 USD   87,545.71 USD
+  2026-10-31  32,786.34 USD   90,291.44 USD
+  2026-11-30  34,550.47 USD   93,155.57 USD
+  2026-12-31  38,201.20 USD   98,306.30 USD
+  2027-01-31  39,335.33 USD  100,540.43 USD
+  2027-02-28  41,099.46 USD  103,404.56 USD
+  2027-03-31  42,863.59 USD  106,268.69 USD
+  · Committed: money in hand, less what is owed on debts with no term and on obligations as they
+    fall due, in USD, after plans, recurring flows found in history and what they can still give.
+    Investments and property are net worth, not liquid. Variable spending is not in it.
   · Bands need 3 full months of spending history; there is not enough yet.
 
 What recurs
-  Expected                                                  Every          Amount  Next        Source
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/bank/checking → expenses/tuition (state-u)         yearly   3,600.00 USD  2026-08-15  plan
-  assets/college → expenses/tuition (state-u)               yearly   1,200.00 USD  2026-08-20  plan
-  assets/bank/checking → expenses/travel                    yearly   2,200.00 USD  2026-07-10  plan
-  assets/bank/checking → expenses/insurance (insurer)       yearly     630.00 USD  2027-01-01  plan
-  income/salary → assets/retirement (acme)                  yearly     400.00 USD  2026-12-15  plan
-  income/salary → expenses/taxes/federal (acme)             yearly     880.00 USD  2026-12-15  plan
-  income/salary → expenses/taxes/state (acme)               yearly     409.00 USD  2026-12-15  plan
-  income/salary → expenses/taxes/payroll (acme)             yearly     306.00 USD  2026-12-15  plan
-  income/salary → assets/bank/checking (acme)               yearly   2,005.00 USD  2026-12-15  plan
-  assets/bank/checking → assets/bank/savings                monthly    500.00 USD  2026-04-20  seen 3 times
-  assets/bank/checking → assets/college                     monthly    300.00 USD  2026-04-05  seen 4 times
-  assets/bank/checking → expenses/rent (landlord)           monthly  2,850.00 USD  2026-04-01  seen 3 times
-  income/interest → assets/bank/savings                     monthly     49.73 USD  2026-04-30  seen 3 times
-  liabilities/visa → expenses/food/groceries (trader-joes)  weekly     118.40 USD  2026-04-02  seen 10 times
+  Expected                                                      Every          Amount  Next        Source
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/bank/checking → expenses/rent (landlord)               monthly  2,850.00 USD  2026-04-01  seen 3 times
+  liabilities/visa → expenses/food/groceries (trader-joes)      weekly     118.40 USD  2026-04-02  seen 10 times
+  assets/bank/checking → assets/college                         monthly    300.00 USD  2026-04-05  seen 4 times
+  income/salary → assets/bank/checking (acme), and 4 more legs  monthly  8,000.00 USD  2026-04-13  seen 3 times
+  assets/bank/checking → assets/bank/savings                    monthly    500.00 USD  2026-04-20  seen 3 times
+  income/interest → assets/bank/savings                         monthly     49.73 USD  2026-04-30  seen 3 times
+  assets/bank/checking → expenses/travel                        yearly   2,200.00 USD  2026-07-10  plan
+  assets/bank/checking → expenses/tuition (state-u)             yearly   3,600.00 USD  2026-08-15  plan
+  assets/college → expenses/tuition (state-u)                   yearly   1,200.00 USD  2026-08-20  plan
+  income/salary → assets/bank/checking (acme), and 4 more legs  yearly   4,000.00 USD  2026-12-15  plan
+  assets/bank/checking → expenses/insurance (insurer)           yearly     630.00 USD  2027-01-01  plan
 
 Problems ahead
-  Date        Problem
-  ─────────────────────────────────────────────────────────────────────
-  2026-06-05  assets/bank/checking is overdrawn, down to -37,892.30 USD
-  2026-06-05  overdraft: balance below zero
+  Date  Problem
+  ─────────────
+  · No law violations or overdrafts are projected.

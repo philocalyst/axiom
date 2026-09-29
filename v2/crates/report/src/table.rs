@@ -123,9 +123,13 @@ pub fn doc_lines(doc: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// The first line of a doc comment, which says what the item is.
-pub fn doc_headline<'s>(book: &Book<'s>, doc: Option<Sym>) -> Option<&'s str> {
-    doc.and_then(|doc| doc_lines(book.name(doc)).next())
+/// What a doc comment says the item is: its first line, marked with an
+/// ellipsis when the sentence runs on.
+pub fn doc_headline(book: &Book, doc: Option<Sym>) -> Option<String> {
+    let mut lines = doc_lines(book.name(doc?));
+    let first = lines.next()?;
+    let runs_on = lines.next().is_some_and(|next| !next.trim().is_empty());
+    Some(if runs_on { format!("{first}…") } else { first.to_string() })
 }
 
 /// `#house`, `#check-1041`: codes as they are written.

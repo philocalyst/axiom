@@ -47,6 +47,18 @@ impl Term {
 pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) -> Report<'s> {
     let year = year.unwrap_or_else(|| run.today.year());
     let lens = Lens::new(book, whose, run.today);
+    let disposals: Vec<&Gain> =
+        run.gains.iter().filter(|gain| gain.day.year() == year && lens.owns(gain.from)).collect();
+    let mut table = section(book, &disposals);
+    if table.rows.is_empty() {
+        table.note(format!("Nothing was sold in {year}."));
+    }
+    Report::new(format!("Gains realized in {year}")).with(table)
+}
+
+/// Disposals as Form 8949 lays them out: short-term, then long-term, then
+/// money withdrawn from tax-deferred places, each with its subtotal.
+pub fn section<'s>(book: &Book<'s>, disposals: &[&Gain]) -> Section<'s> {
     let columns = [
         Column::left("Sold"),
         Column::left("Acquired"),
@@ -58,17 +70,12 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) ->
         Column::left("Term"),
     ];
     let mut table = Section::new(columns);
-    let disposals: Vec<&Gain> =
-        run.gains.iter().filter(|gain| gain.day.year() == year && lens.owns(gain.from)).collect();
     let mut total = (Qty::ZERO, Qty::ZERO);
     let mut groups = 0;
     for (term, heading) in [(Term::Short, "Short-term"), (Term::Long, "Long-term"), (Term::Untimed, "Money withdrawn")]
     {
-        let mut group: Vec<&Gain> = disposals
-            .iter()
-            .copied()
-            .filter(|gain| Term::of(book, gain.unit, gain.acquired, gain.day) == term)
-            .collect();
+        let mut group: Vec<&&Gain> =
+            disposals.iter().filter(|gain| Term::of(book, gain.unit, gain.acquired, gain.day) == term).collect();
         group.sort_by_key(|gain| (gain.day, gain.acquired));
         for gain in &group {
             let cells = [
@@ -92,13 +99,10 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) ->
     if groups > 1 {
         table.push(subtotal(book, "Total", total));
     }
-    if table.rows.is_empty() {
-        table.note(format!("Nothing was sold in {year}."));
-    }
     if disposals.iter().any(|gain| gain.ambiguous) {
         table.note("Muted disposals had no lot policy, so the oldest shares were assumed sold.");
     }
-    Report::new(format!("Gains realized in {year}")).with(table)
+    table
 }
 
 fn subtotal<'s>(book: &Book<'s>, label: &'static str, (proceeds, basis): (Qty, Qty)) -> Row<'s> {

@@ -14,7 +14,7 @@ use axiom_model::{Book, Class, Commodity, Flow, Place, Value};
 use crate::history::Held;
 use crate::lens::{Basket, Lens, Liquidity};
 
-/// A liquid place that goes below zero.
+/// A cash place that goes below zero.
 pub struct Overdraft {
     pub place: Id<Place>,
     pub first: Day,
@@ -25,9 +25,9 @@ pub struct Overdraft {
 pub struct Trace<'b, 's> {
     /// Everything the ledger recorded, history and projection alike.
     pub ledger: Ledger<'b, 's>,
-    /// Money in hand less the debts that fall due, at each checkpoint.
+    /// Money in hand less the debts with no term, at each checkpoint.
     pub liquid: Vec<Qty>,
-    /// Everything owned less everything owed, at each checkpoint, with
+    /// Everything owned less everything owed at each checkpoint, with
     /// commodities grown by their models.
     pub worth: Vec<Qty>,
     pub overdrafts: Vec<Overdraft>,
@@ -42,7 +42,6 @@ pub fn project<'b, 's>(lens: Lens<'b, 's>, today: Day, flows: Vec<Flow>, checkpo
     let mut ledger = Ledger::new(book, Options { today: horizon, relaxed: book.relaxed });
     ledger.advance(today);
 
-    let growth = Growth::new(book);
     let mut overdrawn: BTreeMap<Id<Place>, Overdraft> = BTreeMap::new();
     let (mut liquid, mut worth) = (Vec::new(), Vec::new());
     let mut coming = flows.into_iter().peekable();
@@ -54,7 +53,7 @@ pub fn project<'b, 's>(lens: Lens<'b, 's>, today: Day, flows: Vec<Flow>, checkpo
         }
         ledger.advance(checkpoint);
         let months = checkpoint.since(today).months;
-        let position = |pick: &dyn Fn(&Holding) -> Qty| grown(lens, &growth, months, &ledger, pick);
+        let position = |pick: &dyn Fn(&Holding) -> Qty| grown(lens, months, &ledger, pick);
         liquid.push(position(&|holding| in_hand_or_owed(lens, holding)));
         worth.push(position(&|holding| holding.qty()));
     }
@@ -66,42 +65,37 @@ pub fn project<'b, 's>(lens: Lens<'b, 's>, today: Day, flows: Vec<Flow>, checkpo
 /// the payments the projection already makes.
 fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
     let place = &lens.book.places[holding.place];
+    let maturity = lens.book.names.get("maturity");
+    let has_term = maturity
+        .is_some_and(|name| place.props.iter().any(|prop| prop.name == name && matches!(prop.value, Value::Day(_))));
     match lens.liquidity(holding.place, holding.unit) {
         Some(Liquidity::Cash) => lens.free(holding),
-        _ if place.class == Class::Liability && !has_term(lens.book, place) => holding.qty(),
+        _ if place.class == Class::Liability && !has_term => holding.qty(),
         _ => Qty::ZERO,
     }
 }
 
-/// Whether a debt has a term (`maturity 2050-01-01`).
-fn has_term(book: &Book, place: &Place) -> bool {
-    let maturity = book.names.get("maturity");
-    maturity.is_some_and(|name| place.props.iter().any(|prop| prop.name == name && matches!(prop.value, Value::Day(_))))
-}
-
 /// What the lens's owners hold on the balance sheet, as `pick` counts it,
-/// at today's prices with every commodity grown `months` ahead.
-fn grown(lens: Lens, growth: &Growth, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
+/// each commodity priced as a whole at today's prices and grown `months` ahead.
+fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
     let mut basket = Basket::default();
-    let on_sheet = ledger.holdings().filter(|holding| {
+    let on_sheet = |holding: &&Holding| {
         lens.owns(holding.place) && matches!(lens.book.places[holding.place].class, Class::Asset | Class::Liability)
-    });
-    for holding in on_sheet {
+    };
+    for holding in ledger.holdings().filter(on_sheet) {
         basket.add(holding.unit, Held { qty: pick(holding), booked: Qty::ZERO });
     }
-    let worth = basket.amounts().filter_map(|amount| Some(growth.apply(amount.unit, lens.value(amount)?, months)));
-    worth.sum()
+    basket.amounts().filter_map(|amount| Some(compound(lens.book, amount.unit, lens.value(amount)?, months))).sum()
 }
 
 /// A flow that cannot move more than its ends hold: what leaves an account
 /// that is not cash is limited by what it holds, and a payment into a debt by
 /// what is owed. `None` when there is nothing to move.
 fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
-    let book = lens.book;
     let held_back = matches!(lens.liquidity(flow.from, flow.out.unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
     let room = if held_back {
         Some(ledger.balance(flow.from, flow.out.unit))
-    } else if book.places[flow.to].class == Class::Liability {
+    } else if lens.book.places[flow.to].class == Class::Liability {
         Some(-ledger.balance(flow.to, flow.arrive.unit))
     } else {
         None
@@ -115,12 +109,11 @@ fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
     }
 }
 
-/// Records where a flow left a liquid place below zero.
+/// Records where a flow left a cash place below zero.
 fn note_overdrafts(lens: Lens, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
     let book = lens.book;
-    for place in
-        [flow.from, flow.to].into_iter().filter(|&place| lens.liquidity(place, book.base) == Some(Liquidity::Cash))
-    {
+    let cash = |&place: &Id<Place>| lens.liquidity(place, book.base) == Some(Liquidity::Cash);
+    for place in [flow.from, flow.to].into_iter().filter(cash) {
         let balance = ledger.balance(place, book.base);
         if balance.is_negative() {
             let overdraft = overdrawn.entry(place).or_insert(Overdraft { place, first: flow.day, lowest: balance });
@@ -129,44 +122,28 @@ fn note_overdrafts(lens: Lens, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTr
     }
 }
 
-/// Growth models: a commodity that `grows 5% yearly` is priced 5%/12 higher
-/// each month ahead, compounding. The base currency is the yardstick and does
-/// not grow.
-struct Growth {
-    monthly: Vec<Option<Ratio>>,
-}
-
-impl Growth {
-    fn new(book: &Book) -> Growth {
-        let monthly = book
-            .commodities
-            .iter()
-            .map(|(unit, commodity)| commodity.growth.filter(|_| unit != book.base).and_then(monthly_factor));
-        Growth { monthly: monthly.collect() }
-    }
-
-    fn apply(&self, unit: Id<Commodity>, value: Qty, months: i32) -> Qty {
-        let Some(factor) = self.monthly[unit.index()] else { return value };
-        (0..months).fold(value, |worth, _| worth.scale(factor).unwrap_or(worth))
-    }
-}
-
-/// What one month multiplies a price by: 5% a year is 1 + 5%/12.
-fn monthly_factor(yearly: Ratio) -> Option<Ratio> {
-    Ratio::ONE.checked_add(yearly.checked_div(Ratio::int(12))?)
+/// A commodity that `grows 5% yearly` is priced 5%/12 higher each month
+/// ahead, compounding, rounded half to even each month. The base currency is
+/// the yardstick and does not grow.
+fn compound(book: &Book, unit: Id<Commodity>, value: Qty, months: i32) -> Qty {
+    let yearly = book.commodities[unit].growth.filter(|_| unit != book.base);
+    let monthly = yearly.and_then(|yearly| Ratio::ONE.checked_add(yearly.checked_div(Ratio::int(12))?));
+    monthly.map_or(value, |factor| (0..months).fold(value, |worth, _| worth.scale(factor).unwrap_or(worth)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::household;
 
     #[test]
     fn growth_compounds_monthly_and_leaves_the_yardstick_alone() {
-        let five_percent = Ratio::percent(5, 0).unwrap();
-        let growth = Growth { monthly: vec![None, monthly_factor(five_percent)] };
+        let mut house = household();
+        let (usd, vti) = (house.book.base, Id::new(1));
+        house.book.commodities[vti].growth = Ratio::percent(5, 0);
         // 100,000.00 at 241/240 a month for a year, rounded half-even each month.
-        assert_eq!(growth.apply(Id::new(1), Qty(10_000_000), 12), Qty(10_511_619));
-        assert_eq!(growth.apply(Id::new(0), Qty(10_000_000), 12), Qty(10_000_000));
-        assert_eq!(growth.apply(Id::new(1), Qty(10_000_000), 0), Qty(10_000_000));
+        assert_eq!(compound(&house.book, vti, Qty(10_000_000), 12), Qty(10_511_619));
+        assert_eq!(compound(&house.book, usd, Qty(10_000_000), 12), Qty(10_000_000));
+        assert_eq!(compound(&house.book, vti, Qty(10_000_000), 0), Qty(10_000_000));
     }
 }

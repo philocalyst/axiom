@@ -15,15 +15,94 @@ mod taxline;
 
 pub use self::line::line;
 
-use axiom_core::{Diagnostic, Id, Sym};
-use axiom_engine::Run;
-use axiom_model::{Book, Effect, Entity, EventState, Law, Miss, Period, Place, StepKind, System, Trigger};
+use std::borrow::Cow;
 
+use axiom_core::{Diagnostic, Id, Sym};
+use axiom_engine::{Effect, Run, State};
+use axiom_model::{
+    Book, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place, StepKind, System, Trigger,
+};
+
+use crate::history::Posting;
 use crate::lens::Whose;
-use crate::places::names;
+use crate::places::{names, route};
 use crate::resolve;
-use crate::table::{doc_headline, plural};
+use crate::table::{cause_cell, creditor, doc_headline, plural};
 use crate::{Cell, Column, Report, Row, Section};
+
+/// How many of the latest records a page lists; the rest are counted in a note.
+const RECENT: usize = 12;
+
+/// The latest `RECENT` of `items`, and how many earlier ones were left out.
+fn recent<T>(items: &[T]) -> (&[T], usize) {
+    let left_out = items.len().saturating_sub(RECENT);
+    (&items[left_out..], left_out)
+}
+
+/// Flows, dated, with where each stands.
+fn flows_table<'s>(book: &Book<'s>, run: &Run, ids: &[Id<Flow>], heading: &str) -> Section<'s> {
+    let columns = [
+        Column::left("Date"),
+        Column::left("Flow"),
+        Column::right("Amount"),
+        Column::left("State"),
+        Column::left("From"),
+    ];
+    let mut section = Section::new(columns).headed(heading);
+    let (shown, left_out) = recent(ids);
+    for &id in shown {
+        let posting = Posting::at(book, run, id);
+        let flow = posting.flow;
+        let cells = [
+            Cell::Day(flow.day),
+            Cell::text(route(book, flow)),
+            Cell::amount(book, posting.out()),
+            Cell::text(state_words(posting.posted.state)),
+            Cell::Source(flow.loc),
+        ];
+        section.push(Row::new(cells));
+    }
+    if left_out > 0 {
+        section.note(format!("{left_out} earlier flows not shown."));
+    }
+    section
+}
+
+fn state_words(state: State) -> Cow<'static, str> {
+    match state {
+        State::Actual => "actual".into(),
+        State::Pending => "pending".into(),
+        State::Settled(on) => format!("settled {on}").into(),
+        State::Void => "void".into(),
+        State::Returned(on) => format!("returned {on}").into(),
+        State::Planned => "planned".into(),
+    }
+}
+
+/// What laws counted or owed, when, and for whom.
+fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &str) -> Section<'s> {
+    let columns = ["Date", "Effect", "Owner"].map(Column::left).into_iter();
+    let mut section =
+        Section::new(columns.chain([Column::right("Amount")]).chain(["Owed to", "From"].map(Column::left)));
+    section.heading = Some(heading.to_string());
+    let (shown, left_out) = recent(effects);
+    for effect in shown {
+        let owed = effect.owe.map_or(Cell::Blank, |owed| Cell::text(creditor(book, owed)));
+        let cells = [
+            Cell::Day(effect.day),
+            Cell::text(book.name(effect.name)),
+            Cell::text(book.name(book.entities[effect.owner].path)),
+            Cell::amount(book, effect.amount),
+            owed,
+            cause_cell(book, effect.cause),
+        ];
+        section.push(Row::new(cells));
+    }
+    if left_out > 0 {
+        section.note(format!("{left_out} earlier effects not shown."));
+    }
+    section
+}
 
 pub fn target<'s>(book: &Book<'s>, run: &Run, whose: &Whose, text: &str) -> Result<Report<'s>, Diagnostic> {
     if let Some(code) = text.strip_prefix('#') {
@@ -112,7 +191,9 @@ fn role(law: &Law) -> Role {
     let mut role = Role::Tally;
     for step in law.steps.iter() {
         match step.kind {
-            StepKind::Require { otherwise: Some(_), .. } | StepKind::Effect(Effect::Owe { .. }) => return Role::Price,
+            StepKind::Require { otherwise: Some(_), .. } | StepKind::Effect(Consequence::Owe { .. }) => {
+                return Role::Price;
+            }
             StepKind::Require { .. } => role = Role::Limit,
             _ => {}
         }
@@ -123,7 +204,7 @@ fn role(law: &Law) -> Role {
 /// The tallies a law counts into.
 fn counted(law: &Law) -> impl Iterator<Item = Sym> + '_ {
     law.steps.iter().filter_map(|step| match step.kind {
-        StepKind::Effect(Effect::Count { name, .. }) => Some(name),
+        StepKind::Effect(Consequence::Count { name, .. }) => Some(name),
         _ => None,
     })
 }
