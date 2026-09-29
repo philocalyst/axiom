@@ -15,7 +15,7 @@ use crate::cx::Cx;
 use crate::errors::{Word, duplicate, list_and, unknown};
 use crate::kinds::{self, Kinds};
 use crate::law::Rules;
-use crate::names::{Names, Rank, Scoped, edits};
+use crate::names::{Names, Rank, Scoped, edits, near};
 use crate::paths;
 use crate::props::PropTable;
 use crate::scope::{Home, Scopes};
@@ -251,16 +251,10 @@ impl Commodities {
         id
     }
 
-    /// Whether `symbol` is a typo of a declared commodity, and which.
+    /// The declared commodity `symbol` is a few letters away from, if any.
     fn typo_of<'a>(&self, names: &'a Interner, symbol: &str) -> Option<&'a str> {
-        typo_of(symbol, self.by_symbol.keys().map(|&sym| names.name(sym)))
+        near(symbol, self.by_symbol.keys().map(|&sym| names.name(sym)))
     }
-}
-
-/// The one of `known` that `symbol` is a few letters away from, if any.
-fn typo_of<'a>(symbol: &str, known: impl Iterator<Item = &'a str>) -> Option<&'a str> {
-    let limit = (symbol.len() / 3).max(1);
-    known.map(|other| (edits(symbol, other), other)).filter(|&(distance, _)| distance <= limit).min().map(|(_, o)| o)
 }
 
 /// Commodities are declared, or opened on first use, unless what is written is
@@ -310,7 +304,7 @@ fn commodities<'s>(
         if declared {
             continue;
         }
-        if named == Some(unit.symbol) || typo_of(unit.symbol, known.iter().copied()).is_none() {
+        if named == Some(unit.symbol) || near(unit.symbol, known.iter().copied()).is_none() {
             table.add(cx.names, unit.symbol, unit.places, root, Home::Builtin);
         }
     }
