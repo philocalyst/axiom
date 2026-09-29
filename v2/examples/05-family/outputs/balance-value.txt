@@ -20,9 +20,8 @@ Balances at 2026-04-16
     vehicle                 25,300.00 USD
       crv                   25,300.00 USD
   ───────────────────────────────────────
-  equity                   557,581.84 USD
+  equity                   513,760.90 USD
     opening                513,760.90 USD
-    unknown                 43,820.94 USD
   ───────────────────────────────────────
   expenses                 154,709.02 USD
     auto                     3,278.94 USD
@@ -54,13 +53,14 @@ Balances at 2026-04-16
     tuition                  5,150.00 USD
     utilities                4,763.43 USD
   ───────────────────────────────────────
-  income                   262,990.43 USD
+  income                   306,811.37 USD
     alex-salary            150,000.00 USD
     employer-hsa             1,000.00 USD
     employer-match           8,923.18 USD
     gifts                    3,000.00 USD
     interest                 2,479.02 USD
     jordan-salary           97,440.07 USD
+    market                  43,820.94 USD
     rewards                    148.16 USD
   ───────────────────────────────────────
   liabilities              425,770.63 USD
