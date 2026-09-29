@@ -85,31 +85,31 @@ error[purpose]: grant money spent outside its purpose
     │ ──────────────────┬─────────────────
     │                   ╰── this flow: 300.00 USD of restricted money leaving assets/bank/project
     │
-    ├─[std.ax:148:13] (built in)
+    ├─[std.ax:193:13] (built in)
     │
-148 │     require to is self.purpose "grant money spent outside its purpose"
+193 │     require to is self.purpose "grant money spent outside its purpose"
     │             ─┬    ──────┬─────
     │              │          ╰── education
     │              ╰── expenses/dining
     │
     = note: Grant money may only be spent on what the grant names. This payment went somewhere else.
-            Pay it from another account, or, if the funder agreed to the change, update `purpose` on
+    = help: pay it from another account, or, if the funder agreed to the change, update `purpose` on
             the grant.
 
 error[deadline]: grant money left unspent at the deadline
-    ╭─[std.ax:153:3] (built in)
+    ╭─[std.ax:199:3] (built in)
     │
-153 │   law deadline
+199 │   law deadline
     │   ──────┬─────
     │         ╰── checked for scholarship on 2026-12-31
-154 │     by self.until
-155 │     require remaining == empty "grant money left unspent at the deadline"
+200 │     by self.until
+201 │     require remaining == empty "grant money left unspent at the deadline"
     │             ────┬────
     │                 ╰── 900.00 USD
     │
-    = note: A grant ends on its `until` date, and unspent money is owed back. Spend what is left on
-            the grant's purpose before the deadline, or ask the funder for an extension and move
-            `until`.
+    = note: A grant ends on its `until` date, and unspent money is owed back.
+    = help: spend what is left on the grant's purpose before the deadline, or ask the funder for an
+            extension and move `until`.
 
 note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, due 2026-02-02
    ╭─[03-violations.ax:78:1]
