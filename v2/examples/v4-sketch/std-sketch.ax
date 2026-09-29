@@ -90,7 +90,7 @@ kind sole-proprietorship : entity
   /// A cost allocated to the business, or paid by it, is deductible on
   /// Schedule C.
   law business-costs
-    on cost                         // a flow the business bears, or its share of one
+    on out                          // what leaves the business, its shares of bills included
     count amount as schedule-c-expenses
 
 // ─── Assets that wear out (us/rental) ───────────────────────────────────────
@@ -105,15 +105,16 @@ kind rental-home : property
   /// To fix: set `in-service` to the day the home was first available to rent.
   law depreciation
     each month
-    depreciate (self.cost - self.land) over 27.5y from self.in-service mid-month
-                                    // an effect: consumes basis, counts `depreciation`
+    let d = straight-line(self.cost - self.land, 27.5y, self.in-service, month, mid-month)
+    consume d                       // the part's basis goes down by this month's share
+    count d as depreciation         // runs per part: each improvement on its own 27.5 years
 
   law rental-income
-    on in
-    when purpose is rent of self
+    on flow                         // a flow whose purpose is `of` this home
+    when purpose is rent
     count amount as rental-income
 
   law rental-expenses
-    on out
-    when purpose is repair of self | insurance of self | interest of self
+    on flow
+    when purpose is repair | insurance | interest
     count amount as rental-expenses

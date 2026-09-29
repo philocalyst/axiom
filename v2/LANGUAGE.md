@@ -1,622 +1,585 @@
 # The Axiom language
 
 This is the normative reference. [DESIGN.md](DESIGN.md) says why it is shaped
-this way. Everything here is implemented, or is being implemented by the
-current rework; the examples in `examples/` are its acceptance tests.
+this way. This is version 4: the language after the move from a chart of accounts
+to agents, resources, events and promises. `examples/v4-sketch/` is its first
+worked example, and every example in `examples/` is an acceptance test.
+
+## 0. The model in one page
+
+Axiom records economic **events** (flows) that move **resources** (money and
+things) between **agents** (owners and parties), and the **promises** (contracts)
+that say which events are to come.
+
+- **Owners** are you, and anyone whose money this book keeps: a spouse, a
+  household, a business you own. `me` always exists.
+- **Parties** are everyone else: employers, shops, friends, tax authorities,
+  lenders, funds, the market. What dealing with a party means comes from its kind:
+  paying a grocer is groceries, money from an employer is wages.
+- **Accounts** are positions with institutions: a deposit, a card, a brokerage, a
+  401(k). An institution holds the money; an owner owns it. Money in no account is
+  with its owner (cash in hand).
+- **Assets** are identified things: a condo, a car, a laptop. Each has a history of
+  parts (its purchase, each improvement), and its basis is derived from that
+  history, never written.
+- **Commodities** are what money and holdings are counted in: `USD`, `EUR`, `VTI`.
+  Money is fungible and held as parcels that remember their cost, acquisition day,
+  and whom they are held for.
+- **Purposes** say what a flow is for, as a tree (`groceries` is `food` is
+  `spending`). A flow's purpose is written (`#groceries`) or inferred from its
+  contract, its party, its money or its accounts.
+- **Contracts** state recurring and scheduled promises once: pay, rent, a loan, a
+  lease, a subscription, a standing order. The journal records each time one is
+  kept; `check` notices when one is not; the forecast runs them forward.
+- **Claims** are what a party owes an owner or an owner owes a party: a loan to a
+  friend, an invoice, a lease deposit, a late rent. They are the time between an
+  event and its counterpart, and they live on the party.
+- **Laws** attach to kinds, purposes, individual things, and systems (`us`,
+  `us/ca`), and say what must hold, what is owed, and what is counted.
+- **Derived events** are what the book implies without anyone writing it: a loan
+  payment's interest, a bill's business share, the sales tax inside a price, the
+  cost of an exchange rate, depreciation, a wash sale. They are computed, explained
+  by `why`, and shown by an editor as hints.
+
+There are no income, expense or equity accounts.
 
 ## 1. Lexical structure
 
 Source is UTF-8, read line by line.
 
 - **Items** start in column 0. Indented lines (spaces only; a tab in indentation is
-  an error) belong to the nearest less-indented line above them. Nesting is by
-  indentation, as in Python, so blocks are contiguous deeper lines.
-- **Comments**: `//` to end of line, at line start or after whitespace.
-  **Doc comments**: consecutive `///` lines document the item, leg, or law that
-  follows them. They are shown by `why`. A law's doc comment has two parts: the
-  first paragraph says what the law is, and a paragraph that starts `To fix:`
-  says what to do when it fails. Diagnostics print the first as a note and the
-  second as help.
-- Blank lines separate nothing and mean nothing.
+  an error) belong to the nearest less-indented line above them.
+- **Comments**: `//` to end of line, at line start or after whitespace. **Doc
+  comments**: consecutive `///` lines document the item, leg, law or contract that
+  follows. A law's doc has two parts: the first paragraph says what the law is, a
+  paragraph starting `To fix:` says what to do when it fails.
+- Blank lines mean nothing.
 
-Tokens:
+| token       | shape                                                   | examples |
+|-------------|---------------------------------------------------------|----------|
+| date        | `YYYY-MM-DD`; or `MM-DD` or `DD` where the file's place gives the rest (§10) | `2026-01-15`, `01-15`, `15` |
+| month       | `YYYY-MM`                                               | `2026-03` |
+| number      | digits, `_` separators, optional `.frac`                | `84.20`, `24_500` |
+| percent     | number then `%`                                         | `12%`, `5.875%` |
+| span        | `(digits [ymwd])+`; years may have a fraction           | `30d`, `59y6m`, `27.5y` |
+| name        | `[a-z0-9][a-z0-9_-]*`, `/`-separated, may contain `*`   | `checking`, `trader-joes`, `joint/checking`, `401k` |
+| commodity   | `[A-Z][A-Z0-9_.]*`                                      | `USD`, `BRK.B` |
+| purpose     | `#` then a name                                         | `#groceries`, `#repair` |
+| code        | `^` then `[a-z0-9][a-z0-9_:./-]*`, may contain `*`      | `^inv-2026-01`, `^check-1041` |
+| string      | `"…"` with `\" \\ \n \t`                                | `"food for the routine"` |
+| punct       | `-> .. ... = == != < <= > >= + - * / @ ( ) [ ] , : ! ? . \|` | |
 
-| token     | shape                                   | examples                        |
-|-----------|-----------------------------------------|---------------------------------|
-| date      | `YYYY-MM-DD` (validated)                | `2026-01-15`                    |
-| month     | `YYYY-MM`                               | `2026-03` (selectors, bounds, periods) |
-| number    | digits, `_` separators, optional `.frac`| `84.20`, `24_500`, `3`          |
-| percent   | number immediately followed by `%`      | `10%`, `3.5%`                   |
-| span      | `(digits [ymwd])+`                      | `59y6m`, `2w`, `60d`, `1y`      |
-| name      | `[a-z0-9][a-z0-9_-]*`, `/`-separated, may contain `*` (glob) | `checking`, `assets/bank/checking`, `trader-joes`, `401k`, `expenses/food/*` |
-| commodity | `[A-Z][A-Z0-9_.]*`                      | `USD`, `VTI`, `BRK.B`           |
-| code      | `#[a-z0-9][a-z0-9_:./-]*`, may contain `*` | `#house`, `#check-1041`      |
-| string    | `"…"` with `\" \\ \n \t`                | `"cash tips"`                   |
-| punct     | `-> .. ... = == != < <= > >= + - * / @ ( ) [ ] , : ! ? . \|` | |
+A token starting with a
+digit is a date, month, number, percent or span if it matches that shape
+exactly, and a name otherwise (`401k`). At the start of an item, a lone number of
+one or two digits is a day (§10). Numbers carry no sign; `-` is an operator,
+except before an amount in an assertion or an opening line. Case separates names
+(lowercase) from commodities (uppercase).
 
-A token starting with a digit is a date, month, number, percent, or span if it
-matches that shape exactly, and a name otherwise (`401k`). A four-digit number
-where a period is expected is a year. Numbers carry no sign; `-` is an operator,
-except before the amount of a balance assertion (`= -50 USD`). `a-b` is one name.
-`a - b` is a subtraction. Case separates places and entities (lowercase) from
-commodities (uppercase).
+`:` means only "is a kind of", in declarations: `entity lumen : employer`,
+`purpose groceries : food`. It never appears on a flow.
 
-Keywords are not reserved: `for`, `due`, `basis`, `since`, `via`, `as`, `all`,
-`split`, `empty` and the rest are recognized by position, so an account may be
-called `basis`.
+Keywords are recognized by position and not reserved. `empty` is the zero of every
+commodity; a bare `0` where an amount belongs is an error whose fix is `empty`.
 
-`empty` is the zero of every commodity. A bare `0` where an amount belongs is
-an error, and the fix is to write `empty`. (`precision 0` is a number, not an
-amount, and is fine.)
-
-## 2. Transactions
+## 2. Flows
 
 ```text
-DATE [..DATE] FLOW
-DATE PLAN [AMOUNT] (INDENT LEG)*              an occurrence of a named plan (§6)
-
+DATE FLOW
 FLOW   := SOURCE -> TARGET [@ PRICE] TAIL (INDENT LEG)*
 SOURCE := [END [SELECTOR]] [AMOUNT | all [UNIT]]
 TARGET := [END] [AMOUNT]
-END    := PLACE | PLACE.basis
+END    := ACCOUNT | OWNER | PARTY | ASSET | UNIT | ?
 LEG    := END [SELECTOR] LEGAMOUNT [@ PRICE] TAIL
-TAIL   := [/ PAYEE] CODE* [for WHAT] [due WHEN] [basis AMOUNT] [! [STRING]]
-AMOUNT := NUMBER COMMODITY | (NUMBER COMMODITY) | ? COMMODITY | empty
-LEGAMOUNT := AMOUNT | ... | = NUMBER COMMODITY | all [UNIT]
-PLACE  := name | ?
-SELECTOR := [ SEL (, SEL)* ]
-SEL    := DATE | MONTH | YEAR | DATE..DATE | CODE | fifo | lifo | hifo | prorata
-WHAT   := CODE | PERIOD | ENTITY
-PERIOD := YEAR | MONTH | DATE | DATE..DATE
-WHEN   := DATE | SPAN
+TAIL   := [/ PARTY] [PURPOSE] [STRING] CODE* [for WHOM|PERIOD] [due WHEN] [basis AMOUNT] [! [STRING]]
+PURPOSE:= #NAME [of THING]
+AMOUNT := NUMBER UNIT | (NUMBER UNIT) | ? UNIT | empty
+LEGAMOUNT := AMOUNT | NUMBER% | ... | = NUMBER UNIT | all [UNIT]
 ```
 
-The shapes, and what they mean:
+The tail's clauses may come in any order.
+
+**Ends.** Each end of a flow is one of:
+
+- an **account**: money leaves or joins a position with an institution;
+- an **owner**: money or a thing held directly (`checking -> me 100 USD` is cash in
+  hand; `me -> taqueria 18.50 USD`);
+- a **party**: money leaves the book's owners to it, or comes to them from it;
+- an **asset**: an identified thing arrives or leaves;
+- a **commodity in party position**: its issuer, as in `VTI -> fidelity 198.12 USD`
+  (a fund pays);
+- `?`: an unknown party, for money whose other end nobody knows;
+- nothing: the other side is the legs (a one-sided split), or, for an exchange
+  written with only a source, the same account (`fidelity 20 VTI -> 5_940 USD`: the
+  proceeds stay at fidelity).
+
+Accounts, owners, parties, assets and purposes are separate namespaces; a name
+that could mean two of them is an error at the later declaration.
 
 ```text
-2026-01-18 checking -> food 84.20 USD                one flow
-2026-01-18 visa -> food 84.20 USD / trader-joes      payee: a declared entity
-2026-01-22 checking 2_000 USD -> brokerage 7 VTI     exchange: 2000 USD out, 7 VTI in
-2026-01-22 checking -> brokerage 7 VTI @ 285.70 USD  exchange, price given, 1999.90 USD out
-2026-09-02 brokerage[fifo] 10 VTI -> checking 3_050 USD
-2026-09-02 brokerage[#house] all -> checking 52_000 USD
-2026-05-01 old-broker all VXUS -> new-broker         every VXUS parcel, basis and dates kept
-2026-02-01 checking -> plumber (350 USD) #check-1041 pending: parenthesised amount
-2026-03-02 checking -> ? 40 USD                      destination unknown
-2026-03-02 checking -> cash ? USD                    amount unknown, inferred
-2026-01-01..2026-12-31 checking -> insurance 1_200 USD   paid now, recognized over the year
-2026-01-15 checking -> taxes/federal 3_000 USD for 2025  paid now, belongs to 2025
-2026-03-01 design -> acme 4_800 USD #inv-12 due 30d  an invoice: acme owes it within 30 days
-2026-04-02 acme -> checking 4_800 USD for #inv-12    …and its payment
-2026-09-06 checking -> savings 100 USD for car-fund  earmarked: tied to the `car-fund` envelope
-2026-05-16 grandma -> college 3_000 USD basis 3_000 USD   a gift that arrives with its basis
-2026-09-15 checking -> house.basis 14_200 USD / roofer    an improvement: raises the house's basis
+06 visa -> trader-joes 84.20 USD                      a payment, #groceries by its party
+09 visa -> amazon 62.40 USD #household "hooks"        purpose and description written
+05 checking -> me 100 USD                             cash in hand
+20 checking 2_000 USD -> fidelity 7 VTI               an exchange
+20 checking -> fidelity 7 VTI @ 285.70 USD            price given: 1,999.90 USD out
+05 fidelity[2026-01-20] 1.62 VTI -> 481.14 USD        a sale; the proceeds stay at fidelity
+24 visa 1_739.13 USD -> laptop / best-buy             an asset arrives, bought from best-buy
+02 checking -> bay-plumbing 1_480 USD #improvement of condo
+12 checking -> jo 600 USD due 2026-04-01              lent: jo owes it (§7)
+26 halcyon -> checking 3_800 USD ^inv-2026-01         settles what ^inv-2026-01 marks
+16 checking -> savings 400 USD for emergency          held for the `emergency` envelope
+01 checking -> insurer 1_140 USD #insurance for 2026  paid now, recognized over 2026
+02 checking -> plumber (350 USD) ^check-1041          pending until settled (§3)
+14 checking -> ? 40 USD                               to someone unknown
+14 checking -> me ? USD                               an amount inferred from assertions
 ```
 
-**One side split.** When the header names only one place, the indented legs are
-the other side. With no header amount on that side, its total is the sum of the
-legs. The header may state both amounts when it names one place, so that an
-exchange is written the way a closing statement reads:
+**Split flows.** When the header names only one end, the indented legs are the
+other side; their total is the header amount, or the sum of the legs, and at most
+one leg is `...` (the remainder). A leg may be a percentage of the header amount
+(`retirement 6%`). A leg `= AMOUNT` makes its account's balance equal that amount
+after the flow. Many-to-many is an error.
 
 ```text
-2026-01-15 acme -> 5_200 USD         legs are targets
-  retirement     800 USD
-  taxes/federal  910 USD
-  checking       ...                  the remainder (at most one leg)
-
-2026-02-01 -> landlord 1_800 USD     legs are sources
-  checking       1_000 USD
-  savings        ...
-
-2026-12-29 house 1 HOME -> 431_500 USD   a sale: 1 HOME out, 431,500 USD in, allocated
-  closing-costs  25_000 USD
-  mortgage       276_282.05 USD
-  checking       ...
+15 job                      // a contract occurrence (§5): lumen, 4,600 USD gross
+  retirement   276.00 USD   // an account of an owner
+  irs          498.00 USD   // a party: see below
+  checking     ...
 ```
 
-A leg `= 5_000 USD` is a *target balance*: its amount is whatever makes that
-place's balance equal to the target after the flow. If both header sides name a
-place, the transaction has no legs. Many-to-many splits are an error, and the fix
-is to write two transactions.
+**A leg between two parties passes through the transaction's owner.** When the
+header's end and a leg's end are both parties, the value is the owner's on the
+way: `lumen -> irs 498 USD` in Sam's paystub is Sam's wages, paid on to the IRS.
+The owner of a transaction is the owner of its accounts, or `me`.
 
-**Pairing rules.**
+**Pairing.** The same commodity on both sides is a transfer, and stated amounts
+must agree. Different commodities are an exchange at `out / in`. An `@` price
+given with both amounts must agree, or the difference is written as a leg: Axiom
+never books a difference silently. In an exchange, legs in the header's
+commodity take their stated amounts; legs to parties whose purpose is a cost
+(`#fees`, `#closing-costs`) are costs of the exchange: a sale's gain is less by
+them, a purchase's basis more.
 
-- *Same commodity* on both sides is a transfer. If both sides state an amount,
-  they must be equal.
-- *Different commodities* are an exchange. The price is `out / in`. If `@ P` is
-  given together with both amounts and they disagree, the difference must be
-  written as a leg. Axiom never books a difference silently. An `@` price may
-  carry more decimals than its commodity's precision.
-- In a split, legs in the header commodity take their stated amounts. A single
-  leg in another commodity receives the remainder as its cost (a purchase with a
-  fee leg). Two such legs need `@` prices.
-- A leg into an expense place during an exchange is a cost of that exchange
-  (e.g. a trading fee). It is still recorded as an expense.
+**Purposes.** A flow's purpose, first match wins:
 
-**Places and entities.** A place may be written as any unique suffix of its path,
-or by its alias (§5). An *entity* in place position resolves to its `via` place
-and becomes the payee. `?` as a place is the built-in `equity/unknown`.
-Undeclared places are an error, unless written as a full path under one of the
-roots `assets`, `liabilities`, `income`, `expenses`, or `equity`, which opens
-them; a full path that is a near miss of a declared place is an error with the
-suggestion instead.
+1. written on the leg, or on the header (for every leg that says none);
+2. its contract's (§5);
+3. its party's kind (`kind grocer … purpose groceries`);
+4. its commodity's kind in party position (`kind fund … pays dividend`);
+5. its accounts' kinds (a `401k`'s `takes pre-tax-deferral from wages`).
 
-**The basis end.** `PLACE.basis` names the basis of what a place holds rather
-than its quantity. A flow into it pays money and raises the basis of the place's
-parcels (a capital improvement, a wash-sale adjustment); a flow out of it lowers
-their basis and recognizes the amount at the target (depreciation). Quantities do
-not change. Selectors narrow which parcels: `house[#roof].basis`. The basis is
-spread over the chosen parcels in proportion to their quantity.
+Two sources that disagree are an error naming both. A flow none of them classifies
+is *unclassified*; with a description it is *unclassified, described*. `check
+--strict` asks for a purpose on each. `#NAME of THING` gives a purpose its object
+where the purpose takes one (`#improvement of condo`); a purpose that requires an
+object reports its absence.
 
-**Dates.** A transaction has the day money moves and the period it belongs to.
-`DATE..DATE` pays on the first day and recognizes the flow evenly per day over
-the range. `for PERIOD` says the same with the payment day kept: `for 2025`
-recognizes the flow over 2025, `for 2026-03` over March, `for DATE..DATE` over
-the range. Everything that reasons about a period (tallies, window totals,
-budgets, `flow`, `tax`) reads the recognition; balances and relief read the
-payment day. Folder layout (§10) constrains the payment day.
+**Descriptions.** A string in the tail says why in words. It has no meaning to the
+book: it is shown by `register`, grouped by `flow` among unclassified flows, and
+searched by `why "text"`.
 
-**Tail.** Header tails apply to every leg; a leg's own tail adds to it and
-overrides it.
+**Codes.** `^code` marks a flow or leg so other flows can refer to it: a payment
+carrying the code of an open claim settles that claim (§7); a selector `[^code]`
+picks the parcels it marked; `why ^code` lists everything it marks.
 
-- `/ payee` names a declared entity.
-- `#codes` mark the transaction (a leg's codes mark that leg). They select lots
-  later and link flows.
-- `for` says what the flow is on account of:
-  - `for #code` settles what `#code` marked: at the source it takes the parcels
-    that flows marked `#code` left there (as the selector `[#code]` does), and it
-    links the two. Paying an invoice, returning a deposit and reimbursing a bill
-    are `for` the flow that created them.
-  - `for PERIOD` sets the recognition period (see *Dates*).
-  - `for ENTITY` ties the arriving parcels to that entity: they are held for it,
-    they are not available to spend, and its `on spend` laws govern them.
-    `for` the owner itself (`for me`) unties them. An envelope or a sinking fund
-    is an entity of a restricted kind (§8).
-- `due WHEN` makes the flow a *claim* due on a date, or a span after the payment
-  day (`due 30d`). A claim that is still open after its due day is reported by
-  `check` and listed by `claims`.
-- `basis AMOUNT` is the total basis the arriving parcels take, overriding the
-  kind's arrival rule (§8): a gift into a 529 plan that is not a contribution
-  of pre-tax money, a nondeductible IRA contribution.
-- `!` waives every law violation this transaction raises, priced ones included;
-  the waiver is reported, never hidden. A `!` that waives nothing is a warning.
+**Dates.** A flow has the day money moves and the period it belongs to. `for
+PERIOD` (a year, a month, a date, or `DATE..DATE`) recognizes it evenly per day
+over that period; `for 2025` on an estimated tax payment made in January makes it
+2025's. `DATE..DATE FLOW` is the same with the payment on the first day.
+Tallies, window totals, budgets, `flow` and `tax` read the recognition; balances
+and relief read the day.
 
-## 3. Balance assertions, events, prices and splits
+**Other tail clauses.**
+- `/ PARTY` names the party a payment is really for when it goes through another
+  (`checking -> paypal 20 USD / etsy-seller`); purpose inference reads it.
+- `for OWNER-OR-ENVELOPE` holds the arriving money for that entity (an envelope, a
+  tenant's deposit); `for` the owner itself releases it (§8).
+- `due WHEN` (a date, or a span after the day) makes the flow a claim (§7).
+- `basis AMOUNT` gives arriving parcels a total basis other than their cost (a gift
+  of shares that keeps the giver's basis).
+- `!` waives every law violation this flow raises, priced ones included. The waiver
+  is reported; a `!` that waives nothing is a warning.
+
+## 3. Assertions, events, prices, splits and openings
 
 ```text
-2026-01-31 checking = 7_921.30 USD                balance assertion (end of day)
-2026-01-31 checking = 7_921.30 USD !              …and accept any gap as unexplained
-2026-03-31 retirement = 24_600 USD via market     …and post any gap to a place
-2026-06-30 checking = -42.17 USD                  an overdrawn account
-2026-12-31 visa = empty
-2026-02-06 #check-1041 settled                    pending → actual on this day
-2026-02-20 #check-1044 void                       pending → never happened
-2026-03-04 #deposit-77 returned                   actual → reversed on this day
-2026-01-02 VTI 280.14 USD                         price: 1 VTI = 280.14 USD on that day
-2026-05-22 FAST split 2 for 1                     every FAST parcel doubles; basis and dates stay
+31 checking = 8_828.87 USD                        balance at the end of the day
+31 visa = 2_333.99 USD                            owed, as the statement shows it
+31 retirement = 58_420.18 USD via market          the gap is growth from the market
+30 me = 45.15 USD !                               the gap is accepted as unexplained
+31 mortgage = 310_978.17 USD                      a loan contract's balance (§5)
+06 ^check-1041 settled                            pending → real on this day
+20 ^check-1044 void                               pending → never happened
+04 ^deposit-77 returned                           real → reversed on this day
+02 VTI 280.14 USD                                 1 VTI = 280.14 USD that day
+22 FAST split 2 for 1                             every FAST parcel doubles; basis stays
 ```
 
-An assertion is written the way a statement shows the balance: in the place's
-display sign, so `visa = 1_234.56 USD` means 1,234.56 is owed. A failed
-assertion is an error that shows the difference, the flows since the last
-passing assertion, and the likeliest explanation (a transposed digit, a flow
-entered backwards, a sign, a missing flow of that size). After a failure the gap
-is carried: a later assertion that fails by the same amount is not reported
-again.
+An assertion states a balance the way a statement shows it: what is owed on a card
+or a loan is positive. A failed assertion is an error that shows the difference,
+the flows since the last passing assertion, and the likeliest cause (a transposed
+digit, a flow entered backwards, a wrong sign, a missing flow of that size); the gap
+is carried, so a later assertion failing by the same amount is not reported again.
+`!` accepts the gap as unexplained; `via PARTY` makes it a flow with that party, and
+`via market` is a revaluation (§8). An assertion that depends on an unsolved `?` is
+not checked, and says so once.
 
-- With `!`, the gap becomes an explicit flow from `equity/unknown`.
-- With `via PLACE`, the gap becomes a flow from or to that place. Into a place
-  of kind `market` it is a *revaluation* (§8): a statement that says what a
-  401(k) is worth now, without inventing a withdrawal.
+A **split** multiplies every parcel of a commodity by `N / M`, keeping basis and
+acquisition day. A settlement event is dated on or after what it settles.
 
-When exactly one flow with a `?` amount touches the place between two
-assertions, its amount is inferred from them. An assertion that depends on a `?`
-that could not be solved is not checked, and says so once.
-
-A **split** changes how many units of a commodity exist: every parcel of `UNIT`,
-in every place, is multiplied by `N / M` (`split 1 for 10` is a reverse split),
-keeping its basis and acquisition day. Prices before the split stay in the old
-units.
-
-A settlement event must be dated on or after the flows it settles.
-
-### Opening balances
+**Openings.** A book begins with what its owners hold:
 
 ```text
-opening 2024-12-31
-  checking      10_000 USD
-  college       24_600 USD   basis 19_850 USD
-  house         1 HOME       basis 540_000 USD   since 2023-06-15
-  brokerage     40 VTI       basis 7_200 USD     since 2019-03-04
-  brokerage     25 VTI       basis 6_100 USD     since 2021-11-20
-  mortgage      412_428.22 USD
+opening 01
+  checking    6_062.55 USD
+  checking    2_350.00 USD for dana
+  fidelity    210 VTI basis 48_300 USD since 2021-06-01
+  visa        1_240.18 USD                      owed
+  condo       basis 402_000 USD since 2024-02-20
+  jo owes me  600 USD due 2026-04-01            a claim already open
 ```
 
-Each line creates holdings from `equity/opening`, in the place's display sign,
-with an optional total `basis` and acquisition day (`since`; default: the
-opening day). Several lines on one place make several lots. Openings are not
-flows: no law sees them, they start no period, and they may be older than any
-param. A book may have several `opening` blocks (one per account as it joins the
-book).
+Each line creates holdings with an optional total `basis` and acquisition day
+(`since`, default the opening's day). Openings are states, not flows: no law sees
+them, and they may be older than any param. A loan contract's balance comes from
+its terms and needs no opening line.
 
 ## 4. Declarations
 
 ```text
 base USD
-use us/401k
-relaxed                         // law violations become warnings
-layout free                     // disable folder rules
+use us/ca/san-francisco
+relaxed                      // law violations become warnings
+layout free                  // folders stop giving and constraining dates
 
-account PATH [as ALIAS] [: KIND]    entity NAME[, NAME…] [: KIND]
-commodity SYMBOL [: KIND]           kind NAME [: PARENT]
-  PROPERTY ARG*                       (indented lines)
-  law NAME                            (nested block)
+entity NAME[, NAME…] [: KIND]          account NAME : KIND [at PARTY]
+asset NAME : KIND                      commodity UNIT [: KIND]
+purpose NAME [: PARENT]                kind NAME [: PARENT]
+contract NAME with PARTY               budget PURPOSE AMOUNT monthly|yearly
+  PROPERTY ARG*   (indented lines)
+  law NAME        (a nested block)
 ```
 
-`base` is required once the journal uses more than one currency. With one, that
-currency is the base.
+- `base` is required once the book uses more than one currency.
+- An **account** is always of a kind whose root is `asset` (what is yours at an
+  institution) or `debt` (what you owe on one). `at PARTY` names the institution;
+  interest from it (`chase -> checking 3.12 USD`) and its fees are inferred by its
+  kind. Names are flat; a `/` groups them for reports.
+- An **entity** is an owner or a party. The owners are `me`, entities `member` of
+  a household `me` belongs to, entities with an `owner` among the owners (a
+  business), and any entity named as the `owner` of an account or asset. Every
+  other entity is a party.
+- An **asset** is an identified thing, of a kind rooted at `thing`.
+- A **purpose** is a node of the purpose tree. The roots are `income`, `spending`
+  and `capital`; std ships the rest. A purpose may require an object: `of KIND`.
+- `budget PURPOSE AMOUNT monthly|yearly` is a `warn` on the purpose's total (§6).
 
-`account expenses/business as biz`: `biz` names the place wherever a place is
-written, and an alias always wins over a suffix. When a new declaration makes a
-suffix ambiguous, the error is reported once, at the declaration, with the lines
-it affects counted.
+Built-in properties:
 
-`entity aldi, kroger, trader-joes : grocer` declares several entities of one kind
-at once; with `kind grocer : org` carrying `via expenses/food/groceries`, that is
-a whole payee table.
+| on | property | meaning |
+|----|----------|---------|
+| account | `owner ENTITY` | default `me` |
+| | `holds UNIT, … \| any` | commodities it may hold |
+| | `select fifo\|lifo\|hifo\|prorata` | relief policy |
+| | `opened DATE`, `closed DATE` | flows outside are errors |
+| | `liquidity SPAN` | time to turn into cash |
+| entity | `lives SYSTEM [from DATE] [until DATE]` | a residence; may overlap |
+| | `member ENTITY` | belongs to that household |
+| | `owner ENTITY` | a business: owned by that owner |
+| | `of OWNER` | a client of that owner: what it pays is that owner's |
+| asset | `owner ENTITY` | default `me` |
+| | `at ACCOUNT` | held by an institution, not the owner |
+| commodity | `precision N`, `name STRING`, `liquidity SPAN`, `grows PERCENT yearly` | |
+| kind | `restricted` | money from, or held for, entities of this kind stays tied to them |
+| | `deferred` | accounts of this kind realize nothing inside |
+| | `basis zero\|cost` | what basis arriving value takes (§8) |
+| | `purpose NAME` | on a party kind: what flows with its parties are for |
+| | `pays NAME` | on a commodity kind: what its issuer pays is for |
+| | `takes NAME from NAME` | on an account kind: what arrives from flows of the second purpose is the first |
+| | `select POLICY`, `liquidity SPAN` | defaults |
+| | `has NAME TYPE` | declares a property of this kind's things |
+| party kind | `sales-tax PERCENT` | the tax inside every price paid to its parties (derived, §9) |
+| purpose | `of KIND` | requires an object of that kind |
+| | `business PERCENT for OWNER` | an allocation (§9) |
+| contract, party, purpose | `business PERCENT for OWNER` | the same, per flow |
 
-Property arguments are a space- or comma-separated list of primary expressions.
-Properties are typed. The built-in ones are:
-
-| on        | property                          | meaning                                          |
-|-----------|-----------------------------------|--------------------------------------------------|
-| account   | `owner ENTITY`                    | default `me`; a household may own a place        |
-|           | `holds UNIT, …` / `holds any`     | commodities this place may hold                  |
-|           | `select fifo\|lifo\|hifo\|prorata` | lot relief policy                               |
-|           | `opened DATE` / `closed DATE`     | flows outside are errors                         |
-|           | `budget AMOUNT monthly\|yearly`   | sugar for a `warn` law on inflows (§7)           |
-|           | `liquidity SPAN`                  | time to turn into cash                           |
-| entity    | `via PLACE`                       | the place used when the entity is a flow end     |
-|           | `lives SYSTEM [from DATE] [until DATE]` | a residence; residences may overlap        |
-|           | `member ENTITY`                   | this person belongs to that household            |
-| commodity | `precision N`                     | decimal places (default: most seen in source)    |
-|           | `name STRING`                     |                                                  |
-|           | `liquidity SPAN`                  |                                                  |
-|           | `grows PERCENT yearly`            | valuation model for forecasts                    |
-| kind      | `restricted`                      | money from, or earmarked for, entities of this kind stays tied to them |
-|           | `deferred`                        | places of this kind do not realize gains inside  |
-|           | `basis zero\|cost`                | what basis arriving value takes (§8)             |
-|           | `claim`                           | places of this kind hold what others owe (§8)    |
-|           | `select POLICY`, `liquidity SPAN` | defaults for things of this kind                 |
-|           | `has NAME TYPE`                   | declares a property for things of this kind      |
-
-A kind's other property lines, `via` included, are defaults for its instances.
-`TYPE` is one of `date amount number percent span text name entity place kind
-unit bool`. An unknown property is an error with a suggestion.
-
-Root kinds: `asset liability income expense equity` (places, one per class),
-`commodity`, `entity`, and `market : income` (the counterpart of revaluations).
-Built-in places: `equity/unknown` (written `?`), `equity/opening`, and
-`income/market`. The `me` entity (kind `person`) always exists and owns every
-place by default. A project sets its properties by declaring it: `entity me :
-person` with `born`, `filing` and `lives` lines.
+A kind's other property lines are defaults for its things. `TYPE` is one of `date
+amount number percent span text name entity place kind unit bool purpose asset`.
+An unknown property is an error with a suggestion.
 
 ```text
-code GLOB [GLOB…]         // e.g. `code trip-*`
-  on PLACE-GLOB | KIND …  // codes matching GLOB may only mark flows touching these
+code GLOB [GLOB…]          // `code inv-*`: codes matching it
+  on KIND | NAME …         // may only mark flows touching these
 
 param NAME
-  KEY+ VALUE              // KEY: a year (step lookup: latest ≤), a date, or a name
-  2026 single 0 USD 10% | 12_400 USD 12% | 50_400 USD 22%    // a schedule value
+  KEY+ VALUE               // a year (latest ≤), a date, or names
+  2026 single 0 USD 10% | 12_400 USD 12%
 
 sync FILE
-  run COMMAND…            // raw text to end of line, run by `axiom sync`
+  run COMMAND…
 ```
 
-A header code applies to every leg; a code rule is satisfied when any leg of the
-transaction touches one of its places.
-
-## 5. Households and residence
-
-A household is an entity of kind `household` (in `std`); people join it with
-`member`:
+## 5. Contracts
 
 ```text
-entity household : household
-  filing joint
-  lives  us/ca
-entity alex : person
-  born   1988-04-12
-  member household
-entity jordan : person
-  born   1990-09-30
-  member household
-account assets/bank/joint : bank
-  owner household
-account assets/retirement/jordan-401k : 401k
-  owner jordan
-account income/jordan-salary : wages
-  owner jordan
+contract NAME with PARTY
+  [AMOUNT | buy UNIT for AMOUNT] CADENCE [on DAY] (from | into) HOLDING
+  [PURPOSE] [STRING]
+  [from DATE] [until DATE]
+  [covers PERIOD-SPAN]                         // `covers the year`, `covers 6m`
+  [business PERCENT for OWNER]
+  [deposit AMOUNT]
+  [loan AMOUNT on DATE at PERCENT over SPAN [for ASSET]]
+  [escrow AMOUNT into HOLDING]
+  [match PERCENT of ACCOUNT up to PERCENT]
+  LEG*                                         // a template, as in a split flow
+// CADENCE: daily | weekly | monthly | quarterly | yearly | twice monthly | every SPAN
+// DAY: 15 | last | 15, last | 04-15 | monday … sunday
 ```
 
-A household is governed as one: the top-level laws of the systems it lives in
-govern it and every place it or its members own, with the household as `self`,
-so a joint return reads one `tally(agi)` that both paychecks counted into.
-A member keeps what is personal: the laws of the kinds of the places they own
-(a 401(k)'s deferral limit, an early-withdrawal penalty) run with that person as
-the owner, and count into that person's tallies.
+A contract is a promise of flows with one party: amounts, a schedule, a purpose,
+and what else each flow means. From it:
 
-Residences may overlap and have ends: a citizen abroad `lives us` and
-`lives de from 2025-07-01`; a move is `lives us/ca until 2025-06-30`. A path
-includes its ancestors. A law of a system governs on the days its residence
-covers, and an `each` law runs for every period its residence touched, so a
-part-year resident is taxed for the part.
+- **The journal records it kept.** `DATE NAME` is one occurrence: the contract's
+  flow on that day, written in full by the contract. An amount after the name
+  replaces the contract's (`08 phone 47.30 USD`), or, for `buy`, is what was bought
+  (`20 vti-monthly 1.620 VTI`). Indented legs replace the template's legs of the
+  same end, and `...` absorbs the difference. `DATE NAME ends` ends it.
+- **`check` notices it not kept.** An occurrence that is due and not in the journal
+  by `today` is a claim for as long as it is missing: a rent the party owes, a bill
+  the owner owes. It is reported as late, with the day it was due; the occurrence,
+  when written, settles it. A contract that `until` or `ends` expects nothing more.
+- **The forecast runs it forward**, occurrence by occurrence, through the laws.
+- **What it says applies to every occurrence:** its purpose, `covers` (each
+  payment is recognized over that span from its day), `business` (an allocation,
+  §9), `deposit` (a claim the party holds, and money held for it, from `from` to
+  `until`).
+- **A loan** (`loan AMOUNT on DATE at RATE over SPAN`) is a debt of the owner to
+  the party. Its schedule gives each payment's interest (`#interest`, `of` the
+  asset when `for` names one) and principal, and its balance on any day, which an
+  assertion on the contract's name checks. `escrow` adds to each payment a flow
+  into that holding.
+- **A match** (`match 50% of retirement up to 6%`) derives, for each occurrence, a
+  flow from the party into that account, as a share of what the template puts
+  there, up to a share of the gross.
 
-## 6. Plans
+Contracts replace v3's plans: `every` and named plans are gone.
 
-```text
-every CADENCE [on DAY] [from DATE] [until DATE|MONTH] FLOW
-plan NAME every CADENCE [on DAY] [from DATE] [until DATE|MONTH] FLOW
-  // CADENCE: day | week | month | quarter | year | SPAN (2w, 3m)
-  // DAY: 15 | 04-15 | monday … sunday
-
-every month on 1 checking -> landlord 2_400 USD until 2027-06
-
-/// Every other Friday.
-plan paycheck every 2w from 2026-01-02 acme -> 5_200 USD
-  retirement     800 USD
-  taxes/federal  910 USD
-  checking       ...
-```
-
-A plan exists only in forecasts until the journal says it happened. A named plan
-is also a template: `2026-01-16 paycheck` in the journal is one occurrence,
-written in full by the plan. An amount after the name replaces the header amount,
-and indented legs replace the plan's legs of the same place:
+## 6. Laws
 
 ```text
-2026-01-16 paycheck
-2026-01-30 paycheck
-  taxes/federal  950 USD            // this stub withheld more; `...` absorbs it
-2026-03-13 paycheck 5_900 USD       // a raise
-```
-
-The forecast knows which occurrences happened, projects the rest from the last
-one, and never learns a recurrence from history that a plan already describes.
-Day-of-month past the month's end clamps to the last day.
-
-## 7. Laws
-
-```text
-/// Doc comment: what the law is.
+/// What the law is.
 ///
 /// To fix: what to do when it fails.
 law NAME
   TRIGGER
-  when EXPR                        filter: stop silently if false
+  when EXPR
   let NAME = EXPR
   require EXPR [else EFFECT] [STRING]
   warn EXPR [STRING]
   owe EXPR to ENTITY [by EXPR] [as NAME]
   count EXPR as NAME
+  consume EXPR                     // on an asset: lowers its basis (depreciation)
+  carry EXPR to UNIT within SPAN   // a disallowed loss joins a nearby purchase's basis
 ```
 
-Steps run top to bottom. Triggers:
+| trigger | fires | context |
+|---------|-------|---------|
+| `on in` | value arrives at the governed thing | `amount from to party purpose date self owner` |
+| `on out` | value leaves it | same |
+| `on gain` | parcels leaving it realize a gain | `gain proceeds basis held amount from to date self owner` |
+| `on spend` | money held for a restricted entity leaves its owner | `amount from to party date self` |
+| `on flow` | a flow of the governed purpose; under an asset, a flow whose purpose is `of` it | `amount from to party purpose date self owner` |
+| `each month`, `each year` | a period of the governed thing ends | `date year month self owner` |
+| `each year closing MM-DD` | the year closes on that day of the next | same |
+| `by EXPR` | the journal reaches that date | `date self owner` |
+| `always` | after any change to the governed thing | `balance date self owner` |
 
-| trigger       | fires                                                        | context                              |
-|---------------|--------------------------------------------------------------|--------------------------------------|
-| `on in`       | value arrives in a governed place (or its subtree)           | `amount from to payee date self owner` |
-| `on out`      | value leaves a governed place                                | same                                 |
-| `on gain`     | parcels leaving a governed place realize a gain              | `gain proceeds basis held amount from to date self owner` |
-| `on spend`    | money tied to a restricted entity leaves its owner's places  | `amount from to payee date self`     |
-| `each month`, `each year` | a period of the governed thing ends              | `date year month self owner`         |
-| `each year closing MM-DD` | …or closes, on that day of the next year         | same                                 |
-| `by EXPR`     | the journal reaches that date                                | `date self owner`                    |
-| `always`      | after any change to a governed place                         | `balance date self owner`            |
+`on in from X` is `on in` with `when from is X` first. Every context has `year`,
+`month` (of the recognition's start), `date`, `flow`, `purpose` and `description`
+where a flow triggered it.
 
-`on in from X`, `on out to X` and `on gain from X` are the trigger with
-`when from is X` (or `to`) as its first step. `X` may be a list:
-`on in from wages | bonus`.
+**What a law governs**:
 
-Every context also has `year` and `month` (of the recognition period's start,
-§2), `date` (the day it happens), and `flow` (the triggering flow, for
-`flow is #code`) where a flow triggered the law.
+- In an account kind, asset kind or party kind: every thing of that kind.
+- In an account, asset or entity: that thing.
+- In a purpose: every flow of that purpose and those beneath it (`on flow`);
+  `total(month|year|ever)` there is the purpose's own total.
+- Top-level in a system: the owners who live there (a household as one) and
+  everything they own and do. Top-level in a project: the whole book.
 
-An `each year closing 04-15` law runs for 2025 on 2026-04-15, and what the
-journal recognizes `for 2025` up to that day counts: a fourth estimated tax
-payment made in January is part of the year it pays for.
+`self` is the governed thing, or for a purpose law the flow's owner; `owner` is its
+owner. **Tallies** belong to owners: `count` adds to a line of the owner's year
+(the household's, for a member governed as one), and `tally(x)` reads it;
+`tally(x, year - 1)` reads another year.
 
-*Governed*:
+**Order**: a law that reads a tally runs after every law that counts into it on the
+same occasion; a cycle is an error. Otherwise declaration order.
 
-- A law in a place kind governs every place of that kind.
-- A law in an account governs that account and its subtree.
-- A law in an entity kind governs entities of that kind (`on spend`, `by`).
-- A top-level law in a jurisdiction governs the entities living there (a
-  household as one, §5) and every place they own. A top-level law in a project
-  file governs every place in the book.
-
-`self` is the governed thing: the place for place and kind laws, the entity for
-entity-kind laws, and the resident (a person or household) for top-level laws.
-`owner` is the governed thing's owner (an entity is its own owner).
-
-**Order.** A law that reads `tally(x)` runs after every law that counts into `x`
-on the same occasion, whichever file either is written in; a cycle is an error
-naming both laws. Otherwise laws run in declaration order: systems before the
-project, files in path order. So a project adds an itemized deduction by
-counting into the tally the system reads, without copying the system.
-
-Effects:
-
-- `require` fails with an error (a warning when relaxed or waived) unless an
-  `else` effect prices the violation. A priced violation is reported by `check`
-  as `priced`, with what is owed.
-- `warn` is a warning. Budgets are warnings.
-- A violated law is reported once per subject and window (the month or year of
-  the total it reads, or until it holds again for `always`), at the flow that
-  crossed the line.
-- `owe` creates an obligation from `self`'s owner to an entity, due by a date
-  (default: the flow's date). It is named for reports.
-- `count` adds to a named tally, keyed by owner and year: one namespace per
-  person- (or household-) year, so a tally is a line on that year. A per-person
-  limit is a count followed by a `require` on the tally.
-- `tally(NAME)` reads that line for the owner in the current year.
-
-Every `require` and `warn` that compares two amounts records its *headroom*:
-what was counted and what it is compared against, per subject and window. That
-is what `axiom limits`, `budget` and `why` show before anything breaks.
-
-`budget 650 USD monthly` on an account is the law
-`on in` + `warn total(in, month) <= 650 USD "over budget"`, named `budget`.
+**Effects**: `require` fails with an error unless `else` prices it; `warn` warns; a
+violation is reported once per subject and window, at the flow that crossed the
+line. `owe` creates an obligation to an entity. `consume` lowers the governed
+asset's basis by an amount (depreciation, depletion). `carry` holds a disallowed
+loss and adds it to the basis of the nearest acquisition of that commodity within
+the span, before or after (a wash sale). Every `require` and `warn` comparing two
+amounts records its headroom.
 
 ### Expressions
 
-Operators, from loosest to tightest binding:
-
 ```text
-or        and        not
+or   and   not
 == != < <= > >= is
-+ -       * /        unary -
-postfix: .field   [key, …] (param lookup)   (args) (call)
-atoms:   24_500 USD  10%  2026-04-15  59y6m  "text"  empty  name  UNIT  #code
++ -   * /   unary -
+postfix: .field   [key, …]   (args)
+atoms:   24_500 USD  10%  2026-04-15  59y6m  "text"  empty  name  UNIT  #purpose  ^code
          ( EXPR )  if EXPR then EXPR else EXPR
 ```
 
-Types: `amount number bool date span text place entity kind unit schedule`.
-Numbers are exact rationals. `amount * number` rounds half-to-even to the
-commodity's precision. `amount / amount` (same commodity) is a number.
-Comparing amounts in different commodities values the left side in the right
-side's commodity on the flow's date, or fails with a missing-price error.
-`empty` is the zero of any amount.
+Types: `amount number bool date span text place entity kind unit purpose asset
+schedule`. Numbers are exact rationals; `amount * number` rounds half to even.
 
-- `x is K` tests a place, entity or commodity against a kind (inherited),
-  against a place or entity (the same or a descendant), or against a glob.
-  `flow is #code` tests codes.
-- Fields: `.balance .basis .owner .kind` on places, `.owner .kind .age` on
-  entities (`age` is a span, from `born` to the context date), `.unit` on
-  amounts, `.year .month` on dates, plus any declared property.
-- Functions:
-  - `total(in|out, month|year|ever)`: governed-subtree flow total recognized in
-    this window, including the current flow.
-  - `tally(name)`, `min(a, b)`, `max(a, b)`, `abs(a)`.
-  - `progressive(schedule, x)`: tax on `x` under marginal brackets.
-  - `value(x, UNIT)`, `date(y, m, d)`.
-  - `remaining`: money still tied to `self`, a restricted entity.
-- Params: `limit[year]`, `ordinary[year, owner.filing]`. A bare param name is
-  the row in force on the law's day.
+- `x is K` tests against a kind, an entity or place (the same or a descendant), a
+  purpose (`purpose is food`, `purpose is repair of self`), a code, or a glob.
+- Fields: `.balance .owner .kind` on accounts; `.owner .kind .age` on entities;
+  `.cost .basis .in-service .parts` on assets (and their declared properties);
+  `.unit` on amounts; `.year .month` on dates; `.of` on a purpose.
+- Functions: `total(in|out, window)` on things, `total(window)` under a purpose;
+  `tally(name [, year])`; `min max abs`; `progressive(schedule, x)`;
+  `straight-line(cost, life, from, period [, mid-month])` (this period's share);
+  `value(x, UNIT)`; `date(y, m, d)`; `remaining`.
 
-## 8. Parcels, lots, and gains
+## 7. Claims
 
-Every asset place holds parcels `(quantity, basis, acquired, transaction, tie)`.
-Parcels with equal attributes merge. Base-currency money whose basis equals its
-face value and that is tied to nothing is *plain*, and plain money is one
-parcel. In a place of a `claim` kind, parcels are also told apart by the
-transaction that made them, so each invoice or loan stays its own claim.
-
-- **Arrival** from an income, equity, liability or `?` place creates a parcel.
-  Its basis is set by the target place's kind: `basis cost` (the default) is the
-  face value in the base currency, or `P × quantity` with an `@ P` price;
-  `basis zero` is nothing (pre-tax 401(k) deferrals, deducted IRA
-  contributions). A `basis` tail overrides both. It is tied to the source
-  entity if that entity's kind is `restricted`, and to the `for` entity if the
-  flow names one.
-- **Transfer** between asset places moves parcels unchanged: basis, acquired date,
-  and ties all travel with them, unless the flow says `for` (which re-ties).
-- **Relief** is choosing which parcels leave. Ties go first, then the lot
-  policy. Selectors (`[2024]`, `[#house]`, `[2026-01-22]`) and `for #code`
-  restrict the candidates. The policy comes from the selector, then the place,
-  then the kind chain; `currency` kinds are FIFO. If parcels differ and no
-  policy applies, the flow is *ambiguous*. The error lists every candidate with
-  the gain each would realize, and quantities still move FIFO so everything
-  downstream stays consistent.
-- **Realization** happens when parcels change commodity, leave the owner's asset
-  places, or leave a `deferred` place for a non-deferred one. Then
-  `gain = proceeds − basis`, and `on gain` laws fire, one per parcel relieved.
-  Parcels created by the exchange take `basis = basis(given) + gain realized`,
-  so inside a deferred place basis carries over.
-- **Revaluation.** A flow between an asset place and a `market` place changes
-  what the asset place holds without realizing anything: growth arrives with no
-  basis (an unrealized gain), and a loss shrinks the parcels' quantities and
-  keeps their basis (an unrealized loss).
-- **Basis flows** (`PLACE.basis`) change basis and nothing else (§2).
-- **Splits** scale quantities and keep basis (§3).
-- Liabilities, income, expenses, and equity hold plain balances.
-
-Restricted money is money held for someone. It is tied when it arrives from a
-restricted entity (a grant) or when a flow earmarks it `for` one (an envelope, a
-sinking fund, a tenant's deposit). It is not available to spend. When it leaves
-its owner's places, that entity's `on spend` laws judge the flow. A flow `for`
-the owner releases it.
-
-## 9. Claims
-
-A claim is value someone owes: an invoice, a loan to a friend, a deposit paid,
-a reimbursement due, an IOU. It is a parcel in a place of a `claim` kind
-(`receivable` in `std`), created by the flow that made it and settled by flows
-`for` it:
+A claim is value one side owes the other, between an event and its counterpart:
 
 ```text
-account assets/owed/clients : receivable
-entity acme : org
-  via assets/owed/clients
-
-2026-03-01 design -> acme 4_800 USD #inv-12 due 30d
-2026-04-02 acme -> checking 3_000 USD for #inv-12       partial
-2026-04-20 acme -> checking 1_800 USD for #inv-12       settled
+12 checking -> jo 600 USD due 2026-04-01           lent: jo owes me 600
+12 jo -> checking 200 USD                          settles 200 of it, oldest first
+27 halcyon owes studio 3_800 USD due 30d ^inv-12 #design    invoiced
+26 halcyon -> checking 3_800 USD ^inv-12           settles exactly that claim
+05 me owes pge 142.50 USD due 2026-02-20 #utilities         a bill received
+20 checking -> pge 142.50 USD                      settles it
 ```
 
-A claim's age is its parcel's acquisition day, its counterparty the payee (or
-the entity written in place position), and its due day the `due` of the flow
-that made it. `axiom claims` lists what is open, `check` warns on what is past
-due, `available` counts claims as coming in (never as money to spend), and
-`forecast` expects them on their due days. What you owe others is the same
-thing seen from the other side: a place of kind `payable` (a liability) whose
-flows carry `due`.
+- A flow to a party with `due` is a claim the party owes the flow's owner. `PARTY owes
+  OWNER AMOUNT` and `OWNER owes PARTY AMOUNT` record one without moving money.
+- A later flow from the party to an owner (or from an owner to the party) settles
+  its open claims: the one its `^code` names, else the oldest first. What remains
+  of the flow is an ordinary flow.
+- A contract's missed occurrence is a claim while it is missing (§5), and its
+  deposit is a claim the party holds.
+- A claim's purpose is its recognition: an invoice is income when invoiced in
+  accrual books, when settled in cash books (the owner's `books cash|accrual`,
+  default cash).
+- `claims` lists what is open, with age and due day; `check` warns on what is past
+  due; `available` counts claims as coming in, never as money to spend.
+
+## 8. Parcels, lots, assets and gains
+
+Money is held as parcels `(quantity, basis, acquired, transaction, tie)`. Parcels
+that agree on all of these merge; base-currency money at its face value, tied to
+nothing, is plain and always one parcel.
+
+- **Arrival** from a party or `?` creates a parcel. Its basis is its cost: face
+  value in the base currency, or `P × quantity` for an `@ P` price, or what the
+  exchange gave. An account kind that says `basis zero` gives none (pre-tax
+  deferrals). `basis AMOUNT` overrides both. It is tied to the paying party when
+  that party's kind is `restricted`, and to the `for` entity when the flow names
+  one.
+- **Transfers** between an owner's holdings move parcels unchanged.
+- **Relief** chooses which parcels leave: ties first, then the policy (the
+  selector's, the account's, its kind's, then the commodity kind's; `currency` is
+  FIFO). Selectors: `[2024]`, `[2026-01]`, `[2026-01-20]`, `[^code]`, `[fifo]`.
+  Parcels that differ with no policy are ambiguous: an error listing each candidate
+  and its gain, while quantities move FIFO.
+- **Realization** happens when parcels change commodity, leave the owners for a
+  party, or leave a `deferred` account for one that is not. `gain = proceeds −
+  basis`, and `on gain` fires per parcel.
+- **Revaluation.** Flows with `market` (usually `via market` on an assertion)
+  change what an account holds without realizing: growth arrives with no basis, a
+  loss shrinks parcels and keeps their basis.
+- **Splits** scale quantities and keep basis.
+
+**Assets** are identified things. An asset is one unit made of *parts*: the part
+its acquisition brought, and one more for each flow `#improvement of` it (a
+purpose whose root is `capital` and that takes an object adds a part). A part has
+a cost, a day, and a basis that laws may `consume`. The asset's `cost` is the sum
+of its parts' costs, its `basis` what remains of them; laws of the asset's kind run
+for each part (so each improvement depreciates on its own schedule). A flow
+`#repair of` an asset is spent: it adds no part. Selling or giving the asset
+relieves every part; `why ASSET` shows the parts, what consumed them, and the
+flows that earned or cost the asset something (`purpose … of ASSET`).
+
+Restricted money is money held for someone: tied when it arrives from a restricted
+party or `for` one (an envelope, a tenant's deposit). It is not available to spend;
+its entity's `on spend` laws judge it when it leaves the owners; a flow `for` the
+owner releases it.
+
+## 9. Derived events
+
+Derived events are computed during the run, never written into the journal. Each
+names the line and the declaration it comes from, `why FILE:LINE` shows it, and an
+editor shows it as a hint on that line.
+
+| derived | from | what it is |
+|---------|------|------------|
+| a loan payment's interest and principal | the contract's `loan` | `#interest` (of its asset) and the debt's decrease |
+| escrow | the contract's `escrow` | a flow into that holding |
+| a match | the contract's `match` | a flow from the party |
+| a share | `business N% for OWNER` on a contract, party or purpose | the same purpose, N% of each flow, borne by that owner |
+| recognition | `covers`, `for PERIOD` | how a flow's amount spreads over days |
+| sales tax | a party kind's `sales-tax` | the tax inside a price paid to it (`#sales-tax`, a share of the flow) |
+| exchange cost | an exchange with a market price that day | what was given less what was got, valued that day (`#exchange-cost`) |
+| depreciation | `consume` in a law | a part's basis consumed |
+| a wash sale | `carry` in a law | a loss moved into another parcel's basis |
+| a late occurrence | a contract | a claim, until the occurrence is written |
+
+A share is a flow of its own: the studio's 27.00 of a 45.00 phone bill is a flow
+`#phone` owned by `studio`, and Sam's own phone is 18.00. Budgets, `flow` and the
+tax see both; the bill as paid is one flow in `register`.
 
 ## 10. Projects and layout
 
-`axiom.ax` marks the project root. Every `.ax` file under it is loaded. The
-standard systems are embedded, and `systems/` in the project may add or override
-them. Folder names are constraints unless `layout free` is set:
+`axiom.ax` marks the project root; every `.ax` under it is loaded. `systems/` may
+add or override the embedded systems. Unless `layout free` is set:
 
-- a path segment `YYYY` or a filename `YYYY.ax` restricts dated items in that
-  file to that year;
-- a following `MM` segment or `YYYY-MM.ax` filename restricts them to that month;
-- files under `prices/` may contain only prices;
-- files under `systems/` must be systems.
+- a folder `YYYY` or a file `YYYY.ax` holds items of that year, and an item's date
+  there may be written `MM-DD`;
+- a following folder `MM` or a file `YYYY-MM.ax` / `MM.ax` holds items of that
+  month, and an item's date there may be written `DD`;
+- any other date in such a file may leave out the year its place gives;
+- a full date is always allowed and must agree with its place; a shortened date in
+  a file whose place does not give the rest is an error with the full date as the
+  fix;
+- files under `prices/` hold only prices, and files under `systems/` are systems.
 
 ## 11. Diagnostics
 
-Every diagnostic follows the style guide in `tests/mistakes/REPORT.md` §14:
-
-- The headline states the accounting fact ("checking would go to −1,000.00 USD").
-- The primary label sits in the user's file. Built-in sources are marked
-  `(built in)` and are never the primary.
-- A help is an edit where the fix is mechanical.
-- One root cause is reported once: later errors it causes are counted, not
-  printed.
-- Nothing the user wrote is silently reinterpreted. That covers an unknown
-  commodity near a known one, a mistyped full path, a backwards range, and an
-  event dated before its flow.
+Every diagnostic follows `tests/mistakes/REPORT.md` §14: the headline states the
+accounting fact; the primary label sits in the reader's file (built-in sources are
+marked and never primary); a mechanical fix is shown as an edit; one root cause is
+reported once; nothing written is silently reinterpreted. Every inferred purpose
+and derived event can be asked about: `why FILE:LINE` says what a line means and
+where each part of that meaning came from.
 
 ## 12. Command line
 
 ```text
-axiom check     [PATH]                            diagnostics, priced violations, a summary
-axiom balance   [GLOB…] [--at DATE] [--value] [--monthly]
-axiom register  PLACE [--from DATE] [--to DATE]
-axiom flow      [--by month|year] [--from DATE] [--to DATE]   income and spending
-axiom available [--at DATE]                       what you can spend, and what it costs to get more
+axiom check     [--strict]                     diagnostics, late promises, a summary
+axiom balance   [GLOB…] [--at DATE] [--value] [--monthly]   holdings, assets, claims
+axiom register  ACCOUNT|OWNER|PARTY|ASSET [--from DATE] [--to DATE]
+axiom flow      [--by month|year] [--by purpose|party] [--from DATE] [--to DATE]
+axiom available [--at DATE]
 axiom budget    [MONTH|YEAR]
-axiom limits    [YEAR]                            every cap and budget: counted, limit, room left
-axiom claims    [--at DATE]                       what is owed to you and by you, and how old
+axiom limits    [YEAR]
+axiom claims    [--at DATE]
+axiom contracts                                every promise: next occurrence, kept, late
 axiom tax       [YEAR]
-axiom gains     [YEAR]                            each disposal: acquired, sold, proceeds, basis, gain
-axiom lots      [PLACE] [--at DATE]
+axiom gains     [YEAR]
+axiom lots      [ACCOUNT] [--at DATE]
 axiom forecast  [--until DATE] [--paths N]
-axiom why       TARGET                            a place, entity, system, #code, law, tax line, or file:line
+axiom why       TARGET                         a name, #purpose, ^code, law, tax line, "text" or FILE:LINE
 axiom sync      [FILE…]
 ```
 
-Global options: `--for ENTITY` (whose money: default everything; a household
-includes its members), `--relaxed`, `--today DATE`, `--color auto|always|never`.
-A report runs even when the book has errors; it says so in its header.
+Global options: `--for ENTITY`, `--relaxed`, `--today DATE`, `--color auto|always|never`.
