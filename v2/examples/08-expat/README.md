@@ -128,5 +128,6 @@ withholding), F10 (`available` counts the euros), F17 (an opening statement).
   says what converting cost against the mid-market rate in `prices/fx.ax`.
 - **`gains` lists currency disposals.** It shows every euro spent as a disposal with a gain, although the return
   counts none of them.
-- **Tax on money drawn is missing from `available`'s costs.** The 401(k) shows the early-withdrawal penalty and
-  not the income tax on it: the fork stops before the return closes.
+- **`available` prices a withdrawal against the year so far.** It folds the journal to the day and runs the laws on
+  to the day the return closes, but knows no pay to come: the 401(k) shows the tax its withdrawal would add to the
+  income counted until then, as well as the early-withdrawal penalty.

@@ -20,6 +20,6 @@ What it would take to reach the rest
   assets/rental/house (1 HOME)    90d        388,500.00 USD            388,500.00 USD
   ────────────────────────────────────────────────────────────────────────────────────────────
   If everything were drawn today             388,500.00 USD  0.00 USD  388,500.00 USD
-  · Each line withdraws the whole holding into assets/bank/checking on 2025-06-01 and runs the year
-    out through the laws. Cost is what they would then owe beyond what they already will: penalties,
-    and the tax on any income it creates.
+  · Each line withdraws the whole holding into assets/bank/checking on 2025-06-01 and runs the books
+    on to 2026-04-15, when the year's return closes, through the laws. Cost is what they would then
+    owe beyond what they already will: penalties, and the tax on any income it creates.

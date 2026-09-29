@@ -340,6 +340,106 @@ fn tax_with_one_return_closed_and_one_not_totals_what_is_owed_so_far() {
     });
 }
 
+// ─── Looking ahead to the day a return closes ───────────────────────────────
+
+/// An account whose withdrawals count as income, and a return that taxes the
+/// year's income on April 15 of the next.
+const IRA: &str = "\
+base USD
+commodity USD
+  precision 2
+
+kind retirement : asset
+  liquidity 30d
+  law count-withdrawals
+    on out
+    count amount as income
+
+entity treasury
+
+account assets/checking
+account assets/ira : retirement
+account income/salary
+
+opening 2026-01-01
+  checking 1_000 USD
+  ira      10_000 USD
+
+law return
+  each year closing 04-15
+  owe tally(income) * 20% to treasury as income-tax
+
+2026-01-05 income/salary -> checking 100 USD
+2026-01-06 checking -> ira 100 USD
+";
+
+/// Drawing the account down in June makes income in 2026, and the 2026 return
+/// closes in April 2027: the tax on the withdrawal is a cost of making it.
+#[test]
+fn available_runs_the_books_to_the_day_the_return_closes_to_price_a_withdrawal() {
+    with_run(IRA, day(2026, 6, 1), |book, run| {
+        let available = Query::Available { at: None };
+        let report = crate::report(book, run, &available, None).unwrap();
+        let reach =
+            report.sections.iter().find(|s| s.heading.as_deref() == Some("What it would take to reach the rest"));
+        assert_eq!(
+            lines(reach.unwrap())[0],
+            "assets/ira | 30d | 10,100.00 USD | 2,020.00 USD | 8,080.00 USD | driven by income-tax 2,020.00 USD"
+        );
+    });
+}
+
+/// A salary each month, taxed by a return that closes in April 2027.
+const SALARY: &str = "\
+base USD
+commodity USD
+  precision 2
+
+entity treasury
+
+account assets/checking
+account income/salary
+
+law count-pay
+  on in
+  when to is assets/checking
+  count amount as pay
+
+law return
+  each year closing 04-15
+  owe tally(pay) * 10% to treasury as income-tax
+
+every month on 5 income/salary -> checking 1_000 USD
+
+2026-01-05 income/salary -> checking 1_000 USD
+";
+
+/// A year from today ends in January 2027, three months before the return of
+/// 2026 closes: the forecast goes on to that day, to show what the year owes.
+#[test]
+fn the_forecast_goes_on_to_the_next_closing_day_when_it_is_close_after_its_horizon() {
+    with_run(SALARY, day(2026, 1, 10), |book, run| {
+        let forecast = |until| Query::Forecast { until, paths: 1 };
+        let report = crate::report(book, run, &forecast(None), None).unwrap();
+        assert_eq!(report.title, "Forecast to 2027-04-15");
+        let owed = report.sections.iter().find(|s| s.heading.as_deref() == Some("Obligations coming due")).unwrap();
+        assert_eq!(lines(owed), ["2027-04-15 | income-tax | treasury | 1,200.00 USD"]);
+
+        // What was asked for is what is shown.
+        let asked = crate::report(book, run, &forecast(Some(day(2027, 1, 10))), None).unwrap();
+        assert_eq!(asked.title, "Forecast to 2027-01-10");
+    });
+}
+
+/// Farther than a few months, the next closing day is another year's business.
+#[test]
+fn the_forecast_stops_at_a_year_when_the_next_closing_day_is_far() {
+    with_run(SALARY, day(2026, 5, 10), |book, run| {
+        let report = crate::report(book, run, &Query::Forecast { until: None, paths: 1 }, None).unwrap();
+        assert_eq!(report.title, "Forecast to 2027-05-10");
+    });
+}
+
 // ─── Accepted gaps ──────────────────────────────────────────────────────────
 
 /// One gap of each kind: a revaluation, a gap accepted as unexplained, and a

@@ -5,8 +5,8 @@
 //! tied to someone, what is written but not cashed, and what falls due within
 //! a month. For everything else the question is asked of the laws: draw the
 //! whole holding down into a cash place, on a fork of the ledger, and see what
-//! the laws would then owe by the end of the year beyond what they already
-//! will. A 401k's penalty, the income it creates and the tax on that income
+//! the laws would then owe once the year is judged (its end, or the day its
+//! return closes) beyond what they already will. A 401k's penalty, the income it creates and the tax on that income
 //! all come out of the rules of the 401k's own system, with no special case
 //! here. Liquidity is derived from law.
 
@@ -17,6 +17,7 @@ use axiom_engine::{Effect, Holding, Ledger, Options, Run};
 use axiom_model::{Amount, Book, Class, Entity, Place};
 
 use crate::claims::{self, Claim};
+use crate::closings;
 use crate::history::{Held, postings};
 use crate::lens::{Basket, Lens, Liquidity, Whose};
 use crate::places::path;
@@ -30,8 +31,9 @@ const SOON: Span = Span::days(30);
 pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {
     let at = at.unwrap_or(run.today);
     let lens = Lens::new(book, whose, at);
-    let horizon = at.year_end();
-    // Deadlines fire up to the end of the year, so year-end laws answer too.
+    // Deadlines fire up to the day the year is judged, so the laws that figure
+    // its tax answer too, whether they run at its end or on a closing day.
+    let horizon = closings::judged_through(book, at);
     let mut ledger = Ledger::new(book, Options { today: horizon.max(run.today), relaxed: book.relaxed });
     ledger.advance(at);
 
@@ -58,7 +60,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
     Report::new(format!("Available on {at}"))
         .with(spendable_section(lens, run, &cash, &claims))
         .with(claims::section(lens, "Coming in", &mine))
-        .with(reach_section(lens, &reach, to))
+        .with(reach_section(lens, &reach, to, horizon))
 }
 
 // ─── What you can spend ─────────────────────────────────────────────────────
@@ -189,9 +191,10 @@ struct Reach<'h> {
 
 impl<'h> Reach<'h> {
     /// Forks the ledger, moves the whole holding into `to` as one flow, runs
-    /// out the year, and reads what is owed that would not be otherwise. The
-    /// baseline is a fork run out over the same horizon, so what the year
-    /// would bring anyway is not the withdrawal's cost.
+    /// on to `horizon` (the day the year is judged), and reads what is owed
+    /// that would not be otherwise. The baseline is a fork run out over the
+    /// same horizon, so what the year would bring anyway is not the
+    /// withdrawal's cost.
     fn of(
         ledger: &Ledger,
         lens: Lens,
@@ -245,7 +248,9 @@ impl<'h> Reach<'h> {
     }
 }
 
-fn reach_section<'s>(lens: Lens<'_, 's>, reach: &[Reach], to: Option<Id<Place>>) -> Section<'s> {
+/// One line per holding that is not cash. `judged` is the day the books were
+/// run on to.
+fn reach_section<'s>(lens: Lens<'_, 's>, reach: &[Reach], to: Option<Id<Place>>, judged: Day) -> Section<'s> {
     let (book, at) = (lens.book, lens.day);
     let columns = ["Holding", "Liquid in"].map(Column::left).into_iter();
     let columns = columns.chain(["Value", "Cost", "Net"].map(Column::right)).chain([Column::left("Because")]);
@@ -282,9 +287,14 @@ fn reach_section<'s>(lens: Lens<'_, 's>, reach: &[Reach], to: Option<Id<Place>>)
     section.push(Row::padded(total.into_iter().chain(sums), 6).style(Style::Total));
     match to {
         Some(to) => section.note(format!(
-            "Each line withdraws the whole holding into {} on {at} and runs the year out through the laws. Cost is \
+            "Each line withdraws the whole holding into {} on {at} and runs {} through the laws. Cost is \
              what they would then owe beyond what they already will: penalties, and the tax on any income it creates.",
-            path(book, to)
+            path(book, to),
+            if judged > at.year_end() {
+                format!("the books on to {judged}, when the year's return closes,")
+            } else {
+                "the year out".to_string()
+            }
         )),
         None => section.note("No cash place holds money, so there is nowhere to withdraw into."),
     }

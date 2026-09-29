@@ -117,9 +117,9 @@ the year's return closes, on April 15 of the next year, and `axiom forecast`
 projects them once its horizon reaches that day. On these figures, with the
 plans, the year comes to 11,209.23 USD of federal tax and 4,379.11 USD of
 California tax. More was withheld in both cases (11,440 USD and 4,849 USD), so
-`axiom forecast --until 2027-05-01` lists two refunds due 2027-04-15: -230.77 USD
-federal and -469.89 USD California. A refund is an obligation with a negative
-amount.
+`axiom forecast` lists two refunds due 2027-04-15 (a forecast that would end
+just short of the closing day runs on to it): -230.77 USD federal and -469.89 USD
+California. A refund is an obligation with a negative amount.
 
 ### `axiom forecast`
 

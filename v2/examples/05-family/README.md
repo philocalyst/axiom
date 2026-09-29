@@ -119,8 +119,9 @@ room 13,000.00.
 
 `axiom available`: 114,168.01 USD to spend (checking and savings). The escrow
 (1,440.00 USD, 365 days) is held, the house and the car are slow, and the 401(k)s,
-529 and HSA list their penalties. The tax on money drawn is not in those costs: see
-below.
+529 and HSA list their penalties and, since the books run on to the day the 2026
+return closes (2027-04-15), the federal and California tax the withdrawal would add to
+it. That tax is figured on the income counted so far in 2026, not on the pay to come.
 
 ## Findings this project now demonstrates as fixed
 
@@ -141,10 +142,9 @@ every inflow), F15 in part (`!` waives the HSA's priced penalty).
   the 620.00 USD is also counted as a distribution, and a `count` is not a violation:
   AGI is 620.00 USD too high (about 190 USD of tax). A reimbursement of a bill already
   paid needs the `for #code` link to reach the law (F15).
-- **Tax on money drawn is missing from `available`'s costs.** The fork stops at the
-  end of the year and the return closes on April 15 of the next: the 401(k)s show the
-  10% penalty and not the income tax. The forecast likewise shows the return only when
-  its window reaches April 15.
+- **`available` prices a withdrawal against the year so far.** It folds the journal to
+  the day and runs the laws on to the closing day, but knows no pay to come, so the tax
+  it adds is the tax on the withdrawal on top of the income counted until then.
 - **The house is worth 612,400.00 USD in `available`, not net of its mortgage.**
 - **`gains` lists qualified spending** (the FSA's care, the HSA's medical bills, the
   529's tuition) as withdrawals with a gain; they are not counted as income.
