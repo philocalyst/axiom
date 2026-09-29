@@ -70,8 +70,10 @@ kind fund : commodity
 
 // ─── Allocations: shares of a cost (std) ────────────────────────────────────
 //
-// `business 60% for studio`, on a contract, a party or a purpose, means that
-// 60% of each flow is a cost of `studio`. It is derived, per flow, as a flow
+// `share 60% for studio`, on a contract, a party, a purpose or an asset, means
+// that 60% of each flow is a cost of `studio`. A share may be a measure of the
+// thing's area (`share 120 SQFT for studio`), and a share for a party is what
+// that party owes. It is derived, per flow, as a flow
 // of its own purpose: `studio`'s share of the phone. The whole bill stays
 // the phone. `flow` shows both, and the tax laws count the share.
 

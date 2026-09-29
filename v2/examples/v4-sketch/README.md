@@ -28,13 +28,13 @@ None of it is typed.
   - `irs 498.00 USD` in a paystub is federal tax paid for 2026, because the IRS is a tax authority and the paycheck is dated 2026.
   - `VTI -> fidelity 198.12 USD` is a dividend because VTI is a fund.
 - **Anything a contract already says.**
-  - `2026-01-01 flat` is 2,900 USD of rent from checking, 348 of it the studio's office.
+  - `2026-01-01 flat` is 2,900 USD of rent from checking, 348 of it the studio's office: 120 of the flat's 1,000 square feet.
   - `2026-01-08 phone` is 45 USD from the card, 27 of it the studio's.
   - `2026-01-01 mortgage` is 2,302.90 USD, split by the loan's own terms into 1,527.88 of interest on the condo, 365.02 of principal and 410.00 of escrow.
   - A paystub restates only its amounts.
 - **What changed, only once, on the day it changed.**
-  - `27 gym 120 USD monthly until 04-30 ^promo` halves the gym for a while, and `28 ^promo until 06-30` extends it.
-  - `01 flat` with `+ 12% of 155.00 USD #utilities` adds the building's water to March's rent without touching the contract.
+  - `27 gym now 120 USD monthly until 04-30 ^promo` halves the gym for a while, and `28 ^promo now until 06-30` extends it.
+  - The flat's contract says it takes a share of the building's water when there is a bill (`input water`, `+ 12% of water`); March's `01 flat` states `water = 155.00 USD`, and the 18.60 follows.
   - `03 figma waived` releases one month: nothing is late, and nothing is owed.
 - **Which flows are the same flow.** The bank's export and a line typed from a receipt reconcile into one; a record that keeps a contract is written as its occurrence (`sync.ax`).
 - **Anything implicit in a price.**
@@ -50,8 +50,8 @@ None of it is typed.
 
 ```text
 warning[late]: dana's rent for March is 4 days late: 2,350.00 USD owed since 2026-03-01
-   ╭─[contracts.ax:48:3]
-48 │   2_350 USD monthly on 1 into checking #rent of condo
+   ╭─[contracts.ax:58:3]
+58 │   2_350 USD monthly on 1 into checking #rent of condo
    │   ────────────────────┬────────────────────
    │                       ╰── the lease expects it on the 1st
    = note: February's came on the 3rd
@@ -72,15 +72,15 @@ book knows why:
 
 ```text
 error[assertion]: checking holds 14,431.38 USD, not 11,531.38 USD
-   ╭─[journal/2026/02.ax:58:1]
+   ╭─[journal/2026/02.ax:60:1]
    │
-58 │ 28 checking   = 11_531.38 USD
+60 │ 28 checking   = 11_531.38 USD
    │ ──────────────┬─────────────
    │               ╰── 2,900.00 USD less than the book holds
    │
-   ├─[contracts.ax:21:3]
+   ├─[contracts.ax:26:3]
    │
-21 │   2_900 USD monthly on 1 from checking
+26 │   2_900 USD monthly on 1 from checking
    │   ────────────────┬─────────────────
    │                   ╰── due 2026-02-01, and not written
    │

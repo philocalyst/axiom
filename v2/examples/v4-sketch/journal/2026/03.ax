@@ -3,8 +3,8 @@
 // a share of the building's water on the rent, a month given free, and a
 // promotion extended.
 
-01 flat          // ▸ 2,918.60: the rent, and the water on top
-  + 12% of 155.00 USD #utilities "the building's water for Q1"
+01 flat          // ▸ 2,918.60: the rent, and 12% of the building's water on top
+  water = 155.00 USD                                // the input the contract asks for
 01 gym           // ▸ 120.00: the promotion's terms
 01 lease
 01 mortgage
@@ -26,7 +26,7 @@
 
 14 me -> farmers-market 23.00 USD                   // ▸ #groceries: the party's own purpose
 20 vti-monthly 1.640 VTI
-28 ^promo until 06-30 "the gym extended its promotion through June"
+28 ^promo now until 06-30 "the gym extended its promotion through June"
 
 // Quarterly dividends. A fund that pays is a party like any other, and what
 // it pays is a dividend.
