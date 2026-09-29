@@ -1,0 +1,19 @@
+// A household: one person's money for the first quarter of 2026.
+//
+// This file marks the root of the project. Every `.ax` file below it is loaded,
+// and its folders say what may be in it: `journal/2026/02.ax` holds February
+// 2026 and nothing else, and `prices/` holds only prices.
+
+base USD
+
+use std
+use us/401k
+use us/529
+
+/// Me: a designer at Acme, single, renting in San Francisco. Living here puts me
+/// under the laws of San Francisco, California and the United States, and
+/// `born` and `filing` are what those laws read.
+entity me : person
+  born   1988-04-12
+  filing single
+  lives  us/ca/san-francisco

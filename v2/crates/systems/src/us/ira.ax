@@ -1,0 +1,112 @@
+/// United States individual retirement accounts: traditional and Roth.
+///
+/// Both are tax-deferred and share a yearly contribution limit and the 10%
+/// tax on early withdrawals. They differ in when tax is paid. A deducted
+/// traditional contribution is untaxed, so everything that comes out is income.
+/// A Roth contribution was taxed already, so only its earnings can ever be.
+///
+/// Basis is how Axiom tells them apart. Money moved in from a bank account
+/// keeps its face value as basis: that is a Roth contribution, or a traditional
+/// one that was not deducted (Form 8606). Money that arrives from an income
+/// place, or is rolled over from a 401(k), has no basis: that is a deducted
+/// traditional contribution, and all of it is taxable when it comes out.
+///
+/// The figures are community-maintained data. Verify them against the IRS
+/// (irs.gov, the yearly "COLA" notice) before relying on them, and correct
+/// them in a pull request when they are wrong.
+system us/ira
+
+use us
+
+
+/// An individual retirement account of either kind (IRC §408, §408A).
+kind ira : tax-deferred
+  liquidity 3d
+
+  /// Contributions to IRAs are capped for each person and calendar year, with
+  /// a catch-up from age 50 (IRC §219(b)(5)). This deposit took the year over
+  /// the cap. The limit is shared between a person's traditional and Roth IRAs,
+  /// so count both. Withdraw the excess and its earnings before the tax filing
+  /// deadline, or it is charged 6% for every year it stays (IRC §4973).
+  law contribution-limit
+    on in
+    when not from is income | tax-deferred
+    let extra = if owner.age >= 50y then catch-up[date] else empty
+    require total(in, year) <= limit[date] + extra "IRA contributions over the yearly limit"
+
+  /// Money taken out before age 59½ carries an additional 10% tax on the part
+  /// that is taxable (IRC §72(t)). This withdrawal is priced at that 10%. If an
+  /// exception applies (disability, a first home up to 10,000 USD, higher
+  /// education costs, and others in §72(t)(2)), keep the withdrawal and mark it
+  /// `!` with the reason.
+  law early-withdrawal
+    on gain
+    when gain > empty
+    when not to is tax-deferred
+    require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "IRA withdrawal before age 59½"
+
+/// A traditional IRA (IRC §408): what comes out is ordinary income.
+kind traditional-ira : ira
+  select prorata
+
+  /// What comes out of a traditional IRA is ordinary income in the year it
+  /// comes out (IRC §408(d)(1)), except for the part that is basis: what you
+  /// put in without a deduction. It is counted as a distribution. A rollover
+  /// into another tax-deferred account is not one.
+  law count-distributions
+    on gain
+    when gain > empty
+    when not to is tax-deferred
+    count gain as distributions
+    count gain as agi
+
+  /// From age 73, an owner must take a minimum distribution from a traditional
+  /// IRA every year (IRC §408(a)(6), §401(a)(9)). It is the balance at the end
+  /// of the previous year divided by a divisor from the IRS Uniform Lifetime
+  /// Table (Pub. 590-B), 26.5 at age 73. Nothing came out this year. Take the
+  /// distribution before December 31, or the shortfall is taxed at 25%
+  /// (IRC §4974). The first one may wait until April 1 of the following year.
+  /// Owners born in 1960 or later start at 75.
+  law required-minimum-distribution
+    each year
+    when owner.age >= 73y
+    when self.balance > empty
+    warn total(out, year) > empty "no required minimum distribution taken this year"
+
+/// A Roth IRA (IRC §408A): contributions are taxed already, so only earnings
+/// can be taxed. Set `established` to the day of the first contribution.
+kind roth-ira : ira
+  select hifo
+  has established date
+
+  /// A Roth withdrawal is tax-free when it is qualified (IRC §408A(d)(2)): the
+  /// owner is 59½ or older and the first contribution is at least five years
+  /// old. Contributions come out first and always tax-free (they are the basis,
+  /// which is why this account relieves its highest-basis money first), so only
+  /// the earnings in a withdrawal are tested. These earnings were not
+  /// qualified, so they count as income. The five years are counted from the
+  /// day of the first contribution, a little stricter than the IRS, which counts
+  /// from January 1 of that year.
+  law count-taxable-earnings
+    on gain
+    when gain > empty
+    when not to is tax-deferred
+    let qualified = owner.age >= 59y6m and date >= self.established + 5y
+    when not qualified
+    count gain as distributions
+    count gain as agi
+
+
+// The contribution limit for traditional and Roth IRAs combined (IRC §219(b)(5)).
+// Notice 2023-75 (2024), Notice 2024-80 (2025), Notice 2025-67 (2026).
+// verify: the 2026 figures against Notice 2025-67.
+param limit
+  2024 7_000 USD
+  2025 7_000 USD
+  2026 7_500 USD
+
+// The catch-up for age 50 and over (IRC §219(b)(5)(B)), indexed since 2024.
+param catch-up
+  2024 1_000 USD
+  2025 1_000 USD
+  2026 1_100 USD

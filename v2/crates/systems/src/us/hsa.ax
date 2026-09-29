@@ -1,0 +1,83 @@
+/// United States health savings accounts.
+///
+/// An HSA is a tax-deferred account for people with a high-deductible health
+/// plan. Contributions from pay are untaxed, growth is untaxed, and money that
+/// pays a qualified medical expense comes out untaxed. Anything else that comes
+/// out is income, with a 20% tax added before age 65.
+///
+/// Set `coverage` on each account to `self-only` or `family`: the yearly limit
+/// depends on it. Pay medical costs straight from the account into a place of
+/// kind `medical`, and the withdrawal is qualified.
+///
+/// The figures are community-maintained data. Verify them against the IRS
+/// (irs.gov, the yearly HSA Rev. Proc.) before relying on them, and correct
+/// them in a pull request when they are wrong.
+system us/hsa
+
+use us
+
+
+/// A health savings account (IRC §223).
+kind hsa : tax-deferred
+  liquidity 3d
+  has coverage name
+
+  /// Contributions to an HSA are capped for each person and calendar year,
+  /// with a catch-up from age 55 (IRC §223(b)). This deposit took the year over
+  /// the cap for the account's `coverage`, counting your employer's
+  /// contributions too. Ask payroll to lower the contribution, and withdraw the
+  /// excess before the tax filing deadline, or it is charged 6% for every year
+  /// it stays (IRC §4973(g)).
+  law contribution-limit
+    on in
+    when not from is interest | dividends | gains | tax-deferred
+    let extra = if owner.age >= 55y then catch-up[date] else empty
+    require total(in, year) <= limit[date, self.coverage] + extra "HSA contributions over the yearly limit"
+
+  /// A contribution from pay is not taxed this year (IRC §125, §223(e)). The
+  /// wages law counted it as pay; this law counts it as deferred and takes it
+  /// back out of `agi`. A deposit from a bank account, which is deducted on the
+  /// return instead, is not modelled.
+  law pretax-contribution
+    on in
+    when from is wages
+    count amount as pretax
+    count -amount as agi
+
+  /// The earnings in a withdrawal that did not pay a qualified medical expense
+  /// are taxable income (IRC §223(f)(2)), counted here as a distribution.
+  /// Paying a place of kind `medical` straight from the account, or moving the
+  /// money to another HSA, is qualified.
+  law nonqualified-income
+    on gain
+    when gain > empty
+    when not to is medical | tax-deferred
+    count gain as distributions
+    count gain as agi
+
+  /// A withdrawal that did not pay a qualified medical expense owes an
+  /// additional 20% of what is taxable, unless the owner is 65 or older
+  /// (IRC §223(f)(4)). This withdrawal went somewhere other than a place of kind
+  /// `medical`, so it is priced at that 20%. To reimburse yourself for an
+  /// expense the account should have paid, which the IRS allows with your
+  /// receipts, or when an exception applies (death or disability), keep the
+  /// withdrawal and mark it `!` with the reason.
+  law nonqualified-penalty
+    on gain
+    when gain > empty
+    require (to is medical | tax-deferred) or owner.age >= 65y else owe 20% * gain to irs as nonqualified-hsa-penalty "HSA withdrawal that did not pay a medical expense"
+
+
+// The contribution limit by coverage (IRC §223(b)(2)).
+// Rev. Proc. 2023-23 (2024), Rev. Proc. 2024-25 (2025), Rev. Proc. 2025-19 (2026).
+param limit
+  2024 self-only 4_150 USD
+  2024 family    8_300 USD
+  2025 self-only 4_300 USD
+  2025 family    8_550 USD
+  2026 self-only 4_400 USD
+  2026 family    8_750 USD
+
+// The catch-up for age 55 and over (IRC §223(b)(3)). It is not indexed.
+param catch-up
+  2024 1_000 USD

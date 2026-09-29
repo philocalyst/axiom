@@ -1,0 +1,12 @@
+// Your first Axiom file: three lines.
+//
+// A line is a date, where the money came from, an arrow, where it went, and how
+// much. Places under the five roots (assets, liabilities, income, expenses,
+// equity) open themselves the first time they are named. The last line says what
+// the bank should show, and Axiom checks it.
+
+base USD
+
+2026-01-15 income/salary -> assets/checking 3_200 USD
+2026-01-18 assets/checking -> expenses/food 84.20 USD
+2026-01-31 assets/checking = 3_115.80 USD

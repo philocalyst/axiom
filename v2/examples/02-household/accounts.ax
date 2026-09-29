@@ -1,0 +1,122 @@
+// Where value can be, and who else is involved.
+//
+// A kind after the colon says what an account is, and the kind brings its rules:
+// a `bank` account warns when it overdraws, a `broker` account sells the oldest
+// shares first, a `401k` is capped every year, a `529-plan` prices a withdrawal
+// that does not pay for school.
+
+commodity VTI : fund
+  name "Total stock market ETF"
+  precision 0
+
+
+// ─── Assets ─────────────────────────────────────────────────────────────────
+
+/// Everyday money.
+account assets/bank/checking : bank
+
+/// A high-yield savings account.
+account assets/bank/savings : bank
+
+/// The wallet.
+account assets/cash : cash
+
+/// Index funds, bought and sold at market.
+account assets/brokerage : broker
+
+/// The plan at work. Deferrals from pay go in with no basis: all of it is
+/// taxable when it comes out.
+account assets/retirement : 401k
+  employer acme
+
+/// A 529 plan for my own graduate courses. What was put in is its basis; the
+/// growth has none.
+account assets/college : 529-plan
+  beneficiary me
+
+
+// ─── Liabilities ────────────────────────────────────────────────────────────
+
+/// The card that pays for food and getting around, paid off every month.
+account liabilities/visa : credit-card
+
+
+// ─── Income and equity ──────────────────────────────────────────────────────
+
+account income/salary    : wages
+account income/interest  : interest
+account income/dividends : dividends
+account income/grants
+
+/// The balances a ledger starts from.
+account equity/opening
+
+
+// ─── Expenses ───────────────────────────────────────────────────────────────
+
+/// Groceries and eating out. A budget covers the whole subtree, so it is
+/// checked against both.
+account expenses/food
+  budget 650 USD monthly
+
+account expenses/food/groceries
+account expenses/food/dining
+
+account expenses/rent
+account expenses/utilities
+account expenses/insurance
+account expenses/home
+account expenses/transport
+account expenses/travel
+
+/// Tuition, a place of kind `education`: a 529 plan and a grant may pay it.
+account expenses/tuition : education
+
+account expenses/taxes/federal : federal-tax
+account expenses/taxes/state   : ca-tax
+account expenses/taxes/payroll
+
+
+// ─── People and companies ───────────────────────────────────────────────────
+//
+// An entity written where a place is expected stands for its `via` place and
+// becomes the payee: `checking -> landlord 2_850 USD` pays `expenses/rent`, to
+// the landlord.
+
+/// My employer. Whatever `acme` pays arrives from `income/salary`, so the tax
+/// laws see it as wages.
+entity acme : employer
+  via income/salary
+
+entity landlord : org
+  via expenses/rent
+
+entity trader-joes : org
+  via expenses/food/groceries
+
+entity utility : org
+  via expenses/utilities
+
+entity insurer : org
+  via expenses/insurance
+
+entity plumber : org
+  via expenses/home
+
+entity state-u : org
+  via expenses/tuition
+
+/// A scholarship for coursework. Its money stays tied to it after it lands in
+/// checking, may only be spent on education, and is owed back if any is left
+/// at the end of the year.
+entity scholarship : grant
+  via income/grants
+  purpose education
+  until 2026-12-31
+
+
+// ─── Codes ──────────────────────────────────────────────────────────────────
+
+/// Checks are written from a bank account.
+code check-*
+  on bank

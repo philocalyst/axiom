@@ -1,0 +1,98 @@
+/// United States 401(k) retirement plans.
+///
+/// A 401(k) is a tax-deferred account. Pay that goes in as a pre-tax deferral
+/// arrives with no basis, so all of it, and all of its growth, is taxable when
+/// it comes out. This system caps what goes in each year, counts what comes
+/// out as income, prices a withdrawal before age 59½, and warns when a
+/// required distribution is missed.
+///
+/// The figures are community-maintained data. Verify them against the IRS
+/// (irs.gov, the yearly "COLA" notice) before relying on them, and correct
+/// them in a pull request when they are wrong.
+system us/401k
+
+use us
+
+
+/// An employer-sponsored retirement plan (IRC §401(k)).
+kind 401k : tax-deferred
+  liquidity 5d
+  has employer entity
+
+  /// Elective deferrals are capped for each person and calendar year
+  /// (IRC §402(g)), with a catch-up from age 50 and a larger one from 60
+  /// through 63 (IRC §414(v)). This payment took the year's deferrals over the
+  /// cap. Ask payroll to lower the deferral. Any excess must also be returned
+  /// by the plan before April 15 of the next year, or it is taxed twice
+  /// (IRC §402(g)(2)).
+  law deferral-limit
+    on in
+    when from is wages
+    let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[date] else if owner.age >= 50y then catch-up[date] else empty
+    require total(in, year) <= limit[date] + extra "401(k) deferrals over the yearly limit"
+
+  /// A deferral is pay you chose not to receive, so it is not taxed this year
+  /// (IRC §402(e)(3)). The wages law counted it as pay; this law counts it as
+  /// deferred and takes it back out of `agi`. Roth deferrals are not modelled.
+  law pretax-deferral
+    on in
+    when from is wages
+    count amount as pretax
+    count -amount as agi
+
+  /// Money that comes out of a 401(k) is ordinary income in the year it comes
+  /// out (IRC §402(a)): deferrals and their growth were never taxed. It is
+  /// counted as a distribution. A rollover into another tax-deferred account
+  /// is not one.
+  law count-distributions
+    on gain
+    when gain > empty
+    when not to is tax-deferred
+    count gain as distributions
+    count gain as agi
+
+  /// Money taken out before age 59½ carries an additional 10% tax on top of
+  /// the income tax (IRC §72(t)). This withdrawal is priced at that 10%. If an
+  /// exception applies (disability, separation from service at 55 or later,
+  /// substantially equal payments, and others in §72(t)(2)), keep the
+  /// withdrawal and mark it `!` with the reason.
+  law early-withdrawal
+    on gain
+    when gain > empty
+    when not to is tax-deferred
+    require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "401(k) withdrawal before age 59½"
+
+  /// From age 73, an owner must take a minimum distribution from a 401(k)
+  /// every year (IRC §401(a)(9)). It is the balance at the end of the previous
+  /// year divided by a divisor from the IRS Uniform Lifetime Table (Pub. 590-B),
+  /// 26.5 at age 73. Nothing came out this year. Take the distribution before
+  /// December 31, or the shortfall is taxed at 25% (IRC §4974). The first one
+  /// may wait until April 1 of the following year. Owners born in 1960 or later
+  /// start at 75.
+  law required-minimum-distribution
+    each year
+    when owner.age >= 73y
+    when self.balance > empty
+    warn total(out, year) > empty "no required minimum distribution taken this year"
+
+
+// The elective deferral limit (IRC §402(g)).
+// Notice 2023-75 (2024), Notice 2024-80 (2025), Notice 2025-67 (2026).
+param limit
+  2024 23_000 USD
+  2025 23_500 USD
+  2026 24_500 USD
+
+// The catch-up for age 50 and over (IRC §414(v)).
+param catch-up
+  2024 7_500 USD
+  2025 7_500 USD
+  2026 8_000 USD
+
+// The larger catch-up for ages 60 through 63 (SECURE 2.0 §109), from 2025.
+// The 2024 row repeats the ordinary catch-up: there was no larger one.
+// verify: the 2026 figure against Notice 2025-67.
+param super-catch-up
+  2024  7_500 USD
+  2025 11_250 USD
+  2026 11_250 USD
