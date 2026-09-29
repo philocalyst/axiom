@@ -93,11 +93,20 @@ pub struct Terms {
     /// fee is paid in (a trading fee, a sale's commission): the parcels sold
     /// fetched that much less, and the parcels bought cost that much more.
     pub cost: Option<Amount>,
+    /// `due`: the flow made a claim due on this day. In a `claim` place its
+    /// parcel stays apart, and it is this flow's `due` and payee that say who
+    /// owes it and by when.
+    pub due: Option<Day>,
 }
 
 impl Terms {
     pub const NONE: Terms =
-        Terms { basis: None, hold: None, basis_end: None, since: None, spender: None, cost: None };
+        Terms { basis: None, hold: None, basis_end: None, since: None, spender: None, cost: None, due: None };
+
+    /// The same terms `days` later: a due day goes with the flow that carries it.
+    pub fn moved(&self, days: i32) -> Terms {
+        Terms { due: self.due.map(|due| due.add_days(days)), ..self.clone() }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -151,13 +160,9 @@ pub struct Txn {
     /// The flows it produced: `first .. first + len` in `Book::flows`.
     pub first: Id<Flow>,
     pub len: u32,
-    pub payee: Option<Id<Entity>>,
     pub codes: Box<[Sym]>,
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,
-    /// `due`: the transaction made a claim due on this day. In a `claim` place
-    /// its parcels stay apart, remembering this transaction.
-    pub due: Option<Day>,
     /// The named plan this transaction is an occurrence of (`DATE paycheck`).
     pub plan: Option<Id<Plan>>,
     pub doc: Option<Sym>,

@@ -743,14 +743,14 @@ pub(crate) fn overdue(
     lot: &Parcel,
     today: Day,
 ) -> Option<Diagnostic> {
-    let txn = book.txns.get(lot.txn)?;
-    let due = txn.due.filter(|&due| due <= today)?;
-    let who = txn.payee.map_or_else(|| show::place(book, place), |entity| book.name(book.entities[entity].path));
+    let claim = book.paid_into(lot.txn, place)?;
+    let due = claim.terms().due.filter(|&due| due <= today)?;
+    let who = claim.payee.map_or_else(|| show::place(book, place), |entity| book.name(book.entities[entity].path));
     let owed = book.show(Amount::new(lot.qty, unit));
     let late = today.0 - due.0;
     Some(
         Diagnostic::warning("overdue", format!("{who} still owes {owed}, {late} days past its due day {due}"))
-            .label(txn.loc, format!("claimed on {}, due {due}", lot.acquired))
+            .label(claim.loc, format!("claimed on {}, due {due}", lot.acquired))
             .note(format!("open for {} since it was made", today.since(lot.acquired)))
             .help("if it has been paid, record the payment `for` the claim's code"),
     )

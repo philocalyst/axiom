@@ -20,8 +20,10 @@ outputs/          every command, run with --today 2026-04-16 unless it says othe
 
 - **People owe Alex as claims.** One `receivable` place per person (`assets/owed/by-ben`, `by-cleo`,
   `by-riley`), and each claim is its own parcel, kept apart by the flow that made it. Rent is 3,150.00 USD
-  paid by Alex: one flow with three legs, `#rent-2025-03 due 2025-03-08`, Alex's third an expense
-  and Ben's and Cleo's thirds claims on them. A payment is `for` the code, `ben -> checking 1_050 USD for
+  paid by Alex to the landlord (`/ landlord` on the header): one flow with three legs, `#rent-2025-03 due
+  2025-03-08`, Alex's third an expense and Ben's and Cleo's thirds claims on them. A leg into an entity is a
+  claim on that entity, whatever payee the header names, so `axiom claims` says Cleo, not her place, and a leg
+  may carry a `due` of its own. A payment is `for` the code, `ben -> checking 1_050 USD for
   #rent-2025-03`, and settles that claim, in part or in full: Ben pays half of June and the rest on July 8,
   Cleo is eleven days late in August and 50.00 USD short in November. The 50.00 USD stays open and
   overdue, and `check` says so.
@@ -40,6 +42,9 @@ outputs/          every command, run with --today 2026-04-16 unless it says othe
   Alex's 295.70 USD share is an expense, Ben, Cleo and Riley each owe 295.70 USD by September 15
   (`#trip-2025-08`). Riley also owes the loan, and a payment `for #trip-2025-08` settles the trip and
   not the loan. Cleo pays 200.00 USD on September 5 and 95.70 USD on October 3.
+- **The `by-` names are a choice, and a place that ends in an entity's name is reported.** `assets/owed/lantern`
+  next to `entity lantern`, the payroll, would be an `ambiguous-name` error (a flow that writes `lantern` means the
+  entity), so the Lantern's receivable is `by-lantern`, and the others follow it.
 - **A work expense.** 138.50 USD for an apron and a tablet stand, on the card on 2025-06-02, is not Alex's
   expense: it is `visa -> lantern-owes 138.50 USD #expense-2025-06 due 2025-07-15`, a claim on the employer. When
   the Lantern pays on July 11 (`for #expense-2025-06`) it settles the claim: it is not wages, and not income.
@@ -98,15 +103,8 @@ claim has a due day and `check` reports it when it is missed).
   in Alex's income and expenses. Only the grant's unspent money is held back.
 - **The forecast still projects Riley's 250.00 USD a month** after 50.00 USD is left: a recurrence learned from
   history knows nothing about the claim's balance, and adds 3,000.00 USD to the year's committed money.
-- **A claim made by a leg does not name its debtor.** `axiom claims` shows `assets/owed/by-cleo`, not Cleo, for a
-  leg of a split: the counterparty is the header's payee or the place. A header payee (`/ landlord`) would name
-  the landlord as the debtor of all three claims, so the shared flows have no payee on the header and the landlord
-  is on Alex's leg. `due` can only be on the header.
 - **A schedule is one due day.** The loan is repaid 250.00 USD a month, but the claim has one due date, the last
   payment's; nothing says that May's payment was late.
-- **A place that ends in an entity's name is an ambiguity, and the entity wins.** `assets/owed/lantern` next to
-  `entity lantern` (payroll) is an `ambiguous-name` error, and every `lantern -> ...` means the entity, so the
-  receivable places are `by-ben`, `by-cleo`, `by-lantern`.
 - **Thirds are hand-rounded.** 69.99 USD is 23.33 + 23.33 + 23.33, and any extra cent (73.54 USD is 24.52 + 24.51 + 24.51) is on Alex's
   leg; the language does no splitting.
 - **`axiom balance --at DATE` panics before an accepted gap.** The wallet's `!` on 2025-08-31 is a pad, and a balance at

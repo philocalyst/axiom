@@ -134,6 +134,51 @@ opening 2025-09-01
     });
 }
 
+// ─── Claims made by the legs of a split ─────────────────────────────────────
+
+#[test]
+fn each_leg_of_a_split_is_a_claim_on_its_own_debtor_and_falls_due_on_its_own_day() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind receivable : asset
+  claim
+kind org : entity
+
+account assets/checking
+account assets/owed/ben : receivable
+account assets/owed/cleo : receivable
+account expenses/rent
+
+entity ben : org
+  via assets/owed/ben
+entity cleo : org
+  via assets/owed/cleo
+entity landlord : org
+  via expenses/rent
+
+opening 2025-02-01
+  checking 5_000 USD
+
+2025-03-01 checking -> 3_150 USD / landlord #rent due 2025-03-08
+  rent  1_050 USD
+  ben   1_050 USD
+  cleo  1_050 USD due 2025-03-15
+";
+    with_run(text, day(2025, 4, 1), |_, run| {
+        let overdue: Vec<_> =
+            run.diagnostics.iter().filter(|d| d.code == "overdue").map(|d| d.message.as_str()).collect();
+        assert_eq!(
+            overdue,
+            [
+                "ben still owes 1,050.00 USD, 24 days past its due day 2025-03-08",
+                "cleo still owes 1,050.00 USD, 17 days past its due day 2025-03-15",
+            ]
+        );
+    });
+}
+
 // ─── The fee legs of an exchange ────────────────────────────────────────────
 
 const TRADES: &str = "\

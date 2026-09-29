@@ -281,11 +281,10 @@ impl<'a, 's> Elab<'a, 's> {
         }
     }
 
-    /// What follows a header or leg. A `due` belongs to the transaction, so it
-    /// is refused on a leg.
+    /// What follows a header or leg.
     // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
-    pub fn tail(&mut self, tail: &ast::Tail<'s>, on_leg: bool) -> Option<Tail> {
+    pub fn tail(&mut self, tail: &ast::Tail<'s>) -> Option<Tail> {
         let mut resolved = Tail::default();
         let mut whole = true;
         if let Some(payee) = tail.payee {
@@ -293,13 +292,13 @@ impl<'a, 's> Elab<'a, 's> {
             (resolved.payee, whole) = (payee, whole && payee.is_some());
         }
         for clause in &self.file[tail.clauses] {
-            let ok = self.clause(clause, on_leg, &mut resolved);
+            let ok = self.clause(clause, &mut resolved);
             whole &= ok.is_some();
         }
         whole.then_some(resolved)
     }
 
-    fn clause(&mut self, clause: &ast::Clause<'s>, on_leg: bool, tail: &mut Tail) -> Option<()> {
+    fn clause(&mut self, clause: &ast::Clause<'s>, tail: &mut Tail) -> Option<()> {
         let code = |this: &mut Self, code: ast::Code| {
             let sym = this.world.sym(code.name());
             this.coded.push((sym, this.file.loc(code.0)));
@@ -314,13 +313,6 @@ impl<'a, 's> Elab<'a, 's> {
             }
             ClauseKind::For(For::Period(first, last)) => tail.period = Some((first, last)),
             ClauseKind::For(For::Entity(name)) => tail.hold = Some(self.entity(name.0)?),
-            ClauseKind::Due(_) if on_leg => {
-                return self.fail(
-                    Diagnostic::error("due-on-leg", "a claim falls due as a whole, so `due` belongs on the header")
-                        .label(clause.at, "a leg has no due day of its own")
-                        .help("move `due` to the header of the transaction"),
-                );
-            }
             ClauseKind::Due(due) => tail.due = Some(due),
             ClauseKind::Basis(amount) => tail.basis = Some(self.basis(amount)?),
             ClauseKind::Since(day) => tail.since = Some(day),
@@ -362,13 +354,13 @@ impl<'a, 's> Elab<'a, 's> {
     /// One indented line: a place, how much, and its own tail.
     pub fn leg(&mut self, leg: &ast::Leg<'s>) -> Option<Leg> {
         let (placed, slot, tail) =
-            (self.place(&leg.place), self.quantity(&leg.amount, leg.loc), self.tail(&leg.tail, true));
+            (self.place(&leg.place), self.quantity(&leg.amount, leg.loc), self.tail(&leg.tail));
         Some(Leg { placed: placed?, slot: slot?, tail: tail?, loc: leg.loc })
     }
 
     /// A header and its legs, resolved. `loc` is the header line.
     pub fn shape(&mut self, flow: &ast::Flow<'s>, loc: Loc) -> Option<Shape> {
-        let (from, to, tail) = (self.side(&flow.from, loc), self.side(&flow.to, loc), self.tail(&flow.tail, false));
+        let (from, to, tail) = (self.side(&flow.from, loc), self.side(&flow.to, loc), self.tail(&flow.tail));
         let legs: Vec<Option<Leg>> = self.file[flow.legs].iter().map(|leg| self.leg(leg)).collect();
         let legs: Option<Vec<Leg>> = legs.into_iter().collect();
         Some(Shape { from: from?, to: to?, tail: tail?, legs: legs?, loc, arrow: self.arrow(loc) })

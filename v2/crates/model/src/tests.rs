@@ -475,9 +475,9 @@ fn due_basis_and_basis_ends_are_kept() {
 ";
     with_book(text, |book, diags| {
         assert!(diags.is_empty(), "{diags:?}");
-        let dues: Vec<Option<String>> = book.txns.iter().map(|(_, txn)| txn.due.map(|day| day.to_string())).collect();
-        assert_eq!(dues, [Some("2026-03-31".into()), Some("2026-05-01".into()), None, None, None]);
         let flows = flows_of(book);
+        let dues: Vec<_> = flows.iter().map(|flow| flow.terms().due.map(|day| day.to_string())).collect();
+        assert_eq!(dues, [Some("2026-03-31".into()), Some("2026-05-01".into()), None, None, None]);
         let usd = book.commodity("USD").unwrap();
         assert_eq!(
             flows[2].terms().basis.map(|qty| book.show(crate::Amount::new(qty, usd)).to_string()),
@@ -1087,13 +1087,34 @@ fn a_header_waiver_covers_every_leg_with_one_location() {
 }
 
 #[test]
-fn a_due_day_belongs_to_the_header_and_an_opening_line_says_since() {
+fn a_leg_names_its_own_counterparty_and_due_day_over_the_headers() {
     let text = "
-2026-01-13 acme -> 100 USD
-  savings   40 USD due 30d
-  checking  ...
+entity aldi : grocer
+2026-03-01 checking -> 300 USD / acme #x due 2026-03-08
+  food     100 USD
+  savings  100 USD / aldi
+  aldi     100 USD due 30d
+2026-03-02 -> food 100 USD / aldi
+  savings   40 USD
+  acme      ...
 ";
-    with_book(text, |_, diags| assert_eq!(codes(diags), ["due-on-leg"], "{diags:?}"));
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let name = |flow: &crate::Flow| flow.payee.map(|entity| book.name(book.entities[entity].path));
+        let flows = flows_of(book);
+        let says: Vec<_> = flows.iter().map(|flow| (name(flow), flow.terms().due.map(|day| day.to_string()))).collect();
+        assert_eq!(
+            says,
+            [
+                (Some("acme"), Some("2026-03-08".into())),
+                (Some("aldi"), Some("2026-03-08".into())),
+                (Some("aldi"), Some("2026-03-31".into())),
+                (Some("aldi"), None),
+                (Some("aldi"), None),
+            ],
+            "a leg's own payee, else the entity it pays, else the header's; and its own due"
+        );
+    });
 }
 
 #[test]

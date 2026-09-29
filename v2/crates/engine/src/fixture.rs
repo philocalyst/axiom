@@ -235,10 +235,8 @@ impl Fixture {
             day,
             first: id,
             len: 1,
-            payee: None,
             codes: Box::new([]),
             waive: None,
-            due: None,
             plan: None,
             doc: None,
             loc,
@@ -330,11 +328,9 @@ impl Fixture {
         self.entities[me].member = Some(household);
     }
 
-    /// The flow's transaction made a claim, due on `due`, against `payee`.
+    /// The flow made a claim, due on `due`, against `payee`.
     pub fn claim(&mut self, id: Id<Flow>, due: i32, payee: Id<Entity>) {
-        let txn = self.flows[id.index()].txn;
-        self.txns[txn.index()].due = Some(Day(due));
-        self.txns[txn.index()].payee = Some(payee);
+        self.terms(id, Terms { due: Some(Day(due)), ..Terms::default() });
         self.flows[id.index()].payee = Some(payee);
     }
 

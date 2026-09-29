@@ -8,9 +8,10 @@ use axiom_model::{Amount, Flow, Infer, Mode, Place, Recognition};
 
 /// A `Planned` flow on `day`, as `template` says it: the same ends, payee and
 /// terms (what it is `for`, the basis it takes, a basis end), and its
-/// recognition period moved along with the day, so a plan that pays `for 2026`
-/// each January means 2027 the next time. It carries no codes: those link real
-/// events.
+/// recognition period and due day moved along with the day, so a plan that pays
+/// `for 2026` each January means 2027 the next time, and an invoice a plan
+/// sends falls due a month after each one. It carries no codes: those link
+/// real events.
 pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
     let shift = day.0 - template.day.0;
     let recognized = Recognition {
@@ -21,7 +22,7 @@ pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
         recognized,
         payee: template.payee,
         select: template.select.clone(),
-        terms: template.terms.clone(),
+        terms: template.terms.as_ref().map(|terms| Box::new(terms.moved(shift))),
         ..hypothetical(template, day, template.from, template.to, out, arrive)
     }
 }

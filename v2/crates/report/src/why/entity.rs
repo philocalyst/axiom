@@ -66,7 +66,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> 
     }
 
     let open = claims::open(lens, run, run.holdings.iter());
-    let with_it: Vec<&claims::Claim> = open.iter().filter(|claim| claim.with(book, entity)).collect();
+    let with_it: Vec<&claims::Claim> = open.iter().filter(|claim| claim.with(entity)).collect();
     Report::new(format!("Why {name}")).with(places).with(laws_table(book, &laws)).with(ties).with(claims::section(
         lens,
         "Claims with it",

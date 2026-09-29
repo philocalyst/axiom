@@ -438,6 +438,14 @@ impl<'s> Book<'s> {
         Some(Amount::new(crate::prices::rescale(amount.qty, from, to, rate)?, unit))
     }
 
+    /// The flow of `txn` that paid into `place`: what made a parcel there. A
+    /// claim's counterparty is its payee and its due day is its `due`.
+    pub fn paid_into(&self, txn: Id<Txn>, place: Id<Place>) -> Option<&Flow> {
+        let txn = self.txns.get(txn)?;
+        let first = txn.first.index();
+        (first..first + txn.len as usize).map(|at| &self.flows[Id::new(at as u32)]).find(|flow| flow.to == place)
+    }
+
     /// `1,234.56 USD`
     pub fn show(&self, amount: Amount) -> impl std::fmt::Display + '_ {
         let unit = &self.commodities[amount.unit];
