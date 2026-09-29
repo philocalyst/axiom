@@ -43,14 +43,14 @@ error[ambiguous-lots]: ambiguous lot: assets/wallet holds 2 lots that differ and
    │
 84 │ 2026-02-10 checking -> wallet 0.5 BTC @ 60_000 USD
    │ ─────────────────────────┬────────────────────────
-   │                          ╰── acquired 2026-02-10: 0.50000000 BTC, basis 30,000.00 USD; from it alone the gain is 9,000.00 USD
+   │                          ╰── acquired 2026-02-10: 0.50 BTC, basis 30,000.00 USD; from it alone the gain is 9,000.00 USD
 85 │ 2026-02-20 checking -> wallet 0.5 BTC @ 90_000 USD
    │ ─────────────────────────┬────────────────────────
-   │                          ╰── acquired 2026-02-20: 0.50000000 BTC, basis 45,000.00 USD; from it alone the gain is 1,500.00 USD
+   │                          ╰── acquired 2026-02-20: 0.50 BTC, basis 45,000.00 USD; from it alone the gain is 1,500.00 USD
    ⋮
 94 │ 2026-03-01 wallet 0.25 BTC -> checking 24_000 USD
    │ ────────────────────────┬────────────────────────
-   │                         ╰── 0.25000000 BTC could come from any of them
+   │                         ╰── 0.25 BTC could come from any of them
    │
    = note: the sale still moves the oldest lot first, so the lines after it stay consistent
    = help: name the lot, `assets/wallet[2026-02-10]`, or a policy, `assets/wallet[fifo]` (or lifo,

@@ -52,9 +52,15 @@ impl Qty {
     }
 
     /// Displays with `scale` decimal places and thousands separators:
-    /// `-12,000.50`.
+    /// `-12,000.50`. Every digit is shown, so a column of them aligns.
     pub fn show(self, scale: u8) -> Shown {
-        Shown { qty: self, scale }
+        Shown { qty: self, scale, keep: scale }
+    }
+
+    /// Displays for prose: like [`Qty::show`], but zeros past the second
+    /// decimal are dropped, so `0.50000000 BTC` reads `0.50 BTC`.
+    pub fn brief(self, scale: u8) -> Shown {
+        Shown { qty: self, scale, keep: scale.min(2) }
     }
 }
 
@@ -380,12 +386,18 @@ pub fn digits8(chunk: &[u8; 8]) -> u32 {
 pub struct Shown {
     qty: Qty,
     scale: u8,
+    /// Decimal places always shown; trailing zeros beyond them are dropped.
+    keep: u8,
 }
 
 impl fmt::Display for Shown {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let shown = Shown128 { value: self.qty.0 as i128, scale: self.scale, group: true };
-        f.pad(&shown.to_string())
+        let mut value = self.qty.0 as i128;
+        let mut scale = self.scale;
+        while scale > self.keep && value % 10 == 0 {
+            (value, scale) = (value / 10, scale - 1);
+        }
+        f.pad(&Shown128 { value, scale, group: true }.to_string())
     }
 }
 
@@ -462,6 +474,9 @@ mod tests {
         assert_eq!(Qty(-1234567).show(2).to_string(), "-12,345.67");
         assert_eq!(Qty(5).show(2).to_string(), "0.05");
         assert_eq!(Qty(1000).show(0).to_string(), "1,000");
+        assert_eq!(Qty(50_000_000).brief(8).to_string(), "0.50");
+        assert_eq!(Qty(12_345_678).brief(8).to_string(), "0.12345678");
+        assert_eq!(Qty(1_250).brief(2).to_string(), "12.50");
         assert_eq!(Ratio::percent(35, 1).unwrap().to_string(), "0.035");
         assert_eq!(Ratio::new(1, 3).unwrap().to_string(), "1/3");
     }

@@ -394,7 +394,7 @@ impl<'s> Book<'s> {
     /// `1,234.56 USD`
     pub fn show(&self, amount: Amount) -> impl std::fmt::Display + '_ {
         let unit = &self.commodities[amount.unit];
-        Shown { qty: amount.qty.show(unit.scale), unit: self.name(unit.symbol) }
+        Shown { qty: amount.qty.brief(unit.scale), unit: self.name(unit.symbol) }
     }
 }
 

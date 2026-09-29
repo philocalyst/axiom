@@ -74,6 +74,15 @@ impl<T> Arena<T> {
         Arena { items: Vec::new() }
     }
 
+    pub fn with_capacity(capacity: usize) -> Arena<T> {
+        Arena { items: Vec::with_capacity(capacity) }
+    }
+
+    /// Room for `more` items beyond those held.
+    pub fn reserve(&mut self, more: usize) {
+        self.items.reserve(more);
+    }
+
     pub fn push(&mut self, item: T) -> Id<T> {
         let id = Id::new(u32::try_from(self.items.len()).expect("fewer than 2^32 items"));
         self.items.push(item);
@@ -106,6 +115,14 @@ impl<T> Arena<T> {
 
     pub fn as_slice(&self) -> &[T] {
         &self.items
+    }
+}
+
+impl<T> From<Vec<T>> for Arena<T> {
+    /// Items keep their positions: item `i` gets `Id::new(i)`.
+    fn from(items: Vec<T>) -> Arena<T> {
+        assert!(u32::try_from(items.len()).is_ok(), "fewer than 2^32 items");
+        Arena { items }
     }
 }
 

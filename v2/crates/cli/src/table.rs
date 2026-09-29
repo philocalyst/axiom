@@ -79,7 +79,11 @@ fn table_lines(section: &Section, locator: &mut Locator) -> Vec<Line> {
 
     let mut lines = vec![assemble(titles, &widths, &section.columns), rule()];
     for (at, (row, cells)) in section.rows.iter().zip(rows).enumerate() {
-        if row.style == Style::Total && at > 0 {
+        // A total without a label of its own continues the one above it (the
+        // same total in another commodity), so it shares that total's rule.
+        let continues = matches!(row.cells.first(), None | Some(Cell::Blank))
+            && at.checked_sub(1).is_some_and(|before| section.rows[before].style == Style::Total);
+        if row.style == Style::Total && at > 0 && !continues {
             lines.push(rule());
         }
         lines.push(assemble(cells, &widths, &section.columns));

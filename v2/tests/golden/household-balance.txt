@@ -3,7 +3,6 @@ Balances at 2026-03-31
   Place                Balance
   ────────────────────────────
   assets                 2 VTI
-  ────────────────────────────
                  77,444.63 USD
     bank         26,979.75 USD
       checking   10,332.70 USD
