@@ -2,7 +2,7 @@
 
 use axiom_core::num::POW10;
 use axiom_core::num::mul_div;
-use axiom_core::{Arena, Day, Id, Qty, Ratio};
+use axiom_core::{Arena, Day, Id, Map, Qty, Ratio};
 
 use crate::book::{Amount, Book, Commodity};
 use crate::journal::{Flow, Infer, Mode, Prices, Quote};
@@ -28,10 +28,21 @@ pub(crate) fn implied_rate(commodities: &Arena<Commodity>, priced: Amount, quote
 impl Prices {
     /// Sorts `quotes`. On the same pair and day, written prices beat implied
     /// ones and later declarations beat earlier ones.
-    pub fn new(mut quotes: Vec<Quote>) -> Prices {
+    pub fn new(quotes: Vec<Quote>) -> Prices {
         // Stable, with the winner last: lookups take the last quote of a day.
-        quotes.sort_by_key(|quote| (quote.unit, quote.quote, quote.day, !quote.implied));
-        Prices { quotes }
+        // Quotes come in the order written, which is by day within a pair, so
+        // grouping them by pair leaves each group nearly sorted already.
+        let mut pairs: Map<(Id<Commodity>, Id<Commodity>), Vec<Quote>> = Map::default();
+        for quote in quotes {
+            pairs.entry((quote.unit, quote.quote)).or_default().push(quote);
+        }
+        let mut groups: Vec<_> = pairs.into_iter().collect();
+        groups.sort_unstable_by_key(|&(pair, _)| pair);
+        let sorted = groups.into_iter().flat_map(|(_, mut group)| {
+            group.sort_by_key(|quote| (quote.day, !quote.implied));
+            group
+        });
+        Prices { quotes: sorted.collect() }
     }
 
     /// Whole `quote` units per whole `unit` on `day`: the latest quote at or
