@@ -16,8 +16,8 @@ Counted
     total-income          119.41 USD  3 sources
     investment-income     119.41 USD  3 sources
     payments            3,000.00 USD  journal/2026/04.ax:22
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
 
 Owed
-  Owed  To  Due  Amount  From
-  ───────────────────────────
-  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
+  · The 2026 returns close on 2027-01-15 and 2027-04-15; what they owe is not figured yet; the
+    tallies are counted so far.

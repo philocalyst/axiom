@@ -7,7 +7,7 @@ use axiom_core::{Day, FileId};
 use axiom_engine::{Options, Run};
 use axiom_model::{Book, Source};
 
-use crate::tests::lines;
+use crate::tests::{lines, show};
 use crate::Query;
 
 fn day(y: i32, m: u32, d: u32) -> Day {
@@ -135,6 +135,82 @@ law audit
         };
         assert_eq!(when("return"), "When | each year closing 04-15");
         assert_eq!(when("audit"), "When | each year");
+    });
+}
+
+// ─── Taxes before the return closes ─────────────────────────────────────────
+
+/// A tally counted as the year goes, and a tax figured from it on April 15 of
+/// the next. The last flow is in 2027, so the journal itself reaches into the
+/// year after the one taxed.
+const RETURN: &str = "\
+base USD
+commodity USD
+  precision 2
+
+entity treasury
+
+account assets/checking
+account income/salary
+
+law count-pay
+  on in
+  when to is assets/checking
+  count amount as pay
+
+law return
+  each year closing 04-15
+  owe tally(pay) * 10% to treasury as income-tax
+
+2026-03-01 income/salary -> checking 1_000 USD
+2026-09-01 income/salary -> checking 1_000 USD
+2027-01-05 income/salary -> checking 500 USD
+";
+
+#[test]
+fn tax_says_the_return_is_not_closed_and_leaves_what_it_owes_out_instead_of_at_zero() {
+    with_run(RETURN, day(2027, 3, 1), |book, run| {
+        let tax = Query::Tax { year: Some(2026) };
+        let report = crate::report(book, run, &tax, None).unwrap();
+        let [counted, owed] = &report.sections[..] else { panic!("two sections: {}", show(&report)) };
+        assert_eq!(lines(counted), ["=project |  |", "  pay | 2,000.00 USD | 2 sources"]);
+        assert!(owed.rows.is_empty(), "no line of the return is figured yet");
+        assert_eq!(
+            owed.notes,
+            ["The 2026 return closes on 2027-04-15; what it owes is not figured yet; the tallies are counted so far."]
+        );
+    });
+}
+
+#[test]
+fn tax_after_the_return_closes_shows_what_it_owes() {
+    with_run(RETURN, day(2027, 4, 20), |book, run| {
+        let tax = Query::Tax { year: Some(2026) };
+        let report = crate::report(book, run, &tax, None).unwrap();
+        let [_, owed] = &report.sections[..] else { panic!("two sections: {}", show(&report)) };
+        assert_eq!(lines(owed)[1], "  income-tax | treasury | 2027-04-15 | 200.00 USD | period end");
+        assert!(owed.notes.iter().all(|note| !note.contains("not figured")), "{:?}", owed.notes);
+    });
+}
+
+/// One of two returns has closed: what it owes is listed, and the total is what
+/// is owed so far.
+#[test]
+fn tax_with_one_return_closed_and_one_not_totals_what_is_owed_so_far() {
+    let state = "\nlaw state-return\n  each year closing 06-15\n  owe tally(pay) * 5% to treasury as state-tax\n";
+    with_run(&format!("{RETURN}{state}"), day(2027, 5, 1), |book, run| {
+        let tax = Query::Tax { year: Some(2026) };
+        let report = crate::report(book, run, &tax, None).unwrap();
+        let [_, owed] = &report.sections[..] else { panic!("two sections: {}", show(&report)) };
+        assert_eq!(
+            lines(owed),
+            [
+                "=project |  |  |  |",
+                "  income-tax | treasury | 2027-04-15 | 200.00 USD | period end",
+                "=Total owed so far |  |  | 200.00 USD |",
+            ]
+        );
+        assert_eq!(owed.notes[0], "The 2026 return closes on 2027-06-15; what it owes is not figured yet; the tallies are counted so far.");
     });
 }
 

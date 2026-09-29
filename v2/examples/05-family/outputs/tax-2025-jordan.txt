@@ -7,8 +7,4 @@ Counted
   ────────────────────────────────────────────────
     us/401k
       elective-deferrals  5,846.36 USD  26 sources
-
-Owed
-  Owed  To  Due  Amount  From
-  ───────────────────────────
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

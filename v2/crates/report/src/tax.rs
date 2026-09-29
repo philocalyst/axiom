@@ -12,6 +12,8 @@ use axiom_core::{Day, Id, Map, Qty, Sym};
 use axiom_engine::{Cause, Effect, Owed, Run};
 use axiom_model::{Amount, Book, Commodity, Entity, System};
 
+use crate::closings;
+use crate::history::horizon;
 use crate::lens::Whose;
 use crate::table::{cause_cell, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
@@ -24,15 +26,29 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) ->
     let owners: BTreeSet<Id<Entity>> = owed.iter().chain(&tallied).map(|effect| effect.owner).collect();
 
     let (tallied, owed) = (lines(&tallied), lines(&owed));
-    let mut tallies = tallies(book, &tallied, owners.len() > 1);
-    let mut obligations = obligations(book, &owed, owners.len() > 1);
-    if tallies.rows.is_empty() && obligations.rows.is_empty() {
+    // A closing law has not judged the year until its day: what it owes is
+    // missing, not nothing, and what was counted is counted so far.
+    let closes = pending_closings(book, run, whose, year);
+    let several = owners.len() > 1;
+    let mut tallies = tallies(book, &tallied, several);
+    let mut obligations = obligations(book, &owed, several, !closes.is_empty());
+    if !closes.is_empty() {
+        let note = not_closed(year, &closes);
+        if obligations.rows.is_empty() {
+            // Not an empty table, which would read as owing nothing.
+            obligations = Section::note_only(note).headed("Owed");
+        } else {
+            obligations.note(note);
+        }
+    }
+    if tallies.rows.is_empty() && obligations.rows.is_empty() && closes.is_empty() {
         tallies.note(
             "Nothing was counted or owed. Laws count and owe only for entities \
              that live under a system that declares them.",
         );
     } else {
-        obligations.note("Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.");
+        let listed = if obligations.rows.is_empty() { &mut tallies } else { &mut obligations };
+        listed.note("Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.");
     }
     if owed.iter().any(|line| line.priced) {
         obligations.note("A penalty is the price of a violated law: it is owed instead of the law failing.");
@@ -42,6 +58,28 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) ->
         _ => format!("Taxes {year}"),
     };
     Report::new(title).with(tallies).with(obligations)
+}
+
+/// The days after the run's end on which closing laws written for `whose`
+/// will judge `year`.
+fn pending_closings(book: &Book, run: &Run, whose: &Whose, year: i32) -> Vec<Day> {
+    let horizon = horizon(book, run);
+    let mut days = closings::days_for(book, year, |rule| whose.governs(book, rule.subject));
+    days.retain(|&day| day > horizon);
+    days
+}
+
+/// Why a year has no return yet: the days its closing laws will judge it.
+fn not_closed(year: i32, closes: &[Day]) -> String {
+    let (return_, closes_, owes) = match closes {
+        [_] => ("return", "closes", "it owes"),
+        _ => ("returns", "close", "they owe"),
+    };
+    let days: Vec<String> = closes.iter().map(Day::to_string).collect();
+    format!(
+        "The {year} {return_} {closes_} on {}; what {owes} is not figured yet; the tallies are counted so far.",
+        days.join(" and ")
+    )
 }
 
 /// Everything counted or owed under one name. A tally is one line on a
@@ -99,8 +137,9 @@ fn tallies<'s>(book: &Book<'s>, lines: &[Line], several: bool) -> Section<'s> {
     section
 }
 
-/// Obligations, and what each jurisdiction is owed.
-fn obligations<'s>(book: &Book<'s>, lines: &[Line], several: bool) -> Section<'s> {
+/// Obligations, and what each jurisdiction is owed. `unfinished`: a law that
+/// owes has not judged the year yet, so the totals are what is owed so far.
+fn obligations<'s>(book: &Book<'s>, lines: &[Line], several: bool, unfinished: bool) -> Section<'s> {
     let columns =
         [Column::left("Owed"), Column::left("To"), Column::left("Due"), Column::right("Amount"), Column::left("From")];
     let mut section = Section::new(columns).headed("Owed");
@@ -118,7 +157,7 @@ fn obligations<'s>(book: &Book<'s>, lines: &[Line], several: bool) -> Section<'s
         if several_groups { totals(book, group, &format!("Total {jurisdiction}")) } else { Vec::new() }
     };
     grouped(&mut section, book, lines, several, cells, foot);
-    for row in totals(book, lines, "Total owed") {
+    for row in totals(book, lines, if unfinished { "Total owed so far" } else { "Total owed" }) {
         section.push(row);
     }
     section

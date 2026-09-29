@@ -30,6 +30,8 @@ Owed
     us/529
       nonqualified-529-penalty (penalty)  irs  2027-04-15  34.94 USD  journal/2026/03.ax:29
   ─────────────────────────────────────────────────────────────────────────────────────────
-  Total owed                                               34.94 USD
+  Total owed so far                                        34.94 USD
+  · The 2026 return closes on 2027-04-15; what it owes is not figured yet; the tallies are counted
+    so far.
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
   · A penalty is the price of a violated law: it is owed instead of the law failing.

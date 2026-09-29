@@ -136,6 +136,20 @@ pub fn journal_ends_by(book: &Book, day: Day) -> bool {
         && by(book.asserts.last().map(|assert| assert.day))
 }
 
+/// The last day the run folded: `today`, or the journal's last fact if that is
+/// later (the engine's own rule). Periods close and deadlines fire up to here
+/// and no further, so a law with a deadline after it has not run.
+pub fn horizon(book: &Book, run: &Run) -> Day {
+    let last_flow = book.flows.as_slice().last().map(|flow| flow.day);
+    let last_assert = book.asserts.last().map(|assert| assert.day);
+    let landed = |posted: &Posted| match posted.state {
+        State::Settled(on) | State::Returned(on) => Some(on),
+        _ => None,
+    };
+    let last_change = run.posted.iter().filter_map(landed).max();
+    [last_flow, last_assert, last_change].into_iter().flatten().fold(run.today, Day::max)
+}
+
 /// What a place held of one commodity: how many, and, for places that are not
 /// on the balance sheet, what the flows into it were worth on their own days.
 #[derive(Clone, Copy, Default, Debug)]
