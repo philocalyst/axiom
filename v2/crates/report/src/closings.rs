@@ -6,7 +6,7 @@
 //! figured. Views that look at a year, or run the books forward, ask here when
 //! that day is, from the laws themselves.
 
-use axiom_core::Day;
+use axiom_core::{Day, Days};
 use axiom_model::{Book, Closing, Period, Rule, Trigger};
 
 /// The rules of the book's closing laws, with the day of the year each closes on.
@@ -35,8 +35,8 @@ pub fn next_after(book: &Book, day: Day) -> Option<Day> {
 /// day of that year (a residence that ended before it has nothing to judge).
 pub fn days_for(book: &Book, year: i32, wanted: impl Fn(&Rule) -> bool) -> Vec<Day> {
     let (first, last) = (Day::from_ymd(year, 1, 1), Day::from_ymd(year, 12, 31));
-    let (Some(first), Some(last)) = (first, last) else { return Vec::new() };
-    let in_force = |rule: &Rule| rule.from <= last && first <= rule.until;
+    let Some(days) = first.zip(last).and_then(|(first, last)| Days::new(first, last)) else { return Vec::new() };
+    let in_force = |rule: &Rule| rule.days.overlaps(days);
     let judged = rules(book).filter(|&(rule, _)| in_force(rule) && wanted(rule));
     let mut days: Vec<Day> = judged.filter_map(|(_, closing)| closing.day_for(year)).collect();
     days.sort_unstable();

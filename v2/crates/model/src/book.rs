@@ -7,7 +7,7 @@
 //! include that one" are all interval tests.
 
 use axiom_core::day::days_in_month;
-use axiom_core::{Arena, Day, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Tree};
+use axiom_core::{Arena, Day, Days, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Tree};
 
 use crate::journal::{Assert, Event, Flow, Plan, Prices, Split, Txn};
 use crate::law::{Law, Rules, Ty, Value};
@@ -276,8 +276,7 @@ pub struct Entity {
 /// on either side when unwritten.
 #[derive(Clone, Copy, Debug)]
 pub struct Residence {
-    pub from: Day,
-    pub until: Day,
+    pub days: Days,
     pub system: Id<System>,
 }
 
@@ -520,6 +519,7 @@ fn land(base: Day, on: Option<On>) -> Day {
     match on {
         None => base,
         Some(On::MonthDay(day)) => clamped(month, day).unwrap_or(base),
+        Some(On::Last) => base.month_end(),
         Some(On::YearDay { month, day }) => clamped(u32::from(month).clamp(1, 12), day).unwrap_or(base),
         Some(On::Weekday(weekday)) => base.add_days(((u32::from(weekday) + 7 - base.weekday()) % 7) as i32),
     }
@@ -720,9 +720,7 @@ impl<'s> Book<'s> {
     /// The flow of `txn` that paid into `place`: what made a parcel there. A
     /// claim's counterparty is its payee and its due day is its `due`.
     pub fn paid_into(&self, txn: Id<Txn>, place: Id<Place>) -> Option<&Flow> {
-        let txn = self.txns.get(txn)?;
-        let first = txn.first.index();
-        (first..first + txn.len as usize).map(|at| &self.flows[Id::new(at as u32)]).find(|flow| flow.to == place)
+        self.flows[self.txns.get(txn)?.flows].iter().find(|flow| flow.to == place)
     }
 
     /// `1,234.56 USD`

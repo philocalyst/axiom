@@ -3,7 +3,7 @@
 //! become flows under one [`Txn`].
 
 use axiom_core::diag::closest;
-use axiom_core::{Day, Diagnostic, Id, Map};
+use axiom_core::{Day, Diagnostic, Id, Map, Run};
 use axiom_syntax::{self as ast, Item, Quantity};
 
 use super::moves::Move;
@@ -70,8 +70,7 @@ impl<'a, 's> Elab<'a, 's> {
         self.sink.unordered |= self.sink.txns.last().is_some_and(|last| last.day > day);
         self.sink.txns.push(Txn {
             day,
-            first: Id::new(first as u32),
-            len: (self.sink.flows.len() - first) as u32,
+            flows: Run::new(Id::new(first as u32), (self.sink.flows.len() - first) as u32),
             codes: header.map_or_else(Box::default, |header| header.codes.iter().map(|&(code, _)| code).collect()),
             waive: header.and_then(|header| header.waive),
             plan,

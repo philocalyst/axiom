@@ -7,11 +7,10 @@
 
 use std::iter;
 
-use axiom_core::{Day, Id, Qty};
+use axiom_core::{Day, Days, Id, Qty, spread};
 use axiom_engine::Run;
 use axiom_model::{Book, Period, Place};
 
-use crate::apportion::Apportion;
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
 use crate::lens::{Lens, Whose};
@@ -131,23 +130,22 @@ impl Statement {
     /// whole range.
     fn record(&mut self, lens: Lens, posting: &Posting) {
         let flow = posting.flow;
-        self.spread_seen |= flow.recognized.until > flow.day;
-        self.recognize(lens, flow.from, posting.out_in_base(lens).map(|qty| -qty), flow.day, flow.day);
-        self.recognize(lens, flow.to, posting.arrive_in_base(lens), flow.recognized.from, flow.recognized.until);
+        self.spread_seen |= flow.recognized.last() > flow.day;
+        self.recognize(lens, flow.from, posting.out_in_base(lens).map(|qty| -qty), Days::on(flow.day));
+        self.recognize(lens, flow.to, posting.arrive_in_base(lens), flow.recognized);
     }
 
-    fn recognize(&mut self, lens: Lens, place: Id<Place>, change: Option<Qty>, first: Day, last: Day) {
+    fn recognize(&mut self, lens: Lens, place: Id<Place>, change: Option<Qty>, over: Days) {
         let Some(sign) = statement_sign(lens.book, place).filter(|_| lens.owns(place)) else { return };
         let Some(change) = change else {
             self.unpriced += 1;
             return;
         };
-        let share = Apportion::new(Qty(change.0 * sign), first, last);
-        for period in self.periods.overlapping(first, last) {
-            let start = first.max(self.periods.start(period));
-            let end = last.min(self.periods.end(period)).min(self.cutoff);
-            if start <= end {
-                self.grid.add(place, period, share.between(start, end));
+        let recognized = Qty(change.0 * sign);
+        for period in self.periods.overlapping(over.first(), over.last()) {
+            let window = self.periods.window(period).days();
+            if let Some(happened) = Days::new(window.first(), window.last().min(self.cutoff)) {
+                self.grid.add(place, period, spread(recognized, over, happened));
             }
         }
     }

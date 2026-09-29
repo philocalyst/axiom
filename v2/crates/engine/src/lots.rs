@@ -550,7 +550,7 @@ impl Slot {
         if plain > Qty::ZERO && !selection.constrains() {
             // Plain money has no transaction or acquisition day of its own.
             let basis = if money { plain } else { Qty::ZERO };
-            let parcel = Parcel { qty: plain, basis, acquired: Day(i32::MIN), txn: Id::new(0), tied: None };
+            let parcel = Parcel { qty: plain, basis, acquired: Day::MIN, txn: Id::new(0), tied: None };
             out.push(Candidate { txn: None, ..Candidate::new(Source::Plain, &parcel, money) });
         }
         let lots = self.holding.lots.iter().enumerate();
@@ -684,11 +684,10 @@ impl Selection<'_> {
     }
 
     pub fn admits(&self, lot: &Parcel) -> bool {
-        let ranges =
-            self.selectors.iter().filter_map(|s| if let Select::Range(a, b) = *s { Some((a, b)) } else { None });
+        let ranges = self.selectors.iter().filter_map(|s| if let Select::Range(days) = *s { Some(days) } else { None });
         let codes = self.selectors.iter().filter_map(|s| if let Select::Code(c) = *s { Some(c) } else { None });
         let (mut ranges, mut codes) = (ranges.peekable(), codes.peekable());
-        let in_range = ranges.peek().is_none() || ranges.any(|(from, to)| (from..=to).contains(&lot.acquired));
+        let in_range = ranges.peek().is_none() || ranges.any(|days| days.contains(lot.acquired));
         let marked = codes.peek().is_none() || {
             let marks = self.txns.get(lot.txn).map_or(&[][..], |txn| &txn.codes);
             codes.any(|code| marks.contains(&code))
@@ -862,9 +861,13 @@ impl Holdings {
 
 #[cfg(test)]
 mod tests {
-    use axiom_core::Day;
+    use axiom_core::{Day, Days};
 
     use super::*;
+
+    fn span(first: i32, last: i32) -> Days {
+        Days::new(Day(first), Day(last)).unwrap()
+    }
 
     fn lot(qty: i64, basis: i64, acquired: i32) -> Parcel {
         Parcel { qty: Qty(qty), basis: Qty(basis), acquired: Day(acquired), txn: Id::new(acquired as u32), tied: None }
@@ -1108,8 +1111,8 @@ mod tests {
         let txns = Arena::new();
         let pick = |selectors: &[Select]| held.admitted(false, selectors, &txns).0;
         assert_eq!(pick(&[]), 7);
-        assert_eq!(pick(&[Select::Range(Day(10), Day(20))]), 3);
-        assert_eq!(pick(&[Select::Range(Day(10), Day(10)), Select::Range(Day(30), Day(30))]), 5);
+        assert_eq!(pick(&[Select::Range(span(10, 20))]), 3);
+        assert_eq!(pick(&[Select::Range(span(10, 10)), Select::Range(span(30, 30))]), 5);
         assert_eq!(pick(&[Select::Policy(Policy::Lifo)]), 7);
     }
 
@@ -1149,7 +1152,7 @@ mod tests {
                     let spender = (roll(4) == 0).then(|| Id::new(3));
                     let fast_asks = Ask { policy: Some(policy), permits, spender, ..PLAIN };
                     // A selector that admits everything forces the scanning path.
-                    let all = [Select::Range(Day(i32::MIN), Day(i32::MAX))];
+                    let all = [Select::Range(Days::ALWAYS)];
                     let slow_asks = Ask { policy: Some(policy), selectors: &all, permits, spender, ..PLAIN };
                     let (a, b) = (relieve(&mut fast, need, &fast_asks), relieve(&mut slow, need, &slow_asks));
                     assert_eq!((taken(&a), a.shortfall), (taken(&b), b.shortfall), "{policy:?} step {step}");

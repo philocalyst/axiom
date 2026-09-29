@@ -1,6 +1,6 @@
 //! End to end: text in, book and diagnostics out.
 
-use axiom_core::{Diagnostic, FileId};
+use axiom_core::{Day, Diagnostic, FileId};
 use axiom_syntax::parse;
 
 use crate::{Book, Miss, Source, build};
@@ -411,7 +411,7 @@ fn flows_of<'a>(book: &'a Book) -> Vec<&'a crate::Flow> {
 
 /// The first and last day a flow is recognized over, as text.
 fn recognized(flow: &crate::Flow) -> String {
-    format!("{}..{}", flow.recognized.from, flow.recognized.until)
+    format!("{}..{}", flow.recognized.first(), flow.recognized.last())
 }
 
 #[test]
@@ -790,10 +790,10 @@ entity narcissus : person
         let (family, alex) = (book.entity("family").unwrap(), &book.entities[book.entity("alex").unwrap()]);
         assert_eq!(alex.member, Some(family));
         let path = |system: axiom_core::Id<crate::System>| book.name(book.systems[system].path);
-        let lives: Vec<_> = alex.lives.iter().map(|res| (res.from.0 == i32::MIN, path(res.system))).collect();
+        let lives: Vec<_> = alex.lives.iter().map(|res| (res.days.first() == Day::MIN, path(res.system))).collect();
         assert_eq!(lives, [(true, "us/ca"), (false, "de")], "sorted by their start, not chained");
-        assert_eq!(alex.lives[0].until.to_string(), "2025-06-30");
-        assert_eq!(alex.lives[1].until.0, i32::MAX);
+        assert_eq!(alex.lives[0].days.last().to_string(), "2025-06-30");
+        assert_eq!(alex.lives[1].days.last(), Day::MAX);
     });
 }
 
@@ -1004,7 +1004,7 @@ fn inflow_rules(book: &Book, place: &str) -> Vec<String> {
         .iter()
         .map(|rule| {
             let law = book.name(book.laws[rule.law].name);
-            format!("{law} for {} {}~{}", subject(rule.subject), day(rule.from), day(rule.until))
+            format!("{law} for {} {}~{}", subject(rule.subject), day(rule.days.first()), day(rule.days.last()))
         })
         .collect()
 }

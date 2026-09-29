@@ -3,8 +3,8 @@
 //! They borrow their transaction and source line from a real flow, so any
 //! diagnostic they cause points somewhere meaningful.
 
-use axiom_core::{Day, Id};
-use axiom_model::{Amount, Flow, Infer, Mode, Origin, Place, Recognition};
+use axiom_core::{Day, Days, Id};
+use axiom_model::{Amount, Flow, Infer, Mode, Origin, Place};
 
 /// A `Planned` flow on `day`, as `template` says it: the same ends, payee,
 /// purpose, description and terms (what it is `for`, the basis it takes, a
@@ -14,12 +14,8 @@ use axiom_model::{Amount, Flow, Infer, Mode, Origin, Place, Recognition};
 /// codes: those link real events.
 pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
     let shift = day.0 - template.day.0;
-    let recognized = Recognition {
-        from: template.recognized.from.add_days(shift),
-        until: template.recognized.until.add_days(shift),
-    };
     Flow {
-        recognized,
+        recognized: template.recognized.moved(shift),
         payee: template.payee,
         purpose: template.purpose,
         description: template.description,
@@ -35,7 +31,7 @@ pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
 pub fn hypothetical(borrowing: &Flow, day: Day, from: Id<Place>, to: Id<Place>, out: Amount, arrive: Amount) -> Flow {
     Flow {
         day,
-        recognized: Recognition::on(day),
+        recognized: Days::on(day),
         from,
         to,
         out,

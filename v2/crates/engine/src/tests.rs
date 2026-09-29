@@ -7,7 +7,7 @@
 use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity};
 use axiom_model::*;
 
-use crate::fixture::{Fixture, LawBuilder};
+use crate::fixture::{Fixture, LawBuilder, span};
 use crate::{Cause, Holding, Ledger, Options, Owed, Parcel, Run, State, run};
 
 fn options() -> Options {
@@ -832,8 +832,8 @@ fn value_is_conserved_over_random_journals() {
                     let (shares, proceeds) = (1 + dice.roll(25) as i64, 100_00 + dice.roll(6_000_00) as i64);
                     let sale = f.sell(day, shares, proceeds);
                     if dice.roll(3) == 0 {
-                        let from = Day(2 + dice.roll(day as u64) as i32);
-                        f.flows[sale.index()].select = Box::new([Select::Range(from, Day(day))]);
+                        let from = (2 + dice.roll(day as u64) as i32).min(day);
+                        f.flows[sale.index()].select = Box::new([Select::Range(span(from, day))]);
                     }
                     *expected.entry(vti).or_default() -= shares;
                     *expected.entry(usd).or_default() += proceeds;
@@ -946,7 +946,8 @@ fn a_spread_flow_counts_in_each_month_it_touches_as_the_fold_reaches_it() {
     assert_eq!(violation.cause, Cause::Time, "January opened already over: no flow crossed the line");
     let d = &run.diagnostics[violation.diagnostic as usize];
     assert_eq!(d.message, "expenses/food: 30.56 USD in 2026-01 against a limit of 30.00 USD, over by 0.56 USD");
-    let counted: Vec<_> = run.headroom.iter().map(|h| (h.from.ymd().1, h.counted.qty.0, h.limit.qty.0)).collect();
+    let counted: Vec<_> =
+        run.headroom.iter().map(|h| (h.days.first().ymd().1, h.counted.qty.0, h.limit.qty.0)).collect();
     assert_eq!(
         counted,
         [(12, 11_83, 30_00), (1, 31_56, 30_00), (2, 27_61, 30_00)],
@@ -1008,8 +1009,8 @@ fn a_year_law_runs_for_a_part_year_residence() {
     let law = f.law(law.count(amount, years));
     let subject = Subject::Entity(me);
     let (in_year, other_year) = (
-        Rule { law, subject, from: Day(date(2025, 3, 1)), until: Day(date(2025, 6, 30)) },
-        Rule { law, subject, from: Day(date(2024, 1, 1)), until: Day(date(2024, 12, 31)) },
+        Rule { law, subject, days: span(date(2025, 3, 1), date(2025, 6, 30)) },
+        Rule { law, subject, days: span(date(2024, 1, 1), date(2024, 12, 31)) },
     );
     f.timed.extend([in_year, other_year]);
     f.flow(date(2025, 2, 1), equity, checking, 10_00);
@@ -1034,13 +1035,13 @@ fn a_law_that_two_residences_bring_runs_once_for_a_period_and_once_for_a_flow() 
     let subject = Subject::Entity(me);
     // A move within one system: the same law, brought by the residence before and the one after.
     let (before, after) = (
-        Rule { law, subject, from: Day(date(2024, 1, 1)), until: Day(date(2025, 6, 30)) },
-        Rule { law, subject, from: Day(date(2025, 7, 1)), until: Day(date(2030, 1, 1)) },
+        Rule { law, subject, days: span(date(2024, 1, 1), date(2025, 6, 30)) },
+        Rule { law, subject, days: span(date(2025, 7, 1), date(2030, 1, 1)) },
     );
     f.timed.extend([before, after]);
     // And two residences that overlap, so a flow meets the same law twice.
     let paid = counting(&mut f, checking, subject, "paid");
-    let overlap = Rule { from: Day(date(2025, 3, 1)), ..f.rule(paid, subject) };
+    let overlap = Rule { days: span(date(2025, 3, 1), i32::MAX), ..f.rule(paid, subject) };
     f.on_in.push((checking, overlap));
     f.flow(date(2025, 4, 1), equity, checking, 10_00);
     let book = f.book();
@@ -1306,7 +1307,7 @@ fn every_comparison_keeps_its_last_reading_with_the_sides_of_a_floor_swapped() {
         "room above the floor: limit - counted"
     );
     assert_eq!(
-        (reading.from, reading.until, reading.day),
+        (reading.days.first(), reading.days.last(), reading.day),
         (Day(2), Day(2), Day(2)),
         "no total or tally: the day itself"
     );

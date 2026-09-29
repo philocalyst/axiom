@@ -1,7 +1,7 @@
 //! What the journal records: flows grouped into transactions, balance
 //! assertions, settlement events, prices, and plans.
 
-use axiom_core::{Day, Id, Loc, Qty, Ratio, Span, Sym};
+use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Span, Sym};
 
 use crate::book::{Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose};
 
@@ -13,7 +13,7 @@ pub struct Flow {
     /// The period the flow belongs to: tallies, window totals, budgets and
     /// every report about a period follow it. `day..=day` unless the flow is
     /// spread (`DATE..DATE`) or says `for PERIOD`.
-    pub recognized: Recognition,
+    pub recognized: Days,
     pub from: Id<Place>,
     pub to: Id<Place>,
     /// What leaves `from`.
@@ -140,24 +140,6 @@ pub enum Sharer {
     Purpose(Id<Purpose>),
 }
 
-/// An inclusive range of days over which a flow is recognized.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Recognition {
-    pub from: Day,
-    pub until: Day,
-}
-
-impl Recognition {
-    pub fn on(day: Day) -> Recognition {
-        Recognition { from: day, until: day }
-    }
-
-    /// Whether the whole flow belongs to one day.
-    pub fn is_instant(self) -> bool {
-        self.from == self.until
-    }
-}
-
 /// What a flow says about the parcels it moves, beyond how many.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
 pub struct Terms {
@@ -239,7 +221,7 @@ pub enum End {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Select {
     /// Parcels acquired within these days, inclusive.
-    Range(Day, Day),
+    Range(Days),
     /// Parcels acquired by transactions marked with this code.
     Code(Sym),
     Policy(Policy),
@@ -248,9 +230,8 @@ pub enum Select {
 /// Flows written together.
 pub struct Txn {
     pub day: Day,
-    /// The flows it produced: `first .. first + len` in `Book::flows`.
-    pub first: Id<Flow>,
-    pub len: u32,
+    /// The flows it produced, in `Book::flows`.
+    pub flows: Run<Flow>,
     pub codes: Box<[Sym]>,
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,

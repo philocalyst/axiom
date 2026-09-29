@@ -159,6 +159,11 @@ impl<T> Run<T> {
         Run { start: start.raw, len, of: PhantomData }
     }
 
+    /// The first id of the run; where an empty run would be.
+    pub const fn start(self) -> Id<T> {
+        Id::new(self.start)
+    }
+
     pub const fn len(self) -> u32 {
         self.len
     }

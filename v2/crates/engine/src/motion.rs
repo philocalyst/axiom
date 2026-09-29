@@ -5,10 +5,8 @@
 //! backwards) and the flows an assertion posts to close a gap all become a
 //! `Motion`, so exactly one code path moves value.
 
-use axiom_core::{Day, Id, Loc, Qty, Sym};
-use axiom_model::{
-    Amount, Assert, Book, Class, End, Entity, Flow, Mode, Place, Recognition, Select, Terms, Txn, Waive,
-};
+use axiom_core::{Day, Days, Id, Loc, Qty, Sym};
+use axiom_model::{Amount, Assert, Book, Class, End, Entity, Flow, Mode, Place, Select, Terms, Txn, Waive};
 
 use crate::Cause;
 
@@ -65,7 +63,7 @@ impl Moves {
 pub(crate) struct Motion<'f> {
     pub cause: Cause,
     pub day: Day,
-    pub recognized: Recognition,
+    pub recognized: Days,
     pub from: Id<Place>,
     pub to: Id<Place>,
     /// The places at the two ends, so nobody looks them up again.
@@ -123,7 +121,7 @@ impl<'f> Motion<'f> {
         Motion {
             cause: Cause::Time,
             day: assert.day,
-            recognized: Recognition::on(assert.day),
+            recognized: Days::on(assert.day),
             from,
             to,
             source,

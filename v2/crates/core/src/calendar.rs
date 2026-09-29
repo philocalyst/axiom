@@ -53,6 +53,21 @@ impl Days {
         Days::new(self.first.max(other.first), self.last.min(other.last))
     }
 
+    /// The one range that both make together, if they overlap or run right up
+    /// to each other.
+    pub fn merge(self, other: Days) -> Option<Days> {
+        let meets = |a: Days, b: Days| a.first.0 <= b.last.0.saturating_add(1);
+        (meets(self, other) && meets(other, self))
+            .then(|| Days { first: self.first.min(other.first), last: self.last.max(other.last) })
+    }
+
+    /// The same days `by` days later, or earlier when negative. An unbounded
+    /// end (`Day::MIN`, `Day::MAX`) stays unbounded.
+    pub fn moved(self, by: i32) -> Days {
+        let shift = |day: Day| if day == Day::MIN || day == Day::MAX { day } else { Day(day.0.saturating_add(by)) };
+        Days { first: shift(self.first), last: shift(self.last) }
+    }
+
     /// The day, if these are just the one.
     pub fn single(self) -> Option<Day> {
         (self.first == self.last).then_some(self.first)
@@ -134,6 +149,16 @@ impl Window {
     /// The window `n` periods on, or before when `n` is negative.
     pub fn after(self, n: i32) -> Window {
         Window::containing(self.period, self.days.first().add(Span::months(self.period.months() * n)))
+    }
+
+    /// How many windows on from this one the window containing `day` is: 0 for
+    /// this one, negative before it.
+    pub fn steps_to(self, day: Day) -> i64 {
+        let months = |day: Day| {
+            let (year, month, _) = day.ymd();
+            i64::from(year) * 12 + i64::from(month) - 1
+        };
+        (months(day) - months(self.days.first())).div_euclid(self.period.months().into())
     }
 
     pub fn next(self) -> Window {
@@ -277,6 +302,24 @@ mod tests {
     }
 
     #[test]
+    fn days_that_meet_or_touch_merge() {
+        let (jan, feb, mar) = (
+            days(day(2026, 1, 1), day(2026, 1, 31)),
+            days(day(2026, 2, 1), day(2026, 2, 28)),
+            days(day(2026, 3, 2), day(2026, 3, 31)),
+        );
+        assert_eq!(
+            jan.merge(feb),
+            Some(days(day(2026, 1, 1), day(2026, 2, 28))),
+            "the 31st and the 1st are neighbours"
+        );
+        assert_eq!(feb.merge(jan), jan.merge(feb));
+        assert_eq!(feb.merge(mar), None, "a day between them is a gap");
+        assert_eq!(jan.merge(Days::on(day(2026, 1, 10))), Some(jan));
+        assert_eq!(Days::ALWAYS.merge(jan), Some(Days::ALWAYS), "nothing is one past the end of time");
+    }
+
+    #[test]
     fn windows_step_through_months_and_years() {
         let leap = Window::containing(Period::Month, day(2024, 2, 10));
         assert_eq!(leap.days(), days(day(2024, 2, 1), day(2024, 2, 29)));
@@ -288,6 +331,31 @@ mod tests {
         assert_eq!(year.next().days().first(), day(2027, 1, 1));
         assert_eq!(year.previous().days().last(), day(2025, 12, 31));
         assert_eq!(Window::containing(Period::Month, day(2026, 1, 1)).days().first(), day(2026, 1, 1));
+    }
+
+    #[test]
+    fn a_window_counts_the_windows_to_a_day() {
+        let march = Window::containing(Period::Month, day(2026, 3, 15));
+        let steps =
+            [day(2025, 12, 31), day(2026, 2, 28), day(2026, 3, 1), day(2026, 3, 31), day(2026, 4, 1), day(2027, 3, 1)];
+        assert_eq!(steps.map(|at| march.steps_to(at)), [-3, -1, 0, 0, 1, 12]);
+        let year = Window::containing(Period::Year, day(2026, 6, 1));
+        assert_eq!(
+            [day(2025, 12, 31), day(2026, 12, 31), day(2027, 1, 1), day(2020, 1, 1)].map(|at| year.steps_to(at)),
+            [-1, 0, 1, -6]
+        );
+        for at in steps {
+            assert!(march.after(march.steps_to(at) as i32).days().contains(at), "{at}");
+        }
+    }
+
+    #[test]
+    fn days_move_and_stay_put_at_the_ends_of_time() {
+        let march = days(day(2026, 3, 1), day(2026, 3, 31));
+        assert_eq!(march.moved(31), days(day(2026, 4, 1), day(2026, 5, 1)));
+        assert_eq!(march.moved(-1).first(), day(2026, 2, 28));
+        assert_eq!(Days::ALWAYS.moved(9), Days::ALWAYS);
+        assert_eq!(Days::ALWAYS.moved(-9), Days::ALWAYS);
     }
 
     #[test]

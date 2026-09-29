@@ -51,7 +51,7 @@ mod source_tests;
 #[cfg(test)]
 mod tests;
 
-use axiom_core::{Day, Diagnostic, Id, Qty, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
 use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn};
 
 pub use ledger::{Ledger, run};
@@ -323,10 +323,9 @@ pub struct Headroom {
     pub step: u32,
     pub subject: Subject,
     pub owner: Id<Entity>,
-    /// The window, inclusive: the month or year of the total or tally the
-    /// comparison reads, or the day itself when it reads neither.
-    pub from: Day,
-    pub until: Day,
+    /// The window: the month or year of the total or tally the comparison
+    /// reads, or the day itself when it reads neither.
+    pub days: Days,
     pub counted: Amount,
     pub limit: Amount,
     /// When it was last read.

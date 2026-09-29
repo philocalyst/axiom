@@ -48,7 +48,7 @@ impl<'a> Posting<'a> {
     /// The days on which the flow stands, as the first and the first day past
     /// it: from its own day, or its settlement, until it is returned.
     fn standing(&self) -> Option<(Day, Day)> {
-        let forever = Day(i32::MAX);
+        let forever = Day::MAX;
         match self.posted.state {
             State::Actual => Some((self.flow.day, forever)),
             State::Settled(on) => Some((self.flow.day.max(on), forever)),

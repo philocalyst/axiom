@@ -11,69 +11,20 @@
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
-use axiom_core::day::days_in_month;
-use axiom_core::{Day, Groups, Id, Map, Qty, Sym};
-use axiom_model::{Book, Dir, Entity, Func, Law, NodeId, Op, Place, Recognition, Subject, Ty, Window};
+use axiom_core::calendar;
+use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Sym, spread};
+use axiom_model::{Book, Dir, Entity, Func, Law, NodeId, Op, Place, Subject, Ty, Window};
 
 use crate::eval::V3;
 use crate::scope::{containing, inside};
 
-/// Whether `day` lies within the inclusive range.
-pub(crate) fn has(range: Recognition, day: Day) -> bool {
-    (range.from..=range.until).contains(&day)
-}
-
-/// The days of the month or year containing `day`.
-pub(crate) fn window_of(window: Window, day: Day) -> Recognition {
-    let (year, month, date) = day.ymd();
-    match window {
-        Window::Month => {
-            let from = day.add_days(1 - date as i32);
-            Recognition { from, until: from.add_days(days_in_month(year, month) as i32 - 1) }
-        }
-        Window::Year => {
-            let (start, end) = (Day::from_ymd(year, 1, 1), Day::from_ymd(year, 12, 31));
-            Recognition { from: start.unwrap_or(day), until: end.unwrap_or(day) }
-        }
-        Window::Ever => Recognition { from: Day(i32::MIN), until: Day(i32::MAX) },
-    }
-}
-
-/// The part of `amount`, recognized evenly over `over`, that falls in `window`.
-/// Parts are differences of rounded running shares, so the parts of a range
-/// cut into consecutive windows add up to the amount exactly.
-pub(crate) fn share(amount: Qty, over: Recognition, window: Recognition) -> Qty {
-    if window.from > window.until {
-        return Qty::ZERO;
-    }
-    if over.is_instant() {
-        return if has(window, over.from) { amount } else { Qty::ZERO };
-    }
-    let days = i64::from((over.until.0 - over.from.0 + 1).max(1));
-    let through = |day: Day| {
-        let elapsed = i64::from((day.0.saturating_sub(over.from.0) + 1).clamp(0, days as i32));
-        amount.share(Qty(elapsed), Qty(days)).unwrap_or(amount)
-    };
-    through(window.until) - through(window.from.add_days(-1))
-}
-
 /// `amount` cut by the calendar years `over` touches: the first day of each
 /// year's part, and its share.
-pub(crate) fn by_year(amount: Qty, over: Recognition) -> impl Iterator<Item = (Day, Qty)> {
-    // A flow that belongs to one day belongs to one year: no calendar to consult.
-    let years = if over.is_instant() { 0..=0 } else { over.from.year()..=over.until.year() };
-    years.map(move |year| {
-        if over.is_instant() {
-            return (over.from, amount);
-        }
-        let whole = window_of(Window::Year, Day::from_ymd(year, 1, 1).unwrap_or(over.from));
-        (whole.from.max(over.from), share(amount, over, whole))
+pub(crate) fn by_year(amount: Qty, over: Days) -> impl Iterator<Item = (Day, Qty)> {
+    calendar::Window::covering(Period::Year, over).map(move |year| {
+        let part = year.days();
+        (part.first().max(over.first()), spread(amount, over, part))
     })
-}
-
-/// The part of `amount` that `over` recognizes in the year `over` starts in.
-pub(crate) fn share_in_first_year(amount: Qty, over: Recognition) -> Qty {
-    if over.is_instant() { amount } else { share(amount, over, window_of(Window::Year, over.from)) }
 }
 
 /// Value that entered and left, over one window.
@@ -95,21 +46,21 @@ impl Flowed {
 /// One window's sums, and the days they belong to.
 #[derive(Clone, Copy)]
 struct Rolling {
-    days: Recognition,
+    days: Days,
     flowed: Flowed,
 }
 
 impl Rolling {
-    const NEVER: Rolling = Rolling {
-        days: Recognition { from: Day(i32::MAX), until: Day(i32::MIN) },
-        flowed: Flowed { incoming: Qty::ZERO, outgoing: Qty::ZERO },
-    };
+    /// The window before the first: no day a flow can be on is in it, so the
+    /// first flow rolls the subject into a real one.
+    const NEVER: Rolling =
+        Rolling { days: Days::on(Day::MIN), flowed: Flowed { incoming: Qty::ZERO, outgoing: Qty::ZERO } };
 
     /// The window `days`, holding what earlier flows recognized into it.
-    fn of(days: Recognition, ahead: &[Accrual]) -> Rolling {
+    fn of(days: Days, ahead: &[Accrual]) -> Rolling {
         let mut flowed = Flowed::default();
         for accrual in ahead {
-            *flowed.side(accrual.dir) += share(accrual.amount, accrual.over, days);
+            *flowed.side(accrual.dir) += spread(accrual.amount, accrual.over, days);
         }
         Rolling { days, flowed }
     }
@@ -120,7 +71,7 @@ impl Rolling {
 struct Accrual {
     dir: Dir,
     amount: Qty,
-    over: Recognition,
+    over: Days,
 }
 
 /// One subject's windows. `closed` is the year that just ended, kept for the
@@ -152,34 +103,34 @@ impl Windows {
     #[cold]
     #[inline(never)]
     fn roll(&mut self, day: Day) {
-        if !has(self.month.days, day) {
-            self.month = Rolling::of(window_of(Window::Month, day), &self.ahead);
+        if !self.month.days.contains(day) {
+            self.month = Rolling::of(Window::Month.around(day), &self.ahead);
         }
-        if !has(self.year.days, day) {
-            let year = Rolling::of(window_of(Window::Year, day), &self.ahead);
+        if !self.year.days.contains(day) {
+            let year = Rolling::of(Window::Year.around(day), &self.ahead);
             let old = std::mem::replace(&mut self.year, year);
-            self.closed = if old.days.until.add_days(1) == year.days.from { old } else { Rolling::NEVER };
+            self.closed = if old.days.last().add_days(1) == year.days.first() { old } else { Rolling::NEVER };
         }
-        self.ahead.retain(|accrual| accrual.over.until >= self.month.days.from);
+        self.ahead.retain(|accrual| accrual.over.last() >= self.month.days.first());
     }
 
     /// Counts a flow. Returns whether some of it was recognized after the
     /// month it moved in, and so is now waiting for the windows ahead.
-    fn add(&mut self, day: Day, dir: Dir, amount: Qty, over: Recognition) -> bool {
+    fn add(&mut self, day: Day, dir: Dir, amount: Qty, over: Days) -> bool {
         *self.ever.side(dir) += amount;
-        if !has(self.month.days, day) || !has(self.year.days, day) {
+        if !self.month.days.contains(day) || !self.year.days.contains(day) {
             self.roll(day);
         }
         // Counted on the day it moved, in the windows that day is in: nearly every flow.
-        if over.from == day && over.until == day {
+        if over.single() == Some(day) {
             *self.month.flowed.side(dir) += amount;
             *self.year.flowed.side(dir) += amount;
             return false;
         }
         for rolling in [&mut self.month, &mut self.year, &mut self.closed] {
-            *rolling.flowed.side(dir) += share(amount, over, rolling.days);
+            *rolling.flowed.side(dir) += spread(amount, over, rolling.days);
         }
-        let ahead = over.until > self.month.days.until;
+        let ahead = over.last() > self.month.days.last();
         if ahead {
             self.ahead.push(Accrual { dir, amount, over });
         }
@@ -192,14 +143,14 @@ impl Windows {
         let rolling = match window {
             Window::Ever => return *{ self.ever }.side(dir),
             Window::Month => &self.month,
-            Window::Year if has(self.closed.days, day) => &self.closed,
+            Window::Year if self.closed.days.contains(day) => &self.closed,
             Window::Year => &self.year,
         };
         // A window nothing was counted into yet holds only what was recognized ahead of it.
-        let mut flowed = if has(rolling.days, day) {
+        let mut flowed = if rolling.days.contains(day) {
             rolling.flowed
         } else {
-            Rolling::of(window_of(window, day), &self.ahead).flowed
+            Rolling::of(window.around(day), &self.ahead).flowed
         };
         *flowed.side(dir)
     }
@@ -231,7 +182,7 @@ struct Reaching {
 
 impl Reaching {
     fn new() -> Reaching {
-        Reaching { months: BinaryHeap::new(), soonest: Day(i32::MAX) }
+        Reaching { months: BinaryHeap::new(), soonest: Day::MAX }
     }
 
     /// Notes that `slot` enters the month that begins on `from`.
@@ -244,7 +195,7 @@ impl Reaching {
     fn pop(&mut self, day: Day) -> Option<(Day, u32)> {
         let Reverse(next) = self.months.peek().copied().filter(|&Reverse((from, _))| from <= day)?;
         self.months.pop();
-        self.soonest = self.months.peek().map_or(Day(i32::MAX), |&Reverse((from, _))| from);
+        self.soonest = self.months.peek().map_or(Day::MAX, |&Reverse((from, _))| from);
         Some(next)
     }
 }
@@ -291,7 +242,7 @@ impl Totals {
         &mut self,
         book: &Book,
         (from, to): (Id<Place>, Id<Place>),
-        (day, over): (Day, Recognition),
+        (day, over): (Day, Days),
         out: Option<Qty>,
         arrive: Option<Qty>,
     ) {
@@ -303,7 +254,7 @@ impl Totals {
                 let windows = &mut self.windows[at];
                 if windows.add(day, dir, value, over) && !windows.reaching {
                     windows.reaching = true;
-                    self.reaching.push(windows.month.days.until.add_days(1), at as u32);
+                    self.reaching.push(windows.month.days.last().add_days(1), at as u32);
                 }
             }
         }
@@ -320,11 +271,11 @@ impl Totals {
     /// the subject comes back for the month after while value still reaches it.
     pub fn reached(&mut self, day: Day) -> Option<(Subject, Day)> {
         let (from, at) = self.reaching.pop(day)?;
-        let month = window_of(Window::Month, from);
+        let month = Window::Month.around(from);
         let windows = &mut self.windows[at as usize];
-        windows.reaching = windows.ahead.iter().any(|accrual| accrual.over.until > month.until);
+        windows.reaching = windows.ahead.iter().any(|accrual| accrual.over.last() > month.last());
         if windows.reaching {
-            self.reaching.push(month.until.add_days(1), at);
+            self.reaching.push(month.last().add_days(1), at);
         }
         Some((subject_at(self.places, at as usize), from))
     }
@@ -389,24 +340,26 @@ mod tests {
         Day::from_ymd(year, month, day).unwrap()
     }
 
+    fn days(first: Day, last: Day) -> Days {
+        Days::new(first, last).unwrap()
+    }
+
     #[test]
-    fn a_range_is_shared_out_by_days_and_the_shares_add_up() {
-        let over = Recognition { from: day(2025, 11, 1), until: day(2026, 1, 31) };
-        let month = |year, month| window_of(Window::Month, day(year, month, 15));
-        let parts = [month(2025, 11), month(2025, 12), month(2026, 1)].map(|window| share(Qty(120_00), over, window).0);
-        assert_eq!(parts, [3_913, 4_044, 4_043]);
-        assert_eq!(parts.iter().sum::<i64>(), 120_00);
+    fn a_range_is_cut_by_the_years_it_touches() {
+        let over = days(day(2025, 11, 1), day(2026, 1, 31));
         let years: Vec<_> = by_year(Qty(120_00), over).map(|(from, part)| (from.ymd(), part.0)).collect();
         assert_eq!(years, [((2025, 11, 1), 7_957), ((2026, 1, 1), 4_043)]);
+        let once: Vec<_> = by_year(Qty(120_00), Days::on(day(2026, 3, 9))).collect();
+        assert_eq!(once, [(day(2026, 3, 9), Qty(120_00))]);
     }
 
     #[test]
     fn a_window_reads_what_was_recognized_into_it_including_ahead_of_time() {
         let mut windows = Windows::NONE;
         // 71 days: 12 in December, 31 in January, 28 in February.
-        let spread = Recognition { from: day(2025, 12, 20), until: day(2026, 2, 28) };
-        windows.add(day(2025, 12, 20), Dir::In, Qty(70_00), spread);
-        windows.add(day(2025, 12, 21), Dir::In, Qty(5_00), Recognition::on(day(2025, 12, 21)));
+        let prepaid = days(day(2025, 12, 20), day(2026, 2, 28));
+        windows.add(day(2025, 12, 20), Dir::In, Qty(70_00), prepaid);
+        windows.add(day(2025, 12, 21), Dir::In, Qty(5_00), Days::on(day(2025, 12, 21)));
         let read = |windows: &Windows, window, d| windows.read(Dir::In, window, d).0;
         assert_eq!(read(&windows, Window::Month, day(2025, 12, 31)), 5_00 + 11_83);
         assert_eq!(
@@ -415,7 +368,7 @@ mod tests {
             "January is empty so far: only what was recognized ahead of it"
         );
         assert_eq!(read(&windows, Window::Year, day(2026, 3, 1)), 58_17);
-        windows.add(day(2026, 1, 5), Dir::In, Qty(1_00), Recognition::on(day(2026, 1, 5)));
+        windows.add(day(2026, 1, 5), Dir::In, Qty(1_00), Days::on(day(2026, 1, 5)));
         assert_eq!(
             read(&windows, Window::Month, day(2026, 1, 20)),
             31_56,
@@ -429,12 +382,7 @@ mod tests {
     #[test]
     fn a_flow_recognized_entirely_in_a_closed_window_counts_in_no_current_one() {
         let mut windows = Windows::NONE;
-        windows.add(
-            day(2026, 1, 15),
-            Dir::Out,
-            Qty(3_000_00),
-            Recognition { from: day(2025, 1, 1), until: day(2025, 12, 31) },
-        );
+        windows.add(day(2026, 1, 15), Dir::Out, Qty(3_000_00), days(day(2025, 1, 1), day(2025, 12, 31)));
         assert_eq!(windows.read(Dir::Out, Window::Year, day(2026, 1, 15)), Qty::ZERO);
         assert_eq!(windows.read(Dir::Out, Window::Ever, day(2026, 1, 15)), Qty(3_000_00));
     }

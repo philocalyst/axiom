@@ -5,11 +5,13 @@
 //! laws and rules are added by the test. Flows must be added in day order (the
 //! book's contract), and `book()` assembles the tables the engine reads.
 
-use axiom_core::{Arena, Day, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Sym, Tree};
+use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Run, Sym, Tree};
 use axiom_model::*;
 
-pub(crate) const FAR_PAST: Day = Day(i32::MIN);
-pub(crate) const FAR_FUTURE: Day = Day(i32::MAX);
+/// The days from `first` to `last`, as day numbers.
+pub(crate) fn span(first: i32, last: i32) -> Days {
+    Days::new(Day(first), Day(last)).expect("a span that ends no earlier than it begins")
+}
 
 pub(crate) struct Fixture {
     pub names: Interner<'static>,
@@ -240,8 +242,7 @@ impl Fixture {
         let day = Day(day);
         let txn = Txn {
             day,
-            first: id,
-            len: 1,
+            flows: Run::new(id, 1),
             codes: Box::new([]),
             waive: None,
             plan: None,
@@ -253,7 +254,7 @@ impl Fixture {
         self.txns.push(txn);
         let flow = Flow {
             day,
-            recognized: Recognition::on(day),
+            recognized: Days::on(day),
             from,
             to,
             out,
@@ -291,7 +292,7 @@ impl Fixture {
 
     /// Recognizes a flow over a range of days.
     pub fn recognize(&mut self, id: Id<Flow>, from: i32, until: i32) {
-        self.flows[id.index()].recognized = Recognition { from: Day(from), until: Day(until) };
+        self.flows[id.index()].recognized = span(from, until);
     }
 
     /// Gives a flow terms.
@@ -378,7 +379,7 @@ impl Fixture {
 
     /// A rule that applies for all time.
     pub fn rule(&self, law: Id<Law>, subject: Subject) -> Rule {
-        Rule { law, subject, from: FAR_PAST, until: FAR_FUTURE }
+        Rule { law, subject, days: Days::ALWAYS }
     }
 
     pub fn book(mut self) -> Book<'static> {

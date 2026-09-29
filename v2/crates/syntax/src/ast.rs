@@ -55,6 +55,9 @@ use std::ops::{Deref, Index, Range};
 
 use axiom_core::{Day, Dec, FileId, Id, Loc, Span};
 
+// The calendar words a plan and a law's `each` trigger are written in are core's.
+pub use axiom_core::{On, Period};
+
 // ─── Text ───────────────────────────────────────────────────────────────────
 
 /// A written name, path, glob or commodity: the slice of the source it is.
@@ -727,17 +730,6 @@ pub struct Plan<'s> {
     pub flow: Flow<'s>,
 }
 
-/// The day within each period a plan falls on.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum On {
-    /// `on 15`: past the month's end clamps to its last day.
-    MonthDay(u8),
-    /// `on 04-15`: that month (1 to 12) and day of every year.
-    YearDay { month: u8, day: u8 },
-    /// `on monday`: Monday = 0 … Sunday = 6, as [`Day::weekday`].
-    Weekday(u8),
-}
-
 // ─── Declarations ───────────────────────────────────────────────────────────
 
 /// `account|entity|commodity|kind NAME [: KIND]` with indented properties and laws.
@@ -880,15 +872,6 @@ pub enum Trigger {
     By(ExprId),
     /// `always`: after any change to a governed place.
     Always,
-}
-
-/// The period a law's `each` trigger ends.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub enum Period {
-    /// A calendar month.
-    Month,
-    /// A calendar year.
-    Year,
 }
 
 /// One line of a law's body after its trigger. Steps run top to bottom.

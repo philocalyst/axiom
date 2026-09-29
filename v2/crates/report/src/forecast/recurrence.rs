@@ -3,8 +3,7 @@
 
 use std::borrow::Cow;
 
-use axiom_core::day::days_in_month;
-use axiom_core::{Day, Qty, Span};
+use axiom_core::{Day, Days, Qty, Span, due};
 use axiom_model::On;
 
 /// A rhythm needs at least this many occurrences to be believed.
@@ -112,44 +111,8 @@ impl Schedule {
     /// end), on which the schedule falls.
     pub fn days(&self, after: Day, horizon: Day) -> Vec<Day> {
         let last = self.until.map_or(horizon, |until| until.min(horizon));
-        let mut days = Vec::new();
-        if self.every == Span::default() {
-            return days;
-        }
-        for step in 0.. {
-            let day = self.nth(step);
-            if day > last {
-                break;
-            }
-            if day > after && day >= self.anchor {
-                days.push(day);
-            }
-        }
-        days
-    }
-
-    /// Steps are taken from the anchor, never from the previous day, so a
-    /// month-end clamp does not drag every later month with it.
-    fn nth(&self, step: i32) -> Day {
-        let span = Span { months: self.every.months * step, days: self.every.days * step };
-        land(self.anchor.add(span), self.on)
-    }
-}
-
-/// Moves `base` to the day its period asks for.
-fn land(base: Day, on: Option<On>) -> Day {
-    let (year, month, _) = base.ymd();
-    match on {
-        None => base,
-        // Past the month's end clamps to its last day.
-        Some(On::MonthDay(day)) => {
-            Day::from_ymd(year, month, u32::from(day).min(days_in_month(year, month))).unwrap_or(base)
-        }
-        Some(On::YearDay { month, day }) => {
-            let month = u32::from(month);
-            Day::from_ymd(year, month, u32::from(day).min(days_in_month(year, month.clamp(1, 12)))).unwrap_or(base)
-        }
-        Some(On::Weekday(weekday)) => base.add_days(((u32::from(weekday) + 7 - base.weekday()) % 7) as i32),
+        let Some(within) = Days::new(after.add_days(1), last) else { return Vec::new() };
+        due(axiom_core::Cadence::Every(self.every), self.on.as_slice(), self.anchor, within).collect()
     }
 }
 

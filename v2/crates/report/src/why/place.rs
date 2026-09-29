@@ -103,8 +103,7 @@ fn governing(book: &Book, run: &Run, place: Id<Place>) -> (Vec<Id<Law>>, usize) 
     let watching =
         [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always].into_iter().flat_map(|table| table[place].iter());
     let timed = rules.timed.iter().filter(|rule| rule.subject == Subject::Place(place));
-    let (now, later): (Vec<&Rule>, Vec<&Rule>) =
-        watching.chain(timed).partition(|rule| (rule.from..=rule.until).contains(&run.today));
+    let (now, later): (Vec<&Rule>, Vec<&Rule>) = watching.chain(timed).partition(|rule| rule.days.contains(run.today));
     let laws: Vec<Id<Law>> = now.iter().map(|rule| rule.law).collect();
     let elsewhere = later.iter().filter(|rule| !laws.contains(&rule.law)).count();
     (laws, elsewhere)

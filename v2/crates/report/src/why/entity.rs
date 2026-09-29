@@ -37,7 +37,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> 
     let laws: Vec<Id<Law>> = rules.on_spend[entity]
         .iter()
         .chain(timed)
-        .filter(|rule| (rule.from..=rule.until).contains(&run.today))
+        .filter(|rule| rule.days.contains(run.today))
         .map(|rule| rule.law)
         .collect();
 

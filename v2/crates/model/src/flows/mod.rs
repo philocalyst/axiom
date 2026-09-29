@@ -33,8 +33,8 @@ use crate::sources::Site;
 
 /// Where a worker leaves what it elaborates: its transactions, their flows,
 /// everything else the journal records, and what went wrong. A transaction's
-/// flows are the run `first .. first + len` of `flows`, counted from the start
-/// of this sink; the merge makes them global.
+/// flows are a run of `flows`, counted from the start of this sink; the merge
+/// makes them global.
 #[derive(Default)]
 pub(crate) struct Sink<'s> {
     pub txns: Vec<Txn>,
@@ -75,7 +75,7 @@ impl<'s> Sink<'s> {
         let base = self.flows.len() as u32;
         ends.extend(run.flows.iter().enumerate().flat_map(|(at, flow)| ends_of(Id::new(base + at as u32), flow)));
         self.txns.extend(run.txns.into_iter().map(|mut txn| {
-            txn.first = Id::new(base + txn.first.index() as u32);
+            txn.flows = axiom_core::Run::new(Id::new(base + txn.flows.start().index() as u32), txn.flows.len());
             txn
         }));
         self.flows.append(&mut run.flows);
@@ -193,7 +193,7 @@ fn build_plans<'s>(
         let plan = written.node;
         // The plan's transaction holds no journal flows: its template is not in the book's flows.
         let mut txn = sink.txns.swap_remove(0);
-        (txn.first, txn.len) = (Id::new(0), 0);
+        txn.flows = axiom_core::Run::new(Id::new(0), 0);
         txns.push(txn);
         if sink.flows.is_empty() {
             plans.built.push(None);
@@ -233,13 +233,13 @@ fn lay_out(
     let mut own = flows.into_iter();
     let mut records: Vec<(Txn, Vec<Flow>)> = Vec::with_capacity(txns.len());
     for txn in txns {
-        let len = txn.len as usize;
+        let len = txn.flows.len() as usize;
         records.push((txn, own.by_ref().take(len).collect()));
     }
     records.sort_by_key(|(txn, _)| txn.day);
     let (mut txns, mut flows) = (Vec::with_capacity(records.len()), Vec::new());
     for (at, (mut txn, own)) in records.into_iter().enumerate() {
-        txn.first = Id::new(flows.len() as u32);
+        txn.flows = axiom_core::Run::new(Id::new(flows.len() as u32), txn.flows.len());
         flows.extend(own.into_iter().map(|mut flow| {
             flow.txn = Id::new(at as u32);
             flow
