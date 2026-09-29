@@ -14,7 +14,7 @@
 use std::ops::Deref;
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Days, Id, Qty, Ratio, Span, Sym, day::days_in_month, spread};
+use axiom_core::{Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
     Amount, BinOp, Book, Dir, Effect as Consequence, Entity, Fault, Field, Func, Law, NodeId, Op, Param, Prop,
     StepKind, Subject, Value, Var, Window,
@@ -226,14 +226,16 @@ impl<'a, 's> Machine<'a, 's> {
                 self.scan(*bound);
                 true
             }
-            StepKind::Require { cond, otherwise, warn, .. } => {
+            StepKind::Unless(_) => unreachable!("the v3 model compiles no `unless`"),
+            StepKind::Require { cond, otherwise, severity, .. } => {
                 let held = self.scan(*cond);
                 self.read(step, *cond);
                 match held {
                     Value::Bool(true) => {}
-                    Value::Bool(false) => match otherwise {
+                    // v3 bridge: a v3 `require` has one reparation at most.
+                    Value::Bool(false) => match otherwise.first() {
                         Some(effect) => self.price(step, effect),
-                        None => self.out.push(Outcome::Broken { step, warn: *warn }),
+                        None => self.out.push(Outcome::Broken { step, warn: *severity == Severity::Warning }),
                     },
                     Value::Fault(fault) => self.out.push(Outcome::Faulted { step, fault }),
                     _ => unreachable!("{TYPED}"),

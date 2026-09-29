@@ -15,17 +15,17 @@ use crate::law::Ty;
 pub(crate) fn unify(a: Ty, b: Ty) -> Option<Ty> {
     match (a, b) {
         _ if a == b => Some(a),
-        (Ty::Amount, Ty::Empty) | (Ty::Empty, Ty::Amount) => Some(Ty::Amount),
+        (amount @ Ty::Amount(_), Ty::Empty) | (Ty::Empty, amount @ Ty::Amount(_)) => Some(amount),
         _ => None,
     }
 }
 
 pub(crate) fn is_amount(ty: Ty) -> bool {
-    matches!(ty, Ty::Amount | Ty::Empty)
+    matches!(ty, Ty::Amount(_) | Ty::Empty)
 }
 
 fn is_ordered(ty: Ty) -> bool {
-    matches!(ty, Ty::Amount | Ty::Empty | Ty::Num | Ty::Day | Ty::Span)
+    matches!(ty, Ty::Amount(_) | Ty::Empty | Ty::Num | Ty::Day | Ty::Span)
 }
 
 /// What `left op right` is, if the operator accepts those operands.
@@ -59,7 +59,7 @@ pub(crate) fn binary(op: BinOp, left: Ty, right: Ty) -> Option<Ty> {
 
 /// Whether a `-x` is allowed, and what it is.
 pub(crate) fn negate(ty: Ty) -> Option<Ty> {
-    matches!(ty, Ty::Amount | Ty::Empty | Ty::Num).then_some(ty)
+    matches!(ty, Ty::Amount(_) | Ty::Empty | Ty::Num).then_some(ty)
 }
 
 /// Whether `left is right` can be asked: a place, entity or commodity against a
@@ -130,13 +130,13 @@ mod tests {
 
     #[test]
     fn arithmetic_follows_the_rules_of_amounts() {
-        assert_eq!(binary(BinOp::Add, Ty::Amount, Ty::Empty), Some(Ty::Amount));
-        assert_eq!(binary(BinOp::Mul, Ty::Num, Ty::Amount), Some(Ty::Amount));
-        assert_eq!(binary(BinOp::Div, Ty::Amount, Ty::Amount), Some(Ty::Num));
+        assert_eq!(binary(BinOp::Add, Ty::AMOUNT, Ty::Empty), Some(Ty::AMOUNT));
+        assert_eq!(binary(BinOp::Mul, Ty::Num, Ty::AMOUNT), Some(Ty::AMOUNT));
+        assert_eq!(binary(BinOp::Div, Ty::AMOUNT, Ty::AMOUNT), Some(Ty::Num));
         assert_eq!(binary(BinOp::Sub, Ty::Day, Ty::Day), Some(Ty::Span));
-        assert_eq!(binary(BinOp::Add, Ty::Day, Ty::Amount), None);
-        assert_eq!(binary(BinOp::Mul, Ty::Amount, Ty::Amount), None);
-        assert_eq!(binary(BinOp::Lt, Ty::Amount, Ty::Empty), Some(Ty::Bool));
+        assert_eq!(binary(BinOp::Add, Ty::Day, Ty::AMOUNT), None);
+        assert_eq!(binary(BinOp::Mul, Ty::AMOUNT, Ty::AMOUNT), None);
+        assert_eq!(binary(BinOp::Lt, Ty::AMOUNT, Ty::Empty), Some(Ty::Bool));
         assert_eq!(binary(BinOp::Lt, Ty::Place, Ty::Place), None);
     }
 }

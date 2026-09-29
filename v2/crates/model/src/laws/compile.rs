@@ -11,7 +11,7 @@
 //! any error is dropped whole.
 
 use axiom_core::glob::is_pattern;
-use axiom_core::{Diagnostic, Id, Loc, Sym};
+use axiom_core::{Diagnostic, Id, Loc, Severity, Sym};
 use axiom_syntax::{
     self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep, UnOp,
 };
@@ -22,7 +22,8 @@ use crate::book::{Entity, Param};
 use crate::declare::World;
 use crate::errors::{Word, article, count, list, suggest};
 use crate::law::{
-    Closing, Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Step, StepKind, Trigger, Ty, Value, Var, Window,
+    Closing, Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var,
+    Window,
 };
 use crate::params::Shape;
 use crate::scope::Home;
@@ -32,8 +33,8 @@ const FUNCTIONS: [&str; 8] = ["total", "tally", "min", "max", "abs", "progressiv
 
 /// The functions whose arguments are all of one type each: what they must be, and what they give.
 const FIXED: [(&str, &[Ty], Func, Ty); 3] = [
-    ("progressive", &[Ty::Schedule, Ty::Amount], Func::Progressive, Ty::Amount),
-    ("value", &[Ty::Amount, Ty::Unit], Func::Value, Ty::Amount),
+    ("progressive", &[Ty::Schedule, Ty::AMOUNT], Func::Progressive, Ty::AMOUNT),
+    ("value", &[Ty::AMOUNT, Ty::Unit], Func::Value, Ty::AMOUNT),
     ("date", &[Ty::Num, Ty::Num, Ty::Num], Func::Date, Ty::Day),
 ];
 
@@ -137,6 +138,9 @@ impl<'s> Compiler<'_, '_, 's> {
             system: if let Home::System(system) = site.home { Some(system) } else { None },
             trigger: trigger?,
             budget: None,
+            // v3 bridge: the v3 model has no `overrides`, and ranks nothing: it runs every law.
+            overrides: None,
+            rank: Rank(0),
             steps: steps.into(),
             nodes: std::mem::take(&mut self.nodes).into(),
             loc: law.loc,
@@ -168,12 +172,14 @@ impl<'s> Compiler<'_, '_, 's> {
             }
             WrittenStep::Require { cond, otherwise, message, warn } => {
                 let cond = self.condition(*cond)?;
-                let otherwise = match otherwise {
-                    Some(effect) => Some(self.effect(effect)?),
-                    None => None,
+                // v3 bridge: a v3 `require` has one reparation at most.
+                let otherwise: Box<[Effect]> = match otherwise {
+                    Some(effect) => Box::new([self.effect(effect)?]),
+                    None => Box::default(),
                 };
                 let message = message.map(|text| self.world.book.names.intern(text.0));
-                StepKind::Require { cond, otherwise, message, warn: *warn }
+                let severity = if *warn { Severity::Warning } else { Severity::Error };
+                StepKind::Require { cond, otherwise, message, severity }
             }
             WrittenStep::Effect(effect) => StepKind::Effect(self.effect(effect)?),
         };
@@ -183,7 +189,7 @@ impl<'s> Compiler<'_, '_, 's> {
     fn effect(&mut self, effect: &WrittenEffect<'s>) -> Option<Effect> {
         match effect {
             WrittenEffect::Owe { amount, to, due, name } => {
-                let amount = self.expression(*amount, Ty::Amount)?;
+                let amount = self.expression(*amount, Ty::AMOUNT)?;
                 let to = self.owed_to(to.0);
                 let due = match due {
                     Some(due) => Some(self.expression(*due, Ty::Day)?),
@@ -193,7 +199,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 Some(Effect::Owe { amount, to: to?, due, name })
             }
             WrittenEffect::Count { amount, name } => {
-                let amount = self.expression(*amount, Ty::Amount)?;
+                let amount = self.expression(*amount, Ty::AMOUNT)?;
                 Some(Effect::Count { amount, name: self.world.book.names.intern(name.0) })
             }
         }
@@ -443,9 +449,9 @@ impl<'s> Compiler<'_, '_, 's> {
     fn field(&mut self, receiver: ExprId, field: Word<'s>) -> Check<(Op, Ty)> {
         let (node, ty) = self.child(receiver)?;
         let built_in = match (ty, field.text) {
-            (Ty::Place, "balance") => Some((Field::Balance, Ty::Amount)),
-            (Ty::Place, "basis") => Some((Field::Basis, Ty::Amount)),
-            (Ty::Amount | Ty::Empty, "unit") => Some((Field::Unit, Ty::Unit)),
+            (Ty::Place, "balance") => Some((Field::Balance, Ty::AMOUNT)),
+            (Ty::Place, "basis") => Some((Field::Basis, Ty::AMOUNT)),
+            (Ty::Amount(_) | Ty::Empty, "unit") => Some((Field::Unit, Ty::Unit)),
             (Ty::Place | Ty::Entity, "owner") => Some((Field::Owner, Ty::Entity)),
             (Ty::Place | Ty::Entity | Ty::Unit, "kind") => Some((Field::Kind, Ty::Kind)),
             (Ty::Entity, "age") => Some((Field::Age, Ty::Span)),
@@ -473,7 +479,7 @@ impl<'s> Compiler<'_, '_, 's> {
             Ty::Place => vec!["balance", "basis", "owner", "kind"],
             Ty::Entity => vec!["owner", "kind", "age"],
             Ty::Unit => vec!["kind"],
-            Ty::Amount | Ty::Empty => vec!["unit"],
+            Ty::Amount(_) | Ty::Empty => vec!["unit"],
             Ty::Day => vec!["year", "month"],
             _ => Vec::new(),
         };
@@ -580,14 +586,14 @@ impl<'s> Compiler<'_, '_, 's> {
         let (func, ty) = match function.text {
             "total" => {
                 arity(2, 3)?;
-                (self.total(&typed)?, Ty::Amount)
+                (self.total(&typed)?, Ty::AMOUNT)
             }
             "tally" => {
                 arity(1, 2)?;
                 if args.len() == 2 && !matches!(ty_at(1), Ty::Num | Ty::Day) {
                     return Err(expected("a year or a date", ty_at(1), arg_loc(1)).into());
                 }
-                (self.tally(args[0])?, Ty::Amount)
+                (self.tally(args[0])?, Ty::AMOUNT)
             }
             "min" | "max" => {
                 arity(2, 2)?;

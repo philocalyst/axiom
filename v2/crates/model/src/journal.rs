@@ -1,9 +1,12 @@
 //! What the journal records: flows grouped into transactions, balance
-//! assertions, settlement events, prices, and plans.
+//! assertions, measures, settlement events, prices, returns as filed, and plans.
 
 use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Span, Sym};
 
-use crate::book::{Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose};
+use crate::book::{
+    Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose, System,
+};
+use crate::law::{Law, Subject};
 
 /// Value moving once, from one place to another. Balanced by construction.
 #[derive(Clone, PartialEq, Debug)]
@@ -119,8 +122,6 @@ pub enum Derivation {
     /// A loan payment's interest, or its principal.
     Interest(Id<Contract>),
     Principal(Id<Contract>),
-    Escrow(Id<Contract>),
-    Match(Id<Contract>),
     /// An owner's share of a flow: `business 60% for studio`, declared on
     /// a contract, a party kind or a purpose.
     Share(Sharer),
@@ -132,6 +133,14 @@ pub enum Derivation {
     PassThrough,
     /// A contract deposit or a missing occurrence: a claim.
     Claim(Id<Contract>),
+    /// An `also` line: escrow, an employer's match, a card's cash back.
+    Also(Id<Also>),
+    /// A deadline's `else`, when it passed (a late fee).
+    Otherwise(Id<Contract>),
+    /// A law's reparation (`require … else …`).
+    Reparation(Id<Law>),
+    /// The unused part of a `covers` promise that ended early.
+    Refund(Id<Contract>),
     /// `for PARTY` on a payment: the party owes it, and the payment is its,
     /// passed through the owner.
     PaidFor(Id<Entity>),
@@ -179,11 +188,33 @@ pub struct Detail {
     /// parcel stays apart, and it is this flow's `due` and payee that say who
     /// owes it and by when.
     pub due: Option<Day>,
+    /// `against ^code`: the transaction it refunds or reimburses.
+    pub against: Option<Id<Txn>>,
+    /// How a computed amount was reckoned (`12% of ^bldg-water`), for `why` and
+    /// hints: the share and what it was of, with where that was stated.
+    pub reckoned: Option<Reckoning>,
+}
+
+/// A computed amount's arithmetic: `rate` of `of`, as stated at `from`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Reckoning {
+    pub rate: Ratio,
+    pub of: Amount,
+    pub from: Loc,
 }
 
 impl Detail {
-    pub const NONE: Detail =
-        Detail { basis: None, hold: None, basis_end: None, since: None, spender: None, cost: None, due: None };
+    pub const NONE: Detail = Detail {
+        basis: None,
+        hold: None,
+        basis_end: None,
+        since: None,
+        spender: None,
+        cost: None,
+        due: None,
+        against: None,
+        reckoned: None,
+    };
 
     /// The same detail `days` later: a due day goes with the flow that carries it.
     pub fn moved(&self, days: i32) -> Detail {
@@ -295,6 +326,52 @@ pub struct Split {
     pub unit: Id<Commodity>,
     /// New units per old unit: 2 for `2 for 1`, 1/10 for `1 for 10`.
     pub ratio: Ratio,
+    pub loc: Loc,
+}
+
+/// `12 me worked 6.5 HR for halcyon ^inv-12`, `21 car used 44 MI
+/// #business-travel for studio` (LANGUAGE §5): an event that moves nothing.
+/// Purpose laws fire on it, and `total` counts it in its unit.
+pub struct Measure {
+    pub day: Day,
+    pub action: Action,
+    /// Who worked, or what was used.
+    pub subject: Subject,
+    /// In a unit of a `measure` kind.
+    pub quantity: Amount,
+    /// Whom it was for: its owner, as a flow's.
+    pub owner: Id<Entity>,
+    /// A party it was done for (`for halcyon`).
+    pub party: Option<Id<Entity>>,
+    pub purpose: Option<Purposed>,
+    pub description: Option<Sym>,
+    pub codes: Box<[Sym]>,
+    pub loc: Loc,
+}
+
+/// What a measure records.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Action {
+    Work,
+    Use,
+}
+
+/// `01 ^bldg-water = 155.00 USD`: a named value on a day, for references.
+#[derive(Clone, Copy, Debug)]
+pub struct Reading {
+    pub day: Day,
+    pub code: Sym,
+    pub amount: Amount,
+    pub loc: Loc,
+}
+
+/// `2026-04-15 us filed 2025` with its tally lines (LANGUAGE §11).
+pub struct Filed {
+    pub day: Day,
+    pub system: Id<System>,
+    pub year: i32,
+    pub owner: Id<Entity>,
+    pub lines: Box<[(Sym, Amount, Loc)]>,
     pub loc: Loc,
 }
 

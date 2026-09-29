@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Span, Sym, Tree};
+use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree};
 use axiom_engine::{Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
 use axiom_model::Effect as Consequence;
 use axiom_model::*;
@@ -129,6 +129,10 @@ impl Cast {
             member: matches!(name, "me" | "jordan").then(|| Id::new(2)),
             owner: None,
             client_of: None,
+            owned_by: Box::default(),
+            currency: Id::new(0),
+            citizen: Box::default(),
+            books: Books::Cash,
             known_as: Box::default(),
             props: Box::default(),
             doc: None,
@@ -158,6 +162,7 @@ impl Cast {
             liquidity: (path == "assets/retirement").then_some(Span::months(1)),
             opened: None,
             closed: None,
+            shares: Box::default(),
             known_as: Box::default(),
             props: Box::default(),
             doc: None,
@@ -182,8 +187,14 @@ impl Cast {
         };
         let (usd, vti) = (commodity("USD", 2), commodity("VTI", 3));
 
-        let jurisdictions =
-            ["us", "us/ca"].map(|path| System { path: names.intern(path), laws: Box::default(), doc: None, loc: None });
+        let jurisdictions = ["us", "us/ca"].map(|path| System {
+            path: names.intern(path),
+            laws: Box::default(),
+            currency: None,
+            rates: None,
+            doc: None,
+            loc: None,
+        });
         let (systems, system_ids) = Tree::build(jurisdictions.into(), &[None, Some(0)]).unwrap();
 
         Cast {
@@ -368,8 +379,8 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
     let node = |op, ty, first| Node { op, ty, loc: line(80), first: NodeId(first) };
     let limit = Amount::new(Qty(50_000), cast.usd);
     let nodes = vec![
-        node(Op::Call(Func::Total(Dir::In, Window::Month), Box::default()), Ty::Amount, 0),
-        node(Op::Const(Value::Amount(limit)), Ty::Amount, 1),
+        node(Op::Call(Func::Total(Dir::In, Window::Month), Box::default()), Ty::AMOUNT, 0),
+        node(Op::Const(Value::Amount(limit)), Ty::AMOUNT, 1),
         node(Op::Bin(op, NodeId(0), NodeId(1)), Ty::Bool, 0),
     ];
     Law {
@@ -379,9 +390,16 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
         system: None,
         trigger: Trigger::In,
         budget: None,
+        overrides: None,
+        rank: Rank(0),
         steps: Box::new([Step {
             loc: line(80),
-            kind: StepKind::Require { cond: NodeId(2), otherwise: None, message: None, warn },
+            kind: StepKind::Require {
+                cond: NodeId(2),
+                otherwise: Box::default(),
+                message: None,
+                severity: if warn { Severity::Warning } else { Severity::Error },
+            },
         }]),
         nodes: nodes.into(),
         loc: line(80),
@@ -392,9 +410,9 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
 fn early_withdrawal(cast: &mut Cast) -> Law {
     let node = |op, ty, first| Node { op, ty, loc: line(85), first: NodeId(first) };
     let nodes = vec![
-        node(Op::Var(Var::Amount), Ty::Amount, 0),
+        node(Op::Var(Var::Amount), Ty::AMOUNT, 0),
         node(Op::Const(Value::Num(Ratio::percent(10, 0).unwrap())), Ty::Num, 1),
-        node(Op::Bin(BinOp::Mul, NodeId(0), NodeId(1)), Ty::Amount, 0),
+        node(Op::Bin(BinOp::Mul, NodeId(0), NodeId(1)), Ty::AMOUNT, 0),
     ];
     let owe =
         Consequence::Owe { amount: NodeId(2), to: cast.irs, due: None, name: cast.names.intern("early-withdrawal") };
@@ -405,6 +423,8 @@ fn early_withdrawal(cast: &mut Cast) -> Law {
         system: None,
         trigger: Trigger::Out,
         budget: None,
+        overrides: None,
+        rank: Rank(0),
         steps: Box::new([Step { loc: line(85), kind: StepKind::Effect(owe) }]),
         nodes: nodes.into(),
         loc: line(85),
@@ -430,6 +450,8 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
         system: Some(cast.us),
         trigger: Trigger::In,
         budget: None,
+        overrides: None,
+        rank: Rank(0),
         steps: Box::default(),
         nodes: Box::default(),
         loc: line(90),
@@ -577,12 +599,15 @@ pub(crate) fn household() -> Household {
         commodities: cast.commodities,
         assets: Arena::new(),
         contracts: Arena::new(),
+        also: Arena::new(),
         laws: records.laws,
         rules,
         budgets: Arena::new(),
         params: Arena::new(),
         schedules: Arena::new(),
         codes: Vec::new(),
+        patterns: Arena::new(),
+        formats: Arena::new(),
         txns: journal.txns,
         flows: journal.flows,
         touching,
@@ -591,6 +616,9 @@ pub(crate) fn household() -> Household {
         prices: Prices::default(),
         lookup: Default::default(),
         splits: Vec::new(),
+        measures: Arena::new(),
+        readings: Vec::new(),
+        filed: Vec::new(),
         plans,
         sources: Vec::new(),
     };

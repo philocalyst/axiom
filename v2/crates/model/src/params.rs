@@ -51,7 +51,8 @@ pub(crate) fn declare<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], diag
         }
         let rows = rows(world, home, file, written.node, diags);
         if !rows.is_empty() {
-            world.book.params.push(Param { name: sym, system, rows: rows.into(), loc: file.loc(name) });
+            // v3 bridge: a v3 param's values carry their own units.
+            world.book.params.push(Param { name: sym, unit: None, system, rows: rows.into(), loc: file.loc(name) });
         }
     }
     let things: Vec<_> = world

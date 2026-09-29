@@ -428,7 +428,8 @@ impl Elab<'_, '_> {
             || due.is_some();
         let detail = said.then(|| {
             let (basis, hold, since, cost) = (tail.basis, tail.hold, tail.since, mv.cost);
-            Box::new(Detail { basis, hold, basis_end, since, spender, cost, due })
+            // v3 bridge: no v3 line refunds another (`against`) or computes an amount from a reference (`reckoned`).
+            Box::new(Detail { basis, hold, basis_end, since, spender, cost, due, against: None, reckoned: None })
         });
         let recognized = tail.period.unwrap_or(Days::on(day));
         // v3 bridge: the owner of the first end that is an account, else `me`. Nothing reads it yet.

@@ -382,7 +382,7 @@ fn missing_figures(f: &Frame, param: Id<Param>, system: Id<System>, (cause, text
 /// `let` that carried it there.
 pub(crate) fn first_fault(f: &Frame, step: usize) -> Option<usize> {
     let root = match &f.law.steps[step].kind {
-        StepKind::When(root) | StepKind::Let(root) => *root,
+        StepKind::When(root) | StepKind::Unless(root) | StepKind::Let(root) => *root,
         StepKind::Require { cond, .. } => *cond,
         StepKind::Effect(
             Consequence::Owe { amount, .. }

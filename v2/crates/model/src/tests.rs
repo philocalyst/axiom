@@ -1362,6 +1362,16 @@ fn a_v3_book_fits_the_v4_types() {
         // The flow is its account's owner's, and nothing says what it is for.
         let flow = &book.flows[axiom_core::Id::new(0)];
         assert_eq!((flow.owner, flow.origin, flow.purpose), (roots.me, Origin::Written, None));
+
+        // What the v3 model cannot say is empty or default: an owner counts in the base, on cash books.
+        let me = &book.entities[roots.me];
+        assert_eq!((me.currency, me.books), (book.base, crate::Books::Cash));
+        assert!(me.owned_by.is_empty() && me.citizen.is_empty() && me.known_as.is_empty());
+        assert!(place("checking").shares.is_empty() && place("checking").known_as.is_empty());
+        let (promised, derived) = (book.contracts.len() + book.also.len(), book.budgets.len() + book.patterns.len());
+        assert_eq!((promised, derived, book.formats.len()), (0, 0, 0));
+        assert_eq!((book.measures.len(), book.readings.len(), book.filed.len()), (0, 0, 0));
+        assert!(book.laws.values().all(|law| law.overrides.is_none() && law.rank == crate::Rank(0)));
     });
 }
 
@@ -1372,10 +1382,16 @@ fn terms(every: crate::Cadence, on: &[crate::On], anchor: axiom_core::Day, templ
         on: on.into(),
         anchor,
         template: template.into(),
+        inputs: Box::default(),
         estimate: false,
+        due: None,
+        grace: axiom_core::Span::default(),
+        period: None,
         covers: None,
+        prorated: false,
+        escalation: None,
         shares: Box::default(),
-        escrow: None,
+        also: Box::default(),
         rate: None,
         change: None,
     }
@@ -1403,13 +1419,14 @@ fn contract(days: axiom_core::Days, terms: axiom_core::Timeline<crate::Terms>) -
 // v3 bridge: `sync FILE` with its `run COMMAND` is a source whose sink is that file.
 #[test]
 fn a_v3_sync_is_a_source_that_merges_into_its_file() {
-    use crate::Sink;
+    use crate::sync::{Fetch, Sink};
     with_book("sync prices/2026.ax\n  run ./scripts/quotes.py VTI BND\n", |book, diags| {
         assert!(diags.is_empty(), "{diags:?}");
         let [source] = &book.sources[..] else { panic!("one source") };
-        assert_eq!(book.name(source.run), "./scripts/quotes.py VTI BND");
+        assert!(matches!(source.fetch, Fetch::Run(command) if book.name(command) == "./scripts/quotes.py VTI BND"));
         assert!(matches!(source.sink, Sink::File(file) if book.name(file) == "prices/2026.ax"));
-        assert_eq!((book.name(source.name), source.doc), ("prices/2026.ax", None));
+        assert_eq!(book.name(source.name), "prices/2026.ax");
+        assert_eq!((source.doc, source.format, source.system), (None, None, None));
     });
 }
 

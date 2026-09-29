@@ -191,10 +191,9 @@ enum Role {
 fn role(law: &Law) -> Role {
     let mut role = Role::Tally;
     for step in law.steps.iter() {
-        match step.kind {
-            StepKind::Require { otherwise: Some(_), .. } | StepKind::Effect(Consequence::Owe { .. }) => {
-                return Role::Price;
-            }
+        match &step.kind {
+            StepKind::Require { otherwise, .. } if !otherwise.is_empty() => return Role::Price,
+            StepKind::Effect(Consequence::Owe { .. }) => return Role::Price,
             StepKind::Require { .. } => role = Role::Limit,
             _ => {}
         }

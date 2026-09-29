@@ -44,11 +44,12 @@ fn writes(law: &Law) -> Vec<Sym> {
         Effect::Count { name, .. } => Some(*name),
         Effect::Owe { .. } | Effect::Consume { .. } | Effect::Carry { .. } => None,
     };
-    let names = law.steps.iter().filter_map(|step| match &step.kind {
-        StepKind::Effect(effect) | StepKind::Require { otherwise: Some(effect), .. } => counted(effect),
-        _ => None,
+    let effects = law.steps.iter().flat_map(|step| match &step.kind {
+        StepKind::Effect(effect) => std::slice::from_ref(effect),
+        StepKind::Require { otherwise, .. } => otherwise,
+        _ => &[],
     });
-    names.collect()
+    effects.filter_map(counted).collect()
 }
 
 /// Each law's place in the order, by index: dependencies first, declaration
