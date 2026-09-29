@@ -40,9 +40,9 @@ impl<'s> Parser<'s> {
         let spread = self.spread(line, date)?;
         let from = self.side()?;
         // What is left of a contract's name: no amount to speak of, and no lots.
-        if let (false, Some(end), None) = (spread, from.end, from.amount) {
+        if let (false, Some(end), None) = (spread, &from.end, &from.amount) {
             match self.tok() {
-                Tok::Punct("=") => return self.assertion(line, date, end),
+                Tok::Punct("=") => return self.assertion(line, date, *end),
                 Tok::Name("owes") if end.select.is_empty() => {
                     let claim = self.claim(date, end.name)?;
                     let header = self.end_header(line)?;

@@ -42,8 +42,8 @@ impl<'s> Parser<'s> {
         let (Some(year), Some(month)) = (self.place.year, month) else {
             return self.fail(short_date(at, self.text(at), self.place));
         };
-        let whole = (year, month.into(), day.into());
-        Day::from_ymd(year, whole.1, whole.2).ok_or_else(|| self.report(not_a_date(at, self.text(at), whole)))
+        let (month, day) = (u32::from(month), u32::from(day));
+        Day::from_ymd(year, month, day).ok_or_else(|| self.report(not_a_date(at, self.text(at), (year, month, day))))
     }
 
     /// The token as a day of the month: one or two digits.
