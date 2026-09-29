@@ -35,8 +35,9 @@ matches that shape exactly, and a name otherwise (`401k`). Numbers carry no
 sign; `-` is always an operator. `a-b` is one name. `a - b` is a subtraction.
 Case separates places and entities (lowercase) from commodities (uppercase).
 
-`empty` is the zero of every commodity. A bare `0` with no commodity is an
-error, and the fix is to write `empty`.
+`empty` is the zero of every commodity. A bare `0` where an amount belongs is
+an error, and the fix is to write `empty`. (`precision 0` is a number, not an
+amount, and is fine.)
 
 ## 2. Transactions
 
@@ -129,7 +130,9 @@ never hidden.
 2026-01-02 VTI 280.14 USD                price: 1 VTI = 280.14 USD on that day
 ```
 
-A failed assertion is an error that shows the difference and the flows since the
+An assertion is written the way a statement shows the balance: in the place's
+display sign, so `visa = 1_234.56 USD` means 1,234.56 is owed. A failed
+assertion is an error that shows the difference and the flows since the
 last passing assertion. With `!`, the gap becomes an explicit flow from `unknown`.
 When exactly one flow with a `?` amount touches the place between two
 assertions, its amount is inferred from them.
@@ -176,7 +179,8 @@ unknown property is an error with a suggestion.
 
 Root kinds: `asset liability income expense equity` (places, one per class),
 `commodity`, `entity`. The `me` entity (kind `person`) always exists and owns
-every place by default.
+every place by default. A project sets its properties by declaring it:
+`entity me : person` with `born`, `filing` and `lives` lines.
 
 ```text
 code GLOB                 // e.g. `code trip-*`
@@ -234,6 +238,9 @@ Steps run top to bottom. Triggers:
 | `by EXPR`     | the journal reaches that date                                | `date self owner`                    |
 | `always`      | after any change to a governed place                         | `balance date self owner`            |
 
+Every context also has `year` and `month`, taken from its date, and `flow`
+(the triggering flow, for `flow is #code`) where a flow triggered the law.
+
 *Governed*:
 
 - A law in a place kind governs every place of that kind.
@@ -252,9 +259,10 @@ Effects:
 - `warn` is a warning. Budgets are warnings.
 - `owe` creates an obligation from `self`'s owner to an entity, due by a date
   (default: the flow's date). It is named for reports.
-- `count` adds to a named tally, keyed by owner, year, and system.
-- `tally(NAME)` reads a tally in the current year, looking in the law's own
-  system and then its ancestors.
+- `count` adds to a named tally, keyed by owner and year: one namespace per
+  person-year, so a tally is a line on that person's year. A per-person limit
+  is a count followed by a `require` on the tally.
+- `tally(NAME)` reads that line for the subject's owner in the current year.
 
 ### Expressions
 
