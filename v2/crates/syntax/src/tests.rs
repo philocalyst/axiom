@@ -1338,8 +1338,11 @@ fn expressions_are_post_order_with_first_nodes() {
 /// What a damaged file's changed bytes are taken from: punctuation and signs.
 const ALPHABET: &[u8] = b"-/\"(),:= \n%|^#.0+[]@!?*\t";
 
-/// Sources damaged by a few changed bytes: `source`, again and again.
+/// Sources damaged by a few changed bytes: `source`, again and again (`count`
+/// times, or that many times `AXIOM_FUZZ`, to fuzz for longer).
 fn damaged(source: &str, count: usize, mut with: impl FnMut(&str)) {
+    let longer = std::env::var("AXIOM_FUZZ").ok().and_then(|times| times.parse::<usize>().ok()).unwrap_or(1);
+    let count = count * longer;
     let mut state = 0x2545_F491_4F6C_DD1Du64;
     let mut random = |below: usize| {
         state ^= state << 13;
