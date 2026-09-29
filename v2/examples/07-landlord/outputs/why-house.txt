@@ -1,21 +1,25 @@
-$ axiom why house --today 2026-01-06
+$ axiom why house --today 2026-04-16
 
 Why assets/rental/house
 
 Governed by
-  Law                     When     Governs                                     Explains                                                                      Written
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  count-wages             on in    everyone living under us, and all they own  Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a     us.ax:58
-  count-interest          on in    everyone living under us, and all they own  Interest is ordinary income in the year it is earned (IRC §61(a)(4)),         us.ax:66
-  count-dividends         on in    everyone living under us, and all they own  Dividends are income in the year they are paid (IRC §61(a)(7)), except        us.ax:76
-  credit-withholding      on in    everyone living under us, and all they own  Tax withheld from pay, or paid in installments, is credited against the       us.ax:108
-  count-rental-income     on in    everything in this book                     Rents, late fees and kept deposits count when they arrive (cash method).      tax.ax:19
-  recapture               on gain  every depreciable                           Selling depreciable property brings back the depreciation taken (IRC §1250):  accounts.ax:18
-  count-short-term-gains  on gain  everyone living under us, and all they own  A gain on something held for a year or less is taxed as ordinary income       us.ax:86
-  count-long-term-gains   on gain  everyone living under us, and all they own  A gain on something held for more than a year is taxed at the lower           us.ax:97
+  Law  When  Explains  Written
+  ────────────────────────────
+  · 12 more laws only count, into distributions, dividends, interest, investment-income, itemized,
+    long-term-gains, payments, pretax, recaptured, rental-income, salt, short-term-gains,
+    total-income, wages.
 
 Recent flows
-  Date        With                         Payee     Note   Amount  Balance
-  ─────────────────────────────────────────────────────────────────────────
-  2024-12-18  assets/bank/rental-checking  title-co         1 HOME   1 HOME
-  2025-12-29  assets/bank/rental-checking                  -1 HOME   0 HOME
+  Date        With                          Payee           Note               Amount         Balance
+  ───────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-07-31  opening balance                                                          -5,024.69 USD
+  ───────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-07-31  opening balance                                                                  1 HOME
+  2025-07-31  expenses/rental/depreciation                               -913.58 USD   -5,938.27 USD
+  2025-08-31  expenses/rental/depreciation                               -913.58 USD   -6,851.85 USD
+  2025-09-15  liabilities/bills             summit-roofing  #inv-roof  14,200.00 USD    7,348.15 USD
+  2025-09-30  expenses/rental/depreciation                               -935.10 USD    6,413.05 USD
+  2025-10-31  expenses/rental/depreciation                               -956.61 USD    5,456.44 USD
+  2025-11-30  expenses/rental/depreciation                               -956.61 USD    4,499.83 USD
+  2025-12-29  expenses/rental/depreciation                               -478.31 USD    4,021.52 USD
+  2025-12-29  assets/bank/rental-bank                                         -1 HOME          0 HOME

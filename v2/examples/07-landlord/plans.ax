@@ -1,0 +1,32 @@
+// What repeats. A plan is a template: the journal writes an occurrence as the
+// plan's name (`2025-03-05 manager-fee`), or with what differs (`2025-06-05
+// manager-fee 198 USD`, `mortgage-payment` with new legs), and the forecast
+// projects the rest. Each ends where its reason ends: nothing after the sale.
+
+/// Monthly pay from the day job, before and after tax.
+plan paycheck every month on 28 from 2025-01-28 income/salary -> 8_000.00 USD
+  taxes/federal       1_215.00 USD
+  taxes/payroll       612.00 USD
+  checking            ...
+
+/// Tenant A: 2,400 USD a month on the first, February to August.
+plan rent-a every month on 1 from 2025-02-01 until 2025-08 income/rent -> rental-bank 2_400 USD #lease-a
+
+/// Tenant B: 2,500 USD a month from October. The lease runs to 2026-09-30, but the
+/// house is sold on 2025-12-29 and the buyer takes the lease: the plan stops there.
+plan rent-b every month on 1 from 2025-10-01 until 2025-12 income/rent -> rental-bank 2_500 USD #lease-b
+
+/// The mortgage payment is fixed; what goes to principal grows every month. The
+/// legs below are the first payment's, and each later occurrence writes its own.
+plan mortgage-payment every month on 1 from 2025-02-01 until 2025-12 rental-bank -> 1_809.59 USD / lender
+  mortgage            240.21 USD for #loan   // principal
+  interest            1_569.38 USD   // interest
+
+/// Property management, 8% of the month's rent, paid the month after.
+plan manager-fee every month on 5 from 2025-03-05 until 2025-12 rental-bank -> management 192 USD / hartwell-pm
+
+/// Depreciation is a deduction with no cash: 27.5 years straight line on the
+/// building (80% of the price; the land is not depreciable), a whole month at
+/// 913.58 USD. The first and last months are half months (mid-month convention),
+/// and the roof adds its own from September.
+plan depreciation every month on 31 from 2025-01-31 until 2025-12 house.basis -> expenses/rental/depreciation 913.58 USD

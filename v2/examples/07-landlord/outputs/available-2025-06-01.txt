@@ -1,31 +1,25 @@
-$ axiom available --at 2025-06-01 --today 2026-01-06
+$ axiom available --today 2025-06-01
 
 Available on 2025-06-01
 
 What you can spend
-  Liquid now                            Amount
-  ────────────────────────────────────────────
-  Money in liquid places         42,575.00 USD
-    assets/bank/checking         35,189.60 USD
-    assets/bank/deposit-account   2,400.00 USD
-    assets/bank/rental-checking   1,908.75 USD
-    assets/prepaid/loan-costs     3,076.65 USD
-  Tied to restricted entities    -2,400.00 USD
-    tied to tenant-a             -2,400.00 USD
-  ────────────────────────────────────────────
-  Available to spend             40,175.00 USD
+  In hand                            Amount
+  ─────────────────────────────────────────
+  Money in hand               39,498.35 USD
+    assets/bank/checking      35,189.60 USD
+    assets/bank/deposit-bank   2,400.00 USD
+    assets/bank/rental-bank    1,908.75 USD
+  Held for others             -2,400.00 USD
+    held for tenant-a         -2,400.00 USD
+  ─────────────────────────────────────────
+  Available to spend          37,098.35 USD
 
 What it would take to reach the rest
-  Holding                                    Liquid in           Value     Costs             Net
-  ──────────────────────────────────────────────────────────────────────────────────────────────
-  assets/rental/house (1 HOME)               90d        388,500.00 USD            388,500.00 USD
-    counts -7,898.62 USD as agi
-    counts 5,711.73 USD as short-term-gains
-    counts -7,898.62 USD as taxable-income
-    counts -784.97 USD as income-tax
-    realizes a gain of 11,650.00 USD
-  ──────────────────────────────────────────────────────────────────────────────────────────────
-  If everything were drawn today                        388,500.00 USD  0.00 USD  388,500.00 USD
+  Holding                         Liquid in           Value      Cost             Net  Because
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  assets/rental/house (1 HOME)    90d        388,500.00 USD            388,500.00 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today             388,500.00 USD  0.00 USD  388,500.00 USD
   · Each line withdraws the whole holding into assets/bank/checking on 2025-06-01 and runs the year
-    out through the laws. Costs are what they would owe because of it, as if the year ended today:
-    penalties, and the tax on any income it creates.
+    out through the laws. Cost is what they would then owe beyond what they already will: penalties,
+    and the tax on any income it creates.

@@ -1,0 +1,24 @@
+$ axiom tax 2025 --today 2026-01-06
+
+Taxes 2025 for me
+
+Counted
+  Tally                      Amount  From
+  ────────────────────────────────────────────────────────
+  project
+    rental-expenses   42,065.24 USD  46 sources
+    depreciation      10,178.48 USD  12 sources
+    rental-income     24,725.00 USD  12 sources
+    recaptured        10,178.48 USD  journal/2025/12.ax:25
+    short-term-gains  10,178.48 USD  journal/2025/12.ax:25
+  ────────────────────────────────────────────────────────
+  us
+    wages             96,000.00 USD  36 sources
+    total-income      96,000.00 USD  36 sources
+    payments          14,580.00 USD  12 sources
+    long-term-gains   13,481.25 USD  2 sources
+
+Owed
+  Owed  To  Due  Amount  From
+  ───────────────────────────
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

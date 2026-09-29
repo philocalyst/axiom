@@ -1,9 +1,7 @@
-$ axiom lots --today 2026-01-06
+$ axiom lots --today 2026-04-16
 
-Lots at 2026-01-06
+Lots at 2026-04-16
 
-  Place                   Quantity       Basis  Acquired    Held        Value  Unrealized  Term   Note
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/bank/checking  350.00 USD  350.00 USD  2025-02-01  11m5d  350.00 USD    0.00 USD  short  #lease-a · tied to tenant-a
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Total                             350.00 USD                     350.00 USD    0.00 USD
+  Place  Quantity  Basis  Acquired  Held  Value  Unrealized  Term  Note
+  ─────────────────────────────────────────────────────────────────────
+  · No parcels: everything held is plain money.

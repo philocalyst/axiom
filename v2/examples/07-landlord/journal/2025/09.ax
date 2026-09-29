@@ -1,47 +1,44 @@
 2025-09-01 checking -> own-rent 1_950 USD / oak-street
-2025-09-01 rental-checking -> 1_809.59 USD / lender
-  mortgage            249.83 USD   // principal
+2025-09-01 mortgage-payment
+  mortgage            249.83 USD for #loan   // principal
   interest            1_559.76 USD   // interest
 
 /// Listing for the vacancy.
-2025-09-03 rental-checking -> advertising 149 USD / rentlist
-2025-09-05 rental-checking -> management 192 USD / hartwell-pm
+2025-09-03 rental-bank -> advertising 149 USD / rentlist
+2025-09-05 manager-fee
 
 /// REPAIR: turnover. Paint, carpet clean, new blinds. Routine, so an expense, not an improvement.
-2025-09-06 rental-checking -> repairs 1_150 USD / fresh-paint
+2025-09-06 rental-bank -> repairs 1_150 USD / fresh-paint
 2025-09-08 checking -> groceries 205.73 USD
 
 /// The vacant month: the landlord pays the utilities.
-2025-09-10 rental-checking -> utilities 96.40 USD / city-power
-2025-09-10 rental-checking -> utilities 58.20 USD / city-water
+2025-09-10 rental-bank -> utilities 96.40 USD / city-power
+2025-09-10 rental-bank -> utilities 58.20 USD / city-water
 
-/// Tenant A moves out. Carpet cleaning and a broken blind cost 350.00 USD: kept from the deposit, the rest goes back.
-2025-09-12 deposit-account -> deposits/tenant-a 2_050 USD / tenant-a #lease-a
-2025-09-12 income/forfeited-deposits -> deposits/tenant-a 350 USD / tenant-a #lease-a
-2025-09-12 deposit-account -> rental-checking 350 USD / tenant-a #lease-a ! "kept for damage, per the lease"
-
-/// The roof is paid from personal savings: a contribution into the rental account.
-2025-09-14 checking -> rental-checking 16_500 USD
+/// Tenant A moves out. Carpet cleaning and a broken blind cost 350.00 USD: the lease lets Jamie keep that much of the
+/// deposit. 2,050.00 USD goes back (a payment `for #dep-a`), 350.00 USD settles the rest of the claim as income, and
+/// the money Jamie keeps is released from the tenant (`for me`) into the rental account.
+2025-09-12 deposit-bank -> deposits 2_050 USD / tenant-a for #dep-a
+2025-09-12 income/forfeited-deposits -> deposits 350 USD / tenant-a for #dep-a
+2025-09-12 deposit-bank -> rental-bank 350 USD for me
 2025-09-15 checking -> groceries 127.53 USD
 
-/// IMPROVEMENT: a new roof, 14,200.00 USD. It restores the house past what it was and lasts
-/// decades, so it is not an expense: it is a second asset, depreciated on its own.
-2025-09-15 rental-checking -> roof 1 ROOF @ 14_200 USD / summit-roofing
+/// IMPROVEMENT: a new roof, 14,200.00 USD. It restores the house past what it was and lasts decades, so it is not an
+/// expense: it raises the house's basis (`house.basis`). The contractor's invoice is a bill, due in a month.
+2025-09-15 bills -> house.basis 14_200 USD / summit-roofing #inv-roof due 2025-10-15
 2025-09-19 checking -> dining 100.13 USD
 
 /// Window screens.
-2025-09-20 rental-checking -> repairs 96 USD / hardware-hank
+2025-09-20 rental-bank -> repairs 96 USD / hardware-hank
 2025-09-22 checking -> living 265.91 USD
-2025-09-28 income/salary -> 8_000.00 USD
-  taxes/federal       1_215.00 USD
-  taxes/payroll       612.00 USD
-  checking            ...
-2025-09-30 acc-dep-house -> depreciation 913.58 USD
+2025-09-28 paycheck
 
-/// The roof: 14,200 USD over 27.5 years from mid-September.
-2025-09-30 acc-dep-roof -> depreciation 21.52 USD
-2025-09-30 loan-costs -> amortization 8.67 USD
+/// The roof is depreciated as well, from mid-September: 14,200 USD over 27.5 years, a half month in the first.
+2025-09-30 depreciation 935.10 USD
 2025-09-30 mortgage = 277_040.01 USD
-2025-09-30 rental-checking = 3_901.38 USD
-2025-09-30 checking = 34_156.63 USD
-2025-09-30 deposit-account = 0.00 USD
+2025-09-30 bills = 14_200 USD
+2025-09-30 rental-bank = 1_601.38 USD
+2025-09-30 checking = 50_656.63 USD
+2025-09-30 deposit-bank = 0.00 USD
+2025-09-30 house = 1 HOME
+2025-09-30 deposits = 0.00 USD

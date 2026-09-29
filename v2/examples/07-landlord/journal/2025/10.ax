@@ -1,25 +1,27 @@
-/// Lease B: 2,500 USD a month from 2025-10-01, deposit 2,500 USD.
-2025-10-01 liabilities/deposits/tenant-b -> deposit-account 2_500 USD / tenant-b #lease-b
-2025-10-01 income/rent -> rental-checking 2_500 USD #lease-b
+/// Lease B: 2,500 USD a month from 2025-10-01, deposit 2,500 USD, due back a month after the lease ends (2026-10-31).
+2025-10-01 deposits -> deposit-bank 2_500 USD / tenant-b #dep-b for tenant-b due 2026-10-31
+2025-10-01 rent-b
 2025-10-01 checking -> own-rent 1_950 USD / oak-street
-2025-10-01 rental-checking -> 1_809.59 USD / lender
-  mortgage            251.24 USD   // principal
+2025-10-01 mortgage-payment
+  mortgage            251.24 USD for #loan   // principal
   interest            1_558.35 USD   // interest
 2025-10-08 checking -> groceries 221.65 USD
+
+/// The roof is paid from personal savings: a contribution into the rental account, then the bill is paid.
+2025-10-08 checking -> rental-bank 16_500 USD
+2025-10-10 rental-bank -> bills 14_200 USD / summit-roofing for #inv-roof
 2025-10-15 checking -> groceries 171.31 USD
 2025-10-19 checking -> dining 143.41 USD
 2025-10-22 checking -> living 387.38 USD
-2025-10-28 income/salary -> 8_000.00 USD
-  taxes/federal       1_215.00 USD
-  taxes/payroll       612.00 USD
-  checking            ...
+2025-10-28 paycheck
 
 /// Second half of the county tax.
-2025-10-31 rental-checking -> property-tax 2_190 USD / county
-2025-10-31 acc-dep-house -> depreciation 913.58 USD
-2025-10-31 acc-dep-roof -> depreciation 43.03 USD
-2025-10-31 loan-costs -> amortization 8.67 USD
+2025-10-31 rental-bank -> property-tax 2_190 USD / county
+2025-10-31 depreciation 956.61 USD
 2025-10-31 mortgage = 276_788.77 USD
-2025-10-31 rental-checking = 2_401.79 USD
+2025-10-31 bills = empty
+2025-10-31 rental-bank = 2_401.79 USD
 2025-10-31 checking = 37_455.88 USD
-2025-10-31 deposit-account = 2_500.00 USD
+2025-10-31 deposit-bank = 2_500.00 USD
+2025-10-31 house = 1 HOME
+2025-10-31 deposits = 2_500.00 USD

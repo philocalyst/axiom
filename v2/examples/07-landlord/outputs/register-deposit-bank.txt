@@ -1,0 +1,11 @@
+$ axiom register deposit-bank --today 2026-04-16
+
+Register: assets/bank/deposit-bank
+
+  Date        With                     Payee     Note           Amount       Balance
+  ──────────────────────────────────────────────────────────────────────────────────
+  2025-02-01  liabilities/deposits     tenant-a  #dep-a   2,400.00 USD  2,400.00 USD
+  2025-09-12  liabilities/deposits     tenant-a  #dep-a  -2,050.00 USD    350.00 USD
+  2025-09-12  assets/bank/rental-bank                      -350.00 USD      0.00 USD
+  2025-10-01  liabilities/deposits     tenant-b  #dep-b   2,500.00 USD  2,500.00 USD
+  2025-12-29  assets/bank/rental-bank                    -2,500.00 USD      0.00 USD

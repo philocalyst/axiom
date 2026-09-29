@@ -14,7 +14,8 @@ use us
 sync prices/home.ax
   run sh scripts/home-prices.sh
 
-/// Jamie, 45, a nurse practitioner, single, with a rental on the side.
+/// Jamie, 45, a nurse practitioner, single, with a rental on the side. Washington
+/// has no income tax, so `lives us` is the whole story.
 entity me : person
   born   1980-05-02
   filing single

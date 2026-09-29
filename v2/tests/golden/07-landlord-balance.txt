@@ -1,4 +1,4 @@
-Balances at 2026-01-06
+Balances at 2026-04-16
 
   Place                        Balance
   ────────────────────────────────────
@@ -6,9 +6,7 @@ Balances at 2026-01-06
     bank                173,866.60 USD
       checking          173,866.60 USD
   ────────────────────────────────────
-  equity                138,178.48 USD
-    acc-dep-house        10,049.38 USD
-    acc-dep-roof            129.10 USD
+  equity                128,000.00 USD
     opening             128,000.00 USD
   ────────────────────────────────────
   expenses               98,518.13 USD

@@ -1,0 +1,20 @@
+$ axiom why #loan --today 2026-04-16
+
+Why #loan
+
+Flows
+  Date        Flow                                                    Amount  State   From
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-02-01  assets/bank/rental-bank → liabilities/mortgage      240.21 USD  actual  journal/2025/02.ax:8
+  2025-03-01  assets/bank/rental-bank → liabilities/mortgage      241.57 USD  actual  journal/2025/03.ax:4
+  2025-04-01  assets/bank/rental-bank → liabilities/mortgage      242.93 USD  actual  journal/2025/04.ax:3
+  2025-05-01  assets/bank/rental-bank → liabilities/mortgage      244.29 USD  actual  journal/2025/05.ax:4
+  2025-06-01  assets/bank/rental-bank → liabilities/mortgage      245.67 USD  actual  journal/2025/06.ax:3
+  2025-07-01  assets/bank/rental-bank → liabilities/mortgage      247.05 USD  actual  journal/2025/07.ax:4
+  2025-08-01  assets/bank/rental-bank → liabilities/mortgage      248.44 USD  actual  journal/2025/08.ax:4
+  2025-09-01  assets/bank/rental-bank → liabilities/mortgage      249.83 USD  actual  journal/2025/09.ax:3
+  2025-10-01  assets/bank/rental-bank → liabilities/mortgage      251.24 USD  actual  journal/2025/10.ax:6
+  2025-11-01  assets/bank/rental-bank → liabilities/mortgage      252.65 USD  actual  journal/2025/11.ax:3
+  2025-12-01  assets/bank/rental-bank → liabilities/mortgage      254.07 USD  actual  journal/2025/12.ax:4
+  2025-12-29  assets/bank/rental-bank → liabilities/mortgage  276,282.05 USD  actual  journal/2025/12.ax:22
+  · 1 earlier flows not shown.
