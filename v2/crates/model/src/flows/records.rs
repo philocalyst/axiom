@@ -6,7 +6,7 @@ use axiom_core::glob::is_pattern;
 use axiom_core::{Day, Diagnostic, Id};
 use axiom_syntax::{self as ast, EventState, Item};
 
-use super::shape::Elab;
+use super::shape::{Elab, Priced};
 use crate::book::{Amount, CodeRule, CodeScope, Place, SyncSpec};
 use crate::collect::{Entry, class_of};
 use crate::declare::World;
@@ -28,13 +28,7 @@ impl<'s> Elab<'_, 's> {
         let place = self.end_of(assert.place.name.0);
         let amount = assert.amount;
         let stated = match amount.unit() {
-            Some(unit) => {
-                let (loc, unit) = (self.file.loc(&amount), self.commodity(unit.0));
-                unit.and_then(|unit| {
-                    let resolved = self.world.amount(amount.num(), unit, loc);
-                    self.ok(resolved).map(Some)
-                })
-            }
+            Some(_) => self.amount(amount).map(Some),
             None => Some(None),
         };
         let gap = match assert.gap {
@@ -77,32 +71,15 @@ impl<'s> Elab<'_, 's> {
 
     /// `2026-01-02 VTI 280.14 USD`
     pub fn price_line(&mut self, item: &Item<'s>, price: &ast::Price<'s>) {
-        let Some(quote) = price.price.unit() else {
-            let loc = self.file.loc(&price.price);
-            return self.sink.diags.push(
-                Diagnostic::error("price-unit", "a price is an amount of some commodity")
-                    .label(loc, "which commodity?")
-                    .help("as in `2026-01-02 VTI 280.14 USD`"),
-            );
-        };
-        let (unit, quote) = (self.commodity(price.unit.0), self.commodity(quote.0));
-        let (Some(unit), Some(quote)) = (unit, quote) else {
-            return;
-        };
-        let (unit_loc, price_loc) = (self.file.loc(price.unit.0), self.file.loc(&price.price));
-        match price.price.num().to_ratio().filter(|rate| !rate.is_zero()) {
-            Some(_) if unit == quote => self.sink.diags.push(
+        let (unit, quoted) = (self.commodity(price.unit.0), self.price(price.price));
+        let (Some(unit), Some(Priced { rate, quote, .. })) = (unit, quoted) else { return };
+        match unit == quote {
+            true => self.sink.diags.push(
                 Diagnostic::error("price-self", "a commodity's price in itself is always one")
-                    .label(unit_loc, "priced in itself")
+                    .label(self.file.loc(price.unit.0), "priced in itself")
                     .help("quote it in another commodity"),
             ),
-            Some(rate) => {
-                self.sink.quotes.push(Quote { unit, quote, day: price.date, rate, implied: false, loc: item.loc })
-            }
-            None => self
-                .sink
-                .diags
-                .push(Diagnostic::error("price-zero", "a price is more than nothing").label(price_loc, "this price")),
+            false => self.sink.quotes.push(Quote { unit, quote, day: price.date, rate, implied: false, loc: item.loc }),
         }
     }
 

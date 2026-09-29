@@ -244,9 +244,16 @@ impl<'a, 's> Elab<'a, 's> {
 
     /// `@ 285.70 USD`. The price may carry more decimals than its commodity: it
     /// is a rate, and only the amounts computed from it are rounded.
-    fn price(&mut self, amount: ast::Amount<'s>) -> Option<Priced> {
+    pub fn price(&mut self, amount: ast::Amount<'s>) -> Option<Priced> {
         let loc = self.file.loc(&amount);
-        let quote = self.commodity(amount.unit().map(|unit| unit.0)?)?;
+        let Some(unit) = amount.unit() else {
+            return self.fail(
+                Diagnostic::error("price-unit", "a price is an amount of some commodity")
+                    .label(loc, "which commodity?")
+                    .help("write the commodity after the number, as in `285.70 USD`"),
+            );
+        };
+        let quote = self.commodity(unit.0)?;
         match amount.num().to_ratio().filter(|rate| !rate.is_zero()) {
             Some(rate) => Some(Priced { rate, quote, loc }),
             None => self.fail(Diagnostic::error("price-zero", "a price is more than nothing").label(loc, "this price")),
