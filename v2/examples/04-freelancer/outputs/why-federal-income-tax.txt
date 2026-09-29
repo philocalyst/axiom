@@ -6,7 +6,7 @@ Why federal-income-tax
   ────────────────────────────────────────────────────
   When      each year closing 04-15
   Governs   everyone living under us, and all they own
-  Written   us.ax:351
+  Written   us.ax:350
   Ran       1 time
   Recorded  0 violations, 4 effects
   · Federal income tax for the year (IRC §1), figured from the tallies above.

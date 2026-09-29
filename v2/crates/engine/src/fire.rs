@@ -229,6 +229,11 @@ impl<'b, 's> Ledger<'b, 's> {
                 Outcome::Count { name, amount } if !ctx.checking => {
                     for (day, part) in by_year(amount, ctx.over).filter(|(_, part)| !part.is_zero()) {
                         self.world.tallies.add(ctx.owner, day.year(), name, part);
+                        // What a member's own laws count is a line of the household's year too: the joint return
+                        // reads it, and a limit that is the member's own reads only the member's.
+                        if let (Subject::Place(_), Some(house)) = (ctx.subject, book.entities[ctx.owner].member) {
+                            self.world.tallies.add(house, day.year(), name, part);
+                        }
                         let effect = self.effect(rule, ctx, day, name, Amount::new(part, book.base));
                         self.record.effects.push(effect);
                     }

@@ -90,8 +90,7 @@ kind roth-ira : ira
   /// the earnings in a withdrawal are tested. These earnings were not
   /// qualified, so they count as income. The five years are counted from the
   /// day of the first contribution, a little stricter than the IRS, which counts
-  /// from January 1 of that year. The earnings count for the owner alone, so
-  /// on a joint return they are added by hand.
+  /// from January 1 of that year.
   ///
   /// To fix: `established` must be the day of the first contribution to any Roth
   /// IRA. If a withdrawal is qualified for another reason (a first home,

@@ -134,6 +134,62 @@ opening 2025-09-01
     });
 }
 
+// ─── What a member counts, the household's return reads ─────────────────────
+
+#[test]
+fn what_a_members_own_laws_count_is_also_a_line_of_the_households_year() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind person : entity
+kind household : entity
+kind ira : asset
+  /// Each person has a limit of their own.
+  law limit
+    on in
+    count amount as contributions
+    require tally(contributions) <= 700 USD \"over the limit\"
+
+law close
+  each year
+  count tally(contributions) as reported
+
+account assets/checking
+  owner family
+account assets/alex-ira : ira
+  owner alex
+account assets/jordan-ira : ira
+  owner jordan
+
+entity family : household
+entity alex : person
+  member family
+entity jordan : person
+  member family
+
+opening 2025-01-01
+  checking 5_000 USD
+
+2025-04-01 checking -> alex-ira 500 USD
+2025-04-02 checking -> jordan-ira 500 USD
+";
+    with_run(text, day(2026, 1, 31), |book, run| {
+        let name = |entity: axiom_core::Id<axiom_model::Entity>| book.name(book.entities[entity].path);
+        let counted: Vec<_> = run.effects.iter().map(|e| (book.name(e.name), name(e.owner), e.amount.qty.0)).collect();
+        assert_eq!(
+            counted,
+            [
+                ("contributions", "alex", 500_00),
+                ("contributions", "jordan", 500_00),
+                ("reported", "family", 1_000_00),
+            ],
+            "the return reads both, and each limit only its own person's"
+        );
+        assert!(run.violations.is_empty(), "each is under 700.00: {:?}", run.violations);
+    });
+}
+
 // ─── Which parcel of a currency is spent ────────────────────────────────────
 
 /// Two purchases of euros on different days, and half of what they made spent, in an account that says nothing

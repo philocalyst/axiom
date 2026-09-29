@@ -78,9 +78,8 @@ kind tax-deferred : asset
   /// traditional IRA, an HSA, a SEP-IRA), from money that was taxed already, comes
   /// off income (IRC §219, §223(a), §404(h)). A payroll contribution was never
   /// taxed, so it is not deducted twice. The income limits on deducting an IRA
-  /// contribution are not modelled. It counts for the account's owner: a person's
-  /// own return, so on a joint return hold a deductible account in the household's
-  /// name for its deduction to reach it.
+  /// contribution are not modelled. It counts for the account's owner, and so
+  /// for the household the owner belongs to: a joint return takes it.
   ///
   /// To fix: a contribution that is not deductible (Form 8606) is written with
   /// `basis` for its full amount, and marked `#nondeductible`.
