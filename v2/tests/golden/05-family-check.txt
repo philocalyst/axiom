@@ -1,4 +1,4 @@
-warning[law]: 529 contributions over the annual gift exclusion
+warning[gift-exclusion]: 529 contributions over the annual gift exclusion: 19,850.00 USD in 2024 against a limit of 18,000.00 USD, over by 1,850.00 USD
    ╭─[journal/2024/12.ax:12:1]
    │
 12 │ 2024-12-31 joint-checking -> riley-529 19_850 USD ! "contributions since 2019, not one year's…
@@ -9,10 +9,8 @@ warning[law]: 529 contributions over the annual gift exclusion
    ├─[us/529.ax:36:10] (built in)
    │
 36 │     warn total(in, year) <= gift-exclusion[year] "529 contributions over the annual gift excl…
-   │          ───────┬───────────┬─────────┬──────┬──
-   │                 │           │         │      ╰── 2024
-   │                 │           │         ╰── 18,000.00 USD
-   │                 │           ╰── false
+   │          ───────┬───────    ──────────┬─────────
+   │                 │                     ╰── 18,000.00 USD
    │                 ╰── 19,850.00 USD
    │
    = note: Contributions above the annual gift-tax exclusion count as a gift to the beneficiary,
@@ -21,8 +19,93 @@ warning[law]: 529 contributions over the annual gift exclusion
            at once by electing to spread it (IRC §529(c)(2)(B)); if you have, this warning can be
            waived with `!`.
    = note: waived: contributions since 2019, not one year's
-   = note: also at journal/2024/12.ax:13
    = help: at most 18,000.00 USD more can go in this year
 
-2 warnings
+note[early-withdrawal]: 263.18 USD owed to irs as early-withdrawal-penalty, due 2025-03-31
+   ╭─[journal/2025/03.ax:92:1]
+   │
+92 │ 2025-03-31 alex-401k -> growth 2_631.77 USD
+   │ ─────────────────────┬─────────────────────
+   │                      ╰── this flow: a gain of 2,631.77 USD on 2,631.77 USD
+   │
+   ├─[us/401k.ax:64:13] (built in)
+   │
+64 │     require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "401(k…
+   │             ────┬────
+   │                 ╰── 37y1m21d
+   │
+   = note: Money taken out before age 59½ carries an additional 10% tax on top of the income tax
+           (IRC §72(t)). This withdrawal is priced at that 10%. If an exception applies (disability,
+           separation from service at 55 or later, substantially equal payments, and others in
+           §72(t)(2)), keep the withdrawal and mark it `!` with the reason.
+   = help: if an exception applies, keep the flow and mark it `!` with the reason
+
+note[early-withdrawal]: 168.60 USD owed to irs as early-withdrawal-penalty, due 2025-03-31
+   ╭─[journal/2025/03.ax:93:1]
+   │
+93 │ 2025-03-31 jordan-401k -> growth 1_685.99 USD
+   │ ──────────────────────┬──────────────────────
+   │                       ╰── this flow: a gain of 1,685.99 USD on 1,685.99 USD
+   │
+   ├─[us/401k.ax:64:13] (built in)
+   │
+64 │     require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "401(k…
+   │             ────┬────
+   │                 ╰── 37y9m10d
+   │
+   = note: Money taken out before age 59½ carries an additional 10% tax on top of the income tax
+           (IRC §72(t)). This withdrawal is priced at that 10%. If an exception applies (disability,
+           separation from service at 55 or later, substantially equal payments, and others in
+           §72(t)(2)), keep the withdrawal and mark it `!` with the reason.
+   = help: if an exception applies, keep the flow and mark it `!` with the reason
+
+note[nonqualified-penalty]: 52.35 USD owed to irs as nonqualified-529-penalty, due 2025-10-15
+   ╭─[journal/2025/10.ax:46:1]
+   │
+46 │ 2025-10-15 riley-529 -> joint-checking 1_500 USD
+   │ ────────────────────────┬───────────────────────
+   │                         ╰── this flow: a gain of 523.50 USD on 523.50 USD
+   │
+   ├─[us/529.ax:59:13] (built in)
+   │
+59 │     require to is education | 529-plan else owe 10% * gain to irs as nonqualified-529-penalty…
+   │             ─┬───────────┬────────────
+   │              │           ╰── false
+   │              ╰── assets/bank/joint-checking
+   │
+   = note: A withdrawal that did not pay a qualified education expense owes an additional 10% of its
+           earnings (IRC §529(c)(6), §530(d)(4)). This withdrawal went somewhere other than a place
+           of kind `education`, so it is priced at that 10%. To reimburse yourself for something the
+           plan should have paid, or when an exception applies (a scholarship, a death or disability
+           of the beneficiary), keep the withdrawal and mark it `!` with the reason.
+   = help: if an exception applies, keep the flow and mark it `!` with the reason
+
+note[nonqualified-penalty]: waived: 124.00 USD would be owed to irs as nonqualified-hsa-penalty
+   ╭─[journal/2025/11.ax:15:1]
+   │
+15 │ 2025-11-05 hsa -> joint-checking 620 USD ! "reimburses 2025-05-09 dentist, receipt kept"
+   │ ────────────────────────────────────────────┬───────────────────┬───────────────────────
+   │                                             │                   ╰── waived here
+   │                                             ╰── this flow: a gain of 620.00 USD on 620.00 USD
+   │
+   ├─[us/hsa.ax:69:14] (built in)
+   │
+69 │     require (to is medical | tax-deferred) or owner.age >= 65y else owe 20% * gain to irs as …
+   │              ─┬────────────┬─────────┬──────────┬─┬───┬───────
+   │               │            │         │          │ │   ╰── false
+   │               │            │         │          │ ╰── 37y8m26d
+   │               │            │         │          ╰── me
+   │               │            │         ╰── false
+   │               │            ╰── false
+   │               ╰── assets/bank/joint-checking
+   │
+   = note: A withdrawal that did not pay a qualified medical expense owes an additional 20% of what
+           is taxable, unless the owner is 65 or older (IRC §223(f)(4)). This withdrawal went
+           somewhere other than a place of kind `medical`, so it is priced at that 20%. To reimburse
+           yourself for an expense the account should have paid, which the IRS allows with your
+           receipts, or when an exception applies (death or disability), keep the withdrawal and
+           mark it `!` with the reason.
+   = note: waived: reimburses 2025-05-09 dentist, receipt kept
+
+3 priced · 2 waived
 ✓ 882 flows · 47 places · 29 laws enforced · net worth 684,163.25 USD

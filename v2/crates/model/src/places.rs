@@ -9,7 +9,7 @@ use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Id, Tree};
 use axiom_syntax::Decl;
 
-use crate::book::{Class, Place, Sort};
+use crate::book::{Basis, Class, Place, Sort};
 use crate::catalog::Catalog;
 use crate::cx::Cx;
 use crate::entities::Entities;
@@ -91,6 +91,8 @@ pub(crate) fn declare<'s>(
         let kind_facts = &kinds.tree[kind];
         (place.kind, place.deferred) = (kind, kind_facts.deferred);
         (place.select, place.liquidity) = (kind_facts.select, kind_facts.liquidity);
+        // Until the systems say `basis zero`, pre-tax money into a deferred place has none.
+        place.basis = kind_facts.basis.unwrap_or(if kind_facts.deferred { Basis::Zero } else { Basis::Cost });
         place.doc = written.item.doc.map(|doc| cx.names.intern(doc.0));
         place.loc = Some(decl.name.loc);
     }

@@ -1,5 +1,7 @@
 Limits in 2026
 
-  Who  Limit                    Window      Counted         Cap   Room left  Used
-  ───────────────────────────────────────────────────────────────────────────────
-  me   budget on expenses/food  2026-03  474.50 USD  650.00 USD  175.50 USD   73%
+  Who  Limit                                Window        Counted            Cap      Room left   Used
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  me   budget on expenses/food              2026-03    474.50 USD     650.00 USD     175.50 USD    73%
+  me   deferral-limit on assets/retirement  2026     2,400.00 USD  24,500.00 USD  22,100.00 USD   9.8%
+  me   gift-exclusion on assets/college     2026       900.00 USD  19,000.00 USD  18,100.00 USD  4.74%

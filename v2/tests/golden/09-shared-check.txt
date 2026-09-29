@@ -1,4 +1,4 @@
-warning[law]: no repayment this month
+warning[repayment]: no repayment this month: 0.00 USD in 2025-04 against a minimum of 250.00 USD, short by 250.00 USD
    ╭─[accounts.ax:17:3]
    │
 17 │   law repayment
@@ -6,16 +6,45 @@ warning[law]: no repayment this month
    │         ╰── checked for assets/loans/riley on 2025-04-30
    ⋮
 20 │     warn total(out, month) >= self.expected "no repayment this month"
-   │          ────────┬────────┬─────┬───┬──────
-   │                  │        │     │   ╰── 250.00 USD
-   │                  │        │     ╰── assets/loans/riley
-   │                  │        ╰── false
+   │          ────────┬────────    ──────┬──────
+   │                  │                  ╰── 250.00 USD
    │                  ╰── 0.00 USD
    │
    = note: The friend agreed to pay back `expected` every month. This month passed with less than
            that coming in while a balance is still owed. Ask them, or move the agreement: change
            `expected` on the account.
-   = note: 2 more like this
+
+warning[repayment]: no repayment this month: 0.00 USD in 2025-09 against a minimum of 250.00 USD, short by 250.00 USD
+   ╭─[accounts.ax:17:3]
+   │
+17 │   law repayment
+   │   ──────┬──────
+   │         ╰── checked for assets/loans/riley on 2025-09-30
+   ⋮
+20 │     warn total(out, month) >= self.expected "no repayment this month"
+   │          ────────┬────────    ──────┬──────
+   │                  │                  ╰── 250.00 USD
+   │                  ╰── 0.00 USD
+   │
+   = note: The friend agreed to pay back `expected` every month. This month passed with less than
+           that coming in while a balance is still owed. Ask them, or move the agreement: change
+           `expected` on the account.
+
+warning[repayment]: no repayment this month: 0.00 USD in 2025-10 against a minimum of 250.00 USD, short by 250.00 USD
+   ╭─[accounts.ax:17:3]
+   │
+17 │   law repayment
+   │   ──────┬──────
+   │         ╰── checked for assets/loans/riley on 2025-10-31
+   ⋮
+20 │     warn total(out, month) >= self.expected "no repayment this month"
+   │          ────────┬────────    ──────┬──────
+   │                  │                  ╰── 250.00 USD
+   │                  ╰── 0.00 USD
+   │
+   = note: The friend agreed to pay back `expected` every month. This month passed with less than
+           that coming in while a balance is still owed. Ask them, or move the agreement: change
+           `expected` on the account.
 
 note[pad]: accepted a gap on assets/cash/wallet
    ╭─[journal/2025/08.ax:67:1]
@@ -24,5 +53,5 @@ note[pad]: accepted a gap on assets/cash/wallet
    │ ────────────────┬───────────────
    │                 ╰── 23.00 USD moved out of assets/cash/wallet into unknown
 
-3 warnings
+3 warnings · 1 waived
 ✓ 472 flows · 38 places · 7 laws enforced · net worth 23,213.23 USD

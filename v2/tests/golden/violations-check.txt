@@ -12,7 +12,7 @@ error[unknown-property]: `benificiary` is not a property of an account of kind `
 55 -   benificiary me
 55 +   beneficiary me
 
-error[law]: 401(k) deferrals over the yearly limit
+error[deferral-limit]: 401(k) deferrals over the yearly limit: 26,000.00 USD in 2026 against a limit of 24,500.00 USD, over by 1,500.00 USD
    ╭─[03-violations.ax:70:1]
    │
 70 │ 2026-01-30 acme -> retirement 26_000 USD
@@ -22,12 +22,8 @@ error[law]: 401(k) deferrals over the yearly limit
    ├─[us/401k.ax:33:13] (built in)
    │
 33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
-   │             ────────────┬───────────┬─────────┬──┬─┬─────┬──
-   │                         │           │         │  │ │     ╰── empty
-   │                         │           │         │  │ ╰── 24,500.00 USD
-   │                         │           │         │  ╰── 2026
-   │                         │           │         ╰── 24,500.00 USD
-   │                         │           ╰── false
+   │             ────────────┬────────────    ─────────┬─────────
+   │                         │                         ╰── 24,500.00 USD
    │                         ╰── 26,000.00 USD
    │
    = note: Elective deferrals are capped for each person and calendar year, across every plan they
@@ -52,6 +48,7 @@ error[ambiguous-lots]: ambiguous lot: assets/wallet holds 2 lots that differ and
    │                         ╰── 0.25 BTC could come from any of them
    │
    = note: the sale still moves the oldest lot first, so the lines after it stay consistent
+   = note: later sales from this place are booked the same way, without another report
    = help: name the lot, `assets/wallet[2026-02-10]`, or a policy, `assets/wallet[fifo]` (or lifo,
            hifo, prorata), or give the account `select fifo`
 
@@ -83,7 +80,7 @@ error[price-disagrees]: the price does not match the amounts
                 brokerage 4 VTI @ 285.70 USD
                 expenses/fees 142.80 USD
 
-error[law]: grant money spent outside its purpose
+error[purpose]: grant money spent outside its purpose
     ╭─[03-violations.ax:121:1]
     │
 121 │ 2026-04-02 project -> dining 300 USD
@@ -103,7 +100,7 @@ error[law]: grant money spent outside its purpose
             Pay it from another account, or, if the funder agreed to the change, update `purpose` on
             the grant.
 
-error[law]: grant money left unspent at the deadline
+error[deadline]: grant money left unspent at the deadline
     ╭─[std.ax:153:3] (built in)
     │
 153 │   law deadline
@@ -111,12 +108,30 @@ error[law]: grant money left unspent at the deadline
     │         ╰── checked for scholarship on 2026-12-31
 154 │     by self.until
 155 │     require remaining == empty "grant money left unspent at the deadline"
-    │             ────┬────┬────────
-    │                 │    ╰── false
+    │             ────┬────
     │                 ╰── 900.00 USD
     │
     = note: A grant ends on its `until` date, and unspent money is owed back. Spend what is left on
             the grant's purpose before the deadline, or ask the funder for an extension and move
             `until`.
 
-✗ 7 errors
+note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, due 2026-02-02
+   ╭─[03-violations.ax:78:1]
+   │
+78 │ 2026-02-02 retirement -> checking 10_000 USD
+   │ ──────────────────────┬─────────────────────
+   │                       ╰── this flow: a gain of 10,000.00 USD on 10,000.00 USD
+   │
+   ├─[us/401k.ax:64:13] (built in)
+   │
+64 │     require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "401(k…
+   │             ────┬────
+   │                 ╰── 37y9m21d
+   │
+   = note: Money taken out before age 59½ carries an additional 10% tax on top of the income tax
+           (IRC §72(t)). This withdrawal is priced at that 10%. If an exception applies (disability,
+           separation from service at 55 or later, substantially equal payments, and others in
+           §72(t)(2)), keep the withdrawal and mark it `!` with the reason.
+   = help: if an exception applies, keep the flow and mark it `!` with the reason
+
+✗ 7 errors · 1 priced

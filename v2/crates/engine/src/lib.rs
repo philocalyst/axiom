@@ -15,8 +15,8 @@
 //! the assertions around them, one place per thread. `timeline` then orders
 //! every fact into one total order of moments, and `ledger` consumes them.
 //!
-//! For each flow, `post` moves value: `relief` chooses which parcels leave,
-//! `holdings` keeps what rests where, `totals` keeps the windowed sums laws
+//! For each flow, `post` moves value: `lots` keeps what rests where and chooses
+//! which parcels leave, `totals` keeps the windowed sums laws
 //! read, `fire` runs the laws that watch the flow, `eval` (with `calc`)
 //! evaluates a law, and `explain` (with `show`) turns a failure into a
 //! diagnostic. `reconcile` checks balance assertions and `scope` says whose
@@ -32,13 +32,12 @@ mod eval;
 mod events;
 mod explain;
 mod fire;
-mod holdings;
 mod infer;
 mod ledger;
+mod lots;
 mod motion;
 mod post;
 mod reconcile;
-mod relief;
 mod scope;
 mod show;
 mod state;

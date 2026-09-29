@@ -2,23 +2,56 @@
 //!
 //! The engine records it whenever a `require` or `warn` compares two amounts,
 //! so `limits`, `budget` and `why` can say how close anyone is before anything
-//! breaks. A run that recorded none still has its budgets, which are laws of
-//! one shape, and those are read from the flows.
-
-use std::borrow::Cow;
+//! breaks.
 
 use axiom_core::day::days_in_month;
-use axiom_core::{Day, Id, Map, Qty, Ratio};
+use axiom_core::{Day, Id, Map, Qty, Ratio, Set};
 use axiom_engine::{Headroom, Run};
-use axiom_model::{Amount, BinOp, Book, Dir, Func, Law, Op, Owner, Period, Place, StepKind, Subject, Value, Window};
+use axiom_model::{Amount, BinOp, Book, Func, Law, Op, Period, StepKind, Subject, Value, Window};
 
-use crate::history::Posting;
-use crate::lens::{Lens, Whose};
+/// Every limit's readings, and for each budget that nothing has reached in the
+/// window holding `at`, a reading of nothing against its written limit: a
+/// budget no flow touched is still a budget, wholly unspent. Before the
+/// journal begins there is nothing to budget.
+pub fn current(book: &Book, run: &Run, at: Day) -> Vec<Headroom> {
+    let mut readings = run.headroom.clone();
+    if book.flows.as_slice().first().is_none_or(|first| at < first.day) {
+        return readings;
+    }
+    let mut read: Set<(Id<Law>, u32, Subject, Day)> =
+        readings.iter().map(|reading| (reading.law, reading.step, reading.subject, reading.from)).collect();
+    let rules = book.rules.on_in.values().iter().chain(book.rules.on_out.values());
+    for rule in rules.filter(|rule| (rule.from..=rule.until).contains(&at)) {
+        let (Subject::Place(place), Some((step, window, limit))) = (rule.subject, budget(&book.laws[rule.law])) else {
+            continue;
+        };
+        let (from, until) = match window {
+            Window::Month => (at.month_start(), at.month_end()),
+            Window::Year => (at.year_start(), at.year_end()),
+            Window::Ever => continue,
+        };
+        if read.insert((rule.law, step, rule.subject, from)) {
+            let (owner, counted) = (book.places[place].owner, Amount::new(Qty::ZERO, limit.unit));
+            let (law, subject) = (rule.law, rule.subject);
+            readings.push(Headroom { law, step, subject, owner, from, until, counted, limit, day: at, warn: true });
+        }
+    }
+    readings
+}
 
-/// Every limit's last reading, in the window that contains `at` if the run
-/// recorded none.
-pub fn readings<'r>(book: &Book, run: &'r Run, at: Day) -> Cow<'r, [Headroom]> {
-    if run.headroom.is_empty() { Cow::Owned(implied(book, run, at)) } else { Cow::Borrowed(&run.headroom) }
+/// A budget's step: `warn total(DIR, month|year) <= LIMIT` with the limit
+/// written out, as `budget 500 USD monthly` makes it.
+fn budget(law: &Law) -> Option<(u32, Window, Amount)> {
+    law.steps.iter().enumerate().find_map(|(index, step)| {
+        let StepKind::Require { cond, warn: true, .. } = step.kind else { return None };
+        let Op::Bin(BinOp::Le | BinOp::Lt, total, limit) = law.nodes[cond.index()].op else { return None };
+        match (&law.nodes[total.index()].op, &law.nodes[limit.index()].op) {
+            (Op::Call(Func::Total(_, window), _), Op::Const(Value::Amount(limit))) => {
+                Some((index as u32, *window, *limit))
+            }
+            _ => None,
+        }
+    })
 }
 
 /// The latest window of each limit (per law, step and subject) among `readings`.
@@ -83,89 +116,4 @@ pub fn window_words(reading: &Headroom) -> String {
         None if (reading.from.0, reading.until.0) == (i32::MIN, i32::MAX) => "ever".to_string(),
         None => format!("{}..{}", reading.from, reading.until),
     }
-}
-
-/// The laws of `budget`'s shape, read from the flows of the window holding
-/// `at`: a run with no headroom has still seen these totals.
-fn implied(book: &Book, run: &Run, at: Day) -> Vec<Headroom> {
-    let everyone = Whose::default();
-    let lens = Lens::new(book, &everyone, at);
-    let mut found = Vec::new();
-    for (id, law) in book.laws.iter() {
-        let Some((step, dir, window, limit)) = budget_shape(law) else { continue };
-        let (from, until) = match window {
-            Window::Month => (at.month_start(), at.month_end()),
-            Window::Year => (at.year_start(), at.year_end()),
-            Window::Ever => (Day(i32::MIN), Day(i32::MAX)),
-        };
-        for subject in subjects(book, law.owner) {
-            let counted = crossing(lens, run, subject, dir, from, until.min(run.today));
-            found.push(Headroom {
-                law: id,
-                step,
-                subject: Subject::Place(subject),
-                owner: book.places[subject].owner,
-                from,
-                until,
-                counted: Amount::new(counted, book.base),
-                limit,
-                day: until.min(run.today),
-                warn: true,
-            });
-        }
-    }
-    found
-}
-
-/// The places a law's total covers, when it is written under a place or a kind.
-fn subjects(book: &Book, owner: Owner) -> Vec<Id<Place>> {
-    match owner {
-        Owner::Place(place) => vec![place],
-        Owner::Kind(kind) => {
-            book.places.iter().filter(|(_, place)| book.is_a(place.kind, kind)).map(|(id, _)| id).collect()
-        }
-        Owner::Entity(_) | Owner::System(_) | Owner::Book => Vec::new(),
-    }
-}
-
-/// `warn total(dir, window) <= limit` (or `limit >= total(…)`) with a written
-/// limit: the step's index, and what it bounds.
-fn budget_shape(law: &Law) -> Option<(u32, Dir, Window, Amount)> {
-    law.steps.iter().enumerate().find_map(|(index, step)| {
-        let StepKind::Require { cond, warn: true, .. } = step.kind else { return None };
-        let Op::Bin(op, left, right) = &law.nodes[cond.index()].op else { return None };
-        let (total, limit) = match op {
-            BinOp::Le | BinOp::Lt => (left, right),
-            BinOp::Ge | BinOp::Gt => (right, left),
-            _ => return None,
-        };
-        let (Op::Call(Func::Total(dir, window), _), Op::Const(Value::Amount(limit))) =
-            (&law.nodes[total.index()].op, &law.nodes[limit.index()].op)
-        else {
-            return None;
-        };
-        Some((index as u32, *dir, *window, *limit))
-    })
-}
-
-/// What crossed the boundary of `subject`'s subtree from `from` to `until`,
-/// in the base currency: a flow inside the subtree is neither in nor out.
-fn crossing(lens: Lens, run: &Run, subject: Id<Place>, dir: Dir, from: Day, until: Day) -> Qty {
-    let book = lens.book;
-    let mut total = Qty::ZERO;
-    for place in book.places.subtree(subject) {
-        for &id in &book.touching[place] {
-            let posting = Posting::at(book, run, id);
-            let flow = posting.flow;
-            let (near, far, value) = match dir {
-                Dir::In => (flow.to, flow.from, posting.arrive_in_base(lens)),
-                Dir::Out => (flow.from, flow.to, posting.out_in_base(lens)),
-            };
-            let counts = near == place && !book.places.covers(subject, far) && posting.is_real_on(until);
-            if counts && (from..=until).contains(&flow.day) {
-                total += value.unwrap_or_default();
-            }
-        }
-    }
-    total
 }

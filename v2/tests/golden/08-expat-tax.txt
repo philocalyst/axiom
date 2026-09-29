@@ -32,6 +32,8 @@ Counted
   ─────────────────────────────────────────────────────────────
     us/ca
       ca-withheld           4,416.00 USD  6 sources
+      ca-taxable-income    54,565.81 USD  period end
+      ca-income-tax         1,808.84 USD  period end
 
 Owed
   Owed                   To   Due               Amount  From

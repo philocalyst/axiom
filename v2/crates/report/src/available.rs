@@ -224,7 +224,7 @@ impl<'h> Reach<'h> {
         let applied = fork.apply(&flow);
         fork.advance(horizon);
         let recorded = fork.recorded();
-        let mut forbidden = recorded.violations[applied.violations].iter().filter(|v| !v.warn && !v.waived);
+        let mut forbidden = recorded.violations[applied.violations].iter().filter(|v| !v.warn && !v.waived && !v.priced);
         if let Some(violation) = forbidden.next() {
             let message = &recorded.diagnostics[violation.diagnostic as usize].message;
             (reach.blocked, reach.because) = (true, format!("blocked: {}", headline(message)));

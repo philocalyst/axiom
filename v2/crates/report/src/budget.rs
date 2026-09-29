@@ -12,7 +12,7 @@ use axiom_engine::{Headroom, Run};
 use axiom_model::{Amount, Book, Class, Law, Period, Place, Subject};
 
 use crate::calendar::Periods;
-use crate::headroom::{period, readings, window_words};
+use crate::headroom::{current, period, window_words};
 use crate::lens::Whose;
 use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
@@ -21,7 +21,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>, by: 
     let at = at.unwrap_or(run.today);
     let periods = Periods::covering(by, at, at);
     let (start, end) = (periods.start(0), periods.end(0));
-    let all = readings(book, run, at);
+    let all = &current(book, run, at);
     let mut envelopes: BTreeMap<(Id<Place>, Id<Law>, u32), Vec<&Headroom>> = BTreeMap::new();
     for reading in
         all.iter().filter(|reading| whose.includes(reading.owner) && reading.from <= end && reading.until >= start)

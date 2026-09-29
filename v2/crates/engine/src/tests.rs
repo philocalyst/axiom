@@ -4,7 +4,7 @@
 //! clippy reads as inconsistent digit grouping.
 #![allow(clippy::inconsistent_digit_grouping)]
 
-use axiom_core::{Day, Diagnostic, Id, Qty, Ratio, Severity};
+use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder};
@@ -138,7 +138,12 @@ fn a_sale_of_more_than_is_held_leaves_a_negative_balance() {
 
 /// `total(in, year) <= 24_500 USD`, on flows into the retirement account.
 fn deferral_limit(f: &mut Fixture) -> Id<Law> {
-    let (name, doc) = (f.sym("deferral-limit"), f.sym("/// Elective deferrals are capped per calendar year."));
+    let (name, doc) = (
+        f.sym("deferral-limit"),
+        f.sym(
+            "/// Elective deferrals are capped per calendar year.\n///\n/// To fix: ask payroll to lower the deferral.",
+        ),
+    );
     let limit = f.usd(24_500_00);
     let mut law = LawBuilder::new(name, Trigger::In).doc(doc);
     let total = law.call(Func::Total(Dir::In, Window::Year), &[], Ty::Amount);
@@ -165,14 +170,21 @@ fn a_failed_law_explains_itself_power_assert_style() {
     let violation = run.violations[0];
     assert_eq!((violation.cause, violation.warn, violation.waived), (Cause::Flow(over), false, false));
     let d = &run.diagnostics[violation.diagnostic as usize];
-    assert_eq!((&*d.code, d.severity), ("law", Severity::Error));
-    assert_eq!(d.message, "Elective deferrals are capped per calendar year.");
+    assert_eq!((&*d.code, d.severity), ("deferral-limit", Severity::Error), "the code is the law's own name");
+    assert_eq!(
+        d.message, "assets/retirement: 25,300.00 USD in 1970 against a limit of 24,500.00 USD, over by 800.00 USD",
+        "the headline is the accounting fact"
+    );
     let primary = d.labels.iter().find(|l| l.primary).unwrap();
     assert_eq!(primary.loc, book.flows[over].loc);
     assert_eq!(primary.text, "this flow: 2,600.00 USD into assets/retirement");
-    let values: Vec<_> = d.labels.iter().filter(|l| !l.primary).map(|l| l.text.as_str()).collect();
-    assert_eq!(values, ["25,300.00 USD", "false"], "each non-constant subexpression, with its value");
-    assert!(d.labels.iter().filter(|l| !l.primary).all(|l| l.loc.file.0 == 1), "located in the law's own source");
+    let others: Vec<_> = d.labels.iter().filter(|l| !l.primary).map(|l| (l.loc.file.0, l.text.as_str())).collect();
+    assert_eq!(
+        others,
+        [(0, "1970-01-11: 22,700.00 USD from income/salary to assets/retirement"), (1, "25,300.00 USD")],
+        "the flows that built the count, then the operand of the failing comparison in the law's own source"
+    );
+    assert_eq!(d.notes, ["Elective deferrals are capped per calendar year."]);
     assert_eq!(d.help[0].text, "at most 1,800.00 USD more can go in this year");
 }
 
@@ -195,7 +207,10 @@ fn a_tally_bound_names_the_room_left_when_the_law_counted_this_flow() {
     let book = f.book();
     let run = run(&book, options());
     let d = &run.diagnostics[run.violations[0].diagnostic as usize];
-    assert_eq!(d.message, "401(k) deferrals over the yearly limit");
+    assert_eq!(
+        d.message,
+        "401(k) deferrals over the yearly limit: 48,700.00 USD in 1970 against a limit of 24,500.00 USD, over by 24,200.00 USD"
+    );
     assert_eq!(d.help[0].text, "at most 1,800.00 USD more can count toward `elective-deferrals` this year");
 }
 
@@ -267,14 +282,15 @@ fn unknown_amounts_are_solved_and_a_failed_assertion_names_the_flows_since() {
     assert_eq!(errors.len(), 1, "{errors:?}");
     let d = errors[0];
     assert_eq!((&*d.code, d.message.as_str()), ("assertion", "assets/checking holds 690.00 USD, not 600.00 USD"));
-    assert_eq!(d.labels[0].text, "90.00 USD too much: the ledger holds more than this");
+    assert_eq!(d.labels[0].text, "90.00 USD less than the ledger holds");
     let since: Vec<_> = d.labels.iter().skip(1).map(|l| (l.loc, l.text.as_str())).collect();
     assert_eq!(
         since,
         [(book.flows[lunch].loc, "-10.00 USD to expenses/food")],
         "only the flows after the last assertion that held"
     );
-    assert_eq!(d.help[0].edit.as_ref().unwrap().1, " !");
+    assert_eq!(d.help[0].text, "record the missing flow", "correcting the books comes before accepting the gap");
+    assert_eq!(d.help.last().unwrap().edit.as_ref().unwrap().1, " !");
 }
 
 #[test]
@@ -435,9 +451,14 @@ fn a_require_with_an_else_prices_the_violation_instead_of_failing() {
     f.flow(2, retirement, checking, 1_000_00);
     let book = f.book();
     let run = run(&book, options());
-    assert!(run.violations.is_empty() && run.diagnostics.is_empty(), "a priced violation is not a failure");
     assert_eq!(run.effects.len(), 1);
-    assert_eq!((run.effects[0].amount.qty, run.effects[0].name), (Qty(100_00), penalty));
+    assert_eq!((run.effects[0].amount.qty, run.effects[0].name, run.effects[0].priced), (Qty(100_00), penalty, true));
+    let [violation] = run.violations[..] else { panic!("one priced violation: {:?}", run.violations) };
+    assert!(violation.priced && !violation.waived && !violation.warn);
+    let d = &run.diagnostics[violation.diagnostic as usize];
+    assert_eq!((&*d.code, d.severity, d.disposition), ("early-withdrawal", Severity::Note, Disposition::Priced));
+    assert_eq!(d.message, "100.00 USD owed to nsf-grant as penalty, due 1970-01-03", "what is owed, to whom, and by when");
+    assert!(run.diagnostics.iter().all(|d| !d.is_error()), "a priced violation is a price, not a failure");
 }
 
 #[test]
@@ -479,6 +500,30 @@ fn restricted_money_stays_tied_and_is_spent_first_only_where_its_laws_permit() {
     assert_eq!(run.violations.len(), 1);
     assert_eq!(run.violations[0].cause, Cause::Flow(misuse));
     assert_eq!(run.violations[0].subject, Subject::Entity(nsf));
+}
+
+#[test]
+fn a_flow_between_places_that_hold_no_parcels_spends_nothing() {
+    let mut f = Fixture::new();
+    let (grants, checking, food, unknown, card) = (f.grants, f.checking, f.food, f.unknown, f.card);
+    let (nsf, name) = (f.grant, f.sym("grant-purpose"));
+    let mut law = LawBuilder::new(name, Trigger::Spend);
+    let to = law.var(Var::To, Ty::Place);
+    let allowed = law.konst(Value::Place(food), Ty::Place);
+    let cond = law.is(to, &[allowed]);
+    let law = f.law(law.require(cond, None));
+    let rule = f.rule(law, Subject::Entity(nsf));
+    f.on_spend.push((nsf, rule));
+
+    let award = f.flow(1, grants, checking, 5_000_00);
+    f.flows[award.index()].payee = Some(nsf);
+    f.flow(2, checking, unknown, 500_00);
+    // The card and the food account hold only a balance: the grant money spent a day before is not spent again.
+    f.flow(3, card, food, 100_00);
+    let book = f.book();
+    let run = run(&book, options());
+    assert_eq!(run.checks[law.index()], 1, "only the flow that took tied money out fired it");
+    assert_eq!(run.violations.len(), 1);
 }
 
 #[test]
@@ -804,8 +849,7 @@ fn value_is_conserved_over_random_journals() {
                 "seed {seed}: lots out of order"
             );
             let is_base = holding.unit == usd;
-            let alike =
-                |a: &Parcel, b: &Parcel| crate::holdings::identity(a, is_base) == crate::holdings::identity(b, is_base);
+            let alike = |a: &Parcel, b: &Parcel| crate::lots::identity(a, is_base) == crate::lots::identity(b, is_base);
             for (at, lot) in holding.lots.iter().enumerate() {
                 assert!(
                     holding.lots[at + 1..].iter().all(|other| !alike(lot, other)),
@@ -822,6 +866,597 @@ fn value_is_conserved_over_random_journals() {
             assert_eq!(totals.get(&unit).copied().unwrap_or(0), want, "seed {seed}: unit {unit:?}");
         }
     }
+}
+
+// ─── v3 semantics ───────────────────────────────────────────────────────────
+
+fn date(year: i32, month: u32, day: u32) -> i32 {
+    Day::from_ymd(year, month, day).expect("a real date").0
+}
+
+fn until(year: i32, month: u32, day: u32) -> Options {
+    Options { today: Day(date(year, month, day)), relaxed: false }
+}
+
+/// `count 1.00 USD as NAME`, on flows into `place`.
+fn ticking(f: &mut Fixture, place: Id<Place>, name: &'static str) -> Id<Law> {
+    let (law_name, tally, one) = (f.sym(name), f.sym(name), f.usd(1_00));
+    let mut law = LawBuilder::new(law_name, Trigger::In);
+    let amount = law.konst(Value::Amount(one), Ty::Amount);
+    let law = f.law(law.count(amount, tally));
+    let rule = f.rule(law, Subject::Place(place));
+    f.on_in.push((place, rule));
+    law
+}
+
+/// `count amount as NAME`, on flows into `place`, for `subject`.
+fn counting(f: &mut Fixture, place: Id<Place>, subject: Subject, name: &'static str) -> Id<Law> {
+    let (law_name, tally) = (f.sym(name), f.sym(name));
+    let mut law = LawBuilder::new(law_name, Trigger::In);
+    let amount = law.var(Var::Amount, Ty::Amount);
+    let law = f.law(law.count(amount, tally));
+    let rule = f.rule(law, subject);
+    f.on_in.push((place, rule));
+    law
+}
+
+/// `warn total(in, month) <= cap`, on flows into `place`.
+fn month_budget(f: &mut Fixture, place: Id<Place>, cap: i64) -> Id<Law> {
+    let (name, cap) = (f.sym("budget"), f.usd(cap));
+    let mut law = LawBuilder::new(name, Trigger::In);
+    let total = law.call(Func::Total(Dir::In, Window::Month), &[], Ty::Amount);
+    let cap = law.konst(Value::Amount(cap), Ty::Amount);
+    let cond = law.bin(BinOp::Le, total, cap, Ty::Bool);
+    let law = f.law(law.warn(cond));
+    let rule = f.rule(law, Subject::Place(place));
+    f.on_in.push((place, rule));
+    law
+}
+
+fn lots_of(run: &Run, place: Id<Place>, unit: Id<Commodity>) -> Vec<(i64, i64)> {
+    held(run, place, unit).map_or(Vec::new(), |h| h.lots.iter().map(|lot| (lot.qty.0, lot.basis.0)).collect())
+}
+
+#[test]
+fn a_spread_flow_counts_in_each_month_it_touches_as_the_fold_reaches_it() {
+    let mut f = Fixture::new();
+    let (checking, food) = (f.checking, f.food);
+    month_budget(&mut f, food, 30_00);
+    // 71 days: 12 fall in December, 31 in January, 28 in February.
+    let prepaid = f.flow(date(2025, 12, 20), checking, food, 70_00);
+    f.recognize(prepaid, date(2025, 12, 20), date(2026, 2, 28));
+    f.flow(date(2026, 1, 5), checking, food, 1_00);
+    let book = f.book();
+    let run = run(&book, until(2026, 3, 1));
+    let [violation] = run.violations[..] else { panic!("one violation: {:?}", run.violations) };
+    assert_eq!(violation.day, Day(date(2026, 1, 5)), "nothing in December: only 11.83 of it belongs there");
+    let d = &run.diagnostics[violation.diagnostic as usize];
+    assert_eq!(d.message, "expenses/food: 31.56 USD in 2026-01 against a limit of 30.00 USD, over by 1.56 USD");
+    let counted: Vec<_> = run.headroom.iter().map(|h| (h.from.ymd().1, h.counted.qty.0, h.limit.qty.0)).collect();
+    assert_eq!(counted, [(12, 11_83, 30_00), (1, 31_56, 30_00)], "the last reading of each month's window");
+}
+
+#[test]
+fn a_flow_recognized_for_last_year_counts_in_last_years_tally_and_a_closing_law_reads_it() {
+    let mut f = Fixture::new();
+    let (salary, checking, me, irs) = (f.salary, f.checking, f.me, f.grant);
+    let (paid, tax, closing) = (f.sym("paid"), f.sym("tax"), f.sym("close-year"));
+    counting(&mut f, checking, Subject::Entity(me), "paid");
+    let mut law = LawBuilder::new(closing, Trigger::Each(Period::Year, Some(Closing { month: 4, day: 15 })));
+    let so_far = law.call(Func::Tally(paid), &[], Ty::Amount);
+    let law = f.law(law.owe(so_far, irs, tax));
+    let rule = f.rule(law, Subject::Entity(me));
+    f.timed.push(rule);
+    f.flow(date(2025, 6, 1), salary, checking, 3_000_00);
+    let late = f.flow(date(2026, 1, 15), salary, checking, 500_00);
+    f.recognize(late, date(2025, 1, 1), date(2025, 12, 31));
+    let book = f.book();
+    let run = run(&book, until(2026, 12, 31));
+    let effects: Vec<_> = run.effects.iter().map(|e| (e.name == tax, e.day, e.amount.qty.0)).collect();
+    assert_eq!(
+        effects,
+        [
+            (false, Day(date(2025, 6, 1)), 3_000_00),
+            (false, Day(date(2025, 1, 1)), 500_00),
+            (true, Day(date(2025, 12, 31)), 3_500_00),
+        ],
+        "the January payment counts for 2025, and the closing law for 2025 sees it"
+    );
+    assert_eq!(run.effects[2].owe, Some(Owed { to: irs, due: Day(date(2026, 4, 15)) }), "due the day the year closes");
+    assert_eq!(run.checks[law.index()], 1, "2026 has not closed yet");
+}
+
+#[test]
+fn a_count_over_a_range_splits_by_days_between_the_years() {
+    let mut f = Fixture::new();
+    let (salary, checking, me) = (f.salary, f.checking, f.me);
+    counting(&mut f, checking, Subject::Entity(me), "paid");
+    let plan = f.flow(date(2025, 7, 1), salary, checking, 365_00);
+    f.recognize(plan, date(2025, 7, 1), date(2026, 6, 30));
+    let book = f.book();
+    let run = run(&book, until(2026, 7, 1));
+    let parts: Vec<_> = run.effects.iter().map(|e| (e.day, e.amount.qty.0)).collect();
+    assert_eq!(parts, [(Day(date(2025, 7, 1)), 184_00), (Day(date(2026, 1, 1)), 181_00)]);
+}
+
+#[test]
+fn a_year_law_runs_for_a_part_year_residence() {
+    let mut f = Fixture::new();
+    let (equity, checking, me) = (f.equity, f.checking, f.me);
+    let (yearly, years) = (f.sym("yearly"), f.sym("years"));
+    let mut law = LawBuilder::new(yearly, Trigger::Each(Period::Year, None));
+    let one = f.usd(1_00);
+    let amount = law.konst(Value::Amount(one), Ty::Amount);
+    let law = f.law(law.count(amount, years));
+    let subject = Subject::Entity(me);
+    let (in_year, other_year) = (
+        Rule { law, subject, from: Day(date(2025, 3, 1)), until: Day(date(2025, 6, 30)) },
+        Rule { law, subject, from: Day(date(2024, 1, 1)), until: Day(date(2024, 12, 31)) },
+    );
+    f.timed.extend([in_year, other_year]);
+    f.flow(date(2025, 2, 1), equity, checking, 10_00);
+    let book = f.book();
+    let run = run(&book, until(2026, 6, 1));
+    assert_eq!(
+        run.effects.iter().map(|e| e.day).collect::<Vec<_>>(),
+        [Day(date(2025, 12, 31))],
+        "it overlaps 2025, though it ended in June"
+    );
+}
+
+#[test]
+fn a_law_that_two_residences_bring_runs_once_for_a_period_and_once_for_a_flow() {
+    let mut f = Fixture::new();
+    let (equity, checking, me) = (f.equity, f.checking, f.me);
+    let (yearly, years) = (f.sym("yearly"), f.sym("years"));
+    let mut law = LawBuilder::new(yearly, Trigger::Each(Period::Year, None));
+    let one = f.usd(1_00);
+    let amount = law.konst(Value::Amount(one), Ty::Amount);
+    let law = f.law(law.count(amount, years));
+    let subject = Subject::Entity(me);
+    // A move within one system: the same law, brought by the residence before and the one after.
+    let (before, after) = (
+        Rule { law, subject, from: Day(date(2024, 1, 1)), until: Day(date(2025, 6, 30)) },
+        Rule { law, subject, from: Day(date(2025, 7, 1)), until: Day(date(2030, 1, 1)) },
+    );
+    f.timed.extend([before, after]);
+    // And two residences that overlap, so a flow meets the same law twice.
+    let paid = counting(&mut f, checking, subject, "paid");
+    let overlap = Rule { from: Day(date(2025, 3, 1)), ..f.rule(paid, subject) };
+    f.on_in.push((checking, overlap));
+    f.flow(date(2025, 4, 1), equity, checking, 10_00);
+    let book = f.book();
+    let run = run(&book, until(2026, 6, 1));
+    let closed: Vec<_> = run.effects.iter().filter(|e| e.name == years).map(|e| e.day).collect();
+    assert_eq!(closed, [Day(date(2025, 12, 31))], "2025 is one period, whichever residence it touched");
+    assert_eq!(run.checks[paid.index()], 1, "one flow, one run of the law");
+}
+
+#[test]
+fn an_opening_moves_value_but_no_law_sees_it_and_it_starts_no_period() {
+    let mut f = Fixture::new();
+    let (equity, checking, brokerage, vti, me) = (f.equity, f.checking, f.brokerage, f.vti, f.me);
+    let (monthly, months) = (f.sym("monthly"), f.sym("months"));
+    let bought = ticking(&mut f, brokerage, "bought");
+    let one = f.usd(1_00);
+    let mut each = LawBuilder::new(monthly, Trigger::Each(Period::Month, None));
+    let amount = each.konst(Value::Amount(one), Ty::Amount);
+    let each = f.law(each.count(amount, months));
+    let rule = f.rule(each, Subject::Entity(me));
+    f.timed.push(rule);
+    let (shares, day) = (f.vti(10), date(2024, 12, 31));
+    let opening = f.exchange(day, equity, shares, brokerage, shares);
+    f.opening(opening);
+    f.terms(opening, Terms { basis: Some(Qty(700_00)), since: Some(Day(date(2023, 6, 15))), ..Terms::default() });
+    f.flow(date(2025, 3, 1), equity, checking, 1_000_00);
+    f.buy(date(2025, 3, 10), 300_00, 1);
+    let book = f.book();
+    let run = run(&book, until(2025, 5, 31));
+    assert_eq!(
+        run.effects.iter().filter(|e| e.name == book.names.get("bought").unwrap()).count(),
+        1,
+        "only the purchase"
+    );
+    let month_days: Vec<_> =
+        run.effects.iter().filter(|e| e.name == book.names.get("months").unwrap()).map(|e| e.day).collect();
+    assert_eq!(
+        month_days,
+        [Day(date(2025, 3, 31)), Day(date(2025, 4, 30)), Day(date(2025, 5, 31))],
+        "from the first real fact"
+    );
+    let lots: Vec<_> =
+        held(&run, brokerage, vti).unwrap().lots.iter().map(|l| (l.qty.0, l.basis.0, l.acquired)).collect();
+    assert_eq!(lots, [(10, 700_00, Day(date(2023, 6, 15))), (1, 300_00, Day(date(2025, 3, 10)))]);
+    assert_eq!(run.checks[bought.index()], 1);
+}
+
+#[test]
+fn a_split_scales_every_holding_of_the_commodity_and_keeps_basis_and_dates() {
+    let mut f = Fixture::new();
+    let (equity, checking, brokerage, vti, usd) = (f.equity, f.checking, f.brokerage, f.vti, f.usd);
+    f.places[brokerage].select = Some(Policy::Fifo);
+    f.flow(1, equity, checking, 10_000_00);
+    f.buy(2, 1_000_00, 10);
+    f.buy(3, 500_00, 5);
+    f.split(5, vti, 2, 1);
+    f.sell(5, 5, 300_00);
+    let book = f.book();
+    let run = run(&book, options());
+    assert_eq!(lots_of(&run, brokerage, vti), [(15, 750_00), (10, 500_00)], "20 shares at 50.00 each, five sold");
+    let gain = run.gains[0];
+    assert_eq!((gain.qty, gain.basis, gain.gain(), gain.acquired), (Qty(5), Qty(250_00), Qty(50_00), Day(2)));
+    assert_eq!(qty(&run, checking, usd), 10_000_00 - 1_500_00 + 300_00);
+}
+
+#[test]
+fn a_stated_basis_and_a_hold_override_what_the_route_says() {
+    let mut f = Fixture::new();
+    let (salary, retirement, checking, savings, cash, grant, me) =
+        (f.salary, f.retirement, f.checking, f.savings, f.cash, f.grant, f.me);
+    f.join_household();
+    let household = f.household;
+    f.flow(1, salary, checking, 2_000_00);
+    let gift = f.flow(2, salary, retirement, 6_000_00);
+    f.terms(gift, Terms { basis: Some(Qty(6_000_00)), ..Terms::default() });
+    f.flow(3, salary, retirement, 100_00);
+    let set_aside = f.flow(4, checking, savings, 500_00);
+    f.terms(set_aside, Terms { hold: Some(grant), ..Terms::default() });
+    let mine = f.flow(5, savings, cash, 200_00);
+    f.terms(mine, Terms { hold: Some(me), ..Terms::default() });
+    let family = f.flow(6, savings, cash, 100_00);
+    f.terms(family, Terms { hold: Some(household), ..Terms::default() });
+    let book = f.book();
+    let run = run(&book, options());
+    let usd = book.base;
+    let deferred = held(&run, retirement, usd).unwrap();
+    assert_eq!(
+        (deferred.plain, deferred.lots.iter().map(|l| (l.qty.0, l.basis.0)).collect::<Vec<_>>()),
+        (Qty(6_000_00), vec![(100_00, 0)])
+    );
+    let tied: Vec<_> = held(&run, savings, usd).unwrap().lots.iter().map(|l| (l.qty.0, l.tied)).collect();
+    assert_eq!(tied, [(200_00, Some(grant))], "200 left, still tied to the envelope");
+    let wallet = held(&run, cash, usd).unwrap();
+    assert_eq!((wallet.plain, wallet.lots.len()), (Qty(300_00), 0), "`for` the owner, or its household, unties");
+}
+
+#[test]
+fn basis_flows_change_basis_and_move_no_quantity_and_realize_nothing() {
+    let mut f = Fixture::new();
+    let (equity, checking, brokerage, food, vti, usd) = (f.equity, f.checking, f.brokerage, f.food, f.vti, f.usd);
+    f.flow(1, equity, checking, 5_000_00);
+    f.buy(2, 1_000_00, 10);
+    let improvement = f.flow(3, checking, brokerage, 200_00);
+    f.terms(improvement, Terms { basis_end: Some(End::To), ..Terms::default() });
+    let depreciation = f.flow(4, brokerage, food, 50_00);
+    f.terms(depreciation, Terms { basis_end: Some(End::From), ..Terms::default() });
+    let book = f.book();
+    let run = run(&book, options());
+    assert_eq!(
+        lots_of(&run, brokerage, vti),
+        [(10, 1_150_00)],
+        "+200 capitalized, -50 depreciated, ten shares throughout"
+    );
+    assert!(run.gains.is_empty() && run.diagnostics.is_empty(), "no realization either way: {:?}", run.diagnostics);
+    assert_eq!((qty(&run, checking, usd), qty(&run, food, usd), qty(&run, brokerage, usd)), (3_800_00, 50_00, 0));
+}
+
+#[test]
+fn a_basis_flow_into_a_place_that_holds_nothing_is_an_error_not_a_panic() {
+    let mut f = Fixture::new();
+    let (equity, checking, savings) = (f.equity, f.checking, f.savings);
+    f.flow(1, equity, checking, 100_00);
+    let improvement = f.flow(2, checking, savings, 50_00);
+    f.terms(improvement, Terms { basis_end: Some(End::To), ..Terms::default() });
+    let book = f.book();
+    let run = run(&book, options());
+    assert_eq!(diagnostic(&run, "no-basis").message, "assets/savings holds nothing to carry a change of basis");
+}
+
+#[test]
+fn claims_stay_apart_by_transaction_and_overdue_ones_are_reported_once_each() {
+    let mut f = Fixture::new();
+    let (salary, savings, checking, grant, usd) = (f.salary, f.savings, f.checking, f.grant, f.usd);
+    f.places[savings].claim = true;
+    let first = f.flow(1, salary, savings, 300_00);
+    let second = f.flow(2, salary, savings, 300_00);
+    f.claim(first, 30, grant);
+    f.claim(second, 60, grant);
+    f.mark_txn(first, "#inv-1");
+    let code = f.sym("#inv-1");
+    let partial = f.flow(10, savings, checking, 100_00);
+    f.flows[partial.index()].select = Box::new([Select::Code(code)]);
+    let book = f.book();
+    let run = run(&book, Options { today: Day(45), relaxed: false });
+    assert_eq!(
+        lots_of(&run, savings, usd),
+        [(200_00, 200_00), (300_00, 300_00)],
+        "two claims, not one balance; the first partly paid"
+    );
+    let overdue: Vec<_> = run.diagnostics.iter().filter(|d| d.code == "overdue").collect();
+    assert_eq!(overdue.len(), 1, "the second is not due until day 60");
+    assert_eq!(overdue[0].message, "nsf-grant still owes 200.00 USD, 15 days past its due day 1970-01-31");
+    assert_eq!(overdue[0].severity, Severity::Warning);
+}
+
+#[test]
+fn growth_arrives_without_basis_and_a_loss_leaves_its_basis_with_what_remains() {
+    let mut f = Fixture::new();
+    let (equity, checking, brokerage, market, vti) = (f.equity, f.checking, f.brokerage, f.market, f.vti);
+    f.places[brokerage].select = Some(Policy::Fifo);
+    f.flow(1, equity, checking, 5_000_00);
+    f.buy(2, 600_00, 6);
+    f.buy(3, 400_00, 4);
+    let (grown, lost) = (f.vti(2), f.vti(3));
+    f.exchange(4, market, grown, brokerage, grown);
+    f.exchange(5, brokerage, lost, market, lost);
+    let ins = ticking(&mut f, brokerage, "grown");
+    let book = f.book();
+    let run = run(&book, options());
+    assert!(run.gains.is_empty(), "a market moving an asset's worth realizes nothing");
+    let lots = lots_of(&run, brokerage, vti);
+    assert_eq!(lots.iter().map(|l| l.0).sum::<i64>(), 6 + 4 + 2 - 3);
+    assert_eq!(
+        lots.iter().map(|l| l.1).sum::<i64>(),
+        1_000_00,
+        "the basis of what was lost is not lost: it is an unrealized loss"
+    );
+    // Three of the first lot's 300.00 of basis are shared over 9 shares: 100.00, 133.33 and 66.67 more.
+    assert_eq!(lots, [(3, 400_00), (4, 533_33), (2, 66_67)]);
+    assert_eq!(run.checks[ins.index()], 3, "`on in` fires for both purchases and for growth");
+}
+
+#[test]
+fn a_gap_via_a_market_place_is_a_revaluation_and_a_pad_is_a_flow_that_parcels_see() {
+    let mut f = Fixture::new();
+    let (salary, retirement, market, usd, vti, unknown) = (f.salary, f.retirement, f.market, f.usd, f.vti, f.unknown);
+    let ticks = ticking(&mut f, retirement, "ticks");
+    f.flow(1, salary, retirement, 10_000_00);
+    f.assert(2, retirement, 12_000_00);
+    f.via_last(market);
+    f.assert_vti(3, retirement, 3);
+    f.pad_last();
+    let book = f.book();
+    let run = run(&book, options());
+    assert_eq!(lots_of(&run, retirement, usd), [(12_000_00, 0)], "growth arrives with no basis, in the pre-tax lot");
+    assert_eq!(lots_of(&run, retirement, vti), [(3, 0)], "an unexplained gap of shares is a parcel, not a balance");
+    assert_eq!(run.pads.iter().map(|p| p.counter).collect::<Vec<_>>(), [market, unknown]);
+    assert_eq!(run.checks[ticks.index()], 3, "laws see the flows a gap posts");
+    assert!(
+        run.diagnostics.iter().all(|d| d.code == "pad"),
+        "a `via` says nothing; a `!` says so: {:?}",
+        run.diagnostics
+    );
+    assert!(run.gains.is_empty());
+}
+
+#[test]
+fn a_waiver_waives_a_priced_violation_and_a_waiver_that_waives_nothing_warns() {
+    let mut f = Fixture::new();
+    let (salary, retirement, checking, irs) = (f.salary, f.retirement, f.checking, f.grant);
+    let (name, penalty) = (f.sym("early-withdrawal"), f.sym("penalty"));
+    let mut law = LawBuilder::new(name, Trigger::Gain);
+    let gain = law.var(Var::Gain, Ty::Amount);
+    let nothing = law.konst(Value::Empty, Ty::Empty);
+    let cond = law.bin(BinOp::Le, gain, nothing, Ty::Bool);
+    let tenth = law.konst(Value::Num(Ratio::new(1, 10).unwrap()), Ty::Num);
+    let again = law.var(Var::Gain, Ty::Amount);
+    let tax = law.bin(BinOp::Mul, tenth, again, Ty::Amount);
+    let law = f.law(law.require_else_owe(cond, tax, irs, penalty));
+    let rule = f.rule(law, Subject::Place(retirement));
+    f.on_gain.push((retirement, rule));
+    f.flow(1, salary, retirement, 5_000_00);
+    let waived = f.flow(2, retirement, checking, 1_000_00);
+    f.waive(waived);
+    let pointless = f.flow(3, salary, checking, 10_00);
+    f.waive(pointless);
+    let book = f.book();
+    let run = run(&book, options());
+    assert!(run.effects.is_empty(), "the penalty is waived, so it is not owed");
+    let [violation] = run.violations[..] else { panic!("{:?}", run.violations) };
+    assert!(violation.priced && violation.waived);
+    let d = &run.diagnostics[violation.diagnostic as usize];
+    assert_eq!((d.disposition, d.labels.iter().any(|l| l.text == "waived here")), (Disposition::Waived, true));
+    let unused = diagnostic(&run, "unused-waiver");
+    assert_eq!((unused.severity, unused.labels[0].loc), (Severity::Warning, book.flows[pointless].waive.unwrap().loc));
+    assert_eq!(
+        run.diagnostics.iter().filter(|d| d.code == "unused-waiver").count(),
+        1,
+        "the used waiver is not reported"
+    );
+}
+
+#[test]
+fn every_comparison_keeps_its_last_reading_with_the_sides_of_a_floor_swapped() {
+    let mut f = Fixture::new();
+    let (equity, checking, food) = (f.equity, f.checking, f.food);
+    let name = f.sym("bank");
+    let mut law = LawBuilder::new(name, Trigger::Always);
+    let balance = law.var(Var::Balance, Ty::Amount);
+    let nothing = law.konst(Value::Empty, Ty::Empty);
+    let cond = law.bin(BinOp::Ge, balance, nothing, Ty::Bool);
+    let law = f.law(law.warn(cond));
+    let rule = f.rule(law, Subject::Place(checking));
+    f.always.push((checking, rule));
+    f.flow(1, equity, checking, 500_00);
+    f.flow(2, checking, food, 200_00);
+    let book = f.book();
+    let run = run(&book, options());
+    let [_, reading] = run.headroom[..] else { panic!("one reading a day: {:?}", run.headroom) };
+    assert_eq!(
+        (reading.counted.qty, reading.limit.qty, reading.warn),
+        (Qty::ZERO, Qty(300_00), true),
+        "room above the floor: limit - counted"
+    );
+    assert_eq!(
+        (reading.from, reading.until, reading.day),
+        (Day(2), Day(2), Day(2)),
+        "no total or tally: the day itself"
+    );
+}
+
+#[test]
+fn a_tight_budget_is_reported_once_per_month_not_once_per_flow() {
+    let mut f = Fixture::new();
+    let (checking, food) = (f.checking, f.food);
+    month_budget(&mut f, food, 10_00);
+    for day in 0..59 {
+        f.flow(day, checking, food, 1_00);
+    }
+    let book = f.book();
+    let run = run(&book, options());
+    assert_eq!(run.violations.len(), 2, "January and February, each at the flow that crossed the line");
+    assert_eq!(run.diagnostics.len(), 2);
+    assert_eq!(run.violations[0].day, Day(10));
+    let last: Vec<_> = run.headroom.iter().map(|h| h.counted.qty.0).collect();
+    assert_eq!(last, [31_00, 28_00]);
+}
+
+#[test]
+fn fields_read_a_places_basis_and_an_amounts_commodity() {
+    let mut f = Fixture::new();
+    let (equity, salary, checking, brokerage, vti) = (f.equity, f.salary, f.checking, f.brokerage, f.vti);
+    let (seen, tally, only_shares) = (f.sym("seen"), f.sym("seen"), f.sym("shares-only"));
+    let mut law = LawBuilder::new(seen, Trigger::In);
+    let place = law.konst(Value::Place(brokerage), Ty::Place);
+    let basis = law.field(place, Field::Basis, Ty::Amount);
+    let law = f.law(law.count(basis, tally));
+    let rule = f.rule(law, Subject::Entity(f.me));
+    f.on_in.push((checking, rule));
+    let mut unit = LawBuilder::new(only_shares, Trigger::In);
+    let (amount, shares) = (unit.var(Var::Amount, Ty::Amount), unit.konst(Value::Unit(vti), Ty::Unit));
+    let unit_of = unit.field(amount, Field::Unit, Ty::Unit);
+    let cond = unit.bin(BinOp::Eq, unit_of, shares, Ty::Bool);
+    let unit = f.law(unit.require(cond, None));
+    let rule = f.rule(unit, Subject::Place(checking));
+    f.on_in.push((checking, rule));
+    f.flow(1, equity, checking, 1_000_00);
+    f.buy(2, 300_00, 3);
+    f.flow(3, salary, checking, 50_00);
+    let book = f.book();
+    let run = run(&book, options());
+    let seen: Vec<_> = run.effects.iter().map(|e| e.amount.qty.0).collect();
+    assert_eq!(seen, [300_00], "the basis of the parcels, and nothing yet before them");
+    assert_eq!(run.violations.len(), 2, "each of the two dollar flows into checking is not in shares");
+}
+
+#[test]
+fn a_household_is_the_subject_of_what_its_members_own() {
+    let mut f = Fixture::new();
+    let (salary, checking, savings, household) = (f.salary, f.checking, f.savings, f.household);
+    f.join_household();
+    counting(&mut f, checking, Subject::Entity(household), "household-in");
+    counting(&mut f, savings, Subject::Entity(household), "household-in");
+    f.flow(1, salary, checking, 900_00);
+    f.flow(2, checking, savings, 400_00);
+    let book = f.book();
+    let run = run(&book, options());
+    let counted: Vec<_> = run.effects.iter().map(|e| (e.owner, e.amount.qty.0)).collect();
+    assert_eq!(counted, [(household, 900_00)], "the transfer between two of the household's places is not income");
+}
+
+/// Builds a book with `build` and folds it.
+fn asserted(build: impl FnOnce(&mut Fixture)) -> (Book<'static>, Run) {
+    let mut f = Fixture::new();
+    build(&mut f);
+    let book = f.book();
+    let run = run(&book, options());
+    (book, run)
+}
+
+fn the_error(run: &Run) -> &Diagnostic {
+    let errors: Vec<_> = run.diagnostics.iter().filter(|d| d.code == "assertion").collect();
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    errors[0]
+}
+
+#[test]
+fn a_failed_assertion_notices_a_flow_written_backwards() {
+    let (_, run) = asserted(|f| {
+        let (card, food, checking) = (f.card, f.food, f.checking);
+        f.flow(1, card, food, 300_00);
+        f.flow(2, card, food, 152_00);
+        f.flow(3, card, checking, 200_00);
+        f.assert(4, card, 252_00);
+    });
+    let d = the_error(&run);
+    assert_eq!(d.message, "liabilities/card holds 652.00 USD, not 252.00 USD");
+    assert_eq!(d.labels[0].text, "400.00 USD less than the ledger holds");
+    assert!(
+        d.notes
+            .iter()
+            .any(|n| n == "the gap is exactly twice this flow (2 × 200.00 USD): it is probably written backwards")
+    );
+    assert_eq!(d.help[0].text, "write it the other way: `assets/checking -> liabilities/card`");
+}
+
+#[test]
+fn a_failed_assertion_notices_two_swapped_digits_a_wrong_sign_and_a_wrong_commodity() {
+    let (_, swapped) = asserted(|f| {
+        let (equity, checking) = (f.equity, f.checking);
+        f.flow(1, equity, checking, 3_015_80);
+        f.assert(2, checking, 3_051_80);
+    });
+    assert!(
+        the_error(&swapped)
+            .notes
+            .iter()
+            .any(|n| n == "3,015.80 USD and 3,051.80 USD differ only by two neighbouring digits swapped")
+    );
+    assert_eq!(the_error(&swapped).help[0].text, "if the statement says 3,015.80 USD, correct the amount");
+
+    let (_, sign) = asserted(|f| {
+        let (equity, checking, food) = (f.equity, f.checking, f.food);
+        f.flow(1, equity, checking, 100_00);
+        f.flow(2, checking, food, 150_00);
+        f.assert(3, checking, 50_00);
+    });
+    assert!(
+        the_error(&sign).notes.iter().any(|n| n.starts_with("the ledger holds -50.00 USD, the opposite of 50.00 USD"))
+    );
+
+    let (_, unit) = asserted(|f| {
+        let (equity, savings) = (f.equity, f.savings);
+        f.flow(1, equity, savings, 915_80);
+        f.assert_vti(2, savings, 10);
+    });
+    assert_eq!(the_error(&unit).message, "assets/savings has never held VTI; it holds 915.80 USD");
+    assert_eq!(the_error(&unit).help[0].text, "assert in USD: 915.80 USD");
+}
+
+#[test]
+fn a_gap_is_carried_and_only_a_change_in_it_is_reported_again() {
+    let (_, run) = asserted(|f| {
+        let (equity, salary, checking) = (f.equity, f.salary, f.checking);
+        f.flow(1, equity, checking, 1_000_00);
+        f.assert(2, checking, 1_000_00);
+        f.assert(10, checking, 955_00);
+        f.assert(20, checking, 955_00);
+        f.flow(25, salary, checking, 100_00);
+        f.assert(30, checking, 1_055_00);
+        f.assert(40, checking, 1_045_00);
+    });
+    let errors: Vec<_> = run.diagnostics.iter().filter(|d| d.code == "assertion").collect();
+    assert_eq!(errors.len(), 2, "the same gap at days 20 and 30 says nothing: {errors:?}");
+    assert_eq!(errors[0].labels[0].text, "45.00 USD less than the ledger holds");
+    assert_eq!(errors[1].labels[0].text, "another 10.00 USD less than the ledger holds");
+    assert_eq!(errors[1].labels.len(), 1, "no flow since the assertion on day 30");
+    assert!(errors[1].notes[0].starts_with("the 45.00 USD gap reported at an earlier assertion is carried"));
+}
+
+#[test]
+fn an_assertion_that_depends_on_an_unsolved_amount_is_not_checked_once_and_never_a_false_gap() {
+    let (_, run) = asserted(|f| {
+        let (equity, checking, cash, food) = (f.equity, f.checking, f.cash, f.food);
+        f.flow(1, equity, checking, 1_000_00);
+        f.assert(2, checking, 1_000_00);
+        f.unknown(3, checking, cash);
+        f.unknown(4, checking, food);
+        f.assert(5, checking, 800_00);
+        f.assert(6, checking, 800_00);
+    });
+    let codes: Vec<_> = run.diagnostics.iter().map(|d| &*d.code).collect();
+    assert_eq!(codes, ["cannot-infer", "cannot-infer", "unchecked"], "no assertion error, and the note is said once");
+    assert!(run.diagnostics[2].help.is_empty(), "it never suggests `!`");
 }
 
 /// A million flows through `run`: `cargo test -p axiom-engine --release -- --ignored --nocapture million`.

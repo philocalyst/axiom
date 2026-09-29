@@ -1,1 +1,11 @@
+warning[unused-waiver]: this `!` waives nothing
+   ╭─[journal/2025/09.ax:21:75]
+   │
+21 │ …sit-account -> rental-checking 350 USD / tenant-a #lease-a ! "kept for damage, per the lease"
+   │                                                             ─────────────────┬────────────────
+   │                                                                              ╰── no law objected to this transaction
+   │
+   = help: delete the `!`, or move it to the flow that needs it
+
+1 warning
 ✓ 197 flows · 32 places · 11 laws enforced · net worth 173,866.60 USD

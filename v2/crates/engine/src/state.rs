@@ -9,16 +9,14 @@
 
 use std::mem::Discriminant;
 
-use axiom_core::{Day, Diagnostic, Id, Map, Set};
+use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty, Set};
 use axiom_model::{Book, Commodity, Entity, Fault, Flow, Law, Place, Subject, Value};
 
 use crate::eval::Outcome;
-use crate::holdings::Holdings;
+use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
-use crate::post::Slice;
-use crate::relief::Relief;
 use crate::totals::{Tallies, Totals};
-use crate::{Applied, Effect, Gain, Pad, Violation};
+use crate::{Applied, Effect, Gain, Headroom, Pad, Violation};
 
 #[derive(Clone)]
 pub(crate) struct World {
@@ -33,6 +31,29 @@ impl World {
     }
 }
 
+/// Where the assertions on one place and commodity left off.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Checkpoint {
+    /// The last day one was checked.
+    pub day: Option<Day>,
+    /// How far the statement was from the ledger then (statement minus ledger,
+    /// in the sign the assertion is written in). It is carried: an assertion
+    /// that fails by the same amount is not reported again.
+    pub gap: Qty,
+    /// An amount the assertions depend on could not be solved, and one
+    /// assertion has said so.
+    pub unsolved_said: bool,
+}
+
+/// A limit's latest reading in its window. It is updated in place while the
+/// window lasts, and set aside when a reading falls in the next one.
+#[derive(Clone, Copy)]
+pub(crate) struct Reading {
+    pub headroom: Headroom,
+    /// The window is the year of what a tally counts, not the day a total is read.
+    pub tally: bool,
+}
+
 #[derive(Clone, Default)]
 pub(crate) struct Record {
     /// The quantities of flows that were not fully written: solved from
@@ -45,24 +66,26 @@ pub(crate) struct Record {
     pub diagnostics: Vec<Diagnostic>,
     /// How many times each law ran past its `when` filters.
     pub checks: Vec<u32>,
-    /// The last day each `(place, commodity)` assertion held.
-    pub reconciled: Map<(Id<Place>, Id<Commodity>), Day>,
+    pub checkpoints: Map<(Id<Place>, Id<Commodity>), Checkpoint>,
+    /// By law, step and subject.
+    pub headroom: Map<(Id<Law>, u32, Subject), Reading>,
+    /// Readings of windows that have passed.
+    pub passed: Vec<Headroom>,
+    /// Every `!` a posted flow carried, and whether it waived anything.
+    pub waivers: Map<Loc, bool>,
     /// `always` laws currently failing, so a lasting condition is reported
     /// when it starts rather than after every flow.
     pub failing: Set<(Id<Law>, Subject)>,
+    /// Laws already reported for a subject in a window, by law, step, subject
+    /// and the window's first day: a limit is broken once per window, at the
+    /// flow that crossed it.
+    pub reported: Set<(Id<Law>, u32, Subject, Day)>,
+    /// Places whose lots were already reported ambiguous: one policy fixes them all.
+    pub ambiguous: Set<Id<Place>>,
     /// Prices already reported missing: `(commodity, day)`.
     pub unpriced: Set<(Id<Commodity>, Day)>,
     /// Faults already reported: `(law, step, kind of fault)`.
     pub faulted: Set<(Id<Law>, u32, Discriminant<Fault>)>,
-}
-
-/// How long each record was when something began.
-#[derive(Clone, Copy)]
-pub(crate) struct Marks {
-    gains: usize,
-    effects: usize,
-    violations: usize,
-    diagnostics: usize,
 }
 
 impl Record {
@@ -77,8 +100,10 @@ impl Record {
         Record {
             amounts: self.amounts.clone(),
             checks: vec![0; self.checks.len()],
-            reconciled: self.reconciled.clone(),
+            checkpoints: self.checkpoints.clone(),
             failing: self.failing.clone(),
+            reported: self.reported.clone(),
+            ambiguous: self.ambiguous.clone(),
             unpriced: self.unpriced.clone(),
             faulted: self.faulted.clone(),
             ..Record::default()
@@ -91,22 +116,25 @@ impl Record {
         (self.diagnostics.len() - 1) as u32
     }
 
-    pub fn marks(&self) -> Marks {
-        Marks {
-            gains: self.gains.len(),
-            effects: self.effects.len(),
-            violations: self.violations.len(),
-            diagnostics: self.diagnostics.len(),
+    /// Where each record ends now, as the empty ranges [`since`](Record::since) grows.
+    pub fn marks(&self) -> Applied {
+        let end = |len: usize| len..len;
+        Applied {
+            gains: end(self.gains.len()),
+            effects: end(self.effects.len()),
+            violations: end(self.violations.len()),
+            diagnostics: end(self.diagnostics.len()),
         }
     }
 
     /// Everything recorded since `marks`.
-    pub fn since(&self, marks: Marks) -> Applied {
+    pub fn since(&self, marks: Applied) -> Applied {
+        let to = |start: std::ops::Range<usize>, len: usize| start.start..len;
         Applied {
-            gains: marks.gains..self.gains.len(),
-            effects: marks.effects..self.effects.len(),
-            violations: marks.violations..self.violations.len(),
-            diagnostics: marks.diagnostics..self.diagnostics.len(),
+            gains: to(marks.gains, self.gains.len()),
+            effects: to(marks.effects, self.effects.len()),
+            violations: to(marks.violations, self.violations.len()),
+            diagnostics: to(marks.diagnostics, self.diagnostics.len()),
         }
     }
 }
@@ -120,7 +148,6 @@ pub(crate) struct Scratch {
     pub relief: Relief,
     /// Entities parcels are tied to, and whether their laws permit the flow.
     pub permits: Vec<(Id<Entity>, bool)>,
-    pub slices: Vec<Slice>,
 }
 
 impl Clone for Scratch {

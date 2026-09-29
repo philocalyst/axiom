@@ -22,10 +22,11 @@ Counted
       ca-withheld          1,110.00 USD  3 sources
 
 Owed
-  Owed                          To   Due            Amount  From
-  ───────────────────────────────────────────────────────────────────────────────
+  Owed                                    To   Due            Amount  From
+  ─────────────────────────────────────────────────────────────────────────────────────────
     us/529
-      nonqualified-529-penalty  irs  2026-03-25  34.94 USD  journal/2026/03.ax:34
-  ───────────────────────────────────────────────────────────────────────────────
-  Total owed                                     34.94 USD
+      nonqualified-529-penalty (penalty)  irs  2026-03-25  34.94 USD  journal/2026/03.ax:34
+  ─────────────────────────────────────────────────────────────────────────────────────────
+  Total owed                                               34.94 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
+  · A penalty is the price of a violated law: it is owed instead of the law failing.
