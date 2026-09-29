@@ -296,16 +296,27 @@ impl<'a, 's> Machine<'a, 's> {
         }
     }
 
-    /// A tally as it stands: what the world holds, plus what earlier steps of
-    /// this same law have counted, so `count amount as x` then `require
+    /// A tally as it stands, in the year asked (a number, or a date in it) or
+    /// this one: what the world holds, plus, for this year, what earlier steps
+    /// of this same law have counted, so `count amount as x` then `require
     /// tally(x) <= …` sees the flow it is checking.
-    fn tally(&self, name: Sym) -> Value {
+    fn tally(&self, name: Sym, asked: Option<Value>) -> Value {
         let (ctx, tallies) = (self.ctx, &self.env.world.tallies);
+        let this_year = ctx.over.from.year();
+        let year = match asked {
+            None => this_year,
+            Some(Value::Num(year)) => year.round() as i32,
+            Some(Value::Day(day)) => day.year(),
+            Some(Value::Fault(fault)) => return Value::Fault(fault),
+            Some(_) => unreachable!("{TYPED}"),
+        };
         let counted = self.out.iter().filter_map(|o| match *o {
-            Outcome::Count { name: counted, amount } if counted == name => Some(share_in_first_year(amount, ctx.over)),
+            Outcome::Count { name: counted, amount } if counted == name && year == this_year => {
+                Some(share_in_first_year(amount, ctx.over))
+            }
             _ => None,
         });
-        self.base(tallies.read(ctx.owner, ctx.over.from.year(), name) + counted.sum())
+        self.base(tallies.read(ctx.owner, year, name) + counted.sum())
     }
 
     fn node(&self, at: usize) -> Value {
@@ -479,7 +490,7 @@ impl<'a, 's> Machine<'a, 's> {
         }
         match func {
             Func::Total(dir, window) => self.total(dir, window, args),
-            Func::Tally(name) => self.tally(name),
+            Func::Tally(name) => self.tally(name, Func::tally_year(args).map(|year| self.at(year))),
             Func::Min => self.pick(BinOp::Le, arg(0), arg(1)),
             Func::Max => self.pick(BinOp::Ge, arg(0), arg(1)),
             Func::Abs => match arg(0) {

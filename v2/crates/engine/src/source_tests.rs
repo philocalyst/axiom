@@ -264,6 +264,45 @@ fn a_flow_applied_on_a_day_already_closed_is_late_for_its_closings() {
     });
 }
 
+// ─── A tally of another year ────────────────────────────────────────────────
+
+/// What was paid in a year, and each year's law reading the year before it.
+const YEARS: &str = "\
+base USD
+commodity USD
+  precision 2
+
+account assets/checking
+account expenses/estimated
+  law paid
+    on in
+    count amount as paid
+
+law look-back
+  each year
+  count tally(paid, year - 1) as before
+  count tally(paid) as this
+
+opening 2025-01-01
+  checking 1_000 USD
+
+2025-06-01 checking -> estimated 100 USD
+2026-06-01 checking -> estimated 30 USD
+";
+
+#[test]
+fn a_tally_is_read_for_the_year_asked_and_for_this_one_without_asking() {
+    with_run(YEARS, day(2026, 12, 31), |book, run| {
+        let read = run.effects.iter().filter(|e| book.name(e.name) != "paid");
+        let counted: Vec<_> = read.map(|e| (book.name(e.name), e.day.year(), e.amount.qty.0)).collect();
+        assert_eq!(
+            counted,
+            [("this", 2025, 100_00), ("before", 2026, 100_00), ("this", 2026, 30_00)],
+            "2025 has no year before it with anything in it, and 2026 reads the 100.00 USD of 2025"
+        );
+    });
+}
+
 // ─── Which parcel of a currency is spent ────────────────────────────────────
 
 /// Two purchases of euros on different days, and half of what they made spent, in an account that says nothing

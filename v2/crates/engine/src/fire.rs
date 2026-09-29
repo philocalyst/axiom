@@ -37,9 +37,10 @@ impl Reads {
     /// The finest total or tally the condition rooted at `cond` reads: the
     /// window a comparison is about is the shortest it reads.
     pub fn of(law: &Law, cond: NodeId) -> Option<Reads> {
-        let read = law.range(cond).filter_map(|at| match law.nodes[at].op {
-            Op::Call(Func::Total(dir, window), _) => Some(Reads::Total(dir, window)),
-            Op::Call(Func::Tally(name), _) => Some(Reads::Tally(name)),
+        let read = law.range(cond).filter_map(|at| match &law.nodes[at].op {
+            Op::Call(Func::Total(dir, window), _) => Some(Reads::Total(*dir, *window)),
+            // A tally of another year is settled, not a window this flow is adding to.
+            Op::Call(Func::Tally(name), args) if Func::tally_year(args).is_none() => Some(Reads::Tally(*name)),
             _ => None,
         });
         read.min_by_key(|read| match read {

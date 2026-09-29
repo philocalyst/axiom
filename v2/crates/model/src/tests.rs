@@ -813,6 +813,19 @@ law counts
 }
 
 #[test]
+fn a_tally_is_read_for_another_year_by_a_number_or_a_date_and_by_nothing_else() {
+    let law = |read: &str| {
+        let reads = format!("law reads\n  each year\n  count {read} as before\n");
+        format!("law counts\n  on in\n  count amount as base-total\n\n{reads}")
+    };
+    for read in ["tally(base-total)", "tally(base-total, year - 1)", "tally(base-total, date(2025, 1, 1))"] {
+        with_book(&law(read), |_, diags| assert!(diags.is_empty(), "{read}: {diags:?}"));
+    }
+    with_book(&law("tally(base-total, 5 USD)"), |_, diags| assert_eq!(codes(diags), ["type-mismatch"]));
+    with_book(&law("tally(base-total, year, year)"), |_, diags| assert_eq!(codes(diags), ["call-arity"]));
+}
+
+#[test]
 fn only_a_law_that_is_one_cap_on_a_total_is_a_cap() {
     let text = "
 law yearly

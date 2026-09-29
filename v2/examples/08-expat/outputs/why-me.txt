@@ -21,6 +21,7 @@ Governed by
     fbar                each year                FBAR: the highest values of the year, account by account, added up. Each…  accounts.ax:190
   ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Prices
-    federal-income-tax  each year closing 04-15  Federal income tax for the year (IRC §1), figured from the tallies above.  us.ax:350
+    federal-income-tax  each year closing 04-15  Federal income tax for the year (IRC §1), figured from the tallies above.  us.ax:359
   · 7 more laws only count, into adjustments, agi, credits, deductions, feie-excluded,
-    feie-stacking-tax, investment-income, itemized, net-long-term-gains, other-taxes.
+    feie-stacking-tax, investment-income, itemized, long-loss-carried, net-long-term-gains,
+    other-taxes, short-loss-carried.

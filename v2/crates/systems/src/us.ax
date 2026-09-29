@@ -23,6 +23,8 @@
 ///   short-term-gains      gains on things held a year or less
 ///   long-term-gains       gains on things held longer than a year
 ///   distributions         taxable money that came out of a tax-deferred account
+///   short-loss-carried    a net short-term loss the year could not use, carried
+///   long-loss-carried     a net long-term loss the year could not use, carried
 ///   total-income          the sum of those, gains netted (Form 1040, line 9)
 ///   adjustments           slot: deductions above the line, taken from income
 ///   agi                   adjusted gross income: total income less adjustments
@@ -43,9 +45,8 @@
 ///
 /// Simplified on purpose. It has the standard deduction, itemizing, the child
 /// tax credit and the net investment income tax, but not payroll tax, the
-/// alternative minimum tax, phase-outs of deductions and credits, or carrying
-/// a capital loss into the next year. Only the `single` and `joint` filing
-/// statuses have figures.
+/// alternative minimum tax, or phase-outs of deductions and credits. Only the
+/// `single` and `joint` filing statuses have figures.
 ///
 /// The figures are community-maintained data. Verify them against the IRS
 /// (irs.gov, "Revenue Procedures" for each year) before relying on them, and
@@ -286,19 +287,27 @@ law cap-salt
 
 /// Gains and losses are netted before they are taxed (IRC §1222): a loss of one
 /// term first offsets the gain of the other, and only what is left counts. A
-/// net loss reduces income by at most 3,000 USD, and the rest is not carried
-/// into the next year here. Adjusted gross income is total income less the
-/// adjustments projects and systems counted.
+/// net loss reduces income by at most 3,000 USD, taken from the short-term loss
+/// first, and the rest is carried into the next year as a loss of the same term
+/// (IRC §1212(b)): the year before's `short-loss-carried` and `long-loss-carried`
+/// are read as losses of this one. Adjusted gross income is total income less
+/// the adjustments projects and systems counted.
 ///
 /// To fix: to change what counts, change what was counted: `axiom why agi`
 /// lists every flow and law behind it.
 law adjusted-gross-income
   each year closing 04-15
-  let short = tally(short-term-gains)
-  let long = tally(long-term-gains)
+  let short = tally(short-term-gains) - tally(short-loss-carried, year - 1)
+  let long = tally(long-term-gains) - tally(long-loss-carried, year - 1)
   let short-net = max(short + min(long, empty), empty)
   let long-net = max(long + min(short, empty), empty)
-  let loss = min(max(-(short + long), empty), capital-loss-limit[year])
+  let net-loss = max(-(short + long), empty)
+  let loss = min(net-loss, capital-loss-limit[year])
+  let short-loss = max(min(-short, net-loss), empty)
+  let long-loss = net-loss - short-loss
+  let short-used = min(short-loss, loss)
+  count short-loss - short-used as short-loss-carried
+  count long-loss - (loss - short-used) as long-loss-carried
   count long-net as net-long-term-gains
   count short-net + long-net as investment-income
   count tally(total-income) + short-net + long-net - loss - tally(adjustments) as agi

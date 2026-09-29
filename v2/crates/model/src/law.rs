@@ -223,6 +223,8 @@ pub enum Func {
     /// including the triggering flow, valued in the base currency. An optional
     /// argument widens it to every place of a kind the owner owns.
     Total(Dir, Window),
+    /// What laws counted under the name for the owner, in the current year or,
+    /// with a second argument (a year or a date), in that one.
     Tally(Sym),
     Min,
     Max,
@@ -233,6 +235,14 @@ pub enum Func {
     Value,
     /// `date(y, m, d)`
     Date,
+}
+
+impl Func {
+    /// The year a `tally` call asks for: the operand after the tally's name, if
+    /// there is one.
+    pub fn tally_year(args: &[NodeId]) -> Option<NodeId> {
+        args.get(1).copied()
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

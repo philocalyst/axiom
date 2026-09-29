@@ -107,11 +107,11 @@ lists it among the obligations coming due, the refund as a negative amount. The 
 printed: the ledger starts in September 2024, and a partial year's refund would mean nothing.
 
 The year's long-term loss (584.67 USD) is smaller than its short-term gain, so netting lowers the short-term
-figure and nothing more: no loss deduction, no carryforward. The wash sale adds back 1,978.60 USD that `us`
-had already deducted when the UNH shares were sold. Without `disallow-wash-loss` the return, worked the same
-way by hand, would have AGI 198,528.21, taxable income 182,778.21, income tax 36,713.77, no net investment
-income tax (AGI is under 200,000) and a refund of 3,777.77: 494.12 USD too much (474.86 of income tax at 24%
-and 19.26 of the 3.8% tax).
+figure and nothing more: no loss deduction, and no loss to carry into 2026. The wash sale adds back
+1,978.60 USD that `us` had already deducted when the UNH shares were sold. Without `disallow-wash-loss` the
+return, worked the same way by hand, would have AGI 198,528.21, taxable income 182,778.21, income tax
+36,713.77, no net investment income tax (AGI is under 200,000) and a refund of 3,777.77: 494.12 USD too much
+(474.86 of income tax at 24% and 19.26 of the 3.8% tax).
 
 `axiom check`: no errors, no warnings. The summary reads 331 flows, 25 places, 17 laws enforced and net worth
 469,860.96 USD.

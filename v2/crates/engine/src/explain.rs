@@ -446,7 +446,7 @@ fn follows_flow(f: &Frame, step: usize, lhs: NodeId) -> Option<Moves> {
         (Op::Var(Var::Amount), _) => Some(Moves::Flow),
         (Op::Call(Func::Total(Dir::In, window), _), Trigger::In) => Some(Moves::Total(Dir::In, *window)),
         (Op::Call(Func::Total(Dir::Out, window), _), Trigger::Out) => Some(Moves::Total(Dir::Out, *window)),
-        (Op::Call(Func::Tally(name), _), _) => {
+        (Op::Call(Func::Tally(name), args), _) if Func::tally_year(args).is_none() => {
             let counts_amount = |kind: &StepKind| match kind {
                 StepKind::Effect(Consequence::Count { amount, name: counted }) => {
                     counted == name && matches!(f.law.nodes[amount.index()].op, Op::Var(Var::Amount))

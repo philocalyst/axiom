@@ -139,3 +139,57 @@ fn a_balance_before_an_accepted_gap_does_not_see_it() {
     let after = run(&["-C", project, "--today", "2025-12-31", "balance", "--at", "2025-07-01"]);
     assert!(text(&after.stdout).contains("90.00 USD"), "{}", text(&after.stdout));
 }
+
+/// Two years under `us`, the first with more of a capital loss than one year may deduct.
+const LOSSES: &str = "\
+base USD
+use std
+use us
+
+entity me : person
+  born 1988-04-12
+  filing single
+  lives us
+
+commodity STK : stock
+  precision 0
+
+account assets/checking : bank
+account assets/broker : broker
+
+opening 2024-01-01
+  checking 50_000 USD
+
+// 2025: 4,000 USD lost on shares held over a year, 5,000 USD on shares held less.
+2024-02-01 checking -> broker 100 STK @ 100 USD
+2025-03-01 checking -> broker 100 STK @ 100 USD
+2025-06-01 broker 100 STK -> checking 6_000 USD
+2025-09-01 broker 100 STK -> checking 5_000 USD
+// 2026: 1,000 USD gained.
+2025-12-01 checking -> broker 10 STK @ 100 USD
+2026-03-01 broker 10 STK -> checking 2_000 USD
+";
+
+#[test]
+fn a_net_capital_loss_beyond_the_limit_is_carried_into_the_next_years_return() {
+    let folder = empty_folder("loss-carryforward");
+    fs::write(folder.join("axiom.ax"), LOSSES).expect("write project");
+    let project = folder.to_str().expect("a UTF-8 path");
+    // The lines of the return about losses and income, as `name amount USD`.
+    let lines = |year: &str| -> Vec<String> {
+        let output = run(&["-C", project, "--today", "2027-04-16", "--color", "never", "tax", year]);
+        assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+        let screen = text(&output.stdout);
+        let names = ["short-loss-carried", "long-loss-carried", "agi"];
+        let named = |line: &&str| names.iter().any(|name| line.trim().starts_with(name));
+        let cells = |line: &str| line.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
+        screen.lines().filter(named).map(cells).collect()
+    };
+    // 9,000 USD lost: 3,000 is deducted, from the short-term loss first, and the rest waits.
+    let first = ["short-loss-carried 2,000.00 USD", "long-loss-carried 4,000.00 USD", "agi -3,000.00 USD"];
+    assert_eq!(lines("2025"), first);
+    // The next year's 1,000 USD of gain meets the 2,000 USD short-term loss, then the long-term one:
+    // 5,000 USD is lost again, 3,000 deducted, and only long-term loss is left to carry.
+    assert_eq!(lines("2026"), ["long-loss-carried 2,000.00 USD", "agi -3,000.00 USD"]);
+    let _ = fs::remove_dir_all(folder);
+}
