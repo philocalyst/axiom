@@ -4,10 +4,10 @@
 2026-01-03 checking -> utilities 61.84 USD / power-co
 2026-01-04 visa -> dining 20.72 USD
 2026-01-05 visa -> groceries 48.27 USD / kroger
-2026-01-06 checking -> savings 100 USD #car for car-fund
-2026-01-06 checking -> savings 100 USD #insurance for insurance-fund
-2026-01-06 checking -> savings 250 USD #trip for trip-fund
-2026-01-06 checking -> savings 100 USD #emergency for emergency-fund
+2026-01-06 checking -> savings 100 USD for car-fund
+2026-01-06 checking -> savings 100 USD for insurance-fund
+2026-01-06 checking -> savings 250 USD for trip-fund
+2026-01-06 checking -> savings 100 USD for emergency-fund
 2026-01-08 visa -> phone 40 USD / mint-mobile
 2026-01-08 checking = 4_765.03 USD
 2026-01-09 studio -> 2_307.69 USD
@@ -28,8 +28,8 @@
 2026-01-15 visa -> fun 35.96 USD
 
 /// New brake pads and rotors, 486.25 USD, paid from the car fund: what I saved 100.00 USD a month for.
-/// The deposits carry the code #car, and the payment takes the parcels that code marked: what was tied to the car fund.
-2026-01-15 savings[#car] -> car-repair 486.25 USD / kwik-brakes
+/// The envelope is the source, so the payment takes the parcels tied to it.
+2026-01-15 car-fund -> car-repair 486.25 USD / kwik-brakes
 2026-01-16 visa -> dining 28.16 USD
 2026-01-19 visa -> groceries 58.55 USD / trader-joes
 2026-01-20 #check-1029 void

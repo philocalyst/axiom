@@ -25,6 +25,7 @@ version = "0.3.0"
 dependencies = [
  "axiom-core",
  "axiom-model",
+ "axiom-syntax",
 ]
 
 [[package]]

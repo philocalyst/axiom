@@ -12,10 +12,10 @@
 /// Urgent care copay and the pharmacy.
 2025-11-06 visa -> medical 30 USD / urgent-care
 2025-11-06 visa -> medical 12.40 USD / cvs
-2025-11-06 checking -> savings 100 USD #car for car-fund
-2025-11-06 checking -> savings 100 USD #insurance for insurance-fund
-2025-11-06 checking -> savings 250 USD #trip for trip-fund
-2025-11-06 checking -> savings 100 USD #emergency for emergency-fund
+2025-11-06 checking -> savings 100 USD for car-fund
+2025-11-06 checking -> savings 100 USD for insurance-fund
+2025-11-06 checking -> savings 250 USD for trip-fund
+2025-11-06 checking -> savings 100 USD for emergency-fund
 2025-11-06 checking = 3_625.40 USD
 2025-11-07 checking -> wallet ? USD
 2025-11-08 visa -> phone 40 USD / mint-mobile

@@ -47,6 +47,8 @@ mod totals;
 #[cfg(test)]
 mod fixture;
 #[cfg(test)]
+mod source_tests;
+#[cfg(test)]
 mod tests;
 
 use axiom_core::{Day, Diagnostic, Id, Qty, Sym};

@@ -85,10 +85,14 @@ pub struct Terms {
     pub basis_end: Option<End>,
     /// An opening line's `since`: when its parcels were acquired.
     pub since: Option<Day>,
+    /// An entity written as the source (`car-fund -> car-repair 150 USD`): the
+    /// parcels tied to it leave first, whatever its `on spend` laws make of
+    /// the flow, since the flow says whose money it is.
+    pub spender: Option<Id<Entity>>,
 }
 
 impl Terms {
-    pub const NONE: Terms = Terms { basis: None, hold: None, basis_end: None, since: None };
+    pub const NONE: Terms = Terms { basis: None, hold: None, basis_end: None, since: None, spender: None };
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

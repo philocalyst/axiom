@@ -48,32 +48,29 @@ assert "  checking    4_942.10 USD" in opening and "  wallet      45 USD" in ope
 held = defaultdict(D)               # checking, wallet, visa (negative: owed)
 held["checking"] = D("4942.10")
 held["wallet"] = D("45")
-tied = defaultdict(D)               # the savings account, by the code that marks each envelope's parcels
+tied = defaultdict(D)               # the savings account, by the envelope its money is held for
 pending = {}                        # #code -> the flow written but not yet cleared
 actual = {}                         # #code -> the flow that happened, in case it is returned
 unknown_atm = []
 gaps = []
 solved = []
 CASH = {"checking", "wallet", "visa"}
-
-
-def selector(place):
-    m = re.search(r"\[#(\w+)\]", place)
-    return re.sub(r"\[.*\]", "", place), (m.group(1) if m else None)
+FUNDS = {"emergency-fund", "car-fund", "insurance-fund", "trip-fund"}
 
 
 def move(f, sign=1):
-    """`SRC -> DST AMOUNT`: cash places and the envelopes; income, expenses and unknown are not tracked."""
-    src, code_from = selector(f.src)
+    """`SRC -> DST AMOUNT`: cash places and the envelopes; income, expenses and unknown are not tracked.
+    A deposit into savings is `for` the envelope it belongs to, and a payment out of an envelope is
+    written with the envelope as its source."""
     amount = f.into * sign
-    if src in CASH:
-        held[src] -= amount
-    if code_from:
-        tied[code_from] -= amount
+    if f.src in CASH:
+        held[f.src] -= amount
+    if f.src in FUNDS:
+        tied[f.src] -= amount
     if f.dst in CASH:
         held[f.dst] += amount
     if f.dst == "savings":
-        tied[f.codes[0].lstrip("#")] += amount
+        tied[f.for_] += amount
 
 
 for _, _, kind, e in events:
@@ -116,27 +113,27 @@ for _, _, kind, e in events:
         listed = sum((a for p, a, u in f.legs if a is not None), D(0))
         for place, amt, unit in f.legs:
             amt = f.into - listed if amt is None else amt
-            base, sel = selector(place)
             if f.src == "studio":                         # a pay stub: the legs are where the gross goes
-                if base == "checking":
+                if place == "checking":
                     held["checking"] += amt
             else:                                         # the premium: the legs are the sources
-                if sel:
-                    tied[sel] -= amt
+                if place in FUNDS:
+                    tied[place] -= amt
                 else:
-                    held[base] -= amt
+                    held[place] -= amt
         continue
     if code and code.startswith("deposit-"):
         actual[code] = f
     move(f)
 
 # ── envelopes ──────────────────────────────────────────────────────────────────────────────────────────
-names = {"emergency": "emergency fund", "car": "car fund", "insurance": "insurance fund", "trip": "trip fund"}
+names = {"emergency-fund": "emergency fund", "car-fund": "car fund", "insurance-fund": "insurance fund",
+         "trip-fund": "trip fund"}
 print("the envelopes:", {names[c]: str(tied[c]) for c in names}, "| the savings account", sum(tied.values()))
 print("amounts left blank at the ATM, solved from the statements:", [(d, str(a)) for d, a in solved])
 print("gaps accepted with !:", [(d, n, str(g)) for d, n, g in gaps])
 premium = [f for f in flows if f.dst == "insurance" and f.legs][0]
-from_fund = [a for p, a, u in premium.legs if p.startswith("savings")][0]
+from_fund = [a for p, a, u in premium.legs if p in FUNDS][0]
 print("premium", premium.into, "= from the insurance fund", from_fund, "+ from checking", premium.into - from_fund)
 net = held["checking"] + held["wallet"] + sum(tied.values()) + held["visa"]
 print("checking", held["checking"], "wallet", held["wallet"], "savings", sum(tied.values()), "card owed", -held["visa"])

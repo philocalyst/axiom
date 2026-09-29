@@ -4,8 +4,8 @@ opening 2025-09-01
   wallet      45 USD
 
 /// What is already set aside is moved to the savings account and tied to its envelope: the emergency fund and the insurance fund.
-2025-09-01 checking -> savings 2_400 USD #emergency for emergency-fund
-2025-09-01 checking -> savings 700 USD #insurance for insurance-fund
+2025-09-01 checking -> savings 2_400 USD for emergency-fund
+2025-09-01 checking -> savings 700 USD for insurance-fund
 2025-09-01 checking -> rent 1_150 USD / landlord
 2025-09-01 checking -> transport 48 USD / metro
 2025-09-01 checking -> fun 29 USD / gym
@@ -25,10 +25,10 @@ opening 2025-09-01
 
 /// Sinking funds: money set aside each month for a bill that comes later, in the savings account and tied to its envelope with `for`.
 /// 100.00 USD a month for the car, 100.00 USD for the insurance premium, 250.00 USD for the June trip, 100.00 USD for emergencies.
-2025-09-06 checking -> savings 100 USD #car for car-fund
-2025-09-06 checking -> savings 100 USD #insurance for insurance-fund
-2025-09-06 checking -> savings 250 USD #trip for trip-fund
-2025-09-06 checking -> savings 100 USD #emergency for emergency-fund
+2025-09-06 checking -> savings 100 USD for car-fund
+2025-09-06 checking -> savings 100 USD for insurance-fund
+2025-09-06 checking -> savings 250 USD for trip-fund
+2025-09-06 checking -> savings 100 USD for emergency-fund
 2025-09-08 visa -> phone 40 USD / mint-mobile
 2025-09-09 visa -> transport 11.19 USD / rideshare
 2025-09-10 checking -> car 285.40 USD / carmax-finance

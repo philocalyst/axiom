@@ -122,6 +122,7 @@ impl<'b, 's> Ledger<'b, 's> {
             policy: source.select,
             txns: &book.txns,
             permits: &self.scratch.permits,
+            spender: m.terms.spender,
             now,
             explain: !self.record.ambiguous.contains(&m.from),
         };
@@ -149,6 +150,9 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Learns, for each entity a parcel at the source is tied to, whether its
     /// `on spend` laws permit this flow. Only a flow that leaves the owner's
     /// places spends anything; on an internal transfer tied parcels go last.
+    /// A flow written out of an entity says whose money it is, so it needs no
+    /// law to say so: that entity's parcels go first, and nobody else's are
+    /// asked.
     fn ask_ties(&mut self, m: &Motion) {
         self.scratch.permits.clear();
         let Some(slot) = self.world.holdings.get(m.from, m.out.unit).filter(|slot| slot.is_tied()) else { return };
@@ -157,7 +161,7 @@ impl<'b, 's> Ledger<'b, 's> {
                 self.scratch.permits.push((entity, false));
             }
         }
-        if stays_with_owner(m) {
+        if stays_with_owner(m) || m.terms.spender.is_some() {
             return;
         }
         for at in 0..self.scratch.permits.len() {

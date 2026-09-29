@@ -146,10 +146,61 @@ pub(crate) struct Request<'a> {
     /// For each entity a parcel here is tied to: whether its `on spend` laws
     /// permit this flow.
     pub permits: &'a [(Id<Entity>, bool)],
+    /// The entity the flow is written out of, whose own parcels leave first.
+    pub spender: Option<Id<Entity>>,
     /// The moment, which is when and by what plain money is acquired.
     pub now: (Day, Id<Txn>),
     /// List the candidates if the choice turns out to be ambiguous.
     pub explain: bool,
+}
+
+/// What a parcel's tie says about when relief takes it. The variants are in
+/// the order relief takes them.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+enum Colour {
+    /// Tied to the entity the flow is written out of.
+    Own,
+    /// Tied to an entity whose laws permit the flow.
+    Permitted,
+    /// Tied to nothing.
+    Free,
+    /// Tied to an entity whose laws do not permit it: last, and only if nothing
+    /// else can pay. A flow written out of an entity spends nobody else's
+    /// money, so for it these never leave.
+    Refused,
+}
+
+impl Colour {
+    const ALL: [Colour; 4] = [Colour::Own, Colour::Permitted, Colour::Free, Colour::Refused];
+}
+
+impl Request<'_> {
+    fn colour(&self, tied: Option<Id<Entity>>) -> Colour {
+        match tied {
+            None => Colour::Free,
+            Some(entity) if Some(entity) == self.spender => Colour::Own,
+            Some(entity) if self.permits.contains(&(entity, true)) => Colour::Permitted,
+            Some(_) => Colour::Refused,
+        }
+    }
+
+    /// Whether parcels of `colour` may leave for this request at all.
+    fn allows(&self, colour: Colour) -> bool {
+        colour != Colour::Refused || self.spender.is_none()
+    }
+
+    /// Whether a holding can have parcels of `colour` that may leave, given
+    /// whether any of its parcels is tied at all: the colours nobody asked
+    /// about are skipped.
+    fn possible(&self, colour: Colour, tied: bool) -> bool {
+        self.allows(colour)
+            && match colour {
+                Colour::Free => true,
+                Colour::Own => tied && self.spender.is_some(),
+                Colour::Permitted => tied && self.permits.iter().any(|&(_, permit)| permit),
+                Colour::Refused => tied,
+            }
+    }
 }
 
 /// What relief found. Buffers are reused between requests.
@@ -361,8 +412,8 @@ impl Slot {
 
     /// FIFO, LIFO and HIFO (and no policy at all): from the end of the holding
     /// that the policy names, touching only the lots it uses. Ties are colours:
-    /// lots tied to an entity whose laws permit the flow go first, untied ones
-    /// next, and the rest last.
+    /// the spender's own lots go first, then lots tied to an entity whose laws
+    /// permit the flow, untied ones next, and the rest last.
     fn relieve_in_order(&mut self, req: &Request, policy: Option<Policy>, out: &mut Relief) {
         let takeable = self.qty - self.holding.plain.min(Qty::ZERO);
         let candidates = usize::from(self.holding.plain > Qty::ZERO) + self.live();
@@ -372,21 +423,18 @@ impl Slot {
         }
         let mut left = req.need;
         let (lifo, tied) = (policy == Some(Policy::Lifo), self.is_tied());
-        for colour in 0..3 {
-            let has_colour = colour == 1 || (tied && (colour == 2 || req.permits.iter().any(|&(_, permit)| permit)));
-            if left.is_zero() || !has_colour {
+        for colour in Colour::ALL {
+            if left.is_zero() || !req.possible(colour, tied) {
                 continue;
             }
-            let of_colour = |lot: &Parcel| !tied || rank(lot.tied, req.permits) == colour;
-            let plain_here = colour == 1;
+            let of_colour = |lot: &Parcel| !tied || req.colour(lot.tied) == colour;
+            let plain_here = colour == Colour::Free;
             if plain_here && !lifo {
                 self.take_plain(&mut left, req, out);
             }
             match (policy, colour) {
-                (Some(Policy::Hifo), 1) => self.take_dearest(&mut left, req, out),
-                (Some(Policy::Hifo), _) => {
-                    self.take_priciest(&mut left, |lot| rank(lot.tied, req.permits) == colour, req, out)
-                }
+                (Some(Policy::Hifo), Colour::Free) => self.take_dearest(&mut left, req, out),
+                (Some(Policy::Hifo), _) => self.take_priciest(&mut left, of_colour, req, out),
                 _ => self.take_run(&mut left, lifo, of_colour, req, out),
             }
             if plain_here && lifo {
@@ -466,7 +514,8 @@ impl Slot {
         let mut candidates = std::mem::take(&mut out.gathered);
         candidates.clear();
         self.gather(req.money, selection, &mut candidates);
-        let colour = |c: &Candidate| rank(c.tied, req.permits);
+        let colour = |c: &Candidate| req.colour(c.tied);
+        candidates.retain(|c| req.allows(colour(c)));
         candidates.sort_unstable_by(|a, b| colour(a).cmp(&colour(b)).then_with(|| by_policy(policy, a, b)));
 
         let mut plan = std::mem::take(&mut out.plan);
@@ -655,16 +704,6 @@ impl Candidate {
     }
 }
 
-/// 0: tied to an entity that permits this flow; 1: untied; 2: tied to one that
-/// does not.
-fn rank(tied: Option<Id<Entity>>, permits: &[(Id<Entity>, bool)]) -> u8 {
-    match tied {
-        None => 1,
-        Some(entity) if permits.contains(&(entity, true)) => 0,
-        Some(_) => 2,
-    }
-}
-
 /// Candidates in the order the policy consumes them. Storage order is oldest
 /// first, so FIFO is the identity, and it also orders "no policy", pro-rata
 /// (whose order does not matter) and ties in the others.
@@ -843,19 +882,19 @@ mod tests {
         policy: Option<Policy>,
         selectors: &'a [Select],
         permits: &'a [(Id<Entity>, bool)],
+        spender: Option<Id<Entity>>,
     }
 
-    const PLAIN: Ask = Ask { money: false, policy: None, selectors: &[], permits: &[] };
+    const PLAIN: Ask = Ask { money: false, policy: None, selectors: &[], permits: &[], spender: None };
 
     fn relieve(slot: &mut Slot, need: i64, ask: &Ask) -> Relief {
         let mut relief = Relief::default();
         let txns = Arena::new();
         let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
-        let now = (Day(1_000), Id::new(0));
-        slot.relieve(
-            &Request { need: Qty(need), money, selectors, policy, txns: &txns, permits, now, explain: true },
-            &mut relief,
-        );
+        let (spender, now) = (ask.spender, (Day(1_000), Id::new(0)));
+        let request =
+            Request { need: Qty(need), money, selectors, policy, txns: &txns, permits, spender, now, explain: true };
+        slot.relieve(&request, &mut relief);
         relief
     }
 
@@ -1047,6 +1086,23 @@ mod tests {
     }
 
     #[test]
+    fn a_spender_takes_its_own_parcels_then_untied_ones_and_nobody_elses() {
+        let (car, trip) = (Id::new(4), Id::new(5));
+        let tied = |entity, acquired| Parcel { tied: Some(entity), ..lot(5, 5, acquired) };
+        let held = slot_of(1, 0, &[tied(trip, 1), tied(car, 2), lot(10, 10, 3)], true);
+        let order = |spender, permits: &[(Id<Entity>, bool)], need| {
+            let ask = Ask { money: true, policy: Some(Policy::Fifo), spender, permits, ..PLAIN };
+            let relief = relieve(&mut held.clone(), need, &ask);
+            (relief.slices.iter().map(|s| s.tied).collect::<Vec<_>>(), relief.shortfall.0)
+        };
+        assert_eq!(order(Some(car), &[], 8), (vec![Some(car), None], 0), "then what is tied to nobody");
+        assert_eq!(order(Some(car), &[], 20), (vec![Some(car), None], 5), "and what trip-fund holds is not its to spend");
+        let permitted = [(trip, true), (car, true)];
+        assert_eq!(order(None, &permitted, 12), (vec![Some(trip), Some(car), None], 0), "no spender: the laws decide");
+        assert_eq!(order(None, &[], 20), (vec![None, Some(trip), Some(car)], 0), "and refused money is the last resort");
+    }
+
+    #[test]
     fn selectors_intersect_by_kind_and_union_within_one() {
         let held = slot_of(1, 0, &[lot(1, 1, 10), lot(2, 2, 20), lot(4, 4, 30)], false);
         let txns = Arena::new();
@@ -1090,10 +1146,11 @@ mod tests {
                     let need = 1 + roll(14) as i64;
                     let (yes, no) = ([(Id::new(3), true)], [(Id::new(3), false)]);
                     let permits: &[(Id<Entity>, bool)] = [&[][..], &yes, &no][roll(3) as usize];
-                    let fast_asks = Ask { policy: Some(policy), permits, ..PLAIN };
+                    let spender = (roll(4) == 0).then(|| Id::new(3));
+                    let fast_asks = Ask { policy: Some(policy), permits, spender, ..PLAIN };
                     // A selector that admits everything forces the scanning path.
                     let all = [Select::Range(Day(i32::MIN), Day(i32::MAX))];
-                    let slow_asks = Ask { policy: Some(policy), selectors: &all, permits, ..PLAIN };
+                    let slow_asks = Ask { policy: Some(policy), selectors: &all, permits, spender, ..PLAIN };
                     let (a, b) = (relieve(&mut fast, need, &fast_asks), relieve(&mut slow, need, &slow_asks));
                     assert_eq!((taken(&a), a.shortfall), (taken(&b), b.shortfall), "{policy:?} step {step}");
                 }

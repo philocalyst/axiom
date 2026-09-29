@@ -13,7 +13,7 @@ use axiom_core::{Day, Diagnostic, Id, Loc, Sym};
 use super::faults::{self, Written};
 use super::pairing::{self, Share};
 use super::shape::{Elab, Leg, Placed, Shape, Slot, Stated, Tail};
-use crate::book::{Amount, CodeScope, Commodity, Entity, Place};
+use crate::book::{Amount, Class, CodeScope, Commodity, Entity, Place};
 use crate::errors::{count, iso, list, list_and};
 use crate::journal::{End, Flow, Infer, Mode, Recognition, Terms};
 
@@ -374,8 +374,15 @@ impl Elab<'_, '_> {
             (_, true) => Some(End::To),
             _ => None,
         };
-        let said = tail.basis.is_some() || tail.hold.is_some() || tail.since.is_some() || basis_end.is_some();
-        let terms = said.then(|| Box::new(Terms { basis: tail.basis, hold: tail.hold, basis_end, since: tail.since }));
+        // Only an asset place has parcels to be tied to anyone, so a paycheck from `acme` names no spender.
+        let spender = mv.from.end.entity.filter(|_| self.world.book.places[mv.from.end.place].class == Class::Asset);
+        let said = tail.basis.is_some()
+            || tail.hold.is_some()
+            || tail.since.is_some()
+            || basis_end.is_some()
+            || spender.is_some();
+        let terms =
+            said.then(|| Box::new(Terms { basis: tail.basis, hold: tail.hold, basis_end, since: tail.since, spender }));
         let recognized = tail.period.map_or(Recognition::on(day), |(from, until)| Recognition { from, until });
         Some(Flow {
             day,

@@ -8,3 +8,6 @@ license.workspace = true
 [dependencies]
 axiom-core.workspace = true
 axiom-model.workspace = true
+
+[dev-dependencies]
+axiom-syntax.workspace = true

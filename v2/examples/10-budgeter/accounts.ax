@@ -175,8 +175,3 @@ code check-*
 /// A deposit number ties a deposit to the day it bounces.
 code deposit-*
   on bank
-
-/// Each deposit into the savings account carries the code of its envelope, and a payment out of an envelope
-/// names it: `savings[#car] -> car-repair ...` takes the parcels that code marked.
-code car insurance trip emergency
-  on assets/bank/savings
