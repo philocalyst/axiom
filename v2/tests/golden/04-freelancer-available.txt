@@ -1,0 +1,44 @@
+Available on 2026-02-10
+
+What you can spend
+  Liquid now                              Amount
+  ──────────────────────────────────────────────
+  Money in liquid places           29,380.98 USD
+    assets/bank/business-checking  14,548.43 USD
+    assets/bank/personal-checking   4,411.60 USD
+    assets/bank/tax-vault          10,420.95 USD
+  ──────────────────────────────────────────────
+  Available to spend               29,380.98 USD
+
+What it would take to reach the rest
+  Holding                                                Liquid in          Value         Costs            Net
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/receivable/brightwave                           45d         3,200.00 USD                 3,200.00 USD
+    counts 3,200.00 USD as gross-receipts
+    counts 2,379.13 USD as agi
+    counts -452.14 USD as federal-withheld
+    counts 3,200.00 USD as net-profit
+    counts 452.14 USD as se-tax
+    counts 226.08 USD as se-deduction
+    counts 594.79 USD as sep-deduction
+  assets/receivable/northpeak                            45d         2,600.00 USD                 2,600.00 USD
+    counts 2,600.00 USD as gross-receipts
+    counts 1,933.05 USD as agi
+    counts -367.36 USD as federal-withheld
+    counts 2,600.00 USD as net-profit
+    counts 367.36 USD as se-tax
+    counts 183.68 USD as se-deduction
+    counts 483.27 USD as sep-deduction
+  assets/retirement/sep                                  3d         29,353.79 USD  2,135.38 USD  27,218.41 USD
+    counts 21,033.70 USD as agi
+    counts 320.09 USD as qbi-deduction
+    counts 6,570.51 USD as taxable-income
+    counts 657.05 USD as income-tax
+    counts 21,353.79 USD as distributions
+    early-withdrawal-penalty, owed to irs by 2026-02-10                            2,135.38 USD
+    realizes a gain of 21,353.79 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today                                    35,153.79 USD  2,135.38 USD  33,018.41 USD
+  · Each line withdraws the whole holding into assets/bank/business-checking on 2026-02-10 and runs
+    the year out through the laws. Costs are what they would owe because of it, as if the year ended
+    today: penalties, and the tax on any income it creates.

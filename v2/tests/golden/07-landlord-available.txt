@@ -1,0 +1,11 @@
+Available on 2026-01-06
+
+What you can spend
+  Liquid now                           Amount
+  ───────────────────────────────────────────
+  Money in liquid places       173,866.60 USD
+    assets/bank/checking       173,866.60 USD
+  Tied to restricted entities     -350.00 USD
+    tied to tenant-a              -350.00 USD
+  ───────────────────────────────────────────
+  Available to spend           173,516.60 USD

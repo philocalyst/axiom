@@ -1,0 +1,16 @@
+Available on 2026-01-06
+
+What you can spend
+  Liquid now                                Amount
+  ────────────────────────────────────────────────
+  Money in liquid places             23,718.59 USD
+    assets/bank/checking             10,117.95 USD
+    assets/bank/collective-checking   2,654.61 USD
+    assets/bank/savings              10,100.00 USD
+    assets/cash/collective-cash         109.00 USD
+    assets/cash/wallet                  433.48 USD
+    assets/loans/riley                   50.00 USD
+    assets/roommates/ben                 37.21 USD
+    assets/roommates/cleo               216.34 USD
+  ────────────────────────────────────────────────
+  Available to spend                 23,718.59 USD

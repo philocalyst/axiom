@@ -1,0 +1,64 @@
+Balances at 2026-01-06
+
+  Place                          Balance
+  ──────────────────────────────────────
+  assets                   23,718.59 USD
+    bank                   22,872.56 USD
+      checking             10,117.95 USD
+      collective-checking   2,654.61 USD
+      savings              10,100.00 USD
+    cash                      542.48 USD
+      collective-cash         109.00 USD
+      wallet                  433.48 USD
+    loans                      50.00 USD
+      riley                    50.00 USD
+    roommates                 253.55 USD
+      ben                      37.21 USD
+      cleo                    216.34 USD
+  ──────────────────────────────────────
+  equity                   10,061.58 USD
+    opening                10,084.58 USD
+    unknown                   -23.00 USD
+  ──────────────────────────────────────
+  expenses                 34,309.99 USD
+    car                     4,585.00 USD
+    clothing                  535.80 USD
+    dining                    905.78 USD
+    entertainment             536.47 USD
+    garden                  6,220.94 USD
+      fencing                 640.00 USD
+      irrigation              986.40 USD
+      lumber                1,148.75 USD
+      seeds                   412.60 USD
+      soil                  1,530.00 USD
+      tools                 1,354.99 USD
+      water                   148.20 USD
+    gifts                     200.00 USD
+    groceries               1,391.14 USD
+    health                  1,894.00 USD
+    phone                     450.00 USD
+    rent                   10,500.00 USD
+    taxes                   6,232.01 USD
+      federal               3,854.21 USD
+      payroll               2,377.80 USD
+    transport                  55.25 USD
+    utilities                 580.60 USD
+    volunteer-food             84.50 USD
+    work-supplies             138.50 USD
+  ──────────────────────────────────────
+  income                   47,461.64 USD
+    donations               1,187.50 USD
+    grants                  5,942.75 USD
+    reimbursements            138.50 USD
+    tips                    9,110.47 USD
+    wages                  31,082.42 USD
+  ──────────────────────────────────────
+  liabilities                 505.36 USD
+    visa                      505.36 USD
+
+  Net worth      Value (USD)
+  ──────────────────────────
+  Assets       23,718.59 USD
+  Liabilities     505.36 USD
+  ──────────────────────────
+  Net worth    23,213.23 USD

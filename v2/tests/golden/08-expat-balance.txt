@@ -1,0 +1,76 @@
+Balances at 2026-01-06
+
+  Place                             Balance
+  ─────────────────────────────────────────
+  assets                     100,764.69 USD
+                              31,563.76 EUR
+    bank                      34,164.69 USD
+      us-checking             15,604.75 USD
+      us-savings              18,559.94 USD
+    de                        31,563.76 EUR
+      girokonto                7,481.00 EUR
+      kaution                  3,600.00 EUR
+      tagesgeld               20,482.76 EUR
+    retirement                66,600.00 USD
+      us-401k                 66,600.00 USD
+  ─────────────────────────────────────────
+  equity                      90,165.96 USD
+    opening                   90,165.96 USD
+  ─────────────────────────────────────────
+  expenses                    51,445.74 USD
+                              24,356.33 EUR
+                               1,258.21 GBP
+    conference                   165.00 GBP
+    de-rent                    8,700.00 EUR
+    dining                       979.08 USD
+                                 611.82 EUR
+                                 226.80 GBP
+    fx-fees                       83.10 USD
+                                  29.35 EUR
+                                   1.71 GBP
+    groceries                  2,686.89 USD
+                               1,598.33 EUR
+    loan-interest              1,333.42 USD
+    moving                     2,150.00 USD
+    phone                        119.94 EUR
+    sf-rent                   20,400.00 USD
+    shopping                     540.54 USD
+                                 387.44 EUR
+                                  43.20 GBP
+    sightseeing                   27.50 GBP
+    subscriptions                320.88 USD
+    taxes                     20,687.22 USD
+                              12,465.45 EUR
+      de                      12,465.45 EUR
+        kapitalertragsteuer       53.25 EUR
+        lohnsteuer             5,430.00 EUR
+        sozialabgaben          6,982.20 EUR
+      federal                 10,740.00 USD
+      payroll                  4,781.22 USD
+      sdi                        750.00 USD
+      state                    4,416.00 USD
+    transit                      348.00 EUR
+                                  95.80 GBP
+    transport                    365.57 USD
+    travel                     1,180.40 USD
+                                  96.00 EUR
+                                 698.20 GBP
+    utilities                    718.64 USD
+  ─────────────────────────────────────────
+  income                      63,759.96 USD
+                              32,601.91 EUR
+    interest                   1,259.94 USD
+    interest-de                  201.91 EUR
+    salary-de                 32,400.00 EUR
+    salary-us                 62,500.02 USD
+  ─────────────────────────────────────────
+  liabilities                 27,467.30 USD
+    student-loan              27,413.82 USD
+    visa                          53.48 USD
+
+  Net worth       Value (USD)
+  ───────────────────────────
+  Assets       137,893.14 USD
+  Liabilities   27,467.30 USD
+  ───────────────────────────
+  Net worth    110,425.84 USD

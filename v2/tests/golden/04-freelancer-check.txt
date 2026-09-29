@@ -1,0 +1,68 @@
+warning[law]: law `budget` does not hold for expenses/business/software
+    ╭─[journal/2025/02.ax:21:1]
+    │
+ 21 │ 2025-02-12..2026-02-11 business-card -> software 119.88 USD / dropbox
+    │ ──────────────────────────────────┬──────────────────────────────────
+    │                                   ╰── this flow: 119.88 USD into expenses/business/software
+    │
+    ├─[accounts.ax:110:3]
+    │
+109 │ account expenses/business/software
+110 │   budget 130 USD monthly
+    │   ───────────┬──────────
+    │              ╰── 197.07 USD
+    │
+    = note: also at journal/2025/02.ax:27, journal/2025/02.ax:35
+    = help: at most 52.81 USD more can go in this month
+
+warning[law]: law `budget` does not hold for expenses/food
+    ╭─[journal/2025/04.ax:37:1]
+    │
+ 37 │ 2025-04-27 personal-checking -> groceries 127.58 USD / trader-joes
+    │ ─────────────────────────────────┬────────────────────────────────
+    │                                  ╰── this flow: 127.58 USD into expenses/food/groceries
+    │
+    ├─[accounts.ax:165:3]
+    │
+164 │ account expenses/food
+165 │   budget 550 USD monthly
+    │   ───────────┬──────────
+    │              ╰── 572.85 USD
+    │
+    = note: also at journal/2025/09.ax:36
+    = help: at most 104.73 USD more can go in this month
+
+warning[law]: estimated tax: second installment short
+   ╭─[tax.ax:62:1]
+   │
+62 │ law estimate-2-2025
+   │ ─────────┬─────────
+   │          ╰── checked for me on 2025-06-16
+63 │   by 2025-06-16
+64 │   warn tally(federal-withheld) >= prior-year-tax[2025] * 50% "estimated tax: second installme…
+   │        ───────────┬──────────────┬──────────┬──┬────────────
+   │                   │              │          │  ╰── 4,600.00 USD
+   │                   │              │          ╰── 9,200.00 USD
+   │                   │              ╰── false
+   │                   ╰── 2,400.00 USD
+   │
+   = note: Second installment. June 15 2025 fell on a Sunday, so it was due Monday the 16th.
+
+warning[law]: estimated tax: fourth installment short
+   ╭─[tax.ax:72:1]
+   │
+72 │ law estimate-4-2025
+   │ ─────────┬─────────
+   │          ╰── checked for me on 2026-01-15
+73 │   by 2026-01-15
+74 │   warn tally(federal-withheld) >= prior-year-tax[2025] * 100% "estimated tax: fourth installm…
+   │        ───────────┬───────────────┬─────────┬──┬─────────────
+   │                   │               │         │  ╰── 9,200.00 USD
+   │                   │               │         ╰── 9,200.00 USD
+   │                   │               ╰── false
+   │                   ╰── 2,400.00 USD
+   │
+   = note: Fourth installment, due January 15 2026.
+
+7 warnings
+✓ 403 flows · 47 places · 21 laws enforced · net worth 64,421.58 USD

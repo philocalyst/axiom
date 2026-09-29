@@ -1,0 +1,68 @@
+warning[law]: law `budget` does not hold for expenses/fun
+   ╭─[journal/2025/10.ax:6:1]
+   │
+ 6 │ 2025-10-02 checking -> jo (240 USD) #check-1027
+   │ ───────────────────────┬───────────────────────
+   │                        ╰── this flow: 240.00 USD into expenses/fun
+   │
+   ├─[accounts.ax:62:3]
+   │
+61 │ account expenses/fun
+62 │   budget 120 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 297.01 USD
+   │
+   = note: also at journal/2025/10.ax:51
+   = help: at most 62.99 USD more can go in this month
+
+warning[law]: law `budget` does not hold for expenses/subscriptions
+   ╭─[journal/2025/11.ax:7:1]
+   │
+ 7 │ 2025-11-03 visa -> subscriptions 139 USD / amazon-prime
+   │ ───────────────────────────┬───────────────────────────
+   │                            ╰── this flow: 139.00 USD into expenses/subscriptions
+   │
+   ├─[accounts.ax:65:3]
+   │
+64 │ account expenses/subscriptions
+65 │   budget 90 USD monthly
+   │   ──────────┬──────────
+   │             ╰── 139.00 USD
+   │
+   = note: also at journal/2025/11.ax:28, journal/2025/11.ax:40, journal/2025/11.ax:45,
+           journal/2025/11.ax:51
+   = help: at most 90.00 USD more can go in this month
+
+warning[law]: law `budget` does not hold for expenses/dining
+   ╭─[journal/2025/11.ax:58:1]
+   │
+58 │ 2025-11-28 visa -> dining 18.83 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── this flow: 18.83 USD into expenses/dining
+   │
+   ├─[accounts.ax:55:3]
+   │
+54 │ account expenses/dining
+55 │   budget 150 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 163.17 USD
+   │
+   = note: also at journal/2025/12.ax:59
+   = help: at most 5.66 USD more can go in this month
+
+note[pad]: accepted a gap on assets/bank/checking
+   ╭─[journal/2025/10.ax:64:1]
+   │
+64 │ 2025-10-31 checking = 5_464.24 USD !
+   │ ──────────────────┬─────────────────
+   │                   ╰── 27.60 USD moved out of assets/bank/checking into unknown
+
+note[pad]: accepted a gap on assets/cash/wallet
+   ╭─[journal/2025/12.ax:65:1]
+   │
+65 │ 2025-12-31 wallet = 57.22 USD !
+   │ ───────────────┬───────────────
+   │                ╰── 14.00 USD moved out of assets/cash/wallet into unknown
+
+9 warnings
+✓ 250 flows · 37 places · 15 laws enforced · net worth 10,665.04 USD

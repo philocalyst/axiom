@@ -1,0 +1,28 @@
+warning[law]: 529 contributions over the annual gift exclusion
+   ╭─[journal/2024/12.ax:12:1]
+   │
+12 │ 2024-12-31 joint-checking -> riley-529 19_850 USD ! "contributions since 2019, not one year's…
+   │ ──────────────────────────────────────────────┬────────────────────────┬─────────────────────
+   │                                               │                        ╰── waived here
+   │                                               ╰── this flow: 19,850.00 USD into assets/education/riley-529
+   │
+   ├─[us/529.ax:36:10] (built in)
+   │
+36 │     warn total(in, year) <= gift-exclusion[year] "529 contributions over the annual gift excl…
+   │          ───────┬───────────┬─────────┬──────┬──
+   │                 │           │         │      ╰── 2024
+   │                 │           │         ╰── 18,000.00 USD
+   │                 │           ╰── false
+   │                 ╰── 19,850.00 USD
+   │
+   = note: Contributions above the annual gift-tax exclusion count as a gift to the beneficiary,
+           which may need a gift-tax return (Form 709, IRC §2503(b)). This deposit took the year's
+           contributions over the exclusion. A gift of up to five years of the exclusion may be made
+           at once by electing to spread it (IRC §529(c)(2)(B)); if you have, this warning can be
+           waived with `!`.
+   = note: waived: contributions since 2019, not one year's
+   = note: also at journal/2024/12.ax:13
+   = help: at most 18,000.00 USD more can go in this year
+
+2 warnings
+✓ 882 flows · 56 places · 29 laws enforced · net worth 684,163.25 USD
