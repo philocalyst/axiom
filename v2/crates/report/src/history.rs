@@ -7,7 +7,7 @@
 use std::ops::{AddAssign, Range};
 
 use axiom_core::{Day, Id, Qty, Ratio};
-use axiom_engine::{Holding, Posted, Run, State};
+use axiom_engine::{Holding, Pad, Posted, Run, State};
 use axiom_model::{Amount, Book, End, Flow, Place};
 
 use crate::lens::{Basket, Lens, on_balance_sheet};
@@ -114,6 +114,13 @@ pub fn moves_quantity(flow: &Flow, end: End) -> bool {
     flow.terms().basis_end != Some(end)
 }
 
+/// A pad, seen as the flow it stands for: from its counter place into the
+/// place the assertion is about (or out of it, for a negative gap).
+pub fn pad_ends(pad: &Pad) -> [(Id<Place>, Amount); 2] {
+    let (gain, loss) = (pad.amount, Amount::new(-pad.amount.qty, pad.amount.unit));
+    [(pad.place, gain), (pad.counter, loss)]
+}
+
 /// Every journal flow with its posting, in journal order.
 pub fn postings<'a>(book: &'a Book, run: &'a Run) -> impl Iterator<Item = Posting<'a>> {
     book.flows.iter().zip(run.posted.iter()).map(|((id, flow), posted)| Posting { id, flow, posted })
@@ -218,8 +225,7 @@ impl Snapshots {
         // asked for changes none of them.
         for pad in &run.pads {
             let lo = snapshots.column_from(pad.day);
-            for (place, sign) in [(pad.place, 1), (pad.counter, -1)] {
-                let amount = Amount::new(Qty(pad.amount.qty.0 * sign), pad.amount.unit);
+            for (place, amount) in pad_ends(pad) {
                 if lo < snapshots.days.len() && lens.owns(place) {
                     let held = snapshots.held(lens.on(pad.day), place, amount, valued);
                     snapshots.change(lo..snapshots.days.len(), place, amount.unit, held);

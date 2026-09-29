@@ -3,8 +3,10 @@
 use std::borrow::Cow;
 
 use axiom_core::{Qty, Sym};
-use axiom_engine::{Cause, Owed};
+use axiom_engine::{Cause, Owed, Pad};
 use axiom_model::{Amount, Book};
+
+use crate::places::path;
 
 use crate::{Align, Cell, Column, Report, Row, Section, Style};
 
@@ -140,6 +142,18 @@ pub fn code_labels<'a>(book: &'a Book, codes: &'a [Sym]) -> impl Iterator<Item =
 /// `irs by 2027-04-15`
 pub fn creditor(book: &Book, owed: Owed) -> String {
     format!("{} by {}", book.name(book.entities[owed.to].path), owed.due)
+}
+
+/// Where an accepted gap came from, in the words its assertion was written
+/// with: `!`, or `via` a place, which for a `market` place is a revaluation.
+pub fn gap_words(book: &Book, pad: &Pad) -> String {
+    if pad.counter == book.roots.unknown {
+        "unexplained gap, accepted with !".to_string()
+    } else if book.is_a(book.places[pad.counter].kind, book.roots.market) {
+        format!("revalued via {}", path(book, pad.counter))
+    } else {
+        format!("gap via {}", path(book, pad.counter))
+    }
 }
 
 /// Where a consequence comes from: the line that caused it, so it can be

@@ -7,14 +7,14 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Diagnostic, Id, Qty};
-use axiom_engine::{Run, State};
+use axiom_engine::{Pad, Run, State};
 use axiom_model::{Amount, Book, Commodity, Place};
 
-use crate::history::{Change, Posting};
+use crate::history::{Change, Posting, pad_ends};
 use crate::lens::Whose;
 use crate::places::path;
 use crate::resolve;
-use crate::table::code_labels;
+use crate::table::{code_labels, gap_words};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn view<'s>(
@@ -89,7 +89,7 @@ pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Da
             }
             Change::Rebased(_) => (Cell::Blank, Cell::Blank),
         };
-        let payee = step.posting.and_then(|posting| posting.flow.payee);
+        let payee = step.source.posting().and_then(|posting| posting.flow.payee);
         let cells = [
             Cell::Day(step.day),
             Cell::text(path(book, step.with)),
@@ -118,8 +118,24 @@ struct Step<'a> {
     counts: bool,
     /// The other end.
     with: Id<Place>,
-    /// `None` for a pad, which the journal never wrote.
-    posting: Option<Posting<'a>>,
+    source: Source<'a>,
+}
+
+/// What made a step.
+enum Source<'a> {
+    Flow(Posting<'a>),
+    /// A pad, which the journal never wrote: the engine posted it to close the
+    /// gap an assertion accepted.
+    Gap(&'a Pad),
+}
+
+impl<'a> Source<'a> {
+    fn posting(&self) -> Option<Posting<'a>> {
+        match *self {
+            Source::Flow(posting) => Some(posting),
+            Source::Gap(_) => None,
+        }
+    }
 }
 
 impl Step<'_> {
@@ -142,37 +158,46 @@ fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec
             change,
             counts: posting.is_real_on(cutoff),
             with: posting.counterparty(place),
-            posting: Some(posting),
+            source: Source::Flow(posting),
         })
     });
-    let pads = run.pads.iter().filter(|pad| pad.place == place).map(|pad| Step {
-        day: pad.day,
-        change: Change::Moved(pad.amount),
-        counts: true,
-        with: book.roots.unknown,
-        posting: None,
+    let pads = run.pads.iter().flat_map(|pad| {
+        let [(asserted, _), (counter, _)] = pad_ends(pad);
+        let with = if asserted == place { counter } else { asserted };
+        let here = pad_ends(pad).into_iter().filter(move |&(at, _)| at == place);
+        here.map(move |(_, moved)| Step {
+            day: pad.day,
+            change: Change::Moved(moved),
+            counts: true,
+            with,
+            source: Source::Gap(pad),
+        })
     });
     let mut steps: Vec<Step> = flows.chain(pads).filter(|step| step.day <= cutoff).collect();
     steps.sort_by_key(|step| step.day);
     steps
 }
 
-/// A change of basis, codes and settlement, as one line of small print.
+/// A change of basis, codes, and settlement, as one line of small print.
 fn note(book: &Book, step: &Step) -> Option<Cow<'static, str>> {
-    let Some(posting) = step.posting else { return Some("unexplained gap, accepted with !".into()) };
     let rebased = match step.change {
         Change::Rebased(by) => Some(format!("basis {}{}", if by.qty.is_negative() { "" } else { "+" }, book.show(by))),
         Change::Moved(_) => None,
     };
-    let status: Option<Cow<'static, str>> = match posting.posted.state {
-        State::Actual | State::Planned => None,
-        State::Pending => Some("pending".into()),
-        State::Void => Some("void".into()),
-        State::Settled(on) if !step.counts => Some(format!("pending until {on}").into()),
-        State::Settled(on) => Some(format!("settled {on}").into()),
-        State::Returned(on) => Some(format!("returned {on}").into()),
+    let details: Vec<String> = match step.source {
+        Source::Gap(pad) => vec![gap_words(book, pad)],
+        Source::Flow(posting) => {
+            let status = match posting.posted.state {
+                State::Actual | State::Planned => None,
+                State::Pending => Some("pending".to_string()),
+                State::Void => Some("void".to_string()),
+                State::Settled(on) if !step.counts => Some(format!("pending until {on}")),
+                State::Settled(on) => Some(format!("settled {on}")),
+                State::Returned(on) => Some(format!("returned {on}")),
+            };
+            code_labels(book, &posting.flow.codes).chain(status).collect()
+        }
     };
-    let parts: Vec<Cow<str>> =
-        rebased.map(Cow::Owned).into_iter().chain(code_labels(book, &posting.flow.codes).map(Cow::Owned)).chain(status).collect();
+    let parts: Vec<String> = rebased.into_iter().chain(details).collect();
     (!parts.is_empty()).then(|| parts.join(" · ").into())
 }

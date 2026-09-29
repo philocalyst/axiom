@@ -108,6 +108,76 @@ opening 2025-01-01
     });
 }
 
+// ─── Accepted gaps ──────────────────────────────────────────────────────────
+
+/// One gap of each kind: a revaluation, a gap accepted as unexplained, and a
+/// gap that came out of another account.
+const GAPS: &str = "\
+base USD
+commodity USD
+  precision 2
+
+account assets/k
+account assets/checking
+
+opening 2025-01-01
+  k        10_000 USD
+  checking  5_000 USD
+
+2025-03-31 k = 9_000 USD via market
+2025-06-30 k = 9_500 USD !
+2025-09-30 k = 9_800 USD via checking
+";
+
+#[test]
+fn a_register_says_where_each_gap_came_from() {
+    with_run(GAPS, day(2025, 12, 31), |book, run| {
+        let register = Query::Register { place: "k", from: None, to: None };
+        assert_eq!(
+            rows(book, run, register),
+            [
+                "2025-01-01 | equity/opening |  |  | 10,000.00 USD | 10,000.00 USD",
+                "2025-03-31 | income/market |  | revalued via income/market | -1,000.00 USD | 9,000.00 USD",
+                "2025-06-30 | equity/unknown |  | unexplained gap, accepted with ! | 500.00 USD | 9,500.00 USD",
+                "2025-09-30 | assets/checking |  | gap via assets/checking | 300.00 USD | 9,800.00 USD",
+            ]
+        );
+    });
+}
+
+#[test]
+fn the_line_of_an_assertion_says_where_its_gap_came_from() {
+    with_run(GAPS, day(2025, 12, 31), |book, run| {
+        let words: Vec<String> = book
+            .asserts
+            .iter()
+            .map(|assertion| {
+                let line = Query::Line { loc: assertion.loc };
+                lines(&crate::report(book, run, &line, None).unwrap().sections[0])[0].clone()
+            })
+            .collect();
+        assert!(words[0].starts_with("assertion: assets/k = 9,000.00 USD, revalued via income/market"), "{words:?}");
+        assert!(words[1].starts_with("assertion: assets/k = 9,500.00 USD, unexplained gap, accepted with !"));
+        assert!(words[2].starts_with("assertion: assets/k = 9,800.00 USD, gap via assets/checking"));
+    });
+}
+
+/// The gap is a flow from its counter place, so that place's register lists it too.
+#[test]
+fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
+    with_run(GAPS, day(2025, 12, 31), |book, run| {
+        let register = |place| Query::Register { place, from: None, to: None };
+        assert_eq!(
+            rows(book, run, register("checking")).last().unwrap(),
+            "2025-09-30 | assets/k |  | gap via assets/checking | -300.00 USD | 4,700.00 USD"
+        );
+        assert_eq!(
+            rows(book, run, register("market")),
+            ["2025-03-31 | assets/k |  | revalued via income/market | -1,000.00 USD | -1,000.00 USD"]
+        );
+    });
+}
+
 /// Depreciation lowers a house's basis and recognizes an expense, and the
 /// house still holds its one HOME. A later flow makes the balance replay the
 /// journal instead of reading the run's holdings.
