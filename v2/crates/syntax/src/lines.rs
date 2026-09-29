@@ -5,6 +5,8 @@
 //! lines (with `memchr`), measures indentation, drops blank and comment-only
 //! lines, and attaches each run of `///` lines to the line that follows it.
 
+use std::ops::Range;
+
 use axiom_core::{Diagnostic, FileId, Loc};
 use memchr::memchr;
 
@@ -40,6 +42,35 @@ impl<'s> Line<'s> {
     }
 }
 
+/// The lines indented with a tab, which are reported once for the file.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Tabs {
+    pub count: u32,
+    /// The first such line's indentation, and how many columns it is.
+    pub first: Option<(Loc, usize)>,
+}
+
+impl Tabs {
+    /// Adds the tabs of the piece that follows.
+    pub fn merge(&mut self, later: Tabs) {
+        self.count += later.count;
+        self.first = self.first.or(later.first);
+    }
+
+    /// One error for the whole file, whatever number of lines use tabs.
+    pub fn diagnostic(&self) -> Option<Diagnostic> {
+        let (indentation, columns) = self.first?;
+        let (message, label) = match self.count {
+            1 => ("a line is indented with a tab".to_string(), "this indentation has a tab".to_string()),
+            n => (format!("{n} lines are indented with a tab"), "the first, of all of them".to_string()),
+        };
+        let diag = Diagnostic::error("tab-indent", message)
+            .label(indentation, label)
+            .note("indentation is spaces, so a block's shape looks the same in every editor");
+        Some(diag.fix("indent with two spaces per tab", indentation, " ".repeat(columns)))
+    }
+}
+
 /// Where a pending doc block sits, so the next `///` line can tell whether it
 /// continues it.
 struct Pending {
@@ -53,29 +84,43 @@ pub(crate) struct Lines<'s> {
     src: &'s str,
     file: FileId,
     pos: usize,
+    end: usize,
     peeked: Option<Line<'s>>,
     pending_doc: Option<Pending>,
+    pub tabs: Tabs,
+    /// A `///` block that documents nothing, found at the end.
+    pub stray_doc: Option<Loc>,
 }
 
 impl<'s> Lines<'s> {
-    pub fn new(src: &'s str, file: FileId) -> Lines<'s> {
-        let bom = if src.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
-        Lines { src, file, pos: bom, peeked: None, pending_doc: None }
+    /// The lines of `src[range]`, which starts at a line start.
+    pub fn new(src: &'s str, file: FileId, range: Range<usize>) -> Lines<'s> {
+        let bom = if range.start == 0 && src.starts_with('\u{feff}') { '\u{feff}'.len_utf8() } else { 0 };
+        Lines {
+            src,
+            file,
+            pos: range.start + bom,
+            end: range.end,
+            peeked: None,
+            pending_doc: None,
+            tabs: Tabs::default(),
+            stray_doc: None,
+        }
     }
 
-    pub fn next(&mut self, diags: &mut Vec<Diagnostic>) -> Option<Line<'s>> {
-        self.peeked.take().or_else(|| self.scan(diags))
+    pub fn next(&mut self) -> Option<Line<'s>> {
+        self.peeked.take().or_else(|| self.scan())
     }
 
-    pub fn peek(&mut self, diags: &mut Vec<Diagnostic>) -> Option<&Line<'s>> {
+    pub fn peek(&mut self) -> Option<&Line<'s>> {
         if self.peeked.is_none() {
-            self.peeked = self.scan(diags);
+            self.peeked = self.scan();
         }
         self.peeked.as_ref()
     }
 
-    fn scan(&mut self, diags: &mut Vec<Diagnostic>) -> Option<Line<'s>> {
-        let bytes = self.src.as_bytes();
+    fn scan(&mut self) -> Option<Line<'s>> {
+        let bytes = &self.src.as_bytes()[..self.end];
         while self.pos < bytes.len() {
             let start = self.pos;
             let newline = memchr(b'\n', &bytes[start..]).map_or(bytes.len(), |i| start + i);
@@ -94,11 +139,13 @@ impl<'s> Lines<'s> {
             if text.starts_with(b"//") {
                 continue;
             }
-            let indent = self.measure_indent(start, body, diags);
+            let indent = self.measure_indent(start, body);
             let doc = self.pending_doc.take().map(|pending| self.doc_block(&pending));
             return Some(Line { start, body, end, indent, doc });
         }
-        self.warn_dangling_doc(diags);
+        if let Some(pending) = self.pending_doc.take() {
+            self.stray_doc = Some(self.doc_block(&pending).loc);
+        }
         None
     }
 
@@ -119,36 +166,22 @@ impl<'s> Lines<'s> {
         DocBlock { text, loc: Loc::new(self.file, pending.start as u32, pending.end as u32) }
     }
 
-    fn measure_indent(&self, start: usize, body: usize, diags: &mut Vec<Diagnostic>) -> usize {
+    /// The width of the indentation. A tab counts as two columns and is
+    /// counted, so the whole file is reported once, however many lines use one.
+    fn measure_indent(&mut self, start: usize, body: usize) -> usize {
         let blanks = &self.src.as_bytes()[start..body];
-        let Some(first_tab) = blanks.iter().position(|&b| b == b'\t') else {
-            return blanks.len();
-        };
-        let columns: usize = blanks.iter().map(|&b| if b == b'\t' { 2 } else { 1 }).sum();
-        let tab = Loc::new(self.file, (start + first_tab) as u32, (start + first_tab + 1) as u32);
-        diags.push(
-            Diagnostic::error("tab-indent", "tabs cannot indent a line")
-                .label(tab, "this tab")
-                .note("indentation is spaces, so a block's shape looks the same in every editor")
-                .fix(
-                    "indent with two spaces per tab",
-                    Loc::new(self.file, start as u32, body as u32),
-                    " ".repeat(columns),
-                ),
-        );
-        columns
-    }
-
-    fn warn_dangling_doc(&mut self, diags: &mut Vec<Diagnostic>) {
-        if let Some(pending) = self.pending_doc.take() {
-            let loc = self.doc_block(&pending).loc;
-            diags.push(unattached_doc(loc));
+        let columns = blanks.iter().map(|&b| if b == b'\t' { 2 } else { 1 }).sum();
+        if blanks.contains(&b'\t') {
+            self.tabs.count += 1;
+            let indentation = Loc::new(self.file, start as u32, body as u32);
+            self.tabs.first.get_or_insert((indentation, columns));
         }
+        columns
     }
 }
 
 /// A `///` block that documents nothing.
-fn unattached_doc(loc: Loc) -> Diagnostic {
+pub(crate) fn unattached_doc(loc: Loc) -> Diagnostic {
     Diagnostic::warning("unattached-doc", "this doc comment documents nothing")
         .label(loc, "no item, leg or law follows it")
         .help("`///` documents the item, leg or law below it; use `//` for an ordinary comment")
