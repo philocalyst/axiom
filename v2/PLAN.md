@@ -864,3 +864,54 @@ lanes share.
   means 1,234.56 is owed.
 - A project may declare `entity me : person` to set the built-in `me`'s kind
   and properties.
+
+## 11. The v3 rework (in progress)
+
+Two exploration lanes produced the direction:
+- `examples/FINDINGS.md`: seven realistic ledgers (examples 04–10) and 36
+  findings, with "the five deepest problems".
+- `tests/mistakes/REPORT.md`: 99 graded mistakes, the ideal diagnostic for
+  each, and a diagnostic style guide (§14).
+- `bench/REPORT.md`: benchmarks from 10k to 5M flows, pathologies and hotspots.
+
+`LANGUAGE.md` and `DESIGN.md` were rewritten to answer them (commit 2009dda).
+The new concepts, each chosen because it dissolves several findings:
+
+| concept | dissolves |
+|---|---|
+| a flow's recognition period (`DATE..DATE`, `for PERIOD`), and `each year closing MM-DD` | F07, F18, F26 |
+| `for #code` settles, `due` makes a claim, `claim` kinds keep parcels apart | F06, F15, F32, F35 |
+| `for ENTITY` ties money (envelopes, deposits); `for` the owner unties | F16, F10 |
+| basis as a dimension: `basis zero\|cost` kinds, `basis` tails, `PLACE.basis` flows | F01, F24 |
+| `split`, `opening`, assertion `via PLACE`, `market` revaluations | F02, F03, F17 |
+| households (`member`), overlapping residences with ends | F05, F09, F21 |
+| law order by tally dataflow; headroom on every comparison | F08, F19, constraint surfacing |
+| named plans instantiated by the journal | authoring, F11, F13 |
+| aliases, multi-entity decls, `on in from X`, `all UNIT`, closing-statement headers | F25, F31, F33 |
+
+Deliberately *not* done: self-posting plans (the notes: nothing is generated
+into the journal; a named plan makes each occurrence a one-line fact instead),
+expressions in flow amounts, import rules (a `sync` script's job), loans that
+write their own flows.
+
+**Waves.** The orchestrator wrote the cross-crate types with defaults that
+keep today's behaviour (commits 2009dda and the next), so every lane starts
+green.
+1. **Wave 1, in parallel.**
+   - syntax: compact AST, new surface, SWAR, in-file parallel parse;
+   - engine: performance, and the new semantics against the new `Book` fields;
+   - report: the new views, and the forecast and available fixes;
+   - cli: the diagnostic style, new commands, parallel loading.
+
+   Engine, report and cli merge as they finish. Syntax waits for the model.
+2. **Wave 2.**
+   - model: rebuilt on the new AST, filling every new field;
+   - then systems and examples: `std`/`us` fixed and extended, and examples
+     04–10 rewritten with the new features, their numbers verified.
+3. **Integration.** Goldens, benchmarks against `bench/REPORT.md`, and the
+   mistakes corpus regraded.
+
+Targets: every example and golden keeps working or improves (each diff
+justified); 1M flows `check` well under 1 s on 4 cores; no quadratic path;
+total Rust (non-test, non-comment) down from 17.1k toward 11k while the
+language grows.

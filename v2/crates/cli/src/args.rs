@@ -187,7 +187,8 @@ pub enum Command<'a> {
 pub enum Action<'a> {
     Check,
     Sync { files: Vec<&'a str> },
-    Report(Query<'a>),
+    /// A view, about the money of an entity (`--for`) or of everyone.
+    Report(Query<'a>, Option<&'a str>),
 }
 
 /// Reads the arguments after the program name. Every failure is a usage error,
@@ -250,16 +251,16 @@ fn build<'a>(spec: &CommandSpec, operands: &[&'a str], values: &Values<'a>) -> R
             to: values.day(Opt::To)?,
         },
         Verb::Available => Query::Available { at: values.day(Opt::At)? },
-        Verb::Budget => Query::Budget { month: first.map(parse_month).transpose()? },
-        Verb::Tax => Query::Tax { year: first.map(parse_year).transpose()?, entity: values.text(Opt::Entity) },
-        Verb::Lots => Query::Lots { place: first },
+        Verb::Budget => Query::Budget { at: first.map(parse_month).transpose()?, by: Period::Month },
+        Verb::Tax => Query::Tax { year: first.map(parse_year).transpose()? },
+        Verb::Lots => Query::Lots { place: first, at: None },
         Verb::Forecast => Query::Forecast {
             until: values.day(Opt::Until)?,
             paths: values.number(Opt::Paths)?.unwrap_or(DEFAULT_PATHS),
         },
         Verb::Why => Query::Why { target: required },
     };
-    Ok(Action::Report(query))
+    Ok(Action::Report(query, values.text(Opt::Entity)))
 }
 
 fn usage(message: impl Into<String>) -> Diagnostic {
@@ -450,7 +451,7 @@ mod tests {
         let words = ["balance", "assets/*", "--at", "2026-03-31", "--value", "--monthly", "--relaxed", "expenses"];
         let (command, relaxed) = parse_words(&words).unwrap();
         assert!(relaxed);
-        let Command::Project(Action::Report(Query::Balance { globs, at, value, monthly })) = command else {
+        let Command::Project(Action::Report(Query::Balance { globs, at, value, monthly }, _)) = command else {
             panic!("a balance query")
         };
         assert_eq!((globs, at, value, monthly), (vec!["assets/*", "expenses"], Some(day("2026-03-31")), true, true));
@@ -459,7 +460,7 @@ mod tests {
     #[test]
     fn options_may_be_attached_and_may_come_first() {
         let (command, _) = parse_words(&["--color=never", "forecast", "--paths=50", "--until", "2027-01-01"]).unwrap();
-        let Command::Project(Action::Report(Query::Forecast { until, paths })) = command else { panic!("a forecast") };
+        let Command::Project(Action::Report(Query::Forecast { until, paths }, _)) = command else { panic!("a forecast") };
         assert_eq!((until, paths), (Some(day("2027-01-01")), 50));
 
         let args = ["-C", "ledger", "check"].map(String::from);
@@ -479,15 +480,15 @@ mod tests {
         assert!(!relaxed);
         assert!(matches!(
             command,
-            Command::Project(Action::Report(Query::Flow { by: Period::Month, from: None, to: None }))
+            Command::Project(Action::Report(Query::Flow { by: Period::Month, from: None, to: None }, None))
         ));
         assert!(matches!(
             parse_words(&["tax", "2026"]).unwrap().0,
-            Command::Project(Action::Report(Query::Tax { year: Some(2026), entity: None }))
+            Command::Project(Action::Report(Query::Tax { year: Some(2026) }, None))
         ));
         assert!(matches!(
             parse_words(&["budget", "2026-03"]).unwrap().0,
-            Command::Project(Action::Report(Query::Budget { month: Some(_) }))
+            Command::Project(Action::Report(Query::Budget { at: Some(_), .. }, None))
         ));
         assert!(matches!(parse_words(&[]).unwrap().0, Command::Help));
         assert!(matches!(parse_words(&["balance", "--help"]).unwrap().0, Command::Help));

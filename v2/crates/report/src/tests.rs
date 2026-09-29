@@ -31,7 +31,7 @@ impl Household {
     }
 
     fn report(&self, query: Query) -> Report<'static> {
-        report(&self.book, &self.run, &query).expect("the query resolves")
+        report(&self.book, &self.run, &query, None).expect("the query resolves")
     }
 }
 
@@ -589,9 +589,9 @@ fn budget_compares_the_month_to_its_limit() {
 ##
 expenses/food | budget | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%
 ";
-    assert_eq!(table(&house, Query::Budget { month: Some(day(2026, 2, 10)) }), expected);
+    assert_eq!(table(&house, Query::Budget { at: Some(day(2026, 2, 10)), by: Period::Month }), expected);
     // Groceries in March: nothing yet.
-    assert!(table(&house, Query::Budget { month: None }).contains("0.00 USD | 500.00 USD | 500.00 USD | 0%"));
+    assert!(table(&house, Query::Budget { at: None, by: Period::Month }).contains("0.00 USD | 500.00 USD | 500.00 USD | 0%"));
 }
 
 #[test]
@@ -611,7 +611,7 @@ fn tax_groups_tallies_by_system_and_lists_obligations_with_their_sources() {
 =Total owed |  |  | 1,050.00 USD |
   note: Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
 ";
-    assert_eq!(table(&house, Query::Tax { year: None, entity: None }), expected);
+    assert_eq!(table(&house, Query::Tax { year: None }), expected);
 }
 
 #[test]
@@ -624,7 +624,7 @@ assets/bank/checking | 500.00 USD | 500.00 USD | 2025-06-01 | 9m30d | 500.00 USD
 assets/retirement | 10,000.00 USD | 0.00 USD | 2025-06-01 | 9m30d | 10,000.00 USD | 10,000.00 USD | short |
 =Total |  | 500.00 USD |  |  | 10,500.00 USD | 10,000.00 USD |  |
 ";
-    assert_eq!(table(&house, Query::Lots { place: None }), expected);
+    assert_eq!(table(&house, Query::Lots { place: None, at: None }), expected);
 }
 
 #[test]
@@ -647,7 +647,7 @@ fn a_code_finds_its_flows_and_a_line_explains_itself() {
     assert!(code.contains("2026-03-01 | assets/bank/checking → expenses/repairs | 350.00 USD | pending | @8"));
     let line = table(&house, Query::Line { loc: line(3) });
     assert!(line.contains("flow: assets/bank/checking → expenses/rent, 1,800.00 USD | @3"));
-    let stray = report(&house.book, &house.run, &Query::Why { target: "#check-1014" }).err().expect("no such code");
+    let stray = report(&house.book, &house.run, &Query::Why { target: "#check-1014" }, None).err().expect("no such code");
     assert_eq!(stray.help[0].text, "did you mean `check-1041`?");
 }
 

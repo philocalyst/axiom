@@ -43,9 +43,9 @@ fn run_action(global: &Global, action: &Action, terminals: Terminals) -> Result<
             let run = axiom_engine::run(&book, options);
             Ok(Session::new(&book, &run, &diagnostics, renderer, terminals).check())
         }
-        Action::Report(query) => {
+        Action::Report(query, whose) => {
             let run = axiom_engine::run(&book, options);
-            Ok(Session::new(&book, &run, &diagnostics, renderer, terminals).report(query, global.relaxed))
+            Ok(Session::new(&book, &run, &diagnostics, renderer, terminals).report(query, *whose, global.relaxed))
         }
     }
 }
@@ -92,7 +92,7 @@ impl<'a, 's> Session<'a, 's> {
 
     /// The errors, and unless there are any (and `relaxed` does not say to
     /// carry on regardless) the report.
-    fn report(mut self, query: &Query, relaxed: bool) -> Outcome {
+    fn report(mut self, query: &Query, whose: Option<&str>, relaxed: bool) -> Outcome {
         let errors: Vec<&Diagnostic> =
             self.diagnostics.iter().copied().filter(|diagnostic| diagnostic.is_error()).collect();
         let (mut diagnostics, tally) = self.show(&errors);
@@ -100,7 +100,7 @@ impl<'a, 's> Session<'a, 's> {
             return Outcome { answer: String::new(), diagnostics, failed: true };
         }
         let query = self.pinpoint(query);
-        match axiom_report::report(self.book, self.run, &query) {
+        match axiom_report::report(self.book, self.run, &query, whose) {
             Ok(report) => {
                 let answer = table::render(&report, self.terminals.out, self.renderer.locator());
                 Outcome { answer, diagnostics, failed: tally.errors > 0 }

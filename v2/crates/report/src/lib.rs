@@ -45,12 +45,21 @@ pub enum Query<'a> {
     Flow { by: Period, from: Option<Day>, to: Option<Day> },
     /// What can be spent now, and what drawing on each other place would net.
     Available { at: Option<Day> },
-    /// Each budget (a `warn` law over a window total): spent against limit.
-    Budget { month: Option<Day> },
-    /// Tallies and obligations per system for a year and entity.
-    Tax { year: Option<i32>, entity: Option<&'a str> },
-    /// Parcels with basis and unrealized gain.
-    Lots { place: Option<&'a str> },
+    /// Each budget (a `warn` law over a window total): spent against limit,
+    /// for the month or the year containing `at` (default: today).
+    Budget { at: Option<Day>, by: Period },
+    /// Every cap and budget a person lives under, from the run's headroom:
+    /// counted, limit, room left, share used.
+    Limits { year: Option<i32> },
+    /// What others owe and what is owed to them: open claims with their
+    /// counterparty, age and due day.
+    Claims { at: Option<Day> },
+    /// Tallies and obligations per system for a year.
+    Tax { year: Option<i32> },
+    /// Every disposal in a year: acquired, sold, proceeds, basis, gain, term.
+    Gains { year: Option<i32> },
+    /// Parcels with basis and unrealized gain, as of a day (default: today).
+    Lots { place: Option<&'a str>, at: Option<Day> },
     /// Plans, inferred recurrences, obligations and growth, run forward
     /// through the laws, with bands from bootstrapped spending.
     Forecast { until: Option<Day>, paths: u32 },
@@ -119,16 +128,20 @@ pub enum Cell<'s> {
     Source(Loc),
 }
 
-/// Builds the view `query` asks for.
-pub fn report<'s>(book: &Book<'s>, run: &Run, query: &Query) -> Result<Report<'s>, Diagnostic> {
+/// Builds the view `query` asks for, about the money of `whose` (`--for`: an
+/// entity, a household including its members; default everything).
+pub fn report<'s>(book: &Book<'s>, run: &Run, query: &Query, whose: Option<&str>) -> Result<Report<'s>, Diagnostic> {
     match query {
         Query::Balance { globs, at, value, monthly } => balance::view(book, run, globs, *at, *value, *monthly),
         Query::Register { place, from, to } => register::view(book, run, place, *from, *to),
         Query::Flow { by, from, to } => Ok(flow::view(book, run, *by, *from, *to)),
         Query::Available { at } => Ok(available::view(book, run, *at)),
-        Query::Budget { month } => Ok(budget::view(book, run, *month)),
-        Query::Tax { year, entity } => tax::view(book, run, *year, *entity),
-        Query::Lots { place } => lots::view(book, run, *place),
+        Query::Budget { at, .. } => Ok(budget::view(book, run, *at)),
+        Query::Limits { .. } => Ok(Report::new("Limits (not yet built)")),
+        Query::Claims { .. } => Ok(Report::new("Claims (not yet built)")),
+        Query::Tax { year } => tax::view(book, run, *year, whose),
+        Query::Gains { .. } => Ok(Report::new("Gains (not yet built)")),
+        Query::Lots { place, .. } => lots::view(book, run, *place),
         Query::Forecast { until, paths } => Ok(forecast::view(book, run, *until, *paths)),
         Query::Why { target } => why::target(book, run, target),
         Query::Line { loc } => Ok(why::line(book, run, *loc)),
