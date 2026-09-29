@@ -43,7 +43,12 @@ impl<'s> Parser<'s> {
         if let (false, Some(end), None) = (spread, from.end, from.amount) {
             match self.tok() {
                 Tok::Punct("=") => return self.assertion(line, date, end),
-                Tok::Name("owes") if end.select.is_empty() => return self.claim_item(line, date, end.name),
+                Tok::Name("owes") if end.select.is_empty() => {
+                    let claim = self.claim(date, end.name)?;
+                    let header = self.end_header(line)?;
+                    self.emit(&header, claim, ItemKind::Claim);
+                    return Ok(());
+                }
                 Tok::Name("ends") if end.select.is_empty() => return self.ending(line, date, end.name),
                 _ => {}
             }
@@ -96,15 +101,7 @@ impl<'s> Parser<'s> {
         Ok(())
     }
 
-    /// `DATE DEBTOR owes CREDITOR AMOUNT TAIL`, the debtor already read.
-    fn claim_item(&mut self, line: &mut Line<'s>, date: Day, debtor: Name<'s>) -> Parse<()> {
-        let claim = self.claim(date, debtor)?;
-        let header = self.end_header(line)?;
-        self.emit(&header, claim, ItemKind::Claim);
-        Ok(())
-    }
-
-    /// `owes CREDITOR AMOUNT TAIL`, which is also a line of an opening.
+    /// `owes CREDITOR AMOUNT TAIL` after the debtor: a dated claim, or a line of an opening.
     fn claim(&mut self, date: Day, debtor: Name<'s>) -> Parse<Claim<'s>> {
         self.bump();
         let creditor = self.name("expected-name", "the party or owner it is owed to")?;

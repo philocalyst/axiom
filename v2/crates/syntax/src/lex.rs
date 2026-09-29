@@ -7,8 +7,8 @@
 //! to the general path, which classifies it byte by byte. A token that is not a
 //! token (`2026-02-30`, `$50`) is kept as [`Tok::Invalid`] so the parser can
 //! explain it in the context where it turned up. The lexer can look two tokens
-//! ahead, which is enough to tell `? USD` (an unknown amount) from `?` (a
-//! place), and a year from the number after it.
+//! ahead, which is enough to tell `? USD` (an unknown amount) from `?` (the
+//! unknown party), and a year from the number after it.
 
 use axiom_core::{Day, Dec, FileId, Loc, Span};
 use memchr::memchr2;

@@ -201,7 +201,7 @@ impl<'s> Parser<'s> {
     /// `#NAME [of THING]`, the `#NAME` not yet consumed.
     fn purpose(&mut self, name: Name<'s>) -> Parse<Purpose<'s>> {
         self.bump();
-        let of = self.eat_word("of").map(|_| self.name("expected-name", "what it is of, such as `condo`"));
+        let of = self.eat_word("of").map(|_| self.name("expected-name", "what the purpose is of, such as `condo`"));
         Ok(Purpose { name, of: of.transpose()? })
     }
 
@@ -216,17 +216,10 @@ impl<'s> Parser<'s> {
     /// `for car-fund`, or `for` a year, month, date or range; `keyword` is where
     /// the `for` was written.
     fn for_what(&mut self, keyword: Loc) -> Parse<For<'s>> {
-        let token = self.peek();
-        match token.tok {
+        match self.tok() {
             Tok::Name(entity) => Ok(self.bump_as(For::Entity(Name(entity)))),
-            // v3 said which claim a payment settled with `for #code`.
-            Tok::Code(_) | Tok::Purpose(_) => {
-                let (clause, code) = (keyword.to(token.loc), format!("^{}", &self.text(token.loc)[1..]));
-                let diag = Diagnostic::error("for-code", "a flow that carries a claim's code settles that claim")
-                    .label(clause, "`for` takes a period or a name now, not a code")
-                    .fix(format!("write `{code}` on the flow itself"), clause, code);
-                self.fail(diag)
-            }
+            // v3 said which claim a payment settled with `for #code`: now the payment carries the code.
+            Tok::Purpose(_) => Err(self.hash_code(keyword.to(self.peek().loc))),
             _ => {
                 let (first, last, _) = self.days("expected-period", "a period or a name after `for`")?;
                 Ok(For::Period(first, last))
@@ -234,12 +227,13 @@ impl<'s> Parser<'s> {
         }
     }
 
-    /// A `#name` where v3 wrote a code: v4 writes `^name`, and `#name` is a purpose.
-    pub fn hash_code(&mut self, at: Loc) -> Reported {
-        let code = format!("^{}", &self.text(at)[1..]);
+    /// A `#name` (the next token) where v3 wrote a code: v4 writes `^name`, and
+    /// `#name` is a purpose. A fix rewrites `replaced`, which holds it.
+    pub fn hash_code(&mut self, replaced: Loc) -> Reported {
+        let (at, code) = (self.peek().loc, format!("^{}", &self.text(self.peek().loc)[1..]));
         let diag = Diagnostic::error("hash-code", "a code is written `^code`, and `#name` is a purpose")
-            .label(at, "a purpose goes in a flow's tail, not here")
-            .fix(format!("write `{code}`"), at, code);
+            .label(at, "a purpose goes in a flow's tail, and this is where a code is meant")
+            .fix(format!("write `{code}`"), replaced, code);
         self.report(diag)
     }
 
@@ -350,9 +344,8 @@ fn two_remainders(first: Loc, second: Loc) -> Diagnostic {
 fn basis_is_derived(loc: Loc) -> Diagnostic {
     Diagnostic::error("basis-end", "a basis is derived, never moved: there is no `.basis`")
         .label(loc, "not an end any more")
-        .note("an asset's basis is its cost, plus each improvement, less what laws consume")
-        .help("pay an improvement `#improvement of ASSET`, and a law's `consume` lowers a basis")
-        .help("value that arrives with a basis other than its cost says so: `basis AMOUNT`")
+        .note("an asset's basis is its cost, plus each improvement, less what a law's `consume` takes")
+        .help("pay an improvement `#improvement of ASSET`; value arriving with a basis of its own says `basis AMOUNT`")
 }
 
 fn rest_in_header(loc: Loc) -> Diagnostic {

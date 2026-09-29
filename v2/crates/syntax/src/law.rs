@@ -181,7 +181,7 @@ impl<'s> Parser<'s> {
             .label(keyword.loc, "not a step of a law");
         let diag = match closest(word, STEP_WORDS.into_iter().chain(EFFECTS).chain(TRIGGER_WORDS)) {
             Some(near) => diag.fix(format!("did you mean `{near}`?"), keyword.loc, near),
-            None => diag.note("a law has a trigger, then `when`, `let`, `require`, `warn`, `owe`, `count`, `consume`, `carry`"),
+            None => diag.note("steps are `when`, `let`, `require`, `warn`, `owe`, `count`, `consume` and `carry`"),
         };
         self.report(diag)
     }

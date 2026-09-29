@@ -62,7 +62,11 @@ impl<'s> Parser<'s> {
         self.begin_line(line);
         let token = self.peek();
         match token.tok {
-            Tok::Date(_) | Tok::MonthDay(..) | Tok::Number(_) => {
+            Tok::Date(date) => {
+                self.bump();
+                self.journal_entry(line, date)
+            }
+            Tok::MonthDay(..) | Tok::Number(_) => {
                 let date = self.item_date("a date or a keyword")?;
                 self.journal_entry(line, date)
             }
@@ -122,7 +126,8 @@ impl<'s> Parser<'s> {
         let diag = Diagnostic::error("unknown-keyword", format!("unknown keyword `{word}`"))
             .label(keyword.loc, "a line starts with a date or a keyword");
         let indent = self.point(line.start as u32);
-        let looks_like_leg = matches!(self.tok(), Tok::Number(_) | Tok::Percent(_) | Tok::Punct("..." | "=" | "(" | "?"));
+        let looks_like_leg =
+            matches!(self.tok(), Tok::Number(_) | Tok::Percent(_) | Tok::Punct("..." | "=" | "(" | "?"));
         let near = closest(word, KEYWORDS);
         let diag = if let Some(near) = near {
             diag.fix(format!("did you mean `{near}`?"), keyword.loc, near)

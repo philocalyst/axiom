@@ -633,11 +633,9 @@ fn a_leg_may_be_a_share_of_the_header_and_an_opening_line_an_asset() {
 
 #[test]
 fn a_code_settles_by_being_on_the_flow_not_after_for() {
-    for written in ["for ^inv-12", "for #inv-12"] {
-        let src = format!("2026-04-02 acme -> checking 4_800 USD {written}\n");
-        let error = only_error(&src, "for-code");
-        assert_eq!(first_fix(&src, &error), (written, "^inv-12"));
-    }
+    let src = "2026-04-02 acme -> checking 4_800 USD for #inv-12\n";
+    assert_eq!(first_fix(src, &only_error(src, "hash-code")), ("for #inv-12", "^inv-12"));
+    only_error("2026-04-02 acme -> checking 4_800 USD for ^inv-12\n", "expected-period");
 }
 
 #[test]
@@ -1070,8 +1068,8 @@ fn expressions_are_post_order_with_first_nodes() {
     assert_post_order(&file, true);
 }
 
-/// Sources damaged by a few changed bytes: `EXAMPLE`, again and again.
-fn damaged(count: usize, mut with: impl FnMut(&str)) {
+/// Sources damaged by a few changed bytes: `source`, again and again.
+fn damaged(source: &str, count: usize, mut with: impl FnMut(&str)) {
     let mut state = 0x2545_F491_4F6C_DD1Du64;
     let mut random = |below: usize| {
         state ^= state << 13;
@@ -1080,11 +1078,11 @@ fn damaged(count: usize, mut with: impl FnMut(&str)) {
         (state % below as u64) as usize
     };
     for _ in 0..count {
-        let mut bytes = EXAMPLE.as_bytes().to_vec();
+        let mut bytes = source.as_bytes().to_vec();
         for _ in 0..1 + random(4) {
             let at = random(bytes.len());
             match random(3) {
-                0 => bytes[at] = b"-/\"(),:= \n%|"[random(12)],
+                0 => bytes[at] = b"-/\"(),:= \n%|^#.0"[random(16)],
                 1 => drop(bytes.remove(at)),
                 _ => bytes.insert(at, b" \n\t#"[random(4)]),
             }
@@ -1097,10 +1095,26 @@ fn damaged(count: usize, mut with: impl FnMut(&str)) {
 /// that still parses without errors has no dead nodes.
 #[test]
 fn damaged_files_keep_the_arena_well_formed() {
-    damaged(2_000, |src| {
+    damaged(EXAMPLE, 2_000, |src| {
         let (file, diags) = parse(FileId(0), src);
         assert_post_order(&file, !diags.iter().any(Diagnostic::is_error));
     });
+}
+
+/// The same of the sketch's contracts and journal, in every place: short dates
+/// are where a damaged file has the most to go wrong.
+#[test]
+fn damaged_sketch_files_keep_the_arena_well_formed_in_any_place() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/v4-sketch");
+    for name in ["contracts.ax", "journal/2026/01.ax"] {
+        let src = std::fs::read_to_string(root.join(name)).unwrap();
+        for place in [Place::default(), YEAR, MARCH] {
+            damaged(&src, 300, |text| {
+                let (file, diags) = crate::parse(FileId(0), text, place);
+                assert_post_order(&file, !diags.iter().any(Diagnostic::is_error));
+            });
+        }
+    }
 }
 
 /// A fully parenthesised rendering of an expression.
@@ -1481,7 +1495,7 @@ fn a_file_parsed_in_pieces_is_the_file_parsed_whole() {
     same(
         "/// Kept with the item below, across a cut.\n\n// and a comment\n2026-01-01 a -> b 5 USD\n\n/// Two.\n/// Lines.\nlaw l\n  on in\n",
     );
-    damaged(300, same);
+    damaged(EXAMPLE, 300, same);
     same(&"2026-01-01 a -> b 5 USD\n2026-01-02 a -> b 6 USD\n\tstray\n2026-01-03 a -> b 7 USD\n".repeat(50));
 }
 

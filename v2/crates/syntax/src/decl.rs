@@ -13,6 +13,9 @@ use crate::parser::{Parse, Parser};
 
 const BUDGET_PERIODS: [(&str, Period); 2] = [("monthly", Period::Month), ("yearly", Period::Year)];
 
+/// Where v3's chart put the accounts that v4 has no accounts for.
+const CHART_ROOTS: [&str; 3] = ["income/", "expenses/", "equity/"];
+
 impl<'s> Parser<'s> {
     /// `account NAME [: KIND [at NAME]]`, `entity NAME[, NAME…] [: KIND]`, `asset`,
     /// `purpose`, `commodity SYMBOL [: KIND]` or `kind NAME [: PARENT]`, with its
@@ -26,7 +29,7 @@ impl<'s> Parser<'s> {
         while what == DeclKind::Entity && self.eat(",").is_some() {
             names.push(self.name_like("expected-name", "another entity name")?);
         }
-        if what == DeclKind::Account && ["income/", "expenses/", "equity/"].iter().any(|root| names[0].starts_with(root)) {
+        if what == DeclKind::Account && CHART_ROOTS.iter().any(|root| names[0].starts_with(root)) {
             let note = chart_account(self.loc_of(&names[0]), names[0].0);
             self.diags.push(note);
         }
@@ -222,10 +225,11 @@ impl<'s> Parser<'s> {
     }
 }
 
-/// An account under `income/`, `expenses/` or `equity/`, as v3's chart had them. Whether
-/// it is one is for the model to judge, so this is only a note.
+/// An account under one of [`CHART_ROOTS`]. Whether it is a chart account is for the
+/// model to judge, so this is only a note.
 fn chart_account(loc: Loc, name: &str) -> Diagnostic {
-    Diagnostic::info("chart-account", format!("`{name}` is a v3 chart account: v4 has no income, expense or equity ones"))
+    let message = format!("`{name}` is a v3 chart account: v4 has no income, expense or equity accounts");
+    Diagnostic::info("chart-account", message)
         .label(loc, "what a flow is for is its purpose, and whom it is with is its party")
         .help("declare the party (`entity lumen : employer`), and write `#purpose` where its kind does not say")
 }

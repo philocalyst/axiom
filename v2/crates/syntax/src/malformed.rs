@@ -230,7 +230,7 @@ fn mixed_case(loc: Loc, text: &str) -> Diagnostic {
     let lower = text.to_ascii_lowercase();
     let upper = text.to_ascii_uppercase();
     if mendable && lower.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-' | b'*' | b'?' | b'/')) {
-        diag = diag.fix(format!("as a place or entity, write `{lower}`"), loc, lower);
+        diag = diag.fix(format!("as a name, write `{lower}`"), loc, lower);
     }
     if mendable && upper.bytes().all(|b| matches!(b, b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.')) {
         diag = diag.fix(format!("as a commodity, write `{upper}`"), loc, upper);

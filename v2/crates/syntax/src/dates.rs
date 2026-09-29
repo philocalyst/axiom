@@ -47,7 +47,7 @@ impl<'s> Parser<'s> {
     }
 
     /// The token as a day of the month: one or two digits.
-    fn day_of_month(&self, token: Token<'s>) -> Option<u8> {
+    pub fn day_of_month(&self, token: Token<'s>) -> Option<u8> {
         self.integer_name(token).filter(|digits| digits.len() <= 2)?.parse().ok()
     }
 

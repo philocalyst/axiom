@@ -115,9 +115,9 @@ impl<'s> Parser<'s> {
         loop {
             let token = self.peek();
             let day = match token.tok {
-                Tok::Number(_) => match self.text(token.loc).parse::<u8>() {
-                    Ok(day @ 1..=31) => self.bump_as(On::MonthDay(day)),
-                    _ => return self.fail(not_a_day(token.loc, self.text(token.loc))),
+                Tok::Number(_) => match self.day_of_month(token).filter(|day| (1..=31).contains(day)) {
+                    Some(day) => self.bump_as(On::MonthDay(day)),
+                    None => return self.fail(not_a_day(token.loc, self.text(token.loc))),
                 },
                 Tok::MonthDay(..) => self.month_day().map(|(month, day)| On::YearDay { month, day })?,
                 Tok::Name("last") => self.bump_as(On::Last),

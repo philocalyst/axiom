@@ -58,8 +58,9 @@ use axiom_core::{Day, Dec, FileId, Id, Loc, Span};
 // ─── Text ───────────────────────────────────────────────────────────────────
 
 /// A written name, path, glob or commodity: the slice of the source it is.
-/// Places, entities, kinds and properties are lowercase (`assets/bank/checking`,
-/// `trader-joes`, `expenses/food/*`); commodities are uppercase (`USD`).
+/// Accounts, owners, parties, assets, purposes, kinds and properties are
+/// lowercase (`checking`, `trader-joes`, `joint/savings`, `food/*`);
+/// commodities are uppercase (`USD`).
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Name<'s>(pub &'s str);
 
@@ -455,12 +456,13 @@ pub struct Txn<'s> {
     pub flow: Flow<'s>,
 }
 
-/// `SOURCE -> TARGET TAIL` with optional indented legs: what a transaction and
-/// a plan both say.
+/// `SOURCE -> TARGET TAIL` with optional indented legs.
 ///
-/// When both sides name a place there are no legs. When exactly one side does,
+/// When both sides name an end there are no legs. When exactly one side does,
 /// the legs are the other side (a "one side split"), and the header may state
-/// an amount on either or both sides: `house 1 HOME -> 431_500 USD`.
+/// an amount on either or both sides: `house 1 HOME -> 431_500 USD`. With no
+/// legs, a source and both amounts are an exchange that stays at the source:
+/// `fidelity 20 VTI -> 5_940 USD`.
 #[derive(Debug)]
 pub struct Flow<'s> {
     /// What leaves: the left of the arrow.
