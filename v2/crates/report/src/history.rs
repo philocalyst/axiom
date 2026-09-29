@@ -8,7 +8,7 @@ use std::ops::{AddAssign, Range};
 
 use axiom_core::{Day, Id, Qty, Ratio};
 use axiom_engine::{Holding, Posted, Run, State};
-use axiom_model::{Amount, Book, Flow, Place};
+use axiom_model::{Amount, Book, End, Flow, Place};
 
 use crate::lens::{Basket, Lens, on_balance_sheet};
 
@@ -62,14 +62,28 @@ impl<'a> Posting<'a> {
         if self.flow.from == place { self.flow.to } else { self.flow.from }
     }
 
-    /// What `place` gained (positive) or lost (negative) in this flow.
-    pub fn change_at(&self, place: Id<Place>) -> Option<Amount> {
-        let (gain, loss) = (self.flow.to == place, self.flow.from == place);
-        match (gain, loss) {
-            (true, false) => Some(self.arrive()),
-            (false, true) => Some(Amount::new(-self.posted.out, self.flow.out.unit)),
-            _ => None,
+    /// The place at one end of the flow.
+    pub fn place(&self, end: End) -> Id<Place> {
+        match end {
+            End::From => self.flow.from,
+            End::To => self.flow.to,
         }
+    }
+
+    /// What the flow did at `end`, as solved: what the place lost (negative)
+    /// or gained (positive), or, at a `PLACE.basis` end, how far the basis of
+    /// its parcels fell or rose.
+    pub fn change(&self, end: End) -> Change {
+        let amount = match end {
+            End::From => Amount::new(-self.posted.out, self.flow.out.unit),
+            End::To => self.arrive(),
+        };
+        if moves_quantity(self.flow, end) { Change::Moved(amount) } else { Change::Rebased(amount) }
+    }
+
+    /// What happened at `place`: once for each end of the flow that is there.
+    pub fn changes_at(self, place: Id<Place>) -> impl Iterator<Item = Change> {
+        [End::From, End::To].into_iter().filter(move |&end| self.place(end) == place).map(move |end| self.change(end))
     }
 
     /// The out side priced on the day the flow happened.
@@ -81,6 +95,23 @@ impl<'a> Posting<'a> {
     pub fn arrive_in_base(&self, lens: Lens) -> Option<Qty> {
         lens.on(self.flow.day).value(self.arrive())
     }
+}
+
+/// What a flow did to the place at one of its ends.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Change {
+    /// The place gained (positive) or lost (negative) this much.
+    Moved(Amount),
+    /// The end is `PLACE.basis`: the place holds what it held, and the basis of
+    /// its parcels rose (positive) or fell (negative) by this much.
+    Rebased(Amount),
+}
+
+/// Whether quantity crosses `end` of `flow`. At a `PLACE.basis` end none does:
+/// the flow changes what the place's parcels cost, and nothing arrives there
+/// or leaves it. Every view that reads a flow as money asks this first.
+pub fn moves_quantity(flow: &Flow, end: End) -> bool {
+    flow.terms().basis_end != Some(end)
 }
 
 /// Every journal flow with its posting, in journal order.
@@ -171,12 +202,13 @@ impl Snapshots {
         // Each flow changes every column from the one it stands on until it is
         // returned: a difference at each edge, summed across columns after.
         for posting in postings(book, run) {
-            let Some((start, end)) = posting.standing() else { continue };
-            let (lo, hi) = (snapshots.column_from(start), snapshots.column_from(end));
-            let flow = posting.flow;
-            for (place, amount, sign) in [(flow.from, posting.out(), -1), (flow.to, posting.arrive(), 1)] {
-                if lo < hi && lens.owns(place) {
-                    let held = snapshots.booked(lens.on(flow.day), place, amount, valued, sign);
+            let Some((start, past)) = posting.standing() else { continue };
+            let (lo, hi) = (snapshots.column_from(start), snapshots.column_from(past));
+            for end in [End::From, End::To] {
+                let place = posting.place(end);
+                // A basis end moves no quantity, and so no money.
+                if let (true, Change::Moved(amount)) = (lo < hi && lens.owns(place), posting.change(end)) {
+                    let held = snapshots.held(lens.on(posting.flow.day), place, amount, valued);
                     snapshots.change(lo..hi, place, amount.unit, held);
                 }
             }
@@ -187,9 +219,10 @@ impl Snapshots {
         for pad in &run.pads {
             let lo = snapshots.column_from(pad.day);
             for (place, sign) in [(pad.place, 1), (pad.counter, -1)] {
+                let amount = Amount::new(Qty(pad.amount.qty.0 * sign), pad.amount.unit);
                 if lo < snapshots.days.len() && lens.owns(place) {
-                    let held = snapshots.booked(lens.on(pad.day), place, pad.amount, valued, sign);
-                    snapshots.change(lo..snapshots.days.len(), place, pad.amount.unit, held);
+                    let held = snapshots.held(lens.on(pad.day), place, amount, valued);
+                    snapshots.change(lo..snapshots.days.len(), place, amount.unit, held);
                 }
             }
         }
@@ -205,13 +238,13 @@ impl Snapshots {
         self.days.partition_point(|&column| column < day)
     }
 
-    /// `sign` times what `amount` adds to a place: its quantity, and, off the
-    /// balance sheet, its worth at the prices of `lens`'s day.
-    fn booked(&mut self, lens: Lens, place: Id<Place>, amount: Amount, valued: bool, sign: i64) -> Held {
-        let mut held = Held { qty: Qty(amount.qty.0 * sign), booked: Qty::ZERO };
+    /// What `moved` adds to a place: its quantity, and, off the balance sheet,
+    /// its worth at the prices of `lens`'s day.
+    fn held(&mut self, lens: Lens, place: Id<Place>, moved: Amount, valued: bool) -> Held {
+        let mut held = Held { qty: moved.qty, booked: Qty::ZERO };
         if valued && !on_balance_sheet(lens.book.places[place].class) {
-            match lens.value(amount) {
-                Some(worth) => held.booked = Qty(worth.0 * sign),
+            match lens.value(moved) {
+                Some(worth) => held.booked = worth,
                 None => self.unpriced += 1,
             }
         }

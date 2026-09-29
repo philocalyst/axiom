@@ -56,7 +56,7 @@ Governed by
 Recent flows
   Date        With                  Payee  Note          Amount        Balance
   ────────────────────────────────────────────────────────────────────────────
-  2025-12-04  opening balance                                    4,904.79 USD
+  2025-12-04  opening balance                                    2,926.19 USD
   ────────────────────────────────────────────────────────────────────────────
   2025-12-04  opening balance                                     98.1346 VTI
   ────────────────────────────────────────────────────────────────────────────
@@ -71,9 +71,9 @@ Recent flows
   2025-12-04  opening balance                                     -9.0153 FAST
   2025-12-04  assets/bank/checking                 -8.0000 VTI    90.1346 VTI
   2025-12-05  assets/bank/checking                  4.5096 VTI    94.6442 VTI
-  2025-12-11  income/dividends                       23.51 USD   4,928.30 USD
+  2025-12-11  income/dividends                       23.51 USD   2,949.70 USD
   2025-12-16  assets/bank/checking               -120.0480 VNQ     0.0000 VNQ
   2025-12-16  assets/bank/checking                493.8271 SCHH  493.8271 SCHH
   2025-12-23  income/dividends                      0.2444 VTI    94.8886 VTI
-  2025-12-23  income/dividends                        0.02 USD   4,928.32 USD
-  2025-12-31  income/interest                       278.29 USD   5,206.61 USD
+  2025-12-23  income/dividends                        0.02 USD   2,949.72 USD
+  2025-12-31  income/interest                       278.29 USD   3,228.01 USD

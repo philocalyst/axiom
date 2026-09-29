@@ -10,7 +10,7 @@ use axiom_core::{Day, Diagnostic, Id, Qty};
 use axiom_engine::{Run, State};
 use axiom_model::{Amount, Book, Commodity, Place};
 
-use crate::history::Posting;
+use crate::history::{Change, Posting};
 use crate::lens::Whose;
 use crate::places::path;
 use crate::resolve;
@@ -43,7 +43,9 @@ pub fn view<'s>(
 /// the run's day), each with the balance after it.
 ///
 /// The running balance counts what is real at the end of the window. Pending,
-/// void and returned flows are listed, muted, and leave it alone.
+/// void and returned flows are listed, muted, and leave it alone. A flow into
+/// or out of `PLACE.basis` is listed with the change it made to the basis, and
+/// leaves the balance alone: no quantity moved.
 pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Day>, to: Option<Day>) -> Section<'s> {
     let steps = steps(book, run, place, to.unwrap_or(run.today));
     let split = from.map_or(0, |from| steps.partition_point(|step| step.day < from));
@@ -61,7 +63,9 @@ pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Da
     let mut section = Section::new(columns);
     let mut running: BTreeMap<Id<Commodity>, Qty> = BTreeMap::new();
     for step in &steps[..split] {
-        *running.entry(step.change.unit).or_default() += step.counted();
+        if let Change::Moved(moved) = step.change {
+            *running.entry(moved.unit).or_default() += step.counted();
+        }
     }
     if let Some(from) = from {
         for (&unit, &qty) in running.iter().filter(|(_, qty)| !qty.is_zero()) {
@@ -77,16 +81,22 @@ pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Da
         }
     }
     for step in &steps[split..] {
-        let balance = running.entry(step.change.unit).or_default();
-        *balance += step.counted();
+        let (amount, balance) = match step.change {
+            Change::Moved(moved) => {
+                let balance = running.entry(moved.unit).or_default();
+                *balance += step.counted();
+                (shown(moved.qty, moved.unit), shown(*balance, moved.unit))
+            }
+            Change::Rebased(_) => (Cell::Blank, Cell::Blank),
+        };
         let payee = step.posting.and_then(|posting| posting.flow.payee);
         let cells = [
             Cell::Day(step.day),
             Cell::text(path(book, step.with)),
             payee.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path))),
             note(book, step).map_or(Cell::Blank, Cell::text),
-            shown(step.change.qty, step.change.unit),
-            shown(*balance, step.change.unit),
+            amount,
+            balance,
         ];
         section.push(Row::new(cells).style(if step.counts { Style::Normal } else { Style::Muted }));
     }
@@ -103,8 +113,7 @@ pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Da
 /// One journal flow, or one accepted gap, as seen from a place.
 struct Step<'a> {
     day: Day,
-    /// What the place gained (positive) or lost (negative).
-    change: Amount,
+    change: Change,
     /// Whether it is real at the end of the window.
     counts: bool,
     /// The other end.
@@ -116,18 +125,21 @@ struct Step<'a> {
 impl Step<'_> {
     /// What it adds to the running balance.
     fn counted(&self) -> Qty {
-        if self.counts { self.change.qty } else { Qty::ZERO }
+        match self.change {
+            Change::Moved(moved) if self.counts => moved.qty,
+            Change::Moved(_) | Change::Rebased(_) => Qty::ZERO,
+        }
     }
 }
 
 /// Every step touching `place` up to `cutoff`, in order. A pad, made at the
 /// end of its day, follows that day's flows.
 fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec<Step<'a>> {
-    let flows = book.touching[place].iter().filter_map(|&id| {
+    let flows = book.touching[place].iter().flat_map(|&id| {
         let posting = Posting::at(book, run, id);
-        Some(Step {
+        posting.changes_at(place).map(move |change| Step {
             day: posting.flow.day,
-            change: posting.change_at(place)?,
+            change,
             counts: posting.is_real_on(cutoff),
             with: posting.counterparty(place),
             posting: Some(posting),
@@ -135,7 +147,7 @@ fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec
     });
     let pads = run.pads.iter().filter(|pad| pad.place == place).map(|pad| Step {
         day: pad.day,
-        change: pad.amount,
+        change: Change::Moved(pad.amount),
         counts: true,
         with: book.roots.unknown,
         posting: None,
@@ -145,9 +157,13 @@ fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec
     steps
 }
 
-/// Codes and settlement, as one line of small print.
+/// A change of basis, codes and settlement, as one line of small print.
 fn note(book: &Book, step: &Step) -> Option<Cow<'static, str>> {
     let Some(posting) = step.posting else { return Some("unexplained gap, accepted with !".into()) };
+    let rebased = match step.change {
+        Change::Rebased(by) => Some(format!("basis {}{}", if by.qty.is_negative() { "" } else { "+" }, book.show(by))),
+        Change::Moved(_) => None,
+    };
     let status: Option<Cow<'static, str>> = match posting.posted.state {
         State::Actual | State::Planned => None,
         State::Pending => Some("pending".into()),
@@ -156,6 +172,7 @@ fn note(book: &Book, step: &Step) -> Option<Cow<'static, str>> {
         State::Settled(on) => Some(format!("settled {on}").into()),
         State::Returned(on) => Some(format!("returned {on}").into()),
     };
-    let parts: Vec<Cow<str>> = code_labels(book, &posting.flow.codes).map(Cow::Owned).chain(status).collect();
+    let parts: Vec<Cow<str>> =
+        rebased.map(Cow::Owned).into_iter().chain(code_labels(book, &posting.flow.codes).map(Cow::Owned)).chain(status).collect();
     (!parts.is_empty()).then(|| parts.join(" · ").into())
 }

@@ -138,10 +138,6 @@ legs), F10 (the deposit is held, not spendable).
 - **A recognition range cannot be cut short.** The loan costs should have been written for 30 years and
   accelerated at payoff. Written that way, the rest would never be deducted; this journal, written after the
   sale, gives the range the loan's actual life.
-- **`balance --value` counts basis flows as money.** At 2025-08-31 it shows the house at 398,148.15 USD instead
-  of the 405,000.00 USD price, the depreciation taken (6,851.85) taken off; after the roof it adds 14,200.00. And
-  `axiom register house` lists the basis flows as dollar amounts with a dollar running balance. Both need to
-  skip `PLACE.basis` flows.
 - **A place that `holds HOME` refuses basis flows.** `assets/rental/house` cannot say `holds HOME` (the basis
   flows are dollars: `not-held`), so the account is not restricted to its commodity.
 - **Same-day order still matters.** The half month of depreciation on the day of sale must be journalled before

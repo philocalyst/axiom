@@ -4,14 +4,14 @@ Balances at 2026-04-16
 
   Place               Value (USD)
   ───────────────────────────────
-  assets           479,480.93 USD
+  assets           469,860.96 USD
     bank           167,654.87 USD
       checking      84,554.08 USD
       savings       83,100.79 USD
     coinbase        14,812.82 USD
     espp-cash        8,400.00 USD
-    etrade          64,094.97 USD
-    fidelity        77,445.96 USD
+    etrade          56,453.60 USD
+    fidelity        75,467.36 USD
     retirement     117,733.28 USD
     schwab          13,598.93 USD
     wallet          15,740.10 USD
@@ -42,7 +42,7 @@ Balances at 2026-04-16
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       479,480.93 USD
+  Assets       469,860.96 USD
   Liabilities        0.00 USD
   ───────────────────────────
-  Net worth    479,480.93 USD
+  Net worth    469,860.96 USD

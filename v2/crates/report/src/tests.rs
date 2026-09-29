@@ -634,7 +634,7 @@ fn cell(cell: &Cell) -> String {
     }
 }
 
-fn lines(section: &Section) -> Vec<String> {
+pub(crate) fn lines(section: &Section) -> Vec<String> {
     let mark = |row: &Row| match row.style {
         Style::Normal => "",
         Style::Total => "=",
@@ -651,7 +651,7 @@ fn lines(section: &Section) -> Vec<String> {
         .collect()
 }
 
-fn show(report: &Report) -> String {
+pub(crate) fn show(report: &Report) -> String {
     let mut out = format!("# {}\n", report.title);
     for section in &report.sections {
         out += &format!("##{}\n", section.heading.as_ref().map_or(String::new(), |heading| format!(" {heading}")));

@@ -20,20 +20,20 @@ Effects
   · 7 earlier effects not shown.
 
 Flows behind it
-  Date        Flow                                             Amount  State   From
-  ──────────────────────────────────────────────────────────────────────────────────────────────────
-  2025-05-15  assets/etrade → expenses/taxes/payroll      0.8701 NWND  actual  journal/2025/05.ax:10
-  2025-05-27  assets/fidelity → assets/bank/checking     14.9072 UNH   actual  journal/2025/05.ax:20
-  2025-06-10  equity/wash-sale → assets/fidelity        1,978.60 USD   actual  journal/2025/06.ax:11
-  2025-08-15  assets/etrade → expenses/taxes/federal     13.2000 NWND  actual  journal/2025/08.ax:7
-  2025-08-15  assets/etrade → expenses/taxes/payroll      0.8701 NWND  actual  journal/2025/08.ax:8
-  2025-09-02  assets/fidelity → assets/bank/checking     60.0000 FAST  actual  journal/2025/09.ax:3
-  2025-09-15  assets/etrade → assets/bank/checking       99.0799 NWND  actual  journal/2025/09.ax:10
-  2025-11-15  assets/etrade → expenses/taxes/federal     13.2001 NWND  actual  journal/2025/11.ax:10
-  2025-11-15  assets/etrade → expenses/taxes/payroll      0.8701 NWND  actual  journal/2025/11.ax:11
-  2025-12-04  assets/fidelity → assets/bank/checking      8.0000 VTI   actual  journal/2025/12.ax:8
-  2025-12-09  assets/wallet → assets/bank/checking    1.00000000 ETH   actual  journal/2025/12.ax:13
-  2025-12-16  assets/fidelity → assets/bank/checking    120.0480 VNQ   actual  journal/2025/12.ax:19
+  Date        Flow                                               Amount  State   From
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-05-15  assets/etrade → expenses/taxes/payroll        0.8701 NWND  actual  journal/2025/05.ax:10
+  2025-05-27  assets/fidelity → assets/bank/checking       14.9072 UNH   actual  journal/2025/05.ax:20
+  2025-06-10  equity/wash-sale → assets/fidelity.basis    1,978.60 USD   actual  journal/2025/06.ax:11
+  2025-08-15  assets/etrade → expenses/taxes/federal       13.2000 NWND  actual  journal/2025/08.ax:7
+  2025-08-15  assets/etrade → expenses/taxes/payroll        0.8701 NWND  actual  journal/2025/08.ax:8
+  2025-09-02  assets/fidelity → assets/bank/checking       60.0000 FAST  actual  journal/2025/09.ax:3
+  2025-09-15  assets/etrade → assets/bank/checking         99.0799 NWND  actual  journal/2025/09.ax:10
+  2025-11-15  assets/etrade → expenses/taxes/federal       13.2001 NWND  actual  journal/2025/11.ax:10
+  2025-11-15  assets/etrade → expenses/taxes/payroll        0.8701 NWND  actual  journal/2025/11.ax:11
+  2025-12-04  assets/fidelity → assets/bank/checking        8.0000 VTI   actual  journal/2025/12.ax:8
+  2025-12-09  assets/wallet → assets/bank/checking      1.00000000 ETH   actual  journal/2025/12.ax:13
+  2025-12-16  assets/fidelity → assets/bank/checking      120.0480 VNQ   actual  journal/2025/12.ax:19
   · 5 earlier flows not shown.
 
 Gains realized

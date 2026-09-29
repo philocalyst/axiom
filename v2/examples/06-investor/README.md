@@ -156,9 +156,5 @@ states cost and day).
 - **Tax on money drawn is missing from `available`'s costs.** The fork stops at the end of the year and the return
   closes on April 15 of the next: the 7,397.22 USD of unrealized gain in the employer stock costs nothing in the
   table, and the 401(k) shows the penalty but not the income tax on the withdrawal.
-- **`balance --value` counts a basis flow as money.** Its assets read 479,480.93 USD and its net worth the same,
-  9,619.97 USD above the 469,860.96 USD of `check` and of plain `balance`: the 7,641.37 USD of ESPP discounts and
-  the 1,978.60 USD of the wash sale, flows into a lot's basis, are valued as if they had arrived in the place
-  (it also prints "3 flows have no price on their day"). The report needs to skip flows into `PLACE.basis`.
 - **A market fall is not shown.** The 401(k) here has only contributions and interest; the market
   revaluation case (`via market` in an account that penalizes withdrawals) is shown in `05-family`.
