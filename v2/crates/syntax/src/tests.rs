@@ -497,7 +497,7 @@ account assets/broken :
 ";
     let (file, diags) = parse(FileId(0), src);
     assert_eq!(
-        diags.iter().map(|diag| diag.code).collect::<Vec<_>>(),
+        diags.iter().map(|diag| &*diag.code).collect::<Vec<_>>(),
         ["bare-zero", "expected-kind", "lowercase-commodity"]
     );
     assert_eq!(file.items.len(), 4);

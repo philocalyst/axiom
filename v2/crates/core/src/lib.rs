@@ -14,7 +14,7 @@ pub mod sym;
 pub mod tree;
 
 pub use day::{Day, Span};
-pub use diag::{Diagnostic, FileId, Loc, Severity};
+pub use diag::{Diagnostic, Disposition, FileId, Loc, Severity};
 pub use groups::Groups;
 pub use hash::{Map, Set};
 pub use id::{Arena, Id};

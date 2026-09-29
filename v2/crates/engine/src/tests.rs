@@ -165,7 +165,7 @@ fn a_failed_law_explains_itself_power_assert_style() {
     let violation = run.violations[0];
     assert_eq!((violation.cause, violation.warn, violation.waived), (Cause::Flow(over), false, false));
     let d = &run.diagnostics[violation.diagnostic as usize];
-    assert_eq!((d.code, d.severity), ("law", Severity::Error));
+    assert_eq!((&*d.code, d.severity), ("law", Severity::Error));
     assert_eq!(d.message, "Elective deferrals are capped per calendar year.");
     let primary = d.labels.iter().find(|l| l.primary).unwrap();
     assert_eq!(primary.loc, book.flows[over].loc);
@@ -266,7 +266,7 @@ fn unknown_amounts_are_solved_and_a_failed_assertion_names_the_flows_since() {
     let errors: Vec<_> = run.diagnostics.iter().filter(|d| d.is_error()).collect();
     assert_eq!(errors.len(), 1, "{errors:?}");
     let d = errors[0];
-    assert_eq!((d.code, d.message.as_str()), ("assertion", "assets/checking holds 690.00 USD, not 600.00 USD"));
+    assert_eq!((&*d.code, d.message.as_str()), ("assertion", "assets/checking holds 690.00 USD, not 600.00 USD"));
     assert_eq!(d.labels[0].text, "90.00 USD too much: the ledger holds more than this");
     let since: Vec<_> = d.labels.iter().skip(1).map(|l| (l.loc, l.text.as_str())).collect();
     assert_eq!(

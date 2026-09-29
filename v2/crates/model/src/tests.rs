@@ -48,8 +48,8 @@ fn with_book<R>(text: &str, then: impl FnOnce(&Book, &[Diagnostic]) -> R) -> R {
     with_files(&[("axiom.ax", &text)], then)
 }
 
-fn codes(diags: &[Diagnostic]) -> Vec<&'static str> {
-    diags.iter().map(|diag| diag.code).collect()
+fn codes(diags: &[Diagnostic]) -> Vec<&str> {
+    diags.iter().map(|diag| &*diag.code).collect()
 }
 
 /// `checking -> savings 10 USD`, as the book records it.

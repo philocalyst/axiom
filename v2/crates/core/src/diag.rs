@@ -3,6 +3,8 @@
 //! A diagnostic is data. It names source ranges and says things about them; the
 //! command line decides how to draw it.
 
+use std::borrow::Cow;
+
 /// A loaded source file.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct FileId(pub u16);
@@ -38,11 +40,26 @@ pub enum Severity {
     Note,
 }
 
+/// What became of a problem the ledger accepted rather than rejected. The
+/// summary line counts each.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
+pub enum Disposition {
+    /// Nothing: an error, a warning, or a plain note.
+    #[default]
+    Open,
+    /// A `require … else owe …` that failed and was resolved to a loss.
+    Priced,
+    /// Accepted by `!` or relaxed mode.
+    Waived,
+}
+
 #[derive(Clone, Debug)]
 pub struct Diagnostic {
     pub severity: Severity,
-    /// A stable kebab-case name, e.g. `unknown-place`, `law`.
-    pub code: &'static str,
+    /// A stable kebab-case name: `unknown-place`, or a law's own name
+    /// (`deferral-limit`) for what a law found.
+    pub code: Cow<'static, str>,
+    pub disposition: Disposition,
     pub message: String,
     /// The first primary label anchors the diagnostic.
     pub labels: Vec<Label>,
@@ -65,20 +82,34 @@ pub struct Help {
 }
 
 impl Diagnostic {
-    pub fn new(severity: Severity, code: &'static str, message: impl Into<String>) -> Diagnostic {
-        Diagnostic { severity, code, message: message.into(), labels: vec![], notes: vec![], help: vec![] }
+    pub fn new(severity: Severity, code: impl Into<Cow<'static, str>>, message: impl Into<String>) -> Diagnostic {
+        Diagnostic {
+            severity,
+            code: code.into(),
+            disposition: Disposition::Open,
+            message: message.into(),
+            labels: vec![],
+            notes: vec![],
+            help: vec![],
+        }
     }
 
-    pub fn error(code: &'static str, message: impl Into<String>) -> Diagnostic {
+    pub fn error(code: impl Into<Cow<'static, str>>, message: impl Into<String>) -> Diagnostic {
         Diagnostic::new(Severity::Error, code, message)
     }
 
-    pub fn warning(code: &'static str, message: impl Into<String>) -> Diagnostic {
+    pub fn warning(code: impl Into<Cow<'static, str>>, message: impl Into<String>) -> Diagnostic {
         Diagnostic::new(Severity::Warning, code, message)
     }
 
-    pub fn info(code: &'static str, message: impl Into<String>) -> Diagnostic {
+    pub fn info(code: impl Into<Cow<'static, str>>, message: impl Into<String>) -> Diagnostic {
         Diagnostic::new(Severity::Note, code, message)
+    }
+
+    /// Records what became of the problem.
+    pub fn disposed(mut self, disposition: Disposition) -> Diagnostic {
+        self.disposition = disposition;
+        self
     }
 
     /// Points at the cause.
