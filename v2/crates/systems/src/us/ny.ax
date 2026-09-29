@@ -41,8 +41,6 @@ law credit-ny-payments
   when to is ny-tax
   count amount as ny-withheld
   count amount as salt
-  when date > date(year, 12, 31)
-  owe -amount to dtf by date(year + 1, 4, 15) as paid-after-year-end
 
 /// New York State income tax for the year (Tax Law §601), on federal adjusted
 /// gross income less the state standard deduction. Long-term gains are taxed as
@@ -53,7 +51,7 @@ law credit-ny-payments
 /// To fix: the brackets depend on `filing`: set `filing single` or `filing joint`
 /// on the person or household that lives here.
 law state-income-tax
-  each year
+  each year closing 04-15
   let taxable = max(tally(agi) - deduction[year, owner.filing], empty)
   count taxable as ny-taxable-income
   let liability = progressive(brackets[year, owner.filing], taxable)

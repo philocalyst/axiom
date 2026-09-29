@@ -112,7 +112,7 @@ error[deadline]: grant money left unspent at the deadline
     = help: spend what is left on the grant's purpose before the deadline, or ask the funder for an
             extension and move `until`.
 
-note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, due 2026-02-02
+note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, due 2027-04-15
    ╭─[03-violations.ax:78:1]
    │
 78 │ 2026-02-02 retirement -> checking 10_000 USD
@@ -121,7 +121,7 @@ note[early-withdrawal]: 1,000.00 USD owed to irs as early-withdrawal-penalty, du
    │
    ├─[us/401k.ax:54:13] (built in)
    │
-54 │     require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "401(k)…
+54 │     require owner.age >= 59y6m else owe 10% * gain to irs by date(year + 1, 4, 15) as early-w…
    │             ────┬────
    │                 ╰── 37y9m21d
    │

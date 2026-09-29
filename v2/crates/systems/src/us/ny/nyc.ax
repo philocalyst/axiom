@@ -40,8 +40,6 @@ law credit-nyc-payments
   when to is nyc-tax
   count amount as nyc-withheld
   count amount as salt
-  when date > date(year, 12, 31)
-  owe -amount to nyc-dof by date(year + 1, 4, 15) as paid-after-year-end
 
 /// New York City resident income tax for the year (Administrative Code §11-1701),
 /// on the same taxable income as the state. What was paid by the end of the
@@ -51,7 +49,7 @@ law credit-nyc-payments
 /// To fix: the brackets depend on `filing`: set `filing single` or `filing joint`
 /// on the person or household that lives here.
 law city-income-tax
-  each year
+  each year closing 04-15
   let taxable = max(tally(agi) - deduction[year, owner.filing], empty)
   let liability = progressive(brackets[year, owner.filing], taxable)
   count liability as nyc-income-tax

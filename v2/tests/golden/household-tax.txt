@@ -28,7 +28,7 @@ Owed
   Owed                                    To   Due            Amount  From
   ─────────────────────────────────────────────────────────────────────────────────────────
     us/529
-      nonqualified-529-penalty (penalty)  irs  2026-03-25  34.94 USD  journal/2026/03.ax:34
+      nonqualified-529-penalty (penalty)  irs  2027-04-15  34.94 USD  journal/2026/03.ax:34
   ─────────────────────────────────────────────────────────────────────────────────────────
   Total owed                                               34.94 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

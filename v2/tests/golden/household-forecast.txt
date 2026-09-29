@@ -37,10 +37,9 @@ What recurs
   assets/bank/checking → expenses/insurance (insurer)           yearly     630.00 USD  2027-01-01  plan
 
 Obligations coming due
-  Due         Obligation          To        Amount
-  ────────────────────────────────────────────────
-  2027-04-15  federal-income-tax  irs  -230.77 USD
-  2027-04-15  ca-income-tax       ftb  -469.89 USD
+  Due         Obligation                To      Amount
+  ────────────────────────────────────────────────────
+  2027-04-15  nonqualified-529-penalty  irs  34.94 USD
 
 Problems ahead
   Date  Problem

@@ -4,9 +4,11 @@
 /// A household is governed as one: its members' pay, gains and withholding
 /// count into one return, and a household that files `joint` is taxed on the
 /// sum. The laws below watch value arrive and leave and count what the
-/// Internal Revenue Code calls income into named tallies. At the end of each
-/// year one law figures the tax from the tallies and owes what is left after
-/// the payments so far.
+/// Internal Revenue Code calls income into named tallies. The return closes on
+/// April 15 of the next year, and on that day the laws that figure it run: what
+/// the journal recognizes for the year by then counts, so an installment paid in
+/// January for the year before, or an IRA contribution made before the deadline,
+/// is part of it.
 ///
 /// The tallies are the lines of `axiom tax`, and they are the shared vocabulary
 /// of every system under `us`. A system for a kind of account adds to them, a
@@ -36,10 +38,8 @@
 ///                         `for` the year
 ///
 /// What is owed is the total tax less the payments, and it is owed by April 15
-/// of the next year. A payment made after the year ended, for that year (an
-/// installment in January), is owed back against it as it is made. When more
-/// was paid than is due the amount is negative: the IRS owes you a refund, and
-/// the report shows it as a negative amount owed.
+/// of the next year. When more was paid than is due the amount is negative: the
+/// IRS owes you a refund, and the report shows it as a negative amount owed.
 ///
 /// Simplified on purpose. It has the standard deduction, itemizing, the child
 /// tax credit and the net investment income tax, but not payroll tax, the
@@ -221,9 +221,8 @@ law deduct-contributions
   count amount as adjustments
 
 /// Tax withheld from pay, or paid in installments, is credited against the tax
-/// owed for the year the payment is `for`. The year-end law owes what is left
-/// after the payments made by then; one made later, an installment paid in
-/// January for the year before, is owed back against it on the day it is made.
+/// owed for the year the payment is `for`, so one made in January for the year
+/// before counts for that year.
 ///
 /// To fix: send the payment to a place of kind `federal-tax`, and say what year
 /// it is for with `for 2025`.
@@ -231,8 +230,6 @@ law count-payments
   on in
   when to is federal-tax
   count amount as payments
-  when date > date(year, 12, 31)
-  owe -amount to irs by date(year + 1, 4, 15) as paid-after-year-end
 
 
 // ─── Itemizing ──────────────────────────────────────────────────────────────
@@ -260,7 +257,7 @@ law count-property-tax
 /// To fix: the cap is a fact of the year, not a choice: itemize by other means
 /// or take the standard deduction.
 law cap-salt
-  each year
+  each year closing 04-15
   count min(tally(salt), salt-cap[year, owner.filing]) as itemized
 
 
@@ -275,7 +272,7 @@ law cap-salt
 /// To fix: to change what counts, change what was counted: `axiom why agi`
 /// lists every flow and law behind it.
 law adjusted-gross-income
-  each year
+  each year closing 04-15
   let short = tally(short-term-gains)
   let long = tally(long-term-gains)
   let short-net = max(short + min(long, empty), empty)
@@ -292,7 +289,7 @@ law adjusted-gross-income
 /// To fix: set `filing` on the person or household, and count itemized amounts
 /// into `itemized`.
 law standard-or-itemized
-  each year
+  each year closing 04-15
   count max(standard-deduction[year, owner.filing], tally(itemized)) as deductions
 
 /// A credit for each qualifying child under 17 (IRC §24). Set `children` on the
@@ -303,7 +300,7 @@ law standard-or-itemized
 /// To fix: `children` counts children, and does not age: change it when a child
 /// turns 17.
 law child-tax-credit
-  each year
+  each year closing 04-15
   count child-credit[year] * owner.children as credits
 
 /// The net investment income tax is 3.8% of net investment income, or of the
@@ -314,7 +311,7 @@ law child-tax-credit
 /// To fix: income above the threshold is what triggers it: adjustments and
 /// deductions lower it, and nothing else does.
 law net-investment-income-tax
-  each year
+  each year closing 04-15
   let excess = max(tally(agi) - investment-threshold[year, owner.filing], empty)
   count 3.8% * min(tally(investment-income), excess) as other-taxes
 
@@ -324,14 +321,13 @@ law net-investment-income-tax
 /// reduced by the deductions and taxed on the ordinary brackets. Long-term
 /// gains are stacked on top of it and taxed on the capital-gains brackets. Other
 /// taxes are added, and credits taken off, to give the total tax. What was paid
-/// by the end of the year is set against it, and the rest is owed by April 15
-/// (Form 1040). When more was paid than is due, the amount is negative: a
-/// refund.
+/// for the year is set against it, and the rest is owed by April 15 (Form 1040).
+/// When more was paid than is due, the amount is negative: a refund.
 ///
 /// To fix: the brackets depend on `filing`: set `filing single` or `filing joint`
 /// on the person or household that lives here.
 law federal-income-tax
-  each year
+  each year closing 04-15
   let deduction = tally(deductions)
   let ordinary-income = tally(agi) - tally(net-long-term-gains)
   let taxable = max(tally(agi) - deduction, empty)

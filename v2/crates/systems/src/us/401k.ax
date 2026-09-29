@@ -51,7 +51,7 @@ kind 401k : tax-deferred
     on gain
     when gain > empty
     when not to is market | tax-deferred
-    require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "401(k) withdrawal before age 59½"
+    require owner.age >= 59y6m else owe 10% * gain to irs by date(year + 1, 4, 15) as early-withdrawal-penalty "401(k) withdrawal before age 59½"
 
   /// From age 73, an owner must take a minimum distribution from a 401(k)
   /// every year (IRC §401(a)(9)). It is the balance at the end of the previous

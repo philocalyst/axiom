@@ -54,8 +54,8 @@ No errors. Three things are reported, none of them a failure:
   grocery run.
 - **A priced violation** on 2026-03-25, the 529 withdrawal to checking. It did
   not pay for school, so `nonqualified-penalty` resolves it to a loss: about
-  34.94 USD owed to the IRS, which is 10% of 349.37 USD in earnings. The same
-  earnings count as income.
+  34.94 USD owed to the IRS with the year's return (due 2027-04-15), which is
+  10% of 349.37 USD in earnings. The same earnings count as income.
 - **A waived gap** on 2026-03-31. The wallet should hold 77.50 USD and holds
   63.00 USD. The 14.50 USD difference is booked from `unknown`, and reported
   because it was waived and never hidden.
@@ -113,11 +113,13 @@ law counts it, because scholarship money spent on tuition is not taxable income
 (IRC §117).
 
 The `federal-income-tax` and `ca-income-tax` obligations are worked out when
-the year ends, and `axiom forecast` projects them. On these figures, with the
+the year's return closes, on April 15 of the next year, and `axiom forecast`
+projects them once its horizon reaches that day. On these figures, with the
 plans, the year comes to 11,209.23 USD of federal tax and 4,379.11 USD of
 California tax. More was withheld in both cases (11,440 USD and 4,849 USD), so
-the forecast lists two refunds due 2027-04-15: -230.77 USD federal and -469.89
-USD California. A refund is an obligation with a negative amount.
+`axiom forecast --until 2027-05-01` lists two refunds due 2027-04-15: -230.77 USD
+federal and -469.89 USD California. A refund is an obligation with a negative
+amount.
 
 ### `axiom forecast`
 

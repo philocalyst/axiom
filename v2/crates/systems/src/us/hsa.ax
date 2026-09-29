@@ -55,7 +55,7 @@ kind hsa : tax-deferred
     on gain
     when gain > empty
     when not to is market
-    require (to is medical | tax-deferred) or owner.age >= 65y else owe 20% * gain to irs as nonqualified-hsa-penalty "HSA withdrawal that did not pay a medical expense"
+    require (to is medical | tax-deferred) or owner.age >= 65y else owe 20% * gain to irs by date(year + 1, 4, 15) as nonqualified-hsa-penalty "HSA withdrawal that did not pay a medical expense"
 
 
 // The contribution limit by coverage (IRC §223(b)(2)).

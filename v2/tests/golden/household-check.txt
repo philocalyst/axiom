@@ -14,7 +14,7 @@ warning[budget]: expenses/food: 681.00 USD in 2026-02 against a limit of 650.00 
    │
    = help: at most 97.10 USD more can go in this month
 
-note[nonqualified-penalty]: 34.94 USD owed to irs as nonqualified-529-penalty, due 2026-03-25
+note[nonqualified-penalty]: 34.94 USD owed to irs as nonqualified-529-penalty, due 2027-04-15
    ╭─[journal/2026/03.ax:34:1]
    │
 34 │ 2026-03-25 college -> checking 1_500 USD
@@ -23,7 +23,7 @@ note[nonqualified-penalty]: 34.94 USD owed to irs as nonqualified-529-penalty, d
    │
    ├─[us/529.ax:58:13] (built in)
    │
-58 │     require to is education | 529-plan else owe 10% * gain to irs as nonqualified-529-penalty…
+58 │     require to is education | 529-plan else owe 10% * gain to irs by date(year + 1, 4, 15) as…
    │             ─┬
    │              ╰── assets/bank/checking
    │
@@ -42,4 +42,4 @@ note[pad]: accepted a gap on assets/cash
    │               ╰── 14.50 USD moved out of assets/cash into unknown
 
 1 warning · 1 priced · 1 waived
-✓ 67 flows · 26 places · 19 laws enforced · net worth 77,597.73 USD
+✓ 67 flows · 26 places · 14 laws enforced · net worth 77,597.73 USD
