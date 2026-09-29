@@ -8,13 +8,16 @@ error[assertion]: liabilities/visa holds 652.00 USD, not 252.00 USD
    │ ─────────────────┬────────────────
    │                  ╰── +152.00 USD to expenses/food
 14 │ 2026-01-25 visa -> checking 200.00 USD
-   │ ───────────────────┬──────────────────
-   │                    ╰── +200.00 USD to assets/checking
+   │ ─────────────────┬─┬──────────────────
+   │                  │ ╰── +200.00 USD to assets/checking
+   │                  ╰── probably written the wrong way round
 15 │ 2026-01-31 visa = 252.00 USD
    │ ──────────────┬─────────────
-   │               ╰── 400.00 USD too much: the ledger holds more than this
+   │               ╰── 400.00 USD less than the ledger holds
    │
-   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+   = note: the gap is exactly twice this flow (2 × 200.00 USD): it is probably written backwards
+   = help: write it the other way: `assets/checking -> liabilities/visa`
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 15 + 2026-01-31 visa = 252.00 USD !
 
 ✗ 1 error

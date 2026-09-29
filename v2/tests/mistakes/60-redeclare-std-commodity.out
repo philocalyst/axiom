@@ -1,17 +1,17 @@
-error[duplicate-declaration]: commodity `USD` is declared twice
+error[duplicate-declaration]: `USD` is already declared by system `std`
     ╭─[60-redeclare-std-commodity.ax:6:11]
     │
   6 │ commodity USD : currency
     │           ─┬─
-    │            ╰── first declared here
+    │            ╰── declared again here
     │
     ├─[std.ax:160:11] (built in)
     │
 160 │ commodity USD : currency
     │           ─┬─
-    │            ╰── declared again here
+    │            ╰── first declared here (built in)
     │
-    = help: remove one of the two declarations
+    = help: delete this declaration: the commodity already exists
 
 ✗ 1 error
 [exit status 1]

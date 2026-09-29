@@ -1,19 +1,13 @@
-error[expected-end-of-line]: expected the end of the line, found `)`
+error[unbalanced-delimiter]: this `)` closes nothing
    ╭─[83-extra-close-paren.ax:10:39]
    │
 10 │     warn (total(in, month)) <= 650 USD) "food is over budget"
    │                                       ┬
-   │                                       ╰── expected the end of the line
-
-error[unknown-place]: there is no place `food`
-   ╭─[83-extra-close-paren.ax:13:24]
+   │                                       ╰── nothing is open here
    │
-13 │ 2026-01-08 checking -> food 84.20 USD
-   │                        ──┬─
-   │                          ╰── not a known place
-   │
-   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
-           `expenses` or `equity`, for example `expenses/food`
+   = help: remove it
+10 -     warn (total(in, month)) <= 650 USD) "food is over budget"
+10 +     warn (total(in, month)) <= 650 USD "food is over budget"
 
-✗ 2 errors
+✗ 1 error
 [exit status 1]

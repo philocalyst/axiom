@@ -3,12 +3,10 @@ error[negative-amount]: amounts carry no sign
    │
 16 │ 2026-01-19 checking -> groceries -12.00 USD
    │                                  ┬
-   │                                  ╰── remove this `-`
+   │                                  ╰── a refund goes the other way
    │
-   = note: the arrow gives the direction: money moves from the left of `->` to the right
-   = help: remove the sign
-16 - 2026-01-19 checking -> groceries -12.00 USD
-16 + 2026-01-19 checking -> groceries 12.00 USD
+   = note: the arrow gives the direction: to record money coming back, swap the two places
+   = help: write a refund as its own flow, from where the money came back to where it left
 
 ✗ 1 error
 [exit status 1]

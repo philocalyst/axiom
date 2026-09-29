@@ -1,2 +1,14 @@
-✓ 2 flows · 5 places · 1 law enforced · net worth 1,650.00 USD
-[exit status 0]
+error[event-before-flow]: `#check-1041` is settled 2026-02-06, 4 days before it was written
+   ╭─[57-settle-before-written.ax:14:12]
+   │
+13 │ 2026-02-10 checking -> plumber (350 USD) #check-1041
+   │ ──────────────────────────┬─────────────────────────
+   │                           ╰── written on 2026-02-10
+14 │ 2026-02-06 #check-1041 settled
+   │            ─────┬─────
+   │                 ╰── settled on 2026-02-06
+   │
+   = help: an event happens on or after the flow it changes: date it 2026-02-10 or later
+
+✗ 1 error
+[exit status 1]

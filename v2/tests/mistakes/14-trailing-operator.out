@@ -5,15 +5,5 @@ error[expected-expression]: expected an expression, found the end of the line
    │                                       ┬
    │                                       ╰── expected an expression
 
-error[unknown-place]: there is no place `food`
-   ╭─[14-trailing-operator.ax:13:24]
-   │
-13 │ 2026-01-02 checking -> food 84.20 USD
-   │                        ──┬─
-   │                          ╰── not a known place
-   │
-   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
-           `expenses` or `equity`, for example `expenses/food`
-
-✗ 2 errors
+✗ 1 error
 [exit status 1]

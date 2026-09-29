@@ -1,2 +1,13 @@
-✓ 2 flows · 5 places · 1 law enforced · net worth 1,000.00 USD
-[exit status 0]
+error[empty-range]: this range ends on 2026-01-01, 364 days before it starts on 2026-12-31
+   ╭─[91-backwards-range.ax:10:1]
+   │
+10 │ 2026-12-31..2026-01-01 checking -> insurance 600 USD
+   │ ───────────┬──────────
+   │            ╰── a range runs from the earlier day to the later
+   │
+   = help: swap the bounds
+10 - 2026-12-31..2026-01-01 checking -> insurance 600 USD
+10 + 2026-01-01..2026-12-31 checking -> insurance 600 USD
+
+✗ 1 error
+[exit status 1]

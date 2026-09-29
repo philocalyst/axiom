@@ -1,4 +1,4 @@
-error[law]: grant money spent outside its purpose
+error[purpose]: grant money spent outside its purpose
     ╭─[70-grant-wrong-purpose.ax:18:1]
     │
  18 │ 2026-04-02 checking -> landlord 1_200 USD

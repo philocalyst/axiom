@@ -16,9 +16,11 @@ error[assertion]: assets/checking holds 3,015.80 USD, not 2,970.80 USD
    │                   ╰── -84.20 USD to expenses/food
 22 │ 2026-01-31 checking = 2_970.80 USD
    │ ─────────────────┬────────────────
-   │                  ╰── 45.00 USD too much: the ledger holds more than this
+   │                  ╰── 45.00 USD less than the ledger holds
    │
-   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+   = note: 45.00 USD is neither twice a flow nor a transposition: most likely a flow is missing
+   = help: record the missing flow
+   = help: or accept the gap: it is booked from `equity/unknown` and shown in every report
 22 + 2026-01-31 checking = 2_970.80 USD !
 
 ✗ 1 error

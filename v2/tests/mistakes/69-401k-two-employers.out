@@ -1,6 +1,11 @@
-error[law]: 401(k) deferrals over the yearly limit
+error[deferral-limit]: 401(k) deferrals over the yearly limit: 27,000.00 USD in 2026 against a limit of 24,500.00 USD, over by 2,500.00 USD
    ╭─[69-401k-two-employers.ax:32:3]
    │
+26 │ 2026-05-29 acme -> 20_000 USD
+27 │   retirement  15_000 USD
+   │   ───────────┬──────────
+   │              ╰── 2026-05-29: 15,000.00 USD from income/salary to assets/retirement
+   ⋮
 31 │ 2026-06-26 newco -> 16_000 USD
 32 │   retirement-newco  12_000 USD
    │   ──────────────┬─────────────
@@ -9,12 +14,8 @@ error[law]: 401(k) deferrals over the yearly limit
    ├─[us/401k.ax:33:13] (built in)
    │
 33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
-   │             ────────────┬───────────┬─────────┬──┬─┬─────┬──
-   │                         │           │         │  │ │     ╰── empty
-   │                         │           │         │  │ ╰── 24,500.00 USD
-   │                         │           │         │  ╰── 2026
-   │                         │           │         ╰── 24,500.00 USD
-   │                         │           ╰── false
+   │             ────────────┬────────────    ─────────┬─────────
+   │                         │                         ╰── 24,500.00 USD
    │                         ╰── 27,000.00 USD
    │
    = note: Elective deferrals are capped for each person and calendar year, across every plan they

@@ -1,4 +1,4 @@
-warning[law]: balance below zero
+warning[overdraft]: balance below zero: -1,000.00 USD against a minimum of 0.00 USD, short by 1,000.00 USD
    ╭─[44-overdraft.ax:15:1]
    │
 15 │ 2026-01-01 checking -> landlord 1_800 USD
@@ -8,8 +8,7 @@ warning[law]: balance below zero
    ├─[std.ax:26:10] (built in)
    │
 26 │     warn balance >= empty "balance below zero"
-   │          ───┬────┬───────
-   │             │    ╰── false
+   │          ───┬───
    │             ╰── -1,000.00 USD
    │
    = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
@@ -17,5 +16,5 @@ warning[law]: balance below zero
            or a missing deposit that explains it.
 
 1 warning
-✓ 3 flows · 6 places · 1 law enforced · net worth 8,000.00 USD
+✓ 3 flows · 4 places · 1 law enforced · net worth 8,000.00 USD
 [exit status 0]

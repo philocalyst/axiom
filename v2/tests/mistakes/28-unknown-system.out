@@ -3,7 +3,7 @@ error[unknown-system]: there is no system `us/401l`
   │
 4 │ use us/401l
   │     ───┬───
-  │        ╰── no system has this path
+  │        ╰── not a known system
   │
   = help: did you mean `us/401k`?
 4 - use us/401l

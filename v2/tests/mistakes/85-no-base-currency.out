@@ -22,5 +22,17 @@ error[no-price]: cannot check `overdraft`: no price for EUR in USD on 2025-12-31
    │
    = help: add a price line such as `2025-12-31 EUR <price> USD`
 
-✗ 2 errors
+error[no-base]: the journal uses `USD` and `EUR`, and no `base` says which one values the others
+   ╭─[85-no-base-currency.ax:10:47]
+   │
+ 9 │ 2025-12-31 equity/opening -> checking 1_000 USD
+   │                                             ─┬─
+   │                                              ╰── USD is first written here
+10 │ 2025-12-31 equity/opening -> euro-account 500 EUR
+   │                                               ─┬─
+   │                                                ╰── EUR is a second currency
+   │
+   = help: declare the base currency, for example `base USD`
+
+✗ 3 errors
 [exit status 1]

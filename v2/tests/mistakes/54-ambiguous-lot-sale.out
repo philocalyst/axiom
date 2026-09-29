@@ -12,6 +12,7 @@ error[ambiguous-lots]: ambiguous lot: assets/brokerage holds 2 lots that differ 
    │                         ╰── 8 VTI could come from any of them
    │
    = note: the sale still moves the oldest lot first, so the lines after it stay consistent
+   = note: later sales from this place are booked the same way, without another report
    = help: name the lot, `assets/brokerage[2026-01-22]`, or a policy, `assets/brokerage[fifo]` (or
            lifo, hifo, prorata), or give the account `select fifo`
 
