@@ -1,0 +1,3 @@
+kind piggy-bank : asset
+
+account assets/piggy : piggy-bank

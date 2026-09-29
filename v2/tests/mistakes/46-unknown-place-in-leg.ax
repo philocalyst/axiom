@@ -1,0 +1,16 @@
+// MISTAKE: a leg names `taxes/federl`, a typo of a declared account.
+base USD
+use std
+
+account assets/checking : bank
+account assets/savings  : bank
+account income/salary   : wages
+account equity/opening
+
+entity acme : employer
+  via income/salary
+
+account expenses/taxes/federal
+2026-01-15 acme -> 5_000 USD
+  taxes/federl  900 USD
+  checking      ...

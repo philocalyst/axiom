@@ -1,0 +1,14 @@
+// MISTAKE: `0` where an amount belongs; the card is paid off and the balance
+// should be asserted as `empty`.
+base USD
+use std
+
+account assets/checking : bank
+account liabilities/visa : credit-card
+account expenses/food/groceries
+account equity/opening
+
+2026-01-02 equity/opening -> checking 1_000 USD
+2026-01-08 visa -> groceries 84.20 USD
+2026-01-20 checking -> visa 84.20 USD
+2026-01-31 visa = 0

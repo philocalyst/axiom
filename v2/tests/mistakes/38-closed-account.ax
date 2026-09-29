@@ -1,0 +1,12 @@
+// MISTAKE: money flows into an account after the day it closed.
+base USD
+use std
+
+account assets/checking : bank
+account assets/old-savings : bank
+  opened 2024-01-01
+  closed 2026-01-31
+account equity/opening
+
+2025-12-31 equity/opening -> checking 2_000 USD
+2026-03-20 checking -> old-savings 500 USD

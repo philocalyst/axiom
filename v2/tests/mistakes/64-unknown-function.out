@@ -1,0 +1,12 @@
+error[unknown-function]: there is no function `sum`
+   ╭─[64-unknown-function.ax:10:10]
+   │
+10 │     warn sum(in, month) <= 650 USD "food is over budget"
+   │          ─┬─
+   │           ╰── not a function
+   │
+   = note: the functions are `total`, `tally`, `min`, `max`, `abs`, `progressive`, `value` or `date`
+───╯
+
+✗ 1 error
+[exit status 1]

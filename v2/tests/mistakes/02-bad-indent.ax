@@ -1,0 +1,16 @@
+// MISTAKE: the second leg is indented deeper than the first, so it looks like
+// a continuation of the leg above it.
+base USD
+use std
+
+account assets/checking : bank
+account assets/savings  : bank
+account income/salary   : wages
+account equity/opening
+
+entity acme : employer
+  via income/salary
+
+2026-01-15 acme -> 5_000 USD
+  savings   500 USD
+    checking  ...

@@ -1,0 +1,15 @@
+// MISTAKE: a sale from an account with no lot policy, holding two lots that differ.
+base USD
+use std
+
+commodity VTI : fund
+  precision 0
+
+account assets/brokerage
+account assets/checking : bank
+account equity/opening
+
+2025-12-31 equity/opening -> checking 5_000 USD
+2026-01-22 checking 2_000 USD -> brokerage 7 VTI
+2026-02-18 checking 1_500 USD -> brokerage 5 VTI
+2026-03-02 brokerage 8 VTI -> checking 2_400 USD

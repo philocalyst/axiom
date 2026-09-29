@@ -1,0 +1,14 @@
+error[amounts-differ]: the two sides state different amounts
+   ╭─[37-transfer-unequal.ax:14:29]
+   │
+14 │ 2026-01-20 checking 500 USD -> savings 450 USD
+   │                             ─┬
+   │                              ╰── 500.00 USD leaves, but 450.00 USD arrives
+   │
+   = note: a transfer keeps its amount: value is never created or lost between the two places
+   = help: if the difference is a fee or a rounding, write it as its own leg, or state the amount
+           once
+───╯
+
+✗ 1 error
+[exit status 1]

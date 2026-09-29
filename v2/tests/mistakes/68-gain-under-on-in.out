@@ -1,0 +1,12 @@
+error[law-variable]: `gain` is not available in this law
+   ╭─[68-gain-under-on-in.ax:12:10]
+   │
+12 │     warn gain <= 1_000 USD "large gain"
+   │          ──┬─
+   │            ╰── this law's trigger does not provide `gain`
+   │
+   = help: `gain` is provided by `on gain` laws
+───╯
+
+✗ 1 error
+[exit status 1]

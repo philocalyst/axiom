@@ -1,0 +1,16 @@
+error[repeated-event]: `#check-1041` already has an event
+   ╭─[52-void-twice.ax:15:1]
+   │
+13 │ 2026-02-01 checking -> plumber (350 USD) #check-1041
+   │ ──────────────────────────┬─────────────────────────
+   │                           ╰── the flow
+14 │ 2026-02-10 #check-1041 void
+15 │ 2026-02-12 #check-1041 void
+   │ ─────────────┬─────────────
+   │              ╰── a flow takes one event; this second one is ignored for the flow below
+   │
+   = help: if a settled payment later bounces, write a new flow that reverses it
+───╯
+
+✗ 1 error
+[exit status 1]

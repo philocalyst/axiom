@@ -1,0 +1,27 @@
+// PROBE: `born` is missing and the deferral law needs it. Paychecks in three months
+// of two different years: does one missing line give one error, or one per paycheck
+// and per law?
+base USD
+use std
+use us/401k
+
+entity me : person
+  filing single
+  lives  us
+
+account assets/checking : bank
+account assets/retirement : 401k
+  employer acme
+account income/salary : wages
+entity acme : employer
+  via income/salary
+
+2025-11-15 acme -> 8_000 USD
+  retirement  800 USD
+  checking    ...
+2025-12-15 acme -> 8_000 USD
+  retirement  800 USD
+  checking    ...
+2026-01-15 acme -> 8_000 USD
+  retirement  800 USD
+  checking    ...

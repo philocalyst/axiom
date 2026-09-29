@@ -1,0 +1,8 @@
+base USD
+use std
+account assets/checking : bank
+account expenses/food
+account equity/opening
+2025-12-31 equity/opening -> checking 100 USD
+2026-01-08 checking -> food 150 USD
+2026-01-31 checking = -50 USD

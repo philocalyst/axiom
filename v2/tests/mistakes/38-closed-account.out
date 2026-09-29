@@ -1,0 +1,12 @@
+error[place-closed]: `assets/old-savings` closed on 2026-01-31
+   ╭─[38-closed-account.ax:12:24]
+   │
+12 │ 2026-03-20 checking -> old-savings 500 USD
+   │                        ─────┬─────
+   │                             ╰── this flow is dated 2026-03-20
+   │
+   = help: use another account, or change `opened` or `closed`
+───╯
+
+✗ 1 error
+[exit status 1]

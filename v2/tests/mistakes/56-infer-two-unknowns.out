@@ -1,0 +1,51 @@
+error[cannot-infer]: cannot infer the amount of this flow
+   ╭─[56-infer-two-unknowns.ax:12:1]
+   │
+12 │ 2026-02-08 checking -> cash ? USD
+   │ ────────────────┬────────────────
+   │                 ╰── this amount is unknown
+13 │ 2026-02-12 checking -> food ? USD
+   │ ────────────────┬────────────────
+   │                 ╰── also unknown
+   │
+   = note: more than one amount is unknown between two assertions on assets/checking; one equation
+           cannot solve them all
+   = help: assert assets/cash's balance after 2026-02-08 so the amount can be solved: `DATE
+           assets/cash = AMOUNT`
+───╯
+
+error[cannot-infer]: cannot infer the amount of this flow
+   ╭─[56-infer-two-unknowns.ax:13:1]
+   │
+12 │ 2026-02-08 checking -> cash ? USD
+   │ ────────────────┬────────────────
+   │                 ╰── also unknown
+13 │ 2026-02-12 checking -> food ? USD
+   │ ────────────────┬────────────────
+   │                 ╰── this amount is unknown
+   │
+   = note: more than one amount is unknown between two assertions on assets/checking; one equation
+           cannot solve them all
+   = help: assert expenses/food's balance after 2026-02-12 so the amount can be solved: `DATE
+           expenses/food = AMOUNT`
+───╯
+
+error[assertion]: assets/checking holds 1,000.00 USD, not 800.00 USD
+   ╭─[56-infer-two-unknowns.ax:14:1]
+   │
+12 │ 2026-02-08 checking -> cash ? USD
+   │ ────────────────┬────────────────
+   │                 ╰── -0.00 USD to assets/cash
+13 │ 2026-02-12 checking -> food ? USD
+   │ ────────────────┬────────────────
+   │                 ╰── -0.00 USD to expenses/food
+14 │ 2026-02-28 checking = 800 USD
+   │ ──────────────┬──────────────
+   │               ╰── 200.00 USD too much: the ledger holds more than this
+   │
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+14 + 2026-02-28 checking = 800 USD !
+───╯
+
+✗ 3 errors
+[exit status 1]

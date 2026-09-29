@@ -1,0 +1,12 @@
+error[layout]: files under `systems/` must be systems
+  ╭─[systems/mine.ax:1:1]
+  │
+1 │ kind piggy-bank : asset
+  │ ───────────┬───────────
+  │            ╰── this file does not begin with `system`
+  │
+  = help: start it with `system PATH`, or move it out of `systems/`, or set `layout free`
+──╯
+
+✗ 1 error
+[exit status 1]

@@ -1,0 +1,17 @@
+error[unexpected-indent]: this line is indented further than the lines above it
+   ╭─[02-bad-indent.ax:16:5]
+   │
+14 │ 2026-01-15 acme -> 5_000 USD
+15 │   savings   500 USD
+   │   ────────┬────────
+   │           ╰── this line takes no indented block
+16 │     checking  ...
+   │     ──────┬──────
+   │           ╰── indented 4 spaces, where the block uses 2
+   │
+   = help: align it with the block
+16 +   checking  ...
+───╯
+
+✗ 1 error
+[exit status 1]

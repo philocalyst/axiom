@@ -1,0 +1,23 @@
+error[law]: grant money spent outside its purpose
+    ╭─[70-grant-wrong-purpose.ax:18:1]
+    │
+ 18 │ 2026-04-02 checking -> landlord 1_200 USD
+    │ ────────────────────┬────────────────────
+    │                     ╰── this flow: 1,200.00 USD of restricted money leaving assets/checking
+    │
+    ├─[std.ax:148:13]
+    │
+148 │     require to is self.purpose "grant money spent outside its purpose"
+    │             ─┬──────┬─┬─┬─────
+    │              │      │ │ ╰── education
+    │              │      │ ╰── false
+    │              │      ╰── scholarship
+    │              ╰── expenses/rent
+    │
+    = note: Grant money may only be spent on what the grant names. This payment went somewhere else.
+            Pay it from another account, or, if the funder agreed to the change, update `purpose` on
+            the grant.
+────╯
+
+✗ 1 error
+[exit status 1]

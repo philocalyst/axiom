@@ -1,0 +1,13 @@
+error[assertion]: assets/checking holds 0.00 EUR, not 915.80 EUR
+   ╭─[58-assert-wrong-commodity.ax:11:1]
+   │
+11 │ 2026-01-31 checking = 915.80 EUR
+   │ ────────────────┬───────────────
+   │                 ╰── 915.80 EUR missing: the ledger holds less than this
+   │
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+11 + 2026-01-31 checking = 915.80 EUR !
+───╯
+
+✗ 1 error
+[exit status 1]

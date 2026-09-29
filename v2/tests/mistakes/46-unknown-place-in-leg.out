@@ -1,0 +1,16 @@
+error[unknown-place]: there is no place `taxes/federl`
+   ╭─[46-unknown-place-in-leg.ax:15:3]
+   │
+14 │ 2026-01-15 acme -> 5_000 USD
+15 │   taxes/federl  900 USD
+   │   ──────┬─────
+   │         ╰── not a known place
+   │
+   = help: did you mean `taxes/federal`?
+15 +   taxes/federal  900 USD
+   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
+           `expenses` or `equity`, for example `expenses/federl`
+───╯
+
+✗ 1 error
+[exit status 1]

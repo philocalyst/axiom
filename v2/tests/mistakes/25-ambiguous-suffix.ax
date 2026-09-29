@@ -1,0 +1,11 @@
+// MISTAKE: two accounts end in `checking`, and the flow names only the suffix.
+base USD
+use std
+
+account assets/bank/checking : bank
+account assets/old-bank/checking : bank
+account expenses/food
+account equity/opening
+
+2025-12-31 equity/opening -> assets/bank/checking 1_000 USD
+2026-01-08 checking -> food 84.20 USD

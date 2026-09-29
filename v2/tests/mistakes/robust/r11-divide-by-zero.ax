@@ -1,0 +1,12 @@
+base USD
+use std
+
+account assets/checking : bank
+account expenses/food
+  law div
+    on in
+    warn amount / 0 > 1 "boom"
+account equity/opening
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2026-01-08 checking -> food 84.20 USD

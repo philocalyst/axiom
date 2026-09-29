@@ -1,0 +1,13 @@
+error[glued-amount]: `84.20USD` needs a space between the number and its commodity
+   ╭─[18-glued-amount.ax:15:34]
+   │
+15 │ 2026-01-18 checking -> groceries 84.20USD
+   │                                  ────┬───
+   │                                      ╰── number and commodity run together
+   │
+   = help: amounts are written `84.20 USD`
+15 + 2026-01-18 checking -> groceries 84.20 USD
+───╯
+
+✗ 1 error
+[exit status 1]

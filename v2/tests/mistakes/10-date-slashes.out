@@ -1,0 +1,13 @@
+error[unknown-keyword]: unknown keyword `01/15/2026`
+   ╭─[10-date-slashes.ax:15:1]
+   │
+15 │ 01/15/2026 checking -> groceries 84.20 USD
+   │ ─────┬────
+   │      ╰── a line starts with a date or a keyword
+   │
+   = note: the keywords are `account`, `entity`, `commodity`, `kind`, `code`, `param`, `law`,
+           `every`, `sync`, `system`, `use`, `base`, `relaxed`, `layout`
+───╯
+
+✗ 1 error
+[exit status 1]

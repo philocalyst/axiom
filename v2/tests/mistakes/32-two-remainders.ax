@@ -1,0 +1,15 @@
+// MISTAKE: two `...` legs in one paycheck.
+base USD
+use std
+
+account assets/checking : bank
+account assets/savings  : bank
+account income/salary   : wages
+account equity/opening
+
+entity acme : employer
+  via income/salary
+
+2026-01-15 acme -> 5_000 USD
+  savings   ...
+  checking  ...

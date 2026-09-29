@@ -1,0 +1,5 @@
+base USD
+use std
+account assets/café : bank
+account expenses/food
+2026-01-08 café -> food 84.20 USD

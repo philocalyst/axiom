@@ -1,0 +1,24 @@
+// MISTAKE: `tally(wagess)` reads a line that no law counts (a typo of `wages`).
+base USD
+use std
+use us
+
+entity me : person
+  born   1988-04-12
+  filing single
+  lives  us
+
+account assets/checking : bank
+account income/salary : wages
+account expenses/taxes/federal : federal-tax
+entity acme : employer
+  via income/salary
+
+law wages-note
+  on in
+  when from is wages
+  require tally(wagess) <= 500_000 USD "wages over 500_000 USD"
+
+2026-01-15 acme -> 8_000 USD
+  taxes/federal  880 USD
+  checking       ...

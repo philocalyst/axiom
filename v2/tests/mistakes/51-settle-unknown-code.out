@@ -1,0 +1,14 @@
+error[unknown-code]: no transaction is marked `#check-1014`
+   ╭─[51-settle-unknown-code.ax:14:12]
+   │
+14 │ 2026-02-06 #check-1014 settled
+   │            ─────┬─────
+   │                 ╰── nothing carries this code
+   │
+   = note: an event names the transaction it changes by its code
+   = help: did you mean `#check-1041`?
+14 + 2026-02-06 #check-1041 settled
+───╯
+
+✗ 1 error
+[exit status 1]

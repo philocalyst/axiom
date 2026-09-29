@@ -1,0 +1,27 @@
+error[tab-indent]: tabs cannot indent a line
+   ╭─[01-tab-indent.ax:14:1]
+   │
+13 │ 2026-01-15 acme -> 5_000 USD
+14 │     savings   500 USD
+   │ ──┬─
+   │   ╰── this tab
+   │
+   = note: indentation is spaces, so a block's shape looks the same in every editor
+   = help: indent with two spaces per tab
+14 +   savings   500 USD
+───╯
+
+error[tab-indent]: tabs cannot indent a line
+   ╭─[01-tab-indent.ax:15:1]
+   │
+15 │     checking  ...
+   │ ──┬─
+   │   ╰── this tab
+   │
+   = note: indentation is spaces, so a block's shape looks the same in every editor
+   = help: indent with two spaces per tab
+15 +   checking  ...
+───╯
+
+✗ 2 errors
+[exit status 1]

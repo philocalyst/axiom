@@ -1,0 +1,381 @@
+Constraint-surfacing probes. Household example at 2026-03-31 unless a case file is named.
+
+══ 1. Which laws govern an account? (401k: 13 laws listed, no limits, no headroom)
+$ axiom why retirement -C ../../examples/02-household --today 2026-03-31
+Why assets/retirement
+
+Composition
+  Holds       Quantity  Plain money  Parcels
+  ──────────────────────────────────────────
+  USD    43,700.00 USD                     1
+
+Parcels
+  Place                   Quantity     Basis  Acquired    Tied to  From
+  ─────────────────────────────────────────────────────────────────────────────────────
+  assets/retirement  43,700.00 USD  0.00 USD  2025-12-31           journal/2025/12.ax:9
+
+Governed by
+  Law                            When       Governs                                                      Explains                                                                    Written
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  deferral-limit                 on in      every 401k                                                   Elective deferrals are capped for each person and calendar year, across     us/401k.ax:28
+  pretax-deferral                on in      every 401k                                                   A deferral is pay you chose not to receive, so it is not taxed this year    us/401k.ax:38
+  count-wages                    on in      everyone living under us, and all they own                   Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a   us.ax:58
+  count-interest                 on in      everyone living under us, and all they own                   Interest is ordinary income in the year it is earned (IRC §61(a)(4)),       us.ax:66
+  count-dividends                on in      everyone living under us, and all they own                   Dividends are income in the year they are paid (IRC §61(a)(7)), except      us.ax:76
+  credit-withholding             on in      everyone living under us, and all they own                   Tax withheld from pay, or paid in installments, is credited against the     us.ax:108
+  credit-ca-withholding          on in      everyone living under us/ca, and all they own                Tax withheld from pay, or paid in installments, is credited against the     us/ca.ax:36
+  count-distributions            on gain    every 401k                                                   Money that comes out of a 401(k) is ordinary income in the year it comes    us/401k.ax:48
+  early-withdrawal               on gain    every 401k                                                   Money taken out before age 59½ carries an additional 10% tax on top of      us/401k.ax:60
+  count-short-term-gains         on gain    everyone living under us, and all they own                   A gain on something held for a year or less is taxed as ordinary income     us.ax:86
+  count-long-term-gains          on gain    everyone living under us, and all they own                   A gain on something held for more than a year is taxed at the lower         us.ax:97
+  transfer-tax                   on gain    everyone living under us/ca/san-francisco, and all they own  Selling real property in San Francisco owes the city a transfer tax on the  us/ca/san-francisco.ax:33
+  required-minimum-distribution  each year  every 401k                                                   From age 73, an owner must take a minimum distribution from a 401(k)        us/401k.ax:73
+
+Recent flows
+  Date        With            Payee  Note         Amount        Balance
+  ─────────────────────────────────────────────────────────────────────
+  2025-12-31  equity/opening               41,300.00 USD  41,300.00 USD
+  2026-01-15  income/salary   acme            800.00 USD  42,100.00 USD
+  2026-02-13  income/salary   acme            800.00 USD  42,900.00 USD
+  2026-03-13  income/salary   acme            800.00 USD  43,700.00 USD
+[exit status 0]
+
+══ 2. What limit applies this year, and how close am I? (budget lists only budgets)
+$ axiom budget 2026-03 -C ../../examples/02-household --today 2026-03-31
+Budgets for 2026-03-01
+
+  Place           Law             Window        Spent       Limit        Left  Used
+  ─────────────────────────────────────────────────────────────────────────────────
+  assets/college  gift-exclusion  2026     900.00 USD
+  expenses/food   budget          2026-03  474.50 USD  650.00 USD  175.50 USD   73%
+[exit status 0]
+
+══ 3. The 401(k) deferral cap is a law: what does it say it has counted?
+$ axiom why deferral-limit -C ../../examples/02-household --today 2026-03-31
+Why deferral-limit
+
+  Law       deferral-limit
+  ─────────────────────────────────
+  When      on in
+  Governs   every 401k
+  Written   us/401k.ax:28
+  Ran       3 times
+  Recorded  0 violations, 3 effects
+  · Elective deferrals are capped for each person and calendar year, across
+  · every plan they hold (IRC §402(g)), with a catch-up from age 50 and a
+  · larger one from 60 through 63 (IRC §414(v)). Employer contributions do not
+  · count. This payment took the year's deferrals over the cap. Ask payroll to lower the deferral.
+    Any excess must also be returned
+  · by the plan before April 15 of the next year, or it is taxed twice
+  · (IRC §402(g)(2)).
+
+Recent effects
+  Date        Effect                  Amount  Owed to  From
+  ──────────────────────────────────────────────────────────────────────────
+  2026-01-15  elective-deferrals  800.00 USD           journal/2026/01.ax:18
+  2026-02-13  elective-deferrals  800.00 USD           journal/2026/02.ax:33
+  2026-03-13  elective-deferrals  800.00 USD           journal/2026/03.ax:15
+[exit status 0]
+
+══ 4. The tally behind the cap
+$ axiom why elective-deferrals -C ../../examples/02-household --today 2026-03-31
+Why elective-deferrals
+
+Effects
+  Date        Owner      Amount  Owed to  From
+  ─────────────────────────────────────────────────────────────
+  2026-01-15  me     800.00 USD           journal/2026/01.ax:18
+  2026-02-13  me     800.00 USD           journal/2026/02.ax:33
+  2026-03-13  me     800.00 USD           journal/2026/03.ax:15
+
+Flows behind it
+  Date        Flow                                   Amount  From
+  ────────────────────────────────────────────────────────────────────────────────
+  2026-01-15  income/salary → assets/retirement  800.00 USD  journal/2026/01.ax:18
+  2026-02-13  income/salary → assets/retirement  800.00 USD  journal/2026/02.ax:33
+  2026-03-13  income/salary → assets/retirement  800.00 USD  journal/2026/03.ax:15
+[exit status 0]
+
+══ 5. The same on the year's tax page (a tally, but no limit next to it)
+$ axiom tax 2026 -C ../../examples/02-household --today 2026-03-31
+Taxes 2026 for me
+
+Counted
+  Tally                          Amount  From
+  ────────────────────────────────────────────────────────────
+  us
+    wages                 24,000.00 USD  15 sources
+    federal-withheld       2,640.00 USD  3 sources
+    interest                 147.05 USD  3 sources
+    short-term-gains         141.55 USD  2 sources
+    dividends                  1.88 USD  journal/2026/03.ax:37
+  ────────────────────────────────────────────────────────────
+    us/401k
+      elective-deferrals   2,400.00 USD  3 sources
+      pretax               2,400.00 USD  3 sources
+      agi                 22,239.85 USD  25 sources
+  ────────────────────────────────────────────────────────────
+    us/529
+      distributions          349.37 USD  journal/2026/03.ax:34
+  ────────────────────────────────────────────────────────────
+    us/ca
+      ca-withheld          1,110.00 USD  3 sources
+
+Owed
+  Owed                          To   Due            Amount  From
+  ───────────────────────────────────────────────────────────────────────────────
+    us/529
+      nonqualified-529-penalty  irs  2026-03-25  34.94 USD  journal/2026/03.ax:34
+  ───────────────────────────────────────────────────────────────────────────────
+  Total owed                                     34.94 USD
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
+[exit status 0]
+
+══ 6. A priced violation (529 non-qualified withdrawal) is invisible in check
+$ axiom check -C ../../examples/02-household --today 2026-03-31
+warning[law]: law `budget` does not hold for expenses/food
+   ╭─[journal/2026/02.ax:57:1]
+   │
+57 │ 2026-02-25 visa -> groceries 128.10 USD / trader-joes
+   │ ──────────────────────────┬──────────────────────────
+   │                           ╰── this flow: 128.10 USD into expenses/food/groceries
+   │
+   ├─[accounts.ax:60:3]
+   │
+59 │ account expenses/food
+60 │   budget 650 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 681.00 USD
+   │
+   = help: at most 97.10 USD more can go in this month
+───╯
+
+note[pad]: accepted a gap on assets/cash
+   ╭─[journal/2026/03.ax:42:1]
+   │
+42 │ 2026-03-31 cash = 63.00 USD !
+   │ ──────────────┬──────────────
+   │               ╰── 14.50 USD moved out of assets/cash into unknown
+   │
+───╯
+
+1 warning
+✓ 68 flows · 28 places · 16 laws enforced · net worth 77,597.73 USD
+[exit status 0]
+
+══ 7. A priced violation of the 401(k): check says nothing
+$ axiom check 71-early-withdrawal.ax --today 2026-06-30
+✓ 2 flows · 4 places · 4 laws enforced · net worth 40,000.00 USD
+[exit status 0]
+
+══ 8. ...the cost is only visible in tax
+$ axiom tax 2026 -C 71-early-withdrawal.ax --today 2026-06-30
+Taxes 2026 for me
+
+Counted
+  Tally                     Amount  From
+  ───────────────────────────────────────────────────────────
+    us/401k
+      distributions  10,000.00 USD  71-early-withdrawal.ax:20
+      agi            10,000.00 USD  71-early-withdrawal.ax:20
+
+Owed
+  Owed                          To   Due               Amount  From
+  ──────────────────────────────────────────────────────────────────────────────────────
+    us/401k
+      early-withdrawal-penalty  irs  2026-02-02  1,000.00 USD  71-early-withdrawal.ax:20
+  ──────────────────────────────────────────────────────────────────────────────────────
+  Total owed                                     1,000.00 USD
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
+[exit status 0]
+
+══ 9. A law whose name exists in two systems cannot be asked about
+$ axiom why early-withdrawal -C 71-early-withdrawal.ax --today 2026-06-30
+error[ambiguous-law]: `early-withdrawal` could be `early-withdrawal`, `early-withdrawal`
+  = help: write more of the law's path
+
+✗ 1 error
+[exit status 1]
+
+══ 10. Reports refuse while any error stands (69: 401k over the limit)
+$ axiom why retirement -C 69-401k-two-employers.ax --today 2026-06-30
+error[law]: 401(k) deferrals over the yearly limit
+   ╭─[69-401k-two-employers.ax:32:3]
+   │
+31 │ 2026-06-26 newco -> 16_000 USD
+32 │   retirement-newco  12_000 USD
+   │   ──────────────┬─────────────
+   │                 ╰── this flow: 12,000.00 USD into assets/retirement-newco
+   │
+   ├─[us/401k.ax:33:13]
+   │
+33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearly limit"
+   │             ────────────┬───────────┬─────────┬──┬─┬─────┬──
+   │                         │           │         │  │ │     ╰── empty
+   │                         │           │         │  │ ╰── 24,500.00 USD
+   │                         │           │         │  ╰── 2026
+   │                         │           │         ╰── 24,500.00 USD
+   │                         │           ╰── false
+   │                         ╰── 27,000.00 USD
+   │
+   = note: Elective deferrals are capped for each person and calendar year, across every plan they
+           hold (IRC §402(g)), with a catch-up from age 50 and a larger one from 60 through 63 (IRC
+           §414(v)). Employer contributions do not count. This payment took the year's deferrals
+           over the cap. Ask payroll to lower the deferral. Any excess must also be returned by the
+           plan before April 15 of the next year, or it is taxed twice (IRC §402(g)(2)).
+   = help: at most 9,500.00 USD more can count toward `elective-deferrals` this year
+───╯
+
+✗ 1 error
+[exit status 1]
+
+══ 11. ...unless --relaxed, which the refusal does not mention
+$ axiom why retirement -C 69-401k-two-employers.ax --today 2026-06-30 --relaxed
+Why assets/retirement
+
+Composition
+  Holds       Quantity  Plain money  Parcels
+  ──────────────────────────────────────────
+  USD    15,000.00 USD                     1
+
+Parcels
+  Place                   Quantity     Basis  Acquired    Tied to  From
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  assets/retirement  15,000.00 USD  0.00 USD  2026-05-29           69-401k-two-employers.ax:26
+
+Governed by
+  Law                            When       Governs                                     Explains                                                                   Written
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  deferral-limit                 on in      every 401k                                  Elective deferrals are capped for each person and calendar year, across    us/401k.ax:28
+  pretax-deferral                on in      every 401k                                  A deferral is pay you chose not to receive, so it is not taxed this year   us/401k.ax:38
+  count-wages                    on in      everyone living under us, and all they own  Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a  us.ax:58
+  count-interest                 on in      everyone living under us, and all they own  Interest is ordinary income in the year it is earned (IRC §61(a)(4)),      us.ax:66
+  count-dividends                on in      everyone living under us, and all they own  Dividends are income in the year they are paid (IRC §61(a)(7)), except     us.ax:76
+  credit-withholding             on in      everyone living under us, and all they own  Tax withheld from pay, or paid in installments, is credited against the    us.ax:108
+  count-distributions            on gain    every 401k                                  Money that comes out of a 401(k) is ordinary income in the year it comes   us/401k.ax:48
+  early-withdrawal               on gain    every 401k                                  Money taken out before age 59½ carries an additional 10% tax on top of     us/401k.ax:60
+  count-short-term-gains         on gain    everyone living under us, and all they own  A gain on something held for a year or less is taxed as ordinary income    us.ax:86
+  count-long-term-gains          on gain    everyone living under us, and all they own  A gain on something held for more than a year is taxed at the lower        us.ax:97
+  required-minimum-distribution  each year  every 401k                                  From age 73, an owner must take a minimum distribution from a 401(k)       us/401k.ax:73
+
+Recent flows
+  Date        With           Payee  Note         Amount        Balance
+  ────────────────────────────────────────────────────────────────────
+  2026-05-29  income/salary  acme         15,000.00 USD  15,000.00 USD
+[exit status 0]
+
+══ 12. Money tied to a grant: which laws govern the account it landed in?
+$ axiom why checking -C 70-grant-wrong-purpose.ax --today 2026-06-30 --relaxed
+Why assets/checking
+
+Governed by
+  Law        When    Governs     Explains                                                                Written
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  overdraft  always  every bank  A bank balance below zero is an overdraft: the bank is lending you the  std.ax:24
+
+Recent flows
+  Date        With           Payee        Note         Amount       Balance
+  ─────────────────────────────────────────────────────────────────────────
+  2026-04-01  income/grants  scholarship         1,200.00 USD  1,200.00 USD
+  2026-04-02  expenses/rent  landlord           -1,200.00 USD      0.00 USD
+[exit status 0]
+
+══ 13. Asking about the grant entity shows its via place, not its laws
+$ axiom why scholarship -C 70-grant-wrong-purpose.ax --today 2026-06-30 --relaxed
+Why income/grants
+
+Composition
+  Holds       Quantity    Plain money  Parcels
+  ────────────────────────────────────────────
+  USD    -1,200.00 USD  -1,200.00 USD
+
+Recent flows
+  Date        With             Payee        Note         Amount        Balance
+  ────────────────────────────────────────────────────────────────────────────
+  2026-04-01  assets/checking  scholarship        -1,200.00 USD  -1,200.00 USD
+[exit status 0]
+
+══ 14. Why did this line warn? (a budget: the value that broke it is not shown)
+$ axiom why journal/2026/02.ax:57 -C ../../examples/02-household --today 2026-03-31
+Why this line
+
+  On this line                                                  Source
+  ───────────────────────────────────────────────────────────────────────────────────
+  flow: liabilities/visa → expenses/food/groceries, 128.10 USD  journal/2026/02.ax:57
+
+Consequences
+  What it caused                                Law
+  ────────────────────────────────────────────────────
+  law `budget` does not hold for expenses/food  budget
+[exit status 0]
+
+══ 15. Why did the law fire? Only a count and the doc text (the values are in check)
+$ axiom why budget -C ../../examples/02-household --today 2026-03-31
+Why budget
+
+  Law       budget
+  ─────────────────────────────────────────────────
+  When      on in
+  Governs   expenses/food and everything beneath it
+  Written   accounts.ax:60
+  Ran       18 times
+  Recorded  1 violations, 0 effects
+
+Recent violations
+  Date        Violation                                     From
+  ───────────────────────────────────────────────────────────────────────────────
+  2026-02-25  law `budget` does not hold for expenses/food  journal/2026/02.ax:57
+[exit status 0]
+
+══ 16. Available: what would I owe if I drew the 401k today? (works: the one good answer)
+$ axiom available -C ../../examples/02-household --today 2026-03-31
+Available on 2026-03-31
+
+What you can spend
+  Liquid now                     Amount
+  ─────────────────────────────────────
+  Money in liquid places  27,044.63 USD
+    assets/bank/checking  10,332.70 USD
+    assets/bank/savings   16,647.05 USD
+    assets/brokerage           1.88 USD
+    assets/cash               63.00 USD
+  ─────────────────────────────────────
+  Available to spend      27,044.63 USD
+
+What it would take to reach the rest
+  Holding                                                Liquid in          Value         Costs            Net
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/brokerage (2 VTI)                               2d            605.10 USD                   605.10 USD
+    counts 22.40 USD as agi
+    counts 22.40 USD as short-term-gains
+    counts 22.40 USD as taxable-income
+    counts 2.24 USD as income-tax
+    counts 22.40 USD as ca-taxable-income
+    counts 0.44 USD as ca-income-tax
+    realizes a gain of 22.40 USD
+  assets/college                                         5d          6,700.00 USD    156.05 USD   6,543.95 USD
+    counts 1,560.52 USD as agi
+    counts 1,560.52 USD as taxable-income
+    counts 156.06 USD as income-tax
+    counts 1,560.52 USD as ca-taxable-income
+    counts 31.21 USD as ca-income-tax
+    counts 1,560.52 USD as distributions
+    nonqualified-529-penalty, owed to irs by 2026-03-31                              156.05 USD
+    realizes a gain of 1,560.52 USD
+  assets/retirement                                      5d         43,700.00 USD  8,555.54 USD  35,144.46 USD
+    counts 43,700.00 USD as agi
+    federal-income-tax, owed to irs by 2027-04-15                                  3,092.78 USD
+    counts 43,700.00 USD as taxable-income
+    counts 5,118.80 USD as income-tax
+    counts 43,700.00 USD as ca-taxable-income
+    counts 1,982.87 USD as ca-income-tax
+    ca-income-tax, owed to ftb by 2027-04-15                                       1,092.76 USD
+    counts 43,700.00 USD as distributions
+    early-withdrawal-penalty, owed to irs by 2026-03-31                            4,370.00 USD
+    realizes a gain of 43,700.00 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today                                    51,005.10 USD  8,711.59 USD  42,293.51 USD
+  · Each line withdraws the whole holding into assets/bank/savings on 2026-03-31 and runs the year
+    out through the laws. Costs are what they would owe because of it, as if the year ended today:
+    penalties, and the tax on any income it creates.
+[exit status 0]

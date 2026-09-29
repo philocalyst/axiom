@@ -1,0 +1,16 @@
+// MISTAKE: `employr` for `employer`, on a 401(k) account.
+base USD
+use std
+use us/401k
+
+entity me : person
+  born   1988-04-12
+  filing single
+  lives  us
+
+account assets/retirement : 401k
+  employr acme
+account income/salary : wages
+
+entity acme : employer
+  via income/salary

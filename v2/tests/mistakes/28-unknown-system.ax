@@ -1,0 +1,11 @@
+// MISTAKE: `us/401l` for `us/401k`.
+base USD
+use std
+use us/401l
+
+account assets/checking : bank
+account expenses/food
+account equity/opening
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2026-01-08 checking -> food 84.20 USD

@@ -1,0 +1,18 @@
+error[duplicate-declaration]: account `assets/checking` is declared twice
+  ╭─[journal/2026/01.ax:2:9]
+  │
+2 │ account assets/checking : bank
+  │         ───────┬───────
+  │                ╰── declared again here
+  │
+  ├─[accounts.ax:1:9]
+  │
+1 │ account assets/checking : bank
+  │         ───────┬───────
+  │                ╰── first declared here
+  │
+  = help: remove one of the two declarations
+──╯
+
+✗ 1 error
+[exit status 1]

@@ -1,0 +1,21 @@
+// MISTAKE: the statement says 3_015.80 USD; the assertion transposes two digits.
+base USD
+use std
+
+account assets/checking : bank
+account expenses/food
+account expenses/rent
+account income/salary : wages
+account equity/opening
+
+entity acme : employer
+  via income/salary
+entity landlord : org
+  via expenses/rent
+
+2025-12-31 equity/opening -> checking 1_000.00 USD
+
+2026-01-15 acme -> checking 3_900 USD
+2026-01-16 checking -> landlord 1_800 USD
+2026-01-18 checking -> food 84.20 USD
+2026-01-31 checking = 3_051.80 USD

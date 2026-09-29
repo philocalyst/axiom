@@ -1,0 +1,13 @@
+error[layout]: this transaction is dated 2026-02-10, which `journal/2026/01.ax` does not hold
+  ╭─[journal/2026/01.ax:3:1]
+  │
+3 │ 2026-02-10 checking -> food 61.00 USD
+  │ ─────┬────
+  │      ╰── outside January 2026
+  │
+  = note: `journal/2026/01.ax` holds January 2026, because of where it is
+  = help: move it to `journal/2026/02.ax`, or set `layout free` to ignore folder names
+──╯
+
+✗ 1 error
+[exit status 1]

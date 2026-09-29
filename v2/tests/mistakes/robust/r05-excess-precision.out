@@ -1,0 +1,12 @@
+error[amount-precision]: `0.000000001 USD` has more decimals than USD allows
+  ╭─[r05-excess-precision.ax:9:29]
+  │
+9 │ 2026-01-08 checking -> food 0.000000001 USD
+  │                             ───────┬───────
+  │                                    ╰── USD counts 2 decimal places
+  │
+  = help: round it, or declare `commodity USD` with `precision 9`
+──╯
+
+✗ 1 error
+[exit status 1]

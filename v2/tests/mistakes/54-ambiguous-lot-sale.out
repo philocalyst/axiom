@@ -1,0 +1,20 @@
+error[ambiguous-lots]: ambiguous lot: assets/brokerage holds 2 lots that differ and no policy applies
+   ╭─[54-ambiguous-lot-sale.ax:15:1]
+   │
+13 │ 2026-01-22 checking 2_000 USD -> brokerage 7 VTI
+   │ ────────────────────────┬───────────────────────
+   │                         ╰── acquired 2026-01-22: 7 VTI, basis 2,000.00 USD; from it alone the gain is 100.00 USD
+14 │ 2026-02-18 checking 1_500 USD -> brokerage 5 VTI
+   │ ────────────────────────┬───────────────────────
+   │                         ╰── acquired 2026-02-18: 5 VTI, basis 1,500.00 USD; from it alone the gain is 0.00 USD
+15 │ 2026-03-02 brokerage 8 VTI -> checking 2_400 USD
+   │ ────────────────────────┬───────────────────────
+   │                         ╰── 8 VTI could come from any of them
+   │
+   = note: the sale still moves the oldest lot first, so the lines after it stay consistent
+   = help: name the lot, `assets/brokerage[2026-01-22]`, or a policy, `assets/brokerage[fifo]` (or
+           lifo, hifo, prorata), or give the account `select fifo`
+───╯
+
+✗ 1 error
+[exit status 1]

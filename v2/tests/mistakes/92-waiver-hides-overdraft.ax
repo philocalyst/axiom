@@ -1,0 +1,14 @@
+// MISTAKE-free control: `!` waives the overdraft warning on one flow. Is the waiver
+// visible in `check`?
+base USD
+use std
+
+account assets/checking : bank
+account expenses/rent
+account equity/opening
+
+entity landlord : org
+  via expenses/rent
+
+2025-12-31 equity/opening -> checking 800 USD
+2026-01-01 checking -> landlord 1_800 USD ! "landlord accepts a late deposit"

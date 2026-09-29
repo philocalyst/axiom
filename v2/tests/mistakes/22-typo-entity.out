@@ -1,0 +1,14 @@
+error[unknown-entity]: there is no entity `trader-joe`
+   ╭─[22-typo-entity.ax:15:46]
+   │
+15 │ 2026-01-08 checking -> groceries 84.20 USD / trader-joe
+   │                                              ─────┬────
+   │                                                   ╰── not a known entity
+   │
+   = note: a payee must be a declared entity, so that it is typed like everything else
+   = help: did you mean `trader-joes`?
+15 + 2026-01-08 checking -> groceries 84.20 USD / trader-joes
+───╯
+
+✗ 1 error
+[exit status 1]

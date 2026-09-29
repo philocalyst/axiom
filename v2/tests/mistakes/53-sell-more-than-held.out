@@ -1,0 +1,14 @@
+error[insufficient-holding]: assets/brokerage does not hold 10 VTI
+   ╭─[53-sell-more-than-held.ax:14:1]
+   │
+14 │ 2026-03-02 brokerage 10 VTI -> checking 3_050 USD
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── 3 VTI more than assets/brokerage has
+   │
+   = note: assets/brokerage holds 7 VTI
+   = help: record the purchase before this flow, or check the quantity; the missing amount is left
+           as a negative balance so the rest of the ledger stays consistent
+───╯
+
+✗ 1 error
+[exit status 1]

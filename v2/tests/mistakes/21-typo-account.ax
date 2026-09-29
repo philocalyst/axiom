@@ -1,0 +1,15 @@
+// MISTAKE: `dinning` for `dining`. One flow.
+base USD
+use std
+
+account assets/checking : bank
+account expenses/food/groceries
+account expenses/food/dining
+account equity/opening
+
+entity trader-joes : org
+  via expenses/food/groceries
+
+2025-12-31 equity/opening -> checking 1_000 USD
+
+2026-01-24 checking -> dinning 62.35 USD

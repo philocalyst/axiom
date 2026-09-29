@@ -1,0 +1,14 @@
+// MISTAKE: a check is settled on a day before it was written.
+base USD
+use std
+
+account assets/checking : bank
+account expenses/home
+account equity/opening
+
+entity plumber : org
+  via expenses/home
+
+2025-12-31 equity/opening -> checking 2_000 USD
+2026-02-10 checking -> plumber (350 USD) #check-1041
+2026-02-06 #check-1041 settled

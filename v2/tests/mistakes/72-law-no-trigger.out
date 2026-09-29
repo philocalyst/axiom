@@ -1,0 +1,25 @@
+error[missing-trigger]: this law has no trigger
+  ╭─[72-law-no-trigger.ax:8:3]
+  │
+7 │ account expenses/food
+8 │   law monthly-cap
+  │   ───────┬───────
+  │          ╰── when does it apply?
+  │
+  = help: start the body with a trigger: `on in|out|gain|spend`, `each month|year`, `by DATE` or
+          `always`
+──╯
+
+error[unknown-place]: there is no place `food`
+   ╭─[72-law-no-trigger.ax:12:24]
+   │
+12 │ 2026-01-08 checking -> food 84.20 USD
+   │                        ──┬─
+   │                          ╰── not a known place
+   │
+   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
+           `expenses` or `equity`, for example `expenses/food`
+───╯
+
+✗ 2 errors
+[exit status 1]

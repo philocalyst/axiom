@@ -1,0 +1,29 @@
+error[kind-cycle]: kind `a` inherits from itself
+  ╭─[r12-kind-cycle.ax:2:6]
+  │
+2 │ kind a : b
+  │      ┬
+  │      ╰── its parent chain never reaches a root
+3 │ kind b : a
+  │      ┬
+  │      ╰── `b` inherits from `a` here
+  │
+  = note: the chain is a -> b -> a
+  = help: give one of them a parent outside the loop, such as a root kind like `asset`
+──╯
+
+error[kind-sort]: kind `a` is an entity kind, so it cannot describe the asset account `assets/x`
+  ╭─[r12-kind-cycle.ax:4:20]
+  │
+2 │ kind a : b
+  │      ┬
+  │      ╰── declared here
+3 │ kind b : a
+4 │ account assets/x : a
+  │                    ┬
+  │                    ╰── entity kind
+  │
+──╯
+
+✗ 2 errors
+[exit status 1]

@@ -1,0 +1,13 @@
+error[type-mismatch]: cannot add a date to an amount
+   ╭─[61-type-amount-plus-date.ax:10:29]
+   │
+10 │     warn total(in, month) + date <= 650 USD "food is over budget"
+   │          ────────┬───────   ──┬─
+   │                  │            ╰── this is a date
+   │                  ╰── this is an amount
+   │
+   = note: `+` adds two amounts, two numbers or two spans, or a span to a date
+───╯
+
+✗ 1 error
+[exit status 1]

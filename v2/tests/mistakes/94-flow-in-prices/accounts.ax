@@ -1,0 +1,6 @@
+account assets/checking : bank
+account expenses/food
+account equity/opening
+
+commodity VTI : fund
+  precision 0

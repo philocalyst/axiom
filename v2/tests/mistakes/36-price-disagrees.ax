@@ -1,0 +1,13 @@
+// MISTAKE: 7 VTI at 285.70 USD cost 1_999.90 USD, but 2_000 USD is written.
+base USD
+use std
+
+commodity VTI : fund
+  precision 0
+
+account assets/brokerage : broker
+account assets/checking : bank
+account equity/opening
+
+2025-12-31 equity/opening -> checking 3_000 USD
+2026-01-22 checking 2_000 USD -> brokerage 7 VTI @ 285.70 USD

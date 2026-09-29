@@ -1,0 +1,15 @@
+// MISTAKE: the legs of a paycheck are indented with a tab (an editor inserted it).
+base USD
+use std
+
+account assets/checking : bank
+account assets/savings  : bank
+account income/salary   : wages
+account equity/opening
+
+entity acme : employer
+  via income/salary
+
+2026-01-15 acme -> 5_000 USD
+	savings   500 USD
+	checking  ...

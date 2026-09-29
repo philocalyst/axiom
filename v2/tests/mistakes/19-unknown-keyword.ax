@@ -1,0 +1,10 @@
+// MISTAKE: `account` misspelled.
+base USD
+use std
+
+acount assets/checking : bank
+account expenses/food
+account equity/opening
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2026-01-18 checking -> food 84.20 USD

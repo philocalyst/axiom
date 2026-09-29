@@ -1,0 +1,20 @@
+error[unexpected-character]: unexpected character 'é'
+  ╭─[r08-unicode-name.ax:3:19]
+  │
+3 │ account assets/café : bank
+  │                   ┬
+  │                   ╰── not part of the language
+  │
+──╯
+
+error[unexpected-character]: unexpected character 'é'
+  ╭─[r08-unicode-name.ax:5:15]
+  │
+5 │ 2026-01-08 café -> food 84.20 USD
+  │               ┬
+  │               ╰── not part of the language
+  │
+──╯
+
+✗ 2 errors
+[exit status 1]

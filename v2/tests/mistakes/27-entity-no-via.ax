@@ -1,0 +1,12 @@
+// MISTAKE: an entity used as a flow's end, but it has no `via` place.
+base USD
+use std
+
+account assets/checking : bank
+account expenses/rent
+account equity/opening
+
+entity landlord : org
+
+2025-12-31 equity/opening -> checking 5_000 USD
+2026-01-01 checking -> landlord 1_800 USD

@@ -1,0 +1,13 @@
+error[self-flow]: `assets/checking` cannot pay itself
+  ╭─[42-self-flow.ax:9:12]
+  │
+9 │ 2026-02-14 checking -> checking 500 USD
+  │            ────┬───    ────┬───
+  │                │           ╰── and the target
+  │                ╰── the source
+  │
+  = help: a flow moves value between two places, or between two commodities of one
+──╯
+
+✗ 1 error
+[exit status 1]

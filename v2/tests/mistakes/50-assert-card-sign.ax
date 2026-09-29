@@ -1,0 +1,14 @@
+// MISTAKE: the card statement shows 452.00 USD owed; the assertion is written as a
+// negative balance.
+base USD
+use std
+
+account assets/checking : bank
+account liabilities/visa : credit-card
+account expenses/food
+account equity/opening
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2026-01-08 visa -> food 300.00 USD
+2026-01-17 visa -> food 152.00 USD
+2026-01-31 visa = -452.00 USD

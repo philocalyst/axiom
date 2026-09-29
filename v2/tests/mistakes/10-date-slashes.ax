@@ -1,0 +1,15 @@
+// MISTAKE: an American date, month first, with slashes.
+base USD
+use std
+
+account assets/checking : bank
+account expenses/food/groceries
+account expenses/food/dining
+account equity/opening
+
+entity trader-joes : org
+  via expenses/food/groceries
+
+2025-12-31 equity/opening -> checking 1_000 USD
+
+01/15/2026 checking -> groceries 84.20 USD

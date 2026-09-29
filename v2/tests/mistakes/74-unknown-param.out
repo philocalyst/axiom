@@ -1,0 +1,11 @@
+error[unknown-param]: there is no param `cap`
+   ╭─[74-unknown-param.ax:10:30]
+   │
+10 │     warn total(in, month) <= cap[year] "food is over budget"
+   │                              ─┬─
+   │                               ╰── not a known param
+   │
+───╯
+
+✗ 1 error
+[exit status 1]

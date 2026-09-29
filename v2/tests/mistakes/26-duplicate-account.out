@@ -1,0 +1,16 @@
+error[duplicate-declaration]: account `assets/checking` is declared twice
+  ╭─[26-duplicate-account.ax:7:9]
+  │
+5 │ account assets/checking : bank
+  │         ───────┬───────
+  │                ╰── first declared here
+6 │ account assets/savings : bank
+7 │ account assets/checking : cash
+  │         ───────┬───────
+  │                ╰── declared again here
+  │
+  = help: remove one of the two declarations
+──╯
+
+✗ 1 error
+[exit status 1]

@@ -1,0 +1,12 @@
+// MISTAKE: `expenses/grocries` is a full path under a root, so it silently opens a
+// new account; the real one is `expenses/groceries`. Nothing is reported.
+base USD
+use std
+
+account assets/checking : bank
+account expenses/groceries
+account equity/opening
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2026-01-08 checking -> expenses/groceries 84.20 USD
+2026-01-15 checking -> expenses/grocries 97.10 USD

@@ -1,0 +1,44 @@
+error[unset-property]: cannot check `federal-income-tax`: `filing` is not set
+    ╭─[us.ax:126:1]
+    │
+126 │ law federal-income-tax
+    │ ───────────┬──────────
+    │            ╰── checked for me on 2025-12-31
+    ⋮
+136 │   count taxable as taxable-income
+    │         ───┬───
+    │            ╰── `filing` is not set
+    │
+    = help: give it a value where the thing is declared: `filing …`
+────╯
+
+error[unset-property]: cannot check `federal-income-tax`: `filing` is not set
+    ╭─[us.ax:126:1]
+    │
+126 │ law federal-income-tax
+    │ ───────────┬──────────
+    │            ╰── checked for me on 2025-12-31
+    ⋮
+137 │   count liability as income-tax
+    │         ────┬────
+    │             ╰── `filing` is not set
+    │
+    = help: give it a value where the thing is declared: `filing …`
+────╯
+
+error[unset-property]: cannot check `federal-income-tax`: `filing` is not set
+    ╭─[us.ax:126:1]
+    │
+126 │ law federal-income-tax
+    │ ───────────┬──────────
+    │            ╰── checked for me on 2025-12-31
+    ⋮
+138 │   owe max(liability - tally(federal-withheld), empty) to irs by date(year + 1, 4, 15) as federal-income-tax
+    │           ────┬────
+    │               ╰── `filing` is not set
+    │
+    = help: give it a value where the thing is declared: `filing …`
+────╯
+
+✗ 3 errors
+[exit status 1]

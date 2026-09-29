@@ -1,0 +1,16 @@
+// MISTAKE: both header sides name a place and there are legs anyway.
+base USD
+use std
+
+account assets/checking : bank
+account assets/savings  : bank
+account income/salary   : wages
+account equity/opening
+
+entity acme : employer
+  via income/salary
+
+2025-12-31 equity/opening -> checking 2_000 USD
+2026-01-16 checking -> savings 1_000 USD
+  savings   600 USD
+  checking  400 USD

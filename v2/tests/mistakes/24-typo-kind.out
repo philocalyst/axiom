@@ -1,0 +1,13 @@
+error[unknown-kind]: there is no kind `bnk`
+  ╭─[24-typo-kind.ax:5:27]
+  │
+5 │ account assets/checking : bnk
+  │                           ─┬─
+  │                            ╰── not a known kind
+  │
+  = help: did you mean `bank`?
+5 + account assets/checking : bank
+──╯
+
+✗ 1 error
+[exit status 1]
