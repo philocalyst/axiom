@@ -1,10 +1,10 @@
 //! Data parallelism over borrowed slices.
 //!
-//! Workers borrow their inputs through [`std::thread::scope`] and return their
-//! results by value, in order. Nothing is shared mutably, so there is no `Arc`
-//! and no `Mutex`: the only shared state is one atomic cursor that hands out
-//! chunks, so a worker that drew cheap chunks simply draws more. (A result that
-//! the caller wants as it is made travels back over a channel.)
+//! Workers borrow their inputs through [`std::thread::scope`] and send their
+//! results back over a channel, to be put in order. Nothing is shared mutably,
+//! so there is no `Arc` and no `Mutex`: the only shared state is one atomic
+//! cursor that hands out the items, so a worker that drew cheap ones simply
+//! draws more.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -14,15 +14,21 @@ use std::thread;
 /// handing out a chunk costs more than doing it.
 const GRAIN: usize = 256;
 
-/// `items.iter().map(f).collect()`, on every core, for many light items.
+/// `items.iter().map(f).collect()`, on every core, for many light items, which
+/// are handed out [`GRAIN`] at a time.
 pub fn map<'t, T: Sync, R: Send>(items: &'t [T], f: impl Fn(&'t T) -> R + Sync) -> Vec<R> {
-    chunked(items, GRAIN, f)
+    let chunks: Vec<&'t [T]> = items.chunks(GRAIN).collect();
+    let mut out = Vec::with_capacity(items.len());
+    map_each_ordered(&chunks, |chunk| (*chunk).iter().map(&f).collect::<Vec<R>>(), |part| out.extend(part));
+    out
 }
 
 /// `items.iter().map(f).collect()`, on every core, for a few heavy items (files):
 /// each item is its own unit of work.
 pub fn map_each<'t, T: Sync, R: Send>(items: &'t [T], f: impl Fn(&'t T) -> R + Sync) -> Vec<R> {
-    chunked(items, 1, f)
+    let mut out = Vec::with_capacity(items.len());
+    map_each_ordered(items, f, |result| out.push(result));
+    out
 }
 
 /// `items.iter().map(f)` on every core, for a few heavy items, with each result
@@ -69,20 +75,6 @@ pub fn map_each_ordered<'t, T: Sync, R: Send>(
     });
 }
 
-/// Runs `f` on every item, in place, on every core.
-pub fn for_each_mut<T: Send>(items: &mut [T], f: impl Fn(&mut T) + Sync) {
-    let workers = workers(items.len().div_ceil(GRAIN));
-    if workers <= 1 {
-        return items.iter_mut().for_each(f);
-    }
-    let f = &f;
-    thread::scope(|scope| {
-        for part in items.chunks_mut(items.len().div_ceil(workers)) {
-            scope.spawn(move || part.iter_mut().for_each(f));
-        }
-    });
-}
-
 /// Runs two closures at once and returns both results.
 pub fn join<A: Send, B: Send>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> B + Send) -> (A, B) {
     thread::scope(|scope| {
@@ -90,39 +82,6 @@ pub fn join<A: Send, B: Send>(a: impl FnOnce() -> A + Send, b: impl FnOnce() -> 
         let right = b();
         (settle(left.join()), right)
     })
-}
-
-/// Maps chunks of `grain` items, drawn from a shared cursor by one worker per
-/// core, then puts the results back in item order.
-fn chunked<'t, T: Sync, R: Send>(items: &'t [T], grain: usize, f: impl Fn(&'t T) -> R + Sync) -> Vec<R> {
-    let chunks: Vec<&'t [T]> = items.chunks(grain).collect();
-    let workers = workers(chunks.len());
-    if workers <= 1 {
-        return items.iter().map(f).collect();
-    }
-    let (f, chunks, cursor) = (&f, &chunks, &AtomicUsize::new(0));
-    let drawn: Vec<Vec<(usize, Vec<R>)>> = thread::scope(|scope| {
-        let handles: Vec<_> = (0..workers)
-            .map(|_| {
-                scope.spawn(move || {
-                    let mut mine = Vec::new();
-                    loop {
-                        let at = cursor.fetch_add(1, Ordering::Relaxed);
-                        let Some(chunk) = chunks.get(at) else { return mine };
-                        mine.push((at, chunk.iter().map(f).collect()));
-                    }
-                })
-            })
-            .collect();
-        handles.into_iter().map(|handle| settle(handle.join())).collect()
-    });
-    let mut parts: Vec<(usize, Vec<R>)> = drawn.into_iter().flatten().collect();
-    parts.sort_unstable_by_key(|&(at, _)| at);
-    let mut out = Vec::with_capacity(items.len());
-    for (_, part) in parts {
-        out.extend(part);
-    }
-    out
 }
 
 fn workers(units: usize) -> usize {

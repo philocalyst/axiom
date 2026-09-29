@@ -466,11 +466,6 @@ pub struct Place<'s> {
 }
 
 impl<'s> Place<'s> {
-    /// Whether this is `?`, the place for money whose other end is not known.
-    pub fn is_unknown(&self) -> bool {
-        self.name.0 == "?"
-    }
-
     /// Whether the flow moves the basis of the place's parcels rather than
     /// their quantity: the place is written `PLACE.basis`.
     pub fn is_basis(&self, file: &File<'s>) -> bool {
