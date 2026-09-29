@@ -69,8 +69,7 @@ note[nonqualified-penalty]: 52.35 USD owed to irs as nonqualified-529-penalty, d
    ├─[us/529.ax:59:13] (built in)
    │
 59 │     require to is education | 529-plan else owe 10% * gain to irs as nonqualified-529-penalty…
-   │             ─┬───────────┬────────────
-   │              │           ╰── false
+   │             ─┬
    │              ╰── assets/bank/joint-checking
    │
    = note: A withdrawal that did not pay a qualified education expense owes an additional 10% of its
@@ -91,12 +90,8 @@ note[nonqualified-penalty]: waived: 124.00 USD would be owed to irs as nonqualif
    ├─[us/hsa.ax:69:14] (built in)
    │
 69 │     require (to is medical | tax-deferred) or owner.age >= 65y else owe 20% * gain to irs as …
-   │              ─┬────────────┬─────────┬──────────┬─┬───┬───────
-   │               │            │         │          │ │   ╰── false
-   │               │            │         │          │ ╰── 37y8m26d
-   │               │            │         │          ╰── me
-   │               │            │         ╰── false
-   │               │            ╰── false
+   │              ─┬                               ────┬────
+   │               │                                   ╰── 37y8m26d
    │               ╰── assets/bank/joint-checking
    │
    = note: A withdrawal that did not pay a qualified medical expense owes an additional 20% of what

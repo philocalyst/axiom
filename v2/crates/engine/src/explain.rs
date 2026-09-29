@@ -105,15 +105,15 @@ impl Frame<'_, '_> {
         Some(Bound { counted, limit, upper, off: Amount::new(off, limit.unit) })
     }
 
-    /// The two sides of the failing comparison with their values, or every
-    /// non-constant part of any other condition.
+    /// The two sides of the failing comparison with their values; for any
+    /// other condition, the facts it read (see [`Frame::atoms`]).
     fn operands(&self, cond: NodeId) -> Vec<(Loc, String)> {
         let nodes = &self.law.nodes;
         let at = match nodes[cond.index()].op {
             Op::Bin(BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne, l, r) => {
                 vec![l.index(), r.index()]
             }
-            _ => self.law.range(cond).collect(),
+            _ => self.atoms(cond),
         };
         let unit = at.iter().find_map(|&i| if let Value::Amount(a) = self.values[i] { Some(a.unit) } else { None });
         let mut shown: Vec<(Loc, String)> = Vec::new();
@@ -127,6 +127,26 @@ impl Frame<'_, '_> {
             }
         }
         shown
+    }
+
+    /// The facts a condition read, outermost first found and in source order:
+    /// a variable, a `let`, a field, a param or a call, each once as a whole.
+    /// `owner.age` is one fact, not `owner` and its age; the booleans that
+    /// combine facts, and the constants, say nothing the line does not.
+    fn atoms(&self, cond: NodeId) -> Vec<usize> {
+        let nodes = &self.law.nodes;
+        let (mut atoms, first) = (Vec::new(), nodes[cond.index()].first.index());
+        let mut at = cond.index() + 1;
+        while at > first {
+            at -= 1;
+            if matches!(nodes[at].op, Op::Var(_) | Op::Local(_) | Op::Field(..) | Op::Param(..) | Op::Call(..)) {
+                atoms.push(at);
+                // Skip the atom's own subtree: a field's receiver, a call's arguments.
+                at = nodes[at].first.index();
+            }
+        }
+        atoms.reverse();
+        atoms
     }
 
     /// Up to three flows before this one that built what a limit counted.

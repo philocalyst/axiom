@@ -24,8 +24,7 @@ note[nonqualified-penalty]: 34.94 USD owed to irs as nonqualified-529-penalty, d
    ├─[us/529.ax:59:13] (built in)
    │
 59 │     require to is education | 529-plan else owe 10% * gain to irs as nonqualified-529-penalty…
-   │             ─┬───────────┬────────────
-   │              │           ╰── false
+   │             ─┬
    │              ╰── assets/bank/checking
    │
    = note: A withdrawal that did not pay a qualified education expense owes an additional 10% of its

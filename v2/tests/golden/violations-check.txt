@@ -90,10 +90,8 @@ error[purpose]: grant money spent outside its purpose
     ├─[std.ax:148:13] (built in)
     │
 148 │     require to is self.purpose "grant money spent outside its purpose"
-    │             ─┬──────┬─┬─┬─────
-    │              │      │ │ ╰── education
-    │              │      │ ╰── false
-    │              │      ╰── scholarship
+    │             ─┬    ──────┬─────
+    │              │          ╰── education
     │              ╰── expenses/dining
     │
     = note: Grant money may only be spent on what the grant names. This payment went somewhere else.
