@@ -192,6 +192,29 @@ fn each_form_of_transaction_pairs_what_leaves_with_what_arrives() {
 }
 
 #[test]
+fn the_expense_legs_of_an_exchange_are_its_costs_and_no_other_split_has_any() {
+    let text = "
+2026-01-11 brokerage 10 VTI -> 1_500 USD
+  checking 1_490 USD
+  food 10 USD
+2026-01-12 checking -> 2_000 USD
+  brokerage 7 VTI
+  food 5 USD
+2026-01-13 acme -> 5_200 USD
+  food 200 USD
+  checking ...
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let costs: Vec<_> = book.flows.iter().map(|(_, flow)| flow.terms().cost.map(|cost| cost.qty.0)).collect();
+        // The sale, its payment of the fee, the purchase, its fee, and a paycheck that has none.
+        assert_eq!(costs, [Some(10), None, Some(5), None, None, None]);
+        let exchanges: Vec<_> = book.flows.iter().filter(|(_, flow)| flow.is_exchange()).map(|(_, f)| f.day).collect();
+        assert_eq!(exchanges.len(), 2);
+    });
+}
+
+#[test]
 fn a_transaction_that_does_not_add_up_says_by_how_much() {
     let text = "
 2026-01-13 acme -> 5_200 USD

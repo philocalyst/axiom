@@ -11,7 +11,7 @@ Balances at 2026-04-16
   equity                128,000.00 USD
     opening             128,000.00 USD
   ────────────────────────────────────
-  expenses               98,518.13 USD
+  expenses              125,486.88 USD
     dining                1,926.42 USD
     groceries             4,321.33 USD
     living                4,042.98 USD
@@ -26,6 +26,7 @@ Balances at 2026-04-16
       property-tax        4,380.00 USD
       repairs             2,051.00 USD
       utilities             154.60 USD
+    selling-costs        26,968.75 USD
     taxes                21,924.00 USD
       federal            14,580.00 USD
       payroll             7,344.00 USD

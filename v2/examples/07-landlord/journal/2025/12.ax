@@ -14,15 +14,19 @@
 /// Half a month for the month of sale, booked first: the sale reads what has been taken.
 2025-12-29 depreciation 478.31 USD
 
-/// Sold, 431,500.00 USD. The closing statement is one flow: the house goes out, the price less the seller's costs comes in
-/// (5% commission and 1.25% of other costs, 26_968.75 USD, come off the price and reduce the amount realized), and it is
-/// paid out in legs: the loan is paid off (what is left of the principal, settling #loan, and the interest since the first
-/// of the month), tenant B's deposit is credited to the buyer, and the rest is Jamie's.
-2025-12-29 house 1 HOME -> 404_531.25 USD
+/// Sold, 431,500.00 USD. The closing statement is one flow: the house goes out and the price comes in, and it is paid out
+/// in legs: the seller's costs (5% commission and 1.25% of other costs, 26_968.75 USD: a leg into an expense place during
+/// an exchange is a cost of it, so they come off the price and reduce the amount realized), the loan is paid off (what is
+/// left of the principal, settling #loan), tenant B's deposit is credited to the buyer, and the rest is Jamie's.
+2025-12-29 house 1 HOME -> 431_500 USD
+  selling-costs       26_968.75 USD
   mortgage            276_282.05 USD / lender for #loan
-  interest            1_450.48 USD / lender
   deposits            2_500 USD / buyer for #dep-b
   rental-bank         ...
+
+/// The interest on the loan since the first of the month, paid out of the proceeds as well. It is Schedule E interest, not a
+/// cost of the sale, so it is a flow of its own and not a leg of the statement.
+2025-12-29 rental-bank -> interest 1_450.48 USD / lender
 
 /// Tenant B's deposit money is Jamie's again: the buyer took the claim. Released into the rental account.
 2025-12-29 deposit-bank -> rental-bank 2_500 USD for me

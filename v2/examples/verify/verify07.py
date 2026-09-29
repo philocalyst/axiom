@@ -167,11 +167,14 @@ recaptured = min(max(gain, D(0)), dep_total)
 long_gain = gain - recaptured
 print("sale: costs", costs, "amount realized", amount_realized, "adjusted basis", adjusted_basis, "gain", gain,
       "| recapture (ordinary)", recaptured, "long-term", long_gain)
-# the journal's sale legs agree with the loan
+# the journal's closing statement is the price, with the seller's costs as a leg and the loan payoff in another
 sale_legs = [f for f in flows if f.src == "house" and f.legs][0]
 legs = {p: a for p, a, u in sale_legs.legs}
-assert legs["mortgage"] == balance and legs["interest"] == accrued and sale_legs.into == amount_realized
-paid_to_lender = payment * 11 + legs["mortgage"] + legs["interest"]
+assert sale_legs.into == price and legs["selling-costs"] == costs and legs["mortgage"] == balance
+# the interest to the day of payoff is a flow of its own: Schedule E interest, not a cost of the sale
+payoff_interest = [f for f in flows if f.day.isoformat() == "2025-12-29" and f.dst == "interest"]
+assert [f.into for f in payoff_interest] == [accrued]
+paid_to_lender = payment * 11 + legs["mortgage"] + accrued
 
 # ── the return ──────────────────────────────────────────────────────────────────────────────────
 wages = sum((D(8000) for d, plan, a, l in occ if plan == "paycheck"), D(0))

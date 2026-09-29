@@ -106,6 +106,10 @@ account expenses/rental/depreciation
 /// The loan costs, spread over the time the loan lasted.
 account expenses/rental/amortization
 
+/// What it cost to sell the house: the commission and the other seller's costs. Not a rental expense:
+/// they come off the price the sale realizes.
+account expenses/selling-costs
+
 account expenses/own-rent
 account expenses/groceries
 account expenses/dining

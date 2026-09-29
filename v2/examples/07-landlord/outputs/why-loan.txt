@@ -16,5 +16,5 @@ Flows
   2025-10-01  assets/bank/rental-bank → liabilities/mortgage      251.24 USD  actual  journal/2025/10.ax:6
   2025-11-01  assets/bank/rental-bank → liabilities/mortgage      252.65 USD  actual  journal/2025/11.ax:3
   2025-12-01  assets/bank/rental-bank → liabilities/mortgage      254.07 USD  actual  journal/2025/12.ax:4
-  2025-12-29  assets/bank/rental-bank → liabilities/mortgage  276,282.05 USD  actual  journal/2025/12.ax:22
+  2025-12-29  assets/bank/rental-bank → liabilities/mortgage  276,282.05 USD  actual  journal/2025/12.ax:23
   · 1 earlier flows not shown.

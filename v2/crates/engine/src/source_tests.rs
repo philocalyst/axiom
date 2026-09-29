@@ -134,6 +134,54 @@ opening 2025-09-01
     });
 }
 
+// ─── The fee legs of an exchange ────────────────────────────────────────────
+
+const TRADES: &str = "\
+base USD
+commodity USD
+  precision 2
+commodity VTI
+  precision 0
+
+account assets/broker
+account assets/checking
+account expenses/fees
+
+opening 2024-01-01
+  checking 5_000 USD
+  broker   10 VTI basis 1_000 USD since 2020-01-01
+";
+
+#[test]
+fn a_fee_leg_of_a_sale_comes_off_its_proceeds() {
+    let text = format!("{TRADES}2025-03-01 broker 10 VTI -> 1_500 USD\n  checking 1_490 USD\n  fees 10 USD\n");
+    with_run(&text, day(2025, 12, 31), |book, run| {
+        let [sale] = run.gains[..] else { panic!("one disposal: {:?}", run.gains) };
+        assert_eq!((sale.proceeds.0, sale.basis.0, sale.gain().0), (1_490_00, 1_000_00, 490_00));
+        let usd = |place| holding(book, run, place, "USD").unwrap().qty().0;
+        assert_eq!((usd("checking"), usd("fees")), (5_000_00 + 1_490_00, 10_00), "the fee is still an expense");
+    });
+}
+
+#[test]
+fn a_fee_leg_of_a_purchase_is_part_of_what_the_shares_cost() {
+    let text = format!("{TRADES}2025-04-01 checking -> 2_000 USD\n  broker 7 VTI\n  fees 5 USD\n");
+    with_run(&text, day(2025, 12, 31), |book, run| {
+        let lots = &holding(book, run, "broker", "VTI").unwrap().lots;
+        let bought: Vec<_> = lots.iter().map(|lot| (lot.qty.0, lot.basis.0)).collect();
+        assert_eq!(bought, [(10, 1_000_00), (7, 1_995_00 + 5_00)], "1,995.00 for the shares and 5.00 to buy them");
+    });
+}
+
+#[test]
+fn a_purchase_that_states_its_basis_keeps_it() {
+    let text = format!("{TRADES}2025-04-01 checking -> 2_000 USD basis 1_990 USD\n  broker 7 VTI\n  fees 5 USD\n");
+    with_run(&text, day(2025, 12, 31), |book, run| {
+        let lots = &holding(book, run, "broker", "VTI").unwrap().lots;
+        assert_eq!(lots.last().unwrap().basis.0, 1_990_00);
+    });
+}
+
 // ─── Value recognized ahead of the window it belongs to ─────────────────────
 
 const INSURANCE: &str = "\

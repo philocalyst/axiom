@@ -9,9 +9,9 @@ Income and spending
     interest-de                  234.51 USD                234.51 USD
     salary-de                 37,564.58 USD             37,564.58 USD
     salary-us                 62,500.02 USD             62,500.02 USD
-    realized gains ≈              27.34 USD                 27.34 USD
+    realized gains ≈              -3.27 USD                 -3.27 USD
   ───────────────────────────────────────────────────────────────────
-  Total income               101,586.39 USD            101,586.39 USD
+  Total income               101,555.78 USD            101,555.78 USD
   ───────────────────────────────────────────────────────────────────
   expenses                    77,329.86 USD             77,329.86 USD
     conference                   220.87 USD                220.87 USD
@@ -40,6 +40,6 @@ Income and spending
     travel                     2,225.01 USD              2,225.01 USD
     utilities                    718.64 USD                718.64 USD
   ───────────────────────────────────────────────────────────────────
-  Net                         24,256.53 USD  0.00 USD   24,256.53 USD
+  Net                         24,225.92 USD  0.00 USD   24,225.92 USD
   · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
     them.

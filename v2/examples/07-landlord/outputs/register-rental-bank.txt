@@ -10,9 +10,10 @@ Register: assets/bank/rental-bank
   2025-12-01  expenses/rental/interest    lender                        -1,555.52 USD    3,582.61 USD
   2025-12-05  expenses/rental/management  hartwell-pm                     -200.00 USD    3,382.61 USD
   2025-12-29  expenses/rental/management  hartwell-pm                     -200.00 USD    3,182.61 USD
-  2025-12-29  assets/rental/house                                      404,531.25 USD  407,713.86 USD
+  2025-12-29  assets/rental/house                                      431,500.00 USD  434,682.61 USD
+  2025-12-29  expenses/selling-costs                                   -26,968.75 USD  407,713.86 USD
   2025-12-29  liabilities/mortgage        lender       #loan          -276,282.05 USD  131,431.81 USD
-  2025-12-29  expenses/rental/interest    lender                        -1,450.48 USD  129,981.33 USD
-  2025-12-29  liabilities/deposits        buyer        #dep-b           -2,500.00 USD  127,481.33 USD
+  2025-12-29  liabilities/deposits        buyer        #dep-b           -2,500.00 USD  128,931.81 USD
+  2025-12-29  expenses/rental/interest    lender                        -1,450.48 USD  127,481.33 USD
   2025-12-29  assets/bank/deposit-bank                                   2,500.00 USD  129,981.33 USD
   2025-12-29  assets/bank/checking                                    -129,981.33 USD        0.00 USD

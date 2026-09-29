@@ -89,10 +89,15 @@ pub struct Terms {
     /// parcels tied to it leave first, whatever its `on spend` laws make of
     /// the flow, since the flow says whose money it is.
     pub spender: Option<Id<Entity>>,
+    /// What the legs of an exchange into expense places cost it, in what the
+    /// fee is paid in (a trading fee, a sale's commission): the parcels sold
+    /// fetched that much less, and the parcels bought cost that much more.
+    pub cost: Option<Amount>,
 }
 
 impl Terms {
-    pub const NONE: Terms = Terms { basis: None, hold: None, basis_end: None, since: None, spender: None };
+    pub const NONE: Terms =
+        Terms { basis: None, hold: None, basis_end: None, since: None, spender: None, cost: None };
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

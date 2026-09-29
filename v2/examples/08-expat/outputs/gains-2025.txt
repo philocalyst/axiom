@@ -4,26 +4,26 @@ Gains realized in 2025
 
   Sold        Acquired        Quantity  From                      Proceeds          Basis        Gain  Term
   ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-  2025-07-01  2025-06-27  1,450.00 EUR  assets/de/girokonto   1,701.14 USD   1,690.70 USD   10.44 USD  short
-  2025-07-03  2025-06-27     47.09 EUR  assets/de/girokonto      54.97 USD      54.91 USD    0.06 USD  short
-  2025-07-05  2025-06-27     58.00 EUR  assets/de/girokonto      67.70 USD      67.63 USD    0.07 USD  short
-  2025-07-06  2025-06-27     24.61 EUR  assets/de/girokonto      28.73 USD      28.70 USD    0.03 USD  short
-  2025-07-09  2025-06-27     54.32 EUR  assets/de/girokonto      63.41 USD      63.34 USD    0.07 USD  short
-  2025-07-10  2025-06-27     19.99 EUR  assets/de/girokonto      23.33 USD      23.31 USD    0.02 USD  short
-  2025-07-13  2025-06-27     46.47 EUR  assets/de/girokonto      54.24 USD      54.18 USD    0.06 USD  short
-  2025-07-15  2025-06-27     45.43 EUR  assets/de/girokonto      53.03 USD      52.97 USD    0.06 USD  short
-  2025-07-17  2025-06-27     82.45 EUR  assets/de/girokonto      96.24 USD      96.14 USD    0.10 USD  short
-  2025-07-20  2025-06-27     35.30 EUR  assets/de/girokonto      41.21 USD      41.16 USD    0.05 USD  short
-  2025-07-22  2025-06-27     58.05 EUR  assets/de/girokonto      67.76 USD      67.69 USD    0.07 USD  short
-  2025-07-27  2025-06-27     49.24 EUR  assets/de/girokonto      57.48 USD      57.41 USD    0.07 USD  short
-  2025-08-01  2025-06-27  1,450.00 EUR  assets/de/girokonto   1,656.77 USD   1,690.69 USD  -33.92 USD  short
-  2025-08-03  2025-06-27     49.22 EUR  assets/de/girokonto      56.24 USD      57.39 USD   -1.15 USD  short
-  2025-08-05  2025-06-27     58.00 EUR  assets/de/girokonto      66.27 USD      67.63 USD   -1.36 USD  short
-  2025-08-06  2025-06-27     18.52 EUR  assets/de/girokonto      21.16 USD      21.59 USD   -0.43 USD  short
-  2025-08-08  2025-06-27      4.77 EUR  assets/de/girokonto       5.48 USD       5.56 USD   -0.08 USD  short
-  2025-08-08  2025-06-27    895.23 EUR  assets/de/girokonto   1,027.63 USD   1,043.84 USD  -16.21 USD  short
-  2025-08-09  2025-06-27     45.79 EUR  assets/de/girokonto      52.56 USD      53.39 USD   -0.83 USD  short
-  2025-08-10  2025-06-27      7.78 EUR  assets/de/girokonto       8.93 USD       9.07 USD   -0.14 USD  short
+  2025-07-01  2025-06-27  1,450.00 EUR  assets/de/girokonto   1,701.14 USD   1,700.56 USD    0.58 USD  short
+  2025-07-03  2025-06-27     47.09 EUR  assets/de/girokonto      54.97 USD      55.23 USD   -0.26 USD  short
+  2025-07-05  2025-06-27     58.00 EUR  assets/de/girokonto      67.70 USD      68.02 USD   -0.32 USD  short
+  2025-07-06  2025-06-27     24.61 EUR  assets/de/girokonto      28.73 USD      28.86 USD   -0.13 USD  short
+  2025-07-09  2025-06-27     54.32 EUR  assets/de/girokonto      63.41 USD      63.71 USD   -0.30 USD  short
+  2025-07-10  2025-06-27     19.99 EUR  assets/de/girokonto      23.33 USD      23.44 USD   -0.11 USD  short
+  2025-07-13  2025-06-27     46.47 EUR  assets/de/girokonto      54.24 USD      54.50 USD   -0.26 USD  short
+  2025-07-15  2025-06-27     45.43 EUR  assets/de/girokonto      53.03 USD      53.28 USD   -0.25 USD  short
+  2025-07-17  2025-06-27     82.45 EUR  assets/de/girokonto      96.24 USD      96.70 USD   -0.46 USD  short
+  2025-07-20  2025-06-27     35.30 EUR  assets/de/girokonto      41.21 USD      41.40 USD   -0.19 USD  short
+  2025-07-22  2025-06-27     58.05 EUR  assets/de/girokonto      67.76 USD      68.08 USD   -0.32 USD  short
+  2025-07-27  2025-06-27     49.24 EUR  assets/de/girokonto      57.48 USD      57.75 USD   -0.27 USD  short
+  2025-08-01  2025-06-27  1,450.00 EUR  assets/de/girokonto   1,656.77 USD   1,700.56 USD  -43.79 USD  short
+  2025-08-03  2025-06-27     49.22 EUR  assets/de/girokonto      56.24 USD      57.73 USD   -1.49 USD  short
+  2025-08-05  2025-06-27     58.00 EUR  assets/de/girokonto      66.27 USD      68.02 USD   -1.75 USD  short
+  2025-08-06  2025-06-27     18.52 EUR  assets/de/girokonto      21.16 USD      21.72 USD   -0.56 USD  short
+  2025-08-08  2025-06-27      4.77 EUR  assets/de/girokonto       5.48 USD       5.59 USD   -0.11 USD  short
+  2025-08-08  2025-06-27    895.23 EUR  assets/de/girokonto   1,027.63 USD   1,049.93 USD  -22.30 USD  short
+  2025-08-09  2025-06-27     45.79 EUR  assets/de/girokonto      52.56 USD      53.71 USD   -1.15 USD  short
+  2025-08-10  2025-06-27      7.78 EUR  assets/de/girokonto       8.93 USD       9.12 USD   -0.19 USD  short
   2025-08-10  2025-07-31     12.21 EUR  assets/de/girokonto      14.02 USD      13.95 USD    0.07 USD  short
   2025-08-13  2025-07-31     34.81 EUR  assets/de/girokonto      39.96 USD      39.77 USD    0.19 USD  short
   2025-08-15  2025-07-31     62.32 EUR  assets/de/girokonto      71.54 USD      71.21 USD    0.33 USD  short
@@ -110,4 +110,4 @@ Gains realized in 2025
   2025-12-22  2025-10-31     68.60 EUR  assets/de/girokonto      80.08 USD      78.87 USD    1.21 USD  short
   2025-12-27  2025-10-31     40.12 EUR  assets/de/girokonto      46.84 USD      46.13 USD    0.71 USD  short
   ──────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Short-term                                                 21,327.61 USD  21,300.27 USD   27.34 USD
+  Short-term                                                 21,327.61 USD  21,330.88 USD   -3.27 USD

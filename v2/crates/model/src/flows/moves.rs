@@ -8,7 +8,7 @@
 //! one leg's place, and the others are paid to or from it.
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Diagnostic, Id, Loc, Sym};
+use axiom_core::{Day, Diagnostic, Id, Loc, Qty, Sym};
 
 use super::faults::{self, Written};
 use super::pairing::{self, Share};
@@ -26,6 +26,8 @@ pub(super) struct Move {
     pub infer: Infer,
     pub pending: bool,
     pub tail: Tail,
+    /// What the expense legs of its transaction cost this exchange.
+    pub cost: Option<Amount>,
     pub loc: Loc,
 }
 
@@ -43,7 +45,13 @@ impl Move {
         loc: Loc,
     ) -> Move {
         let (infer, pending) = how;
-        Move { from: from.clone(), to: to.clone(), out: amounts.0, arrive: amounts.1, infer, pending, tail, loc }
+        let (out, arrive) = amounts;
+        Move { from: from.clone(), to: to.clone(), out, arrive, infer, pending, tail, cost: None, loc }
+    }
+
+    /// One commodity leaves and another arrives.
+    fn is_exchange(&self) -> bool {
+        self.out.unit != self.arrive.unit
     }
 }
 
@@ -284,7 +292,40 @@ impl Elab<'_, '_> {
                 false => moves.push(exchanged),
             }
         }
+        self.charge_exchanges(&mut moves);
         Some(Moves { moves, counterparty: named.end.entity })
+    }
+
+    /// A leg into an expense place during an exchange is a cost of that
+    /// exchange (LANGUAGE §2): a trading fee, a sale's commission. It stays an
+    /// expense, and the exchange carries its amount so that the engine, which
+    /// prices, counts it once. Fees are paid in what the exchange is paid in
+    /// (the base currency where it is a side, else what arrives); with several
+    /// exchanges the fees are shared out by what each exchanged.
+    fn charge_exchanges(&self, moves: &mut [Move]) {
+        let book = &self.world.book;
+        let cash = |mv: &Move| if mv.out.unit == book.base { mv.out } else { mv.arrive };
+        let exchanges: Vec<usize> = (0..moves.len()).filter(|&at| moves[at].is_exchange()).collect();
+        let Some(&first) = exchanges.first() else { return };
+        let unit = cash(&moves[first]).unit;
+        let fee = |mv: &Move| {
+            let spent = mv.infer == Infer::Known && !mv.is_exchange() && mv.out.unit == unit;
+            spent && book.places[mv.to.end.place].class == Class::Expense
+        };
+        let fees: Qty = moves.iter().filter(|&mv| fee(mv)).map(|mv| mv.out.qty).sum();
+        let paid_with_it = |&&at: &&usize| cash(&moves[at]).unit == unit;
+        let charged: Vec<usize> = exchanges.iter().filter(paid_with_it).copied().collect();
+        let whole: Qty = charged.iter().map(|&at| cash(&moves[at]).qty).sum();
+        if fees.is_zero() || whole.is_zero() {
+            return;
+        }
+        let (mut seen, mut paid) = (Qty::ZERO, Qty::ZERO);
+        for at in charged {
+            seen += cash(&moves[at]).qty;
+            let owed = fees.share(seen, whole).unwrap_or(fees);
+            moves[at].cost = Some(Amount::new(owed - paid, unit));
+            paid = owed;
+        }
     }
 
     /// The single amount a split header states, and what the named place itself
@@ -380,9 +421,12 @@ impl Elab<'_, '_> {
             || tail.hold.is_some()
             || tail.since.is_some()
             || basis_end.is_some()
-            || spender.is_some();
-        let terms =
-            said.then(|| Box::new(Terms { basis: tail.basis, hold: tail.hold, basis_end, since: tail.since, spender }));
+            || spender.is_some()
+            || mv.cost.is_some();
+        let terms = said.then(|| {
+            let (basis, hold, since, cost) = (tail.basis, tail.hold, tail.since, mv.cost);
+            Box::new(Terms { basis, hold, basis_end, since, spender, cost })
+        });
         let recognized = tail.period.map_or(Recognition::on(day), |(from, until)| Recognition { from, until });
         Some(Flow {
             day,
