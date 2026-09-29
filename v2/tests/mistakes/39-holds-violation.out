@@ -1,11 +1,15 @@
-error[not-held]: `assets/wallet` does not hold USD
+error[not-held]: `assets/wallet` only holds `BTC`, and this flow moves USD
    ╭─[39-holds-violation.ax:14:24]
    │
+ 9 │ account assets/wallet
+10 │   holds BTC
+   │   ────┬────
+   │       ╰── only `BTC` may be held here
+   ⋮
 14 │ 2026-02-10 checking -> wallet 500 USD
    │                        ───┬──
    │                           ╰── USD arrives or leaves here
    │
-   = note: it holds `BTC`
    = help: change what the account holds, or use another account
 
 ✗ 1 error

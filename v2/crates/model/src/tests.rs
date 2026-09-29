@@ -1037,3 +1037,25 @@ law bad-filter
         assert!(book.law("from-payer").is_ok() && book.law("bad-filter").is_err());
     });
 }
+
+#[test]
+fn a_flow_that_breaks_an_opening_closing_or_holding_rule_shows_the_line_that_says_it() {
+    let text = "
+account assets/old : bank
+  opened 2025-01-01
+  closed 2025-12-31
+account assets/wallet
+  holds VTI
+2026-03-20 checking -> old 5 USD
+2026-03-21 checking -> wallet 5 USD
+";
+    with_book(text, |book, diags| {
+        assert_eq!(codes(diags), ["place-closed", "not-held"], "{diags:?}");
+        for diagnostic in diags {
+            let context = diagnostic.labels.iter().find(|label| !label.primary).expect("the rule's own line");
+            assert_ne!(context.loc, diagnostic.labels[0].loc);
+        }
+        assert!(diags[0].message.contains("closed on 2025-12-31") && diags[1].message.contains("only holds `VTI`"));
+        assert!(book.flows.is_empty());
+    });
+}

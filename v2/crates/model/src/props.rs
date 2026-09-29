@@ -54,10 +54,10 @@ impl Target {
 #[derive(Clone, Debug)]
 enum Assign {
     Owner(Id<Entity>),
-    Holds(Option<Box<[Id<Commodity>]>>),
+    Holds(Option<Box<[Id<Commodity>]>>, Loc),
     Select(Policy),
-    Opened(Day),
-    Closed(Day),
+    Opened(Day, Loc),
+    Closed(Day, Loc),
     Budget(Amount, Window, Loc),
     Liquidity(Span),
     Via(Id<Place>),
@@ -89,10 +89,10 @@ type Reader = fn(&mut Args<'_, '_, '_>) -> Result<Assign, Diagnostic>;
 /// under, and how it reads.
 const BUILTINS: [(&str, &[Target], Reader); 18] = [
     ("owner", &[Target::Place], |a| a.entity().map(Assign::Owner)),
-    ("holds", &[Target::Place], |a| a.holds().map(Assign::Holds)),
+    ("holds", &[Target::Place], |a| Ok(Assign::Holds(a.holds()?, a.line.loc))),
     ("select", &[Target::Place], |a| a.policy().map(Assign::Select)),
-    ("opened", &[Target::Place], |a| a.day().map(Assign::Opened)),
-    ("closed", &[Target::Place], |a| a.day().map(Assign::Closed)),
+    ("opened", &[Target::Place], |a| Ok(Assign::Opened(a.day()?, a.line.loc))),
+    ("closed", &[Target::Place], |a| Ok(Assign::Closed(a.day()?, a.line.loc))),
     ("budget", &[Target::Place], |a| {
         let amount = a.amount()?;
         let monthly = a.word(&["monthly", "yearly"])? == "monthly";
@@ -247,10 +247,10 @@ impl Place {
     fn set(&mut self, assign: &Assign) {
         match assign {
             Assign::Owner(owner) => self.owner = *owner,
-            Assign::Holds(holds) => self.holds = holds.clone(),
+            Assign::Holds(holds, _) => self.holds = holds.clone(),
             Assign::Select(policy) => self.select = Some(*policy),
-            Assign::Opened(day) => self.opened = Some(*day),
-            Assign::Closed(day) => self.closed = Some(*day),
+            Assign::Opened(day, _) => self.opened = Some(*day),
+            Assign::Closed(day, _) => self.closed = Some(*day),
             Assign::Liquidity(span) => self.liquidity = Some(*span),
             Assign::Prop(prop) => put(&mut self.props, *prop),
             _ => {}
@@ -675,8 +675,12 @@ fn places<'s>(
         let place = &mut world.book.places[id];
         (place.deferred, place.basis, place.claim) = (deferred, basis, claim);
         for assign in &assigns {
-            if let Assign::Budget(amount, window, loc) = *assign {
-                budgets.push(Budget { place: id, amount, window, loc });
+            match *assign {
+                Assign::Budget(amount, window, loc) => budgets.push(Budget { place: id, amount, window, loc }),
+                Assign::Holds(_, loc) => drop(world.lines.insert((id, "holds"), loc)),
+                Assign::Opened(_, loc) => drop(world.lines.insert((id, "opened"), loc)),
+                Assign::Closed(_, loc) => drop(world.lines.insert((id, "closed"), loc)),
+                _ => {}
             }
             place.set(assign);
         }

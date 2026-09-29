@@ -6,7 +6,7 @@
 //! journal, are resolved against them later.
 
 use axiom_core::diag::closest;
-use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Map, Set, Sym, Tree};
+use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Set, Sym, Tree};
 use axiom_syntax::{DeclKind, ExprKind, Setting};
 
 use crate::book::{Book, Class, Commodity, Entity, Kind, Lookup, Place, Roots, Sort};
@@ -44,6 +44,9 @@ pub(crate) struct World<'s> {
     pub tallies: Set<&'s str>,
     /// The order each place was declared in; places opened by use come last.
     pub ordinal: Vec<u32>,
+    /// Where the lines that say when a place is open and what it holds were
+    /// written (`opened`, `closed`, `holds`), for the errors that enforce them.
+    pub lines: Map<(Id<Place>, &'static str), Loc>,
 }
 
 pub(crate) struct Declared {
@@ -202,6 +205,7 @@ pub(crate) fn declare<'a, 's>(
         declared,
         tallies: Set::default(),
         ordinal: places.ordinal,
+        lines: Map::default(),
     }
 }
 

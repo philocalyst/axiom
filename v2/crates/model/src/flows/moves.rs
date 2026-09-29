@@ -14,7 +14,7 @@ use super::faults::{self, Written};
 use super::pairing::{self, Share};
 use super::shape::{Elab, Leg, Placed, Shape, Slot, Stated, Tail};
 use crate::book::{Amount, CodeScope, Commodity, Entity, Place};
-use crate::errors::{iso, list};
+use crate::errors::{count, iso, list, list_and};
 use crate::journal::{End, Flow, Infer, Mode, Recognition, Terms};
 
 /// One flow, before its transaction's facts are added.
@@ -447,39 +447,63 @@ impl Elab<'_, '_> {
     fn check_holds(&mut self, end: &Placed, unit: Id<Commodity>) -> bool {
         let world = self.world;
         let place = &world.book.places[end.end.place];
-        let Some(holds) = &place.holds else {
-            return true;
-        };
+        let Some(holds) = &place.holds else { return true };
         if holds.contains(&unit) {
             return true;
         }
         let symbol = |unit: Id<Commodity>| world.book.name(world.book.commodities[unit].symbol);
         let held: Vec<&str> = holds.iter().map(|&held| symbol(held)).collect();
-        self.sink.diags.push(
-            Diagnostic::error("not-held", format!("`{}` does not hold {}", world.book.name(place.path), symbol(unit)))
-                .label(end.loc, format!("{} arrives or leaves here", symbol(unit)))
-                .note(format!("it holds {}", list(&held)))
-                .help("change what the account holds, or use another account"),
-        );
+        let mut error = Diagnostic::error(
+            "not-held",
+            format!(
+                "`{}` only holds {}, and this flow moves {}",
+                world.book.name(place.path),
+                list_and(&held),
+                symbol(unit)
+            ),
+        )
+        .label(end.loc, format!("{} arrives or leaves here", symbol(unit)));
+        if let Some(&line) = world.lines.get(&(end.end.place, "holds")) {
+            error = error.context(line, format!("only {} may be held here", list_and(&held)));
+        }
+        self.sink.diags.push(error.help("change what the account holds, or use another account"));
         false
     }
 
     fn check_open(&mut self, end: &Placed, day: Day) -> bool {
-        let place = &self.world.book.places[end.end.place];
-        let name = self.world.book.name(place.path);
-        let fault = match (place.opened, place.closed) {
-            (Some(opened), _) if day < opened => Some(("place-not-open", format!("`{name}` opens on {}", iso(opened)))),
-            (_, Some(closed)) if day > closed => Some(("place-closed", format!("`{name}` closed on {}", iso(closed)))),
-            _ => None,
+        let world = self.world;
+        let place = &world.book.places[end.end.place];
+        let name = world.book.name(place.path);
+        let (code, rule, message, label, help) = match (place.opened, place.closed) {
+            (Some(opened), _) if day < opened => {
+                let early = opened.0 - day.0;
+                let message = format!(
+                    "`{name}` opened on {}; this flow is {} earlier",
+                    iso(opened),
+                    count(early as usize, "day")
+                );
+                let help = format!("move the flow to {} or later, or change `opened`", iso(opened));
+                (
+                    "place-not-open",
+                    "opened",
+                    message,
+                    format!("{} before it opened", count(early as usize, "day")),
+                    help,
+                )
+            }
+            (_, Some(closed)) if day > closed => {
+                let late = day.0 - closed.0;
+                let message = format!("`{name}` was closed on {}; nothing can move on {}", iso(closed), iso(day));
+                let help = "use another account, or, if it reopened, change `closed`".to_string();
+                ("place-closed", "closed", message, format!("{} after it closed", count(late as usize, "day")), help)
+            }
+            _ => return true,
         };
-        let Some((code, message)) = fault else {
-            return true;
-        };
-        self.sink.diags.push(
-            Diagnostic::error(code, message)
-                .label(end.loc, format!("this flow is dated {}", iso(day)))
-                .help("use another account, or change `opened` or `closed`"),
-        );
+        let mut error = Diagnostic::error(code, message).label(end.loc, label);
+        if let Some(&line) = world.lines.get(&(end.end.place, rule)) {
+            error = error.context(line, format!("{rule} here"));
+        }
+        self.sink.diags.push(error.help(help));
         false
     }
 
