@@ -40,6 +40,8 @@ pub struct Ledger<'b, 's> {
 #[derive(Clone)]
 pub(crate) struct Solved {
     pub events: Events,
+    /// The last day the fold reaches ([`Run::horizon`]).
+    pub horizon: Day,
     pub deadlines: Vec<Deadline>,
     /// Some list of rules brings one law to one subject twice: `fire` must not run it twice.
     pub repeats: bool,
@@ -88,7 +90,7 @@ impl<'b, 's> Ledger<'b, 's> {
             blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
         let (repeats, caps, readers) = (fire::repeats(book), fire::caps(book), fire::readers(book));
-        let solved = Solved { events, deadlines, repeats, caps, readers, unsolved: blocked };
+        let solved = Solved { events, horizon, deadlines, repeats, caps, readers, unsolved: blocked };
         let timeline = Timeline::new(&solved.sources(book));
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
         Ledger {
@@ -225,6 +227,7 @@ impl<'b, 's> Ledger<'b, 's> {
         });
         Run {
             today: options.today,
+            horizon: solved.horizon,
             posted: posted.collect(),
             holdings: world.holdings.into_sorted(),
             gains: record.gains,

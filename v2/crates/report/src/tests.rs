@@ -569,6 +569,7 @@ pub(crate) fn household() -> Household {
     };
     let run = Run {
         today: day(2026, 3, 31),
+        horizon: day(2026, 3, 31),
         posted: journal.posted.into(),
         holdings: records.holdings,
         gains: records.gains,

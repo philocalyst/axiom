@@ -148,8 +148,7 @@ pub(crate) fn deadlines(env: Env, horizon: Day, first: Option<Day>, values: &mut
                         from: Day::from_ymd(year, 1, 1).unwrap_or(horizon),
                         until: Day::from_ymd(year, 12, 31).unwrap_or(horizon),
                     };
-                    let closes =
-                        closing.map_or(Some(period.until), |c| Day::from_ymd(year + 1, c.month.into(), c.day.into()));
+                    let closes = closing.map_or(Some(period.until), |closing| closing.day_for(year));
                     let closes = closes.unwrap_or(period.until.add_days(1).month_end());
                     if closes <= horizon {
                         close(closes, period);

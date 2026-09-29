@@ -831,6 +831,17 @@ fn a_tally_is_read_for_another_year_by_a_number_or_a_date_and_by_nothing_else() 
 }
 
 #[test]
+fn a_closing_judges_a_year_on_its_day_of_the_next() {
+    let day = |year, month, day| axiom_core::Day::from_ymd(year, month, day);
+    let april = crate::Closing { month: 4, day: 15 };
+    assert_eq!(april.day_for(2025), day(2026, 4, 15));
+    // A February 29 closing falls on the 28th in a year that has no 29th.
+    let leap_day = crate::Closing { month: 2, day: 29 };
+    assert_eq!(leap_day.day_for(2025), day(2026, 2, 28));
+    assert_eq!(leap_day.day_for(2027), day(2028, 2, 29));
+}
+
+#[test]
 fn only_a_law_that_is_one_cap_on_a_total_is_a_cap() {
     let text = "
 law yearly

@@ -229,6 +229,25 @@ fn a_payment_dated_on_the_closing_day_counts_wherever_the_journal_writes_it() {
     });
 }
 
+/// A law that closes on February 29 judges a year on the 28th in a year that has no 29th.
+#[test]
+fn a_february_29_closing_falls_on_the_28th_in_a_year_without_a_29th() {
+    let text = CLOSING.replace("closing 01-15", "closing 02-29").replace("<= 120 USD", "<= 30 USD");
+    let text = format!("{text}2027-06-01 checking -> estimated 40 USD for 2027\n");
+    with_run(&text, day(2028, 3, 31), |_, run| {
+        let judged: Vec<_> = run.violations.iter().map(|v| v.day.to_string()).collect();
+        assert_eq!(judged, ["2026-02-28", "2028-02-29"], "the 100.00 USD of 2025, then the 40.00 USD of 2027");
+    });
+}
+
+/// Periods close up to the journal's last fact, or to today if that is later, and the run says where it stopped.
+#[test]
+fn the_run_says_the_last_day_it_folded() {
+    let text = format!("{CLOSING}2026-03-01 checking -> estimated 10 USD\n");
+    with_run(&text, day(2026, 1, 1), |_, run| assert_eq!(run.horizon, day(2026, 3, 1)));
+    with_run(&text, day(2026, 6, 1), |_, run| assert_eq!(run.horizon, day(2026, 6, 1)));
+}
+
 /// The journal's 100.00 USD payment, as a 50.00 USD one on the closing day that the journal does not hold.
 fn payment_on_the_closing_day(book: &Book) -> axiom_model::Flow {
     let mut flow = book.flows[axiom_core::Id::new(1)].clone();

@@ -38,8 +38,7 @@ pub fn days_for(book: &Book, year: i32, wanted: impl Fn(&Rule) -> bool) -> Vec<D
     let (Some(first), Some(last)) = (first, last) else { return Vec::new() };
     let in_force = |rule: &Rule| rule.from <= last && first <= rule.until;
     let judged = rules(book).filter(|&(rule, _)| in_force(rule) && wanted(rule));
-    let mut days: Vec<Day> =
-        judged.filter_map(|(_, closing)| Day::from_ymd(year + 1, closing.month.into(), closing.day.into())).collect();
+    let mut days: Vec<Day> = judged.filter_map(|(_, closing)| closing.day_for(year)).collect();
     days.sort_unstable();
     days.dedup();
     days
