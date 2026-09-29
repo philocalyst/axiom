@@ -27,6 +27,17 @@ pub(crate) struct Reported;
 
 pub(crate) type Parse<T> = Result<T, Reported>;
 
+/// Where a leg or a header's tail is written, which says what it may add to
+/// the common clauses.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Scope {
+    /// A flow, its legs, an occurrence's overrides or a contract's template.
+    Flow,
+    /// The lines of an `opening`, which say `since` when their parcels were
+    /// acquired, and which an asset has with a `basis` and no amount.
+    Opening,
+}
+
 /// A parsed header line: where the item is, and what documents it.
 pub(crate) struct Header<'s> {
     pub loc: Loc,
@@ -53,8 +64,8 @@ pub(crate) struct Parser<'s> {
     /// The expression roots of the lists being read. Lists nest (a call inside
     /// an argument), so each is collected here and moved to its table whole.
     pub roots: Vec<ExprId>,
-    /// Whether the block being read is an `opening`, whose lines may say `since`.
-    pub opening: bool,
+    /// Where the tails being read are written: what else they may say.
+    pub scope: Scope,
     /// The commodities the file writes, for the amount that names none. Found
     /// when first needed.
     pub units: Option<Vec<&'s str>>,
@@ -77,7 +88,7 @@ impl<'s> Parser<'s> {
             depth: 0,
             diags: Vec::new(),
             roots: Vec::new(),
-            opening: false,
+            scope: Scope::Flow,
             units: None,
         }
     }
@@ -190,6 +201,14 @@ impl<'s> Parser<'s> {
     pub fn bump_as<T>(&mut self, value: T) -> T {
         self.bump();
         value
+    }
+
+    /// Reads with the tails being in `scope`.
+    pub fn in_scope<T>(&mut self, scope: Scope, read: impl FnOnce(&mut Self) -> T) -> T {
+        let outer = std::mem::replace(&mut self.scope, scope);
+        let parsed = read(self);
+        self.scope = outer;
+        parsed
     }
 
     /// Consumes the token, then reads what it introduces.

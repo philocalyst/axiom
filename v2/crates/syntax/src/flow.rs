@@ -1,6 +1,6 @@
-//! Flows: the `SOURCE -> TARGET` header shared by transactions and plans, its
-//! ends and tail, the indented legs of a one-side split, and the selectors that
-//! say which parcels an end means.
+//! Flows: the `SOURCE -> TARGET` header, its ends and tail, the indented legs
+//! of a one-side split (which an occurrence, a contract and an opening share),
+//! and the selectors that say which parcels an end means.
 
 use std::mem::discriminant;
 
@@ -9,7 +9,7 @@ use axiom_core::{Diagnostic, Id, Loc};
 use crate::ast::*;
 use crate::lex::Tok;
 use crate::lines::Line;
-use crate::parser::{Parse, Parser};
+use crate::parser::{Parse, Parser, Scope};
 
 const POLICIES: [(&str, Policy); 4] =
     [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
@@ -140,15 +140,18 @@ impl<'s> Parser<'s> {
         }
     }
 
-    /// An indented line of a split: `PLACE LEGAMOUNT TAIL`.
+    /// An indented line of a split: `END LEGAMOUNT TAIL`.
     pub fn leg(&mut self, line: &mut Line<'s>) -> Parse<Id<Leg<'s>>> {
         let doc = line.take_doc();
         let end = self.end()?;
-        // What a leg may say that a header end may not: the remainder, or a
-        // target balance.
+        // What a leg may say that a header side may not: the remainder, a
+        // target balance, or a share of the header; and in an opening nothing
+        // but a basis, for an asset.
         let amount = match self.tok() {
             Tok::Punct("...") => self.bump_as(Quantity::Rest),
             Tok::Punct("=") => Quantity::Target(self.then(Self::amount)?),
+            Tok::Percent(percent) => self.bump_as(Quantity::Percent(percent)),
+            Tok::Name("basis") if self.scope == Scope::Opening => Quantity::Whole,
             _ => self.quantity()?,
         };
         let tail = self.tail(self.mark::<Clause>())?;
@@ -157,29 +160,23 @@ impl<'s> Parser<'s> {
         Ok(self.push(Leg { doc, end, amount, tail, loc }))
     }
 
-    /// `[/ PAYEE] CODE* [@ PRICE] [for WHAT] [due WHEN] [basis AMOUNT] [! [STRING]]`, in any
-    /// order; the waiver ends it. Clauses are kept in the order written, from
-    /// `mark`.
-    pub fn tail(&mut self, mark: usize) -> Parse<Tail<'s>> {
-        let mut payee: Option<Name<'s>> = None;
+    /// `[#PURPOSE [of NAME]] [STRING] CODE* [for WHAT] [due WHEN] [basis AMOUNT] [/ PARTY]
+    /// [@ PRICE] [! [STRING]]`, in any order; the waiver ends it. Clauses are
+    /// kept in the order written, from `mark`.
+    pub fn tail(&mut self, mark: usize) -> Parse<Many<Clause<'s>>> {
         loop {
             let token = self.peek();
             let kind = match token.tok {
-                Tok::Punct("/") => {
-                    self.bump();
-                    if let Some(first) = payee {
-                        return Err(self.duplicate("payee", token.loc, self.loc_of(&first)));
-                    }
-                    payee = Some(self.name("expected-payee", "a payee such as `trader-joes`")?);
-                    continue;
-                }
+                Tok::Purpose(name) => ClauseKind::Purpose(self.purpose(name)?),
+                Tok::Str(text) => self.bump_as(ClauseKind::Description(text)),
                 Tok::Code(code) => self.bump_as(ClauseKind::Code(code)),
+                Tok::Punct("/") => ClauseKind::Party(self.then(|p| p.name("expected-party", "a party, like `paypal`"))?),
                 Tok::Punct("@") => ClauseKind::Price(self.then(Self::measured)?),
                 Tok::Punct("!") => ClauseKind::Waive(self.waiver()?),
-                Tok::Name("for") => ClauseKind::For(self.then(Self::for_what)?),
+                Tok::Name("for") => ClauseKind::For(self.then(|p| p.for_what(token.loc))?),
                 Tok::Name("due") => ClauseKind::Due(self.then(Self::due)?),
                 Tok::Name("basis") => ClauseKind::Basis(self.then(Self::amount)?),
-                Tok::Name("since") if self.opening => {
+                Tok::Name("since") if self.scope == Scope::Opening => {
                     ClauseKind::Since(self.then(|p| p.date("the day the parcels were acquired, like `2023-06-15`"))?)
                 }
                 _ => break,
@@ -195,7 +192,14 @@ impl<'s> Parser<'s> {
                 break;
             }
         }
-        Ok(Tail { payee, clauses: self.since(mark) })
+        Ok(self.since(mark))
+    }
+
+    /// `#NAME [of THING]`, the `#NAME` not yet consumed.
+    fn purpose(&mut self, name: Name<'s>) -> Parse<Purpose<'s>> {
+        self.bump();
+        let of = self.eat_word("of").map(|_| self.name("expected-name", "what it is of, such as `condo`"));
+        Ok(Purpose { name, of: of.transpose()? })
     }
 
     /// After `due`: a date, or a span after the date it is measured from.
@@ -206,13 +210,22 @@ impl<'s> Parser<'s> {
         }
     }
 
-    /// `for #code`, `for car-fund`, or `for` a year, month, date or range.
-    fn for_what(&mut self) -> Parse<For<'s>> {
-        match self.tok() {
-            Tok::Code(code) => Ok(self.bump_as(For::Code(code))),
+    /// `for car-fund`, or `for` a year, month, date or range; `keyword` is where
+    /// the `for` was written.
+    fn for_what(&mut self, keyword: Loc) -> Parse<For<'s>> {
+        let token = self.peek();
+        match token.tok {
             Tok::Name(entity) => Ok(self.bump_as(For::Entity(Name(entity)))),
+            // v3 said which claim a payment settled with `for #code`.
+            Tok::Code(_) | Tok::Purpose(_) => {
+                let (clause, code) = (keyword.to(token.loc), format!("^{}", &self.text(token.loc)[1..]));
+                let diag = Diagnostic::error("for-code", "a flow that carries a claim's code settles that claim")
+                    .label(clause, "`for` takes a period or a name now, not a code")
+                    .fix(format!("write `{code}` on the flow itself"), clause, code);
+                self.fail(diag)
+            }
             _ => {
-                let (first, last, _) = self.days("expected-period", "a period, `#code` or entity after `for`")?;
+                let (first, last, _) = self.days("expected-period", "a period or a name after `for`")?;
                 Ok(For::Period(first, last))
             }
         }
@@ -231,7 +244,9 @@ impl<'s> Parser<'s> {
         let legs = self.slice(flow.legs);
         let diag = match (from_named, to_named, legs.first()) {
             (true, true, Some(leg)) => many_to_many(arrow, leg.loc),
-            (false, false, _) => no_place(arrow),
+            (false, false, _) => no_end(arrow),
+            // An exchange with only a source stays at the source: `fidelity 20 VTI -> 5_940 USD`.
+            (true, false, None) if flow.from.amount.is_some() && flow.to.amount.is_some() => return Ok(()),
             (true, false, None) => missing_legs(arrow, true),
             (false, true, None) => missing_legs(arrow, false),
             _ => {
@@ -272,7 +287,10 @@ impl<'s> Parser<'s> {
 
 fn clause_name(kind: &ClauseKind<'_>) -> &'static str {
     match kind {
+        ClauseKind::Purpose(_) => "purpose",
+        ClauseKind::Description(_) => "description",
         ClauseKind::Code(_) => "code",
+        ClauseKind::Party(_) => "party",
         ClauseKind::Price(_) => "price",
         ClauseKind::For(_) => "`for` clause",
         ClauseKind::Due(_) => "`due` clause",
@@ -290,21 +308,21 @@ fn many_to_many(arrow: Loc, leg: Loc) -> Diagnostic {
         .help("write two transactions, one for each flow")
 }
 
-fn no_place(arrow: Loc) -> Diagnostic {
-    Diagnostic::error("flow-without-place", "a flow needs at least one place")
-        .label(arrow, "neither side of this arrow names a place")
-        .help("name where the value comes from or goes to: `checking -> food 84.20 USD`")
+fn no_end(arrow: Loc) -> Diagnostic {
+    Diagnostic::error("flow-without-end", "a flow needs at least one end")
+        .label(arrow, "neither side of this arrow names one")
+        .help("name where the value comes from or goes to: `checking -> trader-joes 84.20 USD`")
 }
 
-/// The header names a place on one side only, and no legs say the other.
+/// The header names an end on one side only, and no legs say the other.
 fn missing_legs(arrow: Loc, right: bool) -> Diagnostic {
     let (side, at, insert, fix) = match right {
-        true => ("right", arrow.end, " ?", "send it to `?`, the place for money whose destination is unknown"),
-        false => ("left", arrow.start, "? ", "take it from `?`, the place for money whose origin is unknown"),
+        true => ("right", arrow.end, " ?", "send it to `?`, the party for money whose destination is unknown"),
+        false => ("left", arrow.start, "? ", "take it from `?`, the party for money whose origin is unknown"),
     };
     Diagnostic::error("missing-legs", format!("nothing is named on the {side} of this arrow"))
         .label(arrow, "the other side is not written, and no legs list it")
-        .help("indent legs below the flow to list where the rest goes, or name a place")
+        .help("indent legs below the flow to list where the rest goes, or name it; an exchange states both amounts")
         .fix(fix, Loc::new(arrow.file, at, at), insert)
 }
 

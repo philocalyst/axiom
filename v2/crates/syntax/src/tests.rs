@@ -107,13 +107,23 @@ law fourth-payment
 
 2026-01-15 checking -> taxes/federal 3_000 USD for 2025
 2026-03-01 design -> acme 4_800 USD ^inv-12 due 30d
-2026-04-02 acme -> checking 4_800 USD for ^inv-12
+2026-04-02 acme -> checking 4_800 USD ^inv-12
 2026-09-06 checking -> savings 100 USD for car-fund
 2026-05-16 grandma -> college 3_000 USD basis 3_000 USD
 2026-05-01 old-broker all VXUS -> new-broker
 2026-12-29 house 1 HOME -> 431_500 USD
   closing-costs  25_000 USD
   mortgage       276_282.05 USD
+  checking       ...
+
+2026-02-02 checking -> bay-plumbing 1_480 USD #improvement of condo "new water heater" / plumbers-inc
+2026-02-03 VTI -> fidelity 198.12 USD
+2026-02-05 fidelity[2026-01-20] 1.62 VTI -> 481.14 USD
+2026-03-26 VXUS -> 25.09 USD
+  foreign-tax    2.49 USD
+  fidelity       ...
+2026-01-31 lumen -> 4_600 USD
+  retirement     6%
   checking       ...
 
 opening 2024-12-31
@@ -214,8 +224,8 @@ fn txns<'f, 's>(file: &'f File<'s>) -> Vec<&'f Txn<'s>> {
 }
 
 /// The clauses of a tail, as their kinds.
-fn clauses<'f, 's>(file: &'f File<'s>, tail: &Tail<'s>) -> Vec<&'f ClauseKind<'s>> {
-    file[tail.clauses].iter().map(|clause| &clause.kind).collect()
+fn clauses<'f, 's>(file: &'f File<'s>, tail: Many<Clause<'s>>) -> Vec<&'f ClauseKind<'s>> {
+    file[tail].iter().map(|clause| &clause.kind).collect()
 }
 
 // ─── Whole files ────────────────────────────────────────────────────────────
@@ -223,7 +233,7 @@ fn clauses<'f, 's>(file: &'f File<'s>, tail: &Tail<'s>) -> Vec<&'f ClauseKind<'s
 #[test]
 fn a_realistic_file_parses_into_the_expected_shapes() {
     let file = parse_clean(EXAMPLE);
-    assert_eq!(file.items.len(), 60);
+    assert_eq!(file.items.len(), 65);
     let txns = txns(&file);
 
     // A paycheck: one named side, legs for the other, the last taking the remainder.
@@ -231,7 +241,7 @@ fn a_realistic_file_parses_into_the_expected_shapes() {
     let legs = &file[paycheck.flow.legs];
     assert!(paycheck.flow.from.end.is_some() && paycheck.flow.to.end.is_none());
     assert!(matches!(legs[2].amount, Quantity::Rest));
-    assert!(matches!(clauses(&file, &legs[0].tail)[..], [ClauseKind::Code(Code("^pretax"))]));
+    assert!(matches!(clauses(&file, legs[0].tail)[..], [ClauseKind::Code(Code("^pretax"))]));
     assert_eq!(legs[0].doc.unwrap().lines().collect::<Vec<_>>(), ["Pre-tax deferral."]);
 
     // Selectors normalise to inclusive day ranges.
@@ -246,12 +256,12 @@ fn a_realistic_file_parses_into_the_expected_shapes() {
 
     // A pending amount, its code and its waiver.
     assert!(matches!(txns[7].flow.to.amount, Some(Quantity::Pending(_))));
-    let kinds = clauses(&file, &txns[7].flow.tail);
+    let kinds = clauses(&file, txns[7].flow.tail);
     assert!(matches!(kinds[0], ClauseKind::Code(code) if code.name() == "check-1041"));
     assert!(matches!(kinds[1], ClauseKind::Waive(Waive { reason: Some("waived"), .. })));
 
     // A spread is the clause `for DATE..DATE`.
-    let spread = clauses(&file, &txns[11].flow.tail);
+    let spread = clauses(&file, txns[11].flow.tail);
     assert!(
         matches!(spread[..], [ClauseKind::For(For::Period(a, b))] if (*a, *b) == (day(2026, 1, 1), day(2026, 12, 31)))
     );
@@ -295,8 +305,9 @@ fn locations_come_from_where_a_slice_was_written() {
     let Some(Quantity::Fixed(amount)) = txn.flow.to.amount else { panic!("an amount") };
     assert_eq!(&src[file.loc(&amount).range()], "84.20 USD");
     assert_eq!((amount.num(), amount.unit().map(|unit| unit.0)), (Dec { mantissa: 8420, scale: 2 }, Some("USD")));
-    let Some(ClauseKind::Code(code)) = clauses(&file, &txn.flow.tail).first().copied() else { panic!("a code") };
-    assert_eq!(&src[file.loc(&code).range()], "^groceries");
+    let kinds = clauses(&file, txn.flow.tail);
+    let (ClauseKind::Party(party), ClauseKind::Code(code)) = (kinds[0], kinds[1]) else { panic!("a party, a code") };
+    assert_eq!((&src[file.loc(party).range()], &src[file.loc(code).range()]), ("trader-joes", "^groceries"));
 }
 
 #[test]
@@ -313,23 +324,24 @@ fn amounts_read_back_from_their_text() {
 fn tails_take_their_clauses_in_any_order() {
     let src = "2026-03-01 design -> acme 4_800 USD due 30d for 2025 / me ^inv-12 basis empty @ 2 USD ! \"ok\"\n";
     let file = parse_clean(src);
-    let tail = &txns(&file)[0].flow.tail;
-    assert_eq!(tail.payee.map(|payee| payee.0), Some("me"));
-    let kinds = clauses(&file, tail);
+    let kinds = clauses(&file, txns(&file)[0].flow.tail);
     assert!(matches!(kinds[0], ClauseKind::Due(Due::After(span)) if *span == Span::days(30)));
     assert!(matches!(kinds[1], ClauseKind::For(For::Period(a, b)) if (*a, *b) == (day(2025, 1, 1), day(2025, 12, 31))));
-    assert!(matches!(kinds[2], ClauseKind::Code(_)));
-    assert!(matches!(kinds[3], ClauseKind::Basis(amount) if amount.0 == "empty"));
-    assert!(matches!(kinds[4], ClauseKind::Price(_)));
-    assert!(matches!(kinds[5], ClauseKind::Waive(_)));
+    assert!(matches!(kinds[2], ClauseKind::Party(Name("me"))));
+    assert!(matches!(kinds[3], ClauseKind::Code(_)));
+    assert!(matches!(kinds[4], ClauseKind::Basis(amount) if amount.0 == "empty"));
+    assert!(matches!(kinds[5], ClauseKind::Price(_)));
+    assert!(matches!(kinds[6], ClauseKind::Waive(_)));
 
-    let file = parse_clean("2026-01-01 a -> b 5 USD for ^inv-1\n2026-01-01 a -> b 5 USD for car-fund\n");
-    let whats: Vec<&ClauseKind> = txns(&file).iter().flat_map(|txn| clauses(&file, &txn.flow.tail)).collect();
-    assert!(matches!(whats[0], ClauseKind::For(For::Code(_))) && matches!(whats[1], ClauseKind::For(For::Entity(_))));
+    let file = parse_clean("2026-01-01 a -> b 5 USD for car-fund ^a ^b\n");
+    let kinds = clauses(&file, txns(&file)[0].flow.tail);
+    assert!(matches!(kinds[0], ClauseKind::For(For::Entity(Name("car-fund")))));
+    assert!(matches!(kinds[1..], [ClauseKind::Code(Code("^a")), ClauseKind::Code(Code("^b"))]), "codes repeat");
 
     only_error("2026-01-01 a -> b 5 USD for 2025 for 2026\n", "duplicate-clause");
     only_error("2026-01-01..2026-12-31 a -> b 5 USD for 2025\n", "duplicate-clause");
     only_error("2026-01-01 a -> b 5 USD due tomorrow\n", "expected-date");
+    only_error("2026-01-01 a -> b 5 USD / c / d\n", "duplicate-clause");
 }
 
 #[test]
@@ -339,6 +351,73 @@ fn ends_take_selectors_and_all_of_a_commodity() {
     let source = txns[0].flow.from.end.as_ref().unwrap();
     assert_eq!(file[source.select].len(), 2);
     assert!(matches!(txns[1].flow.from.amount, Some(Quantity::All(Some(Name("VXUS"))))));
+}
+
+#[test]
+fn a_flow_says_why_with_a_purpose_a_description_and_codes() {
+    let src = "2026-02-02 a -> b 1_480 USD #improvement of condo \"new water heater\" ^job-7 / plumbers-inc\n";
+    let file = parse_clean(src);
+    let kinds = clauses(&file, txns(&file)[0].flow.tail);
+    let ClauseKind::Purpose(purpose) = kinds[0] else { panic!("a purpose") };
+    assert_eq!((purpose.name.0, purpose.of.map(|of| of.0)), ("improvement", Some("condo")));
+    assert!(matches!(kinds[1], ClauseKind::Description("new water heater")));
+    assert!(matches!(kinds[2..], [ClauseKind::Code(Code("^job-7")), ClauseKind::Party(Name("plumbers-inc"))]));
+
+    // The purpose's object is its own name, not the next clause.
+    let file = parse_clean("2026-02-02 a -> b 5 USD #groceries \"the weekly shop\"\n");
+    let kinds = clauses(&file, txns(&file)[0].flow.tail);
+    assert!(matches!(kinds[0], ClauseKind::Purpose(Purpose { name: Name("groceries"), of: None })));
+    // A string after `!` is the waiver's reason, not a description.
+    let file = parse_clean("2026-02-02 a -> b 5 USD ! \"ok\"\n");
+    assert!(matches!(clauses(&file, txns(&file)[0].flow.tail)[..], [ClauseKind::Waive(Waive { reason: Some("ok"), .. })]));
+
+    only_error("2026-02-02 a -> b 5 USD #a #b\n", "duplicate-clause");
+    only_error("2026-02-02 a -> b 5 USD \"x\" \"y\"\n", "duplicate-clause");
+    only_error("2026-02-02 a -> b 5 USD #repair of\n", "expected-name");
+}
+
+#[test]
+fn ends_may_be_commodities_and_an_exchange_may_name_only_its_source() {
+    let file = parse_clean("2026-02-03 VTI -> fidelity 198.12 USD\n2026-02-05 fidelity[2026-01-20] 1.62 VTI -> 481.14 USD\n");
+    let flows = txns(&file);
+    assert_eq!(flows[0].flow.from.end.map(|end| end.name.0), Some("VTI"));
+    let exchange = &flows[1].flow;
+    assert!(exchange.to.end.is_none() && matches!(exchange.to.amount, Some(Quantity::Fixed(_))) && exchange.legs.is_empty());
+    // A commodity first is a party for a flow, and a price when nothing follows it.
+    let file = parse_clean("2026-02-03 VTI 280.14 USD\n");
+    assert!(matches!(file.items[0].kind, ItemKind::Price(_)));
+
+    let file = parse_clean("2026-03-26 VXUS -> 25.09 USD\n  foreign-tax 2.49 USD\n  fidelity ...\n");
+    assert_eq!(file[txns(&file)[0].flow.legs].len(), 2);
+    // Both amounts are what says it is an exchange; a lone source is not one.
+    only_error("2026-02-05 fidelity -> 481.14 USD\n", "missing-legs");
+    only_error("2026-02-05 fidelity 1.62 VTI ->\n", "missing-legs");
+}
+
+#[test]
+fn a_leg_may_be_a_share_of_the_header_and_an_opening_line_an_asset() {
+    let file = parse_clean("2026-01-31 lumen -> 4_600 USD\n  retirement 6%\n  checking ...\n");
+    let legs = &file[txns(&file)[0].flow.legs];
+    assert!(matches!(legs[0].amount, Quantity::Percent(Dec { mantissa: 6, scale: 0 })));
+    only_error("2026-01-31 lumen -> 6%\n", "expected-end-of-line");
+
+    let file = parse_clean("opening 2026-01-01\n  condo basis 402_000 USD since 2024-02-20\n  checking 5 USD\n");
+    let ItemKind::Opening(id) = file.items[0].kind else { panic!("an opening") };
+    let lines = &file[file[id].lines];
+    assert!(matches!(lines[0].amount, Quantity::Whole) && matches!(lines[1].amount, Quantity::Fixed(_)));
+    assert!(matches!(clauses(&file, lines[0].tail)[..], [ClauseKind::Basis(_), ClauseKind::Since(_)]));
+    // Only an opening has things without amounts.
+    only_error("opening 2026-01-01\n  condo since 2024-02-20\n", "expected-amount");
+    only_error("2026-01-31 lumen -> 4_600 USD\n  condo basis 5 USD\n", "expected-amount");
+}
+
+#[test]
+fn a_code_settles_by_being_on_the_flow_not_after_for() {
+    for written in ["for ^inv-12", "for #inv-12"] {
+        let src = format!("2026-04-02 acme -> checking 4_800 USD {written}\n");
+        let error = only_error(&src, "for-code");
+        assert_eq!(first_fix(&src, &error), (written, "^inv-12"));
+    }
 }
 
 #[test]
@@ -393,7 +472,7 @@ fn splits_and_openings() {
     let opening: &Opening = file.iter().next().unwrap();
     let lines = &file[opening.lines];
     assert_eq!((opening.date, lines.len()), (day(2024, 12, 31), 3));
-    let kinds = clauses(&file, &lines[2].tail);
+    let kinds = clauses(&file, lines[2].tail);
     assert!(
         matches!(kinds[0], ClauseKind::Basis(_)) && matches!(kinds[1], ClauseKind::Since(d) if *d == day(2023, 6, 15))
     );
@@ -553,12 +632,12 @@ fn any_other_date_may_leave_out_the_year_when_the_place_gives_it() {
     let src = "2026-03-05 a -> b 5 USD due 04-01 for 01-01..03-31\n";
     let (file, diags) = crate::parse(FileId(0), src, YEAR);
     assert!(diags.is_empty(), "{}", render(src, &diags));
-    let kinds = clauses(&file, &txns(&file)[0].flow.tail);
+    let kinds = clauses(&file, txns(&file)[0].flow.tail);
     assert!(matches!(kinds[0], ClauseKind::Due(Due::On(d)) if *d == day(2026, 4, 1)));
     assert!(matches!(kinds[1], ClauseKind::For(For::Period(a, b)) if (*a, *b) == (day(2026, 1, 1), day(2026, 3, 31))));
     let src = "03-05..03-31 a -> b 5 USD\n";
     let (file, diags) = crate::parse(FileId(0), src, YEAR);
-    assert!(diags.is_empty() && matches!(clauses(&file, &txns(&file)[0].flow.tail)[..], [ClauseKind::For(_)]));
+    assert!(diags.is_empty() && matches!(clauses(&file, txns(&file)[0].flow.tail)[..], [ClauseKind::For(_)]));
 }
 
 #[test]
@@ -973,32 +1052,10 @@ account expenses/food : expense
 #[test]
 fn the_tree_is_compact() {
     use std::mem::size_of;
-    eprintln!(
-        "Item {} Txn {} Flow {} End {} Place {} Quantity {} Tail {} Leg {} Clause {} Select {} Assert {} Event {} Price {} Decl {} Law {} Step {} Expr {} Plan {} Occurrence {} Prop {}",
-        size_of::<Item>(),
-        size_of::<Txn>(),
-        size_of::<Flow>(),
-        size_of::<End>(),
-        size_of::<Place>(),
-        size_of::<Quantity>(),
-        size_of::<Tail>(),
-        size_of::<Leg>(),
-        size_of::<Clause>(),
-        size_of::<Select>(),
-        size_of::<Assert>(),
-        size_of::<Event>(),
-        size_of::<Price>(),
-        size_of::<Decl>(),
-        size_of::<Law>(),
-        size_of::<Step>(),
-        size_of::<Expr>(),
-        size_of::<Plan>(),
-        size_of::<Occurrence>(),
-        size_of::<Prop>()
-    );
     assert!(size_of::<Item>() <= 48, "Item is {}", size_of::<Item>());
     assert!(size_of::<Txn>() <= 160, "Txn is {}", size_of::<Txn>());
     assert!(size_of::<Leg>() <= 128, "Leg is {}", size_of::<Leg>());
+    assert!(size_of::<Clause>() <= 56, "Clause is {}", size_of::<Clause>());
     assert!(size_of::<Expr>() <= 48, "Expr is {}", size_of::<Expr>());
     assert!(size_of::<Many<Leg>>() == 8 && size_of::<Amount>() == 16 && size_of::<Name>() == 16);
 }
@@ -1010,16 +1067,16 @@ fn dump(file: &File) -> String {
     use std::fmt::Write;
     let mut out = String::new();
     let end = |end: &End| format!("{:?}{:?}", end.name, &file[end.select]);
-    let tail = |tail: &Tail| format!("{:?}{:?}", tail.payee, &file[tail.clauses]);
+    let tail = |tail: Many<Clause>| format!("{:?}", &file[tail]);
     let legs = |legs: Many<Leg>| {
         let each = |leg: &Leg| {
-            format!("{:?} {} {:?} {} {:?}", leg.doc, end(&leg.end), leg.amount, tail(&leg.tail), leg.loc)
+            format!("{:?} {} {:?} {} {:?}", leg.doc, end(&leg.end), leg.amount, tail(leg.tail), leg.loc)
         };
         file[legs].iter().map(each).collect::<Vec<_>>().join("; ")
     };
     let flow = |flow: &Flow| {
         let side = |side: &Side| format!("{:?} {:?}", side.end.as_ref().map(end), side.amount);
-        format!("{} -> {} {} [{}]", side(&flow.from), side(&flow.to), tail(&flow.tail), legs(flow.legs))
+        format!("{} -> {} {} [{}]", side(&flow.from), side(&flow.to), tail(flow.tail), legs(flow.legs))
     };
     let expr = |root: ExprId| {
         let nodes = file.exprs.subtree(root);

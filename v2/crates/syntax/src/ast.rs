@@ -346,7 +346,7 @@ tables! {
     legs: Leg<'s>,
     /// The selectors of ends: [`End::select`].
     selects: Select<'s>,
-    /// The clauses of tails: [`Tail::clauses`].
+    /// The clauses of tails: [`Flow::tail`].
     clauses: Clause<'s>,
     /// The property lines of declarations: [`Decl::props`].
     props: Prop<'s>,
@@ -452,8 +452,9 @@ pub struct Flow<'s> {
     pub from: Side<'s>,
     /// What arrives: the right of the arrow.
     pub to: Side<'s>,
-    /// What the header says about the whole flow, which applies to every leg.
-    pub tail: Tail<'s>,
+    /// What the header says about the whole flow, which applies to every leg:
+    /// `&file[flow.tail]`. A `DATE..DATE` spread is the clause `for DATE..DATE`.
+    pub tail: Many<Clause<'s>>,
     /// The indented lines under the header: `&file[flow.legs]`.
     pub legs: Many<Leg<'s>>,
 }
@@ -511,8 +512,8 @@ pub enum Quantity<'s> {
     /// `(350 USD)`: written, not yet real. The amount's location excludes the
     /// parentheses.
     Pending(Amount<'s>),
-    /// `= 5_000 USD` (legs only): whatever makes the place's balance equal
-    /// this after the flow.
+    /// `= 5_000 USD` (legs only): whatever makes the end's balance equal this
+    /// after the flow.
     Target(Amount<'s>),
     /// `? USD`: inferred from surrounding balance assertions. The commodity.
     Unknown(Name<'s>),
@@ -521,39 +522,36 @@ pub enum Quantity<'s> {
     All(Option<Name<'s>>),
     /// `...` (legs only): whatever balances the transaction.
     Rest,
+    /// `6%` (legs only): that share of the header's amount, or in a contract of
+    /// what each occurrence pays.
+    Percent(Dec),
+    /// No amount at all (opening lines only): the thing itself, an asset held
+    /// at its `basis`.
+    Whole,
 }
 
-/// An indented line under a flow: `retirement 800 USD #pretax`. Also a line of
-/// an [`Opening`] (`house 1 HOME basis 540_000 USD since 2023-06-15`) and an
-/// override under a plan [`Occurrence`].
+/// An indented line under a flow: `retirement 800 USD ^pretax`. The same line
+/// is a leg of an occurrence's overrides, of a contract's template, and of an
+/// [`Opening`] (`fidelity 210 VTI basis 48_300 USD since 2021-06-01`).
 #[derive(Debug)]
 pub struct Leg<'s> {
     /// The `///` block above it.
     pub doc: Option<Doc<'s>>,
     /// Where the leg's value goes (or, in an opening, what holds it).
     pub end: End<'s>,
-    /// How much: fixed, pending, a target balance, or the remainder.
+    /// How much: fixed, pending, a target balance, a share, or the remainder.
     pub amount: Quantity<'s>,
     /// The leg's own tail, in addition to the header's.
-    pub tail: Tail<'s>,
+    pub tail: Many<Clause<'s>>,
     /// The whole line, trailing comment excluded.
     pub loc: Loc,
 }
 
-/// What may follow a header's or leg's amounts, in any order:
-/// `/ payee #code for 2025 due 30d basis 3_000 USD @ 285.70 USD ! "reason"`.
-/// A header's tail applies to every leg.
-#[derive(Debug, Default)]
-pub struct Tail<'s> {
-    /// `/ payee`: a declared entity.
-    pub payee: Option<Name<'s>>,
-    /// The rest, in the order written: `&file[tail.clauses]`. A `DATE..DATE`
-    /// spread is the `for` clause `for DATE..DATE`.
-    pub clauses: Many<Clause<'s>>,
-}
-
-/// One clause of a [`Tail`], and where it was written (keyword through value).
-/// The parser rejects a repeated clause, so each kind occurs at most once.
+/// One clause of a tail, and where it was written (keyword through value). A
+/// tail is what may follow a header's or leg's amounts, in any order:
+/// `/ paypal #repair of condo "sink" ^inv-12 for 2025 due 30d basis 3_000 USD @ 2 USD !`.
+/// A header's tail applies to every leg. The parser rejects a repeated clause,
+/// except a code, so no other kind occurs twice.
 #[derive(Clone, Copy, Debug)]
 pub struct Clause<'s> {
     /// Where the clause was written.
@@ -565,9 +563,15 @@ pub struct Clause<'s> {
 /// What a [`Clause`] says.
 #[derive(Clone, Copy, Debug)]
 pub enum ClauseKind<'s> {
-    /// `#code`: marks the transaction or leg. Any number.
-    /// `#code`: marks the transaction or leg. Any number.
+    /// `#groceries`, `#repair of condo`: what the flow is for.
+    Purpose(Purpose<'s>),
+    /// `"food for the routine"`: the contents, escapes not yet processed. It
+    /// says why in words and means nothing to the book.
+    Description(&'s str),
+    /// `^inv-12`: marks the flow or leg so that others can refer to it. Any number.
     Code(Code<'s>),
+    /// `/ etsy-seller`: the party a payment through another is really for.
+    Party(Name<'s>),
     /// `@ 285.70 USD`: the price of one unit of the commodity that arrives.
     Price(Amount<'s>),
     /// `for WHAT`
@@ -582,11 +586,18 @@ pub enum ClauseKind<'s> {
     Waive(Waive<'s>),
 }
 
+/// `#NAME [of THING]`: what a flow is for, and what it is for it to have.
+#[derive(Clone, Copy, Debug)]
+pub struct Purpose<'s> {
+    /// The purpose, without its `#`.
+    pub name: Name<'s>,
+    /// `of condo`: the thing a purpose takes as its object (`#improvement`).
+    pub of: Option<Name<'s>>,
+}
+
 /// What a flow is on account of.
 #[derive(Clone, Copy, Debug)]
 pub enum For<'s> {
-    /// `for #inv-12`: settles the claim the code marks.
-    Code(Code<'s>),
     /// `for 2025`, `for 2026-03`, `for 2026-03-15`, `for 2026-01-01..2026-12-31`:
     /// the period the flow is recognized over, as first and last day.
     Period(Day, Day),

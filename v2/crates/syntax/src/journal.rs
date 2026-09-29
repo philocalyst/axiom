@@ -7,7 +7,7 @@ use crate::ast::*;
 use crate::dates::{empty_range, not_a_day};
 use crate::lex::Tok;
 use crate::lines::Line;
-use crate::parser::{Parse, Parser};
+use crate::parser::{Parse, Parser, Scope};
 
 const EVENT_STATES: [(&str, EventState); 3] =
     [("settled", EventState::Settled), ("void", EventState::Void), ("returned", EventState::Returned)];
@@ -46,7 +46,8 @@ impl<'s> Parser<'s> {
                 self.emit(&header, Event { date, code, state, state_loc }, ItemKind::Event);
                 Ok(())
             }
-            Tok::Unit(_) => self.price_or_split(line, date),
+            // A commodity that starts a flow is a party: `VTI -> fidelity 198.12 USD`.
+            Tok::Unit(_) if self.lexer.peek_second().tok != Tok::Punct("->") => self.price_or_split(line, date),
             _ => self.transaction(line, date),
         }
     }
@@ -123,15 +124,15 @@ impl<'s> Parser<'s> {
     pub fn opening(&mut self, line: &mut Line<'s>) -> Parse<()> {
         let date = self.item_date("the day the balances are stated, like `2024-12-31`")?;
         let header = self.end_header(line)?;
-        self.opening = true;
-        let lines = self.legs(line, |parser, opening_line| {
-            let leg = parser.leg(opening_line)?;
-            match parser.get(leg).amount {
-                Quantity::Fixed(_) => Ok(()),
-                _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),
-            }
+        let lines = self.in_scope(Scope::Opening, |parser| {
+            parser.legs(line, |parser, opening_line| {
+                let leg = parser.leg(opening_line)?;
+                match parser.get(leg).amount {
+                    Quantity::Fixed(_) | Quantity::Whole => Ok(()),
+                    _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),
+                }
+            })
         });
-        self.opening = false;
         self.emit(&header, Opening { date, lines: lines? }, ItemKind::Opening);
         Ok(())
     }
