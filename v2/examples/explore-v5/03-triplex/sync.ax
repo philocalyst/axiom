@@ -1,0 +1,36 @@
+// ─── Where the journal comes from ───────────────────────────────────────────
+
+sync checking
+  run   fcb-export checking --since {since}
+  csv   date "Date" "MM/DD/YYYY", amount "Amount", memo "Description", balance "Balance"
+
+/// The manager's owner portal: every rent received (by unit, with its fee), every repair it paid from the
+/// trust, its own fees, the deposits it holds and returns, and each month's disbursement. It is a web page
+/// with a CSV button, and the CSV is a ledger of the trust account.
+/// ⇄ 03d1: one row per *event*, with a unit ("B", "C") and a category ("Rent", "Mgmt fee", "Repair",
+/// "Disbursement", "Utility reimbursement", "Late fee"). §13 knows amount, date, memo and balance; the unit
+/// is what makes a rent `of unit-b` and a repair `of unit-c`, and it is a column. Without a way to map a
+/// column to the purpose's *object*, the manager's own words end up in a memo and `check` offers a `known-as`.
+sync pm-trust
+  run   elm-portal-export --since {since}
+  csv   date "Date", amount "Amount", memo "Description", balance "Balance"
+
+/// The servicer's escrow statement: the taxes and insurance it paid and the 870.00 it received.
+sync escrow
+  run   first-federal-escrow --since {since}
+  csv   date "Date", amount "Amount", memo "Description", balance "Balance"
+
+/// Water and electricity bills arrive as PDFs. A script reads one and prints a bill.
+/// ⇄ 03d2: it can print `10 water 612.40 USD`, and it can print the tenants' shares only if it knows the
+/// areas. Areas are properties of the units, and the script cannot read the book.
+sync bills
+  run   utility-bill-parse --since {since}
+
+/// Tenant ledgers from the same portal: charges and payments that are not in the trust's bank statement
+/// yet (a late fee posted, a utility reimbursement billed for next month).
+/// ⇄ 03d3: they are claims on tenants, so the export must print `tenant-b owes me …` statements with items.
+sync tenants
+  run   elm-portal-tenants --since {since}
+
+code lf-* dep-* wc-*
+  on tenant

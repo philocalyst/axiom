@@ -1,0 +1,54 @@
+// ─── Where the journal comes from ───────────────────────────────────────────
+
+sync chase-checking
+  run   chase-export checking --since {since}
+  csv   date "Posting Date" "MM/DD/YYYY", amount "Amount", memo "Description", balance "Balance"
+
+/// A US card that shows every foreign purchase in USD, with the merchant's currency and amount in the memo.
+/// ⇄ 04d1: "APPLE STORE ZURICH CH  CHF 3,290.00" is the price the store charged. The flow is in USD, but the
+/// VAT inside it is a share of the *store's* price, the exchange cost of the card is the difference from the
+/// market price of the CHF that day, and the refund of the VAT will arrive in CHF. §13's `csv` has no way
+/// to say "the memo carries the original amount and currency": `original`, and a recognizer for it.
+sync visa
+  run   chase-export visa --since {since}
+  csv   date "Transaction Date" "MM/DD/YYYY", amount "Amount" flipped, memo "Description"
+
+/// Wise's statement for every balance: one row per currency movement, with a fee column and a reference
+/// that ties the two rows of a conversion together.
+/// ⇄ 04d2: `csv` has one currency (the account's). Wise rows say "Currency", and a conversion is a debit
+/// in EUR and a credit in USD that share "TransferWise ID" and are one flow `wise-bal 3_000.00 EUR -> 3_247.01 USD`.
+/// Also a fee column that becomes an item, and `holds` decides the account, not the row.
+sync wise-bal
+  run   wise-export statement --all-currencies --since {since}
+  csv   date "Date" "YYYY-MM-DD", amount "Amount", memo "Description", balance "Running Balance"
+  // currency "Currency", id "TransferWise ID", fee "Total fees"     ✗ none of these three is in §13
+
+/// PayPal's activity export: gross, fee and net on every row.
+/// ⇄ 04d3: the bank sees the net; the row has the gross and the fee. A flow needs `- fee` as an item, so
+/// `csv` needs `gross "Gross", fee "Fee"`, and `amount` becomes what the account received.
+sync paypal-bal
+  run   paypal-export activity --since {since}
+  csv   date "Date" "MM/DD/YYYY", amount "Net", memo "Name", balance "Balance"
+  // gross "Gross", fee "Fee"                                        ✗ not in §13
+
+/// Stripe's balance history: charges, fees, refunds, disputes and payouts, each linked to the payout that swept
+/// it. It prints Axiom.
+sync stripe-bal
+  run   stripe-export balance --since {since}
+
+/// Kraken's ledger of rewards and transfers, and the wallet's transactions from a block explorer, which
+/// prints the gas of each.
+/// ⇄ 04d4: a reward is a row with an asset and an amount, and its USD value is the *price that day* from
+/// `sync prices`. The row is written as `staking 0.001451 ETH` and its income is the amount times the
+/// price of the day (? 04c3: the spec never says an arrival with no cost takes the market price as basis).
+sync kraken-stake
+  run   kraken-export ledger --since {since}
+sync metamask
+  run   explorer-export 0x9f3c…e21a --since {since}
+
+sync prices
+  run   quotes {units} --since {since}          // EUR GBP CHF ETH USDC against USD, every day
+  into  prices/{year}.ax
+
+code inv-* dep-* laptop-*
+  on client, greenline-apts, apple-zurich, global-blue

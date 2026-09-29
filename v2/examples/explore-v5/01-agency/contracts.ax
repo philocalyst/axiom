@@ -1,0 +1,140 @@
+// ─── What Loomfield has agreed to ───────────────────────────────────────────
+
+// ── Retainers: income contracts ─────────────────────────────────────────────
+// Each is billed on the 1st, net 15, for that month, and taxed at Seattle's 10.35% unless the client is
+// outside Washington or exempt.
+//
+// ✗ 01a5: a contract's occurrence is the flow (§5), and here the flow is an *invoice* (a claim, due in 15
+// days), not a payment. Written as a receipt on the 1st, it is late for two weeks every month, and in accrual
+// books the income lands on the payment day, not the invoice day. What I needed:
+// `invoiced on 1 due 15d`, so that each occurrence is `X owes loomfield … due 15d` and the payment settles it.
+// ? 01c5: `covers the month`: §5 gives `covers the year` and the sketch reads it as twelve months from the day
+// (03-01 to 2027-02); a calendar month is what a retainer means. Nothing says which `the` is.
+// ✗ 01a6: the sales-tax item below is the same on seven contracts and absent on three, by the client's `place`
+// and `exempt`; the rate itself is Seattle's, changes by date, and belongs to no contract.
+
+contract halcyon-retainer with halcyon
+  3_200 USD monthly on 1 into operating #retainer
+  + 10.35% #sales-tax-collected for wa-dor                 // ▸ held for the state until the 25th
+  covers the month
+
+contract pinecrest-retainer with pinecrest
+  2_800 USD monthly on 1 into operating #retainer
+  + 10.35% #sales-tax-collected for wa-dor
+  covers the month
+
+contract summit-retainer with summit-labs
+  2_500 USD monthly on 1 into operating #retainer
+  + 10.35% #sales-tax-collected for wa-dor
+  covers the month
+
+contract harbor-retainer with harbor-coffee
+  2_200 USD monthly on 1 into operating #retainer
+  + 10.35% #sales-tax-collected for wa-dor
+  covers the month
+
+contract lattice-retainer with lattice
+  2_000 USD monthly on 1 into operating #retainer
+  + 10.35% #sales-tax-collected for wa-dor
+  covers the month
+
+contract vantage-retainer with vantage-credit
+  1_800 USD monthly on 1 into operating #retainer
+  + 10.35% #sales-tax-collected for wa-dor
+  covers the month
+
+contract brightwell-retainer with brightwell
+  1_500 USD monthly on 1 into operating #retainer
+  + 10.35% #sales-tax-collected for wa-dor
+  covers the month
+
+contract northwind-retainer with northwind                 // Portland: no tax
+  4_500 USD monthly on 1 into operating #retainer
+  covers the month
+
+contract kestrel-retainer with kestrel                     // California: no tax
+  1_200 USD monthly on 1 into operating #retainer
+  covers the month
+
+contract orchard-retainer with orchard-health              // exempt
+  1_000 USD monthly on 1 into operating #retainer
+  covers the month
+
+// ── People ──────────────────────────────────────────────────────────────────
+// Net pay leaves on the last day. The rest of the gross stays in the bank until it is deposited, and
+// is stated each month as what the agency owes (journal). Maya: 6,500.00 gross, Daniel: 8,000.00.
+// ✗ 01a7: nothing in the contract derives the withheld tax, the employee's and the employer's FICA, FUTA or
+// SUTA from the gross and the W-4; the journal states them again every month (journal/2026/*.ax).
+
+contract payroll-maya with maya
+  5_228.15 USD monthly on last from operating #wages of maya
+
+contract payroll-daniel with daniel
+  6_264.80 USD monthly on last from operating #wages of daniel
+
+contract ravi-monthly with ravi
+  2_400 USD monthly on 5 from operating                    // ▸ #contract-labor: ravi is a contractor
+
+// Deposits. Federal by the 15th of the next month, Washington by the end of the month after the quarter.
+// ✎ 01b5: `quarterly on 04-30` fixes the day-of-month at 30, so it lands on 07-30, not 07-31, and has no
+// way to say "last".
+contract eftps with irs
+  about 3_936.50 USD monthly on 15 from operating          // settles ^eftps-YYYY-MM (§7)
+contract esd-return with wa-esd
+  about 1_061.40 USD quarterly on 04-30 from operating     // settles ^esd-YYYY-Qn
+contract wa-excise with wa-dor
+  about 6_100.00 USD monthly on 25 from operating          // sales tax collected and B&O, for the month before
+  // ✗ 01a8: the payment on 02-25 is *for January* and the one on 01-25 for December. `for last month` has no
+  // form in a contract; §2's `for PERIOD` is a literal date or year, so each occurrence is written with its month.
+
+// ── The partners ────────────────────────────────────────────────────────────
+// Draws are 60/40, on the 28th. Each partner pays estimated tax four times a year, the last in January of
+// the next.
+// ✗ 01a2: `with` names a party and both ends here are owners. A contract "with the entity of its own name"
+// would be `draw-me`, which is nobody. There is no way to state a standing transfer between two owners.
+contract draw-me
+  8_400 USD monthly on 28 from operating into my-checking #distribution
+contract draw-theo
+  5_600 USD monthly on 28 from operating into theo-checking #distribution
+
+// ✗ 01a8: the four installments are not a cadence (04-15, 06-15, 09-15 and 01-15), and the January one belongs
+// to the year before. The 2027-01-15 occurrence is `for 2026`; every other is `for 2027`'s next.
+// ✎ 01b6: `yearly on 04-15, 06-15, 09-15, 01-15` reads as one date repeated; §5's DAY takes a list only for days.
+contract est-me with irs
+  9_600 USD yearly on 04-15, 06-15, 09-15, 01-15 from my-checking #tax-paid
+contract est-theo with irs
+  5_300 USD yearly on 04-15, 06-15, 09-15, 01-15 from theo-checking #tax-paid
+
+// ── Overheads ───────────────────────────────────────────────────────────────
+
+contract studio-rent with pike-workspace
+  3_800 USD monthly on 1 from operating #rent              // ▸ landlord: rent
+
+contract cpa with ledger-cpa
+  650 USD monthly on 20 from operating #accounting
+
+contract insurance with hiscox
+  4_860 USD yearly on 03-01 from operating #insurance
+  covers 1y                                                // general liability and E&O, policy year 03-01 to 02-28
+
+contract quickbooks with quickbooks
+  90 USD monthly on 22 from card-me
+contract google with google-workspace
+  84 USD monthly on 1 from card-me
+contract adobe with adobe
+  359.97 USD monthly on 12 from card-me
+contract onepassword with onepassword
+  39.95 USD monthly on 14 from card-me
+contract slack with slack
+  87.50 USD monthly on 3 from card-theo
+contract github with github
+  84 USD monthly on 20 from card-theo
+contract figma with figma
+  45 USD monthly on 3 from card-maya
+contract notion with notion
+  48 USD monthly on 9 from card-maya
+
+// The reserve is topped up on the 26th with what the agency expects to owe the state and the IRS.
+// ✗ 01a4: `about` is a forecast, not a rule. I needed "30% of everything that arrived this month".
+contract reserve-fill
+  about 3_000 USD monthly on 26 from operating into reserve

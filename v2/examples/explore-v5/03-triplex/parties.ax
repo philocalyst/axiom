@@ -1,0 +1,21 @@
+// ─── Who Marta deals with ───────────────────────────────────────────────────
+
+kind tenant : person
+entity tenant-b : tenant                    // Elena Petrov, since 2025-07-01
+  known-as "PETROV ELENA*", "E PETROV*"
+entity tenant-c : tenant                    // Devon Marsh, 2025-09-01 to 2026-03-20
+entity tenant-c2 : tenant                   // Jordan Lee, from 2026-05-15
+
+/// Elm Property Management collects rent, keeps 8% and pays the owner on the 10th of the next month.
+/// What money to it is: a management fee.
+entity elm-pm : property-manager
+  purpose management
+
+// The trades, paid by the manager from the owner's money, or by the owner
+entity ace-plumbing, ace-painting, ace-roofing, floors-plus, northeast-heating : contractor
+entity rochester-water : utility
+  known-as "CITY OF ROCHESTER WATER*"
+entity national-grid : utility
+  known-as "NATIONAL GRID*"
+entity monroe-county : tax-authority
+entity state-farm : insurer

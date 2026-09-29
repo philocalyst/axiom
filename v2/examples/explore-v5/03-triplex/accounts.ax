@@ -1,0 +1,10 @@
+// ─── Where the money sits ───────────────────────────────────────────────────
+
+account checking : deposit at flour-city-bank
+account savings  : deposit at flour-city-bank
+account escrow   : escrow at first-federal               // property tax and the building's insurance
+
+/// The manager's trust account. The rent lands here, less its fee. What is here is Marta's until it is
+/// disbursed, except the deposits, which are the tenants'.
+account pm-trust : trust at elm-pm
+  holds USD

@@ -1,0 +1,31 @@
+// ─── The building and its three homes ───────────────────────────────────────
+//
+// 418 Alder St, bought 2022-08-12 for 468,000 USD with 374,400 USD borrowed. 3,200 sq ft in all:
+// A 1,150 (Marta's), B 1,050, C 1,000. Land is 62,000 USD of the price.
+//
+// A repair or a bill about the *building* is shared by area. A repair or an improvement of a *unit* is
+// that unit's. Each unit is depreciated on its own basis and its own improvements.
+
+/// The building as a whole: the object of everything shared (interest, tax, insurance, water, the boiler).
+/// It has no cost of its own here: the price is split among the units in the opening. It exists so that
+/// a bill has something to be `of`, and so that a share can be attached once instead of on each contract.
+asset triplex : building
+  business 32.81% for rental-b               // ? 03c1: two `business` lines on one thing: §4's table gives one `PERCENT for OWNER`
+  business 31.25% for rental-c               // ▸ the other 35.94% stays Marta's: itemized, not rental
+  // ✗ 03a1: 32.81% is 1,050 / 3,200, rounded by hand. The declaration should say `share 1_050 sqft`
+  // and let the area be the weight, so that a fourth unit or a bigger unit B changes nothing else.
+
+/// Marta's own unit. Not depreciated; what it costs is home cost.
+asset unit-a : home
+  in-service 2022-08-12
+  land       22_281.25 USD
+
+asset unit-b : rental-home
+  owner      rental-b
+  in-service 2022-09-01                      // ▸ `us/rental` depreciates it over 27.5 years, mid-month
+  land       20_343.75 USD                   // 32.81% of 62,000, by hand
+
+asset unit-c : rental-home
+  owner      rental-c
+  in-service 2022-09-01
+  land       19_375.00 USD

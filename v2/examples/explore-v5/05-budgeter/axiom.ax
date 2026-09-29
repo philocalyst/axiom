@@ -1,0 +1,44 @@
+/// Noor Haddad, 27, a zero-based budgeter in Denver. She rents a three-bedroom flat with two roommates,
+/// keeps a sinking fund for everything that is not monthly, plays the cash-back and miles game, and does
+/// not eat out in January. January to July 2026.
+///
+/// Not runnable; written against LANGUAGE v4. Marks: ✗ cannot say · ✎ says it badly ·
+/// ? the spec is unclear · ⇄ what sync would need. Numbers are explained in FINDINGS.md.
+base USD
+use us
+use us/co
+
+entity me : person
+  born    1998-11-03
+  filing  single
+  lives   us/co
+
+// ─── Envelopes ──────────────────────────────────────────────────────────────
+// A sinking fund is money set aside `for` an entity of kind `envelope` (§8): tied, not available to spend.
+// ? 05c1: §4 says `restricted` is a kind property and §8 says envelopes exist, but neither v4 document
+// declares the kind `envelope`; v3's std did. It is assumed here.
+kind envelope : entity
+  restricted
+
+entity emergency, car, gifts, travel, subs, medical : envelope
+
+// ─── What money is for ──────────────────────────────────────────────────────
+
+purpose rent          : home
+purpose utilities     : home
+purpose groceries     : food
+purpose dining        : food
+purpose transport     : spending
+purpose fun           : spending
+purpose clothing      : spending
+purpose subscriptions : spending
+purpose gifts         : spending
+purpose medical       : spending
+purpose travel        : spending
+purpose car           : transport
+purpose household     : home
+purpose rebate                                // ✗ 05a1: cash back and miles are not income, not spending, not a refund
+
+// Roommates: people who owe her their share of a shared bill, and pay it on Venmo.
+kind roommate : person
+entity ben, cleo : roommate

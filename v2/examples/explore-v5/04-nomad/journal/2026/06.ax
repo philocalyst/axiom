@@ -1,0 +1,22 @@
+// June 2026.
+
+01 lisbon-rent
+02 cowork
+05 staking 0.001454 ETH
+05 oakline-labs -> stripe-bal 1_200.00 USD ^inv-2026-022 "dispute won: funds returned"  // ✗ 04a7: the reversal of the reversal; the 15.00 fee is not returned
+08 github
+08 notion
+08 internet
+12 staking 0.001460 ETH
+12 nordlicht-retainer
+14 cloudflare
+15 brightside-retainer
+15 est-tax                                                      // ▸ 3,100.00 from chase-checking, for 2026
+19 staking 0.001454 ETH
+20 edp
+22 health
+22 metamask 1_000.00 USDC -> 0.3054 ETH                            // ▸ a purchase: basis 1,000.00 USD; the USDC leaves at basis 1.00
+  + 0.0029 ETH #gas-fees                                             // ? 04c4: gas is paid in ETH, a third commodity here: a second disposal
+24 metamask 0.4000 ETH -> kraken-stake 0.4000 ETH                  // ▸ between his own accounts: moves parcels unchanged
+  + 0.00081 ETH #gas-fees                                            // ▸ spent: an on-chain transfer's fee, a disposal of 0.00081 ETH
+26 staking 0.001457 ETH

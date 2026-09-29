@@ -994,3 +994,55 @@ Also decided along the way:
 - cutting a recognition range short (B13);
 - a parallel fold of independent owners (P9);
 - smaller `Flow` and `Txn` (page faults are about a quarter of CPU at 1M).
+
+## 12. The v4 rework (in progress)
+
+v4 moves from a chart of accounts to agents, resources, events and promises
+(DESIGN §1). After the first v4 spec, the user asked for four more things:
+- changes to terms written inline (a free month, a promotion and its
+  extension, a looser budget);
+- invoices and automation at the scale of many businesses;
+- diagnostics that use the whole architecture;
+- simpler syntax, with dates as convention, not law.
+
+The spec now has:
+- **statements**, with terms that change;
+- **line items**;
+- **sync**, as recognition and reconciliation;
+- **dates by convention** (26a396c).
+
+Audits of every crate found the quality debt, and each lane's brief carries its
+share.
+
+| lane | branch | what |
+|---|---|---|
+| I4 | main (e14bda3) | the first v4 public types, with the v3 model bridged |
+| S4 | v4 (7663dfd) | the first v4 surface |
+| C5 | main | core calendar (`Days`, `Window`, `spread`, `due`), `Timeline`, `Run`; the public types for terms, budgets and sources; core dedup |
+| S5 | v4 | statements, items, headings, `via`; `Punct`, `Ref<T>` and `Folder` |
+| X5 | main | five ledgers written against the spec, to find what it cannot say |
+| SY | main | the `sync` crate: CSV, recognition, reconciliation, writing |
+| E4a | main, after C5 | engine structure: `Plan`/`Ledger`, `LawFacts`, membership lists, `Verdict`, the hot path |
+| R4 | main, after C5 | the v4 views, `--json`, `check --json`; `Priced`, `Sides`, sparse snapshots |
+| E4b | main, after E4a | the v4 engine: purposes, budgets, assets, carry, claims, promises; assertion windows explained by promises and claims |
+| M4a, M4b | v4, after S5 and C5 | the model rebuilt on the v4 AST: declarations and laws, then the journal |
+| Y4-A, Y4-B | v4, after M4b | `us` and every example in v4; the mistakes corpus |
+
+**Decisions:**
+- **One statement form.** `DATE SUBJECT PREDICATE [until DATE]` covers every
+  line that is not a flow. The parser picks the predicate by its shape, and
+  the model decides what the subject is.
+- **A change is painted on a timeline.** Contract terms, budget limits and
+  dated properties are all `Timeline<T>`, read on the day being judged.
+- **Budgets are first class, and still laws.** `Book.budgets` holds the
+  limit timeline and `carries`. The budget's law reports it like any cap. A
+  carrying budget compares its running total with its running limit.
+- **Sync reconciles; it never imports blindly.** A record matching a written
+  flow (same account and amount, within three days) is already written. No
+  import ids are needed in the journal.
+- **Assets are objects of purposes**, never ends: `#purchase of`, `#sale of`.
+
+**Next, not yet assigned:**
+- a diagnostics pass over the v4 mistakes corpus, once real books build;
+- an `axiom lsp` (hints, hovers from `why`, code actions from fixes);
+- whatever X5 finds.

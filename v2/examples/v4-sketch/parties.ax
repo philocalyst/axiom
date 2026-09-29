@@ -13,7 +13,6 @@ entity farmers-market #groceries
 
 entity lumen        : employer
 entity greystar     : landlord          // Sam's own landlord
-  known-as "GREYSTAR*"
 entity rocket       : lender
 entity dana         : tenant            // rents the condo from Sam
 entity mint         : phone-company
@@ -23,10 +22,11 @@ entity equinox      : gym
 entity state-farm   : insurer
 entity bay-plumbing : contractor
 entity blue-shield  : health-insurer
+// Every party is known on statements by its own name (`safeway` matches
+// "SAFEWAY #1234"). Only a name the bank spells otherwise needs a pattern.
 entity trader-joes : grocer
-  known-as "TRADER JOE*"                // how it appears on statements (sync)
-entity safeway : grocer
-  known-as "SAFEWAY*"
+  known-as "TRADER JOE"                 // the bank writes "TRADER JOE'S #552"
+entity safeway      : grocer
 entity jo           : person            // a friend
 
 /// A store's price includes the sales tax where it sells. The tax is derived
@@ -40,4 +40,3 @@ entity northwind : client
   of studio
 entity halcyon : client
   of studio
-  known-as "HALCYON*"

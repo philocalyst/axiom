@@ -1,0 +1,32 @@
+// ─── What Noor means to spend ───────────────────────────────────────────────
+// Zero-based: every dollar of a month's income is given a purpose before the month starts. Net pay is
+// 4,900 USD a month. The fixed lines come from contracts (rent 1,050, her third of the utilities about 75,
+// phone, insurance, subscriptions), the flexible ones are budgets, and what is left goes to envelopes.
+
+budget groceries      420 USD monthly
+budget dining         200 USD monthly carries        // what a month leaves, the next may spend
+budget fun            150 USD monthly carries
+budget transport      120 USD monthly
+budget clothing        60 USD monthly carries
+budget subscriptions   75 USD monthly                // the annual ones are recognized month by month (`covers`)
+
+// The sinking funds are budgets too. A budget is the plan, and the paychecks' `savings … for car` legs are
+// the money.
+// ✎ 05b1: the same 50 USD a paycheck is written twice, once as a limit that carries and once as a leg into
+// the envelope, and nothing says they must agree. An envelope *is* a budget with money behind it.
+budget car             100 USD monthly carries
+budget gifts            60 USD monthly carries
+budget travel          150 USD monthly carries
+budget medical          40 USD monthly carries
+
+// ✗ 05a3: "every dollar assigned" is a law over the budgets (the limits, the fixed contracts and the envelope
+// legs sum to income), and a law cannot read a budget's limit: a budget is a `warn` on a purpose (§4), not data.
+// The check is done by eye.
+
+// A rule of conduct, for a month.
+2026-01-01 budget dining empty monthly until 2026-01-31 "no restaurants in January"
+
+// Moving 40 USD from fun to groceries for March: two statements, and nothing says they belong together.
+// ✎ 05b2: `budget move` would say it once, and could not be left unbalanced.
+2026-03-24 budget groceries 460 USD monthly until 2026-03-31
+2026-03-24 budget fun 110 USD monthly until 2026-03-31

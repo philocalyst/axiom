@@ -1,0 +1,61 @@
+/// Priya Raman and Jamie Cho, 2026: a year of change. They marry in June, move from
+/// California to New York in August, change jobs, buy a car, refinance and have a baby
+/// in October. January to December.
+///
+/// Not runnable; written against LANGUAGE v4. Marks: ✗ cannot say · ✎ says it badly ·
+/// ? the spec is unclear · ⇄ what sync would need. Numbers are explained in FINDINGS.md.
+///
+/// A note on order. The brief asked for a refinance and then an ARM reset. A loan that has
+/// just been refinanced cannot reset within the year, so here the ARM resets first (its
+/// fifth anniversary, March) and is refinanced into a fixed loan in May. Both are exercised.
+base USD
+use us
+use us/401k
+use us/529
+use us/hsa
+use us/fsa                       // ✗ 02a1: no such system: a dependent-care FSA has a yearly limit and a use-it-or-lose-it rule
+use us/ca/san-francisco
+use us/ny/nyc
+
+/// Priya, a product manager at Lumen until August, then at Harbor Labs.
+entity me : person
+  born    1989-03-14
+  filing  single                 // ✗ 02a2: read on the day, so 12-31's `family` is what the year is judged by (§3)
+  lives   us/ca/san-francisco
+  lives   us/ny/nyc from 2026-08-15   // ? 02c1: `lives` "may overlap" (§4) and a later statement "overrides" (§3): does this end the first?
+
+/// Jamie, an engineer at Pinnacle, remote all year.
+entity jamie : person
+  born    1990-07-22
+  filing  single
+  lives   us/ca/san-francisco
+  lives   us/ny/nyc from 2026-08-15
+
+/// The household. They file joint for the whole of 2026, because they are married on its last day,
+/// but they are members only from the wedding.
+entity family : household
+  filing  joint
+  children 0
+
+/// The baby. Not an owner: a dependent, and the beneficiary of a 529.
+entity noa : person
+  born    2026-10-03
+  lives   us/ny/nyc
+
+// ? 02c6: `us/ca`'s `each year closing 04-15` law governs "the owners who live there" (§6). On 2027-04-15 neither of
+// them lives in California, so the return for the seven months they did is never figured, and the New York law
+// figures all twelve. §6 says nothing about a system an owner has left, or about how a part-year resident's
+// income is divided.
+2026-06-13 family member me           // ✗ 02a2: from this day the two are governed as one, but the return that closes on
+2026-06-13 family member jamie        //   2027-04-15 is for the whole year: Jan-May wages were counted for each alone (§6, tallies)
+2026-10-03 family children 1
+
+// The purposes this book adds to std's.
+purpose wedding        : spending
+purpose moving         : spending
+purpose childcare      : spending
+purpose medical        : spending
+purpose closing-costs  : capital
+purpose points         : spending
+purpose registration   : spending
+purpose tuition        : spending

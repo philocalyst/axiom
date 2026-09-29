@@ -1,0 +1,28 @@
+// ─── Where the money sits ───────────────────────────────────────────────────
+// Three owners keep money: the agency, and each partner.
+
+account operating  : deposit at chase
+  owner loomfield
+account reserve    : deposit at chase                // sales tax, payroll tax and B&O set aside; not for spending
+  owner loomfield
+account stripe-bal : processor-balance at stripe     // what Stripe holds for the agency until its weekly payout
+  owner loomfield
+
+// Company cards: one account each, so the cardholder is known
+account card-me    : card at amex
+  owner loomfield
+account card-theo  : card at amex
+  owner loomfield
+account card-maya  : card at amex
+  owner loomfield
+
+// The partners' own money
+account my-checking   : deposit at chase             // ines
+account my-visa       : card at chase
+account theo-checking : deposit at chase
+  owner theo
+account theo-visa     : card at chase
+  owner theo
+
+// ✗ 01a4: `reserve` is filled by a transfer written by hand each month (see contracts.ax). Nothing says "keep 30%
+// of every receipt here" or "keep what is owed to the state here until the 25th".

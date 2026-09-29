@@ -7,7 +7,7 @@
 // - The forecast runs every contract forward.
 // - `check` notices when one is not kept, such as a rent that never came or
 //   a bill missing from a statement.
-// - What a contract says about its flows (a business share, a covered
+// - What a contract says about its flows (a share, a covered
 //   period, a loan's interest) applies to every one of them without being
 //   written again.
 
@@ -17,21 +17,26 @@ contract job with lumen
   4_600 USD twice monthly on 15, last into checking   // gross; checking takes what is left
   retirement   6%                          // ▸ pre-tax deferral: into a 401k, from wages
   blue-shield  184.20 USD #premium         // ▸ pre-tax (§125): out of wages and payroll tax
-  match 50% of retirement up to 6%         // ▸ Lumen adds 138.00 to each paycheck's 276.00
+  also lumen -> retirement 50% of ([retirement] up to 6% of amount) #match
+                                           // ▸ Lumen adds 138.00 to each paycheck's 276.00
 
-/// The flat. 12% of it is the studio's office.
+/// The flat. Its second bedroom, 120 of its 1,000 square feet, is the studio's
+/// office. Greystar bills a share of the building's water each quarter.
 contract flat with greystar
   2_900 USD monthly on 1 from checking     // ▸ rent: greystar is a landlord
-  business 12% for studio                  // 120 of its 1,000 sq ft
+  area 1_000 SQFT
+  share 120 SQFT for studio                // ▸ 12%: 348.00 of each rent is the studio's
+  input water USD                          // the building's water bill, on the months it comes
+  + 12% of water #utilities
   until 2026-08-31
 
 contract phone with mint
   45 USD monthly on 8 from visa            // ▸ phone: mint is a phone company
-  business 60% for studio                  // ▸ 27.00 of each bill is the studio's
+  share 60% for studio                     // ▸ 27.00 of each bill is the studio's
 
 contract figma with figma
   15 USD monthly on 3 from visa
-  business 100% for studio
+  share 100% for studio
 
 contract netflix with netflix
   15.49 USD monthly on 22 from visa
@@ -46,7 +51,7 @@ contract gym with equinox
 contract mortgage with rocket
   loan 320_000 USD on 2024-02-20 at 5.875% over 30y for condo
   monthly on 1 from checking               // ▸ 1,892.90: the payment follows from the loan
-  escrow 410 USD into escrow               // property tax and insurance
+  also -> escrow 410 USD #escrow           // property tax and insurance, with each payment
 
 /// Dana's lease on the condo, with a deposit held for her.
 contract lease with dana

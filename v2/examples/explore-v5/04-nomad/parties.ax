@@ -1,0 +1,62 @@
+// ─── Who Kai deals with ─────────────────────────────────────────────────────
+
+/// Clients pay for work. Where the client is says nothing about where the work is done.
+kind client : org
+  purpose consulting
+entity nordlicht : client                   // Hamburg. A monthly retainer in EUR, by SEPA, into Wise.
+  known-as "NORDLICHT GMBH*"
+entity brightside : client                  // Manchester. A monthly retainer in GBP, by Faster Payments.
+  known-as "BRIGHTSIDE LTD*"
+entity oakline-labs : client                // Denver. Projects in USD, by card through Stripe.
+entity fieldnotes : client                  // a small US publisher, paid through PayPal
+  known-as "FIELDNOTES MEDIA*"
+entity pixelcraft : client                  // pays in USDC
+entity harborview : client                  // US, by wire
+
+/// What a processor or a wallet keeps is a fee. What arrives from one is whoever the payment was from.
+/// ? 04c2: `purpose fees` on a kind is "what flows with its parties are for" (§2, §4): both ways. Money *from*
+/// Stripe is a payout of a client's payment, not a refund of fees, and it takes `via` to say so.
+kind processor : org
+  purpose fees
+entity stripe : processor
+  known-as "STRIPE*"
+entity paypal : processor
+  known-as "PAYPAL*"
+entity wise : processor
+  known-as "WISE*", "TRANSFERWISE*"
+entity global-blue : processor               // tax-free shopping refunds
+
+// Lisbon
+kind utility : org
+  purpose utilities
+kind software-vendor : org
+  purpose software
+kind exchange : org
+entity casa-alfama : landlord
+  known-as "CASA ALFAMA LDA*"
+entity lx-cowork : merchant #coworking
+  known-as "LX FACTORY COWORK*"
+entity edp : utility
+  known-as "EDP COMERCIAL*"
+entity nos : utility
+  known-as "NOS COMUNICACOES*"
+entity continente, pingo-doce : grocer
+entity aima : government                     // immigration: visa and residence fees
+entity safetywing : insurer
+  purpose insurance
+
+// Software
+entity github, notion, cloudflare : software-vendor
+
+// The chain
+kind protocol : org
+entity kraken : exchange
+entity lido-like : protocol                  // where staking rewards come from ("the network")
+entity uniswap : protocol                    // a swap venue; its 0.3% is inside the price
+entity ethereum : protocol                   // gas is paid to it
+
+/// The Swiss store where the laptop is bought. VAT is inside every price, and refundable on leaving.
+entity apple-zurich : store
+  sales-tax 8.1%                             // ✎ 04b3: `sales-tax` on a store, for VAT: and it is "recoverable"; nothing says so
+
+entity irs : tax-authority

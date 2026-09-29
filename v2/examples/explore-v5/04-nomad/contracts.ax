@@ -1,0 +1,59 @@
+// ─── What Kai has agreed to ─────────────────────────────────────────────────
+
+// ── Retainers, in the client's currency ─────────────────────────────────────
+// As in 01-agency (01a5), each is an invoice that the contract can only write as a receipt. Here the invoice is
+// a claim in EUR or GBP, and what arrives is EUR or GBP, so nothing converts.
+
+contract nordlicht-retainer with nordlicht
+  4_200 EUR monthly on 12 into wise-bal #consulting     // ▸ German B2B: no VAT charged (reverse charge)
+
+contract brightside-retainer with brightside
+  3_100 GBP monthly on 15 into wise-bal #consulting
+
+// ── Austin, until the end of February ───────────────────────────────────────
+
+contract rent-austin with greenline-apts
+  1_650 USD monthly on 1 from chase-checking #rent
+  until 2026-02-28
+
+// ── Lisbon, from the first of March ─────────────────────────────────────────
+// The deposit is paid as a flow with `due` (journal/2026/03.ax): a claim on the landlord, which is what a
+// tenant's deposit is. ? 04c5: that is the *same* thing §5's `deposit` names for a landlord, and this contract has
+// none: two ways to say one thing, and no rule for which.
+
+contract lisbon-rent with casa-alfama
+  1_450 EUR monthly on 1 from wise-bal #rent
+  from 2026-03-01 until 2027-02-28
+
+contract cowork with lx-cowork
+  180 EUR monthly on 2 from wise-bal
+  from 2026-03-02
+contract edp with edp
+  about 62 EUR monthly on 20 from millennium #utilities
+  from 2026-03-20
+contract internet with nos
+  39.99 EUR monthly on 8 from millennium
+  from 2026-03-08
+
+// ── Everything else ─────────────────────────────────────────────────────────
+
+/// Nomad health insurance: charged every four weeks.
+contract health with safetywing
+  56.28 USD every 4w from 2026-01-05 from visa #insurance
+
+contract github with github
+  4 USD monthly on 8 from visa
+contract notion with notion
+  10 USD monthly on 8 from visa
+contract cloudflare with cloudflare
+  20 USD monthly on 14 from visa
+
+/// Federal estimates, for the year the money was earned. The fourth is due in January of the next.
+/// ✗ 04a4: as in 01 and 02 (01a8): four installments that are not a cadence, the last one for the previous
+/// year. §2 has `for 2025` on a flow; a contract has no `for the tax year`.
+contract est-tax with irs
+  3_100 USD yearly on 04-15, 06-15, 09-15, 01-15 from chase-checking #tax-paid
+
+/// Weekly staking rewards on the ETH bonded at Kraken, credited on Fridays. The amount is the network's.
+contract staking with kraken
+  about 0.0015 ETH weekly on friday into kraken-stake #staking

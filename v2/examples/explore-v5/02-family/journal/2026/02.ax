@@ -1,0 +1,22 @@
+// February 2026.
+
+01 mortgage                                                   // ▸ 2,832.44: #interest of home 1,107.60 · principal 1,049.84 · escrow 675.00
+03 me-visa -> trader-joes 78.31 USD
+10 jamie-amex -> target 129.40 USD
+12 electricity-ca
+14 -> bayside-honda 45_046.25 USD #purchase of car2      // the deal, as the dealer's buyer's order states it
+  85.00 USD #fees "documentation fee"                      // ▸ a cost of the purchase: basis more
+  2_821.25 USD #sales-tax "9.25% of 30,500.00: price less the trade-in"    // ✗ 02a9: the derived sales tax is on the whole price
+  640.00 USD #registration "DMV fees"                       // ▸ spent, not part of the cost
+  - 11_000.00 USD #sale of car1 "trade-in"                  // ▸ car1 is disposed of: 11,000.00 against a basis of 24,000.00, a loss on personal-use property, not deductible   // ✗ 02a9
+  me-checking      5_000.00 USD
+  car-loan        29_046.25 USD                          // ▸ the loan draws straight to the dealer
+15 job-lumen
+15 job-jamie
+18 me-visa -> venue-marin 6_000 USD #wedding "deposit, 2026-06-13"
+21 me-visa -> whole-foods 101.77 USD
+27 me-visa -> trader-joes 69.05 USD
+28 mortgage = 461_252.48 USD
+28 job-lumen
+28 job-jamie
+28 hsa-employer

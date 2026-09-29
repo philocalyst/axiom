@@ -1,0 +1,23 @@
+// August 2026.
+
+01 mortgage-2                                                 // ▸ 3,465.38: #interest of home 2,247.78 · principal 515.60 · escrow 702.00
+04 joint-visa -> trader-joes 88.21 USD
+12 electricity-ca
+14 car-loan                                                   // ▸ 560.20: #interest of car2 132.45 · principal 427.75
+15 job-lumen
+15 job-jamie
+15 nyc-lease 2_659.68 USD                                     // ▸ 17 of 31 days, by hand
+20 529-tara -> ucsb 6_400.00 USD #tuition "fall quarter"      // ▸ qualified: the plan pays a school directly
+22 joint-visa -> two-men-and-truck 2_850 USD #moving "balance"
+26 joint-visa -> target 312.06 USD
+29 joint-visa -> whole-foods 67.40 USD
+31 job-lumen
+31 job-jamie
+31 hsa-employer
+31 lumen 4_420 USD -> #wages "PTO payout, 128 hours"
+  irs               972.40 USD
+  ftb               452.17 USD
+  ssa               338.13 USD
+  edd                57.46 USD
+  joint-checking    ...                                  // ▸ 2,599.84
+31 retirement-lumen -> lumen 2_940.00 USD "unvested match, forfeited on leaving"  // ✗ 02a12: a schedule, not an event

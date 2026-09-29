@@ -1,0 +1,46 @@
+// ─── Where the journal comes from ───────────────────────────────────────────
+
+sync checking
+  run   cu-export checking --since {since}
+  csv   date "Date" "MM/DD/YYYY", amount "Amount", memo "Description", balance "Balance"
+
+sync card
+  run   chase-export card-4242 --since {since}
+  csv   date "Transaction Date" "MM/DD/YYYY", amount "Amount" flipped, memo "Description"
+  // category "Category"          ⇄ 05d1: Chase says "Groceries", "Food & Drink", "Gas". For a merchant nobody is
+  //                                known as, that is a purpose to offer. §13 recognizes parties only.
+
+sync delta-card
+  run   amex-export --since {since}
+  csv   date "Date" "MM/DD/YYYY", amount "Amount" flipped, memo "Description"
+
+/// Venmo: one export for the wallet and for every payment she made or received through it, whatever paid for it.
+/// ⇄ 05d2: each row has "From", "To", a "Note" and a "Funding Source" ("Venmo balance", "Visa …4242", "Checking
+/// …0912"). The row belongs to an *account* by that last column, and to a *party* by From or To, and the
+/// note is a description. §13 has one account per sync, one memo, and reads the party out of the memo, so the
+/// party that matters is in a column it never reads and the account that matters is in another.
+/// A `csv` needs `party "To"`/`"From"`, `route "Funding Source"` and `note`, and an amount signed the way the
+/// wallet shows it (money out is negative).
+sync venmo
+  run   venmo-export --since {since}
+  csv   date "Datetime" "YYYY-MM-DD", amount "Amount (total)", memo "Note", balance "Beginning Balance"
+
+/// Delta SkyMiles: what was earned, and what was spent.
+/// ⇄ 05d3: the activity export says "Base miles 312", "Medallion bonus 100", "Award redemption -25,000". The
+/// *earn* is a consequence of a card charge or a flight the book already knows: it should be matched to the flow
+/// that caused it, not written as a new one.
+sync delta-miles
+  run   delta-export activity --since {since}
+
+/// The rebate. A statement credit "CASH BACK REWARD -11.85" reconciles with the flow the card's terms derive
+/// (§13.2, if derived flows count as "already written").
+/// ? 05c2: LANGUAGE §13.2 matches a record with "a flow already on that account". A derived flow (§9) is not
+/// written on any account, and nothing says reconciliation looks at it. If it does not, every rebate is
+/// written twice: derived by the card's terms and again by the feed.
+
+/// Klarna's statement: the plan, its four instalments and their dates. It prints a loan.
+sync boots
+  run   klarna-export plan-88213 --since {since}
+
+code nyt-* pt-*
+  on nyt

@@ -1,0 +1,25 @@
+// December 2026.
+
+01 mortgage-2                                                 // ▸ 3,465.38: #interest of home 2,238.05 · principal 525.33 · escrow 702.00
+01 nyc-lease
+01 daycare for benefit-admin ^dc-1201                         // ? 02c4: a contract occurrence with a tail: §5 gives `DATE NAME [AMOUNT]` and nothing after
+04 joint-visa -> whole-foods 136.72 USD
+05 529-noa-monthly
+05 state-farm -> joint-checking 7_940.00 USD #repair of car2 ^claim-114  // ▸ a refund of the repair (written: the insurer's purpose is `insurance`)   // ✎ 02b2
+10 property-tax 3_512.00 USD                                  // ▸ from escrow2: the old escrow closed in June
+12 electricity-ca
+13 joint-visa -> target 240.15 USD
+14 car-loan                                                   // ▸ 560.20: #interest of car2 123.97 · principal 436.23
+14 electricity-ny
+15 job-jamie
+15 job-harbor
+18 benefit-admin -> joint-checking 1_000.00 USD ^dc-1110 ^dc-1201  // ▸ 610.00 finishes November's claim, 390.00 starts December's
+20 joint-visa -> trader-joes 103.94 USD
+31 mortgage-2 = 476_924.53 USD
+31 car-loan = 24_778.79 USD
+31 job-jamie
+31 hsa-employer
+31 job-harbor
+31 benefit-admin -> joint-checking 500.00 USD ^dc-1201        // the last of the election; 1,410.00 of December's claim is never paid
+31 ^dc-1201 waived "over the election"                        // ▸ 1,410.00 forgiven by the plan: the household's own cost
+// The house in Oakland is listed in January 2027.

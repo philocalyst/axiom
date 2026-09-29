@@ -1,0 +1,63 @@
+// ─── Where the journal comes from ───────────────────────────────────────────
+// Card statement payments and transfers between the household's own accounts are left out of the journal
+// files: a feed writes them and none of them teaches anything. What follows is what sync must do for the
+// lines that do.
+
+sync me-checking
+  run   chase-export checking-1187 --since {since}
+  csv   date "Posting Date" "MM/DD/YYYY", amount "Amount", memo "Description", balance "Balance"
+sync joint-checking
+  run   chase-export checking-4402 --since {since}
+  csv   date "Posting Date" "MM/DD/YYYY", amount "Amount", memo "Description", balance "Balance"
+sync me-visa
+  run   chase-export visa-2231 --since {since}
+  csv   date "Transaction Date" "MM/DD/YYYY", amount "Amount" flipped, memo "Description"
+sync jamie-amex
+  run   amex-export --since {since}
+  csv   date "Date" "MM/DD/YYYY", amount "Amount" flipped, memo "Description"
+
+/// Paystubs arrive as PDFs in an inbox. A script reads one and prints the occurrence.
+/// ⇄ 02d2: it must print `15 job-jamie` when the stub is what the contract says, and the stub's own legs
+/// when it is not (a new state, a new election). Today `check` cannot say "the contract's legs are stale"
+/// on the third stub that differs by the same amount unless the *amounts* were compared: §5 does it for
+/// the header only.
+sync paystubs
+  run   paystub-parse --since {since}
+
+/// Closing disclosures and the dealer's buyer's order: PDFs, again. One flow each, with the legs.
+/// ⇄ 02d3: a bank never shows the refinance as it is: one wire of 12,722.25 into checking. The
+/// disclosure is the record and the wire is its shadow: §13.2 has to match one record to *part* of a flow
+/// (the leg that lands in checking), not to a whole flow.
+sync closings
+  run   closing-parse --since {since}
+
+/// The HSA's export: each distribution names the payee and the date of the expense it reimburses.
+/// ⇄ 02d4: "REIMBURSEMENT - SMILE DENTAL 2026-05-12" is `hsa -> jamie-checking 620.00 ^bill-0512` only if
+/// sync may find the earlier flow it names: the payee and date in a memo pick a *flow*, not a party.
+sync hsa
+  run   healthequity-export --since {since}
+  csv   date "Date", amount "Amount", memo "Description", balance "Balance"
+
+/// Explanations of benefits and hospital statements: claims with items.
+sync bills
+  run   eob-parse --since {since}
+
+/// The FSA's claims portal: what has been submitted, what has been paid, what the balance is.
+/// ⇄ 02d5: a payment from `benefit-admin` names a claim number the book never wrote. A claim on a plan is
+/// created by a `for benefit-admin` on the expense, and the portal is the only place that knows it was filed.
+sync fsa
+  run   fsa-portal-export --since {since}
+
+/// The tax authorities.
+/// ⇄ 02d1: the IRS refund's memo is "TREAS 310 TAX REF" and carries no year; the return it refunds is the
+/// only place that knows. A refund should settle the `owe` its own year's law computed (§6), if `owe`
+/// obligations could be settled by a flow at all (? 02c5).
+
+sync prices
+  run   quotes {units} --since {since}
+  into  prices/{year}.ax
+
+code bill-*
+  on health-provider
+code dc-* claim-*
+  on plan-administrator, insurer, health-provider
