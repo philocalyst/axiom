@@ -1,0 +1,28 @@
+$ axiom why federal-income-tax --today 2026-02-10
+
+Why federal-income-tax
+
+  Law       federal-income-tax
+  ────────────────────────────────────────────────────
+  When      each year
+  Governs   everyone living under us, and all they own
+  Written   us.ax:126
+  Ran       1 times
+  Recorded  0 violations, 3 effects
+  · Federal income tax for the year (IRC §1), figured from the tallies above.
+  ·
+  · Ordinary income is `agi` without long-term gains. It is reduced by the
+  · standard deduction and taxed on the ordinary brackets. Long-term gains are
+  · stacked on top of it and taxed on the capital-gains brackets. Tax already
+  · withheld or paid is credited, and the rest is owed by April 15 of the next
+  · year (Form 1040). A refund, when more was withheld than owed, is not booked.
+  ·
+  · The brackets depend on `filing`, so set `filing single` or `filing joint`
+  · on the person who lives here.
+
+Recent effects
+  Date        Effect                     Amount  Owed to            From
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-31  taxable-income      24,580.29 USD                     period end
+  2025-12-31  income-tax           2,711.13 USD                     period end
+  2025-12-31  federal-income-tax   2,711.13 USD  irs by 2026-04-15  period end

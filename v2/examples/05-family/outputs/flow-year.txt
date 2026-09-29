@@ -1,0 +1,52 @@
+$ axiom flow --by year --today 2026-01-05
+
+Income and spending
+
+  Place                      2024            2025      2026           Total
+  ─────────────────────────────────────────────────────────────────────────
+  income                           306,811.37 USD            306,811.37 USD
+    alex-salary                    150,000.00 USD            150,000.00 USD
+    employer-hsa                     1,000.00 USD              1,000.00 USD
+    employer-match                   8,923.18 USD              8,923.18 USD
+    gifts                            3,000.00 USD              3,000.00 USD
+    growth                          43,820.94 USD             43,820.94 USD
+    interest                         2,479.02 USD              2,479.02 USD
+    jordan-salary                   97,440.07 USD             97,440.07 USD
+    rewards                            148.16 USD                148.16 USD
+    realized gains ≈                12,205.19 USD             12,205.19 USD
+  ─────────────────────────────────────────────────────────────────────────
+  Total income                     319,016.56 USD            319,016.56 USD
+  ─────────────────────────────────────────────────────────────────────────
+  expenses                         154,709.02 USD            154,709.02 USD
+    auto                             3,278.94 USD              3,278.94 USD
+      insurance                      1,148.00 USD              1,148.00 USD
+      loan-interest                    998.46 USD                998.46 USD
+      repairs                        1,132.48 USD              1,132.48 USD
+    charity                          3,900.00 USD              3,900.00 USD
+    childcare                       16,760.00 USD             16,760.00 USD
+    food                            12,214.59 USD             12,214.59 USD
+      dining                         3,047.85 USD              3,047.85 USD
+      groceries                      9,166.74 USD              9,166.74 USD
+    fuel                             1,404.18 USD              1,404.18 USD
+    health-premium                   5,100.00 USD              5,100.00 USD
+    housing                         32,357.32 USD             32,357.32 USD
+      home-insurance                 1,800.00 USD              1,800.00 USD
+      mortgage-interest             24,077.32 USD             24,077.32 USD
+      property-tax                   6,480.00 USD              6,480.00 USD
+    kids                             2,440.97 USD              2,440.97 USD
+    medical                          1,251.35 USD              1,251.35 USD
+    shopping                         3,886.53 USD              3,886.53 USD
+    subscriptions                      455.76 USD                455.76 USD
+    taxes                           59,719.25 USD             59,719.25 USD
+      federal                       27,594.00 USD             27,594.00 USD
+      payroll                       17,697.50 USD             17,697.50 USD
+      sdi                            2,776.15 USD              2,776.15 USD
+      state                         11,239.60 USD             11,239.60 USD
+      state-prior                      412.00 USD                412.00 USD
+    travel                           2,026.70 USD              2,026.70 USD
+    tuition                          5,150.00 USD              5,150.00 USD
+    utilities                        4,763.43 USD              4,763.43 USD
+  ─────────────────────────────────────────────────────────────────────────
+  Net                    0.00 USD  164,307.54 USD  0.00 USD  164,307.54 USD
+  · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
+    them.

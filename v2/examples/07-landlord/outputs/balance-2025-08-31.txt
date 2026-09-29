@@ -1,0 +1,54 @@
+$ axiom balance --at 2025-08-31 --today 2026-01-06
+
+Balances at 2025-08-31
+
+  Place                        Balance
+  ────────────────────────────────────
+  assets                        1 HOME
+                        57,386.14 USD
+    bank                54,335.50 USD
+      checking          47,132.93 USD
+      deposit-account    2,400.00 USD
+      rental-checking    4,802.57 USD
+    prepaid              3,050.64 USD
+      loan-costs         3,050.64 USD
+    rental                      1 HOME
+      house                     1 HOME
+  ────────────────────────────────────
+  equity               134,851.85 USD
+    acc-dep-house        6,851.85 USD
+    opening            128,000.00 USD
+  ────────────────────────────────────
+  expenses              61,180.55 USD
+    dining               1,278.56 USD
+    groceries            2,886.54 USD
+    living               2,485.97 USD
+    own-rent            15,600.00 USD
+    rental              24,313.48 USD
+      amortization          69.36 USD
+      depreciation       6,851.85 USD
+      insurance          1,560.00 USD
+      interest          11,679.27 USD
+      management         1,158.00 USD
+      property-tax       2,190.00 USD
+      repairs              805.00 USD
+    taxes               14,616.00 USD
+      federal            9,720.00 USD
+      payroll            4,896.00 USD
+  ────────────────────────────────────
+  income                80,875.00 USD
+    late-fees               75.00 USD
+    rent                16,800.00 USD
+    salary              64,000.00 USD
+  ────────────────────────────────────
+  liabilities          279,689.84 USD
+    deposits             2,400.00 USD
+      tenant-a           2,400.00 USD
+    mortgage           277,289.84 USD
+
+  Net worth       Value (USD)
+  ───────────────────────────
+  Assets       462,386.14 USD
+  Liabilities  279,689.84 USD
+  ───────────────────────────
+  Net worth    182,696.30 USD

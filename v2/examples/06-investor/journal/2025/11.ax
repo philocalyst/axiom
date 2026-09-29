@@ -1,0 +1,33 @@
+2025-11-01 checking -> rent 2_650 USD / landlord
+2025-11-01 income/staking -> wallet 0.01175053 ETH @ 3876.97 USD
+2025-11-05 checking -> fidelity 4.5614 VTI @ 328.84 USD
+
+/// Trimming Microsoft from the October 2024 lot.
+2025-11-06 fidelity[2024-10-08] 8 MSFT -> checking 4_147.52 USD
+2025-11-09 checking -> utilities 129.62 USD
+2025-11-12 checking -> groceries 416.27 USD
+2025-11-15 northwind -> etrade 60 NWND @ 184.18 USD
+2025-11-15 etrade 13.2001 NWND -> taxes/federal 2_431.18 USD   // sold to cover: 22% supplemental
+2025-11-15 etrade 0.8701 NWND -> taxes/payroll 160.24 USD   // sold to cover: FICA
+2025-11-16 checking -> dining 391.99 USD
+2025-11-20 checking -> groceries 320.64 USD
+2025-11-24 checking -> misc 440.22 USD
+2025-11-28 dividends -> schwab 7.58 USD
+2025-11-30 income/salary -> 14_000.00 USD
+  retirement          1_958.33 USD   // 401(k) deferral
+  espp-cash           1_400.00 USD   // ESPP contribution, after tax
+  taxes/federal       2_650.00 USD
+  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  checking            ...
+2025-11-30 interest -> savings 275.17 USD
+2025-11-30 interest -> fidelity 237.68 USD
+2025-11-30 checking = 61_288.58 USD
+2025-11-30 savings = 82_824.71 USD
+2025-11-30 espp-cash = 7_000.00 USD
+2025-11-30 fidelity = 67.7823 VTI
+2025-11-30 fidelity = 16.3264 MSFT
+2025-11-30 fidelity = 19.7153 UNH
+2025-11-30 etrade = 295.5686 NWND
+2025-11-30 coinbase = 0.15 BTC
+2025-11-30 coinbase = 0.95668225 ETH
+2025-11-30 wallet = 6.07013574 ETH

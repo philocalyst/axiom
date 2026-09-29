@@ -1,0 +1,65 @@
+$ axiom forecast --paths 200 --today 2026-01-06
+
+Forecast to 2027-01-06
+
+Liquid net worth
+  Month end       Committed            p10            p50            p90
+  ──────────────────────────────────────────────────────────────────────
+  2026-01-06  23,213.23 USD
+  2026-01-31  25,262.16 USD  23,967.13 USD  24,974.41 USD  25,216.81 USD
+  2026-02-28  26,330.39 USD  23,813.14 USD  25,079.71 USD  26,064.11 USD
+  2026-03-31  27,595.92 USD  24,350.82 USD  25,638.39 USD  27,048.08 USD
+  2026-04-30  28,664.15 USD  24,536.58 USD  25,762.82 USD  27,322.44 USD
+  2026-05-31  31,094.97 USD  26,216.72 USD  27,669.71 USD  29,101.54 USD
+  2026-06-30  32,163.20 USD  26,164.43 USD  28,035.65 USD  29,611.90 USD
+  2026-07-31  33,231.43 USD  26,415.14 USD  28,388.44 USD  30,267.79 USD
+  2026-08-31  34,496.96 USD  26,957.41 USD  28,891.78 USD  31,020.61 USD
+  2026-09-30  35,565.19 USD  27,278.96 USD  29,377.96 USD  31,445.24 USD
+  2026-10-31  37,770.36 USD  28,501.80 USD  30,766.47 USD  33,243.99 USD
+  2026-11-30  39,064.24 USD  28,965.83 USD  31,326.09 USD  33,923.52 USD
+  2026-12-31  40,132.47 USD  29,111.31 USD  31,697.38 USD  34,357.87 USD
+  2027-01-06  39,151.77 USD  27,892.73 USD  30,584.04 USD  33,253.69 USD
+  · Committed: liquid assets less debts, in USD, after plans, recurring flows found in history,
+    growth models and obligations as they fall due. Variable spending is not in it.
+  · p10, p50 and p90 are the 10th, 50th and 90th percentile of 200 paths. Each path takes the
+    committed figure and subtracts, month by month, a random past month of spending for every
+    top-level expense category (from 10 months of history, without the flows already projected). The
+    seed is fixed, so the bands are reproducible.
+
+What recurs
+  Expected                                                   Every                Amount  Next        Source
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/bank/checking → assets/bank/savings                 monthly          700.00 USD  2026-01-28  seen 10 times
+  assets/bank/checking → assets/roommates/ben (fiberco)      monthly           23.33 USD  2026-01-09  seen 10 times
+  assets/bank/checking → assets/roommates/ben (landlord)     monthly        1,050.00 USD  2026-02-01  seen 10 times
+  assets/bank/checking → assets/roommates/cleo (fiberco)     monthly           23.33 USD  2026-01-09  seen 10 times
+  assets/bank/checking → assets/roommates/cleo (landlord)    monthly        1,050.00 USD  2026-02-01  seen 10 times
+  assets/bank/checking → expenses/car (carmax-finance)       monthly          330.50 USD  2026-01-12  seen 10 times
+  assets/bank/checking → expenses/car (progressive)          monthly          128.00 USD  2026-02-03  seen 10 times
+  assets/bank/checking → expenses/health (marketplace-plan)  monthly          189.40 USD  2026-01-15  seen 10 times
+  assets/bank/checking → expenses/rent (landlord)            monthly        1,050.00 USD  2026-02-01  seen 10 times
+  assets/bank/checking → expenses/utilities (fiberco)        monthly           23.33 USD  2026-01-09  seen 10 times
+  assets/bank/checking → liabilities/visa                    monthly          427.19 USD  2026-01-22  seen 10 times
+  assets/cash/wallet → assets/bank/checking                  monthly          850.00 USD  2026-01-24  seen 10 times
+  assets/cash/wallet → expenses/transport                    monthly            5.84 USD  2026-01-18  seen 10 times
+  assets/loans/riley → assets/bank/checking                  monthly          250.00 USD  2026-01-15  seen 6 times
+  assets/roommates/ben → expenses/utilities (power-co)       monthly           32.10 USD  2026-01-12  seen 10 times
+  income/tips → assets/cash/wallet                           weekly           225.65 USD  2026-01-11  seen 44 times
+  income/wages → assets/bank/checking (lantern)              every 2 weeks  1,136.94 USD  2026-01-09  seen 22 times
+  income/wages → expenses/taxes/federal (lantern)            every 2 weeks    176.34 USD  2026-01-09  seen 22 times
+  income/wages → expenses/taxes/payroll (lantern)            every 2 weeks    108.79 USD  2026-01-09  seen 22 times
+  liabilities/visa → assets/roommates/ben                    every 2 weeks     28.35 USD  2026-01-18  seen 20 times
+  liabilities/visa → assets/roommates/cleo                   every 2 weeks     28.35 USD  2026-01-18  seen 20 times
+  liabilities/visa → expenses/clothing                       monthly           68.36 USD  2026-01-26  seen 10 times
+  liabilities/visa → expenses/dining                         monthly           50.70 USD  2026-01-14  seen 10 times
+  liabilities/visa → expenses/entertainment                  monthly           61.13 USD  2026-01-19  seen 10 times
+  liabilities/visa → expenses/groceries                      every 2 weeks     28.35 USD  2026-01-18  seen 20 times
+  liabilities/visa → expenses/groceries (farmers-market)     monthly           67.19 USD  2026-01-17  seen 10 times
+  liabilities/visa → expenses/phone (mint-mobile)            monthly           45.00 USD  2026-01-08  seen 10 times
+
+Problems ahead
+  Date        Problem
+  ────────────────────────────────────────────────────────────────────
+  2026-01-15  assets/loans/riley is overdrawn, down to -2,950.00 USD
+  2026-08-03  assets/bank/checking is overdrawn, down to -7,062.57 USD
+  2026-08-03  overdraft: balance below zero (and 3 more)

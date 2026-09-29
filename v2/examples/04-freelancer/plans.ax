@@ -1,0 +1,15 @@
+// What has not happened yet, for the forecast.
+//
+// Estimated tax for 2026 is paid from the vault on the four 1040-ES dates.
+// 3_000 USD is a quarter of last year's total federal tax, rounded up. The
+// dates are written as month-day and land on the 15th every year; nothing here
+// moves a due date that falls on a weekend or holiday, so the June 2025 lesson
+// is not encoded. 2026 dates all fall on weekdays.
+
+every year on 04-15 from 2026-04-15 tax-vault -> federal 3_000 USD / irs
+every year on 06-15 from 2026-06-15 tax-vault -> federal 3_000 USD / irs
+every year on 09-15 from 2026-09-15 tax-vault -> federal 3_000 USD / irs
+every year on 01-15 from 2027-01-15 tax-vault -> federal 3_000 USD / irs
+
+/// The SEP-IRA top-up for 2026, made when the year's profit is known.
+every year on 01-25 from 2027-01-25 business-checking -> sep 6_000 USD

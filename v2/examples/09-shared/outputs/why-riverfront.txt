@@ -1,0 +1,14 @@
+$ axiom why riverfront --today 2026-01-06
+
+Why income/grants
+
+Composition
+  Holds       Quantity    Plain money  Parcels
+  ────────────────────────────────────────────
+  USD    -5,942.75 USD  -5,942.75 USD
+
+Recent flows
+  Date        With                             Payee       Note         Amount        Balance
+  ───────────────────────────────────────────────────────────────────────────────────────────
+  2025-03-15  assets/bank/collective-checking  riverfront        -6,000.00 USD  -6,000.00 USD
+  2025-10-28  assets/bank/collective-checking  riverfront            57.25 USD  -5,942.75 USD

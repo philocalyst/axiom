@@ -1,0 +1,196 @@
+$ axiom register checking --today 2026-01-06
+
+Register: assets/bank/checking
+
+  Date        With                             Payee                  Note                                        Amount        Balance
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-03-01  equity/opening                                                                                5,218.44 USD   5,218.44 USD
+  2025-03-01  expenses/rent                    landlord                                                    -1,050.00 USD   4,168.44 USD
+  2025-03-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   3,118.44 USD
+  2025-03-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD   2,068.44 USD
+  2025-03-02  assets/roommates/ben                                    #rent-2025-03                         1,050.00 USD   3,118.44 USD
+  2025-03-03  expenses/car                     progressive                                                   -128.00 USD   2,990.44 USD
+  2025-03-04  assets/roommates/cleo                                   #rent-2025-03                         1,050.00 USD   4,040.44 USD
+  2025-03-07  income/wages                     lantern                                                      1,151.48 USD   5,191.92 USD
+  2025-03-09  expenses/utilities               fiberco                                                        -23.33 USD   5,168.59 USD
+  2025-03-09  assets/roommates/ben             fiberco                                                        -23.33 USD   5,145.26 USD
+  2025-03-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   5,121.93 USD
+  2025-03-12  expenses/car                     carmax-finance                                                -330.50 USD   4,791.43 USD
+  2025-03-15  expenses/health                  marketplace-plan                                              -189.40 USD   4,602.03 USD
+  2025-03-21  income/wages                     lantern                                                      1,116.54 USD   5,718.57 USD
+  2025-03-22  liabilities/visa                                                                               -412.66 USD   5,305.91 USD
+  2025-03-24  assets/cash/wallet                                                                              950.00 USD   6,255.91 USD
+  2025-03-28  assets/bank/savings                                                                            -700.00 USD   5,555.91 USD
+  2025-03-31  assets/roommates/ben                                                                             46.72 USD   5,602.63 USD
+  2025-03-31  assets/roommates/cleo                                                                            76.19 USD   5,678.82 USD
+  2025-04-01  expenses/rent                    landlord                                                    -1,050.00 USD   4,628.82 USD
+  2025-04-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   3,578.82 USD
+  2025-04-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD   2,528.82 USD
+  2025-04-02  assets/roommates/ben                                    #rent-2025-04                         1,050.00 USD   3,578.82 USD
+  2025-04-03  expenses/car                     progressive                                                   -128.00 USD   3,450.82 USD
+  2025-04-04  income/wages                     lantern                                                      1,054.96 USD   4,505.78 USD
+  2025-04-05  assets/roommates/cleo                                   #rent-2025-04                         1,050.00 USD   5,555.78 USD
+  2025-04-09  expenses/utilities               fiberco                                                        -23.33 USD   5,532.45 USD
+  2025-04-09  assets/roommates/ben             fiberco                                                        -23.33 USD   5,509.12 USD
+  2025-04-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   5,485.79 USD
+  2025-04-10  assets/loans/riley                                      #loan-riley                          -2,000.00 USD   3,485.79 USD
+  2025-04-12  expenses/car                     carmax-finance                                                -330.50 USD   3,155.29 USD
+  2025-04-15  expenses/health                  marketplace-plan                                              -189.40 USD   2,965.89 USD
+  2025-04-18  income/wages                     lantern                                                      1,190.22 USD   4,156.11 USD
+  2025-04-22  liabilities/visa                                                                               -420.35 USD   3,735.76 USD
+  2025-04-24  assets/cash/wallet                                                                              750.00 USD   4,485.76 USD
+  2025-04-28  assets/bank/savings                                                                            -700.00 USD   3,785.76 USD
+  2025-04-30  assets/roommates/ben                                                                             66.53 USD   3,852.29 USD
+  2025-04-30  assets/roommates/cleo                                                                            27.79 USD   3,880.08 USD
+  2025-05-01  expenses/rent                    landlord                                                    -1,050.00 USD   2,830.08 USD
+  2025-05-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   1,780.08 USD
+  2025-05-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD     730.08 USD
+  2025-05-02  income/wages                     lantern                                                      1,083.94 USD   1,814.02 USD
+  2025-05-02  assets/roommates/ben                                    #rent-2025-05                         1,050.00 USD   2,864.02 USD
+  2025-05-03  expenses/car                     progressive                                                   -128.00 USD   2,736.02 USD
+  2025-05-05  assets/roommates/cleo                                   #rent-2025-05                         1,050.00 USD   3,786.02 USD
+  2025-05-09  expenses/utilities               fiberco                                                        -23.33 USD   3,762.69 USD
+  2025-05-09  assets/roommates/ben             fiberco                                                        -23.33 USD   3,739.36 USD
+  2025-05-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   3,716.03 USD
+  2025-05-12  expenses/car                     carmax-finance                                                -330.50 USD   3,385.53 USD
+  2025-05-15  assets/loans/riley                                      #loan-riley                             250.00 USD   3,635.53 USD
+  2025-05-15  expenses/health                  marketplace-plan                                              -189.40 USD   3,446.13 USD
+  2025-05-16  income/wages                     lantern                                                      1,107.94 USD   4,554.07 USD
+  2025-05-22  liabilities/visa                                                                               -450.72 USD   4,103.35 USD
+  2025-05-24  assets/cash/wallet                                                                              750.00 USD   4,853.35 USD
+  2025-05-28  assets/bank/savings                                                                            -700.00 USD   4,153.35 USD
+  2025-05-30  income/wages                     lantern                                                      1,163.75 USD   5,317.10 USD
+  2025-05-31  assets/roommates/ben                                                                             68.37 USD   5,385.47 USD
+  2025-05-31  assets/roommates/cleo                                                                            89.74 USD   5,475.21 USD
+  2025-06-01  expenses/rent                    landlord                                                    -1,050.00 USD   4,425.21 USD
+  2025-06-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   3,375.21 USD
+  2025-06-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD   2,325.21 USD
+  2025-06-02  assets/roommates/ben                                    #rent-2025-06                           500.00 USD   2,825.21 USD
+  2025-06-02  income/reimbursements            lantern-reimbursement  #reimb-2025-06 · settled 2025-07-11     138.50 USD   2,963.71 USD
+  2025-06-03  expenses/car                     progressive                                                   -128.00 USD   2,835.71 USD
+  2025-06-05  assets/roommates/cleo                                   #rent-2025-06                         1,050.00 USD   3,885.71 USD
+  2025-06-09  expenses/utilities               fiberco                                                        -23.33 USD   3,862.38 USD
+  2025-06-09  assets/roommates/ben             fiberco                                                        -23.33 USD   3,839.05 USD
+  2025-06-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   3,815.72 USD
+  2025-06-12  expenses/car                     carmax-finance                                                -330.50 USD   3,485.22 USD
+  2025-06-13  income/wages                     lantern                                                      1,197.42 USD   4,682.64 USD
+  2025-06-15  expenses/health                  marketplace-plan                                              -189.40 USD   4,493.24 USD
+  2025-06-16  assets/loans/riley                                      #loan-riley                             250.00 USD   4,743.24 USD
+  2025-06-22  liabilities/visa                                                                               -497.39 USD   4,245.85 USD
+  2025-06-24  assets/cash/wallet                                                                              900.00 USD   5,145.85 USD
+  2025-06-27  income/wages                     lantern                                                      1,059.91 USD   6,205.76 USD
+  2025-06-28  assets/bank/savings                                                                            -700.00 USD   5,505.76 USD
+  2025-06-30  assets/roommates/ben                                                                            594.90 USD   6,100.66 USD
+  2025-06-30  assets/roommates/cleo                                                                            77.00 USD   6,177.66 USD
+  2025-07-01  expenses/rent                    landlord                                                    -1,050.00 USD   5,127.66 USD
+  2025-07-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   4,077.66 USD
+  2025-07-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD   3,027.66 USD
+  2025-07-02  assets/roommates/ben                                    #rent-2025-07                         1,050.00 USD   4,077.66 USD
+  2025-07-03  expenses/car                     progressive                                                   -128.00 USD   3,949.66 USD
+  2025-07-03  assets/bank/collective-checking                                                                 129.99 USD   4,079.65 USD
+  2025-07-05  assets/roommates/cleo                                   #rent-2025-07                         1,050.00 USD   5,129.65 USD
+  2025-07-08  assets/roommates/ben                                    #rent-2025-06                           550.00 USD   5,679.65 USD
+  2025-07-09  expenses/utilities               fiberco                                                        -23.33 USD   5,656.32 USD
+  2025-07-09  assets/roommates/ben             fiberco                                                        -23.33 USD   5,632.99 USD
+  2025-07-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   5,609.66 USD
+  2025-07-11  income/wages                     lantern                                                      1,104.70 USD   6,714.36 USD
+  2025-07-12  expenses/car                     carmax-finance                                                -330.50 USD   6,383.86 USD
+  2025-07-15  assets/loans/riley                                      #loan-riley                             250.00 USD   6,633.86 USD
+  2025-07-15  expenses/health                  marketplace-plan                                              -189.40 USD   6,444.46 USD
+  2025-07-22  liabilities/visa                                                                               -698.47 USD   5,745.99 USD
+  2025-07-24  assets/cash/wallet                                                                              700.00 USD   6,445.99 USD
+  2025-07-25  income/wages                     lantern                                                      1,136.94 USD   7,582.93 USD
+  2025-07-28  assets/bank/savings                                                                            -700.00 USD   6,882.93 USD
+  2025-07-31  assets/roommates/ben                                                                           -527.31 USD   6,355.62 USD
+  2025-07-31  assets/roommates/cleo                                                                            22.84 USD   6,378.46 USD
+  2025-08-01  expenses/rent                    landlord                                                    -1,050.00 USD   5,328.46 USD
+  2025-08-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   4,278.46 USD
+  2025-08-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD   3,228.46 USD
+  2025-08-02  assets/roommates/ben                                    #rent-2025-08                         1,050.00 USD   4,278.46 USD
+  2025-08-03  expenses/car                     progressive                                                   -128.00 USD   4,150.46 USD
+  2025-08-08  income/wages                     lantern                                                      1,143.78 USD   5,294.24 USD
+  2025-08-09  expenses/utilities               fiberco                                                        -23.33 USD   5,270.91 USD
+  2025-08-09  assets/roommates/ben             fiberco                                                        -23.33 USD   5,247.58 USD
+  2025-08-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   5,224.25 USD
+  2025-08-12  expenses/car                     carmax-finance                                                -330.50 USD   4,893.75 USD
+  2025-08-15  assets/loans/riley                                      #loan-riley                             250.00 USD   5,143.75 USD
+  2025-08-15  expenses/health                  marketplace-plan                                              -189.40 USD   4,954.35 USD
+  2025-08-19  assets/roommates/cleo                                   #rent-2025-08                         1,050.00 USD   6,004.35 USD
+  2025-08-22  income/wages                     lantern                                                      1,145.87 USD   7,150.22 USD
+  2025-08-22  liabilities/visa                                                                               -399.31 USD   6,750.91 USD
+  2025-08-24  assets/cash/wallet                                                                            1,000.00 USD   7,750.91 USD
+  2025-08-28  assets/bank/savings                                                                            -700.00 USD   7,050.91 USD
+  2025-08-31  assets/roommates/ben                                                                             35.77 USD   7,086.68 USD
+  2025-08-31  assets/roommates/cleo                                                                            88.74 USD   7,175.42 USD
+  2025-09-01  expenses/rent                    landlord                                                    -1,050.00 USD   6,125.42 USD
+  2025-09-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   5,075.42 USD
+  2025-09-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD   4,025.42 USD
+  2025-09-02  assets/roommates/ben                                    #rent-2025-09                         1,050.00 USD   5,075.42 USD
+  2025-09-03  expenses/car                     progressive                                                   -128.00 USD   4,947.42 USD
+  2025-09-05  income/wages                     lantern                                                      1,163.45 USD   6,110.87 USD
+  2025-09-05  assets/roommates/cleo                                   #rent-2025-09                         1,050.00 USD   7,160.87 USD
+  2025-09-09  expenses/utilities               fiberco                                                        -23.33 USD   7,137.54 USD
+  2025-09-09  assets/roommates/ben             fiberco                                                        -23.33 USD   7,114.21 USD
+  2025-09-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   7,090.88 USD
+  2025-09-12  expenses/car                     carmax-finance                                                -330.50 USD   6,760.38 USD
+  2025-09-15  expenses/health                  marketplace-plan                                              -189.40 USD   6,570.98 USD
+  2025-09-19  income/wages                     lantern                                                      1,189.36 USD   7,760.34 USD
+  2025-09-22  liabilities/visa                                                                               -505.51 USD   7,254.83 USD
+  2025-09-24  assets/cash/wallet                                                                              850.00 USD   8,104.83 USD
+  2025-09-28  assets/bank/savings                                                                            -700.00 USD   7,404.83 USD
+  2025-09-30  assets/roommates/ben                                                                             36.13 USD   7,440.96 USD
+  2025-09-30  assets/roommates/cleo                                                                            76.60 USD   7,517.56 USD
+  2025-10-01  expenses/rent                    landlord                                                    -1,050.00 USD   6,467.56 USD
+  2025-10-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   5,417.56 USD
+  2025-10-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD   4,367.56 USD
+  2025-10-02  assets/roommates/ben                                    #rent-2025-10                         1,050.00 USD   5,417.56 USD
+  2025-10-03  income/wages                     lantern                                                      1,159.46 USD   6,577.02 USD
+  2025-10-03  expenses/car                     progressive                                                   -128.00 USD   6,449.02 USD
+  2025-10-05  assets/roommates/cleo                                   #rent-2025-10                         1,050.00 USD   7,499.02 USD
+  2025-10-09  expenses/utilities               fiberco                                                        -23.33 USD   7,475.69 USD
+  2025-10-09  assets/roommates/ben             fiberco                                                        -23.33 USD   7,452.36 USD
+  2025-10-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   7,429.03 USD
+  2025-10-12  expenses/car                     carmax-finance                                                -330.50 USD   7,098.53 USD
+  2025-10-15  expenses/health                  marketplace-plan                                              -189.40 USD   6,909.13 USD
+  2025-10-17  income/wages                     lantern                                                      1,221.58 USD   8,130.71 USD
+  2025-10-22  liabilities/visa                                                                               -342.18 USD   7,788.53 USD
+  2025-10-24  assets/cash/wallet                                                                              750.00 USD   8,538.53 USD
+  2025-10-28  assets/bank/savings                                                                            -700.00 USD   7,838.53 USD
+  2025-10-31  income/wages                     lantern                                                      1,076.77 USD   8,915.30 USD
+  2025-10-31  assets/roommates/ben                                                                             51.19 USD   8,966.49 USD
+  2025-10-31  assets/roommates/cleo                                                                             8.15 USD   8,974.64 USD
+  2025-11-01  expenses/rent                    landlord                                                    -1,050.00 USD   7,924.64 USD
+  2025-11-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   6,874.64 USD
+  2025-11-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD   5,824.64 USD
+  2025-11-02  assets/roommates/ben                                    #rent-2025-11                         1,050.00 USD   6,874.64 USD
+  2025-11-03  expenses/car                     progressive                                                   -128.00 USD   6,746.64 USD
+  2025-11-05  assets/roommates/cleo                                   #rent-2025-11                         1,000.00 USD   7,746.64 USD
+  2025-11-09  expenses/utilities               fiberco                                                        -23.33 USD   7,723.31 USD
+  2025-11-09  assets/roommates/ben             fiberco                                                        -23.33 USD   7,699.98 USD
+  2025-11-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   7,676.65 USD
+  2025-11-12  expenses/car                     carmax-finance                                                -330.50 USD   7,346.15 USD
+  2025-11-14  income/wages                     lantern                                                      1,036.08 USD   8,382.23 USD
+  2025-11-15  expenses/health                  marketplace-plan                                              -189.40 USD   8,192.83 USD
+  2025-11-17  assets/loans/riley                                      #loan-riley                             500.00 USD   8,692.83 USD
+  2025-11-22  liabilities/visa                                                                               -427.19 USD   8,265.64 USD
+  2025-11-24  assets/cash/wallet                                                                              950.00 USD   9,215.64 USD
+  2025-11-28  income/wages                     lantern                                                      1,128.49 USD  10,344.13 USD
+  2025-11-28  assets/bank/savings                                                                            -700.00 USD   9,644.13 USD
+  2025-11-30  assets/roommates/ben                                                                             54.40 USD   9,698.53 USD
+  2025-12-01  expenses/rent                    landlord                                                    -1,050.00 USD   8,648.53 USD
+  2025-12-01  assets/roommates/ben             landlord                                                    -1,050.00 USD   7,598.53 USD
+  2025-12-01  assets/roommates/cleo            landlord                                                    -1,050.00 USD   6,548.53 USD
+  2025-12-02  assets/roommates/ben                                    #rent-2025-12                         1,050.00 USD   7,598.53 USD
+  2025-12-03  expenses/car                     progressive                                                   -128.00 USD   7,470.53 USD
+  2025-12-05  assets/roommates/cleo                                   #rent-2025-12                         1,050.00 USD   8,520.53 USD
+  2025-12-09  expenses/utilities               fiberco                                                        -23.33 USD   8,497.20 USD
+  2025-12-09  assets/roommates/ben             fiberco                                                        -23.33 USD   8,473.87 USD
+  2025-12-09  assets/roommates/cleo            fiberco                                                        -23.33 USD   8,450.54 USD
+  2025-12-12  income/wages                     lantern                                                      1,130.73 USD   9,581.27 USD
+  2025-12-12  expenses/car                     carmax-finance                                                -330.50 USD   9,250.77 USD
+  2025-12-15  assets/loans/riley                                      #loan-riley                             250.00 USD   9,500.77 USD
+  2025-12-15  expenses/health                  marketplace-plan                                              -189.40 USD   9,311.37 USD
+  2025-12-22  liabilities/visa                                                                               -380.46 USD   8,930.91 USD
+  2025-12-24  assets/cash/wallet                                                                              800.00 USD   9,730.91 USD
+  2025-12-26  income/wages                     lantern                                                      1,087.04 USD  10,817.95 USD
+  2025-12-28  assets/bank/savings                                                                            -700.00 USD  10,117.95 USD

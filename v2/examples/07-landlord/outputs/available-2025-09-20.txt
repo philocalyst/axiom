@@ -1,0 +1,32 @@
+$ axiom available --at 2025-09-20 --today 2026-01-06
+
+Available on 2025-09-20
+
+What you can spend
+  Liquid now                            Amount
+  ────────────────────────────────────────────
+  Money in liquid places         35,201.56 USD
+    assets/bank/checking         28,249.54 USD
+    assets/bank/rental-checking   3,901.38 USD
+    assets/prepaid/loan-costs     3,050.64 USD
+  Tied to restricted entities      -350.00 USD
+    tied to tenant-a               -350.00 USD
+  ────────────────────────────────────────────
+  Available to spend             34,851.56 USD
+
+What it would take to reach the rest
+  Holding                                          Liquid in           Value         Costs             Net
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/rental/house (1 HOME)                     90d        405,000.00 USD  1,849.06 USD  403,150.94 USD
+    counts 11,342.12 USD as agi
+    counts 24,952.47 USD as short-term-gains
+    federal-income-tax, owed to irs by 2026-04-15                             1,849.06 USD
+    counts 11,342.12 USD as taxable-income
+    counts 3,447.99 USD as income-tax
+    realizes a gain of 28,150.00 USD
+  assets/rental/roof (1 ROOF)                      90d         14,200.00 USD                 14,200.00 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today                              419,200.00 USD  1,849.06 USD  417,350.94 USD
+  · Each line withdraws the whole holding into assets/bank/checking on 2025-09-20 and runs the year
+    out through the laws. Costs are what they would owe because of it, as if the year ended today:
+    penalties, and the tax on any income it creates.

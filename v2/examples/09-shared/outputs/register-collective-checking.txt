@@ -1,0 +1,30 @@
+$ axiom register collective-checking --today 2026-01-06
+
+Register: assets/bank/collective-checking
+
+  Date        With                         Payee             Note         Amount       Balance
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  2025-03-01  equity/opening                                        1,842.30 USD  1,842.30 USD
+  2025-03-09  income/donations                                         60.00 USD  1,902.30 USD
+  2025-03-15  income/grants                riverfront               6,000.00 USD  7,902.30 USD
+  2025-03-22  expenses/garden/soil         bayview-soil            -1,280.00 USD  6,622.30 USD
+  2025-04-03  income/donations                                        100.00 USD  6,722.30 USD
+  2025-04-05  expenses/garden/seeds        seed-savers               -412.60 USD  6,309.70 USD
+  2025-04-12  expenses/garden/lumber       northside-lumber        -1,148.75 USD  5,160.95 USD
+  2025-05-03  expenses/garden/irrigation   drip-depot                -986.40 USD  4,174.55 USD
+  2025-05-17  expenses/volunteer-food      pizza-place                -84.50 USD  4,090.05 USD
+  2025-05-19  assets/cash/collective-cash                             600.00 USD  4,690.05 USD
+  2025-05-22  income/donations                                        100.00 USD  4,790.05 USD
+  2025-06-09  income/donations                                         45.00 USD  4,835.05 USD
+  2025-06-14  expenses/garden/tools        shed-co                 -1,225.00 USD  3,610.05 USD
+  2025-07-03  income/donations                                         40.00 USD  3,650.05 USD
+  2025-07-03  assets/bank/checking                                   -129.99 USD  3,520.06 USD
+  2025-07-19  expenses/garden/fencing      northside-lumber          -640.00 USD  2,880.06 USD
+  2025-08-22  income/donations                                         45.00 USD  2,925.06 USD
+  2025-08-30  expenses/garden/water        water-dept                -148.20 USD  2,776.86 USD
+  2025-09-16  income/donations                                         75.00 USD  2,851.86 USD
+  2025-10-16  income/donations                                         40.00 USD  2,891.86 USD
+  2025-10-20  expenses/garden/soil         bayview-soil              -250.00 USD  2,641.86 USD
+  2025-10-28  income/grants                riverfront                 -57.25 USD  2,584.61 USD
+  2025-11-09  income/donations                                         25.00 USD  2,609.61 USD
+  2025-12-16  income/donations                                         45.00 USD  2,654.61 USD

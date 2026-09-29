@@ -1,0 +1,178 @@
+/// United States federal income tax.
+///
+/// PROJECT FORK of the shipped `us`: two edits, marked PROJECT EDIT, add itemized
+/// deductions and credits to `federal-income-tax`. There is no way to extend a
+/// system's law, so the whole file is copied; its figures will go stale.
+///
+/// Everyone who `lives us` is under these laws, and so is everything they own.
+/// The laws below watch value arrive and leave, and count what the Internal
+/// Revenue Code calls income into named tallies. At the end of each year one
+/// law turns the tallies into tax, using the brackets below.
+///
+/// The tallies are the lines of `axiom tax`, and they are the shared vocabulary
+/// of every system under `us`. A system for a particular kind of account adds
+/// to them; a state reads them:
+///
+///   wages              gross pay, before anything is deferred
+///   pretax             wages that were deferred and are not taxed this year
+///   interest           interest earned outside a tax-deferred account
+///   dividends          dividends earned outside a tax-deferred account
+///   short-term-gains   gains on things held a year or less
+///   long-term-gains    gains on things held longer than a year
+///   distributions      taxable money that came out of a tax-deferred account
+///   agi                adjusted gross income: the running sum of the above
+///   federal-withheld   tax already paid to the IRS, by an employer or by you
+///
+/// Simplified on purpose: this is the standard deduction and the ordinary and
+/// capital-gains brackets, nothing else. It leaves out itemized deductions,
+/// credits, payroll tax, the net investment income tax and the alternative
+/// minimum tax, and treats every dividend as ordinary. Only the `single` and
+/// `joint` filing statuses have figures.
+///
+/// The figures are community-maintained data. Verify them against the IRS
+/// (irs.gov, "Revenue Procedures" for each year) before relying on them, and
+/// correct them in a pull request when they are wrong.
+system us
+
+use std
+
+
+// ─── Kinds and entities ─────────────────────────────────────────────────────
+
+/// An account whose growth is not taxed while it stays inside: a 401(k), an
+/// IRA, a 529 plan, an HSA. Tax falls due when value leaves for an account
+/// that is not tax-deferred, so the laws of each kind decide what it costs.
+kind tax-deferred : asset
+  deferred
+
+/// Income tax withheld from pay, or paid to the IRS directly. Every arrival
+/// counts as federal tax already paid.
+kind federal-tax : expense
+
+/// The Internal Revenue Service.
+entity irs : government
+
+
+// ─── Counting income ────────────────────────────────────────────────────────
+
+/// Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a
+/// place of kind `wages` counts, wherever it lands: in checking, in a 401(k)
+/// or in withholding. So the total is the gross pay on the pay stub, and the
+/// account that took a pre-tax deferral takes it back out of `agi`.
+law count-wages
+  on in
+  when from is wages
+  count amount as wages
+  count amount as agi
+
+/// Interest is ordinary income in the year it is earned (IRC §61(a)(4)),
+/// except inside a tax-deferred account, which is taxed when money leaves it.
+law count-interest
+  on in
+  when from is interest
+  when not to is tax-deferred
+  count amount as interest
+  count amount as agi
+
+/// Dividends are income in the year they are paid (IRC §61(a)(7)), except
+/// inside a tax-deferred account. All dividends are treated as ordinary; a
+/// qualified dividend would be taxed at the lower capital-gains rates.
+law count-dividends
+  on in
+  when from is dividends
+  when not to is tax-deferred
+  count amount as dividends
+  count amount as agi
+
+/// A gain on something held for a year or less is taxed as ordinary income
+/// (IRC §1222). A tax-deferred account realizes no gains of its own: what
+/// leaves it is counted by the laws of its kind.
+law count-short-term-gains
+  on gain
+  when gain != empty
+  when held <= 1y
+  when not from is tax-deferred
+  count gain as short-term-gains
+  count gain as agi
+
+/// A gain on something held for more than a year is taxed at the lower
+/// capital-gains rates (IRC §1(h)). A loss lowers `agi` the same way; the
+/// yearly cap of 3,000 USD on deducting net losses is not modelled.
+law count-long-term-gains
+  on gain
+  when gain != empty
+  when held > 1y
+  when not from is tax-deferred
+  count gain as long-term-gains
+  count gain as agi
+
+/// Tax withheld from pay, or paid in installments, is credited against the
+/// tax owed for the year. Send money to a place of kind `federal-tax`, or let
+/// a paycheck leg do it.
+law credit-withholding
+  on in
+  when to is federal-tax
+  count amount as federal-withheld
+
+
+// ─── The tax itself ─────────────────────────────────────────────────────────
+
+/// Federal income tax for the year (IRC §1), figured from the tallies above.
+///
+/// Ordinary income is `agi` without long-term gains. It is reduced by the
+/// standard deduction and taxed on the ordinary brackets. Long-term gains are
+/// stacked on top of it and taxed on the capital-gains brackets. Tax already
+/// withheld or paid is credited, and the rest is owed by April 15 of the next
+/// year (Form 1040). A refund, when more was withheld than owed, is not booked.
+///
+/// The brackets depend on `filing`, so set `filing single` or `filing joint`
+/// on the person who lives here.
+law federal-income-tax
+  each year
+  let deduction = max(standard-deduction[year, owner.filing], tally(itemized))   // PROJECT EDIT 1: itemize when it is more
+  let ordinary-income = tally(agi) - tally(long-term-gains)
+  let taxable = max(tally(agi) - deduction, empty)
+  let taxable-ordinary = min(max(ordinary-income - deduction, empty), taxable)
+  let ordinary-tax = progressive(ordinary[year, owner.filing], taxable-ordinary)
+  let tax-through-gains = progressive(capital-gains[year, owner.filing], taxable)
+  let tax-below-gains = progressive(capital-gains[year, owner.filing], taxable-ordinary)
+  let liability = ordinary-tax + tax-through-gains - tax-below-gains
+  count taxable as taxable-income
+  count liability as income-tax
+  // PROJECT EDIT 2: credits reduce the tax, not the income
+  owe max(liability - tally(credits) - tally(federal-withheld), empty) to irs by date(year + 1, 4, 15) as federal-income-tax
+
+
+// ─── Figures ────────────────────────────────────────────────────────────────
+
+// Ordinary income brackets: the marginal rate above each threshold.
+// Rev. Proc. 2023-34 (2024), Rev. Proc. 2024-40 (2025), Rev. Proc. 2025-32 (2026).
+param ordinary
+  2024 single       0 USD 10% |  11_600 USD 12% |  47_150 USD 22% | 100_525 USD 24% | 191_950 USD 32% | 243_725 USD 35% | 609_350 USD 37%
+  2024 joint        0 USD 10% |  23_200 USD 12% |  94_300 USD 22% | 201_050 USD 24% | 383_900 USD 32% | 487_450 USD 35% | 731_200 USD 37%
+  2025 single       0 USD 10% |  11_925 USD 12% |  48_475 USD 22% | 103_350 USD 24% | 197_300 USD 32% | 250_525 USD 35% | 626_350 USD 37%
+  2025 joint        0 USD 10% |  23_850 USD 12% |  96_950 USD 22% | 206_700 USD 24% | 394_600 USD 32% | 501_050 USD 35% | 751_600 USD 37%
+  2026 single       0 USD 10% |  12_400 USD 12% |  50_400 USD 22% | 105_700 USD 24% | 201_775 USD 32% | 256_225 USD 35% | 640_600 USD 37%
+  // verify: the 2026 joint thresholds against Rev. Proc. 2025-32.
+  2026 joint        0 USD 10% |  24_800 USD 12% | 100_800 USD 22% | 211_400 USD 24% | 403_550 USD 32% | 512_450 USD 35% | 768_700 USD 37%
+
+// Long-term capital gains and qualified dividends: the rate by where the
+// taxable income lands, stacked on top of ordinary income.
+param capital-gains
+  2024 single       0 USD 0%  |  47_025 USD 15% | 518_900 USD 20%
+  2024 joint        0 USD 0%  |  94_050 USD 15% | 583_750 USD 20%
+  2025 single       0 USD 0%  |  48_350 USD 15% | 533_400 USD 20%
+  2025 joint        0 USD 0%  |  96_700 USD 15% | 600_050 USD 20%
+  2026 single       0 USD 0%  |  49_450 USD 15% | 545_500 USD 20%
+  // verify: the 2026 joint thresholds against Rev. Proc. 2025-32.
+  2026 joint        0 USD 0%  |  98_900 USD 15% | 613_700 USD 20%
+
+// The standard deduction. The 2025 figures include the increase in Public Law
+// 119-21 (15,000 and 30,000 before it).
+param standard-deduction
+  2024 single 14_600 USD
+  2024 joint  29_200 USD
+  2025 single 15_750 USD
+  2025 joint  31_500 USD
+  2026 single 16_100 USD
+  2026 joint  32_200 USD

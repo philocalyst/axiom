@@ -1,0 +1,177 @@
+// The house, its money and its tenants. Tax rules are in tax.ax.
+
+// ─── Kinds ──────────────────────────────────────────────────────────────────
+
+/// Rent, late fees and kept deposits: income of the rental, taxed when received.
+kind rent-income : income
+
+/// Property that is depreciated. `depreciation` names the place where the
+/// depreciation taken so far piles up, because the flows that book it are
+/// deductions with no cash behind them and the sale needs their total.
+kind depreciable : property
+  has depreciation place
+
+  /// Selling depreciable property brings back the depreciation taken (IRC §1250):
+  /// the gain the sale realizes is measured from cost, and the tax gain from cost
+  /// less depreciation, so the depreciation is added back. It is taxed as
+  /// ordinary income (at most 25%, and this person's rate is lower).
+  law recapture
+    on gain
+    count self.depreciation.balance as short-term-gains
+    count self.depreciation.balance as agi
+
+kind rental-property : depreciable
+  liquidity 60d
+
+kind rental-improvement : depreciable
+  liquidity 60d
+
+/// A tenant's security deposit. It is money held for someone else: it stays tied
+/// to the tenant in whatever account it lands, and may only go back to them.
+kind deposit-holder : entity
+  restricted
+  has repay place
+  has lease-end date
+
+  /// A deposit goes back to the tenant. This payment went somewhere else. If the
+  /// lease lets the landlord keep part of it for damage, keep the payment and mark
+  /// it `!` with the reason.
+  law returned
+    on spend
+    require to is self.repay "a security deposit may only go back to the tenant"
+
+commodity HOME : real-estate
+  name "the rental house"
+  precision 0
+
+commodity ROOF : real-estate
+  name "the new roof"
+  precision 0
+
+
+// ─── Banks and things ───────────────────────────────────────────────────────
+
+account assets/bank/checking : bank
+
+/// All the rental's money moves through here.
+account assets/bank/rental-checking : bank
+
+/// Tenants' deposits are kept apart, as the lease requires.
+account assets/bank/deposit-account : bank
+
+/// The house: land and building together, one unit.
+account assets/rental/house : rental-property
+  holds HOME
+  depreciation equity/acc-dep-house
+
+/// The new roof, a capital improvement: its own asset, its own depreciation.
+account assets/rental/roof : rental-improvement
+  holds ROOF
+  depreciation equity/acc-dep-roof
+
+/// Loan costs paid at closing, spread over the life of the loan.
+account assets/prepaid/loan-costs
+
+account liabilities/mortgage : mortgage
+  rate     6.75%
+  maturity 2054-12-18
+
+/// What is owed back to each tenant.
+account liabilities/deposits/tenant-a
+account liabilities/deposits/tenant-b
+
+
+// ─── Income and equity ──────────────────────────────────────────────────────
+
+account income/rent           : rent-income
+account income/late-fees      : rent-income
+account income/forfeited-deposits : rent-income
+account income/salary         : wages
+
+account equity/opening
+
+/// Depreciation is booked as a flow out of here into expenses: no cash moves. What
+/// piles up is the accumulated depreciation, one place per asset.
+account equity/acc-dep-house
+account equity/acc-dep-roof
+
+
+// ─── Expenses ───────────────────────────────────────────────────────────────
+
+/// Everything under here is a rental expense on Schedule E. One law covers it.
+account expenses/rental
+  law deductible
+    on in
+    count amount as rental-expenses
+
+account expenses/rental/interest
+account expenses/rental/property-tax
+account expenses/rental/insurance
+account expenses/rental/management
+account expenses/rental/advertising
+account expenses/rental/utilities
+
+/// Repairs keep the house as it is: deducted in the year. A new roof does not:
+/// it is an asset (assets/rental/roof).
+account expenses/rental/repairs
+
+account expenses/rental/depreciation
+account expenses/rental/amortization
+
+account expenses/own-rent
+account expenses/groceries
+account expenses/dining
+account expenses/living
+account expenses/taxes/federal : federal-tax
+account expenses/taxes/payroll
+
+
+// ─── People ─────────────────────────────────────────────────────────────────
+
+entity lender : org
+  via liabilities/mortgage
+
+/// The buyer of the house. Tenant B's deposit goes to them.
+entity buyer : org
+
+entity title-co : org
+  via assets/rental/house
+
+entity summit-roofing : org
+  via assets/rental/roof
+
+entity landlord-policy : org
+  via expenses/rental/insurance
+entity quick-plumbing : org
+  via expenses/rental/repairs
+entity appliance-doc : org
+  via expenses/rental/repairs
+entity green-yards : org
+  via expenses/rental/repairs
+entity fresh-paint : org
+  via expenses/rental/repairs
+entity hardware-hank : org
+  via expenses/rental/repairs
+entity rentlist : org
+  via expenses/rental/advertising
+entity city-power : org
+  via expenses/rental/utilities
+entity city-water : org
+  via expenses/rental/utilities
+entity county : org
+  via expenses/rental/property-tax
+entity hartwell-pm : org
+  via expenses/rental/management
+entity oak-street : org
+  via expenses/own-rent
+
+/// Tenant A. Money from a deposit-holder stays tied to them, so a tenant's
+/// rent must not be written with the tenant as payee: rent is identified by its
+/// lease code instead (#lease-a).
+entity tenant-a : deposit-holder
+  repay     liabilities/deposits/tenant-a
+  lease-end 2025-08-31
+
+entity tenant-b : deposit-holder
+  repay     liabilities/deposits/tenant-b
+  lease-end 2026-09-30

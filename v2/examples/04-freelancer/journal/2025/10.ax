@@ -1,0 +1,41 @@
+/// Monthly retainer, net 30.
+2025-10-01 design -> brightwave 3_200 USD #inv-2025-b10
+2025-10-01 business-card -> software 7.20 USD / google
+2025-10-01 personal-checking -> landlord 1_750 USD
+2025-10-01 personal-checking -> bluecross 412 USD
+2025-10-02 fernhill -> 6_200 USD #inv-2025-f3
+  business-checking           6_019.90 USD
+  fees                        180.10 USD   // Stripe fee
+2025-10-02 business-checking -> tax-vault 1_203.98 USD
+2025-10-03 business-card -> software 10 USD / notion
+2025-10-03 business-checking -> personal-checking 2_950 USD // owner's draw
+2025-10-05 personal-checking -> statefarm 22 USD
+2025-10-05 personal-checking -> groceries 102.38 USD / trader-joes
+
+/// Winter campaign.
+2025-10-06 design -> northpeak 5_900 USD #inv-2025-n2
+2025-10-08 business-card -> software 59.99 USD / adobe
+2025-10-08 personal-checking -> dining 43.50 USD
+2025-10-09 business-card -> meals 32.10 USD
+2025-10-09 odometer -> mileage 24 MI / fernhill
+2025-10-10 personal-checking -> transport 53.29 USD
+2025-10-12 personal-checking -> comcast 80 USD
+2025-10-12 personal-checking -> groceries 69.91 USD / safeway
+2025-10-14 brightwave -> business-checking 3_200 USD #inv-2025-b09
+2025-10-14 business-checking -> tax-vault 640 USD
+2025-10-14 business-card -> software 15 USD / figma
+2025-10-16 personal-checking -> pge 64.90 USD
+2025-10-18 personal-checking -> tmobile 64 USD
+
+/// The September statement, paid in full.
+2025-10-20 business-checking -> business-card 251.59 USD
+2025-10-20 personal-checking -> groceries 78.72 USD / safeway
+2025-10-22 business-card -> software 21 USD / freshbooks
+2025-10-22 personal-checking -> dining 54.12 USD
+2025-10-23 odometer -> mileage 71 MI / northpeak
+2025-10-27 personal-checking -> groceries 82.51 USD / trader-joes
+2025-10-31 interest -> tax-vault 28.48 USD
+2025-10-31 business-card = 145.29 USD
+2025-10-31 business-checking = 10_235.06 USD
+2025-10-31 personal-checking = 3_836.82 USD
+2025-10-31 tax-vault = 8_165.40 USD

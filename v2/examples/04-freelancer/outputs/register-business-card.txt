@@ -1,0 +1,105 @@
+$ axiom register business-card --today 2026-02-10
+
+Register: liabilities/business-card
+
+  Date        With                           Payee        Note                  Amount        Balance
+  ───────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-01-01  expenses/business/software     google                          -7.20 USD      -7.20 USD
+  2025-01-03  expenses/business/software     notion                         -10.00 USD     -17.20 USD
+  2025-01-08  expenses/business/software     adobe                          -59.99 USD     -77.19 USD
+  2025-01-14  expenses/business/software     figma                          -15.00 USD     -92.19 USD
+  2025-01-22  expenses/business/software     freshbooks                     -21.00 USD    -113.19 USD
+  2025-02-01  expenses/business/software     google                          -7.20 USD    -120.39 USD
+  2025-02-03  expenses/business/software     notion                         -10.00 USD    -130.39 USD
+  2025-02-03  expenses/business/insurance    hiscox                        -780.00 USD    -910.39 USD
+  2025-02-08  expenses/business/software     adobe                          -59.99 USD    -970.38 USD
+  2025-02-12  expenses/business/software     dropbox                       -119.88 USD  -1,090.26 USD
+  2025-02-14  expenses/business/software     figma                          -15.00 USD  -1,105.26 USD
+  2025-02-20  assets/bank/business-checking                                 113.19 USD    -992.07 USD
+  2025-02-22  expenses/business/software     freshbooks                     -21.00 USD  -1,013.07 USD
+  2025-03-01  expenses/business/software     google                          -7.20 USD  -1,020.27 USD
+  2025-03-01  expenses/business/fees                                       -375.00 USD  -1,395.27 USD
+  2025-03-03  expenses/business/software     notion                         -10.00 USD  -1,405.27 USD
+  2025-03-05  expenses/business/equipment    apple        #macbook-2025  -2,499.00 USD  -3,904.27 USD
+  2025-03-08  expenses/business/software     adobe                          -59.99 USD  -3,964.26 USD
+  2025-03-13  expenses/meals                                                -54.80 USD  -4,019.06 USD
+  2025-03-14  expenses/business/software     figma                          -15.00 USD  -4,034.06 USD
+  2025-03-20  assets/bank/business-checking                               1,013.07 USD  -3,020.99 USD
+  2025-03-22  expenses/business/software     freshbooks                     -21.00 USD  -3,041.99 USD
+  2025-04-01  expenses/business/software     google                          -7.20 USD  -3,049.19 USD
+  2025-04-03  expenses/business/software     notion                         -10.00 USD  -3,059.19 USD
+  2025-04-08  expenses/business/software     adobe                          -59.99 USD  -3,119.18 USD
+  2025-04-08  expenses/business/education    ixdf                          -249.00 USD  -3,368.18 USD
+  2025-04-14  expenses/business/software     figma                          -15.00 USD  -3,383.18 USD
+  2025-04-20  assets/bank/business-checking                               3,041.99 USD    -341.19 USD
+  2025-04-22  expenses/business/software     freshbooks                     -21.00 USD    -362.19 USD
+  2025-04-22  expenses/business/printing                                    -62.00 USD    -424.19 USD
+  2025-05-01  expenses/business/software     google                          -7.20 USD    -431.39 USD
+  2025-05-03  expenses/business/software     notion                         -10.00 USD    -441.39 USD
+  2025-05-05  expenses/business/education    config       #config-2025     -699.00 USD  -1,140.39 USD
+  2025-05-05  expenses/business/travel       alaska-air   #config-2025     -342.18 USD  -1,482.57 USD
+  2025-05-06  expenses/business/travel       sf-hotel     #config-2025     -618.40 USD  -2,100.97 USD
+  2025-05-06  expenses/meals                 sf-hotel     #config-2025      -96.30 USD  -2,197.27 USD
+  2025-05-07  expenses/business/travel       lyft         #config-2025      -58.20 USD  -2,255.47 USD
+  2025-05-08  expenses/business/software     adobe                          -59.99 USD  -2,315.46 USD
+  2025-05-14  expenses/business/software     figma                          -15.00 USD  -2,330.46 USD
+  2025-05-20  assets/bank/business-checking                                 424.19 USD  -1,906.27 USD
+  2025-05-22  expenses/business/software     freshbooks                     -21.00 USD  -1,927.27 USD
+  2025-06-01  expenses/business/software     google                          -7.20 USD  -1,934.47 USD
+  2025-06-03  expenses/business/software     notion                         -10.00 USD  -1,944.47 USD
+  2025-06-08  expenses/business/software     adobe                          -59.99 USD  -2,004.46 USD
+  2025-06-14  expenses/business/software     figma                          -15.00 USD  -2,019.46 USD
+  2025-06-19  expenses/business/fonts        monotype                      -240.00 USD  -2,259.46 USD
+  2025-06-20  assets/bank/business-checking                               1,927.27 USD    -332.19 USD
+  2025-06-20  expenses/business/equipment    apple                         -649.00 USD    -981.19 USD
+  2025-06-22  expenses/business/software     freshbooks                     -21.00 USD  -1,002.19 USD
+  2025-07-01  expenses/business/software     google                          -7.20 USD  -1,009.39 USD
+  2025-07-03  expenses/business/software     notion                         -10.00 USD  -1,019.39 USD
+  2025-07-08  expenses/business/software     adobe                          -59.99 USD  -1,079.38 USD
+  2025-07-10  expenses/meals                                               -118.60 USD  -1,197.98 USD
+  2025-07-14  expenses/business/software     figma                          -15.00 USD  -1,212.98 USD
+  2025-07-20  assets/bank/business-checking                               1,002.19 USD    -210.79 USD
+  2025-07-22  expenses/business/software     freshbooks                     -21.00 USD    -231.79 USD
+  2025-08-01  expenses/business/software     google                          -7.20 USD    -238.99 USD
+  2025-08-03  expenses/business/software     notion                         -10.00 USD    -248.99 USD
+  2025-08-04  expenses/business/hosting      squarespace                   -216.00 USD    -464.99 USD
+  2025-08-04  expenses/business/hosting      squarespace                    -22.99 USD    -487.98 USD
+  2025-08-08  expenses/business/software     adobe                          -59.99 USD    -547.97 USD
+  2025-08-14  expenses/business/software     figma                          -15.00 USD    -562.97 USD
+  2025-08-20  assets/bank/business-checking                                 231.79 USD    -331.18 USD
+  2025-08-22  expenses/business/software     freshbooks                     -21.00 USD    -352.18 USD
+  2025-09-01  expenses/business/software     google                          -7.20 USD    -359.38 USD
+  2025-09-03  expenses/business/software     notion                         -10.00 USD    -369.38 USD
+  2025-09-08  expenses/business/software     adobe                          -59.99 USD    -429.37 USD
+  2025-09-14  expenses/business/software     figma                          -15.00 USD    -444.37 USD
+  2025-09-18  expenses/business/printing                                   -138.40 USD    -582.77 USD
+  2025-09-20  assets/bank/business-checking                                 352.18 USD    -230.59 USD
+  2025-09-22  expenses/business/software     freshbooks                     -21.00 USD    -251.59 USD
+  2025-10-01  expenses/business/software     google                          -7.20 USD    -258.79 USD
+  2025-10-03  expenses/business/software     notion                         -10.00 USD    -268.79 USD
+  2025-10-08  expenses/business/software     adobe                          -59.99 USD    -328.78 USD
+  2025-10-09  expenses/meals                                                -32.10 USD    -360.88 USD
+  2025-10-14  expenses/business/software     figma                          -15.00 USD    -375.88 USD
+  2025-10-20  assets/bank/business-checking                                 251.59 USD    -124.29 USD
+  2025-10-22  expenses/business/software     freshbooks                     -21.00 USD    -145.29 USD
+  2025-11-01  expenses/business/software     google                          -7.20 USD    -152.49 USD
+  2025-11-03  expenses/business/software     notion                         -10.00 USD    -162.49 USD
+  2025-11-06  expenses/business/printing                                    -96.75 USD    -259.24 USD
+  2025-11-08  expenses/business/software     adobe                          -59.99 USD    -319.23 USD
+  2025-11-14  expenses/business/software     figma                          -15.00 USD    -334.23 USD
+  2025-11-19  expenses/meals                                                -61.45 USD    -395.68 USD
+  2025-11-20  assets/bank/business-checking                                 145.29 USD    -250.39 USD
+  2025-11-22  expenses/business/software     freshbooks                     -21.00 USD    -271.39 USD
+  2025-12-01  expenses/business/software     google                          -7.20 USD    -278.59 USD
+  2025-12-03  expenses/business/software     notion                         -10.00 USD    -288.59 USD
+  2025-12-08  expenses/business/software     adobe                          -59.99 USD    -348.58 USD
+  2025-12-14  expenses/business/software     figma                          -15.00 USD    -363.58 USD
+  2025-12-20  assets/bank/business-checking                                 271.39 USD     -92.19 USD
+  2025-12-22  expenses/business/software     freshbooks                     -21.00 USD    -113.19 USD
+  2025-12-27  income/rewards                                                 87.40 USD     -25.79 USD
+  2026-01-01  expenses/business/software     google                          -7.20 USD     -32.99 USD
+  2026-01-03  expenses/business/software     notion                         -10.00 USD     -42.99 USD
+  2026-01-08  expenses/business/software     adobe                          -59.99 USD    -102.98 USD
+  2026-01-14  expenses/business/software     figma                          -15.00 USD    -117.98 USD
+  2026-01-20  assets/bank/business-checking                                  25.79 USD     -92.19 USD
+  2026-01-22  expenses/business/software     freshbooks                     -21.00 USD    -113.19 USD

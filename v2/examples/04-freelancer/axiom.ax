@@ -1,0 +1,18 @@
+// A freelance designer's books: tax year 2025, plus January 2026 for the fourth
+// estimated payment and the invoices still open.
+//
+// The folders are constraints: journal/2025/02.ax holds February 2025 only.
+
+base USD
+
+use std
+use us
+use us/ira
+
+/// Me: a brand designer working alone, single, born in 1989. The `lives us` line
+/// puts federal income tax in force. Self-employment tax is not in any shipped
+/// system, so tax.ax writes it as project laws.
+entity me : person
+  born   1989-09-03
+  filing single
+  lives  us

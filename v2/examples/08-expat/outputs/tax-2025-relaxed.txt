@@ -1,0 +1,45 @@
+$ axiom tax 2025 --relaxed --today 2026-01-06
+
+Taxes 2025 for me
+
+Counted
+  Tally                           Amount  From
+  ─────────────────────────────────────────────────────────────
+  project
+    fbar-girokonto          9,444.90 USD  journal/2025/06.ax:27
+    fbar-kaution            4,223.52 USD  journal/2025/06.ax:38
+    fbar-tagesgeld         24,093.87 USD  4 sources
+    fbar-wise               1,164.86 USD  journal/2025/10.ax:8
+    fbar-aggregate         38,927.15 USD  period end
+  ─────────────────────────────────────────────────────────────
+  us
+    wages                 100,064.60 USD  54 sources
+    federal-withheld       10,740.00 USD  6 sources
+    interest                1,494.45 USD  24 sources
+    short-term-gains           27.34 USD  105 sources
+    taxable-income         44,521.81 USD  period end
+    income-tax              5,104.12 USD  period end
+  ─────────────────────────────────────────────────────────────
+    us/401k
+      elective-deferrals    3,750.00 USD  6 sources
+      pretax                3,750.00 USD  6 sources
+      agi                  60,271.81 USD  190 sources
+  ─────────────────────────────────────────────────────────────
+    us/abroad
+      foreign-earned       37,564.58 USD  18 sources
+      feie-excluded        37,564.58 USD  period end
+  ─────────────────────────────────────────────────────────────
+      us/abroad/de
+        foreign-tax-paid    6,357.40 USD  12 sources
+  ─────────────────────────────────────────────────────────────
+    us/ca
+      ca-withheld           4,416.00 USD  6 sources
+
+Owed
+  Owed                   To   Due               Amount  From
+  ────────────────────────────────────────────────────────────────
+    us/abroad
+      feie-stacking-tax  irs  2026-04-15  3,599.64 USD  period end
+  ────────────────────────────────────────────────────────────────
+  Total owed                              3,599.64 USD
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

@@ -1,0 +1,26 @@
+$ axiom why long-term-gains --today 2026-01-06
+
+Why long-term-gains
+
+Effects
+  Date        Owner      Amount  Owed to  From
+  ────────────────────────────────────────────────────────────
+  2025-10-10  me     283.58 USD           journal/2025/10.ax:7
+  2025-10-10  me     255.88 USD           journal/2025/10.ax:7
+  2025-11-06  me     707.52 USD           journal/2025/11.ax:6
+  2025-12-02  me     524.35 USD           journal/2025/12.ax:5
+
+Flows behind it
+  Date        Flow                                             Amount  From
+  ─────────────────────────────────────────────────────────────────────────────────────────
+  2025-10-10  assets/fidelity → assets/bank/checking     10.0000 VTI   journal/2025/10.ax:7
+  2025-11-06  assets/fidelity → assets/bank/checking      8.0000 MSFT  journal/2025/11.ax:6
+  2025-12-02  assets/coinbase → assets/bank/checking  0.02000000 BTC   journal/2025/12.ax:5
+
+Gains realized
+  Date        Sold from            Proceeds         Basis        Gain  Held since
+  ───────────────────────────────────────────────────────────────────────────────
+  2025-10-10  assets/fidelity  1,783.56 USD  1,499.98 USD  283.58 USD  2024-10-05
+  2025-10-10  assets/fidelity  1,468.74 USD  1,212.86 USD  255.88 USD  2024-09-05
+  2025-11-06  assets/fidelity  4,147.52 USD  3,440.00 USD  707.52 USD  2024-10-08
+  2025-12-02  assets/coinbase  1,825.72 USD  1,301.37 USD  524.35 USD  2024-10-14

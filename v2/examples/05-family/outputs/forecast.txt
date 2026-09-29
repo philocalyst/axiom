@@ -1,0 +1,89 @@
+$ axiom forecast --paths 200 --today 2026-01-05
+
+Forecast to 2027-01-05
+
+Liquid net worth
+  Month end        Committed             p10             p50             p90
+  ──────────────────────────────────────────────────────────────────────────
+  2026-01-05  327,537.38 USD
+  2026-01-31  331,777.96 USD  328,374.45 USD  329,651.97 USD  330,856.64 USD
+  2026-02-28  333,151.93 USD  326,822.45 USD  328,466.38 USD  330,125.84 USD
+  2026-03-31  340,253.53 USD  331,202.40 USD  333,071.30 USD  335,442.15 USD
+  2026-04-30  337,593.58 USD  325,497.71 USD  327,766.38 USD  330,455.75 USD
+  2026-05-31  338,909.94 USD  324,142.48 USD  326,836.28 USD  330,003.63 USD
+  2026-06-30  338,413.91 USD  320,392.59 USD  324,011.44 USD  327,145.24 USD
+  2026-07-31  342,291.49 USD  321,353.34 USD  325,645.04 USD  328,726.82 USD
+  2026-08-31  343,582.17 USD  320,610.43 USD  324,153.80 USD  327,888.37 USD
+  2026-09-30  344,896.66 USD  318,869.06 USD  323,271.04 USD  326,789.41 USD
+  2026-10-31  346,213.02 USD  317,342.68 USD  322,288.89 USD  325,790.27 USD
+  2026-11-30  344,286.99 USD  313,197.36 USD  317,404.76 USD  321,941.76 USD
+  2026-12-31  345,439.85 USD  311,440.81 USD  316,137.63 USD  321,176.99 USD
+  2027-01-05  345,238.48 USD  310,825.06 USD  315,583.21 USD  320,548.43 USD
+  · Committed: liquid assets less debts, in USD, after plans, recurring flows found in history,
+    growth models and obligations as they fall due. Variable spending is not in it.
+  · p10, p50 and p90 are the 10th, 50th and 90th percentile of 200 paths. Each path takes the
+    committed figure and subtracts, month by month, a random past month of spending for every
+    top-level expense category (from 12 months of history, without the flows already projected). The
+    seed is fixed, so the bands are reproducible.
+
+What recurs
+  Expected                                                                  Every                Amount  Next        Source
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/escrow → expenses/housing/property-tax (county)                    yearly         3,300.00 USD  2026-04-10  plan
+  assets/escrow → expenses/housing/property-tax (county)                    yearly         3,300.00 USD  2026-11-10  plan
+  assets/escrow → expenses/housing/home-insurance (homeguard)               yearly         1,870.00 USD  2026-06-20  plan
+  assets/education/riley-529 → expenses/tuition (st-annes-school)           yearly         4,800.00 USD  2026-01-10  plan
+  income/alex-salary → assets/retirement/alex-401k (acme)                   yearly         1,200.00 USD  2026-03-14  plan
+  income/alex-salary → expenses/taxes/federal (acme)                        yearly         2,640.00 USD  2026-03-14  plan
+  income/alex-salary → expenses/taxes/state (acme)                          yearly         1,227.60 USD  2026-03-14  plan
+  income/alex-salary → expenses/taxes/payroll (acme)                        yearly           918.00 USD  2026-03-14  plan
+  income/alex-salary → expenses/taxes/sdi (acme)                            yearly           144.00 USD  2026-03-14  plan
+  income/alex-salary → assets/bank/joint-checking (acme)                    yearly         5,870.40 USD  2026-03-14  plan
+  assets/bank/joint-checking → assets/bank/joint-savings                    monthly        2,800.00 USD  2026-01-10  seen 12 times
+  assets/bank/joint-checking → assets/education/riley-529                   monthly          250.00 USD  2026-01-08  seen 13 times
+  assets/bank/joint-checking → assets/escrow (lender)                       monthly          690.00 USD  2026-02-01  seen 12 times
+  assets/bank/joint-checking → expenses/auto/loan-interest (honda-finance)  monthly           84.31 USD  2026-02-05  seen 12 times
+  assets/bank/joint-checking → expenses/charity (st-annes-parish)           monthly          200.00 USD  2026-02-03  seen 12 times
+  assets/bank/joint-checking → expenses/childcare (kids-club)               monthly          473.34 USD  2026-02-05  seen 4 times
+  assets/bank/joint-checking → expenses/housing/mortgage-interest (lender)  monthly        2,007.68 USD  2026-02-01  seen 12 times
+  assets/bank/joint-checking → liabilities/car-loan (honda-finance)         monthly          520.21 USD  2026-02-05  seen 12 times
+  assets/bank/joint-checking → liabilities/card                             monthly        2,156.39 USD  2026-01-25  seen 12 times
+  assets/bank/joint-checking → liabilities/mortgage (lender)                monthly          479.12 USD  2026-02-01  seen 12 times
+  assets/dcfsa → expenses/childcare (kids-club)                             monthly          416.66 USD  2026-02-05  seen 4 times
+  income/alex-salary → assets/dcfsa (acme)                                  every 2 weeks    208.33 USD  2026-01-14  seen 24 times
+  income/alex-salary → assets/hsa (acme)                                    every 2 weeks    250.00 USD  2026-01-14  seen 24 times
+  income/alex-salary → expenses/health-premium (acme)                       every 2 weeks    212.50 USD  2026-01-14  seen 24 times
+  income/employer-match → assets/retirement/alex-401k (acme)                every 2 weeks    230.00 USD  2026-01-14  seen 25 times
+  income/employer-match → assets/retirement/jordan-401k (bluefin)           every 2 weeks    114.09 USD  2026-01-16  seen 26 times
+  income/growth → assets/education/riley-529                                quarterly      1,540.94 USD  2026-03-31  seen 4 times
+  income/growth → assets/hsa                                                quarterly         99.66 USD  2026-03-31  seen 4 times
+  income/growth → assets/retirement/alex-401k                               quarterly      9,775.13 USD  2026-03-30  seen 3 times
+  income/growth → assets/retirement/jordan-401k                             quarterly      6,156.54 USD  2026-03-30  seen 3 times
+  income/interest → assets/bank/joint-savings                               monthly          211.51 USD  2026-01-31  seen 12 times
+  income/jordan-salary → assets/bank/joint-checking (bluefin)               every 2 weeks  2,782.33 USD  2026-01-16  seen 26 times
+  income/jordan-salary → assets/retirement/jordan-401k (bluefin)            every 2 weeks    228.18 USD  2026-01-16  seen 26 times
+  income/jordan-salary → expenses/taxes/federal (bluefin)                   every 2 weeks    330.00 USD  2026-01-16  seen 26 times
+  income/jordan-salary → expenses/taxes/payroll (bluefin)                   every 2 weeks    290.93 USD  2026-01-16  seen 26 times
+  income/jordan-salary → expenses/taxes/sdi (bluefin)                       every 2 weeks     45.64 USD  2026-01-16  seen 26 times
+  income/jordan-salary → expenses/taxes/state (bluefin)                     every 2 weeks    126.00 USD  2026-01-16  seen 26 times
+  liabilities/card → expenses/food/dining                                   weekly            57.61 USD  2026-01-09  seen 49 times
+  liabilities/card → expenses/food/groceries (costco)                       every 2 weeks    221.11 USD  2026-01-14  seen 24 times
+  liabilities/card → expenses/fuel (shell)                                  every 2 weeks     59.48 USD  2026-01-06  seen 24 times
+  liabilities/card → expenses/kids (target)                                 every 2 weeks     83.29 USD  2026-01-19  seen 24 times
+  liabilities/card → expenses/subscriptions (netflix)                       monthly           17.99 USD  2026-02-02  seen 12 times
+  liabilities/card → expenses/subscriptions (spotify)                       monthly           19.99 USD  2026-01-11  seen 12 times
+  liabilities/card → expenses/utilities (comcast)                           monthly           89.99 USD  2026-01-12  seen 12 times
+  liabilities/card → expenses/utilities (pge)                               monthly          158.20 USD  2026-01-16  seen 12 times
+  liabilities/card → expenses/utilities (verizon)                           monthly          142.50 USD  2026-01-18  seen 12 times
+
+Obligations coming due
+  Due         Obligation     To       Amount
+  ──────────────────────────────────────────
+  2026-04-15  ca-income-tax  ftb  733.92 USD
+
+Problems ahead
+  Date        Problem
+  ──────────────────────────────────────────────────────────────────────────
+  2026-06-20  assets/escrow is overdrawn, down to -280.00 USD
+  2027-01-01  assets/bank/joint-checking is overdrawn, down to -2,387.10 USD
+  2027-01-01  overdraft: balance below zero (and 1 more)

@@ -1,0 +1,10 @@
+$ axiom lots schwab --today 2026-01-06
+
+Lots at 2026-01-06
+
+  Place              Quantity         Basis  Acquired    Held            Value  Unrealized  Term  Note
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/schwab  38.2029 VXUS  2,500.00 USD  2024-09-18  1y3m19d  3,037.13 USD  537.13 USD  long
+  assets/schwab  33.4448 BND   2,500.00 USD  2024-09-18  1y3m19d  2,486.96 USD  -13.04 USD  long
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                        5,000.00 USD                       5,524.09 USD  524.09 USD

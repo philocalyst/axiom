@@ -1,0 +1,46 @@
+// Laws the shipped systems do not have: itemized deductions and the child tax
+// credit, at the end of the year, feeding the forked `us` in systems/us.ax.
+//
+// FILE ORDER MATTERS. Laws that fire at year end run in the order their files are
+// read, which is path order: this file (laws.ax) sorts before systems/us.ax, so it
+// tallies `itemized` and `credits` before the forked federal-income-tax reads them.
+// Rename this file `tax.ax` and it sorts after, and every figure here changes.
+
+/// Schedule A: mortgage interest (IRC §163(h)), state and local taxes up to the
+/// cap (IRC §164(b)(6)), and gifts to charity (IRC §170), for the year that
+/// just ended. `us` takes the larger of this and the standard deduction. The
+/// State tax counted is what was withheld plus last year's balance paid, and
+/// the property tax the servicer paid from escrow.
+law itemized-deductions
+  each year
+  let salt = min(tally(salt) + tally(ca-withheld), salt-cap[year])
+  count tally(mortgage-interest) + salt + tally(charity) as itemized
+
+/// The child tax credit (IRC §24): 2,200 USD for each qualifying child under 17,
+/// phased out above 400,000 USD of income on a joint return (not modelled: this
+/// household is far below it).
+law child-tax-credit
+  each year
+  count child-tax-credit[year] * owner.children as credits
+
+
+// ─── Figures ────────────────────────────────────────────────────────────────
+
+// The dependent-care FSA cap (IRC §129(a)(2)). 2026 rises to 7,500 (P.L. 119-21).
+param dependent-care-limit
+  2024 5_000 USD
+  2025 5_000 USD
+  2026 7_500 USD
+
+// The cap on the state and local tax deduction (IRC §164(b)(6), P.L. 119-21).
+// verify: the 2026 figure.
+param salt-cap
+  2024 10_000 USD
+  2025 40_000 USD
+  2026 40_400 USD
+
+// The child tax credit per child (IRC §24, P.L. 119-21).
+param child-tax-credit
+  2024 2_000 USD
+  2025 2_200 USD
+  2026 2_200 USD

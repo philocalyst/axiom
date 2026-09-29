@@ -1,0 +1,70 @@
+$ axiom forecast --paths 200 --today 2026-02-10
+
+Forecast to 2027-02-10
+
+Liquid net worth
+  Month end       Committed            p10            p50            p90
+  ──────────────────────────────────────────────────────────────────────
+  2026-02-10  29,267.79 USD
+  2026-02-28  32,189.52 USD  29,472.77 USD  31,764.65 USD  31,931.91 USD
+  2026-03-31  37,127.66 USD  32,399.41 USD  35,524.15 USD  36,351.50 USD
+  2026-04-30  30,504.96 USD  23,694.90 USD  27,211.16 USD  29,182.45 USD
+  2026-05-31  31,073.90 USD  23,090.71 USD  26,555.72 USD  29,061.89 USD
+  2026-06-30  33,012.04 USD  22,803.80 USD  27,044.24 USD  30,113.50 USD
+  2026-07-31  33,580.98 USD  21,874.18 USD  26,116.65 USD  29,700.87 USD
+  2026-08-31  34,149.92 USD  20,811.98 USD  25,580.57 USD  29,164.12 USD
+  2026-09-30  36,088.06 USD  21,201.56 USD  26,301.86 USD  30,007.36 USD
+  2026-10-31  36,603.63 USD  19,775.56 USD  25,251.01 USD  29,467.19 USD
+  2026-11-30  37,172.57 USD  18,926.62 USD  24,812.19 USD  29,018.16 USD
+  2026-12-31  42,110.71 USD  21,670.84 USD  28,423.24 USD  33,023.34 USD
+  2027-01-31  33,679.65 USD  12,312.61 USD  18,731.50 USD  23,705.07 USD
+  2027-02-10  31,326.86 USD   9,371.00 USD  15,953.34 USD  20,765.38 USD
+  · Committed: liquid assets less debts, in USD, after plans, recurring flows found in history,
+    growth models and obligations as they fall due. Variable spending is not in it.
+  · p10, p50 and p90 are the 10th, 50th and 90th percentile of 200 paths. Each path takes the
+    committed figure and subtracts, month by month, a random past month of spending for every
+    top-level expense category (from 13 months of history, without the flows already projected). The
+    seed is fixed, so the bands are reproducible.
+
+What recurs
+  Expected                                                               Every                Amount  Next        Source
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/bank/tax-vault → expenses/taxes/federal (irs)                   yearly         3,000.00 USD  2026-04-15  plan
+  assets/bank/tax-vault → expenses/taxes/federal (irs)                   yearly         3,000.00 USD  2026-06-15  plan
+  assets/bank/tax-vault → expenses/taxes/federal (irs)                   yearly         3,000.00 USD  2026-09-15  plan
+  assets/bank/tax-vault → expenses/taxes/federal (irs)                   yearly         3,000.00 USD  2027-01-15  plan
+  assets/bank/business-checking → assets/retirement/sep                  yearly         6,000.00 USD  2027-01-25  plan
+  assets/bank/business-checking → assets/bank/personal-checking          monthly        2,950.00 USD  2026-03-03  seen 13 times
+  assets/bank/business-checking → liabilities/business-card              monthly          352.18 USD  2026-02-20  seen 12 times
+  assets/bank/personal-checking → expenses/food/dining                   every 2 weeks     53.37 USD  2026-02-19  seen 26 times
+  assets/bank/personal-checking → expenses/health-insurance (bluecross)  monthly          412.00 USD  2026-03-01  seen 13 times
+  assets/bank/personal-checking → expenses/home/insurance (statefarm)    monthly           22.00 USD  2026-03-05  seen 13 times
+  assets/bank/personal-checking → expenses/home/internet (comcast)       monthly           80.00 USD  2026-02-12  seen 13 times
+  assets/bank/personal-checking → expenses/home/rent (landlord)          monthly        1,750.00 USD  2026-03-01  seen 13 times
+  assets/bank/personal-checking → expenses/home/utilities (pge)          monthly           66.85 USD  2026-02-16  seen 13 times
+  assets/bank/personal-checking → expenses/phone (tmobile)               monthly           64.00 USD  2026-02-18  seen 13 times
+  assets/bank/personal-checking → expenses/transport                     monthly           38.23 USD  2026-03-10  seen 13 times
+  assets/receivable/brightwave → assets/bank/business-checking           monthly        3,200.00 USD  2026-02-13  seen 12 times
+  assets/receivable/fernhill → assets/bank/business-checking             quarterly      4,369.20 USD  2026-03-30  seen 4 times
+  assets/receivable/fernhill → expenses/business/fees                    quarterly        130.80 USD  2026-03-30  seen 4 times
+  income/design → assets/receivable/brightwave                           monthly        3,200.00 USD  2026-03-02  seen 13 times
+  income/design → assets/receivable/fernhill                             quarterly      4,500.00 USD  2026-02-14  seen 4 times
+  income/growth → assets/retirement/sep                                  quarterly        984.57 USD  2026-04-30  seen 4 times
+  income/interest → assets/bank/tax-vault                                monthly           21.95 USD  2026-02-28  seen 13 times
+  liabilities/business-card → expenses/business/software (adobe)         monthly           59.99 USD  2026-03-08  seen 13 times
+  liabilities/business-card → expenses/business/software (figma)         monthly           15.00 USD  2026-02-14  seen 13 times
+  liabilities/business-card → expenses/business/software (freshbooks)    monthly           21.00 USD  2026-02-22  seen 13 times
+  liabilities/business-card → expenses/business/software (google)        monthly            7.20 USD  2026-03-01  seen 13 times
+  liabilities/business-card → expenses/business/software (notion)        monthly           10.00 USD  2026-03-03  seen 13 times
+
+Obligations coming due
+  Due         Obligation           To         Amount
+  ──────────────────────────────────────────────────
+  2026-04-15  self-employment-tax  irs  1,427.14 USD
+  2026-04-15  federal-income-tax   irs  2,711.13 USD
+
+Problems ahead
+  Date        Problem
+  ─────────────────────────────────────────────────────────────────────
+  2027-01-15  assets/bank/tax-vault is overdrawn, down to -1,337.60 USD
+  2027-01-15  overdraft: balance below zero

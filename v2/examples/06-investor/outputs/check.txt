@@ -1,0 +1,3 @@
+$ axiom check --today 2026-01-06
+
+✓ 328 flows · 28 places · 12 laws enforced · net worth 430,872.40 USD

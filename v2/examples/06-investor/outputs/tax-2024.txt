@@ -1,0 +1,24 @@
+$ axiom tax 2024 --today 2026-01-06
+
+Taxes 2024 for me
+
+Counted
+  Tally                          Amount  From
+  ─────────────────────────────────────────────────
+  us
+    dividends                 88.61 USD  8 sources
+    agi                   62,535.17 USD  42 sources
+    wages                 68,446.52 USD  22 sources
+    federal-withheld      12,388.73 USD  5 sources
+    interest               1,833.36 USD  8 sources
+    taxable-income        47,935.17 USD  period end
+    income-tax             5,598.74 USD  period end
+  ─────────────────────────────────────────────────
+    us/401k
+      elective-deferrals   7,833.32 USD  4 sources
+      pretax               7,833.32 USD  4 sources
+
+Owed
+  Owed  To  Due  Amount  From
+  ───────────────────────────
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

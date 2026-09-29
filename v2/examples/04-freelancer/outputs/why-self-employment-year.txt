@@ -1,0 +1,36 @@
+$ axiom why self-employment-year --today 2026-02-10
+
+Why self-employment-year
+
+  Law       self-employment-year
+  ─────────────────────────────────
+  When      each year
+  Governs   everything in this book
+  Written   tax.ax:26
+  Ran       1 times
+  Recorded  0 violations, 8 effects
+  · Schedule C, Schedule SE and the adjustments to income, for the year that
+  · just ended (IRC §1401, §164(f), §162(l), §404(h), §199A).
+  ·
+  · Net earnings are receipts less expenses. Self-employment tax is 12.4% Social
+  · Security up to the wage base and 2.9% Medicare, on 92.35% of net earnings.
+  · Half of it, the SEP-IRA contribution (at most 20% of net earnings after
+  · that half, and 70,000 USD) and the health premiums come off income. The
+  · 20% qualified business income deduction is limited to 20% of taxable income
+  · before it.
+  ·
+  · Self-employment tax is paid with the same estimated payments as income tax,
+  · so what was paid first covers it, and only the rest is credited against
+  · income tax by `us`.
+
+Recent effects
+  Date        Effect                      Amount  Owed to            From
+  ─────────────────────────────────────────────────────────────────────────────
+  2025-12-31  net-profit           61,057.46 USD                     period end
+  2025-12-31  se-tax                8,627.14 USD                     period end
+  2025-12-31  se-deduction          4,313.57 USD                     period end
+  2025-12-31  sep-deduction         6,000.00 USD                     period end
+  2025-12-31  qbi-deduction         6,145.07 USD                     period end
+  2025-12-31  agi                  39,654.82 USD                     period end
+  2025-12-31  federal-withheld     -7,200.00 USD                     period end
+  2025-12-31  self-employment-tax   1,427.14 USD  irs by 2026-04-15  period end

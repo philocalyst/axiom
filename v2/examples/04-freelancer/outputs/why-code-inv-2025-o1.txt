@@ -1,0 +1,12 @@
+$ axiom why #inv-2025-o1 --today 2026-02-10
+
+Why #inv-2025-o1
+
+Flows
+  Date        Flow                                                                Amount  State   From
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-03-03  income/design → assets/receivable/orbit-labs                  5,500.00 USD  actual  journal/2025/03.ax:10
+  2025-04-20  assets/receivable/orbit-labs → assets/bank/business-checking  2,735.00 USD  actual  journal/2025/04.ax:26
+  2025-04-20  assets/receivable/orbit-labs → expenses/business/fees            15.00 USD  actual  journal/2025/04.ax:27
+  2025-06-12  assets/receivable/orbit-labs → assets/bank/business-checking  2,735.00 USD  actual  journal/2025/06.ax:21
+  2025-06-12  assets/receivable/orbit-labs → expenses/business/fees            15.00 USD  actual  journal/2025/06.ax:22

@@ -1,0 +1,9 @@
+$ axiom tax 2024 --today 2026-01-06
+
+Taxes 2024 for me
+
+Counted
+  Tally  Amount  From
+  ───────────────────
+  · Nothing was counted or owed. Laws count and owe only for entities that live under a system that
+    declares them.

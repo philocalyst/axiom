@@ -1,0 +1,8 @@
+$ axiom why #mortgage-2025-05 --today 2026-01-05
+
+Why #mortgage-2025-05
+
+Flows
+  Date        Flow                                                   Amount  State   From
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-05-01  assets/bank/joint-checking → liabilities/mortgage  474.46 USD  actual  journal/2025/05.ax:2

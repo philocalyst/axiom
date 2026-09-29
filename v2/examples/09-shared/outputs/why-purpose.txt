@@ -1,0 +1,14 @@
+$ axiom why purpose --today 2026-01-06
+
+Why purpose
+
+  Law       purpose
+  ─────────────────────────────────
+  When      on spend
+  Governs   every grant
+  Written   std.ax:146
+  Ran       8 times
+  Recorded  0 violations, 0 effects
+  · Grant money may only be spent on what the grant names. This payment went
+  · somewhere else. Pay it from another account, or, if the funder agreed to
+  · the change, update `purpose` on the grant.

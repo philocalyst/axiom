@@ -1,0 +1,5 @@
+$ axiom why #none --today 2026-01-06
+
+error[unknown-target]: no code named `none`
+
+✗ 1 error

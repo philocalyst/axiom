@@ -1,0 +1,47 @@
+2025-03-01 business-card -> software 7.20 USD / google
+2025-03-01 business-card -> fees 375 USD
+2025-03-01 personal-checking -> landlord 1_750 USD
+2025-03-01 personal-checking -> bluecross 412 USD
+
+/// Monthly retainer, net 30.
+2025-03-03 design -> brightwave 3_200 USD #inv-2025-b03
+
+/// Brand guidelines; billed once, paid in two halves by wire.
+2025-03-03 design -> orbit-labs 5_500 USD #inv-2025-o1
+2025-03-03 business-card -> software 10 USD / notion
+2025-03-03 business-checking -> personal-checking 2_950 USD // owner's draw
+2025-03-05 business-card -> equipment 2_499 USD / apple #macbook-2025
+2025-03-05 personal-checking -> statefarm 22 USD
+2025-03-05 personal-checking -> groceries 65.35 USD / trader-joes
+2025-03-08 business-card -> software 59.99 USD / adobe
+2025-03-08 personal-checking -> dining 66.06 USD
+2025-03-10 personal-checking -> transport 38.19 USD
+2025-03-12 personal-checking -> comcast 80 USD
+2025-03-12 personal-checking -> groceries 61.64 USD / safeway
+2025-03-13 business-card -> meals 54.80 USD
+2025-03-13 odometer -> mileage 22 MI / fernhill
+2025-03-14 brightwave -> business-checking 3_200 USD #inv-2025-b02
+2025-03-14 business-checking -> tax-vault 640 USD
+2025-03-14 business-card -> software 15 USD / figma
+2025-03-16 personal-checking -> pge 71.10 USD
+2025-03-18 personal-checking -> tmobile 64 USD
+
+/// The February statement, paid in full.
+2025-03-20 business-checking -> business-card 1_013.07 USD
+2025-03-20 personal-checking -> groceries 60.06 USD / safeway
+2025-03-22 business-card -> software 21 USD / freshbooks
+2025-03-22 personal-checking -> dining 34.49 USD
+2025-03-27 personal-checking -> groceries 95.76 USD / trader-joes
+2025-03-28 fernhill -> 4_500 USD #inv-2025-f1
+  business-checking           4_369.20 USD
+  fees                        130.80 USD   // Stripe fee
+2025-03-28 business-checking -> tax-vault 873.84 USD
+2025-03-31 interest -> tax-vault 22.35 USD
+
+/// Quarterly statement: the market's return on the balance.
+2025-03-31 sep -> growth 385.35 USD
+2025-03-31 business-card = 3_041.99 USD
+2025-03-31 business-checking = 7_259.54 USD
+2025-03-31 personal-checking = 3_454.93 USD
+2025-03-31 tax-vault = 6_407.88 USD
+2025-03-31 sep = 17_964.65 USD

@@ -1,0 +1,44 @@
+2025-12-01 checking -> rent 2_650 USD / landlord
+2025-12-01 income/staking -> wallet 0.01036270 ETH @ 2999.62 USD
+
+/// Selling a slice of the October 2024 bitcoin: more than a year, so long-term.
+2025-12-02 coinbase[2024-10-14] 0.02 BTC -> checking 1_825.72 USD
+
+/// Selling 8 VTI with no lot named: the account's policy is highest cost first (`select hifo`), which realizes the smallest gain.
+2025-12-04 fidelity 8 VTI -> checking 2_649.12 USD
+2025-12-05 checking -> fidelity 4.5096 VTI @ 332.62 USD
+2025-12-09 checking -> utilities 176.50 USD
+
+/// Selling one ETH from the wallet's oldest lot to fund the year-end tax bill.
+2025-12-09 wallet 1 ETH -> checking 3_027.21 USD
+2025-12-11 dividends -> fidelity 13.55 USD
+2025-12-12 checking -> groceries 383.30 USD
+2025-12-16 checking -> dining 294.34 USD
+
+/// Tax-loss harvesting: sell the real-estate ETF at a loss and buy a similar, not identical, one the same day.
+2025-12-16 fidelity 120.0480 VNQ -> checking 10_261.70 USD
+2025-12-16 checking -> fidelity 493.8271 SCHH @ 21.06 USD
+2025-12-20 checking -> groceries 284.77 USD
+2025-12-23 dividends -> schwab 27.51 USD
+2025-12-23 dividends -> fidelity 0.1660 VTI @ 332.93 USD   // reinvested: 55.29 USD dividend
+2025-12-23 dividends -> fidelity 0.02 USD
+2025-12-24 checking -> misc 374.04 USD
+2025-12-28 dividends -> schwab 7.58 USD
+2025-12-31 income/salary -> 14_000.00 USD
+  retirement          1_958.33 USD   // 401(k) deferral
+  espp-cash           1_400.00 USD   // ESPP contribution, after tax
+  taxes/federal       2_650.00 USD
+  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  checking            ...
+2025-12-31 interest -> savings 276.08 USD
+2025-12-31 interest -> fidelity 276.33 USD
+2025-12-31 checking = 69_910.07 USD
+2025-12-31 savings = 83_100.79 USD
+2025-12-31 espp-cash = 8_400.00 USD
+2025-12-31 fidelity = 64.4579 VTI
+2025-12-31 fidelity = 16.3264 MSFT
+2025-12-31 fidelity = 19.7153 UNH
+2025-12-31 etrade = 295.5686 NWND
+2025-12-31 coinbase = 0.13 BTC
+2025-12-31 coinbase = 0.95668225 ETH
+2025-12-31 wallet = 5.08049844 ETH

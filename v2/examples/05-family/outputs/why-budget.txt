@@ -1,0 +1,11 @@
+$ axiom why budget --today 2026-01-05
+
+Why budget
+
+  Law       budget
+  ─────────────────────────────────────────────────
+  When      on in
+  Governs   expenses/food and everything beneath it
+  Written   accounts.ax:139
+  Ran       109 times
+  Recorded  0 violations, 0 effects

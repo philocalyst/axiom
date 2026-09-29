@@ -1,0 +1,53 @@
+$ axiom why gross-receipts --today 2026-02-10
+
+Why gross-receipts
+
+Effects
+  Date        Owner        Amount  Owed to  From
+  ───────────────────────────────────────────────────────────────
+  2025-06-10  me     3,200.00 USD           journal/2025/06.ax:17
+  2025-06-12  me     2,735.00 USD           journal/2025/06.ax:21
+  2025-06-12  me        15.00 USD           journal/2025/06.ax:22
+  2025-06-30  me     2,718.50 USD           journal/2025/06.ax:46
+  2025-06-30  me        81.50 USD           journal/2025/06.ax:47
+  2025-07-15  me     3,200.00 USD           journal/2025/07.ax:21
+  2025-08-12  me     3,200.00 USD           journal/2025/08.ax:18
+  2025-08-15  me     7,400.00 USD           journal/2025/08.ax:23
+  2025-09-16  me     3,200.00 USD           journal/2025/09.ax:21
+  2025-10-02  me     6,019.90 USD           journal/2025/10.ax:7
+  2025-10-02  me       180.10 USD           journal/2025/10.ax:8
+  2025-10-14  me     3,200.00 USD           journal/2025/10.ax:24
+  2025-11-12  me     3,200.00 USD           journal/2025/11.ax:19
+  2025-11-20  me     5,900.00 USD           journal/2025/11.ax:28
+  2025-11-26  me     4,185.00 USD           journal/2025/11.ax:37
+  2025-11-26  me        15.00 USD           journal/2025/11.ax:38
+  2025-12-10  me     3,200.00 USD           journal/2025/12.ax:16
+  2025-12-30  me     3,009.80 USD           journal/2025/12.ax:37
+  2025-12-30  me        90.20 USD           journal/2025/12.ax:38
+  2026-01-13  me     3,200.00 USD           journal/2026/01.ax:16
+  · 8 earlier effects not shown.
+
+Flows behind it
+  Date        Flow                                                                Amount  From
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-06-10  assets/receivable/brightwave → assets/bank/business-checking  3,200.00 USD  journal/2025/06.ax:17
+  2025-06-12  assets/receivable/orbit-labs → assets/bank/business-checking  2,735.00 USD  journal/2025/06.ax:21
+  2025-06-12  assets/receivable/orbit-labs → expenses/business/fees            15.00 USD  journal/2025/06.ax:22
+  2025-06-30  assets/receivable/fernhill → assets/bank/business-checking    2,718.50 USD  journal/2025/06.ax:46
+  2025-06-30  assets/receivable/fernhill → expenses/business/fees              81.50 USD  journal/2025/06.ax:47
+  2025-07-15  assets/receivable/brightwave → assets/bank/business-checking  3,200.00 USD  journal/2025/07.ax:21
+  2025-08-12  assets/receivable/brightwave → assets/bank/business-checking  3,200.00 USD  journal/2025/08.ax:18
+  2025-08-15  assets/receivable/northpeak → assets/bank/business-checking   7,400.00 USD  journal/2025/08.ax:23
+  2025-09-16  assets/receivable/brightwave → assets/bank/business-checking  3,200.00 USD  journal/2025/09.ax:21
+  2025-10-02  assets/receivable/fernhill → assets/bank/business-checking    6,019.90 USD  journal/2025/10.ax:7
+  2025-10-02  assets/receivable/fernhill → expenses/business/fees             180.10 USD  journal/2025/10.ax:8
+  2025-10-14  assets/receivable/brightwave → assets/bank/business-checking  3,200.00 USD  journal/2025/10.ax:24
+  2025-11-12  assets/receivable/brightwave → assets/bank/business-checking  3,200.00 USD  journal/2025/11.ax:19
+  2025-11-20  assets/receivable/northpeak → assets/bank/business-checking   5,900.00 USD  journal/2025/11.ax:28
+  2025-11-26  assets/receivable/orbit-labs → assets/bank/business-checking  4,185.00 USD  journal/2025/11.ax:37
+  2025-11-26  assets/receivable/orbit-labs → expenses/business/fees            15.00 USD  journal/2025/11.ax:38
+  2025-12-10  assets/receivable/brightwave → assets/bank/business-checking  3,200.00 USD  journal/2025/12.ax:16
+  2025-12-30  assets/receivable/fernhill → assets/bank/business-checking    3,009.80 USD  journal/2025/12.ax:37
+  2025-12-30  assets/receivable/fernhill → expenses/business/fees              90.20 USD  journal/2025/12.ax:38
+  2026-01-13  assets/receivable/brightwave → assets/bank/business-checking  3,200.00 USD  journal/2026/01.ax:16
+  · 8 earlier flows not shown.

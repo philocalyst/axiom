@@ -1,0 +1,15 @@
+$ axiom lots tagesgeld --today 2026-01-06
+
+Lots at 2026-01-06
+
+  Place                     Quantity          Basis  Acquired    Held          Value  Unrealized  Term   Note
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/de/tagesgeld  20,334.10 EUR  24,000.00 USD  2025-07-03  6m3d  23,919.00 USD  -81.00 USD  short
+  assets/de/tagesgeld      24.70 EUR      28.22 USD  2025-07-31  5m6d      29.05 USD    0.83 USD  short
+  assets/de/tagesgeld      24.73 EUR      28.85 USD  2025-08-31  4m6d      29.09 USD    0.24 USD  short
+  assets/de/tagesgeld      24.76 EUR      29.00 USD  2025-09-30  3m7d      29.13 USD    0.13 USD  short
+  assets/de/tagesgeld      24.79 EUR      28.50 USD  2025-10-31  2m6d      29.16 USD    0.66 USD  short
+  assets/de/tagesgeld      24.82 EUR      28.85 USD  2025-11-30  1m7d      29.20 USD    0.35 USD  short
+  assets/de/tagesgeld      24.86 EUR      29.24 USD  2025-12-31  6d        29.24 USD    0.00 USD  short
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                               24,172.66 USD                    24,093.87 USD  -78.79 USD

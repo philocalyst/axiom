@@ -1,0 +1,15 @@
+$ axiom lots --today 2026-01-05
+
+Lots at 2026-01-05
+
+  Place                                 Quantity           Basis  Acquired    Held           Value      Unrealized  Term   Note
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/dcfsa                       416.74 USD         0.00 USD  2025-12-15  21d       416.74 USD      416.74 USD  short
+  assets/education/riley-529      10,299.29 USD         0.00 USD  2024-12-31  1y5d   10,299.29 USD   10,299.29 USD  long
+  assets/house                            1 HOME  540,000.00 USD  2024-12-31  1y5d  612,400.00 USD   72,400.00 USD  long
+  assets/hsa                      13,544.20 USD         0.00 USD  2024-12-31  1y5d   13,544.20 USD   13,544.20 USD  long
+  assets/retirement/alex-401k    193,133.41 USD         0.00 USD  2024-12-31  1y5d  193,133.41 USD  193,133.41 USD  long
+  assets/retirement/jordan-401k  120,629.41 USD         0.00 USD  2024-12-31  1y5d  120,629.41 USD  120,629.41 USD  long
+  assets/vehicle/crv                      1 CRV    33,900.00 USD  2024-12-31  1y5d   25,300.00 USD   -8,600.00 USD  long
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                                           573,900.00 USD                    975,723.05 USD  401,823.05 USD

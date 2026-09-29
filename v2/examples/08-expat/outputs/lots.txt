@@ -1,0 +1,11 @@
+$ axiom lots girokonto --today 2026-01-06
+
+Lots at 2026-01-06
+
+  Place                    Quantity         Basis  Acquired    Held         Value  Unrealized  Term   Note
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/de/girokonto    818.40 EUR    940.92 USD  2025-10-31  2m6d    962.68 USD   21.76 USD  short
+  assets/de/girokonto  3,331.30 EUR  3,868.31 USD  2025-11-28  1m9d  3,918.61 USD   50.30 USD  short
+  assets/de/girokonto  3,331.30 EUR  3,888.96 USD  2025-12-19  18d   3,918.61 USD   29.65 USD  short
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                              8,698.19 USD                    8,799.90 USD  101.71 USD

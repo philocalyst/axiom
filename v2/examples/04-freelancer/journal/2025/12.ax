@@ -1,0 +1,46 @@
+/// Monthly retainer, net 30.
+2025-12-01 design -> brightwave 3_200 USD #inv-2025-b12
+
+/// Spring line concepts. Open at year end.
+2025-12-01 design -> northpeak 2_600 USD #inv-2025-n3
+2025-12-01 business-card -> software 7.20 USD / google
+2025-12-01 personal-checking -> landlord 1_750 USD
+2025-12-01 personal-checking -> bluecross 412 USD
+2025-12-03 business-card -> software 10 USD / notion
+2025-12-03 business-checking -> personal-checking 2_950 USD // owner's draw
+2025-12-04 odometer -> mileage 60 MI / brightwave
+2025-12-05 personal-checking -> statefarm 22 USD
+2025-12-05 personal-checking -> groceries 112.02 USD / trader-joes
+2025-12-08 business-card -> software 59.99 USD / adobe
+2025-12-08 personal-checking -> dining 54.85 USD
+2025-12-10 brightwave -> business-checking 3_200 USD #inv-2025-b11
+2025-12-10 business-checking -> tax-vault 640 USD
+2025-12-10 personal-checking -> transport 35.69 USD
+2025-12-12 personal-checking -> comcast 80 USD
+2025-12-12 personal-checking -> groceries 104.17 USD / safeway
+2025-12-14 business-card -> software 15 USD / figma
+
+/// Three reminders, one "the check is in the mail", then silence. Written off.
+2025-12-15 delta-rugs -> bad-debt 3_800 USD #inv-2025-d1
+2025-12-16 personal-checking -> pge 101.30 USD
+2025-12-18 personal-checking -> tmobile 64 USD
+
+/// The November statement, paid in full.
+2025-12-20 business-checking -> business-card 271.39 USD
+2025-12-20 personal-checking -> groceries 118.05 USD / safeway
+2025-12-22 business-card -> software 21 USD / freshbooks
+2025-12-22 personal-checking -> dining 51.12 USD
+2025-12-22 business-checking -> sep 2_000 USD
+2025-12-27 rewards -> business-card 87.40 USD
+2025-12-27 personal-checking -> groceries 97.89 USD / trader-joes
+2025-12-30 fernhill -> 3_100 USD #inv-2025-f4
+  business-checking           3_009.80 USD
+  fees                        90.20 USD   // Stripe fee
+2025-12-30 business-checking -> tax-vault 601.96 USD
+2025-12-31 interest -> tax-vault 42.36 USD
+2025-12-31 growth -> sep 607.81 USD
+2025-12-31 business-card = 25.79 USD
+2025-12-31 business-checking = 16_964.22 USD
+2025-12-31 personal-checking = 4_389.49 USD
+2025-12-31 tax-vault = 12_144.60 USD
+2025-12-31 sep = 27_034.41 USD

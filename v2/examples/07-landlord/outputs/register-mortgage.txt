@@ -1,0 +1,19 @@
+$ axiom register mortgage --today 2026-01-06
+
+Register: liabilities/mortgage
+
+  Date        With                         Payee   Note           Amount          Balance
+  ───────────────────────────────────────────────────────────────────────────────────────
+  2024-12-18  assets/bank/rental-checking  lender        -279,000.00 USD  -279,000.00 USD
+  2025-02-01  assets/bank/rental-checking  lender             240.21 USD  -278,759.79 USD
+  2025-03-01  assets/bank/rental-checking  lender             241.57 USD  -278,518.22 USD
+  2025-04-01  assets/bank/rental-checking  lender             242.93 USD  -278,275.29 USD
+  2025-05-01  assets/bank/rental-checking  lender             244.29 USD  -278,031.00 USD
+  2025-06-01  assets/bank/rental-checking  lender             245.67 USD  -277,785.33 USD
+  2025-07-01  assets/bank/rental-checking  lender             247.05 USD  -277,538.28 USD
+  2025-08-01  assets/bank/rental-checking  lender             248.44 USD  -277,289.84 USD
+  2025-09-01  assets/bank/rental-checking  lender             249.83 USD  -277,040.01 USD
+  2025-10-01  assets/bank/rental-checking  lender             251.24 USD  -276,788.77 USD
+  2025-11-01  assets/bank/rental-checking  lender             252.65 USD  -276,536.12 USD
+  2025-12-01  assets/bank/rental-checking  lender             254.07 USD  -276,282.05 USD
+  2025-12-29  assets/bank/rental-checking  lender         276,282.05 USD         0.00 USD

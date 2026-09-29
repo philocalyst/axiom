@@ -1,0 +1,28 @@
+// Rental income and the sale of a rental, for the year that just ended. The shipped
+// `us` counts wages, interest, dividends and gains; it has no Schedule E.
+//
+// Simplifications, on purpose: cash method; the 25,000 USD passive-loss allowance
+// is applied without its phase-out above 100,000 USD of income (this person is
+// below it); depreciation recapture is taxed as ordinary income, which is right
+// while the bracket is below 25%; no state tax.
+
+/// Schedule E: rents received less everything under expenses/rental. A loss
+/// offsets other income up to 25,000 USD (IRC §469(i)), and the loss on paper,
+/// because of depreciation and interest, is common in the first year.
+law schedule-e
+  each year
+  let net = tally(rental-income) - tally(rental-expenses)
+  count net as rental-net
+  count max(net, empty - passive-allowance[year]) as agi
+
+/// Rents, late fees and kept deposits count when they arrive (cash method).
+law count-rental-income
+  on in
+  when from is rent-income
+  count amount as rental-income
+
+// The passive-loss allowance for active participation in a rental (IRC §469(i)).
+param passive-allowance
+  2024 25_000 USD
+  2025 25_000 USD
+  2026 25_000 USD

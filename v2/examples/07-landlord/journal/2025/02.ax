@@ -1,0 +1,23 @@
+/// Lease A: 2,400 USD a month from 2025-02-01 to 2025-08-31, deposit 2,400 USD, held apart.
+2025-02-01 liabilities/deposits/tenant-a -> deposit-account 2_400 USD / tenant-a #lease-a
+2025-02-01 checking -> own-rent 1_950 USD / oak-street
+
+/// First payment: principal and interest, no escrow. Interest is for the month behind.
+2025-02-01 rental-checking -> 1_809.59 USD / lender
+  mortgage            240.21 USD   // principal
+  interest            1_569.38 USD   // interest
+2025-02-03 income/rent -> rental-checking 2_400 USD #lease-a
+2025-02-08 checking -> groceries 204.31 USD
+2025-02-15 checking -> groceries 163.88 USD
+2025-02-19 checking -> dining 99.86 USD
+2025-02-22 checking -> living 362.38 USD
+2025-02-28 income/salary -> 8_000.00 USD
+  taxes/federal       1_215.00 USD
+  taxes/payroll       612.00 USD
+  checking            ...
+2025-02-28 acc-dep-house -> depreciation 913.58 USD
+2025-02-28 loan-costs -> amortization 8.67 USD
+2025-02-28 mortgage = 278_759.79 USD
+2025-02-28 rental-checking = 5_338.11 USD
+2025-02-28 checking = 26_874.77 USD
+2025-02-28 deposit-account = 2_400.00 USD

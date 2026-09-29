@@ -1,0 +1,8 @@
+$ axiom register house --today 2026-01-06
+
+Register: assets/rental/house
+
+  Date        With                         Payee     Note   Amount  Balance
+  ─────────────────────────────────────────────────────────────────────────
+  2024-12-18  assets/bank/rental-checking  title-co         1 HOME   1 HOME
+  2025-12-29  assets/bank/rental-checking                  -1 HOME   0 HOME

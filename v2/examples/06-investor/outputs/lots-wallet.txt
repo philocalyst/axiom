@@ -1,0 +1,17 @@
+$ axiom lots wallet --today 2026-01-06
+
+Lots at 2026-01-06
+
+  Place                Quantity         Basis  Acquired    Held           Value    Unrealized  Term   Note
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/wallet  4.99790000 ETH  8,810.59 USD  2025-04-08  8m29d  15,484.19 USD  6,673.60 USD  short
+  assets/wallet  0.01087589 ETH     17.41 USD  2025-05-01  8m5d       33.70 USD     16.29 USD  short
+  assets/wallet  0.01076454 ETH     27.02 USD  2025-06-01  7m5d       33.35 USD      6.33 USD  short
+  assets/wallet  0.00950374 ETH     23.68 USD  2025-07-01  6m5d       29.44 USD      5.76 USD  short
+  assets/wallet  0.00974570 ETH     35.97 USD  2025-08-01  5m5d       30.19 USD     -5.78 USD  short
+  assets/wallet  0.01006557 ETH     43.28 USD  2025-09-01  4m5d       31.18 USD    -12.10 USD  short
+  assets/wallet  0.00952977 ETH     39.40 USD  2025-10-01  3m5d       29.52 USD     -9.88 USD  short
+  assets/wallet  0.01175053 ETH     45.56 USD  2025-11-01  2m5d       36.40 USD     -9.16 USD  short
+  assets/wallet  0.01036270 ETH     31.08 USD  2025-12-01  1m5d       32.11 USD      1.03 USD  short
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                          9,073.99 USD                     15,740.08 USD  6,666.09 USD

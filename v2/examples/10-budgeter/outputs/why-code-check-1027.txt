@@ -1,0 +1,13 @@
+$ axiom why #check-1027 --today 2026-02-14
+
+Why #check-1027
+
+Flows
+  Date        Flow                                     Amount  State               From
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-10-02  assets/bank/checking → expenses/fun  240.00 USD  settled 2025-10-16  journal/2025/10.ax:6
+
+Events
+  Date        Event    From
+  ──────────────────────────────────────────
+  2025-10-16  settled  journal/2025/10.ax:32

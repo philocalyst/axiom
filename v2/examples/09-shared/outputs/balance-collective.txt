@@ -1,0 +1,9 @@
+$ axiom balance assets/bank/collective-checking --today 2026-01-06
+
+Balances at 2026-01-06
+
+  Place                         Balance
+  ─────────────────────────────────────
+  assets
+    bank
+      collective-checking  2,654.61 USD

@@ -1,0 +1,95 @@
+// Self-employment tax and the deductions around it, written as project laws
+// because no shipped system has them. Everything here is tax year 2025 and
+// simplified: no QBI wage/property limits (income is far below the threshold),
+// no state tax, no underpayment penalty.
+//
+// The laws count flows into tallies as they happen; one law at year end turns
+// the tallies into tax. Project laws that fire at year end run before the
+// systems' laws, which this file relies on: it must finish adjusting `agi` and
+// `federal-withheld` before `us` reads them.
+
+// ─── The year ───────────────────────────────────────────────────────────────
+
+/// Schedule C, Schedule SE and the adjustments to income, for the year that
+/// just ended (IRC §1401, §164(f), §162(l), §404(h), §199A).
+///
+/// Net earnings are receipts less expenses. Self-employment tax is 12.4% Social
+/// Security up to the wage base and 2.9% Medicare, on 92.35% of net earnings.
+/// Half of it, the SEP-IRA contribution (at most 20% of net earnings after
+/// that half, and 70,000 USD) and the health premiums come off income. The
+/// 20% qualified business income deduction is limited to 20% of taxable income
+/// before it.
+///
+/// Self-employment tax is paid with the same estimated payments as income tax,
+/// so what was paid first covers it, and only the rest is credited against
+/// income tax by `us`.
+law self-employment-year
+  each year
+  let net = tally(gross-receipts) - tally(business-expenses)
+  let earnings = max(net, empty) * 92.35%
+  let se-tax = min(earnings, ss-wage-base[year]) * 12.4% + earnings * 2.9%
+  let half = se-tax * 50%
+  let sep-cap = min((net - half) * 20%, sep-limit[year])
+  let sep = min(tally(sep-contributions), sep-cap)
+  let adjusted = net - half - tally(health-premiums) - sep
+  let before-qbi = max(tally(agi) + adjusted - standard-deduction[year, owner.filing], empty)
+  let qbi = min(max(adjusted, empty) * 20%, before-qbi * 20%)
+  let se-credit = min(tally(federal-withheld), se-tax)
+  count net as net-profit
+  count se-tax as se-tax
+  count half as se-deduction
+  count sep as sep-deduction
+  count qbi as qbi-deduction
+  count adjusted - qbi as agi
+  count -se-credit as federal-withheld
+  owe se-tax - se-credit to irs by date(year + 1, 4, 15) as self-employment-tax
+
+
+// ─── Estimated payments ─────────────────────────────────────────────────────
+
+// Form 1040-ES: four installments, each due on a fixed day. Paying 100% of last
+// year's tax in four equal parts is the safe harbor from the underpayment
+// penalty (IRC §6654(d)). A `by` law fires when the journal reaches its date and
+// reads what has been paid so far, so each one asks: is the running total of
+// payments at least its share of the safe harbor?
+
+/// First installment, due April 15 2025.
+law estimate-1-2025
+  by 2025-04-15
+  warn tally(federal-withheld) >= prior-year-tax[2025] * 25% "estimated tax: first installment short"
+
+/// Second installment. June 15 2025 fell on a Sunday, so it was due Monday the 16th.
+law estimate-2-2025
+  by 2025-06-16
+  warn tally(federal-withheld) >= prior-year-tax[2025] * 50% "estimated tax: second installment short"
+
+/// Third installment, due September 15 2025.
+law estimate-3-2025
+  by 2025-09-15
+  warn tally(federal-withheld) >= prior-year-tax[2025] * 75% "estimated tax: third installment short"
+
+/// Fourth installment, due January 15 2026.
+law estimate-4-2025
+  by 2026-01-15
+  warn tally(federal-withheld) >= prior-year-tax[2025] * 100% "estimated tax: fourth installment short"
+
+
+// ─── Figures ────────────────────────────────────────────────────────────────
+
+// The Social Security wage base (SSA, October 2024 and October 2025 releases).
+param ss-wage-base
+  2025 176_100 USD
+  2026 184_500 USD
+
+// The SEP-IRA dollar cap (IRC §415(c)).
+param sep-limit
+  2025 70_000 USD
+  2026 72_000 USD
+
+// The share of the home used for work.
+param office-share
+  2025 15%
+
+// Last year's total tax, from the 2024 return: the safe-harbor amount.
+param prior-year-tax
+  2025 9_200 USD

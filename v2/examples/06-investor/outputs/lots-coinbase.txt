@@ -1,0 +1,11 @@
+$ axiom lots coinbase --today 2026-01-06
+
+Lots at 2026-01-06
+
+  Place                  Quantity          Basis  Acquired    Held             Value    Unrealized  Term   Note
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/coinbase  0.03000000 BTC   1,952.05 USD  2024-10-14  1y2m23d   2,734.36 USD    782.31 USD  long
+  assets/coinbase  0.10000000 BTC   9,856.66 USD  2025-01-20  11m17d    9,114.53 USD   -742.13 USD  short
+  assets/coinbase  0.95668225 ETH   1,686.49 USD  2025-04-08  8m29d     2,963.94 USD  1,277.45 USD  short
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                            13,495.20 USD                       14,812.83 USD  1,317.63 USD

@@ -1,0 +1,36 @@
+$ axiom lots fidelity --today 2026-01-06
+
+Lots at 2026-01-06
+
+  Place                 Quantity          Basis  Acquired    Held             Value     Unrealized  Term   Note
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/fidelity    1.0691 VTI      287.13 USD  2024-09-05  1y4m1d      356.87 USD      69.74 USD  long
+  assets/fidelity    5.4108 VTI    1,499.98 USD  2024-11-05  1y2m1d    1,806.13 USD     306.15 USD  long
+  assets/fidelity    5.1727 VTI    1,499.98 USD  2024-12-05  1y1m1d    1,726.65 USD     226.67 USD  long
+  assets/fidelity    0.0649 VTI       18.61 USD  2024-12-26  1y11d        21.66 USD       3.05 USD  long
+  assets/fidelity    5.2237 VTI    1,499.99 USD  2025-01-05  1y1d      1,743.67 USD     243.68 USD  long
+  assets/fidelity    5.2048 VTI    1,499.97 USD  2025-02-05  11m1d     1,737.36 USD     237.39 USD  short
+  assets/fidelity    5.3086 VTI    1,500.00 USD  2025-03-05  10m1d     1,772.01 USD     272.01 USD  short
+  assets/fidelity    0.1177 VTI       32.19 USD  2025-03-26  9m11d        39.29 USD       7.10 USD  short
+  assets/fidelity    5.5076 VTI    1,499.99 USD  2025-04-05  9m1d      1,838.44 USD     338.45 USD  short
+  assets/fidelity    5.4332 VTI    1,500.00 USD  2025-05-05  8m1d      1,813.60 USD     313.60 USD  short
+  assets/fidelity    5.1544 VTI    1,499.98 USD  2025-06-05  7m1d      1,720.54 USD     220.56 USD  short
+  assets/fidelity    0.1539 VTI       46.15 USD  2025-06-26  6m11d        51.37 USD       5.22 USD  short
+  assets/fidelity    4.9804 VTI    1,500.00 USD  2025-07-05  6m1d      1,662.46 USD     162.46 USD  short
+  assets/fidelity    4.8340 VTI    1,499.99 USD  2025-08-05  5m1d      1,613.59 USD     113.60 USD  short
+  assets/fidelity    4.7690 VTI    1,499.99 USD  2025-09-05  4m1d      1,591.89 USD      91.90 USD  short
+  assets/fidelity    0.1831 VTI       58.81 USD  2025-09-26  3m11d        61.12 USD       2.31 USD  short
+  assets/fidelity    1.1944 VTI      386.70 USD  2025-10-05  3m1d        398.69 USD      11.99 USD  short
+  assets/fidelity    4.5096 VTI    1,499.98 USD  2025-12-05  1m1d      1,505.30 USD       5.32 USD  short
+  assets/fidelity    0.1660 VTI       55.27 USD  2025-12-23  14d          55.41 USD       0.14 USD  short
+  assets/fidelity   37.7871 VXUS   2,499.99 USD  2025-03-12  9m25d     3,004.07 USD     504.08 USD  short
+  assets/fidelity   35.2907 VXUS   2,499.99 USD  2025-06-16  6m21d     2,805.61 USD     305.62 USD  short
+  assets/fidelity   33.3689 VXUS   2,500.00 USD  2025-09-16  3m21d     2,652.83 USD     152.83 USD  short
+  assets/fidelity  493.8271 SCHH  10,400.00 USD  2025-12-16  21d      10,320.99 USD     -79.01 USD  short
+  assets/fidelity    6.6511 MSFT   2,859.97 USD  2024-10-08  1y2m29d   3,219.13 USD     359.16 USD  long
+  assets/fidelity    9.6753 MSFT   3,999.96 USD  2025-02-04  11m2d     4,682.85 USD     682.89 USD  short
+  assets/fidelity    9.7153 UNH    4,699.97 USD  2025-03-11  9m26d     3,107.05 USD  -1,592.92 USD  short
+  assets/fidelity   10.0000 UNH    5,000.70 USD  2025-06-10  6m27d     3,198.10 USD  -1,802.60 USD  short
+  assets/fidelity   41.9695 FAST   1,683.40 USD  2024-12-10  1y27d     1,766.92 USD      83.52 USD  long
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                           55,028.69 USD                       56,273.60 USD   1,244.91 USD

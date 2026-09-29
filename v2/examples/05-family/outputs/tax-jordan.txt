@@ -1,0 +1,24 @@
+$ axiom tax 2025 --entity jordan --today 2026-01-05
+
+Taxes 2025 for jordan
+
+Counted
+  Tally                         Amount  From
+  ───────────────────────────────────────────────────────────
+  us
+    wages                 5,846.36 USD  26 sources
+  ───────────────────────────────────────────────────────────
+    us/401k
+      elective-deferrals  5,846.36 USD  26 sources
+      pretax              5,846.36 USD  26 sources
+      agi                 1,685.99 USD  53 sources
+      distributions       1,685.99 USD  journal/2025/03.ax:93
+
+Owed
+  Owed                          To   Due             Amount  From
+  ────────────────────────────────────────────────────────────────────────────────
+    us/401k
+      early-withdrawal-penalty  irs  2025-03-31  168.60 USD  journal/2025/03.ax:93
+  ────────────────────────────────────────────────────────────────────────────────
+  Total owed                                     168.60 USD
+  · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

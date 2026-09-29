@@ -1,0 +1,17 @@
+$ axiom register wallet --today 2026-01-06
+
+Register: assets/wallet
+
+  Date        With                   Payee  Note           Amount         Balance
+  ───────────────────────────────────────────────────────────────────────────────
+  2025-04-10  assets/coinbase                      6.00000000 ETH  6.00000000 ETH
+  2025-04-10  expenses/network-fees               -0.00210000 ETH  5.99790000 ETH
+  2025-05-01  income/staking                       0.01087589 ETH  6.00877589 ETH
+  2025-06-01  income/staking                       0.01076454 ETH  6.01954043 ETH
+  2025-07-01  income/staking                       0.00950374 ETH  6.02904417 ETH
+  2025-08-01  income/staking                       0.00974570 ETH  6.03878987 ETH
+  2025-09-01  income/staking                       0.01006557 ETH  6.04885544 ETH
+  2025-10-01  income/staking                       0.00952977 ETH  6.05838521 ETH
+  2025-11-01  income/staking                       0.01175053 ETH  6.07013574 ETH
+  2025-12-01  income/staking                       0.01036270 ETH  6.08049844 ETH
+  2025-12-09  assets/bank/checking                -1.00000000 ETH  5.08049844 ETH

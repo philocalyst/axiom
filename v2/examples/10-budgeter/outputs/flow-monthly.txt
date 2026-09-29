@@ -1,0 +1,35 @@
+$ axiom flow --by month --today 2026-02-14
+
+Income and spending
+
+  Place                   2025-09       2025-10       2025-11       2025-12       2026-01       2026-02          Total
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  income             4,615.38 USD  6,923.07 USD  4,615.38 USD  4,615.38 USD  4,615.38 USD  2,307.69 USD  27,692.28 USD
+    salary           4,615.38 USD  6,923.07 USD  4,615.38 USD  4,615.38 USD  4,615.38 USD  2,307.69 USD  27,692.28 USD
+  expenses           3,353.34 USD  4,038.46 USD  3,515.22 USD  4,976.23 USD  3,739.88 USD  2,355.41 USD  21,978.54 USD
+    car                285.40 USD    285.40 USD    285.40 USD    285.40 USD    285.40 USD    285.40 USD   1,712.40 USD
+    car-repair                                                                 486.25 USD                   486.25 USD
+    clothing            47.60 USD     24.29 USD                   43.23 USD                                 115.12 USD
+    dining             134.15 USD    120.86 USD    163.17 USD    160.00 USD    130.19 USD     50.26 USD     758.63 USD
+    fees                                            12.00 USD                                                12.00 USD
+    fun                 99.98 USD    323.02 USD     96.07 USD    107.06 USD    103.09 USD     29.00 USD     758.22 USD
+    gifts                                                        460.60 USD                                 460.60 USD
+    groceries          264.69 USD    263.41 USD    273.90 USD    240.50 USD    228.52 USD    150.35 USD   1,421.37 USD
+    health             120.00 USD    180.00 USD    120.00 USD    120.00 USD    120.00 USD     60.00 USD     720.00 USD
+    insurance                                                  1,140.00 USD                               1,140.00 USD
+    medical                                         42.40 USD                                                42.40 USD
+    personal-care                     35.00 USD                   35.00 USD                   35.00 USD     105.00 USD
+    phone               40.00 USD     40.00 USD     40.00 USD     40.00 USD     40.00 USD     40.00 USD     240.00 USD
+    rent             1,150.00 USD  1,150.00 USD  1,150.00 USD  1,150.00 USD  1,150.00 USD  1,150.00 USD   6,900.00 USD
+    student-loan       190.00 USD    190.00 USD    190.00 USD    190.00 USD    190.00 USD                   950.00 USD
+    subscriptions       71.45 USD     71.45 USD    192.46 USD     53.46 USD     53.46 USD     27.48 USD     469.76 USD
+    taxes              805.08 USD  1,207.62 USD    805.08 USD    805.08 USD    805.08 USD    402.54 USD   4,830.48 USD
+      federal          452.00 USD    678.00 USD    452.00 USD    452.00 USD    452.00 USD    226.00 USD   2,712.00 USD
+      payroll          353.08 USD    529.62 USD    353.08 USD    353.08 USD    353.08 USD    176.54 USD   2,118.48 USD
+    transport           83.15 USD     85.57 USD     82.90 USD     84.06 USD     86.05 USD     63.54 USD     485.27 USD
+    utilities           61.84 USD     61.84 USD     61.84 USD     61.84 USD     61.84 USD     61.84 USD     371.04 USD
+    unexplained (?)                  -20.00 USD                   14.20 USD                                  -5.80 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total spending     3,353.34 USD  4,018.46 USD  3,515.22 USD  4,990.43 USD  3,739.88 USD  2,355.41 USD  21,972.74 USD
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Net                1,262.04 USD  2,904.61 USD  1,100.16 USD   -375.05 USD    875.50 USD    -47.72 USD   5,719.54 USD

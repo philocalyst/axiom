@@ -1,0 +1,13 @@
+$ axiom register car-fund --today 2026-02-14
+
+Register: assets/funds/car-fund
+
+  Date        With                  Payee        Note       Amount     Balance
+  ────────────────────────────────────────────────────────────────────────────
+  2025-09-06  assets/bank/checking                      100.00 USD  100.00 USD
+  2025-10-06  assets/bank/checking                      100.00 USD  200.00 USD
+  2025-11-06  assets/bank/checking                      100.00 USD  300.00 USD
+  2025-12-06  assets/bank/checking                      100.00 USD  400.00 USD
+  2026-01-06  assets/bank/checking                      100.00 USD  500.00 USD
+  2026-01-15  expenses/car-repair   kwik-brakes        -486.25 USD   13.75 USD
+  2026-02-06  assets/bank/checking                      100.00 USD  113.75 USD

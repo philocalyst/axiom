@@ -1,0 +1,9 @@
+$ axiom why se-tax --today 2026-02-10
+
+Why se-tax
+
+Effects
+  Date        Owner        Amount  Owed to  From
+  ────────────────────────────────────────────────────
+  2025-12-31  me     8,627.14 USD           period end
+  · Effects from a period ending were computed from the tallies counted during it.

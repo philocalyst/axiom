@@ -1,0 +1,31 @@
+$ axiom register brightwave --today 2026-02-10
+
+Register: assets/receivable/brightwave
+
+  Date        With                           Payee  Note                  Amount       Balance
+  ────────────────────────────────────────────────────────────────────────────────────────────
+  2025-01-02  income/design                         #inv-2025-b01   3,200.00 USD  3,200.00 USD
+  2025-02-03  income/design                         #inv-2025-b02   3,200.00 USD  6,400.00 USD
+  2025-02-12  assets/bank/business-checking         #inv-2025-b01  -3,200.00 USD  3,200.00 USD
+  2025-03-03  income/design                         #inv-2025-b03   3,200.00 USD  6,400.00 USD
+  2025-03-14  assets/bank/business-checking         #inv-2025-b02  -3,200.00 USD  3,200.00 USD
+  2025-04-01  income/design                         #inv-2025-b04   3,200.00 USD  6,400.00 USD
+  2025-04-11  assets/bank/business-checking         #inv-2025-b03  -3,200.00 USD  3,200.00 USD
+  2025-05-01  income/design                         #inv-2025-b05   3,200.00 USD  6,400.00 USD
+  2025-05-13  assets/bank/business-checking         #inv-2025-b04  -3,200.00 USD  3,200.00 USD
+  2025-06-02  income/design                         #inv-2025-b06   3,200.00 USD  6,400.00 USD
+  2025-06-10  assets/bank/business-checking         #inv-2025-b05  -3,200.00 USD  3,200.00 USD
+  2025-07-01  income/design                         #inv-2025-b07   3,200.00 USD  6,400.00 USD
+  2025-07-15  assets/bank/business-checking         #inv-2025-b06  -3,200.00 USD  3,200.00 USD
+  2025-08-01  income/design                         #inv-2025-b08   3,200.00 USD  6,400.00 USD
+  2025-08-12  assets/bank/business-checking         #inv-2025-b07  -3,200.00 USD  3,200.00 USD
+  2025-09-02  income/design                         #inv-2025-b09   3,200.00 USD  6,400.00 USD
+  2025-09-16  assets/bank/business-checking         #inv-2025-b08  -3,200.00 USD  3,200.00 USD
+  2025-10-01  income/design                         #inv-2025-b10   3,200.00 USD  6,400.00 USD
+  2025-10-14  assets/bank/business-checking         #inv-2025-b09  -3,200.00 USD  3,200.00 USD
+  2025-11-03  income/design                         #inv-2025-b11   3,200.00 USD  6,400.00 USD
+  2025-11-12  assets/bank/business-checking         #inv-2025-b10  -3,200.00 USD  3,200.00 USD
+  2025-12-01  income/design                         #inv-2025-b12   3,200.00 USD  6,400.00 USD
+  2025-12-10  assets/bank/business-checking         #inv-2025-b11  -3,200.00 USD  3,200.00 USD
+  2026-01-02  income/design                         #inv-2026-b01   3,200.00 USD  6,400.00 USD
+  2026-01-13  assets/bank/business-checking         #inv-2025-b12  -3,200.00 USD  3,200.00 USD

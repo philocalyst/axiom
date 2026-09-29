@@ -1,0 +1,63 @@
+$ axiom register us-checking --today 2026-01-06
+
+Register: assets/bank/us-checking
+
+  Date        With                      Payee        Note         Amount        Balance
+  ─────────────────────────────────────────────────────────────────────────────────────
+  2025-01-01  equity/opening                               18,420.55 USD  18,420.55 USD
+  2025-01-01  expenses/sf-rent          landlord-sf        -3,400.00 USD  15,020.55 USD
+  2025-01-05  liabilities/student-loan  mohela               -302.52 USD  14,718.03 USD
+  2025-01-05  expenses/loan-interest    mohela               -117.48 USD  14,600.55 USD
+  2025-01-20  liabilities/visa                             -1,284.19 USD  13,316.36 USD
+  2025-01-31  income/salary-us          acme                6,343.80 USD  19,660.16 USD
+  2025-02-01  expenses/sf-rent          landlord-sf        -3,400.00 USD  16,260.16 USD
+  2025-02-05  liabilities/student-loan  mohela               -303.66 USD  15,956.50 USD
+  2025-02-05  expenses/loan-interest    mohela               -116.34 USD  15,840.16 USD
+  2025-02-20  liabilities/visa                               -842.35 USD  14,997.81 USD
+  2025-02-28  income/salary-us          acme                6,343.80 USD  21,341.61 USD
+  2025-03-01  expenses/sf-rent          landlord-sf        -3,400.00 USD  17,941.61 USD
+  2025-03-05  liabilities/student-loan  mohela               -304.81 USD  17,636.80 USD
+  2025-03-05  expenses/loan-interest    mohela               -115.19 USD  17,521.61 USD
+  2025-03-20  liabilities/visa                               -726.94 USD  16,794.67 USD
+  2025-03-31  income/salary-us          acme                6,343.80 USD  23,138.47 USD
+  2025-04-01  expenses/sf-rent          landlord-sf        -3,400.00 USD  19,738.47 USD
+  2025-04-05  liabilities/student-loan  mohela               -305.96 USD  19,432.51 USD
+  2025-04-05  expenses/loan-interest    mohela               -114.04 USD  19,318.47 USD
+  2025-04-20  liabilities/visa                               -886.34 USD  18,432.13 USD
+  2025-04-30  income/salary-us          acme                6,343.80 USD  24,775.93 USD
+  2025-05-01  expenses/sf-rent          landlord-sf        -3,400.00 USD  21,375.93 USD
+  2025-05-05  liabilities/student-loan  mohela               -307.11 USD  21,068.82 USD
+  2025-05-05  expenses/loan-interest    mohela               -112.89 USD  20,955.93 USD
+  2025-05-20  liabilities/visa                               -869.54 USD  20,086.39 USD
+  2025-05-30  income/salary-us          acme                6,343.80 USD  26,430.19 USD
+  2025-06-01  expenses/sf-rent          landlord-sf        -3,400.00 USD  23,030.19 USD
+  2025-06-05  liabilities/student-loan  mohela               -308.27 USD  22,721.92 USD
+  2025-06-05  expenses/loan-interest    mohela               -111.73 USD  22,610.19 USD
+  2025-06-12  expenses/moving           sea-freight        -2,150.00 USD  20,460.19 USD
+  2025-06-20  liabilities/visa                               -945.82 USD  19,514.37 USD
+  2025-06-27  expenses/fx-fees                                -55.10 USD  19,459.27 USD
+  2025-06-27  assets/de/girokonto                          -9,444.90 USD  10,014.37 USD
+  2025-06-30  income/salary-us          acme                6,343.80 USD  16,358.17 USD
+  2025-07-05  liabilities/student-loan  mohela               -309.44 USD  16,048.73 USD
+  2025-07-05  expenses/loan-interest    mohela               -110.56 USD  15,938.17 USD
+  2025-07-20  liabilities/visa                             -2,200.13 USD  13,738.04 USD
+  2025-08-05  liabilities/student-loan  mohela               -310.61 USD  13,427.43 USD
+  2025-08-05  expenses/loan-interest    mohela               -109.39 USD  13,318.04 USD
+  2025-08-08  assets/de/girokonto                           1,027.63 USD  14,345.67 USD
+  2025-08-20  liabilities/visa                                -53.48 USD  14,292.19 USD
+  2025-09-05  liabilities/student-loan  mohela               -311.78 USD  13,980.41 USD
+  2025-09-05  expenses/loan-interest    mohela               -108.22 USD  13,872.19 USD
+  2025-09-08  assets/de/girokonto                           1,048.85 USD  14,921.04 USD
+  2025-09-20  liabilities/visa                                -53.48 USD  14,867.56 USD
+  2025-10-05  liabilities/student-loan  mohela               -312.96 USD  14,554.60 USD
+  2025-10-05  expenses/loan-interest    mohela               -107.04 USD  14,447.56 USD
+  2025-10-08  assets/de/girokonto                           1,044.46 USD  15,492.02 USD
+  2025-10-20  liabilities/visa                                -53.48 USD  15,438.54 USD
+  2025-11-05  liabilities/student-loan  mohela               -314.14 USD  15,124.40 USD
+  2025-11-05  expenses/loan-interest    mohela               -105.86 USD  15,018.54 USD
+  2025-11-08  assets/de/girokonto                           1,034.26 USD  16,052.80 USD
+  2025-11-20  liabilities/visa                             -1,014.74 USD  15,038.06 USD
+  2025-12-05  liabilities/student-loan  mohela               -315.32 USD  14,722.74 USD
+  2025-12-05  expenses/loan-interest    mohela               -104.68 USD  14,618.06 USD
+  2025-12-08  assets/de/girokonto                           1,040.17 USD  15,658.23 USD
+  2025-12-20  liabilities/visa                                -53.48 USD  15,604.75 USD

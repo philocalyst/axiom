@@ -1,0 +1,83 @@
+$ axiom why fidelity --today 2026-01-06
+
+Why assets/fidelity
+
+Composition
+  Holds       Quantity   Plain money  Parcels
+  ───────────────────────────────────────────
+  VTI     64.4579 VTI                      19
+  VXUS   106.4467 VXUS                      3
+  SCHH   493.8271 SCHH                      1
+  MSFT    16.3264 MSFT                      2
+  UNH     19.7153 UNH                       2
+  FAST    41.9695 FAST                      1
+  USD    2,738.20 USD   2,738.20 USD
+
+Parcels
+  Place                 Quantity          Basis  Acquired    Tied to  From
+  ─────────────────────────────────────────────────────────────────────────────────────────
+  assets/fidelity    1.0691 VTI      287.13 USD  2024-09-05           journal/2024/09.ax:10
+  assets/fidelity    5.4108 VTI    1,499.98 USD  2024-11-05           journal/2024/11.ax:3
+  assets/fidelity    5.1727 VTI    1,499.98 USD  2024-12-05           journal/2024/12.ax:2
+  assets/fidelity    0.0649 VTI       18.61 USD  2024-12-26           journal/2024/12.ax:15
+  assets/fidelity    5.2237 VTI    1,499.99 USD  2025-01-05           journal/2025/01.ax:2
+  assets/fidelity    5.2048 VTI    1,499.97 USD  2025-02-05           journal/2025/02.ax:6
+  assets/fidelity    5.3086 VTI    1,500.00 USD  2025-03-05           journal/2025/03.ax:7
+  assets/fidelity    0.1177 VTI       32.19 USD  2025-03-26           journal/2025/03.ax:19
+  assets/fidelity    5.5076 VTI    1,499.99 USD  2025-04-05           journal/2025/04.ax:3
+  assets/fidelity    5.4332 VTI    1,500.00 USD  2025-05-05           journal/2025/05.ax:5
+  assets/fidelity    5.1544 VTI    1,499.98 USD  2025-06-05           journal/2025/06.ax:3
+  assets/fidelity    0.1539 VTI       46.15 USD  2025-06-26           journal/2025/06.ax:20
+  assets/fidelity    4.9804 VTI    1,500.00 USD  2025-07-05           journal/2025/07.ax:3
+  assets/fidelity    4.8340 VTI    1,499.99 USD  2025-08-05           journal/2025/08.ax:3
+  assets/fidelity    4.7690 VTI    1,499.99 USD  2025-09-05           journal/2025/09.ax:4
+  assets/fidelity    0.1831 VTI       58.81 USD  2025-09-26           journal/2025/09.ax:16
+  assets/fidelity    1.1944 VTI      386.70 USD  2025-10-05           journal/2025/10.ax:3
+  assets/fidelity    4.5096 VTI    1,499.98 USD  2025-12-05           journal/2025/12.ax:9
+  assets/fidelity    0.1660 VTI       55.27 USD  2025-12-23           journal/2025/12.ax:23
+  assets/fidelity   37.7871 VXUS   2,499.99 USD  2025-03-12           journal/2025/03.ax:13
+  assets/fidelity   35.2907 VXUS   2,499.99 USD  2025-06-16           journal/2025/06.ax:16
+  assets/fidelity   33.3689 VXUS   2,500.00 USD  2025-09-16           journal/2025/09.ax:12
+  assets/fidelity  493.8271 SCHH  10,400.00 USD  2025-12-16           journal/2025/12.ax:20
+  assets/fidelity    6.6511 MSFT   2,859.97 USD  2024-10-08           journal/2024/10.ax:5
+  assets/fidelity    9.6753 MSFT   3,999.96 USD  2025-02-04           journal/2025/02.ax:5
+  assets/fidelity    9.7153 UNH    4,699.97 USD  2025-03-11           journal/2025/03.ax:11
+  assets/fidelity   10.0000 UNH    5,000.70 USD  2025-06-10           journal/2025/06.ax:12
+  assets/fidelity   41.9695 FAST   1,683.40 USD  2024-12-10           journal/2024/12.ax:6
+
+Governed by
+  Law                     When     Governs                                     Explains                                                                    Written
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  count-wages             on in    everyone living under us, and all they own  Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a   us.ax:58
+  count-interest          on in    everyone living under us, and all they own  Interest is ordinary income in the year it is earned (IRC §61(a)(4)),       us.ax:66
+  count-dividends         on in    everyone living under us, and all they own  Dividends are income in the year they are paid (IRC §61(a)(7)), except      us.ax:76
+  credit-withholding      on in    everyone living under us, and all they own  Tax withheld from pay, or paid in installments, is credited against the     us.ax:108
+  count-staking           on in    everything in this book                     Staking rewards are ordinary income at their value on the day they arrive   tax.ax:5
+  disallow-wash-loss      on in    everything in this book                     A wash sale (IRC §1091): a loss on a sale is disallowed when substantially  tax.ax:17
+  count-short-term-gains  on gain  everyone living under us, and all they own  A gain on something held for a year or less is taxed as ordinary income     us.ax:86
+  count-long-term-gains   on gain  everyone living under us, and all they own  A gain on something held for more than a year is taxed at the lower         us.ax:97
+
+Recent flows
+  Date        With                  Payee  Note          Amount        Balance
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-04  opening balance                                     67.7823 VTI
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-04  opening balance                                    106.4467 VXUS
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-04  opening balance                                    120.0480 VNQ
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-04  opening balance                                     16.3264 MSFT
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-04  opening balance                                      9.7153 UNH
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-04  opening balance                                     41.9695 FAST
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-04  opening balance                                    7,449.00 USD
+  2025-12-04  assets/bank/checking                 -8.0000 VTI    59.7823 VTI
+  2025-12-05  assets/bank/checking                  4.5096 VTI    64.2919 VTI
+  2025-12-11  income/dividends                       13.55 USD   7,462.55 USD
+  2025-12-16  assets/bank/checking               -120.0480 VNQ     0.0000 VNQ
+  2025-12-16  assets/bank/checking                493.8271 SCHH  493.8271 SCHH
+  2025-12-23  income/dividends                      0.1660 VTI    64.4579 VTI
+  2025-12-23  income/dividends                        0.02 USD   7,462.57 USD
+  2025-12-31  income/interest                       276.33 USD   7,738.90 USD

@@ -1,0 +1,47 @@
+$ axiom flow --by year --today 2026-02-10
+
+Income and spending
+
+  Place                        2025           2026          Total
+  ───────────────────────────────────────────────────────────────
+  income              87,461.93 USD   3,555.73 USD  91,017.66 USD
+    design            84,400.00 USD   3,200.00 USD  87,600.00 USD
+    growth             2,684.41 USD     319.38 USD   3,003.79 USD
+    interest             290.12 USD      36.35 USD     326.47 USD
+    rewards               87.40 USD                     87.40 USD
+    realized gains ≈     385.35 USD                    385.35 USD
+  ───────────────────────────────────────────────────────────────
+  Total income        87,847.28 USD   3,555.73 USD  91,403.01 USD
+  ───────────────────────────────────────────────────────────────
+  expenses            55,985.22 USD   5,581.22 USD  61,566.44 USD
+    bad-debt           3,800.00 USD                  3,800.00 USD
+    business           8,840.14 USD     221.43 USD   9,061.57 USD
+      education          948.00 USD                    948.00 USD
+      equipment        3,148.00 USD                  3,148.00 USD
+      fees               902.60 USD                    902.60 USD
+      fonts              240.00 USD                    240.00 USD
+      hosting            111.76 USD      24.26 USD     136.02 USD
+      insurance          709.48 USD      70.52 USD     780.00 USD
+      printing           297.15 USD                    297.15 USD
+      software         1,464.37 USD     126.65 USD   1,591.02 USD
+      travel           1,018.78 USD                  1,018.78 USD
+    food               5,867.93 USD     453.80 USD   6,321.73 USD
+      dining           1,252.34 USD     106.26 USD   1,358.60 USD
+      groceries        4,615.59 USD     347.54 USD   4,963.13 USD
+    health-insurance   4,944.00 USD     425.00 USD   5,369.00 USD
+    home              23,088.20 USD   1,948.20 USD  25,036.40 USD
+      insurance          264.00 USD      22.00 USD     286.00 USD
+      internet           960.00 USD      80.00 USD   1,040.00 USD
+      rent            21,000.00 USD   1,750.00 USD  22,750.00 USD
+      utilities          864.20 USD      96.20 USD     960.40 USD
+    meals                363.25 USD                    363.25 USD
+    mileage              585.20 USD      31.90 USD     617.10 USD
+    phone                768.00 USD      64.00 USD     832.00 USD
+    taxes              7,200.00 USD   2,400.00 USD   9,600.00 USD
+      federal          7,200.00 USD   2,400.00 USD   9,600.00 USD
+    transport            528.50 USD      36.89 USD     565.39 USD
+  ───────────────────────────────────────────────────────────────
+  Net                 31,862.06 USD  -2,025.49 USD  29,836.57 USD
+  · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
+    them.
+  · Flows written over a date range are recognized a little each day across the periods they cover.

@@ -1,0 +1,273 @@
+// Kinds, commodities, places and people of the household. Laws that only apply
+// to one place sit with it; the year-end laws are in laws.ax.
+
+// ─── Kinds this project needs ───────────────────────────────────────────────
+
+/// A person who files a tax return: `children` is what the child tax credit
+/// counts.
+kind taxpayer : person
+  has children number
+
+/// A dependent-care FSA (IRC §129): pre-tax pay set aside for care of a child
+/// under 13, capped per household. What pays a place of kind `childcare` comes
+/// out tax-free; anything else is income.
+kind dependent-care-fsa : tax-deferred
+  liquidity 5d
+
+  /// Employer-provided dependent-care benefits are excluded from income up to
+  /// 5,000 USD for the household (IRC §129(a)(2)). This deferral took the year
+  /// over the cap. Lower the election at the next open enrollment, or the excess
+  /// is wages.
+  law contribution-limit
+    on in
+    when from is wages
+    count amount as dcfsa-contributions
+    require tally(dcfsa-contributions) <= dependent-care-limit[year] "dependent-care FSA over the yearly limit"
+
+  /// A deferral is pay you chose not to receive: not taxed this year.
+  law pretax-deferral
+    on in
+    when from is wages
+    count amount as pretax
+    count -amount as agi
+
+  /// What the FSA pays for anything but care of the child is income.
+  law nonqualified-income
+    on gain
+    when gain > empty
+    when not to is childcare
+    count gain as distributions
+    count gain as agi
+
+/// Care that a dependent-care FSA may pay.
+kind childcare : expense
+
+/// Premiums taken from pay before tax (IRC §125). Wages counted the gross; this
+/// takes the premium back out of income.
+kind pretax-benefit : expense
+  law exclude-premium
+    on in
+    when from is wages
+    count amount as pretax
+    count -amount as agi
+
+commodity HOME : real-estate
+  name "the house"
+  precision 0
+
+commodity CRV : good
+  name "the car"
+  precision 0
+
+
+// ─── Cash and everyday accounts ─────────────────────────────────────────────
+
+/// The joint checking account. It belongs to both adults; Axiom can name only
+/// one owner, so it is `me`'s (wishes.ax.txt).
+account assets/bank/joint-checking : bank
+
+account assets/bank/joint-savings : bank
+
+/// Money the servicer holds to pay property tax and insurance on the house.
+account assets/escrow
+
+
+// ─── Retirement, health and education accounts ──────────────────────────────
+
+account assets/retirement/alex-401k : 401k
+  employer acme
+
+account assets/retirement/jordan-401k : 401k
+  owner    jordan
+  employer bluefin
+
+/// The family HSA: 8,550 USD for 2025, employer money included.
+account assets/hsa : hsa
+  coverage family
+
+account assets/dcfsa : dependent-care-fsa
+
+/// Riley's 529 plan. What was put in is its basis, and the growth has none.
+account assets/education/riley-529 : 529-plan
+  beneficiary riley
+
+
+// ─── Things owned ───────────────────────────────────────────────────────────
+
+/// The house, one unit whose value is a price in prices/home.ax. Its cost is its
+/// basis.
+account assets/house : property
+  holds HOME
+
+account assets/vehicle/crv : vehicle
+  holds CRV
+
+
+// ─── Debts ──────────────────────────────────────────────────────────────────
+
+/// 420,000 USD at 5.875% for thirty years, first payment 2023-08-01.
+account liabilities/mortgage : mortgage
+  rate     5.875%
+  maturity 2053-07-01
+
+/// 32,000 USD at 4.9% for sixty months, first payment 2023-07-05.
+account liabilities/car-loan : loan
+  rate     4.9%
+  maturity 2028-06-05
+
+/// One card for everyday spending, paid in full on the 25th.
+account liabilities/card : credit-card
+
+
+// ─── Income and equity ──────────────────────────────────────────────────────
+
+account income/alex-salary   : wages
+account income/jordan-salary : wages
+account income/interest      : interest
+account income/employer-match
+account income/employer-hsa
+account income/gifts
+account income/growth : gains
+account income/rewards
+account equity/opening
+
+
+// ─── Expenses ───────────────────────────────────────────────────────────────
+
+/// Groceries and eating out.
+account expenses/food
+  budget 1_300 USD monthly
+
+account expenses/food/groceries
+account expenses/food/dining
+
+account expenses/housing/mortgage-interest
+  law itemized-interest
+    on in
+    count amount as mortgage-interest
+
+account expenses/housing/property-tax
+  law itemized-property-tax
+    on in
+    count amount as salt
+
+account expenses/housing/home-insurance
+account expenses/utilities
+account expenses/subscriptions
+account expenses/shopping
+account expenses/kids
+account expenses/travel
+account expenses/fuel
+account expenses/auto/insurance
+account expenses/auto/loan-interest
+account expenses/auto/repairs
+
+account expenses/charity
+  law itemized-charity
+    on in
+    count amount as charity
+
+/// Care for Riley: a place of kind `childcare`, so the FSA may pay it.
+account expenses/childcare : childcare
+
+/// School: a place of kind `education`, so the 529 plan may pay it.
+account expenses/tuition : education
+
+/// Medical costs: a place of kind `medical`, so the HSA may pay them.
+account expenses/medical : medical
+
+/// Medical, dental and vision premiums, taken from pay before tax.
+account expenses/health-premium : pretax-benefit
+
+/// Tax withheld from pay. Places of a kind `us` and `us/ca` know count what
+/// arrives as tax already paid.
+account expenses/taxes/federal : federal-tax
+account expenses/taxes/state   : ca-tax
+account expenses/taxes/payroll
+/// California SDI is deductible as a state tax.
+account expenses/taxes/sdi
+  law itemized-sdi
+    on in
+    count amount as salt
+
+/// The balance due on last year's California return, paid in April: state
+/// income tax paid in 2025, deductible as such.
+account expenses/taxes/state-prior
+  law itemized-state
+    on in
+    count amount as salt
+
+
+// ─── Employers and others ───────────────────────────────────────────────────
+
+entity acme : employer
+  via income/alex-salary
+entity bluefin : employer
+  via income/jordan-salary
+
+/// The servicer. A payment to it is split into principal, interest and escrow.
+entity lender : org
+  via liabilities/mortgage
+entity honda-finance : org
+  via liabilities/car-loan
+
+entity county : org
+  via expenses/housing/property-tax
+entity homeguard : org
+  via expenses/housing/home-insurance
+entity costco : org
+  via expenses/food/groceries
+entity trader-joes : org
+  via expenses/food/groceries
+entity shell : org
+  via expenses/fuel
+entity amazon : org
+  via expenses/shopping
+entity target : org
+  via expenses/kids
+entity pge : org
+  via expenses/utilities
+entity comcast : org
+  via expenses/utilities
+entity verizon : org
+  via expenses/utilities
+entity netflix : org
+  via expenses/subscriptions
+entity spotify : org
+  via expenses/subscriptions
+entity statefarm : org
+  via expenses/auto/insurance
+entity brake-shop : org
+  via expenses/auto/repairs
+entity st-annes-parish : org
+  via expenses/charity
+entity food-bank : org
+  via expenses/charity
+entity little-sprouts : org
+  via expenses/childcare
+entity kids-club : org
+  via expenses/childcare
+entity st-annes-school : org
+  via expenses/tuition
+entity dr-chen : org
+  via expenses/medical
+entity smile-dental : org
+  via expenses/medical
+entity cvs : org
+  via expenses/medical
+entity er-clinic : org
+  via expenses/medical
+
+/// Riley's grandmother. Money from her lands in the 529 plan.
+entity grandma : org
+  via income/gifts
+
+
+// ─── Codes ──────────────────────────────────────────────────────────────────
+
+/// A payment to the servicer, tied to its statement.
+code mortgage-*
+  on mortgage
+
+code 529-*
+  on 529-plan

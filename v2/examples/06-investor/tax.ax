@@ -1,0 +1,21 @@
+// Laws for an investor that the shipped `us` lacks.
+
+/// Staking rewards are ordinary income at their value on the day they arrive
+/// (Rev. Rul. 2023-14), and the reward's basis is that same value.
+law count-staking
+  on in
+  when from is staking-income
+  count value(amount, USD) as other-income
+  count value(amount, USD) as agi
+
+/// A wash sale (IRC §1091): a loss on a sale is disallowed when substantially
+/// identical shares are bought within 30 days either side, and it is added to
+/// the basis of the shares bought. Axiom cannot see the 30-day window, so the
+/// loss is parked by hand in `equity/wash-sale` and released into the new lot's
+/// cost when the replacement is bought. `us` counted the whole loss when the
+/// shares were sold; this law adds the disallowed part back.
+law disallow-wash-loss
+  on in
+  when from is wash-adjustment
+  count amount as short-term-gains
+  count amount as agi

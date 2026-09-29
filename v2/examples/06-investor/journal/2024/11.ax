@@ -1,0 +1,29 @@
+2024-11-01 checking -> rent 2_650 USD / landlord
+2024-11-02 savings -> checking 20_000 USD
+2024-11-05 checking -> fidelity 5.4108 VTI @ 277.22 USD
+2024-11-09 checking -> utilities 131.82 USD
+2024-11-12 checking -> groceries 384.34 USD
+
+/// Restricted stock units vest: 60 shares at the market price, taxed as pay on the day.
+2024-11-15 northwind -> etrade 60 NWND @ 135.51 USD
+2024-11-15 etrade 13.2000 NWND -> taxes/federal 1_788.73 USD   // sold to cover: 22% supplemental
+2024-11-15 etrade 1.1445 NWND -> taxes/payroll 155.09 USD   // sold to cover: FICA
+2024-11-16 checking -> dining 349.75 USD
+2024-11-20 checking -> groceries 274.52 USD
+2024-11-24 checking -> misc 313.79 USD
+2024-11-28 dividends -> fidelity 7.58 USD
+2024-11-30 income/salary -> 14_000.00 USD
+  retirement          1_958.33 USD   // 401(k) deferral
+  espp-cash           1_400.00 USD   // ESPP contribution, after tax
+  taxes/federal       2_650.00 USD
+  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  checking            ...
+2024-11-30 interest -> savings 379.63 USD
+2024-11-30 interest -> fidelity 50.31 USD
+2024-11-30 checking = 29_440.35 USD
+2024-11-30 savings = 114_267.77 USD
+2024-11-30 espp-cash = 8_400.00 USD
+2024-11-30 fidelity = 16.4799 VTI
+2024-11-30 fidelity = 14.6511 MSFT
+2024-11-30 etrade = 45.6555 NWND
+2024-11-30 coinbase = 0.2 BTC

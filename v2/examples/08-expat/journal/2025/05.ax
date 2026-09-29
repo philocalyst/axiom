@@ -1,0 +1,28 @@
+2025-05-01 us-checking -> sf-rent 3_400 USD / landlord-sf
+2025-05-04 visa -> groceries 155.14 USD
+2025-05-05 us-checking -> 420 USD / mohela
+  student-loan            307.11 USD   // principal
+  loan-interest           112.89 USD   // interest
+2025-05-09 visa -> dining 79.09 USD
+2025-05-11 visa -> groceries 77.45 USD
+2025-05-14 visa -> utilities 156.22 USD
+2025-05-16 visa -> transport 64.74 USD
+2025-05-18 visa -> groceries 145.60 USD
+
+/// April's statement, paid in full.
+2025-05-20 us-checking -> visa 869.54 USD
+2025-05-21 visa -> dining 100.48 USD
+2025-05-23 visa -> shopping 78.56 USD
+2025-05-25 visa -> groceries 88.54 USD
+2025-05-30 acme -> 10_416.67 USD
+  us-401k                 625.00 USD   // 6% pre-tax
+  taxes/federal           1_790.00 USD
+  taxes/state             736.00 USD
+  taxes/payroll           796.87 USD   // Social Security and Medicare
+  taxes/sdi               125.00 USD   // California SDI
+  us-checking             ...
+2025-05-31 interest -> us-savings 146.58 USD
+2025-05-31 visa = 945.82 USD
+2025-05-31 us-checking = 26_430.19 USD
+2025-05-31 us-savings = 42_027.82 USD
+2025-05-31 student-loan = 29_596.34 USD

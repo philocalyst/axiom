@@ -1,0 +1,47 @@
+2025-06-01 checking -> rent 2_650 USD / landlord
+2025-06-01 income/staking -> wallet 0.01076454 ETH @ 2510.11 USD
+2025-06-05 checking -> fidelity 5.1544 VTI @ 291.01 USD
+2025-06-09 checking -> utilities 134.35 USD
+
+/// Buying UNH back thirteen days after selling it at a loss: a wash sale on 10 shares. Axiom cannot see it.
+/// The 1_978.60 USD loss on those 10 shares is disallowed and added to the new lot's basis by hand,
+/// through equity/wash-sale, which also adds it back to short-term gains (accounts.ax).
+2025-06-10 -> fidelity 5_000.70 USD
+  checking            3_022.10 USD
+  wash-sale           1_978.60 USD   // disallowed loss, 10 x (basis - price)
+2025-06-10 fidelity 5_000.70 USD -> fidelity 10 UNH
+2025-06-12 checking -> groceries 346.05 USD
+2025-06-12 dividends -> fidelity 20.19 USD
+2025-06-16 checking -> dining 183.32 USD
+2025-06-16 checking -> fidelity 35.2907 VXUS @ 70.84 USD
+2025-06-20 checking -> groceries 358.41 USD
+2025-06-24 checking -> misc 309.09 USD
+2025-06-25 dividends -> schwab 27.51 USD
+2025-06-26 dividends -> fidelity 0.1539 VTI @ 299.85 USD   // reinvested: 46.15 USD dividend
+2025-06-28 dividends -> schwab 7.58 USD
+2025-06-30 income/salary -> 14_000.00 USD
+  retirement          1_958.33 USD   // 401(k) deferral
+  espp-cash           1_400.00 USD   // ESPP contribution, after tax
+  taxes/federal       2_650.00 USD
+  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  checking            ...
+
+/// Employee stock purchase plan, January-June offering.
+/// Offering date price 142.43, purchase date price 169.00: the plan buys at 85% of the lower, 121.07.
+/// The discount of 3_325.45 USD is pay: booked as wages, and part of the basis.
+2025-06-30 -> etrade 11_725.46 USD
+  espp-cash           8_400.01 USD
+  espp-discount       3_325.45 USD
+2025-06-30 etrade 11_725.46 USD -> etrade 69.3814 NWND
+2025-06-30 interest -> savings 270.62 USD
+2025-06-30 interest -> fidelity 202.33 USD
+2025-06-30 checking = 29_690.82 USD
+2025-06-30 savings = 81_457.99 USD
+2025-06-30 espp-cash = 0.00 USD
+2025-06-30 fidelity = 53.8214 VTI
+2025-06-30 fidelity = 24.3264 MSFT
+2025-06-30 fidelity = 19.7153 UNH
+2025-06-30 etrade = 302.7888 NWND
+2025-06-30 coinbase = 0.15 BTC
+2025-06-30 coinbase = 0.95668225 ETH
+2025-06-30 wallet = 6.01954043 ETH

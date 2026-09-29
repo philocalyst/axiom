@@ -1,0 +1,68 @@
+/// Balances on the first day of the ledger, from the bank apps.
+2025-09-01 opening -> checking 1_842.10 USD
+2025-09-01 opening -> emergency 2_400 USD
+2025-09-01 opening -> insurance-fund 700 USD
+2025-09-01 opening -> wallet 45 USD
+2025-09-01 checking -> rent 1_150 USD / landlord
+2025-09-01 checking -> transport 48 USD / metro
+2025-09-01 checking -> fun 29 USD / gym
+2025-09-01 checking = 615.10 USD
+2025-09-01 emergency = 2_400.00 USD
+2025-09-01 insurance-fund = 700.00 USD
+2025-09-01 wallet = 45.00 USD
+2025-09-03 checking -> utilities 61.84 USD / power-co
+2025-09-04 visa -> dining 21.14 USD
+
+/// Pay from the studio, every second Friday: gross 2,307.69, the health premium comes off before it lands.
+2025-09-05 studio -> 2_307.69 USD
+  taxes/federal         226.00 USD
+  taxes/payroll         176.54 USD
+  health                60.00 USD
+  checking              ...
+2025-09-05 visa -> groceries 68.30 USD / trader-joes
+
+/// Sinking funds: money set aside each month for a bill that comes later. 100.00 USD a month for the car, 100.00 USD for the insurance premium, 250.00 USD for the June trip.
+2025-09-06 checking -> car-fund 100 USD
+2025-09-06 checking -> insurance-fund 100 USD
+2025-09-06 checking -> trip-fund 250 USD
+2025-09-06 checking -> emergency 100 USD
+2025-09-08 visa -> phone 40 USD / mint-mobile
+2025-09-09 visa -> transport 11.19 USD / rideshare
+2025-09-10 checking -> car 285.40 USD / carmax-finance
+2025-09-10 visa -> dining 27.88 USD
+2025-09-11 visa -> subscriptions 15.49 USD / netflix
+2025-09-12 visa -> groceries 71.55 USD / kroger
+2025-09-13 wallet -> dining 7.27 USD
+2025-09-14 visa -> subscriptions 11.99 USD / spotify
+2025-09-15 checking -> student-loan 190 USD / mohela
+2025-09-15 visa -> fun 13.97 USD
+2025-09-16 visa -> dining 24.50 USD
+
+/// A streaming service I forgot about, cancelled in October.
+2025-09-17 visa -> subscriptions 17.99 USD / hulu
+2025-09-18 visa -> clothing 47.60 USD
+2025-09-18 checking = 1_373.01 USD
+2025-09-19 studio -> 2_307.69 USD
+  taxes/federal         226.00 USD
+  taxes/payroll         176.54 USD
+  health                60.00 USD
+  checking              ...
+2025-09-19 visa -> groceries 59 USD / trader-joes
+
+/// The ATM: I did not write the amount down. The bank's balance the day before and the day after say what it was: exactly one unknown between two assertions.
+2025-09-19 checking -> wallet ? USD
+2025-09-20 visa -> subscriptions 2.99 USD / apple
+2025-09-20 checking = 3_138.16 USD
+2025-09-21 visa -> transport 23.96 USD / rideshare
+2025-09-23 visa -> dining 17.60 USD
+2025-09-24 visa -> fun 57.01 USD
+2025-09-24 wallet -> dining 9.22 USD
+2025-09-26 visa -> subscriptions 22.99 USD / adobe
+2025-09-27 visa -> groceries 65.84 USD / kroger
+2025-09-28 visa -> dining 26.54 USD
+2025-09-30 visa = 647.53 USD
+2025-09-30 checking = 3_138.16 USD
+2025-09-30 car-fund = 100.00 USD
+2025-09-30 insurance-fund = 800.00 USD
+2025-09-30 trip-fund = 250.00 USD
+2025-09-30 emergency = 2_500.00 USD

@@ -1,0 +1,58 @@
+$ axiom balance --at 2025-06-30 --today 2026-01-06
+
+Balances at 2025-06-30
+
+  Place                          Balance
+  ──────────────────────────────────────
+  assets                   17,457.70 USD
+    bank                   15,549.21 USD
+      checking              6,039.16 USD
+      collective-checking   3,610.05 USD
+      savings               5,900.00 USD
+    cash                      408.49 USD
+      collective-cash         109.00 USD
+      wallet                  299.49 USD
+    loans                   1,500.00 USD
+      riley                 1,500.00 USD
+  ──────────────────────────────────────
+  equity                   10,084.58 USD
+    opening                10,084.58 USD
+  ──────────────────────────────────────
+  expenses                 16,501.44 USD
+    car                     1,834.00 USD
+    clothing                  214.63 USD
+    dining                    370.50 USD
+    entertainment             206.24 USD
+    garden                  5,182.74 USD
+      irrigation              986.40 USD
+      lumber                1,148.75 USD
+      seeds                   412.60 USD
+      soil                  1,280.00 USD
+      tools                 1,354.99 USD
+    groceries                 570.31 USD
+    health                    757.60 USD
+    phone                     180.00 USD
+    rent                    4,200.00 USD
+    taxes                   2,539.47 USD
+      federal               1,570.54 USD
+      payroll                 968.93 USD
+    transport                  22.96 USD
+    utilities                 199.99 USD
+    volunteer-food             84.50 USD
+    work-supplies             138.50 USD
+  ──────────────────────────────────────
+  income                   23,176.09 USD
+    donations                 917.50 USD
+    grants                  6,000.00 USD
+    tips                    3,592.96 USD
+    wages                  12,665.63 USD
+  ──────────────────────────────────────
+  liabilities                 698.47 USD
+    visa                      698.47 USD
+
+  Net worth      Value (USD)
+  ──────────────────────────
+  Assets       17,457.70 USD
+  Liabilities     698.47 USD
+  ──────────────────────────
+  Net worth    16,759.23 USD

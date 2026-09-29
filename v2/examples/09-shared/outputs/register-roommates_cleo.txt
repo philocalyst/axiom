@@ -1,0 +1,67 @@
+$ axiom register roommates/cleo --today 2026-01-06
+
+Register: assets/roommates/cleo
+
+  Date        With                  Payee     Note                  Amount       Balance
+  ──────────────────────────────────────────────────────────────────────────────────────
+  2025-03-01  assets/bank/checking  landlord                  1,050.00 USD  1,050.00 USD
+  2025-03-04  assets/bank/checking            #rent-2025-03  -1,050.00 USD      0.00 USD
+  2025-03-07  liabilities/visa                                   28.35 USD     28.35 USD
+  2025-03-09  assets/bank/checking  fiberco                      23.33 USD     51.68 USD
+  2025-03-21  liabilities/visa                                   24.51 USD     76.19 USD
+  2025-03-31  assets/bank/checking                              -76.19 USD      0.00 USD
+  2025-04-01  assets/bank/checking  landlord                  1,050.00 USD  1,050.00 USD
+  2025-04-05  assets/bank/checking            #rent-2025-04  -1,050.00 USD      0.00 USD
+  2025-04-07  liabilities/visa                                   24.24 USD     24.24 USD
+  2025-04-09  assets/bank/checking  fiberco                      23.33 USD     47.57 USD
+  2025-04-19  expenses/groceries    costco                      -62.47 USD    -14.90 USD
+  2025-04-21  liabilities/visa                                   42.69 USD     27.79 USD
+  2025-04-30  assets/bank/checking                              -27.79 USD      0.00 USD
+  2025-05-01  assets/bank/checking  landlord                  1,050.00 USD  1,050.00 USD
+  2025-05-05  assets/bank/checking            #rent-2025-05  -1,050.00 USD      0.00 USD
+  2025-05-07  liabilities/visa                                   37.73 USD     37.73 USD
+  2025-05-09  assets/bank/checking  fiberco                      23.33 USD     61.06 USD
+  2025-05-21  liabilities/visa                                   28.68 USD     89.74 USD
+  2025-05-31  assets/bank/checking                              -89.74 USD      0.00 USD
+  2025-06-01  assets/bank/checking  landlord                  1,050.00 USD  1,050.00 USD
+  2025-06-05  assets/bank/checking            #rent-2025-06  -1,050.00 USD      0.00 USD
+  2025-06-07  liabilities/visa                                   34.32 USD     34.32 USD
+  2025-06-09  assets/bank/checking  fiberco                      23.33 USD     57.65 USD
+  2025-06-21  liabilities/visa                                   19.35 USD     77.00 USD
+  2025-06-30  assets/bank/checking                              -77.00 USD      0.00 USD
+  2025-07-01  assets/bank/checking  landlord                  1,050.00 USD  1,050.00 USD
+  2025-07-05  assets/bank/checking            #rent-2025-07  -1,050.00 USD      0.00 USD
+  2025-07-07  liabilities/visa                                   22.09 USD     22.09 USD
+  2025-07-09  assets/bank/checking  fiberco                      23.33 USD     45.42 USD
+  2025-07-21  liabilities/visa                                   24.80 USD     70.22 USD
+  2025-07-26  expenses/groceries    costco                      -47.38 USD     22.84 USD
+  2025-07-31  assets/bank/checking                              -22.84 USD      0.00 USD
+  2025-08-01  assets/bank/checking  landlord                  1,050.00 USD  1,050.00 USD
+  2025-08-07  liabilities/visa                                   25.98 USD  1,075.98 USD
+  2025-08-09  assets/bank/checking  fiberco                      23.33 USD  1,099.31 USD
+  2025-08-19  assets/bank/checking            #rent-2025-08  -1,050.00 USD     49.31 USD
+  2025-08-21  liabilities/visa                                   39.43 USD     88.74 USD
+  2025-08-31  assets/bank/checking                              -88.74 USD      0.00 USD
+  2025-09-01  assets/bank/checking  landlord                  1,050.00 USD  1,050.00 USD
+  2025-09-05  assets/bank/checking            #rent-2025-09  -1,050.00 USD      0.00 USD
+  2025-09-07  liabilities/visa                                   26.91 USD     26.91 USD
+  2025-09-09  assets/bank/checking  fiberco                      23.33 USD     50.24 USD
+  2025-09-21  liabilities/visa                                   26.36 USD     76.60 USD
+  2025-09-30  assets/bank/checking                              -76.60 USD      0.00 USD
+  2025-10-01  assets/bank/checking  landlord                  1,050.00 USD  1,050.00 USD
+  2025-10-05  assets/bank/checking            #rent-2025-10  -1,050.00 USD      0.00 USD
+  2025-10-07  liabilities/visa                                   32.10 USD     32.10 USD
+  2025-10-09  assets/bank/checking  fiberco                      23.33 USD     55.43 USD
+  2025-10-11  expenses/groceries    costco                      -67.97 USD    -12.54 USD
+  2025-10-21  liabilities/visa                                   20.69 USD      8.15 USD
+  2025-10-31  assets/bank/checking                               -8.15 USD      0.00 USD
+  2025-11-01  assets/bank/checking  landlord                  1,050.00 USD  1,050.00 USD
+  2025-11-05  assets/bank/checking            #rent-2025-11  -1,000.00 USD     50.00 USD
+  2025-11-07  liabilities/visa                                   28.74 USD     78.74 USD
+  2025-11-09  assets/bank/checking  fiberco                      23.33 USD    102.07 USD
+  2025-11-21  liabilities/visa                                   33.16 USD    135.23 USD
+  2025-12-01  assets/bank/checking  landlord                  1,050.00 USD  1,185.23 USD
+  2025-12-05  assets/bank/checking            #rent-2025-12  -1,050.00 USD    135.23 USD
+  2025-12-07  liabilities/visa                                   29.91 USD    165.14 USD
+  2025-12-09  assets/bank/checking  fiberco                      23.33 USD    188.47 USD
+  2025-12-21  liabilities/visa                                   27.87 USD    216.34 USD

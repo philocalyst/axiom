@@ -1,0 +1,25 @@
+2025-03-01 income/rent -> rental-checking 2_400 USD #lease-a
+2025-03-01 checking -> own-rent 1_950 USD / oak-street
+2025-03-01 rental-checking -> 1_809.59 USD / lender
+  mortgage            241.57 USD   // principal
+  interest            1_568.02 USD   // interest
+
+/// Property management, 8% of the rent, paid the month after.
+2025-03-05 rental-checking -> management 192 USD / hartwell-pm
+2025-03-08 checking -> groceries 144.50 USD
+
+/// REPAIR: a leaking trap and faucet. Ordinary, deducted now.
+2025-03-12 rental-checking -> repairs 385 USD / quick-plumbing
+2025-03-15 checking -> groceries 172.04 USD
+2025-03-19 checking -> dining 101.88 USD
+2025-03-22 checking -> living 229.03 USD
+2025-03-28 income/salary -> 8_000.00 USD
+  taxes/federal       1_215.00 USD
+  taxes/payroll       612.00 USD
+  checking            ...
+2025-03-31 acc-dep-house -> depreciation 913.58 USD
+2025-03-31 loan-costs -> amortization 8.67 USD
+2025-03-31 mortgage = 278_518.22 USD
+2025-03-31 rental-checking = 5_351.52 USD
+2025-03-31 checking = 30_450.32 USD
+2025-03-31 deposit-account = 2_400.00 USD

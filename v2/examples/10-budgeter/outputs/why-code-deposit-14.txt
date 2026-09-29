@@ -1,0 +1,13 @@
+$ axiom why #deposit-14 --today 2026-02-14
+
+Why #deposit-14
+
+Flows
+  Date        Flow                                         Amount  State                From
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-11-10  income/freelance → assets/bank/checking  350.00 USD  returned 2025-11-14  journal/2025/11.ax:25
+
+Events
+  Date        Event     From
+  ───────────────────────────────────────────
+  2025-11-14  returned  journal/2025/11.ax:38
