@@ -127,6 +127,10 @@ fn applies(book: &Book, rule: &Rule, on: &Occasion) -> bool {
 impl<'b, 's> Ledger<'b, 's> {
     /// Runs every rule in `rules` that applies to this occasion, in order.
     pub(crate) fn fire(&mut self, rules: &[Rule], on: &Occasion) {
+        // Most places have no rule for most occasions: nothing to set up then.
+        if rules.is_empty() {
+            return;
+        }
         let (book, mut done) = (self.book, Vec::new());
         for rule in rules.iter().filter(|rule| applies(book, rule, &on)) {
             // A law that two rules bring to one subject runs once.

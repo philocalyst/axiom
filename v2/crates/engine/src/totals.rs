@@ -21,10 +21,14 @@ use crate::scope::{containing, inside};
 /// `amount` cut by the calendar years `over` touches: the first day of each
 /// year's part, and its share.
 pub(crate) fn by_year(amount: Qty, over: Days) -> impl Iterator<Item = (Day, Qty)> {
-    calendar::Window::covering(Period::Year, over).map(move |year| {
+    // A flow that belongs to one day belongs to one year: no calendar to consult.
+    let one_day = over.single().map(|day| (day, amount));
+    let years = one_day.map_or_else(|| Some(calendar::Window::covering(Period::Year, over)), |_| None);
+    let cut = years.into_iter().flatten().map(move |year| {
         let part = year.days();
         (part.first().max(over.first()), spread(amount, over, part))
-    })
+    });
+    one_day.into_iter().chain(cut)
 }
 
 /// Value that entered and left, over one window.

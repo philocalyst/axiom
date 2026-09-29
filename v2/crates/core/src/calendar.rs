@@ -134,8 +134,8 @@ impl Window {
     /// The windows of `period` that any of `days` fall in, in order. `days` must end.
     pub fn covering(period: Period, days: Days) -> impl Iterator<Item = Window> {
         let first = Window::containing(period, days.first());
-        std::iter::successors(Some(first), Window::successor)
-            .take_while(move |window| window.days.first() <= days.last())
+        // The next window is worked out only if these days go on into it.
+        std::iter::successors(Some(first), move |window| (window.days.last() < days.last()).then(|| window.following()))
     }
 
     pub fn period(self) -> Period {
@@ -169,9 +169,9 @@ impl Window {
         self.after(-1)
     }
 
-    /// The window that follows, unless the calendar ends here.
-    fn successor(&self) -> Option<Window> {
-        (self.days.last() < Day::MAX).then(|| Window::containing(self.period, self.days.last().add_days(1)))
+    /// The window that starts the day after this one ends. Not the last day there is.
+    fn following(&self) -> Window {
+        Window::containing(self.period, self.days.last().add_days(1))
     }
 }
 
