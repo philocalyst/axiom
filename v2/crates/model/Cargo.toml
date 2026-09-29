@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 axiom-core.workspace = true
 axiom-syntax.workspace = true
+memchr.workspace = true

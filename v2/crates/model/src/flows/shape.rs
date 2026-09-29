@@ -353,8 +353,8 @@ impl<'a, 's> Elab<'a, 's> {
     /// amount contains one. A header that spells it another way is pointed at
     /// whole.
     fn arrow(&self, header: Loc) -> Loc {
-        let text = &self.file.src[header.range()];
-        match text.find('>').filter(|&at| at > 0 && text.as_bytes()[at - 1] == b'-') {
+        let text = &self.file.src.as_bytes()[header.range()];
+        match memchr::memchr(b'>', text).filter(|&at| at > 0 && text[at - 1] == b'-') {
             Some(at) => Loc::new(header.file, header.start + at as u32 - 1, header.start + at as u32 + 1),
             None => header,
         }

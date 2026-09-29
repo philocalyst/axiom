@@ -33,6 +33,7 @@ version = "0.3.0"
 dependencies = [
  "axiom-core",
  "axiom-syntax",
+ "memchr",
 ]
 
 [[package]]
