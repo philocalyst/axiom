@@ -3,28 +3,24 @@
 //! They borrow their transaction and source line from a real flow, so any
 //! diagnostic they cause points somewhere meaningful.
 
-use axiom_core::{Day, Id};
-use axiom_model::{Amount, Flow, Infer, Mode, Origin, Place, Recognition};
+use axiom_core::{Day, Days, Id};
+use axiom_model::{Amount, Flow, Infer, Mode, Origin, Place};
 
 /// A `Planned` flow on `day`, as `template` says it: the same ends, payee,
-/// purpose, description and terms (what it is `for`, the basis it takes, a
+/// purpose, description and detail (what it is `for`, the basis it takes, a
 /// basis end), and its recognition period and due day moved along with the
 /// day, so a plan that pays `for 2026` each January means 2027 the next time,
 /// and an invoice a plan sends falls due a month after each one. It carries no
 /// codes: those link real events.
 pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
     let shift = day.0 - template.day.0;
-    let recognized = Recognition {
-        from: template.recognized.from.add_days(shift),
-        until: template.recognized.until.add_days(shift),
-    };
     Flow {
-        recognized,
+        recognized: template.recognized.moved(shift),
         payee: template.payee,
         purpose: template.purpose,
         description: template.description,
         select: template.select.clone(),
-        terms: template.terms.as_ref().map(|terms| Box::new(terms.moved(shift))),
+        detail: template.detail.as_ref().map(|detail| Box::new(detail.moved(shift))),
         ..hypothetical(template, day, template.from, template.to, out, arrive)
     }
 }
@@ -35,7 +31,7 @@ pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
 pub fn hypothetical(borrowing: &Flow, day: Day, from: Id<Place>, to: Id<Place>, out: Amount, arrive: Amount) -> Flow {
     Flow {
         day,
-        recognized: Recognition::on(day),
+        recognized: Days::on(day),
         from,
         to,
         out,
@@ -53,6 +49,6 @@ pub fn hypothetical(borrowing: &Flow, day: Day, from: Id<Place>, to: Id<Place>, 
         codes: Box::default(),
         loc: borrowing.loc,
         waive: None,
-        terms: None,
+        detail: None,
     }
 }

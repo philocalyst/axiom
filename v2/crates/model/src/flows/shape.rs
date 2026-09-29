@@ -6,7 +6,7 @@
 //! so that they are all reported together. A name that resolves to nothing is
 //! only noted here: each is explained once, however often it is written.
 
-use axiom_core::{Day, Diagnostic, Id, Loc, Qty, Ratio, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Ratio, Sym};
 use axiom_syntax::{self as ast, ClauseKind, Due, File, For, Quantity};
 
 use super::Sink;
@@ -64,7 +64,7 @@ pub(super) struct Tail {
     pub codes: Vec<(Sym, Loc)>,
     pub settles: Option<Sym>,
     pub price: Option<Priced>,
-    pub period: Option<(Day, Day)>,
+    pub period: Option<Days>,
     pub hold: Option<Id<Entity>>,
     pub due: Option<Due>,
     pub basis: Option<Qty>,
@@ -196,7 +196,7 @@ impl<'a, 's> Elab<'a, 's> {
         let select = selects
             .iter()
             .filter_map(|select| match *select {
-                ast::Select::Range(first, last, _) => Some(Select::Range(first, last)),
+                ast::Select::Range(first, last, _) => Days::new(first, last).map(Select::Range),
                 ast::Select::Code(code) => Some(Select::Code(sym(code))),
                 ast::Select::Policy(policy, _) => Some(Select::Policy(policy)),
                 ast::Select::Basis => None,
@@ -311,7 +311,7 @@ impl<'a, 's> Elab<'a, 's> {
                 let (sym, loc) = code(self, written);
                 (tail.settles, tail.codes) = (Some(sym), tail.codes.iter().copied().chain([(sym, loc)]).collect());
             }
-            ClauseKind::For(For::Period(first, last)) => tail.period = Some((first, last)),
+            ClauseKind::For(For::Period(first, last)) => tail.period = Days::new(first, last),
             ClauseKind::For(For::Entity(name)) => tail.hold = Some(self.entity(name.0)?),
             ClauseKind::Due(due) => tail.due = Some(due),
             ClauseKind::Basis(amount) => tail.basis = Some(self.basis(amount)?),

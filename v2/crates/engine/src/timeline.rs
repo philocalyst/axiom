@@ -28,10 +28,9 @@
 //! settlement changes and deadlines (periods included) are each already
 //! sorted, so [`Timeline`] merges five cursors: a clone copies five numbers.
 
-use std::iter::successors;
-
-use axiom_core::{Day, Id, Set};
-use axiom_model::{Book, Flow, Mode, Period, Recognition, Trigger, Value};
+use axiom_core::calendar::Window;
+use axiom_core::{Day, Days, Id, Set};
+use axiom_model::{Book, Flow, Mode, Period, Trigger, Value};
 
 use crate::State;
 use crate::eval::{self, Env, Occasion};
@@ -70,7 +69,7 @@ impl Moment {
         Moment { day, fact: Fact::Assert(u32::MAX) }
     }
 
-    pub const LAST: Moment = Moment { day: Day(i32::MAX), fact: Fact::Deadline(u32::MAX) };
+    pub const LAST: Moment = Moment { day: Day::MAX, fact: Fact::Deadline(u32::MAX) };
 }
 
 /// The day of the first fact that starts a period: a flow that moves value on
@@ -109,7 +108,7 @@ pub(crate) struct Deadline {
     /// Index into `Rules::timed`.
     pub rule: usize,
     /// The days the law runs for: the deadline itself, or the month or year it closes.
-    pub period: Recognition,
+    pub period: Days,
 }
 
 /// Every deadline that falls due by `horizon`, sorted. A rule whose date
@@ -122,34 +121,37 @@ pub(crate) fn deadlines(env: Env, horizon: Day, first: Option<Day>, values: &mut
     let mut due = Vec::new();
     for (rule_index, rule) in book.rules.timed.iter().enumerate() {
         let law = &book.laws[rule.law];
-        let mut close = |day: Day, period: Recognition| {
-            if rule.from <= period.until && period.from <= rule.until {
+        let mut close = |day: Day, period: Days| {
+            if rule.days.overlaps(period) {
                 due.push(Deadline { day, rule: rule_index, period });
             }
         };
+        // The months or years, whole, that the fold's days touch.
+        let windows = |period| {
+            let touched = first.and_then(|first| Days::new(first, horizon));
+            touched.into_iter().flat_map(move |days| Window::covering(period, days))
+        };
         match law.trigger {
             Trigger::By(when) => {
-                let day = rule.from;
-                let on = Occasion::time(day, Recognition::on(day));
+                let day = rule.days.first();
+                let on = Occasion::time(day, Days::on(day));
                 let ctx = eval::Context::new(rule.subject, owner_of(book, rule.subject), &on);
                 let Value::Day(day) = eval::expression(env, law, when, &ctx, values) else { continue };
                 if day <= horizon {
-                    close(day, Recognition::on(day));
+                    close(day, Days::on(day));
                 }
             }
+            // A month closes on its last day, once the fold has reached it.
             Trigger::Each(Period::Month, _) => {
-                let ends = successors(first.map(Day::month_end), |end| Some(end.add_days(1).month_end()));
-                ends.take_while(|&end| end <= horizon)
-                    .for_each(|end| close(end, Recognition { from: end.month_start(), until: end }));
+                for month in windows(Period::Month).map(Window::days).filter(|month| month.last() <= horizon) {
+                    close(month.last(), month);
+                }
             }
             Trigger::Each(Period::Year, closing) => {
-                for year in first.map_or(0..0, |first| first.year()..horizon.year() + 1) {
-                    let period = Recognition {
-                        from: Day::from_ymd(year, 1, 1).unwrap_or(horizon),
-                        until: Day::from_ymd(year, 12, 31).unwrap_or(horizon),
-                    };
-                    let closes = closing.map_or(Some(period.until), |closing| closing.day_for(year));
-                    let closes = closes.unwrap_or(period.until.add_days(1).month_end());
+                for year in windows(Period::Year) {
+                    let (period, year) = (year.days(), year.days().first().year());
+                    let closes = closing.map_or(Some(period.last()), |closing| closing.day_for(year));
+                    let closes = closes.unwrap_or(period.last().add_days(1).month_end());
                     if closes <= horizon {
                         close(closes, period);
                     }
@@ -163,7 +165,7 @@ pub(crate) fn deadlines(env: Env, horizon: Day, first: Option<Day>, values: &mut
     let mut seen = Set::default();
     due.retain(|d| {
         let rule = &book.rules.timed[d.rule];
-        seen.insert((d.day, rule.law, rule.subject, d.period.from))
+        seen.insert((d.day, rule.law, rule.subject, d.period.first()))
     });
     due
 }

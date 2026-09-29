@@ -41,7 +41,7 @@ fn flows_on(book: &Book, at: Loc) -> Vec<Id<Flow>> {
         return direct;
     }
     let headers = book.txns.values().filter(|txn| overlaps(txn.loc, at));
-    headers.flat_map(|txn| (0..txn.len).map(move |leg| Id::new(txn.first.index() as u32 + leg))).collect()
+    headers.flat_map(|txn| txn.flows.ids()).collect()
 }
 
 /// Everything whose source overlaps the line, described in a sentence.

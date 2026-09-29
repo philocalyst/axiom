@@ -172,22 +172,22 @@ fn a_planned_occurrence_keeps_the_terms_of_its_template_and_moves_its_period_alo
         let usd = |flow: &axiom_model::Flow| flow.out;
 
         let premium = template(0);
-        assert_eq!((premium.recognized.from, premium.recognized.until), (day(2026, 1, 1), day(2026, 12, 31)));
+        assert_eq!((premium.recognized.first(), premium.recognized.last()), (day(2026, 1, 1), day(2026, 12, 31)));
         let next = crate::synth::planned(premium, day(2027, 1, 15), usd(premium), usd(premium));
         assert_eq!(next.day, day(2027, 1, 15));
-        assert_eq!((next.recognized.from, next.recognized.until), (day(2027, 1, 1), day(2027, 12, 31)));
+        assert_eq!((next.recognized.first(), next.recognized.last()), (day(2027, 1, 1), day(2027, 12, 31)));
 
         let deposit = template(1);
         let next = crate::synth::planned(deposit, day(2026, 5, 1), usd(deposit), usd(deposit));
-        assert_eq!(next.terms, deposit.terms);
+        assert_eq!(next.detail, deposit.detail);
         assert!(
-            next.terms().hold.is_some() && next.terms().basis.is_some(),
+            next.detail().hold.is_some() && next.detail().basis.is_some(),
             "held for the envelope, at 90 USD of basis"
         );
 
         let depreciation = template(2);
         let next = crate::synth::planned(depreciation, day(2026, 5, 28), usd(depreciation), usd(depreciation));
-        assert_eq!(next.terms().basis_end, Some(axiom_model::End::From));
+        assert_eq!(next.detail().basis_end, Some(axiom_model::End::From));
         assert_eq!(crate::places::route(book, &next), "assets/house.basis → expenses/depreciation");
     });
 }
@@ -257,7 +257,10 @@ fn a_hypothetical_flow_borrows_only_the_transaction_and_the_line() {
         let flow =
             crate::synth::hypothetical(deposit, day(2026, 4, 2), deposit.to, deposit.from, deposit.out, deposit.out);
         assert_eq!((flow.txn, flow.loc), (deposit.txn, deposit.loc));
-        assert_eq!((flow.terms, flow.recognized.from, flow.recognized.until), (None, day(2026, 4, 2), day(2026, 4, 2)));
+        assert_eq!(
+            (flow.detail, flow.recognized.first(), flow.recognized.last()),
+            (None, day(2026, 4, 2), day(2026, 4, 2))
+        );
     });
 }
 

@@ -198,6 +198,8 @@ fn budget_law(world: &mut World, budget: &Budget) -> Law {
         owner: Owner::Place(budget.place),
         system: None,
         trigger: Trigger::In,
+        // v3 bridge: a v3 budget is a property; the law holds its limit as a constant.
+        budget: None,
         steps: Box::new([step]),
         nodes: Box::new(nodes),
         loc: budget.loc,

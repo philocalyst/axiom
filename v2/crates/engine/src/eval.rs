@@ -14,10 +14,10 @@
 use std::ops::Deref;
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Id, Qty, Ratio, Span, Sym, day::days_in_month};
+use axiom_core::{Day, Days, Id, Qty, Ratio, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
     Amount, BinOp, Book, Dir, Effect as Consequence, Entity, Fault, Field, Func, Law, NodeId, Op, Param, Prop,
-    Recognition, StepKind, Subject, Value, Var, Window,
+    StepKind, Subject, Value, Var, Window,
 };
 
 use crate::calc::{Calc, progressive};
@@ -25,7 +25,6 @@ use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
 use crate::scope::{inside, is_money};
 use crate::state::World;
-use crate::totals::share_in_first_year;
 use crate::{Cause, Owed};
 
 /// What laws read: the book and the state as of now.
@@ -44,9 +43,9 @@ pub(crate) struct Occasion<'a> {
     /// The days it belongs to. `year` and `month` are its first day's, and a
     /// count is shared out over it. A flow's is its recognition; a period's is
     /// its last day.
-    pub over: Recognition,
+    pub over: Days,
     /// The days a rule must be in force for: a flow's day, or a whole period.
-    pub span: Recognition,
+    pub span: Days,
     pub cause: Cause,
     /// The flow that fired the law, if one did (not for `each` and `by`).
     pub motion: Option<&'a Motion<'a>>,
@@ -64,7 +63,7 @@ pub(crate) struct Occasion<'a> {
 
 impl<'a> Occasion<'a> {
     pub fn flow(m: &'a Motion<'a>) -> Occasion<'a> {
-        let (over, span) = (m.recognized, Recognition::on(m.day));
+        let (over, span) = (m.recognized, Days::on(m.day));
         Occasion {
             day: m.day,
             over,
@@ -79,8 +78,8 @@ impl<'a> Occasion<'a> {
     }
 
     /// A period ending, or a deadline passing, on `day`.
-    pub fn time(day: Day, period: Recognition) -> Occasion<'static> {
-        let over = Recognition::on(period.until);
+    pub fn time(day: Day, period: Days) -> Occasion<'static> {
+        let over = Days::on(period.last());
         Occasion {
             day,
             over,
@@ -96,14 +95,14 @@ impl<'a> Occasion<'a> {
 
     /// A window that some flow recognized value into ahead of time, entered on
     /// `day`: the laws about its total are read as no flow will make them.
-    pub fn window(day: Day, period: Recognition) -> Occasion<'static> {
+    pub fn window(day: Day, period: Days) -> Occasion<'static> {
         Occasion { checking: true, ..Occasion::time(day, period) }
     }
 
     /// The day whose window totals are read: the day a flow moved, or the last
     /// day of the period a law closes.
     pub fn anchor(&self) -> Day {
-        if self.motion.is_some() { self.day } else { self.over.from }
+        if self.motion.is_some() { self.day } else { self.over.first() }
     }
 }
 
@@ -307,7 +306,7 @@ impl<'a, 's> Machine<'a, 's> {
     /// tally(x) <= …` sees the flow it is checking.
     fn tally(&self, name: Sym, asked: Option<Value>) -> Value {
         let (ctx, tallies) = (self.ctx, &self.env.world.tallies);
-        let this_year = ctx.over.from.year();
+        let this_year = ctx.over.first().year();
         let year = match asked {
             None => this_year,
             Some(Value::Num(year)) => year.round() as i32,
@@ -317,7 +316,7 @@ impl<'a, 's> Machine<'a, 's> {
         };
         let counted = self.out.iter().filter_map(|o| match *o {
             Outcome::Count { name: counted, amount } if counted == name && year == this_year => {
-                Some(share_in_first_year(amount, ctx.over))
+                Some(spread(amount, ctx.over, Window::Year.around(ctx.over.first())))
             }
             _ => None,
         });
@@ -366,8 +365,8 @@ impl<'a, 's> Machine<'a, 's> {
             Var::To => flow(|m| Value::Place(m.to)),
             Var::Payee => flow(|m| m.payee.map_or(Value::Empty, Value::Entity)),
             Var::Date => Value::Day(ctx.day),
-            Var::Year => Value::Num(Ratio::int(ctx.over.from.year() as i64)),
-            Var::Month => Value::Num(Ratio::int(ctx.over.from.ymd().1 as i64)),
+            Var::Year => Value::Num(Ratio::int(ctx.over.first().year() as i64)),
+            Var::Month => Value::Num(Ratio::int(ctx.over.first().ymd().1 as i64)),
             Var::Subject => match ctx.subject {
                 Subject::Place(place) => Value::Place(place),
                 Subject::Entity(entity) => Value::Entity(entity),

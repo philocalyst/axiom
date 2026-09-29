@@ -13,7 +13,7 @@
 //! commodity was asserted, or a flow is missing, and puts the likeliest in a
 //! note before it offers to accept the gap.
 
-use axiom_core::{Day, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym};
+use axiom_core::{Day, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
     Amount, Assert, BinOp, Book, Commodity, Dir, Effect as Consequence, End, Fault, Flow, Func, Law, NodeId, Op, Param,
     Place, StepKind, Subject, System, Trigger, Value, Var, Waive, Window,
@@ -26,7 +26,6 @@ use crate::fire::Reads;
 use crate::lots::Candidate;
 use crate::motion::Motion;
 use crate::show;
-use crate::totals::has;
 use crate::{Cause, Effect, Owed, Parcel};
 
 /// The most flows an assertion's explanation draws.
@@ -172,7 +171,7 @@ impl Frame<'_, '_> {
         let mut found: Vec<Id<Flow>> = match reads {
             Reads::Tally(name) => {
                 let of_name = self.effects.iter().rev().filter(|e| e.owner == ctx.owner && e.name == name);
-                let counted = of_name.filter(|e| has(window, e.day)).filter_map(|e| match e.cause {
+                let counted = of_name.filter(|e| window.contains(e.day)).filter_map(|e| match e.cause {
                     Cause::Flow(id) if Some(id) != current => Some(id),
                     _ => None,
                 });
@@ -191,7 +190,7 @@ impl Frame<'_, '_> {
                 };
                 let moves = flows[..before].iter().rev().take(400).filter(|&&id| {
                     let flow = &book.flows[id];
-                    crosses(flow) && flow.recognized.until >= window.from && flow.recognized.from <= window.until
+                    crosses(flow) && flow.recognized.overlaps(window)
                 });
                 moves.copied().take(3).collect()
             }
@@ -263,14 +262,12 @@ pub(crate) fn broken(f: &Frame, step: usize, warn: bool, waiver: Option<Waiver>)
 
 /// "27,000.00 USD in 2026 against a limit of 24,500.00 USD, over by 2,500.00 USD"
 fn fact(f: &Frame, bound: &Bound, reads: Option<Reads>) -> String {
-    let window = reads.map(|reads| reads.window(f.ctx).from);
-    let when = match (reads, window) {
-        (Some(Reads::Total(_, Window::Month)), Some(from)) => {
-            format!(" in {}-{:02}", from.year(), from.ymd().1)
+    let when = match reads {
+        None => String::new(),
+        Some(Reads::Total(_, Window::Ever)) => " in total".to_owned(),
+        Some(reads) => {
+            calendar::Window::exactly(reads.window(f.ctx)).map_or(String::new(), |window| format!(" in {window}"))
         }
-        (Some(Reads::Total(_, Window::Ever)), _) => " in total".to_owned(),
-        (Some(_), Some(from)) => format!(" in {}", from.year()),
-        _ => String::new(),
     };
     let (bar, past) = if bound.upper { ("limit", "over") } else { ("minimum", "short") };
     let over = if bound.off.qty > Qty::ZERO { format!(", {past} by {}", f.money(bound.off)) } else { String::new() };
@@ -364,7 +361,7 @@ pub(crate) fn faulted(f: &Frame, fault: Fault, origin: Option<usize>, holder: Op
 /// is older than the figures the system ships. Every law that needs a figure
 /// of that year is skipped, and this is said once.
 fn missing_figures(f: &Frame, param: Id<Param>, system: Id<System>, (cause, text): (Loc, String)) -> Diagnostic {
-    let (book, year) = (f.book, f.ctx.over.from.year());
+    let (book, year) = (f.book, f.ctx.over.first().year());
     let (param, system) = (&book.params[param], book.name(book.systems[system].path));
     let first = param.rows.iter().filter_map(|row| row.since).min().map(|day| day.year());
     let starts = first.map_or(String::new(), |first| format!(": its figures start in {first}"));
@@ -751,7 +748,7 @@ pub(crate) fn overdue(
     today: Day,
 ) -> Option<Diagnostic> {
     let claim = book.paid_into(lot.txn, place)?;
-    let due = claim.terms().due.filter(|&due| due <= today)?;
+    let due = claim.detail().due.filter(|&due| due <= today)?;
     let who = claim.payee.map_or_else(|| show::place(book, place), |entity| book.name(book.entities[entity].path));
     let owed = book.show(Amount::new(lot.qty, unit));
     let late = today.0 - due.0;

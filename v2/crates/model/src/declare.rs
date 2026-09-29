@@ -173,9 +173,12 @@ pub(crate) fn declare<'a, 's>(
         systems: tree,
         commodities: commodities.arena,
         assets: Arena::new(),
+        // v3 bridge: the v3 model makes plans, and no contract.
         contracts: Arena::new(),
         laws: Arena::new(),
         rules: Rules::default(),
+        // v3 bridge: a v3 budget is a property that makes a law, not an item of its own.
+        budgets: Arena::new(),
         params: Arena::new(),
         schedules: Arena::new(),
         codes: Vec::new(),
@@ -187,7 +190,7 @@ pub(crate) fn declare<'a, 's>(
         prices: Default::default(),
         splits: Vec::new(),
         plans: Arena::new(),
-        syncs: Vec::new(),
+        sources: Vec::new(),
         lookup: Lookup {
             places: places.names,
             entities: entities.index,
@@ -407,6 +410,8 @@ fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, cx: &mut Cx<'_, 's>) -
         member: None,
         owner: None,
         client_of: None,
+        // v3 bridge: no v3 entity is known by a name on statements.
+        known_as: Box::default(),
         props: Box::default(),
         doc: None,
         loc: None,
@@ -506,6 +511,8 @@ fn places<'s>(
             liquidity: None,
             opened: None,
             closed: None,
+            // v3 bridge: no v3 place is known by a name on statements.
+            known_as: Box::default(),
             props: Box::default(),
             doc: None,
             loc: None,

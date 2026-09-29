@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Arena, Day, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Span, Sym, Tree};
+use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Span, Sym, Tree};
 use axiom_engine::{Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
 use axiom_model::Effect as Consequence;
 use axiom_model::*;
@@ -129,6 +129,7 @@ impl Cast {
             member: matches!(name, "me" | "jordan").then(|| Id::new(2)),
             owner: None,
             client_of: None,
+            known_as: Box::default(),
             props: Box::default(),
             doc: None,
             loc: None,
@@ -157,6 +158,7 @@ impl Cast {
             liquidity: (path == "assets/retirement").then_some(Span::months(1)),
             opened: None,
             closed: None,
+            known_as: Box::default(),
             props: Box::default(),
             doc: None,
             loc: (!path.starts_with("assets/vault")).then(|| line(1)),
@@ -287,8 +289,7 @@ fn journal(cast: &mut Cast) -> Journal {
         };
         let txn = journal.txns.push(Txn {
             day: when,
-            first: Id::new(index as u32),
-            len: 1,
+            flows: axiom_core::Run::new(Id::new(index as u32), 1),
             codes: codes.clone(),
             waive: None,
             plan: None,
@@ -303,7 +304,7 @@ fn journal(cast: &mut Cast) -> Journal {
         journal.flows.push(Flow {
             day: when,
             // The insurance is paid for the whole year.
-            recognized: Recognition { from: when, until: if row == 1 { day(2026, 12, 31) } else { when } },
+            recognized: Days::new(when, if row == 1 { day(2026, 12, 31) } else { when }).unwrap(),
             from: cast.id(from),
             to: cast.id(to),
             out: amount,
@@ -320,7 +321,7 @@ fn journal(cast: &mut Cast) -> Journal {
             codes,
             loc: line(row),
             waive: None,
-            terms: due.map(|due| Box::new(Terms { due: Some(due), ..Terms::default() })),
+            detail: due.map(|due| Box::new(Detail { due: Some(due), ..Detail::default() })),
         });
         journal.posted.push(Posted { out: Qty(cents), arrive: Qty(cents), state });
     }
@@ -332,7 +333,7 @@ fn rent_plan(cast: &Cast) -> Plan {
     let amount = Amount::new(Qty(180_000), cast.usd);
     let once = Flow {
         day: day(2026, 4, 1),
-        recognized: Recognition::on(day(2026, 4, 1)),
+        recognized: Days::on(day(2026, 4, 1)),
         from: cast.id("assets/bank/checking"),
         to: cast.id("expenses/rent"),
         out: amount,
@@ -349,7 +350,7 @@ fn rent_plan(cast: &Cast) -> Plan {
         codes: Box::default(),
         loc: line(60),
         waive: None,
-        terms: None,
+        detail: None,
     };
     Plan {
         name: None,
@@ -377,6 +378,7 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
         owner,
         system: None,
         trigger: Trigger::In,
+        budget: None,
         steps: Box::new([Step {
             loc: line(80),
             kind: StepKind::Require { cond: NodeId(2), otherwise: None, message: None, warn },
@@ -402,6 +404,7 @@ fn early_withdrawal(cast: &mut Cast) -> Law {
         owner: Owner::Place(cast.id("assets/retirement")),
         system: None,
         trigger: Trigger::Out,
+        budget: None,
         steps: Box::new([Step { loc: line(85), kind: StepKind::Effect(owe) }]),
         nodes: nodes.into(),
         loc: line(85),
@@ -426,6 +429,7 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
         owner: Owner::System(cast.us),
         system: Some(cast.us),
         trigger: Trigger::In,
+        budget: None,
         steps: Box::default(),
         nodes: Box::default(),
         loc: line(90),
@@ -529,16 +533,13 @@ pub(crate) fn household() -> Household {
     let records = records(&mut cast, &journal);
 
     let food = cast.id("expenses/food");
-    let budget_rule =
-        Rule { law: Id::new(0), subject: Subject::Place(food), from: Day(i32::MIN), until: Day(i32::MAX) };
+    let budget_rule = Rule { law: Id::new(0), subject: Subject::Place(food), days: Days::ALWAYS };
     // The deferral limit governs the retirement place only until the end of 2025.
     let retirement = cast.id("assets/retirement");
-    let lapsed =
-        Rule { law: Id::new(2), subject: Subject::Place(retirement), from: Day(i32::MIN), until: day(2025, 12, 31) };
-    let in_force =
-        Rule { law: Id::new(3), subject: Subject::Place(retirement), from: Day(i32::MIN), until: Day(i32::MAX) };
-    let penalty =
-        Rule { law: Id::new(4), subject: Subject::Place(retirement), from: Day(i32::MIN), until: Day(i32::MAX) };
+    let ends_2025 = Days::new(Day::MIN, day(2025, 12, 31)).unwrap();
+    let lapsed = Rule { law: Id::new(2), subject: Subject::Place(retirement), days: ends_2025 };
+    let in_force = Rule { law: Id::new(3), subject: Subject::Place(retirement), days: Days::ALWAYS };
+    let penalty = Rule { law: Id::new(4), subject: Subject::Place(retirement), days: Days::ALWAYS };
     let rules = Rules {
         on_in: Groups::build(cast.places.len(), [(food, budget_rule), (retirement, lapsed), (retirement, in_force)]),
         on_out: Groups::build(cast.places.len(), [(retirement, penalty)]),
@@ -578,6 +579,7 @@ pub(crate) fn household() -> Household {
         contracts: Arena::new(),
         laws: records.laws,
         rules,
+        budgets: Arena::new(),
         params: Arena::new(),
         schedules: Arena::new(),
         codes: Vec::new(),
@@ -590,7 +592,7 @@ pub(crate) fn household() -> Household {
         lookup: Default::default(),
         splits: Vec::new(),
         plans,
-        syncs: Vec::new(),
+        sources: Vec::new(),
     };
     let run = Run {
         today: day(2026, 3, 31),
@@ -622,8 +624,7 @@ impl Household {
             step: 0,
             subject: Subject::Place(self.place(place)),
             owner,
-            from,
-            until,
+            days: Days::new(from, until).unwrap(),
             counted: cents(counted),
             limit: cents(limit),
             day: until,
@@ -1260,8 +1261,7 @@ fn tax_lines_are_kept_apart_by_person_when_several_have_them() {
 #[test]
 fn a_window_of_all_time_is_named_and_never_panics() {
     let mut house = household().with_headroom();
-    house.run.headroom[0].from = Day(i32::MIN);
-    house.run.headroom[0].until = Day(i32::MAX);
+    house.run.headroom[0].days = Days::ALWAYS;
     let report = house.report(Query::Limits { year: Some(2026) });
     assert!(lines(&report.sections[0]).iter().any(|row| row.contains("| ever |")));
 }

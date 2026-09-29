@@ -5,11 +5,13 @@
 //! laws and rules are added by the test. Flows must be added in day order (the
 //! book's contract), and `book()` assembles the tables the engine reads.
 
-use axiom_core::{Arena, Day, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Sym, Tree};
+use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Run, Sym, Tree};
 use axiom_model::*;
 
-pub(crate) const FAR_PAST: Day = Day(i32::MIN);
-pub(crate) const FAR_FUTURE: Day = Day(i32::MAX);
+/// The days from `first` to `last`, as day numbers.
+pub(crate) fn span(first: i32, last: i32) -> Days {
+    Days::new(Day(first), Day(last)).expect("a span that ends no earlier than it begins")
+}
 
 pub(crate) struct Fixture {
     pub names: Interner<'static>,
@@ -65,6 +67,7 @@ impl Fixture {
             member: None,
             owner: None,
             client_of: None,
+            known_as: Box::new([]),
             props: Box::new([]),
             doc: None,
             loc: None,
@@ -91,6 +94,7 @@ impl Fixture {
             liquidity: None,
             opened: None,
             closed: None,
+            known_as: Box::new([]),
             props: Box::new([]),
             doc: None,
             loc: None,
@@ -240,8 +244,7 @@ impl Fixture {
         let day = Day(day);
         let txn = Txn {
             day,
-            first: id,
-            len: 1,
+            flows: Run::new(id, 1),
             codes: Box::new([]),
             waive: None,
             plan: None,
@@ -253,7 +256,7 @@ impl Fixture {
         self.txns.push(txn);
         let flow = Flow {
             day,
-            recognized: Recognition::on(day),
+            recognized: Days::on(day),
             from,
             to,
             out,
@@ -270,7 +273,7 @@ impl Fixture {
             codes: Box::new([]),
             loc,
             waive: None,
-            terms: None,
+            detail: None,
         };
         self.flows.push(flow);
         id
@@ -291,12 +294,12 @@ impl Fixture {
 
     /// Recognizes a flow over a range of days.
     pub fn recognize(&mut self, id: Id<Flow>, from: i32, until: i32) {
-        self.flows[id.index()].recognized = Recognition { from: Day(from), until: Day(until) };
+        self.flows[id.index()].recognized = span(from, until);
     }
 
-    /// Gives a flow terms.
-    pub fn terms(&mut self, id: Id<Flow>, terms: Terms) {
-        self.flows[id.index()].terms = Some(Box::new(terms));
+    /// Gives a flow detail.
+    pub fn detail(&mut self, id: Id<Flow>, detail: Detail) {
+        self.flows[id.index()].detail = Some(Box::new(detail));
     }
 
     /// Makes a flow an `opening` line.
@@ -343,7 +346,7 @@ impl Fixture {
 
     /// The flow made a claim, due on `due`, against `payee`.
     pub fn claim(&mut self, id: Id<Flow>, due: i32, payee: Id<Entity>) {
-        self.terms(id, Terms { due: Some(Day(due)), ..Terms::default() });
+        self.detail(id, Detail { due: Some(Day(due)), ..Detail::default() });
         self.flows[id.index()].payee = Some(payee);
     }
 
@@ -378,7 +381,7 @@ impl Fixture {
 
     /// A rule that applies for all time.
     pub fn rule(&self, law: Id<Law>, subject: Subject) -> Rule {
-        Rule { law, subject, from: FAR_PAST, until: FAR_FUTURE }
+        Rule { law, subject, days: Days::ALWAYS }
     }
 
     pub fn book(mut self) -> Book<'static> {
@@ -460,6 +463,7 @@ impl Fixture {
             contracts: Arena::new(),
             laws: self.laws,
             rules,
+            budgets: Arena::new(),
             params: Arena::new(),
             schedules: Arena::new(),
             codes: Vec::new(),
@@ -471,7 +475,7 @@ impl Fixture {
             prices: Prices::default(),
             splits: self.splits,
             plans: Arena::new(),
-            syncs: Vec::new(),
+            sources: Vec::new(),
             lookup: Default::default(),
         }
     }
@@ -593,6 +597,7 @@ impl LawBuilder {
             owner: Owner::Kind(Id::new(0)),
             system: None,
             trigger: self.trigger,
+            budget: None,
             steps: self.steps.into(),
             nodes: self.nodes.into(),
             loc: Loc::new(FileId(1), 0, 1000),

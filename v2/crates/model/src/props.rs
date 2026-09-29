@@ -10,7 +10,7 @@
 //! order their lines need: an amount is only exact once its commodity's
 //! precision is settled.
 
-use axiom_core::{Day, Diagnostic, Id, Loc, Map, Ratio, Span, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, Span, Sym};
 use axiom_syntax::{Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line};
 
 use crate::book::{Amount, Basis, Commodity, Entity, Has, Kind, Place, Prop, Residence, Sort};
@@ -407,19 +407,19 @@ impl<'a, 's> Args<'_, 'a, 's> {
     fn residence(&mut self) -> Result<Assign, Diagnostic> {
         let word = self.name("a system")?;
         let system = self.world.system(word)?;
-        let mut residence = Residence { from: Day(i32::MIN), until: Day(i32::MAX), system };
+        let (mut from, mut until) = (Day::MIN, Day::MAX);
         while self.peek().is_some() {
             match self.word(&["from", "until"])? {
-                "from" => residence.from = self.day()?,
-                _ => residence.until = self.day()?,
+                "from" => from = self.day()?,
+                _ => until = self.day()?,
             }
         }
-        if residence.until < residence.from {
+        let Some(days) = Days::new(from, until) else {
             return Err(Diagnostic::error("residence-order", "this residence ends before it begins")
                 .label(self.line.loc, "`until` is earlier than `from`")
                 .help("swap the two dates"));
-        }
-        Ok(Assign::Lives(residence))
+        };
+        Ok(Assign::Lives(Residence { days, system }))
     }
 
     /// `has employer entity`
@@ -443,7 +443,8 @@ impl<'a, 's> Args<'_, 'a, 's> {
     fn declared(&mut self, has: Has) -> Result<Assign, Diagnostic> {
         let id = self.next_id("a value")?;
         let (value, _) = self.world.constant(self.home, self.file, id, Some(has.ty))?;
-        Ok(Assign::Prop(Prop { name: has.name, value, loc: Some(self.line.loc) }))
+        // v3 bridge: a property holds from the beginning; statements that change one come with the v4 model.
+        Ok(Assign::Prop(Prop { name: has.name, value, since: Day::MIN, loc: Some(self.line.loc) }))
     }
 }
 
@@ -654,7 +655,7 @@ fn entities<'s>(
             }
         }
         let mut lives = std::mem::take(&mut entity.lives).into_vec();
-        lives.sort_by_key(|residence| (residence.from, residence.until));
+        lives.sort_by_key(|residence| residence.days);
         entity.lives = lives.into();
     }
 }

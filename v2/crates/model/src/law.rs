@@ -10,13 +10,14 @@
 //! [`Value::Fault`], not an early exit. `if`, `and` and `or` pick among values
 //! already computed, so a fault in a branch not taken is never observed.
 
+use axiom_core::calendar;
 use axiom_core::day::days_in_month;
-use axiom_core::{Day, Groups, Id, Loc, Ratio, Span, Sym};
+use axiom_core::{Day, Days, Groups, Id, Loc, Period, Ratio, Span, Sym};
 
-use crate::book::{Amount, Asset, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System};
+use crate::book::{Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System};
 use crate::journal::Object;
 
-pub use axiom_syntax::{BinOp, Period};
+pub use axiom_syntax::BinOp;
 
 pub struct Law {
     pub name: Sym,
@@ -26,6 +27,9 @@ pub struct Law {
     /// are scoped here.
     pub system: Option<Id<System>>,
     pub trigger: Trigger,
+    /// The `budget` item that reports through this law: its cap reads the
+    /// budget's limits and `carries` rather than a constant.
+    pub budget: Option<Id<Budget>>,
     pub steps: Box<[Step]>,
     pub nodes: Box<[Node]>,
     pub loc: Loc,
@@ -299,6 +303,19 @@ pub enum Window {
     Ever,
 }
 
+impl Window {
+    /// The days this window is on the day `day` falls in: its calendar month or
+    /// year, or all of time.
+    pub fn around(self, day: Day) -> Days {
+        let period = match self {
+            Window::Month => Period::Month,
+            Window::Year => Period::Year,
+            Window::Ever => return Days::ALWAYS,
+        };
+        calendar::Window::containing(period, day).days()
+    }
+}
+
 /// A static type.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Ty {
@@ -422,9 +439,8 @@ pub struct Rule {
     /// the place itself for kind laws, the resident for system laws, and the
     /// flow's owner for purpose laws.
     pub subject: Subject,
-    /// Inclusive: the rule applies on days in `from..=until`.
-    pub from: Day,
-    pub until: Day,
+    /// The days the rule applies on.
+    pub days: Days,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
