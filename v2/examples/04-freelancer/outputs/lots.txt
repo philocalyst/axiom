@@ -1,9 +1,13 @@
-$ axiom lots --today 2026-02-10
+$ axiom lots --today 2026-04-16
 
-Lots at 2026-02-10
+Lots at 2026-04-16
 
-  Place                       Quantity     Basis  Acquired    Held            Value     Unrealized  Term  Note
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  assets/retirement/sep  21,353.79 USD  0.00 USD  2025-01-01  1y1m9d  21,353.79 USD  21,353.79 USD  long
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  Total                                 0.00 USD                      21,353.79 USD  21,353.79 USD
+  Place                       Quantity          Basis  Acquired    Held             Value     Unrealized  Term  Note
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/bank/tax-vault   8,856.11 USD   8,856.11 USD  2025-01-01  1y3m15d   8,856.11 USD       0.00 USD        tied to vault
+  assets/receivable       2,600.00 USD   2,600.00 USD  2025-12-01  4m15d     2,600.00 USD       0.00 USD        #inv-2025-n3
+  assets/receivable       6,000.00 USD   6,000.00 USD  2026-03-10  1m6d      6,000.00 USD       0.00 USD        #inv-2026-o1
+  assets/receivable       3,200.00 USD   3,200.00 USD  2026-04-01  15d       3,200.00 USD       0.00 USD        #inv-2026-b04
+  assets/retirement/sep  21,586.06 USD       0.00 USD  2025-01-01  1y3m15d  21,586.06 USD  21,586.06 USD
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                                 20,656.11 USD                       42,242.17 USD  21,586.06 USD

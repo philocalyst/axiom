@@ -1,20 +1,21 @@
-$ axiom tax 2026 --today 2026-02-10
+$ axiom tax 2026 --today 2026-04-16
 
 Taxes 2026 for me
 
 Counted
-  Tally                      Amount  From
-  ────────────────────────────────────────────────────────
+  Tally                       Amount  From
+  ─────────────────────────────────────────────────────────
   project
-    business-expenses    475.72 USD  11 sources
-    health-premiums      425.00 USD  journal/2026/01.ax:3
-    gross-receipts     3,200.00 USD  journal/2026/01.ax:16
-    sep-contributions  2,000.00 USD  journal/2026/01.ax:35
-  ────────────────────────────────────────────────────────
+    business-expenses   3,540.19 USD  44 sources
+    health-premiums     1,700.00 USD  4 sources
+    adjustments         1,700.00 USD  4 sources
+    gross-receipts     17,600.00 USD  6 sources
+  ─────────────────────────────────────────────────────────
   us
-    federal-withheld   2,400.00 USD  journal/2026/01.ax:21
-    interest              36.35 USD  journal/2026/01.ax:36
-    agi                   36.35 USD  journal/2026/01.ax:36
+    interest              119.41 USD  3 sources
+    total-income          119.41 USD  3 sources
+    investment-income     119.41 USD  3 sources
+    payments            3,000.00 USD  journal/2026/04.ax:22
 
 Owed
   Owed  To  Due  Amount  From

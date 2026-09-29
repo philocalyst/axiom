@@ -1,64 +1,62 @@
-Balances at 2026-02-10
+Balances at 2026-04-16
 
-  Place                        Balance
-  ────────────────────────────────────
-  assets                 64,534.77 USD
-    bank                 29,380.98 USD
-      business-checking  14,548.43 USD
-      personal-checking   4,411.60 USD
-      tax-vault          10,420.95 USD
-    receivable            5,800.00 USD
-      brightwave          3,200.00 USD
-      northpeak           2,600.00 USD
-    retirement           29,353.79 USD
-      sep                29,353.79 USD
-  ────────────────────────────────────
-  equity                 34,456.56 USD
-                               880 MI
-    odometer                   880 MI
-    opening              34,456.56 USD
-  ────────────────────────────────────
-  expenses               61,052.64 USD
-                               880 MI
-    bad-debt              3,800.00 USD
-    business              9,164.87 USD
-      education             948.00 USD
-      equipment           3,148.00 USD
-      fees                  902.60 USD
-      fonts                 240.00 USD
-      hosting               238.99 USD
-      insurance             780.00 USD
-      printing              297.15 USD
-      software            1,591.35 USD
-      travel              1,018.78 USD
-    food                  6,321.73 USD
-      dining              1,358.60 USD
-      groceries           4,963.13 USD
-    health-insurance      5,369.00 USD
-    home                 25,036.40 USD
-      insurance             286.00 USD
-      internet            1,040.00 USD
-      rent               22,750.00 USD
-      utilities             960.40 USD
-    meals                   363.25 USD
-    mileage                    880 MI
-    phone                   832.00 USD
-    taxes                 9,600.00 USD
-      federal             9,600.00 USD
-    transport               565.39 USD
-  ────────────────────────────────────
-  income                 91,017.66 USD
-    design               87,600.00 USD
-    growth                3,003.79 USD
-    interest                326.47 USD
-    rewards                  87.40 USD
-  ────────────────────────────────────
-  liabilities               113.19 USD
-    business-card           113.19 USD
+  Place                         Balance
+  ─────────────────────────────────────
+  assets                  70,355.17 USD
+    bank                  28,969.11 USD
+      business-checking   15,324.46 USD
+      personal-checking    4,788.54 USD
+      tax-vault            8,856.11 USD
+    receivable            11,800.00 USD
+    retirement            29,586.06 USD
+      sep                 29,586.06 USD
+  ─────────────────────────────────────
+  equity                  34,456.56 USD
+                                919 MI
+    odometer                    919 MI
+    opening               34,456.56 USD
+  ─────────────────────────────────────
+  expenses                75,967.08 USD
+                                919 MI
+    bad-debt               3,800.00 USD
+    business              11,058.95 USD
+      education              948.00 USD
+      equipment            3,148.00 USD
+      fees                 1,042.10 USD
+      fonts                  240.00 USD
+      hosting                238.99 USD
+      insurance            1,592.00 USD
+      printing               381.35 USD
+      software             2,449.73 USD
+      travel               1,018.78 USD
+    food                   7,418.46 USD
+      dining               1,600.73 USD
+      groceries            5,817.73 USD
+    health-insurance       6,644.00 USD
+    home                  30,751.95 USD
+      insurance              352.00 USD
+      internet             1,280.00 USD
+      rent                28,000.00 USD
+      utilities            1,119.95 USD
+    meals                    410.55 USD
+    mileage                     919 MI
+    phone                    960.00 USD
+    taxes                 14,100.00 USD
+      federal             14,100.00 USD
+    transport                823.17 USD
+  ─────────────────────────────────────
+  income                 111,732.99 USD
+    design               108,000.00 USD
+    interest                 409.53 USD
+    market                 3,236.06 USD
+    rewards                   87.40 USD
+  ─────────────────────────────────────
+  liabilities                132.70 USD
+    business-card            132.70 USD
 
   Net worth      Value (USD)
   ──────────────────────────
-  Assets       64,534.77 USD
-  Liabilities     113.19 USD
+  Assets       70,355.17 USD
+  Liabilities     132.70 USD
   ──────────────────────────
-  Net worth    64,421.58 USD
+  Net worth    70,222.47 USD

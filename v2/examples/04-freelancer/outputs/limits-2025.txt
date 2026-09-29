@@ -1,0 +1,14 @@
+$ axiom limits 2025 --today 2026-04-16
+
+Limits in 2025
+
+  Who  Limit                                        Window        Counted                 Cap      Room left    Used
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  me   estimate-2-2025 for me                       2025     2,400.00 USD  floor 4,600.00 USD  -2,200.00 USD
+  me   budget on expenses/food                      2025-12    538.10 USD          600.00 USD      61.90 USD  89.68%
+  me   contribution-limit on assets/retirement/sep  2025     8,000.00 USD       11,399.25 USD   3,399.25 USD  70.18%
+  me   budget on expenses/business/software         2025-12     63.39 USD          130.00 USD      66.61 USD  48.76%
+  me   estimate-1-2025 for me                       2025     2,400.00 USD  floor 2,300.00 USD     100.00 USD
+  me   estimate-3-2025 for me                       2025     7,200.00 USD  floor 6,900.00 USD     300.00 USD
+  me   estimate-4 for me                            2025     9,600.00 USD  floor 9,200.00 USD     400.00 USD
+  · A floor, like a minimum payment, shows what stands as counted and the room above it.

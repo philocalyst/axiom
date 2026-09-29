@@ -1,9 +1,7 @@
 2025-11-01 business-card -> software 7.20 USD / google
 2025-11-01 personal-checking -> landlord 1_750 USD
 2025-11-01 personal-checking -> bluecross 412 USD
-
-/// Monthly retainer, net 30.
-2025-11-03 design -> brightwave 3_200 USD #inv-2025-b11
+2025-11-03 design -> brightwave 3_200 USD #inv-2025-b11 due 30d
 2025-11-03 business-card -> software 10 USD / notion
 2025-11-03 business-checking -> personal-checking 3_500 USD // owner's draw
 2025-11-05 personal-checking -> statefarm 22 USD
@@ -12,12 +10,12 @@
 2025-11-06 odometer -> mileage 52 MI / northpeak
 2025-11-08 business-card -> software 59.99 USD / adobe
 2025-11-08 personal-checking -> dining 32.01 USD
-2025-11-10 personal-checking -> transport 37.82 USD
+2025-11-10 personal-checking -> transport 46.75 USD
 
 /// Holiday campaign.
-2025-11-12 design -> fernhill 3_100 USD #inv-2025-f4
-2025-11-12 brightwave -> business-checking 3_200 USD #inv-2025-b10
-2025-11-12 business-checking -> tax-vault 640 USD
+2025-11-12 design -> fernhill 3_100 USD #inv-2025-f4 due 30d
+2025-11-12 brightwave -> business-checking 3_200 USD for #inv-2025-b10
+2025-11-12 business-checking -> tax-vault 640 USD for vault
 2025-11-12 personal-checking -> comcast 80 USD
 2025-11-12 personal-checking -> groceries 78.40 USD / safeway
 2025-11-14 business-card -> software 15 USD / figma
@@ -25,21 +23,21 @@
 2025-11-18 personal-checking -> tmobile 64 USD
 2025-11-19 business-card -> meals 61.45 USD
 2025-11-19 odometer -> mileage 29 MI / fernhill
-2025-11-20 northpeak -> business-checking 5_900 USD #inv-2025-n2
-2025-11-20 business-checking -> tax-vault 1_180 USD
+2025-11-20 northpeak -> business-checking 5_900 USD for #inv-2025-n2
+2025-11-20 business-checking -> tax-vault 1_180 USD for vault
 
 /// The October statement, paid in full.
 2025-11-20 business-checking -> business-card 145.29 USD
 2025-11-20 personal-checking -> groceries 78.32 USD / safeway
 2025-11-22 business-card -> software 21 USD / freshbooks
 2025-11-22 personal-checking -> dining 42.96 USD
-2025-11-26 orbit-labs -> 4_200 USD #inv-2025-o2
-  business-checking           4_185.00 USD
-  fees                        15.00 USD   // incoming wire fee
-2025-11-26 business-checking -> tax-vault 837 USD
+2025-11-26 orbit-labs -> 4_200 USD for #inv-2025-o2
+  business-checking       4_185.00 USD
+  fees                    15.00 USD   // incoming wire fee
+2025-11-26 business-checking -> tax-vault 837 USD for vault
 2025-11-27 personal-checking -> groceries 105.25 USD / trader-joes
-2025-11-30 interest -> tax-vault 37.88 USD
+2025-11-30 interest -> tax-vault 37.88 USD for vault
 2025-11-30 business-card = 271.39 USD
 2025-11-30 business-checking = 17_217.77 USD
-2025-11-30 personal-checking = 4_442.58 USD
+2025-11-30 personal-checking = 4_385.92 USD
 2025-11-30 tax-vault = 10_860.28 USD

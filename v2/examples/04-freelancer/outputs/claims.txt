@@ -1,3 +1,5 @@
+$ axiom claims --today 2026-04-16
+
 Claims on 2026-04-16
 
 Owed to you

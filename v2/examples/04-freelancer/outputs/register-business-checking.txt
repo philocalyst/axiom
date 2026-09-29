@@ -1,78 +1,16 @@
-$ axiom register business-checking --today 2026-02-10
+$ axiom register business-checking --from 2026-03-01 --today 2026-04-16
 
 Register: assets/bank/business-checking
 
-  Date        With                           Payee  Note                  Amount        Balance
-  ─────────────────────────────────────────────────────────────────────────────────────────────
-  2025-01-01  equity/opening                                        8,420.44 USD   8,420.44 USD
-  2025-01-03  assets/bank/personal-checking                        -2,950.00 USD   5,470.44 USD
-  2025-02-03  assets/bank/personal-checking                        -2,750.00 USD   2,720.44 USD
-  2025-02-12  assets/receivable/brightwave          #inv-2025-b01   3,200.00 USD   5,920.44 USD
-  2025-02-12  assets/bank/tax-vault                                  -640.00 USD   5,280.44 USD
-  2025-02-20  liabilities/business-card                              -113.19 USD   5,167.25 USD
-  2025-03-03  assets/bank/personal-checking                        -2,950.00 USD   2,217.25 USD
-  2025-03-14  assets/receivable/brightwave          #inv-2025-b02   3,200.00 USD   5,417.25 USD
-  2025-03-14  assets/bank/tax-vault                                  -640.00 USD   4,777.25 USD
-  2025-03-20  liabilities/business-card                            -1,013.07 USD   3,764.18 USD
-  2025-03-28  assets/receivable/fernhill            #inv-2025-f1    4,369.20 USD   8,133.38 USD
-  2025-03-28  assets/bank/tax-vault                                  -873.84 USD   7,259.54 USD
-  2025-04-03  assets/bank/personal-checking                        -2,950.00 USD   4,309.54 USD
-  2025-04-11  assets/receivable/brightwave          #inv-2025-b03   3,200.00 USD   7,509.54 USD
-  2025-04-11  assets/bank/tax-vault                                  -640.00 USD   6,869.54 USD
-  2025-04-20  assets/receivable/orbit-labs          #inv-2025-o1    2,735.00 USD   9,604.54 USD
-  2025-04-20  assets/bank/tax-vault                                  -547.00 USD   9,057.54 USD
-  2025-04-20  liabilities/business-card                            -3,041.99 USD   6,015.55 USD
-  2025-05-03  assets/bank/personal-checking                        -2,950.00 USD   3,065.55 USD
-  2025-05-13  assets/receivable/brightwave          #inv-2025-b04   3,200.00 USD   6,265.55 USD
-  2025-05-13  assets/bank/tax-vault                                  -640.00 USD   5,625.55 USD
-  2025-05-20  liabilities/business-card                              -424.19 USD   5,201.36 USD
-  2025-06-03  assets/bank/personal-checking                        -2,950.00 USD   2,251.36 USD
-  2025-06-10  assets/receivable/brightwave          #inv-2025-b05   3,200.00 USD   5,451.36 USD
-  2025-06-10  assets/bank/tax-vault                                  -640.00 USD   4,811.36 USD
-  2025-06-12  assets/receivable/orbit-labs          #inv-2025-o1    2,735.00 USD   7,546.36 USD
-  2025-06-12  assets/bank/tax-vault                                  -547.00 USD   6,999.36 USD
-  2025-06-20  liabilities/business-card                            -1,927.27 USD   5,072.09 USD
-  2025-06-27  assets/retirement/sep                                -2,000.00 USD   3,072.09 USD
-  2025-06-30  assets/receivable/fernhill            #inv-2025-f2    2,718.50 USD   5,790.59 USD
-  2025-06-30  assets/bank/tax-vault                                  -543.70 USD   5,246.89 USD
-  2025-07-03  assets/bank/personal-checking                        -2,950.00 USD   2,296.89 USD
-  2025-07-15  assets/receivable/brightwave          #inv-2025-b06   3,200.00 USD   5,496.89 USD
-  2025-07-15  assets/bank/tax-vault                                  -640.00 USD   4,856.89 USD
-  2025-07-20  liabilities/business-card                            -1,002.19 USD   3,854.70 USD
-  2025-08-03  assets/bank/personal-checking                        -3,300.00 USD     554.70 USD
-  2025-08-12  assets/receivable/brightwave          #inv-2025-b07   3,200.00 USD   3,754.70 USD
-  2025-08-12  assets/bank/tax-vault                                  -640.00 USD   3,114.70 USD
-  2025-08-15  assets/receivable/northpeak           #inv-2025-n1    7,400.00 USD  10,514.70 USD
-  2025-08-15  assets/bank/tax-vault                                -1,480.00 USD   9,034.70 USD
-  2025-08-20  liabilities/business-card                              -231.79 USD   8,802.91 USD
-  2025-09-03  assets/bank/personal-checking                        -2,950.00 USD   5,852.91 USD
-  2025-09-16  assets/receivable/brightwave          #inv-2025-b08   3,200.00 USD   9,052.91 USD
-  2025-09-16  assets/bank/tax-vault                                  -640.00 USD   8,412.91 USD
-  2025-09-20  liabilities/business-card                              -352.18 USD   8,060.73 USD
-  2025-09-26  assets/retirement/sep                                -2,000.00 USD   6,060.73 USD
-  2025-10-02  assets/receivable/fernhill            #inv-2025-f3    6,019.90 USD  12,080.63 USD
-  2025-10-02  assets/bank/tax-vault                                -1,203.98 USD  10,876.65 USD
-  2025-10-03  assets/bank/personal-checking                        -2,950.00 USD   7,926.65 USD
-  2025-10-14  assets/receivable/brightwave          #inv-2025-b09   3,200.00 USD  11,126.65 USD
-  2025-10-14  assets/bank/tax-vault                                  -640.00 USD  10,486.65 USD
-  2025-10-20  liabilities/business-card                              -251.59 USD  10,235.06 USD
-  2025-11-03  assets/bank/personal-checking                        -3,500.00 USD   6,735.06 USD
-  2025-11-12  assets/receivable/brightwave          #inv-2025-b10   3,200.00 USD   9,935.06 USD
-  2025-11-12  assets/bank/tax-vault                                  -640.00 USD   9,295.06 USD
-  2025-11-20  assets/receivable/northpeak           #inv-2025-n2    5,900.00 USD  15,195.06 USD
-  2025-11-20  assets/bank/tax-vault                                -1,180.00 USD  14,015.06 USD
-  2025-11-20  liabilities/business-card                              -145.29 USD  13,869.77 USD
-  2025-11-26  assets/receivable/orbit-labs          #inv-2025-o2    4,185.00 USD  18,054.77 USD
-  2025-11-26  assets/bank/tax-vault                                  -837.00 USD  17,217.77 USD
-  2025-12-03  assets/bank/personal-checking                        -2,950.00 USD  14,267.77 USD
-  2025-12-10  assets/receivable/brightwave          #inv-2025-b11   3,200.00 USD  17,467.77 USD
-  2025-12-10  assets/bank/tax-vault                                  -640.00 USD  16,827.77 USD
-  2025-12-20  liabilities/business-card                              -271.39 USD  16,556.38 USD
-  2025-12-22  assets/retirement/sep                                -2,000.00 USD  14,556.38 USD
-  2025-12-30  assets/receivable/fernhill            #inv-2025-f4    3,009.80 USD  17,566.18 USD
-  2025-12-30  assets/bank/tax-vault                                  -601.96 USD  16,964.22 USD
-  2026-01-03  assets/bank/personal-checking                        -2,950.00 USD  14,014.22 USD
-  2026-01-13  assets/receivable/brightwave          #inv-2025-b12   3,200.00 USD  17,214.22 USD
-  2026-01-13  assets/bank/tax-vault                                  -640.00 USD  16,574.22 USD
-  2026-01-20  liabilities/business-card                               -25.79 USD  16,548.43 USD
-  2026-01-28  assets/retirement/sep                 #sep-for-2025  -2,000.00 USD  14,548.43 USD
+  Date        With                           Payee       Note                  Amount        Balance
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  2026-03-01  opening balance                                                          13,445.34 USD
+  2026-03-03  assets/bank/personal-checking                             -2,950.00 USD  10,495.34 USD
+  2026-03-12  assets/receivable              brightwave  #inv-2026-b02   3,200.00 USD  13,695.34 USD
+  2026-03-12  assets/bank/tax-vault                                       -640.00 USD  13,055.34 USD
+  2026-03-20  liabilities/business-card                                 -1,069.28 USD  11,986.06 USD
+  2026-03-30  assets/receivable              fernhill    #inv-2026-f1    4,660.50 USD  16,646.56 USD
+  2026-03-30  assets/bank/tax-vault                                       -932.10 USD  15,714.46 USD
+  2026-04-03  assets/bank/personal-checking                             -2,950.00 USD  12,764.46 USD
+  2026-04-10  assets/receivable              brightwave  #inv-2026-b03   3,200.00 USD  15,964.46 USD
+  2026-04-10  assets/bank/tax-vault                                       -640.00 USD  15,324.46 USD

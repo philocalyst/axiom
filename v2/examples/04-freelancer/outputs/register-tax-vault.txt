@@ -1,0 +1,18 @@
+$ axiom register tax-vault --from 2026-01-01 --today 2026-04-16
+
+Register: assets/bank/tax-vault
+
+  Date        With                           Payee  Note                  Amount        Balance
+  ─────────────────────────────────────────────────────────────────────────────────────────────
+  2026-01-01  opening balance                                                     12,144.60 USD
+  2026-01-13  assets/bank/business-checking                           640.00 USD  12,784.60 USD
+  2026-01-14  expenses/taxes/federal         irs    #q4-2025       -2,400.00 USD  10,384.60 USD
+  2026-01-31  income/interest                                          36.35 USD  10,420.95 USD
+  2026-02-13  assets/bank/business-checking                           640.00 USD  11,060.95 USD
+  2026-02-28  income/interest                                          38.71 USD  11,099.66 USD
+  2026-03-12  assets/bank/business-checking                           640.00 USD  11,739.66 USD
+  2026-03-30  assets/bank/business-checking                           932.10 USD  12,671.76 USD
+  2026-03-31  income/interest                                          44.35 USD  12,716.11 USD
+  2026-04-10  assets/bank/business-checking                           640.00 USD  13,356.11 USD
+  2026-04-10  expenses/taxes/federal         irs    #balance-2025  -1,500.00 USD  11,856.11 USD
+  2026-04-14  expenses/taxes/federal         irs    #q1-2026       -3,000.00 USD   8,856.11 USD

@@ -1,8 +1,6 @@
 Limits in 2026
 
-  Who  Limit                                 Window        Counted                 Cap      Room left  Used
-  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
-  me   estimate-4-2025 for me                2026     2,400.00 USD  floor 9,200.00 USD  -6,800.00 USD
-  me   budget on expenses/business/software  2026-02      0.00 USD          130.00 USD     130.00 USD    0%
-  me   budget on expenses/food               2026-02      0.00 USD          550.00 USD     550.00 USD    0%
-  · A floor, like a minimum payment, shows what stands as counted and the room above it.
+  Who  Limit                                 Window      Counted         Cap   Room left    Used
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  me   budget on expenses/business/software  2026-04  101.22 USD  130.00 USD   28.78 USD  77.86%
+  me   budget on expenses/food               2026-04  252.14 USD  600.00 USD  347.86 USD  42.02%

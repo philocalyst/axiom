@@ -1,0 +1,8 @@
+$ axiom budget 2026-03 --today 2026-04-16
+
+Budgets for 2026-03
+
+  Place                       Law     Window        Spent       Limit        Left    Used
+  ───────────────────────────────────────────────────────────────────────────────────────
+  expenses/business/software  budget  2026-03  124.53 USD  130.00 USD    5.47 USD  95.79%
+  expenses/food               budget  2026-03  417.86 USD  600.00 USD  182.14 USD  69.64%

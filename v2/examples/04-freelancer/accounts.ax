@@ -1,58 +1,44 @@
 // Where the money is, who it comes from, and what each kind of place means for
-// tax. The rules themselves are in tax.ax.
+// tax. The laws that add self-employment tax are in tax.ax.
 
 // ─── Kinds this project needs ───────────────────────────────────────────────
 
-/// Money a client owes for an invoice sent and not yet paid. One place per
-/// client, so each client's balance is one line.
-kind receivable : asset
-  liquidity 45d
-
-  /// Cash method (IRC §446): an invoice is income when the money arrives, not
-  /// when it is sent. Everything that leaves a receivable place counts,
-  /// including what a processor kept as its fee: the fee is a deductible
-  /// expense of its own. A write-off is not a receipt.
-  ///
-  /// This law lives in the kind, not at the top of the project: a top-level
-  /// law does not see a flow between two places of the same owner.
-  law count-receipts
-    on out
-    when not to is bad-debt
-    count amount as gross-receipts
-
-/// A SEP-IRA: pre-tax money that comes out taxed as income. There is no shipped
-/// system for it, so the limit and the deduction are in tax.ax.
+/// A SEP-IRA: pre-tax money that comes out taxed as income. `us` deducts what is
+/// paid in from a bank account and counts what comes out; the kind says what
+/// arrives has no basis, and adds this account's own limit.
 kind sep-ira : tax-deferred
+  basis zero
+  deductible true
   liquidity 3d
 
-  /// Contributions made from a bank account are what the year-end law caps and
-  /// deducts. Growth and the opening balance do not come from a bank.
+  /// Contributions from a bank account are what the return caps and deducts.
+  /// Growth reaches the account through `market` and is not a contribution.
   law count-contributions
     on in
-    when from is bank
+    when from is asset
     count amount as sep-contributions
 
-  /// Everything that comes out of a SEP-IRA is ordinary income (IRC §408(d)).
-  /// It is pre-tax money, so all of it is gain.
-  law count-distributions
-    on gain
-    when gain > empty
-    when not to is tax-deferred
-    count gain as distributions
-    count gain as agi
-
-  /// Money taken out before age 59½ owes an extra 10% (IRC §72(t)).
-  law early-withdrawal
-    on gain
-    when gain > empty
-    when not to is tax-deferred
-    require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "SEP-IRA withdrawal before age 59½"
+  /// A SEP-IRA takes at most 20% of net earnings after half of the
+  /// self-employment tax, and 70,000 USD (IRC §404(h), §415(c)). The limit is
+  /// known when the return closes, and a contribution made in January for the
+  /// year before, `for` that year, counts.
+  ///
+  /// To fix: take the excess back out of the account before the return's due date,
+  /// or it is taxed twice.
+  law contribution-limit
+    each year closing 04-15
+    let cap = min((tally(net-profit) - tally(se-deduction)) * 20%, sep-limit[year])
+    require tally(sep-contributions) <= cap "SEP-IRA contributions over the limit for the year"
 
 // A mile is a unit like any other. The deduction is what a mile is worth on the
 // day, so the rate goes in the price file.
 commodity MI
   name "mile"
   precision 0
+
+/// The tax vault. Money set aside `for vault` is tied to it: it is not available
+/// to spend, and it comes out only to pay tax.
+entity vault : envelope
 
 
 // ─── Banks, card, retirement ────────────────────────────────────────────────
@@ -63,8 +49,8 @@ account assets/bank/business-checking : bank
 /// Personal checking, funded by an owner's draw each month.
 account assets/bank/personal-checking : bank
 
-/// Taxes are set aside here: a quarter of every payment goes in when it arrives,
-/// and the estimated payments come out.
+/// A fifth of every payment goes in when it arrives, `for vault`, and the
+/// estimated payments come out.
 account assets/bank/tax-vault : bank
 
 /// SEP-IRA at the custodian.
@@ -73,22 +59,31 @@ account assets/retirement/sep : sep-ira
 /// The business card, paid in full every month.
 account liabilities/business-card : credit-card
 
-// One receivable per client.
-account assets/receivable/brightwave  : receivable
-account assets/receivable/fernhill    : receivable
-account assets/receivable/orbit-labs  : receivable
-account assets/receivable/delta-rugs  : receivable
-account assets/receivable/northpeak   : receivable
+/// What clients owe. An invoice is a flow into this place with `due 30d`: one
+/// claim, kept apart from the others, that a payment `for` its code settles in
+/// whole or in part. Whose it is comes from the client entity written where the
+/// place would be.
+account assets/receivable : receivable
+
+  /// Cash method (IRC §446): an invoice is income when the money arrives, not
+  /// when it is sent. Everything that leaves the receivable place counts,
+  /// including what a processor kept as its fee: the fee is a deductible
+  /// expense of its own. A write-off is not a receipt.
+  ///
+  /// To fix: if money left a claim for another reason (a refund, a credit note),
+  /// send it to a place that is not the bank.
+  law count-receipts
+    on out
+    when not to is bad-debt
+    count amount as gross-receipts
 
 
 // ─── Income and equity ──────────────────────────────────────────────────────
 
-/// Fees for design work. Recognized when invoiced; taxed when paid (tax.ax).
+/// Fees for design work, recognized when invoiced and taxed when paid.
 account income/design
 account income/interest : interest
-account income/growth   : gains
 account income/rewards
-account equity/opening
 
 /// Miles driven for work. Only the deduction matters, so the log is a source of
 /// miles like an income place is a source of dollars.
@@ -98,14 +93,17 @@ account equity/odometer
 // ─── Business expenses ──────────────────────────────────────────────────────
 
 /// Everything under here is an ordinary business expense (IRC §162), deducted in
-/// the year it is paid or charged. One law covers the subtree.
+/// the year it is recognized. One law covers the subtree.
+///
+/// To fix: an expense that is not for the business belongs outside this subtree.
 account expenses/business
   law deductible
     on in
     count amount as business-expenses
 
-/// Subscriptions are budgeted: 113.19 USD a month is the standing total, and
-/// an annual plan on top of it (Dropbox) goes over.
+/// Subscriptions are budgeted: 113.19 USD a month is the standing total. An annual
+/// plan is spread over the year it covers, so the budget sees a twelfth of it a
+/// month.
 account expenses/business/software
   budget 130 USD monthly
 account expenses/business/insurance
@@ -154,74 +152,48 @@ account expenses/phone
     on in
     count amount * 60% as business-expenses
 
-/// Health insurance premiums: an adjustment to income, not a business expense.
+/// Health insurance premiums: an adjustment to income (IRC §162(l)), not a
+/// business expense.
 account expenses/health-insurance
   law self-employed-health
     on in
     count amount as health-premiums
+    count amount as adjustments
 
 /// Groceries and eating out.
 account expenses/food
-  budget 550 USD monthly
+  budget 600 USD monthly
 
 account expenses/food/groceries
 account expenses/food/dining
 account expenses/transport
 
 /// Estimated tax payments. A place of kind `federal-tax` counts what arrives as
-/// tax already paid.
+/// tax paid for the year it says `for`.
 account expenses/taxes/federal : federal-tax
 
 
 // ─── Clients and vendors ────────────────────────────────────────────────────
 
 /// A client. An entity written where a place is expected stands for its `via`
-/// place: `income/design -> brightwave` is an invoice, `brightwave -> business`
-/// is the payment.
-entity brightwave : org
-  via assets/receivable/brightwave
+/// place and is the payee: `design -> brightwave` is an invoice and
+/// `brightwave -> business-checking` is the payment.
+entity brightwave, fernhill, orbit-labs, delta-rugs, northpeak : org
+  via assets/receivable
 
-entity fernhill : org
-  via assets/receivable/fernhill
-
-entity orbit-labs : org
-  via assets/receivable/orbit-labs
-
-entity delta-rugs : org
-  via assets/receivable/delta-rugs
-
-entity northpeak : org
-  via assets/receivable/northpeak
-
-entity adobe : org
-  via expenses/business/software
-entity figma : org
-  via expenses/business/software
-entity notion : org
-  via expenses/business/software
-entity google : org
-  via expenses/business/software
-entity freshbooks : org
-  via expenses/business/software
-entity dropbox : org
+entity adobe, figma, notion, google, freshbooks, dropbox : org
   via expenses/business/software
 entity hiscox : org
   via expenses/business/insurance
 entity apple : org
   via expenses/business/equipment
-entity ixdf : org
-  via expenses/business/education
-entity config : org
+entity ixdf, config : org
   via expenses/business/education
 entity monotype : org
   via expenses/business/fonts
 entity squarespace : org
   via expenses/business/hosting
-entity alaska-air : org
-  via expenses/business/travel
-entity sf-hotel : org
-  via expenses/business/travel
-entity lyft : org
+entity alaska-air, sf-hotel, lyft : org
   via expenses/business/travel
 
 entity landlord : org
@@ -236,14 +208,12 @@ entity tmobile : org
   via expenses/phone
 entity bluecross : org
   via expenses/health-insurance
-entity trader-joes : org
-  via expenses/food/groceries
-entity safeway : org
+entity trader-joes, safeway : org
   via expenses/food/groceries
 
 
 // ─── Codes ──────────────────────────────────────────────────────────────────
 
-/// An invoice number links the invoice to every payment against it.
+/// An invoice number marks the invoice, and links it to every payment against it.
 code inv-*
   on receivable

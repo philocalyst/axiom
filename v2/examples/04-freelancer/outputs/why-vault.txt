@@ -1,0 +1,10 @@
+$ axiom why vault --today 2026-04-16
+
+Why vault
+
+Held for it
+  Place                        Amount  Since       From
+  ─────────────────────────────────────────────────────────────────────
+  assets/bank/tax-vault  8,856.11 USD  2025-01-01  journal/2025/01.ax:9
+  ─────────────────────────────────────────────────────────────────────
+  Remaining              8,856.11 USD

@@ -1,0 +1,13 @@
+$ axiom claims --at 2025-09-30 --today 2026-04-16
+
+Claims on 2025-09-30
+
+Owed to you
+  Counterparty  What                                                     Left  Made        Age    Due         Status
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  delta-rugs    #inv-2025-d1 · Catalogue redesign. Never paid.   3,800.00 USD  2025-06-02  3m28d  2025-07-02  overdue 90d
+  fernhill      #inv-2025-f3 · Campaign assets.                  6,200.00 USD  2025-08-18  1m12d  2025-09-17  overdue 13d
+  brightwave    #inv-2025-b09                                    3,200.00 USD  2025-09-02  28d    2025-10-02  in 2d
+  orbit-labs    #inv-2025-o2 · Pitch deck.                       4,200.00 USD  2025-09-22  8d     2025-10-22  in 22d
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                                                         17,400.00 USD

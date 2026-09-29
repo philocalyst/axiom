@@ -1,8 +1,0 @@
-$ axiom budget 2025-02 --today 2026-02-10
-
-Budgets for 2025-02-01
-
-  Place                       Law     Window        Spent       Limit         Left     Used
-  ─────────────────────────────────────────────────────────────────────────────────────────
-  expenses/business/software  budget  2025-02  233.07 USD  130.00 USD  -103.07 USD  179.28%
-  expenses/food               budget  2025-02  454.36 USD  550.00 USD    95.64 USD   82.61%
