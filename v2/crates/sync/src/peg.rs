@@ -68,7 +68,7 @@ impl Class {
 }
 
 /// The bytes of the character that starts with `lead`.
-pub fn char_width(lead: u8) -> usize {
+fn char_width(lead: u8) -> usize {
     match lead {
         0xF0.. => 4,
         0xE0.. => 3,
@@ -132,30 +132,14 @@ impl Peg {
         if parser.at < text.len() {
             return Err(parser.error(1, "there is nothing to close here"));
         }
-        let mut peg = Peg { nodes: parser.nodes, root, names: parser.names, starts: None };
-        peg.starts = peg.starts_of(root);
-        Ok(peg)
+        let starts = starts_of(&parser.nodes, root);
+        Ok(Peg { nodes: parser.nodes, root, names: parser.names, starts })
     }
 
     /// The literals a match begins with, one for each way it can. `None` if it
     /// may begin with a class instead, and so has to be tried everywhere.
     pub fn starts(&self) -> Option<&[Vec<u8>]> {
         self.starts.as_deref()
-    }
-
-    fn starts_of(&self, node: u32) -> Option<Vec<Vec<u8>>> {
-        match &self.nodes[node as usize] {
-            Node::Literal(bytes) => Some(vec![bytes.to_vec()]),
-            Node::Sequence(children) => self.starts_of(children[0]),
-            Node::Capture { body, .. } => self.starts_of(*body),
-            Node::Repeat { body, min, .. } if *min > 0 => self.starts_of(*body),
-            Node::Choice(alternatives) => {
-                let each: Option<Vec<_>> =
-                    alternatives.iter().map(|&alternative| self.starts_of(alternative)).collect();
-                each.map(|each| each.concat())
-            }
-            Node::Class(_) | Node::Repeat { .. } => None,
-        }
     }
 
     /// The literal every match begins with, if there is only one way to.
@@ -234,6 +218,22 @@ impl Peg {
     }
 }
 
+/// The literals a match of `node` begins with, one for each way it can; `None`
+/// if it may begin with anything.
+fn starts_of(nodes: &[Node], node: u32) -> Option<Vec<Vec<u8>>> {
+    match &nodes[node as usize] {
+        Node::Literal(bytes) => Some(vec![bytes.to_vec()]),
+        Node::Sequence(children) => starts_of(nodes, children[0]),
+        Node::Capture { body, .. } => starts_of(nodes, *body),
+        Node::Repeat { body, min, .. } if *min > 0 => starts_of(nodes, *body),
+        Node::Choice(alternatives) => {
+            let each: Option<Vec<_>> = alternatives.iter().map(|&alternative| starts_of(nodes, alternative)).collect();
+            each.map(|each| each.concat())
+        }
+        Node::Class(_) | Node::Repeat { .. } => None,
+    }
+}
+
 /// The text of a pattern, read into nodes.
 struct Parser<'t> {
     text: &'t str,
@@ -244,7 +244,7 @@ struct Parser<'t> {
     names: Vec<String>,
 }
 
-impl Parser<'_> {
+impl<'t> Parser<'t> {
     fn error(&self, len: usize, message: impl Into<String>) -> PatternError {
         PatternError { at: self.at, len, message: message.into(), help: None }
     }
@@ -264,15 +264,17 @@ impl Parser<'_> {
     }
 
     /// One node for several: the node itself for one, else a node that has them.
-    fn all_of(&mut self, mut nodes: Vec<u32>, make: fn(Box<[u32]>) -> Node) -> u32 {
-        match nodes.pop() {
-            Some(only) if nodes.is_empty() => only,
-            Some(last) => {
-                nodes.push(last);
-                self.push(make(nodes.into()))
-            }
-            None => unreachable!("a choice and a sequence have at least one part"),
+    fn all_of(&mut self, nodes: Vec<u32>, make: fn(Box<[u32]>) -> Node) -> u32 {
+        match nodes.as_slice() {
+            &[only] => only,
+            _ => self.push(make(nodes.into())),
         }
+    }
+
+    /// The characters from here that `accept` takes.
+    fn word(&self, accept: fn(char) -> bool) -> &'t str {
+        let rest = &self.text[self.at..];
+        &rest[..rest.find(|c| !accept(c)).unwrap_or(rest.len())]
     }
 
     fn choice(&mut self) -> Result<u32, PatternError> {
@@ -295,10 +297,7 @@ impl Parser<'_> {
     /// An atom, with the name it captures under and the repeat that follows it.
     fn item(&mut self) -> Result<u32, PatternError> {
         self.skip_space();
-        let word = self.text[self.at..]
-            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
-            .next()
-            .unwrap_or("");
+        let word = self.word(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
         let name = self.text[self.at + word.len()..].starts_with(':').then_some(word).filter(|word| !word.is_empty());
         if let Some(name) = name {
             self.at += name.len() + 1;
@@ -326,9 +325,8 @@ impl Parser<'_> {
         match self.peek() {
             Some('"') => self.literal(),
             Some('(') => {
-                let open = self.error(1, format!("groups nest at most {MAX_DEPTH} deep"));
                 if self.depth == MAX_DEPTH {
-                    return Err(open);
+                    return Err(self.error(1, format!("groups nest at most {MAX_DEPTH} deep")));
                 }
                 (self.at, self.depth) = (self.at + 1, self.depth + 1);
                 let inner = self.choice()?;
@@ -350,26 +348,26 @@ impl Parser<'_> {
     /// `"TEXT"`, where `\"` and `\\` are a quote and a backslash.
     fn literal(&mut self) -> Result<u32, PatternError> {
         let start = self.at;
-        let mut bytes = Vec::new();
+        let mut text = String::new();
         let mut chars = self.text[start + 1..].char_indices();
         while let Some((offset, c)) = chars.next() {
             match c {
-                '"' if bytes.is_empty() => {
+                '"' if text.is_empty() => {
                     self.at = start;
                     return Err(self.error(offset + 2, "a literal cannot be empty"));
                 }
                 '"' => {
                     self.at = start + offset + 2;
-                    return Ok(self.push(Node::Literal(bytes.to_ascii_lowercase().into())));
+                    return Ok(self.push(Node::Literal(text.to_ascii_lowercase().into_bytes().into())));
                 }
                 '\\' => match chars.next() {
-                    Some((_, escaped @ ('"' | '\\'))) => bytes.extend_from_slice(escaped.to_string().as_bytes()),
+                    Some((_, escaped @ ('"' | '\\'))) => text.push(escaped),
                     _ => {
                         self.at = start + offset + 1;
                         return Err(self.error(2, "a backslash in a literal is followed by `\"` or `\\`"));
                     }
                 },
-                c => bytes.extend_from_slice(c.to_string().as_bytes()),
+                c => text.push(c),
             }
         }
         self.at = start;
@@ -377,7 +375,7 @@ impl Parser<'_> {
     }
 
     fn class(&mut self) -> Result<u32, PatternError> {
-        let word = self.text[self.at..].split(|c: char| !c.is_ascii_alphabetic()).next().unwrap_or("");
+        let word = self.word(|c| c.is_ascii_alphabetic());
         let Some(&(_, class)) = CLASSES.iter().find(|(name, _)| *name == word) else {
             let mut error = self.error(word.len(), format!("`{word}` is not a class"));
             let names = CLASSES.iter().map(|(name, _)| *name);

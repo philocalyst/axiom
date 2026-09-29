@@ -1,6 +1,6 @@
-//! Who a memo is. The ledger's `known-as` patterns are compiled once and looked
-//! up by the first byte they can start with, so a record costs one pass over its
-//! memo and no allocation.
+//! Who a memo is. The ledger's `known-as` patterns are compiled once and found
+//! through a trie of the literals they begin with, so a record costs one pass
+//! over its memo and no allocation.
 
 use std::cmp::Reverse;
 

@@ -52,12 +52,10 @@ fn items(
     for item in &found {
         let dated = item.day.filter(|_| !lines[item.head].starts_with("opening"));
         let Some(day) = dated else {
-            let start: usize = lines[..item.head].iter().map(|line| line.len()).sum();
-            let loc = Loc::new(FileId(0), start as u32, (start + lines[item.head].trim_end().len()) as u32);
             let headline = "the output has a line that does not start with a date".to_string();
             problems.push(
                 Diagnostic::error("undated-line", headline)
-                    .label(loc, "expected a date such as 2026-03-05")
+                    .label(line_loc(&lines, item.head), "expected a date such as 2026-03-05")
                     .help("print full dates: sync files each line by its day"),
             );
             continue;
@@ -71,6 +69,12 @@ fn items(
         }
     }
     if problems.is_empty() { Ok(inserts) } else { Err(problems) }
+}
+
+/// Where line `at` of what a command printed is, without its line ending.
+fn line_loc(lines: &[&str], at: usize) -> Loc {
+    let start: usize = lines[..at].iter().map(|line| line.len()).sum();
+    Loc::new(FileId(0), start as u32, (start + lines[at].trim_end().len()) as u32)
 }
 
 /// How many items each day and subject have in a file.
@@ -127,20 +131,17 @@ fn rows(
     for key in existing {
         *present.entry(key).or_default() += 1;
     }
-    let (mut inserts, mut problems, mut start) = (Vec::new(), Vec::new(), 0);
-    for line in output.split_inclusive('\n') {
-        let at = start;
-        start += line.len();
+    let lines: Vec<&str> = output.split_inclusive('\n').collect();
+    let (mut inserts, mut problems) = (Vec::new(), Vec::new());
+    for (at, line) in lines.iter().enumerate() {
         let row = line.trim();
         if row.is_empty() || row.starts_with("//") {
             continue;
         }
         let Some(key) = row_key(row) else {
-            let loc = Loc::new(FileId(0), at as u32, (at + line.trim_end().len()) as u32);
             let headline = "the output has a row that does not start with a year or a date".to_string();
-            problems.push(
-                Diagnostic::error("bad-row", headline).label(loc, "expected `2026`, `2026-03` or `2026-03-05` here"),
-            );
+            let label = "expected `2026`, `2026-03` or `2026-03-05` here";
+            problems.push(Diagnostic::error("bad-row", headline).label(line_loc(&lines, at), label));
             continue;
         };
         match present.get_mut(&key) {

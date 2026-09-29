@@ -34,8 +34,7 @@ impl Context {
     /// The day a written date means here, if it is one: `2026-01-15`, `01-15`
     /// where the year is known, `15` where the month is too.
     fn complete(self, token: &str) -> Option<Day> {
-        let number =
-            |text: &str| text.bytes().all(|byte| byte.is_ascii_digit()).then(|| text.parse::<u32>().ok()).flatten();
+        let number = |text: &str| text.parse::<u32>().ok().filter(|_| text.bytes().all(|byte| byte.is_ascii_digit()));
         match token.len() {
             10 => Day::parse(token.as_bytes()),
             5 => {
@@ -218,37 +217,53 @@ fn place(dated: &[&Item], day: Day, fallback: (usize, Context)) -> (usize, Conte
     }
 }
 
-/// `lines` with each group of new lines put in before the line it is keyed by,
-/// the groups in day order. A file's own line endings are kept.
-fn splice(lines: &[&str], mut groups: BTreeMap<usize, Vec<(Day, usize, String)>>) -> String {
-    let eol = if lines.first().is_some_and(|line| line.ends_with("\r\n")) { "\r\n" } else { "\n" };
-    let mut text = String::new();
-    for at in 0..=lines.len() {
-        if let Some(mut group) = groups.remove(&at) {
-            group.sort();
-            if !text.is_empty() && !text.ends_with('\n') {
-                text += eol;
-            }
-            for line in group.iter().flat_map(|(_, _, added)| added.lines()) {
-                text += line;
-                text += eol;
-            }
-        }
-        text += lines.get(at).copied().unwrap_or("");
+/// New lines, each group to go in before the line it is keyed by.
+#[derive(Default)]
+struct Additions {
+    /// A group is what goes in one place: each addition's day, its order among
+    /// the additions, and its text.
+    groups: BTreeMap<usize, Vec<(Day, usize, String)>>,
+}
+
+impl Additions {
+    fn add(&mut self, before: usize, day: Day, text: String) {
+        let group = self.groups.entry(before).or_default();
+        group.push((day, group.len(), text));
     }
-    text
+
+    /// `lines` with the additions in, the lines of a group in day order and,
+    /// within a day, in the order they were added. A file's own line endings
+    /// are kept.
+    fn splice(mut self, lines: &[&str]) -> String {
+        let eol = if lines.first().is_some_and(|line| line.ends_with("\r\n")) { "\r\n" } else { "\n" };
+        let mut text = String::new();
+        for at in 0..=lines.len() {
+            if let Some(mut group) = self.groups.remove(&at) {
+                group.sort();
+                if !text.is_empty() && !text.ends_with('\n') {
+                    text += eol;
+                }
+                for line in group.iter().flat_map(|(_, _, added)| added.lines()) {
+                    text += line;
+                    text += eol;
+                }
+            }
+            text += lines.get(at).copied().unwrap_or("");
+        }
+        text
+    }
 }
 
 fn insert_items(text: &str, path: &str, adds: &[(Day, &str)]) -> String {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let (items, last) = scan(&lines, Context::of_path(path));
     let dated = by_day(&items);
-    let mut groups: BTreeMap<usize, Vec<(Day, usize, String)>> = BTreeMap::new();
-    for (order, &(day, body)) in adds.iter().enumerate() {
+    let mut additions = Additions::default();
+    for &(day, body) in adds {
         let (at, ctx) = place(&dated, day, (lines.len(), last));
-        groups.entry(at).or_default().push((day, order, format!("{} {body}", ctx.shorten(day))));
+        additions.add(at, day, format!("{} {body}", ctx.shorten(day)));
     }
-    splice(&lines, groups)
+    additions.splice(&lines)
 }
 
 /// What a row of a param starts with: the day it holds from (`2026` is the
@@ -311,12 +326,12 @@ fn insert_rows(text: &str, param: &str, rows: &[(Day, &str)]) -> Option<String> 
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let block = block(&lines, param)?;
     let dated = by_day(&block.rows);
-    let mut groups: BTreeMap<usize, Vec<(Day, usize, String)>> = BTreeMap::new();
-    for (order, &(since, row)) in rows.iter().enumerate() {
+    let mut additions = Additions::default();
+    for &(since, row) in rows {
         let (at, _) = place(&dated, since, (block.end, Context::default()));
-        groups.entry(at).or_default().push((since, order, format!("{}{row}", block.indent)));
+        additions.add(at, since, format!("{}{row}", block.indent));
     }
-    Some(splice(&lines, groups))
+    Some(additions.splice(&lines))
 }
 
 /// The text of `path` with the inserts in.
