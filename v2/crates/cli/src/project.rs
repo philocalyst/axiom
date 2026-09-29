@@ -1,0 +1,280 @@
+//! Finding a project on disk and reading its sources.
+//!
+//! A project is a folder with an `axiom.ax` in it; every `.ax` file below is
+//! part of it. A lone `.ax` file with no project above it is a one-file project.
+//! The standard systems are embedded in the binary and join every project, unless
+//! the project's own `systems/` folder has a file at the same path.
+
+use std::borrow::Cow;
+use std::ffi::OsStr;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+use axiom_core::{Diagnostic, FileId, par};
+use axiom_model::Source;
+
+/// The file that marks a project's root.
+const MARKER: &str = "axiom.ax";
+const EXTENSION: &str = "ax";
+/// A project's own systems live here, and win over embedded ones of the same path.
+const SYSTEMS_DIR: &str = "systems/";
+
+/// A project found on disk.
+pub struct Project {
+    /// Where relative paths start, and where `sync` commands run.
+    pub root: PathBuf,
+    /// The one file of a one-file project; everything under `root` otherwise.
+    only: Option<PathBuf>,
+}
+
+impl Project {
+    /// The project around `start`: the nearest folder at or above it with an
+    /// `axiom.ax`. A `.ax` file with no such folder above it is a project alone.
+    pub fn find(start: &Path) -> Result<Project, Diagnostic> {
+        let start =
+            fs::canonicalize(start).map_err(|error| failure(format!("cannot open {}: {error}", start.display())))?;
+        if start.is_file() {
+            return Project::around_file(start);
+        }
+        match marker_above(&start) {
+            Some(root) => Ok(Project { root, only: None }),
+            None => Err(failure(format!("no {MARKER} in {} or any folder above it", start.display()))
+                .help("run axiom inside a project, or give it a .ax file")),
+        }
+    }
+
+    fn around_file(file: PathBuf) -> Result<Project, Diagnostic> {
+        if file.extension() != Some(OsStr::new(EXTENSION)) {
+            return Err(failure(format!("{} is not a folder or a .{EXTENSION} file", file.display())));
+        }
+        let folder = file.parent().unwrap_or(Path::new("/")).to_path_buf();
+        Ok(match marker_above(&folder) {
+            Some(root) => Project { root, only: None },
+            None => Project { root: folder, only: Some(file) },
+        })
+    }
+
+    /// Reads every source of the project, and the systems that come with it.
+    pub fn load(&self) -> Result<Sources, Diagnostic> {
+        let relative = match &self.only {
+            Some(file) => file.file_name().map(PathBuf::from).into_iter().collect(),
+            None => self.find_sources()?,
+        };
+        let mut texts = Vec::with_capacity(relative.len());
+        for path in relative {
+            let shown = display(&path);
+            let text = fs::read_to_string(self.root.join(&path))
+                .map_err(|error| failure(format!("cannot read {shown}: {error}")))?;
+            texts.push((shown, text));
+        }
+        Sources::assemble(texts, axiom_systems::SYSTEMS)
+    }
+
+    fn find_sources(&self) -> Result<Vec<PathBuf>, Diagnostic> {
+        let mut found = Vec::new();
+        collect(&self.root, Path::new(""), &mut found)
+            .map_err(|error| failure(format!("cannot list {}: {error}", self.root.display())))?;
+        // Path order compares folder by folder, so a folder's files stay
+        // together and declaration order is the same on every machine.
+        found.sort();
+        Ok(found)
+    }
+}
+
+fn marker_above(folder: &Path) -> Option<PathBuf> {
+    folder.ancestors().find(|candidate| candidate.join(MARKER).is_file()).map(Path::to_path_buf)
+}
+
+/// Adds every `.ax` file under `root/relative` to `found`, as paths relative to
+/// `root`. Hidden entries and `target/` are skipped. A link to a file counts as
+/// the file; a link to a folder is not followed, since it could lead around in
+/// circles.
+fn collect(root: &Path, relative: &Path, found: &mut Vec<PathBuf>) -> io::Result<()> {
+    for entry in fs::read_dir(root.join(relative))? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') || name == "target" {
+            continue;
+        }
+        let path = relative.join(&name);
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            collect(root, &path, found)?;
+        } else if path.extension() == Some(OsStr::new(EXTENSION)) && is_file(&entry, kind) {
+            found.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Whether `entry`, of type `kind`, is a file or a link to one. A dangling link
+/// is neither.
+fn is_file(entry: &fs::DirEntry, kind: fs::FileType) -> bool {
+    kind.is_file() || (kind.is_symlink() && fs::metadata(entry.path()).is_ok_and(|metadata| metadata.is_file()))
+}
+
+/// `journal/2026/01.ax`, with `/` on every platform.
+fn display(path: &Path) -> String {
+    let parts: Vec<_> = path.components().map(|part| part.as_os_str().to_string_lossy()).collect();
+    parts.join("/")
+}
+
+fn failure(message: String) -> Diagnostic {
+    Diagnostic::error("", message)
+}
+
+/// One source text and where it came from.
+pub struct SourceFile {
+    /// Assigned in order: the project's files by path, then embedded systems.
+    pub id: FileId,
+    /// Relative to the project root; the system path for embedded systems.
+    pub path: Cow<'static, str>,
+    pub text: Cow<'static, str>,
+    /// Shipped with Axiom rather than found in the project.
+    pub embedded: bool,
+}
+
+/// Every source text of a run. The syntax tree, the book and every diagnostic
+/// borrow from here, so it outlives them all.
+#[derive(Default)]
+pub struct Sources {
+    files: Vec<SourceFile>,
+}
+
+impl Sources {
+    /// One text that is not on disk: what a `sync` command printed.
+    pub fn single(path: String, text: String) -> Sources {
+        let file = SourceFile { id: FileId(0), path: Cow::Owned(path), text: Cow::Owned(text), embedded: false };
+        Sources { files: vec![file] }
+    }
+
+    /// The project's files first, then each embedded system the project does
+    /// not override. Embedded texts are borrowed, never copied.
+    fn assemble(
+        project: Vec<(String, String)>,
+        systems: &'static [(&'static str, &'static str)],
+    ) -> Result<Sources, Diagnostic> {
+        let inherited: Vec<_> = systems.iter().filter(|(path, _)| !overridden(&project, path)).collect();
+        let own = project.into_iter().map(|(path, text)| (Cow::Owned(path), Cow::Owned(text), false));
+        let embedded = inherited.into_iter().map(|&(path, text)| (Cow::Borrowed(path), Cow::Borrowed(text), true));
+        let files = own
+            .chain(embedded)
+            .enumerate()
+            .map(|(index, (path, text, embedded))| {
+                let id = u16::try_from(index).map(FileId).map_err(|_| {
+                    failure(format!("too many source files: at most {} are supported", usize::from(u16::MAX) + 1))
+                })?;
+                Ok(SourceFile { id, path, text, embedded })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Sources { files })
+    }
+
+    /// Texts that are not on disk, as project files in the order given.
+    #[cfg(test)]
+    pub fn in_memory(files: &[(&str, &str)]) -> Sources {
+        let texts = files.iter().map(|&(path, text)| (path.to_string(), text.to_string())).collect();
+        Sources::assemble(texts, &[]).expect("a handful of files")
+    }
+
+    /// The source with this id, if there is one.
+    pub fn get(&self, id: FileId) -> Option<&SourceFile> {
+        self.files.get(usize::from(id.0))
+    }
+
+    /// Parses every file, in parallel, into what the model builds from.
+    pub fn parse(&self) -> (Vec<Source<'_>>, Vec<Diagnostic>) {
+        // `par::map` returns values that outlive the item it was handed only if
+        // the item is itself a reference, so it maps over references.
+        let files: Vec<&SourceFile> = self.files.iter().collect();
+        let parsed = par::map(&files, |&file| axiom_syntax::parse(file.id, &file.text));
+        let mut diagnostics = Vec::new();
+        let sources = self
+            .files
+            .iter()
+            .zip(parsed)
+            .map(|(file, (ast, found))| {
+                diagnostics.extend(found);
+                Source { path: &file.path, file: ast, embedded: file.embedded }
+            })
+            .collect();
+        (sources, diagnostics)
+    }
+}
+
+fn overridden(project: &[(String, String)], system: &str) -> bool {
+    project.iter().any(|(path, _)| path.strip_prefix(SYSTEMS_DIR) == Some(system))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testing::TempDir;
+
+    fn texts(sources: &Sources) -> Vec<(&str, bool)> {
+        sources.files.iter().map(|file| (&*file.path, file.embedded)).collect()
+    }
+
+    #[test]
+    fn finds_the_root_from_below_and_lists_files_in_path_order() {
+        let dir = TempDir::new("root");
+        dir.write("axiom.ax", "base USD\n");
+        dir.write("journal/2026/02.ax", "");
+        dir.write("journal/2026/01.ax", "");
+        dir.write("journal/2026.ax", "");
+        dir.write("target/junk.ax", "");
+        dir.write(".hidden/secret.ax", "");
+        dir.write("notes.txt", "");
+
+        let project = Project::find(&dir.path().join("journal/2026")).unwrap();
+        assert_eq!(project.root, fs::canonicalize(dir.path()).unwrap());
+        let sources = project.load().unwrap();
+        let paths: Vec<_> = texts(&sources).into_iter().map(|(path, _)| path).collect();
+        assert_eq!(paths, ["axiom.ax", "journal/2026/01.ax", "journal/2026/02.ax", "journal/2026.ax"]);
+    }
+
+    #[test]
+    fn links_to_files_count_and_links_to_folders_are_not_followed() {
+        use std::os::unix::fs::symlink;
+
+        let dir = TempDir::new("links");
+        dir.write("axiom.ax", "");
+        dir.write("shared/prices.ax", "");
+        dir.write("shared/loop/inner.ax", "");
+        symlink(dir.path().join("shared/prices.ax"), dir.path().join("linked.ax")).unwrap();
+        symlink(dir.path().join("missing.ax"), dir.path().join("dangling.ax")).unwrap();
+        symlink(dir.path(), dir.path().join("shared/loop/back")).unwrap();
+
+        let sources = Project::find(dir.path()).unwrap().load().unwrap();
+        let paths: Vec<_> = texts(&sources).into_iter().map(|(path, _)| path).collect();
+        assert_eq!(paths, ["axiom.ax", "linked.ax", "shared/loop/inner.ax", "shared/prices.ax"]);
+    }
+
+    #[test]
+    fn a_lone_file_is_a_project_but_a_bare_folder_is_not() {
+        let dir = TempDir::new("lone");
+        dir.write("first-steps.ax", "2026-01-01 a -> b 1 USD\n");
+
+        let project = Project::find(&dir.path().join("first-steps.ax")).unwrap();
+        assert_eq!(texts(&project.load().unwrap()), [("first-steps.ax", false)]);
+
+        let error = Project::find(dir.path()).err().unwrap();
+        assert!(error.message.contains("no axiom.ax"), "{}", error.message);
+        let error = Project::find(&dir.path().join("missing")).err().unwrap();
+        assert!(error.message.starts_with("cannot open"), "{}", error.message);
+    }
+
+    #[test]
+    fn project_systems_override_embedded_ones_by_path() {
+        static EMBEDDED: [(&str, &str); 2] = [("us.ax", "system us"), ("us/401k.ax", "system us/401k")];
+        let project = vec![
+            ("systems/us.ax".to_string(), "system us // mine".to_string()),
+            ("journal.ax".to_string(), String::new()),
+        ];
+        let sources = Sources::assemble(project, &EMBEDDED).unwrap();
+        assert_eq!(texts(&sources), [("systems/us.ax", false), ("journal.ax", false), ("us/401k.ax", true)]);
+        assert_eq!(sources.get(FileId(2)).map(|file| file.id), Some(FileId(2)));
+        assert!(sources.get(FileId(3)).is_none());
+    }
+}

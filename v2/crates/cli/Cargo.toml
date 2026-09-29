@@ -16,3 +16,4 @@ axiom-model.workspace = true
 axiom-engine.workspace = true
 axiom-report.workspace = true
 axiom-systems.workspace = true
+memchr.workspace = true
