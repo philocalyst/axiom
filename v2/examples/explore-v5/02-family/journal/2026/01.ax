@@ -1,0 +1,32 @@
+// January 2026: two people with their own accounts, a house with an adjustable mortgage, a job each.
+// Paychecks and bills are their contracts' names; almost nothing else is typed. Card statement payments and
+// transfers between the household's own accounts are left out of these files: a feed writes them.
+
+opening 01
+  me-checking       18_420.55 USD
+  jamie-checking    11_840.20 USD
+  savings           32_600.00 USD
+  me-visa            2_214.36 USD                        // owed
+  jamie-amex         1_308.72 USD                        // owed
+  retirement-lumen  96_880.40 USD
+  retirement-jamie  61_105.75 USD
+  hsa                3_218.40 USD
+  529-tara          14_902.10 USD  basis 11_800.00 USD since 2019-08-30
+  escrow             3_737.70 USD
+  home        basis 650_000 USD since 2021-01-15
+  car1        basis 24_000 USD since 2018-06-15
+
+01 mortgage                                                   // ▸ 2,832.44: #interest of home 1,110.11 · principal 1,047.33 · escrow 675.00
+05 me-visa -> trader-joes 87.40 USD
+09 me-visa -> target 64.18 USD                                // ▸ #household · the sales tax inside it is 8.625%, for Oakland   // ✎ 02b3
+12 electricity-ca
+15 job-lumen                                                  // ▸ 5,750.00 gross · 3,553.87 net
+15 job-jamie                                                  // ▸ 4,400.00 gross · 2,792.50 net
+17 jamie-amex -> whole-foods 112.06 USD
+20 jamie-checking -> me-checking 400 USD                      // ▸ between two owners, not yet a household: what is it?   // ✗ 02a8
+24 me-visa -> trader-joes 95.22 USD
+30 jamie-amex -> amazon 48.90 USD
+31 mortgage = 462_302.32 USD                                  // what the loan's terms say it should be
+31 job-lumen
+31 job-jamie
+31 hsa-employer                                               // ▸ 100.00 into the HSA, from Pinnacle

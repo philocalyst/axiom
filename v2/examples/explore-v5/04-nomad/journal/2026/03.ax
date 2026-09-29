@@ -1,0 +1,25 @@
+// March 2026.
+
+01 lisbon-rent                                                  // ▸ 1,450.00 EUR from wise-bal
+01 wise-bal -> casa-alfama 2_900.00 EUR due 2027-02-28 "deposit, two months"  // ▸ a claim on the landlord, not spending    // ? 04c5
+02 cowork
+02 health
+04 nordlicht -> wise-bal 2_800.00 EUR ^inv-2026-020
+05 wise-bal -> millennium 3_500.00 EUR                          // ▸ between his own accounts
+06 staking 0.001441 ETH
+06 millennium -> aima 320.00 EUR "residence visa application fees"
+08 github
+08 notion
+08 internet
+12 nordlicht-retainer
+13 staking 0.001445 ETH
+14 cloudflare
+14 greenline-apts -> chase-checking 1_650.00 USD ^dep-austin    // ▸ the deposit, back
+15 brightside-retainer
+20 staking 0.001447 ETH
+20 edp
+22 millennium -> continente 64.20 EUR #groceries
+27 staking 0.001446 ETH
+27 wise-bal 480.00 GBP -> 559.40 EUR                            // ▸ a small conversion for the month; gain vs. the GBP that paid for it: 200 USD or less: not income (§988(e))
+30 health
+31 kraken-stake = 2.428729 ETH

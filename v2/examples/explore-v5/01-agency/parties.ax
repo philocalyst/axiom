@@ -1,0 +1,98 @@
+// ─── Who Loomfield deals with ───────────────────────────────────────────────
+
+/// A client pays the agency, not a partner. `place` is where the work is used:
+/// Washington taxes advertising services and custom websites by destination
+/// (ESSB 5814, from 2025-10-01), so a client in Oregon is charged nothing.
+kind client : org
+  of      loomfield
+  has     place       place
+  has     exempt      bool                  // resale or nonprofit certificate on file
+  place   us/wa
+  exempt  false
+  purpose design                            // what money from a client is
+
+// Retainer clients, billed on the 1st, net 15 (ten of them). A property that differs is a declaration of its own.
+entity pinecrest, summit-labs, harbor-coffee, lattice, brightwell : client
+entity northwind : client
+  place   us/or                             // Portland: no Washington tax
+entity kestrel : client
+  place   us/ca
+entity orchard-health : client
+  exempt  true                              // a nonprofit clinic
+entity halcyon : client
+  known-as "HALCYON MEDIA*", "HLCYN*"
+entity vantage-credit : client
+  known-as "VANTAGE CU*"
+
+// Project clients (twenty), invoiced when a milestone lands
+entity ashgrove, blue-heron, cedar-and-co, driftwood, foxglove, granite-peak : client
+entity hollis-foods, ironbark, juniper-books, larkspur, meridian-law, nova-fitness : client
+entity oakline, quill-press, redwood-realty, sable-hotels : client
+entity kiln-ceramics : client
+  place   us/or
+entity plover-outdoors : client
+  place   us/or
+entity tidewater : client
+  exempt  true                              // a tribal enterprise
+entity elm-street-dental : client
+  known-as "ELM ST DENTAL*"
+
+// ✎ 01b3: a list declaration shares every property, so the nine clients that differ are declared alone and
+// the other twenty-one are cut into four lists: thirteen declarations for thirty clients.
+// ⇄ 01d1: none of the other 27 says how it appears on a statement. sync can recognize "ASHGROVE DESIGN CO ACH"
+// only if the name itself is the default pattern (`ashgrove*`, hyphens as spaces, any case).
+
+/// People on payroll. What money to one is: wages, of that person.
+kind employee : person
+  purpose wages                             // ? 01c3: `#wages of maya` is written below; §2 and §8 show `of` for assets only
+  has     hired   date
+entity maya   : employee                    // Maya Ruiz, designer, 78,000 a year
+  hired   2023-05-01
+entity daniel : employee                    // Daniel Osei, developer, 96,000 a year
+  hired   2024-01-08
+
+/// Paid on a 1099 and no other way.
+kind contractor : org
+  purpose contract-labor
+  has     w9      bool
+  /// A payee paid the reporting threshold or more in a year needs a 1099-NEC by January 31.
+  ///
+  /// To fix: collect a W-9 before the next payment.
+  law needs-1099
+    each year
+    when total(in, year) >= threshold-1099[year]      // ▸ `in`: arrives at the party, from the owners
+    require self.w9 "a 1099-NEC is due and no W-9 is on file"
+entity ravi : contractor                    // Ravi Shah, illustrator
+  w9      true
+
+// Vendors
+kind software-vendor : org
+  purpose software
+entity figma, adobe, slack, notion, github, google-workspace, quickbooks : software-vendor
+entity onepassword : software-vendor
+  known-as "1PASSWORD*", "AGILEBITS*"
+entity pike-workspace : landlord            // the studio's desks and a meeting room
+  known-as "PIKE PLACE WORKSPACE*"
+entity ledger-cpa   : accountant
+entity hiscox       : insurer
+entity printworks   : merchant #print-production    // the print shop
+entity delta        : airline
+entity amazon, staples, office-depot : merchant     // ✎ 01b2: `merchant` has no purpose, so each charge needs one written
+entity whole-foods, lunchbox-cafe : merchant
+entity lyft, uber : rideshare
+
+// Authorities
+entity irs    : tax-authority               // ▸ money to it is tax paid, for the year of the flow
+entity wa-dor : tax-authority               // Department of Revenue: sales tax and B&O, monthly
+entity wa-esd : tax-authority               // Employment Security: SUTA, PFML, WA Cares, quarterly
+entity wa-lni : tax-authority               // Labor & Industries: workers' comp, quarterly
+
+/// The card processor and the payment intermediary clients use.
+kind processor : org
+  purpose fees                              // ? 01c4: what is money *from* a processor? `purpose fees` says "fees", both ways
+entity stripe : processor
+  known-as "STRIPE*"
+
+param threshold-1099
+  2025 600 USD
+  2026 2_000 USD                            // raised for payments made after 2025-12-31

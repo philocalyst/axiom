@@ -1,0 +1,53 @@
+/// Kai Lindqvist, a US citizen and freelance developer paid in euros, pounds and dollars. Until the end of
+/// February 2026 he lives in Austin. On 2026-03-01 he moves to Lisbon and becomes a Portuguese tax resident
+/// while remaining a US taxpayer. January to August 2026.
+///
+/// Not runnable; written against LANGUAGE v4. Marks: ✗ cannot say · ✎ says it badly ·
+/// ? the spec is unclear · ⇄ what sync would need. Numbers are explained in FINDINGS.md.
+base USD
+use us
+use us/abroad                    // ✗ 04a1: not shipped: the foreign earned income exclusion, foreign tax credit, FBAR
+use pt                           // ✗ 04a1: nor is Portugal
+
+/// Kai. `lives` is where he is taxed as a resident; `in` is where his body is. Neither is the other.
+///
+/// ? 04c1: §4's `lives SYSTEM [from DATE] [until DATE]` is "a residence; may overlap", and `us` governs everyone
+/// who `lives us`. A US citizen is taxed by `us` wherever he is, so `lives us` must stay true for the whole book,
+/// and `lives pt` from March overlaps it. That reads right. But §3 says "a later statement overrides an
+/// earlier one for the days it covers", and nothing says `lives` is the exception.
+kind traveler : person
+  has     in  place              // where the body is, for the physical presence test: a property declared on the kind (§4)
+
+entity me : traveler
+  born    1991-04-08
+  filing  single
+  lives   us                     // ✎ 04b1: a citizen's obligation is written as a residence
+  in      us/tx
+
+2026-03-01 me lives pt           // ▸ Portuguese tax resident from the day he signs a twelve-month lease
+2026-03-01 me in pt
+2026-07-14 me in ch until 2026-07-24    // Zurich, ten days: the laptop (§3 `until`: `pt` resumes on the 25th)
+
+// ✗ 04a2: the physical presence test is 330 full days outside the US in any 12 consecutive months. It cannot
+// be said: there is no function that counts the days a property held a value (`days(me.in is foreign, window)`),
+// the window starts on a day the book chooses, and the test can only be judged at its end (2027-02-28), so the
+// 2026 return has to be *forecast*. FINDINGS F28 of the first exploration still stands.
+
+commodity ETH  : crypto
+  precision 6
+commodity USDC : crypto
+  precision 2
+  name "USD Coin"
+  // ✎ 04b2: a stablecoin is a `crypto` kind that is also money; every swap into it is a disposal with a gain of cents
+
+purpose consulting    : income
+purpose staking       : income
+purpose fees          : spending
+purpose software      : spending
+purpose rent          : spending
+purpose coworking     : spending
+purpose travel        : spending
+purpose utilities     : spending
+purpose insurance     : spending
+purpose gas-fees      : fees                   // a network fee, in ETH
+purpose exchange-cost : fees                   // what a conversion cost (derived, §9)

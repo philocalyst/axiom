@@ -1,0 +1,73 @@
+// ─── What Noor has agreed to ────────────────────────────────────────────────
+
+/// Net pay, twice a month. Each paycheck is divided at the source: 197.50 USD goes to the envelopes.
+contract job with acme-corp
+  2_450 USD twice monthly on 15, last into checking
+  savings   50.00 USD for car                     // ▸ tied: not available to spend
+  savings   30.00 USD for gifts
+  savings   75.00 USD for travel
+  savings   22.50 USD for subs
+  savings   20.00 USD for medical
+
+// ── The flat: three people, one lease ───────────────────────────────────────
+// Noor is on the lease and pays all of it. The share of each roommate is an item that pays on their behalf:
+// they owe it (§2 `for PARTY`, §7).
+
+contract rent with pine-property
+  3_150 USD monthly on 1 from checking #rent
+  1_050.00 USD for ben                            // ▸ ben owes 1,050.00
+  1_050.00 USD for cleo
+
+contract electric with xcel
+  about 96 USD monthly on 12 from checking #utilities
+  33.33% for ben
+  33.33% for cleo                                 // ▸ 33.34% stays hers
+
+contract gas with xcel
+  about 58 USD monthly on 14 from checking #utilities
+  33.33% for ben
+  33.33% for cleo
+
+/// Comcast: a promotional price, then the list price. The promotion is a change that holds for a while.
+contract internet with xfinity
+  85 USD monthly on 9 from checking #utilities
+  33.33% for ben
+  33.33% for cleo
+2026-01-01 internet 60 USD monthly until 2026-03-31 ^promo "12-month promotion"   // ▸ what she signed in April 2025
+// ✎ 05b3: the declaration says 85 and holds from the book's first day; the promotion overrides it from the
+// same day. The contract reads as if 85 were the rule and 60 the exception, when 60 is what she pays.
+
+// ── Everything else, monthly ────────────────────────────────────────────────
+
+contract phone with mint
+  30 USD monthly on 3 from card #phone
+contract netflix with netflix
+  15.49 USD monthly on 22 from card
+contract gym with peak-gym
+  45 USD monthly on 1 from card
+
+// ── Prepaid a year at a time ────────────────────────────────────────────────
+
+/// Recognized 8.33 a month for a year from the day it is paid.
+contract nyt with nyt
+  100 USD yearly on 02-10 from card #subscriptions
+  covers 1y
+contract spotify with spotify
+  129 USD yearly on 03-14 from card #subscriptions
+  covers 1y
+contract 1password with 1password
+  35.88 USD yearly on 05-05 from card #subscriptions
+  covers 1y
+
+/// Six months at a time.
+contract auto with geico
+  612 USD every 6m on 04-01 from checking #insurance
+  covers 6m
+
+// ── Buy now, pay later ──────────────────────────────────────────────────────
+/// Klarna: boots for 240 USD, 60 down and three payments of 60 every two weeks. A loan at nothing.
+/// The 240 is spent on the day of the purchase, whatever the payment plan.
+contract boots with klarna
+  loan 180 USD on 2026-03-06 at 0% over 6w
+  every 2w on friday from checking
+  from 2026-03-20

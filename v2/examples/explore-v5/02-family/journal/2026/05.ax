@@ -1,0 +1,26 @@
+// May 2026.
+
+01 mortgage                                                   // ▸ 3,364.95: #interest of home 1,867.41 · principal 795.54 · escrow 702.00
+02 me-visa -> trader-joes 76.40 USD
+09 jamie-amex -> target 141.22 USD
+12 electricity-ca
+12 jamie-checking -> smile-dental 620.00 USD #medical ^bill-0512 "crown, first visit"  // ▸ paid out of pocket; the HSA could have paid it
+14 car-loan                                                   // ▸ 560.20: #interest of car2 138.70 · principal 421.50
+14 me-visa -> aurora-catering 4_000 USD #wedding "catering deposit"
+15 job-lumen
+15 job-jamie
+20 mortgage-2 480_039.99 USD ->                            // the closing disclosure, as one flow
+  mortgage          458_875.51 USD                       // ▸ principal of the old loan: it ends today
+  rocket              1_164.48 USD #interest of home      // 19 days of interest at 4.875%
+  title-co            1_900.00 USD #points for 2026-05-20..2056-05-19    // ▸ recognized over the loan's life
+  title-co            3_140.00 USD #closing-costs "lender fee 895, appraisal 650, title 1,420, recording 175"
+  newrez                887.75 USD #interest of home "prepaid, 05-20 to 05-31"
+  escrow2             1_350.00 USD                       // the new servicer's cushion
+  me-checking        12_722.25 USD                       // ✗ 02a5: cash out: 20,000 less what the closing took
+20 mortgage = empty                                           // paid off
+23 me-visa -> whole-foods 105.15 USD
+30 me-visa -> trader-joes 82.63 USD
+31 job-lumen
+31 job-jamie
+31 hsa-employer
+31 escrow = 2_341.70 USD                                      // what the old servicer will refund

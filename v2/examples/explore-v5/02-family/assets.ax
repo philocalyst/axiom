@@ -1,0 +1,14 @@
+// ─── Things they own ────────────────────────────────────────────────────────
+
+/// The house in Oakland, bought by Priya in January 2021 for 650,000 USD. It is the home they leave in
+/// August: it stays theirs, empty, for sale in 2027.
+asset home : home
+  owner me
+  in-service 2021-01-15
+
+/// Priya's 2018 Honda CR-V, traded in in February.
+asset car1 : vehicle
+
+/// The 2026 Honda CR-V Hybrid. It arrives with the purchase on 2026-02-14.
+asset car2 : vehicle
+  owner me

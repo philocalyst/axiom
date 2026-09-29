@@ -1,0 +1,25 @@
+// February 2026.
+
+01 rent
+01 gym
+03 phone
+03 card -> king-soopers 90.15 USD
+07 card -> trader-joes 48.90 USD
+09 internet
+10 nyt                                                          // ▸ 100.00 from card · #subscriptions, 8.33 a month for a year from today
+12 electric 98.40 USD
+14 gas 79.60 USD
+14 card -> sushi-den 78.50 USD #dining "dinner with Jo"
+  39.25 USD for jo                                                  // ▸ jo owes her half
+15 job
+16 jo -> venmo 39.25 USD "dinner"                               // ▸ settles what jo owes
+18 card -> king-soopers 85.62 USD
+20 ben -> venmo 1_129.33 USD "rent + power, gas, wifi"
+21 cleo -> venmo 1_129.33 USD "rent + power, gas, wifi"
+22 netflix
+22 card -> blue-bottle 14.25 USD #dining
+24 venmo -> checking 2_258.66 USD
+26 card -> sprouts 52.30 USD
+28 job
+28 chase -> card 11.20 USD #rebate "cash back, 2% of 560.21"
+// dining: January left 200.00 (a dry month), so February may spend 400.00 and spent 92.75

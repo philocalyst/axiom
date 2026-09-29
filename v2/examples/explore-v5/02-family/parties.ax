@@ -1,0 +1,66 @@
+// ─── Who they deal with ─────────────────────────────────────────────────────
+
+// Employers
+entity lumen : employer                   // Priya, until 2026-08-29
+entity harbor-labs : employer             // Priya, from 2026-09-08
+entity pinnacle : employer                // Jamie
+
+// Tax authorities. The federal one and California's ship in `us` and `us/ca`; New York's in `us/ny`.
+// ? 02c2: the paystub legs below name `ssa`, `edd`, `nyc-dof`, `ny-pfl`: which of them are tax authorities
+// and which purposes they carry is std's business, and std v4 does not list them.
+entity nyc-dof : tax-authority            // the city's finance department: NYC resident income tax
+entity ny-pfl : tax-authority             // paid family leave premium
+
+// Lenders and servicers
+entity rocket : lender
+  known-as "ROCKET MORTGAGE*", "ROCKET MTG*"
+entity newrez : lender
+  known-as "NEWREZ*", "SHELLPOINT*"
+entity sf-fcu : lender                    // the car loan
+  known-as "SF FEDERAL CU*"
+entity title-co : title-company
+  known-as "BAYVIEW TITLE*"
+
+// The car
+entity bayside-honda : dealer
+  known-as "BAYSIDE HONDA*"
+entity state-farm : insurer               // ✎ 02b2: premiums out, claim payouts in: one purpose (`insurance`) serves one direction
+  known-as "STATE FARM*"
+entity redline-collision : mechanic       // the body shop
+
+// Health
+kind health-provider : org
+  purpose medical
+entity smile-dental, nyu-langone, sunset-pediatrics : health-provider
+entity blue-shield : health-insurer
+entity healthequity : plan-administrator  // the HSA
+  known-as "HEALTHEQUITY*"
+entity benefit-admin : plan-administrator // the dependent-care FSA
+  known-as "WEX*", "BENEFITWALLET*"
+
+// Home and city
+entity pge : utility
+  known-as "PG&E*"
+entity coned : utility
+  known-as "CON ED*"
+entity west-84th : landlord               // the New York apartment
+  known-as "WEST 84TH ST LLC*"
+entity alameda-county : tax-authority     // property tax on the house
+entity little-oaks : daycare
+entity ny-529, scholarshare : plan-administrator
+
+// People who are neither owners nor employers
+entity grandma : person                   // Priya's mother, who gives to the 529
+entity tara : person                      // Jamie's niece, off to college
+entity maria : person                     // the wedding planner, paid by the day
+kind vendor : merchant
+entity blooming-events, venue-marin, aurora-catering : vendor #wedding
+
+// Shops that sell a mix. The sales tax inside their prices depends on where they are and on what they sold
+// (groceries and children's clothing are exempt in both states), not on who they are.
+entity trader-joes : grocer
+  known-as "TRADER JOE*"
+entity whole-foods : grocer
+  known-as "WHOLEFDS*", "WHOLE FOODS*"
+entity target : store                     // ✎ 02b3: `sales-tax` belongs to the store in v4's sketch (best-buy, 8.625%);
+                                          //   this Target is in Oakland and then in Manhattan, and sells food

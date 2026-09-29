@@ -1,0 +1,37 @@
+// ─── Who Noor deals with ────────────────────────────────────────────────────
+
+entity acme-corp : employer                  // net pay only: the gross does not matter to this book
+entity pine-property : landlord              // the flat: 3,150 USD, three people
+  known-as "PINE PROPERTY MGMT*"
+entity xcel : utility
+  known-as "XCEL ENERGY*"
+entity xfinity : internet-provider
+  known-as "COMCAST*", "XFINITY*"
+entity mint : phone-company
+entity netflix : streaming
+entity nyt : news                            // annual digital subscription
+  known-as "NYTIMES*"
+entity spotify : streaming
+entity 1password : software
+  known-as "AGILEBITS*"
+entity peak-gym : gym
+entity geico : insurer
+entity klarna : lender                       // buy now, pay later: four payments, no interest
+  known-as "KLARNA*"
+
+kind grocer : merchant
+  purpose groceries
+entity king-soopers, trader-joes, sprouts : grocer
+entity chipotle, blue-bottle, sushi-den, tacos-el-jefe : restaurant
+entity rei, uniqlo, nordstrom-rack : store #clothing
+entity target : store
+entity costco : store                         // where the discounted gift cards are
+entity delta : airline
+  known-as "DELTA AIR*"
+entity marriott : hotel #travel
+entity discount-tire : mechanic #car
+entity irs : tax-authority
+
+/// Chase pays the cash back; its kind says money from it is interest on a deposit or a fee reversal, and it
+/// is neither.
+entity chase : bank

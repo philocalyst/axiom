@@ -1,0 +1,60 @@
+// ─── Where the journal comes from ───────────────────────────────────────────
+// Nobody types a bank line. The journal in journal/2026/ is what these sources wrote; each `⇄` below is a
+// line that sync as specified in §13 could not have written, and what it would have needed.
+
+/// Chase business checking.
+sync operating
+  run   chase-export business-checking --since {since}
+  csv   date "Posting Date" "MM/DD/YYYY", amount "Amount", memo "Description", balance "Balance"
+
+/// One Amex export for three cards, told apart by a column.
+/// ⇄ 01d2: §13 has one `csv` per sync and one account per sync. This file has all three cardholders in it, so
+/// there are three syncs over one export, each keeping the rows whose "Card Member" is its own: `keep`, or a
+/// column that names the account (`account "Card Member" as ines: card-me, theo: card-theo, …`).
+sync card-me
+  run   amex-export --since {since}
+  csv   date "Date" "MM/DD/YYYY", amount "Amount" flipped, memo "Description"
+  keep  "Card Member" is "INES MOREAU"                     // ✗ not in §13
+sync card-theo
+  run   amex-export --since {since}
+  csv   date "Date" "MM/DD/YYYY", amount "Amount" flipped, memo "Description"
+  keep  "Card Member" is "THEO OKAFOR"
+sync card-maya
+  run   amex-export --since {since}
+  csv   date "Date" "MM/DD/YYYY", amount "Amount" flipped, memo "Description"
+  keep  "Card Member" is "MAYA RUIZ"
+
+/// The partners' own accounts, for the draws they receive and the estimates they pay.
+sync my-checking
+  run   chase-export personal-checking --since {since}
+  csv   date "Posting Date" "MM/DD/YYYY", amount "Amount", memo "Description", balance "Balance"
+sync theo-checking
+  run   chase-export theo-checking --since {since}
+  csv   date "Posting Date" "MM/DD/YYYY", amount "Amount", memo "Description", balance "Balance"
+
+/// Stripe: charges, fees, refunds and a weekly payout, all in one balance history.
+/// ⇄ 01d3: a payout is one bank record and about twelve flows. The export knows the gross of each charge, its
+/// fee (2.9% + 0.30) and the payout that swept them, so it prints Axiom itself. Without `run … prints Axiom`
+/// with line items, the payout is a 4,812.20 USD arrival from `stripe` that nobody can explain.
+sync stripe-bal
+  run   stripe-export balance --since {since}
+
+/// Invoices sent, from the invoicing tool. Prints `owes` statements with items and the sales-tax line.
+/// ⇄ 01d4: it must also print what has *happened to* an invoice: a credit note, a late fee, a write-off. §7
+/// has `waived` and nothing for the rest (01a9), so today those three are typed by hand.
+sync invoices
+  run   invoicing-export --since {since}
+
+/// The payroll run: net-pay flows, and one `owes` statement each for the IRS and Washington.
+/// ⇄ 01d5: the bank shows one debit of 11,492.95 for the net pay on the 31st (two ACH lines, one per employee,
+/// batched by the bank) and nothing on the day the tax is owed. The run is the record; the bank line has to be
+/// matched to it by the *sum* of its legs, not by any one amount (§13.2 matches one record to one flow).
+sync payroll
+  run   payroll-export --since {since}
+
+code inv-*                                                 // an invoice, sent and paid
+  on client
+code eftps-* esd-* wa-excise-*                             // what the agency owes an authority, and its payment
+  on irs, wa-esd, wa-dor
+code pt-*                                                  // a cost paid for a client, to be billed
+  on client

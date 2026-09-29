@@ -1,0 +1,48 @@
+// ─── Where the money sits ───────────────────────────────────────────────────
+
+// Before the wedding each has their own; the joint ones open on the day.
+account me-checking     : deposit at chase
+account me-visa         : card at chase
+account jamie-checking  : deposit at wells-fargo
+  owner jamie
+account jamie-amex      : card at amex
+  owner jamie
+account joint-checking  : deposit at chase
+  owner family
+  opened 2026-06-13
+account joint-visa      : card at chase
+  owner family
+  opened 2026-06-13
+account savings         : deposit at ally
+  owner me
+2026-06-13 savings owner family      // ▸ two people become one household: the account changes owner on the day
+
+account brokerage       : broker at fidelity          // Priya's, small; only its dividends show up below
+
+// Retirement, health, education
+account retirement-lumen  : 401k at fidelity
+  employer lumen
+account retirement-harbor : 401k at fidelity
+  employer harbor-labs
+  opened 2026-10-06
+account retirement-jamie  : 401k at vanguard
+  owner jamie
+  employer pinnacle
+account hsa             : hsa at healthequity
+  owner jamie
+  coverage self-only
+2026-06-13 hsa coverage family
+account dcfsa           : fsa at benefit-admin        // ✗ 02a1: kind `fsa` does not exist in std or us
+  owner jamie
+account 529-noa         : 529-plan at ny-529
+  owner family
+  beneficiary noa
+  opened 2026-10-20
+account 529-tara        : 529-plan at scholarshare
+  owner jamie
+  beneficiary tara
+
+// Held by the lenders for taxes and insurance
+account escrow          : escrow at rocket
+account escrow2         : escrow at newrez
+  opened 2026-05-20
