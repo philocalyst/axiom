@@ -775,3 +775,79 @@ kinds), `us/529.ax`, `us/hsa.ax`, `us/ca.ax`, `us/ny.ax`, `us/ny/nyc.ax`,
   community-maintained data.
 - Weekday uses Joffe's MIT `get_weekday_32unix`. The date algorithms are BSL-1.0
   and attributed in `day.rs`.
+
+## 10. Decisions made while writing the interfaces
+
+The interface types in `crates/*/src` are now the contract; §6 above is the
+earlier sketch. Where they differ, the code wins. These are the rules the
+lanes share.
+
+**Data structures.**
+- Every hierarchy (places, entities, kinds, systems) is a `core::Tree`: ids
+  are assigned in pre-order, so a subtree is the id range `id..end(id)`.
+  `covers(a, b)` is two comparisons; `lineage(id)` walks up. The model sorts
+  inputs by path segment before building so siblings come out alphabetical.
+- `core::Groups<K, V>` is a compressed-row table (one flat vector plus offsets,
+  built by a stable counting sort). Governance (`Rules`) and `Book::touching`
+  (flows per place) use it.
+- Model types carry no lifetimes: names are `Sym`, docs are `Sym`. Only
+  `Book<'s>` does, through its interner.
+- Expressions are post-order arenas in both the AST (`Exprs`, per file) and
+  compiled laws (`Law::nodes`, per law), one compiled node per source node.
+  Every node stores the first node of its subtree, so a step's expression is
+  the range `first..=root`. Type checking and evaluation are single forward
+  scans; the engine keeps every node's value, which is exactly what the
+  power-assert diagnostic prints.
+- Evaluation is total. Faults (missing price, unset property, missing param
+  row, divide by zero, overflow) are `Value::Fault` and propagate; `if`,
+  `and`, `or` select among already-computed values, so a fault in an unused
+  branch is never seen. A fault reaching a step is reported as its own error.
+
+**Semantics.**
+- `?` as a place is the built-in `equity/unknown`. Reports call it
+  "unexplained": value into it is unexplained spending, out of it unexplained
+  income.
+- Balances are inflow minus outflow. `Class::display_sign` flips income,
+  liabilities and equity for display.
+- `total(dir, window)` is kept in the **base currency**, valued on the flow's
+  day, per place, and added to every ancestor. A flow whose both ends lie in
+  the subject's subtree does not count as entering or leaving it, and does not
+  fire the subject's `on in`/`on out` laws.
+- Tallies are keyed by `(owner, year, name, system)`. `tally(name)` in a law of
+  system S sums tallies whose system is S, an ancestor of S, or a descendant of
+  S (two interval tests on the system tree), plus project-level tallies. So
+  `us` sees what `us/401k` counted, `us/ca` sees `us`, and `us/ny` sees
+  neither `us/ca` nor its descendants.
+- Param keys: a year `2026` means "since 2026-01-01"; a date key means since
+  that day. A lookup with a number `N` asks for N-01-01; with a date, that day.
+  The latest row at or before wins, among rows whose name keys match.
+- **Plain money** is base currency, in an asset place, with basis equal to its
+  face and no tie. It is one signed integer (`Holding::plain`). Everything else
+  is a `Parcel` in `Holding::lots`. Non-plain parcels merge only when
+  `(acquired, txn, tied)` are equal (their basis adds).
+- **Relief** at an asset place: (1) apply selectors; (2) order by colors: if
+  the flow is one a tied entity's `on spend` laws permit, its tied parcels go
+  first, otherwise plain and untied parcels go first and tied ones last; (3)
+  apply the policy (selector, else place, else kind chain). Candidates are
+  *interchangeable* when they agree on basis per unit and tie, and, for
+  non-base commodities, on acquired day. Only relief among
+  non-interchangeable candidates with no policy is ambiguous: it is an error
+  listing each candidate and the gain it would realize, and FIFO is used so
+  everything downstream stays consistent.
+- **Realization** happens when parcels change commodity, leave the owner's
+  asset places (to an expense, income, equity, liability, `?`, or another
+  entity's place), or leave a `deferred` place for a non-deferred one. It never
+  happens between two deferred places or within one owner's taxable asset
+  places. Exchange rule: `basis(new) = basis(given) + gain realized`.
+- **Arrival basis**: from income, equity or `?`, face value in base (valued on
+  the day), or zero if the target is `deferred`; with `@ P`, `P × qty`. Tied
+  to the source entity when its kind is `restricted` (the source place's
+  owner, or the payee).
+- Law firing order for a flow: `on out` rules at `from`, relief and `on gain`
+  per relieved parcel, arrival, `on in` rules at `to`, `on spend` rules of any
+  tie that left, then `always` rules at both ends.
+- Governance is precomputed in `Rules` and dated by residence (`lives X from
+  D`), so the engine filters by `from..=until` and never searches.
+- `budget 500 USD monthly` on an account compiles to a place law
+  `on in` + `warn total(in, month) <= 500 USD`, named `budget`, with every node
+  located at the property.
