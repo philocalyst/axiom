@@ -112,3 +112,6 @@ in part (a warning per breach, not one per flow after it, and the yearly bill no
 - **No rollover.** A budget starts at zero each month, so a bill that is not monthly still needs its own envelope.
 - **The gaps are not listed.** `equity/unknown` holds -35.80 USD (the 27.60 and 14.00 accepted, the 14.20 out and
   the 20.00 in); nothing lists the four items.
+- **`axiom balance --at DATE` panics before an accepted gap.** The pads of 2025-10-31 and 2025-12-31 (`!`) make
+  a balance at an earlier day stop in `crates/report/src/history.rs:220` (index out of bounds), so there is
+  no balance-at-a-day output here.

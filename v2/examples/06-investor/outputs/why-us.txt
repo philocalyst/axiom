@@ -17,29 +17,31 @@ Laws
     Interest is ordinary income in the year it is earned (IRC §61(a)(4)),…
   count-dividends                                                                    on in      dividends 1,606.44 USD · total-income 1,606.44 USD · investment-income 1,606.44 USD                                          us.ax:167
     Dividends are income in the year they are paid (IRC §61(a)(7)), except…
-  count-short-term-gains                                                             on gain    short-term-gains 4,450.44 USD                                                                                                us.ax:182
+  count-short-term-gains                                                             on gain    short-term-gains 4,450.44 USD                                                                                                us.ax:183
     A gain on something held for a year or less is taxed as ordinary income…
-  count-long-term-gains                                                              on gain    long-term-gains -584.67 USD                                                                                                  us.ax:198
+  count-long-term-gains                                                              on gain    long-term-gains -584.67 USD                                                                                                  us.ax:200
     A gain on something held for more than a year is taxed at the lower…
-  count-distributions                                                                on gain                                                                                                                                 us.ax:216
+  count-currency-gains                                                               on gain                                                                                                                                 us.ax:219
+    Money in another currency is cash, not an investment: spending a euro is not…
+  count-distributions                                                                on gain                                                                                                                                 us.ax:236
     What comes out of a tax-deferred account is income in the year it comes out…
-  count-payments                                                                     on in      payments 52,880.27 USD                                                                                                       us.ax:231
+  count-payments                                                                     on in      payments 52,880.27 USD                                                                                                       us.ax:251
     Tax withheld from pay, or paid in installments, is credited against the tax…
-  itemize-interest-and-gifts                                                         on in                                                                                                                                   us.ax:243
+  itemize-interest-and-gifts                                                         on in                                                                                                                                   us.ax:263
     Mortgage interest and gifts to charity are itemized deductions.
-  count-property-tax                                                                 on in                                                                                                                                   us.ax:252
+  count-property-tax                                                                 on in                                                                                                                                   us.ax:272
     Property tax is a state and local tax. So is state income tax, which the…
-  cap-salt                                                                           each year                                                                                                                               us.ax:261
+  cap-salt                                                                           each year                                                                                                                               us.ax:281
     State and local taxes are deducted only up to a cap (IRC §164(b)(6)).
-  adjusted-gross-income                                                              each year  investment-income 5,844.37 USD · agi 263,361.89 USD                                                                          us.ax:276
+  adjusted-gross-income                                                              each year  investment-income 5,844.37 USD · agi 263,361.89 USD                                                                          us.ax:296
     Gains and losses are netted before they are taxed (IRC §1222): a loss of one…
-  standard-or-itemized                                                               each year  deductions 30,350.00 USD                                                                                                     us.ax:293
+  standard-or-itemized                                                               each year  deductions 30,350.00 USD                                                                                                     us.ax:313
     The deduction is the larger of the standard deduction for the filing status…
-  child-tax-credit                                                                   each year                                                                                                                               us.ax:304
+  child-tax-credit                                                                   each year                                                                                                                               us.ax:324
     A credit for each qualifying child under 17 (IRC §24). Set `children` on the…
-  net-investment-income-tax                                                          each year  other-taxes 19.26 USD                                                                                                        us.ax:315
+  net-investment-income-tax                                                          each year  other-taxes 19.26 USD                                                                                                        us.ax:335
     The net investment income tax is 3.8% of net investment income, or of the…
-  federal-income-tax                                                                 each year  owes federal-income-tax -10,003.26 USD · taxable-income 233,011.89 USD · income-tax 42,857.75 USD · total-tax 42,877.01 USD  us.ax:331
+  federal-income-tax                                                                 each year  owes federal-income-tax -10,003.26 USD · taxable-income 233,011.89 USD · income-tax 42,857.75 USD · total-tax 42,877.01 USD  us.ax:351
     Federal income tax for the year (IRC §1), figured from the tallies above.
   deferral-limit                                                                     on in      elective-deferrals 31,333.28 USD                                                                                             us/401k.ax:37
     Elective deferrals are capped for each person and calendar year, across…

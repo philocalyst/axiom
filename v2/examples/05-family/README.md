@@ -148,3 +148,6 @@ every inflow), F15 in part (`!` waives the HSA's priced penalty).
 - **The house is worth 612,400.00 USD in `available`, not net of its mortgage.**
 - **`gains` lists qualified spending** (the FSA's care, the HSA's medical bills, the
   529's tuition) as withdrawals with a gain; they are not counted as income.
+- **`axiom balance --at DATE` panics before a revaluation.** The quarterly statements are `via market`,
+  and a balance at a day earlier than one of them stops in `crates/report/src/history.rs:220` (index out of
+  bounds), so this project has no mid-year balance output. `axiom balance --at 2025-12-31` works.

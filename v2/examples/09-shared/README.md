@@ -108,3 +108,6 @@ claim has a due day and `check` reports it when it is missed).
   payroll flow written `lantern -> ...`, so the receivable places are `by-ben`, `by-cleo`, `by-lantern`.
 - **Thirds are hand-rounded.** 69.99 USD is 23.33 + 23.33 + 23.33, and any extra cent (73.54 USD is 24.52 + 24.51 + 24.51) is on Alex's
   leg; the language does no splitting.
+- **`axiom balance --at DATE` panics before an accepted gap.** The wallet's `!` on 2025-08-31 is a pad, and a balance at
+  an earlier day stops in `crates/report/src/history.rs:220` (index out of bounds), so there is no
+  mid-year balance output here.

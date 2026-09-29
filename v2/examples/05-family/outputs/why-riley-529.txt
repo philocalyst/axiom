@@ -19,14 +19,14 @@ Limits
   family  gift-exclusion on assets/education/riley-529  2025    6,000.00 USD  19,000.00 USD  13,000.00 USD  31.58%
 
 Governed by
-  Law                     When     Explains                                                                   Written
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Law                         When     Explains                                                                   Written
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Limits
-    gift-exclusion        on in    Contributions above the annual gift-tax exclusion count as a gift to the…  us/529.ax:40
-  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    gift-exclusion            on in    Contributions above the annual gift-tax exclusion count as a gift to the…  us/529.ax:40
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Prices
-    nonqualified-penalty  on gain  A withdrawal that did not pay a qualified education expense owes an…       us/529.ax:54
-  · 12 more laws only count, into adjustments, ca-withheld, distributions, dividends, interest,
+    nonqualified-529-penalty  on gain  A withdrawal that did not pay a qualified education expense owes an…       us/529.ax:54
+  · 13 more laws only count, into adjustments, ca-withheld, distributions, dividends, interest,
     investment-income, itemized, long-term-gains, payments, pretax, salt, short-term-gains,
     total-income, wages.
 

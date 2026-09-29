@@ -51,7 +51,7 @@ kind hsa : tax-deferred
   /// which the IRS allows with your receipts, or when an exception applies
   /// (death or disability), keep the withdrawal and mark it `!` with the
   /// reason.
-  law nonqualified-penalty
+  law nonqualified-hsa-penalty
     on gain
     when gain > empty
     when not to is market

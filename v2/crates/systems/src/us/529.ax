@@ -51,7 +51,7 @@ kind 529-plan : tax-deferred
   /// To fix: to reimburse yourself for something the plan should have paid, or
   /// when an exception applies (a scholarship, a death or disability of the
   /// beneficiary), keep the withdrawal and mark it `!` with the reason.
-  law nonqualified-penalty
+  law nonqualified-529-penalty
     on gain
     when gain > empty
     when not to is market

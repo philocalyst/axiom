@@ -14,7 +14,7 @@ warning[budget]: expenses/food: 681.00 USD in 2026-02 against a limit of 650.00 
    │
    = help: at most 97.10 USD more can go in this month
 
-note[nonqualified-penalty]: 34.94 USD owed to irs as nonqualified-529-penalty, due 2027-04-15
+note[nonqualified-529-penalty]: 34.94 USD owed to irs as nonqualified-529-penalty, due 2027-04-15
    ╭─[journal/2026/03.ax:34:1]
    │
 34 │ 2026-03-25 college -> checking 1_500 USD

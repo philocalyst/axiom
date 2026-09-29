@@ -1,0 +1,30 @@
+$ axiom why count-de-tax --today 2026-04-16
+
+Why count-de-tax
+
+  Law       count-de-tax
+  ────────────────────────────────────────────────────
+  When      on in
+  Governs   everyone living under de, and all they own
+  Written   systems/de.ax:25
+  Ran       12 times
+  Recorded  0 violations, 12 effects
+  · Tax paid to Germany, counted in dollars at the rate of the day.
+  ·
+  · To fix: German tax must arrive at a place of kind `de-tax`.
+
+Recent effects
+  Date        Effect            Owner        Amount  Owed to  From
+  ─────────────────────────────────────────────────────────────────────────────────
+  2025-07-31  foreign-tax-paid  me     1,034.05 USD           journal/2025/07.ax:28
+  2025-07-31  foreign-tax-paid  me        10.11 USD           journal/2025/07.ax:35
+  2025-08-29  foreign-tax-paid  me     1,053.78 USD           journal/2025/08.ax:28
+  2025-08-31  foreign-tax-paid  me        10.34 USD           journal/2025/08.ax:33
+  2025-09-30  foreign-tax-paid  me     1,059.85 USD           journal/2025/09.ax:26
+  2025-09-30  foreign-tax-paid  me        10.39 USD           journal/2025/09.ax:31
+  2025-10-31  foreign-tax-paid  me     1,040.48 USD           journal/2025/10.ax:59
+  2025-10-31  foreign-tax-paid  me        10.21 USD           journal/2025/10.ax:64
+  2025-11-28  foreign-tax-paid  me     1,050.89 USD           journal/2025/11.ax:26
+  2025-11-30  foreign-tax-paid  me        10.33 USD           journal/2025/11.ax:31
+  2025-12-19  foreign-tax-paid  me     1,056.50 USD           journal/2025/12.ax:20
+  2025-12-31  foreign-tax-paid  me        10.47 USD           journal/2025/12.ax:31

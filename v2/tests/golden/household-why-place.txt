@@ -16,14 +16,14 @@ Limits
   me   gift-exclusion on assets/college  2026    900.00 USD  19,000.00 USD  18,100.00 USD  4.74%
 
 Governed by
-  Law                     When     Explains                                                                     Written
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Law                         When     Explains                                                                     Written
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Limits
-    gift-exclusion        on in    Contributions above the annual gift-tax exclusion count as a gift to the…    us/529.ax:40
-  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    gift-exclusion            on in    Contributions above the annual gift-tax exclusion count as a gift to the…    us/529.ax:40
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Prices
-    nonqualified-penalty  on gain  A withdrawal that did not pay a qualified education expense owes an…         us/529.ax:54
-    transfer-tax          on gain  Selling real property in San Francisco owes the city a transfer tax on the…  us/ca/san-francisco.ax:36
+    nonqualified-529-penalty  on gain  A withdrawal that did not pay a qualified education expense owes an…         us/529.ax:54
+    transfer-tax              on gain  Selling real property in San Francisco owes the city a transfer tax on the…  us/ca/san-francisco.ax:36
   · 13 more laws only count, into adjustments, ca-withheld, distributions, dividends, interest,
     investment-income, itemized, long-term-gains, payments, pretax, salt, short-term-gains,
     total-income, wages.

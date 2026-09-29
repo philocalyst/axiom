@@ -53,7 +53,7 @@ No errors. Three things are reported, none of them a failure:
   budget of 650.00 USD, over by 31.00 USD. It crosses the line on the last
   grocery run.
 - **A priced violation** on 2026-03-25, the 529 withdrawal to checking. It did
-  not pay for school, so `nonqualified-penalty` resolves it to a loss: about
+  not pay for school, so `nonqualified-529-penalty` resolves it to a loss: about
   34.94 USD owed to the IRS with the year's return (due 2027-04-15), which is
   10% of 349.37 USD in earnings. The same earnings count as income.
 - **A waived gap** on 2026-03-31. The wallet should hold 77.50 USD and holds

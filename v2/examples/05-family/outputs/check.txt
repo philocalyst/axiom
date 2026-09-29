@@ -1,6 +1,6 @@
 $ axiom check --today 2026-04-16
 
-note[nonqualified-penalty]: 20.67 USD owed to irs as nonqualified-529-penalty, due 2026-04-15
+note[nonqualified-529-penalty]: 20.67 USD owed to irs as nonqualified-529-penalty, due 2026-04-15
    ╭─[journal/2025/10.ax:46:1]
    │
 46 │ 2025-10-15 riley-529 -> joint-checking 1_500 USD
@@ -20,7 +20,7 @@ note[nonqualified-penalty]: 20.67 USD owed to irs as nonqualified-529-penalty, d
            applies (a scholarship, a death or disability of the beneficiary), keep the withdrawal
            and mark it `!` with the reason.
 
-note[nonqualified-penalty]: 18.62 USD owed to irs as nonqualified-529-penalty, due 2026-04-15
+note[nonqualified-529-penalty]: 18.62 USD owed to irs as nonqualified-529-penalty, due 2026-04-15
    ╭─[journal/2025/10.ax:46:1]
    │
 46 │ 2025-10-15 riley-529 -> joint-checking 1_500 USD
@@ -40,7 +40,7 @@ note[nonqualified-penalty]: 18.62 USD owed to irs as nonqualified-529-penalty, d
            applies (a scholarship, a death or disability of the beneficiary), keep the withdrawal
            and mark it `!` with the reason.
 
-note[nonqualified-penalty]: waived: 124.00 USD would be owed to irs as nonqualified-hsa-penalty
+note[nonqualified-hsa-penalty]: waived: 124.00 USD would be owed to irs as nonqualified-hsa-penalty
    ╭─[journal/2025/11.ax:15:1]
    │
 15 │ 2025-11-05 hsa -> joint-checking 620 USD ! "reimburses 2025-05-09 dentist, receipt kept"
