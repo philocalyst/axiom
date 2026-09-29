@@ -74,6 +74,23 @@ kind tax-deferred : asset
   taxed-by-kind     false
   deductible        false
 
+  /// Money paid into an account whose contributions are deductible (a
+  /// traditional IRA, an HSA, a SEP-IRA), from money that was taxed already, comes
+  /// off income (IRC §219, §223(a), §404(h)). A payroll contribution was never
+  /// taxed, so it is not deducted twice. The income limits on deducting an IRA
+  /// contribution are not modelled. It counts for the account's owner: a person's
+  /// own return, so on a joint return hold a deductible account in the household's
+  /// name for its deduction to reach it.
+  ///
+  /// To fix: a contribution that is not deductible (Form 8606) is written with
+  /// `basis` for its full amount, and marked `#nondeductible`.
+  law deduct-contributions
+    on in
+    when self.deductible
+    when from is asset and not from is tax-deferred
+    when not flow is #nondeductible
+    count amount as adjustments
+
 /// Income tax withheld from pay, or paid to the IRS directly. Every arrival
 /// counts as tax already paid for the year it is `for`.
 kind federal-tax : expense
@@ -204,21 +221,6 @@ law count-distributions
   when not to is market | tax-deferred | from.pays
   count gain as distributions
   count gain as total-income
-
-/// Money paid into an account whose contributions are deductible, from money
-/// that was taxed already, comes off income (IRC §219, §223(a)). A payroll
-/// contribution was never taxed, so it is not deducted twice. The income limits
-/// on deducting an IRA contribution are not modelled.
-///
-/// To fix: a contribution that is not deductible (Form 8606) is written with
-/// `basis` for its full amount, and marked `#nondeductible`.
-law deduct-contributions
-  on in
-  when to is tax-deferred
-  when to.deductible
-  when from is asset and not from is tax-deferred
-  when not flow is #nondeductible
-  count amount as adjustments
 
 /// Tax withheld from pay, or paid in installments, is credited against the tax
 /// owed for the year the payment is `for`, so one made in January for the year
