@@ -8,11 +8,9 @@ use crate::lex::{Tok, Token};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported};
 
+#[rustfmt::skip]
 const ON_TRIGGERS: [(&str, Trigger); 5] = [
-    ("in", Trigger::In),
-    ("out", Trigger::Out),
-    ("gain", Trigger::Gain),
-    ("spend", Trigger::Spend),
+    ("in", Trigger::In), ("out", Trigger::Out), ("gain", Trigger::Gain), ("spend", Trigger::Spend),
     ("flow", Trigger::Flow),
 ];
 

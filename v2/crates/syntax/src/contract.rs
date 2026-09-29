@@ -15,11 +15,9 @@ use crate::lex::Tok;
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Scope};
 
+#[rustfmt::skip]
 const CADENCES: [(&str, Span); 5] = [
-    ("daily", Span::days(1)),
-    ("weekly", Span::days(7)),
-    ("monthly", Span::months(1)),
-    ("quarterly", Span::months(3)),
+    ("daily", Span::days(1)), ("weekly", Span::days(7)), ("monthly", Span::months(1)), ("quarterly", Span::months(3)),
     ("yearly", Span::months(12)),
 ];
 
