@@ -23,6 +23,7 @@
 mod command;
 mod csv;
 mod diff;
+mod peg;
 mod promise;
 mod recognize;
 mod reconcile;
@@ -39,7 +40,8 @@ use axiom_core::{Day, Loc, Qty};
 pub use command::{Failed, substitute};
 pub use csv::{Amounts, Column, Csv, DateFormat};
 pub use promise::Due;
-pub use recognize::{Known, Recognizer, Scratch};
+pub use peg::{PatternError, Peg};
+pub use recognize::{BadPattern, Known, Recognizer, Scratch};
 pub use reconcile::{Existing, WINDOW};
 pub use session::{Env, Failure, Kind, Outcome, Source, sync};
 pub use sink::Sink;

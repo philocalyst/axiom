@@ -124,7 +124,7 @@ fn sources<'a>(order: &[&str]) -> Vec<Source<'a>> {
 /// journal's own lines. `known` says who is known as what.
 fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World<'a> {
     let mut world = World {
-        recognizer: Recognizer::new(known, &["inv-*"]),
+        recognizer: Recognizer::new(known, &["code:(\"inv-\" digit+ \"-\" digit+)"]).unwrap(),
         layout: Layout::new(files.keys().map(String::as_str)),
         accounts: Map::default(),
         dues: Vec::new(),
@@ -180,13 +180,13 @@ fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World
 fn known<'a>(recognizes_visa_from_checking: bool) -> Vec<Known<'a>> {
     let party = |name: &'a str, pattern: &'a str| Known { name, account: false, patterns: vec![pattern] };
     let mut known = vec![
-        party("greystar", "GREYSTAR*"),
-        party("halcyon", "HALCYON*"),
-        party("trader-joes", "TRADER JOE*"),
-        party("amazon", "AMAZON*"),
+        party("greystar", "\"GREYSTAR\""),
+        party("halcyon", "\"HALCYON\""),
+        party("trader-joes", "\"TRADER JOE\""),
+        party("amazon", "\"AMAZON\""),
     ];
     let account = |name: &'a str, pattern: &'a str| Known { name, account: true, patterns: vec![pattern] };
-    known.push(if recognizes_visa_from_checking { account("visa", "CHASE CREDIT CRD AUTOPAY*") } else { account("checking", "PAYMENT THANK YOU*") });
+    known.push(if recognizes_visa_from_checking { account("visa", "\"CHASE CREDIT CRD AUTOPAY\"") } else { account("checking", "\"PAYMENT THANK YOU\"") });
     known
 }
 
