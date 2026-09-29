@@ -29,6 +29,7 @@ use crate::ledger::Ledger;
 use crate::lots::{Origin, Request, Selection, Shares, Slice};
 use crate::motion::{Motion, Moves};
 use crate::scope::{is_money, stays_with_owner};
+use crate::state::Missing;
 use crate::{Cause, Gain, Parcel, show};
 
 /// Whether the parcels' basis starts over at what they fetched. It does unless
@@ -333,14 +334,15 @@ impl<'b, 's> Ledger<'b, 's> {
     }
 
     /// `amount` in the base currency at the flow's day. A missing price is
-    /// reported once per commodity and day.
+    /// reported once per commodity: the first day it is missing, which is
+    /// before the first price, since a price stands until the next.
     fn base_value(&mut self, m: &Motion, amount: Amount) -> Option<Qty> {
         let book = self.book;
         if amount.unit == book.base {
             return Some(amount.qty);
         }
         let value = book.convert(amount, book.base, m.day).map(|priced| priced.qty);
-        if value.is_none() && self.record.unpriced.insert((amount.unit, m.day)) {
+        if value.is_none() && self.record.missing.insert(Missing::Price(amount.unit, book.base)) {
             let fault = Fault::NoPrice { unit: amount.unit, quote: book.base };
             let (what, help) = show::fault(book, fault, m.day);
             let mut d =

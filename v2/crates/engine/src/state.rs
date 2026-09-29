@@ -7,10 +7,8 @@
 //! flat copies, never a replay). The *scratch* buffers are reused between flows
 //! so nothing allocates in steady state, and are deliberately not cloned.
 
-use std::mem::Discriminant;
-
-use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty, Set};
-use axiom_model::{Book, Commodity, Entity, Fault, Flow, Law, Place, Subject, Value};
+use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
+use axiom_model::{Book, Commodity, Entity, Flow, Law, Param, Place, Subject, Value};
 
 use crate::eval::Outcome;
 use crate::lots::{Holdings, Relief};
@@ -82,10 +80,24 @@ pub(crate) struct Record {
     pub reported: Set<(Id<Law>, u32, Subject, Day)>,
     /// Places whose lots were already reported ambiguous: one policy fixes them all.
     pub ambiguous: Set<Id<Place>>,
-    /// Prices already reported missing: `(commodity, day)`.
-    pub unpriced: Set<(Id<Commodity>, Day)>,
-    /// Faults already reported: `(law, step, kind of fault)`.
-    pub faulted: Set<(Id<Law>, u32, Discriminant<Fault>)>,
+    /// What was already reported missing.
+    pub missing: Set<Missing>,
+}
+
+/// What a value could not be computed without. A report is about this, not
+/// about the law that ran into it: a price nobody wrote, or a `filing` never
+/// set, is one mistake however many laws and flows need it.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub(crate) enum Missing {
+    /// A price of the first commodity in the second.
+    Price(Id<Commodity>, Id<Commodity>),
+    /// A property of one entity or place (`filing` on `me`), or of whatever
+    /// a law read it from when that is neither.
+    Property(Option<Subject>, Sym),
+    /// Rows of a param for the day asked.
+    Row(Id<Param>),
+    /// Arithmetic that failed, per law and step.
+    Arithmetic(Id<Law>, u32),
 }
 
 impl Record {
@@ -104,8 +116,7 @@ impl Record {
             failing: self.failing.clone(),
             reported: self.reported.clone(),
             ambiguous: self.ambiguous.clone(),
-            unpriced: self.unpriced.clone(),
-            faulted: self.faulted.clone(),
+            missing: self.missing.clone(),
             ..Record::default()
         }
     }

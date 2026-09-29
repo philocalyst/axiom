@@ -273,6 +273,9 @@ impl Slot {
 
     /// Puts a lot in its place among the lots, oldest first, after any of the same day.
     fn insert(&mut self, parcel: Parcel) {
+        // A lot that arrives with no quantity (a rounded share of nothing) is
+        // exhausted from the start: `dead` counts every lot of quantity zero.
+        self.dead += usize::from(parcel.qty.is_zero());
         let lots = &mut self.holding.lots;
         let at = lots.partition_point(|lot| lot.acquired <= parcel.acquired);
         lots.insert(at, parcel);
@@ -862,6 +865,14 @@ mod tests {
 
     fn lots(slot: &Slot) -> Vec<(i64, i64)> {
         slot.holding.lots.iter().filter(|lot| !lot.qty.is_zero()).map(|l| (l.qty.0, l.basis.0)).collect()
+    }
+
+    #[test]
+    fn a_lot_that_arrives_empty_is_swept_like_any_exhausted_one() {
+        let mut slot = slot_of(3, 0, &[lot(10, 10, 5), lot(0, 0, 7)], false);
+        let relief = relieve(&mut slot, 10, &Ask { policy: Some(Policy::Lifo), ..PLAIN });
+        assert_eq!(taken(&relief), [(10, 10)]);
+        assert!(slot.holding.lots.is_empty() && slot.dead == 0, "both ends swept, and the count agrees");
     }
 
     #[test]

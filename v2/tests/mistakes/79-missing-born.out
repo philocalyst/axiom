@@ -1,18 +1,22 @@
-error[unset-property]: cannot check `deferral-limit`: `born` is not set
-   ╭─[79-missing-born.ax:18:3]
+error[unset-property]: `born` is not set on `me`, so `deferral-limit` cannot be checked
+   ╭─[79-missing-born.ax:6:8]
    │
+ 6 │ entity me : person
+   │        ─┬
+   │         ╰── `me` has no `born`
+   ⋮
 17 │ 2026-01-15 acme -> 8_000 USD
 18 │   retirement  800 USD
    │   ─────────┬─────────
    │            ╰── this flow: 800.00 USD into assets/retirement
    │
-   ├─[us/401k.ax:33:56] (built in)
+   ├─[us/401k.ax:32:20] (built in)
    │
-33 │     require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the year…
-   │                                                        ──┬──
-   │                                                          ╰── `born` is not set
+32 │     let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[year] else if ow…
+   │                    ────┬────
+   │                        ╰── `deferral-limit` reads it here
    │
-   = help: give it a value where the thing is declared: `born …`
+   = help: add a `born …` line under the declaration of `me`
 
 ✗ 1 error
 [exit status 1]

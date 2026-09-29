@@ -10,8 +10,6 @@
 //! A violated law is reported once per subject and window, at the flow that
 //! crossed the line, and its diagnostic is built only then.
 
-use std::mem::discriminant;
-
 use axiom_core::{Day, Diagnostic, Id, Set, Sym};
 use axiom_model::{
     Amount, Book, Dir, Entity, Fault, Func, Law, NodeId, Op, Recognition, Rule, StepKind, Trigger, Window,
@@ -22,7 +20,7 @@ use crate::explain::{self, Frame, Waiver};
 use crate::ledger::Ledger;
 use crate::motion::Motion;
 use crate::scope::{inside, owner_of};
-use crate::state::Reading;
+use crate::state::{Missing, Reading};
 use crate::totals::{by_year, window_of};
 use crate::{Effect, Headroom, Owed, Violation};
 
@@ -270,15 +268,23 @@ impl<'b, 's> Ledger<'b, 's> {
         }
     }
 
-    /// A fault reached a step. One report per law, step and kind of fault: a
-    /// missing price would otherwise repeat on every flow.
+    /// A fault reached a step. It is reported once for what was missing (a
+    /// price, a property of one thing, a param's rows), however many laws,
+    /// steps and flows run into it.
     fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
-        if !self.record.faulted.insert((rule.law, step as u32, discriminant(&fault))) {
-            return;
-        }
         let (book, law) = (self.book, &self.book.laws[rule.law]);
         let frame = Frame { book, law, ctx, values: &self.scratch.values, effects: &self.record.effects };
-        let diagnostic = explain::faulted(&frame, step, fault);
-        self.record.report(diagnostic);
+        let origin = explain::first_fault(&frame, step);
+        let holder = origin.and_then(|at| frame.holder(at));
+        let missing = match fault {
+            Fault::NoPrice { unit, quote } => Missing::Price(unit, quote),
+            Fault::Unset(name) => Missing::Property(holder, name),
+            Fault::NoRow(param) => Missing::Row(param),
+            Fault::DivideByZero | Fault::Overflow => Missing::Arithmetic(rule.law, step as u32),
+        };
+        if self.record.missing.insert(missing) {
+            let diagnostic = explain::faulted(&frame, fault, origin, holder);
+            self.record.report(diagnostic);
+        }
     }
 }

@@ -1,16 +1,21 @@
-error[unset-property]: cannot check `federal-income-tax`: `filing` is not set
-    ╭─[us.ax:126:1] (built in)
+error[unset-property]: `filing` is not set on `me`, so `federal-income-tax` cannot be checked
+    ╭─[78-missing-filing-status.ax:6:8]
+    │
+  6 │ entity me : person
+    │        ─┬
+    │         ╰── `me` has no `filing`
+    │
+    ├─[us.ax:126:1] (built in)
     │
 126 │ law federal-income-tax
     │ ───────────┬──────────
     │            ╰── checked for me on 2025-12-31
-    ⋮
-136 │   count taxable as taxable-income
-    │         ───┬───
-    │            ╰── `filing` is not set
+127 │   each year
+128 │   let deduction = standard-deduction[year, owner.filing]
+    │                                            ──────┬─────
+    │                                                  ╰── `federal-income-tax` reads it here
     │
-    = note: 2 more like this
-    = help: give it a value where the thing is declared: `filing …`
+    = help: add a `filing …` line under the declaration of `me`
 
-✗ 3 errors
+✗ 1 error
 [exit status 1]

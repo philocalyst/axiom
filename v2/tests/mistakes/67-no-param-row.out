@@ -20,10 +20,10 @@ error[no-param-row]: cannot check `federal-income-tax`: `standard-deduction` has
 126 │ law federal-income-tax
     │ ───────────┬──────────
     │            ╰── checked for me on 2023-12-31
-    ⋮
-136 │   count taxable as taxable-income
-    │         ───┬───
-    │            ╰── `standard-deduction` has no row for 2023-12-31
+127 │   each year
+128 │   let deduction = standard-deduction[year, owner.filing]
+    │                   ───────────────────┬──────────────────
+    │                                      ╰── `standard-deduction` has no row for 2023-12-31
     │
     = help: add a row to `param standard-deduction` that starts on or before that day
 
@@ -34,12 +34,11 @@ error[no-param-row]: cannot check `federal-income-tax`: `ordinary` has no row fo
     │ ───────────┬──────────
     │            ╰── checked for me on 2023-12-31
     ⋮
-137 │   count liability as income-tax
-    │         ────┬────
-    │             ╰── `ordinary` has no row for 2023-12-31
+132 │   let ordinary-tax = progressive(ordinary[year, owner.filing], taxable-ordinary)
+    │                                  ──────────────┬─────────────
+    │                                                ╰── `ordinary` has no row for 2023-12-31
     │
-    = note: 1 more like this
     = help: add a row to `param ordinary` that starts on or before that day
 
-✗ 4 errors
+✗ 3 errors
 [exit status 1]

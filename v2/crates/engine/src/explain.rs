@@ -129,6 +129,16 @@ impl Frame<'_, '_> {
         shown
     }
 
+    /// Whose property node `at` read: the entity or place a field was taken from.
+    pub fn holder(&self, at: usize) -> Option<Subject> {
+        let Op::Field(receiver, _) = self.law.nodes[at].op else { return None };
+        match self.values[receiver.index()] {
+            Value::Entity(entity) => Some(Subject::Entity(entity)),
+            Value::Place(place) => Some(Subject::Place(place)),
+            _ => None,
+        }
+    }
+
     /// The facts a condition read, outermost first found and in source order:
     /// a variable, a `let`, a field, a param or a call, each once as a whole.
     /// `owner.age` is one fact, not `owner` and its age; the booleans that
@@ -303,36 +313,57 @@ pub(crate) fn priced(
     }
 }
 
-/// A fault reached a step: the data the law needs does not exist.
-pub(crate) fn faulted(f: &Frame, step: usize, fault: Fault) -> Diagnostic {
-    let (what, help) = show::fault(f.book, fault, f.ctx.day);
+/// A fault reached a step: the data the law needs does not exist. A property
+/// never set is shown where its holder is declared, since that is where the
+/// line that fixes it goes; the law's line that read it is context.
+pub(crate) fn faulted(f: &Frame, fault: Fault, origin: Option<usize>, holder: Option<Subject>) -> Diagnostic {
+    let (book, law) = (f.book, f.book.name(f.law.name));
+    let (what, help) = show::fault(book, fault, f.ctx.day);
     let code = match fault {
         Fault::NoPrice { .. } => "no-price",
         Fault::Unset(_) => "unset-property",
         Fault::NoRow(_) => "no-param-row",
         Fault::DivideByZero | Fault::Overflow => "arithmetic",
     };
-    let mut d = Diagnostic::error(code, format!("cannot check `{}`: {what}", f.book.name(f.law.name)));
-    let (loc, text) = f.cause_label();
-    d = d.label(loc, text);
-    if let Some(origin) = first_fault(f, step) {
-        d = d.context(f.law.nodes[origin].loc, what);
+    let (cause, text) = f.cause_label();
+    let read = origin.map(|at| (f.law.nodes[at].loc, what.clone()));
+    if let (Fault::Unset(name), Some(holder)) = (fault, holder) {
+        let (name, thing) = (book.name(name), show::subject(book, holder));
+        let declared = match holder {
+            Subject::Place(place) => book.places[place].loc,
+            Subject::Entity(entity) => book.entities[entity].loc,
+        };
+        let d = Diagnostic::error(code, format!("`{name}` is not set on `{thing}`, so `{law}` cannot be checked"));
+        let d = match declared {
+            Some(loc) => d.label(loc, format!("`{thing}` has no `{name}`")).context(cause, text),
+            None => d.label(cause, text),
+        };
+        let d = read.into_iter().fold(d, |d, (loc, _)| d.context(loc, format!("`{law}` reads it here")));
+        return d.help(format!("add a `{name} …` line under the declaration of `{thing}`"));
     }
-    match help {
-        Some(help) => d.help(help),
-        None => d,
-    }
+    let d = Diagnostic::error(code, format!("cannot check `{law}`: {what}")).label(cause, text);
+    let d = read.into_iter().fold(d, |d, (loc, what)| d.context(loc, what));
+    help.into_iter().fold(d, Diagnostic::help)
 }
 
 /// Where the value that could not be computed first appeared: the earliest
-/// node of the step's expression holding a fault.
-fn first_fault(f: &Frame, step: usize) -> Option<usize> {
+/// node of the step's expression holding a fault, followed back through any
+/// `let` that carried it there.
+pub(crate) fn first_fault(f: &Frame, step: usize) -> Option<usize> {
     let root = match &f.law.steps[step].kind {
         StepKind::When(root) | StepKind::Let(root) => *root,
         StepKind::Require { cond, .. } => *cond,
         StepKind::Effect(Consequence::Owe { amount, .. } | Consequence::Count { amount, .. }) => *amount,
     };
-    f.law.range(root).find(|&at| matches!(f.values[at], Value::Fault(_)))
+    origin(f, root)
+}
+
+fn origin(f: &Frame, root: NodeId) -> Option<usize> {
+    let at = f.law.range(root).find(|&at| matches!(f.values[at], Value::Fault(_)))?;
+    match f.law.nodes[at].op {
+        Op::Local(bound) => origin(f, bound).or(Some(at)),
+        _ => Some(at),
+    }
 }
 
 /// When the condition is `lhs <= rhs` (or `<`, `>=`, `>`) and `lhs` moves
