@@ -459,6 +459,7 @@ fn commodity(symbol: Sym, scale: u8) -> Commodity {
         scale,
         title: None,
         liquidity: None,
+        select: None,
         growth: None,
         props: Box::new([]),
         doc: None,

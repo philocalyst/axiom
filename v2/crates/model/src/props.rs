@@ -90,7 +90,7 @@ type Reader = fn(&mut Args<'_, '_, '_>) -> Result<Assign, Diagnostic>;
 const BUILTINS: [(&str, &[Target], Reader); 18] = [
     ("owner", &[Target::Place], |a| a.entity().map(Assign::Owner)),
     ("holds", &[Target::Place], |a| Ok(Assign::Holds(a.holds()?, a.line.loc))),
-    ("select", &[Target::Place], |a| a.policy().map(Assign::Select)),
+    ("select", &[Target::Place, Target::Commodity], |a| a.policy().map(Assign::Select)),
     ("opened", &[Target::Place], |a| Ok(Assign::Opened(a.day()?, a.line.loc))),
     ("closed", &[Target::Place], |a| Ok(Assign::Closed(a.day()?, a.line.loc))),
     ("budget", &[Target::Place], |a| {
@@ -223,6 +223,7 @@ impl Commodity {
         match assign {
             Assign::Precision(scale) => self.scale = *scale,
             Assign::Title(title) => self.title = Some(*title),
+            Assign::Select(policy) => self.select = Some(*policy),
             Assign::Liquidity(span) => self.liquidity = Some(*span),
             Assign::Grows(rate) => self.growth = Some(*rate),
             Assign::Prop(prop) => put(&mut self.props, *prop),

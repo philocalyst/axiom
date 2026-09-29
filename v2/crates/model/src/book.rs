@@ -282,6 +282,9 @@ pub struct Commodity {
     pub scale: u8,
     pub title: Option<Sym>,
     pub liquidity: Option<Span>,
+    /// Resolved from the kind chain (`select fifo` on `currency`): how parcels
+    /// of it are relieved where neither the flow nor the place says.
+    pub select: Option<Policy>,
     /// `grows 5% yearly`: the valuation model forecasts use.
     pub growth: Option<Ratio>,
     pub props: Props,

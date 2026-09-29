@@ -6,5 +6,5 @@ Governed by
   Law         When       Explains                                                                   Written
   ────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Limits
-    purpose   on spend   Grant money may only be spent on what the grant names. This payment went…  std.ax:199
-    deadline  by a date  A grant ends on its `until` date, and unspent money is owed back.          std.ax:207
+    purpose   on spend   Grant money may only be spent on what the grant names. This payment went…  std.ax:196
+    deadline  by a date  A grant ends on its `until` date, and unspent money is owed back.          std.ax:204

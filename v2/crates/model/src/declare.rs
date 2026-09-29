@@ -242,6 +242,7 @@ impl Commodities {
             scale: scale.min(MAX_SCALE),
             title: None,
             liquidity: None,
+            select: None,
             growth: None,
             props: Box::default(),
             doc: None,

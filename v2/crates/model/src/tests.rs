@@ -708,6 +708,27 @@ account assets/owed : receivable
 }
 
 #[test]
+fn a_kind_of_commodity_says_how_its_parcels_are_relieved() {
+    let text = "
+kind money : currency
+  select lifo
+kind legal-tender : commodity
+  select fifo
+kind good : commodity
+commodity EUR : currency
+commodity CHF : money
+commodity GLD : good
+commodity BRL : legal-tender
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let select = |symbol: &str| book.commodities[book.commodity(symbol).unwrap()].select;
+        assert_eq!((select("EUR"), select("BRL"), select("GLD")), (None, Some(crate::Policy::Fifo), None));
+        assert_eq!(select("CHF"), Some(crate::Policy::Lifo), "a kind may say otherwise than the one it comes from");
+    });
+}
+
+#[test]
 fn the_built_in_places_and_kinds_resolve_as_names() {
     let text = "
 2026-01-31 savings = 1 USD via market

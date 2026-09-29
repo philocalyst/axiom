@@ -119,7 +119,8 @@ impl<'b, 's> Ledger<'b, 's> {
             need: m.out.qty,
             money: is_money(book, m.from, unit),
             selectors: m.select,
-            policy: source.select,
+            // A flow's selector, then the place's policy, then what the commodity says (currencies are FIFO).
+            policy: source.select.or(book.commodities[unit].select),
             txns: &book.txns,
             permits: &self.scratch.permits,
             spender: m.terms.spender,

@@ -35,8 +35,8 @@ outputs/                    every command, run with --today 2026-04-16 unless it
 - **Foreign currency is cash.** The German salary (5,400.00 EUR gross, 3,331.30 EUR net,
   Lohnsteuer and social contributions as split legs), the flat's rent and its blocked
   deposit, the savings moved from the US to a German Tagesgeld account, and a Wise account in
-  pounds are money. A euro spent on groceries is not a sale: `std` spends bank money oldest first,
-  with no account saying so, and `us` counts a currency gain only above 200 USD in one disposal
+  pounds are money. A euro spent on groceries is not a sale: `std` spends a currency oldest first
+  (`select fifo` on the kind `currency`), with no account saying so, and `us` counts a currency gain only above 200 USD in one disposal
   (IRC §988(e)). `axiom gains` still lists the 105 small disposals (a loss of 3.27 USD in all), and the
   return counts none of them. `axiom available` counts the euros in hand.
 - **Conversions with a cost.** Two shapes: Wise-style (`girokonto 900 EUR ->` with a fee leg and

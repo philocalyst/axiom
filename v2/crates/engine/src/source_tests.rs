@@ -134,6 +134,53 @@ opening 2025-09-01
     });
 }
 
+// ─── Which parcel of a currency is spent ────────────────────────────────────
+
+/// Two purchases of euros on different days, and half of what they made spent, in an account that says nothing
+/// about lots. `kind` is what the euros are: legal tender, or a thing kept for what it will fetch.
+fn spent_euros(kind: &str) -> String {
+    format!(
+        "\
+base USD
+commodity USD
+  precision 2
+kind currency : commodity
+  select fifo
+kind good : commodity
+commodity EUR : {kind}
+  precision 2
+
+account assets/checking
+account assets/wallet
+account expenses/food
+
+opening 2025-01-01
+  checking 5_000 USD
+
+2025-01-05 checking 1_100 USD -> wallet 1_000 EUR
+2025-02-05 checking 1_150 USD -> wallet 1_000 EUR
+2025-03-01 EUR 1.2 USD
+2025-03-01 wallet -> food 1_500 EUR
+"
+    )
+}
+
+#[test]
+fn a_currency_is_spent_oldest_first_wherever_it_is_held() {
+    with_run(&spent_euros("currency"), day(2025, 3, 31), |book, run| {
+        assert!(run.diagnostics.iter().all(|d| d.code != "ambiguous-lots"), "{:?}", run.diagnostics);
+        let lots = &holding(book, run, "wallet", "EUR").unwrap().lots;
+        assert_eq!(lots.iter().map(|lot| (lot.qty.0, lot.basis.0)).collect::<Vec<_>>(), [(500_00, 575_00)]);
+    });
+}
+
+#[test]
+fn anything_else_that_differs_is_still_ambiguous_without_a_policy() {
+    with_run(&spent_euros("good"), day(2025, 3, 31), |_, run| {
+        assert!(run.diagnostics.iter().any(|d| d.code == "ambiguous-lots"));
+    });
+}
+
 // ─── Claims made by the legs of a split ─────────────────────────────────────
 
 #[test]

@@ -5,9 +5,9 @@ warning[overdraft]: balance below zero: -84.20 USD against a minimum of 0.00 USD
    │ ──────────────────┬──────────────────
    │                   ╰── this flow: 84.20 USD from assets/checking to expenses/food
    │
-   ├─[std.ax:33:10] (built in)
+   ├─[std.ax:28:10] (built in)
    │
-33 │     warn balance >= empty "balance below zero"
+28 │     warn balance >= empty "balance below zero"
    │          ───┬───
    │             ╰── -84.20 USD
    │

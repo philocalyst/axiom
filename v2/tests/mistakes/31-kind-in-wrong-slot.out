@@ -5,9 +5,9 @@ error[kind-sort]: kind `fund` is a commodity kind, so it cannot describe the ass
     │                            ──┬─
     │                              ╰── commodity kind
     │
-    ├─[std.ax:128:6] (built in)
+    ├─[std.ax:125:6] (built in)
     │
-128 │ kind fund : security
+125 │ kind fund : security
     │      ──┬─
     │        ╰── declared here
 

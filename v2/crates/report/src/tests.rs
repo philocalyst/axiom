@@ -169,6 +169,7 @@ impl Cast {
                 scale,
                 title: None,
                 liquidity: None,
+                select: None,
                 growth: None,
                 props: Box::default(),
                 doc: None,
