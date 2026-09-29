@@ -224,8 +224,8 @@ impl<'s> World<'s> {
             Cause::Commodity => self.explain_commodity(word),
             Cause::Plan => unknown("unknown-plan", "plan", word, None),
         };
-        if uses > 1 && cause != Cause::AmbiguousPlace {
-            diagnostic = diagnostic.note(format!("{} write it, and none of them is kept", count(uses, "line")));
+        if uses > 1 || cause == Cause::AmbiguousPlace {
+            diagnostic = diagnostic.note(format!("it is written on {}, and none of them is kept", count(uses, "line")));
         }
         diagnostic
     }

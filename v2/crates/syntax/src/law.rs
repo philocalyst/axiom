@@ -42,7 +42,8 @@ impl<'s> Parser<'s> {
             return Err(if children.is_err() { Reported } else { self.report(missing_trigger(header.loc)) });
         };
         let steps = self.since(mark);
-        Ok(self.push(Law { doc: header.doc, name, trigger, trigger_loc, steps, loc: header.loc }))
+        let damaged = children.is_err();
+        Ok(self.push(Law { doc: header.doc, name, trigger, trigger_loc, steps, damaged, loc: header.loc }))
     }
 
     /// One line of a law's body: its trigger, or a step. `mark` is where the

@@ -837,6 +837,10 @@ pub struct Law<'s> {
     /// as the trigger and a first step `when from is X | Y`, its expression
     /// nodes located at what was written.
     pub steps: Many<Step<'s>>,
+    /// A line of its body did not parse and is left out, so what remains is
+    /// not the whole law: its own diagnostic says why, and anything that only
+    /// follows from the missing line is not worth another.
+    pub damaged: bool,
     /// The `law NAME` line.
     pub loc: Loc,
 }

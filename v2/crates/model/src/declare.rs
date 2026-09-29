@@ -48,6 +48,8 @@ pub(crate) struct World<'s> {
 
 pub(crate) struct Declared {
     pub kinds: Vec<Id<Kind>>,
+    /// Indexed by kind: its parent chain is broken, and said so once.
+    pub unrooted: Vec<bool>,
     pub commodities: Vec<Id<Commodity>>,
     pub entities: Vec<Id<Entity>>,
     pub places: Vec<Option<Id<Place>>>,
@@ -188,6 +190,7 @@ pub(crate) fn declare<'a, 's>(
     };
     let declared = Declared {
         kinds: kinds.declared,
+        unrooted: kinds.unrooted,
         commodities: commodities.declared,
         entities: entities.declared,
         places: places.declared,
@@ -247,14 +250,14 @@ impl Commodities {
 
     /// Whether `symbol` is a typo of a declared commodity, and which.
     fn typo_of<'a>(&self, names: &'a Interner, symbol: &str) -> Option<&'a str> {
-        let limit = (symbol.len() / 3).max(1);
-        let known = self.by_symbol.keys().map(|&sym| names.name(sym));
-        known
-            .map(|other| (edits(symbol, other), other))
-            .filter(|&(distance, _)| distance <= limit)
-            .min()
-            .map(|(_, other)| other)
+        typo_of(symbol, self.by_symbol.keys().map(|&sym| names.name(sym)))
     }
+}
+
+/// The one of `known` that `symbol` is a few letters away from, if any.
+fn typo_of<'a>(symbol: &str, known: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let limit = (symbol.len() / 3).max(1);
+    known.map(|other| (edits(symbol, other), other)).filter(|&(distance, _)| distance <= limit).min().map(|(_, o)| o)
 }
 
 /// Commodities are declared, or opened on first use, unless what is written is
@@ -294,9 +297,17 @@ fn commodities<'s>(
         table.arena[id].loc = Some(word.loc);
         table.declared.push(id);
     }
+    // What the sources declare, and the currency they name as the base, are
+    // what a stray symbol may be a typo of; two undeclared symbols are equals.
     let root = kinds.roots.commodity();
+    let named = settings.base.map(|word| word.text);
+    let known: Vec<&str> = table.by_symbol.keys().map(|&sym| cx.names.name(sym)).chain(named).collect();
     for unit in units {
-        if table.find(cx.names, unit.symbol).is_none() && table.typo_of(cx.names, unit.symbol).is_none() {
+        let declared = table.find(cx.names, unit.symbol).is_some();
+        if declared {
+            continue;
+        }
+        if named == Some(unit.symbol) || typo_of(unit.symbol, known.iter().copied()).is_none() {
             table.add(cx.names, unit.symbol, unit.places, root, Home::Builtin);
         }
     }

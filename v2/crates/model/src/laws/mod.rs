@@ -57,6 +57,9 @@ pub(crate) fn declare<'s>(
                     }
                     DeclKind::Kind => {
                         let id = world.declared.kinds[position];
+                        if world.declared.unrooted[id.index()] {
+                            continue;
+                        }
                         let subject = match world.book.kinds[id].sort {
                             Sort::Place(_) => Ty::Place,
                             Sort::Entity => Ty::Entity,
@@ -124,7 +127,11 @@ fn add<'s>(world: &mut World<'s>, diags: &mut Vec<Diagnostic>, site: &Site<'_, '
         diags.push(problem);
         return;
     }
-    if let Some(compiled) = compile(world, diags, site, law) {
+    // The parser reported the line it left out; compiling what remains would
+    // only report that line again, as a name nothing defines.
+    if !law.damaged
+        && let Some(compiled) = compile(world, diags, site, law)
+    {
         push(world, compiled);
     }
 }

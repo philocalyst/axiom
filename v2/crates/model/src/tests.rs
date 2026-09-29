@@ -13,6 +13,15 @@ kind broker : asset
 kind credit-card : liability
 kind person : entity
 kind employer : entity
+kind household : entity
+kind grocer : entity
+  via expenses/food
+kind receivable : asset
+  claim
+kind pretax : asset
+  deferred
+kind gift : asset
+  basis zero
 kind currency : commodity
 kind stock : commodity
 ";
@@ -25,6 +34,8 @@ account assets/bank/checking : bank
 account assets/bank/savings : bank
 account assets/brokerage : broker
 account liabilities/visa : credit-card
+account expenses/food
+account income/salary
 ";
 
 /// Builds the files of a project beside the tiny standard system, and hands the
@@ -329,4 +340,633 @@ fn assertions_and_events_are_kept_in_day_order() {
         assert!(book.asserts.windows(2).all(|pair| pair[0].day <= pair[1].day));
         assert!(book.events.windows(2).all(|pair| pair[0].day <= pair[1].day));
     });
+}
+
+// ─── The v3 language ────────────────────────────────────────────────────────
+
+fn flows_of<'a>(book: &'a Book) -> Vec<&'a crate::Flow> {
+    book.flows.iter().map(|(_, flow)| flow).collect()
+}
+
+/// The first and last day a flow is recognized over, as text.
+fn recognized(flow: &crate::Flow) -> String {
+    format!("{}..{}", flow.recognized.from, flow.recognized.until)
+}
+
+#[test]
+fn a_flow_is_recognized_over_its_range_or_the_period_it_is_for() {
+    let text = "
+2026-01-01..2026-12-31 checking -> savings 1_200 USD
+2026-01-15 checking -> savings 100 USD for 2025
+2026-02-01 checking -> savings 10 USD for 2026-03
+2026-02-02 checking -> savings 10 USD for 2026-04-05
+2026-02-03 checking -> savings 10 USD for 2026-06-01..2026-06-30
+2026-02-04 checking -> savings 10 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let flows = flows_of(book);
+        let days: Vec<String> = flows.iter().map(|flow| flow.day.to_string()).collect();
+        assert_eq!(days, ["2026-01-01", "2026-01-15", "2026-02-01", "2026-02-02", "2026-02-03", "2026-02-04"]);
+        let periods: Vec<String> = flows.iter().map(|flow| recognized(flow)).collect();
+        assert_eq!(
+            periods,
+            [
+                "2026-01-01..2026-12-31",
+                "2025-01-01..2025-12-31",
+                "2026-03-01..2026-03-31",
+                "2026-04-05..2026-04-05",
+                "2026-06-01..2026-06-30",
+                "2026-02-04..2026-02-04",
+            ]
+        );
+    });
+}
+
+#[test]
+fn for_a_code_selects_and_links_and_for_an_entity_holds() {
+    let text = "
+2026-03-01 acme -> checking 4_800 USD #inv-12
+2026-04-02 checking -> savings 3_000 USD for #inv-12
+2026-04-03 checking -> savings 100 USD for acme
+2026-04-04 checking -> savings 100 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let flows = flows_of(book);
+        let code = book.names.get("inv-12").unwrap();
+        assert!(matches!(&*flows[1].select, [crate::Select::Code(sym)] if *sym == code));
+        assert_eq!(&*flows[1].codes, [code], "the link is the code on the flow");
+        assert_eq!(flows[2].terms().hold, Some(book.entity("acme").unwrap()));
+        assert_eq!(flows[3].terms().hold, None);
+        assert!(flows[3].terms.is_none(), "a flow that says nothing carries nothing");
+    });
+}
+
+#[test]
+fn due_basis_and_basis_ends_are_kept() {
+    let text = "
+2026-03-01 acme -> checking 4_800 USD #inv-12 due 30d
+2026-03-02 acme -> savings 100 USD due 2026-05-01
+2026-03-03 acme -> savings 100 USD basis 40 USD
+2026-03-04 checking -> brokerage.basis 200 USD
+2026-03-05 brokerage.basis 50 USD -> checking
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let dues: Vec<Option<String>> = book.txns.iter().map(|(_, txn)| txn.due.map(|day| day.to_string())).collect();
+        assert_eq!(dues, [Some("2026-03-31".into()), Some("2026-05-01".into()), None, None, None]);
+        let flows = flows_of(book);
+        let usd = book.commodity("USD").unwrap();
+        assert_eq!(
+            flows[2].terms().basis.map(|qty| book.show(crate::Amount::new(qty, usd)).to_string()),
+            Some("40 USD".into())
+        );
+        assert_eq!(flows[3].terms().basis_end, Some(crate::End::To));
+        assert_eq!(flows[4].terms().basis_end, Some(crate::End::From));
+    });
+}
+
+#[test]
+fn a_basis_in_another_commodity_than_the_base_is_refused() {
+    with_book("2026-03-03 acme -> brokerage 3 VTI basis 40 VTI\n", |_, diags| {
+        assert_eq!(codes(diags), ["basis-unit"]);
+    });
+}
+
+#[test]
+fn a_closing_statement_is_one_exchange_its_legs_allocate() {
+    let text = "
+2026-12-29 brokerage 1 VTI -> 431_500 USD
+  expenses/food  25_000 USD
+  savings        400_000 USD
+  checking       ...
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        // The exchange runs through the remainder leg's place, and the other
+        // legs pay out of the proceeds.
+        assert_eq!(
+            moves(book),
+            [
+                "assets/brokerage -> assets/bank/checking  1 VTI  arrives 431,500 USD",
+                "assets/bank/checking -> expenses/food  25,000 USD  arrives 25,000 USD",
+                "assets/bank/checking -> assets/bank/savings  400,000 USD  arrives 400,000 USD",
+            ]
+        );
+    });
+}
+
+#[test]
+fn an_all_source_is_solved_from_what_the_place_holds() {
+    with_book("2026-05-01 brokerage all VTI -> savings 500 USD\n", |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(flows_of(book)[0].infer, crate::Infer::All);
+    });
+}
+
+#[test]
+fn a_plan_occurrence_is_the_plan_redated_with_overrides() {
+    let text = "
+plan paycheck every 2w from 2026-01-02 acme -> 5_200 USD
+  savings 800 USD
+  checking ...
+2026-01-16 paycheck
+2026-01-30 paycheck
+  savings 900 USD
+2026-03-13 paycheck 5_900 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let plan = book.plans.iter().next().unwrap().0;
+        // The plan's own transaction follows the journal's and holds no flows.
+        let planned: Vec<_> = book.txns.iter().map(|(_, txn)| txn.plan).collect();
+        assert_eq!(planned, [Some(plan), Some(plan), Some(plan), None]);
+        assert_eq!(
+            moves(book),
+            [
+                "income/salary -> assets/bank/savings  800 USD  arrives 800 USD",
+                "income/salary -> assets/bank/checking  4,400 USD  arrives 4,400 USD",
+                "income/salary -> assets/bank/savings  900 USD  arrives 900 USD",
+                "income/salary -> assets/bank/checking  4,300 USD  arrives 4,300 USD",
+                "income/salary -> assets/bank/savings  800 USD  arrives 800 USD",
+                "income/salary -> assets/bank/checking  5,100 USD  arrives 5,100 USD",
+            ]
+        );
+        assert_eq!(book.name(book.plans[plan].name.unwrap()), "paycheck");
+    });
+}
+
+#[test]
+fn an_unknown_plan_is_an_error_with_a_suggestion() {
+    let text = "
+plan paycheck every 2w from 2026-01-02 acme -> 5_200 USD
+  checking ...
+2026-01-16 paychek
+";
+    with_book(text, |_, diags| {
+        assert_eq!(codes(diags), ["unknown-plan"]);
+        assert_eq!(diags[0].help[0].text, "did you mean `paycheck`?");
+    });
+}
+
+#[test]
+fn openings_are_flows_from_equity_in_the_place_display_sign() {
+    let text = "
+opening 2024-12-31
+  checking   10_000 USD
+  visa       500 USD
+  brokerage  40 VTI  basis 7_200 USD  since 2019-03-04
+  brokerage  25 VTI
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            moves(book),
+            [
+                "equity/opening -> assets/bank/checking  10,000 USD  arrives 10,000 USD",
+                "liabilities/visa -> equity/opening  500 USD  arrives 500 USD",
+                "equity/opening -> assets/brokerage  40 VTI  arrives 40 VTI",
+                "equity/opening -> assets/brokerage  25 VTI  arrives 25 VTI",
+            ]
+        );
+        assert!(book.flows.iter().all(|(_, flow)| flow.mode == crate::Mode::Opening));
+        assert_eq!(book.txns.len(), 1, "one transaction per block");
+        let terms = flows_of(book)[2].terms();
+        assert_eq!(terms.since.map(|day| day.to_string()), Some("2019-03-04".into()));
+        assert!(terms.basis.is_some());
+    });
+}
+
+#[test]
+fn splits_keep_their_ratio_and_are_sorted_by_day() {
+    let text = "
+2026-06-01 VTI split 1 for 10
+2026-05-22 VTI split 2 for 1
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let ratios: Vec<String> = book.splits.iter().map(|split| format!("{} {}", split.day, split.ratio)).collect();
+        assert_eq!(ratios, ["2026-05-22 2", "2026-06-01 0.1"]);
+    });
+}
+
+#[test]
+fn an_assertion_says_where_its_gap_goes() {
+    let text = "
+2026-01-31 checking = 5 USD
+2026-01-31 savings = 7 USD !
+2026-01-31 brokerage = 3 USD via market
+2026-01-31 visa = -3 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        use crate::Gap;
+        let gaps: Vec<_> = book.asserts.iter().map(|assert| assert.gap).collect();
+        assert!(matches!(gaps[0], Gap::Refused));
+        assert!(matches!(gaps[1], Gap::Unexplained(_)));
+        assert!(matches!(gaps[2], Gap::Via { place, .. } if book.name(book.places[place].path) == "income/market"));
+        let shown: Vec<String> = book.asserts.iter().map(|assert| book.show(assert.amount).to_string()).collect();
+        assert_eq!(shown[3], "-3 USD");
+    });
+}
+
+#[test]
+fn a_price_may_have_more_decimals_than_its_commodity() {
+    let text = "
+commodity USD
+  precision 2
+2026-01-12 checking -> brokerage 3 VTI @ 285.7043 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(moves(book), ["assets/bank/checking -> assets/brokerage  857.11 USD  arrives 3 VTI"]);
+    });
+}
+
+#[test]
+fn an_alias_wins_over_a_suffix_and_an_ambiguity_is_reported_once_at_the_declaration() {
+    let text = "
+account assets/broker/checking as brk : broker
+2026-01-05 savings -> checking 10 USD
+2026-01-06 savings -> checking 10 USD
+2026-01-07 savings -> checking 10 USD
+2026-01-08 savings -> brk 10 USD
+2026-01-09 savings -> bank/checking 10 USD
+";
+    with_book(text, |book, diags| {
+        assert_eq!(codes(diags), ["ambiguous-place"], "{diags:?}");
+        let diagnostic = &diags[0];
+        let declared = book.places[book.place("brk").unwrap()].loc.unwrap();
+        assert_eq!(diagnostic.labels[0].loc.file, declared.file);
+        assert!(diagnostic.notes.iter().any(|note| note.contains("3 lines")), "{:?}", diagnostic.notes);
+        assert!(diagnostic.help.iter().any(|help| help.text.contains("as")), "{:?}", diagnostic.help);
+        assert_eq!(book.name(book.places[book.place("brk").unwrap()].path), "assets/broker/checking");
+        assert_eq!(book.flows.len(), 2, "only the lines that named a place are kept");
+    });
+}
+
+#[test]
+fn several_entities_share_one_declaration() {
+    let text = "
+entity aldi, kroger : grocer
+2026-01-05 checking -> aldi 10 USD
+2026-01-06 checking -> kroger 12 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let grocer = book.kind("grocer").unwrap();
+        for name in ["aldi", "kroger"] {
+            let entity = &book.entities[book.entity(name).unwrap()];
+            assert_eq!(entity.kind, grocer);
+            assert_eq!(entity.via, Some(book.place("expenses/food").unwrap()), "{name} takes its kind's via");
+        }
+        assert_eq!(book.flows.len(), 2);
+    });
+}
+
+#[test]
+fn kinds_resolve_basis_deferred_and_claim_down_their_chain() {
+    let text = "
+kind roth : pretax
+  basis cost
+account assets/ira : pretax
+account assets/roth : roth
+account assets/gifted : gift
+account assets/owed : receivable
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let place = |name: &str| &book.places[book.place(name).unwrap()];
+        assert_eq!((place("ira").deferred, place("ira").basis), (true, crate::Basis::Zero));
+        assert_eq!((place("roth").deferred, place("roth").basis), (true, crate::Basis::Cost));
+        assert_eq!(place("gifted").basis, crate::Basis::Zero);
+        assert!(place("owed").claim && !place("ira").claim);
+        assert_eq!(book.kinds[book.kind("roth").unwrap()].basis, Some(crate::Basis::Cost));
+    });
+}
+
+#[test]
+fn the_built_in_places_and_kinds_resolve_as_names() {
+    let text = "
+2026-01-31 savings = 1 USD via market
+2026-01-05 opening -> savings 10 USD
+2026-01-06 ? -> savings 5 USD
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(book.places[book.roots.unknown].path, book.names.get("equity/unknown").unwrap());
+        assert_eq!(book.places[book.roots.opening].path, book.names.get("equity/opening").unwrap());
+        assert_eq!(book.kinds[book.places[book.place("market").unwrap()].kind].name, book.names.get("market").unwrap());
+    });
+}
+
+#[test]
+fn a_member_belongs_to_another_entity_and_residences_may_overlap() {
+    let files = [
+        ("systems/us.ax", "system us/ca\n"),
+        ("systems/de.ax", "system de\n"),
+        (
+            "axiom.ax",
+            "
+base USD
+entity family : household
+  lives us
+entity alex : person
+  member family
+  lives de from 2025-07-01
+  lives us/ca until 2025-06-30
+entity ghost : person
+  member nobody
+entity narcissus : person
+  member narcissus
+",
+        ),
+    ];
+    with_files(&files, |book, diags| {
+        assert_eq!(codes(diags), ["unknown-entity", "member-self"], "{diags:?}");
+        let (family, alex) = (book.entity("family").unwrap(), &book.entities[book.entity("alex").unwrap()]);
+        assert_eq!(alex.member, Some(family));
+        let path = |system: axiom_core::Id<crate::System>| book.name(book.systems[system].path);
+        let lives: Vec<_> = alex.lives.iter().map(|res| (res.from.0 == i32::MIN, path(res.system))).collect();
+        assert_eq!(lives, [(true, "us/ca"), (false, "de")], "sorted by their start, not chained");
+        assert_eq!(alex.lives[0].until.to_string(), "2025-06-30");
+        assert_eq!(alex.lives[1].until.0, i32::MAX);
+    });
+}
+
+#[test]
+fn a_law_that_reads_a_tally_runs_after_the_laws_that_count_into_it() {
+    let text = "
+law reads
+  on in
+  require tally(base-total) <= 10 USD
+
+law counts
+  on in
+  count amount as base-total
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let checking = book.place("checking").unwrap();
+        let order: Vec<&str> =
+            book.rules.on_in[checking].iter().map(|rule| book.name(book.laws[rule.law].name)).collect();
+        assert_eq!(order, ["counts", "reads"], "the count comes first though it is written second");
+    });
+}
+
+#[test]
+fn laws_that_need_each_other_are_a_cycle_naming_both() {
+    let text = "
+law first
+  on in
+  require tally(x) <= 10 USD
+  count amount as y
+
+law second
+  on in
+  require tally(y) <= 10 USD
+  count amount as x
+";
+    with_book(text, |book, diags| {
+        assert_eq!(codes(diags), ["law-cycle"], "{diags:?}");
+        let shown = format!("{:?}", diags[0]);
+        assert!(shown.contains("first") && shown.contains("second"), "{shown}");
+        assert!(book.law("first").is_ok(), "the laws stay; only their order is undecided");
+    });
+}
+
+#[test]
+fn a_commodity_one_letter_from_a_known_one_is_a_typo_but_a_new_one_is_a_commodity() {
+    with_book("2026-01-05 checking -> savings 10 UDS\n2026-01-06 checking -> brokerage 7 VTI\n", |book, diags| {
+        assert_eq!(codes(diags), ["unknown-commodity"], "{diags:?}");
+        assert_eq!(diags[0].help[0].text, "did you mean `USD`?");
+        assert!(book.commodity("UDS").is_none() && book.commodity("VTI").is_some());
+        assert_eq!(book.flows.len(), 1);
+    });
+}
+
+#[test]
+fn a_full_path_one_letter_from_a_declared_place_is_a_typo_but_a_new_path_opens() {
+    let text = "
+2026-01-05 checking -> expenses/fod 10 USD
+2026-01-06 checking -> expenses/travel/taxis 10 USD
+";
+    with_book(text, |book, diags| {
+        assert_eq!(codes(diags), ["unknown-place"], "{diags:?}");
+        assert_eq!(diags[0].help[0].text, "did you mean `expenses/food`?");
+        assert!(book.place("expenses/fod").is_err());
+        assert!(book.place("expenses/travel/taxis").is_ok());
+        assert_eq!(book.flows.len(), 1);
+    });
+}
+
+#[test]
+fn an_event_dated_before_its_flow_is_an_error() {
+    let text = "
+2026-01-06 checking -> savings 1 USD #a
+2026-01-05 #a settled
+2026-01-07 #a settled
+2026-01-07 #nothing settled
+";
+    with_book(text, |book, diags| {
+        assert_eq!(codes(diags), ["event-before-flow", "unknown-code"], "{diags:?}");
+        assert_eq!(book.events.len(), 1, "the one dated after its flow is kept");
+    });
+}
+
+#[test]
+fn the_base_is_the_one_currency_used_and_several_need_a_base() {
+    let one = [(
+        "axiom.ax",
+        "account assets/bank : bank\naccount assets/other : bank\n2026-01-05 bank 5 EUR -> other 5 EUR\n",
+    )];
+    with_files(&one, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(book.name(book.commodities[book.base].symbol), "EUR");
+    });
+    let two = [(
+        "axiom.ax",
+        "account assets/bank : bank\naccount assets/other : bank\n2026-01-05 bank 5 EUR -> other 6 USD\n",
+    )];
+    with_files(&two, |_, diags| {
+        assert_eq!(codes(diags), ["no-base"], "{diags:?}");
+        assert!(diags[0].message.contains("`EUR` and `USD`"), "{}", diags[0].message);
+    });
+}
+
+#[test]
+fn a_code_rule_takes_several_globs_and_is_met_by_any_leg() {
+    let text = "
+code trip-* holiday
+  on expenses/food | expenses/travel/*
+2026-01-05 acme -> 100 USD #trip-1
+  expenses/food  40 USD
+  checking       ...
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let patterns: Vec<&str> = book.codes.iter().map(|rule| book.name(rule.pattern)).collect();
+        assert_eq!(patterns, ["trip-*", "holiday"]);
+        assert!(book.codes.iter().all(|rule| rule.on.len() == 2));
+        let code = book.names.get("trip-1").unwrap();
+        assert!(book.flows.iter().all(|(_, flow)| flow.codes.contains(&code)), "a header code marks every leg");
+    });
+}
+
+#[test]
+fn each_year_closing_is_a_timed_law_with_its_closing_day() {
+    let text = "
+law estimated
+  each year closing 04-15
+  count 1 USD as paid
+";
+    with_book(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let law = &book.laws[book.law("estimated").unwrap()];
+        assert_eq!(law.trigger, crate::Trigger::Each(crate::Period::Year, Some(crate::Closing { month: 4, day: 15 })));
+    });
+}
+
+/// The rules a place answers to on its inflows: law, subject, and the days.
+fn inflow_rules(book: &Book, place: &str) -> Vec<String> {
+    let place = book.place(place).unwrap();
+    let subject = |subject| match subject {
+        crate::Subject::Entity(entity) => book.name(book.entities[entity].path),
+        crate::Subject::Place(place) => book.name(book.places[place].path),
+    };
+    let day = |day: axiom_core::Day| match day.0 {
+        i32::MIN => "..".to_string(),
+        i32::MAX => "..".to_string(),
+        _ => day.to_string(),
+    };
+    let rules = &book.rules.on_in[place];
+    rules
+        .iter()
+        .map(|rule| {
+            let law = book.name(book.laws[rule.law].name);
+            format!("{law} for {} {}~{}", subject(rule.subject), day(rule.from), day(rule.until))
+        })
+        .collect()
+}
+
+const COUNTRIES: [(&str, &str); 2] = [
+    ("systems/us.ax", "system us\nlaw us-law\n  on in\n  count amount as inflow\n"),
+    ("systems/de.ax", "system de\nlaw de-law\n  on in\n  count amount as inflow\n"),
+];
+
+fn in_countries<R>(project: &str, then: impl FnOnce(&Book, &[Diagnostic]) -> R) -> R {
+    let project = format!("base USD\naccount assets/bank/joint : bank\naccount assets/bank/alex : bank\n{project}");
+    let files = [COUNTRIES[0], COUNTRIES[1], ("axiom.ax", project.as_str())];
+    with_files(&files, then)
+}
+
+#[test]
+fn a_household_is_governed_as_one_with_its_members_places() {
+    let text = "
+entity family : household
+  lives us
+entity alex : person
+  member family
+";
+    let text = format!("{text}account assets/bank/joint2 : bank\n  owner family\n");
+    in_countries(&text.replace("joint2", "shared"), |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(inflow_rules(book, "shared"), ["us-law for family ..~.."]);
+        // `alex` owns nothing yet: his place is owned by `me`.
+        assert!(inflow_rules(book, "alex").is_empty());
+    });
+    let members = "
+entity family : household
+  lives us
+entity alex : person
+  member family
+account assets/bank/mine : bank
+  owner alex
+";
+    in_countries(members, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(inflow_rules(book, "mine"), ["us-law for family ..~.."], "the household is the subject");
+    });
+}
+
+#[test]
+fn a_member_who_lives_elsewhere_is_also_governed_there_as_themselves() {
+    let text = "
+entity family : household
+  lives us
+entity alex : person
+  member family
+  lives de
+account assets/bank/mine : bank
+  owner alex
+";
+    in_countries(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let mut rules = inflow_rules(book, "mine");
+        rules.sort();
+        assert_eq!(rules, ["de-law for alex ..~..", "us-law for family ..~.."]);
+    });
+}
+
+#[test]
+fn rules_are_dated_by_residence_and_overlapping_residences_merge() {
+    let text = "
+entity me : person
+  lives us from 2025-01-01 until 2025-06-30
+  lives us from 2025-06-01 until 2025-12-31
+  lives de from 2026-01-01
+account assets/bank/mine : bank
+";
+    in_countries(text, |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        assert_eq!(
+            inflow_rules(book, "mine"),
+            ["de-law for me 2026-01-01~..", "us-law for me 2025-01-01~2025-12-31"],
+            "in declaration order: systems are read in path order"
+        );
+    });
+}
+
+#[test]
+fn a_kind_that_never_reaches_a_root_is_reported_once_and_not_at_every_use() {
+    let text = "
+kind loop-a : loop-b
+kind loop-b : loop-a
+kind orphan : nosuch
+kind under-orphan : orphan
+  law inside
+    on in
+    count amount as n
+account assets/x : loop-a
+account assets/y : orphan
+account assets/z : under-orphan
+";
+    with_book(text, |book, diags| {
+        let mut found = codes(diags);
+        found.sort();
+        assert_eq!(found, ["kind-cycle", "unknown-kind"], "{diags:?}");
+        assert!(book.place("x").is_ok() && book.place("z").is_ok(), "the accounts exist, with their root kind");
+    });
+}
+
+#[test]
+fn a_law_with_a_line_that_did_not_parse_adds_nothing_to_that_error() {
+    let text = format!(
+        "{ACCOUNTS}
+law damaged
+  on in
+  let cap = if amount > 5 USD then 5 USD
+  require amount <= cap
+"
+    );
+    let parsed = [("std.ax", STD, true), ("axiom.ax", text.as_str(), false)].map(|(path, text, embedded)| {
+        let (file, syntax) = parse(FileId(embedded as u16), text);
+        (Source { path, file, embedded }, syntax.len())
+    });
+    assert_eq!(parsed[1].1, 1, "the parser reports the incomplete `if`");
+    let sources: Vec<_> = parsed.into_iter().map(|(source, _)| source).collect();
+    let (book, diags) = build(&sources);
+    assert!(diags.is_empty(), "nothing follows from the missing line: {diags:?}");
+    assert!(book.law("damaged").is_err(), "and the law is left out rather than run without its `let`");
 }

@@ -70,6 +70,10 @@ pub(crate) struct Kinds {
     pub roots: RootKinds,
     /// The id of each declaration, in the order written.
     pub declared: Vec<Id<Kind>>,
+    /// Kinds whose chain never reached a root: their parent is missing, or
+    /// unknown, or on a cycle. That was reported once, and what is described
+    /// by them, or written inside them, has no need to say it again.
+    pub unrooted: Vec<bool>,
 }
 
 fn draft<'s>(names: &mut Interner<'s>, name: &'s str, sort: Sort) -> Kind {
@@ -123,15 +127,17 @@ pub(crate) fn declare<'a, 's>(entries: &[Entry<'a, 's>], cx: &mut Cx<'_, 's>) ->
     let index = index_of(names, texts.iter().zip(&homes).map(|(&text, &home)| (text, home)));
     let mut parents: Vec<Option<usize>> = vec![None; ROOTS.len()];
     parents[MARKET] = Some(INCOME);
+    let mut broken = vec![false; ROOTS.len()];
     for (written, &draft) in declared.iter().zip(&draft_of) {
         if draft == parents.len() {
             let parent = parent_of(written, &index, &drafts, names, systems, scopes, diags);
-            parents.push(Some(parent));
+            broken.push(parent.is_none());
+            parents.push(Some(parent.unwrap_or(ENTITY)));
         }
     }
     for cycle in cycles(&parents) {
         diags.push(cycle_diagnostic(&cycle, &drafts, names));
-        cycle.iter().for_each(|&kind| parents[kind] = Some(ENTITY));
+        cycle.iter().for_each(|&kind| (parents[kind], broken[kind]) = (Some(ENTITY), true));
     }
     let (mut tree, new_id) = Tree::build(drafts, &parents).expect("cycles were cut, so kinds form a forest");
     for id in tree.ids() {
@@ -140,13 +146,21 @@ pub(crate) fn declare<'a, 's>(entries: &[Entry<'a, 's>], cx: &mut Cx<'_, 's>) ->
         }
     }
     let mut final_homes = vec![Home::Builtin; homes.len()];
+    let mut unrooted = vec![false; homes.len()];
     for (old, &home) in homes.iter().enumerate() {
         final_homes[new_id[old].index()] = home;
+        unrooted[new_id[old].index()] = broken[old];
+    }
+    // Parents come first in the tree, so a kind under a broken one is broken too.
+    for id in tree.ids() {
+        if let Some(parent) = tree.parent(id) {
+            unrooted[id.index()] |= unrooted[parent.index()];
+        }
     }
     let things = tree.iter().map(|(id, kind)| (id, names.name(kind.name), final_homes[id.index()])).collect::<Vec<_>>();
     let index = Scoped::build(names, things);
     let roots = RootKinds(std::array::from_fn(|at| new_id[at]));
-    Kinds { tree, index, roots, declared: draft_of.iter().map(|&draft| new_id[draft]).collect() }
+    Kinds { tree, index, roots, declared: draft_of.iter().map(|&draft| new_id[draft]).collect(), unrooted }
 }
 
 fn index_of<'s>(names: &mut Interner<'s>, things: impl Iterator<Item = (&'s str, Home)>) -> Scoped<Kind> {
@@ -166,6 +180,7 @@ impl Kinds {
                 root
             }
             Ok(kind) if self.tree[kind].sort == sort => kind,
+            Ok(kind) if self.unrooted[kind.index()] => root,
             Ok(kind) => {
                 let is = self.tree[kind].sort.noun();
                 let mut diagnostic = Diagnostic::error(
@@ -192,7 +207,7 @@ fn parent_of<'a, 's>(
     systems: &Tree<System>,
     scopes: &Scopes,
     diags: &mut Vec<Diagnostic>,
-) -> usize {
+) -> Option<usize> {
     let (file, decl) = (written.file(), written.node);
     let Some(parent) = decl.kind else {
         diags.push(
@@ -200,15 +215,15 @@ fn parent_of<'a, 's>(
                 .label(file.loc(decl.name.0), "what kind of thing is this?")
                 .help("write `: asset`, `: liability`, `: income`, `: expense`, `: equity`, `: commodity`, `: entity`, or another kind"),
         );
-        return ENTITY;
+        return None;
     };
     let scope = scopes.of(written.home());
     match find(index, names, systems, parent.0, |home| scope.sees(home)) {
-        Ok(id) => id.index(),
+        Ok(id) => Some(id.index()),
         Err(miss) => {
             let word = Word { text: parent.0, loc: file.loc(parent.0) };
             diags.push(unresolved(miss, word, index, names, systems, |id| drafts[id.index()].loc));
-            ENTITY
+            None
         }
     }
 }
