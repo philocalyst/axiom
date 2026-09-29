@@ -13,8 +13,8 @@
 
 use axiom_core::{Diagnostic, Interner, Loc, Map, Set, par};
 use axiom_syntax::{
-    Amount, ClauseKind, CodeRule, Decl, DeclKind, ExprKind, File, Flow, For, Gap, Item, ItemKind, Law, Leg, Many,
-    Param, Place, Plan, Quantity, Select, Setting, Sync, Tail,
+    Amount, Assert, Clause, ClauseKind, CodeRule, Decl, DeclKind, ExprKind, File, For, Gap, Item, ItemKind, Law, Leg,
+    Occurrence, Param, Plan, Price, Prop, Quantity, Select, Setting, Split, Sync, Txn,
 };
 
 use crate::book::Class;
@@ -77,18 +77,32 @@ pub(crate) struct Seen<'s> {
     pub journal: bool,
 }
 
-/// What a look found.
+impl Seen<'_> {
+    /// Takes in what another sighting of the same commodity says.
+    fn absorb(&mut self, other: &Seen) {
+        (self.places, self.journal) = (self.places.max(other.places), self.journal | other.journal);
+    }
+}
+
+/// What one run of items declares, and how many transactions it makes.
 #[derive(Default)]
-struct Survey<'a, 's> {
+struct Declared<'a, 's> {
     entries: Vec<Entry<'a, 's>>,
+    diags: Vec<Diagnostic>,
+    /// Items that will each make one transaction.
+    txns: usize,
+}
+
+/// What a source says about commodities, places and texts, found by looking at
+/// each kind of node in turn wherever it sits, so that nothing here depends on
+/// how the items are nested.
+#[derive(Default)]
+struct Facts<'s> {
     units: Vec<Seen<'s>>,
     unit_at: Map<&'s str, usize>,
     paths: Vec<&'s str>,
     path_seen: Set<&'s str>,
     texts: Vec<&'s str>,
-    diags: Vec<Diagnostic>,
-    /// Items that will each make one transaction.
-    txns: usize,
 }
 
 /// Everything the look found, merged.
@@ -141,152 +155,153 @@ pub(crate) fn survey<'a, 's>(sites: &'a [Site<'a, 's>], names: &mut Interner<'s>
             chunks.map(move |(at, items)| Run { site, first: at * RUN, items })
         })
         .collect();
-    let surveys = par::map_each(&runs, Survey::of);
+    let (declared, facts) =
+        par::join(|| par::map_each(&runs, Declared::of), || par::map_each(sites, |site| Facts::of(&site.source.file)));
 
-    let mut merged = Survey::default();
-    let mut journal = Vec::new();
-    let mut first_txn = 0u32;
-    for (run, survey) in runs.iter().zip(surveys) {
+    let (mut entries, mut diags, mut journal, mut first_txn) = (Vec::new(), Vec::new(), Vec::new(), 0u32);
+    for (run, mut found) in runs.iter().zip(declared) {
         if run.site.home == Home::Project {
             journal.push((*run, first_txn));
         }
-        first_txn += survey.txns as u32;
-        merged.merge(survey);
+        first_txn += found.txns as u32;
+        entries.append(&mut found.entries);
+        diags.append(&mut found.diags);
     }
-    for site in sites {
-        merged.expressions(&site.source.file);
-    }
-    for text in merged.texts {
+    let mut merged = Facts::default();
+    facts.into_iter().for_each(|facts| merged.merge(facts));
+    merged.texts.into_iter().for_each(|text| {
         names.intern(text);
-    }
-    Surveyed {
-        entries: merged.entries,
-        units: merged.units,
-        paths: merged.paths,
-        journal,
-        txns: first_txn,
-        diags: merged.diags,
+    });
+    Surveyed { entries, units: merged.units, paths: merged.paths, journal, txns: first_txn, diags }
+}
+
+impl<'a, 's> Declared<'a, 's> {
+    fn of(run: &Run<'a, 's>) -> Declared<'a, 's> {
+        let (site, file) = (run.site, &run.site.source.file);
+        let mut found = Declared::default();
+        for (offset, item) in run.items.iter().enumerate() {
+            if let Err(misplaced) = placement(site, run.first + offset, item) {
+                found.diags.push(misplaced);
+                continue;
+            }
+            match item.kind {
+                ItemKind::Decl(id) => found.entries.push(Entry::Decl(Written { site, item, node: &file[id] })),
+                ItemKind::Law(id) => found.entries.push(Entry::Law(Written { site, item, node: &file[id] })),
+                ItemKind::Param(id) => found.entries.push(Entry::Param(Written { site, item, node: &file[id] })),
+                ItemKind::Code(id) => found.entries.push(Entry::Code(Written { site, item, node: &file[id] })),
+                ItemKind::Sync(id) => found.entries.push(Entry::Sync(Written { site, item, node: &file[id] })),
+                ItemKind::Plan(id) => found.entries.push(Entry::Plan(Written { site, item, node: &file[id] })),
+                ItemKind::Setting(id) => found.entries.push(Entry::Setting(site, file[id])),
+                ItemKind::Txn(_) | ItemKind::Occurrence(_) | ItemKind::Opening(_) => found.txns += 1,
+                ItemKind::Assert(_) | ItemKind::Event(_) | ItemKind::Price(_) | ItemKind::Split(_) => {}
+            }
+        }
+        found
     }
 }
 
-impl<'a, 's> Survey<'a, 's> {
-    fn of(run: &Run<'a, 's>) -> Survey<'a, 's> {
-        let mut survey = Survey::default();
-        for (offset, item) in run.items.iter().enumerate() {
-            match placement(run.site, run.first + offset, item) {
-                Ok(()) => survey.item(run.site, item),
-                Err(misplaced) => survey.diags.push(misplaced),
+impl<'s> Facts<'s> {
+    fn of(file: &File<'s>) -> Facts<'s> {
+        let mut facts = Facts::default();
+        facts.texts.extend(file.items.iter().filter_map(|item| item.doc).map(|doc| doc.0));
+        // The header of a transaction or plan; its legs, like those of an
+        // occurrence or an opening, are in the table of legs.
+        let flows = file.iter::<Txn>().map(|txn| &txn.flow).chain(file.iter::<Plan>().map(|plan| &plan.flow));
+        for end in flows.flat_map(|flow| [&flow.from, &flow.to]) {
+            end.place.iter().for_each(|place| facts.open(place.name.0));
+            end.amount.iter().for_each(|quantity| facts.quantity(file, quantity));
+        }
+        for leg in file.iter::<Leg>() {
+            facts.open(leg.place.name.0);
+            facts.quantity(file, &leg.amount);
+        }
+        let codes = file.iter::<Select>().filter_map(|select| match select {
+            Select::Code(code) => Some(code.name()),
+            _ => None,
+        });
+        facts.texts.extend(codes);
+        for clause in file.iter::<Clause>() {
+            match clause.kind {
+                ClauseKind::Code(code) | ClauseKind::For(For::Code(code)) => facts.texts.push(code.name()),
+                ClauseKind::Price(amount) | ClauseKind::Basis(amount) => facts.amount(file, amount, true),
+                ClauseKind::Waive(waive) => facts.texts.extend(waive.reason),
+                ClauseKind::For(_) | ClauseKind::Due(_) | ClauseKind::Since(_) => {}
             }
         }
-        survey
-    }
-
-    /// Adds what `later` saw, which came after everything seen so far.
-    fn merge(&mut self, later: Survey<'a, 's>) {
-        self.entries.extend(later.entries);
-        for seen in later.units {
-            self.unit(seen.symbol, seen.places, || seen.first, seen.journal);
-        }
-        later.paths.into_iter().for_each(|path| self.open(path));
-        self.texts.extend(later.texts);
-        self.diags.extend(later.diags);
-    }
-
-    fn unit(&mut self, symbol: &'s str, places: u8, first: impl FnOnce() -> Loc, journal: bool) {
-        match self.unit_at.get(symbol) {
-            Some(&at) => {
-                let seen = &mut self.units[at];
-                (seen.places, seen.journal) = (seen.places.max(places), seen.journal | journal);
-            }
-            None => {
-                self.unit_at.insert(symbol, self.units.len());
-                self.units.push(Seen { symbol, places, first: first(), journal });
+        for assert in file.iter::<Assert>() {
+            facts.open(assert.place.name.0);
+            facts.amount(file, assert.amount, true);
+            match assert.gap {
+                Gap::Waived(waive) => facts.texts.extend(waive.reason),
+                Gap::Via(place) => facts.open(place.0),
+                Gap::Refused => {}
             }
         }
-    }
-
-    /// Amounts and units written inside expressions: properties, params, laws.
-    fn expressions(&mut self, file: &File<'s>) {
+        for price in file.iter::<Price>() {
+            facts.unit(price.unit.0, 0, file.loc(price.unit.0), true);
+            facts.amount(file, price.price, true);
+        }
+        for split in file.iter::<Split>() {
+            facts.unit(split.unit.0, 0, file.loc(split.unit.0), true);
+        }
+        for occurrence in file.iter::<Occurrence>() {
+            occurrence.amount.iter().for_each(|&amount| facts.amount(file, amount, true));
+        }
+        for prop in file.iter::<Prop>() {
+            for &arg in &file[prop.args] {
+                if let ExprKind::Name(path) = file.exprs[arg].kind {
+                    facts.open(path.0);
+                }
+            }
+        }
+        // Amounts and units written inside expressions: properties, params, laws.
         for expr in file.exprs.iter() {
             match expr.kind {
-                ExprKind::Amount(amount) => {
-                    if let Some(unit) = amount.unit() {
-                        self.unit(unit.0, places_of(amount), || file.loc(unit.0), false);
-                    }
-                }
-                ExprKind::Unit(unit) => self.unit(unit.0, 0, || file.loc(unit.0), false),
+                ExprKind::Amount(amount) => facts.amount(file, amount, false),
+                ExprKind::Unit(unit) => facts.unit(unit.0, 0, file.loc(unit.0), false),
                 _ => {}
             }
         }
+        facts.units.sort_by_key(|seen| seen.first.start);
+        facts
     }
 
-    fn item(&mut self, site: &'a Site<'a, 's>, item: &'a Item<'s>) {
-        let file = &site.source.file;
-        if let Some(doc) = item.doc {
-            self.texts.push(doc.0);
+    /// Adds what a later source saw: what was written first stays first.
+    fn merge(&mut self, later: Facts<'s>) {
+        for seen in later.units {
+            match self.unit_at.get(seen.symbol) {
+                Some(&at) => self.units[at].absorb(&seen),
+                None => {
+                    self.unit_at.insert(seen.symbol, self.units.len());
+                    self.units.push(seen);
+                }
+            }
         }
-        match item.kind {
-            ItemKind::Decl(id) => {
-                let decl = &file[id];
-                for prop in &file[decl.props] {
-                    for &arg in &file[prop.args] {
-                        if let ExprKind::Name(path) = file.exprs[arg].kind {
-                            self.open(path.0);
-                        }
-                    }
-                }
-                self.entries.push(Entry::Decl(Written { site, item, node: decl }));
-            }
-            ItemKind::Law(id) => self.entries.push(Entry::Law(Written { site, item, node: &file[id] })),
-            ItemKind::Param(id) => self.entries.push(Entry::Param(Written { site, item, node: &file[id] })),
-            ItemKind::Code(id) => self.entries.push(Entry::Code(Written { site, item, node: &file[id] })),
-            ItemKind::Sync(id) => self.entries.push(Entry::Sync(Written { site, item, node: &file[id] })),
-            ItemKind::Setting(id) => self.entries.push(Entry::Setting(site, file[id])),
-            ItemKind::Plan(id) => {
-                let plan = &file[id];
-                self.flow(file, &plan.flow);
-                self.entries.push(Entry::Plan(Written { site, item, node: plan }));
-            }
-            ItemKind::Txn(id) => {
-                self.flow(file, &file[id].flow);
-                self.txns += 1;
-            }
-            ItemKind::Occurrence(id) => {
-                let occurrence = &file[id];
-                occurrence.amount.iter().for_each(|&amount| self.amount(file, amount));
-                self.legs(file, occurrence.legs);
-                self.txns += 1;
-            }
-            ItemKind::Opening(id) => {
-                self.legs(file, file[id].lines);
-                self.txns += 1;
-            }
-            ItemKind::Assert(id) => {
-                let assert = &file[id];
-                self.place(file, &assert.place);
-                self.amount(file, assert.amount);
-                match assert.gap {
-                    Gap::Waived(waive) => self.texts.extend(waive.reason),
-                    Gap::Via(place) => self.open(place.0),
-                    Gap::Refused => {}
+        later.paths.into_iter().for_each(|path| self.open(path));
+        self.texts.extend(later.texts);
+    }
+
+    /// `first` is where `symbol` is written here: the earliest is kept.
+    fn unit(&mut self, symbol: &'s str, places: u8, first: Loc, journal: bool) {
+        let seen = Seen { symbol, places, first, journal };
+        match self.unit_at.get(symbol) {
+            Some(&at) => {
+                let earlier = &mut self.units[at];
+                earlier.absorb(&seen);
+                if first.start < earlier.first.start {
+                    earlier.first = first;
                 }
             }
-            ItemKind::Price(id) => {
-                let price = &file[id];
-                self.unit(price.unit.0, 0, || file.loc(price.unit.0), true);
-                self.amount(file, price.price);
+            None => {
+                self.unit_at.insert(symbol, self.units.len());
+                self.units.push(seen);
             }
-            ItemKind::Split(id) => {
-                let unit = file[id].unit.0;
-                self.unit(unit, 0, || file.loc(unit), true);
-            }
-            ItemKind::Event(_) => {}
         }
     }
 
-    fn amount(&mut self, file: &File<'s>, amount: Amount<'s>) {
+    fn amount(&mut self, file: &File<'s>, amount: Amount<'s>, journal: bool) {
         if let Some(unit) = amount.unit() {
-            self.unit(unit.0, places_of(amount), || file.loc(unit.0), true);
+            self.unit(unit.0, places_of(amount), file.loc(unit.0), journal);
         }
     }
 
@@ -297,49 +312,14 @@ impl<'a, 's> Survey<'a, 's> {
         }
     }
 
-    fn place(&mut self, file: &File<'s>, place: &Place<'s>) {
-        self.open(place.name.0);
-        for select in &file[place.select] {
-            if let Select::Code(code) = select {
-                self.texts.push(code.name());
-            }
-        }
-    }
-
     fn quantity(&mut self, file: &File<'s>, quantity: &Quantity<'s>) {
         match *quantity {
-            Quantity::Fixed(amount) | Quantity::Pending(amount) | Quantity::Target(amount) => self.amount(file, amount),
-            Quantity::Unknown(unit) | Quantity::All(Some(unit)) => self.unit(unit.0, 0, || file.loc(unit.0), true),
+            Quantity::Fixed(amount) | Quantity::Pending(amount) | Quantity::Target(amount) => {
+                self.amount(file, amount, true)
+            }
+            Quantity::Unknown(unit) | Quantity::All(Some(unit)) => self.unit(unit.0, 0, file.loc(unit.0), true),
             Quantity::All(None) | Quantity::Rest => {}
         }
-    }
-
-    fn tail(&mut self, file: &File<'s>, tail: &Tail<'s>) {
-        for clause in &file[tail.clauses] {
-            match clause.kind {
-                ClauseKind::Code(code) | ClauseKind::For(For::Code(code)) => self.texts.push(code.name()),
-                ClauseKind::Price(amount) | ClauseKind::Basis(amount) => self.amount(file, amount),
-                ClauseKind::Waive(waive) => self.texts.extend(waive.reason),
-                ClauseKind::For(_) | ClauseKind::Due(_) | ClauseKind::Since(_) => {}
-            }
-        }
-    }
-
-    fn legs(&mut self, file: &File<'s>, legs: Many<Leg<'s>>) {
-        for leg in &file[legs] {
-            self.place(file, &leg.place);
-            self.quantity(file, &leg.amount);
-            self.tail(file, &leg.tail);
-        }
-    }
-
-    fn flow(&mut self, file: &File<'s>, flow: &Flow<'s>) {
-        for end in [&flow.from, &flow.to] {
-            end.place.iter().for_each(|place| self.place(file, place));
-            end.amount.iter().for_each(|quantity| self.quantity(file, quantity));
-        }
-        self.tail(file, &flow.tail);
-        self.legs(file, flow.legs);
     }
 }
 

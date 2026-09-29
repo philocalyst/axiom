@@ -16,7 +16,7 @@ mod vars;
 use axiom_core::{Diagnostic, Id, Set};
 use axiom_syntax::{self as ast, BinOp, DeclKind, Trigger as Written};
 
-use self::compile::{Site, compile};
+use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
 use crate::book::{Kind, Sort, System};
 use crate::collect::Entry;
@@ -25,14 +25,16 @@ use crate::law::{Dir, Func, Law, Node, NodeId, Op, Owner, Step, StepKind, Trigge
 use crate::names::Rank;
 use crate::props::Budget;
 use crate::scope::Home;
+use crate::sources::Site;
 
 pub(crate) fn declare<'s>(
     world: &mut World<'s>,
+    sites: &[Site<'_, 's>],
     entries: &[Entry<'_, 's>],
     budgets: Vec<Budget>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    world.tallies = counted(entries);
+    world.tallies = counted(sites);
     let mut written: [usize; 4] = [0; 4];
     let mut seen: Set<(DeclKind, usize)> = Set::default();
     for entry in entries {
@@ -42,7 +44,7 @@ pub(crate) fn declare<'s>(
                     Home::System(system) => Owner::System(system),
                     Home::Project | Home::Builtin => Owner::Book,
                 };
-                let site = Site { file: law.file(), home: law.home(), owner, subject: Ty::Entity };
+                let site = Placement { file: law.file(), home: law.home(), owner, subject: Ty::Entity };
                 add(world, diags, &site, law.node);
             }
             Entry::Decl(decl) => {
@@ -81,7 +83,7 @@ pub(crate) fn declare<'s>(
                 };
                 // A repeated declaration is reported once, and its laws not compiled twice.
                 if seen.insert((node.what, id)) {
-                    let site = Site { file, home: decl.home(), owner, subject };
+                    let site = Placement { file, home: decl.home(), owner, subject };
                     file[node.laws].iter().for_each(|law| add(world, diags, &site, law));
                 }
             }
@@ -96,33 +98,18 @@ pub(crate) fn declare<'s>(
 }
 
 /// The names some law counts into.
-fn counted<'s>(entries: &[Entry<'_, 's>]) -> Set<&'s str> {
-    let mut names = Set::default();
-    let mut laws = |file: &ast::File<'s>, laws: &[ast::Law<'s>]| {
-        for law in laws {
-            for step in &file[law.steps] {
-                match &step.kind {
-                    ast::StepKind::Effect(ast::Effect::Count { name, .. })
-                    | ast::StepKind::Require { otherwise: Some(ast::Effect::Count { name, .. }), .. } => {
-                        names.insert(name.0);
-                    }
-                    _ => {}
-                }
-            }
-        }
-    };
-    for entry in entries {
-        match entry {
-            Entry::Law(law) => laws(law.file(), std::slice::from_ref(law.node)),
-            Entry::Decl(decl) => laws(decl.file(), &decl.file()[decl.node.laws]),
-            _ => {}
-        }
-    }
-    names
+fn counted<'s>(sites: &[Site<'_, 's>]) -> Set<&'s str> {
+    let steps = sites.iter().flat_map(|site| site.source.file.iter::<ast::Step>());
+    let counts = steps.filter_map(|step| match &step.kind {
+        ast::StepKind::Effect(ast::Effect::Count { name, .. })
+        | ast::StepKind::Require { otherwise: Some(ast::Effect::Count { name, .. }), .. } => Some(name.0),
+        _ => None,
+    });
+    counts.collect()
 }
 
 /// Compiles `law` and adds it to the book, if it fits where it was written.
-fn add<'s>(world: &mut World<'s>, diags: &mut Vec<Diagnostic>, site: &Site<'_, 's>, law: &ast::Law<'s>) {
+fn add<'s>(world: &mut World<'s>, diags: &mut Vec<Diagnostic>, site: &Placement<'_, 's>, law: &ast::Law<'s>) {
     if let Err(problem) = fits(world, site.owner, law) {
         diags.push(problem);
         return;

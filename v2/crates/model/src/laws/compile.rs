@@ -66,7 +66,7 @@ impl From<Diagnostic> for Bad {
 type Check<T> = Result<T, Bad>;
 
 /// Where a law was written, and what it governs.
-pub(crate) struct Site<'a, 's> {
+pub(crate) struct Placement<'a, 's> {
     pub file: &'a File<'s>,
     pub home: Home,
     pub owner: Owner,
@@ -77,7 +77,7 @@ pub(crate) struct Site<'a, 's> {
 pub(crate) fn compile<'s>(
     world: &mut World<'s>,
     diags: &mut Vec<Diagnostic>,
-    site: &Site<'_, 's>,
+    site: &Placement<'_, 's>,
     law: &ast::Law<'s>,
 ) -> Option<Law> {
     let law_name = world.book.names.intern(law.name.0);
@@ -122,7 +122,7 @@ struct Compiler<'w, 'a, 's> {
 }
 
 impl<'s> Compiler<'_, '_, 's> {
-    fn law(&mut self, site: &Site<'_, 's>, law: &ast::Law<'s>) -> Option<Law> {
+    fn law(&mut self, site: &Placement<'_, 's>, law: &ast::Law<'s>) -> Option<Law> {
         let trigger = self.trigger(&law.trigger);
         self.when = When::of(&law.trigger);
         let written = &self.file[law.steps];

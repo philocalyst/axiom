@@ -70,7 +70,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let mut world = declare::declare(&surveyed, &settings, names, systems_tree, systems, scopes, &mut diags);
     let budgets = props::apply(&mut world, entries, &mut diags);
     params::declare(&mut world, entries, &mut diags);
-    laws::declare(&mut world, entries, budgets, &mut diags);
+    laws::declare(&mut world, &sites, entries, budgets, &mut diags);
     let rank = laws::rank(&world.book, &mut diags);
     rules::govern(&mut world.book, &rank);
     flows::record(&mut world, &sites, entries, &surveyed.journal, surveyed.txns, settings.layout_free, &mut diags);
