@@ -13,7 +13,7 @@
 //! timeline is cursors into the book's own tables.
 
 use axiom_core::{Day, Diagnostic, Id, Map, Qty};
-use axiom_model::{Book, Commodity, End, Flow, Infer, Place};
+use axiom_model::{Book, Cap, Commodity, End, Flow, Infer, Place};
 
 use crate::eval::Env;
 use crate::events::{self, Events};
@@ -43,6 +43,8 @@ pub(crate) struct Solved {
     pub deadlines: Vec<Deadline>,
     /// Some list of rules brings one law to one subject twice: `fire` must not run it twice.
     pub repeats: bool,
+    /// By law id: the laws that are one cap on a total in the base currency.
+    pub caps: Vec<Option<Cap>>,
     /// The first day of each place and commodity whose balance depends on an
     /// amount that could not be solved, and the flow to blame.
     pub unsolved: Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>,
@@ -83,7 +85,7 @@ impl<'b, 's> Ledger<'b, 's> {
         for (key, first) in unsolved {
             blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
-        let solved = Solved { events, deadlines, repeats: fire::repeats(book), unsolved: blocked };
+        let solved = Solved { events, deadlines, repeats: fire::repeats(book), caps: fire::caps(book), unsolved: blocked };
         let timeline = Timeline::new(&solved.sources(book));
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
         Ledger {
