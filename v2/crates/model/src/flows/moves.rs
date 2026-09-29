@@ -32,7 +32,7 @@ pub(super) struct Move {
 impl Move {
     /// A flow from `from` to `to`, with what leaves and what arrives, whether
     /// its quantity is known and whether it is pending, and what its tail says.
-    fn between(
+    pub fn between(
         from: &Placed,
         to: &Placed,
         amounts: (Amount, Amount),

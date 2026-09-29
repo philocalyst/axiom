@@ -176,16 +176,7 @@ impl<'a, 's> Elab<'a, 's> {
             // has earned, so the value flows out of it into the opening equity.
             let from_equity = self.world.book.places[line.placed.end.place].class.display_sign() > 0;
             let (from, to) = if from_equity { (equity, line.placed) } else { (line.placed, equity) };
-            let mv = Move {
-                from,
-                to,
-                out: amount,
-                arrive: amount,
-                infer: Infer::Known,
-                pending: false,
-                tail: line.tail,
-                loc: line.loc,
-            };
+            let mv = Move::between(&from, &to, (amount, amount), (Infer::Known, false), line.tail, line.loc);
             if let Some(moves) = moves.as_mut() {
                 moves.push(mv);
             }
