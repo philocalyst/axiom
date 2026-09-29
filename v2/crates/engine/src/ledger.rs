@@ -6,7 +6,7 @@
 //! fact the journal does not hold through the same `post` the journal's own
 //! flows take.
 //!
-//! A clone copies what the future depends on (the world, six timeline cursors,
+//! A clone copies what the future depends on (the world, five timeline cursors,
 //! the small solved tables) and the records so far: flat vectors, so a clone is
 //! a handful of memory copies, never a replay. Nothing is kept per journal flow:
 //! the solve pass remembers only the flows an event or a `?` touched, and the
@@ -17,6 +17,7 @@ use axiom_model::{Book, Commodity, End, Flow, Infer, Place};
 
 use crate::eval::Env;
 use crate::events::{self, Events};
+use crate::fire;
 use crate::motion::{Amounts, Motion};
 use crate::scope::{display, is_money};
 use crate::state::{Record, Scratch, World};
@@ -40,6 +41,8 @@ pub struct Ledger<'b, 's> {
 pub(crate) struct Solved {
     pub events: Events,
     pub deadlines: Vec<Deadline>,
+    /// Some list of rules brings one law to one subject twice: `fire` must not run it twice.
+    pub repeats: bool,
     /// The first day of each place and commodity whose balance depends on an
     /// amount that could not be solved, and the flow to blame.
     pub unsolved: Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>,
@@ -80,7 +83,7 @@ impl<'b, 's> Ledger<'b, 's> {
         for (key, first) in unsolved {
             blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
-        let solved = Solved { events, deadlines, unsolved: blocked };
+        let solved = Solved { events, deadlines, repeats: fire::repeats(book), unsolved: blocked };
         let timeline = Timeline::new(&solved.sources(book));
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
         Ledger {

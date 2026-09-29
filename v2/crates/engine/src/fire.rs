@@ -12,7 +12,7 @@
 
 use std::mem::discriminant;
 
-use axiom_core::{Day, Diagnostic, Id, Sym};
+use axiom_core::{Day, Diagnostic, Id, Set, Sym};
 use axiom_model::{
     Amount, Book, Dir, Entity, Fault, Func, Law, NodeId, Op, Recognition, Rule, StepKind, Trigger, Window,
 };
@@ -67,6 +67,20 @@ fn require(law: &Law, step: u32) -> (Option<Reads>, bool) {
     }
 }
 
+/// Whether some list of rules brings one law to one subject twice, as two residences under one system do.
+pub(crate) fn repeats(book: &Book) -> bool {
+    let rules = &book.rules;
+    let mut lists: Vec<&[Rule]> = vec![&rules.timed];
+    for table in [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always] {
+        lists.extend(table.iter().map(|(_, list)| list));
+    }
+    lists.extend(rules.on_spend.iter().map(|(_, list)| list));
+    lists.into_iter().any(|list| {
+        let mut seen = Set::default();
+        list.iter().any(|rule| !seen.insert((rule.law, rule.subject)))
+    })
+}
+
 /// Whether the rule is in force for some day of the occasion.
 fn applies(book: &Book, rule: &Rule, on: &Occasion) -> bool {
     let internal = on.skip_internal
@@ -77,8 +91,15 @@ fn applies(book: &Book, rule: &Rule, on: &Occasion) -> bool {
 impl<'b, 's> Ledger<'b, 's> {
     /// Runs every rule in `rules` that applies to this occasion, in order.
     pub(crate) fn fire(&mut self, rules: &[Rule], on: Occasion) {
-        let book = self.book;
+        let (book, mut done) = (self.book, Vec::new());
         for rule in rules.iter().filter(|rule| applies(book, rule, &on)) {
+            // A law that two rules bring to one subject runs once.
+            if self.solved.repeats {
+                if done.contains(&(rule.law, rule.subject)) {
+                    continue;
+                }
+                done.push((rule.law, rule.subject));
+            }
             self.enforce(rule, &Context::new(rule.subject, owner_of(book, rule.subject), &on));
         }
     }

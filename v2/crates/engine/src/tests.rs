@@ -503,6 +503,30 @@ fn restricted_money_stays_tied_and_is_spent_first_only_where_its_laws_permit() {
 }
 
 #[test]
+fn a_flow_between_places_that_hold_no_parcels_spends_nothing() {
+    let mut f = Fixture::new();
+    let (grants, checking, food, unknown, card) = (f.grants, f.checking, f.food, f.unknown, f.card);
+    let (nsf, name) = (f.grant, f.sym("grant-purpose"));
+    let mut law = LawBuilder::new(name, Trigger::Spend);
+    let to = law.var(Var::To, Ty::Place);
+    let allowed = law.konst(Value::Place(food), Ty::Place);
+    let cond = law.is(to, &[allowed]);
+    let law = f.law(law.require(cond, None));
+    let rule = f.rule(law, Subject::Entity(nsf));
+    f.on_spend.push((nsf, rule));
+
+    let award = f.flow(1, grants, checking, 5_000_00);
+    f.flows[award.index()].payee = Some(nsf);
+    f.flow(2, checking, unknown, 500_00);
+    // The card and the food account hold only a balance: the grant money spent a day before is not spent again.
+    f.flow(3, card, food, 100_00);
+    let book = f.book();
+    let run = run(&book, options());
+    assert_eq!(run.checks[law.index()], 1, "only the flow that took tied money out fired it");
+    assert_eq!(run.violations.len(), 1);
+}
+
+#[test]
 fn a_pending_flow_lands_on_its_settlement_day_and_a_typo_gets_a_suggestion() {
     let mut f = Fixture::new();
     let (equity, checking, food, usd) = (f.equity, f.checking, f.food, f.usd);
@@ -978,6 +1002,34 @@ fn a_year_law_runs_for_a_part_year_residence() {
         [Day(date(2025, 12, 31))],
         "it overlaps 2025, though it ended in June"
     );
+}
+
+#[test]
+fn a_law_that_two_residences_bring_runs_once_for_a_period_and_once_for_a_flow() {
+    let mut f = Fixture::new();
+    let (equity, checking, me) = (f.equity, f.checking, f.me);
+    let (yearly, years) = (f.sym("yearly"), f.sym("years"));
+    let mut law = LawBuilder::new(yearly, Trigger::Each(Period::Year, None));
+    let one = f.usd(1_00);
+    let amount = law.konst(Value::Amount(one), Ty::Amount);
+    let law = f.law(law.count(amount, years));
+    let subject = Subject::Entity(me);
+    // A move within one system: the same law, brought by the residence before and the one after.
+    let (before, after) = (
+        Rule { law, subject, from: Day(date(2024, 1, 1)), until: Day(date(2025, 6, 30)) },
+        Rule { law, subject, from: Day(date(2025, 7, 1)), until: Day(date(2030, 1, 1)) },
+    );
+    f.timed.extend([before, after]);
+    // And two residences that overlap, so a flow meets the same law twice.
+    let paid = counting(&mut f, checking, subject, "paid");
+    let overlap = Rule { from: Day(date(2025, 3, 1)), ..f.rule(paid, subject) };
+    f.on_in.push((checking, overlap));
+    f.flow(date(2025, 4, 1), equity, checking, 10_00);
+    let book = f.book();
+    let run = run(&book, until(2026, 6, 1));
+    let closed: Vec<_> = run.effects.iter().filter(|e| e.name == years).map(|e| e.day).collect();
+    assert_eq!(closed, [Day(date(2025, 12, 31))], "2025 is one period, whichever residence it touched");
+    assert_eq!(run.checks[paid.index()], 1, "one flow, one run of the law");
 }
 
 #[test]

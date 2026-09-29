@@ -24,7 +24,7 @@
 
 use std::iter::successors;
 
-use axiom_core::{Day, Id};
+use axiom_core::{Day, Id, Set};
 use axiom_model::{Book, Flow, Mode, Period, Recognition, Trigger, Value};
 
 use crate::State;
@@ -149,6 +149,12 @@ pub(crate) fn deadlines(env: Env, horizon: Day, first: Option<Day>, values: &mut
         }
     }
     due.sort_unstable_by_key(|d| (d.day, d.rule));
+    // Two residences under one system bring its law twice: it runs once for each period.
+    let mut seen = Set::default();
+    due.retain(|d| {
+        let rule = &book.rules.timed[d.rule];
+        seen.insert((d.day, rule.law, rule.subject, d.period.from))
+    });
     due
 }
 

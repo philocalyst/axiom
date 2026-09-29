@@ -71,7 +71,8 @@ impl<'b, 's> Ledger<'b, 's> {
             let keeps = self.price(m);
             self.arrive(m, keeps);
         } else {
-            // Places that hold only a plain balance have no parcels to move.
+            // Places that hold only a plain balance have no parcels to move, and nothing was relieved.
+            self.scratch.relief.slices.clear();
             self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);
             self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
         }
