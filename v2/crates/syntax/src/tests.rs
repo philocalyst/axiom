@@ -474,25 +474,19 @@ fn hyphens_and_slashes_join_names_but_arrows_and_comments_do_not() {
     assert_eq!(tokens("#check-1041"), [Tok::Code(Code("#check-1041"))]);
 }
 
-/// The eight-bytes-at-a-time scan finds the same word ends as a byte at a time.
+/// The fast paths for plain words decline whatever would make them longer or
+/// different, and leave it to the general path.
 #[test]
-fn names_scan_like_a_byte_at_a_time() {
-    let mut state = 0x9E37_79B9_7F4A_7C15u64;
-    let alphabet = "ab0-_*/ AZ?.>#é";
-    let alphabet: Vec<char> = alphabet.chars().collect();
-    for _ in 0..20_000 {
-        let len = 1 + (state % 40) as usize;
-        let text: String = (0..len)
-            .map(|_| {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                alphabet[(state % alphabet.len() as u64) as usize]
-            })
-            .collect();
-        let expected = text.bytes().take_while(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'*' | b'-')).count();
-        assert_eq!(crate::lex::name_run(text.as_bytes()), expected, "{text:?}");
-    }
+fn a_plain_word_ends_where_the_general_reading_says() {
+    assert_eq!(tokens("5. x"), [number(5, 0), Tok::Punct("."), Tok::Name("x")]);
+    assert_eq!(tokens("84.20 USD"), [number(8420, 2), Tok::Unit("USD")]);
+    assert_eq!(tokens("10%"), [Tok::Percent(Dec { mantissa: 10, scale: 0 })]);
+    assert_eq!(tokens("1_000 USD"), [number(1000, 0), Tok::Unit("USD")]);
+    assert_eq!(tokens("123456789012345678901"), [Tok::Invalid(Malformed::Number)]);
+    assert_eq!(tokens("USD ->"), [Tok::Unit("USD"), Tok::Punct("->")]);
+    assert_eq!(tokens("USD2"), [Tok::Unit("USD2")]);
+    assert_eq!(tokens("USD/x"), [Tok::Invalid(Malformed::Word)]);
+    assert_eq!(tokens("a-/b->"), [Tok::Name("a-/b"), Tok::Punct("->")]);
 }
 
 // ─── Expressions ────────────────────────────────────────────────────────────

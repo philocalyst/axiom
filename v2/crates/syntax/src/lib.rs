@@ -2,7 +2,7 @@
 //!
 //! Parsing is line-oriented: a column-0 line starts an item and indented lines
 //! belong to it, so each item parses (and recovers) on its own. Lines are found
-//! with `memchr`, and names are scanned eight bytes at a time.
+//! with `memchr`, and dates are read eight bytes at a time.
 //! That independence is also what lets a large file be cut at item boundaries
 //! and its pieces parsed on every core (see [`parse`]).
 //!

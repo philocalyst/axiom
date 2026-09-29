@@ -296,24 +296,27 @@ impl Dec {
     /// Parses `digits[.digits]`, ignoring `_` separators. `None` for anything
     /// else, or for more digits than a mantissa holds.
     pub fn parse(text: &[u8]) -> Option<Dec> {
-        Dec::plain(text).or_else(|| Dec::separated(text))
+        match Dec::prefix(text) {
+            Some((dec, len)) if len == text.len() => Some(dec),
+            _ => Dec::separated(text),
+        }
     }
 
-    /// The commonest numbers, a few digits and perhaps a point (`84.20`), read
-    /// directly: eighteen bytes cannot overflow, so nothing is checked.
-    fn plain(text: &[u8]) -> Option<Dec> {
-        if text.len() > 18 {
+    /// The number a text starts with, if it is the commonest kind: digits and
+    /// perhaps a point and more digits (`84.20`), with no separators. Also how
+    /// many bytes it takes. Eighteen digits cannot overflow, so nothing is
+    /// checked; a longer run is left to [`Dec::parse`].
+    pub fn prefix(text: &[u8]) -> Option<(Dec, usize)> {
+        let (whole, mantissa) = digit_run(text, 0, 0);
+        if whole == 0 {
             return None;
         }
-        let (mut mantissa, mut point) = (0i64, None);
-        for (at, &b) in text.iter().enumerate() {
-            match b {
-                b'0'..=b'9' => mantissa = mantissa * 10 + (b - b'0') as i64,
-                b'.' if point.is_none() && at > 0 && at + 1 < text.len() => point = Some(at),
-                _ => return None,
-            }
-        }
-        Some(Dec { mantissa, scale: point.map_or(0, |at| (text.len() - at - 1) as u8) })
+        let (end, mantissa) = match text[whole..] {
+            [b'.', next, ..] if next.is_ascii_digit() => digit_run(text, whole + 1, mantissa),
+            _ => (whole, mantissa),
+        };
+        let point = usize::from(end > whole);
+        (end - point <= 18).then_some((Dec { mantissa, scale: end.saturating_sub(whole + 1) as u8 }, end))
     }
 
     /// Any number: `_` separators, long runs, and everything that is not one.
@@ -390,6 +393,17 @@ impl Dec {
     pub fn to_ratio(self) -> Option<Ratio> {
         Ratio::new(self.mantissa as i128, *POW10.get(self.scale as usize)?)
     }
+}
+
+/// Where the run of digits starting at `from` ends, and `mantissa` with those
+/// digits appended (wrapping: the caller refuses runs too long to fit).
+fn digit_run(text: &[u8], from: usize, mut mantissa: i64) -> (usize, i64) {
+    let mut at = from;
+    while let Some(&b) = text.get(at).filter(|b| b.is_ascii_digit()) {
+        mantissa = mantissa.wrapping_mul(10).wrapping_add((b - b'0') as i64);
+        at += 1;
+    }
+    (at, mantissa)
 }
 
 fn all_digits(chunk: &[u8; 8]) -> bool {
