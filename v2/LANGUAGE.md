@@ -403,8 +403,9 @@ where a flow triggered it.
 
 - In an account kind, asset kind or party kind: every thing of that kind.
 - In an account, asset or entity: that thing.
-- In a purpose: every flow of that purpose and those beneath it (`on flow`);
-  `total(month|year|ever)` there is the purpose's own total.
+- In a purpose: every flow of that purpose and those beneath it. A law in a
+  purpose needs no trigger: it is `on flow`. `total(month|year|ever)` there is
+  the purpose's own total.
 - Top-level in a system: the owners who live there (a household as one) and
   everything they own and do. Top-level in a project: the whole book.
 
@@ -541,7 +542,8 @@ tax see both; the bill as paid is one flow in `register`.
 ## 10. Projects and layout
 
 `axiom.ax` marks the project root; every `.ax` under it is loaded. `systems/` may
-add or override the embedded systems. Unless `layout free` is set:
+add or override the embedded systems. Unless `layout free` is set (in `axiom.ax`,
+which is read first):
 
 - a folder `YYYY` or a file `YYYY.ax` holds items of that year, and an item's date
   there may be written `MM-DD`;
