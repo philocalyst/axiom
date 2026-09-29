@@ -171,27 +171,42 @@ pub fn closest<'a>(name: &str, candidates: impl IntoIterator<Item = &'a str>) ->
         .map(|(_, c)| c)
 }
 
+/// Rows of the distance table kept on the stack: names this long or shorter
+/// (nearly all of them) are compared without allocating.
+const STACK_WIDTH: usize = 64;
+
 /// Optimal-string-alignment distance: insertions, deletions, substitutions, and
 /// transpositions of adjacent characters each cost one.
 pub fn distance(a: &str, b: &str) -> usize {
     let (a, b) = (a.as_bytes(), b.as_bytes());
-    let mut rows = vec![vec![0usize; b.len() + 1]; 3];
-    for (j, cell) in rows[1].iter_mut().enumerate() {
+    // Three rows of the table: the one being filled and the two before it.
+    let width = b.len() + 1;
+    let mut stack = [0usize; 3 * STACK_WIDTH];
+    let mut heap;
+    let cells = if 3 * width <= stack.len() {
+        &mut stack[..3 * width]
+    } else {
+        heap = vec![0usize; 3 * width];
+        &mut heap[..]
+    };
+    let (mut before_last, rest) = cells.split_at_mut(width);
+    let (mut last, mut row) = rest.split_at_mut(width);
+    for (j, cell) in last.iter_mut().enumerate() {
         *cell = j;
     }
     for i in 1..=a.len() {
-        rows.rotate_left(1);
-        rows[1][0] = i;
+        row[0] = i;
         for j in 1..=b.len() {
             let cost = (a[i - 1] != b[j - 1]) as usize;
-            let mut best = (rows[0][j] + 1).min(rows[1][j - 1] + 1).min(rows[0][j - 1] + cost);
+            let mut best = (last[j] + 1).min(row[j - 1] + 1).min(last[j - 1] + cost);
             if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
-                best = best.min(rows[2][j - 2] + 1);
+                best = best.min(before_last[j - 2] + 1);
             }
-            rows[1][j] = best;
+            row[j] = best;
         }
+        (before_last, last, row) = (last, row, before_last);
     }
-    rows[1][b.len()]
+    last[b.len()]
 }
 
 #[cfg(test)]
@@ -202,5 +217,16 @@ mod tests {
         assert_eq!(super::closest("benificiary", names), Some("beneficiary"));
         assert_eq!(super::closest("bron", names), Some("born"));
         assert_eq!(super::closest("zzz", names), None);
+    }
+
+    #[test]
+    fn distances_count_each_edit_once() {
+        let distance = super::distance;
+        assert_eq!([distance("", ""), distance("abc", ""), distance("", "abc")], [0, 3, 3]);
+        assert_eq!(distance("kitten", "sitting"), 3);
+        assert_eq!(distance("ca", "ac"), 1, "a transposition is one edit");
+        assert_eq!(distance("ab", "bca"), 3, "optimal alignment lets no edit overlap another");
+        let (long, longer) = ("x".repeat(100), "x".repeat(101));
+        assert_eq!(distance(&long, &longer), 1, "past the stack rows, the table moves to the heap");
     }
 }

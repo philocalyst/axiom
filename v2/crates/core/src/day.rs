@@ -9,6 +9,8 @@
 
 use std::fmt;
 
+use crate::num;
+
 /// Days since 1970-01-01.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct Day(pub i32);
@@ -129,24 +131,19 @@ impl Day {
         Day::from_ymd(self.year(), 12, 31).expect("new year's eve")
     }
 
-    /// Parses `YYYY-MM-DD`. The eight digits are gathered into one word,
-    /// validated together, and folded into two-digit fields with a single
-    /// multiply.
+    /// Parses `YYYY-MM-DD`. The eight digits are gathered, validated together,
+    /// and folded into two-digit fields with a single multiply.
     pub fn parse(text: &[u8]) -> Option<Day> {
         let s: &[u8; 10] = text.try_into().ok()?;
         if s[4] != b'-' || s[7] != b'-' {
             return None;
         }
-        let w = u64::from_le_bytes([s[0], s[1], s[2], s[3], s[5], s[6], s[8], s[9]]);
-        const HIGH: u64 = 0xF0F0_F0F0_F0F0_F0F0;
-        const ZEROS: u64 = 0x3030_3030_3030_3030;
-        if w & HIGH != ZEROS || w.wrapping_add(0x0606_0606_0606_0606) & HIGH != ZEROS {
+        let digits = [s[0], s[1], s[2], s[3], s[5], s[6], s[8], s[9]];
+        if !num::all_digits(&digits) {
             return None;
         }
-        // Each byte is a digit; `w×10 + w>>8` leaves the pairs YY YY MM DD in
-        // the even bytes.
-        let w = w - ZEROS;
-        let w = (w.wrapping_mul(10) + (w >> 8)) & 0x00FF_00FF_00FF_00FF;
+        // The pairs are YY YY MM DD.
+        let w = num::digit_pairs(&digits);
         let year = (w & 0xFF) * 100 + (w >> 16 & 0xFF);
         Day::from_ymd(year as i32, (w >> 32 & 0xFF) as u32, (w >> 48) as u32)
     }
@@ -159,7 +156,7 @@ impl fmt::Display for Day {
     }
 }
 
-pub fn is_leap(year: i32) -> bool {
+fn is_leap(year: i32) -> bool {
     // Divisible by 4, and by 400 when divisible by 100. For multiples of 100,
     // "divisible by 400" is the same as "divisible by 16".
     let mask = if year % 100 == 0 { 15 } else { 3 };
@@ -265,7 +262,15 @@ mod tests {
     fn parsing_is_strict() {
         assert_eq!(Day::parse(b"1970-01-01"), Some(Day(0)));
         assert_eq!(Day::parse(b"2024-02-29").map(|d| d.to_string()).as_deref(), Some("2024-02-29"));
-        for bad in [&b"2023-02-29"[..], b"2026-13-01", b"2026-00-10", b"2026/01/01", b"2026-1-011", b"20a6-01-01", b"2026-01-32"] {
+        for bad in [
+            &b"2023-02-29"[..],
+            b"2026-13-01",
+            b"2026-00-10",
+            b"2026/01/01",
+            b"2026-1-011",
+            b"20a6-01-01",
+            b"2026-01-32",
+        ] {
             assert_eq!(Day::parse(bad), None, "{}", String::from_utf8_lossy(bad));
         }
     }

@@ -38,17 +38,13 @@ impl Qty {
 
     /// `self × ratio`, rounded half to even. `None` if the result leaves `i64`.
     pub fn scale(self, ratio: Ratio) -> Option<Qty> {
-        mul_div(self.0 as i128, ratio.num as i128, ratio.den as i128)
-            .and_then(|v| i64::try_from(v).ok())
-            .map(Qty)
+        mul_div(self.0 as i128, ratio.num as i128, ratio.den as i128).and_then(|v| i64::try_from(v).ok()).map(Qty)
     }
 
     /// `self × num ÷ den` with the same rounding: the share of `self` that `num`
     /// is of `den`. Used for pro-rata relief, where `den` is a holding's size.
     pub fn share(self, num: Qty, den: Qty) -> Option<Qty> {
-        mul_div(self.0 as i128, num.0 as i128, den.0 as i128)
-            .and_then(|v| i64::try_from(v).ok())
-            .map(Qty)
+        mul_div(self.0 as i128, num.0 as i128, den.0 as i128).and_then(|v| i64::try_from(v).ok()).map(Qty)
     }
 
     /// Displays with `scale` decimal places and thousands separators:
@@ -150,10 +146,7 @@ impl Ratio {
         }
         let g = gcd(num.unsigned_abs(), den.unsigned_abs()) as i128;
         let sign = den.signum();
-        Some(Ratio {
-            num: i64::try_from(sign * num / g).ok()?,
-            den: i64::try_from(sign * den / g).ok()?,
-        })
+        Some(Ratio { num: i64::try_from(sign * num / g).ok()?, den: i64::try_from(sign * den / g).ok()? })
     }
 
     pub const fn int(n: i64) -> Ratio {
@@ -406,7 +399,7 @@ fn digit_run(text: &[u8], from: usize, mut mantissa: i64) -> (usize, i64) {
     (at, mantissa)
 }
 
-fn all_digits(chunk: &[u8; 8]) -> bool {
+pub(crate) fn all_digits(chunk: &[u8; 8]) -> bool {
     let w = u64::from_le_bytes(*chunk);
     const HIGH: u64 = 0xF0F0_F0F0_F0F0_F0F0;
     const ZEROS: u64 = 0x3030_3030_3030_3030;
@@ -414,11 +407,17 @@ fn all_digits(chunk: &[u8; 8]) -> bool {
     w & HIGH == ZEROS && w.wrapping_add(0x0606_0606_0606_0606) & HIGH == ZEROS
 }
 
-/// Folds eight ASCII digits into their value with three multiplies: pairs, then
-/// quads, then the whole word. The first digit sits in the lowest byte.
-pub fn digits8(chunk: &[u8; 8]) -> u32 {
+/// Eight ASCII digits folded into four two-digit values, one in each even byte,
+/// the first pair lowest. One multiply; the digits must already be checked.
+pub(crate) fn digit_pairs(chunk: &[u8; 8]) -> u64 {
     let w = u64::from_le_bytes(*chunk) - 0x3030_3030_3030_3030;
-    let w = (w.wrapping_mul(10) + (w >> 8)) & 0x00FF_00FF_00FF_00FF;
+    (w.wrapping_mul(10) + (w >> 8)) & 0x00FF_00FF_00FF_00FF
+}
+
+/// Folds eight ASCII digits into their value: the pairs, then quads, then the
+/// whole word. The first digit sits in the lowest byte.
+fn digits8(chunk: &[u8; 8]) -> u32 {
+    let w = digit_pairs(chunk);
     let w = (w.wrapping_mul(100) + (w >> 16)) & 0x0000_FFFF_0000_FFFF;
     (w.wrapping_mul(10_000) + (w >> 32)) as u32
 }
