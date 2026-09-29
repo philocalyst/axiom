@@ -21,7 +21,8 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>, by: 
     let at = at.unwrap_or(run.today);
     let periods = Periods::covering(by, at, at);
     let (start, end) = (periods.start(0), periods.end(0));
-    let all = &current(book, run, at);
+    // Every window of the period so far is read, those no flow reached included.
+    let all = &current(book, run, start, end.min(run.today).max(at));
     let mut envelopes: BTreeMap<(Id<Place>, Id<Law>, u32), Vec<&Headroom>> = BTreeMap::new();
     for reading in
         all.iter().filter(|reading| whose.includes(reading.owner) && reading.from <= end && reading.until >= start)

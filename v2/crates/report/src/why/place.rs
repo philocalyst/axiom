@@ -23,7 +23,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, place: Id<Place>) -> Report<'s> {
     let recent_from = book.touching[place].iter().rev().nth(RECENT - 1).map(|&flow| book.flows[flow].day);
 
     // A limit is about this place when it measures it, or a place around it, or one within it.
-    let all = &current(book, run, run.today);
+    let all = &current(book, run, run.today, run.today);
     let about = |subject: Subject| matches!(subject, Subject::Place(other) if book.places.covers(other, place) || book.places.covers(place, other));
     let limits = limits::section(book, latest(all.iter().filter(|reading| about(reading.subject)))).headed("Limits");
 

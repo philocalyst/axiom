@@ -340,6 +340,47 @@ fn tax_with_one_return_closed_and_one_not_totals_what_is_owed_so_far() {
     });
 }
 
+// ─── Budgets ────────────────────────────────────────────────────────────────
+
+/// A monthly budget that nothing touched in February, and one that nothing
+/// touched at all.
+const ENVELOPES: &str = "\
+base USD
+commodity USD
+  precision 2
+
+account assets/checking
+account expenses/dining
+  budget 150 USD monthly
+account expenses/clothing
+  budget 80 USD monthly
+
+opening 2026-01-01
+  checking 1_000 USD
+
+2026-01-10 checking -> dining 120 USD
+";
+
+/// The year is its months so far, each one read: a month no flow reached is
+/// wholly unspent, not missing.
+#[test]
+fn a_years_budget_reads_every_month_so_far_even_those_nothing_touched() {
+    with_run(ENVELOPES, day(2026, 2, 14), |book, run| {
+        let budget = Query::Budget { at: Some(day(2026, 1, 1)), by: axiom_model::Period::Year };
+        assert_eq!(
+            rows(book, run, budget),
+            [
+                "expenses/clothing | budget | 2026 | 0.00 USD | 160.00 USD | 160.00 USD | 0%",
+                "~   |  | 2026-01 | 0.00 USD | 80.00 USD | 80.00 USD | 0%",
+                "~   |  | 2026-02 | 0.00 USD | 80.00 USD | 80.00 USD | 0%",
+                "expenses/dining | budget | 2026 | 120.00 USD | 300.00 USD | 180.00 USD | 40%",
+                "~   |  | 2026-01 | 120.00 USD | 150.00 USD | 30.00 USD | 80%",
+                "~   |  | 2026-02 | 0.00 USD | 150.00 USD | 150.00 USD | 0%",
+            ]
+        );
+    });
+}
+
 // ─── Looking ahead to the day a return closes ───────────────────────────────
 
 /// An account whose withdrawals count as income, and a return that taxes the
