@@ -66,22 +66,22 @@ const PLACES: [(&str, Class); 25] = [
     ("assets/owed", Class::Asset),
     ("assets/owed/clients", Class::Asset),
     ("assets/retirement", Class::Asset),
-    ("equity", Class::Equity),
-    ("equity/unknown", Class::Equity),
-    ("expenses", Class::Expense),
-    ("expenses/food", Class::Expense),
-    ("expenses/food/groceries", Class::Expense),
-    ("expenses/insurance", Class::Expense),
-    ("expenses/rent", Class::Expense),
-    ("expenses/repairs", Class::Expense),
-    ("income", Class::Income),
-    ("income/design", Class::Income),
-    ("income/gains", Class::Income),
-    ("income/jordan-pay", Class::Income),
-    ("income/salary", Class::Income),
-    ("liabilities", Class::Liability),
-    ("liabilities/bills", Class::Liability),
-    ("liabilities/visa", Class::Liability),
+    ("equity", Class::Outside),
+    ("equity/unknown", Class::Outside),
+    ("expenses", Class::Outside),
+    ("expenses/food", Class::Outside),
+    ("expenses/food/groceries", Class::Outside),
+    ("expenses/insurance", Class::Outside),
+    ("expenses/rent", Class::Outside),
+    ("expenses/repairs", Class::Outside),
+    ("income", Class::Outside),
+    ("income/design", Class::Outside),
+    ("income/gains", Class::Outside),
+    ("income/jordan-pay", Class::Outside),
+    ("income/salary", Class::Outside),
+    ("liabilities", Class::Debt),
+    ("liabilities/bills", Class::Debt),
+    ("liabilities/visa", Class::Debt),
     ("assets/vault", Class::Asset),
     ("assets/vault/coins", Class::Asset),
 ];
@@ -99,6 +99,7 @@ struct Cast {
     acme: Id<Entity>,
     irs: Id<Entity>,
     nsf: Id<Entity>,
+    market: Id<Entity>,
     entities: Tree<Entity>,
     places: Tree<Place>,
     place_ids: Vec<Id<Place>>,
@@ -113,26 +114,27 @@ struct Cast {
 impl Cast {
     fn new() -> Cast {
         let mut names = Interner::default();
-        // `market` is its own kind, so no place of the household is one.
-        let kinds = vec![kind(names.intern("thing")), kind(names.intern("market"))];
-        let (kinds, kind_ids) = Tree::build(kinds, &[None, None]).unwrap();
+        let (kinds, kind_ids) = Tree::build(vec![kind(names.intern("thing"))], &[None]).unwrap();
         let thing = kind_ids[0];
 
         // Roots take their ids in the order given: `me` and `jordan` belong to the third.
-        let people = ["me", "jordan", "household", "landlord", "acme", "irs", "nsf"];
+        // No place of the household is the market's.
+        let people = ["me", "jordan", "household", "landlord", "acme", "irs", "nsf", "market"];
         let entities = people.map(|name| Entity {
             path: names.intern(name),
             kind: thing,
-            via: None,
+            place: None,
             restricted: false,
             lives: Box::default(),
             member: matches!(name, "me" | "jordan").then(|| Id::new(2)),
+            owner: None,
+            client_of: None,
             props: Box::default(),
             doc: None,
             loc: None,
         });
-        let (entities, ids) = Tree::build(entities.into(), &[None; 7]).unwrap();
-        let [me, jordan, landlord, acme, irs, nsf] = [ids[0], ids[1], ids[3], ids[4], ids[5], ids[6]];
+        let (entities, ids) = Tree::build(entities.into(), &[None; 8]).unwrap();
+        let [me, jordan, landlord, acme, irs, nsf, market] = [ids[0], ids[1], ids[3], ids[4], ids[5], ids[6], ids[7]];
         assert_eq!(ids[2], Id::new(2), "the household is the third root");
 
         let parents: Vec<Option<usize>> = PLACES
@@ -144,6 +146,7 @@ impl Cast {
         let items = PLACES.iter().map(|&(path, class)| Place {
             path: names.intern(path),
             class,
+            role: if class == Class::Outside { Role::Outside(None) } else { Role::Account { institution: None } },
             kind: thing,
             owner: if JORDAN_OWNS.contains(&path) { jordan } else { me },
             holds: None,
@@ -152,7 +155,6 @@ impl Cast {
             basis: Basis::Cost,
             claim: path == "assets/owed/clients",
             liquidity: (path == "assets/retirement").then_some(Span::months(1)),
-            alias: None,
             opened: None,
             closed: None,
             props: Box::default(),
@@ -190,6 +192,7 @@ impl Cast {
             acme,
             irs,
             nsf,
+            market,
             entities,
             places,
             place_ids,
@@ -218,6 +221,11 @@ fn kind(name: Sym) -> Kind {
         claim: false,
         select: None,
         liquidity: None,
+        purpose: None,
+        pays: None,
+        takes: Box::default(),
+        sales_tax: None,
+        shares: Box::default(),
         has: Box::default(),
         props: Box::default(),
         laws: Box::default(),
@@ -284,10 +292,14 @@ fn journal(cast: &mut Cast) -> Journal {
             codes: codes.clone(),
             waive: None,
             plan: None,
+            contract: None,
+            ends: false,
             doc: (row == 13).then(|| cast.names.intern("/// The March design invoice.")),
             loc: line(row),
         });
         let amount = Amount::new(Qty(cents), cast.usd);
+        let owner = [cast.id(from), cast.id(to)].map(|id| &cast.places[id]);
+        let owner = owner.into_iter().find(|place| place.class != Class::Outside).map_or(cast.me, |place| place.owner);
         journal.flows.push(Flow {
             day: when,
             // The insurance is paid for the whole year.
@@ -300,6 +312,10 @@ fn journal(cast: &mut Cast) -> Journal {
             infer: Infer::Known,
             txn,
             payee,
+            owner,
+            purpose: None,
+            description: None,
+            origin: Origin::Written,
             select: Box::default(),
             codes,
             loc: line(row),
@@ -325,6 +341,10 @@ fn rent_plan(cast: &Cast) -> Plan {
         infer: Infer::Known,
         txn: Id::new(2),
         payee: Some(cast.landlord),
+        owner: cast.me,
+        purpose: None,
+        description: None,
+        origin: Origin::Written,
         select: Box::default(),
         codes: Box::default(),
         loc: line(60),
@@ -526,18 +546,20 @@ pub(crate) fn household() -> Household {
     };
     let touching =
         Groups::build(cast.places.len(), journal.flows.iter().flat_map(|(id, flow)| [(flow.from, id), (flow.to, id)]));
+    let (purposes, [income, spending, capital]) = Purpose::roots(&mut cast.names);
     let roots = Roots {
         me: cast.me,
         unknown: cast.id("equity/unknown"),
+        opening: cast.id("equity/unknown"),
+        market: cast.market,
         asset: Id::new(0),
-        liability: Id::new(0),
-        income: Id::new(0),
-        expense: Id::new(0),
-        equity: Id::new(0),
+        debt: Id::new(0),
+        thing: Id::new(0),
         commodity: Id::new(0),
         entity: Id::new(0),
-        opening: cast.id("equity/unknown"),
-        market: Id::new(1),
+        income,
+        spending,
+        capital,
     };
     let plans = vec![rent_plan(&cast)].into();
     let law_count = records.laws.len();
@@ -549,8 +571,11 @@ pub(crate) fn household() -> Household {
         places: cast.places,
         entities: cast.entities,
         kinds: cast.kinds,
+        purposes,
         systems: cast.systems,
         commodities: cast.commodities,
+        assets: Arena::new(),
+        contracts: Arena::new(),
         laws: records.laws,
         rules,
         params: Arena::new(),
@@ -577,6 +602,9 @@ pub(crate) fn household() -> Household {
         violations: Vec::new(),
         headroom: Vec::new(),
         pads: Vec::new(),
+        assets: Vec::new(),
+        promises: Vec::new(),
+        adjustments: Vec::new(),
         checks: vec![0; law_count].into(),
         diagnostics: Vec::new(),
     };

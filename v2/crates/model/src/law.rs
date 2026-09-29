@@ -13,7 +13,8 @@
 use axiom_core::day::days_in_month;
 use axiom_core::{Day, Groups, Id, Loc, Ratio, Span, Sym};
 
-use crate::book::{Amount, Commodity, Entity, Kind, Param, Place, Schedule, System};
+use crate::book::{Amount, Asset, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System};
+use crate::journal::Object;
 
 pub use axiom_syntax::{BinOp, Period};
 
@@ -73,6 +74,12 @@ pub enum Owner {
     Place(Id<Place>),
     /// Governs the entity (`on spend`, `by`, `each`).
     Entity(Id<Entity>),
+    /// Governs every flow of the purpose and those beneath it.
+    Purpose(Id<Purpose>),
+    /// Governs the asset, part by part.
+    Asset(Id<Asset>),
+    /// Governs the contract's flows.
+    Contract(Id<Contract>),
     /// A system's top-level law: governs its residents and all they own.
     System(Id<System>),
     /// A law written at the top level of a project file: governs every place
@@ -86,6 +93,9 @@ pub enum Trigger {
     Out,
     Gain,
     Spend,
+    /// A flow of the governed purpose (and those beneath it), or, under an
+    /// asset or an asset kind, a flow whose purpose is `of` it.
+    Flow,
     /// At the end of each period, or on its `closing` day in the next one.
     Each(Period, Option<Closing>),
     /// Fires once the journal reaches this date, evaluated per subject.
@@ -137,6 +147,12 @@ pub enum Effect {
     Owe { amount: NodeId, to: Id<Entity>, due: Option<NodeId>, name: Sym },
     /// Adds to a tally keyed by owner, year, name and the law's system.
     Count { amount: NodeId, name: Sym },
+    /// Lowers the governed asset part's basis (depreciation, depletion).
+    Consume { amount: NodeId },
+    /// Holds a disallowed loss and adds it to the basis of the nearest
+    /// acquisition of `unit` within the span `within`, before or after (a wash
+    /// sale).
+    Carry { amount: NodeId, unit: NodeId, within: NodeId },
 }
 
 /// Index of a node in its law's arena.
@@ -209,6 +225,10 @@ pub enum Var {
     Remaining,
     /// The triggering flow, for `flow is #code`.
     Flow,
+    /// What the triggering flow is for.
+    Purpose,
+    /// The triggering flow's words: `"food for the routine"`.
+    Description,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -222,6 +242,14 @@ pub enum Field {
     Kind,
     /// From the `born` property to the context date.
     Age,
+    /// An asset's cost: the sum of its parts' costs, in the base currency.
+    Cost,
+    /// The day an asset's first part was acquired.
+    InService,
+    /// How many parts an asset has.
+    Parts,
+    /// A purpose's object: `purpose.of`.
+    Of,
     Year,
     Month,
     Prop(Sym),
@@ -245,6 +273,9 @@ pub enum Func {
     Value,
     /// `date(y, m, d)`
     Date,
+    /// `straight-line(cost, life, from, period [, mid-month])`: this period's
+    /// share of a cost written off evenly over a life.
+    StraightLine,
 }
 
 impl Func {
@@ -282,6 +313,8 @@ pub enum Ty {
     Entity,
     Kind,
     Unit,
+    Purpose,
+    Asset,
     Schedule,
     Code,
     Glob,
@@ -305,6 +338,8 @@ impl Ty {
             Ty::Entity => "entity",
             Ty::Kind => "kind",
             Ty::Unit => "unit",
+            Ty::Purpose => "purpose",
+            Ty::Asset => "asset",
             Ty::Schedule => "schedule",
             Ty::Code => "code",
             Ty::Glob => "pattern",
@@ -329,6 +364,9 @@ pub enum Value {
     Entity(Id<Entity>),
     Kind(Id<Kind>),
     Unit(Id<Commodity>),
+    /// A purpose, with the object it was written `of`, if any.
+    Purpose(Id<Purpose>, Option<Object>),
+    Asset(Id<Asset>),
     Schedule(Id<Schedule>),
     Code(Sym),
     Glob(Sym),
@@ -368,6 +406,11 @@ pub struct Rules {
     pub always: Groups<Place, Rule>,
     /// `on spend` laws of each restricted entity.
     pub on_spend: Groups<Entity, Rule>,
+    /// `on flow` laws of each purpose, ancestors' included, in dependency order.
+    pub purposes: Groups<Purpose, Rule>,
+    /// `on flow` laws of each asset's place (its kind chain's and its own):
+    /// flows whose purpose is `of` it.
+    pub about: Groups<Place, Rule>,
     /// `each` and `by` laws, once per subject they govern.
     pub timed: Vec<Rule>,
 }
@@ -376,7 +419,8 @@ pub struct Rules {
 pub struct Rule {
     pub law: Id<Law>,
     /// What `self` is when the law runs: the governing place for place laws,
-    /// the place itself for kind laws, the resident for system laws.
+    /// the place itself for kind laws, the resident for system laws, and the
+    /// flow's owner for purpose laws.
     pub subject: Subject,
     /// Inclusive: the rule applies on days in `from..=until`.
     pub from: Day,
@@ -387,4 +431,5 @@ pub struct Rule {
 pub enum Subject {
     Place(Id<Place>),
     Entity(Id<Entity>),
+    Asset(Id<Asset>),
 }

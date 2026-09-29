@@ -96,7 +96,7 @@ impl Rules {
                     Trigger::Out => &mut on_out,
                     Trigger::Gain => &mut on_gain,
                     Trigger::Always => &mut always_on,
-                    Trigger::Spend | Trigger::Each(..) | Trigger::By(_) => continue,
+                    Trigger::Spend | Trigger::Flow | Trigger::Each(..) | Trigger::By(_) => continue,
                 };
                 table.push((place, rule));
             }
@@ -112,6 +112,9 @@ impl Rules {
             on_gain: Groups::build(places, on_gain),
             always: Groups::build(places, always_on),
             on_spend: Groups::build(book.entities.len(), spending),
+            // v3 bridge: no v3 law is an `on flow` law.
+            purposes: Groups::default(),
+            about: Groups::default(),
             timed,
         }
     }
@@ -182,6 +185,8 @@ fn timed(book: &Book, residents: &Residents) -> Vec<Rule> {
         match law.owner {
             Owner::Place(place) => rules.push(always(id, Subject::Place(place))),
             Owner::Entity(entity) => rules.push(always(id, Subject::Entity(entity))),
+            // v3 bridge: no v3 law is written in a purpose, an asset or a contract.
+            Owner::Purpose(_) | Owner::Asset(_) | Owner::Contract(_) => {}
             Owner::Kind(kind) => match book.kinds[kind].sort {
                 Sort::Place(_) => {
                     let governed = book.places.iter().filter(|(_, place)| book.kinds.covers(kind, place.kind));
@@ -191,7 +196,7 @@ fn timed(book: &Book, residents: &Residents) -> Vec<Rule> {
                     let governed = book.entities.iter().filter(|(_, entity)| book.kinds.covers(kind, entity.kind));
                     rules.extend(governed.map(|(entity, _)| always(id, Subject::Entity(entity))));
                 }
-                Sort::Commodity => {}
+                Sort::Thing | Sort::Commodity => {}
             },
             Owner::System(_) => {
                 for entity in book.entities.ids() {

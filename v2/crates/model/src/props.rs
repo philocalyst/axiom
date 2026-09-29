@@ -43,7 +43,8 @@ impl Target {
     /// What the instances of a kind of this sort are.
     fn of(sort: Sort) -> Target {
         match sort {
-            Sort::Place(_) => Target::Place,
+            // v3 bridge: no v3 thing has properties.
+            Sort::Place(_) | Sort::Thing => Target::Place,
             Sort::Entity => Target::Entity,
             Sort::Commodity => Target::Commodity,
         }
@@ -165,6 +166,7 @@ impl PropTable {
     fn family(sort: Sort) -> Ty {
         match sort {
             Sort::Place(_) => Ty::Place,
+            Sort::Thing => Ty::Asset,
             Sort::Commodity => Ty::Unit,
             Sort::Entity => Ty::Entity,
         }
@@ -235,7 +237,7 @@ impl Commodity {
 impl Entity {
     fn set(&mut self, assign: &Assign) {
         match assign {
-            Assign::Via(place) => self.via = Some(*place),
+            Assign::Via(place) => self.place = Some(*place),
             Assign::Lives(residence) => self.lives = self.lives.iter().copied().chain([*residence]).collect(),
             Assign::Member(entity, _) => self.member = Some(*entity),
             Assign::Prop(prop) => put(&mut self.props, *prop),

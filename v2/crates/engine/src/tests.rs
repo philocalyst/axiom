@@ -40,6 +40,19 @@ fn an_empty_book_folds_to_nothing() {
 }
 
 #[test]
+fn a_promise_is_late_by_the_days_until_it_is_kept_or_the_horizon_if_it_never_is() {
+    let promise = |kept: Option<i32>| crate::Promise {
+        contract: Id::new(0),
+        due: Day(100),
+        kept: kept.map(|day| (Day(day), Id::new(0))),
+    };
+    assert_eq!(promise(Some(95)).late(Day(200)), 0, "kept early");
+    assert_eq!(promise(Some(103)).late(Day(200)), 3, "kept late");
+    assert_eq!(promise(None).late(Day(110)), 10, "still missing");
+    assert_eq!(promise(None).late(Day(90)), 0, "not due yet");
+}
+
+#[test]
 fn plain_money_is_one_integer_per_place() {
     let mut f = Fixture::new();
     let (equity, checking, food, salary, usd) = (f.equity, f.checking, f.food, f.salary, f.usd);

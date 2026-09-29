@@ -14,9 +14,9 @@ use axiom_syntax::Due;
 use super::faults::{self, Written};
 use super::pairing::{self, Share};
 use super::shape::{Elab, Leg, Placed, Shape, Slot, Stated, Tail};
-use crate::book::{Amount, Class, CodeScope, Commodity, Place};
+use crate::book::{Amount, Class, CodeScope, Commodity, PathRoot, Place};
 use crate::errors::{count, iso, list, list_and};
-use crate::journal::{End, Flow, Infer, Mode, Recognition, Terms};
+use crate::journal::{End, Flow, Infer, Mode, Origin, Recognition, Terms};
 
 /// One flow, before its transaction's facts are added.
 pub(super) struct Move {
@@ -304,7 +304,7 @@ impl Elab<'_, '_> {
         let unit = cash(&moves[first]).unit;
         let fee = |mv: &Move| {
             let spent = mv.infer == Infer::Known && !mv.is_exchange() && mv.out.unit == unit;
-            spent && book.places[mv.to.end.place].class == Class::Expense
+            spent && book.v3_root(mv.to.end.place) == PathRoot::Expenses
         };
         let fees: Qty = moves.iter().filter(|&mv| fee(mv)).map(|mv| mv.out.qty).sum();
         let paid_with_it = |&&at: &&usize| cash(&moves[at]).unit == unit;
@@ -431,6 +431,13 @@ impl Elab<'_, '_> {
             Box::new(Terms { basis, hold, basis_end, since, spender, cost, due })
         });
         let recognized = tail.period.map_or(Recognition::on(day), |(from, until)| Recognition { from, until });
+        // v3 bridge: the owner of the first end that is an account, else `me`. Nothing reads it yet.
+        let book = &self.world.book;
+        let owner = [mv.from.end.place, mv.to.end.place]
+            .into_iter()
+            .map(|place| &book.places[place])
+            .find(|place| place.class != Class::Outside)
+            .map_or(book.roots.me, |place| place.owner);
         Some(Flow {
             day,
             recognized,
@@ -442,6 +449,11 @@ impl Elab<'_, '_> {
             infer: mv.infer,
             txn: Id::new(self.txn),
             payee: tail.payee,
+            owner,
+            // v3 bridge: no v3 line says what a flow is for, and a plan's flows are written like any other.
+            purpose: None,
+            description: None,
+            origin: Origin::Written,
             select: select.into(),
             codes,
             loc: mv.loc,

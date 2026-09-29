@@ -77,6 +77,9 @@ fn governs<'s>(book: &Book<'s>, owner: Owner) -> String {
         Owner::Kind(kind) => format!("every {}", book.name(book.kinds[kind].name)),
         Owner::Place(place) => format!("{} and everything beneath it", book.name(book.places[place].path)),
         Owner::Entity(entity) => book.name(book.entities[entity].path).to_string(),
+        Owner::Purpose(purpose) => format!("every flow of {}, and beneath it", book.name(book.purposes[purpose].name)),
+        Owner::Asset(asset) => book.name(book.assets[asset].name).to_string(),
+        Owner::Contract(contract) => format!("every flow of {}", book.name(book.contracts[contract].name)),
         Owner::System(system) => {
             format!("everyone living under {}, and all they own", book.name(book.systems[system].path))
         }

@@ -685,7 +685,7 @@ entity aldi, kroger : grocer
         for name in ["aldi", "kroger"] {
             let entity = &book.entities[book.entity(name).unwrap()];
             assert_eq!(entity.kind, grocer);
-            assert_eq!(entity.via, Some(book.place("expenses/food").unwrap()), "{name} takes its kind's via");
+            assert_eq!(entity.place, Some(book.place("expenses/food").unwrap()), "{name} takes its kind's via");
         }
         assert_eq!(book.flows.len(), 2);
     });
@@ -992,6 +992,7 @@ fn inflow_rules(book: &Book, place: &str) -> Vec<String> {
     let subject = |subject| match subject {
         crate::Subject::Entity(entity) => book.name(book.entities[entity].path),
         crate::Subject::Place(place) => book.name(book.places[place].path),
+        crate::Subject::Asset(asset) => book.name(book.assets[asset].name),
     };
     let day = |day: axiom_core::Day| match day.0 {
         i32::MIN => "..".to_string(),
@@ -1334,4 +1335,70 @@ fn a_system_may_only_hold_what_systems_hold_and_is_defined_once() {
             assert_ne!(primary.loc.file, FileId(0), "{code}: the built-in std is never the primary");
         });
     }
+}
+
+// v3 bridge: what the v4 types make of a v3 book.
+#[test]
+fn a_v3_book_fits_the_v4_types() {
+    use crate::{Class, Origin, Role};
+    with_book("2026-01-05 checking -> food 10 USD\n", |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let place = |path| &book.places[book.place(path).unwrap()];
+        let account = Role::Account { institution: None };
+        assert_eq!((place("checking").class, place("checking").role), (Class::Asset, account));
+        assert_eq!((place("visa").class, place("visa").role), (Class::Debt, account));
+        assert_eq!((place("food").class, place("food").role), (Class::Outside, Role::Outside(None)));
+        assert_eq!(place("equity/unknown").class, Class::Outside);
+
+        let roots = book.roots;
+        assert_eq!(book.name(book.entities[roots.market].path), "market");
+        assert_eq!(book.entities[roots.market].place, book.place("income/market").ok());
+        assert!(book.entity("market").is_err(), "no line names the market entity: `market` is the place");
+        assert_eq!(book.name(book.kinds[roots.thing].name), "thing");
+        let purposes = [roots.income, roots.spending, roots.capital].map(|root| book.name(book.purposes[root].name));
+        assert_eq!(purposes, ["income", "spending", "capital"]);
+
+        // The flow is its account's owner's, and nothing says what it is for.
+        let flow = &book.flows[axiom_core::Id::new(0)];
+        assert_eq!((flow.owner, flow.origin, flow.purpose), (roots.me, Origin::Written, None));
+    });
+}
+
+#[test]
+fn a_contract_falls_due_from_its_start_until_it_ends() {
+    use crate::{Cadence, Contract, On, Recur};
+    use axiom_core::{Day, Id, Interner, Loc, Span};
+    let day = |month, day| Day::from_ymd(2026, month, day).unwrap();
+    let loc = Loc::new(FileId(0), 0, 0);
+    let contract = |on, until, ended: Option<Day>| Contract {
+        name: Interner::default().intern("rent"),
+        party: Id::new(0),
+        owner: Id::new(0),
+        schedule: Recur { every: Cadence::Every(Span::months(1)), on, from: day(1, 31), until },
+        template: Box::default(),
+        buys: None,
+        covers: None,
+        shares: Box::default(),
+        deposit: None,
+        loan: None,
+        escrow: None,
+        matching: None,
+        ended: ended.map(|ended| (ended, loc)),
+        laws: Box::default(),
+        doc: None,
+        loc,
+    };
+    // A month's end does not drag the months after it, and `from` cuts the start off.
+    let days = contract(None, None, None).due_days(day(2, 1), day(4, 30));
+    assert_eq!(days, [day(2, 28), day(3, 31), day(4, 30)]);
+    // `until` and `ended` bound it, whichever comes first, and the start comes before every occurrence.
+    let days = contract(Some(On::MonthDay(15)), Some(day(4, 20)), Some(day(3, 20))).due_days(day(1, 1), day(12, 31));
+    assert_eq!(days, [day(2, 15), day(3, 15)]);
+}
+
+#[test]
+fn a_flow_stays_small() {
+    // A flow is copied into every reader of the journal: its size is felt at a million.
+    assert!(size_of::<crate::Flow>() <= 200, "a Flow is {} bytes", size_of::<crate::Flow>());
+    assert_eq!(size_of::<Option<crate::Purposed>>(), 20);
 }

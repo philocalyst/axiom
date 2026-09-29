@@ -15,6 +15,7 @@ use axiom_core::day::days_in_month;
 use axiom_core::{Day, Groups, Id, Map, Qty, Sym};
 use axiom_model::{Book, Dir, Entity, Func, Law, NodeId, Op, Place, Recognition, Subject, Ty, Window};
 
+use crate::eval::V3;
 use crate::scope::{containing, inside};
 
 /// Whether `day` lies within the inclusive range.
@@ -339,6 +340,7 @@ fn slot(places: usize, subject: Subject) -> usize {
     match subject {
         Subject::Place(place) => place.index(),
         Subject::Entity(entity) => places + entity.index(),
+        Subject::Asset(_) => unreachable!("{V3}"),
     }
 }
 

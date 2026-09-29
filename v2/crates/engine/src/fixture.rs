@@ -18,6 +18,8 @@ pub(crate) struct Fixture {
     pub me: Id<Entity>,
     pub grant: Id<Entity>,
     pub household: Id<Entity>,
+    /// The market, whose place is `market`.
+    pub trader: Id<Entity>,
     pub assets: Id<Place>,
     pub checking: Id<Place>,
     pub savings: Id<Place>,
@@ -31,7 +33,7 @@ pub(crate) struct Fixture {
     pub unknown: Id<Place>,
     pub opening: Id<Place>,
     pub card: Id<Place>,
-    /// A place of the market kind: revaluations come from and go to it.
+    /// The market's place: revaluations come from and go to it.
     pub market: Id<Place>,
     pub places: Tree<Place>,
     entities: Tree<Entity>,
@@ -57,10 +59,12 @@ impl Fixture {
         let entity = |path: Sym, restricted| Entity {
             path,
             kind,
-            via: None,
+            place: None,
             restricted,
             lives: Box::new([]),
             member: None,
+            owner: None,
+            client_of: None,
             props: Box::new([]),
             doc: None,
             loc: None,
@@ -69,12 +73,14 @@ impl Fixture {
             entity(names.intern("me"), false),
             entity(names.intern("nsf-grant"), true),
             entity(names.intern("household"), false),
+            entity(names.intern("market"), false),
         ];
-        let (entities, ids) = Tree::build(people, &[None, None, None]).expect("no cycles");
+        let (mut entities, ids) = Tree::build(people, &[None; 4]).expect("no cycles");
         let me = ids[0];
         let place = |path: Sym, class| Place {
             path,
             class,
+            role: if class == Class::Outside { Role::Outside(None) } else { Role::Account { institution: None } },
             kind,
             owner: me,
             holds: None,
@@ -83,7 +89,6 @@ impl Fixture {
             basis: Basis::Cost,
             claim: false,
             liquidity: None,
-            alias: None,
             opened: None,
             closed: None,
             props: Box::new([]),
@@ -97,17 +102,17 @@ impl Fixture {
             ("assets/cash", Class::Asset, Some(0)),
             ("assets/brokerage", Class::Asset, Some(0)),
             ("assets/retirement", Class::Asset, Some(0)),
-            ("income", Class::Income, None),
-            ("income/salary", Class::Income, Some(6)),
-            ("income/grants", Class::Income, Some(6)),
-            ("expenses", Class::Expense, None),
-            ("expenses/food", Class::Expense, Some(9)),
-            ("equity", Class::Equity, None),
-            ("equity/opening", Class::Equity, Some(11)),
-            ("equity/unknown", Class::Equity, Some(11)),
-            ("liabilities", Class::Liability, None),
-            ("liabilities/card", Class::Liability, Some(14)),
-            ("income/market", Class::Income, Some(6)),
+            ("income", Class::Outside, None),
+            ("income/salary", Class::Outside, Some(6)),
+            ("income/grants", Class::Outside, Some(6)),
+            ("expenses", Class::Outside, None),
+            ("expenses/food", Class::Outside, Some(9)),
+            ("equity", Class::Outside, None),
+            ("equity/opening", Class::Outside, Some(11)),
+            ("equity/unknown", Class::Outside, Some(11)),
+            ("liabilities", Class::Debt, None),
+            ("liabilities/card", Class::Debt, Some(14)),
+            ("income/market", Class::Outside, Some(6)),
         ];
         let items = spec.iter().map(|&(path, class, _)| place(names.intern(path), class)).collect();
         let parents: Vec<_> = spec.iter().map(|&(.., parent)| parent).collect();
@@ -115,6 +120,7 @@ impl Fixture {
         places[p[5]].deferred = true;
         places[p[5]].basis = Basis::Zero;
         places[p[16]].kind = Id::new(1);
+        entities[ids[3]].place = Some(p[16]);
         let mut commodities = Arena::new();
         let usd = commodities.push(commodity(names.intern("USD"), 2));
         let vti = commodities.push(commodity(names.intern("VTI"), 0));
@@ -125,6 +131,7 @@ impl Fixture {
             me,
             grant: ids[1],
             household: ids[2],
+            trader: ids[3],
             assets: p[0],
             checking: p[1],
             savings: p[2],
@@ -238,6 +245,8 @@ impl Fixture {
             codes: Box::new([]),
             waive: None,
             plan: None,
+            contract: None,
+            ends: false,
             doc: None,
             loc,
         };
@@ -253,6 +262,10 @@ impl Fixture {
             infer,
             txn: Id::new(id.index() as u32),
             payee: None,
+            owner: self.me,
+            purpose: None,
+            description: None,
+            origin: Origin::Written,
             select: Box::new([]),
             codes: Box::new([]),
             loc,
@@ -380,27 +393,34 @@ impl Fixture {
             claim: false,
             select: None,
             liquidity: None,
+            purpose: None,
+            pays: None,
+            takes: Box::new([]),
+            sales_tax: None,
+            shares: Box::new([]),
             has: Box::new([]),
             props: Box::new([]),
             laws: Box::new([]),
             doc: None,
             loc: None,
         };
-        let market = Kind { name: self.names.intern("market"), sort: Sort::Place(Class::Income), ..kind.clone() };
+        let market = Kind { name: self.names.intern("market"), sort: Sort::Place(Class::Outside), ..kind.clone() };
         let (kinds, _) = Tree::build(vec![kind, market], &[None, None]).expect("no cycles");
         let k = Id::new(0);
+        let (purposes, [income, spending, capital]) = Purpose::roots(&mut self.names);
         let roots = Roots {
             me: self.me,
             unknown: self.unknown,
             opening: self.opening,
-            market: Id::new(1),
+            market: self.trader,
             asset: k,
-            liability: k,
-            income: k,
-            expense: k,
-            equity: k,
+            debt: k,
+            thing: k,
             commodity: k,
             entity: k,
+            income,
+            spending,
+            capital,
         };
         let places = self.places.len();
         let ends = |(i, flow): (usize, &Flow)| {
@@ -414,6 +434,8 @@ impl Fixture {
             on_gain: Groups::build(places, self.on_gain),
             always: Groups::build(places, self.always),
             on_spend: Groups::build(self.entities.len(), self.on_spend),
+            purposes: Groups::default(),
+            about: Groups::default(),
             timed: self.timed,
         };
         let (mut txns, mut flows) = (Arena::new(), Arena::new());
@@ -431,8 +453,11 @@ impl Fixture {
             places: self.places,
             entities: self.entities,
             kinds,
+            purposes,
             systems: Tree::default(),
             commodities: self.commodities,
+            assets: Arena::new(),
+            contracts: Arena::new(),
             laws: self.laws,
             rules,
             params: Arena::new(),

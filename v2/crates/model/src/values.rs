@@ -25,6 +25,8 @@ impl Value {
             Value::Entity(_) => Ty::Entity,
             Value::Kind(_) => Ty::Kind,
             Value::Unit(_) => Ty::Unit,
+            Value::Purpose(..) => Ty::Purpose,
+            Value::Asset(_) => Ty::Asset,
             Value::Schedule(_) => Ty::Schedule,
             Value::Code(_) => Ty::Code,
             Value::Glob(_) => Ty::Glob,

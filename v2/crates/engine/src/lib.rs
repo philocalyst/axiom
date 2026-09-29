@@ -52,7 +52,7 @@ mod source_tests;
 mod tests;
 
 use axiom_core::{Day, Diagnostic, Id, Qty, Sym};
-use axiom_model::{Amount, Commodity, Entity, Flow, Law, Place, Subject, System, Txn};
+use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn};
 
 pub use ledger::{Ledger, run};
 
@@ -85,9 +85,72 @@ pub struct Run {
     /// The last reading of every limit, per law step, subject and window.
     pub headroom: Vec<Headroom>,
     pub pads: Vec<Pad>,
+    /// Every asset's parts at the end of the fold, by asset.
+    pub assets: Vec<AssetState>,
+    /// Every occurrence a contract expected up to the horizon, and whether and
+    /// when the journal kept it.
+    pub promises: Vec<Promise>,
+    /// Basis the laws moved: consumed (depreciation) or carried (wash sales).
+    pub adjustments: Vec<Adjustment>,
     /// How many times each law ran past its `when` filters, by law id.
     pub checks: Box<[u32]>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+/// An asset and its parts.
+pub struct AssetState {
+    pub asset: Id<Asset>,
+    pub parts: Vec<Part>,
+    /// When it left the owners, and to whom.
+    pub disposed: Option<(Day, Id<Flow>)>,
+}
+
+/// One part of an asset: its acquisition, or an improvement.
+#[derive(Clone, Copy, Debug)]
+pub struct Part {
+    /// The flow that made it.
+    pub flow: Id<Flow>,
+    pub day: Day,
+    /// What it cost, in base quanta.
+    pub cost: Qty,
+    /// What remains of its cost after what the laws consumed.
+    pub basis: Qty,
+}
+
+/// One expected occurrence of a contract.
+#[derive(Clone, Copy, Debug)]
+pub struct Promise {
+    pub contract: Id<Contract>,
+    pub due: Day,
+    /// The occurrence that kept it (its transaction), or `None` if the journal
+    /// has not written it by the horizon.
+    pub kept: Option<(Day, Id<Txn>)>,
+}
+
+impl Promise {
+    /// Days late: kept after `due`, or still missing at `horizon`.
+    pub fn late(&self, horizon: Day) -> i32 {
+        let seen = self.kept.map_or(horizon, |(day, _)| day);
+        (seen.0 - self.due.0).max(0)
+    }
+}
+
+/// Basis a law moved.
+#[derive(Clone, Copy, Debug)]
+pub struct Adjustment {
+    pub day: Day,
+    pub law: Id<Law>,
+    pub kind: AdjustmentKind,
+    pub amount: Qty,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum AdjustmentKind {
+    /// A part's basis consumed: depreciation.
+    Consumed { asset: Id<Asset>, part: u32 },
+    /// A disallowed loss held from a sale and added to a later (or earlier)
+    /// acquisition: a wash sale.
+    Carried { from: Id<Flow>, to: Option<Id<Flow>> },
 }
 
 /// A journal flow with its quantities solved and its settlement known.

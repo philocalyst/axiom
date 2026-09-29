@@ -75,6 +75,8 @@ impl<'a, 's> Elab<'a, 's> {
             codes: header.map_or_else(Box::default, |header| header.codes.iter().map(|&(code, _)| code).collect()),
             waive: header.and_then(|header| header.waive),
             plan,
+            contract: None,
+            ends: false,
             doc: item.doc.map(|doc| world.sym(doc.0)),
             loc: item.loc,
         });
@@ -173,7 +175,7 @@ impl<'a, 's> Elab<'a, 's> {
             };
             // A liability, income or equity place is shown by what it owes or
             // has earned, so the value flows out of it into the opening equity.
-            let from_equity = self.world.book.places[line.placed.end.place].class.display_sign() > 0;
+            let from_equity = self.world.book.v3_root(line.placed.end.place).display_sign() > 0;
             let (from, to) = if from_equity { (equity, line.placed) } else { (line.placed, equity) };
             let mv = Move::between(&from, &to, (amount, amount), (Infer::Known, false), line.tail, line.loc);
             if let Some(moves) = moves.as_mut() {

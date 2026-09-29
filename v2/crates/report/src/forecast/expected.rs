@@ -187,7 +187,7 @@ fn has_ended(book: &Book, run: &Run, habit: &Expectation) -> bool {
     // A basis end moves nothing through its account, so an empty account says nothing there.
     let ends = [(End::From, flow.from, flow.out.unit), (End::To, flow.to, flow.arrive.unit)];
     let on_sheet = |&(end, place, _): &(End, _, _)| {
-        flow.moves_quantity(end) && matches!(book.places[place].class, Class::Asset | Class::Liability)
+        flow.moves_quantity(end) && matches!(book.places[place].class, Class::Asset | Class::Debt)
     };
     ends.into_iter().filter(on_sheet).any(|(_, place, unit)| {
         let recent = book.touching[place].iter().rev().map(|&id| &book.flows[id]);

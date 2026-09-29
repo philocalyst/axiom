@@ -82,6 +82,8 @@ impl Var {
             Var::Subject | Var::Owner => true,
             Var::Date | Var::Year | Var::Month => when != When::Deadline,
             Var::Amount | Var::From | Var::To | Var::Flow => flow,
+            // v3 bridge: no v3 trigger knows what a flow is for.
+            Var::Purpose | Var::Description => false,
             Var::Payee => flow && when != When::Gain,
             Var::Gain | Var::Proceeds | Var::Basis | Var::Held => when == When::Gain,
             Var::Balance => when == When::Always,
@@ -105,6 +107,8 @@ impl Var {
             Var::Held => Ty::Span,
             Var::Subject => subject,
             Var::Flow => Ty::Flow,
+            Var::Purpose => Ty::Purpose,
+            Var::Description => Ty::Text,
         }
     }
 }

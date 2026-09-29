@@ -10,8 +10,8 @@ use axiom_core::diag::distance;
 use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Set, Sym, Tree};
 use axiom_syntax::{DeclKind, ExprKind, Setting};
 
-use crate::book::{Book, Class, Commodity, Entity, Kind, Lookup, Place, Roots, Sort};
-use crate::collect::{Entry, Seen, Surveyed, Written, class_of, decls};
+use crate::book::{Book, Class, Commodity, Entity, Kind, Lookup, PathRoot, Place, Purpose, Role, Roots, Sort};
+use crate::collect::{Entry, Seen, Surveyed, Written, decls};
 use crate::cx::Cx;
 use crate::errors::{Word, duplicate, list_and, unknown};
 use crate::kinds::{self, Kinds};
@@ -30,7 +30,7 @@ pub(crate) const MAX_SCALE: u8 = 18;
 const UNKNOWN: &str = "equity/unknown";
 /// Where `opening` balances come from.
 const OPENING: &str = "equity/opening";
-/// The built-in place of kind `market`: `via market` on an assertion.
+/// The market's place, which `via market` on an assertion names.
 const MARKET: &str = "income/market";
 
 /// The book under construction, with what only the build needs.
@@ -142,21 +142,24 @@ pub(crate) fn declare<'a, 's>(
     let entries = &surveyed.entries;
     let kinds = kinds::declare(entries, &mut cx);
     let commodities = commodities(entries, &surveyed.units, settings, &kinds, &mut cx);
-    let entities = entities(entries, &kinds, &mut cx);
+    let mut entities = entities(entries, &kinds, &mut cx);
     let places = places(entries, &surveyed.paths, &kinds, &entities, &mut cx);
+    entities.tree[entities.market].place = Some(places.market);
+    let (purposes, [income, spending, capital]) = Purpose::roots(cx.names);
 
     let roots = Roots {
         me: entities.me,
         unknown: places.unknown,
         opening: places.opening,
-        market: kinds.roots.market(),
-        asset: kinds.roots.of_class(Class::Asset),
-        liability: kinds.roots.of_class(Class::Liability),
-        income: kinds.roots.of_class(Class::Income),
-        expense: kinds.roots.of_class(Class::Expense),
-        equity: kinds.roots.of_class(Class::Equity),
+        market: entities.market,
+        asset: kinds.roots.of_root(PathRoot::Assets),
+        debt: kinds.roots.of_root(PathRoot::Liabilities),
+        thing: kinds.roots.thing(),
         commodity: kinds.roots.commodity(),
         entity: kinds.roots.entity(),
+        income,
+        spending,
+        capital,
     };
     let book = Book {
         names,
@@ -166,8 +169,11 @@ pub(crate) fn declare<'a, 's>(
         places: places.tree,
         entities: entities.tree,
         kinds: kinds.tree,
+        purposes,
         systems: tree,
         commodities: commodities.arena,
+        assets: Arena::new(),
+        contracts: Arena::new(),
         laws: Arena::new(),
         rules: Rules::default(),
         params: Arena::new(),
@@ -186,6 +192,9 @@ pub(crate) fn declare<'a, 's>(
             places: places.names,
             entities: entities.index,
             kinds: kinds.index,
+            purposes: Scoped::default(),
+            assets: Map::default(),
+            contracts: Map::default(),
             params: Scoped::default(),
             laws: Names::default(),
             commodities: commodities.by_symbol,
@@ -291,7 +300,7 @@ fn commodities<'s>(
         }
         let kind_word = written.node.kind.map(|kind| Word { text: kind.0, loc: file.loc(kind.0) });
         let thing = format!("the commodity `{symbol}`");
-        let kind = kinds.declared(kind_word, written.home(), Sort::Commodity, &thing, cx);
+        let kind = kinds.declared(kind_word, written.home(), kinds.roots.commodity(), &thing, cx);
         let id = table.add(cx.names, symbol, scale_of(symbol), kind, written.home());
         table.arena[id].doc = written.item.doc.map(|doc| cx.names.intern(doc.0));
         table.arena[id].loc = Some(word.loc);
@@ -381,20 +390,23 @@ struct Entities {
     tree: Tree<Entity>,
     index: Scoped<Entity>,
     me: Id<Entity>,
+    market: Id<Entity>,
     declared: Vec<Id<Entity>>,
 }
 
 /// Entities form a path tree (`paypal/john` sits under `paypal`), with `me`
-/// always present.
+/// and the market always present.
 fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, cx: &mut Cx<'_, 's>) -> Entities {
-    let written = decls(entries, DeclKind::Entity).map(|written| written.node.name.0).chain(["me"]);
+    let written = decls(entries, DeclKind::Entity).map(|written| written.node.name.0).chain(["me", "market"]);
     let (mut tree, by_path) = paths::build(written, |path| Entity {
         path: cx.names.intern(path),
         kind: kinds.roots.entity(),
-        via: None,
+        place: None,
         restricted: false,
         lives: Box::default(),
         member: None,
+        owner: None,
+        client_of: None,
         props: Box::default(),
         doc: None,
         loc: None,
@@ -412,7 +424,7 @@ fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, cx: &mut Cx<'_, 's>) -
         }
         homes[id.index()] = written.home();
         let kind_word = written.node.kind.map(|kind| Word { text: kind.0, loc: file.loc(kind.0) });
-        let kind = kinds.declared(kind_word, written.home(), Sort::Entity, &format!("the entity `{path}`"), cx);
+        let kind = kinds.declared(kind_word, written.home(), kinds.roots.entity(), &format!("the entity `{path}`"), cx);
         let entity = &mut tree[id];
         entity.kind = kind;
         entity.doc = written.item.doc.map(|doc| cx.names.intern(doc.0));
@@ -422,8 +434,13 @@ fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, cx: &mut Cx<'_, 's>) -
     if tree[me].loc.is_none() {
         tree[me].kind = person_or_root(kinds, cx);
     }
-    let things: Vec<_> = tree.iter().map(|(id, entity)| (id, cx.names.name(entity.path), homes[id.index()])).collect();
-    Entities { index: Scoped::build(cx.names, things), tree, me, declared }
+    // v3 bridge: the market entity is the place `income/market` under another name, and no line names it: `market`
+    // in a flow, a law or `why` has always meant the place, or the kind. Only a declaration makes it findable.
+    let market = by_path["market"];
+    let findable = |&(id, entity): &(Id<Entity>, &Entity)| id != market || entity.loc.is_some();
+    let things: Vec<_> =
+        tree.iter().filter(findable).map(|(id, entity)| (id, cx.names.name(entity.path), homes[id.index()])).collect();
+    Entities { index: Scoped::build(cx.names, things), tree, me, market, declared }
 }
 
 /// `me` is a `person` when the standard kinds are in scope.
@@ -442,6 +459,7 @@ struct Places {
     names: Names<Place>,
     unknown: Id<Place>,
     opening: Id<Place>,
+    market: Id<Place>,
     declared: Vec<Option<Id<Place>>>,
     ordinal: Vec<u32>,
 }
@@ -460,8 +478,8 @@ fn places<'s>(
     let accounts: Vec<Written<_>> = decls(entries, DeclKind::Account).collect();
     // An account outside every class root has no class, so it cannot exist.
     let valid: Vec<bool> = accounts.iter().map(|written| root_is_valid(written, cx)).collect();
-    let declared_paths: Vec<&str> = Class::ALL
-        .map(Class::root)
+    let declared_paths: Vec<&str> = PathRoot::ALL
+        .map(PathRoot::path)
         .into_iter()
         .chain([UNKNOWN, OPENING, MARKET])
         .chain(accounts.iter().zip(&valid).filter(|&(_, &ok)| ok).map(|(written, _)| written.node.name.0))
@@ -470,11 +488,15 @@ fn places<'s>(
     let opens =
         opened.iter().copied().filter(|path| declared_set.contains(path) || !typo_of_place(path, &declared_paths));
     let (mut tree, by_path) = paths::build(declared_paths.iter().copied().chain(opens), |path| {
-        let class = class_of(path).expect("only paths under a class root are written");
+        let root = PathRoot::of(path).expect("only paths under a class root are written");
+        // v3 bridge: no v3 place has an institution or names a party.
+        let role =
+            if root.class() == Class::Outside { Role::Outside(None) } else { Role::Account { institution: None } };
         Place {
             path: cx.names.intern(path),
-            class,
-            kind: kinds.roots.of_class(class),
+            class: root.class(),
+            role,
+            kind: kinds.roots.of_root(root),
             owner: entities.me,
             holds: None,
             select: None,
@@ -482,7 +504,6 @@ fn places<'s>(
             basis: Default::default(),
             claim: false,
             liquidity: None,
-            alias: None,
             opened: None,
             closed: None,
             props: Box::default(),
@@ -505,10 +526,10 @@ fn places<'s>(
             continue;
         }
         ordinal[id.index()] = at as u32;
-        let class = tree[id].class;
-        let thing = format!("the {} account `{}`", Sort::Place(class).noun(), decl.name.0);
+        let root = kinds.roots.of_root(PathRoot::of(decl.name.0).expect("a valid account starts at a root"));
+        let thing = format!("the {} account `{}`", cx.names.name(kinds.tree[root].name), decl.name.0);
         let kind_word = decl.kind.map(|kind| Word { text: kind.0, loc: file.loc(kind.0) });
-        let kind = kinds.declared(kind_word, Home::Project, Sort::Place(class), &thing, cx);
+        let kind = kinds.declared(kind_word, Home::Project, root, &thing, cx);
         let place = &mut tree[id];
         place.kind = kind;
         place.doc = written.item.doc.map(|doc| cx.names.intern(doc.0));
@@ -529,7 +550,6 @@ fn places<'s>(
                 }
                 None => {
                     aliases.insert(alias.0, id);
-                    tree[id].alias = Some(cx.names.intern(alias.0));
                 }
             }
         }
@@ -543,7 +563,8 @@ fn places<'s>(
     for (&alias, &id) in &aliases {
         names.insert(cx.names, alias, Rank::Alias, id);
     }
-    Places { unknown: by_path[UNKNOWN], opening: by_path[OPENING], tree, names, declared, ordinal }
+    let (unknown, opening, market) = (by_path[UNKNOWN], by_path[OPENING], by_path[MARKET]);
+    Places { unknown, opening, market, tree, names, declared, ordinal }
 }
 
 /// Whether a full path that no account declares is a typo of one that does.
@@ -568,10 +589,10 @@ pub(crate) fn near_place<'a>(path: &str, declared: &[&'a str]) -> Option<&'a str
 /// Whether `decl` starts at a class root; if not, says so.
 fn root_is_valid(written: &Written<axiom_syntax::Decl>, cx: &mut Cx) -> bool {
     let (file, path) = (written.file(), written.node.name.0);
-    if class_of(path).is_some() {
+    if PathRoot::of(path).is_some() {
         return true;
     }
-    let roots = Class::ALL.map(Class::root);
+    let roots = PathRoot::ALL.map(PathRoot::path);
     let loc = file.loc(path);
     let mut diagnostic = Diagnostic::error("account-root", format!("`{path}` does not start at a class root"))
         .label(loc, "an account belongs to one of the five classes")

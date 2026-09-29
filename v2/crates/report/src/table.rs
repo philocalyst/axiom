@@ -148,7 +148,7 @@ pub fn creditor(book: &Book, owed: Owed) -> String {
 pub fn gap_words(book: &Book, pad: &Pad) -> String {
     if pad.counter == book.roots.unknown {
         "unexplained gap, accepted with !".to_string()
-    } else if book.is_a(book.places[pad.counter].kind, book.roots.market) {
+    } else if book.entities[book.roots.market].place == Some(pad.counter) {
         format!("revalued via {}", path(book, pad.counter))
     } else {
         format!("gap via {}", path(book, pad.counter))
