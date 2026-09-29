@@ -1,12 +1,16 @@
 // March 2026: a yearly premium, dividends with a foreign tax taken at
-// source, and a contract that ends.
+// source, a contract that ends, and contracts kept a little differently:
+// a share of the building's water on the rent, a month given free, and a
+// promotion extended.
 
-01 flat
-01 gym
+01 flat          // ▸ 2,918.60: the rent, and the water on top
+  + 12% of 155.00 USD #utilities "the building's water for Q1"
+01 gym           // ▸ 120.00: the promotion's terms
 01 lease
 01 mortgage
 01 condo-insurance   // ▸ 1,140.00 · #insurance of condo, 95.00 a month through 2027-02
-03 figma
+03 figma waived "a month free: figma's apology for the outage"
+                                                    // ▸ kept at nothing: not late, nothing owed
 08 phone
 
 10 netflix ends      // cancelled: no more payments are expected, and none is missing
@@ -20,7 +24,9 @@
   edd              52.99 USD
   checking        ...
 
+14 me -> farmers-market 23.00 USD                   // ▸ #groceries: the party's own purpose
 20 vti-monthly 1.640 VTI
+28 ^promo until 06-30 "the gym extended its promotion through June"
 
 // Quarterly dividends. A fund that pays is a party like any other, and what
 // it pays is a dividend.

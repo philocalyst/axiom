@@ -16,7 +16,8 @@ None of it is typed.
 | `assets.ax` | the condo and the laptop, each an identified thing with a history |
 | `contracts.ax` | everything recurring or scheduled, stated once |
 | `budgets.ax` | budgets on what money is for |
-| `journal/2026/*.ax` | three months: mostly contract names, plus the one-offs |
+| `journal/2026/*.ax` | three months: mostly contract names, plus the one-offs and the changes |
+| `sync.ax` | where the journal comes from: the bank's and card's exports, prices |
 | `std-sketch.ax` | where the hints come from: purposes, party kinds, allocations, `us/rental` |
 
 ## What the journal no longer says
@@ -31,8 +32,13 @@ None of it is typed.
   - `2026-01-08 phone` is 45 USD from the card, 27 of it the studio's.
   - `2026-01-01 mortgage` is 2,302.90 USD, split by the loan's own terms into 1,527.88 of interest on the condo, 365.02 of principal and 410.00 of escrow.
   - A paystub restates only its amounts.
+- **What changed, only once, on the day it changed.**
+  - `27 gym 120 USD monthly until 04-30 ^promo` halves the gym for a while, and `28 ^promo until 06-30` extends it.
+  - `01 flat` with `+ 12% of 155.00 USD #utilities` adds the building's water to March's rent without touching the contract.
+  - `03 figma waived` releases one month: nothing is late, and nothing is owed.
+- **Which flows are the same flow.** The bank's export and a line typed from a receipt reconcile into one; a record that keeps a contract is written as its occurrence (`sync.ax`).
 - **Anything implicit in a price.**
-  - The 138.09 USD of sales tax inside the laptop's 1,739.13.
+  - The 138.09 USD of sales tax inside the laptop's 1,739.13, which is part of what the laptop cost (`#purchase of laptop`).
   - The 0.39 USD the card's exchange rate cost in Paris.
   - The 2.49 USD of foreign tax taken from VXUS's dividend. That one is written, because it is a withholding like a paystub's, and becomes a credit.
 - **Any basis.**
@@ -57,6 +63,36 @@ note[wash-sale]: 18.86 USD of loss on VTI sold 2026-02-05 is disallowed: VTI was
    = note: the loss joins the 2026-02-20 lot's basis (500.00 → 518.86), which is held since 2026-01-20
 
 ✓ 3 months · 14 contracts kept 41 times · net worth 214,388.17 USD
+```
+
+## What `check` says when a statement disagrees
+
+If February's rent had not been written, the bank's balance would not match, and the
+book knows why:
+
+```text
+error[assertion]: checking holds 14,431.38 USD, not 11,531.38 USD
+   ╭─[journal/2026/02.ax:58:1]
+   │
+58 │ 28 checking   = 11_531.38 USD
+   │ ──────────────┬─────────────
+   │               ╰── 2,900.00 USD less than the book holds
+   │
+   ├─[contracts.ax:21:3]
+   │
+21 │   2_900 USD monthly on 1 from checking
+   │   ────────────────┬─────────────────
+   │                   ╰── due 2026-02-01, and not written
+   │
+   = since 01-31, when checking held 8,828.87:
+       02-01  mortgage       -2,302.90     6,525.97
+       02-02  bay-plumbing   -1,480.00     5,045.97   #improvement of condo
+       …
+       02-28  job            +3,054.70    14,431.38
+   = note: the difference is exactly the flat's rent for February, due 02-01, which the journal does not record
+   = help: record it: `01 flat` in journal/2026/02.ax
+
+✗ 1 error
 ```
 
 ## What `why condo` shows

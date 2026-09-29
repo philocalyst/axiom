@@ -20,6 +20,7 @@ asset      a thing, with a history      condo, laptop
 commodity  what it is counted in        USD, EUR, VTI
 purpose    what a flow is for           #groceries, #wages, #improvement of condo
 flow       an event: value moving       06 visa -> trader-joes 84.20 USD
+statement  a fact about one thing       31 checking = 8_828.87 USD · 07-01 flat 3_050 USD monthly
 contract   a promise of flows           phone with mint: 45 USD monthly, 60% business
 claim      what is owed, until paid     jo owes me 400 USD, due 04-01
 law        what must hold, and count    deferrals per year <= limit[year]
@@ -70,17 +71,20 @@ answer.
   in envelopes. Budgets live on purposes, and envelopes are money held `for`
   someone.
 
-## 2. Flows are the only facts
+## 2. Flows and statements are the only facts
 
-A journal line records one event: value moved between two ends.
+A journal line records one of two things. A **flow** is an event: value moved
+between two ends. A **statement** is a fact about one thing on a day: its
+balance, a contract kept, a claim, a price, a change of terms. Both read
+`DATE WHAT …`, and nothing else is written.
 
 ```text
 06 visa -> trader-joes 84.20 USD
 ```
 
-The ends are accounts, owners, parties and assets. `from -> to` balances
-every flow by construction, so there is no balancing account to invent. A
-transaction is flows written together, with one side split:
+The ends are accounts, owners and parties. `from -> to` balances every flow
+by construction, so there is no balancing account to invent. A transaction is
+flows written together, with one side split:
 
 ```text
 15 job
@@ -93,7 +97,10 @@ A leg between two parties passes through the transaction's owner. `lumen ->
 irs 498 USD` is Sam's wages, paid on to the IRS, which is exactly how a tax
 reads a paystub.
 
-A flow says why it happened in three registers, and each has one mark:
+A receipt breaks down by line items, which name no end: `32.10 USD
+#groceries` under a store payment carves out part of it, `+ 4.00 USD #tip`
+adds to it, and `- 60 USD "loyalty"` takes from it. A flow says why it
+happened in three registers, and each has one mark:
 - **a purpose**, `#groceries`, `#repair of condo`: structured, declared,
   typed, budgeted, counted by laws;
 - **a description**, `"food for the routine"`: free words for people, with
@@ -117,8 +124,9 @@ editor shows the rest as hints, each with where it came from.
 A flow has two times: the day value moves, and the period it belongs to (`for
 2025`, or a contract that `covers the year`). Balances read the day. Tallies,
 budgets and taxes read the period. A flow in parentheses is pending (a check
-written but not cashed). A date says only what its file's place does not: in
-`journal/2026/01.ax`, `15 job` is enough.
+written but not cashed). A date says only what its context does not: in
+`journal/2026/01.ax`, or below a `2026-01` heading, `15 job` is enough. The
+folders are a convention the tools follow and never a law they enforce.
 
 The journal holds nothing but authored facts. What a book implies is derived
 and shown, never generated into it (§5).
@@ -137,11 +145,14 @@ that made it, and whom it is held for.
   leave a tax-deferred account.
 
 An asset is one identified thing made of parts: its acquisition, and each
-improvement. Laws of its kind run per part, so a new water heater
-depreciates on its own schedule. `consume` lowers a part's basis. Selling the
-asset relieves every part. `why condo` is the asset's whole history: what it
-cost, what improved it, what it has consumed, and what it earned and cost
-along the way.
+improvement. It never moves like money; flows are *about* it, through their
+purpose's object: `#purchase of laptop`, `#improvement of condo`, `#repair of
+condo`, `#rent of condo`, `#sale of condo`. Identity lives in the money and
+what it was for, not in an account. Laws of its kind run per part, so a new
+water heater depreciates on its own schedule. `consume` lowers a part's
+basis. Selling the asset relieves every part. `why condo` is the asset's whole
+history: what it cost, what improved it, what it has consumed, and what it
+earned and cost along the way.
 
 ## 4. Promises: contracts and claims
 
@@ -163,8 +174,31 @@ A claim is the time between an event and its counterpart:
 - a deposit held;
 - a late occurrence.
 
-A claim lives on the party. Their next payment settles it, the one its code
-names or the oldest. There are no receivable or payable accounts.
+A claim lives on the party. Their next payment settles it: the ones its codes
+name, else the one of exactly its amount, else the oldest. There are no
+receivable or payable accounts. Paying for someone (`visa -> delta 420 USD for
+lumen`) is a claim on them, not your spending.
+
+**Terms change.** A promise is rarely kept exactly as made. The rent goes up;
+the landlord asks for a share of the water bill one month and waives
+December the next; a gym runs a promotion, then extends it; a lease is
+renewed; a mortgage's rate resets. Each is one statement on the day it
+happens, for good or `until` a day, and each can carry a code so a later
+statement can extend or end it:
+
+```text
+07-01 flat 3_050 USD monthly
+01 flat
+  + 12% of 155.00 USD #utilities "the building's water"
+12-01 flat waived "December free"
+03-01 gym 120 USD monthly until 05-31 ^promo
+05-28 ^promo until 08-31
+```
+
+The declaration is only the first of a thing's terms. The same holds for
+every property and budget (`06-15 me lives us/ny`; `12-01 budget food 1_200
+USD monthly until 12-31`), so the book says what was true on each day, and
+laws, promises and forecasts read it as it stood then.
 
 ## 5. The implicit, made visible
 
@@ -246,7 +280,10 @@ to it is tax paid for the flow's year", is a line of `us`.
   - What each other holding would yield comes from running a withdrawal
     through the laws. Liquidity is derived from law.
 - **Budgets** are warnings on purposes, and **limits** are every cap's
-  headroom.
+  headroom. A budget is a constraint you may loosen for a while (a statement
+  with `until`), tighten (a dry January is a budget of `empty`), tie to another
+  purpose (`10% of #income`), or let carry, so an overspent month is a loss
+  the next one takes.
 - **Taxes** are laws that tally purposes and gains, and closing laws that
   figure the return from them.
 - **Contracts** show what is promised and kept, what is late, and what is
@@ -284,8 +321,12 @@ bytes ──parse──▶ AST ──model──▶ Book ──engine──▶ R
   `mul_div` through `i128` with banker's rounding. There are no floats.
 - **Dates**: `Day(i32)`, with Joffe's multiplication-only calendar
   conversions.
-- **Diagnostics** speak accounting. They state the fact, point into the
-  reader's file, show the facts a law read, and give the fix as an edit.
+- **Diagnostics** speak accounting, and use everything the book knows. They
+  state the fact, point into the reader's file and at the causes (the rule,
+  the contract, the flows a tally counted), show the facts a law read, and
+  give the fix as an edit. A failed assertion is explained by what the book
+  expected: an occurrence due and not written, a claim settled elsewhere, a
+  derived flow also written by hand.
 
 ## 10. Crates
 
@@ -306,10 +347,28 @@ uses `Arc`, `Mutex`, `Rc` or `RefCell`. The only dependency is `memchr`.
 
 ## 11. Sync without the network
 
-`sync FILE` names a command whose stdout is Axiom. `axiom sync` runs the
-commands in parallel and writes each file only if it parses. Prices,
-appraisals and statements arrive this way. The core stays pure and
-reproducible.
+A book at any scale is mostly written by machines: a bank's export, an
+invoicing system, a price feed, a statistics office. `sync NAME` declares a
+source as a command whose output Axiom reads. The core never touches the
+network, so it stays pure and reproducible.
+
+- **Recognition is identity again.** A party says how it appears on
+  statements (`known-as "TRADER JOE*"`), and a code declaration says what its
+  codes look like, so a record's memo becomes a party, a purpose by
+  inference, and the invoice it settles.
+- **Reconciliation, not import.** A record that matches a flow already
+  written (the same account and amount, within days) is left alone: a
+  receipt typed by hand and the bank's line are one flow, and a transfer
+  seen by two feeds is written once.
+- **Promises absorb the routine.** A record that keeps a contract is written
+  as the occurrence (`01 flat`), so the journal stays as short as a person
+  would write it.
+- **Only facts are added.** Nothing written is changed; new lines go into
+  the file their day belongs to, dated as briefly as it allows. Prices,
+  parameters (an inflation index) and system updates arrive the same way.
+- **Queries go the other way.** Every view prints JSON, so the scripts that
+  feed the book can read it too (the open invoices to chase, the balance to
+  reconcile against).
 
 ## 12. What was deliberately dropped
 
@@ -319,9 +378,10 @@ reproducible.
 - **From v3:** the chart of accounts:
   - income, expense and equity accounts;
   - `receivable` and `payable`;
-  - `PLACE.basis`;
+  - `PLACE.basis`, and assets as flow ends;
   - plans (contracts replace them);
-  - `:` on flows.
+  - `:` and `/ PARTY` on flows;
+  - layouts that constrain dates.
 
 What survives are properties, not machinery:
 - determinism and exactness;
