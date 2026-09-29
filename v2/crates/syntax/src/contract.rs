@@ -48,7 +48,7 @@ impl<'s> Parser<'s> {
                     None => Ok(()),
                 }
             }
-            _ => parser.leg(child, Scope::Flow).map(drop),
+            _ => parser.leg(child, Scope::Undated).map(drop),
         });
         if schedule.is_none() && body.is_ok() {
             self.report(missing_schedule(header.loc));

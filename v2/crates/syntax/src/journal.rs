@@ -63,9 +63,9 @@ impl<'s> Parser<'s> {
                 return self.occurrence(line, date, end.name, amount);
             }
         }
-        let (mut flow, arrow) = self.flow_head(from, clauses)?;
+        let (mut flow, arrow) = self.flow_head(from, date, clauses)?;
         let header = self.end_header(line)?;
-        self.flow_legs(line, &mut flow, arrow)?;
+        self.flow_legs(line, &mut flow, date, arrow)?;
         self.emit(&header, Txn { date, flow }, ItemKind::Txn);
         Ok(())
     }
@@ -106,13 +106,13 @@ impl<'s> Parser<'s> {
         self.bump();
         let creditor = self.name("expected-name", "the party or owner it is owed to")?;
         let amount = self.amount()?;
-        Ok(Claim { date, debtor, creditor, amount, tail: self.tail(Scope::Flow, self.mark::<Clause>())? })
+        Ok(Claim { date, debtor, creditor, amount, tail: self.tail(Scope::Dated(date), self.mark::<Clause>())? })
     }
 
     /// `DATE CONTRACT [AMOUNT]` with override legs below.
     fn occurrence(&mut self, line: &mut Line<'s>, date: Day, name: Name<'s>, amount: Option<Amount<'s>>) -> Parse<()> {
         let header = self.end_header(line)?;
-        let legs = self.legs(line, |parser, leg_line| parser.leg(leg_line, Scope::Flow).map(drop))?;
+        let legs = self.legs(line, |parser, leg_line| parser.leg(leg_line, Scope::Dated(date)).map(drop))?;
         self.emit(&header, Occurrence { date, contract: name, amount, legs }, ItemKind::Occurrence);
         Ok(())
     }
@@ -139,7 +139,7 @@ impl<'s> Parser<'s> {
                 parser.push(claim);
                 return Ok(());
             }
-            let leg = parser.leg(opening_line, Scope::Opening)?;
+            let leg = parser.leg(opening_line, Scope::Opening(date))?;
             match parser.get(leg).amount {
                 Quantity::Fixed(_) | Quantity::Whole => Ok(()),
                 _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),

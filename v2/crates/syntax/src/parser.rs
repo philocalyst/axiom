@@ -13,7 +13,7 @@
 use std::ops::Range;
 
 use axiom_core::diag::closest;
-use axiom_core::{Diagnostic, FileId, Loc};
+use axiom_core::{Day, Diagnostic, FileId, Loc};
 
 use crate::ast::*;
 use crate::ast::{Piece, locate};
@@ -27,17 +27,35 @@ pub(crate) struct Reported;
 
 pub(crate) type Parse<T> = Result<T, Reported>;
 
-/// Where a leg or a header's tail is written, which says what it may add to
-/// the common clauses.
+/// Where a leg or a header's tail is written: what it may add to the common
+/// clauses, and the day a short `due` date counts forward from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Scope {
-    /// A flow, its legs, an occurrence's overrides or a contract's template.
-    Flow,
-    /// The lines of an `opening`, which say `since` when their parcels were
-    /// acquired, and which an asset has with a `basis` and no amount.
-    Opening,
+    /// A flow, a statement, or the lines under one, on this day.
+    Dated(Day),
+    /// The lines of an `opening` on this day, which say `since` when their
+    /// parcels were acquired, and which an asset has with a `basis` and no
+    /// amount.
+    Opening(Day),
+    /// A contract's template: no day, so no short dates.
+    Undated,
     /// A contract's schedule, which says only its purpose and a description.
     Schedule,
+}
+
+impl Scope {
+    /// The day it is written on, if it has one.
+    pub fn day(self) -> Option<Day> {
+        match self {
+            Scope::Dated(day) | Scope::Opening(day) => Some(day),
+            Scope::Undated | Scope::Schedule => None,
+        }
+    }
+
+    /// Whether it is the lines of an `opening`.
+    pub fn is_opening(self) -> bool {
+        matches!(self, Scope::Opening(_))
+    }
 }
 
 /// A parsed header line: where the item is, and what documents it.

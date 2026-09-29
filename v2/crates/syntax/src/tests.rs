@@ -930,22 +930,72 @@ fn any_other_date_may_leave_out_the_year_when_the_place_gives_it() {
 }
 
 #[test]
+fn a_short_due_date_counts_forward_from_its_line() {
+    // No context is needed: `due 04-01` is the first April the 1st on or after the line's day.
+    let due = |src: &str| {
+        let (file, diags) = crate::parse(FileId(0), src, Folder::default());
+        assert!(diags.is_empty(), "{}", render(src, &diags));
+        let kinds = clauses(&file, txns(&file)[0].flow.tail);
+        let ClauseKind::Due(Due::On(day)) = kinds[0] else { panic!("a due date") };
+        *day
+    };
+    assert_eq!(due("2026-01-12 a -> b 5 USD due 04-01\n"), day(2026, 4, 1));
+    assert_eq!(due("2026-04-01 a -> b 5 USD due 04-01\n"), day(2026, 4, 1), "on the day itself");
+    assert_eq!(due("2026-12-20 a -> b 5 USD due 01-05\n"), day(2027, 1, 5), "next year");
+    assert_eq!(due("2026-12-20 a -> b 5 USD due 2026-12-01\n"), day(2026, 12, 1), "a whole date is as written");
+    assert_eq!(due("2027-01-01 a -> b 5 USD due 02-29\n"), day(2028, 2, 29), "waits for a leap year");
+    let src = "2026-01-01 a -> b 5 USD due 02-30\n";
+    assert_eq!(first_fix(src, &only_error(src, "bad-date")), ("02-30", "02-28"));
+}
+
+#[test]
+fn a_heading_gives_the_lines_below_it_their_year_or_month() {
+    let src = "\
+2026-02
+15 a -> b 5 USD
+2026-03-01 a -> b 5 USD
+03 a -> b 5 USD
+2027
+02-01 a -> b 5 USD
+2026-04 // April again
+30 a -> b 5 USD
+";
+    assert_eq!(
+        dates_in(Folder::default(), src),
+        [day(2026, 2, 15), day(2026, 3, 1), day(2026, 2, 3), day(2027, 2, 1), day(2026, 4, 30)]
+    );
+    // A heading replaces what the folder said, month included.
+    let src = "2026-04\n03 a -> b 5 USD\n2027\n03 a -> b 5 USD\n";
+    let errors = crate::parse(FileId(0), src, MARCH).1;
+    assert_eq!(errors.iter().map(|error| &*error.code).collect::<Vec<_>>(), ["short-date"]);
+    assert_eq!(&src[errors[0].anchor().unwrap().range()], "03");
+    assert_eq!(errors[0].anchor().unwrap().start as usize, src.rfind("03 a").unwrap(), "the one under `2027`");
+    // What is not a heading is not one: a date, a heading with words, an impossible month.
+    for (src, code) in [("2026-13\n", "bad-date"), ("2026-03 x\n", "expected-item"), ("2026 x\n", "expected-date")] {
+        assert_eq!(crate::parse(FileId(0), src, Folder::default()).1[0].code, code, "{src}");
+    }
+    // It documents nothing, and says so.
+    let (_, diags) = crate::parse(FileId(0), "/// Not a doc.\n2026\n", Folder::default());
+    assert_eq!(diags[0].code, "misplaced-doc");
+}
+
+#[test]
 fn a_short_date_where_the_place_does_not_give_the_rest_is_an_error() {
     // (place, source, what the date leaves out)
     let cases = [
         (Folder::default(), "15 a -> b 5 USD\n", "year"),
         (YEAR, "15 a -> b 5 USD\n", "month"),
         (Folder::default(), "03-15 a -> b 5 USD\n", "year"),
-        (Folder::default(), "2026-03-15 a -> b 5 USD due 04-01\n", "year"),
+        (Folder::default(), "2026-03-15 a -> b 5 USD for 04-01\n", "year"),
     ];
     for (place, src, missing) in cases {
         let error = place_error(place, src, "short-date");
-        assert!(error.message.ends_with(&format!("leaves out the {missing}, which this file does not give")));
+        assert!(error.message.ends_with(&format!("leaves out the {missing}, which no heading above it and no folder gives")));
         let written = &src[error.anchor().unwrap().range()];
         assert!(error.message.starts_with(&format!("`{written}`")), "{}", error.message);
     }
     // The label is on the date itself, in the middle of the line too.
-    let src = "2026-03-15 a -> b 5 USD due 04-01\n";
+    let src = "2026-03-15 a -> b 5 USD for 04-01\n";
     assert_eq!(&src[place_error(Folder::default(), src, "short-date").anchor().unwrap().range()], "04-01");
 }
 
@@ -1513,6 +1563,12 @@ fn a_file_parsed_in_pieces_is_the_file_parsed_whole() {
     );
     damaged(EXAMPLE, 300, same);
     same(&"2026-01-01 a -> b 5 USD\n2026-01-02 a -> b 6 USD\n\tstray\n2026-01-03 a -> b 7 USD\n".repeat(50));
+    // A heading reaches the lines below it, in whichever piece they are.
+    let months = (1..=12).map(|month| format!("2026-{month:02}\n01 a -> b 5 USD\n// a note\n15 a -> b 6 USD due 02-01\n"));
+    let headed = months.collect::<String>() + "2027\n03-04 a -> b 7 USD\n";
+    same(&headed);
+    same(&headed.repeat(3));
+    damaged(&headed, 300, same);
 }
 
 #[test]

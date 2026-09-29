@@ -10,6 +10,7 @@ use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Loc};
 
 use crate::ast::*;
+use crate::dates::heading;
 use crate::lex::{Punct, Tok, Token};
 use crate::lines::Line;
 use crate::parser::{Parse, Parser, Reported, list_words};
@@ -104,7 +105,16 @@ impl<'s> Parser<'s> {
                 self.bump();
                 self.journal_entry(line, date)
             }
-            Tok::MonthDay(..) | Tok::Number(_) => {
+            Tok::Month(_) | Tok::Number(_) | Tok::MonthDay(..) => {
+                // A line of only a year or a month says what the lines below it are in.
+                if let Some(folder) = heading(&self.src.as_bytes()[line.body..line.end]) {
+                    self.warn_ignored_doc(line);
+                    self.folder = folder;
+                    return Ok(());
+                }
+                if let Tok::Month(_) = token.tok {
+                    return Err(self.expected("expected-item", "a date, a keyword, or a heading on a line of its own"));
+                }
                 let date = self.item_date("a date or a keyword")?;
                 self.journal_entry(line, date)
             }
@@ -285,7 +295,7 @@ impl<'s> Parser<'s> {
 
     /// Lines that cannot be documented (properties, steps, rows) still tell the
     /// author when a `///` block above them is being ignored.
-    fn warn_ignored_doc(&mut self, line: &Line<'s>) {
+    pub fn warn_ignored_doc(&mut self, line: &Line<'s>) {
         if let Some(doc) = line.doc {
             let diag = Diagnostic::warning("misplaced-doc", "this doc comment is ignored")
                 .label(doc.loc, "nothing here takes documentation")

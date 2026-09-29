@@ -4,7 +4,7 @@
 
 use std::mem::discriminant;
 
-use axiom_core::{Diagnostic, Loc};
+use axiom_core::{Day, Diagnostic, Loc};
 
 use crate::ast::*;
 use crate::lex::{Punct, Tok};
@@ -17,16 +17,16 @@ impl<'s> Parser<'s> {
     /// read first (a `DATE..DATE` spread) count too. Also gives where the arrow
     /// was. The legs come after the header line has ended: see
     /// [`Self::flow_legs`].
-    pub fn flow_head(&mut self, from: Side<'s>, clauses: usize) -> Parse<(Flow<'s>, Loc)> {
+    pub fn flow_head(&mut self, from: Side<'s>, date: Day, clauses: usize) -> Parse<(Flow<'s>, Loc)> {
         let arrow = self.arrow(&from)?;
         let to = self.side()?;
-        let tail = self.tail(Scope::Flow, clauses)?;
+        let tail = self.tail(Scope::Dated(date), clauses)?;
         Ok((Flow { from, to, tail, legs: Many::EMPTY }, arrow))
     }
 
     /// Reads the legs under `line` into `flow` and checks they fit its sides.
-    pub fn flow_legs(&mut self, line: &Line<'s>, flow: &mut Flow<'s>, arrow: Loc) -> Parse<()> {
-        flow.legs = self.legs(line, |parser, leg_line| parser.leg(leg_line, Scope::Flow).map(drop))?;
+    pub fn flow_legs(&mut self, line: &Line<'s>, flow: &mut Flow<'s>, date: Day, arrow: Loc) -> Parse<()> {
+        flow.legs = self.legs(line, |parser, leg_line| parser.leg(leg_line, Scope::Dated(date)).map(drop))?;
         self.check_shape(flow, arrow)
     }
 
@@ -148,7 +148,7 @@ impl<'s> Parser<'s> {
             Tok::Punct(Punct::Ellipsis) => self.bump_as(Quantity::Rest),
             Tok::Punct(Punct::Eq) => Quantity::Target(self.then(Self::amount)?),
             Tok::Percent(percent) => self.bump_as(Quantity::Percent(percent)),
-            Tok::Name("basis") if scope == Scope::Opening => Quantity::Whole,
+            Tok::Name("basis") if scope.is_opening() => Quantity::Whole,
             _ => self.quantity()?,
         };
         let tail = self.tail(scope, self.mark::<Clause>())?;
@@ -174,9 +174,9 @@ impl<'s> Parser<'s> {
                 Tok::Punct(Punct::At) => ClauseKind::Price(self.then(Self::measured)?),
                 Tok::Punct(Punct::Bang) => ClauseKind::Waive(self.waiver()?),
                 Tok::Name("for") => ClauseKind::For(self.then(|p| p.for_what(token.loc))?),
-                Tok::Name("due") => ClauseKind::Due(self.then(Self::due)?),
+                Tok::Name("due") => ClauseKind::Due(self.then(|p| p.due(scope))?),
                 Tok::Name("basis") => ClauseKind::Basis(self.then(Self::amount)?),
-                Tok::Name("since") if scope == Scope::Opening => {
+                Tok::Name("since") if scope.is_opening() => {
                     ClauseKind::Since(self.then(|p| p.date("the day the parcels were acquired, like `2023-06-15`"))?)
                 }
                 _ => break,
@@ -202,11 +202,12 @@ impl<'s> Parser<'s> {
         Ok(Purpose { name, of: of.transpose()? })
     }
 
-    /// After `due`: a date, or a span after the date it is measured from.
-    fn due(&mut self) -> Parse<Due> {
+    /// After `due`: a date, which if short is the first such day on or after
+    /// the day the line is dated, or a span after that day.
+    fn due(&mut self, scope: Scope) -> Parse<Due> {
         match self.tok() {
             Tok::Span(span) => Ok(Due::After(self.bump_as(span))),
-            _ => self.date("a date or a span such as `30d`").map(Due::On),
+            _ => self.date_from(scope.day(), "a date or a span such as `30d`").map(Due::On),
         }
     }
 

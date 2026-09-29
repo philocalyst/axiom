@@ -52,6 +52,7 @@ use axiom_core::{Diagnostic, FileId, Loc, par};
 use memchr::{memchr, memchr_iter, memrchr};
 
 use crate::ast::Piece;
+use crate::dates::heading;
 use crate::lines::{Tabs, unattached_doc};
 use crate::parser::Parser;
 use crate::refs::MAX_PIECES;
@@ -97,8 +98,22 @@ pub fn parse(file: FileId, src: &str, folder: Folder) -> (File<'_>, Vec<Diagnost
 
 /// [`parse`] with the file cut into about `pieces` pieces.
 pub(crate) fn parse_in(file: FileId, src: &str, folder: Folder, pieces: usize) -> (File<'_>, Vec<Diagnostic>) {
-    let ranges: Vec<(usize, Range<usize>)> = cut(src, pieces).into_iter().enumerate().collect();
-    let parsed = par::map_each(&ranges, |(number, range)| parse_piece(file, src, folder, range.clone(), *number));
+    let ranges = cut(src, pieces);
+    // What each piece holds is read first, because what a piece's dates leave
+    // out depends on the last heading before it, in whichever piece that was.
+    let scans = par::map_each(&ranges, |range| Scan::of(&src.as_bytes()[range.clone()]));
+    let mut context = folder;
+    let jobs: Vec<Job> = ranges
+        .into_iter()
+        .zip(scans)
+        .enumerate()
+        .map(|(number, (range, scan))| {
+            let job = Job { number, range, folder: context, scan };
+            context = job.scan.heading.unwrap_or(context);
+            job
+        })
+        .collect();
+    let parsed = par::map_each(&jobs, |job| parse_piece(file, src, job));
     let (mut pieces, mut diags, mut tabs) = (Vec::new(), Vec::new(), Tabs::default());
     for (piece, more, more_tabs) in parsed {
         pieces.push(piece);
@@ -113,30 +128,54 @@ pub(crate) fn parse_in(file: FileId, src: &str, folder: Folder, pieces: usize) -
 /// A parsed piece, what it found wrong, and its lines that were indented with tabs.
 type Parsed<'s> = (Piece<'s>, Vec<Diagnostic>, Tabs);
 
-/// Piece number `number` of the file, `src[range]`, parsed.
-fn parse_piece(file: FileId, src: &str, folder: Folder, range: Range<usize>, number: usize) -> Parsed<'_> {
-    let mut parser = Parser::new(file, src, range.clone(), number, folder);
-    let (items, dated) = count_items(&src.as_bytes()[range]);
-    parser.items.reserve(items);
-    parser.reserve::<Txn>(dated);
-    parser.items(number == 0);
+/// One piece of the file to parse: which, where, what its dates start out as,
+/// and what a first look at it found.
+struct Job {
+    number: usize,
+    range: Range<usize>,
+    folder: Folder,
+    scan: Scan,
+}
+
+/// The piece `job` describes, parsed.
+fn parse_piece<'s>(file: FileId, src: &'s str, job: &Job) -> Parsed<'s> {
+    let mut parser = Parser::new(file, src, job.range.clone(), job.number, job.folder);
+    parser.items.reserve(job.scan.items);
+    parser.reserve::<Txn>(job.scan.dated);
+    parser.items(job.number == 0);
     let (piece, mut diags, lines) = parser.finish();
     diags.extend(lines.stray_doc.map(unattached_doc));
     (piece, diags, lines.tabs)
 }
 
-/// How many lines of `text` start an item, and how many of those start with a
-/// date: room for the tables, so they never grow.
-fn count_items(text: &[u8]) -> (usize, usize) {
-    let mut counts = (1, usize::from(text.first().is_some_and(u8::is_ascii_digit)));
-    for newline in memchr_iter(b'\n', text) {
-        match text.get(newline + 1) {
-            Some(b'0'..=b'9') => counts = (counts.0 + 1, counts.1 + 1),
-            Some(b' ' | b'\t' | b'\r' | b'\n') | None => {}
-            Some(_) => counts.0 += 1,
+/// What one pass over a piece's lines finds: room for the tables, so they
+/// never grow, and the last heading, which the pieces after it start from.
+struct Scan {
+    /// How many lines start an item.
+    items: usize,
+    /// How many of those start with a date (or a number).
+    dated: usize,
+    /// The context of the last heading line, if the piece has one.
+    heading: Option<Folder>,
+}
+
+impl Scan {
+    fn of(text: &[u8]) -> Scan {
+        let first_is_digit = text.first().is_some_and(u8::is_ascii_digit);
+        let mut scan = Scan { items: 1, dated: usize::from(first_is_digit), heading: None };
+        scan.heading = text.first().filter(|_| first_is_digit).and_then(|_| heading(text));
+        for newline in memchr_iter(b'\n', text) {
+            match text.get(newline + 1) {
+                Some(b'0'..=b'9') => {
+                    (scan.items, scan.dated) = (scan.items + 1, scan.dated + 1);
+                    scan.heading = heading(&text[newline + 1..]).or(scan.heading);
+                }
+                Some(b' ' | b'\t' | b'\r' | b'\n') | None => {}
+                Some(_) => scan.items += 1,
+            }
         }
+        scan
     }
-    counts
 }
 
 /// Cuts `src` into about `pieces` ranges, each starting where an item does.
