@@ -1,0 +1,20 @@
+$ axiom available --at 2025-05-01 --today 2026-01-06
+
+Available on 2025-05-01
+
+What you can spend
+  Liquid now                                Amount
+  ────────────────────────────────────────────────
+  Money in liquid places             14,915.98 USD
+    assets/bank/checking                730.08 USD
+    assets/bank/collective-checking   5,160.95 USD
+    assets/bank/savings               4,500.00 USD
+    assets/cash/collective-cash          96.50 USD
+    assets/cash/wallet                  328.45 USD
+    assets/loans/riley                2,000.00 USD
+    assets/roommates/ben              1,050.00 USD
+    assets/roommates/cleo             1,050.00 USD
+  Tied to restricted entities        -3,158.65 USD
+    tied to riverfront               -3,158.65 USD
+  ────────────────────────────────────────────────
+  Available to spend                 11,757.33 USD

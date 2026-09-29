@@ -1,0 +1,23 @@
+// A US citizen who moved from San Francisco to Berlin on 2025-07-01. Calendar year
+// 2025. Reports are in dollars; the German pay, rent and savings are in euros, and
+// a trip to London is in pounds.
+//
+// The folders are constraints: journal/2025/07.ax holds July 2025 only.
+
+base USD
+
+use std
+use us/401k
+use us/abroad/de
+
+/// Dana, 37, single. San Francisco until the end of June, Berlin from July 1.
+/// `lives` says where, and dates when: the second line ends the first.
+///
+/// A US citizen stays under United States law wherever they live, and `lives` cannot
+/// name two jurisdictions at once, so Berlin is spelled `us/abroad/de`: under `us`
+/// (by its path) and under Germany. See systems/us/abroad.ax.
+entity me : person
+  born   1987-09-14
+  filing single
+  lives  us/ca/san-francisco
+  lives  us/abroad/de from 2025-07-01

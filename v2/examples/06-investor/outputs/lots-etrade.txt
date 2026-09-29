@@ -1,0 +1,13 @@
+$ axiom lots etrade --today 2026-01-06
+
+Lots at 2026-01-06
+
+  Place              Quantity          Basis  Acquired    Held            Value    Unrealized  Term   Note
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/etrade  46.1872 NWND   7,276.33 USD  2025-02-15  10m22d   8,821.76 USD  1,545.43 USD  short
+  assets/etrade  60.0000 NWND   8,895.60 USD  2025-05-15  7m22d   11,460.00 USD  2,564.40 USD  short
+  assets/etrade  69.3814 NWND  11,725.46 USD  2025-06-30  6m7d    13,251.85 USD  1,526.39 USD  short
+  assets/etrade  60.0000 NWND  10,108.20 USD  2025-08-15  4m22d   11,460.00 USD  1,351.80 USD  short
+  assets/etrade  60.0000 NWND  11,050.80 USD  2025-11-15  1m22d   11,460.00 USD    409.20 USD  short
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Total                        49,056.39 USD                      56,453.61 USD  7,397.22 USD

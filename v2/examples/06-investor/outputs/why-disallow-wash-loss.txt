@@ -1,0 +1,23 @@
+$ axiom why disallow-wash-loss --today 2026-01-06
+
+Why disallow-wash-loss
+
+  Law       disallow-wash-loss
+  ─────────────────────────────────
+  When      on in
+  Governs   everything in this book
+  Written   tax.ax:17
+  Ran       1 times
+  Recorded  0 violations, 2 effects
+  · A wash sale (IRC §1091): a loss on a sale is disallowed when substantially
+  · identical shares are bought within 30 days either side, and it is added to
+  · the basis of the shares bought. Axiom cannot see the 30-day window, so the
+  · loss is parked by hand in `equity/wash-sale` and released into the new lot's
+  · cost when the replacement is bought. `us` counted the whole loss when the
+  · shares were sold; this law adds the disallowed part back.
+
+Recent effects
+  Date        Effect                  Amount  Owed to  From
+  ──────────────────────────────────────────────────────────────────────────
+  2025-06-10  short-term-gains  1,978.60 USD           journal/2025/06.ax:11
+  2025-06-10  agi               1,978.60 USD           journal/2025/06.ax:11

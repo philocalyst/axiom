@@ -1,0 +1,212 @@
+// Who is where, who owes whom, and what each kind of place means.
+
+// ─── Kinds ──────────────────────────────────────────────────────────────────
+
+/// What a person owes me (a positive balance) or what I owe them (a negative
+/// one). One place per person, netted, the way an expense-splitting app shows it.
+kind iou : asset
+
+/// Money lent to a friend, paid back on a rhythm. A month with no repayment
+/// while something is still owed is worth a warning.
+kind personal-loan : asset
+  has expected amount
+
+  /// The friend agreed to pay back `expected` every month. This month passed with
+  /// less than that coming in while a balance is still owed. Ask them, or move
+  /// the agreement: change `expected` on the account.
+  law repayment
+    each month
+    when self.balance > empty
+    warn total(out, month) >= self.expected "no repayment this month"
+
+/// What a garden grant may pay for.
+kind garden : expense
+
+/// Pay that is not wages: a reimbursement of something I bought for work. It
+/// arrives as income to the books and cancels the expense; it is not taxable.
+kind reimbursement : income
+
+
+// ─── Me: money ──────────────────────────────────────────────────────────────
+
+account assets/bank/checking : bank
+account assets/bank/savings  : bank
+
+/// Cash in the wallet: tips in, small things out.
+account assets/cash/wallet : cash
+
+/// One card for everything, paid in full on the 22nd.
+account liabilities/visa : credit-card
+
+
+// ─── The flat and the friend ────────────────────────────────────────────────
+
+/// Ben. Positive: Ben owes me. Negative: I owe Ben.
+account assets/roommates/ben : iou
+
+/// Cleo.
+account assets/roommates/cleo : iou
+
+/// The 2,000.00 USD lent to Riley on 2025-04-10, 250.00 USD a month expected.
+account assets/loans/riley : personal-loan
+  expected 250 USD
+
+
+// ─── Income ─────────────────────────────────────────────────────────────────
+
+/// Pay and card tips from The Lantern, through payroll.
+account income/wages : wages
+
+/// Cash tips: taxable income when received (IRC §61), reported to the employer
+/// monthly and to the IRS on the return.
+account income/tips : wages
+
+account income/reimbursements : reimbursement
+account equity/opening
+
+
+// ─── Expenses ───────────────────────────────────────────────────────────────
+
+account expenses/rent
+account expenses/utilities
+account expenses/groceries
+account expenses/dining
+account expenses/transport
+account expenses/phone
+account expenses/car
+account expenses/health
+account expenses/entertainment
+account expenses/clothing
+account expenses/gifts
+
+/// What I bought for the job and will be paid back for. The reimbursement, when
+/// it arrives, cancels it.
+account expenses/work-supplies
+
+account expenses/taxes/federal : federal-tax
+account expenses/taxes/payroll
+
+
+// ─── The collective ─────────────────────────────────────────────────────────
+//
+// Everything below belongs to green-table, not to me, though I am the one who
+// enters it. The grant's money comes with strings (std's `grant` kind): it stays
+// tied to the foundation in the collective's account, and may only be spent on
+// places of kind `garden`, before the deadline.
+
+/// The collective's account, opened with what earlier plant sales left.
+account assets/bank/collective-checking : bank
+  owner green-table
+
+/// The cash box at events.
+account assets/cash/collective-cash : cash
+  owner green-table
+
+account income/donations
+  owner green-table
+account income/grants
+  owner green-table
+
+/// Everything under here is a garden supply or a garden cost: the grant may pay it.
+account expenses/garden/soil : garden
+  owner green-table
+account expenses/garden/seeds : garden
+  owner green-table
+account expenses/garden/lumber : garden
+  owner green-table
+account expenses/garden/irrigation : garden
+  owner green-table
+account expenses/garden/tools : garden
+  owner green-table
+account expenses/garden/fencing : garden
+  owner green-table
+account expenses/garden/water : garden
+  owner green-table
+
+/// Not a garden supply: the grant may not pay for it.
+account expenses/volunteer-food
+  owner green-table
+
+/// The Riverfront Foundation's grant: 6,000.00 USD for garden supplies and
+/// tools, to be spent by 2025-10-31. Money from it stays tied to it wherever it
+/// lands; what is left at the deadline is owed back.
+entity riverfront : grant
+  via income/grants
+  purpose garden
+  until   2025-10-31
+
+
+// ─── People and merchants ───────────────────────────────────────────────────
+
+/// The Lantern, my employer. Pay arrives from `income/wages`.
+entity lantern : employer
+  via income/wages
+
+/// The Lantern paying back what I bought for it: not wages.
+entity lantern-reimbursement : org
+  via income/reimbursements
+
+/// Ben and Cleo, my roommates. A payment from one of them reduces what they owe.
+entity ben : person
+  via assets/roommates/ben
+entity cleo : person
+  via assets/roommates/cleo
+
+/// A friend, Riley: the loan is an asset, and a repayment comes from `riley`.
+entity riley : person
+  via assets/loans/riley
+
+entity landlord : org
+  via expenses/rent
+entity fiberco : org
+  via expenses/utilities
+entity power-co : org
+  via expenses/utilities
+entity costco : org
+  via expenses/groceries
+entity farmers-market : org
+  via expenses/groceries
+entity bar-supply : org
+  via expenses/work-supplies
+entity mint-mobile : org
+  via expenses/phone
+entity progressive : org
+  via expenses/car
+entity carmax-finance : org
+  via expenses/car
+entity marketplace-plan : org
+  via expenses/health
+entity pizza-place : org
+  via expenses/volunteer-food
+entity hardware-hank : org
+  via expenses/garden/tools
+entity water-dept : org
+  via expenses/garden/water
+entity bayview-soil : org
+  via expenses/garden/soil
+entity seed-savers : org
+  via expenses/garden/seeds
+entity northside-lumber : org
+  via expenses/garden/lumber
+entity drip-depot : org
+  via expenses/garden/irrigation
+entity shed-co : org
+  via expenses/garden/tools
+
+
+// ─── Codes ──────────────────────────────────────────────────────────────────
+
+/// A month's rent share ties a payment to the month it is for.
+code rent-*
+  on iou
+
+code loan-*
+  on personal-loan
+
+code expense-*
+  on expenses/work-supplies
+
+/// The reimbursement is a different flow from the purchase and settles on its own day,
+/// so it needs its own code: the code that settles a flow cannot also mark an actual one.
+code reimb-*
+  on reimbursement

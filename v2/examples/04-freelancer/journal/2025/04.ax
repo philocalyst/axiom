@@ -1,0 +1,42 @@
+/// Monthly retainer, net 30.
+2025-04-01 design -> brightwave 3_200 USD #inv-2025-b04
+2025-04-01 business-card -> software 7.20 USD / google
+2025-04-01 personal-checking -> landlord 1_750 USD
+2025-04-01 personal-checking -> bluecross 412 USD
+2025-04-03 business-card -> software 10 USD / notion
+2025-04-03 business-checking -> personal-checking 2_950 USD // owner's draw
+2025-04-05 personal-checking -> statefarm 22 USD
+2025-04-05 personal-checking -> groceries 72.01 USD / trader-joes
+2025-04-08 business-card -> software 59.99 USD / adobe
+2025-04-08 business-card -> education 249 USD / ixdf
+2025-04-08 personal-checking -> dining 58.49 USD
+2025-04-09 odometer -> mileage 58 MI / orbit-labs
+2025-04-10 personal-checking -> transport 35.74 USD
+2025-04-11 brightwave -> business-checking 3_200 USD #inv-2025-b03
+2025-04-11 business-checking -> tax-vault 640 USD
+2025-04-12 personal-checking -> comcast 80 USD
+2025-04-12 personal-checking -> groceries 110.41 USD / safeway
+2025-04-14 business-card -> software 15 USD / figma
+
+/// Estimated tax, first quarter. Due April 15.
+2025-04-14 tax-vault -> federal 2_400 USD / irs #q1-2025
+2025-04-16 personal-checking -> pge 59.30 USD
+2025-04-18 personal-checking -> tmobile 64 USD
+2025-04-20 orbit-labs -> 2_750 USD #inv-2025-o1
+  business-checking           2_735.00 USD
+  fees                        15.00 USD   // incoming wire fee
+2025-04-20 business-checking -> tax-vault 547 USD
+
+/// The March statement, paid in full.
+2025-04-20 business-checking -> business-card 3_041.99 USD
+2025-04-20 personal-checking -> groceries 130.61 USD / safeway
+2025-04-22 business-card -> software 21 USD / freshbooks
+2025-04-22 business-card -> printing 62 USD
+2025-04-22 personal-checking -> dining 73.75 USD
+2025-04-24 odometer -> mileage 31 MI / orbit-labs
+2025-04-27 personal-checking -> groceries 127.58 USD / trader-joes
+2025-04-30 interest -> tax-vault 18.18 USD
+2025-04-30 business-card = 424.19 USD
+2025-04-30 business-checking = 6_015.55 USD
+2025-04-30 personal-checking = 3_409.04 USD
+2025-04-30 tax-vault = 5_213.06 USD

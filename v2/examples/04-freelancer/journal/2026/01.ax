@@ -1,0 +1,42 @@
+2026-01-01 business-card -> software 7.20 USD / google
+2026-01-01 personal-checking -> landlord 1_750 USD
+2026-01-01 personal-checking -> bluecross 425 USD
+
+/// January retainer.
+2026-01-02 design -> brightwave 3_200 USD #inv-2026-b01
+2026-01-03 business-card -> software 10 USD / notion
+2026-01-03 business-checking -> personal-checking 2_950 USD // owner's draw
+2026-01-05 personal-checking -> statefarm 22 USD
+2026-01-05 personal-checking -> groceries 86.39 USD / trader-joes
+2026-01-08 business-card -> software 59.99 USD / adobe
+2026-01-08 personal-checking -> dining 51.28 USD
+2026-01-10 personal-checking -> transport 36.89 USD
+2026-01-12 personal-checking -> comcast 80 USD
+2026-01-12 personal-checking -> groceries 83.41 USD / safeway
+2026-01-13 brightwave -> business-checking 3_200 USD #inv-2025-b12
+2026-01-13 business-checking -> tax-vault 640 USD
+2026-01-14 business-card -> software 15 USD / figma
+
+/// Fourth quarter of 2025, due January 15, 2026.
+2026-01-14 tax-vault -> federal 2_400 USD / irs #q4-2025
+2026-01-16 personal-checking -> pge 96.20 USD
+2026-01-18 personal-checking -> tmobile 64 USD
+
+/// The December statement, paid in full.
+2026-01-20 business-checking -> business-card 25.79 USD
+2026-01-20 personal-checking -> groceries 76.23 USD / safeway
+2026-01-21 odometer -> mileage 44 MI / brightwave
+2026-01-22 business-card -> software 21 USD / freshbooks
+2026-01-22 personal-checking -> dining 54.98 USD
+2026-01-27 personal-checking -> groceries 101.51 USD / trader-joes
+
+/// A top-up made in January that counts toward 2025 (the SEP deadline is the
+/// return's due date, with extension). Axiom files it under 2026.
+2026-01-28 business-checking -> sep 2_000 USD #sep-for-2025
+2026-01-31 interest -> tax-vault 36.35 USD
+2026-01-31 growth -> sep 319.38 USD
+2026-01-31 business-card = 113.19 USD
+2026-01-31 business-checking = 14_548.43 USD
+2026-01-31 personal-checking = 4_411.60 USD
+2026-01-31 tax-vault = 10_420.95 USD
+2026-01-31 sep = 29_353.79 USD

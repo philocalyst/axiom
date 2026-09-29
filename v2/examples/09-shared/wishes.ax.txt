@@ -1,0 +1,60 @@
+// Wishes for the shared project. NOT loaded (the loader reads only *.ax files).
+// Each one is answered in ../FINDINGS.md with a proposed design.
+
+// ── 1. A claim between two people is one thing ──────────────────────────────
+//
+// An IOU with a roommate, a loan to a friend, a security deposit, an invoice, an
+// expense report and a grant are all "someone owes someone value, under terms".
+//
+//   2025-03-01 me pays landlord 3_150 USD for rent split 1:1:1 with ben, cleo    // three claims, one line
+//   2025-03-12 ben paid power-co 88.40 USD for split 1:1:1 with me, cleo          // I owe ben 29.47
+//   2025-03-31 settle ben                                                          // net of the month, both ways
+//   2025-04-10 me lends riley 2_000 USD repaid 250 USD monthly from 2025-05-15    // schedule, not a hope
+//   2025-06-02 me claims 138.50 USD from lantern-reimbursement #expense-2025-06   // pending is a claim
+//   2025-07-11 lantern-reimbursement pays #expense-2025-06
+//
+//   axiom claims                    // who owes whom, since when, how late
+//     ben      owes you   37.21 USD   roommate splits
+//     cleo     owes you  216.34 USD   includes 50.00 short on November's rent
+//     riley    owes you   50.00 USD   250.00 USD a month agreed
+//
+// and none of it counts as money you can spend.
+
+// ── 2. Ownership is a boundary in reports ───────────────────────────────────
+//
+//   axiom balance --owner me
+//   axiom available --owner me            // the collective's cash is not mine
+//   axiom flow --owner green-table
+//
+// Today the collective's 2,654.61 USD counts as spendable, and its grant and
+// garden costs are in my income and expenses.
+
+// ── 3. A grant is a first-class claim with a clock ──────────────────────────
+//
+//   axiom grants
+//     riverfront   6,000.00 USD  purpose garden  until 2025-10-31
+//                  spent 5,942.75  left 57.25  (returned 2025-10-28)  0 days left
+//
+// and returning unspent money is a named outcome, not a payment to the funder's
+// income place.
+
+// ── 4. A loan agreement starts on a date ────────────────────────────────────
+//
+//   account assets/loans/riley : personal-loan
+//     expected 250 USD monthly from 2025-05-15
+//
+// so April, the month of the loan, is not a violation.
+
+// ── 5. Splitting is arithmetic the language does ────────────────────────────
+//
+//   2025-03-09 checking -> 69.99 USD / fiberco split 1:1:1 ben cleo   // thirds; the extra cent is mine
+//
+// Today: three legs and a hand-rounded third (23.33, 23.33, 23.33 + 0.00) in 20 places.
+
+// ── 6. A cash wallet is counted, not reconciled ─────────────────────────────
+//
+//   2025-08-31 wallet counts 367.90 USD        // the ledger says 390.90; the 23.00 USD is booked as "unaccounted cash"
+//                                              // in a named place, and reported by month
+//
+// (`wallet = 367.90 USD !` does this, but it looks like any other assertion and
+// nothing says how many times it was used.)

@@ -1,0 +1,26 @@
+2025-06-01 checking -> own-rent 1_950 USD / oak-street
+2025-06-01 rental-checking -> 1_809.59 USD / lender
+  mortgage            245.67 USD   // principal
+  interest            1_563.92 USD   // interest
+2025-06-05 rental-checking -> management 192 USD / hartwell-pm
+2025-06-08 checking -> groceries 257.15 USD
+
+/// June's rent arrives on the ninth: four days past the grace period, so the lease's 75.00 USD late fee applies.
+2025-06-09 income/rent -> rental-checking 2_400 USD #lease-a
+2025-06-09 income/late-fees -> rental-checking 75 USD #lease-a
+2025-06-15 checking -> groceries 125.59 USD
+2025-06-19 checking -> dining 235.94 USD
+
+/// Gutters and the lawn.
+2025-06-21 rental-checking -> repairs 180 USD / green-yards
+2025-06-22 checking -> living 292.67 USD
+2025-06-28 income/salary -> 8_000.00 USD
+  taxes/federal       1_215.00 USD
+  taxes/payroll       612.00 USD
+  checking            ...
+2025-06-30 acc-dep-house -> depreciation 913.58 USD
+2025-06-30 loan-costs -> amortization 8.67 USD
+2025-06-30 mortgage = 277_785.33 USD
+2025-06-30 rental-checking = 4_011.75 USD
+2025-06-30 checking = 40_451.25 USD
+2025-06-30 deposit-account = 2_400.00 USD

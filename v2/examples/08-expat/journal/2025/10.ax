@@ -1,0 +1,73 @@
+2025-10-01 girokonto -> de-rent 1_450 EUR / hausverwaltung
+2025-10-03 visa -> subscriptions 15.49 USD / netflix
+2025-10-03 girokonto -> groceries 53.72 EUR
+
+/// London for a conference and a long weekend. 1,000 EUR into pounds for the trip, through Wise.
+2025-10-03 girokonto 1_000.00 EUR ->
+  fx-fees                 5.50 EUR
+  wise                    869.04 GBP
+2025-10-05 us-checking -> 420 USD / mohela
+  student-loan            312.96 USD   // principal
+  loan-interest           107.04 USD   // interest
+2025-10-05 girokonto -> transit 58 EUR / bvg
+2025-10-06 girokonto -> dining 25.49 EUR
+2025-10-07 visa -> subscriptions 2.99 USD / apple
+2025-10-08 girokonto 900.00 EUR ->
+  fx-fees                 4.77 EUR
+  us-checking             1_044.46 USD
+2025-10-09 girokonto -> groceries 50.04 EUR
+2025-10-10 girokonto -> phone 19.99 EUR
+
+/// Five nights in a London hotel, charged in pounds on the US card. The network converts at its rate and the
+/// card adds a 3% foreign transaction fee, printed as its own line on the statement.
+2025-10-10 visa 855.51 USD -> travel 640 GBP / london-hotel
+2025-10-10 visa -> fx-fees 25.67 USD / london-hotel
+2025-10-10 wise -> dining 38.60 GBP / pret-a-manger
+2025-10-10 wise -> transit 11.20 GBP / tfl
+2025-10-11 wise -> conference 165 GBP / design-conf
+2025-10-11 wise -> dining 52.40 GBP / borough-market
+2025-10-11 wise -> transit 8.40 GBP / tfl
+2025-10-12 wise -> sightseeing 27.50 GBP / british-museum
+2025-10-12 wise -> dining 61.80 GBP / dishoom
+2025-10-12 wise -> transit 14.60 GBP / tfl
+2025-10-13 girokonto -> dining 33.12 EUR
+2025-10-13 wise -> shopping 43.20 GBP / liberty
+2025-10-13 wise -> dining 44.10 GBP / the-pub
+2025-10-13 wise -> transit 42.50 GBP / black-cab
+2025-10-14 visa 77.75 USD -> travel 58.20 GBP / london-hotel   // minibar and late checkout
+2025-10-14 visa -> fx-fees 2.33 USD / london-hotel
+2025-10-14 wise -> dining 29.90 GBP / cafe
+2025-10-15 visa -> subscriptions 35 USD / us-phone
+2025-10-15 girokonto -> groceries 61.68 EUR
+2025-10-15 wise -> transit 19.10 GBP / heathrow-express
+
+/// Return flight from Berlin, paid in euros from the German account.
+2025-10-15 girokonto -> travel 96 EUR / ryanair
+
+/// What is left in pounds goes back to euros.
+2025-10-16 wise 310.74 GBP ->
+  fx-fees                 1.71 GBP
+  girokonto               354.47 EUR
+2025-10-17 girokonto -> shopping 46.79 EUR
+2025-10-20 girokonto -> dining 31.72 EUR
+
+/// September's statement, paid in full.
+2025-10-20 us-checking -> visa 53.48 USD
+2025-10-22 girokonto -> groceries 53.54 EUR
+2025-10-27 girokonto -> groceries 52.13 EUR
+2025-10-31 employer-gmbh -> 5_400.00 EUR
+  lohnsteuer              905.00 EUR   // income tax, tax class 1
+  sozialabgaben           1_163.70 EUR   // pension, health, unemployment, care
+  girokonto               ...
+2025-10-31 interest -> us-savings 64.28 USD
+2025-10-31 income/interest-de -> 33.67 EUR
+  kapitalertragsteuer     8.88 EUR
+  tagesgeld               ...
+2025-10-31 visa = 1_014.74 USD
+2025-10-31 us-checking = 15_438.54 USD
+2025-10-31 us-savings = 18_430.70 USD
+2025-10-31 student-loan = 28_043.28 USD
+2025-10-31 girokonto = 6_543.38 EUR
+2025-10-31 tagesgeld = 20_433.08 EUR
+2025-10-31 kaution = 3_600.00 EUR
+2025-10-31 wise = 0.00 GBP

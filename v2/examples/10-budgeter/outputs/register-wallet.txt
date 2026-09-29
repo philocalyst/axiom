@@ -1,0 +1,25 @@
+$ axiom register wallet --today 2026-02-14
+
+Register: assets/cash/wallet
+
+  Date        With                    Payee   Note                                  Amount     Balance
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-09-01  equity/opening                                                     45.00 USD   45.00 USD
+  2025-09-13  expenses/dining                                                    -7.27 USD   37.73 USD
+  2025-09-19  assets/bank/checking                                               80.00 USD  117.73 USD
+  2025-09-24  expenses/dining                                                    -9.22 USD  108.51 USD
+  2025-10-11  expenses/personal-care  barber                                    -35.00 USD   73.51 USD
+  2025-10-13  expenses/dining                                                    -8.85 USD   64.66 USD
+  2025-10-24  expenses/dining                                                    -9.67 USD   54.99 USD
+  2025-11-07  assets/bank/checking                                               80.00 USD  134.99 USD
+  2025-11-13  expenses/dining                                                    -6.48 USD  128.51 USD
+  2025-11-24  expenses/dining                                                    -9.21 USD  119.30 USD
+  2025-12-06  expenses/personal-care  barber                                    -35.00 USD   84.30 USD
+  2025-12-13  expenses/dining                                                    -4.72 USD   79.58 USD
+  2025-12-24  expenses/dining                                                    -8.36 USD   71.22 USD
+  2025-12-31  equity/unknown                  unexplained gap, accepted with !  -14.00 USD   57.22 USD
+  2026-01-09  assets/bank/checking                                               80.00 USD  137.22 USD
+  2026-01-13  expenses/dining                                                    -5.95 USD  131.27 USD
+  2026-01-24  expenses/dining                                                    -8.50 USD  122.77 USD
+  2026-02-07  expenses/personal-care  barber                                    -35.00 USD   87.77 USD
+  2026-02-13  expenses/dining                                                    -6.21 USD   81.56 USD

@@ -1,0 +1,73 @@
+// Wishes for the landlord project. NOT loaded (the loader reads only *.ax files).
+// Each one is answered in ../FINDINGS.md with a proposed design.
+
+// ── 1. Basis changes are flows, and the parcel remembers them ───────────────
+//
+//   2025-09-15 rental-checking -> house[basis] 14_200 USD / summit-roofing    // improvement: basis +14,200
+//   2025-01-31 house[basis] -> expenses/rental/depreciation 456.79 USD        // depreciation: basis -456.79
+//
+// `house` is still 1 HOME; its basis is now 376,850 + 14,200 - 9,592.59. The sale's
+// realized gain is the tax gain, `flow` and `tax` agree, and there is no
+// `equity/acc-dep-*` and no second commodity for the roof.
+//
+// Depreciation itself is a schedule, not 12 lines:
+//
+//   depreciate house 27.5y straight-line mid-month from 2025-01-15 basis 80%
+//   depreciate roof  27.5y straight-line mid-month from 2025-09-15
+//
+// and `axiom flow` shows it every month, `tax` counts it, the sale reads it.
+
+// ── 2. A claim with a lifetime: deposits, invoices, loans ───────────────────
+//
+//   2025-02-01 tenant-a deposits 2_400 USD held #lease-a                // creates the claim and its restriction
+//   2025-09-12 tenant-a settles #lease-a returns 2_050 USD keeps 350 USD "carpet, blind"
+//                                                                        // extinguishes it, releases the tie,
+//                                                                        // and 350 becomes income
+//   2025-10-01 tenant-b deposits 2_500 USD held #lease-b
+//   2025-12-29 tenant-b assigns #lease-b to buyer                       // liability moves with the lease
+//
+// One thing, three views: balance (liability), available (restricted), tax
+// (income when kept). No second entity for the same tenant, no `repay place` property.
+
+// ── 3. A sale is one statement ──────────────────────────────────────────────
+//
+//   2025-12-29 house 1 HOME, roof 1 ROOF -> 431_500 USD   // one price, allocated by the language
+//     allocate roof at 14_070.90 USD
+//     selling-costs   26_968.75 USD                       // reduce the amount realized
+//     mortgage        276_282.05 USD                      // paid off
+//     interest         1_450.48 USD
+//     deposits/tenant-b 2_500 USD  to buyer
+//     rental-checking  ...
+//
+// Today: `-> rental-checking 404_531.25 USD` with two source legs (HOME, ROOF @ price),
+// and every closing-statement line as a separate flow.
+
+// ── 4. Loans know their rate ────────────────────────────────────────────────
+//
+//   account liabilities/mortgage : mortgage
+//     rate 6.75%  amortizes 30y from 2025-02-01
+//   2025-05-01 rental-checking -> mortgage payment 1_809.59 USD   // splits itself: principal, interest
+//   2025-05-01 mortgage = 278_022.71 USD                          // statement check; a mismatch says
+//                                                                 // "interest 1,565.30 expected, 1,566.00 written"
+//
+// and the forecast stops paying it when it reaches zero, or when the asset securing
+// it is sold:
+//
+//   account liabilities/mortgage
+//     secured-by assets/rental/house
+//
+// so `available` shows the house's equity, not its value, and selling it pays the
+// loan off first.
+
+// ── 5. The rent roll ────────────────────────────────────────────────────────
+//
+//   lease lease-a tenant-a 2025-02-01..2025-08-31 rent 2_400 USD due 1 grace 5 late-fee 75 USD deposit 2_400 USD
+//   axiom rent-roll --at 2025-09-05      // expected vs received, days late, vacancies
+//
+// (June's 9th-of-the-month payment gets its fee from the lease, not from typing 75 USD.)
+
+// ── 6. Personal-use and investment property are different kinds ─────────────
+//
+//   account assets/rental/house : rental-property
+//     holds 1 HOME  primary-residence-until 2024-12-18
+//   // rentals: passive activity, depreciation; homes: §121 exclusion; cars: no losses

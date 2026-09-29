@@ -1,0 +1,46 @@
+$ axiom balance --today 2026-01-06
+
+Balances at 2026-01-06
+
+  Place                        Balance
+  ────────────────────────────────────
+  assets                173,866.60 USD
+    bank                173,866.60 USD
+      checking          173,866.60 USD
+  ────────────────────────────────────
+  equity                138,178.48 USD
+    acc-dep-house        10,049.38 USD
+    acc-dep-roof            129.10 USD
+    opening             128,000.00 USD
+  ────────────────────────────────────
+  expenses               98,518.13 USD
+    dining                1,926.42 USD
+    groceries             4,321.33 USD
+    living                4,042.98 USD
+    own-rent             23,400.00 USD
+    rental               42,903.40 USD
+      advertising           149.00 USD
+      amortization        3,120.00 USD
+      depreciation       10,178.48 USD
+      insurance           1,560.00 USD
+      interest           19,360.32 USD
+      management          1,950.00 USD
+      property-tax        4,380.00 USD
+      repairs             2,051.00 USD
+      utilities             154.60 USD
+    taxes                21,924.00 USD
+      federal            14,580.00 USD
+      payroll             7,344.00 USD
+  ────────────────────────────────────
+  income                120,725.00 USD
+    forfeited-deposits      350.00 USD
+    late-fees                75.00 USD
+    rent                 24,300.00 USD
+    salary               96,000.00 USD
+
+  Net worth       Value (USD)
+  ───────────────────────────
+  Assets       173,866.60 USD
+  Liabilities        0.00 USD
+  ───────────────────────────
+  Net worth    173,866.60 USD

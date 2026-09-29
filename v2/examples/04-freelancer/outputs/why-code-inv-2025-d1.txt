@@ -1,0 +1,9 @@
+$ axiom why #inv-2025-d1 --today 2026-02-10
+
+Why #inv-2025-d1
+
+Flows
+  Date        Flow                                                    Amount  State   From
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-06-02  income/design → assets/receivable/delta-rugs      3,800.00 USD  actual  journal/2025/06.ax:9
+  2025-12-15  assets/receivable/delta-rugs → expenses/bad-debt  3,800.00 USD  actual  journal/2025/12.ax:24

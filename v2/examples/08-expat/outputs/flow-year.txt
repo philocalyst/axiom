@@ -1,0 +1,45 @@
+$ axiom flow --by year --today 2026-01-06
+
+Income and spending
+
+  Place                                2025      2026           Total
+  ───────────────────────────────────────────────────────────────────
+  income                     101,559.05 USD            101,559.05 USD
+    interest                   1,259.94 USD              1,259.94 USD
+    interest-de                  234.51 USD                234.51 USD
+    salary-de                 37,564.58 USD             37,564.58 USD
+    salary-us                 62,500.02 USD             62,500.02 USD
+    realized gains ≈              27.34 USD                 27.34 USD
+  ───────────────────────────────────────────────────────────────────
+  Total income               101,586.39 USD            101,586.39 USD
+  ───────────────────────────────────────────────────────────────────
+  expenses                    81,385.86 USD             81,385.86 USD
+    conference                   220.87 USD                220.87 USD
+    de-rent                   10,100.13 USD             10,100.13 USD
+    dining                     1,992.76 USD              1,992.76 USD
+    fx-fees                      119.51 USD                119.51 USD
+    groceries                  4,543.41 USD              4,543.41 USD
+    loan-interest              1,333.42 USD              1,333.42 USD
+    moving                     2,150.00 USD              2,150.00 USD
+    phone                        139.34 USD                139.34 USD
+    sf-rent                   20,400.00 USD             20,400.00 USD
+    shopping                   1,048.39 USD              1,048.39 USD
+    sightseeing                   36.72 USD                 36.72 USD
+    subscriptions                320.88 USD                320.88 USD
+    taxes                     35,139.78 USD             35,139.78 USD
+      de                      14,452.56 USD             14,452.56 USD
+        kapitalertragsteuer       61.85 USD                 61.85 USD
+        lohnsteuer             6,295.55 USD              6,295.55 USD
+        sozialabgaben          8,095.16 USD              8,095.16 USD
+      federal                 10,740.00 USD             10,740.00 USD
+      payroll                  4,781.22 USD              4,781.22 USD
+      sdi                        750.00 USD                750.00 USD
+      state                    4,416.00 USD              4,416.00 USD
+    transit                      531.43 USD                531.43 USD
+    transport                    365.57 USD                365.57 USD
+    travel                     2,225.01 USD              2,225.01 USD
+    utilities                    718.64 USD                718.64 USD
+  ───────────────────────────────────────────────────────────────────
+  Net                         20,200.53 USD  0.00 USD   20,200.53 USD
+  · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
+    them.

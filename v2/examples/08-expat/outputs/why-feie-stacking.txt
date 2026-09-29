@@ -1,0 +1,9 @@
+$ axiom why feie-stacking-tax --today 2026-01-06
+
+Why feie-stacking-tax
+
+Effects
+  Date        Owner        Amount  Owed to            From
+  ──────────────────────────────────────────────────────────────
+  2025-12-31  me     3,599.64 USD  irs by 2026-04-15  period end
+  · Effects from a period ending were computed from the tallies counted during it.

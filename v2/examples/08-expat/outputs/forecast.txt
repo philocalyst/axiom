@@ -1,0 +1,59 @@
+$ axiom forecast --paths 200 --today 2026-01-06
+
+Forecast to 2027-01-06
+
+Liquid net worth
+  Month end       Committed            p10            p50            p90
+  ──────────────────────────────────────────────────────────────────────
+  2026-01-06  39,591.16 USD
+  2026-01-31  43,280.00 USD  37,099.72 USD  39,885.71 USD  42,856.77 USD
+  2026-02-28  45,067.76 USD  32,715.99 USD  37,002.54 USD  41,779.01 USD
+  2026-03-31  46,855.52 USD  29,301.54 USD  34,492.38 USD  40,129.37 USD
+  2026-04-30  45,043.64 USD  21,536.97 USD  27,934.99 USD  34,842.92 USD
+  2026-05-31  46,768.42 USD  18,490.47 USD  25,889.13 USD  33,567.57 USD
+  2026-06-30  48,556.18 USD  14,977.46 USD  22,852.26 USD  31,643.19 USD
+  2026-07-31  50,343.94 USD  11,837.10 USD  20,427.34 USD  29,911.37 USD
+  2026-08-31  52,068.72 USD   8,522.79 USD  18,477.62 USD  27,252.05 USD
+  2026-09-30  53,856.48 USD   5,357.30 USD  14,967.64 USD  26,529.61 USD
+  2026-10-31  55,581.27 USD   1,626.51 USD  13,458.71 USD  24,205.75 USD
+  2026-11-30  57,369.03 USD  -2,051.70 USD  10,404.41 USD  22,051.68 USD
+  2026-12-31  59,156.79 USD  -4,646.42 USD   8,109.40 USD  19,729.16 USD
+  2027-01-06  57,192.73 USD  -7,046.65 USD   5,384.31 USD  16,739.09 USD
+  · Committed: liquid assets less debts, in USD, after plans, recurring flows found in history,
+    growth models and obligations as they fall due. Variable spending is not in it.
+  · p10, p50 and p90 are the 10th, 50th and 90th percentile of 200 paths. Each path takes the
+    committed figure and subtracts, month by month, a random past month of spending for every
+    top-level expense category (from 12 months of history, without the flows already projected). The
+    seed is fixed, so the bands are reproducible.
+
+What recurs
+  Expected                                                            Every          Amount  Next        Source
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/bank/us-checking → expenses/loan-interest (mohela)           monthly    111.73 USD  2026-02-05  seen 12 times
+  assets/bank/us-checking → liabilities/student-loan (mohela)         monthly    309.44 USD  2026-02-05  seen 12 times
+  assets/bank/us-checking → liabilities/visa                          monthly    869.54 USD  2026-01-20  seen 12 times
+  assets/de/girokonto → expenses/de-rent (hausverwaltung)             monthly  1,450.00 EUR  2026-02-01  seen 6 times
+  assets/de/girokonto → expenses/fx-fees                              monthly      4.77 EUR  2026-01-08  seen 6 times
+  assets/de/girokonto → expenses/groceries                            weekly      53.54 EUR  2026-01-10  seen 30 times
+  assets/de/girokonto → expenses/phone                                monthly     19.99 EUR  2026-01-10  seen 6 times
+  assets/de/girokonto → expenses/shopping                             monthly     71.79 EUR  2026-01-17  seen 6 times
+  assets/de/girokonto → expenses/transit (bvg)                        monthly     58.00 EUR  2026-02-05  seen 6 times
+  income/interest → assets/bank/us-savings                            monthly    144.55 USD  2026-01-31  seen 12 times
+  income/interest-de → assets/de/tagesgeld                            monthly     24.79 EUR  2026-01-31  seen 6 times
+  income/interest-de → expenses/taxes/de/kapitalertragsteuer          monthly      8.88 EUR  2026-01-31  seen 6 times
+  income/salary-de → assets/de/girokonto (employer-gmbh)              monthly  3,331.30 EUR  2026-01-30  seen 6 times
+  income/salary-de → expenses/taxes/de/lohnsteuer (employer-gmbh)     monthly    905.00 EUR  2026-01-30  seen 6 times
+  income/salary-de → expenses/taxes/de/sozialabgaben (employer-gmbh)  monthly  1,163.70 EUR  2026-01-30  seen 6 times
+  liabilities/visa → expenses/subscriptions (apple)                   monthly      2.99 USD  2026-01-07  seen 6 times
+  liabilities/visa → expenses/subscriptions (netflix)                 monthly     15.49 USD  2026-02-03  seen 6 times
+  liabilities/visa → expenses/subscriptions (us-phone)                monthly     35.00 USD  2026-01-15  seen 6 times
+
+Obligations coming due
+  Due         Obligation         To         Amount
+  ────────────────────────────────────────────────
+  2026-04-15  feie-stacking-tax  irs  3,599.64 USD
+
+Problems ahead
+  Date        Problem
+  ────────────────────────────────────────────────────────────────────────────────────────
+  2026-12-31  fbar: foreign accounts passed 10,000 USD: file FinCEN 114 (FBAR) by April 15

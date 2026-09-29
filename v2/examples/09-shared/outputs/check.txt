@@ -1,0 +1,70 @@
+$ axiom check --today 2026-01-06
+
+✓ 472 flows · 44 places · 7 laws enforced · net worth 23,213.23 USD
+warning[law]: no repayment this month
+   ╭─[accounts.ax:17:3]
+   │
+17 │   law repayment
+   │   ──────┬──────
+   │         ╰── checked for assets/loans/riley on 2025-04-30
+   ⋮
+20 │     warn total(out, month) >= self.expected "no repayment this month"
+   │          ────────┬────────┬─────┬───┬──────
+   │                  │        │     │   ╰── 250.00 USD
+   │                  │        │     ╰── assets/loans/riley
+   │                  │        ╰── false
+   │                  ╰── 0.00 USD
+   │
+   = note: The friend agreed to pay back `expected` every month. This month passed with less than
+           that coming in while a balance is still owed. Ask them, or move the agreement: change
+           `expected` on the account.
+───╯
+
+warning[law]: no repayment this month
+   ╭─[accounts.ax:17:3]
+   │
+17 │   law repayment
+   │   ──────┬──────
+   │         ╰── checked for assets/loans/riley on 2025-09-30
+   ⋮
+20 │     warn total(out, month) >= self.expected "no repayment this month"
+   │          ────────┬────────┬─────┬───┬──────
+   │                  │        │     │   ╰── 250.00 USD
+   │                  │        │     ╰── assets/loans/riley
+   │                  │        ╰── false
+   │                  ╰── 0.00 USD
+   │
+   = note: The friend agreed to pay back `expected` every month. This month passed with less than
+           that coming in while a balance is still owed. Ask them, or move the agreement: change
+           `expected` on the account.
+───╯
+
+warning[law]: no repayment this month
+   ╭─[accounts.ax:17:3]
+   │
+17 │   law repayment
+   │   ──────┬──────
+   │         ╰── checked for assets/loans/riley on 2025-10-31
+   ⋮
+20 │     warn total(out, month) >= self.expected "no repayment this month"
+   │          ────────┬────────┬─────┬───┬──────
+   │                  │        │     │   ╰── 250.00 USD
+   │                  │        │     ╰── assets/loans/riley
+   │                  │        ╰── false
+   │                  ╰── 0.00 USD
+   │
+   = note: The friend agreed to pay back `expected` every month. This month passed with less than
+           that coming in while a balance is still owed. Ask them, or move the agreement: change
+           `expected` on the account.
+───╯
+
+note[pad]: accepted a gap on assets/cash/wallet
+   ╭─[journal/2025/08.ax:67:1]
+   │
+67 │ 2025-08-31 wallet = 367.90 USD !
+   │ ────────────────┬───────────────
+   │                 ╰── 23.00 USD moved out of assets/cash/wallet into unknown
+   │
+───╯
+
+3 warnings

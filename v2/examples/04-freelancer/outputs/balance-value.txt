@@ -1,0 +1,64 @@
+$ axiom balance --value --today 2026-02-10
+
+Balances at 2026-02-10
+
+  Place                    Value (USD)
+  ────────────────────────────────────
+  assets                 64,534.77 USD
+    bank                 29,380.98 USD
+      business-checking  14,548.43 USD
+      personal-checking   4,411.60 USD
+      tax-vault          10,420.95 USD
+    receivable            5,800.00 USD
+      brightwave          3,200.00 USD
+      northpeak           2,600.00 USD
+    retirement           29,353.79 USD
+      sep                29,353.79 USD
+  ────────────────────────────────────
+  equity                 35,094.56 USD
+    odometer                638.00 USD
+    opening              34,456.56 USD
+  ────────────────────────────────────
+  expenses               61,690.64 USD
+    bad-debt              3,800.00 USD
+    business              9,164.87 USD
+      education             948.00 USD
+      equipment           3,148.00 USD
+      fees                  902.60 USD
+      fonts                 240.00 USD
+      hosting               238.99 USD
+      insurance             780.00 USD
+      printing              297.15 USD
+      software            1,591.35 USD
+      travel              1,018.78 USD
+    food                  6,321.73 USD
+      dining              1,358.60 USD
+      groceries           4,963.13 USD
+    health-insurance      5,369.00 USD
+    home                 25,036.40 USD
+      insurance             286.00 USD
+      internet            1,040.00 USD
+      rent               22,750.00 USD
+      utilities             960.40 USD
+    meals                   363.25 USD
+    mileage                 638.00 USD
+    phone                   832.00 USD
+    taxes                 9,600.00 USD
+      federal             9,600.00 USD
+    transport               565.39 USD
+  ────────────────────────────────────
+  income                 91,017.66 USD
+    design               87,600.00 USD
+    growth                3,003.79 USD
+    interest                326.47 USD
+    rewards                  87.40 USD
+  ────────────────────────────────────
+  liabilities               113.19 USD
+    business-card           113.19 USD
+
+  Net worth      Value (USD)
+  ──────────────────────────
+  Assets       64,534.77 USD
+  Liabilities     113.19 USD
+  ──────────────────────────
+  Net worth    64,421.58 USD

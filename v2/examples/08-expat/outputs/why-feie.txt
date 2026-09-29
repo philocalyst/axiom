@@ -1,0 +1,21 @@
+$ axiom why feie --today 2026-01-06
+
+Why feie
+
+  Law       feie
+  ───────────────────────────────────────────────────────────
+  When      each year
+  Governs   everyone living under us/abroad, and all they own
+  Written   systems/us/abroad.ax:41
+  Ran       1 times
+  Recorded  0 violations, 3 effects
+  · The foreign earned income exclusion (IRC §911): pay earned abroad, up to a
+  · yearly limit prorated by the days spent abroad, is not taxed by the United
+  · States. `days-abroad` is the number of qualifying days in the year.
+
+Recent effects
+  Date        Effect                     Amount  Owed to            From
+  ────────────────────────────────────────────────────────────────────────────
+  2025-12-31  feie-excluded       37,564.58 USD                     period end
+  2025-12-31  agi                -37,564.58 USD                     period end
+  2025-12-31  feie-stacking-tax    3,599.64 USD  irs by 2026-04-15  period end

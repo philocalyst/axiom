@@ -1,0 +1,7 @@
+$ axiom budget 2025-06 --today 2026-01-06
+
+Budgets for 2025-06-01
+
+  Place  Law  Window  Spent  Limit  Left  Used
+  ────────────────────────────────────────────
+  · No budgets. A line like `budget 500 USD monthly` under an account makes one.

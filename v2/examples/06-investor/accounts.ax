@@ -1,0 +1,124 @@
+// What is held, where, and what each kind of place means for tax. The rules that
+// the shipped systems lack are in tax.ax.
+
+// ─── Kinds ──────────────────────────────────────────────────────────────────
+
+/// Crypto rewards for validating a network. Income at the value the day they
+/// arrive (Rev. Rul. 2023-14); tax.ax counts them.
+kind staking-income : income
+
+/// A place where a wash sale's disallowed loss is parked: a loss on a sale
+/// that Axiom cannot see is a wash sale, adjusted by hand. Value leaving it
+/// goes into the basis of the replacement shares; tax.ax adds the loss back to
+/// the year's short-term gains.
+kind wash-adjustment : equity
+
+
+// ─── Securities and coins ───────────────────────────────────────────────────
+
+commodity VTI : fund
+  name "Vanguard Total Stock Market ETF"
+  precision 4
+commodity VXUS : fund
+  name "Vanguard Total International Stock ETF"
+  precision 4
+commodity BND : fund
+  name "Vanguard Total Bond Market ETF"
+  precision 4
+commodity VNQ : fund
+  name "Vanguard Real Estate ETF"
+  precision 4
+commodity SCHH : fund
+  name "Schwab U.S. REIT ETF"
+  precision 4
+
+commodity MSFT : stock
+  precision 4
+commodity UNH : stock
+  precision 4
+commodity FAST : stock
+  name "Fastenal"
+  precision 4
+commodity NWND : stock
+  name "Northwind Systems"
+  precision 4
+
+commodity BTC : crypto
+  precision 8
+commodity ETH : crypto
+  precision 8
+
+
+// ─── Cash and brokerage places ──────────────────────────────────────────────
+
+account assets/bank/checking : bank
+account assets/bank/savings  : bank
+
+/// Contributions to the employee stock purchase plan wait here, taken from pay
+/// after tax, until the purchase date.
+account assets/espp-cash : cash
+
+/// The 401(k) at work: 14% of pay, pre-tax.
+account assets/retirement : 401k
+  employer northwind
+
+/// The main taxable brokerage. No lot is named on a plain sale, so the account
+/// sells the highest-cost lot first.
+account assets/fidelity : broker
+  select hifo
+
+/// A second broker, where the international fund and the bonds were moved in
+/// kind. Its lots carry their basis and dates from Fidelity.
+account assets/schwab : broker
+  select fifo
+
+/// Employer stock: vested restricted stock units and ESPP purchases.
+account assets/etrade : broker
+  select fifo
+
+account assets/coinbase : broker
+  holds BTC, ETH, USD
+  select fifo
+
+/// Self-custody wallet: ether that is staked.
+account assets/wallet : broker
+  holds ETH
+  select fifo
+
+
+// ─── Income and equity ──────────────────────────────────────────────────────
+
+account income/salary       : wages
+account income/rsu          : wages
+account income/espp-discount : wages
+account income/dividends    : dividends
+account income/interest     : interest
+account income/staking      : staking-income
+
+account equity/opening
+account equity/wash-sale    : wash-adjustment
+
+
+// ─── Expenses ───────────────────────────────────────────────────────────────
+
+account expenses/rent
+account expenses/utilities
+account expenses/groceries
+account expenses/dining
+account expenses/misc
+
+/// Blockchain fees, paid in ether: each one is a small sale of the coin.
+account expenses/network-fees
+
+account expenses/taxes/federal : federal-tax
+account expenses/taxes/payroll
+
+
+// ─── People ─────────────────────────────────────────────────────────────────
+
+/// The employer. RSU vests arrive from here.
+entity northwind : employer
+  via income/rsu
+
+entity landlord : org
+  via expenses/rent

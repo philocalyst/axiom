@@ -1,0 +1,47 @@
+$ axiom balance --value --today 2026-01-06
+
+Balances at 2026-01-06
+
+  Place               Value (USD)
+  ───────────────────────────────
+  assets           430,872.39 USD
+    bank           153,010.86 USD
+      checking      69,910.07 USD
+      savings       83,100.79 USD
+    coinbase        14,812.83 USD
+    espp-cash        8,400.00 USD
+    etrade          56,453.60 USD
+    fidelity        59,011.80 USD
+    retirement     117,733.28 USD
+    schwab           5,709.93 USD
+    wallet          15,740.10 USD
+  ───────────────────────────────
+  equity           255,199.15 USD
+    opening        253,220.55 USD
+    wash-sale        1,978.60 USD
+  ───────────────────────────────
+  expenses         135,479.56 USD
+    dining           4,929.80 USD
+    groceries       10,190.04 USD
+    misc             4,081.49 USD
+    network-fees         6.51 USD
+    rent            42,400.00 USD
+    taxes           71,246.42 USD
+      federal       52,880.27 USD
+      payroll       18,366.15 USD
+    utilities        2,625.30 USD
+  ───────────────────────────────
+  income           287,778.23 USD
+    dividends          556.21 USD
+    espp-discount    7,641.37 USD
+    interest         7,679.65 USD
+    rsu             47,637.60 USD
+    salary         224,000.00 USD
+    staking            263.40 USD
+
+  Net worth       Value (USD)
+  ───────────────────────────
+  Assets       430,872.40 USD
+  Liabilities        0.00 USD
+  ───────────────────────────
+  Net worth    430,872.40 USD

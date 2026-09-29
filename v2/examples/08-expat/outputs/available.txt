@@ -1,0 +1,41 @@
+$ axiom available --today 2026-01-06
+
+Available on 2026-01-06
+
+What you can spend
+  Liquid now                        Amount
+  ────────────────────────────────────────
+  Money in liquid places     34,164.69 USD
+    assets/bank/us-checking  15,604.75 USD
+    assets/bank/us-savings   18,559.94 USD
+  ────────────────────────────────────────
+  Available to spend         34,164.69 USD
+
+What it would take to reach the rest
+  Holding                                                Liquid in           Value          Costs            Net
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/de/girokonto (7,481.00 EUR)                     now          8,799.90 USD                  8,799.90 USD
+    counts 101.71 USD as agi
+    counts 101.71 USD as short-term-gains
+    realizes a gain of 101.71 USD
+  assets/de/kaution (3,600.00 EUR)                       700d         4,234.68 USD                  4,234.68 USD
+    counts 37.08 USD as agi
+    counts 37.08 USD as short-term-gains
+    realizes a gain of 37.08 USD
+  assets/de/tagesgeld (20,482.76 EUR)                    now         24,093.87 USD                 24,093.87 USD
+    counts -78.79 USD as agi
+    counts -78.79 USD as short-term-gains
+    realizes a gain of -78.79 USD
+  assets/retirement/us-401k                              5d          66,600.00 USD  12,482.00 USD  54,118.00 USD
+    counts 66,600.00 USD as agi
+    federal-income-tax, owed to irs by 2027-04-15                                    5,822.00 USD
+    counts 50,500.00 USD as taxable-income
+    counts 5,822.00 USD as income-tax
+    counts 66,600.00 USD as distributions
+    early-withdrawal-penalty, owed to irs by 2026-01-06                              6,660.00 USD
+    realizes a gain of 66,600.00 USD
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today                                    103,728.45 USD  12,482.00 USD  91,246.45 USD
+  · Each line withdraws the whole holding into assets/bank/us-savings on 2026-01-06 and runs the
+    year out through the laws. Costs are what they would owe because of it, as if the year ended
+    today: penalties, and the tax on any income it creates.

@@ -1,0 +1,6 @@
+$ axiom why budget --today 2026-02-14
+
+error[ambiguous-law]: `budget` could be `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`, `budget`
+  = help: write more of the law's path
+
+✗ 1 error

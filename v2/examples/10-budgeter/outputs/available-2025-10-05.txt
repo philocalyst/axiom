@@ -1,0 +1,27 @@
+$ axiom available --at 2025-10-05 --today 2026-02-14
+
+Available on 2025-10-05
+
+What you can spend
+  Liquid now                          Amount
+  ──────────────────────────────────────────
+  Money in liquid places        3,802.98 USD
+    assets/bank/checking        3,694.47 USD
+    assets/cash/wallet            108.51 USD
+  Pending outflows               -240.00 USD
+    2025-10-02 to expenses/fun   -240.00 USD
+  ──────────────────────────────────────────
+  Available to spend            3,562.98 USD
+
+What it would take to reach the rest
+  Holding                         Liquid in         Value     Costs           Net
+  ───────────────────────────────────────────────────────────────────────────────
+  assets/funds/car-fund           1d           100.00 USD              100.00 USD
+  assets/funds/emergency          1d         2,500.00 USD            2,500.00 USD
+  assets/funds/insurance-fund     1d           800.00 USD              800.00 USD
+  assets/funds/trip-fund          1d           250.00 USD              250.00 USD
+  ───────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today             3,650.00 USD  0.00 USD  3,650.00 USD
+  · Each line withdraws the whole holding into assets/bank/checking on 2025-10-05 and runs the year
+    out through the laws. Costs are what they would owe because of it, as if the year ended today:
+    penalties, and the tax on any income it creates.

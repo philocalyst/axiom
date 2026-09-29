@@ -1,0 +1,51 @@
+$ axiom forecast --paths 200 --today 2026-01-06
+
+Forecast to 2027-01-06
+
+Liquid net worth
+  Month end        Committed             p10             p50             p90
+  ──────────────────────────────────────────────────────────────────────────
+  2026-01-06  173,866.60 USD
+  2026-01-31  179,524.71 USD  177,461.65 USD  179,193.94 USD  179,269.44 USD
+  2026-02-28  183,879.67 USD  180,378.39 USD  182,237.03 USD  183,274.05 USD
+  2026-03-31  188,234.63 USD  183,526.99 USD  185,575.97 USD  187,270.36 USD
+  2026-04-30  192,589.59 USD  186,603.17 USD  189,127.77 USD  191,078.86 USD
+  2026-05-31  196,944.55 USD  189,645.39 USD  192,447.19 USD  194,841.32 USD
+  2026-06-30  201,299.51 USD  192,753.12 USD  195,834.09 USD  198,421.94 USD
+  2026-07-31  205,654.47 USD  196,461.34 USD  199,245.63 USD  201,901.19 USD
+  2026-08-31  210,009.43 USD  199,194.08 USD  202,731.50 USD  205,533.99 USD
+  2026-09-30  214,364.39 USD  202,466.20 USD  205,696.25 USD  208,829.88 USD
+  2026-10-31  218,719.35 USD  205,442.19 USD  209,338.78 USD  212,536.84 USD
+  2026-11-30  223,074.31 USD  208,859.62 USD  212,794.89 USD  216,373.76 USD
+  2026-12-31  227,429.27 USD  211,505.62 USD  216,102.71 USD  219,889.50 USD
+  2027-01-06  226,126.12 USD  210,126.41 USD  214,654.60 USD  218,376.06 USD
+  · Committed: liquid assets less debts, in USD, after plans, recurring flows found in history,
+    growth models and obligations as they fall due. Variable spending is not in it.
+  · p10, p50 and p90 are the 10th, 50th and 90th percentile of 200 paths. Each path takes the
+    committed figure and subtracts, month by month, a random past month of spending for every
+    top-level expense category (from 13 months of history, without the flows already projected). The
+    seed is fixed, so the bands are reproducible.
+
+What recurs
+  Expected                                                                Every          Amount  Next        Source
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/bank/checking → expenses/dining                                  monthly    179.28 USD  2026-01-19  seen 12 times
+  assets/bank/checking → expenses/living                                  monthly    326.94 USD  2026-01-22  seen 12 times
+  assets/bank/checking → expenses/own-rent (oak-street)                   monthly  1,950.00 USD  2026-02-01  seen 12 times
+  assets/bank/rental-checking → expenses/rental/interest (lender)         monthly  1,561.15 USD  2026-02-01  seen 13 times
+  assets/bank/rental-checking → expenses/rental/management (hartwell-pm)  monthly    192.00 USD  2026-02-05  seen 10 times
+  assets/bank/rental-checking → liabilities/mortgage (lender)             monthly    248.44 USD  2026-02-01  seen 12 times
+  assets/prepaid/loan-costs → expenses/rental/amortization                monthly      8.67 USD  2026-01-31  seen 12 times
+  equity/acc-dep-house → expenses/rental/depreciation                     monthly    913.58 USD  2026-01-31  seen 12 times
+  equity/acc-dep-roof → expenses/rental/depreciation                      monthly     43.03 USD  2026-01-30  seen 4 times
+  income/rent → assets/bank/rental-checking                               monthly  2,400.00 USD  2026-02-01  seen 10 times
+  income/salary → assets/bank/checking                                    monthly  6,173.00 USD  2026-01-28  seen 12 times
+  income/salary → expenses/taxes/federal                                  monthly  1,215.00 USD  2026-01-28  seen 12 times
+  income/salary → expenses/taxes/payroll                                  monthly    612.00 USD  2026-01-28  seen 12 times
+
+Problems ahead
+  Date        Problem
+  ───────────────────────────────────────────────────────────────────────────
+  2026-01-31  assets/prepaid/loan-costs is overdrawn, down to -104.04 USD
+  2026-02-01  assets/bank/rental-checking is overdrawn, down to -1,809.59 USD
+  2026-02-01  overdraft: balance below zero (and 4 more)

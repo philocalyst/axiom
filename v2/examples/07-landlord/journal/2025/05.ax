@@ -1,0 +1,20 @@
+2025-05-01 income/rent -> rental-checking 2_400 USD #lease-a
+2025-05-01 checking -> own-rent 1_950 USD / oak-street
+2025-05-01 rental-checking -> 1_809.59 USD / lender
+  mortgage            244.29 USD   // principal
+  interest            1_565.30 USD   // interest
+2025-05-05 rental-checking -> management 192 USD / hartwell-pm
+2025-05-08 checking -> groceries 215.29 USD
+2025-05-15 checking -> groceries 233.73 USD
+2025-05-19 checking -> dining 188.11 USD
+2025-05-22 checking -> living 326.94 USD
+2025-05-28 income/salary -> 8_000.00 USD
+  taxes/federal       1_215.00 USD
+  taxes/payroll       612.00 USD
+  checking            ...
+2025-05-31 acc-dep-house -> depreciation 913.58 USD
+2025-05-31 loan-costs -> amortization 8.67 USD
+2025-05-31 mortgage = 278_031.00 USD
+2025-05-31 rental-checking = 3_718.34 USD
+2025-05-31 checking = 37_139.60 USD
+2025-05-31 deposit-account = 2_400.00 USD

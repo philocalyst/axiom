@@ -1,0 +1,42 @@
+2025-12-01 income/rent -> rental-checking 2_500 USD #lease-b
+2025-12-01 checking -> own-rent 1_950 USD / oak-street
+2025-12-01 rental-checking -> 1_809.59 USD / lender
+  mortgage            254.07 USD   // principal
+  interest            1_555.52 USD   // interest
+2025-12-05 rental-checking -> management 200 USD / hartwell-pm
+2025-12-08 checking -> groceries 169.29 USD
+2025-12-15 checking -> groceries 188.93 USD
+2025-12-19 checking -> dining 179.28 USD
+2025-12-22 checking -> living 480.04 USD
+2025-12-28 income/salary -> 8_000.00 USD
+  taxes/federal       1_215.00 USD
+  taxes/payroll       612.00 USD
+  checking            ...
+2025-12-29 rental-checking -> management 200 USD / hartwell-pm
+
+/// Sold, 431,500.00 USD. The closing statement nets 5% commission and 1.25% of other seller costs
+/// (26_968.75 USD) out of the price. The roof is sold with the house: the price is split by hand,
+/// the roof at its adjusted basis, the house the rest.
+/// Half a month of depreciation for the month of sale, booked first: the sale reads the total.
+2025-12-29 acc-dep-house -> depreciation 456.79 USD
+2025-12-29 acc-dep-roof -> depreciation 21.52 USD
+2025-12-29 -> rental-checking 404_531.25 USD
+  house               1 HOME
+  roof                1 ROOF @ 14_070.90 USD
+
+/// Tenant B's deposit goes to the buyer with the lease.
+2025-12-29 deposit-account -> deposits/tenant-b 2_500 USD / buyer #lease-b
+
+/// Payoff: what is left of the principal, and the interest since the first of the month.
+2025-12-29 rental-checking -> 277_732.53 USD / lender
+  mortgage            276_282.05 USD
+  interest            1_450.48 USD
+
+/// The loan is gone, so the rest of its costs is deducted now.
+2025-12-29 loan-costs -> amortization 3_024.63 USD
+
+/// The rest of the rental account moves to checking.
+2025-12-29 rental-checking -> checking 129_981.33 USD
+2025-12-31 mortgage = empty
+2025-12-31 rental-checking = 0.00 USD
+2025-12-31 checking = 173_866.60 USD

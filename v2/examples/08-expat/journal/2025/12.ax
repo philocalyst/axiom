@@ -1,0 +1,39 @@
+2025-12-01 girokonto -> de-rent 1_450 EUR / hausverwaltung
+2025-12-03 visa -> subscriptions 15.49 USD / netflix
+2025-12-03 girokonto -> groceries 40.90 EUR
+2025-12-05 us-checking -> 420 USD / mohela
+  student-loan            315.32 USD   // principal
+  loan-interest           104.68 USD   // interest
+2025-12-05 girokonto -> transit 58 EUR / bvg
+2025-12-06 girokonto -> dining 18.75 EUR
+2025-12-07 visa -> subscriptions 2.99 USD / apple
+2025-12-08 girokonto 900.00 EUR ->
+  fx-fees                 4.77 EUR
+  us-checking             1_040.17 USD
+2025-12-09 girokonto -> groceries 36.46 EUR
+2025-12-10 girokonto -> phone 19.99 EUR
+2025-12-13 girokonto -> dining 40.54 EUR
+2025-12-15 visa -> subscriptions 35 USD / us-phone
+2025-12-15 girokonto -> groceries 69.54 EUR
+2025-12-17 girokonto -> shopping 70.01 EUR
+2025-12-19 employer-gmbh -> 5_400.00 EUR
+  lohnsteuer              905.00 EUR   // income tax, tax class 1
+  sozialabgaben           1_163.70 EUR   // pension, health, unemployment, care
+  girokonto               ...
+2025-12-20 girokonto -> dining 29.06 EUR
+
+/// November's statement, paid in full.
+2025-12-20 us-checking -> visa 53.48 USD
+2025-12-22 girokonto -> groceries 68.60 EUR
+2025-12-27 girokonto -> groceries 40.12 EUR
+2025-12-31 interest -> us-savings 64.73 USD
+2025-12-31 income/interest-de -> 33.76 EUR
+  kapitalertragsteuer     8.90 EUR
+  tagesgeld               ...
+2025-12-31 visa = 53.48 USD
+2025-12-31 us-checking = 15_604.75 USD
+2025-12-31 us-savings = 18_559.94 USD
+2025-12-31 student-loan = 27_413.82 USD
+2025-12-31 girokonto = 7_481.00 EUR
+2025-12-31 tagesgeld = 20_482.76 EUR
+2025-12-31 kaution = 3_600.00 EUR

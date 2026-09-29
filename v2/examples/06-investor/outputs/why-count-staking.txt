@@ -1,0 +1,25 @@
+$ axiom why count-staking --today 2026-01-06
+
+Why count-staking
+
+  Law       count-staking
+  ──────────────────────────────────
+  When      on in
+  Governs   everything in this book
+  Written   tax.ax:5
+  Ran       8 times
+  Recorded  0 violations, 16 effects
+  · Staking rewards are ordinary income at their value on the day they arrive
+  · (Rev. Rul. 2023-14), and the reward's basis is that same value.
+
+Recent effects
+  Date        Effect           Amount  Owed to  From
+  ──────────────────────────────────────────────────────────────────
+  2025-09-01  other-income  43.28 USD           journal/2025/09.ax:2
+  2025-09-01  agi           43.28 USD           journal/2025/09.ax:2
+  2025-10-01  other-income  39.40 USD           journal/2025/10.ax:2
+  2025-10-01  agi           39.40 USD           journal/2025/10.ax:2
+  2025-11-01  other-income  45.56 USD           journal/2025/11.ax:2
+  2025-11-01  agi           45.56 USD           journal/2025/11.ax:2
+  2025-12-01  other-income  31.08 USD           journal/2025/12.ax:2
+  2025-12-01  agi           31.08 USD           journal/2025/12.ax:2

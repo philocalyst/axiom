@@ -1,0 +1,31 @@
+$ axiom flow --by year --today 2026-01-06
+
+Income and spending
+
+  Place                        2024            2025      2026           Total
+  ───────────────────────────────────────────────────────────────────────────
+  income              70,368.49 USD  217,409.74 USD            287,778.23 USD
+    dividends             88.61 USD      467.60 USD                556.21 USD
+    espp-discount      4,315.92 USD    3,325.45 USD              7,641.37 USD
+    interest           1,833.36 USD    5,846.29 USD              7,679.65 USD
+    rsu                8,130.60 USD   39,507.00 USD             47,637.60 USD
+    salary            56,000.00 USD  168,000.00 USD            224,000.00 USD
+    staking                              263.40 USD                263.40 USD
+    realized gains ≈                   6,221.77 USD              6,221.77 USD
+  ───────────────────────────────────────────────────────────────────────────
+  Total income        70,368.49 USD  223,631.51 USD            294,000.00 USD
+  ───────────────────────────────────────────────────────────────────────────
+  expenses            32,910.20 USD  102,566.50 USD            135,476.70 USD
+    dining             1,297.33 USD    3,632.47 USD              4,929.80 USD
+    groceries          2,505.38 USD    7,684.66 USD             10,190.04 USD
+    misc               1,046.79 USD    3,034.70 USD              4,081.49 USD
+    network-fees                           3.65 USD                  3.65 USD
+    rent              10,600.00 USD   31,800.00 USD             42,400.00 USD
+    taxes             16,827.82 USD   54,418.60 USD             71,246.42 USD
+      federal         12,388.73 USD   40,491.54 USD             52,880.27 USD
+      payroll          4,439.09 USD   13,927.06 USD             18,366.15 USD
+    utilities            632.88 USD    1,992.42 USD              2,625.30 USD
+  ───────────────────────────────────────────────────────────────────────────
+  Net                 37,458.29 USD  121,065.01 USD  0.00 USD  158,523.30 USD
+  · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
+    them.

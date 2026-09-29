@@ -1,0 +1,14 @@
+$ axiom register loans/riley --today 2026-01-06
+
+Register: assets/loans/riley
+
+  Date        With                  Payee  Note               Amount       Balance
+  ────────────────────────────────────────────────────────────────────────────────
+  2025-04-10  assets/bank/checking         #loan-riley  2,000.00 USD  2,000.00 USD
+  2025-05-15  assets/bank/checking         #loan-riley   -250.00 USD  1,750.00 USD
+  2025-06-16  assets/bank/checking         #loan-riley   -250.00 USD  1,500.00 USD
+  2025-07-15  assets/bank/checking         #loan-riley   -250.00 USD  1,250.00 USD
+  2025-08-15  assets/bank/checking         #loan-riley   -250.00 USD  1,000.00 USD
+  2025-11-17  assets/bank/checking         #loan-riley   -500.00 USD    500.00 USD
+  2025-12-15  assets/bank/checking         #loan-riley   -250.00 USD    250.00 USD
+  2025-12-24  expenses/gifts               #loan-riley   -200.00 USD     50.00 USD

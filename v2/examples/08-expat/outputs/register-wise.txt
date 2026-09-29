@@ -1,0 +1,22 @@
+$ axiom register wise --today 2026-01-06
+
+Register: assets/uk/wise
+
+  Date        With                  Payee             Note       Amount     Balance
+  ─────────────────────────────────────────────────────────────────────────────────
+  2025-10-03  assets/de/girokonto                            869.04 GBP  869.04 GBP
+  2025-10-10  expenses/dining       pret-a-manger            -38.60 GBP  830.44 GBP
+  2025-10-10  expenses/transit      tfl                      -11.20 GBP  819.24 GBP
+  2025-10-11  expenses/conference   design-conf             -165.00 GBP  654.24 GBP
+  2025-10-11  expenses/dining       borough-market           -52.40 GBP  601.84 GBP
+  2025-10-11  expenses/transit      tfl                       -8.40 GBP  593.44 GBP
+  2025-10-12  expenses/sightseeing  british-museum           -27.50 GBP  565.94 GBP
+  2025-10-12  expenses/dining       dishoom                  -61.80 GBP  504.14 GBP
+  2025-10-12  expenses/transit      tfl                      -14.60 GBP  489.54 GBP
+  2025-10-13  expenses/shopping     liberty                  -43.20 GBP  446.34 GBP
+  2025-10-13  expenses/dining       the-pub                  -44.10 GBP  402.24 GBP
+  2025-10-13  expenses/transit      black-cab                -42.50 GBP  359.74 GBP
+  2025-10-14  expenses/dining       cafe                     -29.90 GBP  329.84 GBP
+  2025-10-15  expenses/transit      heathrow-express         -19.10 GBP  310.74 GBP
+  2025-10-16  expenses/fx-fees                                -1.71 GBP  309.03 GBP
+  2025-10-16  assets/de/girokonto                           -309.03 GBP    0.00 GBP

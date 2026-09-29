@@ -1,0 +1,23 @@
+$ axiom why recapture --today 2026-01-06
+
+Why recapture
+
+  Law       recapture
+  ─────────────────────────────────
+  When      on gain
+  Governs   every depreciable
+  Written   accounts.ax:18
+  Ran       2 times
+  Recorded  0 violations, 4 effects
+  · Selling depreciable property brings back the depreciation taken (IRC §1250):
+  · the gain the sale realizes is measured from cost, and the tax gain from cost
+  · less depreciation, so the depreciation is added back. It is taxed as
+  · ordinary income (at most 25%, and this person's rate is lower).
+
+Recent effects
+  Date        Effect                   Amount  Owed to  From
+  ───────────────────────────────────────────────────────────────────────────
+  2025-12-29  short-term-gains  10,049.38 USD           journal/2025/12.ax:24
+  2025-12-29  agi               10,049.38 USD           journal/2025/12.ax:24
+  2025-12-29  short-term-gains     129.10 USD           journal/2025/12.ax:25
+  2025-12-29  agi                  129.10 USD           journal/2025/12.ax:25

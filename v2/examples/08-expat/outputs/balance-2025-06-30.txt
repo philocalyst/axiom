@@ -1,0 +1,50 @@
+$ axiom balance --at 2025-06-30 --value --today 2026-01-06
+
+Balances at 2025-06-30
+
+  Place               Value (USD)
+  ───────────────────────────────
+  assets           134,636.32 USD
+    bank            58,533.09 USD
+      us-checking   16,358.17 USD
+      us-savings    42,174.92 USD
+    de               9,503.23 USD
+      girokonto      5,279.71 USD
+      kaution        4,223.52 USD
+    retirement      66,600.00 USD
+      us-401k       66,600.00 USD
+  ───────────────────────────────
+  equity            90,165.96 USD
+    opening         90,165.96 USD
+  ───────────────────────────────
+  expenses          50,451.11 USD
+    dining             979.08 USD
+    fx-fees             55.10 USD
+    groceries        2,686.89 USD
+    loan-interest      687.67 USD
+    moving           2,150.00 USD
+    sf-rent         20,400.00 USD
+    shopping           540.54 USD
+    taxes           20,687.22 USD
+      federal       10,740.00 USD
+      payroll        4,781.22 USD
+      sdi              750.00 USD
+      state          4,416.00 USD
+    transport          365.57 USD
+    travel           1,180.40 USD
+    utilities          718.64 USD
+  ───────────────────────────────
+  income            63,374.94 USD
+    interest           874.92 USD
+    salary-us       62,500.02 USD
+  ───────────────────────────────
+  liabilities       31,488.20 USD
+    student-loan    29,288.07 USD
+    visa             2,200.13 USD
+
+  Net worth       Value (USD)
+  ───────────────────────────
+  Assets       134,636.32 USD
+  Liabilities   31,488.20 USD
+  ───────────────────────────
+  Net worth    103,148.12 USD

@@ -1,0 +1,66 @@
+// Wishes for the expat project. NOT loaded (the loader reads only *.ax files).
+// Each one is answered in ../FINDINGS.md with a proposed design.
+
+// ── 1. Residence, citizenship and regime are different things ───────────────
+//
+//   entity me : person
+//     citizen us                          // taxed by us everywhere, always
+//     lives   us/ca/san-francisco until 2025-06-30
+//     lives   de from 2025-07-01
+//     elects  feie                        // a regime chosen by filing: a law switch
+//
+// Today the second `lives` ends the first, so an American abroad is spelled
+// `us/abroad/de` and every regime hangs from a jurisdiction path.
+
+// ── 2. A part-year resident owes for the part-year ──────────────────────────
+//
+// California's year-end law should run for the residence that ended in the year,
+// on the income counted while it was in force:
+//
+//   law state-income-tax
+//     each year
+//     for the days of `year` inside the residence              // prorated return (Form 540NR)
+//
+// Today: `ca-income-tax` does not exist for 2025 at all.
+
+// ── 3. FX rates are prices with more than two decimals ──────────────────────
+//
+//   2025-07-05 income/salary-de -> girokonto 5_400 EUR @ 1.0860 USD     // rejected: USD has 2 decimals
+//
+// a rate is a ratio, not an amount of the quote currency: it should carry its own
+// precision (`EUR 1.0860 USD` is accepted on a price line, `@ 1.0860 USD` is not).
+
+// ── 4. Conversion is a first-class flow, and its cost is derived ────────────
+//
+//   2025-07-03 us-savings 24_000 USD -> tagesgeld 20_334.10 EUR
+//   // report: mid 1.1673 USD/EUR -> should have received 20,560.27 EUR; spread 226.17 EUR = 264.00 USD = 1.10%
+//
+//   axiom fx                            // every conversion: mid rate, rate obtained, cost in USD
+//
+// The price file has the mid-market rate. The implied price of a conversion has
+// the rate you got. The difference is a cost, and a place for it (expenses/fx-fees).
+
+// ── 5. Cash in a foreign currency is not an investment ─────────────────────
+//
+//   account assets/de/girokonto : bank
+//     holds EUR
+//     currency-gains ignore-below 200 USD        // IRC §988(e): personal transactions
+//
+// A euro spent on groceries is not a sale of a lot, and a loss on a personal
+// currency conversion is never deductible. Today all of it is a short-term
+// capital gain or loss, 105 times.
+
+// ── 6. Aggregates over history ──────────────────────────────────────────────
+//
+//   law fbar
+//     each year
+//     let peak = max(value(balance, USD)) over year of each foreign-account     // a max over time and a sum over accounts
+//     warn sum(peak) <= 10_000 USD "FBAR"
+//
+// Today: one law per account, a tally used as a memory cell, and the account names
+// spelled out in the year-end law.
+
+// ── 7. A conversion budget ──────────────────────────────────────────────────
+//
+//   forecast: 900 EUR a month to the US account -> ~1,050 USD, at the mid rate on the
+//   day, less the usual cost, shown as a monthly transfer, not as two unrelated flows.

@@ -1,0 +1,41 @@
+2025-08-01 girokonto -> de-rent 1_450 EUR / hausverwaltung
+2025-08-03 visa -> subscriptions 15.49 USD / netflix
+2025-08-03 girokonto -> groceries 49.22 EUR
+2025-08-05 us-checking -> 420 USD / mohela
+  student-loan            310.61 USD   // principal
+  loan-interest           109.39 USD   // interest
+2025-08-05 girokonto -> transit 58 EUR / bvg
+2025-08-06 girokonto -> dining 18.52 EUR
+2025-08-07 visa -> subscriptions 2.99 USD / apple
+
+/// A monthly transfer of 900 EUR to the US account for the student loan and the card, through Wise.
+2025-08-08 girokonto 900.00 EUR ->
+  fx-fees                 4.77 EUR
+  us-checking             1_027.63 USD
+2025-08-09 girokonto -> groceries 45.79 EUR
+2025-08-10 girokonto -> phone 19.99 EUR
+2025-08-13 girokonto -> dining 34.81 EUR
+2025-08-15 visa -> subscriptions 35 USD / us-phone
+2025-08-15 girokonto -> groceries 62.32 EUR
+2025-08-17 girokonto -> shopping 41.40 EUR
+2025-08-20 girokonto -> dining 48.37 EUR
+
+/// July's statement, paid in full.
+2025-08-20 us-checking -> visa 53.48 USD
+2025-08-22 girokonto -> groceries 65.66 EUR
+2025-08-27 girokonto -> groceries 47.36 EUR
+2025-08-29 employer-gmbh -> 5_400.00 EUR
+  lohnsteuer              905.00 EUR   // income tax, tax class 1
+  sozialabgaben           1_163.70 EUR   // pension, health, unemployment, care
+  girokonto               ...
+2025-08-31 interest -> us-savings 63.83 USD
+2025-08-31 income/interest-de -> 33.59 EUR
+  kapitalertragsteuer     8.86 EUR
+  tagesgeld               ...
+2025-08-31 visa = 53.48 USD
+2025-08-31 us-checking = 14_292.19 USD
+2025-08-31 us-savings = 18_302.36 USD
+2025-08-31 student-loan = 28_668.02 USD
+2025-08-31 girokonto = 6_350.47 EUR
+2025-08-31 tagesgeld = 20_383.53 EUR
+2025-08-31 kaution = 3_600.00 EUR

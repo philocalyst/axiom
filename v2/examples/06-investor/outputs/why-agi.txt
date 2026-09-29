@@ -1,0 +1,79 @@
+$ axiom why agi --today 2026-01-06
+
+Why agi
+
+Effects
+  Date        Owner         Amount  Owed to  From
+  ────────────────────────────────────────────────────────────────
+  2025-11-30  me        237.68 USD           journal/2025/11.ax:23
+  2025-12-01  me         31.08 USD           journal/2025/12.ax:2
+  2025-12-02  me        524.35 USD           journal/2025/12.ax:5
+  2025-12-04  me         10.49 USD           journal/2025/12.ax:8
+  2025-12-04  me         25.38 USD           journal/2025/12.ax:8
+  2025-12-09  me      1,264.35 USD           journal/2025/12.ax:13
+  2025-12-11  me         13.55 USD           journal/2025/12.ax:14
+  2025-12-16  me       -738.30 USD           journal/2025/12.ax:19
+  2025-12-23  me         27.51 USD           journal/2025/12.ax:22
+  2025-12-23  me         55.27 USD           journal/2025/12.ax:23
+  2025-12-23  me          0.02 USD           journal/2025/12.ax:24
+  2025-12-28  me          7.58 USD           journal/2025/12.ax:26
+  2025-12-31  me     -1,958.33 USD           journal/2025/12.ax:28
+  2025-12-31  me      1,958.33 USD           journal/2025/12.ax:28
+  2025-12-31  me      1,400.00 USD           journal/2025/12.ax:29
+  2025-12-31  me      2,650.00 USD           journal/2025/12.ax:30
+  2025-12-31  me      1,071.00 USD           journal/2025/12.ax:31
+  2025-12-31  me      6,920.67 USD           journal/2025/12.ax:32
+  2025-12-31  me        276.08 USD           journal/2025/12.ax:33
+  2025-12-31  me        276.33 USD           journal/2025/12.ax:34
+  · 181 earlier effects not shown.
+
+Flows behind it
+  Date        Flow                                            Amount  From
+  ─────────────────────────────────────────────────────────────────────────────────────────
+  2025-11-30  income/salary → assets/bank/checking      6,920.67 USD  journal/2025/11.ax:21
+  2025-11-30  income/interest → assets/bank/savings       275.17 USD  journal/2025/11.ax:22
+  2025-11-30  income/interest → assets/fidelity           237.68 USD  journal/2025/11.ax:23
+  2025-12-01  income/staking → assets/wallet               31.08 USD  journal/2025/12.ax:2
+  2025-12-02  assets/coinbase → assets/bank/checking  0.02000000 BTC  journal/2025/12.ax:5
+  2025-12-04  assets/fidelity → assets/bank/checking      8.0000 VTI  journal/2025/12.ax:8
+  2025-12-09  assets/wallet → assets/bank/checking    1.00000000 ETH  journal/2025/12.ax:13
+  2025-12-11  income/dividends → assets/fidelity           13.55 USD  journal/2025/12.ax:14
+  2025-12-16  assets/fidelity → assets/bank/checking    120.0480 VNQ  journal/2025/12.ax:19
+  2025-12-23  income/dividends → assets/schwab             27.51 USD  journal/2025/12.ax:22
+  2025-12-23  income/dividends → assets/fidelity           55.27 USD  journal/2025/12.ax:23
+  2025-12-23  income/dividends → assets/fidelity            0.02 USD  journal/2025/12.ax:24
+  2025-12-28  income/dividends → assets/schwab              7.58 USD  journal/2025/12.ax:26
+  2025-12-31  income/salary → assets/retirement         1,958.33 USD  journal/2025/12.ax:28
+  2025-12-31  income/salary → assets/espp-cash          1,400.00 USD  journal/2025/12.ax:29
+  2025-12-31  income/salary → expenses/taxes/federal    2,650.00 USD  journal/2025/12.ax:30
+  2025-12-31  income/salary → expenses/taxes/payroll    1,071.00 USD  journal/2025/12.ax:31
+  2025-12-31  income/salary → assets/bank/checking      6,920.67 USD  journal/2025/12.ax:32
+  2025-12-31  income/interest → assets/bank/savings       276.08 USD  journal/2025/12.ax:33
+  2025-12-31  income/interest → assets/fidelity           276.33 USD  journal/2025/12.ax:34
+  · 162 earlier flows not shown.
+
+Gains realized
+  Date        Sold from             Proceeds          Basis           Gain  Held since
+  ────────────────────────────────────────────────────────────────────────────────────
+  2025-02-15  assets/etrade     2,079.53 USD   1,788.75 USD     290.78 USD  2024-11-15
+  2025-02-15  assets/etrade       639.26 USD     549.87 USD      89.39 USD  2024-11-15
+  2025-04-08  assets/coinbase  12,263.64 USD   9,760.24 USD   2,503.40 USD  2024-10-14
+  2025-04-10  assets/wallet         3.65 USD       3.70 USD      -0.05 USD  2025-04-08
+  2025-05-15  assets/etrade     1,957.03 USD   1,788.73 USD     168.30 USD  2024-11-15
+  2025-05-15  assets/etrade       128.99 USD     117.91 USD      11.08 USD  2024-11-15
+  2025-05-27  assets/fidelity   4,650.45 USD   7,599.99 USD  -2,949.54 USD  2025-01-14
+  2025-08-15  assets/etrade     2,223.80 USD   1,788.73 USD     435.07 USD  2024-11-15
+  2025-08-15  assets/etrade       146.57 USD     117.91 USD      28.66 USD  2024-11-15
+  2025-09-02  assets/fidelity   2,748.60 USD   2,406.60 USD     342.00 USD  2024-12-10
+  2025-09-15  assets/etrade    16,704.87 USD  14,115.91 USD   2,588.96 USD  2024-12-31
+  2025-10-10  assets/fidelity   1,783.56 USD   1,499.98 USD     283.58 USD  2024-10-05
+  2025-10-10  assets/fidelity   1,468.74 USD   1,212.86 USD     255.88 USD  2024-09-05
+  2025-11-06  assets/fidelity   4,147.52 USD   3,440.00 USD     707.52 USD  2024-10-08
+  2025-11-15  assets/etrade        47.41 USD      34.88 USD      12.53 USD  2024-11-15
+  2025-11-15  assets/etrade     2,383.77 USD   2,038.99 USD     344.78 USD  2025-02-15
+  2025-11-15  assets/etrade       160.24 USD     137.08 USD      23.16 USD  2025-02-15
+  2025-12-02  assets/coinbase   1,825.72 USD   1,301.37 USD     524.35 USD  2024-10-14
+  2025-12-04  assets/fidelity   1,510.46 USD   1,499.97 USD      10.49 USD  2025-11-05
+  2025-12-04  assets/fidelity   1,138.66 USD   1,113.28 USD      25.38 USD  2025-10-05
+  2025-12-09  assets/wallet     3,027.21 USD   1,762.86 USD   1,264.35 USD  2025-04-08
+  2025-12-16  assets/fidelity  10,261.70 USD  11,000.00 USD    -738.30 USD  2025-02-20

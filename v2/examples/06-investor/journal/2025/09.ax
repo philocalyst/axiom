@@ -1,0 +1,36 @@
+2025-09-01 checking -> rent 2_650 USD / landlord
+2025-09-01 income/staking -> wallet 0.01006557 ETH @ 4300.15 USD
+2025-09-02 fidelity 60 FAST -> checking 2_748.60 USD
+2025-09-05 checking -> fidelity 4.7690 VTI @ 314.53 USD
+2025-09-09 checking -> utilities 182.36 USD
+2025-09-11 dividends -> fidelity 20.19 USD
+2025-09-12 checking -> groceries 351.65 USD
+
+/// Selling the December ESPP shares: held under a year, so it is a disqualifying disposition.
+2025-09-15 etrade[2024-12-31] 99.0799 NWND -> checking 16_704.87 USD
+2025-09-16 checking -> dining 239.59 USD
+2025-09-16 checking -> fidelity 33.3689 VXUS @ 74.92 USD
+2025-09-20 checking -> groceries 267.93 USD
+2025-09-24 checking -> misc 260.10 USD
+2025-09-24 dividends -> schwab 27.51 USD
+2025-09-26 dividends -> fidelity 0.1831 VTI @ 321.17 USD   // reinvested: 58.83 USD dividend
+2025-09-26 dividends -> fidelity 0.02 USD
+2025-09-28 dividends -> schwab 7.58 USD
+2025-09-30 income/salary -> 14_000.00 USD
+  retirement          1_958.33 USD   // 401(k) deferral
+  espp-cash           1_400.00 USD   // ESPP contribution, after tax
+  taxes/federal       2_650.00 USD
+  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  checking            ...
+2025-09-30 interest -> savings 273.34 USD
+2025-09-30 interest -> fidelity 226.72 USD
+2025-09-30 checking = 51_353.28 USD
+2025-09-30 savings = 82_275.29 USD
+2025-09-30 espp-cash = 4_200.00 USD
+2025-09-30 fidelity = 68.5879 VTI
+2025-09-30 fidelity = 24.3264 MSFT
+2025-09-30 fidelity = 19.7153 UNH
+2025-09-30 etrade = 249.6388 NWND
+2025-09-30 coinbase = 0.15 BTC
+2025-09-30 coinbase = 0.95668225 ETH
+2025-09-30 wallet = 6.04885544 ETH

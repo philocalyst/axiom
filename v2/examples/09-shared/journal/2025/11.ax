@@ -1,0 +1,62 @@
+2025-11-01 checking -> 3_150.00 USD / landlord
+  rent                    1_050.00 USD
+  roommates/ben           1_050.00 USD
+  roommates/cleo          1_050.00 USD
+2025-11-02 income/tips -> wallet 200.69 USD
+2025-11-02 ben -> checking 1_050 USD #rent-2025-11
+2025-11-03 checking -> car 128 USD / progressive
+
+/// November: 1,000.00 USD, 50.00 USD short: still owed on the last day.
+2025-11-05 cleo -> checking 1000 USD #rent-2025-11
+2025-11-06 wallet -> dining 20.01 USD
+2025-11-07 visa -> 86.22 USD
+  groceries               28.74 USD
+  roommates/ben           28.74 USD
+  roommates/cleo          28.74 USD
+2025-11-08 visa -> phone 45 USD / mint-mobile
+2025-11-09 income/tips -> wallet 233.04 USD
+2025-11-09 checking -> 69.99 USD / fiberco
+  utilities               23.33 USD
+  roommates/ben           23.33 USD
+  roommates/cleo          23.33 USD
+2025-11-09 income/donations -> collective-checking 25 USD
+2025-11-12 roommates/ben -> utilities 30.83 USD / power-co   // my third of 92.50
+2025-11-12 checking -> car 330.50 USD / carmax-finance
+2025-11-13 wallet -> dining 19.20 USD
+2025-11-14 lantern -> 1_295.91 USD   // 962.00 wages + 333.91 card tips
+  taxes/federal           160.69 USD
+  taxes/payroll           99.14 USD
+  checking                ...
+2025-11-14 visa -> dining 28.57 USD
+2025-11-15 checking -> health 189.40 USD / marketplace-plan
+2025-11-16 income/tips -> wallet 248.39 USD
+
+/// Two months missed, paid together in November.
+2025-11-17 riley -> checking 500 USD #loan-riley
+2025-11-17 visa -> groceries 37.58 USD / farmers-market
+2025-11-18 wallet -> transport 6.28 USD
+2025-11-19 visa -> entertainment 65.55 USD
+2025-11-21 visa -> 99.47 USD
+  groceries               33.15 USD
+  roommates/ben           33.16 USD
+  roommates/cleo          33.16 USD
+2025-11-22 checking -> visa 427.19 USD
+2025-11-23 income/tips -> wallet 203.09 USD
+2025-11-24 wallet -> checking 950 USD
+2025-11-26 visa -> clothing 18.07 USD
+2025-11-27 wallet -> dining 20.29 USD
+2025-11-28 lantern -> 1_411.49 USD   // 962.00 wages + 449.49 card tips
+  taxes/federal           175.02 USD
+  taxes/payroll           107.98 USD
+  checking                ...
+2025-11-28 checking -> savings 700 USD
+2025-11-30 income/tips -> wallet 209.13 USD
+
+2025-11-30 ben -> checking 54.40 USD
+2025-11-30 roommates/ben = 0.00 USD
+2025-11-30 roommates/cleo = 135.23 USD
+2025-11-30 visa = 380.46 USD
+2025-11-30 checking = 9_698.53 USD
+2025-11-30 savings = 9_400.00 USD
+2025-11-30 collective-checking = 2_609.61 USD
+2025-11-30 wallet = 385.16 USD

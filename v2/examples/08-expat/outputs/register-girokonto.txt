@@ -1,0 +1,100 @@
+$ axiom register girokonto --today 2026-01-06
+
+Register: assets/de/girokonto
+
+  Date        With                     Payee           Note         Amount       Balance
+  ──────────────────────────────────────────────────────────────────────────────────────
+  2025-06-27  assets/bank/us-checking                         8,100.26 EUR  8,100.26 EUR
+  2025-06-30  assets/de/kaution                              -3,600.00 EUR  4,500.26 EUR
+  2025-07-01  expenses/de-rent         hausverwaltung        -1,450.00 EUR  3,050.26 EUR
+  2025-07-03  expenses/groceries                                -47.09 EUR  3,003.17 EUR
+  2025-07-05  expenses/transit         bvg                      -58.00 EUR  2,945.17 EUR
+  2025-07-06  expenses/dining                                   -24.61 EUR  2,920.56 EUR
+  2025-07-09  expenses/groceries                                -54.32 EUR  2,866.24 EUR
+  2025-07-10  expenses/phone                                    -19.99 EUR  2,846.25 EUR
+  2025-07-13  expenses/dining                                   -46.47 EUR  2,799.78 EUR
+  2025-07-15  expenses/groceries                                -45.43 EUR  2,754.35 EUR
+  2025-07-17  expenses/shopping                                 -82.45 EUR  2,671.90 EUR
+  2025-07-20  expenses/dining                                   -35.30 EUR  2,636.60 EUR
+  2025-07-22  expenses/groceries                                -58.05 EUR  2,578.55 EUR
+  2025-07-27  expenses/groceries                                -49.24 EUR  2,529.31 EUR
+  2025-07-31  income/salary-de         employer-gmbh          3,331.30 EUR  5,860.61 EUR
+  2025-08-01  expenses/de-rent         hausverwaltung        -1,450.00 EUR  4,410.61 EUR
+  2025-08-03  expenses/groceries                                -49.22 EUR  4,361.39 EUR
+  2025-08-05  expenses/transit         bvg                      -58.00 EUR  4,303.39 EUR
+  2025-08-06  expenses/dining                                   -18.52 EUR  4,284.87 EUR
+  2025-08-08  expenses/fx-fees                                   -4.77 EUR  4,280.10 EUR
+  2025-08-08  assets/bank/us-checking                          -895.23 EUR  3,384.87 EUR
+  2025-08-09  expenses/groceries                                -45.79 EUR  3,339.08 EUR
+  2025-08-10  expenses/phone                                    -19.99 EUR  3,319.09 EUR
+  2025-08-13  expenses/dining                                   -34.81 EUR  3,284.28 EUR
+  2025-08-15  expenses/groceries                                -62.32 EUR  3,221.96 EUR
+  2025-08-17  expenses/shopping                                 -41.40 EUR  3,180.56 EUR
+  2025-08-20  expenses/dining                                   -48.37 EUR  3,132.19 EUR
+  2025-08-22  expenses/groceries                                -65.66 EUR  3,066.53 EUR
+  2025-08-27  expenses/groceries                                -47.36 EUR  3,019.17 EUR
+  2025-08-29  income/salary-de         employer-gmbh          3,331.30 EUR  6,350.47 EUR
+  2025-09-01  expenses/de-rent         hausverwaltung        -1,450.00 EUR  4,900.47 EUR
+  2025-09-03  expenses/groceries                                -56.23 EUR  4,844.24 EUR
+  2025-09-05  expenses/transit         bvg                      -58.00 EUR  4,786.24 EUR
+  2025-09-06  expenses/dining                                   -25.31 EUR  4,760.93 EUR
+  2025-09-08  expenses/fx-fees                                   -4.77 EUR  4,756.16 EUR
+  2025-09-08  assets/bank/us-checking                          -895.23 EUR  3,860.93 EUR
+  2025-09-09  expenses/groceries                                -60.51 EUR  3,800.42 EUR
+  2025-09-10  expenses/phone                                    -19.99 EUR  3,780.43 EUR
+  2025-09-13  expenses/dining                                   -68.79 EUR  3,711.64 EUR
+  2025-09-15  expenses/groceries                                -51.69 EUR  3,659.95 EUR
+  2025-09-17  expenses/shopping                                 -71.79 EUR  3,588.16 EUR
+  2025-09-20  expenses/dining                                   -27.00 EUR  3,561.16 EUR
+  2025-09-22  expenses/groceries                                -30.53 EUR  3,530.63 EUR
+  2025-09-27  expenses/groceries                                -72.10 EUR  3,458.53 EUR
+  2025-09-30  income/salary-de         employer-gmbh          3,331.30 EUR  6,789.83 EUR
+  2025-10-01  expenses/de-rent         hausverwaltung        -1,450.00 EUR  5,339.83 EUR
+  2025-10-03  expenses/groceries                                -53.72 EUR  5,286.11 EUR
+  2025-10-03  expenses/fx-fees                                   -5.50 EUR  5,280.61 EUR
+  2025-10-03  assets/uk/wise                                   -994.50 EUR  4,286.11 EUR
+  2025-10-05  expenses/transit         bvg                      -58.00 EUR  4,228.11 EUR
+  2025-10-06  expenses/dining                                   -25.49 EUR  4,202.62 EUR
+  2025-10-08  expenses/fx-fees                                   -4.77 EUR  4,197.85 EUR
+  2025-10-08  assets/bank/us-checking                          -895.23 EUR  3,302.62 EUR
+  2025-10-09  expenses/groceries                                -50.04 EUR  3,252.58 EUR
+  2025-10-10  expenses/phone                                    -19.99 EUR  3,232.59 EUR
+  2025-10-13  expenses/dining                                   -33.12 EUR  3,199.47 EUR
+  2025-10-15  expenses/groceries                                -61.68 EUR  3,137.79 EUR
+  2025-10-15  expenses/travel          ryanair                  -96.00 EUR  3,041.79 EUR
+  2025-10-16  assets/uk/wise                                    354.47 EUR  3,396.26 EUR
+  2025-10-17  expenses/shopping                                 -46.79 EUR  3,349.47 EUR
+  2025-10-20  expenses/dining                                   -31.72 EUR  3,317.75 EUR
+  2025-10-22  expenses/groceries                                -53.54 EUR  3,264.21 EUR
+  2025-10-27  expenses/groceries                                -52.13 EUR  3,212.08 EUR
+  2025-10-31  income/salary-de         employer-gmbh          3,331.30 EUR  6,543.38 EUR
+  2025-11-01  expenses/de-rent         hausverwaltung        -1,450.00 EUR  5,093.38 EUR
+  2025-11-03  expenses/groceries                                -42.38 EUR  5,051.00 EUR
+  2025-11-05  expenses/transit         bvg                      -58.00 EUR  4,993.00 EUR
+  2025-11-06  expenses/dining                                   -21.75 EUR  4,971.25 EUR
+  2025-11-08  expenses/fx-fees                                   -4.77 EUR  4,966.48 EUR
+  2025-11-08  assets/bank/us-checking                          -895.23 EUR  4,071.25 EUR
+  2025-11-09  expenses/groceries                                -34.90 EUR  4,036.35 EUR
+  2025-11-10  expenses/phone                                    -19.99 EUR  4,016.36 EUR
+  2025-11-13  expenses/dining                                   -47.01 EUR  3,969.35 EUR
+  2025-11-15  expenses/groceries                                -59.29 EUR  3,910.06 EUR
+  2025-11-17  expenses/shopping                                 -75.00 EUR  3,835.06 EUR
+  2025-11-20  expenses/dining                                   -35.20 EUR  3,799.86 EUR
+  2025-11-22  expenses/groceries                                -58.33 EUR  3,741.53 EUR
+  2025-11-27  expenses/groceries                                -81.16 EUR  3,660.37 EUR
+  2025-11-28  income/salary-de         employer-gmbh          3,331.30 EUR  6,991.67 EUR
+  2025-12-01  expenses/de-rent         hausverwaltung        -1,450.00 EUR  5,541.67 EUR
+  2025-12-03  expenses/groceries                                -40.90 EUR  5,500.77 EUR
+  2025-12-05  expenses/transit         bvg                      -58.00 EUR  5,442.77 EUR
+  2025-12-06  expenses/dining                                   -18.75 EUR  5,424.02 EUR
+  2025-12-08  expenses/fx-fees                                   -4.77 EUR  5,419.25 EUR
+  2025-12-08  assets/bank/us-checking                          -895.23 EUR  4,524.02 EUR
+  2025-12-09  expenses/groceries                                -36.46 EUR  4,487.56 EUR
+  2025-12-10  expenses/phone                                    -19.99 EUR  4,467.57 EUR
+  2025-12-13  expenses/dining                                   -40.54 EUR  4,427.03 EUR
+  2025-12-15  expenses/groceries                                -69.54 EUR  4,357.49 EUR
+  2025-12-17  expenses/shopping                                 -70.01 EUR  4,287.48 EUR
+  2025-12-19  income/salary-de         employer-gmbh          3,331.30 EUR  7,618.78 EUR
+  2025-12-20  expenses/dining                                   -29.06 EUR  7,589.72 EUR
+  2025-12-22  expenses/groceries                                -68.60 EUR  7,521.12 EUR
+  2025-12-27  expenses/groceries                                -40.12 EUR  7,481.00 EUR

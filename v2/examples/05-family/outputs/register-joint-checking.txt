@@ -1,0 +1,189 @@
+$ axiom register joint-checking --today 2026-01-05
+
+Register: assets/bank/joint-checking
+
+  Date        With                                Payee            Note                       Amount        Balance
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2024-12-31  equity/opening                                                           12,480.66 USD  12,480.66 USD
+  2024-12-31  equity/opening                                                           19,850.00 USD  32,330.66 USD
+  2024-12-31  assets/education/riley-529                                              -19,850.00 USD  12,480.66 USD
+  2025-01-01  liabilities/mortgage                lender           #mortgage-2025-01     -465.28 USD  12,015.38 USD
+  2025-01-01  expenses/housing/mortgage-interest  lender                               -2,019.18 USD   9,996.20 USD
+  2025-01-01  assets/escrow                       lender                                 -690.00 USD   9,306.20 USD
+  2025-01-03  income/jordan-salary                bluefin                               2,714.00 USD  12,020.20 USD
+  2025-01-03  expenses/charity                    st-annes-parish                        -200.00 USD  11,820.20 USD
+  2025-01-05  liabilities/car-loan                honda-finance                          -507.65 USD  11,312.55 USD
+  2025-01-05  expenses/auto/loan-interest         honda-finance                           -94.76 USD  11,217.79 USD
+  2025-01-05  expenses/childcare                  little-sprouts                       -1,650.00 USD   9,567.79 USD
+  2025-01-08  assets/education/riley-529                           #529-monthly          -250.00 USD   9,317.79 USD
+  2025-01-10  assets/bank/joint-savings                                                -2,800.00 USD   6,517.79 USD
+  2025-01-15  income/alex-salary                  acme                                  3,077.66 USD   9,595.45 USD
+  2025-01-17  income/jordan-salary                bluefin                               2,714.00 USD  12,309.45 USD
+  2025-01-25  liabilities/card                                                         -2,284.17 USD  10,025.28 USD
+  2025-01-31  income/alex-salary                  acme                                  3,077.66 USD  13,102.94 USD
+  2025-01-31  income/jordan-salary                bluefin                               2,714.00 USD  15,816.94 USD
+  2025-02-01  liabilities/mortgage                lender           #mortgage-2025-02     -467.56 USD  15,349.38 USD
+  2025-02-01  expenses/housing/mortgage-interest  lender                               -2,016.90 USD  13,332.48 USD
+  2025-02-01  assets/escrow                       lender                                 -690.00 USD  12,642.48 USD
+  2025-02-03  expenses/charity                    st-annes-parish                        -200.00 USD  12,442.48 USD
+  2025-02-05  liabilities/car-loan                honda-finance                          -509.72 USD  11,932.76 USD
+  2025-02-05  expenses/auto/loan-interest         honda-finance                           -92.69 USD  11,840.07 USD
+  2025-02-05  expenses/childcare                  little-sprouts                       -1,233.34 USD  10,606.73 USD
+  2025-02-08  assets/education/riley-529                           #529-monthly          -250.00 USD  10,356.73 USD
+  2025-02-10  assets/bank/joint-savings                                                -2,800.00 USD   7,556.73 USD
+  2025-02-14  income/jordan-salary                bluefin                               2,714.00 USD  10,270.73 USD
+  2025-02-15  income/alex-salary                  acme                                  3,077.66 USD  13,348.39 USD
+  2025-02-25  liabilities/card                                                         -2,028.75 USD  11,319.64 USD
+  2025-02-28  income/alex-salary                  acme                                  3,077.66 USD  14,397.30 USD
+  2025-02-28  income/jordan-salary                bluefin                               2,714.00 USD  17,111.30 USD
+  2025-03-01  liabilities/mortgage                lender           #mortgage-2025-03     -469.85 USD  16,641.45 USD
+  2025-03-01  expenses/housing/mortgage-interest  lender                               -2,014.61 USD  14,626.84 USD
+  2025-03-01  assets/escrow                       lender                                 -690.00 USD  13,936.84 USD
+  2025-03-03  expenses/charity                    st-annes-parish                        -200.00 USD  13,736.84 USD
+  2025-03-05  liabilities/car-loan                honda-finance                          -511.80 USD  13,225.04 USD
+  2025-03-05  expenses/auto/loan-interest         honda-finance                           -90.61 USD  13,134.43 USD
+  2025-03-05  expenses/childcare                  little-sprouts                       -1,233.34 USD  11,901.09 USD
+  2025-03-06  expenses/auto/insurance             statefarm                              -574.00 USD  11,327.09 USD
+  2025-03-08  assets/education/riley-529                           #529-monthly          -250.00 USD  11,077.09 USD
+  2025-03-10  assets/bank/joint-savings                                                -2,800.00 USD   8,277.09 USD
+  2025-03-14  income/alex-salary                  acme                                  5,870.40 USD  14,147.49 USD
+  2025-03-14  income/jordan-salary                bluefin                               2,714.00 USD  16,861.49 USD
+  2025-03-14  expenses/tuition                    st-annes-school                        -350.00 USD  16,511.49 USD
+  2025-03-15  income/alex-salary                  acme                                  3,077.66 USD  19,589.15 USD
+  2025-03-25  liabilities/card                                                         -2,308.35 USD  17,280.80 USD
+  2025-03-28  income/jordan-salary                bluefin                               2,714.00 USD  19,994.80 USD
+  2025-03-31  income/alex-salary                  acme                                  3,077.66 USD  23,072.46 USD
+  2025-04-01  liabilities/mortgage                lender           #mortgage-2025-04     -472.15 USD  22,600.31 USD
+  2025-04-01  expenses/housing/mortgage-interest  lender                               -2,012.31 USD  20,588.00 USD
+  2025-04-01  assets/escrow                       lender                                 -690.00 USD  19,898.00 USD
+  2025-04-03  expenses/charity                    st-annes-parish                        -200.00 USD  19,698.00 USD
+  2025-04-05  liabilities/car-loan                honda-finance                          -513.89 USD  19,184.11 USD
+  2025-04-05  expenses/auto/loan-interest         honda-finance                           -88.52 USD  19,095.59 USD
+  2025-04-05  expenses/childcare                  little-sprouts                       -1,233.34 USD  17,862.25 USD
+  2025-04-08  assets/education/riley-529                           #529-monthly          -250.00 USD  17,612.25 USD
+  2025-04-10  assets/bank/joint-savings                                                -2,800.00 USD  14,812.25 USD
+  2025-04-11  income/jordan-salary                bluefin                               2,714.00 USD  17,526.25 USD
+  2025-04-15  income/alex-salary                  acme                                  3,077.66 USD  20,603.91 USD
+  2025-04-15  expenses/taxes/state-prior                                                 -412.00 USD  20,191.91 USD
+  2025-04-25  income/jordan-salary                bluefin                               2,714.00 USD  22,905.91 USD
+  2025-04-25  liabilities/card                                                         -1,937.78 USD  20,968.13 USD
+  2025-04-30  income/alex-salary                  acme                                  3,077.66 USD  24,045.79 USD
+  2025-05-01  liabilities/mortgage                lender           #mortgage-2025-05     -474.46 USD  23,571.33 USD
+  2025-05-01  expenses/housing/mortgage-interest  lender                               -2,010.00 USD  21,561.33 USD
+  2025-05-01  assets/escrow                       lender                                 -690.00 USD  20,871.33 USD
+  2025-05-03  expenses/charity                    st-annes-parish                        -200.00 USD  20,671.33 USD
+  2025-05-05  liabilities/car-loan                honda-finance                          -515.99 USD  20,155.34 USD
+  2025-05-05  expenses/auto/loan-interest         honda-finance                           -86.42 USD  20,068.92 USD
+  2025-05-05  expenses/childcare                  little-sprouts                       -1,233.34 USD  18,835.58 USD
+  2025-05-08  assets/education/riley-529                           #529-monthly          -250.00 USD  18,585.58 USD
+  2025-05-09  income/jordan-salary                bluefin                               2,714.00 USD  21,299.58 USD
+  2025-05-09  expenses/medical                    smile-dental                           -620.00 USD  20,679.58 USD
+  2025-05-10  assets/bank/joint-savings                                                -2,800.00 USD  17,879.58 USD
+  2025-05-15  income/alex-salary                  acme                                  3,077.66 USD  20,957.24 USD
+  2025-05-23  income/jordan-salary                bluefin                               2,714.00 USD  23,671.24 USD
+  2025-05-25  liabilities/card                                                         -1,893.13 USD  21,778.11 USD
+  2025-05-31  income/alex-salary                  acme                                  3,077.66 USD  24,855.77 USD
+  2025-06-01  liabilities/mortgage                lender           #mortgage-2025-06     -476.78 USD  24,378.99 USD
+  2025-06-01  expenses/housing/mortgage-interest  lender                               -2,007.68 USD  22,371.31 USD
+  2025-06-01  assets/escrow                       lender                                 -690.00 USD  21,681.31 USD
+  2025-06-03  expenses/charity                    st-annes-parish                        -200.00 USD  21,481.31 USD
+  2025-06-05  liabilities/car-loan                honda-finance                          -518.10 USD  20,963.21 USD
+  2025-06-05  expenses/auto/loan-interest         honda-finance                           -84.31 USD  20,878.90 USD
+  2025-06-05  expenses/childcare                  little-sprouts                       -1,233.34 USD  19,645.56 USD
+  2025-06-06  income/jordan-salary                bluefin                               2,714.00 USD  22,359.56 USD
+  2025-06-08  assets/education/riley-529                           #529-monthly          -250.00 USD  22,109.56 USD
+  2025-06-10  assets/bank/joint-savings                                                -2,800.00 USD  19,309.56 USD
+  2025-06-15  income/alex-salary                  acme                                  3,077.66 USD  22,387.22 USD
+  2025-06-20  income/jordan-salary                bluefin                               2,714.00 USD  25,101.22 USD
+  2025-06-25  liabilities/card                                                         -2,156.39 USD  22,944.83 USD
+  2025-06-30  income/alex-salary                  acme                                  3,077.66 USD  26,022.49 USD
+  2025-07-01  liabilities/mortgage                lender           #mortgage-2025-07     -479.12 USD  25,543.37 USD
+  2025-07-01  expenses/housing/mortgage-interest  lender                               -2,005.34 USD  23,538.03 USD
+  2025-07-01  assets/escrow                       lender                                 -690.00 USD  22,848.03 USD
+  2025-07-03  expenses/charity                    st-annes-parish                        -200.00 USD  22,648.03 USD
+  2025-07-04  income/jordan-salary                bluefin                               2,782.33 USD  25,430.36 USD
+  2025-07-05  liabilities/car-loan                honda-finance                          -520.21 USD  24,910.15 USD
+  2025-07-05  expenses/auto/loan-interest         honda-finance                           -82.20 USD  24,827.95 USD
+  2025-07-05  expenses/childcare                  little-sprouts                       -1,233.34 USD  23,594.61 USD
+  2025-07-08  assets/education/riley-529                           #529-monthly          -250.00 USD  23,344.61 USD
+  2025-07-10  assets/bank/joint-savings                                                -2,800.00 USD  20,544.61 USD
+  2025-07-15  income/alex-salary                  acme                                  3,077.66 USD  23,622.27 USD
+  2025-07-18  income/jordan-salary                bluefin                               2,782.33 USD  26,404.60 USD
+  2025-07-25  liabilities/card                                                         -3,202.31 USD  23,202.29 USD
+  2025-07-31  income/alex-salary                  acme                                  3,077.66 USD  26,279.95 USD
+  2025-08-01  income/jordan-salary                bluefin                               2,782.33 USD  29,062.28 USD
+  2025-08-01  liabilities/mortgage                lender           #mortgage-2025-08     -481.46 USD  28,580.82 USD
+  2025-08-01  expenses/housing/mortgage-interest  lender                               -2,003.00 USD  26,577.82 USD
+  2025-08-01  assets/escrow                       lender                                 -690.00 USD  25,887.82 USD
+  2025-08-03  expenses/charity                    st-annes-parish                        -200.00 USD  25,687.82 USD
+  2025-08-05  liabilities/car-loan                honda-finance                          -522.34 USD  25,165.48 USD
+  2025-08-05  expenses/auto/loan-interest         honda-finance                           -80.07 USD  25,085.41 USD
+  2025-08-05  expenses/childcare                  little-sprouts                       -1,233.34 USD  23,852.07 USD
+  2025-08-08  assets/education/riley-529                           #529-monthly          -250.00 USD  23,602.07 USD
+  2025-08-10  assets/bank/joint-savings                                                -2,800.00 USD  20,802.07 USD
+  2025-08-15  income/alex-salary                  acme                                  3,077.66 USD  23,879.73 USD
+  2025-08-15  income/jordan-salary                bluefin                               2,782.33 USD  26,662.06 USD
+  2025-08-25  liabilities/card                                                         -3,125.39 USD  23,536.67 USD
+  2025-08-29  income/jordan-salary                bluefin                               2,782.33 USD  26,319.00 USD
+  2025-08-31  income/alex-salary                  acme                                  3,077.66 USD  29,396.66 USD
+  2025-09-01  liabilities/mortgage                lender           #mortgage-2025-09     -483.82 USD  28,912.84 USD
+  2025-09-01  expenses/housing/mortgage-interest  lender                               -2,000.64 USD  26,912.20 USD
+  2025-09-01  assets/escrow                       lender                                 -705.00 USD  26,207.20 USD
+  2025-09-03  expenses/charity                    st-annes-parish                        -200.00 USD  26,007.20 USD
+  2025-09-05  liabilities/car-loan                honda-finance                          -524.47 USD  25,482.73 USD
+  2025-09-05  expenses/auto/loan-interest         honda-finance                           -77.94 USD  25,404.79 USD
+  2025-09-05  expenses/childcare                  kids-club                              -473.34 USD  24,931.45 USD
+  2025-09-06  expenses/auto/insurance             statefarm                              -574.00 USD  24,357.45 USD
+  2025-09-08  assets/education/riley-529                           #529-monthly          -250.00 USD  24,107.45 USD
+  2025-09-10  assets/bank/joint-savings                                                -2,800.00 USD  21,307.45 USD
+  2025-09-12  income/jordan-salary                bluefin                               2,782.33 USD  24,089.78 USD
+  2025-09-15  income/alex-salary                  acme                                  3,077.66 USD  27,167.44 USD
+  2025-09-25  liabilities/card                                                         -1,767.07 USD  25,400.37 USD
+  2025-09-26  income/jordan-salary                bluefin                               2,782.33 USD  28,182.70 USD
+  2025-09-30  income/alex-salary                  acme                                  3,077.66 USD  31,260.36 USD
+  2025-10-01  liabilities/mortgage                lender           #mortgage-2025-10     -486.19 USD  30,774.17 USD
+  2025-10-01  expenses/housing/mortgage-interest  lender                               -1,998.27 USD  28,775.90 USD
+  2025-10-01  assets/escrow                       lender                                 -705.00 USD  28,070.90 USD
+  2025-10-03  expenses/charity                    st-annes-parish                        -200.00 USD  27,870.90 USD
+  2025-10-05  liabilities/car-loan                honda-finance                          -526.61 USD  27,344.29 USD
+  2025-10-05  expenses/auto/loan-interest         honda-finance                           -75.80 USD  27,268.49 USD
+  2025-10-05  expenses/childcare                  kids-club                              -473.34 USD  26,795.15 USD
+  2025-10-08  assets/education/riley-529                           #529-monthly          -250.00 USD  26,545.15 USD
+  2025-10-10  income/jordan-salary                bluefin                               2,782.33 USD  29,327.48 USD
+  2025-10-10  assets/bank/joint-savings                                                -2,800.00 USD  26,527.48 USD
+  2025-10-15  income/alex-salary                  acme                                  3,077.66 USD  29,605.14 USD
+  2025-10-15  assets/education/riley-529                                                1,500.00 USD  31,105.14 USD
+  2025-10-16  expenses/auto/repairs               brake-shop                           -1,132.48 USD  29,972.66 USD
+  2025-10-24  income/jordan-salary                bluefin                               2,782.33 USD  32,754.99 USD
+  2025-10-25  liabilities/card                                                         -2,027.04 USD  30,727.95 USD
+  2025-10-31  income/alex-salary                  acme                                  3,077.66 USD  33,805.61 USD
+  2025-11-01  liabilities/mortgage                lender           #mortgage-2025-11     -488.57 USD  33,317.04 USD
+  2025-11-01  expenses/housing/mortgage-interest  lender                               -1,995.89 USD  31,321.15 USD
+  2025-11-01  assets/escrow                       lender                                 -705.00 USD  30,616.15 USD
+  2025-11-03  expenses/charity                    st-annes-parish                        -200.00 USD  30,416.15 USD
+  2025-11-05  liabilities/car-loan                honda-finance                          -528.76 USD  29,887.39 USD
+  2025-11-05  expenses/auto/loan-interest         honda-finance                           -73.65 USD  29,813.74 USD
+  2025-11-05  assets/hsa                                                                  620.00 USD  30,433.74 USD
+  2025-11-05  expenses/childcare                  kids-club                              -473.34 USD  29,960.40 USD
+  2025-11-07  income/jordan-salary                bluefin                               2,782.33 USD  32,742.73 USD
+  2025-11-08  assets/education/riley-529                           #529-monthly          -250.00 USD  32,492.73 USD
+  2025-11-10  assets/bank/joint-savings                                                -2,800.00 USD  29,692.73 USD
+  2025-11-15  income/alex-salary                  acme                                  3,077.66 USD  32,770.39 USD
+  2025-11-21  income/jordan-salary                bluefin                               2,782.33 USD  35,552.72 USD
+  2025-11-25  liabilities/card                                                         -1,952.72 USD  33,600.00 USD
+  2025-11-30  income/alex-salary                  acme                                  3,077.66 USD  36,677.66 USD
+  2025-12-01  liabilities/mortgage                lender           #mortgage-2025-12     -490.96 USD  36,186.70 USD
+  2025-12-01  expenses/housing/mortgage-interest  lender                               -1,993.50 USD  34,193.20 USD
+  2025-12-01  assets/escrow                       lender                                 -705.00 USD  33,488.20 USD
+  2025-12-03  expenses/charity                    st-annes-parish                        -200.00 USD  33,288.20 USD
+  2025-12-05  income/jordan-salary                bluefin                               2,782.33 USD  36,070.53 USD
+  2025-12-05  liabilities/car-loan                honda-finance                          -530.92 USD  35,539.61 USD
+  2025-12-05  expenses/auto/loan-interest         honda-finance                           -71.49 USD  35,468.12 USD
+  2025-12-05  expenses/childcare                  kids-club                              -473.34 USD  34,994.78 USD
+  2025-12-08  assets/education/riley-529                           #529-monthly          -250.00 USD  34,744.78 USD
+  2025-12-10  assets/bank/joint-savings                                                -2,800.00 USD  31,944.78 USD
+  2025-12-15  income/alex-salary                  acme                                  3,077.66 USD  35,022.44 USD
+  2025-12-19  income/jordan-salary                bluefin                               2,782.33 USD  37,804.77 USD
+  2025-12-20  expenses/charity                    food-bank                            -1,500.00 USD  36,304.77 USD
+  2025-12-25  liabilities/card                                                         -2,543.37 USD  33,761.40 USD
+  2025-12-31  income/alex-salary                  acme                                  3,077.59 USD  36,838.99 USD

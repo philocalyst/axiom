@@ -1,0 +1,6 @@
+$ axiom why contribution-limit --today 2026-01-05
+
+error[ambiguous-law]: `contribution-limit` could be `contribution-limit`, `contribution-limit`, `contribution-limit`
+  = help: write more of the law's path
+
+✗ 1 error

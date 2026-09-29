@@ -1,0 +1,13 @@
+$ axiom why #check-1029 --today 2026-02-14
+
+Why #check-1029
+
+Flows
+  Date        Flow                                      Amount  State  From
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  2025-12-20  assets/bank/checking → expenses/gifts  75.00 USD  void   journal/2025/12.ax:45
+
+Events
+  Date        Event  From
+  ────────────────────────────────────────
+  2026-01-20  void   journal/2026/01.ax:34

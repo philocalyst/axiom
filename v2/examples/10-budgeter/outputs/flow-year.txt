@@ -1,0 +1,35 @@
+$ axiom flow --by year --today 2026-02-14
+
+Income and spending
+
+  Place                       2025          2026          Total
+  ─────────────────────────────────────────────────────────────
+  income             20,769.21 USD  6,923.07 USD  27,692.28 USD
+    salary           20,769.21 USD  6,923.07 USD  27,692.28 USD
+  expenses           15,883.25 USD  6,095.29 USD  21,978.54 USD
+    car               1,141.60 USD    570.80 USD   1,712.40 USD
+    car-repair                        486.25 USD     486.25 USD
+    clothing            115.12 USD                   115.12 USD
+    dining              578.18 USD    180.45 USD     758.63 USD
+    fees                 12.00 USD                    12.00 USD
+    fun                 626.13 USD    132.09 USD     758.22 USD
+    gifts               460.60 USD                   460.60 USD
+    groceries         1,042.50 USD    378.87 USD   1,421.37 USD
+    health              540.00 USD    180.00 USD     720.00 USD
+    insurance         1,140.00 USD                 1,140.00 USD
+    medical              42.40 USD                    42.40 USD
+    personal-care        70.00 USD     35.00 USD     105.00 USD
+    phone               160.00 USD     80.00 USD     240.00 USD
+    rent              4,600.00 USD  2,300.00 USD   6,900.00 USD
+    student-loan        760.00 USD    190.00 USD     950.00 USD
+    subscriptions       388.82 USD     80.94 USD     469.76 USD
+    taxes             3,622.86 USD  1,207.62 USD   4,830.48 USD
+      federal         2,034.00 USD    678.00 USD   2,712.00 USD
+      payroll         1,588.86 USD    529.62 USD   2,118.48 USD
+    transport           335.68 USD    149.59 USD     485.27 USD
+    utilities           247.36 USD    123.68 USD     371.04 USD
+    unexplained (?)      -5.80 USD                    -5.80 USD
+  ─────────────────────────────────────────────────────────────
+  Total spending     15,877.45 USD  6,095.29 USD  21,972.74 USD
+  ─────────────────────────────────────────────────────────────
+  Net                 4,891.76 USD    827.78 USD   5,719.54 USD

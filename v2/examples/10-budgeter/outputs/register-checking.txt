@@ -1,0 +1,95 @@
+$ axiom register checking --today 2026-02-14
+
+Register: assets/bank/checking
+
+  Date        With                         Payee           Note                                      Amount       Balance
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-09-01  equity/opening                                                                   1,842.10 USD  1,842.10 USD
+  2025-09-01  expenses/rent                landlord                                           -1,150.00 USD    692.10 USD
+  2025-09-01  expenses/transport           metro                                                 -48.00 USD    644.10 USD
+  2025-09-01  expenses/fun                 gym                                                   -29.00 USD    615.10 USD
+  2025-09-03  expenses/utilities           power-co                                              -61.84 USD    553.26 USD
+  2025-09-05  income/salary                studio                                              1,845.15 USD  2,398.41 USD
+  2025-09-06  assets/funds/car-fund                                                             -100.00 USD  2,298.41 USD
+  2025-09-06  assets/funds/insurance-fund                                                       -100.00 USD  2,198.41 USD
+  2025-09-06  assets/funds/trip-fund                                                            -250.00 USD  1,948.41 USD
+  2025-09-06  assets/funds/emergency                                                            -100.00 USD  1,848.41 USD
+  2025-09-10  expenses/car                 carmax-finance                                       -285.40 USD  1,563.01 USD
+  2025-09-15  expenses/student-loan        mohela                                               -190.00 USD  1,373.01 USD
+  2025-09-19  income/salary                studio                                              1,845.15 USD  3,218.16 USD
+  2025-09-19  assets/cash/wallet                                                                 -80.00 USD  3,138.16 USD
+  2025-10-01  expenses/rent                landlord                                           -1,150.00 USD  1,988.16 USD
+  2025-10-01  expenses/transport           metro                                                 -48.00 USD  1,940.16 USD
+  2025-10-01  expenses/fun                 gym                                                   -29.00 USD  1,911.16 USD
+  2025-10-02  expenses/fun                 jo              #check-1027 · settled 2025-10-16     -240.00 USD  1,671.16 USD
+  2025-10-03  income/salary                studio                                              1,845.15 USD  3,516.31 USD
+  2025-10-03  expenses/utilities           power-co                                              -61.84 USD  3,454.47 USD
+  2025-10-06  assets/funds/car-fund                                                             -100.00 USD  3,354.47 USD
+  2025-10-06  assets/funds/insurance-fund                                                       -100.00 USD  3,254.47 USD
+  2025-10-06  assets/funds/trip-fund                                                            -250.00 USD  3,004.47 USD
+  2025-10-06  assets/funds/emergency                                                            -100.00 USD  2,904.47 USD
+  2025-10-10  expenses/car                 carmax-finance                                       -285.40 USD  2,619.07 USD
+  2025-10-15  expenses/student-loan        mohela                                               -190.00 USD  2,429.07 USD
+  2025-10-17  income/salary                studio                                              1,845.15 USD  4,274.22 USD
+  2025-10-22  equity/unknown                                                                      20.00 USD  4,294.22 USD
+  2025-10-22  liabilities/visa                                                                  -647.53 USD  3,646.69 USD
+  2025-10-31  income/salary                studio                                              1,845.15 USD  5,491.84 USD
+  2025-10-31  equity/unknown                               unexplained gap, accepted with !      -27.60 USD  5,464.24 USD
+  2025-11-01  expenses/rent                landlord                                           -1,150.00 USD  4,314.24 USD
+  2025-11-01  expenses/transport           metro                                                 -48.00 USD  4,266.24 USD
+  2025-11-01  expenses/fun                 gym                                                   -29.00 USD  4,237.24 USD
+  2025-11-03  expenses/utilities           power-co                                              -61.84 USD  4,175.40 USD
+  2025-11-06  assets/funds/car-fund                                                             -100.00 USD  4,075.40 USD
+  2025-11-06  assets/funds/insurance-fund                                                       -100.00 USD  3,975.40 USD
+  2025-11-06  assets/funds/trip-fund                                                            -250.00 USD  3,725.40 USD
+  2025-11-06  assets/funds/emergency                                                            -100.00 USD  3,625.40 USD
+  2025-11-07  assets/cash/wallet                                                                 -80.00 USD  3,545.40 USD
+  2025-11-10  income/freelance             corner-cafe     #deposit-14 · returned 2025-11-14     350.00 USD  3,545.40 USD
+  2025-11-10  expenses/car                 carmax-finance                                       -285.40 USD  3,260.00 USD
+  2025-11-14  income/salary                studio                                              1,845.15 USD  5,105.15 USD
+  2025-11-14  expenses/fees                first-bank                                            -12.00 USD  5,093.15 USD
+  2025-11-15  expenses/student-loan        mohela                                               -190.00 USD  4,903.15 USD
+  2025-11-22  liabilities/visa                                                                  -593.08 USD  4,310.07 USD
+  2025-11-28  income/salary                studio                                              1,845.15 USD  6,155.22 USD
+  2025-12-01  expenses/rent                landlord                                           -1,150.00 USD  5,005.22 USD
+  2025-12-01  expenses/transport           metro                                                 -48.00 USD  4,957.22 USD
+  2025-12-01  expenses/fun                 gym                                                   -29.00 USD  4,928.22 USD
+  2025-12-03  expenses/utilities           power-co                                              -61.84 USD  4,866.38 USD
+  2025-12-06  assets/funds/car-fund                                                             -100.00 USD  4,766.38 USD
+  2025-12-06  assets/funds/insurance-fund                                                       -100.00 USD  4,666.38 USD
+  2025-12-06  assets/funds/trip-fund                                                            -250.00 USD  4,416.38 USD
+  2025-12-06  assets/funds/emergency                                                            -100.00 USD  4,316.38 USD
+  2025-12-09  equity/unknown                                                                     -14.20 USD  4,302.18 USD
+  2025-12-10  expenses/car                 carmax-finance                                       -285.40 USD  4,016.78 USD
+  2025-12-12  income/salary                studio                                              1,845.15 USD  5,861.93 USD
+  2025-12-12  expenses/insurance           progressive                                           -40.00 USD  5,821.93 USD
+  2025-12-15  expenses/student-loan        mohela                                               -190.00 USD  5,631.93 USD
+  2025-12-20  expenses/gifts               food-bank       #check-1029 · void                    -75.00 USD  5,631.93 USD
+  2025-12-21  expenses/gifts               food-bank                                             -75.00 USD  5,556.93 USD
+  2025-12-22  liabilities/visa                                                                  -798.21 USD  4,758.72 USD
+  2025-12-26  income/salary                studio                                              1,845.15 USD  6,603.87 USD
+  2026-01-01  expenses/rent                landlord                                           -1,150.00 USD  5,453.87 USD
+  2026-01-01  expenses/transport           metro                                                 -48.00 USD  5,405.87 USD
+  2026-01-01  expenses/fun                 gym                                                   -29.00 USD  5,376.87 USD
+  2026-01-03  expenses/utilities           power-co                                              -61.84 USD  5,315.03 USD
+  2026-01-06  assets/funds/car-fund                                                             -100.00 USD  5,215.03 USD
+  2026-01-06  assets/funds/insurance-fund                                                       -100.00 USD  5,115.03 USD
+  2026-01-06  assets/funds/trip-fund                                                            -250.00 USD  4,865.03 USD
+  2026-01-06  assets/funds/emergency                                                            -100.00 USD  4,765.03 USD
+  2026-01-09  income/salary                studio                                              1,845.15 USD  6,610.18 USD
+  2026-01-09  assets/cash/wallet                                                                 -80.00 USD  6,530.18 USD
+  2026-01-10  expenses/car                 carmax-finance                                       -285.40 USD  6,244.78 USD
+  2026-01-15  expenses/student-loan        mohela                                               -190.00 USD  6,054.78 USD
+  2026-01-22  liabilities/visa                                                                -1,023.83 USD  5,030.95 USD
+  2026-01-23  income/salary                studio                                              1,845.15 USD  6,876.10 USD
+  2026-02-01  expenses/rent                landlord                                           -1,150.00 USD  5,726.10 USD
+  2026-02-01  expenses/transport           metro                                                 -48.00 USD  5,678.10 USD
+  2026-02-01  expenses/fun                 gym                                                   -29.00 USD  5,649.10 USD
+  2026-02-03  expenses/utilities           power-co                                              -61.84 USD  5,587.26 USD
+  2026-02-06  income/salary                studio                                              1,845.15 USD  7,432.41 USD
+  2026-02-06  assets/funds/car-fund                                                             -100.00 USD  7,332.41 USD
+  2026-02-06  assets/funds/insurance-fund                                                       -100.00 USD  7,232.41 USD
+  2026-02-06  assets/funds/trip-fund                                                            -250.00 USD  6,982.41 USD
+  2026-02-06  assets/funds/emergency                                                            -100.00 USD  6,882.41 USD
+  2026-02-10  expenses/car                 carmax-finance                                       -285.40 USD  6,597.01 USD
+  · Muted lines are pending, void or returned: they do not move the balance.

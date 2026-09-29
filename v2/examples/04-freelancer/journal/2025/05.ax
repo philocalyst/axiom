@@ -1,0 +1,40 @@
+/// Monthly retainer, net 30.
+2025-05-01 design -> brightwave 3_200 USD #inv-2025-b05
+2025-05-01 business-card -> software 7.20 USD / google
+2025-05-01 personal-checking -> landlord 1_750 USD
+2025-05-01 personal-checking -> bluecross 412 USD
+2025-05-03 business-card -> software 10 USD / notion
+2025-05-03 business-checking -> personal-checking 2_950 USD // owner's draw
+2025-05-05 business-card -> education 699 USD / config #config-2025
+2025-05-05 business-card -> travel 342.18 USD / alaska-air #config-2025
+2025-05-05 personal-checking -> statefarm 22 USD
+2025-05-05 personal-checking -> groceries 84.23 USD / trader-joes
+2025-05-06 business-card -> travel 618.40 USD / sf-hotel #config-2025
+2025-05-06 business-card -> meals 96.30 USD / sf-hotel #config-2025
+2025-05-07 business-card -> travel 58.20 USD / lyft #config-2025
+2025-05-08 business-card -> software 59.99 USD / adobe
+2025-05-08 personal-checking -> dining 35.24 USD
+
+/// Packaging refresh; paid 52 days after the invoice.
+2025-05-09 design -> fernhill 2_800 USD #inv-2025-f2
+2025-05-10 personal-checking -> transport 47.74 USD
+2025-05-12 personal-checking -> comcast 80 USD
+2025-05-12 personal-checking -> groceries 125.50 USD / safeway
+2025-05-13 brightwave -> business-checking 3_200 USD #inv-2025-b04
+2025-05-13 business-checking -> tax-vault 640 USD
+2025-05-14 business-card -> software 15 USD / figma
+2025-05-15 odometer -> mileage 45 MI / fernhill
+2025-05-16 personal-checking -> pge 52.75 USD
+2025-05-18 personal-checking -> tmobile 64 USD
+
+/// The April statement, paid in full.
+2025-05-20 business-checking -> business-card 424.19 USD
+2025-05-20 personal-checking -> groceries 102.08 USD / safeway
+2025-05-22 business-card -> software 21 USD / freshbooks
+2025-05-22 personal-checking -> dining 37.15 USD
+2025-05-27 personal-checking -> groceries 98.41 USD / trader-joes
+2025-05-31 interest -> tax-vault 20.49 USD
+2025-05-31 business-card = 1_927.27 USD
+2025-05-31 business-checking = 5_201.36 USD
+2025-05-31 personal-checking = 3_447.94 USD
+2025-05-31 tax-vault = 5_873.55 USD

@@ -1,0 +1,19 @@
+$ axiom register mortgage --today 2026-01-05
+
+Register: liabilities/mortgage
+
+  Date        With                        Payee   Note                        Amount          Balance
+  ───────────────────────────────────────────────────────────────────────────────────────────────────
+  2024-12-31  equity/opening                                         -412,428.22 USD  -412,428.22 USD
+  2025-01-01  assets/bank/joint-checking  lender  #mortgage-2025-01       465.28 USD  -411,962.94 USD
+  2025-02-01  assets/bank/joint-checking  lender  #mortgage-2025-02       467.56 USD  -411,495.38 USD
+  2025-03-01  assets/bank/joint-checking  lender  #mortgage-2025-03       469.85 USD  -411,025.53 USD
+  2025-04-01  assets/bank/joint-checking  lender  #mortgage-2025-04       472.15 USD  -410,553.38 USD
+  2025-05-01  assets/bank/joint-checking  lender  #mortgage-2025-05       474.46 USD  -410,078.92 USD
+  2025-06-01  assets/bank/joint-checking  lender  #mortgage-2025-06       476.78 USD  -409,602.14 USD
+  2025-07-01  assets/bank/joint-checking  lender  #mortgage-2025-07       479.12 USD  -409,123.02 USD
+  2025-08-01  assets/bank/joint-checking  lender  #mortgage-2025-08       481.46 USD  -408,641.56 USD
+  2025-09-01  assets/bank/joint-checking  lender  #mortgage-2025-09       483.82 USD  -408,157.74 USD
+  2025-10-01  assets/bank/joint-checking  lender  #mortgage-2025-10       486.19 USD  -407,671.55 USD
+  2025-11-01  assets/bank/joint-checking  lender  #mortgage-2025-11       488.57 USD  -407,182.98 USD
+  2025-12-01  assets/bank/joint-checking  lender  #mortgage-2025-12       490.96 USD  -406,692.02 USD

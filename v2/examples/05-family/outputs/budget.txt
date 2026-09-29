@@ -1,0 +1,8 @@
+$ axiom budget 2025-05 --today 2026-01-05
+
+Budgets for 2025-05-01
+
+  Place                       Law             Window           Spent         Limit        Left    Used
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/education/riley-529  gift-exclusion  2025     10,602.11 USD
+  expenses/food               budget          2025-05   1,023.40 USD  1,300.00 USD  276.60 USD  78.72%

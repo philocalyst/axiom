@@ -1,0 +1,56 @@
+// Wishes for the budgeter project. NOT loaded (the loader reads only *.ax files).
+// Each one is answered in ../FINDINGS.md with a proposed design.
+
+// ── 1. Money can be set aside for a purpose, by me ──────────────────────────
+//
+//   2025-09-06 checking -> car-fund 100 USD earmark car-cost          // a tie to a purpose, not to a person
+//   2026-01-15 car-fund -> car-repair 486.25 USD / kwik-brakes         // fine: it is what it was set aside for
+//   2025-10-10 car-fund -> dining 20 USD                               // warning: this money was set aside for `car-cost`
+//
+// `available to spend` leaves earmarked money out; the forecast counts it against
+// the plan it belongs to. Today a payee on a transfer between my own accounts
+// creates no tie and the fund counts as spendable (F16 in FINDINGS.md).
+
+// ── 2. Envelopes roll over, and a yearly one is a monthly one ───────────────
+//
+//   account expenses/dining
+//     budget 150 USD monthly rollover        // what is not spent adds to next month
+//   account expenses/subscriptions
+//     budget 90 USD monthly
+//     annual amazon-prime 139 USD in november   // spread as 11.58 a month: the envelope sees 101.58 every month
+//
+// `DATE..DATE` already spreads recognition in `flow`; the envelope should see the
+// same spread instead of the day-one payment.
+
+// ── 3. One warning per breach ───────────────────────────────────────────────
+//
+//   2025-11-03 warning: subscriptions envelope broken: 139.00 over-spent 49.00 USD
+//   // and then silent until the month ends (`axiom budget` says the rest)
+//
+// Today: the 139.00 USD charge warns, and so do the four ordinary charges after it.
+
+// ── 4. "Can I afford it?" is a question ─────────────────────────────────────
+//
+//   axiom afford 3_000 USD on 2026-06-14
+//     from trip-fund (2,500.00 USD by then) and checking (500.00 USD): yes
+//     lowest liquid balance on the way (p10): shown, with its date
+//     what it displaces: the emergency fund is untouched; the car fund is untouched
+//
+// with and without, in one command, instead of two forecasts, two files and a subtraction.
+
+// ── 5. A returned item is one event with its fee ────────────────────────────
+//
+//   2025-11-14 #deposit-14 returned fee 12 USD to first-bank
+//
+// (`returned` and a separate `checking -> fees 12 USD` are two lines that belong together.)
+
+// ── 6. Unknowns as a named debt to reconcile ────────────────────────────────
+//
+//   axiom gaps
+//     2025-10-31 checking   27.60 USD out, accepted with !
+//     2025-12-09 checking   14.20 USD to ?
+//     2025-12-31 wallet     14.00 USD out, accepted with !
+//     2025-10-22 checking   20.00 USD in from ?
+//     out 55.80 USD, in 20.00 USD (2025-10-22, from ?): net 35.80 USD in 4 items
+//
+// (`equity/unknown` holds the sum today; nothing lists the items.)

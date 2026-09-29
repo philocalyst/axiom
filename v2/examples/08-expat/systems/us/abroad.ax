@@ -1,0 +1,62 @@
+/// A United States citizen living abroad.
+///
+/// The United States taxes its citizens on everything they earn anywhere, so
+/// nothing of `us` stops applying when someone moves. `lives` cannot say "under
+/// two jurisdictions at once" (a second residence ends the first), so this system
+/// nests under `us`: whoever lives at `us/abroad/<country>` is under `us` (federal
+/// law, by the path) and under the country's own laws.
+///
+/// What it adds:
+///   foreign-earned   pay from a place of kind `foreign-wages`, in dollars
+///   feie-excluded    the foreign earned income exclusion (Form 2555)
+///
+/// Simplified on purpose: the choice between the exclusion and the foreign tax
+/// credit is fixed, and a year's qualifying days are a param (laws cannot count
+/// days). The "stacking rule" (the income that is not excluded is taxed at the
+/// rates the excluded income would have used, IRC §911(f)) is written as an extra
+/// obligation, because the `us` law cannot be told to stack: it computes tax on
+/// what is left.
+///
+/// The figures are community-maintained data. Verify them against the IRS (Rev.
+/// Proc. 2024-40 for 2025) before relying on them.
+system us/abroad
+
+use us
+
+
+/// Pay earned abroad, from an employer in the country of residence.
+kind foreign-wages : wages
+
+
+/// Pay from a foreign employer counts as foreign earned income, in dollars at
+/// the rate of the day.
+law count-foreign-earned
+  on in
+  when from is foreign-wages
+  count value(amount, USD) as foreign-earned
+
+/// The foreign earned income exclusion (IRC §911): pay earned abroad, up to a
+/// yearly limit prorated by the days spent abroad, is not taxed by the United
+/// States. `days-abroad` is the number of qualifying days in the year.
+law feie
+  each year
+  let cap = feie-limit[year] * days-abroad[year] / 365
+  let excluded = min(tally(foreign-earned), cap)
+  let with-it = max(tally(agi) - standard-deduction[year, owner.filing], empty)
+  let without = max(with-it - excluded, empty)
+  let stacking = progressive(ordinary[year, owner.filing], with-it) - progressive(ordinary[year, owner.filing], excluded) - progressive(ordinary[year, owner.filing], without)
+  count excluded as feie-excluded
+  count -excluded as agi
+  owe max(stacking, empty) to irs by date(year + 1, 4, 15) as feie-stacking-tax
+
+
+// The exclusion limit per person (IRC §911(b)(2)(D)). Rev. Proc. 2024-40 (2025).
+// verify: the 2026 figure against the next Rev. Proc.
+param feie-limit
+  2025 130_000 USD
+  2026 132_900 USD
+
+// Qualifying days abroad in the year: 2025-07-01 to 2025-12-31 is 184 days.
+param days-abroad
+  2025 184
+  2026 365

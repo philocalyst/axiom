@@ -1,0 +1,24 @@
+$ axiom register checking --from 2025-11-01 --to 2025-11-30 --today 2026-02-14
+
+Register: assets/bank/checking
+
+  Date        With                         Payee           Note                                      Amount       Balance
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  2025-11-01  opening balance                                                                                5,464.24 USD
+  2025-11-01  expenses/rent                landlord                                           -1,150.00 USD  4,314.24 USD
+  2025-11-01  expenses/transport           metro                                                 -48.00 USD  4,266.24 USD
+  2025-11-01  expenses/fun                 gym                                                   -29.00 USD  4,237.24 USD
+  2025-11-03  expenses/utilities           power-co                                              -61.84 USD  4,175.40 USD
+  2025-11-06  assets/funds/car-fund                                                             -100.00 USD  4,075.40 USD
+  2025-11-06  assets/funds/insurance-fund                                                       -100.00 USD  3,975.40 USD
+  2025-11-06  assets/funds/trip-fund                                                            -250.00 USD  3,725.40 USD
+  2025-11-06  assets/funds/emergency                                                            -100.00 USD  3,625.40 USD
+  2025-11-07  assets/cash/wallet                                                                 -80.00 USD  3,545.40 USD
+  2025-11-10  income/freelance             corner-cafe     #deposit-14 · returned 2025-11-14     350.00 USD  3,545.40 USD
+  2025-11-10  expenses/car                 carmax-finance                                       -285.40 USD  3,260.00 USD
+  2025-11-14  income/salary                studio                                              1,845.15 USD  5,105.15 USD
+  2025-11-14  expenses/fees                first-bank                                            -12.00 USD  5,093.15 USD
+  2025-11-15  expenses/student-loan        mohela                                               -190.00 USD  4,903.15 USD
+  2025-11-22  liabilities/visa                                                                  -593.08 USD  4,310.07 USD
+  2025-11-28  income/salary                studio                                              1,845.15 USD  6,155.22 USD
+  · Muted lines are pending, void or returned: they do not move the balance.

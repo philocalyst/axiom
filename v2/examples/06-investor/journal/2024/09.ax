@@ -1,0 +1,36 @@
+/// Balances at the start of the ledger.
+2024-09-01 opening -> checking 14_620.55 USD
+2024-09-01 opening -> savings 148_000 USD
+2024-09-01 opening -> retirement 86_400 USD
+2024-09-01 opening -> espp-cash 4_200 USD
+2024-09-01 checking -> rent 2_650 USD / landlord
+2024-09-02 savings -> checking 15_000 USD
+
+/// A standing habit: 1,500 USD of VTI on the fifth of every month. Each purchase is its own lot.
+2024-09-05 checking -> fidelity 5.5851 VTI @ 268.57 USD
+2024-09-09 checking -> utilities 173.47 USD
+2024-09-12 checking -> groceries 387.95 USD
+2024-09-16 checking -> dining 286.11 USD
+
+/// International index fund, a few times a year.
+2024-09-18 checking -> fidelity 38.2029 VXUS @ 65.44 USD
+
+/// Bond fund for the fixed-income slice.
+2024-09-18 checking -> fidelity 33.4448 BND @ 74.75 USD
+2024-09-20 checking -> groceries 247.09 USD
+2024-09-24 checking -> misc 120.16 USD
+2024-09-28 dividends -> fidelity 7.58 USD
+
+/// Monthly pay from Northwind. 14% into the 401(k), 10% into the employee stock purchase plan.
+2024-09-30 income/salary -> 14_000.00 USD
+  retirement          1_958.33 USD   // 401(k) deferral
+  espp-cash           1_400.00 USD   // ESPP contribution, after tax
+  taxes/federal       2_650.00 USD
+  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  checking            ...
+2024-09-30 interest -> savings 443.33 USD
+2024-09-30 interest -> fidelity 20.61 USD
+2024-09-30 checking = 26_176.45 USD
+2024-09-30 savings = 133_443.33 USD
+2024-09-30 espp-cash = 5_600.00 USD
+2024-09-30 fidelity = 5.5851 VTI

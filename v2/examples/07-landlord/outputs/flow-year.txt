@@ -1,0 +1,37 @@
+$ axiom flow --by year --today 2026-01-06
+
+Income and spending
+
+  Place                        2024            2025      2026           Total
+  ───────────────────────────────────────────────────────────────────────────
+  income                             120,725.00 USD            120,725.00 USD
+    forfeited-deposits                   350.00 USD                350.00 USD
+    late-fees                             75.00 USD                 75.00 USD
+    rent                              24,300.00 USD             24,300.00 USD
+    salary                            96,000.00 USD             96,000.00 USD
+    realized gains ≈                  13,481.25 USD             13,481.25 USD
+  ───────────────────────────────────────────────────────────────────────────
+  Total income                       134,206.25 USD            134,206.25 USD
+  ───────────────────────────────────────────────────────────────────────────
+  expenses               722.30 USD   97,795.83 USD             98,518.13 USD
+    dining                             1,926.42 USD              1,926.42 USD
+    groceries                          4,321.33 USD              4,321.33 USD
+    living                             4,042.98 USD              4,042.98 USD
+    own-rent                          23,400.00 USD             23,400.00 USD
+    rental               722.30 USD   42,181.10 USD             42,903.40 USD
+      advertising                        149.00 USD                149.00 USD
+      amortization                     3,120.00 USD              3,120.00 USD
+      depreciation                    10,178.48 USD             10,178.48 USD
+      insurance                        1,560.00 USD              1,560.00 USD
+      interest           722.30 USD   18,638.02 USD             19,360.32 USD
+      management                       1,950.00 USD              1,950.00 USD
+      property-tax                     4,380.00 USD              4,380.00 USD
+      repairs                          2,051.00 USD              2,051.00 USD
+      utilities                          154.60 USD                154.60 USD
+    taxes                             21,924.00 USD             21,924.00 USD
+      federal                         14,580.00 USD             14,580.00 USD
+      payroll                          7,344.00 USD              7,344.00 USD
+  ───────────────────────────────────────────────────────────────────────────
+  Net                   -722.30 USD   36,410.42 USD  0.00 USD   35,688.12 USD
+  · ≈ Realized gains are derived from the basis of the parcels sold; the journal does not state
+    them.

@@ -1,0 +1,5 @@
+$ axiom why inv-2025-o1 --today 2026-02-10
+
+error[unknown-target]: no place, #code, law or tax line named `inv-2025-o1`
+
+✗ 1 error

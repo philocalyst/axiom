@@ -1,0 +1,26 @@
+2024-12-31 card -> opening 2_284.17 USD
+2024-12-31 card = 2_284.17 USD
+
+/// Balances at the start of the ledger.
+2024-12-31 opening -> joint-checking 12_480.66 USD
+2024-12-31 opening -> joint-savings 41_250 USD
+2024-12-31 opening -> escrow 1_380 USD
+2024-12-31 opening -> alex-401k 148_300 USD
+2024-12-31 opening -> jordan-401k 96_850 USD
+2024-12-31 opening -> hsa 7_420 USD
+2024-12-31 opening -> joint-checking 19_850 USD
+2024-12-31 joint-checking -> riley-529 19_850 USD ! "contributions since 2019, not one year's"
+2024-12-31 opening -> riley-529 4_750 USD ! "growth since 2019"
+2024-12-31 opening -> house 1 HOME @ 540_000 USD   // bought 2023-06 for 540,000
+2024-12-31 opening -> crv 1 CRV @ 33_900 USD       // bought 2023-06
+2024-12-31 mortgage -> opening 412_428.22 USD
+2024-12-31 car-loan -> opening 23_207.37 USD
+2024-12-31 joint-checking = 12_480.66 USD
+2024-12-31 joint-savings = 41_250.00 USD
+2024-12-31 escrow = 1_380.00 USD
+2024-12-31 alex-401k = 148_300.00 USD
+2024-12-31 jordan-401k = 96_850.00 USD
+2024-12-31 hsa = 7_420.00 USD
+2024-12-31 riley-529 = 24_600.00 USD
+2024-12-31 mortgage = 412_428.22 USD
+2024-12-31 car-loan = 23_207.37 USD

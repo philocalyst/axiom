@@ -1,0 +1,73 @@
+$ axiom available --today 2026-01-05
+
+Available on 2026-01-05
+
+What you can spend
+  Liquid now                            Amount
+  ────────────────────────────────────────────
+  Money in liquid places        115,608.01 USD
+    assets/bank/joint-checking   36,838.99 USD
+    assets/bank/joint-savings    77,329.02 USD
+    assets/escrow                 1,440.00 USD
+  ────────────────────────────────────────────
+  Available to spend            115,608.01 USD
+
+What it would take to reach the rest
+  Holding                                                Liquid in           Value          Costs             Net
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  assets/dcfsa                                           5d             416.74 USD                     416.74 USD
+    counts 416.74 USD as agi
+    counts 416.74 USD as distributions
+    realizes a gain of 416.74 USD
+  assets/education/riley-529                             5d          28,902.11 USD   1,029.93 USD   27,872.18 USD
+    counts 10,299.29 USD as agi
+    counts 10,299.29 USD as distributions
+    nonqualified-529-penalty, owed to irs by 2026-01-05                              1,029.93 USD
+    realizes a gain of 10,299.29 USD
+  assets/house (1 HOME)                                  90d        612,400.00 USD   1,167.38 USD  611,232.62 USD
+    counts 72,400.00 USD as agi
+    counts 72,400.00 USD as long-term-gains
+    counts 40,200.00 USD as taxable-income
+    counts 60,988.00 USD as ca-taxable-income
+    counts 1,167.38 USD as ca-income-tax
+    ca-income-tax, owed to ftb by 2027-04-15                                         1,167.38 USD
+    realizes a gain of 72,400.00 USD
+  assets/hsa                                             3d          13,544.20 USD   2,730.16 USD   10,814.04 USD
+    counts 13,544.20 USD as agi
+    counts 2,132.20 USD as ca-taxable-income
+    counts 21.32 USD as ca-income-tax
+    ca-income-tax, owed to ftb by 2027-04-15                                            21.32 USD
+    counts 13,544.20 USD as distributions
+    nonqualified-hsa-penalty, owed to irs by 2026-01-05                              2,708.84 USD
+    realizes a gain of 13,544.20 USD
+  assets/retirement/alex-401k                            5d         193,133.41 USD  51,720.06 USD  141,413.35 USD
+    counts 193,133.41 USD as agi
+    federal-income-tax, owed to irs by 2027-04-15                                   22,629.35 USD
+    counts 160,933.41 USD as taxable-income
+    counts 24,829.35 USD as income-tax
+    counts 181,721.41 USD as ca-taxable-income
+    counts 9,777.37 USD as ca-income-tax
+    ca-income-tax, owed to ftb by 2027-04-15                                         9,777.37 USD
+    counts 193,133.41 USD as distributions
+    early-withdrawal-penalty, owed to irs by 2026-01-05                             19,313.34 USD
+    realizes a gain of 193,133.41 USD
+  assets/retirement/jordan-401k                          5d         120,629.41 USD  25,801.29 USD   94,828.12 USD
+    counts 120,629.41 USD as agi
+    federal-income-tax, owed to irs by 2027-04-15                                   10,115.53 USD
+    counts 88,429.41 USD as taxable-income
+    counts 10,115.53 USD as income-tax
+    counts 109,217.41 USD as ca-taxable-income
+    counts 3,622.82 USD as ca-income-tax
+    ca-income-tax, owed to ftb by 2027-04-15                                         3,622.82 USD
+    counts 120,629.41 USD as distributions
+    early-withdrawal-penalty, owed to irs by 2026-01-05                             12,062.94 USD
+    realizes a gain of 120,629.41 USD
+  assets/vehicle/crv (1 CRV)                             30d         25,300.00 USD                  25,300.00 USD
+    counts -8,600.00 USD as agi
+    counts -8,600.00 USD as long-term-gains
+    realizes a gain of -8,600.00 USD
+  ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  If everything were drawn today                                    994,325.87 USD  82,448.82 USD  911,877.05 USD
+  · Each line withdraws the whole holding into assets/bank/joint-savings on 2026-01-05 and runs the
+    year out through the laws. Costs are what they would owe because of it, as if the year ended
+    today: penalties, and the tax on any income it creates.

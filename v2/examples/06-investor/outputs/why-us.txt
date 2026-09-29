@@ -1,0 +1,5 @@
+$ axiom why us --today 2026-01-06
+
+error[unknown-target]: no place, #code, law or tax line named `us`
+
+✗ 1 error

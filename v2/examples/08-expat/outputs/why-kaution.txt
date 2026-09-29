@@ -1,0 +1,34 @@
+$ axiom why kaution --today 2026-01-06
+
+Why assets/de/kaution
+
+Composition
+  Holds      Quantity  Plain money  Parcels
+  ─────────────────────────────────────────
+  EUR    3,600.00 EUR                     1
+
+Parcels
+  Place                  Quantity         Basis  Acquired    Tied to  From
+  ─────────────────────────────────────────────────────────────────────────────────────────
+  assets/de/kaution  3,600.00 EUR  4,197.60 USD  2025-06-27           journal/2025/06.ax:25
+
+Governed by
+  Law                     When     Governs                                                      Explains                                                                    Written
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  count-wages             on in    everyone living under us, and all they own                   Wages are ordinary income (IRC §61(a)(1)). Everything that arrives from a   us.ax:58
+  count-interest          on in    everyone living under us, and all they own                   Interest is ordinary income in the year it is earned (IRC §61(a)(4)),       us.ax:66
+  count-dividends         on in    everyone living under us, and all they own                   Dividends are income in the year they are paid (IRC §61(a)(7)), except      us.ax:76
+  credit-withholding      on in    everyone living under us, and all they own                   Tax withheld from pay, or paid in installments, is credited against the     us.ax:108
+  credit-ca-withholding   on in    everyone living under us/ca, and all they own                Tax withheld from pay, or paid in installments, is credited against the     us/ca.ax:36
+  count-foreign-earned    on in    everyone living under us/abroad, and all they own            Pay from a foreign employer counts as foreign earned income, in dollars at  systems/us/abroad.ax:33
+  count-de-tax            on in    everyone living under us/abroad/de, and all they own         Tax paid to Germany, counted in dollars at the rate of the day.             systems/us/abroad/de.ax:23
+  count-short-term-gains  on gain  everyone living under us, and all they own                   A gain on something held for a year or less is taxed as ordinary income     us.ax:86
+  count-long-term-gains   on gain  everyone living under us, and all they own                   A gain on something held for more than a year is taxed at the lower         us.ax:97
+  transfer-tax            on gain  everyone living under us/ca/san-francisco, and all they own  Selling real property in San Francisco owes the city a transfer tax on the  us/ca/san-francisco.ax:33
+  fbar-max                always   assets/de/kaution and everything beneath it                                                                                              accounts.ax:52
+  overdraft               always   every bank                                                   A bank balance below zero is an overdraft: the bank is lending you the      std.ax:24
+
+Recent flows
+  Date        With                 Payee  Note        Amount       Balance
+  ────────────────────────────────────────────────────────────────────────
+  2025-06-30  assets/de/girokonto               3,600.00 EUR  3,600.00 EUR

@@ -1,0 +1,73 @@
+$ axiom register rental-checking --today 2026-01-06
+
+Register: assets/bank/rental-checking
+
+  Date        With                          Payee            Note               Amount         Balance
+  ────────────────────────────────────────────────────────────────────────────────────────────────────
+  2024-12-18  assets/bank/checking                                      108,000.00 USD  108,000.00 USD
+  2024-12-18  liabilities/mortgage          lender                      279,000.00 USD  387,000.00 USD
+  2024-12-18  assets/rental/house           title-co                   -376,850.00 USD   10,150.00 USD
+  2024-12-18  assets/prepaid/loan-costs     lender                       -3,120.00 USD    7,030.00 USD
+  2024-12-18  expenses/rental/interest      lender                         -722.30 USD    6,307.70 USD
+  2025-01-06  expenses/rental/insurance     landlord-policy              -1,560.00 USD    4,747.70 USD
+  2025-02-01  liabilities/mortgage          lender                         -240.21 USD    4,507.49 USD
+  2025-02-01  expenses/rental/interest      lender                       -1,569.38 USD    2,938.11 USD
+  2025-02-03  income/rent                                    #lease-a     2,400.00 USD    5,338.11 USD
+  2025-03-01  income/rent                                    #lease-a     2,400.00 USD    7,738.11 USD
+  2025-03-01  liabilities/mortgage          lender                         -241.57 USD    7,496.54 USD
+  2025-03-01  expenses/rental/interest      lender                       -1,568.02 USD    5,928.52 USD
+  2025-03-05  expenses/rental/management    hartwell-pm                    -192.00 USD    5,736.52 USD
+  2025-03-12  expenses/rental/repairs       quick-plumbing                 -385.00 USD    5,351.52 USD
+  2025-04-01  liabilities/mortgage          lender                         -242.93 USD    5,108.59 USD
+  2025-04-01  expenses/rental/interest      lender                       -1,566.66 USD    3,541.93 USD
+  2025-04-02  income/rent                                    #lease-a     2,400.00 USD    5,941.93 USD
+  2025-04-05  expenses/rental/management    hartwell-pm                    -192.00 USD    5,749.93 USD
+  2025-04-18  expenses/rental/repairs       appliance-doc                  -240.00 USD    5,509.93 USD
+  2025-04-30  expenses/rental/property-tax  county                       -2,190.00 USD    3,319.93 USD
+  2025-05-01  income/rent                                    #lease-a     2,400.00 USD    5,719.93 USD
+  2025-05-01  liabilities/mortgage          lender                         -244.29 USD    5,475.64 USD
+  2025-05-01  expenses/rental/interest      lender                       -1,565.30 USD    3,910.34 USD
+  2025-05-05  expenses/rental/management    hartwell-pm                    -192.00 USD    3,718.34 USD
+  2025-06-01  liabilities/mortgage          lender                         -245.67 USD    3,472.67 USD
+  2025-06-01  expenses/rental/interest      lender                       -1,563.92 USD    1,908.75 USD
+  2025-06-05  expenses/rental/management    hartwell-pm                    -192.00 USD    1,716.75 USD
+  2025-06-09  income/rent                                    #lease-a     2,400.00 USD    4,116.75 USD
+  2025-06-09  income/late-fees                               #lease-a        75.00 USD    4,191.75 USD
+  2025-06-21  expenses/rental/repairs       green-yards                    -180.00 USD    4,011.75 USD
+  2025-07-01  income/rent                                    #lease-a     2,400.00 USD    6,411.75 USD
+  2025-07-01  liabilities/mortgage          lender                         -247.05 USD    6,164.70 USD
+  2025-07-01  expenses/rental/interest      lender                       -1,562.54 USD    4,602.16 USD
+  2025-07-05  expenses/rental/management    hartwell-pm                    -198.00 USD    4,404.16 USD
+  2025-08-01  income/rent                                    #lease-a     2,400.00 USD    6,804.16 USD
+  2025-08-01  liabilities/mortgage          lender                         -248.44 USD    6,555.72 USD
+  2025-08-01  expenses/rental/interest      lender                       -1,561.15 USD    4,994.57 USD
+  2025-08-05  expenses/rental/management    hartwell-pm                    -192.00 USD    4,802.57 USD
+  2025-09-01  liabilities/mortgage          lender                         -249.83 USD    4,552.74 USD
+  2025-09-01  expenses/rental/interest      lender                       -1,559.76 USD    2,992.98 USD
+  2025-09-03  expenses/rental/advertising   rentlist                       -149.00 USD    2,843.98 USD
+  2025-09-05  expenses/rental/management    hartwell-pm                    -192.00 USD    2,651.98 USD
+  2025-09-06  expenses/rental/repairs       fresh-paint                  -1,150.00 USD    1,501.98 USD
+  2025-09-10  expenses/rental/utilities     city-power                      -96.40 USD    1,405.58 USD
+  2025-09-10  expenses/rental/utilities     city-water                      -58.20 USD    1,347.38 USD
+  2025-09-12  assets/bank/deposit-account   tenant-a         #lease-a       350.00 USD    1,697.38 USD
+  2025-09-14  assets/bank/checking                                       16,500.00 USD   18,197.38 USD
+  2025-09-15  assets/rental/roof            summit-roofing              -14,200.00 USD    3,997.38 USD
+  2025-09-20  expenses/rental/repairs       hardware-hank                   -96.00 USD    3,901.38 USD
+  2025-10-01  income/rent                                    #lease-b     2,500.00 USD    6,401.38 USD
+  2025-10-01  liabilities/mortgage          lender                         -251.24 USD    6,150.14 USD
+  2025-10-01  expenses/rental/interest      lender                       -1,558.35 USD    4,591.79 USD
+  2025-10-31  expenses/rental/property-tax  county                       -2,190.00 USD    2,401.79 USD
+  2025-11-01  liabilities/mortgage          lender                         -252.65 USD    2,149.14 USD
+  2025-11-01  expenses/rental/interest      lender                       -1,556.94 USD      592.20 USD
+  2025-11-03  income/rent                                    #lease-b     2,500.00 USD    3,092.20 USD
+  2025-11-05  expenses/rental/management    hartwell-pm                    -200.00 USD    2,892.20 USD
+  2025-12-01  income/rent                                    #lease-b     2,500.00 USD    5,392.20 USD
+  2025-12-01  liabilities/mortgage          lender                         -254.07 USD    5,138.13 USD
+  2025-12-01  expenses/rental/interest      lender                       -1,555.52 USD    3,582.61 USD
+  2025-12-05  expenses/rental/management    hartwell-pm                    -200.00 USD    3,382.61 USD
+  2025-12-29  expenses/rental/management    hartwell-pm                    -200.00 USD    3,182.61 USD
+  2025-12-29  assets/rental/house                                       390,460.35 USD  393,642.96 USD
+  2025-12-29  assets/rental/roof                                         14,070.90 USD  407,713.86 USD
+  2025-12-29  liabilities/mortgage          lender                     -276,282.05 USD  131,431.81 USD
+  2025-12-29  expenses/rental/interest      lender                       -1,450.48 USD  129,981.33 USD
+  2025-12-29  assets/bank/checking                                     -129,981.33 USD        0.00 USD

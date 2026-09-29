@@ -1,0 +1,175 @@
+$ axiom check --today 2026-02-14
+
+✓ 250 flows · 36 places · 15 laws enforced · net worth 10,665.04 USD
+warning[law]: law `budget` does not hold for expenses/fun
+   ╭─[journal/2025/10.ax:6:1]
+   │
+ 6 │ 2025-10-02 checking -> jo (240 USD) #check-1027
+   │ ───────────────────────┬───────────────────────
+   │                        ╰── this flow: 240.00 USD into expenses/fun
+   │
+   ├─[accounts.ax:62:3]
+   │
+61 │ account expenses/fun
+62 │   budget 120 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 297.01 USD
+   │
+   = help: at most 62.99 USD more can go in this month
+───╯
+
+warning[law]: law `budget` does not hold for expenses/fun
+   ╭─[journal/2025/10.ax:51:1]
+   │
+51 │ 2025-10-24 visa -> fun 26.01 USD
+   │ ────────────────┬───────────────
+   │                 ╰── this flow: 26.01 USD into expenses/fun
+   │
+   ├─[accounts.ax:62:3]
+   │
+61 │ account expenses/fun
+62 │   budget 120 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 323.02 USD
+   │
+   = help: nothing more can go in this month: it is already 177.01 USD over
+───╯
+
+note[pad]: accepted a gap on assets/bank/checking
+   ╭─[journal/2025/10.ax:64:1]
+   │
+64 │ 2025-10-31 checking = 5_464.24 USD !
+   │ ──────────────────┬─────────────────
+   │                   ╰── 27.60 USD moved out of assets/bank/checking into unknown
+   │
+───╯
+
+warning[law]: law `budget` does not hold for expenses/subscriptions
+   ╭─[journal/2025/11.ax:7:1]
+   │
+ 7 │ 2025-11-03 visa -> subscriptions 139 USD / amazon-prime
+   │ ───────────────────────────┬───────────────────────────
+   │                            ╰── this flow: 139.00 USD into expenses/subscriptions
+   │
+   ├─[accounts.ax:65:3]
+   │
+64 │ account expenses/subscriptions
+65 │   budget 90 USD monthly
+   │   ──────────┬──────────
+   │             ╰── 139.00 USD
+   │
+   = help: at most 90.00 USD more can go in this month
+───╯
+
+warning[law]: law `budget` does not hold for expenses/subscriptions
+   ╭─[journal/2025/11.ax:28:1]
+   │
+28 │ 2025-11-11 visa -> subscriptions 15.49 USD / netflix
+   │ ──────────────────────────┬─────────────────────────
+   │                           ╰── this flow: 15.49 USD into expenses/subscriptions
+   │
+   ├─[accounts.ax:65:3]
+   │
+64 │ account expenses/subscriptions
+65 │   budget 90 USD monthly
+   │   ──────────┬──────────
+   │             ╰── 154.49 USD
+   │
+   = help: nothing more can go in this month: it is already 49.00 USD over
+───╯
+
+warning[law]: law `budget` does not hold for expenses/subscriptions
+   ╭─[journal/2025/11.ax:40:1]
+   │
+40 │ 2025-11-14 visa -> subscriptions 11.99 USD / spotify
+   │ ──────────────────────────┬─────────────────────────
+   │                           ╰── this flow: 11.99 USD into expenses/subscriptions
+   │
+   ├─[accounts.ax:65:3]
+   │
+64 │ account expenses/subscriptions
+65 │   budget 90 USD monthly
+   │   ──────────┬──────────
+   │             ╰── 166.48 USD
+   │
+   = help: nothing more can go in this month: it is already 64.49 USD over
+───╯
+
+warning[law]: law `budget` does not hold for expenses/subscriptions
+   ╭─[journal/2025/11.ax:45:1]
+   │
+45 │ 2025-11-20 visa -> subscriptions 2.99 USD / apple
+   │ ────────────────────────┬────────────────────────
+   │                         ╰── this flow: 2.99 USD into expenses/subscriptions
+   │
+   ├─[accounts.ax:65:3]
+   │
+64 │ account expenses/subscriptions
+65 │   budget 90 USD monthly
+   │   ──────────┬──────────
+   │             ╰── 169.47 USD
+   │
+   = help: nothing more can go in this month: it is already 76.48 USD over
+───╯
+
+warning[law]: law `budget` does not hold for expenses/subscriptions
+   ╭─[journal/2025/11.ax:51:1]
+   │
+51 │ 2025-11-26 visa -> subscriptions 22.99 USD / adobe
+   │ ─────────────────────────┬────────────────────────
+   │                          ╰── this flow: 22.99 USD into expenses/subscriptions
+   │
+   ├─[accounts.ax:65:3]
+   │
+64 │ account expenses/subscriptions
+65 │   budget 90 USD monthly
+   │   ──────────┬──────────
+   │             ╰── 192.46 USD
+   │
+   = help: nothing more can go in this month: it is already 79.47 USD over
+───╯
+
+warning[law]: law `budget` does not hold for expenses/dining
+   ╭─[journal/2025/11.ax:58:1]
+   │
+58 │ 2025-11-28 visa -> dining 18.83 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── this flow: 18.83 USD into expenses/dining
+   │
+   ├─[accounts.ax:55:3]
+   │
+54 │ account expenses/dining
+55 │   budget 150 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 163.17 USD
+   │
+   = help: at most 5.66 USD more can go in this month
+───╯
+
+warning[law]: law `budget` does not hold for expenses/dining
+   ╭─[journal/2025/12.ax:59:1]
+   │
+59 │ 2025-12-28 visa -> dining 14.47 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── this flow: 14.47 USD into expenses/dining
+   │
+   ├─[accounts.ax:55:3]
+   │
+54 │ account expenses/dining
+55 │   budget 150 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 160.00 USD
+   │
+   = help: at most 4.47 USD more can go in this month
+───╯
+
+note[pad]: accepted a gap on assets/cash/wallet
+   ╭─[journal/2025/12.ax:65:1]
+   │
+65 │ 2025-12-31 wallet = 57.22 USD !
+   │ ───────────────┬───────────────
+   │                ╰── 14.00 USD moved out of assets/cash/wallet into unknown
+   │
+───╯
+
+9 warnings

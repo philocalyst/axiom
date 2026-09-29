@@ -1,0 +1,21 @@
+$ axiom why itemized-deductions --today 2026-01-05
+
+Why itemized-deductions
+
+  Law       itemized-deductions
+  ─────────────────────────────────
+  When      each year
+  Governs   everything in this book
+  Written   laws.ax:14
+  Ran       4 times
+  Recorded  0 violations, 1 effects
+  · Schedule A: mortgage interest (IRC §163(h)), state and local taxes up to the
+  · cap (IRC §164(b)(6)), and gifts to charity (IRC §170), for the year that
+  · just ended. `us` takes the larger of this and the standard deduction. The
+  · State tax counted is what was withheld plus last year's balance paid, and
+  · the property tax the servicer paid from escrow.
+
+Recent effects
+  Date        Effect           Amount  Owed to  From
+  ────────────────────────────────────────────────────────
+  2025-12-31  itemized  48,885.07 USD           period end

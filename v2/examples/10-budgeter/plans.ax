@@ -1,0 +1,14 @@
+// The question: can I afford a 3,000 USD trip in June?
+//
+// The trip is written as two plans: the flights in March and the hotel and the
+// rest in June. The trip fund pays what it holds, and checking pays the rest.
+// Plans exist only in forecasts; take them out and run `axiom forecast` again to
+// see the difference (outputs/forecast-without-the-trip.txt).
+
+/// Flights, from the trip fund: about 1,150.00 USD.
+every year on 03-10 from 2026-03-10 trip-fund -> travel 1_150 USD / airline
+
+/// The hotel and the spending money. The trip fund will hold about 2,500.00 USD by
+/// then, so it pays what is left of it, and checking pays the rest.
+every year on 06-14 from 2026-06-14 trip-fund -> travel 1_350 USD / hotel
+every year on 06-14 from 2026-06-14 checking -> travel 500 USD / hotel
