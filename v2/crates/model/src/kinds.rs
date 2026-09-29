@@ -1,7 +1,7 @@
 //! Kinds: what things are.
 //!
 //! Kinds form one tree rooted in the built-in `asset liability income expense
-//! equity` (place kinds), `commodity` and `entity`. A kind adds properties
+//! equity` (place kinds), `thing`, `commodity` and `entity`. A kind adds properties
 //! (typed, with defaults) and laws to everything beneath it. This stage creates
 //! the kinds and links each to its parent; what flows down the chain is
 //! resolved with the other properties, once everything can be named.
@@ -9,37 +9,42 @@
 use axiom_core::{Diagnostic, Id, Interner, Loc, Map, Tree};
 use axiom_syntax::DeclKind;
 
-use crate::book::{Class, Kind, Miss, Sort, System};
+use crate::book::{Class, Kind, Miss, PathRoot, Sort, System};
 use crate::collect::{Entry, decls};
 use crate::cx::Cx;
 use crate::errors::{Candidate, Word, article, duplicate, not_used, unknown};
 use crate::names::Scoped;
 use crate::scope::{Home, Scopes};
 
-pub(crate) const ROOTS: [(&str, Sort); 8] = [
+/// The five place roots come first, in the order of [`PathRoot`].
+pub(crate) const ROOTS: [(&str, Sort); 9] = [
     ("asset", Sort::Place(Class::Asset)),
-    ("liability", Sort::Place(Class::Liability)),
-    ("income", Sort::Place(Class::Income)),
-    ("expense", Sort::Place(Class::Expense)),
-    ("equity", Sort::Place(Class::Equity)),
+    ("liability", Sort::Place(Class::Debt)),
+    ("income", Sort::Place(Class::Outside)),
+    ("expense", Sort::Place(Class::Outside)),
+    ("equity", Sort::Place(Class::Outside)),
     ("commodity", Sort::Commodity),
     ("entity", Sort::Entity),
-    // Built in, under `income`: the counterpart of revaluations.
-    ("market", Sort::Place(Class::Income)),
+    // v3 bridge: built in, under `income`, for `is market` in laws, which the
+    // standard systems write. The market itself is now an entity.
+    ("market", Sort::Place(Class::Outside)),
+    ("thing", Sort::Thing),
 ];
 
-/// The position of `market` in `ROOTS`, of its parent `income`, and of `entity`.
+/// The positions in `ROOTS` of `market`, of its parent `income`, of `entity`, and of `thing`.
 const MARKET: usize = 7;
 const INCOME: usize = 2;
 const ENTITY: usize = 6;
+const THING: usize = 8;
 
 /// Where the built-in roots landed in the tree.
 #[derive(Clone, Copy)]
 pub(crate) struct RootKinds(pub [Id<Kind>; ROOTS.len()]);
 
 impl RootKinds {
-    pub fn of_class(&self, class: Class) -> Id<Kind> {
-        self.0[class as usize]
+    /// The root kind of the places under a path root.
+    pub fn of_root(&self, root: PathRoot) -> Id<Kind> {
+        self.0[root as usize]
     }
 
     pub fn commodity(&self) -> Id<Kind> {
@@ -50,17 +55,13 @@ impl RootKinds {
         self.0[ENTITY]
     }
 
-    pub fn market(&self) -> Id<Kind> {
-        self.0[MARKET]
+    pub fn thing(&self) -> Id<Kind> {
+        self.0[THING]
     }
 
-    /// The root of `sort`.
-    fn of_sort(&self, sort: Sort) -> Id<Kind> {
-        match sort {
-            Sort::Place(class) => self.of_class(class),
-            Sort::Commodity => self.commodity(),
-            Sort::Entity => self.entity(),
-        }
+    // v3 bridge: the kind of the market's place.
+    pub fn market(&self) -> Id<Kind> {
+        self.0[MARKET]
     }
 }
 
@@ -87,6 +88,11 @@ fn draft<'s>(names: &mut Interner<'s>, name: &'s str, sort: Sort) -> Kind {
         claim: false,
         select: None,
         liquidity: None,
+        purpose: None,
+        pays: None,
+        takes: Box::default(),
+        sales_tax: None,
+        shares: Box::default(),
         has: Box::default(),
         props: Box::default(),
         laws: Box::default(),
@@ -168,10 +174,9 @@ fn index_of<'s>(names: &mut Interner<'s>, things: impl Iterator<Item = (&'s str,
 }
 
 impl Kinds {
-    /// The kind a declaration names, which must be a kind of `sort`; the root
-    /// of that sort when it names none, or one that cannot fit.
-    pub fn declared(&self, written: Option<Word>, home: Home, sort: Sort, thing: &str, cx: &mut Cx) -> Id<Kind> {
-        let root = self.roots.of_sort(sort);
+    /// The kind a declaration names, which must be a kind under `root`; `root`
+    /// itself when it names none, or one that cannot fit.
+    pub fn declared(&self, written: Option<Word>, home: Home, root: Id<Kind>, thing: &str, cx: &mut Cx) -> Id<Kind> {
         let Some(word) = written else { return root };
         let scope = cx.scopes.of(home);
         match find(&self.index, cx.names, cx.systems, word.text, |home| scope.sees(home)) {
@@ -179,10 +184,11 @@ impl Kinds {
                 cx.diags.push(unresolved(miss, word, &self.index, cx.names, cx.systems, |id| self.tree[id].loc));
                 root
             }
-            Ok(kind) if self.tree[kind].sort == sort => kind,
+            Ok(kind) if self.tree.covers(root, kind) => kind,
             Ok(kind) if self.unrooted[kind.index()] => root,
             Ok(kind) => {
-                let is = self.tree[kind].sort.noun();
+                let top = self.tree.lineage(kind).last().unwrap_or(kind);
+                let is = cx.names.name(self.tree[top].name);
                 let mut diagnostic = Diagnostic::error(
                     "kind-sort",
                     format!("kind `{}` is {} kind, so it cannot describe {thing}", word.text, article(is)),

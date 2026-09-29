@@ -7,8 +7,8 @@ use axiom_core::{Day, Diagnostic, Id};
 use axiom_syntax::{self as ast, EventState, Item};
 
 use super::shape::{Elab, Priced};
-use crate::book::{Amount, CodeRule, CodeScope, Place, SyncSpec};
-use crate::collect::{Entry, class_of};
+use crate::book::{Amount, CodeRule, CodeScope, PathRoot, Place, SyncSpec};
+use crate::collect::Entry;
 use crate::declare::World;
 use crate::journal::{Assert, Gap, Quote, Split, Waive};
 use crate::scope::Home;
@@ -120,7 +120,7 @@ pub(super) fn code_rules<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], d
         let mut scopes = Vec::new();
         for name in &file[rule.on] {
             let word = crate::errors::Word { text: name.0, loc: file.loc(name.0) };
-            if is_pattern(name.0) || class_of(name.0).is_some() {
+            if is_pattern(name.0) || PathRoot::of(name.0).is_some() {
                 scopes.push(CodeScope::Places(world.book.names.intern(name.0)));
                 continue;
             }

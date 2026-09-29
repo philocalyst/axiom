@@ -17,7 +17,7 @@ use axiom_syntax::{
     Occurrence, Param, Plan, Price, Prop, Quantity, Select, Setting, Split, Sync, Txn,
 };
 
-use crate::book::Class;
+use crate::book::PathRoot;
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -127,21 +127,6 @@ pub(crate) struct Surveyed<'a, 's> {
     /// How many transactions the journal makes in all.
     pub txns: u32,
     pub diags: Vec<Diagnostic>,
-}
-
-/// The class a full path belongs to, if it starts at a class root.
-pub(crate) fn class_of(path: &str) -> Option<Class> {
-    let bytes = path.as_bytes();
-    let class = match bytes.first()? {
-        b'a' => Class::Asset,
-        b'l' => Class::Liability,
-        b'i' => Class::Income,
-        b'e' if bytes.get(1) == Some(&b'x') => Class::Expense,
-        b'e' => Class::Equity,
-        _ => return None,
-    };
-    let rest = path.strip_prefix(class.root())?;
-    (rest.is_empty() || rest.starts_with('/')).then_some(class)
 }
 
 /// The decimals an amount needs: `84.20` needs one.
@@ -317,7 +302,7 @@ impl<'s> Facts<'s> {
 
     /// A full path under a class root opens its place.
     fn open(&mut self, path: &'s str) {
-        if class_of(path).is_some() && self.path_seen.insert(path) {
+        if PathRoot::of(path).is_some() && self.path_seen.insert(path) {
             self.paths.push(path);
         }
     }

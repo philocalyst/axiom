@@ -69,6 +69,11 @@ pub(crate) fn declare<'s>(
                                 misplaced(diags, file, node.laws, "a commodity kind");
                                 continue;
                             }
+                            // v3 bridge: the v4 model has laws of asset kinds.
+                            Sort::Thing => {
+                                misplaced(diags, file, node.laws, "an asset kind");
+                                continue;
+                            }
                         };
                         (Owner::Kind(id), subject, id.index())
                     }
@@ -145,7 +150,9 @@ fn fits(world: &World, owner: Owner, law: &ast::Law) -> Result<(), Diagnostic> {
     let about_entities = match owner {
         Owner::Entity(_) => true,
         Owner::Kind(kind) => world.book.kinds[kind].sort == Sort::Entity,
-        Owner::Place(_) | Owner::System(_) | Owner::Book => false,
+        Owner::Place(_) | Owner::System(_) | Owner::Book | Owner::Purpose(_) | Owner::Asset(_) | Owner::Contract(_) => {
+            false
+        }
     };
     let trigger_loc = law.trigger_loc;
     match (law.trigger, about_entities) {
@@ -206,7 +213,12 @@ fn register(world: &mut World) {
         match law.owner {
             Owner::Kind(kind) => of_kind[kind.index()].push(id),
             Owner::System(system) => of_system[system.index()].push(id),
-            Owner::Place(_) | Owner::Entity(_) | Owner::Book => {}
+            Owner::Place(_)
+            | Owner::Entity(_)
+            | Owner::Book
+            | Owner::Purpose(_)
+            | Owner::Asset(_)
+            | Owner::Contract(_) => {}
         }
     }
     for id in book.kinds.ids().collect::<Vec<Id<Kind>>>() {

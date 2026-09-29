@@ -3,7 +3,7 @@
 
 use axiom_core::{Day, Id, Loc, Qty, Ratio, Span, Sym};
 
-use crate::book::{Amount, Commodity, Entity, EventState, On, Place, Policy};
+use crate::book::{Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose};
 
 /// Value moving once, from one place to another. Balanced by construction.
 #[derive(Clone, Debug)]
@@ -26,6 +26,15 @@ pub struct Flow {
     pub infer: Infer,
     pub txn: Id<Txn>,
     pub payee: Option<Id<Entity>>,
+    /// Who bears it, or earns it: tallies and budgets follow this. The owner
+    /// of the flow's account ends by default; a share makes it another.
+    pub owner: Id<Entity>,
+    /// What it is for, and why the book thinks so.
+    pub purpose: Option<Purposed>,
+    /// `"food for the routine"`.
+    pub description: Option<Sym>,
+    /// Written, an occurrence of a contract, or derived.
+    pub origin: Origin,
     /// Lot selectors applied when relieving parcels at `from`.
     pub select: Box<[Select]>,
     /// The transaction's codes, then the leg's own.
@@ -59,6 +68,70 @@ impl Flow {
     }
 }
 
+/// A flow's purpose, its object, and where it came from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Purposed {
+    pub purpose: Id<Purpose>,
+    /// `of condo`.
+    pub of: Option<Object>,
+    pub source: Source,
+}
+
+/// What a purpose is `of`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Object {
+    Asset(Id<Asset>),
+    Place(Id<Place>),
+    Entity(Id<Entity>),
+}
+
+/// Where a flow's purpose came from, first match winning (LANGUAGE §2).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Source {
+    /// On the leg or its header.
+    Written(Loc),
+    Contract(Id<Contract>),
+    /// The kind of the party at the flow's other end.
+    Party(Id<Kind>),
+    /// The kind of the commodity paying, in party position.
+    Commodity(Id<Kind>),
+    /// A `takes … from …` of an account's kind.
+    Account(Id<Kind>),
+    /// A derived flow's own purpose (interest, sales tax, a match).
+    Derived,
+}
+
+/// How a flow came to be.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Origin {
+    Written,
+    /// An occurrence of a contract, written in the journal as `DATE NAME`.
+    Occurrence(Id<Contract>),
+    /// Implied by something written; never in the journal.
+    Derived(Derivation),
+}
+
+/// What a derived flow is, and what it came from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Derivation {
+    /// A loan payment's interest, or its principal.
+    Interest(Id<Contract>),
+    Principal(Id<Contract>),
+    Escrow(Id<Contract>),
+    Match(Id<Contract>),
+    /// An owner's share of a flow: `business 60% for studio`, from a
+    /// contract, a party kind or a purpose. `Loc` is the share's declaration.
+    Share(Loc),
+    /// The tax inside a price paid to a party with `sales-tax`.
+    SalesTax(Id<Kind>),
+    /// What an exchange rate cost: what was given less what was got.
+    ExchangeCost,
+    /// A leg between two parties, split into its two halves through the owner.
+    PassThrough,
+    /// A contract deposit or a missing occurrence: a claim.
+    Claim(Id<Contract>),
+}
+
 /// An inclusive range of days over which a flow is recognized.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Recognition {
@@ -86,6 +159,9 @@ pub struct Terms {
     /// `for ENTITY`: the arriving parcels are held for this entity, and its
     /// `on spend` laws govern them. The target's owner means "untie".
     pub hold: Option<Id<Entity>>,
+    /// v3 only: the v4 model has no `.basis` places, and this goes with the
+    /// v3 model.
+    ///
     /// `PLACE.basis` at one end: that end moves basis, not quantity. Into it,
     /// the place's parcels gain basis; out of it, they lose basis and the
     /// amount is recognized at the other end.
@@ -171,7 +247,12 @@ pub struct Txn {
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,
     /// The named plan this transaction is an occurrence of (`DATE paycheck`).
+    /// v3 only: the v4 model fills `contract`.
     pub plan: Option<Id<Plan>>,
+    /// The contract this transaction is an occurrence of (`DATE phone`).
+    pub contract: Option<Id<Contract>>,
+    /// `DATE NAME ends`: it ends the contract, and has no flows.
+    pub ends: bool,
     pub doc: Option<Sym>,
     pub loc: Loc,
 }

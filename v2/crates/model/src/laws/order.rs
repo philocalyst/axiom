@@ -24,7 +24,8 @@ fn occasion(trigger: Trigger) -> u8 {
         Trigger::Gain => 2,
         Trigger::Spend => 3,
         Trigger::Always => 4,
-        Trigger::Each(..) | Trigger::By(_) => 5,
+        Trigger::Flow => 5,
+        Trigger::Each(..) | Trigger::By(_) => 6,
     }
 }
 
@@ -37,11 +38,11 @@ fn reads(law: &Law) -> Vec<Sym> {
     tallies.collect()
 }
 
-/// The tallies a law counts into. An `owe` counts into nothing.
+/// The tallies a law counts into. An `owe`, a `consume` and a `carry` count into nothing.
 fn writes(law: &Law) -> Vec<Sym> {
     let counted = |effect: &Effect| match effect {
         Effect::Count { name, .. } => Some(*name),
-        Effect::Owe { .. } => None,
+        Effect::Owe { .. } | Effect::Consume { .. } | Effect::Carry { .. } => None,
     };
     let names = law.steps.iter().filter_map(|step| match &step.kind {
         StepKind::Effect(effect) | StepKind::Require { otherwise: Some(effect), .. } => counted(effect),

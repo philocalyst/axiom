@@ -10,7 +10,7 @@ use axiom_core::diag::closest;
 use axiom_core::num::DecError;
 use axiom_core::{Dec, Diagnostic, Id, Loc, Map, Sym};
 
-use crate::book::{Amount, Class, Commodity, Entity, Kind, Miss, Param, Place, System, Taken};
+use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, PathRoot, Place, System, Taken};
 use crate::declare::{World, near_place};
 use crate::errors::{Candidate, Word, ambiguous, count, list, list_and, not_used, unknown};
 use crate::kinds;
@@ -191,10 +191,15 @@ impl<'s> World<'s> {
         let mut taken = Map::default();
         for name in entities.names.keys(&book.names) {
             let Found::One(entity) = entities.find(&book.names, scope, name) else { continue };
-            let Some(via) = book.entities[entity].via else { continue };
+            // v3 bridge: the market entity is the place `income/market` under another name, and a line that writes
+            // `market` has always meant the place.
+            if entity == book.roots.market {
+                continue;
+            }
+            let Some(place) = book.entities[entity].place else { continue };
             let accounts = book.lookup.places.candidates(&book.names, name);
             if !accounts.is_empty() {
-                let clash = accounts.iter().any(|&place| place != via);
+                let clash = accounts.iter().any(|&account| account != place);
                 taken.insert(self.sym(name), Taken { entity, clash });
             }
         }
@@ -223,7 +228,7 @@ impl<'s> World<'s> {
         if self.any_taken()
             && let Some(Taken { entity, .. }) = self.taken(text)
         {
-            let place = self.book.entities[entity].via.expect("only an entity with a `via` takes a name");
+            let place = self.book.entities[entity].place.expect("only an entity with a place takes a name");
             return Ok(End { place, entity: Some(entity) });
         }
         match self.book.lookup.places.find(&self.book.names, text, |_| true) {
@@ -235,7 +240,7 @@ impl<'s> World<'s> {
         }
         let (lookup, scope) = (&self.book.lookup.entities, self.scopes.of(Home::Project));
         match lookup.find(&self.book.names, scope, text) {
-            Found::One(entity) => match self.book.entities[entity].via {
+            Found::One(entity) => match self.book.entities[entity].place {
                 Some(place) => Ok(End { place, entity: Some(entity) }),
                 None => Err(Cause::NoVia),
             },
@@ -277,7 +282,7 @@ impl<'s> World<'s> {
         };
         let mut diagnostic = unknown("unknown-place", "place", word, closest);
         // A full path is opened unless it is a typo; say which one it was taken for.
-        if crate::collect::class_of(word.text).is_some() {
+        if PathRoot::of(word.text).is_some() {
             let declared: Vec<&str> = self.book.places.values().map(|place| self.book.name(place.path)).collect();
             if let Some(typo) = near_place(word.text, &declared) {
                 diagnostic = diagnostic
@@ -290,7 +295,7 @@ impl<'s> World<'s> {
             return diagnostic;
         }
         if closest.is_none() {
-            let roots: Vec<&str> = Class::ALL.iter().map(|class| class.root()).collect();
+            let roots: Vec<&str> = PathRoot::ALL.iter().map(|root| root.path()).collect();
             let leaf = word.text.rsplit('/').next().unwrap_or(word.text);
             diagnostic = diagnostic.help(format!(
                 "to open a new account, write its full path under {}, for example `expenses/{leaf}`",
@@ -342,7 +347,7 @@ impl<'s> World<'s> {
     fn explain_shadowed(&self, word: Word) -> Diagnostic {
         let (book, names) = (&self.book, &self.book.names);
         let entity = self.seek_entity(Home::Project, word).ok().flatten().expect("a shadowed name is an entity's");
-        let via = book.entities[entity].via;
+        let via = book.entities[entity].place;
         let accounts: Vec<Id<Place>> =
             book.lookup.places.candidates(names, word.text).iter().copied().filter(|&id| Some(id) != via).collect();
         let path = |id: Id<Place>| book.name(book.places[id].path);
