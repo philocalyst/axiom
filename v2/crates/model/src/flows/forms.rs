@@ -50,15 +50,18 @@ impl<'a, 's> Elab<'a, 's> {
         let empty = Tail::default();
         let header = header.unwrap_or(&empty);
         let payee = header.payee.or(moves.as_ref().and_then(|moves| moves.counterparty));
-        let mut flows = Vec::new();
         for mv in moves.into_iter().flat_map(|moves| moves.moves) {
-            flows.extend(self.flow(mv, day, mode));
+            let flow = self.flow(mv, day, mode);
+            self.sink.flows.extend(flow);
         }
-        self.check_codes(&flows);
-        let complete = diags == self.sink.diags.len() && misses == self.sink.misses.len() && !flows.is_empty();
-        if complete {
-            self.sink.quotes.extend(flows.iter().filter_map(|flow| implied_quote(&world.book, flow)));
-            self.sink.flows.extend(flows);
+        let flows = std::mem::take(&mut self.sink.flows);
+        self.check_codes(&flows[first..]);
+        self.sink.flows = flows;
+        let made = &self.sink.flows[first..];
+        if diags != self.sink.diags.len() || misses != self.sink.misses.len() || made.is_empty() {
+            self.sink.flows.truncate(first);
+        } else {
+            self.sink.quotes.extend(made.iter().filter_map(|flow| implied_quote(&world.book, flow)));
         }
         self.sink.unordered |= self.sink.txns.last().is_some_and(|last| last.day > day);
         self.sink.txns.push(Txn {

@@ -59,7 +59,7 @@ pub(crate) fn rank(book: &Book, diags: &mut Vec<Diagnostic>) -> Vec<u32> {
     for (at, names) in writes.iter().enumerate() {
         names.iter().for_each(|&name| writers.entry(name).or_default().push(at));
     }
-    // `waits[a]` are the laws that must run before law `a`.
+    // `after[a]` are the laws that must run after law `a`.
     let mut after: Vec<Vec<usize>> = vec![Vec::new(); laws.len()];
     let mut waiting = vec![0usize; laws.len()];
     for (reader, names) in reads.iter().enumerate() {
@@ -71,12 +71,11 @@ pub(crate) fn rank(book: &Book, diags: &mut Vec<Diagnostic>) -> Vec<u32> {
             }
         }
     }
-    let mut ready: BinaryHeap<Reverse<usize>> = (0..laws.len()).filter(|&at| waiting[at] == 0).map(Reverse).collect();
+    let mut ready: BinaryHeap<Reverse<usize>> = (0..laws.len()).filter(|&law| waiting[law] == 0).map(Reverse).collect();
     let mut rank = vec![u32::MAX; laws.len()];
     let mut placed = 0u32;
     while let Some(Reverse(law)) = ready.pop() {
-        rank[law] = placed;
-        placed += 1;
+        (rank[law], placed) = (placed, placed + 1);
         for &next in &after[law] {
             waiting[next] -= 1;
             if waiting[next] == 0 {
@@ -84,81 +83,42 @@ pub(crate) fn rank(book: &Book, diags: &mut Vec<Diagnostic>) -> Vec<u32> {
             }
         }
     }
-    if (placed as usize) < laws.len() {
-        let stuck: Vec<usize> = (0..laws.len()).filter(|&at| rank[at] == u32::MAX).collect();
-        for cycle in cycles(&after, &stuck) {
-            diags.push(cycle_diagnostic(book, &cycle, &reads, &writes));
-        }
-        // The laws that could not be ordered run last, in the order declared.
-        for at in stuck {
-            rank[at] = placed;
-            placed += 1;
-        }
+    // What is left waits on itself, or behind something that does. Those laws
+    // run last, in the order declared.
+    let stuck: Vec<usize> = (0..laws.len()).filter(|&law| rank[law] == u32::MAX).collect();
+    for cycle in cycles(&after, stuck.clone()) {
+        diags.push(cycle_diagnostic(book, &cycle, &reads, &writes));
+    }
+    for law in stuck {
+        (rank[law], placed) = (placed, placed + 1);
     }
     rank
 }
 
-/// The sets of laws that wait on each other, each in declaration order:
-/// strongly connected components of two or more laws among `stuck`.
-fn cycles(after: &[Vec<usize>], stuck: &[usize]) -> Vec<Vec<usize>> {
-    struct Walk<'a> {
-        after: &'a [Vec<usize>],
-        index: Vec<Option<usize>>,
-        low: Vec<usize>,
-        on_stack: Vec<bool>,
-        stack: Vec<usize>,
-        found: Vec<Vec<usize>>,
-        next: usize,
-    }
-    impl Walk<'_> {
-        fn visit(&mut self, law: usize) {
-            (self.index[law], self.low[law]) = (Some(self.next), self.next);
-            self.next += 1;
-            self.stack.push(law);
-            self.on_stack[law] = true;
-            for &later in self.after[law].iter() {
-                match self.index[later] {
-                    None => {
-                        self.visit(later);
-                        self.low[law] = self.low[law].min(self.low[later]);
-                    }
-                    Some(at) if self.on_stack[later] => self.low[law] = self.low[law].min(at),
-                    Some(_) => {}
-                }
-            }
-            if Some(self.low[law]) == self.index[law] {
-                let mut members = Vec::new();
-                while let Some(member) = self.stack.pop() {
-                    self.on_stack[member] = false;
-                    members.push(member);
-                    if member == law {
-                        break;
-                    }
-                }
-                if members.len() > 1 {
-                    members.sort_unstable();
-                    self.found.push(members);
-                }
-            }
+/// The loops among laws that could not be ordered, each in declaration order.
+fn cycles(after: &[Vec<usize>], mut stuck: Vec<usize>) -> Vec<Vec<usize>> {
+    let mut found = Vec::new();
+    loop {
+        // A law nothing else here waits for is only behind a loop, not in one.
+        while let Some(at) = stuck.iter().position(|&law| after[law].iter().all(|next| !stuck.contains(next))) {
+            stuck.remove(at);
         }
+        let Some(&start) = stuck.first() else { return found };
+        // Every law that is left waits for another, so following them repeats.
+        let mut path = vec![start];
+        let mut cycle = loop {
+            let Some(next) = after[path[path.len() - 1]].iter().copied().find(|next| stuck.contains(next)) else {
+                break path;
+            };
+            match path.iter().position(|&law| law == next) {
+                Some(at) => break path.split_off(at),
+                None => path.push(next),
+            }
+        };
+        stuck.retain(|law| !cycle.contains(law));
+        cycle.sort_unstable();
+        found.push(cycle);
     }
-    let n = after.len();
-    let mut walk = Walk {
-        after,
-        index: vec![None; n],
-        low: vec![0; n],
-        on_stack: vec![false; n],
-        stack: Vec::new(),
-        found: Vec::new(),
-        next: 0,
-    };
-    for &law in stuck {
-        if walk.index[law].is_none() {
-            walk.visit(law);
-        }
-    }
-    walk.found.sort();
-    walk.found
 }
 
 fn cycle_diagnostic(book: &Book, members: &[usize], reads: &[Vec<Sym>], writes: &[Vec<Sym>]) -> Diagnostic {
