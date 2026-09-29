@@ -1,0 +1,15 @@
+error[unknown-place]: there is no place `dinning`
+   ╭─[21-typo-account.ax:15:24]
+   │
+15 │ 2026-01-24 checking -> dinning 62.35 USD
+   │                        ───┬───
+   │                           ╰── not a known place
+   │
+   = help: did you mean `dining`?
+15 + 2026-01-24 checking -> dining 62.35 USD
+   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
+           `expenses` or `equity`, for example `expenses/dinning`
+───╯
+
+✗ 1 error
+[exit status 1]

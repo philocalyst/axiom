@@ -1,0 +1,16 @@
+// MISTAKE: groceries and dining go over the 650 USD monthly food budget.
+base USD
+use std
+
+account assets/checking : bank
+account expenses/food
+  budget 650 USD monthly
+account expenses/food/groceries
+account expenses/food/dining
+account equity/opening
+
+2025-12-31 equity/opening -> checking 3_000 USD
+2026-01-05 checking -> groceries 300.00 USD
+2026-01-12 checking -> dining 180.00 USD
+2026-01-19 checking -> groceries 210.00 USD
+2026-01-26 checking -> dining 60.00 USD

@@ -1,0 +1,18 @@
+error[price-disagrees]: the price does not match the amounts
+   ╭─[36-price-disagrees.ax:13:52]
+   │
+13 │ 2026-01-22 checking 2_000 USD -> brokerage 7 VTI @ 285.70 USD
+   │                               ─┬                   ─────┬────
+   │                                │                        ╰── this price
+   │                                ╰── 2,000.00 USD for 7 VTI
+   │
+   = note: 7 VTI × 285.70 USD = 1,999.90 USD, but 2,000.00 USD was written
+   = note: 2,000.00 USD ÷ 7 VTI = 285.71428… USD per VTI, which is not the price written
+   = help: if the 0.10 USD difference is a fee or a rounding, write it as a leg:
+             checking -> 2_000.00 USD
+               brokerage 7 VTI @ 285.70 USD
+               expenses/fees 0.10 USD
+───╯
+
+✗ 1 error
+[exit status 1]

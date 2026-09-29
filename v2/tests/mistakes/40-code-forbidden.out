@@ -1,0 +1,17 @@
+error[code-placement]: `#check-1041` may not mark this flow
+   ╭─[40-code-forbidden.ax:18:38]
+   │
+14 │ code check-*
+   │ ──────┬─────
+   │       ╰── the rule for codes like it
+   ⋮
+18 │ 2026-02-01 visa -> plumber (350 USD) #check-1041
+   │                                      ─────┬─────
+   │                                           ╰── this code
+   │
+   = note: it may only mark flows touching `bank`
+   = help: use the code where the rule allows it, or change the rule
+───╯
+
+✗ 1 error
+[exit status 1]

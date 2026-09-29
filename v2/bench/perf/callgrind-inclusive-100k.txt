@@ -1,0 +1,51 @@
+--------------------------------------------------------------------------------
+1,048,483,447 (100.0%)  PROGRAM TOTALS
+
+--------------------------------------------------------------------------------
+Ir                      file:function
+--------------------------------------------------------------------------------
+1,047,809,336 (99.94%)  ???:std::sys::backtrace::__rust_begin_short_backtrace
+  580,751,062 (55.39%)  ./nptl/./nptl/pthread_create.c:start_thread
+  580,596,679 (55.37%)  ???:std::sys::thread::unix::Thread::new::thread_start
+  580,526,746 (55.37%)  ???:core::ops::function::FnOnce::call_once{{vtable.shim}}
+  467,732,308 (44.61%)  ???:0x000000000001f540
+  467,384,982 (44.58%)  ???:(below main)
+  467,384,970 (44.58%)  ./csu/../csu/libc-start.c:__libc_start_main@@GLIBC_2.34
+  467,384,787 (44.58%)  ./csu/../sysdeps/nptl/libc_start_call_main.h:(below main)
+  467,382,773 (44.58%)  ???:main
+  467,382,762 (44.58%)  ???:std::rt::lang_start_internal
+  467,284,773 (44.57%)  ???:std::rt::lang_start::{{closure}}
+  467,284,763 (44.57%)  ???:axiom::main
+  467,265,138 (44.57%)  ???:axiom::commands::run_action
+  343,033,369 (32.72%)  ???:axiom_syntax::parse
+  314,640,970 (30.01%)  ???:axiom_syntax::item::<impl axiom_syntax::parser::Parser>::item
+  282,531,716 (26.95%)  ???:axiom_engine::ledger::run
+  258,486,661 (24.65%)  ???:axiom_engine::ledger::Ledger::advance_through
+  233,147,092 (22.24%)  ???:axiom_engine::post::<impl axiom_engine::ledger::Ledger>::post
+  188,218,121 (17.95%)  ???:axiom_model::flows::elaborate_runs
+  177,633,944 (16.94%)  ???:axiom_model::flows::txn::elaborate
+  172,299,162 (16.43%)  ???:axiom_syntax::parser::Parser::begin_line
+  164,647,072 (15.70%)  ???:axiom_model::flows::elaborate_runs'2
+  137,844,586 (13.15%)  ./misc/../sysdeps/unix/sysv/linux/x86_64/clone.S:start_thread
+  137,844,537 (13.15%)  ./nptl/./nptl/pthread_create.c:start_thread'2
+  113,446,469 (10.82%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::fire
+  111,009,708 (10.59%)  ???:axiom_model::build
+   92,254,953 ( 8.80%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::enforce
+   84,582,401 ( 8.07%)  ???:axiom_model::flows::record
+   79,764,702 ( 7.61%)  ???:axiom_model::read::read_runs
+   79,341,012 ( 7.57%)  ???:axiom_engine::fire::<impl axiom_engine::ledger::Ledger>::evaluate
+   64,780,936 ( 6.18%)  ???:axiom_engine::eval::Machine::scan
+   64,154,693 ( 6.12%)  ./string/../sysdeps/x86_64/multiarch/memmove-vec-unaligned-erms.S:__memcpy_avx_unaligned_erms
+   63,825,974 ( 6.09%)  ???:axiom_syntax::lex::Lexer::scan_word
+   59,212,238 ( 5.65%)  ???:axiom_model::survey::Survey::flow
+   58,054,852 ( 5.54%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::flow_head
+   57,404,238 ( 5.47%)  ???:axiom_model::read::read_runs'2
+   54,580,090 ( 5.21%)  ???:axiom_report::summary
+   54,483,634 ( 5.20%)  ???:axiom_report::history::Balances::at
+   53,014,715 ( 5.06%)  ???:axiom_model::resolve::<impl axiom_model::world::World>::end
+   46,777,163 ( 4.46%)  ???:axiom_core::sym::Interner::get
+   46,740,712 ( 4.46%)  ???:axiom_syntax::flow::<impl axiom_syntax::parser::Parser>::side
+   45,801,950 ( 4.37%)  ???:core::slice::sort::stable::quicksort::quicksort'2
+   42,243,627 ( 4.03%)  ???:axiom_model::resolve::<impl axiom_model::world::World>::seek_place
+   40,618,641 ( 3.87%)  ???:axiom_model::flows::txn::Elaborator::header_quantity
+   38,937,588 ( 3.71%)  ???:axiom_model::flows::txn::Elaborator::quantity

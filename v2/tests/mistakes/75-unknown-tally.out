@@ -1,0 +1,14 @@
+error[unknown-tally]: no law counts `wagess`
+   ╭─[75-unknown-tally.ax:20:17]
+   │
+20 │   require tally(wagess) <= 500_000 USD "wages over 500_000 USD"
+   │                 ───┬──
+   │                    ╰── nothing is tallied under this name
+   │
+   = note: `tally(NAME)` reads what `count … as NAME` lines add up
+   = help: did you mean `wages`?
+20 +   require tally(wages) <= 500_000 USD "wages over 500_000 USD"
+───╯
+
+✗ 1 error
+[exit status 1]

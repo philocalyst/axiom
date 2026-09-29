@@ -1,0 +1,14 @@
+// MISTAKE: `is` tests a kind, a place or a glob; here it is given an amount's kind.
+base USD
+use std
+
+account assets/checking : bank
+account equity/opening
+account expenses/food
+  law large-purchase
+    on in
+    when amount is wages
+    warn amount <= 500 USD "large purchase"
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2026-01-08 checking -> food 84.20 USD

@@ -1,0 +1,38 @@
+warning[law]: balance below zero
+   ╭─[84-assert-sign-overdrawn.ax:11:1]
+   │
+11 │ 2026-01-08 checking -> food 150 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── this flow: 150.00 USD from assets/checking to expenses/food
+   │
+   ├─[std.ax:26:10]
+   │
+26 │     warn balance >= empty "balance below zero"
+   │          ───┬────┬───────
+   │             │    ╰── false
+   │             ╰── -50.00 USD
+   │
+   = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
+           usually for a fee. Move money in before the payment clears, or look for a pending payment
+           or a missing deposit that explains it.
+───╯
+
+error[assertion]: assets/checking holds -50.00 USD, not 50.00 USD
+   ╭─[84-assert-sign-overdrawn.ax:12:1]
+   │
+10 │ 2025-12-31 equity/opening -> checking 100 USD
+   │ ──────────────────────┬──────────────────────
+   │                       ╰── +100.00 USD from equity/opening
+11 │ 2026-01-08 checking -> food 150 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── -150.00 USD to expenses/food
+12 │ 2026-01-31 checking = 50 USD
+   │ ──────────────┬─────────────
+   │               ╰── 100.00 USD missing: the ledger holds less than this
+   │
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+12 + 2026-01-31 checking = 50 USD !
+───╯
+
+✗ 1 error, 1 warning
+[exit status 1]

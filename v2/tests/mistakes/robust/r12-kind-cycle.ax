@@ -1,0 +1,4 @@
+base USD
+kind a : b
+kind b : a
+account assets/x : a

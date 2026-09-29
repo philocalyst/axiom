@@ -1,0 +1,12 @@
+error[unknown-entity]: there is no entity `groceries`
+   ╭─[30-payee-not-entity.ax:15:46]
+   │
+15 │ 2026-01-08 checking -> groceries 84.20 USD / groceries
+   │                                              ────┬────
+   │                                                  ╰── not a known entity
+   │
+   = note: a payee must be a declared entity, so that it is typed like everything else
+───╯
+
+✗ 1 error
+[exit status 1]

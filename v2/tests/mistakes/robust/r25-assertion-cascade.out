@@ -1,0 +1,203 @@
+error[assertion]: assets/checking holds 3,915.80 USD, not 3,900.72 USD
+   ╭─[r25-assertion-cascade.ax:19:1]
+   │
+15 │ 2025-12-31 equity/opening -> checking 1_000 USD
+   │ ───────────────────────┬───────────────────────
+   │                        ╰── +1,000.00 USD from equity/opening
+16 │
+17 │ 2026-01-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+18 │ 2026-01-10 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -84.20 USD to expenses/food
+19 │ 2026-01-31 checking = 3_900.72 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── 15.08 USD too much: the ledger holds more than this
+   │
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+19 + 2026-01-31 checking = 3_900.72 USD !
+───╯
+
+error[assertion]: assets/checking holds 6,824.70 USD, not 6,809.62 USD
+   ╭─[r25-assertion-cascade.ax:23:1]
+   │
+15 │ 2025-12-31 equity/opening -> checking 1_000 USD
+   │ ───────────────────────┬───────────────────────
+   │                        ╰── +1,000.00 USD from equity/opening
+16 │
+17 │ 2026-01-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+18 │ 2026-01-10 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -84.20 USD to expenses/food
+   ⋮
+21 │ 2026-02-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+22 │ 2026-02-12 checking -> food 91.10 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -91.10 USD to expenses/food
+23 │ 2026-02-28 checking = 6_809.62 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── 15.08 USD too much: the ledger holds more than this
+   │
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+23 + 2026-02-28 checking = 6_809.62 USD !
+───╯
+
+error[assertion]: assets/checking holds 9,747.35 USD, not 9,732.27 USD
+   ╭─[r25-assertion-cascade.ax:27:1]
+   │
+15 │ 2025-12-31 equity/opening -> checking 1_000 USD
+   │ ───────────────────────┬───────────────────────
+   │                        ╰── +1,000.00 USD from equity/opening
+16 │
+17 │ 2026-01-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+18 │ 2026-01-10 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -84.20 USD to expenses/food
+   ⋮
+21 │ 2026-02-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+22 │ 2026-02-12 checking -> food 91.10 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -91.10 USD to expenses/food
+   ⋮
+25 │ 2026-03-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+26 │ 2026-03-14 checking -> food 77.35 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -77.35 USD to expenses/food
+27 │ 2026-03-31 checking = 9_732.27 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── 15.08 USD too much: the ledger holds more than this
+   │
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+27 + 2026-03-31 checking = 9_732.27 USD !
+───╯
+
+error[assertion]: assets/checking holds 12,659.35 USD, not 12,644.27 USD
+   ╭─[r25-assertion-cascade.ax:31:1]
+   │
+17 │ 2026-01-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+18 │ 2026-01-10 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -84.20 USD to expenses/food
+   ⋮
+21 │ 2026-02-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+22 │ 2026-02-12 checking -> food 91.10 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -91.10 USD to expenses/food
+   ⋮
+25 │ 2026-03-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+26 │ 2026-03-14 checking -> food 77.35 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -77.35 USD to expenses/food
+   ⋮
+29 │ 2026-04-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+30 │ 2026-04-11 checking -> food 88.00 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -88.00 USD to expenses/food
+31 │ 2026-04-30 checking = 12_644.27 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── 15.08 USD too much: the ledger holds more than this
+   │
+   = note: 1 earlier flows since the start of the book are not shown
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+31 + 2026-04-30 checking = 12_644.27 USD !
+───╯
+
+error[assertion]: assets/checking holds 15,589.45 USD, not 15,574.37 USD
+   ╭─[r25-assertion-cascade.ax:35:1]
+   │
+21 │ 2026-02-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+22 │ 2026-02-12 checking -> food 91.10 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -91.10 USD to expenses/food
+   ⋮
+25 │ 2026-03-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+26 │ 2026-03-14 checking -> food 77.35 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -77.35 USD to expenses/food
+   ⋮
+29 │ 2026-04-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+30 │ 2026-04-11 checking -> food 88.00 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -88.00 USD to expenses/food
+   ⋮
+33 │ 2026-05-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+34 │ 2026-05-16 checking -> food 69.90 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -69.90 USD to expenses/food
+35 │ 2026-05-31 checking = 15_574.37 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── 15.08 USD too much: the ledger holds more than this
+   │
+   = note: 3 earlier flows since the start of the book are not shown
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+35 + 2026-05-31 checking = 15_574.37 USD !
+───╯
+
+error[assertion]: assets/checking holds 18,494.20 USD, not 18,479.12 USD
+   ╭─[r25-assertion-cascade.ax:39:1]
+   │
+25 │ 2026-03-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+26 │ 2026-03-14 checking -> food 77.35 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -77.35 USD to expenses/food
+   ⋮
+29 │ 2026-04-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+30 │ 2026-04-11 checking -> food 88.00 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -88.00 USD to expenses/food
+   ⋮
+33 │ 2026-05-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+34 │ 2026-05-16 checking -> food 69.90 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -69.90 USD to expenses/food
+   ⋮
+37 │ 2026-06-05 acme -> checking 3_000 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── +3,000.00 USD from income/salary
+38 │ 2026-06-13 checking -> food 95.25 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── -95.25 USD to expenses/food
+39 │ 2026-06-30 checking = 18_479.12 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── 15.08 USD too much: the ledger holds more than this
+   │
+   = note: 5 earlier flows since the start of the book are not shown
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+39 + 2026-06-30 checking = 18_479.12 USD !
+───╯
+
+✗ 6 errors
+[exit status 1]

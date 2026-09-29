@@ -1,0 +1,15 @@
+error[cannot-infer]: cannot infer the amount of this flow
+   ╭─[55-infer-no-assertion.ax:10:1]
+   │
+10 │ 2026-02-08 checking -> cash ? USD
+   │ ────────────────┬────────────────
+   │                 ╰── this amount is unknown
+   │
+   = help: assert assets/cash's balance after 2026-02-08 so the amount can be solved: `DATE
+           assets/cash = AMOUNT`
+   = help: assert assets/checking's balance after 2026-02-08 so the amount can be solved: `DATE
+           assets/checking = AMOUNT`
+───╯
+
+✗ 1 error
+[exit status 1]

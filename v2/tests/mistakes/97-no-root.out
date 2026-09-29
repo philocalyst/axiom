@@ -1,0 +1,3 @@
+error: no axiom.ax in <mistakes>/97-no-root or any folder above it
+  = help: run axiom inside a project, or give it a .ax file
+[exit status 2]

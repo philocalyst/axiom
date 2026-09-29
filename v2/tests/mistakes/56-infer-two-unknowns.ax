@@ -1,0 +1,14 @@
+// MISTAKE: two unknown amounts between the same two assertions.
+base USD
+use std
+
+account assets/checking : bank
+account assets/cash : cash
+account expenses/food
+account equity/opening
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2026-01-31 checking = 1_000 USD
+2026-02-08 checking -> cash ? USD
+2026-02-12 checking -> food ? USD
+2026-02-28 checking = 800 USD

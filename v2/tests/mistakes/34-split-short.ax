@@ -1,0 +1,16 @@
+// MISTAKE: the paycheck's legs add up to 4_800 USD, not the 5_000 USD in the header,
+// and no leg takes the remainder.
+base USD
+use std
+
+account assets/checking : bank
+account assets/savings  : bank
+account income/salary   : wages
+account equity/opening
+
+entity acme : employer
+  via income/salary
+
+2026-01-15 acme -> 5_000 USD
+  savings   800 USD
+  checking  4_000 USD

@@ -1,0 +1,15 @@
+error[unknown-name]: `wage` means nothing in this law
+   ╭─[76-kind-typo-in-law.ax:18:16]
+   │
+18 │   when from is wage
+   │                ──┬─
+   │                  ╰── not a variable, param, kind, place or entity here
+   │
+   = note: a name in a law is a variable of the trigger (`amount`, `from`, `date`, …), a `let`, a
+           param, or a kind, place or entity
+   = help: did you mean `wages`?
+18 +   when from is wages
+───╯
+
+✗ 1 error
+[exit status 1]

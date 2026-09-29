@@ -1,0 +1,13 @@
+error[type-mismatch]: cannot compare an amount with a number
+   ╭─[62-type-amount-lt-number.ax:10:30]
+   │
+10 │     warn total(in, month) <= 650 "food is over budget"
+   │          ────────┬───────    ─┬─
+   │                  │            ╰── this is a number
+   │                  ╰── this is an amount
+   │
+   = note: `<` and its kin compare two amounts, numbers, dates or spans
+───╯
+
+✗ 1 error
+[exit status 1]

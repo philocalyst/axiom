@@ -1,0 +1,33 @@
+// MISTAKE: a job change. Each employer's payroll stayed under the limit, but the
+// person's deferrals across both plans are 27_000 USD against a 24_500 USD limit.
+base USD
+use std
+use us/401k
+
+entity me : person
+  born   1988-04-12
+  filing single
+  lives  us
+
+account assets/checking : bank
+account assets/retirement : 401k
+  employer acme
+account assets/retirement-newco : 401k
+  employer newco
+account income/salary : wages
+account income/salary-newco : wages
+
+entity acme : employer
+  via income/salary
+entity newco : employer
+  via income/salary-newco
+
+// January to May at Acme: 15_000 USD deferred.
+2026-05-29 acme -> 20_000 USD
+  retirement  15_000 USD
+  checking    ...
+
+// From June at NewCo: 12_000 USD deferred.
+2026-06-26 newco -> 16_000 USD
+  retirement-newco  12_000 USD
+  checking          ...

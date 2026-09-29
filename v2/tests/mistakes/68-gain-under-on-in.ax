@@ -1,0 +1,16 @@
+// MISTAKE: a law that fires `on in` reads `gain`, which only exists `on gain`.
+base USD
+use std
+
+commodity VTI : fund
+  precision 0
+
+account assets/checking : bank
+account assets/brokerage : broker
+  law gains-note
+    on in
+    warn gain <= 1_000 USD "large gain"
+account equity/opening
+
+2025-12-31 equity/opening -> checking 3_000 USD
+2026-01-22 checking 2_000 USD -> brokerage 7 VTI

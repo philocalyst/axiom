@@ -1,0 +1,12 @@
+// MISTAKE: the same account declared twice, the second time with another kind.
+base USD
+use std
+
+account assets/checking : bank
+account assets/savings : bank
+account assets/checking : cash
+account expenses/food
+account equity/opening
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2026-01-08 checking -> food 84.20 USD

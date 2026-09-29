@@ -1,0 +1,15 @@
+error[insufficient-holding]: assets/brokerage does not hold 3 VTI
+   ╭─[88-lot-selector-nothing.ax:15:1]
+   │
+15 │ 2026-03-02 brokerage[2026-01-23] 3 VTI -> checking 900 USD
+   │ ─────────────────────────────┬────────────────────────────
+   │                              ╰── 3 VTI more than assets/brokerage has
+   │
+   = note: assets/brokerage holds 12 VTI
+   = note: the selectors match 0 VTI of it
+   = help: record the purchase before this flow, or check the quantity; the missing amount is left
+           as a negative balance so the rest of the ledger stays consistent
+───╯
+
+✗ 1 error
+[exit status 1]

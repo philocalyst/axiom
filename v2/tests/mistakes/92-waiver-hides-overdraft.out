@@ -1,0 +1,24 @@
+warning[law]: balance below zero
+   ╭─[92-waiver-hides-overdraft.ax:14:1]
+   │
+14 │ 2026-01-01 checking -> landlord 1_800 USD ! "landlord accepts a late deposit"
+   │ ──────────────────────────────────────┬────────────────────┬─────────────────
+   │                                       │                    ╰── waived here
+   │                                       ╰── this flow: 1,800.00 USD from assets/checking to expenses/rent
+   │
+   ├─[std.ax:26:10]
+   │
+26 │     warn balance >= empty "balance below zero"
+   │          ───┬────┬───────
+   │             │    ╰── false
+   │             ╰── -1,000.00 USD
+   │
+   = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
+           usually for a fee. Move money in before the payment clears, or look for a pending payment
+           or a missing deposit that explains it.
+   = note: waived: landlord accepts a late deposit
+───╯
+
+1 warning
+✓ 2 flows · 4 places · 1 law enforced · net worth -1,000.00 USD
+[exit status 0]

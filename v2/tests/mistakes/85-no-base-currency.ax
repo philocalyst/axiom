@@ -1,0 +1,11 @@
+// MISTAKE: the file never says which currency is the base, and has two currencies.
+use std
+
+account assets/checking : bank
+account assets/euro-account : bank
+account expenses/food
+account equity/opening
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2025-12-31 equity/opening -> euro-account 500 EUR
+2026-01-08 checking -> food 84.20 USD

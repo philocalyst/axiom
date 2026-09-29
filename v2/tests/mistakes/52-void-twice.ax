@@ -1,0 +1,15 @@
+// MISTAKE: the same check is voided twice.
+base USD
+use std
+
+account assets/checking : bank
+account expenses/home
+account equity/opening
+
+entity plumber : org
+  via expenses/home
+
+2025-12-31 equity/opening -> checking 2_000 USD
+2026-02-01 checking -> plumber (350 USD) #check-1041
+2026-02-10 #check-1041 void
+2026-02-12 #check-1041 void

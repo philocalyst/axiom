@@ -1,0 +1,14 @@
+// MISTAKE: `fortnight` is not a cadence (`2w` is).
+base USD
+use std
+
+account assets/checking : bank
+account expenses/rent
+account equity/opening
+
+entity landlord : org
+  via expenses/rent
+
+2025-12-31 equity/opening -> checking 5_000 USD
+
+every fortnight checking -> landlord 900 USD

@@ -1,0 +1,41 @@
+error[unknown-place]: there is no place `grocries`
+   ╭─[r23-repeated-typo.ax:10:24]
+   │
+10 │ 2026-01-16 checking -> grocries 10 USD
+   │                        ────┬───
+   │                            ╰── not a known place
+   │
+   = help: did you mean `groceries`?
+10 + 2026-01-16 checking -> groceries 10 USD
+   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
+           `expenses` or `equity`, for example `expenses/grocries`
+───╯
+
+error[unknown-place]: there is no place `grocries`
+   ╭─[r23-repeated-typo.ax:11:24]
+   │
+11 │ 2026-01-17 checking -> grocries 11 USD
+   │                        ────┬───
+   │                            ╰── not a known place
+   │
+   = help: did you mean `groceries`?
+11 + 2026-01-17 checking -> groceries 11 USD
+   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
+           `expenses` or `equity`, for example `expenses/grocries`
+───╯
+
+error[unknown-place]: there is no place `grocries`
+   ╭─[r23-repeated-typo.ax:12:24]
+   │
+12 │ 2026-01-18 checking -> grocries 12 USD
+   │                        ────┬───
+   │                            ╰── not a known place
+   │
+   = help: did you mean `groceries`?
+12 + 2026-01-18 checking -> groceries 12 USD
+   = help: to open a new account, write its full path under `assets`, `liabilities`, `income`,
+           `expenses` or `equity`, for example `expenses/grocries`
+───╯
+
+✗ 3 errors
+[exit status 1]

@@ -1,0 +1,12 @@
+// PROBE: the same typo, used three times. One root cause; how many errors?
+base USD
+use std
+
+account assets/checking : bank
+account expenses/groceries
+account equity/opening
+
+2025-12-31 equity/opening -> checking 1_000 USD
+2026-01-16 checking -> grocries 10 USD
+2026-01-17 checking -> grocries 11 USD
+2026-01-18 checking -> grocries 12 USD

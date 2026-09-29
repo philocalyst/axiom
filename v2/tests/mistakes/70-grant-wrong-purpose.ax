@@ -1,0 +1,18 @@
+// MISTAKE: scholarship money, which may only be spent on education, pays the rent.
+base USD
+use std
+
+account assets/checking : bank
+account income/grants
+account expenses/rent
+account expenses/tuition : education
+
+entity scholarship : grant
+  via income/grants
+  purpose education
+  until 2026-12-31
+entity landlord : org
+  via expenses/rent
+
+2026-04-01 scholarship -> checking 1_200 USD
+2026-04-02 checking -> landlord 1_200 USD

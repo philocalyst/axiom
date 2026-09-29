@@ -1,0 +1,14 @@
+// MISTAKE: the check is settled as #check-1014, but it was written as #check-1041.
+base USD
+use std
+
+account assets/checking : bank
+account expenses/home
+account equity/opening
+
+entity plumber : org
+  via expenses/home
+
+2025-12-31 equity/opening -> checking 2_000 USD
+2026-02-01 checking -> plumber (350 USD) #check-1041
+2026-02-06 #check-1014 settled

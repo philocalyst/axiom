@@ -1,0 +1,14 @@
+// MISTAKE: a transfer between two of my own accounts, with amounts that differ.
+base USD
+use std
+
+account assets/checking : bank
+account assets/savings  : bank
+account income/salary   : wages
+account equity/opening
+
+entity acme : employer
+  via income/salary
+
+2025-12-31 equity/opening -> checking 2_000 USD
+2026-01-20 checking 500 USD -> savings 450 USD

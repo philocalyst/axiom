@@ -1,0 +1,13 @@
+error[thousands-comma]: `1,…` is not a number: thousands are separated with `_`
+   ╭─[17-thousands-comma.ax:15:40]
+   │
+15 │ 2026-01-02 equity/opening -> checking 1,200 USD
+   │                                        ┬
+   │                                        ╰── use `_` here
+   │
+   = help: write `_` between digit groups: `1_000`
+15 + 2026-01-02 equity/opening -> checking 1_200 USD
+───╯
+
+✗ 1 error
+[exit status 1]

@@ -1,0 +1,19 @@
+// MISTAKE: `born` is not set, and the 401(k) law asks for the owner's age.
+base USD
+use std
+use us/401k
+
+entity me : person
+  filing single
+  lives  us
+
+account assets/checking : bank
+account assets/retirement : 401k
+  employer acme
+account income/salary : wages
+entity acme : employer
+  via income/salary
+
+2026-01-15 acme -> 8_000 USD
+  retirement  800 USD
+  checking    ...

@@ -1,0 +1,16 @@
+error[two-remainders]: only one leg can take the remainder
+   ╭─[32-two-remainders.ax:15:3]
+   │
+13 │ 2026-01-15 acme -> 5_000 USD
+14 │   savings   ...
+   │   ──────┬──────
+   │         ╰── this leg already takes whatever remains
+15 │   checking  ...
+   │   ──────┬──────
+   │         ╰── a second `...`
+   │
+   = help: give one of the legs an amount
+───╯
+
+✗ 1 error
+[exit status 1]

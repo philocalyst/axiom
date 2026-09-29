@@ -1,0 +1,16 @@
+error[unknown-property]: `employr` is not a property of an account of kind `401k`
+   ╭─[29-property-typo.ax:12:3]
+   │
+11 │ account assets/retirement : 401k
+12 │   employr acme
+   │   ───┬───
+   │      ╰── no such property
+   │
+   = note: its properties are `owner`, `holds`, `select`, `opened`, `closed`, `budget`, `liquidity`
+           or `employer`
+   = help: did you mean `employer`?
+12 +   employer acme
+───╯
+
+✗ 1 error
+[exit status 1]

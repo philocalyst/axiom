@@ -1,0 +1,14 @@
+error[negative-amount]: amounts carry no sign
+   ╭─[16-negative-amount.ax:16:34]
+   │
+16 │ 2026-01-19 checking -> groceries -12.00 USD
+   │                                  ┬
+   │                                  ╰── remove this `-`
+   │
+   = note: the arrow gives the direction: money moves from the left of `->` to the right
+   = help: remove the sign
+16 + 2026-01-19 checking -> groceries 12.00 USD
+───╯
+
+✗ 1 error
+[exit status 1]

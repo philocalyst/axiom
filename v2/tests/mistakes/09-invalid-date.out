@@ -1,0 +1,13 @@
+error[bad-date]: February 2026 has 28 days
+   ╭─[09-invalid-date.ax:15:9]
+   │
+15 │ 2026-02-30 checking -> groceries 84.20 USD
+   │         ─┬
+   │          ╰── there is no day 30
+   │
+   = help: the last day of February 2026 is `2026-02-28`
+15 + 2026-02-28 checking -> groceries 84.20 USD
+───╯
+
+✗ 1 error
+[exit status 1]

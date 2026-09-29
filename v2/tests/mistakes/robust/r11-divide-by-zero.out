@@ -1,0 +1,13 @@
+error[type-mismatch]: cannot compare an amount with a number
+  ╭─[r11-divide-by-zero.ax:8:23]
+  │
+8 │     warn amount / 0 > 1 "boom"
+  │          ─────┬────   ┬
+  │               │       ╰── this is a number
+  │               ╰── this is an amount
+  │
+  = note: `<` and its kin compare two amounts, numbers, dates or spans
+──╯
+
+✗ 1 error
+[exit status 1]

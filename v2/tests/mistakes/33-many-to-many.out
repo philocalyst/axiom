@@ -1,0 +1,17 @@
+error[many-to-many]: a transaction cannot name both sides and also list legs
+   ╭─[33-many-to-many.ax:15:3]
+   │
+14 │ 2026-01-16 checking -> savings 1_000 USD
+   │                     ─┬
+   │                      ╰── both sides are already named here
+15 │   savings   600 USD
+   │   ────────┬────────
+   │           ╰── this leg has no side to belong to
+   │
+   = note: legs spell out the side the header leaves unnamed: `acme -> 5_200 USD` with legs for
+           where it goes
+   = help: write two transactions, one for each flow
+───╯
+
+✗ 1 error
+[exit status 1]

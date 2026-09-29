@@ -1,0 +1,5 @@
+// accounts opened again next to the journal
+account assets/checking : bank
+
+2026-01-02 equity/opening -> checking 1_000 USD
+2026-01-08 checking -> food 84.20 USD

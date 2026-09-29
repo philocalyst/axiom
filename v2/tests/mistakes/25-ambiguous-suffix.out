@@ -1,0 +1,22 @@
+error[ambiguous-place]: `checking` could be either of these accounts
+   ╭─[25-ambiguous-suffix.ax:11:12]
+   │
+ 5 │ account assets/bank/checking : bank
+   │         ──────────┬─────────
+   │                   ╰── `assets/bank/checking` is declared here
+ 6 │ account assets/old-bank/checking : bank
+   │         ────────────┬───────────
+   │                     ╰── `assets/old-bank/checking` is declared here
+   ⋮
+11 │ 2026-01-08 checking -> food 84.20 USD
+   │            ────┬───
+   │                ╰── which one is meant?
+   │
+   = help: write `bank/checking` for `assets/bank/checking`
+11 + 2026-01-08 bank/checking -> food 84.20 USD
+   = help: write `old-bank/checking` for `assets/old-bank/checking`
+11 + 2026-01-08 old-bank/checking -> food 84.20 USD
+───╯
+
+✗ 1 error
+[exit status 1]

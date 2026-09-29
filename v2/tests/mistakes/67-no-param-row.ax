@@ -1,0 +1,21 @@
+// MISTAKE: a 2023 paycheck, but the standard library's limits start in 2024.
+base USD
+use std
+use us/401k
+
+entity me : person
+  born   1988-04-12
+  filing single
+  lives  us
+
+account assets/checking : bank
+account assets/retirement : 401k
+  employer acme
+account income/salary : wages
+
+entity acme : employer
+  via income/salary
+
+2023-01-13 acme -> 6_000 USD
+  retirement  800 USD
+  checking    ...

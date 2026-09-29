@@ -1,0 +1,13 @@
+error[unknown-policy]: unknown lot policy `fifoo`
+   ╭─[89-unknown-policy.ax:15:22]
+   │
+15 │ 2026-03-02 brokerage[fifoo] 3 VTI -> checking 900 USD
+   │                      ──┬──
+   │                        ╰── not a known lot policy
+   │
+   = help: did you mean `fifo`?
+15 + 2026-03-02 brokerage[fifo] 3 VTI -> checking 900 USD
+───╯
+
+✗ 1 error
+[exit status 1]

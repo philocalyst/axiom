@@ -1,0 +1,22 @@
+warning[law]: balance below zero
+   ╭─[r06-year-0000.ax:9:1]
+   │
+ 9 │ 0000-01-08 checking -> food 84.20 USD
+   │ ──────────────────┬──────────────────
+   │                   ╰── this flow: 84.20 USD from assets/checking to expenses/food
+   │
+   ├─[std.ax:26:10]
+   │
+26 │     warn balance >= empty "balance below zero"
+   │          ───┬────┬───────
+   │             │    ╰── false
+   │             ╰── -84.20 USD
+   │
+   = note: A bank balance below zero is an overdraft: the bank is lending you the difference,
+           usually for a fee. Move money in before the payment clears, or look for a pending payment
+           or a missing deposit that explains it.
+───╯
+
+1 warning
+✓ 3 flows · 4 places · 1 law enforced · net worth 915.80 USD
+[exit status 0]

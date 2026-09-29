@@ -1,0 +1,9 @@
+// MISTAKE: the same account on both sides of the arrow.
+base USD
+use std
+
+account assets/checking : bank
+account equity/opening
+
+2025-12-31 equity/opening -> checking 2_000 USD
+2026-02-14 checking -> checking 500 USD

@@ -1,0 +1,22 @@
+error[assertion]: liabilities/visa holds 652.00 USD, not 252.00 USD
+   ╭─[59-reversed-card-payment.ax:15:1]
+   │
+12 │ 2026-01-08 visa -> food 300.00 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── +300.00 USD to expenses/food
+13 │ 2026-01-17 visa -> food 152.00 USD
+   │ ─────────────────┬────────────────
+   │                  ╰── +152.00 USD to expenses/food
+14 │ 2026-01-25 visa -> checking 200.00 USD
+   │ ───────────────────┬──────────────────
+   │                    ╰── +200.00 USD to assets/checking
+15 │ 2026-01-31 visa = 252.00 USD
+   │ ──────────────┬─────────────
+   │               ╰── 400.00 USD too much: the ledger holds more than this
+   │
+   = help: if the gap is a genuine externality (a missed transaction), accept it explicitly
+15 + 2026-01-31 visa = 252.00 USD !
+───╯
+
+✗ 1 error
+[exit status 1]

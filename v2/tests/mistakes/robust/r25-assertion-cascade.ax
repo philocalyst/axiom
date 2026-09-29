@@ -1,0 +1,39 @@
+// PROBE: one missed purchase in January (15.08 USD at a coffee shop, paid from the
+// account, never entered). Every later month-end assertion inherits the gap. How many
+// errors, and how long does each list of "flows since the last passing assertion" get?
+base USD
+use std
+
+account assets/checking : bank
+account expenses/food
+account income/salary : wages
+account equity/opening
+
+entity acme : employer
+  via income/salary
+
+2025-12-31 equity/opening -> checking 1_000 USD
+
+2026-01-05 acme -> checking 3_000 USD
+2026-01-10 checking -> food 84.20 USD
+2026-01-31 checking = 3_900.72 USD
+
+2026-02-05 acme -> checking 3_000 USD
+2026-02-12 checking -> food 91.10 USD
+2026-02-28 checking = 6_809.62 USD
+
+2026-03-05 acme -> checking 3_000 USD
+2026-03-14 checking -> food 77.35 USD
+2026-03-31 checking = 9_732.27 USD
+
+2026-04-05 acme -> checking 3_000 USD
+2026-04-11 checking -> food 88.00 USD
+2026-04-30 checking = 12_644.27 USD
+
+2026-05-05 acme -> checking 3_000 USD
+2026-05-16 checking -> food 69.90 USD
+2026-05-31 checking = 15_574.37 USD
+
+2026-06-05 acme -> checking 3_000 USD
+2026-06-13 checking -> food 95.25 USD
+2026-06-30 checking = 18_479.12 USD

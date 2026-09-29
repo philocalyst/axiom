@@ -1,0 +1,12 @@
+error[expected-commodity]: expected a commodity such as `USD`, found the end of the line
+   ╭─[06-amount-no-commodity.ax:15:39]
+   │
+15 │ 2026-01-18 checking -> groceries 84.20
+   │                                       ┬
+   │                                       ╰── expected a commodity such as `USD`
+   │
+   = help: an amount is a number and its commodity, like `84.20 USD`
+───╯
+
+✗ 1 error
+[exit status 1]

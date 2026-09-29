@@ -1,0 +1,33 @@
+warning[law]: law `budget` does not hold for expenses/food
+   ╭─[77-budget-overspend.ax:15:1]
+   │
+ 6 │ account expenses/food
+ 7 │   budget 650 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 690.00 USD
+   ⋮
+15 │ 2026-01-19 checking -> groceries 210.00 USD
+   │ ─────────────────────┬─────────────────────
+   │                      ╰── this flow: 210.00 USD into expenses/food/groceries
+   │
+   = help: at most 170.00 USD more can go in this month
+───╯
+
+warning[law]: law `budget` does not hold for expenses/food
+   ╭─[77-budget-overspend.ax:16:1]
+   │
+ 6 │ account expenses/food
+ 7 │   budget 650 USD monthly
+   │   ───────────┬──────────
+   │              ╰── 750.00 USD
+   ⋮
+16 │ 2026-01-26 checking -> dining 60.00 USD
+   │ ───────────────────┬───────────────────
+   │                    ╰── this flow: 60.00 USD into expenses/food/dining
+   │
+   = help: nothing more can go in this month: it is already 40.00 USD over
+───╯
+
+2 warnings
+✓ 5 flows · 6 places · 2 laws enforced · net worth 2,250.00 USD
+[exit status 0]

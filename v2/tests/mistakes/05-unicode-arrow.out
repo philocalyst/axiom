@@ -1,0 +1,11 @@
+error[unexpected-character]: unexpected character '→'
+   ╭─[05-unicode-arrow.ax:15:21]
+   │
+15 │ 2026-01-18 checking → groceries 84.20 USD
+   │                     ┬
+   │                     ╰── not part of the language
+   │
+───╯
+
+✗ 1 error
+[exit status 1]
