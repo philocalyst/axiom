@@ -202,6 +202,7 @@ impl<'a, 's> Elab<'a, 's> {
         Some(Placed { end, loc: self.file.loc(text), select, basis: place.is_basis(self.file) })
     }
 
+    #[inline(always)]
     pub fn amount(&mut self, amount: ast::Amount<'s>) -> Option<Amount> {
         let loc = self.file.loc(&amount);
         let Some(unit) = amount.unit() else {
@@ -217,6 +218,7 @@ impl<'a, 's> Elab<'a, 's> {
     }
 
     /// An amount a flow moves: more than nothing.
+    #[inline(always)]
     fn positive(&mut self, amount: ast::Amount<'s>) -> Option<Stated> {
         let resolved = self.amount(amount)?;
         if resolved.qty.is_zero() {
@@ -231,6 +233,7 @@ impl<'a, 's> Elab<'a, 's> {
 
     /// `fallback` is where to point for `...` and `all`, which have no text of
     /// their own.
+    #[inline(always)]
     pub fn quantity(&mut self, quantity: &Quantity<'s>, fallback: Loc) -> Option<Slot> {
         let file = self.file;
         let (stated, pending, loc) = match *quantity {
@@ -265,6 +268,7 @@ impl<'a, 's> Elab<'a, 's> {
 
     /// What follows a header or leg. A `due` belongs to the transaction, so it
     /// is refused on a leg.
+    #[inline(always)]
     pub fn tail(&mut self, tail: &ast::Tail<'s>, on_leg: bool) -> Option<Tail> {
         let mut resolved = Tail::default();
         let mut whole = true;
@@ -328,6 +332,7 @@ impl<'a, 's> Elab<'a, 's> {
 
     // ─── Shapes ─────────────────────────────────────────────────────────────
 
+    #[inline(always)]
     fn side(&mut self, end: &ast::End<'s>, loc: Loc) -> Option<Side> {
         let placed = end.place.as_ref().map(|place| self.place(place));
         let slot = end.amount.as_ref().map(|quantity| self.quantity(quantity, loc));
