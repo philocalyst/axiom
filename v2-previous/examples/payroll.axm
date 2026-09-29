@@ -1,0 +1,11 @@
+ledger payroll_example
+use personal
+use community.rewards
+
+party worker_ada
+  name "Ada Lovelace"
+
+2026-05-31 payroll may_payroll
+  worker @worker_ada
+  gross 3200 USD
+  withheld 400 USD

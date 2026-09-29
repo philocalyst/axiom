@@ -997,12 +997,38 @@ impl Workspace {
     pub fn analyze_commit(&mut self, commit: CommitId) -> Result<CommitAnalysis, WorkspaceError> {
         let source = self.source_ledger(commit)?;
         let source_commit_value = self.store.commit(commit)?.clone();
+
+        // Generic forms are an extension only after every occurrence has
+        // been checked against the artifact pinned on this exact commit.
+        // Keep the checked values separate from the built-in ledger so they
+        // cannot become facts merely because analysis accepts the mixed file.
+        let package_forms = if source.surface().forms().next().is_some() {
+            Some(self.elaborate_package_forms(commit)?)
+        } else {
+            None
+        };
+        let package_form_nodes = package_forms.map_or_else(Vec::new, |forms| {
+            forms
+                .forms()
+                .iter()
+                .map(ElaboratedForm::node_id)
+                .collect::<Vec<_>>()
+        });
+
         self.sync_source_input(source.source(), source.bytes())?;
         let package_names = source_package_names(source.bytes());
         self.sync_package_inputs(
             source.source(),
             source.bytes(),
             &source_commit_value.packages,
+        )?;
+        let artifact_dependency =
+            compiled_artifact_dependency(source_commit_value.compiled_artifact);
+        let artifact_key = compiled_artifact_input_key(source.source());
+        self.incremental.upsert_input(
+            artifact_key.clone(),
+            "compiled-artifact",
+            artifact_dependency.clone(),
         )?;
         let policy_registry = self.policy_registry(commit)?;
         let source_key = source_key(source.source());
@@ -1039,6 +1065,9 @@ impl Workspace {
         let package_source_for_query = source.source().clone();
         let registry_for_query = policy_registry.clone();
         let package_names_for_query = package_names.clone();
+        let package_form_nodes_for_elaboration = package_form_nodes.clone();
+        let artifact_key_for_elaboration = artifact_key.clone();
+        let artifact_dependency_for_elaboration = artifact_dependency.clone();
         let package_hashes = source_commit_value
             .packages
             .iter()
@@ -1050,6 +1079,17 @@ impl Workspace {
             .incremental
             .evaluate_typed(analysis_key, move |context| {
                 let _ = context.input(&commit_key);
+                let Some(artifact_input) = context.input(&artifact_key) else {
+                    return Err(MemoOutcome::incomplete(
+                        "compiled-artifact input is missing",
+                    ));
+                };
+                if artifact_input.content() != artifact_dependency.as_slice() {
+                    return Err(MemoOutcome::error(QueryError::explicit(
+                        "artifact-mismatch",
+                        "compiled-artifact binding changed during analysis",
+                    )));
+                }
                 for package_name in &package_names_for_query {
                     let key =
                         SourceKey::new(package_input_name(&package_source_for_query, package_name))
@@ -1068,6 +1108,22 @@ impl Workspace {
                             "source binding does not match the requested commit",
                         )));
                     }
+                    if !package_form_nodes_for_elaboration.is_empty() {
+                        let Some(artifact_input) = context.input(&artifact_key_for_elaboration)
+                        else {
+                            return Err(MemoOutcome::incomplete(
+                                "compiled-artifact input is missing",
+                            ));
+                        };
+                        if artifact_input.content()
+                            != artifact_dependency_for_elaboration.as_slice()
+                        {
+                            return Err(MemoOutcome::error(QueryError::explicit(
+                                "artifact-mismatch",
+                                "compiled-artifact binding changed during mixed-surface parsing",
+                            )));
+                        }
+                    }
                     let source_text = str::from_utf8(input.content()).map_err(|_| {
                         MemoOutcome::error(QueryError::explicit(
                             "utf8",
@@ -1075,13 +1131,14 @@ impl Workspace {
                         ))
                     })?;
                     let surface = SurfaceFile::parse(source_text);
-                    parser::parse_surface_ledger(&surface)
-                        .map_err(|error| {
-                            MemoOutcome::error(QueryError::explicit("parse", error.to_string()))
-                        })
-                        .map(|ledger| {
-                            (ledger, source_for_elaboration.content().as_bytes().to_vec())
-                        })
+                    parser::parse_surface_ledger_with_package_forms(
+                        &surface,
+                        &package_form_nodes_for_elaboration,
+                    )
+                    .map_err(|error| {
+                        MemoOutcome::error(QueryError::explicit("parse", error.to_string()))
+                    })
+                    .map(|ledger| (ledger, source_for_elaboration.content().as_bytes().to_vec()))
                 })?;
                 let ledger_for_report = ledger.clone();
                 let package_source_for_report = package_source_for_query.clone();
@@ -1669,6 +1726,23 @@ fn source_partition_key(source: &SourceId, partition: &str) -> SourceKey {
         .expect("workspace source partition keys are never empty")
 }
 
+fn compiled_artifact_input_key(source: &SourceId) -> SourceKey {
+    SourceKey::new(format!("workspace/compiled-artifact/{source}"))
+        .expect("workspace compiled-artifact keys are never empty")
+}
+
+fn compiled_artifact_dependency(artifact: Option<CompiledArtifactId>) -> Vec<u8> {
+    let mut dependency = Vec::with_capacity(1 + 32);
+    match artifact {
+        Some(artifact) => {
+            dependency.push(1);
+            dependency.extend_from_slice(artifact.hash().as_bytes());
+        }
+        None => dependency.push(0),
+    }
+    dependency
+}
+
 /// Split a source into the quote-sensitive and remaining semantic partitions.
 ///
 /// This intentionally works at the tolerant surface boundary rather than the
@@ -1743,13 +1817,29 @@ fn source_package_names(bytes: &[u8]) -> BTreeSet<String> {
     let Ok(source) = str::from_utf8(bytes) else {
         return BTreeSet::new();
     };
-    source
-        .lines()
-        .filter_map(|line| {
-            let mut words = line.split_whitespace();
-            (words.next() == Some("use")).then(|| words.next().map(str::to_owned))?
-        })
-        .collect()
+    let surface = SurfaceFile::parse(source);
+    let mut names = BTreeSet::new();
+
+    for node in surface.nodes() {
+        if node.head.as_deref() != Some("use") {
+            continue;
+        }
+        let Some(tokens) = node
+            .token_range()
+            .and_then(|range| surface.tokens().get(range))
+        else {
+            continue;
+        };
+        if let Some(package) = tokens
+            .iter()
+            .filter(|token| !token.is_trivia())
+            .nth(1)
+            .filter(|token| token.kind == crate::surface::TokenKind::Identifier)
+        {
+            names.insert(package.lexeme.clone());
+        }
+    }
+    names
 }
 
 fn ensure_utf8(bytes: &[u8]) -> Result<(), WorkspaceError> {

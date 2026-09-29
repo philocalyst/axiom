@@ -1,0 +1,35 @@
+ledger clean_ledger
+use personal
+
+party issuer
+  name "Northwind Workshop"
+
+party customer
+  name "Ada Customer"
+
+2026-05-01 buy lot_1
+  account brokerage_primary
+  units 5 FUND
+  cost 50 EUR
+
+2026-06-01 sell sale_1
+  account brokerage_primary
+  units 2 FUND
+  proceeds 30 EUR
+  lot @lot_1
+
+2026-05-10 invoice invoice_1
+  issuer @issuer
+  customer @customer
+  amount 200 EUR
+
+payment payment_1
+  payer @customer
+  payee @issuer
+  amount 120 EUR
+  history [{state:"issued",date:2026-05-11},{state:"presented",date:2026-05-12},{state:"settled",date:2026-05-13}]
+
+allocation allocation_1
+  invoice @invoice_1
+  payment @payment_1
+  amount 120 EUR

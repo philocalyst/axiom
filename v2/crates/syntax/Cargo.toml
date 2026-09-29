@@ -1,0 +1,10 @@
+[package]
+name = "axiom-syntax"
+description = "Lexer and parser: source text to a borrowed syntax tree"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-core.workspace = true
+memchr.workspace = true

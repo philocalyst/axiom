@@ -1,0 +1,18 @@
+[package]
+name = "axiom-cli"
+description = "The axiom command"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "axiom"
+path = "src/main.rs"
+
+[dependencies]
+axiom-core.workspace = true
+axiom-syntax.workspace = true
+axiom-model.workspace = true
+axiom-engine.workspace = true
+axiom-report.workspace = true
+axiom-systems.workspace = true

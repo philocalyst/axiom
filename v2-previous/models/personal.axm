@@ -1,0 +1,196 @@
+# Personal and small-business patterns, rules, and pure books.
+package personal
+
+party ?party
+  name ?name
+
+?date buy ?buy
+  account ?account
+  units ?units ?asset
+  cost ?cost ?currency
+  fees 0 ?currency
+
+?date sell ?sell
+  account ?account
+  units ?units ?asset
+  proceeds ?proceeds ?currency
+  fees 0 ?currency
+  lot @?buy
+
+?issued invoice ?invoice
+  issuer @?party
+  customer @?party
+  amount ?amount ?currency
+
+payment ?payment
+  payer @?party
+  payee @?party
+  amount ?amount ?currency
+  history [?event]
+
+allocation ?allocation
+  invoice @?invoice
+  payment @?payment
+  amount ?amount ?currency
+
+?date spend ?spend
+  from ?account
+  payee ?payee
+  amount ?amount ?currency
+
+rule validate_buy
+  for b buy
+  require (gt (number b.units) 0)
+  require (ge (number b.cost) 0)
+  require (ge (number b.fees) 0)
+  emit buy_check
+  set buy (ref b)
+  set date b.date
+  set units b.units
+  set cash_basis (add b.cost b.fees)
+
+rule investment_gain
+  for s sell
+  require (gt (number s.units) 0)
+  require (gt (number s.proceeds) 0)
+  require (ge (number s.fees) 0)
+  require (le s.fees s.proceeds)
+  choose b s.lot (filter (rows buy) c (and (eq c.account s.account) (and (eq (unit c.units) (unit s.units)) (le c.date s.date))))
+  require (eq (unit b.units) (unit s.units))
+  require (eq (unit s.proceeds) (unit b.cost))
+  require (gt (number b.units) 0)
+  require (ge (number b.cost) 0)
+  require (ge (number b.fees) 0)
+  let selected_sales (filter (rows sell) p (and (eq p.account b.account) (and (eq (unit p.units) (unit b.units)) (eq p.lot (ref b)))))
+  require (all selected_sales p (and (gt (number p.units) 0) (le b.date p.date)))
+  let total_sold (add (quantity 0 (unit b.units)) (sum (map selected_sales p p.units)))
+  require (le total_sold b.units)
+  emit gain
+  set sell (ref s)
+  set lot (ref b)
+  set account s.account
+  set date s.date
+  set units s.units
+  set proceeds s.proceeds
+  set fees s.fees
+  set basis (mul (div s.units b.units) (add b.cost b.fees))
+  set amount (sub (sub s.proceeds s.fees) (mul (div s.units b.units) (add b.cost b.fees)))
+
+rule invoice_issue
+  for i invoice
+  require (gt (number i.amount) 0)
+  choose issuer i.issuer (rows party)
+  choose customer i.customer (rows party)
+  emit invoice_accrual
+  set invoice (ref i)
+  set issued i.issued
+  set issuer (ref issuer)
+  set customer (ref customer)
+  set amount i.amount
+
+rule payment_lifecycle
+  for p payment
+  require (gt (number p.amount) 0)
+  choose payer p.payer (rows party)
+  choose payee p.payee (rows party)
+  require (gt (count p.history) 0)
+  require (eq (get (first p.history) state) "issued")
+  let allowed_edges [["issued","presented"],["presented","settled"],["presented","returned"],["settled","returned"],["returned","represented"],["represented","presented"]]
+  require (all (pairs p.history) edge (and (le (get (at edge 0) date) (get (at edge 1) date)) (contains allowed_edges (list (get (at edge 0) state) (get (at edge 1) state)))))
+  emit payment_position
+  set payment (ref p)
+  set as_of (get (last p.history) date)
+  set state (get (last p.history) state)
+  set amount (if (eq (get (last p.history) state) "settled") p.amount (quantity 0 (unit p.amount)))
+
+rule allocate_satisfaction
+  for a allocation
+  require (gt (number a.amount) 0)
+  choose i a.invoice (rows invoice)
+  choose p a.payment (rows payment)
+  require (eq i.customer p.payer)
+  require (eq i.issuer p.payee)
+  let payment_positions (filter (rows payment_position) pos (eq pos.payment (ref p)))
+  let position (first payment_positions)
+  require (eq position.state "settled")
+  require (eq (unit a.amount) (unit i.amount))
+  require (eq (unit a.amount) (unit position.amount))
+  require (gt (number i.amount) 0)
+  require (gt (number position.amount) 0)
+  let other_invoice_allocations (filter (rows allocation) x (and (ne x.id a.id) (eq x.invoice (ref i))))
+  require (all other_invoice_allocations x (and (gt (number x.amount) 0) (eq (unit x.amount) (unit a.amount))))
+  let invoice_used (add (quantity 0 (unit a.amount)) (sum (map other_invoice_allocations x x.amount)))
+  let other_payment_allocations (filter (rows allocation) x (and (ne x.id a.id) (eq x.payment (ref p))))
+  require (all other_payment_allocations x (and (gt (number x.amount) 0) (eq (unit x.amount) (unit a.amount))))
+  let payment_used (add (quantity 0 (unit a.amount)) (sum (map other_payment_allocations x x.amount)))
+  require (le a.amount (sub i.amount invoice_used))
+  require (le a.amount (sub position.amount payment_used))
+  emit satisfaction
+  set allocation (ref a)
+  set invoice (ref i)
+  set payment (ref p)
+  set amount a.amount
+  set invoice_remaining (sub (sub i.amount invoice_used) a.amount)
+  set payment_remaining (sub (sub position.amount payment_used) a.amount)
+
+rule cash_buy
+  for b buy_check
+  emit cash_entry
+  set date b.date
+  set kind "investment purchase"
+  set amount (mul -1 b.cash_basis)
+  book cash
+
+rule cash_sale
+  for s sell
+  require (gt (number s.units) 0)
+  require (gt (number s.proceeds) 0)
+  require (ge (number s.fees) 0)
+  require (le s.fees s.proceeds)
+  emit cash_entry
+  set date s.date
+  set kind "investment sale"
+  set amount (sub s.proceeds s.fees)
+  book cash
+
+rule cash_spend
+  for s spend
+  require (gt (number s.amount) 0)
+  emit cash_entry
+  set date s.date
+  set kind "everyday spending"
+  set amount (mul -1 s.amount)
+  book cash
+
+rule cash_payment
+  for p payment_position
+  emit cash_entry
+  set date p.as_of
+  set kind "settled payment"
+  set amount p.amount
+  book cash
+
+rule tax_gain
+  for g gain
+  emit tax_entry
+  set date g.date
+  set kind "investment gain"
+  set amount g.amount
+  book tax
+
+rule accrual_invoice
+  for i invoice_accrual
+  emit accrual_entry
+  set date i.issued
+  set kind "invoice revenue"
+  set amount i.amount
+  book accrual
+
+book cash
+  include cash_entry
+
+book tax
+  include tax_entry
+
+book accrual
+  include accrual_entry

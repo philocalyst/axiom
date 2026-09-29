@@ -1,0 +1,23 @@
+ledger unresolved_lot
+use personal
+
+2026-05-01 buy lot_1
+  account brokerage_primary
+  units 5 FUND
+  cost 50 USD
+
+2026-05-02 buy lot_2
+  account brokerage_primary
+  units 5 FUND
+  cost 60 USD
+
+2026-06-01 sell sale_1
+  account brokerage_primary
+  units 2 FUND
+  proceeds 30 USD
+  lot ?which_lot
+
+2026-05-03 buy other_account_lot
+  account brokerage_secondary
+  units 100 FUND
+  cost 100 USD

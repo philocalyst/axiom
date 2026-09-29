@@ -1,0 +1,27 @@
+ledger party_mismatch
+use personal
+
+party issuer
+  name "Northwind Workshop"
+
+party customer
+  name "Ada Customer"
+
+party unrelated
+  name "Unrelated Payer"
+
+2026-07-01 invoice invoice_1
+  issuer @issuer
+  customer @customer
+  amount 100 USD
+
+payment payment_1
+  payer @unrelated
+  payee @issuer
+  amount 100 USD
+  history [{state:"issued",date:2026-07-02},{state:"presented",date:2026-07-03},{state:"settled",date:2026-07-04}]
+
+allocation allocation_1
+  invoice @invoice_1
+  payment @payment_1
+  amount 100 USD

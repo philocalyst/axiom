@@ -1,0 +1,10 @@
+[package]
+name = "axiom-engine"
+description = "The timeline: parcels, gains, laws, and inference over a Book"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-core.workspace = true
+axiom-model.workspace = true

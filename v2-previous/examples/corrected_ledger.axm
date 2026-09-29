@@ -1,0 +1,70 @@
+ledger corrected_ledger
+use personal
+
+party issuer
+  name "Northwind Workshop"
+
+party customer
+  name "Ada Customer"
+
+2026-01-03 buy lot_alpha
+  account brokerage_primary
+  units 10 ALPHA
+  cost 1000 USD
+  fees 10 USD
+
+2026-02-03 sell sale_alpha_part
+  account brokerage_primary
+  units 4 ALPHA
+  proceeds 600 USD
+  fees 4 USD
+  lot @lot_alpha
+
+2026-03-03 sell sale_alpha_over
+  account brokerage_primary
+  units 6 ALPHA
+  proceeds 900 USD
+  fees 4 USD
+  lot @lot_alpha
+
+2026-01-04 buy lot_beta_one
+  account brokerage_primary
+  units 8 BETA
+  cost 240 USD
+
+2026-01-05 buy lot_beta_two
+  account brokerage_primary
+  units 8 BETA
+  cost 320 USD
+
+2026-02-04 sell sale_beta_ambiguous
+  account brokerage_primary
+  units 3 BETA
+  proceeds 150 USD
+  fees 1 USD
+  lot ?beta_lot
+
+decide choose_beta_lot
+  target sale_beta_ambiguous.lot
+  value @lot_beta_one
+
+2026-01-10 invoice invoice_1
+  issuer @issuer
+  customer @customer
+  amount 1000 USD
+
+payment payment_1
+  payer @customer
+  payee @issuer
+  amount 600 USD
+  history [{state:"issued",date:2026-01-11},{state:"presented",date:2026-01-12},{state:"settled",date:2026-01-13},{state:"returned",date:2026-01-20},{state:"represented",date:2026-01-21},{state:"presented",date:2026-01-22},{state:"settled",date:2026-01-23}]
+
+allocation allocation_1
+  invoice @invoice_1
+  payment @payment_1
+  amount 400 USD
+
+allocation allocation_2
+  invoice @invoice_1
+  payment @payment_1
+  amount 200 USD

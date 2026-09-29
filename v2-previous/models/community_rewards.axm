@@ -1,0 +1,24 @@
+# A community payroll/reward package using only the standard rule algebra.
+package community.rewards
+use personal
+
+?paid payroll ?payroll
+  worker @?party
+  gross ?gross ?currency
+  withheld 0 ?currency
+
+rule payroll_reward
+  for p payroll
+  require (gt (number p.gross) 0)
+  require (ge (number p.withheld) 0)
+  require (eq (unit p.gross) (unit p.withheld))
+  require (le p.withheld p.gross)
+  choose worker p.worker (rows party)
+  emit reward
+  set worker (ref worker)
+  set paid p.paid
+  set amount (sub p.gross p.withheld)
+  book payroll_book
+
+book payroll_book
+  include reward

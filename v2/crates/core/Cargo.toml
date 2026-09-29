@@ -1,0 +1,6 @@
+[package]
+name = "axiom-core"
+description = "Exact amounts, calendar days, interning, typed ids, diagnostics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true

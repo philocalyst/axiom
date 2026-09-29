@@ -6,10 +6,10 @@
 //! source line and diagnostics point at the first character that made a line
 //! invalid.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 
-use crate::surface::{SurfaceFile, Token, TokenKind};
+use crate::surface::{NodeId, NodeKind, SurfaceFile, Token, TokenKind};
 
 /// A one-based source location.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -558,12 +558,94 @@ pub fn parse_source(source: &str) -> Result<ParsedLedger, ParseError> {
 /// wording.  The tolerant surface can therefore be used by editors and the
 /// strict result by the semantic elaborator without introducing another AST.
 pub fn parse_surface_file(surface: &SurfaceFile) -> Result<ParsedLedger, ParseError> {
+    parse_surface_file_inner(surface, &BTreeMap::new())
+}
+
+/// Parse a source ledger while treating only successfully elaborated package
+/// forms as extension nodes. The supplied values are the artifact-bound
+/// results for this exact surface; every other `form` node remains subject to
+/// the strict ledger parser and will fail as an unknown directive.
+///
+/// This is the explicit mixed-surface entry point. [`parse_surface_file`],
+/// [`parse_source`], and [`parse_surface_ledger`] retain their strict
+/// behavior.
+pub fn parse_surface_file_with_package_forms(
+    surface: &SurfaceFile,
+    package_form_nodes: &[NodeId],
+) -> Result<ParsedLedger, ParseError> {
+    let mut approved = package_form_nodes.iter().copied().collect::<BTreeSet<_>>();
+    let mut ranges = BTreeMap::new();
+
+    for node in surface.nodes() {
+        if node.head.as_deref() != Some("form") || !approved.remove(&node.id) {
+            continue;
+        }
+        if node.kind != NodeKind::Form {
+            return Err(ParseError::new(
+                node.span.line,
+                node.span.column,
+                "validated package form does not match a complete form node",
+            ));
+        }
+        let token_range = node.token_range().ok_or_else(|| {
+            ParseError::new(
+                node.span.line,
+                node.span.column,
+                "validated package form has an invalid token range",
+            )
+        })?;
+        let tokens = surface.tokens().get(token_range).ok_or_else(|| {
+            ParseError::new(
+                node.span.line,
+                node.span.column,
+                "validated package form has an invalid token range",
+            )
+        })?;
+        let end_line = tokens
+            .last()
+            .map_or(node.span.line, |token| token.span.line);
+        ranges.insert(node.span.line, end_line);
+    }
+
+    if !approved.is_empty() {
+        return Err(ParseError::new(
+            1,
+            1,
+            "validated package form does not belong to this source surface",
+        ));
+    }
+    parse_surface_file_inner(surface, &ranges)
+}
+
+fn parse_surface_file_inner(
+    surface: &SurfaceFile,
+    package_form_ranges: &BTreeMap<usize, usize>,
+) -> Result<ParsedLedger, ParseError> {
     let mut book: Option<Book> = None;
     let mut statements = Vec::new();
     let mut pending: Option<Pending> = None;
     let mut form_ids: HashMap<String, (String, Location)> = HashMap::new();
+    let mut skip_through_line = 0;
 
     for (line, line_tokens) in surface_lines(surface) {
+        if line <= skip_through_line {
+            continue;
+        }
+        if let Some(end_line) = package_form_ranges.get(&line) {
+            if book.is_none() {
+                return Err(ParseError::new(
+                    line,
+                    1,
+                    "ledger must begin with a `book NAME` declaration",
+                ));
+            }
+            if let Some(form) = pending.take() {
+                statements.push(finish_pending(form, line.saturating_sub(1))?);
+            }
+            skip_through_line = *end_line;
+            continue;
+        }
+
         let tokens = surface_words(&line_tokens);
         if tokens.is_empty() {
             continue;
@@ -687,6 +769,17 @@ pub fn parse_ledger(source: &str) -> Result<crate::model::Ledger, ParseError> {
 /// integrations while preserving the historical string API.
 pub fn parse_surface_ledger(surface: &SurfaceFile) -> Result<crate::model::Ledger, ParseError> {
     let parsed = parse_surface_file(surface)?;
+    lower_to_model(parsed)
+}
+
+/// Parse and lower a mixed authoring surface after its generic package forms
+/// have been validated against the exact artifact pinned by the source commit.
+/// Package forms remain outside the built-in [`crate::model::Ledger`].
+pub fn parse_surface_ledger_with_package_forms(
+    surface: &SurfaceFile,
+    package_form_nodes: &[NodeId],
+) -> Result<crate::model::Ledger, ParseError> {
+    let parsed = parse_surface_file_with_package_forms(surface, package_form_nodes)?;
     lower_to_model(parsed)
 }
 

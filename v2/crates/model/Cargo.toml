@@ -1,0 +1,10 @@
+[package]
+name = "axiom-model"
+description = "Resolution and typing: syntax trees to a Book"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-core.workspace = true
+axiom-syntax.workspace = true

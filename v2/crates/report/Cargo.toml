@@ -1,0 +1,11 @@
+[package]
+name = "axiom-report"
+description = "Views over a run: balances, flows, availability, budgets, taxes, forecasts"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+axiom-core.workspace = true
+axiom-model.workspace = true
+axiom-engine.workspace = true

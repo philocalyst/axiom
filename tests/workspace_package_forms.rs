@@ -6,13 +6,32 @@ use axiom_ledger::package_compiler::PackageInput;
 use axiom_ledger::package_lock::{
     Dependency, LockedPackage, Lockfile, PackageManifest, Version, VersionReq,
 };
+use axiom_ledger::store::Period;
 use axiom_ledger::workspace::{Workspace, WorkspaceError};
 
 const SOURCE: &str =
     "form invoice/1 : billing::types::Invoice\n  approved true\n  count 7\n  note paid\n";
 
+const MIXED_SOURCE: &str = r#"book brokerage
+buy buy/one on 2026-01-04
+  10 ABC into brokerage
+  for 200 USD
+form invoice/1 : billing::types::Invoice
+  approved true
+  count 7
+  note paid
+sell sell/one on 2026-09-20
+  10 ABC from brokerage
+  for 500 USD
+  lot ?lot
+"#;
+
 fn package(name: &str, record: &str) -> (PackageInput, Lockfile) {
-    let manifest = PackageManifest::new(name, Version::new(1, 0, 0), "record-package");
+    package_version(name, record, Version::new(1, 0, 0))
+}
+
+fn package_version(name: &str, record: &str, version: Version) -> (PackageInput, Lockfile) {
+    let manifest = PackageManifest::new(name, version, "record-package");
     let module = axiom_ledger::hir::lower(AstModule {
         path: ModulePath::root(Name::new("types").unwrap()),
         declarations: vec![AstDeclaration {
@@ -164,4 +183,138 @@ fn package_forms_reject_a_source_commit_without_a_pinned_artifact() {
         workspace.elaborate_package_forms(source.commit),
         Err(WorkspaceError::MissingCompiledArtifact { commit }) if commit == source.commit
     ));
+}
+
+#[test]
+fn analysis_and_close_accept_artifact_bound_forms_between_builtin_blocks() {
+    let (package, lockfile) = package("billing", "Invoice");
+    let mut workspace = Workspace::new();
+    let source = workspace.load_source("mixed-ledger", MIXED_SOURCE).unwrap();
+    let (artifact_id, _) = workspace
+        .compile_packages_persisted([package], &lockfile)
+        .unwrap();
+    let pinned = workspace
+        .commit_with_compiled_artifact(source.commit, artifact_id)
+        .unwrap();
+
+    // Public strict parsing remains unchanged. Only the workspace path that
+    // first binds the form to this commit's artifact accepts the mixed file.
+    assert!(axiom_ledger::parser::parse_ledger(MIXED_SOURCE).is_err());
+    let analysis = workspace.analyze_commit(pinned.commit).unwrap();
+    assert_eq!(analysis.ledger().forms.len(), 2);
+    assert!(matches!(
+        analysis.ledger().forms[0],
+        axiom_ledger::model::LedgerForm::Buy(_)
+    ));
+    assert!(matches!(
+        analysis.ledger().forms[1],
+        axiom_ledger::model::LedgerForm::Sell(_)
+    ));
+    let package_forms = workspace.elaborate_package_forms(pinned.commit).unwrap();
+    assert_eq!(package_forms.forms().len(), 1);
+    assert_eq!(
+        package_forms.forms()[0].value().record().field("count"),
+        Some(&Term::Integer(7.into()))
+    );
+
+    let period = Period::new("2026-01-01".parse().unwrap(), "2026-12-31".parse().unwrap()).unwrap();
+    assert!(workspace.close_sale_ledger(pinned.commit, period).is_ok());
+}
+
+#[test]
+fn artifact_repin_invalidates_mixed_surface_elaboration() {
+    let (package_a, lockfile_a) = package_version("billing", "Invoice", Version::new(1, 0, 0));
+    let (package_b, lockfile_b) = package_version("billing", "Invoice", Version::new(2, 0, 0));
+    let mut workspace = Workspace::new();
+    let source = workspace
+        .load_source("repinned-ledger", MIXED_SOURCE)
+        .unwrap();
+    let (artifact_a, _) = workspace
+        .compile_packages_persisted([package_a], &lockfile_a)
+        .unwrap();
+    let pinned_a = workspace
+        .commit_with_compiled_artifact(source.commit, artifact_a)
+        .unwrap();
+    workspace.analyze_commit(pinned_a.commit).unwrap();
+
+    let (artifact_b, _) = workspace
+        .compile_packages_persisted([package_b], &lockfile_b)
+        .unwrap();
+    let pinned_b = workspace
+        .commit_with_compiled_artifact(pinned_a.commit, artifact_b)
+        .unwrap();
+    assert_eq!(pinned_a.bytes(), pinned_b.bytes());
+    assert_ne!(pinned_a.commit, pinned_b.commit);
+
+    workspace.clear_incremental_trace();
+    workspace.analyze_commit(pinned_b.commit).unwrap();
+    assert!(workspace.incremental_trace().iter().any(|event| matches!(
+        event,
+        axiom_ledger::incremental::TraceEvent::Invalidated { query, .. }
+            if query.as_str() == "workspace/elaborate/repinned-ledger"
+    )));
+}
+
+#[test]
+fn invalid_package_forms_block_analysis_and_close_without_persisting() {
+    let (package, lockfile) = package("billing", "Invoice");
+    let mut workspace = Workspace::new();
+    let (artifact_id, _) = workspace
+        .compile_packages_persisted([package], &lockfile)
+        .unwrap();
+
+    let unpinned = workspace
+        .load_source("unpinned-form", MIXED_SOURCE)
+        .unwrap();
+    let before_unpinned = workspace.store().len();
+    assert!(matches!(
+        workspace.analyze_commit(unpinned.commit),
+        Err(WorkspaceError::MissingCompiledArtifact { commit }) if commit == unpinned.commit
+    ));
+    let period = Period::new("2026-01-01".parse().unwrap(), "2026-12-31".parse().unwrap()).unwrap();
+    assert!(matches!(
+        workspace.close_sale_ledger(unpinned.commit, period.clone()),
+        Err(WorkspaceError::MissingCompiledArtifact { commit }) if commit == unpinned.commit
+    ));
+    assert_eq!(workspace.store().len(), before_unpinned);
+
+    let unknown = workspace
+        .load_source(
+            "unknown-form-package",
+            MIXED_SOURCE.replace("billing::types::Invoice", "elsewhere::types::Invoice"),
+        )
+        .unwrap();
+    let unknown = workspace
+        .commit_with_compiled_artifact(unknown.commit, artifact_id)
+        .unwrap();
+    let before_unknown = workspace.store().len();
+    assert!(matches!(
+        workspace.analyze_commit(unknown.commit),
+        Err(WorkspaceError::PackageFormElaboration(_))
+    ));
+    assert!(matches!(
+        workspace.close_sale_ledger(unknown.commit, period.clone()),
+        Err(WorkspaceError::PackageFormElaboration(_))
+    ));
+    assert_eq!(workspace.store().len(), before_unknown);
+
+    let malformed = workspace
+        .load_source(
+            "malformed-form",
+            MIXED_SOURCE.replace("  note paid", "  note paid extra"),
+        )
+        .unwrap();
+    let malformed = workspace
+        .commit_with_compiled_artifact(malformed.commit, artifact_id)
+        .unwrap();
+    let before_malformed = workspace.store().len();
+    assert!(matches!(
+        workspace.analyze_commit(malformed.commit),
+        Err(WorkspaceError::PackageFormElaboration(_))
+    ));
+    assert!(matches!(
+        workspace.close_sale_ledger(malformed.commit, period),
+        Err(WorkspaceError::PackageFormElaboration(_))
+    ));
+    assert_eq!(workspace.store().len(), before_malformed);
 }
