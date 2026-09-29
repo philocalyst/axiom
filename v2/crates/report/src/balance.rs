@@ -4,46 +4,41 @@ use std::collections::BTreeSet;
 use std::iter;
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Diagnostic, Id, Qty, par};
+use axiom_core::{Day, Diagnostic, Id, Qty};
 use axiom_engine::Run;
 use axiom_model::{Amount, Book, Class, Commodity, Period, Place};
 
 use crate::calendar::Periods;
-use crate::history::Balances;
+use crate::history::Snapshots;
+use crate::lens::{Basket, Lens, Valued, Whose};
 use crate::places::{depth, leaf, names};
 use crate::resolve;
-use crate::value::{Basket, Valued, Valuer};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// How many month-end columns `--monthly` shows.
 const MONTHLY_COLUMNS: usize = 12;
 
-/// The books on one day: a column of the report.
-struct Snapshot {
-    day: Day,
-    balances: Balances,
-}
-
 pub fn view<'s>(
     book: &Book<'s>,
     run: &Run,
+    whose: &Whose,
     globs: &[&str],
     at: Option<Day>,
     value: bool,
     monthly: bool,
 ) -> Result<Report<'s>, Diagnostic> {
     let at = at.unwrap_or(run.today);
+    let lens = Lens::new(book, whose, at);
     let selection = Selection::new(book, globs)?;
-    let days = column_days(book, at, monthly);
-    let snapshots = par::map_each(&days, |&day| Snapshot { day, balances: Balances::at(book, run, day) });
+    let snapshots = Snapshots::of(lens, run, &column_days(book, at, monthly), value);
 
     let mut table = Section::new(iter::once(Column::left("Place")).chain(amount_columns(book, &snapshots, value)));
     let mut unpriced = 0;
     for place in book.places.ids() {
         match selection.mark(place) {
             Mark::Hidden => {}
-            Mark::Context => table.push(context_row(book, place, snapshots.len())),
-            Mark::Chosen => unpriced += push_place(&mut table, book, place, &snapshots, value),
+            Mark::Context => table.push(context_row(book, place, snapshots.days().len())),
+            Mark::Chosen => unpriced += push_place(&mut table, lens, place, &snapshots, value),
         }
     }
     if table.rows.is_empty() {
@@ -52,42 +47,47 @@ pub fn view<'s>(
     if unpriced > 0 {
         table.note("Holdings without a price are muted, in their own commodity, and left out of every total.");
     }
+    if snapshots.unpriced > 0 {
+        table
+            .note(format!("{} flows have no price on their day and are not counted in the value.", snapshots.unpriced));
+    }
 
     let title = if monthly { format!("Balances by month to {at}") } else { format!("Balances at {at}") };
     let mut report = Report::new(title).with(table);
     if globs.is_empty() {
-        report = report.with(net_worth_section(book, &snapshots));
+        report = report.with(net_worth_section(lens, &snapshots));
     }
     Ok(report)
 }
 
-/// Assets and liabilities in the base currency: what someone would call
-/// their net worth.
+/// Assets and liabilities in the base currency, each priced as a whole: what
+/// someone would call their net worth.
 #[derive(Default, Debug)]
 pub struct NetWorth {
     pub assets: Qty,
     /// Negative: liabilities are naturally credit balances.
     pub liabilities: Qty,
-    /// Holdings with no price path, left out.
+    /// Commodities with no price path, left out.
     pub unpriced: usize,
 }
 
 impl NetWorth {
-    pub fn of(book: &Book, balances: &Balances, day: Day) -> NetWorth {
-        let valuer = Valuer::new(book, day);
-        let mut worth = NetWorth::default();
-        for (place, amount) in balances.holdings() {
-            let class = book.places[place].class;
-            if !matches!(class, Class::Asset | Class::Liability) {
-                continue;
+    /// The books on `snapshots`' `column`, at the lens's prices.
+    pub fn of(lens: Lens, snapshots: &Snapshots, column: usize) -> NetWorth {
+        let book = lens.book;
+        let side = |class: Class| -> Valued {
+            let mut basket = Basket::default();
+            for root in book.places.roots().filter(|&root| book.places[root].class == class) {
+                basket.merge(&snapshots.subtree(book, column, root));
             }
-            match valuer.qty(amount) {
-                Some(qty) if class == Class::Asset => worth.assets += qty,
-                Some(qty) => worth.liabilities += qty,
-                None => worth.unpriced += 1,
-            }
+            basket.value(lens, class)
+        };
+        let (assets, liabilities) = (side(Class::Asset), side(Class::Liability));
+        NetWorth {
+            assets: assets.total,
+            liabilities: liabilities.total,
+            unpriced: assets.unpriced.len() + liabilities.unpriced.len(),
         }
-        worth
     }
 
     pub fn total(&self) -> Qty {
@@ -105,12 +105,12 @@ fn column_days(book: &Book, at: Day, monthly: bool) -> Vec<Day> {
     Periods::covering(Period::Month, first, at).last(MONTHLY_COLUMNS).ends().map(|end| end.min(at)).collect()
 }
 
-fn amount_columns(book: &Book, snapshots: &[Snapshot], value: bool) -> Vec<Column> {
-    if snapshots.len() == 1 {
+fn amount_columns(book: &Book, snapshots: &Snapshots, value: bool) -> Vec<Column> {
+    if let [_] = snapshots.days() {
         let title = if value { format!("Value ({})", base_symbol(book)) } else { "Balance".to_string() };
         return vec![Column::right(title)];
     }
-    snapshots.iter().map(|snapshot| Column::right(snapshot.day.to_string())).collect()
+    snapshots.days().iter().map(|day| Column::right(day.to_string())).collect()
 }
 
 fn base_symbol<'s>(book: &Book<'s>) -> &'s str {
@@ -185,14 +185,20 @@ struct Line<'s> {
 /// Adds the place's lines to the table; returns how many were unpriced.
 fn push_place<'s>(
     table: &mut Section<'s>,
-    book: &Book<'s>,
+    lens: Lens<'_, 's>,
     place: Id<Place>,
-    snapshots: &[Snapshot],
+    snapshots: &Snapshots,
     value: bool,
 ) -> usize {
-    let baskets: Vec<Basket> = snapshots.iter().map(|snapshot| snapshot.balances.subtree(book, place)).collect();
-    let sign = book.places[place].class.display_sign();
-    let lines = if value { market_lines(book, snapshots, &baskets, sign) } else { native_lines(book, &baskets, sign) };
+    let book = lens.book;
+    let baskets: Vec<Basket> =
+        (0..snapshots.days().len()).map(|column| snapshots.subtree(book, column, place)).collect();
+    let class = book.places[place].class;
+    let lines = if value {
+        market_lines(lens, class, snapshots.days(), &baskets)
+    } else {
+        native_lines(book, class.display_sign(), &baskets)
+    };
     let unpriced = lines.iter().filter(|line| line.style == Style::Muted).count();
     let is_root = depth(book, place) == 0;
     for (index, line) in lines.into_iter().enumerate() {
@@ -210,9 +216,9 @@ fn context_row<'s>(book: &Book<'s>, place: Id<Place>, columns: usize) -> Row<'s>
 }
 
 /// One line per commodity held anywhere in the subtree, at its own units.
-fn native_lines<'s>(book: &Book<'s>, baskets: &[Basket], sign: i64) -> Vec<Line<'s>> {
+fn native_lines<'s>(book: &Book<'s>, sign: i64, baskets: &[Basket]) -> Vec<Line<'s>> {
     let units: BTreeSet<Id<Commodity>> =
-        baskets.iter().flat_map(|basket| basket.iter().map(|held| held.unit)).collect();
+        baskets.iter().flat_map(|basket| basket.amounts().map(|held| held.unit)).collect();
     units
         .into_iter()
         .map(|unit| Line {
@@ -224,12 +230,10 @@ fn native_lines<'s>(book: &Book<'s>, baskets: &[Basket], sign: i64) -> Vec<Line<
 
 /// One line valuing everything priceable in the base currency, then a muted
 /// line for each commodity that has no price.
-fn market_lines<'s>(book: &Book<'s>, snapshots: &[Snapshot], baskets: &[Basket], sign: i64) -> Vec<Line<'s>> {
-    let valued: Vec<Valued> = baskets
-        .iter()
-        .zip(snapshots)
-        .map(|(basket, snapshot)| basket.value(&Valuer::new(book, snapshot.day)))
-        .collect();
+fn market_lines<'s>(lens: Lens<'_, 's>, class: Class, days: &[Day], baskets: &[Basket]) -> Vec<Line<'s>> {
+    let (book, sign) = (lens.book, class.display_sign());
+    let valued: Vec<Valued> =
+        baskets.iter().zip(days).map(|(basket, &day)| basket.value(lens.on(day), class)).collect();
     let mut lines = Vec::new();
     if valued.iter().any(|column| column.priced > 0) {
         let cells = valued
@@ -255,9 +259,14 @@ fn amount_cell<'s>(book: &Book<'s>, qty: Qty, unit: Id<Commodity>, sign: i64) ->
 
 // ─── Net worth ──────────────────────────────────────────────────────────────
 
-fn net_worth_section<'s>(book: &Book<'s>, snapshots: &[Snapshot]) -> Section<'s> {
-    let worths: Vec<NetWorth> =
-        snapshots.iter().map(|snapshot| NetWorth::of(book, &snapshot.balances, snapshot.day)).collect();
+fn net_worth_section<'s>(lens: Lens<'_, 's>, snapshots: &Snapshots) -> Section<'s> {
+    let book = lens.book;
+    let worths: Vec<NetWorth> = snapshots
+        .days()
+        .iter()
+        .enumerate()
+        .map(|(column, &day)| NetWorth::of(lens.on(day), snapshots, column))
+        .collect();
     let columns = amount_columns(book, snapshots, true);
     let mut section = Section::new(iter::once(Column::left("Net worth")).chain(columns));
     let rows: [(&str, Style, fn(&NetWorth) -> Qty); 3] = [

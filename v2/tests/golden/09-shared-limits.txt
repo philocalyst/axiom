@@ -1,1 +1,6 @@
-Limits (not yet built)
+Limits in 2026
+
+  Who  Limit  Window  Counted  Cap  Room left  Used
+  ─────────────────────────────────────────────────
+  · No limit was read in 2026. Laws record what they count when a `require` or `warn` compares two
+    amounts.

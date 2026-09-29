@@ -1,1 +1,15 @@
-Limits (not yet built)
+Limits in 2026
+
+  Who  Limit                             Window      Counted           Cap     Room left    Used
+  ──────────────────────────────────────────────────────────────────────────────────────────────
+  me   budget on expenses/personal-care  2026-02   35.00 USD     40.00 USD      5.00 USD   87.5%
+  me   budget on expenses/utilities      2026-02   61.84 USD    100.00 USD     38.16 USD  61.84%
+  me   budget on expenses/transport      2026-02   63.54 USD    120.00 USD     56.46 USD  52.95%
+  me   budget on expenses/groceries      2026-02  150.35 USD    350.00 USD    199.65 USD  42.96%
+  me   budget on expenses/dining         2026-02   50.26 USD    150.00 USD     99.74 USD  33.51%
+  me   budget on expenses/subscriptions  2026-02   27.48 USD     90.00 USD     62.52 USD  30.53%
+  me   budget on expenses/fun            2026-02   29.00 USD    120.00 USD     91.00 USD  24.17%
+  me   budget on expenses/clothing       2026-02    0.00 USD     80.00 USD     80.00 USD      0%
+  me   budget on expenses/gifts          2026       0.00 USD    500.00 USD    500.00 USD      0%
+  me   budget on expenses/insurance      2026       0.00 USD  1,200.00 USD  1,200.00 USD      0%
+  me   budget on expenses/medical        2026       0.00 USD    400.00 USD    400.00 USD      0%

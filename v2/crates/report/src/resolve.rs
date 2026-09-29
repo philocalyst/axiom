@@ -2,7 +2,7 @@
 
 use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Id};
-use axiom_model::{Book, Entity, Law, Miss, Place};
+use axiom_model::{Book, Entity, Miss, Place};
 
 /// How to speak about one kind of name in errors.
 struct Noun {
@@ -13,7 +13,6 @@ struct Noun {
 
 const PLACE: Noun = Noun { word: "place", unknown: "unknown-place", ambiguous: "ambiguous-place" };
 const ENTITY: Noun = Noun { word: "entity", unknown: "unknown-entity", ambiguous: "ambiguous-entity" };
-const LAW: Noun = Noun { word: "law", unknown: "unknown-law", ambiguous: "ambiguous-law" };
 
 pub fn place(book: &Book, text: &str) -> Result<Id<Place>, Diagnostic> {
     book.place(text).map_err(|miss| place_miss(book, text, miss))
@@ -26,11 +25,6 @@ pub fn entity(book: &Book, text: &str) -> Result<Id<Entity>, Diagnostic> {
 /// Why `text` is not one place.
 pub fn place_miss(book: &Book, text: &str, miss: Miss<Place>) -> Diagnostic {
     explain(book, &PLACE, text, miss, |id| book.places[id].path)
-}
-
-/// Why `text` is not one law.
-pub fn law_miss(book: &Book, text: &str, miss: Miss<Law>) -> Diagnostic {
-    explain(book, &LAW, text, miss, |id| book.laws[id].name)
 }
 
 /// The error for a name that matched nothing among `candidates`, with the

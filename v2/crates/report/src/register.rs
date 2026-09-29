@@ -1,4 +1,7 @@
 //! `register`: one place's flows, dated, with a running balance.
+//!
+//! Amounts and balances are in the place's display sign, the way a statement
+//! shows them: what a card owes is positive, and a charge adds to it.
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
@@ -8,6 +11,7 @@ use axiom_engine::{Run, State};
 use axiom_model::{Amount, Book, Commodity, Place};
 
 use crate::history::Posting;
+use crate::lens::Whose;
 use crate::places::path;
 use crate::resolve;
 use crate::table::code_labels;
@@ -16,13 +20,23 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 pub fn view<'s>(
     book: &Book<'s>,
     run: &Run,
+    whose: &Whose,
     place: &str,
     from: Option<Day>,
     to: Option<Day>,
 ) -> Result<Report<'s>, Diagnostic> {
     let place = resolve::place(book, place)?;
-    let title = format!("Register: {}", path(book, place));
-    Ok(Report::new(title).with(section(book, run, place, from, to)))
+    // A place is somebody's: another owner's register is not part of whose money this is.
+    let owner = book.places[place].owner;
+    let register = match whose.includes(owner) {
+        true => section(book, run, place, from, to),
+        false => Section::note_only(format!(
+            "{} belongs to {}, whose money this is not.",
+            path(book, place),
+            book.name(book.entities[owner].path)
+        )),
+    };
+    Ok(Report::new(format!("Register: {}", path(book, place))).with(register))
 }
 
 /// The flows touching `place` from `from` to `to` (default: everything up to
@@ -33,6 +47,8 @@ pub fn view<'s>(
 pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Day>, to: Option<Day>) -> Section<'s> {
     let steps = steps(book, run, place, to.unwrap_or(run.today));
     let split = from.map_or(0, |from| steps.partition_point(|step| step.day < from));
+    let sign = book.places[place].class.display_sign();
+    let shown = |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));
 
     let columns = [
         Column::left("Date"),
@@ -49,16 +65,30 @@ pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Da
     }
     if let Some(from) = from {
         for (&unit, &qty) in running.iter().filter(|(_, qty)| !qty.is_zero()) {
-            let balance = Cell::amount(book, Amount::new(qty, unit));
-            let cells =
-                [Cell::Day(from), Cell::text("opening balance"), Cell::Blank, Cell::Blank, Cell::Blank, balance];
+            let cells = [
+                Cell::Day(from),
+                Cell::text("opening balance"),
+                Cell::Blank,
+                Cell::Blank,
+                Cell::Blank,
+                shown(qty, unit),
+            ];
             section.push(Row::new(cells).style(Style::Total));
         }
     }
     for step in &steps[split..] {
         let balance = running.entry(step.change.unit).or_default();
         *balance += step.counted();
-        section.push(row(book, step, *balance));
+        let payee = step.posting.and_then(|posting| posting.flow.payee);
+        let cells = [
+            Cell::Day(step.day),
+            Cell::text(path(book, step.with)),
+            payee.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path))),
+            note(book, step).map_or(Cell::Blank, Cell::text),
+            shown(step.change.qty, step.change.unit),
+            shown(*balance, step.change.unit),
+        ];
+        section.push(Row::new(cells).style(if step.counts { Style::Normal } else { Style::Muted }));
     }
 
     if section.rows.is_empty() {
@@ -113,19 +143,6 @@ fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec
     let mut steps: Vec<Step> = flows.chain(pads).filter(|step| step.day <= cutoff).collect();
     steps.sort_by_key(|step| step.day);
     steps
-}
-
-fn row<'s>(book: &Book<'s>, step: &Step, balance: Qty) -> Row<'s> {
-    let payee = step.posting.and_then(|posting| posting.flow.payee);
-    let cells = [
-        Cell::Day(step.day),
-        Cell::text(path(book, step.with)),
-        payee.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path))),
-        note(book, step).map_or(Cell::Blank, Cell::text),
-        Cell::amount(book, step.change),
-        Cell::amount(book, Amount::new(balance, step.change.unit)),
-    ];
-    Row::new(cells).style(if step.counts { Style::Normal } else { Style::Muted })
 }
 
 /// Codes and settlement, as one line of small print.

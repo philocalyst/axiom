@@ -65,4 +65,4 @@ warning[law]: estimated tax: fourth installment short
    = note: Fourth installment, due January 15 2026.
 
 7 warnings
-✓ 403 flows · 47 places · 21 laws enforced · net worth 64,421.58 USD
+✓ 403 flows · 41 places · 21 laws enforced · net worth 64,421.58 USD

@@ -65,4 +65,4 @@ note[pad]: accepted a gap on assets/cash/wallet
    │                ╰── 14.00 USD moved out of assets/cash/wallet into unknown
 
 9 warnings
-✓ 250 flows · 37 places · 15 laws enforced · net worth 10,665.04 USD
+✓ 250 flows · 32 places · 15 laws enforced · net worth 10,665.04 USD

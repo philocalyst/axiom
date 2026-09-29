@@ -14,14 +14,23 @@ use axiom_model::{Book, Class, Period, Place};
 use crate::apportion::Apportion;
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
+use crate::lens::{Lens, Whose};
 use crate::places::{depth, leaf};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// How many periods to show when the window is not given.
 const DEFAULT_PERIODS: usize = 12;
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, by: Period, from: Option<Day>, to: Option<Day>) -> Report<'s> {
+pub fn view<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    whose: &Whose,
+    by: Period,
+    from: Option<Day>,
+    to: Option<Day>,
+) -> Report<'s> {
     let to = to.unwrap_or(run.today);
+    let lens = Lens::new(book, whose, to);
     let periods = match from {
         Some(from) => Periods::covering(by, from, to),
         None => {
@@ -29,7 +38,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, by: Period, from: Option<Day>, to: O
             Periods::covering(by, first, to).last(DEFAULT_PERIODS)
         }
     };
-    let statement = Statement::compile(book, run, periods, to);
+    let statement = Statement::compile(lens, run, periods, to);
     Report::new("Income and spending").with(statement.section(book))
 }
 
@@ -97,7 +106,8 @@ fn statement_sign(book: &Book, place: Id<Place>) -> Option<i64> {
 }
 
 impl Statement {
-    fn compile(book: &Book, run: &Run, periods: Periods, cutoff: Day) -> Statement {
+    fn compile(lens: Lens, run: &Run, periods: Periods, cutoff: Day) -> Statement {
+        let book = lens.book;
         let mut statement = Statement {
             periods,
             cutoff,
@@ -107,9 +117,9 @@ impl Statement {
             unpriced: 0,
         };
         for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
-            statement.record(book, &posting);
+            statement.record(lens, &posting);
         }
-        for gain in run.gains.iter().filter(|gain| gain.day <= cutoff) {
+        for gain in run.gains.iter().filter(|gain| gain.day <= cutoff && lens.owns(gain.from)) {
             for period in periods.overlapping(gain.day, gain.day) {
                 statement.gains[period] += gain.gain();
             }
@@ -119,15 +129,15 @@ impl Statement {
 
     /// The source pays on the flow's day; the arrival is recognized over its
     /// whole range.
-    fn record(&mut self, book: &Book, posting: &Posting) {
+    fn record(&mut self, lens: Lens, posting: &Posting) {
         let flow = posting.flow;
         self.spread_seen |= flow.recognized.until > flow.day;
-        self.recognize(book, flow.from, posting.out_in_base(book).map(|qty| -qty), flow.day, flow.day);
-        self.recognize(book, flow.to, posting.arrive_in_base(book), flow.recognized.from, flow.recognized.until);
+        self.recognize(lens, flow.from, posting.out_in_base(lens).map(|qty| -qty), flow.day, flow.day);
+        self.recognize(lens, flow.to, posting.arrive_in_base(lens), flow.recognized.from, flow.recognized.until);
     }
 
-    fn recognize(&mut self, book: &Book, place: Id<Place>, change: Option<Qty>, first: Day, last: Day) {
-        let Some(sign) = statement_sign(book, place) else { return };
+    fn recognize(&mut self, lens: Lens, place: Id<Place>, change: Option<Qty>, first: Day, last: Day) {
+        let Some(sign) = statement_sign(lens.book, place).filter(|_| lens.owns(place)) else { return };
         let Some(change) = change else {
             self.unpriced += 1;
             return;

@@ -1,1 +1,6 @@
-Limits (not yet built)
+Limits in 2026
+
+  Who  Limit                                 Window    Counted         Cap   Room left  Used
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  me   budget on expenses/business/software  2026-02  0.00 USD  130.00 USD  130.00 USD    0%
+  me   budget on expenses/food               2026-02  0.00 USD  550.00 USD  550.00 USD    0%

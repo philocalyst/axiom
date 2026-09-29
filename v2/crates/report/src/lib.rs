@@ -3,7 +3,8 @@
 //!
 //! Every view is a pure function of the book and its run. What several views
 //! need lives in one place: [`history`] answers "what happened, as posted",
-//! [`value`] prices it in the base currency, [`calendar`] cuts time into
+//! [`lens`] says whose it is, what it is worth and how liquid it is,
+//! [`headroom`] what every limit has counted, [`calendar`] cuts time into
 //! periods, and [`table`] builds sections so the views stay declarative.
 
 mod apportion;
@@ -11,9 +12,14 @@ mod available;
 mod balance;
 mod budget;
 mod calendar;
+mod claims;
 mod flow;
 mod forecast;
+mod gains;
+mod headroom;
 mod history;
+mod lens;
+mod limits;
 mod lots;
 mod places;
 mod register;
@@ -21,7 +27,6 @@ mod resolve;
 mod synth;
 mod table;
 mod tax;
-mod value;
 mod why;
 
 #[cfg(test)]
@@ -29,9 +34,12 @@ mod tests;
 
 use std::borrow::Cow;
 
-use axiom_core::{Day, Diagnostic, Loc, Qty, Ratio};
+use axiom_core::{Day, Diagnostic, Id, Loc, Qty, Ratio};
 use axiom_engine::Run;
-use axiom_model::{Amount, Book, Period};
+use axiom_model::{Amount, Book, Period, Place};
+
+use crate::history::Snapshots;
+use crate::lens::{Lens, Whose};
 
 /// What to show. Built by the command line from its arguments.
 #[derive(Clone, Debug)]
@@ -131,19 +139,24 @@ pub enum Cell<'s> {
 /// Builds the view `query` asks for, about the money of `whose` (`--for`: an
 /// entity, a household including its members; default everything).
 pub fn report<'s>(book: &Book<'s>, run: &Run, query: &Query, whose: Option<&str>) -> Result<Report<'s>, Diagnostic> {
+    views(book, run, &Whose::resolve(book, whose)?, query)
+}
+
+/// The view `query` asks for, about the money of `whose`.
+fn views<'s>(book: &Book<'s>, run: &Run, whose: &Whose, query: &Query) -> Result<Report<'s>, Diagnostic> {
     match query {
-        Query::Balance { globs, at, value, monthly } => balance::view(book, run, globs, *at, *value, *monthly),
-        Query::Register { place, from, to } => register::view(book, run, place, *from, *to),
-        Query::Flow { by, from, to } => Ok(flow::view(book, run, *by, *from, *to)),
-        Query::Available { at } => Ok(available::view(book, run, *at)),
-        Query::Budget { at, .. } => Ok(budget::view(book, run, *at)),
-        Query::Limits { .. } => Ok(Report::new("Limits (not yet built)")),
-        Query::Claims { .. } => Ok(Report::new("Claims (not yet built)")),
-        Query::Tax { year } => tax::view(book, run, *year, whose),
-        Query::Gains { .. } => Ok(Report::new("Gains (not yet built)")),
-        Query::Lots { place, .. } => lots::view(book, run, *place),
-        Query::Forecast { until, paths } => Ok(forecast::view(book, run, *until, *paths)),
-        Query::Why { target } => why::target(book, run, target),
+        Query::Balance { globs, at, value, monthly } => balance::view(book, run, whose, globs, *at, *value, *monthly),
+        Query::Register { place, from, to } => register::view(book, run, whose, place, *from, *to),
+        Query::Flow { by, from, to } => Ok(flow::view(book, run, whose, *by, *from, *to)),
+        Query::Available { at } => Ok(available::view(book, run, whose, *at)),
+        Query::Budget { at, by } => Ok(budget::view(book, run, whose, *at, *by)),
+        Query::Limits { year } => Ok(limits::view(book, run, whose, *year)),
+        Query::Claims { at } => Ok(claims::view(book, run, whose, *at)),
+        Query::Tax { year } => Ok(tax::view(book, run, whose, *year)),
+        Query::Gains { year } => Ok(gains::view(book, run, whose, *year)),
+        Query::Lots { place, at } => lots::view(book, run, whose, *place, *at),
+        Query::Forecast { until, paths } => Ok(forecast::view(book, run, whose, *until, *paths)),
+        Query::Why { target } => why::target(book, run, whose, target),
         Query::Line { loc } => Ok(why::line(book, run, *loc)),
     }
 }
@@ -161,12 +174,20 @@ pub struct Summary {
 }
 
 pub fn summary(book: &Book, run: &Run) -> Summary {
-    let balances = history::Balances::at(book, run, run.today);
-    let worth = balance::NetWorth::of(book, &balances, run.today);
+    let (everyone, today) = (Whose::default(), run.today);
+    let lens = Lens::new(book, &everyone, today);
+    let worth = balance::NetWorth::of(lens, &Snapshots::of(lens, run, &[today], false), 0);
+    // Class roots (`assets`, `expenses`, …) group places, and the built-in
+    // places exist in every book: only what was declared or used counts.
+    let used = |place: Id<Place>| {
+        let held = run.holdings.partition_point(|holding| holding.place < place);
+        book.places[place].loc.is_some()
+            || !book.touching[place].is_empty()
+            || run.holdings.get(held).is_some_and(|holding| holding.place == place)
+    };
     Summary {
         flows: book.flows.len(),
-        // Class roots (`assets`, `expenses`, …) group places; nobody declared them.
-        places: book.places.ids().filter(|&place| !places::is_class_root(book, place)).count(),
+        places: book.places.ids().filter(|&place| !places::is_class_root(book, place) && used(place)).count(),
         laws: run.checks.iter().filter(|&&ran| ran > 0).count(),
         net_worth: Amount::new(worth.total(), book.base),
         unpriced: worth.unpriced,

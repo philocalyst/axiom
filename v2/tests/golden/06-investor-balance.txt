@@ -59,7 +59,7 @@ Balances at 2026-01-06
 
   Net worth       Value (USD)
   ───────────────────────────
-  Assets       430,872.40 USD
+  Assets       430,872.38 USD
   Liabilities        0.00 USD
   ───────────────────────────
-  Net worth    430,872.40 USD
+  Net worth    430,872.38 USD

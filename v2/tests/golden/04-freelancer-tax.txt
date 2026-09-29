@@ -29,8 +29,12 @@ Owed
     early-withdrawal-penalty  irs  2025-03-31     38.54 USD  journal/2025/03.ax:42
     self-employment-tax       irs  2026-04-15  1,427.14 USD  period end
   ────────────────────────────────────────────────────────────────────────────────
+    Total project                              1,465.68 USD
+  ────────────────────────────────────────────────────────────────────────────────
   us
     federal-income-tax        irs  2026-04-15  2,711.13 USD  period end
+  ────────────────────────────────────────────────────────────────────────────────
+    Total us                                   2,711.13 USD
   ────────────────────────────────────────────────────────────────────────────────
   Total owed                                   4,176.81 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.

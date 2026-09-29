@@ -25,4 +25,4 @@ warning[law]: 529 contributions over the annual gift exclusion
    = help: at most 18,000.00 USD more can go in this year
 
 2 warnings
-✓ 882 flows · 56 places · 29 laws enforced · net worth 684,163.25 USD
+✓ 882 flows · 47 places · 29 laws enforced · net worth 684,163.25 USD

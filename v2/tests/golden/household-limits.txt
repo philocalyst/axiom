@@ -1,1 +1,5 @@
-Limits (not yet built)
+Limits in 2026
+
+  Who  Limit                    Window      Counted         Cap   Room left  Used
+  ───────────────────────────────────────────────────────────────────────────────
+  me   budget on expenses/food  2026-03  474.50 USD  650.00 USD  175.50 USD   73%

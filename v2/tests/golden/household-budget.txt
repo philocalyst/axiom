@@ -1,6 +1,5 @@
-Budgets for 2026-02-01
+Budgets for 2026-02
 
-  Place           Law             Window        Spent       Limit        Left     Used
-  ────────────────────────────────────────────────────────────────────────────────────
-  assets/college  gift-exclusion  2026     900.00 USD
-  expenses/food   budget          2026-02  681.00 USD  650.00 USD  -31.00 USD  104.77%
+  Place          Law     Window        Spent       Limit        Left     Used
+  ───────────────────────────────────────────────────────────────────────────
+  expenses/food  budget  2026-02  681.00 USD  650.00 USD  -31.00 USD  104.77%

@@ -1,23 +1,23 @@
 Available on 2026-02-14
 
 What you can spend
-  Liquid now                    Amount
+  In hand                       Amount
   ────────────────────────────────────
-  Money in liquid places  6,678.57 USD
+  Money in hand           6,678.57 USD
     assets/bank/checking  6,597.01 USD
     assets/cash/wallet       81.56 USD
   ────────────────────────────────────
   Available to spend      6,678.57 USD
 
 What it would take to reach the rest
-  Holding                         Liquid in         Value     Costs           Net
-  ───────────────────────────────────────────────────────────────────────────────
+  Holding                         Liquid in         Value      Cost           Net  Because
+  ────────────────────────────────────────────────────────────────────────────────────────
   assets/funds/car-fund           1d           113.75 USD              113.75 USD
   assets/funds/emergency          1d         3,000.00 USD            3,000.00 USD
   assets/funds/insurance-fund     1d           200.00 USD              200.00 USD
   assets/funds/trip-fund          1d         1,500.00 USD            1,500.00 USD
-  ───────────────────────────────────────────────────────────────────────────────
+  ────────────────────────────────────────────────────────────────────────────────────────
   If everything were drawn today             4,813.75 USD  0.00 USD  4,813.75 USD
   · Each line withdraws the whole holding into assets/bank/checking on 2026-02-14 and runs the year
-    out through the laws. Costs are what they would owe because of it, as if the year ended today:
-    penalties, and the tax on any income it creates.
+    out through the laws. Cost is what they would then owe beyond what they already will: penalties,
+    and the tax on any income it creates.

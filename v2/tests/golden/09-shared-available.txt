@@ -1,9 +1,9 @@
 Available on 2026-01-06
 
 What you can spend
-  Liquid now                                Amount
+  In hand                                   Amount
   ────────────────────────────────────────────────
-  Money in liquid places             23,718.59 USD
+  Money in hand                      23,718.59 USD
     assets/bank/checking             10,117.95 USD
     assets/bank/collective-checking   2,654.61 USD
     assets/bank/savings              10,100.00 USD

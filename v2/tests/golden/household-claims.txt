@@ -1,1 +1,3 @@
-Claims (not yet built)
+Claims on 2026-03-31
+
+  · Nothing is owed either way. A flow with `due` into a receivable place makes one.
