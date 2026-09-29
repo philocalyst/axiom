@@ -47,6 +47,12 @@ done
 
 # Robustness probes: inputs that are not plausible mistakes but must never
 # panic or hang. Named robust/rNN-*.ax; `want` matches on `robust/rNN`.
+# The long-line probe is 2 MB of comment, so it is written here, not kept.
+[ -e robust/r10-long-line.ax ] || {
+    printf 'base USD\nuse std\n\naccount assets/checking : bank\naccount expenses/food\naccount equity/opening\n\n2025-12-31 equity/opening -> checking 1_000 USD\n// '
+    head -c 2000000 /dev/zero | tr '\0' x
+    printf '\n2026-01-08 checking -> food 84.20 USD\n'
+} > robust/r10-long-line.ax
 for f in robust/r[0-9][0-9]-*.ax; do
     [ -e "$f" ] || continue
     name=${f%.ax}
