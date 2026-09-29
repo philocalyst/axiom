@@ -663,6 +663,14 @@ fn a_header_may_state_both_amounts_while_naming_one_end() {
 }
 
 #[test]
+fn basis_is_an_asset_arriving_when_an_amount_follows_and_a_kinds_property_when_not() {
+    let file = parse_clean("2026-05-01 car basis 12_000 USD since 2019-03-01\n2026-05-01 401k basis zero\n");
+    let said = statements(&file);
+    assert!(matches!(said[0].predicate, Predicate::Basis { amount, since: Some(_) } if amount.0 == "12_000 USD"));
+    assert!(matches!(&said[1].predicate, Predicate::Property(prop) if prop.name.0 == "basis"));
+}
+
+#[test]
 fn a_dated_name_is_an_occurrence_unless_it_says_something_else() {
     let file = parse_clean(
         "2026-01-16 paycheck\n2026-03-13 paycheck 5_900 USD\n  taxes 950 USD\n2026-01-31 paycheck = 5 USD\n",

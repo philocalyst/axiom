@@ -99,7 +99,8 @@ impl<'s> Parser<'s> {
             "owes" => self.owes(),
             "ends" => Ok(self.bump_as(Predicate::Ends)),
             "waived" => Ok(self.bump_as(Predicate::Waived)),
-            "basis" => self.basis(),
+            // `basis zero` is a kind's property; `basis 12_000 USD` is an asset arriving.
+            "basis" if matches!(self.lexer.peek_second().tok, Tok::Number(_) | Tok::Name("empty")) => self.basis(),
             "split" => self.split(),
             "settled" | "void" | "returned" => {
                 self.choose(&EVENT_STATES, "unknown-event-state", "settlement state").map(|(state, _)| Predicate::Event(state))
