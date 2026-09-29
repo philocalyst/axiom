@@ -195,6 +195,29 @@ impl Basket {
     }
 }
 
+/// Values added up in the base currency, and how many amounts had no price to
+/// be part of them: the one place a view counts what it has left out.
+#[derive(Default, Debug)]
+pub struct Priced {
+    pub total: Qty,
+    missing: usize,
+}
+
+impl Priced {
+    /// Adds `worth` to the total, or counts the amount that had none.
+    pub fn add(&mut self, worth: Option<Qty>) -> Option<Qty> {
+        match worth {
+            Some(worth) => self.total += worth,
+            None => self.missing += 1,
+        }
+        worth
+    }
+
+    pub fn missing(&self) -> usize {
+        self.missing
+    }
+}
+
 /// A basket priced in the base currency.
 #[derive(Default, Debug)]
 pub struct Valued {

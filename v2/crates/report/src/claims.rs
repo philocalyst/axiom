@@ -14,7 +14,7 @@ use axiom_engine::{Holding, Ledger, Options, Run};
 use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Select, Txn};
 
 use crate::history::{Posting, journal_ends_by};
-use crate::lens::{Lens, Whose};
+use crate::lens::{Lens, Priced, Whose};
 use crate::places::path;
 use crate::table::{code_labels, doc_headline};
 use crate::{Cell, Column, Report, Row, Section, Style};
@@ -149,7 +149,7 @@ pub fn section<'s>(lens: Lens<'_, 's>, heading: &str, claims: &[&Claim]) -> Sect
     let columns = ["Counterparty", "What"].map(Column::left).into_iter();
     let columns = columns.chain([Column::right("Left")]).chain(["Made", "Age", "Due", "Status"].map(Column::left));
     let mut section = Section::new(columns).headed(heading);
-    let (mut total, mut unpriced) = (Qty::ZERO, 0);
+    let mut worth = Priced::default();
     for claim in claims {
         let txn = &book.txns[claim.txn];
         let what: Vec<String> = code_labels(book, &txn.codes).chain(doc_headline(book, txn.doc)).collect();
@@ -157,10 +157,7 @@ pub fn section<'s>(lens: Lens<'_, 's>, heading: &str, claims: &[&Claim]) -> Sect
         let what = if what.is_empty() { Cell::Source(txn.loc) } else { Cell::text(what.join(" · ")) };
         let days_left = claim.due.map(|due| due.0 - at.0);
         let status = days_left.map(|days| if days < 0 { format!("overdue {}d", -days) } else { format!("in {days}d") });
-        match lens.value(claim.left) {
-            Some(qty) => total += qty,
-            None => unpriced += 1,
-        }
+        worth.add(lens.value(claim.left));
         let cells = [
             Cell::text(claim.counterparty(book)),
             what,
@@ -177,10 +174,8 @@ pub fn section<'s>(lens: Lens<'_, 's>, heading: &str, claims: &[&Claim]) -> Sect
         }));
     }
     if !claims.is_empty() {
-        section.push(Row::padded([Cell::text("Total"), Cell::Blank, Cell::base(book, total)], 7).style(Style::Total));
+        section.total([Cell::text("Total"), Cell::Blank, Cell::base(book, worth.total)]);
     }
-    if unpriced > 0 {
-        section.note(format!("{unpriced} claims have no price and are left out of the total."));
-    }
+    section.unpriced(worth.missing(), "claim");
     section
 }

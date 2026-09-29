@@ -226,7 +226,7 @@ fn laws_table<'s>(book: &Book<'s>, ids: &[Id<Law>]) -> Section<'s> {
         if group.is_empty() {
             continue;
         }
-        section.push(Row::padded([Cell::text(heading)], 4).style(crate::Style::Total));
+        section.total([Cell::text(heading)]);
         for &id in group {
             let law = &book.laws[id];
             let explains = doc_headline(book, law.doc).map_or(Cell::Blank, Cell::text);

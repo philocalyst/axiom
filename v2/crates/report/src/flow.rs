@@ -13,7 +13,7 @@ use axiom_model::{Book, Period, Place};
 
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
-use crate::lens::{Lens, Whose};
+use crate::lens::{Lens, Priced, Whose};
 use crate::places::{Side, depth, leaf, v3_side};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
@@ -88,7 +88,8 @@ struct Statement {
     /// Realized gains per period, derived from the run's parcels.
     gains: Vec<Qty>,
     spread_seen: bool,
-    unpriced: usize,
+    /// The flows with no price on their day, which the statement leaves out.
+    unpriced: Priced,
 }
 
 /// How a place's balance change reads in the statement: income and spending
@@ -113,7 +114,7 @@ impl Statement {
             grid: Grid::new(book.places.len(), periods.len()),
             gains: vec![Qty::ZERO; periods.len()],
             spread_seen: false,
-            unpriced: 0,
+            unpriced: Priced::default(),
         };
         for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
             statement.record(lens, &posting);
@@ -137,10 +138,7 @@ impl Statement {
 
     fn recognize(&mut self, lens: Lens, place: Id<Place>, change: Option<Qty>, over: Days) {
         let Some(sign) = statement_sign(lens.book, place).filter(|_| lens.owns(place)) else { return };
-        let Some(change) = change else {
-            self.unpriced += 1;
-            return;
-        };
+        let Some(change) = self.unpriced.add(change) else { return };
         let recognized = Qty(change.0 * sign);
         for period in self.periods.overlapping(over.first(), over.last()) {
             let window = self.periods.window(period).days();
@@ -179,9 +177,7 @@ impl Statement {
                 "Flows written over a date range are recognized a little each day across the periods they cover.",
             );
         }
-        if self.unpriced > 0 {
-            section.note(format!("{} flows have no price on their day and are left out.", self.unpriced));
-        }
+        section.unpriced(self.unpriced.missing(), "flow");
         section
     }
 

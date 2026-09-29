@@ -43,7 +43,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, system: Id<System>)
         ];
         laws.push(Row::new(cells));
         if !doc.is_empty() {
-            laws.push(Row::padded([Cell::text(doc)], 4).depth(1).style(crate::Style::Muted));
+            laws.push(Row::new([Cell::text(doc)]).depth(1).style(crate::Style::Muted));
         }
     }
     let residents: Vec<&str> = book

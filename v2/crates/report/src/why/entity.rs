@@ -11,9 +11,9 @@ use axiom_model::{Amount, Book, Entity, Law, Subject};
 
 use super::laws_table;
 use crate::claims;
-use crate::lens::{Lens, Whose, on_balance_sheet};
+use crate::lens::{Lens, Priced, Whose, on_balance_sheet};
 use crate::places::path;
-use crate::{Cell, Column, Report, Row, Section, Style};
+use crate::{Cell, Column, Report, Row, Section};
 
 pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> {
     let name = book.name(book.entities[entity].path);
@@ -45,13 +45,13 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> 
     let mut ties =
         Section::new([Column::left("Place"), Column::right("Amount"), Column::left("Since"), Column::left("From")])
             .headed("Held for it");
-    let mut remaining = Qty::ZERO;
+    let mut remaining = Priced::default();
     let everyone = Whose::default();
     let lens = Lens::new(book, &everyone, run.today);
     for holding in &run.holdings {
         for lot in holding.lots.iter().filter(|lot| lot.tied == Some(entity)) {
             let held = Amount::new(lot.qty, holding.unit);
-            remaining += lens.value(held).unwrap_or_default();
+            remaining.add(lens.value(held));
             let cells = [
                 Cell::text(path(book, holding.place)),
                 Cell::amount(book, held),
@@ -62,8 +62,9 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> 
         }
     }
     if !ties.rows.is_empty() {
-        ties.push(Row::padded([Cell::text("Remaining"), Cell::base(book, remaining)], 4).style(Style::Total));
+        ties.total([Cell::text("Remaining"), Cell::base(book, remaining.total)]);
     }
+    ties.unpriced(remaining.missing(), "amount");
 
     let open = claims::open(lens, run, run.holdings.iter());
     let with_it: Vec<&claims::Claim> = open.iter().filter(|claim| claim.with(entity)).collect();

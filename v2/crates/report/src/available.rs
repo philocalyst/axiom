@@ -19,10 +19,10 @@ use axiom_model::{Amount, Book, Class, Entity, Place};
 use crate::claims::{self, Claim};
 use crate::closings;
 use crate::history::{Held, postings};
-use crate::lens::{Basket, Lens, Liquidity, Whose};
+use crate::lens::{Basket, Lens, Liquidity, Priced, Whose};
 use crate::places::path;
 use crate::synth::hypothetical;
-use crate::table::{headline, plural};
+use crate::table::headline;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Obligations falling due within this long count against what can be spent.
@@ -69,13 +69,12 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
 fn spendable_section<'s>(lens: Lens<'_, 's>, run: &Run, cash: &[&Holding], claims: &[Claim]) -> Section<'s> {
     let (book, at) = (lens.book, lens.day);
     let mut section = Section::new([Column::left("In hand"), Column::right("Amount")]).headed("What you can spend");
-    let mut unpriced = 0;
-    let mut line = |section: &mut Section<'s>, label: String, worth: Option<Qty>, depth: usize| match worth {
-        Some(qty) => {
+    let mut priced = Priced::default();
+    let mut line = |section: &mut Section<'s>, label: String, worth: Option<Qty>, depth: usize| {
+        if let Some(qty) = priced.add(worth) {
             let style = if depth > 0 { Style::Muted } else { Style::Normal };
             section.push(Row::new([Cell::text(label), Cell::base(book, qty)]).depth(depth).style(style));
         }
-        None => unpriced += 1,
     };
 
     // Money in hand: every currency, each priced as a whole.
@@ -124,10 +123,8 @@ fn spendable_section<'s>(lens: Lens<'_, 's>, run: &Run, cash: &[&Holding], claim
             }
         }
     }
-    section.push(Row::new([Cell::text("Available to spend"), Cell::base(book, spendable)]).style(Style::Total));
-    if unpriced > 0 {
-        section.note(format!("{} have no price and are left out.", plural(unpriced, "amount")));
-    }
+    section.total([Cell::text("Available to spend"), Cell::base(book, spendable)]);
+    section.unpriced(priced.missing(), "amount");
     section
 }
 
@@ -285,7 +282,7 @@ fn reach_section<'s>(lens: Lens<'_, 's>, reach: &[Reach], to: Option<Id<Place>>,
     }
     let total = [Cell::text("If everything were drawn today"), Cell::Blank];
     let sums = [value, costs, value - costs].map(|qty| Cell::base(book, qty));
-    section.push(Row::padded(total.into_iter().chain(sums), 6).style(Style::Total));
+    section.total(total.into_iter().chain(sums));
     match to {
         Some(to) => section.note(format!(
             "Each line withdraws the whole holding into {} on {at} and runs {} through the laws. Cost is \

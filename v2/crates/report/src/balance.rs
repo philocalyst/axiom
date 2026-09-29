@@ -47,10 +47,7 @@ pub fn view<'s>(
     if unpriced > 0 {
         table.note("Holdings without a price are muted, in their own commodity, and left out of every total.");
     }
-    if snapshots.unpriced > 0 {
-        table
-            .note(format!("{} flows have no price on their day and are not counted in the value.", snapshots.unpriced));
-    }
+    table.unpriced(snapshots.unpriced.missing(), "flow");
 
     let title = if monthly { format!("Balances by month to {at}") } else { format!("Balances at {at}") };
     let mut report = Report::new(title).with(table);
@@ -278,8 +275,6 @@ fn net_worth_section<'s>(lens: Lens<'_, 's>, snapshots: &Snapshots) -> Section<'
         let cells = worths.iter().map(|worth| Cell::base(book, pick(worth)));
         section.push(Row::new(iter::once(Cell::text(label)).chain(cells)).style(style));
     }
-    if let Some(unpriced) = worths.iter().map(|worth| worth.unpriced).max().filter(|&n| n > 0) {
-        section.note(format!("{unpriced} holdings have no price and are not counted."));
-    }
+    section.unpriced(worths.iter().map(|worth| worth.unpriced).max().unwrap_or(0), "holding");
     section
 }

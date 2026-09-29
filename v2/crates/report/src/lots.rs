@@ -6,7 +6,7 @@ use axiom_model::{Amount, Book};
 
 use crate::claims::holdings_at;
 use crate::gains::Term;
-use crate::lens::{Lens, Whose};
+use crate::lens::{Lens, Priced, Whose};
 use crate::places::path;
 use crate::resolve;
 use crate::table::code_labels;
@@ -35,22 +35,16 @@ pub fn view<'s>(
         Column::left("Note"),
     ]);
 
-    let (mut basis, mut value, mut unrealized, mut unpriced) = (Qty::ZERO, Qty::ZERO, Qty::ZERO, 0);
+    let (mut basis, mut value, mut unrealized) = (Qty::ZERO, Priced::default(), Qty::ZERO);
     let holdings = holdings_at(book, run, at);
     let held = holdings.iter().filter(|holding| {
         lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
     });
     for holding in held {
         for lot in &holding.lots {
-            let worth = lens.value(Amount::new(lot.qty, holding.unit));
+            let worth = value.add(lens.value(Amount::new(lot.qty, holding.unit)));
             basis += lot.basis;
-            match worth {
-                Some(worth) => {
-                    value += worth;
-                    unrealized += worth - lot.basis;
-                }
-                None => unpriced += 1,
-            }
+            unrealized += worth.map_or(Qty::ZERO, |worth| worth - lot.basis);
             section.push(row(lens, holding, lot, worth));
         }
     }
@@ -64,14 +58,12 @@ pub fn view<'s>(
             Cell::base(book, basis),
             Cell::Blank,
             Cell::Blank,
-            Cell::base(book, value),
+            Cell::base(book, value.total),
             Cell::base(book, unrealized),
         ];
-        section.push(Row::padded(cells, 9).style(Style::Total));
+        section.total(cells);
     }
-    if unpriced > 0 {
-        section.note(format!("{unpriced} parcels have no price; they are muted and left out of Value and Unrealized."));
-    }
+    section.unpriced(value.missing(), "parcel");
     Ok(Report::new(format!("Lots at {at}")).with(section))
 }
 

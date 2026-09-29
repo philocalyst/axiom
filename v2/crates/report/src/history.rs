@@ -10,7 +10,7 @@ use axiom_core::{Day, Id, Qty, Ratio};
 use axiom_engine::{Holding, Pad, Posted, Run, State};
 use axiom_model::{Amount, Book, End, Flow, Place};
 
-use crate::lens::{Basket, Lens, on_balance_sheet};
+use crate::lens::{Basket, Lens, Priced, on_balance_sheet};
 
 /// A journal flow together with what the run made of it.
 #[derive(Clone, Copy)]
@@ -154,7 +154,7 @@ pub struct Snapshots {
     units: usize,
     cells: Vec<Held>,
     /// Flows with no price on their day, left out of `booked`.
-    pub unpriced: usize,
+    pub unpriced: Priced,
 }
 
 impl Snapshots {
@@ -177,7 +177,7 @@ impl Snapshots {
 
     fn empty(book: &Book, days: Vec<Day>) -> Snapshots {
         let (places, units) = (book.places.len(), book.commodities.len());
-        Snapshots { cells: vec![Held::default(); days.len() * places * units], days, places, units, unpriced: 0 }
+        Snapshots { cells: vec![Held::default(); days.len() * places * units], days, places, units, unpriced: Priced::default() }
     }
 
     fn final_state(lens: Lens, run: &Run, day: Day) -> Snapshots {
@@ -245,10 +245,7 @@ impl Snapshots {
     fn held(&mut self, lens: Lens, place: Id<Place>, moved: Amount, valued: bool) -> Held {
         let mut held = Held { qty: moved.qty, booked: Qty::ZERO };
         if valued && !on_balance_sheet(lens.book.places[place].class) {
-            match lens.value(moved) {
-                Some(worth) => held.booked = worth,
-                None => self.unpriced += 1,
-            }
+            held.booked = self.unpriced.add(lens.value(moved)).unwrap_or_default();
         }
         held
     }

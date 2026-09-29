@@ -50,9 +50,24 @@ impl<'s> Section<'s> {
         self
     }
 
-    pub fn push(&mut self, row: Row<'s>) {
-        debug_assert_eq!(row.cells.len(), self.columns.len(), "a cell for every column");
+    /// Adds a row. One with fewer cells than the table has columns is a label
+    /// or a total, and is padded with blanks to the table's own width.
+    pub fn push(&mut self, mut row: Row<'s>) {
+        debug_assert!(row.cells.len() <= self.columns.len(), "a column for every cell");
+        row.cells.resize_with(self.columns.len(), || Cell::Blank);
         self.rows.push(row);
+    }
+
+    /// A total row: the leading cells, and blanks under the rest.
+    pub fn total(&mut self, lead: impl IntoIterator<Item = Cell<'s>>) {
+        self.push(Row::new(lead).style(Style::Total));
+    }
+
+    /// Says what was left out of a total for lack of a price, if anything was.
+    pub fn unpriced(&mut self, missing: usize, what: &str) {
+        if missing > 0 {
+            self.note(format!("{} left out for lack of a price.", plural(missing, what)));
+        }
     }
 
     pub fn note(&mut self, note: impl Into<String>) {
@@ -63,13 +78,6 @@ impl<'s> Section<'s> {
 impl<'s> Row<'s> {
     pub fn new(cells: impl IntoIterator<Item = Cell<'s>>) -> Row<'s> {
         Row { depth: 0, style: Style::Normal, cells: cells.into_iter().collect() }
-    }
-
-    /// The leading cells, padded with blanks to `columns`.
-    pub fn padded(cells: impl IntoIterator<Item = Cell<'s>>, columns: usize) -> Row<'s> {
-        let mut cells: Vec<Cell> = cells.into_iter().collect();
-        cells.resize_with(columns, || Cell::Blank);
-        Row::new(cells)
     }
 
     pub fn depth(mut self, depth: usize) -> Row<'s> {
