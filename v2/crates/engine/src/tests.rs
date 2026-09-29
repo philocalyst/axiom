@@ -159,8 +159,8 @@ fn deferral_limit(f: &mut Fixture) -> Id<Law> {
     );
     let limit = f.usd(24_500_00);
     let mut law = LawBuilder::new(name, Trigger::In).doc(doc);
-    let total = law.call(Func::Total(Dir::In, Window::Year), &[], Ty::Amount);
-    let cap = law.konst(Value::Amount(limit), Ty::Amount);
+    let total = law.call(Func::Total(Dir::In, Window::Year), &[], Ty::AMOUNT);
+    let cap = law.konst(Value::Amount(limit), Ty::AMOUNT);
     let cond = law.bin(BinOp::Le, total, cap, Ty::Bool);
     let law = f.law(law.require(cond, None));
     let (retirement, rule) = (f.retirement, f.rule(law, Subject::Place(f.retirement)));
@@ -208,9 +208,9 @@ fn a_tally_bound_names_the_room_left_when_the_law_counted_this_flow() {
     let (name, deferrals, message) =
         (f.sym("deferral-limit"), f.sym("elective-deferrals"), f.sym("401(k) deferrals over the yearly limit"));
     let mut law = LawBuilder::new(name, Trigger::In);
-    let amount = law.var(Var::Amount, Ty::Amount);
-    let counted = law.call(Func::Tally(deferrals), &[], Ty::Amount);
-    let cap = law.konst(Value::Amount(f.usd(24_500_00)), Ty::Amount);
+    let amount = law.var(Var::Amount, Ty::AMOUNT);
+    let counted = law.call(Func::Tally(deferrals), &[], Ty::AMOUNT);
+    let cap = law.konst(Value::Amount(f.usd(24_500_00)), Ty::AMOUNT);
     let cond = law.bin(BinOp::Le, counted, cap, Ty::Bool);
     let law = f.law(law.count(amount, deferrals).require(cond, Some(message)));
     let rule = f.rule(law, Subject::Entity(f.me));
@@ -256,8 +256,8 @@ fn value_moving_inside_a_subject_does_not_count_toward_its_totals() {
     let (equity, salary, checking, savings, assets) = (f.equity, f.salary, f.checking, f.savings, f.assets);
     let (name, cap) = (f.sym("monthly-cap"), f.usd(10_000_00));
     let mut law = LawBuilder::new(name, Trigger::In);
-    let total = law.call(Func::Total(Dir::In, Window::Month), &[], Ty::Amount);
-    let cap = law.konst(Value::Amount(cap), Ty::Amount);
+    let total = law.call(Func::Total(Dir::In, Window::Month), &[], Ty::AMOUNT);
+    let cap = law.konst(Value::Amount(cap), Ty::AMOUNT);
     let cond = law.bin(BinOp::Le, total, cap, Ty::Bool);
     let law = f.law(law.require(cond, None));
     for place in [checking, savings] {
@@ -399,8 +399,8 @@ fn deferred_money_has_no_basis_and_a_withdrawal_realizes_all_of_it() {
     let (name, penalty, irs) = (f.sym("early-withdrawal"), f.sym("penalty"), f.grant);
     let mut law = LawBuilder::new(name, Trigger::Gain);
     let tenth = law.konst(Value::Num(Ratio::new(1, 10).unwrap()), Ty::Num);
-    let gain = law.var(Var::Gain, Ty::Amount);
-    let tax = law.bin(BinOp::Mul, tenth, gain, Ty::Amount);
+    let gain = law.var(Var::Gain, Ty::AMOUNT);
+    let tax = law.bin(BinOp::Mul, tenth, gain, Ty::AMOUNT);
     let law = f.law(law.owe(tax, irs, penalty));
     let rule = f.rule(law, Subject::Place(retirement));
     f.on_gain.push((retirement, rule));
@@ -451,12 +451,12 @@ fn a_require_with_an_else_prices_the_violation_instead_of_failing() {
     let (salary, retirement, checking, irs) = (f.salary, f.retirement, f.checking, f.grant);
     let (name, penalty) = (f.sym("early-withdrawal"), f.sym("penalty"));
     let mut law = LawBuilder::new(name, Trigger::Gain);
-    let gain = law.var(Var::Gain, Ty::Amount);
+    let gain = law.var(Var::Gain, Ty::AMOUNT);
     let nothing = law.konst(Value::Empty, Ty::Empty);
     let cond = law.bin(BinOp::Le, gain, nothing, Ty::Bool);
     let tenth = law.konst(Value::Num(Ratio::new(1, 10).unwrap()), Ty::Num);
-    let again = law.var(Var::Gain, Ty::Amount);
-    let tax = law.bin(BinOp::Mul, tenth, again, Ty::Amount);
+    let again = law.var(Var::Gain, Ty::AMOUNT);
+    let tax = law.bin(BinOp::Mul, tenth, again, Ty::AMOUNT);
     let law = f.law(law.require_else_owe(cond, tax, irs, penalty));
     let rule = f.rule(law, Subject::Place(retirement));
     f.on_gain.push((retirement, rule));
@@ -567,7 +567,7 @@ fn timed_book(assertion_on: Option<i32>) -> (Book<'static>, Id<Law>) {
     let (monthly, deadline, months) = (f.sym("monthly"), f.sym("payoff"), f.sym("months"));
     let one = f.usd(100);
     let mut each = LawBuilder::new(monthly, Trigger::Each(Period::Month, None));
-    let amount = each.konst(Value::Amount(one), Ty::Amount);
+    let amount = each.konst(Value::Amount(one), Ty::AMOUNT);
     let each = f.law(each.count(amount, months));
     let mut by = LawBuilder::new(deadline, Trigger::Always);
     let (y, m, d) = (
@@ -577,7 +577,7 @@ fn timed_book(assertion_on: Option<i32>) -> (Book<'static>, Id<Law>) {
     );
     let date = by.call(Func::Date, &[y, m, d], Ty::Day);
     by.by(date);
-    let balance = by.var(Var::Balance, Ty::Amount);
+    let balance = by.var(Var::Balance, Ty::AMOUNT);
     let nothing = by.konst(Value::Empty, Ty::Empty);
     let cond = by.bin(BinOp::Eq, balance, nothing, Ty::Bool);
     let by = f.law(by.require(cond, None));
@@ -596,8 +596,8 @@ fn balance_reads_in_the_display_sign_and_a_lasting_condition_is_reported_once() 
     let (card, checking, food, equity) = (f.card, f.checking, f.food, f.equity);
     let (name, limit) = (f.sym("card-limit"), f.usd(100_00));
     let mut law = LawBuilder::new(name, Trigger::Always);
-    let owed = law.var(Var::Balance, Ty::Amount);
-    let cap = law.konst(Value::Amount(limit), Ty::Amount);
+    let owed = law.var(Var::Balance, Ty::AMOUNT);
+    let cap = law.konst(Value::Amount(limit), Ty::AMOUNT);
     let cond = law.bin(BinOp::Le, owed, cap, Ty::Bool);
     let law = f.law(law.warn(cond));
     let rule = f.rule(law, Subject::Place(card));
@@ -686,15 +686,15 @@ fn tallies_count_what_a_filter_lets_through_and_year_end_laws_read_them() {
     let mut count = LawBuilder::new(counting, Trigger::In);
     let (from, source) = (count.var(Var::From, Ty::Place), count.konst(Value::Place(salary), Ty::Place));
     let paid_by_employer = count.is(from, &[source]);
-    let amount = count.var(Var::Amount, Ty::Amount);
+    let amount = count.var(Var::Amount, Ty::AMOUNT);
     let count = f.law(count.when(paid_by_employer).count(amount, wages));
     let rule = f.rule(count, Subject::Entity(me));
     f.on_in.push((checking, rule));
 
     let mut owe = LawBuilder::new(taxing, Trigger::Each(Period::Year, None));
     let (rate, earned) =
-        (owe.konst(Value::Num(Ratio::new(1, 10).unwrap()), Ty::Num), owe.call(Func::Tally(wages), &[], Ty::Amount));
-    let due = owe.bin(BinOp::Mul, rate, earned, Ty::Amount);
+        (owe.konst(Value::Num(Ratio::new(1, 10).unwrap()), Ty::Num), owe.call(Func::Tally(wages), &[], Ty::AMOUNT));
+    let due = owe.bin(BinOp::Mul, rate, earned, Ty::AMOUNT);
     let owe = f.law(owe.owe(due, irs, tax));
     let rule = f.rule(owe, Subject::Entity(me));
     f.timed.push(rule);
@@ -721,8 +721,8 @@ fn a_warn_law_is_a_warning_and_says_how_much_room_is_left() {
     let (checking, food) = (f.checking, f.food);
     let (name, budget) = (f.sym("budget"), f.usd(100_00));
     let mut law = LawBuilder::new(name, Trigger::In);
-    let total = law.call(Func::Total(Dir::In, Window::Month), &[], Ty::Amount);
-    let cap = law.konst(Value::Amount(budget), Ty::Amount);
+    let total = law.call(Func::Total(Dir::In, Window::Month), &[], Ty::AMOUNT);
+    let cap = law.konst(Value::Amount(budget), Ty::AMOUNT);
     let cond = law.bin(BinOp::Le, total, cap, Ty::Bool);
     let law = f.law(law.warn(cond));
     let rule = f.rule(law, Subject::Place(food));
@@ -895,7 +895,7 @@ fn until(year: i32, month: u32, day: u32) -> Options {
 fn ticking(f: &mut Fixture, place: Id<Place>, name: &'static str) -> Id<Law> {
     let (law_name, tally, one) = (f.sym(name), f.sym(name), f.usd(1_00));
     let mut law = LawBuilder::new(law_name, Trigger::In);
-    let amount = law.konst(Value::Amount(one), Ty::Amount);
+    let amount = law.konst(Value::Amount(one), Ty::AMOUNT);
     let law = f.law(law.count(amount, tally));
     let rule = f.rule(law, Subject::Place(place));
     f.on_in.push((place, rule));
@@ -906,7 +906,7 @@ fn ticking(f: &mut Fixture, place: Id<Place>, name: &'static str) -> Id<Law> {
 fn counting(f: &mut Fixture, place: Id<Place>, subject: Subject, name: &'static str) -> Id<Law> {
     let (law_name, tally) = (f.sym(name), f.sym(name));
     let mut law = LawBuilder::new(law_name, Trigger::In);
-    let amount = law.var(Var::Amount, Ty::Amount);
+    let amount = law.var(Var::Amount, Ty::AMOUNT);
     let law = f.law(law.count(amount, tally));
     let rule = f.rule(law, subject);
     f.on_in.push((place, rule));
@@ -917,8 +917,8 @@ fn counting(f: &mut Fixture, place: Id<Place>, subject: Subject, name: &'static 
 fn month_budget(f: &mut Fixture, place: Id<Place>, cap: i64) -> Id<Law> {
     let (name, cap) = (f.sym("budget"), f.usd(cap));
     let mut law = LawBuilder::new(name, Trigger::In);
-    let total = law.call(Func::Total(Dir::In, Window::Month), &[], Ty::Amount);
-    let cap = law.konst(Value::Amount(cap), Ty::Amount);
+    let total = law.call(Func::Total(Dir::In, Window::Month), &[], Ty::AMOUNT);
+    let cap = law.konst(Value::Amount(cap), Ty::AMOUNT);
     let cond = law.bin(BinOp::Le, total, cap, Ty::Bool);
     let law = f.law(law.warn(cond));
     let rule = f.rule(law, Subject::Place(place));
@@ -962,7 +962,7 @@ fn a_flow_recognized_for_last_year_counts_in_last_years_tally_and_a_closing_law_
     let (paid, tax, closing) = (f.sym("paid"), f.sym("tax"), f.sym("close-year"));
     counting(&mut f, checking, Subject::Entity(me), "paid");
     let mut law = LawBuilder::new(closing, Trigger::Each(Period::Year, Some(Closing { month: 4, day: 15 })));
-    let so_far = law.call(Func::Tally(paid), &[], Ty::Amount);
+    let so_far = law.call(Func::Tally(paid), &[], Ty::AMOUNT);
     let law = f.law(law.owe(so_far, irs, tax));
     let rule = f.rule(law, Subject::Entity(me));
     f.timed.push(rule);
@@ -1005,7 +1005,7 @@ fn a_year_law_runs_for_a_part_year_residence() {
     let (yearly, years) = (f.sym("yearly"), f.sym("years"));
     let mut law = LawBuilder::new(yearly, Trigger::Each(Period::Year, None));
     let one = f.usd(1_00);
-    let amount = law.konst(Value::Amount(one), Ty::Amount);
+    let amount = law.konst(Value::Amount(one), Ty::AMOUNT);
     let law = f.law(law.count(amount, years));
     let subject = Subject::Entity(me);
     let (in_year, other_year) = (
@@ -1030,7 +1030,7 @@ fn a_law_that_two_residences_bring_runs_once_for_a_period_and_once_for_a_flow() 
     let (yearly, years) = (f.sym("yearly"), f.sym("years"));
     let mut law = LawBuilder::new(yearly, Trigger::Each(Period::Year, None));
     let one = f.usd(1_00);
-    let amount = law.konst(Value::Amount(one), Ty::Amount);
+    let amount = law.konst(Value::Amount(one), Ty::AMOUNT);
     let law = f.law(law.count(amount, years));
     let subject = Subject::Entity(me);
     // A move within one system: the same law, brought by the residence before and the one after.
@@ -1059,7 +1059,7 @@ fn an_opening_moves_value_but_no_law_sees_it_and_it_starts_no_period() {
     let bought = ticking(&mut f, brokerage, "bought");
     let one = f.usd(1_00);
     let mut each = LawBuilder::new(monthly, Trigger::Each(Period::Month, None));
-    let amount = each.konst(Value::Amount(one), Ty::Amount);
+    let amount = each.konst(Value::Amount(one), Ty::AMOUNT);
     let each = f.law(each.count(amount, months));
     let rule = f.rule(each, Subject::Entity(me));
     f.timed.push(rule);
@@ -1254,12 +1254,12 @@ fn a_waiver_waives_a_priced_violation_and_a_waiver_that_waives_nothing_warns() {
     let (salary, retirement, checking, irs) = (f.salary, f.retirement, f.checking, f.grant);
     let (name, penalty) = (f.sym("early-withdrawal"), f.sym("penalty"));
     let mut law = LawBuilder::new(name, Trigger::Gain);
-    let gain = law.var(Var::Gain, Ty::Amount);
+    let gain = law.var(Var::Gain, Ty::AMOUNT);
     let nothing = law.konst(Value::Empty, Ty::Empty);
     let cond = law.bin(BinOp::Le, gain, nothing, Ty::Bool);
     let tenth = law.konst(Value::Num(Ratio::new(1, 10).unwrap()), Ty::Num);
-    let again = law.var(Var::Gain, Ty::Amount);
-    let tax = law.bin(BinOp::Mul, tenth, again, Ty::Amount);
+    let again = law.var(Var::Gain, Ty::AMOUNT);
+    let tax = law.bin(BinOp::Mul, tenth, again, Ty::AMOUNT);
     let law = f.law(law.require_else_owe(cond, tax, irs, penalty));
     let rule = f.rule(law, Subject::Place(retirement));
     f.on_gain.push((retirement, rule));
@@ -1290,7 +1290,7 @@ fn every_comparison_keeps_its_last_reading_with_the_sides_of_a_floor_swapped() {
     let (equity, checking, food) = (f.equity, f.checking, f.food);
     let name = f.sym("bank");
     let mut law = LawBuilder::new(name, Trigger::Always);
-    let balance = law.var(Var::Balance, Ty::Amount);
+    let balance = law.var(Var::Balance, Ty::AMOUNT);
     let nothing = law.konst(Value::Empty, Ty::Empty);
     let cond = law.bin(BinOp::Ge, balance, nothing, Ty::Bool);
     let law = f.law(law.warn(cond));
@@ -1337,12 +1337,12 @@ fn fields_read_a_places_basis_and_an_amounts_commodity() {
     let (seen, tally, only_shares) = (f.sym("seen"), f.sym("seen"), f.sym("shares-only"));
     let mut law = LawBuilder::new(seen, Trigger::In);
     let place = law.konst(Value::Place(brokerage), Ty::Place);
-    let basis = law.field(place, Field::Basis, Ty::Amount);
+    let basis = law.field(place, Field::Basis, Ty::AMOUNT);
     let law = f.law(law.count(basis, tally));
     let rule = f.rule(law, Subject::Entity(f.me));
     f.on_in.push((checking, rule));
     let mut unit = LawBuilder::new(only_shares, Trigger::In);
-    let (amount, shares) = (unit.var(Var::Amount, Ty::Amount), unit.konst(Value::Unit(vti), Ty::Unit));
+    let (amount, shares) = (unit.var(Var::Amount, Ty::AMOUNT), unit.konst(Value::Unit(vti), Ty::Unit));
     let unit_of = unit.field(amount, Field::Unit, Ty::Unit);
     let cond = unit.bin(BinOp::Eq, unit_of, shares, Ty::Bool);
     let unit = f.law(unit.require(cond, None));
@@ -1490,7 +1490,7 @@ fn a_million_flows() {
         if laws {
             let (bank, budget, wages) = (f.sym("bank"), f.sym("budget"), f.sym("wages"));
             let mut never_overdrawn = LawBuilder::new(bank, Trigger::Always);
-            let balance = never_overdrawn.var(Var::Balance, Ty::Amount);
+            let balance = never_overdrawn.var(Var::Balance, Ty::AMOUNT);
             let nothing = never_overdrawn.konst(Value::Empty, Ty::Empty);
             let cond = never_overdrawn.bin(BinOp::Ge, balance, nothing, Ty::Bool);
             let law = f.law(never_overdrawn.warn(cond));
@@ -1499,15 +1499,15 @@ fn a_million_flows() {
 
             let cap = f.usd(1_000_000_00);
             let mut monthly = LawBuilder::new(budget, Trigger::In);
-            let total = monthly.call(Func::Total(Dir::In, Window::Month), &[], Ty::Amount);
-            let cap = monthly.konst(Value::Amount(cap), Ty::Amount);
+            let total = monthly.call(Func::Total(Dir::In, Window::Month), &[], Ty::AMOUNT);
+            let cap = monthly.konst(Value::Amount(cap), Ty::AMOUNT);
             let cond = monthly.bin(BinOp::Le, total, cap, Ty::Bool);
             let law = f.law(monthly.warn(cond));
             let rule = f.rule(law, Subject::Place(food));
             f.on_in.push((food, rule));
 
             let mut count = LawBuilder::new(wages, Trigger::In);
-            let amount = count.var(Var::Amount, Ty::Amount);
+            let amount = count.var(Var::Amount, Ty::AMOUNT);
             let law = f.law(count.count(amount, wages));
             let rule = f.rule(law, Subject::Entity(f.me));
             f.on_in.push((checking, rule));

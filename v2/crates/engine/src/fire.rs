@@ -11,7 +11,7 @@
 //! crossed the line (or, for a window that value recognized ahead of time
 //! broke by itself, as the window opens), and its diagnostic is built only then.
 
-use axiom_core::{Day, Days, Diagnostic, Id, Map, Set, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Map, Set, Severity, Sym};
 use axiom_model::{
     Amount, Book, Cap, Dir, Entity, Fault, Func, Law, NodeId, Op, Rule, StepKind, Subject, Trigger, Window,
 };
@@ -62,7 +62,7 @@ impl Reads {
 /// What the `require` or `warn` at `step` reads, and whether it only warns.
 fn require(law: &Law, step: u32) -> (Option<Reads>, bool) {
     match law.steps[step as usize].kind {
-        StepKind::Require { cond, warn, .. } => (Reads::of(law, cond), warn),
+        StepKind::Require { cond, severity, .. } => (Reads::of(law, cond), severity == Severity::Warning),
         _ => (None, false),
     }
 }
