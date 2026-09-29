@@ -26,6 +26,7 @@ use crate::fire::Reads;
 use crate::lots::Candidate;
 use crate::motion::Motion;
 use crate::show;
+use crate::totals::has;
 use crate::{Cause, Effect, Owed, Parcel};
 
 /// The most flows an assertion's explanation draws.
@@ -87,7 +88,9 @@ impl Frame<'_, '_> {
             (Trigger::Gain, Some(r)) => {
                 format!("a gain of {} on {}", self.money(Amount::new(r.gain, book.base)), self.money(moving))
             }
-            (Trigger::Spend, _) => format!("{} of restricted money leaving {from}", self.money(moving)),
+            (Trigger::Spend, _) => {
+                format!("{} of restricted money leaving {from}", self.money(moving))
+            }
             _ => format!("{} from {from} to {to}", self.money(motion.out)),
         };
         (motion.loc, format!("this flow: {what}"))
@@ -142,18 +145,12 @@ impl Frame<'_, '_> {
         let window = reads.window(ctx);
         let mut found: Vec<Id<Flow>> = match reads {
             Reads::Tally(name) => {
-                let counted = |e: &&Effect| {
-                    e.owner == ctx.owner && e.name == name && window.from <= e.day && e.day <= window.until
-                };
-                self.effects
-                    .iter()
-                    .rev()
-                    .filter(counted)
-                    .filter_map(|e| match e.cause {
-                        Cause::Flow(id) if id != current => Some(id),
-                        _ => None,
-                    })
-                    .collect()
+                let of_name = self.effects.iter().rev().filter(|e| e.owner == ctx.owner && e.name == name);
+                let counted = of_name.filter(|e| has(window, e.day)).filter_map(|e| match e.cause {
+                    Cause::Flow(id) if id != current => Some(id),
+                    _ => None,
+                });
+                counted.take(3).collect()
             }
             Reads::Total(dir, _) => {
                 let Subject::Place(place) = ctx.subject else { return Vec::new() };
@@ -167,12 +164,19 @@ impl Frame<'_, '_> {
                     let flow = &book.flows[id];
                     crosses(flow) && flow.recognized.until >= window.from && flow.recognized.from <= window.until
                 });
-                moves.copied().collect()
+                moves.copied().take(3).collect()
             }
         };
-        found.truncate(3);
         found.reverse();
         found
+    }
+
+    /// The flow that fired the law, the flows that built what its condition
+    /// counted (when it reads a total or tally), and the values it compared.
+    fn locate(&self, d: Diagnostic, cond: NodeId, reads: Option<Reads>) -> Diagnostic {
+        let (loc, text) = self.cause_label();
+        let d = self.contributions(d.label(loc, text), reads);
+        self.operands(cond).into_iter().fold(d, |d, (loc, value)| d.context(loc, value))
     }
 
     /// The flows that built the count, as labels.
@@ -222,21 +226,9 @@ pub(crate) fn broken(f: &Frame, step: usize, warn: bool, waiver: Option<Waiver>)
         }),
     };
     let severity = if warn { Severity::Warning } else { Severity::Error };
-    let mut d = Diagnostic::new(severity, f.book.name(f.law.name).to_owned(), headline);
-    let (loc, text) = f.cause_label();
-    d = f.contributions(d.label(loc, text), reads);
-    for (loc, value) in f.operands(cond) {
-        d = d.context(loc, value);
-    }
-    if let Some(what) = what.filter(|_| message.is_some() || bound.is_some()) {
-        d = d.note(what);
-    }
-    if let Some(help) = suggestion(f, step, cond) {
-        d = d.help(help);
-    }
-    if let Some(fix) = fix {
-        d = d.help(fix);
-    }
+    let d = f.locate(Diagnostic::new(severity, f.book.name(f.law.name).to_owned(), headline), cond, reads);
+    let d = what.filter(|_| message.is_some() || bound.is_some()).into_iter().fold(d, Diagnostic::note);
+    let d = [suggestion(f, step, cond), fix].into_iter().flatten().fold(d, Diagnostic::help);
     accepted(d, f, waiver)
 }
 
@@ -244,7 +236,9 @@ pub(crate) fn broken(f: &Frame, step: usize, warn: bool, waiver: Option<Waiver>)
 fn fact(f: &Frame, bound: &Bound, reads: Option<Reads>) -> String {
     let window = reads.map(|reads| reads.window(f.ctx).from);
     let when = match (reads, window) {
-        (Some(Reads::Total(_, Window::Month)), Some(from)) => format!(" in {}-{:02}", from.year(), from.ymd().1),
+        (Some(Reads::Total(_, Window::Month)), Some(from)) => {
+            format!(" in {}-{:02}", from.year(), from.ymd().1)
+        }
         (Some(Reads::Total(_, Window::Ever)), _) => " in total".to_owned(),
         (Some(_), Some(from)) => format!(" in {}", from.year()),
         _ => String::new(),
@@ -282,16 +276,9 @@ pub(crate) fn priced(
     let StepKind::Require { cond, .. } = f.law.steps[step].kind else { unreachable!("only a require prices") };
     let who = f.book.name(f.book.entities[owed.to].path);
     let headline = format!("{} owed to {who} by {}: {}", f.money(amount), owed.due, f.book.name(name));
-    let mut d = Diagnostic::info(f.book.name(f.law.name).to_owned(), headline).disposed(Disposition::Priced);
-    let (loc, text) = f.cause_label();
-    d = d.label(loc, text);
-    for (loc, value) in f.operands(cond) {
-        d = d.context(loc, value);
-    }
+    let d = Diagnostic::info(f.book.name(f.law.name).to_owned(), headline).disposed(Disposition::Priced);
     let (what, fix) = f.doc();
-    if let Some(what) = what {
-        d = d.note(what);
-    }
+    let d = what.into_iter().fold(f.locate(d, cond, None), Diagnostic::note);
     match waive {
         Some(waive) => accepted(d, f, Some(Waiver::Marked(waive))),
         None => match fix {
@@ -344,30 +331,22 @@ fn suggestion(f: &Frame, step: usize, cond: NodeId) -> Option<String> {
     let show = |qty: Qty| f.money(Amount::new(qty, bound.limit.unit));
     // How far the counted side is beyond the bound, or short of it.
     let off = bound.off.qty;
-    Some(match (moves, bound.upper) {
-        (Moves::Flow, true) if flow > off => format!("lower this flow to at most {}", show(flow - off)),
-        (Moves::Flow, true) => "no amount of this flow satisfies it".to_owned(),
-        (Moves::Flow, false) => format!("this flow must be at least {}", show(flow + off)),
-        (Moves::Total(dir, window), true) if flow > off => {
-            format!("at most {} more can {} {}", show(flow - off), verb(dir), span(window))
+    // What the counted side is a running sum of, in the words of the advice.
+    let of = match moves {
+        Moves::Flow => {
+            return Some(match (bound.upper, flow > off) {
+                (true, true) => format!("lower this flow to at most {}", show(flow - off)),
+                (true, false) => "no amount of this flow satisfies it".to_owned(),
+                (false, _) => format!("this flow must be at least {}", show(flow + off)),
+            });
         }
-        (Moves::Total(dir, window), true) => {
-            format!("nothing more can {} {}: it is already {} over", verb(dir), span(window), show(off - flow))
-        }
-        (Moves::Total(dir, window), false) => {
-            format!("at least {} more must {} {}", show(off), verb(dir), span(window))
-        }
-        (Moves::Tally(name), true) if flow > off => {
-            format!("at most {} more can count toward `{}` this year", show(flow - off), f.book.name(name))
-        }
-        (Moves::Tally(name), true) => format!(
-            "nothing more can count toward `{}` this year: it is already {} over",
-            f.book.name(name),
-            show(off - flow)
-        ),
-        (Moves::Tally(name), false) => {
-            format!("at least {} more must count toward `{}` this year", show(off), f.book.name(name))
-        }
+        Moves::Total(dir, window) => format!("{} {}", if dir == Dir::In { "go in" } else { "come out" }, span(window)),
+        Moves::Tally(name) => format!("count toward `{}` this year", f.book.name(name)),
+    };
+    Some(match (bound.upper, flow > off) {
+        (true, true) => format!("at most {} more can {of}", show(flow - off)),
+        (true, false) => format!("nothing more can {of}: it is already {} over", show(off - flow)),
+        (false, _) => format!("at least {} more must {of}", show(off)),
     })
 }
 
@@ -398,13 +377,6 @@ fn follows_flow(f: &Frame, step: usize, lhs: NodeId) -> Option<Moves> {
             f.law.steps[..step].iter().any(|s| counts_amount(&s.kind)).then_some(Moves::Tally(*name))
         }
         _ => None,
-    }
-}
-
-fn verb(dir: Dir) -> &'static str {
-    match dir {
-        Dir::In => "go in",
-        Dir::Out => "come out",
     }
 }
 

@@ -12,9 +12,9 @@
 
 use std::mem::discriminant;
 
-use axiom_core::{Day, Id, Sym};
+use axiom_core::{Day, Diagnostic, Id, Sym};
 use axiom_model::{
-    Amount, Book, Dir, Entity, Fault, Func, Law, NodeId, Op, Period, Recognition, Rule, StepKind, Trigger, Window,
+    Amount, Book, Dir, Entity, Fault, Func, Law, NodeId, Op, Recognition, Rule, StepKind, Trigger, Window,
 };
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
@@ -59,17 +59,12 @@ impl Reads {
     }
 }
 
-/// What each `require` and `warn` step reads, found once from the law's nodes.
-pub(crate) fn reads(book: &Book) -> Vec<((Id<Law>, u32), Reads)> {
-    let mut found = Vec::new();
-    for (id, law) in book.laws.iter() {
-        for (step, kind) in law.steps.iter().enumerate() {
-            if let StepKind::Require { cond, .. } = kind.kind {
-                found.extend(Reads::of(law, cond).map(|read| ((id, step as u32), read)));
-            }
-        }
+/// What the `require` or `warn` at `step` reads, and whether it only warns.
+fn require(law: &Law, step: u32) -> (Option<Reads>, bool) {
+    match law.steps[step as usize].kind {
+        StepKind::Require { cond, warn, .. } => (Reads::of(law, cond), warn),
+        _ => (None, false),
     }
-    found
 }
 
 /// Whether the rule is in force for some day of the occasion.
@@ -103,34 +98,12 @@ impl<'b, 's> Ledger<'b, 's> {
         })
     }
 
-    /// Closes the periods that end on `day`: `each month` always, `each year`
-    /// on December 31.
-    pub(crate) fn close_period(&mut self, day: Day) {
-        let book = self.book;
-        for rule in &book.rules.timed {
-            let period = match book.laws[rule.law].trigger {
-                Trigger::Each(Period::Month, _) => Recognition { from: day.month_start(), until: day },
-                Trigger::Each(Period::Year, None) if day == day.year_end() => {
-                    Recognition { from: day.year_start(), until: day }
-                }
-                _ => continue,
-            };
-            self.run_timed(rule, Occasion::time(day, period));
-        }
-    }
-
-    /// Fires one `by` law whose date the journal has reached, or closes a year
-    /// for an `each year closing` law.
+    /// Fires one `by` law whose date the journal has reached, or closes a
+    /// month or year for an `each` law, if its rule was in force then.
     pub(crate) fn deadline(&mut self, at: usize) {
         let due = self.solved.deadlines[at];
-        self.run_timed(&self.book.rules.timed[due.rule], Occasion::time(due.day, due.period));
-    }
-
-    /// A period's law runs when its rule was in force for some day of the period.
-    fn run_timed(&mut self, rule: &Rule, on: Occasion) {
-        if applies(self.book, rule, &on) {
-            self.enforce(rule, &Context::new(rule.subject, owner_of(self.book, rule.subject), &on));
-        }
+        let rule = &self.book.rules.timed[due.rule];
+        self.fire(std::slice::from_ref(rule), Occasion::time(due.day, due.period));
     }
 
     pub(crate) fn evaluate(&mut self, law: Id<Law>, ctx: &Context) -> bool {
@@ -199,8 +172,7 @@ impl<'b, 's> Ledger<'b, 's> {
                 return;
             }
         }
-        let warn = matches!(self.book.laws[rule.law].steps[step as usize].kind, StepKind::Require { warn: true, .. });
-        let reads = self.solved.reads.get(&(rule.law, step)).copied();
+        let (reads, warn) = require(&self.book.laws[rule.law], step);
         let window = reads.map_or(Recognition::on(ctx.anchor()), |reads| reads.window(ctx));
         let headroom = Headroom {
             law: rule.law,
@@ -238,9 +210,9 @@ impl<'b, 's> Ledger<'b, 's> {
     fn violate(&mut self, rule: &Rule, ctx: &Context, step: u32, warn: bool) {
         let (book, law) = (self.book, &self.book.laws[rule.law]);
         let waiver = self.waiver(ctx);
-        let fresh = match (law.trigger, self.solved.window(rule.law, step, ctx)) {
+        let fresh = match (law.trigger, require(law, step).0) {
             (Trigger::Always, _) => self.record.failing.insert((rule.law, rule.subject)),
-            (_, Some(window)) => self.record.reported.insert((rule.law, step, rule.subject, window.from)),
+            (_, Some(reads)) => self.record.reported.insert((rule.law, step, rule.subject, reads.window(ctx).from)),
             _ => true,
         };
         if !fresh {
@@ -248,19 +220,15 @@ impl<'b, 's> Ledger<'b, 's> {
         }
         let frame = Frame { book, law, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::broken(&frame, step as usize, warn, waiver);
+        self.violation(rule, ctx, diagnostic, (warn, waiver.is_some(), false));
+    }
+
+    /// Records a violation with its diagnostic.
+    fn violation(&mut self, rule: &Rule, ctx: &Context, diagnostic: Diagnostic, kind: (bool, bool, bool)) {
+        let (warn, waived, priced) = kind;
         let diagnostic = self.record.report(diagnostic);
-        let (day, subject) = (ctx.day, rule.subject);
-        let violation = Violation {
-            law: rule.law,
-            subject,
-            day,
-            cause: ctx.cause,
-            warn,
-            waived: waiver.is_some(),
-            priced: false,
-            diagnostic,
-        };
-        self.record.violations.push(violation);
+        let (law, subject, day, cause) = (rule.law, rule.subject, ctx.day, ctx.cause);
+        self.record.violations.push(Violation { law, subject, day, cause, warn, waived, priced, diagnostic });
     }
 
     /// A `require … else owe …` that does not hold costs what the law says,
@@ -273,19 +241,7 @@ impl<'b, 's> Ledger<'b, 's> {
         }
         let frame = Frame { book, law, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::priced(&frame, step as usize, (name, amount, owed), waive);
-        let diagnostic = self.record.report(diagnostic);
-        let (day, subject) = (ctx.day, rule.subject);
-        let violation = Violation {
-            law: rule.law,
-            subject,
-            day,
-            cause: ctx.cause,
-            warn: false,
-            waived: waive.is_some(),
-            priced: true,
-            diagnostic,
-        };
-        self.record.violations.push(violation);
+        self.violation(rule, ctx, diagnostic, (false, waive.is_some(), true));
         if waive.is_none() {
             let effect =
                 Effect { owe: Some(owed), priced: true, ..self.effect(rule, ctx, ctx.over.from, name, amount) };
@@ -299,13 +255,8 @@ impl<'b, 's> Ledger<'b, 's> {
         if !self.record.faulted.insert((rule.law, step as u32, discriminant(&fault))) {
             return;
         }
-        let frame = Frame {
-            book: self.book,
-            law: &self.book.laws[rule.law],
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-        };
+        let (book, law) = (self.book, &self.book.laws[rule.law]);
+        let frame = Frame { book, law, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::faulted(&frame, step, fault);
         self.record.report(diagnostic);
     }

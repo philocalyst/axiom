@@ -13,11 +13,10 @@
 //! timeline is cursors into the book's own tables.
 
 use axiom_core::{Day, Diagnostic, Id, Map, Qty};
-use axiom_model::{Book, Commodity, End, Flow, Infer, Law, Place, Recognition, Trigger};
+use axiom_model::{Book, Commodity, End, Flow, Infer, Place};
 
-use crate::eval::{Env, Occasion};
+use crate::eval::Env;
 use crate::events::{self, Events};
-use crate::fire::{self, Reads};
 use crate::motion::{Amounts, Motion};
 use crate::scope::{display, is_money};
 use crate::state::{Record, Scratch, World};
@@ -41,10 +40,6 @@ pub struct Ledger<'b, 's> {
 pub(crate) struct Solved {
     pub events: Events,
     pub deadlines: Vec<Deadline>,
-    /// Periods and deadlines fire up to here.
-    pub horizon: Day,
-    /// What each `require` and `warn` reads, which decides its window.
-    pub reads: Map<(Id<Law>, u32), Reads>,
     /// The first day of each place and commodity whose balance depends on an
     /// amount that could not be solved, and the flow to blame.
     pub unsolved: Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>,
@@ -52,12 +47,7 @@ pub(crate) struct Solved {
 
 impl Solved {
     pub fn sources<'a>(&'a self, book: &'a Book<'a>) -> Sources<'a> {
-        Sources { book, events: &self.events, deadlines: &self.deadlines, horizon: self.horizon }
-    }
-
-    /// The window a step's limit lives in on this occasion, if it reads one.
-    pub fn window(&self, law: Id<Law>, step: u32, on: &Occasion) -> Option<Recognition> {
-        self.reads.get(&(law, step)).map(|reads| reads.window(on))
+        Sources { book, events: &self.events, deadlines: &self.deadlines }
     }
 }
 
@@ -90,10 +80,8 @@ impl<'b, 's> Ledger<'b, 's> {
         for (key, first) in unsolved {
             blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
-        let solved =
-            Solved { events, deadlines, horizon, reads: fire::reads(book).into_iter().collect(), unsolved: blocked };
-        let periodic = book.rules.timed.iter().any(|rule| matches!(book.laws[rule.law].trigger, Trigger::Each(..)));
-        let timeline = Timeline::new(&solved.sources(book), start.filter(|_| periodic));
+        let solved = Solved { events, deadlines, unsolved: blocked };
+        let timeline = Timeline::new(&solved.sources(book));
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
         Ledger {
             book,
@@ -237,7 +225,6 @@ impl<'b, 's> Ledger<'b, 's> {
                 self.post(&if returned { motion.reversed() } else { motion });
             }
             Fact::Assert(index) => self.reconcile(index as usize),
-            Fact::Period => self.close_period(moment.day),
             Fact::Deadline(at) => self.deadline(at as usize),
         }
     }
