@@ -73,19 +73,25 @@ impl<'s> World<'s> {
 
     /// `number` of the commodity `unit`, in its quanta.
     pub fn amount(&self, number: Dec, unit: Id<Commodity>, loc: Loc) -> Result<Amount, Diagnostic> {
+        let scale = self.book.commodities[unit].scale;
+        let quantity = number.to_qty(scale);
+        quantity.map(|qty| Amount::new(qty, unit)).map_err(|error| self.not_an_amount(error, number, unit, loc))
+    }
+
+    /// Why a written number is not an amount of `unit`.
+    fn not_an_amount(&self, error: DecError, number: Dec, unit: Id<Commodity>, loc: Loc) -> Diagnostic {
         let commodity = &self.book.commodities[unit];
         let (scale, symbol) = (commodity.scale, self.book.name(commodity.symbol));
-        match number.to_qty(scale) {
-            Ok(qty) => Ok(Amount::new(qty, unit)),
-            Err(DecError::Inexact) => Err(Diagnostic::error(
+        match error {
+            DecError::Inexact => Diagnostic::error(
                 "amount-precision",
                 format!("{} has more decimals than {symbol} allows", written(number, symbol)),
             )
             .label(loc, format!("{symbol} counts {scale} decimal places"))
-            .help(format!("round it, or declare `commodity {symbol}` with `precision {}`", number.places()))),
-            Err(DecError::Range) => Err(Diagnostic::error("amount-range", "this amount is too large to count exactly")
+            .help(format!("round it, or declare `commodity {symbol}` with `precision {}`", number.places())),
+            DecError::Range => Diagnostic::error("amount-range", "this amount is too large to count exactly")
                 .label(loc, "beyond 100,000,000,000,000,000 quanta")
-                .help("a single amount stays below that; use a coarser unit")),
+                .help("a single amount stays below that; use a coarser unit"),
         }
     }
 

@@ -107,6 +107,8 @@ struct Declared<'a, 's> {
 struct Facts<'s> {
     units: Vec<Seen<'s>>,
     unit_at: Map<&'s str, usize>,
+    /// The commodity written last, since amounts repeat their commodity.
+    last_unit: Option<(&'s str, usize)>,
     paths: Vec<&'s str>,
     path_seen: Set<&'s str>,
     texts: Vec<&'s str>,
@@ -288,16 +290,23 @@ impl<'s> Facts<'s> {
     /// `first` is where `symbol` is written here: the earliest is kept.
     fn unit(&mut self, symbol: &'s str, places: u8, first: Loc, journal: bool) {
         let seen = Seen { symbol, places, first, journal };
-        match self.unit_at.get(symbol) {
-            Some(&at) => {
+        let known = match self.last_unit {
+            Some((last, at)) if last == symbol => Some(at),
+            _ => self.unit_at.get(symbol).copied(),
+        };
+        let at = match known {
+            Some(at) => {
                 let earlier = &mut self.units[at];
                 earlier.absorb(&seen, first.start < earlier.first.start);
+                at
             }
             None => {
                 self.unit_at.insert(symbol, self.units.len());
                 self.units.push(seen);
+                self.units.len() - 1
             }
-        }
+        };
+        self.last_unit = Some((symbol, at));
     }
 
     fn amount(&mut self, file: &File<'s>, amount: Amount<'s>, journal: bool) {

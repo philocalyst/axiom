@@ -101,20 +101,27 @@ impl<'s> Doc<'s> {
     }
 }
 
+/// The blanks that may separate a number from its commodity.
+fn is_blank(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t')
+}
+
 impl<'s> Amount<'s> {
     /// The written number, sign included. The parser has validated it, so this
     /// cannot fail; `empty` is zero.
     pub fn num(self) -> Dec {
-        let number = self.split([' ', '\t']).next().unwrap_or_default();
-        match number.strip_prefix('-') {
-            Some(unsigned) => Dec::parse(unsigned.as_bytes()).unwrap_or_default().neg(),
-            None => Dec::parse(number.as_bytes()).unwrap_or_default(),
-        }
+        let (negative, text) = match self.0.strip_prefix('-') {
+            Some(unsigned) => (true, unsigned),
+            None => (false, self.0),
+        };
+        let number = text.bytes().position(is_blank).map_or(text, |end| &text[..end]);
+        let dec = Dec::parse(number.as_bytes()).unwrap_or_default();
+        if negative { dec.neg() } else { dec }
     }
 
     /// The commodity, or `None` for `empty`, the zero of every commodity.
     pub fn unit(self) -> Option<Name<'s>> {
-        self.0.rsplit_once([' ', '\t']).map(|(_, unit)| Name(unit))
+        self.0.bytes().rposition(is_blank).map(|blank| Name(&self.0[blank + 1..]))
     }
 }
 

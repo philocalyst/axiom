@@ -293,10 +293,33 @@ pub enum DecError {
 impl Dec {
     pub const ZERO: Dec = Dec { mantissa: 0, scale: 0 };
 
-    /// Parses `digits[.digits]`, ignoring `_` separators. Eight-digit runs are
-    /// folded in one SWAR step; everything else goes a digit at a time. `None`
-    /// for anything else, or for more digits than a mantissa holds.
+    /// Parses `digits[.digits]`, ignoring `_` separators. `None` for anything
+    /// else, or for more digits than a mantissa holds.
     pub fn parse(text: &[u8]) -> Option<Dec> {
+        Dec::plain(text).or_else(|| Dec::separated(text))
+    }
+
+    /// The commonest numbers, a few digits and perhaps a point (`84.20`), read
+    /// directly: eighteen bytes cannot overflow, so nothing is checked.
+    fn plain(text: &[u8]) -> Option<Dec> {
+        if text.len() > 18 {
+            return None;
+        }
+        let (mut mantissa, mut point) = (0i64, None);
+        for (at, &b) in text.iter().enumerate() {
+            match b {
+                b'0'..=b'9' => mantissa = mantissa * 10 + (b - b'0') as i64,
+                b'.' if point.is_none() && at > 0 && at + 1 < text.len() => point = Some(at),
+                _ => return None,
+            }
+        }
+        Some(Dec { mantissa, scale: point.map_or(0, |at| (text.len() - at - 1) as u8) })
+    }
+
+    /// Any number: `_` separators, long runs, and everything that is not one.
+    /// Eight-digit runs are folded in one SWAR step; the rest goes a digit at a
+    /// time, checking for overflow.
+    fn separated(text: &[u8]) -> Option<Dec> {
         let (mut mantissa, mut scale, mut seen, mut dot) = (0i64, 0u8, false, false);
         let mut rest = text;
         while let Some((&b, tail)) = rest.split_first() {
@@ -342,6 +365,11 @@ impl Dec {
 
     /// This value in quanta of a commodity with `scale` decimal places.
     pub fn to_qty(self, scale: u8) -> Result<Qty, DecError> {
+        // Amounts are nearly always written to the commodity's own precision.
+        if scale == self.scale {
+            let fits = self.mantissa.unsigned_abs() <= Qty::LIMIT as u64;
+            return if fits { Ok(Qty(self.mantissa)) } else { Err(DecError::Range) };
+        }
         let mantissa = self.mantissa as i128;
         let value = if scale >= self.scale {
             let p = POW10.get((scale - self.scale) as usize).ok_or(DecError::Range)?;
