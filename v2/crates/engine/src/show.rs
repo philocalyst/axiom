@@ -37,6 +37,14 @@ pub(crate) fn subject<'a>(book: &Book<'a>, subject: Subject) -> &'a str {
     }
 }
 
+/// A subject as a sortable key: places, then entities, each by id.
+pub(crate) fn subject_key(subject: Subject) -> (u8, usize) {
+    match subject {
+        Subject::Place(place) => (0, place.index()),
+        Subject::Entity(entity) => (1, entity.index()),
+    }
+}
+
 /// Why a value could not be computed, and the fix. `day` is the day the law
 /// was evaluated for, which the missing-price message names.
 pub(crate) fn fault(book: &Book, fault: Fault, day: Day) -> (String, Option<String>) {

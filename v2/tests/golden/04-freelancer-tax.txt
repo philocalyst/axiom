@@ -4,37 +4,38 @@ Counted
   Tally                       Amount  From
   ─────────────────────────────────────────────────────────
   project
-    business-expenses  13,742.54 USD  166 sources
+    business-expenses  13,531.00 USD  166 sources
     health-premiums     4,944.00 USD  12 sources
     gross-receipts     74,800.00 USD  27 sources
     distributions         385.35 USD  journal/2025/03.ax:42
     sep-contributions   6,000.00 USD  3 sources
-    net-profit         61,057.46 USD  period end
-    se-tax              8,627.14 USD  period end
-    se-deduction        4,313.57 USD  period end
+    net-profit         61,269.00 USD  period end
+    se-tax              8,657.04 USD  period end
+    se-deduction        4,328.52 USD  period end
     sep-deduction       6,000.00 USD  period end
-    qbi-deduction       6,145.07 USD  period end
+    qbi-deduction       6,184.39 USD  period end
   ─────────────────────────────────────────────────────────
   us
     interest              290.12 USD  12 sources
-    agi                40,330.29 USD  14 sources
+    agi                40,487.56 USD  14 sources
     federal-withheld        0.00 USD  4 sources
-    taxable-income     24,580.29 USD  period end
-    income-tax          2,711.13 USD  period end
+    taxable-income     24,737.56 USD  period end
+    income-tax          2,730.01 USD  period end
 
 Owed
-  Owed                        To   Due               Amount  From
-  ────────────────────────────────────────────────────────────────────────────────
+  Owed                                  To   Due               Amount  From
+  ──────────────────────────────────────────────────────────────────────────────────────────
   project
-    early-withdrawal-penalty  irs  2025-03-31     38.54 USD  journal/2025/03.ax:42
-    self-employment-tax       irs  2026-04-15  1,427.14 USD  period end
-  ────────────────────────────────────────────────────────────────────────────────
-    Total project                              1,465.68 USD
-  ────────────────────────────────────────────────────────────────────────────────
+    early-withdrawal-penalty (penalty)  irs  2025-03-31     38.54 USD  journal/2025/03.ax:42
+    self-employment-tax                 irs  2026-04-15  1,457.04 USD  period end
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    Total project                                        1,495.58 USD
+  ──────────────────────────────────────────────────────────────────────────────────────────
   us
-    federal-income-tax        irs  2026-04-15  2,711.13 USD  period end
-  ────────────────────────────────────────────────────────────────────────────────
-    Total us                                   2,711.13 USD
-  ────────────────────────────────────────────────────────────────────────────────
-  Total owed                                   4,176.81 USD
+    federal-income-tax                  irs  2026-04-15  2,730.01 USD  period end
+  ──────────────────────────────────────────────────────────────────────────────────────────
+    Total us                                             2,730.01 USD
+  ──────────────────────────────────────────────────────────────────────────────────────────
+  Total owed                                             4,225.59 USD
   · Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.
+  · A penalty is the price of a violated law: it is owed instead of the law failing.

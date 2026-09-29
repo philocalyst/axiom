@@ -1,21 +1,4 @@
-warning[law]: law `budget` does not hold for expenses/business/software
-    ╭─[journal/2025/02.ax:21:1]
-    │
- 21 │ 2025-02-12..2026-02-11 business-card -> software 119.88 USD / dropbox
-    │ ──────────────────────────────────┬──────────────────────────────────
-    │                                   ╰── this flow: 119.88 USD into expenses/business/software
-    │
-    ├─[accounts.ax:110:3]
-    │
-109 │ account expenses/business/software
-110 │   budget 130 USD monthly
-    │   ───────────┬──────────
-    │              ╰── 197.07 USD
-    │
-    = note: also at journal/2025/02.ax:27, journal/2025/02.ax:35
-    = help: at most 52.81 USD more can go in this month
-
-warning[law]: law `budget` does not hold for expenses/food
+warning[budget]: expenses/food: 572.85 USD in 2025-04 against a limit of 550.00 USD, over by 22.85 USD
     ╭─[journal/2025/04.ax:37:1]
     │
  37 │ 2025-04-27 personal-checking -> groceries 127.58 USD / trader-joes
@@ -29,10 +12,25 @@ warning[law]: law `budget` does not hold for expenses/food
     │   ───────────┬──────────
     │              ╰── 572.85 USD
     │
-    = note: also at journal/2025/09.ax:36
     = help: at most 104.73 USD more can go in this month
 
-warning[law]: estimated tax: second installment short
+warning[budget]: expenses/food: 552.97 USD in 2025-09 against a limit of 550.00 USD, over by 2.97 USD
+    ╭─[journal/2025/09.ax:36:1]
+    │
+ 36 │ 2025-09-27 personal-checking -> groceries 120.15 USD / trader-joes
+    │ ─────────────────────────────────┬────────────────────────────────
+    │                                  ╰── this flow: 120.15 USD into expenses/food/groceries
+    │
+    ├─[accounts.ax:165:3]
+    │
+164 │ account expenses/food
+165 │   budget 550 USD monthly
+    │   ───────────┬──────────
+    │              ╰── 552.97 USD
+    │
+    = help: at most 117.18 USD more can go in this month
+
+warning[estimate-2-2025]: estimated tax: second installment short: 2,400.00 USD in 2025 against a minimum of 4,600.00 USD, short by 2,200.00 USD
    ╭─[tax.ax:62:1]
    │
 62 │ law estimate-2-2025
@@ -40,15 +38,13 @@ warning[law]: estimated tax: second installment short
    │          ╰── checked for me on 2025-06-16
 63 │   by 2025-06-16
 64 │   warn tally(federal-withheld) >= prior-year-tax[2025] * 50% "estimated tax: second installme…
-   │        ───────────┬──────────────┬──────────┬──┬────────────
-   │                   │              │          │  ╰── 4,600.00 USD
-   │                   │              │          ╰── 9,200.00 USD
-   │                   │              ╰── false
+   │        ───────────┬───────────    ─────────────┬────────────
+   │                   │                            ╰── 4,600.00 USD
    │                   ╰── 2,400.00 USD
    │
    = note: Second installment. June 15 2025 fell on a Sunday, so it was due Monday the 16th.
 
-warning[law]: estimated tax: fourth installment short
+warning[estimate-4-2025]: estimated tax: fourth installment short: 2,400.00 USD in 2026 against a minimum of 9,200.00 USD, short by 6,800.00 USD
    ╭─[tax.ax:72:1]
    │
 72 │ law estimate-4-2025
@@ -56,13 +52,27 @@ warning[law]: estimated tax: fourth installment short
    │          ╰── checked for me on 2026-01-15
 73 │   by 2026-01-15
 74 │   warn tally(federal-withheld) >= prior-year-tax[2025] * 100% "estimated tax: fourth installm…
-   │        ───────────┬───────────────┬─────────┬──┬─────────────
-   │                   │               │         │  ╰── 9,200.00 USD
-   │                   │               │         ╰── 9,200.00 USD
-   │                   │               ╰── false
+   │        ───────────┬───────────    ─────────────┬─────────────
+   │                   │                            ╰── 9,200.00 USD
    │                   ╰── 2,400.00 USD
    │
    = note: Fourth installment, due January 15 2026.
 
-7 warnings
+note[early-withdrawal]: 38.54 USD owed to irs as early-withdrawal-penalty, due 2025-03-31
+   ╭─[journal/2025/03.ax:42:1]
+   │
+42 │ 2025-03-31 sep -> growth 385.35 USD
+   │ ─────────────────┬─────────────────
+   │                  ╰── this flow: a gain of 385.35 USD on 385.35 USD
+   │
+   ├─[accounts.ax:49:13]
+   │
+49 │     require owner.age >= 59y6m else owe 10% * gain to irs as early-withdrawal-penalty "SEP-I…
+   │             ────┬────
+   │                 ╰── 35y6m28d
+   │
+   = note: Money taken out before age 59½ owes an extra 10% (IRC §72(t)).
+   = help: if an exception applies, keep the flow and mark it `!` with the reason
+
+4 warnings · 1 priced
 ✓ 403 flows · 41 places · 21 laws enforced · net worth 64,421.58 USD

@@ -889,36 +889,19 @@ fn gains_are_listed_as_form_8949_does_with_short_and_long_subtotals() {
 // ─── Limits and budgets ─────────────────────────────────────────────────────
 
 #[test]
-fn budget_falls_back_to_the_flows_when_the_run_recorded_no_headroom() {
-    let house = household();
-    // February: 120 on the card into groceries, against 500.
-    let expected = "\
-# Budgets for 2026-02
-##
-expenses/food | budget | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%
-";
-    assert_eq!(table(&house, Query::Budget { at: Some(day(2026, 2, 10)), by: Period::Month }), expected);
-    // Groceries in March: nothing yet.
-    assert!(
-        table(&house, Query::Budget { at: None, by: Period::Month })
-            .contains("0.00 USD | 500.00 USD | 500.00 USD | 0%")
-    );
-}
-
-#[test]
 fn limits_rank_every_cap_by_how_much_of_it_is_used() {
     let house = household().with_headroom();
     let report = house.report(Query::Limits { year: Some(2026) });
-    // Over its limit first; then by share used; the floor, which has none, last.
-    // The food budget shows its latest window.
+    // Over its limit first, then by share used. The food budget is in its
+    // current window, March, where nothing has been spent yet; the overdraft
+    // floor of nothing is an invariant, not a limit, and is left out.
     assert_eq!(
         lines(&report.sections[0]),
         [
             "!me | budget on expenses/insurance | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%",
-            "me | budget on expenses/food | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%",
             "me | deferral-limit on assets/retirement | 2026 | 2,400.00 USD | 24,000.00 USD | 21,600.00 USD | 10%",
             "jordan | deferral-limit on assets/bank/jordan-checking | 2026 | 900.00 USD | 18,000.00 USD | 17,100.00 USD | 5%",
-            "me | overdraft on assets/bank/checking | on 2026-03-31 | 8,955.80 USD | floor 0.00 USD | 8,955.80 USD |",
+            "me | budget on expenses/food | 2026-03 | 0.00 USD | 500.00 USD | 500.00 USD | 0%",
         ]
     );
 }
