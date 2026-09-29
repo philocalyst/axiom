@@ -3,9 +3,11 @@
 //! Workers borrow their inputs through [`std::thread::scope`] and return their
 //! results by value, in order. Nothing is shared mutably, so there is no `Arc`
 //! and no `Mutex`: the only shared state is one atomic cursor that hands out
-//! chunks, so a worker that drew cheap chunks simply draws more.
+//! chunks, so a worker that drew cheap chunks simply draws more. (A result that
+//! the caller wants as it is made travels back over a channel.)
 
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 use std::thread;
 
 /// Items per chunk for light work (flows, transactions, places): below this,
@@ -21,6 +23,50 @@ pub fn map<'t, T: Sync, R: Send>(items: &'t [T], f: impl Fn(&'t T) -> R + Sync) 
 /// each item is its own unit of work.
 pub fn map_each<'t, T: Sync, R: Send>(items: &'t [T], f: impl Fn(&'t T) -> R + Sync) -> Vec<R> {
     chunked(items, 1, f)
+}
+
+/// `items.iter().map(f)` on every core, for a few heavy items, with each result
+/// given to `consume` in item order as soon as it and every result before it
+/// are ready. Work that has to take results in order (laying them end to end)
+/// overlaps with the work that makes them, instead of starting after all of it.
+pub fn map_each_ordered<'t, T: Sync, R: Send>(
+    items: &'t [T],
+    f: impl Fn(&'t T) -> R + Sync,
+    mut consume: impl FnMut(R),
+) {
+    let workers = workers(items.len());
+    if workers <= 1 {
+        return items.iter().for_each(|item| consume(f(item)));
+    }
+    let (f, cursor) = (&f, &AtomicUsize::new(0));
+    let (sender, results) = mpsc::channel();
+    thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                let sender = sender.clone();
+                scope.spawn(move || {
+                    loop {
+                        let at = cursor.fetch_add(1, Ordering::Relaxed);
+                        let Some(item) = items.get(at) else { return };
+                        if sender.send((at, f(item))).is_err() {
+                            return;
+                        }
+                    }
+                })
+            })
+            .collect();
+        drop(sender);
+        let mut waiting: Vec<Option<R>> = items.iter().map(|_| None).collect();
+        let mut next = 0;
+        for (at, result) in results {
+            waiting[at] = Some(result);
+            while let Some(ready) = waiting.get_mut(next).and_then(Option::take) {
+                consume(ready);
+                next += 1;
+            }
+        }
+        handles.into_iter().for_each(|handle| settle(handle.join()));
+    });
 }
 
 /// Runs `f` on every item, in place, on every core.
@@ -98,5 +144,20 @@ mod tests {
         assert!(borrowed.iter().zip(&words).all(|(a, b)| *a == b));
         let lengths = super::map_each(&words[..9], |word| word.len());
         assert_eq!(lengths, vec![1; 9]);
+    }
+
+    #[test]
+    fn ordered_results_arrive_in_item_order_whatever_order_they_finish_in() {
+        let delays: Vec<u64> = (0..40).map(|n| (40 - n) % 7).collect();
+        let mut seen = Vec::new();
+        super::map_each_ordered(
+            &delays,
+            |&delay| {
+                std::thread::sleep(std::time::Duration::from_millis(delay));
+                delay
+            },
+            |delay| seen.push(delay),
+        );
+        assert_eq!(seen, delays);
     }
 }
