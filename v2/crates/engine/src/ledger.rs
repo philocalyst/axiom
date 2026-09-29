@@ -171,11 +171,8 @@ impl<'b, 's> Ledger<'b, 's> {
         });
         let mut unused: Vec<_> = self.record.waivers.iter().filter(|&(_, &used)| !used).map(|(&loc, _)| loc).collect();
         unused.sort_unstable();
-        let mut reports: Vec<Diagnostic> = overdue.collect();
-        reports.extend(unused.into_iter().map(explain::unused_waiver));
-        reports.into_iter().for_each(|report| {
-            self.record.report(report);
-        });
+        let reports: Vec<Diagnostic> = overdue.chain(unused.into_iter().map(explain::unused_waiver)).collect();
+        self.record.diagnostics.extend(reports);
         let mut headroom = std::mem::take(&mut self.record.passed);
         headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading.headroom));
         headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.from));

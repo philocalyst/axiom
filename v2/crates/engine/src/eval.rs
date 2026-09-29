@@ -235,17 +235,7 @@ impl<'a, 's> Machine<'a, 's> {
 
     /// Notes what a comparison of amounts compared: the counted side and its limit.
     fn read(&mut self, step: u32, cond: NodeId) {
-        let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), left, right) =
-            self.law.nodes[cond.index()].op
-        else {
-            return;
-        };
-        let (left, right) = match (self.at(left), self.at(right)) {
-            (Value::Amount(l), Value::Amount(r)) => (l, r),
-            (Value::Amount(l), Value::Empty) => (l, Amount::zero(l.unit)),
-            (Value::Empty, Value::Amount(r)) => (Amount::zero(r.unit), r),
-            _ => return,
-        };
+        let Some((cmp, left, right)) = compared(self.law, self.values, cond) else { return };
         let (counted, limit) = if matches!(cmp, BinOp::Lt | BinOp::Le) { (left, right) } else { (right, left) };
         self.out.push(Outcome::Read { step, counted, limit });
     }
@@ -590,6 +580,20 @@ impl<'a, 's> Machine<'a, 's> {
             }
         }
         self.base(total)
+    }
+}
+
+/// What an ordering comparison (`<`, `<=`, `>`, `>=`) compared, an `empty` side as zero. `None` for any other
+/// condition, or one whose sides are not amounts.
+pub(crate) fn compared(law: &Law, values: &[Value], cond: NodeId) -> Option<(BinOp, Amount, Amount)> {
+    let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), left, right) = law.nodes[cond.index()].op else {
+        return None;
+    };
+    match (values[left.index()], values[right.index()]) {
+        (Value::Amount(l), Value::Amount(r)) => Some((cmp, l, r)),
+        (Value::Amount(l), Value::Empty) => Some((cmp, l, Amount::zero(l.unit))),
+        (Value::Empty, Value::Amount(r)) => Some((cmp, Amount::zero(r.unit), r)),
+        _ => None,
     }
 }
 

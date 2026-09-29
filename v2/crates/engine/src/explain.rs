@@ -20,7 +20,7 @@ use axiom_model::{
 };
 
 use crate::calc::Calc;
-use crate::eval::Context;
+use crate::eval::{Context, compared};
 use crate::events::Events;
 use crate::fire::Reads;
 use crate::lots::Candidate;
@@ -98,16 +98,7 @@ impl Frame<'_, '_> {
 
     /// The comparison a step failed on, when it compares amounts.
     fn bound(&self, cond: NodeId) -> Option<Bound> {
-        let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), l, r) = self.law.nodes[cond.index()].op
-        else {
-            return None;
-        };
-        let (counted, limit) = match (self.values[l.index()], self.values[r.index()]) {
-            (Value::Amount(a), Value::Amount(b)) => (a, b),
-            (Value::Amount(a), Value::Empty) => (a, Amount::zero(a.unit)),
-            (Value::Empty, Value::Amount(b)) => (Amount::zero(b.unit), b),
-            _ => return None,
-        };
+        let (cmp, counted, limit) = compared(self.law, self.values, cond)?;
         let upper = matches!(cmp, BinOp::Lt | BinOp::Le);
         let counted_in_limit = Calc { book: self.book, day: self.ctx.day }.convert(counted, limit.unit).ok()?;
         let off = if upper { counted_in_limit.qty - limit.qty } else { limit.qty - counted_in_limit.qty };

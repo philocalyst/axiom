@@ -257,17 +257,9 @@ impl<'b, 's> Ledger<'b, 's> {
         for slice in &self.scratch.relief.slices {
             let qty = shares.take(slice.qty);
             let kept = if keeps || (stays && slice.origin != Origin::Fresh) { slice.tied } else { restricted };
-            let parcel = match keeps {
-                true => Parcel {
-                    qty,
-                    basis: slice.carried,
-                    acquired: slice.acquired,
-                    txn: slice.txn,
-                    tied: hold.unwrap_or(kept),
-                },
-                false => Parcel { qty, basis: slice.carried, acquired: since, txn: m.txn, tied: hold.unwrap_or(kept) },
-            };
-            slot.land(parcel, money);
+            // Parcels that keep their identity keep their day and purchase; the rest start over.
+            let (acquired, txn) = if keeps { (slice.acquired, slice.txn) } else { (since, m.txn) };
+            slot.land(Parcel { qty, basis: slice.carried, acquired, txn, tied: hold.unwrap_or(kept) }, money);
         }
     }
 

@@ -88,15 +88,6 @@ pub(crate) struct Record {
     pub faulted: Set<(Id<Law>, u32, Discriminant<Fault>)>,
 }
 
-/// How long each record was when something began.
-#[derive(Clone, Copy)]
-pub(crate) struct Marks {
-    gains: usize,
-    effects: usize,
-    violations: usize,
-    diagnostics: usize,
-}
-
 impl Record {
     pub fn new(book: &Book, amounts: Map<Id<Flow>, Amounts>, diagnostics: Vec<Diagnostic>) -> Record {
         Record { amounts, diagnostics, checks: vec![0; book.laws.len()], ..Record::default() }
@@ -125,22 +116,25 @@ impl Record {
         (self.diagnostics.len() - 1) as u32
     }
 
-    pub fn marks(&self) -> Marks {
-        Marks {
-            gains: self.gains.len(),
-            effects: self.effects.len(),
-            violations: self.violations.len(),
-            diagnostics: self.diagnostics.len(),
+    /// Where each record ends now, as the empty ranges [`since`](Record::since) grows.
+    pub fn marks(&self) -> Applied {
+        let end = |len: usize| len..len;
+        Applied {
+            gains: end(self.gains.len()),
+            effects: end(self.effects.len()),
+            violations: end(self.violations.len()),
+            diagnostics: end(self.diagnostics.len()),
         }
     }
 
     /// Everything recorded since `marks`.
-    pub fn since(&self, marks: Marks) -> Applied {
+    pub fn since(&self, marks: Applied) -> Applied {
+        let to = |start: std::ops::Range<usize>, len: usize| start.start..len;
         Applied {
-            gains: marks.gains..self.gains.len(),
-            effects: marks.effects..self.effects.len(),
-            violations: marks.violations..self.violations.len(),
-            diagnostics: marks.diagnostics..self.diagnostics.len(),
+            gains: to(marks.gains, self.gains.len()),
+            effects: to(marks.effects, self.effects.len()),
+            violations: to(marks.violations, self.violations.len()),
+            diagnostics: to(marks.diagnostics, self.diagnostics.len()),
         }
     }
 }
