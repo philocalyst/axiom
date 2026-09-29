@@ -154,7 +154,7 @@ fn tokens(src: &str) -> Vec<Tok<'_>> {
     }
 }
 
-fn number(mantissa: i128, scale: u8) -> Tok<'static> {
+fn number(mantissa: i64, scale: u8) -> Tok<'static> {
     Tok::Number(Dec { mantissa, scale })
 }
 

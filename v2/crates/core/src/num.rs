@@ -265,9 +265,13 @@ fn gcd(mut a: u128, mut b: u128) -> u128 {
 }
 
 /// A decimal literal exactly as written: `mantissa × 10^-scale`.
+///
+/// Eighteen significant digits fit, more than any amount may have
+/// ([`Qty::LIMIT`]), and the whole literal is 16 bytes, so syntax trees full
+/// of amounts stay small.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct Dec {
-    pub mantissa: i128,
+    pub mantissa: i64,
     pub scale: u8,
 }
 
@@ -284,21 +288,22 @@ impl Dec {
     pub const ZERO: Dec = Dec { mantissa: 0, scale: 0 };
 
     /// Parses `digits[.digits]`, ignoring `_` separators. Eight-digit runs are
-    /// folded in one SWAR step; everything else goes a digit at a time.
+    /// folded in one SWAR step; everything else goes a digit at a time. `None`
+    /// for anything else, or for more digits than a mantissa holds.
     pub fn parse(text: &[u8]) -> Option<Dec> {
-        let (mut mantissa, mut scale, mut seen, mut dot) = (0i128, 0u8, false, false);
+        let (mut mantissa, mut scale, mut seen, mut dot) = (0i64, 0u8, false, false);
         let mut rest = text;
         while let Some((&b, tail)) = rest.split_first() {
             if let Some(eight) = rest.first_chunk::<8>().filter(|c| all_digits(c)) {
-                mantissa = mantissa.checked_mul(100_000_000)?.checked_add(digits8(eight) as i128)?;
+                mantissa = mantissa.checked_mul(100_000_000)?.checked_add(digits8(eight) as i64)?;
                 scale = scale.checked_add(if dot { 8 } else { 0 })?;
                 (seen, rest) = (true, &rest[8..]);
                 continue;
             }
             match b {
                 b'0'..=b'9' => {
-                    mantissa = mantissa.checked_mul(10)?.checked_add((b - b'0') as i128)?;
-                    scale += dot as u8;
+                    mantissa = mantissa.checked_mul(10)?.checked_add((b - b'0') as i64)?;
+                    scale = scale.checked_add(dot as u8)?;
                     seen = true;
                 }
                 b'_' if seen && !dot => {}
@@ -307,7 +312,8 @@ impl Dec {
             }
             rest = tail;
         }
-        (seen && scale <= 38).then_some(Dec { mantissa, scale })
+        // Every power of ten a scale may need must fit the `i128` table.
+        (seen && (scale as usize) < POW10.len()).then_some(Dec { mantissa, scale })
     }
 
     pub fn is_zero(self) -> bool {
@@ -330,15 +336,16 @@ impl Dec {
 
     /// This value in quanta of a commodity with `scale` decimal places.
     pub fn to_qty(self, scale: u8) -> Result<Qty, DecError> {
+        let mantissa = self.mantissa as i128;
         let value = if scale >= self.scale {
             let p = POW10.get((scale - self.scale) as usize).ok_or(DecError::Range)?;
-            self.mantissa.checked_mul(*p).ok_or(DecError::Range)?
+            mantissa.checked_mul(*p).ok_or(DecError::Range)?
         } else {
             let p = POW10[(self.scale - scale) as usize];
-            if self.mantissa % p != 0 {
+            if mantissa % p != 0 {
                 return Err(DecError::Inexact);
             }
-            self.mantissa / p
+            mantissa / p
         };
         match i64::try_from(value) {
             Ok(v) if v.abs() <= Qty::LIMIT => Ok(Qty(v)),
@@ -347,7 +354,7 @@ impl Dec {
     }
 
     pub fn to_ratio(self) -> Option<Ratio> {
-        Ratio::new(self.mantissa, *POW10.get(self.scale as usize)?)
+        Ratio::new(self.mantissa as i128, *POW10.get(self.scale as usize)?)
     }
 }
 
@@ -442,6 +449,11 @@ mod tests {
         assert_eq!(d.to_qty(0), Err(DecError::Inexact));
         assert_eq!(Dec::parse(b"123456789012.5").unwrap().mantissa, 1234567890125);
         assert!(Dec::parse(b"1.").is_none() && Dec::parse(b"_1").is_none());
+        assert_eq!(Dec::parse(b"9_223_372_036_854_775_807").unwrap().mantissa, i64::MAX);
+        assert!(Dec::parse(b"9_223_372_036_854_775_808").is_none(), "one past i64 is refused, not wrapped");
+        assert_eq!(std::mem::size_of::<Dec>(), 16);
+        let tiny = format!("0.{}1", "0".repeat(300));
+        assert!(Dec::parse(tiny.as_bytes()).is_none(), "a scale past the table is refused");
         assert_eq!(Dec::parse(b"2.50").unwrap().places(), 1);
     }
 
