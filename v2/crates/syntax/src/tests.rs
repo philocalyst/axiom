@@ -816,6 +816,161 @@ fn laws_take_closing_days_and_desugar_their_sources() {
     only_error("law l\n  each year closing 13-45\n", "bad-day");
 }
 
+// ─── Line items, `via`, and what v3 wrote ───────────────────────────────────
+
+/// The items of the first flow or statement of `src`, as (sign, amount text, tail kinds).
+fn items_of(src: &str) -> Vec<(Sign, String, usize)> {
+    let file = parse_clean(src);
+    let body = match file.items[0].kind {
+        ItemKind::Txn(id) => file[id].flow.body,
+        ItemKind::Statement(id) => file[id].body,
+        _ => panic!("a flow or a statement"),
+    };
+    let amount = |amount: &ItemAmount| match amount {
+        ItemAmount::Fixed(amount) => amount.0.to_string(),
+        ItemAmount::Share(percent) => format!("{}%", percent.mantissa),
+        ItemAmount::ShareOf(percent, of) => format!("{}% of {}", percent.mantissa, of.0),
+    };
+    file[body.items].iter().map(|item| (item.sign, amount(&item.amount), file[item.tail].len())).collect()
+}
+
+#[test]
+fn a_line_that_names_no_end_is_an_item_of_the_flow_above_it() {
+    let src = "\
+2026-03-14 visa -> target 120.00 USD #household
+  32.10 USD #groceries
+  12.00 USD #gifts \"for jo's birthday\"
+  + 5% of 100.00 USD #fees
+  - 2.50 USD #discount
+  10%
+";
+    let file = parse_clean(src);
+    let flow = &txns(&file)[0].flow;
+    let items = &file[flow.body.items];
+    let kinds: Vec<(Sign, &ItemAmount)> = items.iter().map(|item| (item.sign, &item.amount)).collect();
+    assert!(matches!(kinds[0], (Sign::Carve, ItemAmount::Fixed(amount)) if amount.0 == "32.10 USD"));
+    assert!(matches!(kinds[2], (Sign::Add, ItemAmount::ShareOf(percent, of)) if percent.mantissa == 5 && of.0 == "100.00 USD"));
+    assert!(matches!(kinds[3], (Sign::Less, ItemAmount::Fixed(_))));
+    assert!(matches!(kinds[4], (Sign::Carve, ItemAmount::Share(percent)) if percent.mantissa == 10));
+    let tail = clauses(&file, items[1].tail);
+    assert!(matches!(tail[..], [ClauseKind::Purpose(_), ClauseKind::Description(Text("for jo's birthday"))]));
+    assert!(flow.body.legs.is_empty());
+    // What names an end is a leg, and under a one-sided flow the two may be mixed.
+    let file = parse_clean("2026-03-14 lumen -> 4_600 USD\n  retirement 6%\n  - 100 USD #fees\n  checking ...\n");
+    let flow = &txns(&file)[0].flow;
+    assert_eq!((flow.body.legs.len(), flow.body.items.len()), (2, 1));
+    // An item has an amount, and its tail is a flow's.
+    only_error("2026-03-14 a -> b 5 USD\n  + #fees\n", "expected-amount");
+    only_error("2026-03-14 a -> b 5 USD\n  - - 5 USD\n", "negative-amount");
+}
+
+#[test]
+fn items_follow_occurrences_and_claims_and_may_be_lined_up_by_indenting() {
+    assert_eq!(
+        items_of("2026-03-01 flat\n  + 12% of 155.00 USD #utilities \"the building's water\"\n"),
+        [(Sign::Add, "12% of 155.00 USD".to_string(), 2)]
+    );
+    // Amounts right-aligned with spaces are still one block of items.
+    let invoice = "2026-01-27 halcyon owes studio due 30d ^inv-2026-01\n  3_000 USD #design \"brand refresh\"\n    800 USD #design \"icon set\"\n";
+    assert_eq!(items_of(invoice).len(), 2);
+    // Only what starts with an amount may be indented further.
+    let src = "2026-01-27 a -> b 5 USD\n  c 1 USD\n    d 2 USD\n";
+    only_error(src, "unexpected-indent");
+    // A contract's template may have them too, and its schedule is not one.
+    let src = "contract c with p\n  45 USD monthly from x\n  - 2 USD #fee\n  5%\n  y 3 USD\n";
+    let file = parse_clean(src);
+    let contract: &Contract = file.iter().next().unwrap();
+    assert_eq!((contract.body.legs.len(), contract.body.items.len()), (1, 2));
+    assert!(contract.schedule.is_some());
+}
+
+#[test]
+fn via_names_the_party_it_went_through() {
+    let file = parse_clean("2026-03-20 checking -> etsy-seller 20 USD via paypal ^x\n");
+    let kinds = clauses(&file, txns(&file)[0].flow.tail);
+    assert!(matches!(kinds[..], [ClauseKind::Via(Name("paypal")), ClauseKind::Code(_)]));
+    only_error("2026-03-20 a -> b 5 USD via\n", "expected-party");
+}
+
+#[test]
+fn a_v3_party_after_a_slash_says_how_it_is_written_now() {
+    // The end went through the party: swap them.
+    let src = "2026-03-20 checking -> paypal 20 USD / etsy-seller ^x\n";
+    let error = only_error(src, "v3-party");
+    assert_eq!(&src[error.anchor().unwrap().range()], "/ etsy-seller");
+    assert_eq!(first_fix(src, &error), ("paypal 20 USD / etsy-seller", "etsy-seller 20 USD via paypal"));
+
+    // An asset is bought, not paid through: the second fix says so.
+    let src = "2026-03-24 visa 1_739.13 USD -> laptop / best-buy\n";
+    let error = only_error(src, "v3-party");
+    let fixes: Vec<(&str, &str)> = error.help.iter().filter_map(|help| help.edit.as_ref()).map(|(loc, text)| (&src[loc.range()], &**text)).collect();
+    assert_eq!(fixes[0], ("laptop / best-buy", "best-buy via laptop"));
+    assert_eq!(fixes[1], ("visa 1_739.13 USD -> laptop / best-buy", "visa -> best-buy 1_739.13 USD #purchase of laptop"));
+    assert!(error.help[1].text.contains("if `laptop` is an asset"));
+    // The same when the amount is on the target.
+    let src = "2026-03-24 visa -> laptop 1_739.13 USD / best-buy\n";
+    let error = only_error(src, "v3-party");
+    assert_eq!(first_fix(src, &error).1, "best-buy 1_739.13 USD via laptop");
+
+    // Where there is nothing to swap, or the slash is late, it is explained without an edit.
+    for src in ["2026-03-24 visa 5 USD -> ? / x\n", "2026-03-24 a -> b 5 USD ^c / x\n", "2026-03-24 a -> 5 USD\n  b 1 USD / x\n"] {
+        let error = only_error(src, "v3-party");
+        assert!(error.help.iter().all(|help| help.edit.is_none()) || src.contains("? /"), "{src}");
+    }
+    only_error("2026-03-24 a -> b 5 USD / 5\n", "expected-party");
+}
+
+#[test]
+fn contracts_may_leave_out_their_party_and_declarations_take_the_new_lines() {
+    let file = parse_clean("contract netflix\n  15 USD monthly on 22 from visa\ncontract flat with greystar\n  about 2_900 USD monthly on 1 from checking #rent\n");
+    let contracts: Vec<&Contract> = file.iter().collect();
+    assert_eq!((contracts[0].name.0, contracts[0].party), ("netflix", None));
+    assert_eq!(contracts[1].party.map(|party| party.0), Some("greystar"));
+    assert!(contracts[1].schedule.unwrap().terms.about && !contracts[0].schedule.unwrap().terms.about);
+    // A party written without `with` is asked for.
+    let src = "contract flat greystar\n  5 USD monthly from x\n";
+    assert_eq!(first_fix(src, &only_error(src, "expected-with")), ("", "with "));
+    only_error("contract flat with\n", "expected-name");
+
+    // An entity may carry its own purpose, with or without a kind.
+    let file = parse_clean("entity farmers-market #groceries\nentity a, b : grocer #groceries\nentity c : person\n");
+    let decls: Vec<&Decl> = file.iter().collect();
+    let purposes: Vec<Option<&str>> = decls.iter().map(|decl| decl.purpose.map(|purpose| purpose.0)).collect();
+    assert_eq!(purposes, [Some("groceries"), Some("groceries"), Some("groceries"), None]);
+    only_error("account a : bank #groceries\n", "expected-end-of-line");
+
+    // A budget's limit is an amount or a share of another purpose's total, and it may carry.
+    let file = parse_clean("budget food 900 USD monthly\nbudget fun 10% of #income monthly carries\nbudget travel 3_000 USD yearly carries\n");
+    let budgets: Vec<&Budget> = file.iter().collect();
+    assert!(matches!(budgets[1].allowance.limit, Limit::Share { percent, of: Name("income") } if percent.mantissa == 10));
+    assert_eq!(budgets.iter().map(|budget| budget.allowance.carries).collect::<Vec<_>>(), [false, true, true]);
+    assert_eq!(budgets[2].allowance.per, Period::Year);
+    only_error("budget fun 10% monthly\n", "expected-of");
+    only_error("budget fun 10% of income monthly\n", "expected-purpose");
+}
+
+#[test]
+fn a_sync_names_its_source_and_takes_generic_lines() {
+    let src = "/// Chase's export.\nsync checking\n  run chase-export checking --since {since}\n  csv date \"Posting Date\" \"MM/DD/YYYY\", amount 4 flipped, memo 3\n  into prices/{year}.ax\n";
+    let file = parse_clean(src);
+    let ItemKind::Sync(id) = file.items[0].kind else { panic!("a sync") };
+    let sync = &file[id];
+    assert_eq!((sync.name.0, sync.run.0), ("checking", "chase-export checking --since {since}"));
+    assert_eq!(sync.into.map(|text| text.0), Some("prices/{year}.ax"));
+    let csv = &file[sync.props][0];
+    let words: Vec<&str> = file[csv.args].iter().map(|&arg| &src[file.exprs[arg].loc.range()]).collect();
+    assert_eq!(words, ["date", "\"Posting Date\"", "\"MM/DD/YYYY\"", "amount", "4", "flipped", "memo", "3"]);
+    assert!(file.items[0].doc.is_some());
+
+    only_error("sync checking\n  csv date 1\n", "missing-run");
+    only_error("sync checking\n  run a\n  run b\n", "duplicate-clause");
+    only_error("sync checking\n  run a\n  into x\n  into y\n", "duplicate-clause");
+    // v3 named the file, which is `into` now.
+    let src = "sync prices/2026.ax\n  run python3 fetch.py\n";
+    let error = only_error(src, "sync-file");
+    assert_eq!(first_fix(src, &error), ("prices/2026.ax", "prices\n  into prices/2026.ax"));
+}
+
 // ─── Tokens ─────────────────────────────────────────────────────────────────
 
 #[test]
@@ -1175,6 +1330,9 @@ fn expressions_are_post_order_with_first_nodes() {
     assert_post_order(&file, true);
 }
 
+/// What a damaged file's changed bytes are taken from: punctuation and signs.
+const ALPHABET: &[u8] = b"-/\"(),:= \n%|^#.0+[]@!?*\t";
+
 /// Sources damaged by a few changed bytes: `source`, again and again.
 fn damaged(source: &str, count: usize, mut with: impl FnMut(&str)) {
     let mut state = 0x2545_F491_4F6C_DD1Du64;
@@ -1189,7 +1347,7 @@ fn damaged(source: &str, count: usize, mut with: impl FnMut(&str)) {
         for _ in 0..1 + random(4) {
             let at = random(bytes.len());
             match random(3) {
-                0 => bytes[at] = b"-/\"(),:= \n%|^#.0"[random(16)],
+                0 => bytes[at] = ALPHABET[random(ALPHABET.len())],
                 1 => drop(bytes.remove(at)),
                 _ => bytes.insert(at, b" \n\t#"[random(4)]),
             }
@@ -1208,16 +1366,17 @@ fn damaged_files_keep_the_arena_well_formed() {
     });
 }
 
-/// The same of the sketch's contracts and journal, in every place: short dates
-/// are where a damaged file has the most to go wrong.
+/// The same of every file of the sketch, in every folder: short dates and the
+/// forms of the second wave (statements, items, headings, syncs) are where a
+/// damaged file has the most to go wrong, and none may panic.
 #[test]
-fn damaged_sketch_files_keep_the_arena_well_formed_in_any_place() {
+fn damaged_sketch_files_keep_the_arena_well_formed_in_any_folder() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/v4-sketch");
-    for name in ["contracts.ax", "journal/2026/01.ax"] {
-        let src = std::fs::read_to_string(root.join(name)).unwrap();
-        for place in [Folder::default(), YEAR, MARCH] {
-            damaged(&src, 300, |text| {
-                let (file, diags) = crate::parse(FileId(0), text, place);
+    for path in ax_files(&root, &root) {
+        let src = std::fs::read_to_string(root.join(&path)).unwrap();
+        for folder in [Folder::default(), YEAR, MARCH, Folder::of(path.to_str().unwrap())] {
+            damaged(&src, 100, |text| {
+                let (file, diags) = crate::parse(FileId(0), text, folder);
                 assert_post_order(&file, !diags.iter().any(Diagnostic::is_error));
             });
         }
@@ -1495,6 +1654,8 @@ fn the_tree_is_compact() {
     assert!(size_of::<Leg>() <= 128, "Leg is {}", size_of::<Leg>());
     assert!(size_of::<Clause>() <= 56, "Clause is {}", size_of::<Clause>());
     assert!(size_of::<Expr>() <= 48, "Expr is {}", size_of::<Expr>());
+    assert!(size_of::<Statement>() <= 168, "Statement is {}", size_of::<Statement>());
+    assert!(size_of::<LineItem>() <= 96, "LineItem is {}", size_of::<LineItem>());
     assert!(size_of::<Many<Leg>>() == 8 && size_of::<Amount>() == 16 && size_of::<Name>() == 16);
 }
 
