@@ -915,3 +915,43 @@ Targets: every example and golden keeps working or improves (each diff
 justified); 1M flows `check` well under 1 s on 4 cores; no quadratic path;
 total Rust (non-test, non-comment) down from 17.1k toward 11k while the
 language grows.
+
+### Wave 1, as it landed
+
+| lane | merged | lines (target) | what it bought |
+|---|---|---|---|
+| cli | a2a883c | 1,750 (1,500) | one report per cause, the reader's file first, new commands, parallel loading |
+| report | b0e0517 | 3,650 (2,900) | `Lens` (whose, worth, liquidity), limits, claims, gains, `--for`, forecast and available rebuilt |
+| engine | 617677b | 3,844 (3,200) | the v3 fold, relief without scanning (400k trades: 13 s → 0.9 s), headroom, per-window reporting |
+| syntax | on `lane-m` (169cbd5) | 3,074 (2,300) | 40-byte items, per-piece tables, parallel parse (64 MB: 0.58 → 0.20 s), the whole v3 surface |
+
+Every lane missed its size target, by the new semantics and the diagnostics
+the style guide asks for. Each overrun was reviewed and accepted: nothing was
+found that a better formulation would remove without dropping a feature.
+
+Syntax cannot land on main until the model is rebuilt on its AST. The model
+lane works on branch `lane-m`, which is main plus lane S, and merges main as
+the other lanes land.
+
+### Decisions taken while merging
+
+- **A deferred kind with no written `basis` has `Basis::Zero`.** This is the
+  old engine's rule, now in the model. The systems will say `basis zero`
+  explicitly, and the default stays for projects that declare their own
+  deferred kinds.
+- **A violated law is reported once per subject and window, as LANGUAGE says.**
+  Three missed months are three warnings, each naming its month; they are no
+  longer folded into "2 more like this", which hid which months.
+- **The priced headline:** "34.94 USD owed to irs as nonqualified-529-penalty,
+  due 2026-03-25". A waived one says "waived: … would be owed …", never "owed".
+- **Power-assert:** a comparison shows its two sides. Any other condition
+  shows each fact it read once, as a whole (`owner.age`, not `owner` and then
+  its age), and never the booleans that combine them.
+- **Headroom is the engine's.** The report no longer re-reads flows. A budget
+  that no flow reached in the current window reads as nothing spent against
+  its written limit.
+- **`limits` lists limits, not invariants.** A floor of nothing
+  (`balance >= empty`) is left out; a real floor (a minimum payment) stays.
+- **`gains` lists what realized something.** Money leaving at its own basis
+  (a grant spent, a deposit returned) is not a disposal.
+- **`available` treats a priced violation as a cost, not a block.**
