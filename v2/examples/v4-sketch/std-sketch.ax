@@ -6,13 +6,15 @@
 // always one click away.
 //
 // How a flow gets its purpose, first match wins:
-//   1. written on the flow or leg:   `: repair of condo`
-//   2. its contract:                 `contract flat with greystar  … : rent`
+//   1. written on the flow or leg:   `#repair of condo`
+//   2. its contract:                 `contract flat with greystar  … #rent`
 //   3. its party's kind:             `kind grocer … purpose groceries`
 //   4. its money's kind:             `kind fund … pays dividend`
 //   5. its accounts' kinds:          `kind 401k … takes pre-tax-deferral from wages`
 // Two sources that disagree are an error naming both. When none says, the
-// flow is `unclassified`, and `check --strict` asks what it was for.
+// flow is `unclassified`. A "description" still says why in words, and
+// `check --strict` asks for a purpose. Declarations use `:` for "is a kind
+// of", and flows use `#` for a purpose, so the two never meet.
 
 // ─── Purposes: what money is for (std) ──────────────────────────────────────
 

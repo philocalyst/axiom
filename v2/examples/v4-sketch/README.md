@@ -36,8 +36,8 @@ None of it is typed.
   - The 0.39 USD the card's exchange rate cost in Paris.
   - The 2.49 USD of foreign tax taken from VXUS's dividend. That one is written, because it is a withholding like a paystub's, and becomes a credit.
 - **Any basis.**
-  - The condo's basis is what it cost, plus the water heater (`: improvement of condo`), less the depreciation `us/rental` derives each month.
-  - The leak under the sink (`: repair of condo`) is spent instead.
+  - The condo's basis is what it cost, plus the water heater (`#improvement of condo`), less the depreciation `us/rental` derives each month.
+  - The leak under the sink (`#repair of condo`) is spent instead.
   - The wash sale moves 18.86 USD of loss into the February lot's basis. The `us` wash-sale law derives it from the sale and the standing order 15 days later.
 
 ## What `check` says on 2026-03-05
@@ -45,11 +45,11 @@ None of it is typed.
 ```text
 warning[late]: dana's rent for March is 4 days late: 2,350.00 USD owed since 2026-03-01
    ╭─[contracts.ax:48:3]
-48 │   2_350 USD monthly on 1 into checking : rent of condo
+48 │   2_350 USD monthly on 1 into checking #rent of condo
    │   ────────────────────┬────────────────────
    │                       ╰── the lease expects it on the 1st
    = note: February's came on the 3rd
-   = help: record it when it arrives: `2026-03-0N lease`
+   = help: record it when it arrives: `05 lease` in journal/2026/03.ax
 
 note[wash-sale]: 18.86 USD of loss on VTI sold 2026-02-05 is disallowed: VTI was bought again on 2026-02-20
    ╭─[journal/2026/02.ax:22:1]

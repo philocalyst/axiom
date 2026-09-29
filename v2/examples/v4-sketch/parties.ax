@@ -7,7 +7,7 @@
 //
 // std and `us` declare the common kinds, and the agencies `irs`, `ftb`,
 // `ssa` and `edd`. A party that is never declared can still be written: it
-// is simply untyped, and its flows need a `: purpose`.
+// is simply untyped, and its flows need a `#purpose` (or at least a "description").
 
 entity lumen        : employer
 entity greystar     : landlord          // Sam's own landlord

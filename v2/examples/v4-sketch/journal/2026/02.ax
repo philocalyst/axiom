@@ -1,37 +1,33 @@
 // February 2026: an improvement and a repair to the condo, a sale that
-// becomes a wash sale, a dinner in Paris, and a claim settled from each
-// side.
+// becomes a wash sale, a dinner in Paris, and a claim settled from each side.
 
-2026-02-01 flat
-2026-02-01 gym
-2026-02-01 mortgage      // ▸ 2,302.90: interest 1,526.09 of condo · principal 366.81 · escrow 410.00
+01 flat
+01 gym
+01 mortgage      // ▸ 2,302.90: #interest of condo 1,526.09 · principal 366.81 · escrow 410.00
 
-/// The condo's water heater, replaced: it joins the condo.
-2026-02-02 checking -> bay-plumbing 1_480 USD : improvement of condo
-                                                    // ▸ condo basis +1,480.00 · depreciated from 2026-02 over 27.5 years
+02 checking -> bay-plumbing 1_480 USD #improvement of condo "new water heater"
+                                                    // ▸ joins the condo: basis +1,480.00, depreciated over 27.5 years from 02
 
-2026-02-03 lease         // ▸ 2 days late: dana owed 2,350.00 from 02-01 to 02-03
-2026-02-03 figma
+03 lease         // ▸ 2 days late: dana owed 2,350.00 from 02-01 to 02-03
+03 figma
 
-/// Sold the January lot by name: its price fell.
-2026-02-05 fidelity[2026-01-20] 1.620 VTI -> 481.14 USD
+05 fidelity[2026-01-20] 1.620 VTI -> 481.14 USD "sold the January lot: its price fell"
                                                     // ▸ proceeds stay at fidelity · loss 18.86
-                                                    // ▸ wash sale: the 2026-02-20 purchase is within 30 days, so the
+                                                    // ▸ wash sale: VTI is bought again on 02-20, within 30 days, so the
                                                     //   loss is disallowed and joins that lot's basis (500.00 → 518.86)
 
-2026-02-08 phone
+07 me -> corner-store 9.80 USD "food for the routine"
+08 phone
 
-/// Dinner in Paris, on the dollar card.
-2026-02-10 visa 64.12 USD -> cafe-de-flore 58.40 EUR : dining
+10 visa 64.12 USD -> cafe-de-flore 58.40 EUR #dining "dinner in Paris"
                                                     // ▸ 58.40 EUR was 63.73 USD at 1.0912 · 0.39 exchange cost
 
-2026-02-12 jo -> checking 200 USD                   // ▸ settles 200.00 of what jo owes · 400.00 left, due 04-01
+12 jo -> checking 200 USD                           // ▸ settles 200.00 of what jo owes · 400.00 left, due 04-01
 
-/// A leak under the kitchen sink: fixed, not improved.
-2026-02-14 checking -> bay-plumbing 240 USD : repair of condo
-                                                    // ▸ a rental expense this year
+14 checking -> bay-plumbing 240 USD #repair of condo "leak under the kitchen sink"
+                                                    // ▸ spent: a rental expense this year
 
-2026-02-15 job
+15 job
   retirement      276.00 USD
   blue-shield     184.20 USD
   irs             498.00 USD
@@ -40,14 +36,15 @@
   edd              52.99 USD
   checking        ...
 
-2026-02-20 vti-monthly 1.660 VTI                    // ▸ 500.00 at 301.20 · basis 518.86 (the wash sale's loss)
-2026-02-22 netflix
-2026-02-25 checking -> visa 2_333.99 USD
+20 vti-monthly 1.660 VTI                            // ▸ 500.00 at 301.20 · basis 518.86, with the wash sale's loss
+21 me -> corner-store 14.15 USD "food for the routine"
+22 netflix
+25 checking -> visa 2_333.99 USD "January's statement"
 
-2026-02-26 halcyon -> checking 3_800 USD            // ▸ settles #inv-2026-01: the studio's design income, on its due day
-2026-02-27 visa -> trader-joes 96.10 USD
+26 halcyon -> checking 3_800 USD ^inv-2026-01       // ▸ settles it: the studio's #design income, on its due day
+27 visa -> trader-joes 96.10 USD
 
-2026-02-28 job
+28 job
   retirement      276.00 USD
   blue-shield     184.20 USD
   irs             498.00 USD
@@ -56,5 +53,5 @@
   edd              52.99 USD
   checking        ...
 
-2026-02-28 checking   = 11_531.38 USD
-2026-02-28 fidelity   = 481.14 USD                  // the cash side of the brokerage
+28 checking   = 11_531.38 USD
+28 fidelity   = 481.14 USD                          // the cash side of the brokerage

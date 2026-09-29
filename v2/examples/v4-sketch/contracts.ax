@@ -17,10 +17,10 @@ contract job with lumen
   4_600 USD twice monthly on 15, last      // gross
   into checking                            // what is left of each paycheck
   retirement   6%                          // ▸ pre-tax deferral: into a 401k, from wages
-  blue-shield  184.20 USD : premium        // ▸ pre-tax (§125): out of wages and payroll tax
+  blue-shield  184.20 USD #premium         // ▸ pre-tax (§125): out of wages and payroll tax
   match 50% of retirement up to 6%         // ▸ Lumen adds 138.00 to each paycheck's 276.00
 
-/// The flat. A tenth of it is the studio's office.
+/// The flat. 12% of it is the studio's office.
 contract flat with greystar
   2_900 USD monthly on 1 from checking     // ▸ rent: greystar is a landlord
   business 12% for studio                  // 120 of its 1,000 sq ft
@@ -51,12 +51,12 @@ contract mortgage with rocket
 
 /// Dana's lease on the condo, with a deposit held for her.
 contract lease with dana
-  2_350 USD monthly on 1 into checking : rent of condo
+  2_350 USD monthly on 1 into checking #rent of condo
   deposit 2_350 USD                        // ▸ held for dana: not Sam's to spend, owed back at the end
   from 2025-07-01 until 2026-06-30
 
 contract condo-insurance with state-farm
-  1_140 USD yearly on 03-01 from checking : insurance of condo
+  1_140 USD yearly on 03-01 from checking #insurance of condo
   covers the year                          // ▸ recognized at 95.00 a month
 
 /// A standing order: 500 USD of VTI on the 20th.

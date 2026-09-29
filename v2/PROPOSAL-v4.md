@@ -43,7 +43,7 @@ The notes asked for the opposite:
 
 **Capital vs revenue expenditure.**
 - **Theory:** Money spent that joins a thing (an improvement) is capitalized into it. Money spent keeping it as it was (a repair) is an expense.
-- **In Axiom:** Purposes can take an object: `: improvement of condo` joins the condo, and `: repair of condo` is spent. `.basis` goes away.
+- **In Axiom:** Purposes can take an object: `#improvement of condo` joins the condo, and `#repair of condo` is spent. `.basis` goes away.
 
 **Cost allocation** (joint and mixed-use costs).
 - **Theory:** One bill can serve two owners or two ends: the phone that is 60% business, the flat's office corner.
@@ -86,7 +86,7 @@ The notes asked for the opposite:
 
 **Events (flows).**
 - The grammar is v3's arrow, and each end is an account, an owner, a party, an asset, or nothing.
-- **A purpose** is `: purpose [of THING]`, a kind of flow in a tree std ships. It is inferred, first match wins:
+- **A purpose** is `#purpose [of THING]`, a kind of flow in a tree std ships. It is inferred, first match wins:
   1. what is written on the flow or leg;
   2. its contract;
   3. its party's kind;
@@ -143,7 +143,9 @@ Tallies belong to the taxpayer who owns the flow, so a household's member's dedu
 - `purpose NAME : PARENT` with `of TYPE`;
 - `asset NAME : KIND`;
 - `contract NAME with PARTY` (terms, allocations, legs), with `DATE CONTRACT [AMOUNT]` and `DATE CONTRACT ends` in the journal;
-- `: PURPOSE [of THING]` on flows and legs;
+- `#PURPOSE [of THING]` and `"description"` on flows and legs;
+- `^code`, which links an invoice and its payment, or marks lots;
+- dates shortened to what their file's place does not already say;
 - `PARTY owes OWNER AMOUNT`;
 - `business N% for OWNER`;
 - `at INSTITUTION` on accounts;
@@ -151,10 +153,37 @@ Tallies belong to the taxpayer who owns the flow, so a household's member's dedu
 - the law effect `depreciate`.
 
 **Kept:**
-- dates, amounts, `@`, `due`, `for`, `#codes`, `!`;
+- amounts, `@`, `due`, `for` (now only whom money is held for, or which period it covers), `!`;
 - lot selectors `[…]`;
 - `opening`, `split`, assertions with `via`;
 - kinds, properties, params, laws and systems.
+
+## Saying why, in three registers
+
+A flow can say why it happened in three ways. Each has one mark, and none of
+them reuses `:`, which now only ever means "is a kind of", in declarations:
+
+| mark | register | declared? | what reads it |
+|---|---|---|---|
+| `#groceries`, `#repair of condo` | a **purpose**: structured and typed, a node in a tree | yes (std ships most) | laws, budgets, `flow`, the tax |
+| `"food for the routine"` | a **description**: free words | no | people, `register`, search |
+| `^inv-12` | a **code**: the same mark on things that belong together | patterns may be (`code inv-*`) | settlement, lot selection, `why ^inv-12` |
+
+- A description asks nothing of the book. It is how a thought is written down before it deserves a purpose.
+- A flow with a description and no purpose is `unclassified, described`. `flow` groups those by their words. When several flows share a description, the editor offers to turn it into a purpose: "3 flows say "food for the routine": make it a purpose?".
+- A purpose is checked: a misspelled `#grocceries` is an error with the suggestion, never a new category.
+- Paying off something structured stays structured. A grocery run broken into legs gives each leg its own `#purpose` or description, which covers most "what was in this payment".
+
+## Dates say what their place does not
+
+Folder layout already constrains dates (`journal/2026/01.ax` may only hold
+January 2026), so it now also supplies them:
+- In `journal/2026/01.ax`, an item's date is its day: `15 job`.
+- In `journal/2026.ax`, it is month and day: `01-15 job`.
+- Anywhere else, it is the whole date.
+- Any other date on a line (`due`, `since`, a lot) may leave out the year its file already says.
+- A full date is always allowed, and must agree with the place.
+- A shortened date in a file whose place says nothing is an error with the fix.
 
 ## The editor
 

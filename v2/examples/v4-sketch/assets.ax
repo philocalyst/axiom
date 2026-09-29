@@ -3,8 +3,8 @@
 // An asset is one identified thing. What it cost, what improved it and what
 // has been depreciated are its own history. `why condo` tells that history,
 // and a sale realizes against it. Nobody writes a basis by hand, and there is
-// no `.basis`: a payment `: improvement of condo` joins the condo, and a
-// payment `: repair of condo` is spent.
+// no `.basis`: a payment `#improvement of condo` joins the condo, and a
+// payment `#repair of condo` is spent.
 
 /// The condo at 41 Alma St. It was bought on 2024-02-20 and has been rented out
 /// since March 2024.
