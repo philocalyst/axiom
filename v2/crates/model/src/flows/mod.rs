@@ -51,10 +51,34 @@ pub(crate) struct Sink<'s> {
     pub unordered: bool,
 }
 
-impl Sink<'_> {
+impl<'s> Sink<'s> {
     /// Room for `items` items, most of which are one flow.
     fn with_room_for(items: usize) -> Sink<'static> {
         Sink { txns: Vec::with_capacity(items), flows: Vec::with_capacity(items + items / 8), ..Sink::default() }
+    }
+
+    /// Lays the next run after what this sink has taken so far. Its flows
+    /// already know their transactions' numbers; only where they start has to
+    /// be added. Both ends of each go on `ends`, for `Book::touching`.
+    fn take(&mut self, mut run: Sink<'s>, ends: &mut Vec<(Id<Place>, Id<Flow>)>) {
+        self.diags.append(&mut run.diags);
+        self.misses.append(&mut run.misses);
+        self.misfiled.append(&mut run.misfiled);
+        self.quotes.append(&mut run.quotes);
+        self.asserts.append(&mut run.asserts);
+        self.splits.append(&mut run.splits);
+        self.events.append(&mut run.events);
+        if let (Some(first), Some(last)) = (run.txns.first(), self.txns.last()) {
+            self.unordered |= last.day > first.day;
+        }
+        self.unordered |= run.unordered;
+        let base = self.flows.len() as u32;
+        ends.extend(run.flows.iter().enumerate().flat_map(|(at, flow)| ends_of(Id::new(base + at as u32), flow)));
+        self.txns.extend(run.txns.into_iter().map(|mut txn| {
+            txn.first = Id::new(base + txn.first.index() as u32);
+            txn
+        }));
+        self.flows.append(&mut run.flows);
     }
 }
 
@@ -73,31 +97,31 @@ pub(crate) fn record<'a, 's>(
     let (plans, plan_txns) = build_plans(world, entries, txns, &mut misses, diags);
 
     let shared: &World = world;
-    let mut journal = Journal::new(txns as usize, misses);
+    let mut all = Sink { misses, ..Sink::with_room_for(txns as usize) };
+    let mut ends = Vec::with_capacity(2 * txns as usize);
     par::map_each_ordered(
         journal_runs,
         |(run, first)| elaborate(shared, run, *first, &plans, layout_free),
-        |sink| journal.take(sink),
+        |sink| all.take(sink, &mut ends),
     );
-    diags.append(&mut journal.diags);
-    diags.extend(explain_misses(world, &plans, journal.misses));
-    diags.extend(explain_misfiled(sites, &journal.misfiled));
+    diags.append(&mut all.diags);
+    diags.extend(explain_misses(world, &plans, all.misses));
+    diags.extend(explain_misfiled(sites, &all.misfiled));
 
     let book = &mut world.book;
-    journal.asserts.sort_by_key(|assert| assert.day);
-    book.asserts = journal.asserts;
-    journal.splits.sort_by_key(|split| split.day);
-    book.splits = journal.splits;
-    let places = book.places.len();
-    let (txns, flows, touching) = Journal::lay_out(journal.txns, journal.flows, journal.ends, journal.in_order, places);
+    all.asserts.sort_by_key(|assert| assert.day);
+    book.asserts = all.asserts;
+    all.splits.sort_by_key(|split| split.day);
+    book.splits = all.splits;
+    let (txns, flows, touching) = lay_out(all.txns, all.flows, ends, !all.unordered, book.places.len());
     book.txns = txns.into();
     book.flows = flows.into();
     for txn in plan_txns {
         book.txns.push(txn);
     }
     book.touching = touching;
-    book.prices = Prices::new(journal.quotes);
-    let events = check_events(world, journal.events, diags);
+    book.prices = Prices::new(all.quotes);
+    let events = check_events(world, all.events, diags);
     world.book.events = events;
 }
 
@@ -192,105 +216,39 @@ fn build_plans<'s>(
 
 // ─── Laying out ─────────────────────────────────────────────────────────────
 
-/// What the runs of the journal add up to, taken in order as each finishes.
-struct Journal<'s> {
+/// The transactions and flows in day order, and which flows touch each of
+/// `places` places, given both ends of every flow as the runs were laid. Runs
+/// laid end to end are almost always in order; when they are not, every
+/// transaction moves with its flows and ties keep declaration order.
+fn lay_out(
     txns: Vec<Txn>,
     flows: Vec<Flow>,
-    /// Both ends of every flow so far, for `Book::touching`, while the runs
-    /// are in day order and the flows keep the numbers they have.
     ends: Vec<(Id<Place>, Id<Flow>)>,
-    asserts: Vec<Assert>,
-    splits: Vec<Split>,
-    events: Vec<RawEvent<'s>>,
-    quotes: Vec<Quote>,
-    misses: Vec<(Cause, &'s str, Loc)>,
-    misfiled: Vec<Misfiled>,
-    diags: Vec<Diagnostic>,
-    /// The day of the last transaction laid.
-    last_day: Option<Day>,
-    /// Whether every transaction so far is on or after the one before it:
-    /// usually true, since journals are written as time passes.
     in_order: bool,
-}
-
-impl<'s> Journal<'s> {
-    /// An empty journal with room for `txns` transactions, most of which are
-    /// one flow, and the misses already found.
-    fn new(txns: usize, misses: Vec<(Cause, &'s str, Loc)>) -> Journal<'s> {
-        Journal {
-            txns: Vec::with_capacity(txns),
-            flows: Vec::with_capacity(txns + txns / 8),
-            ends: Vec::with_capacity(2 * txns),
-            asserts: Vec::new(),
-            splits: Vec::new(),
-            events: Vec::new(),
-            quotes: Vec::new(),
-            misses,
-            misfiled: Vec::new(),
-            diags: Vec::new(),
-            last_day: None,
-            in_order: true,
-        }
+    places: usize,
+) -> (Vec<Txn>, Vec<Flow>, Groups<Place, Id<Flow>>) {
+    if in_order {
+        return (txns, flows, Groups::build(places, ends));
     }
-
-    /// Lays the next run after those before it. Its flows already know their
-    /// transactions' numbers; only where they start has to be added.
-    fn take(&mut self, mut sink: Sink<'s>) {
-        self.diags.append(&mut sink.diags);
-        self.misses.append(&mut sink.misses);
-        self.misfiled.append(&mut sink.misfiled);
-        self.quotes.append(&mut sink.quotes);
-        self.asserts.append(&mut sink.asserts);
-        self.splits.append(&mut sink.splits);
-        self.events.append(&mut sink.events);
-        if let (Some(first), Some(last)) = (sink.txns.first(), sink.txns.last()) {
-            self.in_order &= !sink.unordered && self.last_day.is_none_or(|before| before <= first.day);
-            self.last_day = Some(last.day);
-        }
-        let base = self.flows.len() as u32;
-        let ends = sink.flows.iter().enumerate().flat_map(|(at, flow)| ends_of(Id::new(base + at as u32), flow));
-        self.ends.extend(ends);
-        self.txns.extend(sink.txns.into_iter().map(|mut txn| {
-            txn.first = Id::new(base + txn.first.index() as u32);
-            txn
+    let mut own = flows.into_iter();
+    let mut records: Vec<(Txn, Vec<Flow>)> = Vec::with_capacity(txns.len());
+    for txn in txns {
+        let len = txn.len as usize;
+        records.push((txn, own.by_ref().take(len).collect()));
+    }
+    records.sort_by_key(|(txn, _)| txn.day);
+    let (mut txns, mut flows) = (Vec::with_capacity(records.len()), Vec::new());
+    for (at, (mut txn, own)) in records.into_iter().enumerate() {
+        txn.first = Id::new(flows.len() as u32);
+        flows.extend(own.into_iter().map(|mut flow| {
+            flow.txn = Id::new(at as u32);
+            flow
         }));
-        self.flows.append(&mut sink.flows);
+        txns.push(txn);
     }
-
-    /// The transactions and flows in day order, and which flows touch each of
-    /// `places` places. Runs laid end to end are almost always in order; when
-    /// they are not, every transaction moves with its flows and ties keep
-    /// declaration order.
-    fn lay_out(
-        txns: Vec<Txn>,
-        flows: Vec<Flow>,
-        ends: Vec<(Id<Place>, Id<Flow>)>,
-        in_order: bool,
-        places: usize,
-    ) -> (Vec<Txn>, Vec<Flow>, Groups<Place, Id<Flow>>) {
-        if in_order {
-            return (txns, flows, Groups::build(places, ends));
-        }
-        let mut own = flows.into_iter();
-        let mut records: Vec<(Txn, Vec<Flow>)> = Vec::with_capacity(txns.len());
-        for txn in txns {
-            let len = txn.len as usize;
-            records.push((txn, own.by_ref().take(len).collect()));
-        }
-        records.sort_by_key(|(txn, _)| txn.day);
-        let (mut txns, mut flows) = (Vec::with_capacity(records.len()), Vec::new());
-        for (at, (mut txn, own)) in records.into_iter().enumerate() {
-            txn.first = Id::new(flows.len() as u32);
-            flows.extend(own.into_iter().map(|mut flow| {
-                flow.txn = Id::new(at as u32);
-                flow
-            }));
-            txns.push(txn);
-        }
-        let ends = flows.iter().enumerate().flat_map(|(at, flow)| ends_of(Id::new(at as u32), flow));
-        let touching = Groups::build(places, ends);
-        (txns, flows, touching)
-    }
+    let ends = flows.iter().enumerate().flat_map(|(at, flow)| ends_of(Id::new(at as u32), flow));
+    let touching = Groups::build(places, ends);
+    (txns, flows, touching)
 }
 
 /// The places a flow touches: its source and, if another, its target.
