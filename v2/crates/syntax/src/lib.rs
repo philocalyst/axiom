@@ -170,7 +170,11 @@ impl Scan {
             match text.get(newline + 1) {
                 Some(b'0'..=b'9') => {
                     (scan.items, scan.dated) = (scan.items + 1, scan.dated + 1);
-                    scan.heading = heading(&text[newline + 1..]).or(scan.heading);
+                    // A whole date is not a heading, and is what nearly every dated line starts with.
+                    let line = &text[newline + 1..];
+                    if !(line.get(4) == Some(&b'-') && line.get(7) == Some(&b'-')) {
+                        scan.heading = heading(line).or(scan.heading);
+                    }
                 }
                 Some(b' ' | b'\t' | b'\r' | b'\n') | None => {}
                 Some(_) => scan.items += 1,

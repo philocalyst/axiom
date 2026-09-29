@@ -20,7 +20,7 @@ impl<'s> Parser<'s> {
             }
             Tok::Purpose(_) => Err(self.hash_code(self.peek().loc)),
             // A commodity that starts a flow is a party: `VTI -> fidelity 198.12 USD`.
-            Tok::Unit(unit) if self.lexer.peek_second().tok != Tok::Punct(Punct::Arrow) => {
+            Tok::Unit(unit) if !matches!(self.lexer.peek_second().tok, Tok::Punct(Punct::Arrow)) => {
                 self.bump();
                 self.statement(line, date, Subject::Unit(Name(unit)), None)
             }

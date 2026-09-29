@@ -235,7 +235,7 @@ impl<'s> Parser<'s> {
 
     /// Whether the next token is the punctuation `punct`.
     pub fn at(&self, punct: Punct) -> bool {
-        self.tok() == Tok::Punct(punct)
+        matches!(self.tok(), Tok::Punct(next) if next == punct)
     }
 
     pub fn eat(&mut self, punct: Punct) -> Option<Loc> {
@@ -345,7 +345,7 @@ impl<'s> Parser<'s> {
             .label(token.loc, format!("expected {what}"));
         // A `/` touching another is `//` written where it is no comment.
         let touching = |at: Option<usize>| at.is_some_and(|at| self.src.as_bytes().get(at) == Some(&b'/'));
-        let doubled = token.tok == Tok::Punct(Punct::Slash)
+        let doubled = matches!(token.tok, Tok::Punct(Punct::Slash))
             && (touching(Some(token.loc.end as usize)) || touching((token.loc.start as usize).checked_sub(1)));
         match doubled {
             true => diag.note("`//` starts a comment only after whitespace, and a path separator is a single `/`"),

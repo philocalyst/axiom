@@ -37,6 +37,10 @@ impl<'s> Parser<'s> {
     /// starts with a sign or an amount). Items may be indented further than
     /// their siblings, to line their amounts up.
     pub fn body(&mut self, line: &Line<'s>, scope: Scope) -> Parse<Body<'s>> {
+        // Most flows have no lines under them.
+        if !self.lines.peek().is_some_and(|next| next.indent > line.indent) {
+            return Ok(Body::default());
+        }
         let (legs, items) = (self.mark::<Leg>(), self.mark::<LineItem>());
         self.block(line, true, |parser, child| match parser.at_item() {
             true => parser.line_item(child, scope).map(drop),
