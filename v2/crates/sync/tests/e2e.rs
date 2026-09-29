@@ -12,7 +12,7 @@ use std::time::Duration;
 use axiom_core::{Day, Map, Qty};
 use axiom_sync::{
     Account, Amounts, Column, Csv, DateFormat, Due, Env, Existing, Failure, Feed, Format, Input, Kind, Known, Layout,
-    Recognizer, Sink, Source, Unit, World, sync,
+    Patterns, Recognizer, Sink, Source, Unit, World, sync,
 };
 
 const USD: Unit = Unit { name: "USD", scale: 2 };
@@ -127,7 +127,7 @@ fn sources<'a>(order: &[&str]) -> Vec<Source<'a>> {
 /// journal's own lines. `known` says who is known as what.
 fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World<'a> {
     let mut world = World {
-        recognizer: Recognizer::new(known, &["code:(\"inv-\" digit+ \"-\" digit+)"]).unwrap(),
+        recognizer: Recognizer::new(known, &["code:(\"inv-\" digit+ \"-\" digit+)"], &Patterns::default()).unwrap(),
         layout: Layout::new(files.keys().map(String::as_str)),
         accounts: Map::default(),
         dues: Vec::new(),

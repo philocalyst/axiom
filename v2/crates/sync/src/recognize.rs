@@ -1,13 +1,13 @@
-//! Who a memo is. The ledger's `known-as` patterns are compiled once and found
-//! through a trie of the literals they begin with, so a record costs one pass
-//! over its memo and no allocation.
+//! Who a memo is. The ledger's `known-as` patterns, and every name's own name,
+//! are compiled once and found through a trie of the literals they begin with,
+//! so a record costs one pass over its memo and no allocation.
 
 use std::cmp::Reverse;
 
 use axiom_core::par;
 
 use crate::Record;
-use crate::peg::{Found, PatternError, Peg, Run};
+use crate::peg::{Capture, Found, Parts, Pattern, PatternError, Patterns, Run};
 
 /// Records handed to one worker at a time: enough to reuse a scratch buffer.
 const CHUNK: usize = 4096;
@@ -17,9 +17,10 @@ pub struct Known<'a> {
     pub name: &'a str,
     /// An account rather than a party: money with it is a transfer.
     pub account: bool,
-    /// `known-as` patterns (see [`Peg`]), each matched anywhere in the memo, in
-    /// any case. A pattern with a `payee` capture names a go-between: what the
-    /// capture holds is who the money was for (`"PAYPAL *" payee:(any+)`).
+    /// `known-as` patterns (see [`Pattern`]), each matched anywhere in the memo,
+    /// in any case. A pattern with a `payee` capture names a go-between: what the
+    /// capture holds is who the money was for (`"PAYPAL *" payee:rest`). The name
+    /// itself is a pattern too, with hyphens as spaces, and needs none written.
     pub patterns: Vec<&'a str>,
 }
 
@@ -40,16 +41,19 @@ pub struct Recognized<'a> {
 }
 
 /// Two patterns of different entities that match equally well.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct Tie<'a> {
-    pub first: (Who<'a>, &'a str),
-    pub second: (Who<'a>, &'a str),
+    pub first: (Who<'a>, String),
+    pub second: (Who<'a>, String),
 }
 
-/// A memo, read: who it is, and the codes it names, lowercased.
+/// A memo, read: who it is, the codes it names, lowercased, and the amount and
+/// day it says of itself, when a pattern captured them.
 pub struct Reading<'a> {
     pub who: Result<Recognized<'a>, Tie<'a>>,
     pub codes: Vec<String>,
+    pub amount: Option<String>,
+    pub date: Option<String>,
 }
 
 /// A pattern that does not compile, and whose it is (`code` for a code).
@@ -60,17 +64,27 @@ pub struct BadPattern<'a> {
     pub error: PatternError,
 }
 
-struct Pattern<'a> {
+struct Entry {
     owner: usize,
-    source: &'a str,
-    peg: Peg,
+    /// As the ledger wrote it, for a tie to name.
+    source: String,
+    pattern: Pattern,
+    /// A name's own pattern: it counts only as a whole word.
+    whole: bool,
 }
 
+#[derive(Clone, Copy)]
 struct Hit {
-    pattern: usize,
+    entry: usize,
     found: Found,
-    /// Where the `payee` capture was, if the pattern has one.
-    payee: Option<(usize, usize)>,
+    /// Where the pattern's captures were.
+    parts: Parts,
+}
+
+impl Hit {
+    fn part(&self, capture: Capture) -> Option<(usize, usize)> {
+        self.parts[capture as usize]
+    }
 }
 
 /// Room for reading one memo, kept between memos.
@@ -138,40 +152,57 @@ impl Trie {
 
 pub struct Recognizer<'a> {
     known: Vec<Known<'a>>,
-    patterns: Vec<Pattern<'a>>,
+    entries: Vec<Entry>,
     starts: Trie,
     /// The patterns that may begin with anything, to be tried everywhere.
     floating: Vec<usize>,
     /// The declared `code` patterns. What one captures as `code`, or else all
     /// it matches, is a code.
-    codes: Vec<Peg>,
+    codes: Vec<Pattern>,
+}
+
+/// The text between two offsets of the lowercased memo.
+fn text(hay: &[u8], start: usize, end: usize) -> Option<String> {
+    std::str::from_utf8(&hay[start..end]).ok().map(String::from)
 }
 
 impl<'a> Recognizer<'a> {
-    pub fn new(known: Vec<Known<'a>>, codes: &[&'a str]) -> Result<Recognizer<'a>, Vec<BadPattern<'a>>> {
-        let (mut patterns, mut compiled, mut bad) = (Vec::new(), Vec::new(), Vec::new());
-        let owned = known
+    /// Compiles every pattern, each able to call the ledger's `named` ones.
+    pub fn new(
+        known: Vec<Known<'a>>,
+        codes: &[&'a str],
+        named: &Patterns,
+    ) -> Result<Recognizer<'a>, Vec<BadPattern<'a>>> {
+        let (mut entries, mut compiled, mut bad) = (Vec::new(), Vec::new(), Vec::new());
+        let written = known
             .iter()
             .enumerate()
             .flat_map(|(owner, entry)| entry.patterns.iter().map(move |&source| (Some(owner), entry.name, source)));
-        for (owner, name, source) in owned.chain(codes.iter().map(|&source| (None, "code", source))) {
-            match (Peg::new(source), owner) {
-                (Ok(peg), Some(owner)) => patterns.push(Pattern { owner, source, peg }),
-                (Ok(peg), None) => compiled.push(peg),
+        for (owner, name, source) in written.chain(codes.iter().map(|&source| (None, "code", source))) {
+            match (Pattern::new(source, named), owner) {
+                (Ok(pattern), Some(owner)) => {
+                    entries.push(Entry { owner, source: source.to_string(), pattern, whole: false })
+                }
+                (Ok(pattern), None) => compiled.push(pattern),
                 (Err(error), _) => bad.push(BadPattern { owner: name, pattern: source, error }),
             }
         }
         if !bad.is_empty() {
             return Err(bad);
         }
+        for (owner, entry) in known.iter().enumerate() {
+            let words = entry.name.replace('-', " ");
+            let (source, pattern) = (format!("\"{words}\""), Pattern::literal(&words));
+            entries.push(Entry { owner, source, pattern, whole: true });
+        }
         let (mut starts, mut floating) = (Trie::new(), Vec::new());
-        for (at, pattern) in patterns.iter().enumerate() {
-            match pattern.peg.starts() {
+        for (at, entry) in entries.iter().enumerate() {
+            match entry.pattern.starts() {
                 Some(literals) => literals.iter().for_each(|literal| starts.insert(literal, at)),
                 None => floating.push(at),
             }
         }
-        Ok(Recognizer { known, patterns, starts, floating, codes: compiled })
+        Ok(Recognizer { known, entries, starts, floating, codes: compiled })
     }
 
     /// Reads every record's memo, in parallel.
@@ -189,27 +220,37 @@ impl<'a> Recognizer<'a> {
         lower.clear();
         lower.extend(memo.bytes().map(|byte| byte.to_ascii_lowercase()));
         self.find_hits(lower, run, hits);
-        Reading { who: self.decide(lower, hits), codes: self.codes_in(lower, run) }
+        let mut codes = self.codes_in(lower, run);
+        codes.extend(hits.iter().filter_map(|hit| hit.part(Capture::Code)).filter_map(|(a, b)| text(lower, a, b)));
+        let (who, parts) = match self.decide(lower, hits) {
+            Ok((who, parts)) => (Ok(who), parts),
+            Err(tie) => (Err(tie), Parts::default()),
+        };
+        let told = |capture: Capture| parts[capture as usize].and_then(|(start, end)| text(lower, start, end));
+        Reading { who, codes, amount: told(Capture::Amount), date: told(Capture::Date) }
     }
 
     /// Every place a pattern matches in `hay`.
     fn find_hits(&self, hay: &[u8], run: &mut Run, hits: &mut Vec<Hit>) {
         hits.clear();
         for at in 0..hay.len() {
-            let mut try_pattern = |pattern: usize| {
-                let peg = &self.patterns[pattern].peg;
+            let mut try_entry = |entry: usize| {
+                let Entry { pattern, whole, .. } = &self.entries[entry];
                 // A match of nothing says nothing about who it was.
-                if let Some(found) = peg.matches_at(hay, at, run).filter(|found| found.end > found.start) {
-                    hits.push(Hit { pattern, found, payee: peg.capture("payee", run) });
+                let found = pattern.matches_at(hay, at, run).filter(|found| found.end > found.start);
+                let word = |at: usize| hay.get(at).is_some_and(|byte| byte.is_ascii_alphanumeric());
+                let bounded = |found: &Found| !*whole || !(found.start > 0 && word(found.start - 1) || word(found.end));
+                if let Some(found) = found.filter(bounded) {
+                    hits.push(Hit { entry, found, parts: pattern.parts(run) });
                 }
             };
-            self.starts.walk(hay, at, &mut try_pattern);
-            self.floating.iter().for_each(|&pattern| try_pattern(pattern));
+            self.starts.walk(hay, at, &mut try_entry);
+            self.floating.iter().for_each(|&entry| try_entry(entry));
         }
     }
 
     fn owner(&self, hit: &Hit) -> usize {
-        self.patterns[hit.pattern].owner
+        self.entries[hit.entry].owner
     }
 
     fn who(&self, owner: usize) -> Who<'a> {
@@ -218,13 +259,14 @@ impl<'a> Recognizer<'a> {
 
     /// The best-matching entity: the most literal text matched wins, and two
     /// that tie are an error. What lies inside another party's `payee` is not
-    /// in the running: that pattern has said what it is.
-    fn decide(&self, hay: &[u8], hits: &mut [Hit]) -> Result<Recognized<'a>, Tie<'a>> {
+    /// in the running: that pattern has said what it is. What the best pattern
+    /// captured comes with it.
+    fn decide(&self, hay: &[u8], hits: &mut [Hit]) -> Result<(Recognized<'a>, Parts), Tie<'a>> {
         hits.sort_unstable_by_key(|hit| (self.owner(hit), Reverse(hit.found.literal), hit.found.start));
+        let payee = |hit: &Hit| hit.part(Capture::Payee).filter(|_| !self.known[self.owner(hit)].account);
         let inside_a_payee = |hit: &Hit| {
             hits.iter().any(|other| {
-                let payee = other.payee.filter(|_| !self.known[self.owner(other)].account);
-                payee.is_some_and(|(start, end)| {
+                payee(other).is_some_and(|(start, end)| {
                     self.owner(other) != self.owner(hit) && start <= hit.found.start && hit.found.end <= end
                 })
             })
@@ -236,39 +278,37 @@ impl<'a> Recognizer<'a> {
             }
         }
         best_of_each.sort_by_key(|hit| (Reverse(hit.found.literal), hit.found.start));
-        let candidate = |hit: &Hit| (self.who(self.owner(hit)), self.patterns[hit.pattern].source);
+        let candidate = |hit: &Hit| (self.who(self.owner(hit)), self.entries[hit.entry].source.clone());
         match best_of_each.as_slice() {
-            [] => Ok(Recognized::default()),
+            [] => Ok((Recognized::default(), Parts::default())),
             [best, next, ..] if best.found.literal == next.found.literal => {
                 Err(Tie { first: candidate(best), second: candidate(next) })
             }
-            [best, ..] => self.through(best, hay),
+            [best, ..] => Ok((self.through(best, payee(best), hay)?, best.parts)),
         }
     }
 
     /// The best hit as a party, or, if its pattern names a `payee`, the party
     /// that is, with the best hit as the go-between.
-    fn through(&self, best: &Hit, hay: &[u8]) -> Result<Recognized<'a>, Tie<'a>> {
+    fn through(&self, best: &Hit, payee: Option<(usize, usize)>, hay: &[u8]) -> Result<Recognized<'a>, Tie<'a>> {
         let outer = self.who(self.owner(best));
-        let Some((start, end)) = best.payee.filter(|_| !outer.account) else {
-            return Ok(Recognized { who: Some(outer), via: None });
-        };
+        let Some((start, end)) = payee else { return Ok(Recognized { who: Some(outer), via: None }) };
         let (mut run, mut hits) = (Run::default(), Vec::new());
         self.find_hits(&hay[start..end], &mut run, &mut hits);
-        Ok(match self.decide(&hay[start..end], &mut hits)?.who {
+        Ok(match self.decide(&hay[start..end], &mut hits)?.0.who {
             Some(inner) => Recognized { who: Some(inner), via: Some(outer.name) },
             None => Recognized { who: Some(outer), via: None },
         })
     }
 
-    /// The codes the memo names, by each pattern in turn.
+    /// The codes the memo names, by each declared code pattern in turn.
     fn codes_in(&self, hay: &[u8], run: &mut Run) -> Vec<String> {
         let mut codes = Vec::new();
-        for peg in &self.codes {
+        for pattern in &self.codes {
             let mut from = 0;
-            while let Some(found) = peg.find(hay, from, run) {
-                let (start, end) = peg.capture("code", run).unwrap_or((found.start, found.end));
-                codes.extend(std::str::from_utf8(&hay[start..end]).ok().map(String::from));
+            while let Some(found) = pattern.find(hay, from, run) {
+                let (start, end) = pattern.capture(Capture::Code, run).unwrap_or((found.start, found.end));
+                codes.extend(text(hay, start, end));
                 from = found.end.max(found.start + 1);
             }
         }
@@ -289,7 +329,7 @@ mod tests {
             party("trader-joes", &["\"TRADER JOE\""]),
             party("shell", &["\"SHELL\""]),
             party("shell-oil", &["\"SHELL OIL\""]),
-            party("paypal", &["\"PAYPAL\"", "\"PAYPAL *\" payee:(any+)"]),
+            party("paypal", &["\"PAYPAL\"", "\"PAYPAL *\" payee:rest"]),
             party("etsy-seller", &["\"ETSY SELLER\""]),
             party("uber", &["\"UBER\""]),
             party("halcyon", &["\"HALCYON\""]),
@@ -299,7 +339,7 @@ mod tests {
             Known { name: "visa", account: true, patterns: vec!["\"CHASE CARD PAYMENT\""] },
         ];
         let codes = ["code:(\"inv-\" digit+ \"-\" digit+)", "\"CHECK \" code:(digit+)"];
-        Recognizer::new(known, &codes).unwrap_or_else(|bad| panic!("{}", bad[0].error.message))
+        Recognizer::new(known, &codes, &Patterns::default()).unwrap_or_else(|bad| panic!("{}", bad[0].error.message))
     }
 
     fn who(memo: &str) -> (Option<&'static str>, Option<&'static str>) {
@@ -319,6 +359,28 @@ mod tests {
         assert_eq!(who("SOMETHING ELSE"), (None, None));
         assert_eq!(who("CAFÉ ☕ SHELL"), (Some("shell"), None));
         assert_eq!(who(""), (None, None));
+    }
+
+    #[test]
+    fn a_name_is_known_by_itself_as_a_whole_word() {
+        let known = vec![party("ashgrove", &[]), party("trader-joes", &[]), party("uber", &[])];
+        let recognizer = Recognizer::new(known, &[], &Patterns::default()).unwrap();
+        let who = |memo: &str| recognizer.read(memo, &mut Scratch::default()).who.ok()?.who.map(|who| who.name);
+        assert_eq!(who("ach ASHGROVE property"), Some("ashgrove"));
+        assert_eq!(who("TRADER JOES #634"), Some("trader-joes"));
+        assert_eq!(who("TRADER JOE'S #634"), None, "a spelling the bank chose needs a pattern");
+        assert_eq!(who("UBER *TRIP"), Some("uber"));
+        assert_eq!((who("SUBERB"), who("UBERALLES"), who("uber2")), (None, None, None));
+    }
+
+    #[test]
+    fn a_pattern_can_say_the_amount_and_the_day_of_its_memo() {
+        let pattern = "\"WISE \" amount:(digit+ \".\" digit+) \" on \" date:(digit+ \"/\" digit+)";
+        let recognizer = Recognizer::new(vec![party("wise", &[pattern])], &[], &Patterns::default()).unwrap();
+        let reading = recognizer.read("CONVERSION WISE 58.40 ON 01/05 REF 9", &mut Scratch::default());
+        assert_eq!((reading.amount.as_deref(), reading.date.as_deref()), (Some("58.40"), Some("01/05")));
+        assert_eq!(reading.who.unwrap().who.map(|who| who.name), Some("wise"));
+        assert_eq!(recognizer.read("WISE TRANSFER", &mut Scratch::default()).amount, None);
     }
 
     #[test]
@@ -359,25 +421,25 @@ mod tests {
     #[test]
     fn a_pattern_that_does_not_compile_is_reported_with_whose_it_is() {
         let known = vec![party("trader-joes", &["\"TRADER JOE\" digt+"])];
-        let bad = Recognizer::new(known, &["\"ok\"", "oops"]).err().expect("refused");
+        let bad = Recognizer::new(known, &["\"ok\"", "oops"], &Patterns::default()).err().expect("refused");
         let shown: Vec<_> = bad.iter().map(|bad| (bad.owner, bad.pattern, bad.error.message.as_str())).collect();
         assert_eq!(
             shown,
             [
-                ("trader-joes", "\"TRADER JOE\" digt+", "`digt` is not a class"),
-                ("code", "oops", "`oops` is not a class")
+                ("trader-joes", "\"TRADER JOE\" digt+", "there is no class or pattern called `digt`"),
+                ("code", "oops", "there is no class or pattern called `oops`")
             ]
         );
     }
 
     #[test]
-    #[cfg_attr(debug_assertions, ignore = "timings are for release builds")]
+    #[ignore = "a timing, alone: cargo test -p axiom-sync --release -- --ignored --test-threads=1"]
     fn a_million_memos_against_two_hundred_patterns() {
         let names: Vec<String> = (0..200).map(|n| format!("merchant-{n}")).collect();
         let sources: Vec<String> = (0..200).map(|n| format!("\"SHOP {n:03} \" any+ / \"MRCH{n:03}\"")).collect();
         let known =
             names.iter().zip(&sources).map(|(name, source)| Known { name, account: false, patterns: vec![source] });
-        let recognizer = Recognizer::new(known.collect(), &["code:(\"inv-\" digit+)"]).unwrap();
+        let recognizer = Recognizer::new(known.collect(), &["code:(\"inv-\" digit+)"], &Patterns::default()).unwrap();
         let mut seed = 7u64;
         let mut next = |bound: u64| {
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
@@ -428,7 +490,7 @@ mod tests {
         let mut scratch = Scratch::default();
         for (record, reading) in records.iter().zip(&read) {
             let alone = recognizer.read(&record.memo, &mut scratch);
-            assert_eq!(alone.who.ok(), reading.who.ok());
+            assert_eq!(alone.who.as_ref().ok(), reading.who.as_ref().ok());
             assert_eq!(alone.codes, reading.codes);
         }
     }

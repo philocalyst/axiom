@@ -95,8 +95,8 @@ mod tests {
         for group in group(memos) {
             let pattern = group.pattern();
             let known = vec![Known { name: "someone", account: false, patterns: vec![&pattern] }];
-            let recognizer =
-                Recognizer::new(known, &[]).unwrap_or_else(|bad| panic!("{pattern}: {}", bad[0].error.message));
+            let recognizer = Recognizer::new(known, &[], &crate::Patterns::default())
+                .unwrap_or_else(|bad| panic!("{pattern}: {}", bad[0].error.message));
             let reading = recognizer.read(group.example, &mut Scratch::default());
             assert!(
                 reading.who.ok().and_then(|found| found.who).is_some(),
@@ -112,7 +112,11 @@ mod tests {
         for memo in ["7-ELEVEN #123", "#", "\"quoted\" 5", "12345"] {
             let groups = group([memo]);
             assert_eq!(groups.len(), 1, "{memo:?}");
-            assert!(crate::Peg::new(&groups[0].pattern()).is_ok(), "{memo:?}: {}", groups[0].known_as());
+            assert!(
+                crate::Pattern::new(&groups[0].pattern(), &crate::Patterns::default()).is_ok(),
+                "{memo:?}: {}",
+                groups[0].known_as()
+            );
         }
     }
 }

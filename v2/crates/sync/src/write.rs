@@ -506,7 +506,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(debug_assertions, ignore = "timings are for release builds")]
+    #[ignore = "a timing, alone: cargo test -p axiom-sync --release -- --ignored --test-threads=1"]
     fn a_hundred_thousand_lines_into_a_file_of_two_hundred_thousand() {
         let first = day("2016-01-01");
         let mut text = String::new();

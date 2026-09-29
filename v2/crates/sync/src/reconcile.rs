@@ -123,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(debug_assertions, ignore = "timings are for release builds")]
+    #[ignore = "a timing, alone: cargo test -p axiom-sync --release -- --ignored --test-threads=1"]
     fn a_hundred_thousand_records_against_a_million_flows() {
         let mut seed = 0x9E37_79B9_7F4A_7C15u64;
         let mut next = |bound: u64| {

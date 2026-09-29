@@ -44,7 +44,7 @@ use axiom_core::{Day, FileId, Loc, Qty};
 
 pub use command::{Failed, substitute};
 pub use csv::{Amounts, Column, Csv, DateFormat};
-pub use peg::{PatternError, Peg};
+pub use peg::{Pattern, PatternError, Patterns};
 pub use promise::Due;
 pub use recognize::{BadPattern, Known, Recognizer, Scratch};
 pub use reconcile::{Existing, WINDOW};

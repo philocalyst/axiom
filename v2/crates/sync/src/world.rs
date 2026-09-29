@@ -177,7 +177,7 @@ impl<'a> World<'a> {
     /// Who a record was with: the memo's party, else the party of the claim
     /// whose code it names. Only codes of the claims of that party are carried.
     fn other(&self, reading: &Reading<'a>) -> Other<'a> {
-        let found = reading.who.unwrap_or_default();
+        let found = reading.who.as_ref().ok().copied().unwrap_or_default();
         let mut other = Other { who: found.who, via: found.via, codes: Vec::new() };
         for code in &reading.codes {
             let Some((&claim, &party)) = self.claims.get_key_value(code.as_str()) else { continue };
@@ -193,7 +193,7 @@ impl<'a> World<'a> {
 }
 
 fn tie_error(record: &Record, tie: &Tie) -> Diagnostic {
-    let ((first, first_pattern), (second, second_pattern)) = (tie.first, tie.second);
+    let ((first, first_pattern), (second, second_pattern)) = (&tie.first, &tie.second);
     let headline = format!("`{}` is known as both {} and {}", record.memo.trim(), first.name, second.name);
     let note = format!(
         "`known-as {first_pattern}` of {} and `known-as {second_pattern}` of {} match it equally well",
@@ -274,6 +274,7 @@ fn closing_of(records: &[Record]) -> Option<(Day, Qty)> {
 #[cfg(test)]
 mod tests {
     use crate::csv::{Amounts, Column, Csv, DateFormat};
+    use crate::peg::Patterns;
     use crate::recognize::Known;
 
     use super::*;
@@ -301,7 +302,7 @@ mod tests {
     fn world(known: Vec<Known<'static>>) -> World<'static> {
         let codes = ["code:(\"inv-\" digit+ \"-\" digit+)"];
         World {
-            recognizer: Recognizer::new(known, &codes).unwrap(),
+            recognizer: Recognizer::new(known, &codes, &Patterns::default()).unwrap(),
             layout: Layout::new(["journal/2026/01.ax"]),
             accounts: Map::default(),
             dues: Vec::new(),
@@ -440,7 +441,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(debug_assertions, ignore = "timings are for release builds")]
+    #[ignore = "a timing, alone: cargo test -p axiom-sync --release -- --ignored --test-threads=1"]
     fn a_statement_of_a_hundred_thousand_records_against_an_account_of_a_million_flows() {
         let mut seed = 11u64;
         let mut next = |bound: u64| {

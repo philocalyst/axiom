@@ -664,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(debug_assertions, ignore = "timings are for release builds")]
+    #[ignore = "a timing, alone: cargo test -p axiom-sync --release -- --ignored --test-threads=1"]
     fn a_million_rows() {
         let csv = named("Posting Date", "MM/DD/YYYY", "Amount", "Description");
         let mut text = String::from("Posting Date,Description,Amount,Balance\n");

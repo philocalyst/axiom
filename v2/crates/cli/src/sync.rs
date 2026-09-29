@@ -9,7 +9,7 @@ use std::time::Duration;
 use axiom_core::diag::closest;
 use axiom_core::{Day, Diagnostic, FileId};
 use axiom_model::Book;
-use axiom_sync::{Change, Env, Failure, Input, Kind, Layout, Recognizer, Sink, Source, World, sync};
+use axiom_sync::{Change, Env, Failure, Input, Kind, Layout, Patterns, Recognizer, Sink, Source, World, sync};
 
 use crate::Outcome;
 use crate::project::Sources;
@@ -62,7 +62,8 @@ pub fn execute(
     let paths: Vec<&str> =
         (0..).map_while(|id| files.get(FileId(id))).filter(|file| !file.embedded).map(|file| &*file.path).collect();
     let mut world = World {
-        recognizer: Recognizer::new(Vec::new(), &[]).unwrap_or_else(|_| unreachable!("no patterns, none can be wrong")),
+        recognizer: Recognizer::new(Vec::new(), &[], &Patterns::default())
+            .unwrap_or_else(|_| unreachable!("no patterns, none can be wrong")),
         layout: Layout::new(paths),
         accounts: Default::default(),
         dues: Vec::new(),
@@ -229,7 +230,7 @@ mod tests {
     /// The source, run in `dir`: what `axiom sync` would report and write.
     fn run(dir: &TempDir, sources: &[Source], dry: bool) -> Outcome {
         let mut world = World {
-            recognizer: Recognizer::new(Vec::new(), &[]).unwrap(),
+            recognizer: Recognizer::new(Vec::new(), &[], &Patterns::default()).unwrap(),
             layout: Layout::new(["prices/2026.ax"]),
             accounts: Default::default(),
             dues: Vec::new(),
