@@ -35,7 +35,7 @@ pub fn view<'s>(
     let at = at.unwrap_or(run.today);
     let selection = Selection::new(book, globs)?;
     let days = column_days(book, at, monthly);
-    let snapshots = par::map(&days, |&day| Snapshot { day, balances: Balances::at(book, run, day) });
+    let snapshots = par::map_each(&days, |&day| Snapshot { day, balances: Balances::at(book, run, day) });
 
     let mut table = Section::new(iter::once(Column::left("Place")).chain(amount_columns(book, &snapshots, value)));
     let mut unpriced = 0;

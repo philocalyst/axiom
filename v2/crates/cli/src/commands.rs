@@ -99,9 +99,10 @@ impl<'a, 's> Session<'a, 's> {
         if tally.errors > 0 && !relaxed {
             return Outcome { answer: String::new(), diagnostics, failed: true };
         }
-        match axiom_report::report(self.book, self.run, query) {
+        let query = self.pinpoint(query);
+        match axiom_report::report(self.book, self.run, &query) {
             Ok(report) => {
-                let answer = table::render(&report, self.terminals.out);
+                let answer = table::render(&report, self.terminals.out, self.renderer.locator());
                 Outcome { answer, diagnostics, failed: tally.errors > 0 }
             }
             Err(refusal) => {
@@ -109,6 +110,16 @@ impl<'a, 's> Session<'a, 's> {
                 Outcome { answer: String::new(), diagnostics, failed: true }
             }
         }
+    }
+
+    /// `why journal/2026/01.ax:14` asks about a line, which only the sources
+    /// can find; any other query goes to the report as it is.
+    fn pinpoint<'q>(&mut self, query: &Query<'q>) -> Query<'q> {
+        let Query::Why { target } = query else { return query.clone() };
+        let line = target.rsplit_once(':').and_then(|(path, number)| {
+            self.renderer.locator().line(path, number.parse().ok()?)
+        });
+        line.map_or_else(|| query.clone(), |loc| Query::Line { loc })
     }
 
     /// The diagnostics, and after them how many of each there were.

@@ -16,6 +16,7 @@
 use axiom_core::{Qty, Ratio};
 use axiom_report::{Align, Cell, Column, Report, Row, Section, Style};
 
+use crate::render::Locator;
 use crate::style::{Color, Ink, Line, Terminal};
 use crate::text::wrap;
 
@@ -29,22 +30,22 @@ const DEPTH: usize = 2;
 const MIN_NOTE_WIDTH: usize = 20;
 
 /// Draws a report: its title, then each section with its table and notes.
-pub fn render(report: &Report, terminal: Terminal) -> String {
+pub fn render(report: &Report, terminal: Terminal, locator: &mut Locator) -> String {
     let mut lines = vec![Line::text(&report.title, Ink::BOLD)];
     for section in &report.sections {
         lines.push(Line::new());
-        lines.extend(section_lines(section, terminal.width));
+        lines.extend(section_lines(section, terminal.width, locator));
     }
     lines.iter().map(|line| line.render(terminal.painter) + "\n").collect()
 }
 
-fn section_lines(section: &Section, width: usize) -> Vec<Line> {
+fn section_lines(section: &Section, width: usize, locator: &mut Locator) -> Vec<Line> {
     let mut lines = Vec::new();
     if let Some(heading) = &section.heading {
         lines.push(Line::text(heading, Ink::BOLD));
     }
     if !section.columns.is_empty() {
-        lines.extend(table_lines(section));
+        lines.extend(table_lines(section, locator));
     }
     let room = width.saturating_sub(INDENT + 2).max(MIN_NOTE_WIDTH);
     for note in &section.notes {
@@ -61,10 +62,11 @@ fn section_lines(section: &Section, width: usize) -> Vec<Line> {
 }
 
 /// The column titles, a rule, and the rows, with a rule above each total.
-fn table_lines(section: &Section) -> Vec<Line> {
+fn table_lines(section: &Section, locator: &mut Locator) -> Vec<Line> {
     let units = unit_widths(section);
     let titles: Vec<Line> = section.columns.iter().map(|column| Line::text(&column.title, Ink::DIM)).collect();
-    let rows: Vec<Vec<Line>> = section.rows.iter().map(|row| row_cells(row, &section.columns, &units)).collect();
+    let rows: Vec<Vec<Line>> =
+        section.rows.iter().map(|row| row_cells(row, &section.columns, &units, locator)).collect();
     let widths: Vec<usize> = (0..section.columns.len())
         .map(|at| titles[at].width().max(rows.iter().map(|cells| cells[at].width()).max().unwrap_or(0)))
         .collect();
@@ -101,7 +103,7 @@ fn assemble(cells: Vec<Line>, widths: &[usize], columns: &[Column]) -> Line {
 
 /// One line per column: the row's cell, in the row's style, and for the first
 /// column indented to the row's depth.
-fn row_cells(row: &Row, columns: &[Column], units: &[usize]) -> Vec<Line> {
+fn row_cells(row: &Row, columns: &[Column], units: &[usize], locator: &mut Locator) -> Vec<Line> {
     let ink = match row.style {
         Style::Normal => Ink::PLAIN,
         Style::Total => Ink::BOLD,
@@ -109,7 +111,7 @@ fn row_cells(row: &Row, columns: &[Column], units: &[usize]) -> Vec<Line> {
         Style::Alert => Ink::RED,
     };
     let mut cells: Vec<Line> = (0..columns.len())
-        .map(|at| row.cells.get(at).map_or(Line::new(), |cell| cell_line(cell, ink, units[at])))
+        .map(|at| row.cells.get(at).map_or(Line::new(), |cell| cell_line(cell, ink, units[at], locator)))
         .collect();
     if let Some(first) = cells.first_mut() {
         first.right_align(first.width() + DEPTH * usize::from(row.depth));
@@ -129,7 +131,7 @@ fn unit_widths(section: &Section) -> Vec<usize> {
         .collect()
 }
 
-fn cell_line(cell: &Cell, ink: Ink, unit_width: usize) -> Line {
+fn cell_line(cell: &Cell, ink: Ink, unit_width: usize, locator: &mut Locator) -> Line {
     match cell {
         Cell::Blank => Line::new(),
         Cell::Text(text) => Line::text(text, ink),
@@ -140,6 +142,7 @@ fn cell_line(cell: &Cell, ink: Ink, unit_width: usize) -> Line {
             let padding = unit_width.saturating_sub(unit.chars().count());
             Line::text(&format!("{} {unit}{}", qty.show(*scale), " ".repeat(padding)), ink)
         }
+        Cell::Source(loc) => Line::text(&locator.describe(*loc).unwrap_or_default(), Ink::DIM),
     }
 }
 
@@ -159,6 +162,7 @@ mod tests {
     use axiom_core::Day;
 
     use super::*;
+    use crate::project::Sources;
 
     fn column(title: &'static str, align: Align) -> Column {
         Column { title: Cow::Borrowed(title), align }
@@ -201,7 +205,7 @@ mod tests {
         };
         let report = Report { title: "Balances at 2026-03-31".to_string(), sections: vec![section] };
         assert_eq!(
-            render(&report, Terminal::plain(80)),
+            render(&report, Terminal::plain(80), &mut Locator::new(&Sources::default())),
             "\
 Balances at 2026-03-31
 

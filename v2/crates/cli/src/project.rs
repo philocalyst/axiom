@@ -183,6 +183,11 @@ impl Sources {
         self.files.get(usize::from(id.0))
     }
 
+    /// The source at `path`, as `axiom why` or a diagnostic shows it.
+    pub fn find(&self, path: &str) -> Option<&SourceFile> {
+        self.files.iter().find(|file| file.path == path)
+    }
+
     /// Parses every file, in parallel, into what the model builds from.
     pub fn parse(&self) -> (Vec<Source<'_>>, Vec<Diagnostic>) {
         let parsed = par::map_each(&self.files, |file| axiom_syntax::parse(file.id, &file.text));

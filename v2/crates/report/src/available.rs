@@ -33,7 +33,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, at: Option<Day>) -> Report<'s> {
     let candidates = candidates(book, &holdings, at);
     let destination = cash.largest_place();
     let baseline = Recorded::by(book, &settled(ledger.clone(), year_end), at);
-    let outcomes = par::map(&candidates, |candidate| Outcome::of(&ledger, candidate, destination, &baseline, at));
+    let outcomes = par::map_each(&candidates, |candidate| Outcome::of(&ledger, candidate, destination, &baseline, at));
 
     let elsewhere = elsewhere_section(book, &candidates, &outcomes, destination, at);
     Report::new(format!("Available on {at}")).with(cash.section(book)).with(elsewhere)

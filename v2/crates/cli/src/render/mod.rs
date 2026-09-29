@@ -15,13 +15,12 @@ mod page;
 mod snippet;
 mod source;
 
-use axiom_core::Map;
 use axiom_core::diag::{Diagnostic, FileId, Help, Label, Severity};
 
 use self::page::Page;
 use self::snippet::{Row, Snippet};
-use self::source::LineIndex;
-use crate::project::{SourceFile, Sources};
+pub use self::source::Locator;
+use crate::project::Sources;
 use crate::style::{Ink, Line, Terminal};
 use crate::text::plural;
 
@@ -74,15 +73,19 @@ impl Tally {
 
 /// Draws diagnostics against the sources they point into.
 pub struct Renderer<'a> {
-    sources: &'a Sources,
+    locator: Locator<'a>,
     terminal: Terminal,
-    indexes: Map<FileId, LineIndex>,
 }
 
 impl<'a> Renderer<'a> {
     /// A renderer for diagnostics that point into `sources`.
     pub fn new(sources: &'a Sources, terminal: Terminal) -> Renderer<'a> {
-        Renderer { sources, terminal, indexes: Map::default() }
+        Renderer { locator: Locator::new(sources), terminal }
+    }
+
+    /// Where things are in the sources, for anything else that needs to say.
+    pub fn locator(&mut self) -> &mut Locator<'a> {
+        &mut self.locator
     }
 
     /// Every diagnostic in file and source order, each followed by a blank
@@ -130,12 +133,12 @@ impl<'a> Renderer<'a> {
         let mut files: Vec<FileId> = diagnostic.labels.iter().map(|label| label.loc.file).collect();
         files.sort_by_key(|&file| (Some(file) != anchor, file));
         files.dedup();
-        let sources = self.sources;
+        let sources = self.locator.sources;
         let mut snippets = Vec::new();
         for id in files {
             let Some(file) = sources.get(id) else { continue };
             let labels: Vec<&Label> = diagnostic.labels.iter().filter(|label| label.loc.file == id).collect();
-            snippets.push(snippet::snippet(file, self.index(file), &labels, inks));
+            snippets.push(snippet::snippet(file, self.locator.index(file), &labels, inks));
         }
         snippets
     }
@@ -143,13 +146,8 @@ impl<'a> Renderer<'a> {
     /// The edit a help carries, shown as the lines it would leave.
     fn fix_rows(&mut self, help: &Help) -> Vec<Row> {
         let Some((loc, replacement)) = &help.edit else { return Vec::new() };
-        let Some(file) = self.sources.get(loc.file) else { return Vec::new() };
-        snippet::edited_lines(file, self.index(file), *loc, replacement)
-    }
-
-    /// Line numbers of a file, built when a diagnostic first points into it.
-    fn index(&mut self, file: &SourceFile) -> &LineIndex {
-        self.indexes.entry(file.id).or_insert_with(|| LineIndex::new(&file.text))
+        let Some(file) = self.locator.sources.get(loc.file) else { return Vec::new() };
+        snippet::edited_lines(file, self.locator.index(file), *loc, replacement)
     }
 }
 

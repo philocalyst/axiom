@@ -1,5 +1,43 @@
 //! Where things are in a source text: lines, and columns within them.
 
+use axiom_core::{FileId, Loc, Map};
+
+use crate::project::{SourceFile, Sources};
+
+/// Line indexes for the files of a run, each built the first time something
+/// points into it. Diagnostics and report tables share one.
+pub struct Locator<'a> {
+    pub sources: &'a Sources,
+    indexes: Map<FileId, LineIndex>,
+}
+
+impl<'a> Locator<'a> {
+    pub fn new(sources: &'a Sources) -> Locator<'a> {
+        Locator { sources, indexes: Map::default() }
+    }
+
+    pub fn index(&mut self, file: &SourceFile) -> &LineIndex {
+        self.indexes.entry(file.id).or_insert_with(|| LineIndex::new(&file.text))
+    }
+
+    /// `journal/2026/01.ax:14`: what `axiom why` accepts back.
+    pub fn describe(&mut self, loc: Loc) -> Option<String> {
+        let file = self.sources.get(loc.file)?;
+        let line = self.index(file).line_of(loc.start as usize) + 1;
+        Some(format!("{}:{line}", file.path))
+    }
+
+    /// The bytes of line `number` (counted from 1) of the file at `path`.
+    pub fn line(&mut self, path: &str, number: usize) -> Option<Loc> {
+        let file = self.sources.find(path)?;
+        let index = self.index(file);
+        let line = number.checked_sub(1).filter(|&line| line < index.len())?;
+        let start = index.start(line, &file.text);
+        let end = start + index.line(line, &file.text).len();
+        Some(Loc::new(file.id, start as u32, end as u32))
+    }
+}
+
 /// The byte offset at which each line of a text starts.
 pub struct LineIndex {
     starts: Vec<usize>,
@@ -9,6 +47,11 @@ impl LineIndex {
     pub fn new(text: &str) -> LineIndex {
         let newlines = memchr::memchr_iter(b'\n', text.as_bytes()).map(|at| at + 1);
         LineIndex { starts: std::iter::once(0).chain(newlines).collect() }
+    }
+
+    /// How many lines the text has.
+    pub fn len(&self) -> usize {
+        self.starts.len()
     }
 
     /// The line (counting from 0) that holds byte `offset`. An offset past the
