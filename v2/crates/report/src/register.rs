@@ -1,0 +1,144 @@
+//! `register`: one place's flows, dated, with a running balance.
+
+use std::borrow::Cow;
+use std::collections::BTreeMap;
+
+use axiom_core::{Day, Diagnostic, Id, Qty};
+use axiom_engine::{Run, State};
+use axiom_model::{Amount, Book, Commodity, Place};
+
+use crate::history::Posting;
+use crate::places::path;
+use crate::resolve;
+use crate::table::code_labels;
+use crate::{Cell, Column, Report, Row, Section, Style};
+
+pub fn view<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    place: &str,
+    from: Option<Day>,
+    to: Option<Day>,
+) -> Result<Report<'s>, Diagnostic> {
+    let place = resolve::place(book, place)?;
+    let title = format!("Register: {}", path(book, place));
+    Ok(Report::new(title).with(section(book, run, place, from, to)))
+}
+
+/// The flows touching `place` from `from` to `to` (default: everything up to
+/// the run's day), each with the balance after it.
+///
+/// The running balance counts what is real at the end of the window. Pending,
+/// void and returned flows are listed, muted, and leave it alone.
+pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Day>, to: Option<Day>) -> Section<'s> {
+    let steps = steps(book, run, place, to.unwrap_or(run.today));
+    let split = from.map_or(0, |from| steps.partition_point(|step| step.day < from));
+
+    let columns = [
+        Column::left("Date"),
+        Column::left("With"),
+        Column::left("Payee"),
+        Column::left("Note"),
+        Column::right("Amount"),
+        Column::right("Balance"),
+    ];
+    let mut section = Section::new(columns);
+    let mut running: BTreeMap<Id<Commodity>, Qty> = BTreeMap::new();
+    for step in &steps[..split] {
+        *running.entry(step.change.unit).or_default() += step.counted();
+    }
+    if let Some(from) = from {
+        for (&unit, &qty) in running.iter().filter(|(_, qty)| !qty.is_zero()) {
+            let balance = Cell::amount(book, Amount::new(qty, unit));
+            let cells =
+                [Cell::Day(from), Cell::text("opening balance"), Cell::Blank, Cell::Blank, Cell::Blank, balance];
+            section.push(Row::new(cells).style(Style::Total));
+        }
+    }
+    for step in &steps[split..] {
+        let balance = running.entry(step.change.unit).or_default();
+        *balance += step.counted();
+        section.push(row(book, step, *balance));
+    }
+
+    if section.rows.is_empty() {
+        section.note(format!("Nothing touches {} in this window.", path(book, place)));
+    }
+    if section.rows.iter().any(|row| row.style == Style::Muted) {
+        section.note("Muted lines are pending, void or returned: they do not move the balance.");
+    }
+    section
+}
+
+/// One journal flow, or one accepted gap, as seen from a place.
+struct Step<'a> {
+    day: Day,
+    /// What the place gained (positive) or lost (negative).
+    change: Amount,
+    /// Whether it is real at the end of the window.
+    counts: bool,
+    /// The other end.
+    with: Id<Place>,
+    /// `None` for a pad, which the journal never wrote.
+    posting: Option<Posting<'a>>,
+}
+
+impl Step<'_> {
+    /// What it adds to the running balance.
+    fn counted(&self) -> Qty {
+        if self.counts { self.change.qty } else { Qty::ZERO }
+    }
+}
+
+/// Every step touching `place` up to `cutoff`, in order. A pad, made at the
+/// end of its day, follows that day's flows.
+fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec<Step<'a>> {
+    let flows = book.touching[place].iter().filter_map(|&id| {
+        let posting = Posting::at(book, run, id);
+        Some(Step {
+            day: posting.flow.day,
+            change: posting.change_at(place)?,
+            counts: posting.is_real_on(cutoff),
+            with: posting.counterparty(place),
+            posting: Some(posting),
+        })
+    });
+    let pads = run.pads.iter().filter(|pad| pad.place == place).map(|pad| Step {
+        day: pad.day,
+        change: pad.amount,
+        counts: true,
+        with: book.roots.unknown,
+        posting: None,
+    });
+    let mut steps: Vec<Step> = flows.chain(pads).filter(|step| step.day <= cutoff).collect();
+    steps.sort_by_key(|step| step.day);
+    steps
+}
+
+fn row<'s>(book: &Book<'s>, step: &Step, balance: Qty) -> Row<'s> {
+    let payee = step.posting.and_then(|posting| posting.flow.payee);
+    let cells = [
+        Cell::Day(step.day),
+        Cell::text(path(book, step.with)),
+        payee.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path))),
+        note(book, step).map_or(Cell::Blank, Cell::text),
+        Cell::amount(book, step.change),
+        Cell::amount(book, Amount::new(balance, step.change.unit)),
+    ];
+    Row::new(cells).style(if step.counts { Style::Normal } else { Style::Muted })
+}
+
+/// Codes and settlement, as one line of small print.
+fn note(book: &Book, step: &Step) -> Option<Cow<'static, str>> {
+    let Some(posting) = step.posting else { return Some("unexplained gap, accepted with !".into()) };
+    let status: Option<Cow<'static, str>> = match posting.posted.state {
+        State::Actual | State::Planned => None,
+        State::Pending => Some("pending".into()),
+        State::Void => Some("void".into()),
+        State::Settled(on) if !step.counts => Some(format!("pending until {on}").into()),
+        State::Settled(on) => Some(format!("settled {on}").into()),
+        State::Returned(on) => Some(format!("returned {on}").into()),
+    };
+    let parts: Vec<Cow<str>> = code_labels(book, &posting.flow.codes).map(Cow::Owned).chain(status).collect();
+    (!parts.is_empty()).then(|| parts.join(" · ").into())
+}
