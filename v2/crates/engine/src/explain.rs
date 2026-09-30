@@ -26,7 +26,7 @@ use crate::facts::{Follows, LawFacts, Reads};
 use crate::lots::Candidate;
 use crate::motion::Motion;
 use crate::show;
-use crate::{Cause, Effect, Owed, Parcel};
+use crate::{Cause, Effect, Owed, Parcel, Waiver};
 
 /// The most flows an assertion's explanation draws.
 const SHOWN: usize = 8;
@@ -42,15 +42,6 @@ pub(crate) struct Frame<'a, 's> {
     pub values: &'a [Value],
     /// What laws recorded so far: which flows counted into a tally.
     pub effects: &'a [Effect],
-}
-
-/// Why a violation is not an error.
-#[derive(Clone, Copy)]
-pub(crate) enum Waiver {
-    /// `!` on the flow's leg or transaction.
-    Marked(Waive),
-    /// The book or the command line is `relaxed`.
-    Relaxed,
 }
 
 impl Frame<'_, '_> {

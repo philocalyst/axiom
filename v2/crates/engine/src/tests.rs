@@ -8,7 +8,7 @@ use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder, span};
-use crate::{Bound, Cause, Holding, Options, Owed, Parcel, Plan, Run, State, run};
+use crate::{Bound, Cause, Holding, Options, Owed, Parcel, Plan, Run, State, Verdict, run};
 
 fn options() -> Options {
     Options { today: Day(1000), relaxed: false }
@@ -182,7 +182,7 @@ fn a_failed_law_explains_itself_power_assert_style() {
     assert_eq!(run.checks[law.index()], 2);
     assert_eq!(run.violations.len(), 1);
     let violation = run.violations[0];
-    assert_eq!((violation.cause, violation.warn, violation.waived), (Cause::Flow(over), false, false));
+    assert_eq!((violation.cause, violation.verdict), (Cause::Flow(over), Verdict::Blocks));
     let d = &run.diagnostics[violation.diagnostic as usize];
     assert_eq!((&*d.code, d.severity), ("deferral-limit", Severity::Error), "the code is the law's own name");
     assert_eq!(
@@ -238,7 +238,7 @@ fn a_waived_transaction_or_a_relaxed_book_demotes_the_error() {
     f.flows[over.index()].waive = Some(Waive { loc, reason: None });
     let book = f.book();
     let run = run(&book, options());
-    assert!(run.violations[0].waived);
+    assert!(run.violations[0].verdict.is_waived());
     assert_eq!(run.diagnostics[0].severity, Severity::Warning);
     assert!(run.diagnostics[0].labels.iter().any(|l| l.text == "waived here"));
 
@@ -416,7 +416,7 @@ fn deferred_money_has_no_basis_and_a_withdrawal_realizes_all_of_it() {
     assert_eq!(gain.cause, Cause::Flow(withdrawal));
     let effect = run.effects[0];
     assert_eq!((effect.amount.qty, effect.amount.unit, effect.name), (Qty(400_00), usd, penalty));
-    assert_eq!(effect.owe, Some(Owed { to: irs, due: Day(2) }));
+    assert_eq!(effect.owed(), Some(Owed { to: irs, due: Day(2) }));
     let left = held(&run, retirement, usd).unwrap();
     assert_eq!(
         (left.plain, left.lots.iter().map(|l| (l.qty.0, l.basis.0)).collect::<Vec<_>>()),
@@ -466,9 +466,10 @@ fn a_require_with_an_else_prices_the_violation_instead_of_failing() {
     let book = f.book();
     let run = run(&book, options());
     assert_eq!(run.effects.len(), 1);
-    assert_eq!((run.effects[0].amount.qty, run.effects[0].name, run.effects[0].priced), (Qty(100_00), penalty, true));
+    let [effect] = run.effects[..] else { panic!("{:?}", run.effects) };
+    assert_eq!((effect.amount.qty, effect.name, effect.is_penalty()), (Qty(100_00), penalty, true));
     let [violation] = run.violations[..] else { panic!("one priced violation: {:?}", run.violations) };
-    assert!(violation.priced && !violation.waived && !violation.warn);
+    assert_eq!(violation.verdict, Verdict::Priced { waived: false });
     let d = &run.diagnostics[violation.diagnostic as usize];
     assert_eq!((&*d.code, d.severity, d.disposition), ("early-withdrawal", Severity::Note, Disposition::Priced));
     assert_eq!(d.message, "100.00 USD owed to nsf-grant as penalty, due 1970-01-03", "what is owed, to whom, and by when");
@@ -735,7 +736,7 @@ fn a_warn_law_is_a_warning_and_says_how_much_room_is_left() {
     let book = f.book();
     let run = run(&book, options());
     assert_eq!(run.violations.len(), 1);
-    assert!(run.violations[0].warn);
+    assert_eq!(run.violations[0].verdict, Verdict::Warns);
     let d = &run.diagnostics[run.violations[0].diagnostic as usize];
     assert_eq!(d.severity, Severity::Warning);
     assert_eq!(d.help[0].text, "at most 20.00 USD more can go in this month");
@@ -986,7 +987,7 @@ fn a_flow_recognized_for_last_year_counts_in_last_years_tally_and_a_closing_law_
         ],
         "the January payment counts for 2025, and the closing law for 2025 sees it"
     );
-    assert_eq!(run.effects[2].owe, Some(Owed { to: irs, due: Day(date(2026, 4, 15)) }), "due the day the year closes");
+    assert_eq!(run.effects[2].owed(), Some(Owed { to: irs, due: Day(date(2026, 4, 15)) }), "due the day the year closes");
     assert_eq!(run.checks[law.index()], 1, "2026 has not closed yet");
 }
 
@@ -1277,7 +1278,7 @@ fn a_waiver_waives_a_priced_violation_and_a_waiver_that_waives_nothing_warns() {
     let run = run(&book, options());
     assert!(run.effects.is_empty(), "the penalty is waived, so it is not owed");
     let [violation] = run.violations[..] else { panic!("{:?}", run.violations) };
-    assert!(violation.priced && violation.waived);
+    assert_eq!(violation.verdict, Verdict::Priced { waived: true });
     let d = &run.diagnostics[violation.diagnostic as usize];
     assert_eq!((d.disposition, d.labels.iter().any(|l| l.text == "waived here")), (Disposition::Waived, true));
     let unused = diagnostic(&run, "unused-waiver");
@@ -1353,7 +1354,7 @@ fn a_floor_of_nothing_is_read_off_the_holdings_and_leaves_a_reading_only_when_it
     let book = f.book();
     let broke = run(&book, options());
     let [violation] = broke.violations[..] else { panic!("{:?}", broke.violations) };
-    assert_eq!((violation.day, violation.warn), (Day(2), true));
+    assert_eq!((violation.day, violation.verdict), (Day(2), Verdict::Warns));
     let [reading] = broke.headroom[..] else { panic!("the failing reading only: {:?}", broke.headroom) };
     assert_eq!((reading.limit.qty, reading.day, reading.bound), (Qty(-200_00), Day(2), Bound::Floor));
 }

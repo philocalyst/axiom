@@ -88,9 +88,9 @@ fn checkpoints(today: Day, until: Day) -> Vec<Day> {
 
 /// Obligations of the lens's owners falling due after `today`, soonest first.
 fn coming_due<'t>(trace: &'t Trace<'_, '_, '_>, whose: &Whose, today: Day) -> Vec<&'t Effect> {
-    let owed = |effect: &&Effect| whose.includes(effect.owner) && effect.owe.is_some_and(|owed| owed.due > today);
+    let owed = |effect: &&Effect| whose.includes(effect.owner) && effect.owed().is_some_and(|owed| owed.due > today);
     let mut due: Vec<&Effect> = trace.ledger.recorded().effects.iter().filter(owed).collect();
-    due.sort_by_key(|effect| effect.owe.map(|owed| owed.due));
+    due.sort_by_key(|effect| effect.owed().map(|owed| owed.due));
     due
 }
 
@@ -98,7 +98,7 @@ fn coming_due<'t>(trace: &'t Trace<'_, '_, '_>, whose: &Whose, today: Day) -> Ve
 fn committed(lens: Lens, checkpoints: &[Day], liquid: &[Qty], due: &[&Effect]) -> Vec<Qty> {
     let lens = lens.on(checkpoints[0]);
     let owed_by = |day: Day| -> Qty {
-        let paid = due.iter().filter(|effect| effect.owe.is_some_and(|owed| owed.due <= day));
+        let paid = due.iter().filter(|effect| effect.owed().is_some_and(|owed| owed.due <= day));
         paid.filter_map(|effect| lens.value(effect.amount)).sum()
     };
     checkpoints.iter().zip(liquid).map(|(&day, &liquid)| liquid - owed_by(day)).collect()
@@ -222,7 +222,7 @@ fn owed_section<'s>(book: &Book<'s>, due: &[&Effect]) -> Section<'s> {
     let columns = [Column::left("Due"), Column::left("Obligation"), Column::left("To"), Column::right("Amount")];
     let mut section = Section::new(columns).headed("Obligations coming due");
     for effect in due {
-        let Some(owed) = effect.owe else { continue };
+        let Some(owed) = effect.owed() else { continue };
         let cells = [
             Cell::Day(owed.due),
             Cell::text(book.name(effect.name)),
@@ -246,7 +246,7 @@ fn problems_section<'s>(book: &Book<'s>, trace: &Trace<'_, '_, '_>, today: Day) 
         let message = &recorded.diagnostics[first.diagnostic as usize].message;
         let more = if count > 1 { format!(" (and {} more)", count - 1) } else { String::new() };
         let text = format!("{}: {}{more}", book.name(book.laws[first.law].name), headline(message));
-        problems.push((first.day, text, if first.waived { Style::Muted } else { Style::Alert }));
+        problems.push((first.day, text, if first.verdict.is_waived() { Style::Muted } else { Style::Alert }));
     }
     for overdraft in &trace.overdrafts {
         let lowest = book.show(Amount::new(overdraft.lowest, book.base));

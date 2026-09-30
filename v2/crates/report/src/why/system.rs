@@ -21,7 +21,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, system: Id<System>)
     for (id, law) in declared {
         let mut totals: BTreeMap<(Sym, bool, Id<Commodity>), Qty> = BTreeMap::new();
         for effect in run.effects.iter().filter(|effect| effect.law == id && whose.includes(effect.owner)) {
-            *totals.entry((effect.name, effect.owe.is_some(), effect.amount.unit)).or_default() += effect.amount.qty;
+            *totals.entry((effect.name, effect.owed().is_some(), effect.amount.unit)).or_default() += effect.amount.qty;
         }
         let did: Vec<String> = totals
             .into_iter()

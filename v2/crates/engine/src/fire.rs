@@ -15,7 +15,7 @@ use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
 use axiom_model::{Amount, Cap, Entity, Fault, Law, Rule, Subject, Trigger, Window};
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
-use crate::explain::{self, Frame, Waiver};
+use crate::explain::{self, Frame};
 use crate::facts::{Reads, Shortcut};
 use crate::ledger::Ledger;
 use crate::motion::Motion;
@@ -23,7 +23,7 @@ use crate::plan::Plan;
 use crate::scope::owner_of;
 use crate::state::{Missing, Reading};
 use crate::totals::by_year;
-use crate::{Effect, Headroom, Owed, Violation};
+use crate::{Consequence, Effect, Headroom, Owed, Verdict, Violation, Waiver};
 
 /// Whether the rule is in force for some day of the occasion.
 fn applies(plan: &Plan, rule: &Rule, on: &Occasion) -> bool {
@@ -174,12 +174,13 @@ impl Ledger<'_, '_, '_> {
                         if let (Subject::Place(_), Some(house)) = (ctx.subject, book.entities[ctx.owner].member) {
                             self.world.tallies.add(house, day.year(), name, part);
                         }
-                        let effect = self.effect(rule, ctx, day, name, Amount::new(part, book.base));
+                        let amount = Amount::new(part, book.base);
+                        let effect = self.effect(rule, ctx, (day, name, amount), Consequence::Count);
                         self.record.effects.push(effect);
                     }
                 }
                 Outcome::Owe { name, amount, owed } if !ctx.checking => {
-                    let effect = Effect { owe: Some(owed), ..self.effect(rule, ctx, ctx.over.first(), name, amount) };
+                    let effect = self.effect(rule, ctx, (ctx.over.first(), name, amount), Consequence::Owe(owed));
                     self.record.effects.push(effect);
                 }
                 Outcome::Count { .. } | Outcome::Owe { .. } => {}
@@ -194,20 +195,16 @@ impl Ledger<'_, '_, '_> {
 
     /// What a law recorded for the day it belongs to: the tally line's year,
     /// and the year a report finds an obligation under, is that day's.
-    fn effect(&self, rule: &Rule, ctx: &Context, day: Day, name: Sym, amount: Amount) -> Effect {
+    fn effect(
+        &self,
+        rule: &Rule,
+        ctx: &Context,
+        (day, name, amount): (Day, Sym, Amount),
+        consequence: Consequence,
+    ) -> Effect {
         let law = &self.plan.book.laws[rule.law];
-        Effect {
-            law: rule.law,
-            subject: rule.subject,
-            owner: ctx.owner,
-            system: law.system,
-            day,
-            name,
-            amount,
-            owe: None,
-            cause: ctx.cause,
-            priced: false,
-        }
+        let (law, subject, owner, system, cause) = (rule.law, rule.subject, ctx.owner, law.system, ctx.cause);
+        Effect { law, subject, owner, system, day, name, amount, consequence, cause }
     }
 
     /// The last reading of a limit in its window: updated in place while the
@@ -273,15 +270,19 @@ impl Ledger<'_, '_, '_> {
         }
         let frame = Frame { book, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::broken(&frame, step as usize, warn, waiver);
-        self.violation(rule, ctx, diagnostic, (warn, waiver.is_some(), false));
+        let verdict = match (waiver, warn) {
+            (Some(waiver), _) => Verdict::Waived(waiver),
+            (None, true) => Verdict::Warns,
+            (None, false) => Verdict::Blocks,
+        };
+        self.violation(rule, ctx, diagnostic, verdict);
     }
 
     /// Records a violation with its diagnostic.
-    fn violation(&mut self, rule: &Rule, ctx: &Context, diagnostic: Diagnostic, kind: (bool, bool, bool)) {
-        let (warn, waived, priced) = kind;
+    fn violation(&mut self, rule: &Rule, ctx: &Context, diagnostic: Diagnostic, verdict: Verdict) {
         let diagnostic = self.record.report(diagnostic);
         let (law, subject, day, cause) = (rule.law, rule.subject, ctx.day, ctx.cause);
-        self.record.violations.push(Violation { law, subject, day, cause, warn, waived, priced, diagnostic });
+        self.record.violations.push(Violation { law, subject, day, cause, verdict, diagnostic });
     }
 
     /// A `require … else owe …` that does not hold costs what the law says,
@@ -295,10 +296,9 @@ impl Ledger<'_, '_, '_> {
         let facts = &self.plan.laws[rule.law.index()];
         let frame = Frame { book, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::priced(&frame, step as usize, (name, amount, owed), waive);
-        self.violation(rule, ctx, diagnostic, (false, waive.is_some(), true));
+        self.violation(rule, ctx, diagnostic, Verdict::Priced { waived: waive.is_some() });
         if waive.is_none() {
-            let effect =
-                Effect { owe: Some(owed), priced: true, ..self.effect(rule, ctx, ctx.over.first(), name, amount) };
+            let effect = self.effect(rule, ctx, (ctx.over.first(), name, amount), Consequence::Penalty(owed));
             self.record.effects.push(effect);
         }
     }

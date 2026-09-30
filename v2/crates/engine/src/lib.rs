@@ -56,7 +56,7 @@ mod source_tests;
 mod tests;
 
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
-use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn};
+use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn, Waive};
 
 pub use ledger::Ledger;
 pub use plan::{Plan, run};
@@ -289,10 +289,36 @@ pub struct Effect {
     pub day: Day,
     pub name: Sym,
     pub amount: Amount,
-    pub owe: Option<Owed>,
+    pub consequence: Consequence,
     pub cause: Cause,
+}
+
+impl Effect {
+    /// What is owed, and to whom and by when, if this is an obligation.
+    pub fn owed(&self) -> Option<Owed> {
+        match self.consequence {
+            Consequence::Count => None,
+            Consequence::Owe(owed) | Consequence::Penalty(owed) => Some(owed),
+        }
+    }
+
     /// The price of a violated `require … else owe …`.
-    pub priced: bool,
+    pub fn is_penalty(&self) -> bool {
+        matches!(self.consequence, Consequence::Penalty(_))
+    }
+}
+
+/// What a law's effect does. Being a penalty implies an obligation, so it
+/// cannot be one without the other.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Consequence {
+    /// A tally line: counted, owed to no one.
+    Count,
+    /// `owe`: an obligation.
+    Owe(Owed),
+    /// The price of a violated `require … else owe …`: an obligation the same
+    /// firing's violation is [`Verdict::Priced`] for.
+    Penalty(Owed),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -309,13 +335,39 @@ pub struct Violation {
     pub subject: Subject,
     pub day: Day,
     pub cause: Cause,
-    pub warn: bool,
-    /// By `!` or relaxed mode.
-    pub waived: bool,
-    /// A `require … else owe …`: the violation was priced, and its effects are
-    /// the ones with `priced` set that the same firing recorded.
-    pub priced: bool,
+    pub verdict: Verdict,
     pub diagnostic: u32,
+}
+
+/// What became of a failed `require` or `warn`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Verdict {
+    /// An error: the flow breaks the law.
+    Blocks,
+    /// A `warn`: reported, and stops nothing.
+    Warns,
+    /// Accepted, by a `!` or by `relaxed`.
+    Waived(Waiver),
+    /// A `require … else owe …`: the violation was priced, and the
+    /// [`Consequence::Penalty`] the same firing recorded is its price, unless a
+    /// `!` waived it.
+    Priced { waived: bool },
+}
+
+impl Verdict {
+    /// Whether a `!` or `relaxed` accepted it.
+    pub fn is_waived(self) -> bool {
+        matches!(self, Verdict::Waived(_) | Verdict::Priced { waived: true })
+    }
+}
+
+/// Why a violation is not an error.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Waiver {
+    /// `!` on the flow's leg or transaction.
+    Marked(Waive),
+    /// The book or the command line is `relaxed`.
+    Relaxed,
 }
 
 /// What a limit had counted and what it allowed, the last time one of its
