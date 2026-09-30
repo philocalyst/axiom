@@ -3,16 +3,16 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Id, Qty, Sym};
-use axiom_engine::Run;
-use axiom_model::{Amount, Book, Commodity, System};
+use axiom_model::{Amount, Commodity, System};
 
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::table::doc_headline;
 use crate::{Cell, Column, Report, Row, Section};
 
 use super::trigger_words;
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, system: Id<System>) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'_, 's>, system: Id<System>) -> Report<'s> {
+    let (book, run, whose) = (lens.book, lens.run, lens.whose);
     let columns =
         [Column::left("Law"), Column::left("When"), Column::left("Counted for residents"), Column::left("Written")];
     let mut laws = Section::new(columns).headed("Laws");

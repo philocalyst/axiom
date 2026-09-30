@@ -5,12 +5,11 @@ use std::iter;
 
 use axiom_core::glob::glob;
 use axiom_core::{Day, Diagnostic, Id, Qty};
-use axiom_engine::Run;
 use axiom_model::{Amount, Book, Class, Commodity, Period, Place};
 
 use crate::calendar::Periods;
 use crate::history::Snapshots;
-use crate::lens::{Basket, Lens, Valued, Whose};
+use crate::lens::{Basket, Lens, Valued};
 use crate::places::{depth, leaf, names};
 use crate::resolve;
 use crate::{Cell, Column, Report, Row, Section, Style};
@@ -19,18 +18,16 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 const MONTHLY_COLUMNS: usize = 12;
 
 pub fn view<'s>(
-    book: &Book<'s>,
-    run: &Run,
-    whose: &Whose,
+    lens: Lens<'_, 's>,
     globs: &[&str],
     at: Option<Day>,
     value: bool,
     monthly: bool,
 ) -> Result<Report<'s>, Diagnostic> {
-    let at = at.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, at);
+    let (book, at) = (lens.book, at.unwrap_or(lens.day));
+    let lens = lens.on(at);
     let selection = Selection::new(book, globs)?;
-    let snapshots = Snapshots::of(lens, run, &column_days(book, at, monthly), value);
+    let snapshots = Snapshots::of(lens, &column_days(book, at, monthly), value);
 
     let mut table = Section::new(iter::once(Column::left("Place")).chain(amount_columns(book, &snapshots, value)));
     let mut unpriced = 0;
@@ -190,7 +187,7 @@ fn push_place<'s>(
     let book = lens.book;
     let baskets: Vec<Basket> =
         (0..snapshots.days().len()).map(|column| snapshots.subtree(book, column, place)).collect();
-    let (class, sign) = (book.places[place].class, book.v3_root(place).display_sign());
+    let (class, sign) = (book.places[place].class, lens.sides.sign(place));
     let lines = if value {
         market_lines(lens, class, sign, snapshots.days(), &baskets)
     } else {

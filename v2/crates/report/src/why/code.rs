@@ -4,16 +4,16 @@ use std::collections::BTreeSet;
 
 use axiom_core::glob::glob;
 use axiom_core::{Diagnostic, Sym};
-use axiom_engine::Run;
-use axiom_model::Book;
 
 use super::{event_words, flows_table};
 use crate::history::postings;
+use crate::lens::Lens;
 use crate::resolve;
 use crate::{Cell, Column, Report, Row, Section};
 
 /// `pattern` may be a glob: `check-*`.
-pub fn report<'s>(book: &Book<'s>, run: &Run, pattern: &str) -> Result<Report<'s>, Diagnostic> {
+pub fn report<'s>(lens: Lens<'_, 's>, pattern: &str) -> Result<Report<'s>, Diagnostic> {
+    let (book, run) = (lens.book, lens.run);
     let marked = |code: Sym| glob(pattern, bare(book.name(code)));
     let flows: Vec<_> = postings(book, run)
         .filter(|posting| posting.flow.codes.iter().any(|&code| marked(code)))

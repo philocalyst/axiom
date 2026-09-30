@@ -9,24 +9,25 @@ use std::collections::BTreeMap;
 
 use axiom_core::calendar::Window;
 use axiom_core::{Day, Id, Ratio};
-use axiom_engine::{Headroom, Run};
+use axiom_engine::Headroom;
 use axiom_model::{Amount, Book, Law, Period, Place, Subject};
 
 use crate::calendar::Periods;
 use crate::headroom::{current, window_words};
-use crate::lens::Whose;
-use crate::places::{Side, path, v3_side};
+use crate::lens::Lens;
+use crate::places::{Side, path};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>, by: Period) -> Report<'s> {
-    let at = at.unwrap_or(run.today);
+pub fn view<'s>(lens: Lens<'_, 's>, at: Option<Day>, by: Period) -> Report<'s> {
+    let (book, whose, today) = (lens.book, lens.whose, lens.day);
+    let at = at.unwrap_or(today);
     let periods = Periods::covering(by, at, at);
     let window = periods.window(0).days();
     // Every window of the period so far is read, those no flow reached included.
-    let all = &current(book, run, window.first(), window.last().min(run.today).max(at));
+    let all = &current(lens, window.first(), window.last().min(today).max(at));
     let mut envelopes: BTreeMap<(Id<Place>, Id<Law>, u32), Vec<&Headroom>> = BTreeMap::new();
     for reading in all.iter().filter(|reading| whose.includes(reading.owner) && reading.days.overlaps(window)) {
-        if let Some(place) = envelope(book, reading) {
+        if let Some(place) = envelope(lens, reading) {
             envelopes.entry((place, reading.law, reading.step)).or_default().push(reading);
         }
     }
@@ -67,11 +68,10 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>, by: 
 }
 
 /// The place an envelope watches, if the reading is one.
-fn envelope(book: &Book, reading: &Headroom) -> Option<Id<Place>> {
+fn envelope(lens: Lens, reading: &Headroom) -> Option<Id<Place>> {
     let Subject::Place(place) = reading.subject else { return None };
-    let is_budget = book.name(book.laws[reading.law].name) == "budget";
-    let on_expenses = Window::exactly(reading.days).is_some() && v3_side(book, place) == Some(Side::Spending);
-    (reading.warn && (is_budget || on_expenses)).then_some(place)
+    let on_expenses = Window::exactly(reading.days).is_some() && lens.sides.side(place) == Some(Side::Spending);
+    (reading.warn && (lens.is_budget(reading.law) || on_expenses)).then_some(place)
 }
 
 /// One window of an envelope. Past the limit it is an alert, whatever its style.

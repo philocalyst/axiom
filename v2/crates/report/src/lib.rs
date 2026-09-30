@@ -41,7 +41,7 @@ use axiom_engine::Run;
 use axiom_model::{Amount, Book, Period, Place};
 
 use crate::history::Snapshots;
-use crate::lens::{Lens, Whose};
+use crate::lens::{Context, Lens, Whose};
 
 /// What to show. Built by the command line from its arguments.
 #[derive(Clone, Debug)]
@@ -141,25 +141,26 @@ pub enum Cell<'s> {
 /// Builds the view `query` asks for, about the money of `whose` (`--for`: an
 /// entity, a household including its members; default everything).
 pub fn report<'s>(book: &Book<'s>, run: &Run, query: &Query, whose: Option<&str>) -> Result<Report<'s>, Diagnostic> {
-    views(book, run, &Whose::resolve(book, whose)?, query)
+    let (cx, whose) = (Context::new(book, run), Whose::resolve(book, whose)?);
+    views(Lens::new(&cx, &whose, run.today), query)
 }
 
-/// The view `query` asks for, about the money of `whose`.
-fn views<'s>(book: &Book<'s>, run: &Run, whose: &Whose, query: &Query) -> Result<Report<'s>, Diagnostic> {
+/// The view `query` asks for, through a lens on the run's day.
+fn views<'s>(lens: Lens<'_, 's>, query: &Query) -> Result<Report<'s>, Diagnostic> {
     match query {
-        Query::Balance { globs, at, value, monthly } => balance::view(book, run, whose, globs, *at, *value, *monthly),
-        Query::Register { place, from, to } => register::view(book, run, whose, place, *from, *to),
-        Query::Flow { by, from, to } => Ok(flow::view(book, run, whose, *by, *from, *to)),
-        Query::Available { at } => Ok(available::view(book, run, whose, *at)),
-        Query::Budget { at, by } => Ok(budget::view(book, run, whose, *at, *by)),
-        Query::Limits { year } => Ok(limits::view(book, run, whose, *year)),
-        Query::Claims { at } => Ok(claims::view(book, run, whose, *at)),
-        Query::Tax { year } => Ok(tax::view(book, run, whose, *year)),
-        Query::Gains { year } => Ok(gains::view(book, run, whose, *year)),
-        Query::Lots { place, at } => lots::view(book, run, whose, *place, *at),
-        Query::Forecast { until, paths } => Ok(forecast::view(book, run, whose, *until, *paths)),
-        Query::Why { target } => why::target(book, run, whose, target),
-        Query::Line { loc } => Ok(why::line(book, run, *loc)),
+        Query::Balance { globs, at, value, monthly } => balance::view(lens, globs, *at, *value, *monthly),
+        Query::Register { place, from, to } => register::view(lens, place, *from, *to),
+        Query::Flow { by, from, to } => Ok(flow::view(lens, *by, *from, *to)),
+        Query::Available { at } => Ok(available::view(lens, *at)),
+        Query::Budget { at, by } => Ok(budget::view(lens, *at, *by)),
+        Query::Limits { year } => Ok(limits::view(lens, *year)),
+        Query::Claims { at } => Ok(claims::view(lens, *at)),
+        Query::Tax { year } => Ok(tax::view(lens, *year)),
+        Query::Gains { year } => Ok(gains::view(lens, *year)),
+        Query::Lots { place, at } => lots::view(lens, *place, *at),
+        Query::Forecast { until, paths } => Ok(forecast::view(lens, *until, *paths)),
+        Query::Why { target } => why::target(lens, target),
+        Query::Line { loc } => Ok(why::line(lens, *loc)),
     }
 }
 
@@ -176,9 +177,9 @@ pub struct Summary {
 }
 
 pub fn summary(book: &Book, run: &Run) -> Summary {
-    let (everyone, today) = (Whose::default(), run.today);
-    let lens = Lens::new(book, &everyone, today);
-    let worth = balance::NetWorth::of(lens, &Snapshots::of(lens, run, &[today], false), 0);
+    let (cx, everyone) = (Context::new(book, run), Whose::default());
+    let lens = Lens::new(&cx, &everyone, run.today);
+    let worth = balance::NetWorth::of(lens, &Snapshots::of(lens, &[run.today], false), 0);
     // Class roots (`assets`, `expenses`, …) group places, and the built-in
     // places exist in every book: only what was declared or used counts.
     let used = |place: Id<Place>| {
@@ -189,7 +190,7 @@ pub fn summary(book: &Book, run: &Run) -> Summary {
     };
     Summary {
         flows: book.flows.len(),
-        places: book.places.ids().filter(|&place| !places::is_class_root(book, place) && used(place)).count(),
+        places: book.places.ids().filter(|&place| !cx.sides.is_root(place) && used(place)).count(),
         laws: run.checks.iter().filter(|&&ran| ran > 0).count(),
         net_worth: Amount::new(worth.total(), book.base),
         unpriced: worth.unpriced,

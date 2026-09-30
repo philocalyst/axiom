@@ -1,27 +1,22 @@
 //! `lots`: parcels with their basis, and what they would fetch at the latest price.
 
 use axiom_core::{Day, Diagnostic, Qty};
-use axiom_engine::{Holding, Parcel, Run};
-use axiom_model::{Amount, Book};
+use axiom_engine::{Holding, Parcel};
+use axiom_model::Amount;
 
 use crate::claims::holdings_at;
 use crate::gains::Term;
-use crate::lens::{Lens, Priced, Whose};
+use crate::lens::{Lens, Priced};
 use crate::places::path;
 use crate::resolve;
 use crate::table::code_labels;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn view<'s>(
-    book: &Book<'s>,
-    run: &Run,
-    whose: &Whose,
-    place: Option<&str>,
-    at: Option<Day>,
-) -> Result<Report<'s>, Diagnostic> {
+pub fn view<'s>(lens: Lens<'_, 's>, place: Option<&str>, at: Option<Day>) -> Result<Report<'s>, Diagnostic> {
+    let book = lens.book;
     let scope = place.map(|text| resolve::place(book, text)).transpose()?;
-    let at = at.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, at);
+    let at = at.unwrap_or(lens.day);
+    let lens = lens.on(at);
 
     let mut section = Section::new([
         Column::left("Place"),
@@ -36,7 +31,7 @@ pub fn view<'s>(
     ]);
 
     let (mut basis, mut value, mut unrealized) = (Qty::ZERO, Priced::default(), Qty::ZERO);
-    let holdings = holdings_at(book, run, at);
+    let holdings = holdings_at(lens);
     let held = holdings.iter().filter(|holding| {
         lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
     });

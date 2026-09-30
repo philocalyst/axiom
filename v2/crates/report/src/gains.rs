@@ -3,10 +3,10 @@
 //! what was gained, with short-term and long-term subtotals.
 
 use axiom_core::{Day, Id, Qty, Span};
-use axiom_engine::{Gain, Run};
+use axiom_engine::Gain;
 use axiom_model::{Amount, Book, Commodity};
 
-use crate::lens::{Lens, Whose};
+use crate::lens::Lens;
 use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
@@ -44,9 +44,9 @@ impl Term {
     }
 }
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) -> Report<'s> {
-    let year = year.unwrap_or_else(|| run.today.year());
-    let lens = Lens::new(book, whose, run.today);
+pub fn view<'s>(lens: Lens<'_, 's>, year: Option<i32>) -> Report<'s> {
+    let (book, run) = (lens.book, lens.run);
+    let year = year.unwrap_or_else(|| lens.day.year());
     // Money leaving at its own basis (a grant spent, a deposit returned) realized nothing.
     let realized = |gain: &&Gain| gain.unit != book.base || gain.proceeds != gain.basis;
     let disposals: Vec<&Gain> =

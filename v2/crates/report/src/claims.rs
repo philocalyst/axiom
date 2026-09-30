@@ -10,11 +10,11 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Sym};
-use axiom_engine::{Holding, Ledger, Options, Run};
+use axiom_engine::{Holding, Ledger, Options};
 use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Select, Txn};
 
 use crate::history::{Posting, journal_ends_by};
-use crate::lens::{Lens, Priced, Whose};
+use crate::lens::{Lens, Priced};
 use crate::places::path;
 use crate::table::{code_labels, doc_headline};
 use crate::{Cell, Column, Report, Row, Section, Style};
@@ -47,11 +47,12 @@ impl Claim {
     }
 }
 
-/// The holdings on `day`: the run's, unless the journal goes on after it, in
-/// which case the ledger is folded up to it.
-pub fn holdings_at<'r>(book: &Book, run: &'r Run, day: Day) -> Cow<'r, [Holding]> {
+/// The holdings on the lens's day: the run's, unless the journal goes on after
+/// it, in which case the ledger is folded up to it.
+pub fn holdings_at<'r>(lens: Lens<'r, '_>) -> Cow<'r, [Holding]> {
+    let (book, day) = (lens.book, lens.day);
     if journal_ends_by(book, day) {
-        return Cow::Borrowed(&run.holdings);
+        return Cow::Borrowed(&lens.run.holdings);
     }
     let mut ledger = Ledger::new(book, Options { today: day, relaxed: book.relaxed });
     ledger.advance(day);
@@ -60,7 +61,7 @@ pub fn holdings_at<'r>(book: &Book, run: &'r Run, day: Day) -> Cow<'r, [Holding]
 
 /// Every claim open on the lens's day, for its owners, given the holdings on
 /// that day: soonest due first, what is owed to you before what you owe.
-pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Holding>) -> Vec<Claim> {
+pub fn open<'h>(lens: Lens, holdings: impl IntoIterator<Item = &'h Holding>) -> Vec<Claim> {
     let book = lens.book;
     let claimed = holdings.into_iter().filter(|holding| book.places[holding.place].claim && lens.owns(holding.place));
     let parcels = claimed.flat_map(|holding| {
@@ -77,11 +78,10 @@ pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Ho
             }
         })
     });
-    let payable = book.kind("payable").ok();
     let payables = book.places.iter().filter(|&(id, place)| {
-        place.class == Class::Debt && lens.owns(id) && payable.is_some_and(|kind| book.is_a(place.kind, kind))
+        place.class == Class::Debt && lens.owns(id) && lens.payable.is_some_and(|kind| book.is_a(place.kind, kind))
     });
-    let mut claims: Vec<Claim> = parcels.chain(payables.flat_map(|(place, _)| owed_by_you(lens, run, place))).collect();
+    let mut claims: Vec<Claim> = parcels.chain(payables.flat_map(|(place, _)| owed_by_you(lens, place))).collect();
     claims.sort_by_key(|claim| (!claim.mine, claim.due.unwrap_or(Day::MAX), claim.made));
     claims
 }
@@ -89,8 +89,8 @@ pub fn open<'h>(lens: Lens, run: &Run, holdings: impl IntoIterator<Item = &'h Ho
 /// What is owed through a payable place, netted per code: a flow out of it
 /// (a bill) names its debt by its first code, and a flow into it (a payment)
 /// settles the debts of the codes it names.
-pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim> {
-    let book = lens.book;
+pub(crate) fn owed_by_you(lens: Lens, place: Id<Place>) -> Vec<Claim> {
+    let (book, run) = (lens.book, lens.run);
     let mut debts: BTreeMap<Sym, Claim> = BTreeMap::new();
     for &id in &book.touching[place] {
         let posting = Posting::at(book, run, id);
@@ -126,11 +126,11 @@ fn settled_codes(flow: &Flow) -> impl Iterator<Item = Sym> + '_ {
     flow.codes.iter().copied().chain(selected)
 }
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {
-    let at = at.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, at);
-    let holdings = holdings_at(book, run, at);
-    let claims = open(lens, run, holdings.iter());
+pub fn view<'s>(lens: Lens<'_, 's>, at: Option<Day>) -> Report<'s> {
+    let at = at.unwrap_or(lens.day);
+    let lens = lens.on(at);
+    let holdings = holdings_at(lens);
+    let claims = open(lens, holdings.iter());
     let (mine, theirs): (Vec<&Claim>, Vec<&Claim>) = claims.iter().partition(|claim| claim.mine);
     let report = Report::new(format!("Claims on {at}")).with(section(lens, "Owed to you", &mine));
     let report = report.with(section(lens, "Owed by you", &theirs));

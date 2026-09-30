@@ -35,12 +35,13 @@ const SEED: u64 = 0x5EED_0A11_CE00_0001;
 /// Bootstrapping needs a past to draw from.
 const MIN_HISTORY_MONTHS: usize = 3;
 
-pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: Option<Day>, paths: u32) -> Report<'s> {
+pub fn view<'s>(lens: Lens<'_, 's>, until: Option<Day>, paths: u32) -> Report<'s> {
+    let (book, run, whose) = (lens.book, lens.run, lens.whose);
     let today = run.today;
     let until = until.unwrap_or_else(|| default_horizon(book, today)).max(today);
-    let lens = Lens::new(book, whose, today);
+    let lens = lens.on(today);
 
-    let expected = expected(lens, run);
+    let expected = expected(lens);
     let mut flows: Vec<Flow> = expected.iter().flat_map(|expectation| expectation.flows(today, until)).collect();
     flows.sort_by_key(|flow| flow.day);
     let checkpoints = checkpoints(today, until);
@@ -49,7 +50,7 @@ pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: 
     let due = coming_due(&trace, whose, today);
     let committed = committed(lens, &checkpoints, &trace.liquid, &due);
     let variable =
-        Variable::from_history(lens, run, |flow| expected.iter().any(|expectation| expectation.covers(flow)));
+        Variable::from_history(lens, |flow| expected.iter().any(|expectation| expectation.covers(flow)));
     let bands = simulate(&checkpoints, &committed, &variable, paths);
 
     let mut outlook = outlook_section(book, &checkpoints, &committed, &trace.worth, bands.as_ref());

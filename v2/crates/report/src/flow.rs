@@ -8,28 +8,21 @@
 use std::iter;
 
 use axiom_core::{Day, Days, Id, Qty, spread};
-use axiom_engine::Run;
 use axiom_model::{Book, Period, Place};
 
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
-use crate::lens::{Lens, Priced, Whose};
-use crate::places::{Side, depth, leaf, v3_side};
+use crate::lens::{Lens, Priced};
+use crate::places::{Side, depth, leaf};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// How many periods to show when the window is not given.
 const DEFAULT_PERIODS: usize = 12;
 
-pub fn view<'s>(
-    book: &Book<'s>,
-    run: &Run,
-    whose: &Whose,
-    by: Period,
-    from: Option<Day>,
-    to: Option<Day>,
-) -> Report<'s> {
-    let to = to.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, to);
+pub fn view<'s>(lens: Lens<'_, 's>, by: Period, from: Option<Day>, to: Option<Day>) -> Report<'s> {
+    let book = lens.book;
+    let to = to.unwrap_or(lens.day);
+    let lens = lens.on(to);
     let periods = match from {
         Some(from) => Periods::covering(by, from, to),
         None => {
@@ -37,8 +30,8 @@ pub fn view<'s>(
             Periods::covering(by, first, to).last(DEFAULT_PERIODS)
         }
     };
-    let statement = Statement::compile(lens, run, periods, to);
-    Report::new("Income and spending").with(statement.section(book))
+    let statement = Statement::compile(lens, periods, to);
+    Report::new("Income and spending").with(statement.section(lens))
 }
 
 /// A quantity per place per period, stored flat so that a subtree's figures
@@ -94,11 +87,11 @@ struct Statement {
 
 /// How a place's balance change reads in the statement: income and spending
 /// both come out positive. Value that fell into `?` is unexplained spending.
-fn statement_sign(book: &Book, place: Id<Place>) -> Option<i64> {
-    if place == book.roots.unknown {
+fn statement_sign(lens: Lens, place: Id<Place>) -> Option<i64> {
+    if place == lens.book.roots.unknown {
         return Some(1);
     }
-    match v3_side(book, place) {
+    match lens.sides.side(place) {
         Some(Side::Income) => Some(-1),
         Some(Side::Spending) => Some(1),
         None => None,
@@ -106,8 +99,8 @@ fn statement_sign(book: &Book, place: Id<Place>) -> Option<i64> {
 }
 
 impl Statement {
-    fn compile(lens: Lens, run: &Run, periods: Periods, cutoff: Day) -> Statement {
-        let book = lens.book;
+    fn compile(lens: Lens, periods: Periods, cutoff: Day) -> Statement {
+        let (book, run) = (lens.book, lens.run);
         let mut statement = Statement {
             periods,
             cutoff,
@@ -137,7 +130,7 @@ impl Statement {
     }
 
     fn recognize(&mut self, lens: Lens, place: Id<Place>, change: Option<Qty>, over: Days) {
-        let Some(sign) = statement_sign(lens.book, place).filter(|_| lens.owns(place)) else { return };
+        let Some(sign) = statement_sign(lens, place).filter(|_| lens.owns(place)) else { return };
         let Some(change) = self.unpriced.add(change) else { return };
         let recognized = Qty(change.0 * sign);
         for period in self.periods.overlapping(over.first(), over.last()) {
@@ -148,7 +141,8 @@ impl Statement {
         }
     }
 
-    fn section<'s>(&self, book: &Book<'s>) -> Section<'s> {
+    fn section<'s>(&self, lens: Lens<'_, 's>) -> Section<'s> {
+        let book = lens.book;
         let periods = (0..self.periods.len()).map(|period| Column::right(self.periods.title(period)));
         let total = (self.periods.len() > 1).then(|| Column::right("Total"));
         let mut section = Section::new(iter::once(Column::left("Place")).chain(periods).chain(total));
@@ -157,8 +151,8 @@ impl Statement {
         let unexplained = self.grid.subtree(book, book.roots.unknown);
         let unexplained =
             Derived { label: "unexplained (?)", side: "spending", values: &unexplained, style: Style::Normal };
-        let income = self.side_rows(book, &mut section, Side::Income, &gains);
-        let spending = self.side_rows(book, &mut section, Side::Spending, &unexplained);
+        let income = self.side_rows(lens, &mut section, Side::Income, &gains);
+        let spending = self.side_rows(lens, &mut section, Side::Spending, &unexplained);
         // Spending that vanished into `?` is still spending.
         let net: Vec<Qty> = income.iter().zip(&spending).map(|(&earned, &spent)| earned - spent).collect();
         let cells = net
@@ -182,10 +176,10 @@ impl Statement {
     }
 
     /// The rows of one side's tree, then its derived line; returns the side's total.
-    fn side_rows<'s>(&self, book: &Book<'s>, section: &mut Section<'s>, side: Side, derived: &Derived) -> Vec<Qty> {
-        let has_derived = !is_zero(derived.values);
+    fn side_rows<'s>(&self, lens: Lens<'_, 's>, section: &mut Section<'s>, side: Side, derived: &Derived) -> Vec<Qty> {
+        let (book, has_derived) = (lens.book, !is_zero(derived.values));
         let mut total = derived.values.to_vec();
-        for root in book.places.roots().filter(|&root| v3_side(book, root) == Some(side)) {
+        for root in book.places.roots().filter(|&root| lens.sides.side(root) == Some(side)) {
             for place in book.places.subtree(root) {
                 let values = self.grid.subtree(book, place);
                 if place == root {

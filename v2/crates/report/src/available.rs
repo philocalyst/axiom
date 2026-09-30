@@ -13,13 +13,13 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Span, Sym, par};
-use axiom_engine::{Effect, Holding, Ledger, Options, Run};
-use axiom_model::{Amount, Book, Class, Entity, Place};
+use axiom_engine::{Effect, Holding, Ledger, Options};
+use axiom_model::{Amount, Class, Entity, Place};
 
 use crate::claims::{self, Claim};
 use crate::closings;
 use crate::history::{Held, postings};
-use crate::lens::{Basket, Lens, Liquidity, Priced, Whose};
+use crate::lens::{Basket, Lens, Liquidity, Priced};
 use crate::places::path;
 use crate::synth::hypothetical;
 use crate::table::headline;
@@ -28,9 +28,10 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 /// Obligations falling due within this long count against what can be spent.
 const SOON: Span = Span::days(30);
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {
-    let at = at.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, at);
+pub fn view<'s>(lens: Lens<'_, 's>, at: Option<Day>) -> Report<'s> {
+    let (book, run) = (lens.book, lens.run);
+    let at = at.unwrap_or(lens.day);
+    let lens = lens.on(at);
     // Deadlines fire up to the day the year is judged, so the laws that figure
     // its tax answer too, whether they run at its end or on a closing day.
     let horizon = closings::judged_through(book, at);
@@ -47,7 +48,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
             Some(Liquidity::Claim) | None => {}
         }
     }
-    let claims = claims::open(lens, run, holdings.iter().copied());
+    let claims = claims::open(lens, holdings.iter().copied());
     let to = cash.iter().filter(|holding| holding.unit == book.base).max_by_key(|holding| holding.qty());
     let to = to.map(|holding| holding.place);
 
@@ -59,15 +60,15 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
 
     let mine: Vec<&Claim> = claims.iter().filter(|claim| claim.mine).collect();
     Report::new(format!("Available on {at}"))
-        .with(spendable_section(lens, run, &cash, &claims))
+        .with(spendable_section(lens, &cash, &claims))
         .with(claims::section(lens, "Coming in", &mine))
         .with(reach_section(lens, &reach, to, horizon))
 }
 
 // ─── What you can spend ─────────────────────────────────────────────────────
 
-fn spendable_section<'s>(lens: Lens<'_, 's>, run: &Run, cash: &[&Holding], claims: &[Claim]) -> Section<'s> {
-    let (book, at) = (lens.book, lens.day);
+fn spendable_section<'s>(lens: Lens<'_, 's>, cash: &[&Holding], claims: &[Claim]) -> Section<'s> {
+    let (book, run, at) = (lens.book, lens.run, lens.day);
     let mut section = Section::new([Column::left("In hand"), Column::right("Amount")]).headed("What you can spend");
     let mut priced = Priced::default();
     let mut line = |section: &mut Section<'s>, label: String, worth: Option<Qty>, depth: usize| {
@@ -111,7 +112,7 @@ fn spendable_section<'s>(lens: Lens<'_, 's>, run: &Run, cash: &[&Holding], claim
     let spoken_for = [
         ("Held for others", held.collect::<Vec<_>>()),
         ("Pending outflows", pending.collect()),
-        ("Due within 30 days", due_soon(lens, run, claims)),
+        ("Due within 30 days", due_soon(lens, claims)),
     ];
     for (heading, items) in spoken_for {
         let total: Qty = items.iter().map(|(_, qty)| *qty).sum();
@@ -139,10 +140,10 @@ fn place_label(lens: Lens, holding: &Holding) -> String {
 
 /// What falls due within a month: obligations the laws recorded, and debts
 /// with a due day.
-fn due_soon(lens: Lens, run: &Run, claims: &[Claim]) -> Vec<(String, Qty)> {
+fn due_soon(lens: Lens, claims: &[Claim]) -> Vec<(String, Qty)> {
     let (book, at) = (lens.book, lens.day);
     let soon = |day: Day| day >= at && day <= at.add(SOON);
-    let recorded = run.effects.iter().filter(|effect| effect.day <= at && lens.whose.includes(effect.owner));
+    let recorded = lens.run.effects.iter().filter(|effect| effect.day <= at && lens.whose.includes(effect.owner));
     let owed = recorded.filter_map(|effect: &Effect| {
         let owed = effect.owe.filter(|owed| soon(owed.due))?;
         let label =

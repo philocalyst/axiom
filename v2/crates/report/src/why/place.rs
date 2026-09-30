@@ -9,6 +9,7 @@ use axiom_model::{Amount, Book, Commodity, Law, Place, Rule, Subject};
 
 use super::laws_table;
 use crate::headroom::{current, latest};
+use crate::lens::Lens;
 use crate::limits;
 use crate::places::path;
 use crate::register;
@@ -18,12 +19,13 @@ use crate::{Cell, Column, Report, Row, Section};
 /// How many recent flows to show.
 const RECENT: usize = 8;
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, place: Id<Place>) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'_, 's>, place: Id<Place>) -> Report<'s> {
+    let (book, run) = (lens.book, lens.run);
     let held: Vec<&Holding> = run.holdings.iter().filter(|holding| book.places.covers(place, holding.place)).collect();
     let recent_from = book.touching[place].iter().rev().nth(RECENT - 1).map(|&flow| book.flows[flow].day);
 
     // A limit is about this place when it measures it, or a place around it, or one within it.
-    let all = &current(book, run, run.today, run.today);
+    let all = &current(lens, run.today, run.today);
     let about = |subject: Subject| matches!(subject, Subject::Place(other) if book.places.covers(other, place) || book.places.covers(place, other));
     let limits = limits::section(book, latest(all.iter().filter(|reading| about(reading.subject)))).headed("Limits");
 
@@ -40,7 +42,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, place: Id<Place>) -> Report<'s> {
         .with(parcels(book, &held))
         .with(limits)
         .with(laws)
-        .with(register::section(book, run, place, recent_from, None).headed("Recent flows"))
+        .with(register::section(lens, place, recent_from, None).headed("Recent flows"))
 }
 
 /// What is held, by commodity, and how much of it is plain money.

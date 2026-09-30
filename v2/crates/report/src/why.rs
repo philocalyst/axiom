@@ -25,7 +25,7 @@ use axiom_model::{
 };
 
 use crate::history::Posting;
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::places::{names, route};
 use crate::resolve;
 use crate::table::{cause_cell, creditor, doc_headline, plural};
@@ -105,15 +105,15 @@ fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &str) -> Sec
     section
 }
 
-pub fn target<'s>(book: &Book<'s>, run: &Run, whose: &Whose, text: &str) -> Result<Report<'s>, Diagnostic> {
+pub fn target<'s>(lens: Lens<'_, 's>, text: &str) -> Result<Report<'s>, Diagnostic> {
     if let Some(code) = text.strip_prefix('#') {
-        return code::report(book, run, code);
+        return code::report(lens, code);
     }
-    Ok(explain(book, run, whose, identify(book, run, text)?))
+    Ok(explain(lens, identify(lens, text)?))
 }
 
 /// What a name means, once found.
-pub(crate) enum Found<'a> {
+pub(crate) enum Found {
     Place(Id<Place>),
     Entity(Id<Entity>),
     System(Id<System>),
@@ -121,17 +121,17 @@ pub(crate) enum Found<'a> {
     /// Several laws share the name.
     Laws(Box<[Id<Law>]>),
     /// A name some law counted or owed under.
-    TaxLine(&'a str),
+    TaxLine(Sym),
 }
 
-pub(crate) fn explain<'s>(book: &Book<'s>, run: &Run, whose: &Whose, found: Found) -> Report<'s> {
+pub(crate) fn explain<'s>(lens: Lens<'_, 's>, found: Found) -> Report<'s> {
     match found {
-        Found::Place(place) => place::report(book, run, place),
-        Found::Entity(entity) => entity::report(book, run, entity),
-        Found::System(system) => system::report(book, run, whose, system),
-        Found::Law(law) => law::report(book, run, law),
-        Found::Laws(candidates) => law::which(book, &candidates),
-        Found::TaxLine(name) => taxline::report(book, run, name),
+        Found::Place(place) => place::report(lens, place),
+        Found::Entity(entity) => entity::report(lens, entity),
+        Found::System(system) => system::report(lens, system),
+        Found::Law(law) => law::report(lens, law),
+        Found::Laws(candidates) => law::which(lens.book, &candidates),
+        Found::TaxLine(name) => taxline::report(lens, name),
     }
 }
 
@@ -139,7 +139,8 @@ pub(crate) fn explain<'s>(book: &Book<'s>, run: &Run, whose: &Whose, found: Foun
 /// something a law tallied or owed. An ambiguous place is an error, not a
 /// reason to look on. An entity that only stands in for its place is
 /// asked about as the entity: its own laws and ties are what was wanted.
-fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diagnostic> {
+fn identify(lens: Lens, text: &str) -> Result<Found, Diagnostic> {
+    let (book, run) = (lens.book, lens.run);
     let entity = book.entity(text).ok();
     match book.place(text) {
         Ok(place) => {
@@ -166,8 +167,8 @@ fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diag
         Err(Miss::Ambiguous(candidates)) => return Ok(Found::Laws(candidates)),
         Err(Miss::Unknown { .. }) => {}
     }
-    if run.effects.iter().any(|effect| book.name(effect.name) == text) {
-        return Ok(Found::TaxLine(text));
+    if let Some(name) = book.names.get(text).filter(|&name| run.effects.iter().any(|effect| effect.name == name)) {
+        return Ok(Found::TaxLine(name));
     }
     let laws = book.laws.values().map(|law| book.name(law.name));
     let tallies = run.effects.iter().map(|effect| book.name(effect.name));

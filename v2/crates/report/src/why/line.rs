@@ -6,12 +6,14 @@ use axiom_model::{Amount, Book, Flow};
 
 use super::event_words;
 use crate::history::Posting;
+use crate::lens::Lens;
 use crate::places::{path, route};
 use crate::table::{creditor, gap_words};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Explains the items whose source overlaps `at`.
-pub fn line<'s>(book: &Book<'s>, run: &Run, at: Loc) -> Report<'s> {
+pub fn line<'s>(lens: Lens<'_, 's>, at: Loc) -> Report<'s> {
+    let (book, run) = (lens.book, lens.run);
     let flows = flows_on(book, at);
     let mut written = Section::new([Column::left("On this line"), Column::left("Source")]);
     for (text, loc) in items(book, run, at, &flows) {

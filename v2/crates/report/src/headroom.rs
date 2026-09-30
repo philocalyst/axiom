@@ -6,16 +6,18 @@
 
 use axiom_core::calendar::Window as Calendar;
 use axiom_core::{Day, Days, Id, Map, Qty, Ratio, Set};
-use axiom_engine::{Headroom, Run};
+use axiom_engine::Headroom;
 use axiom_model::{Amount, BinOp, Book, Law, Op, Period, StepKind, Subject, Window};
 
 use crate::calendar::Periods;
+use crate::lens::Lens;
 
 /// Every limit's readings, and for each budget that nothing has reached in a
 /// window that touches `from..=to`, a reading of nothing against its written
 /// limit: a budget no flow touched is still a budget, wholly unspent. Before
 /// the journal begins there is nothing to budget.
-pub fn current(book: &Book, run: &Run, from: Day, to: Day) -> Vec<Headroom> {
+pub fn current(lens: Lens, from: Day, to: Day) -> Vec<Headroom> {
+    let (book, run) = (lens.book, lens.run);
     let mut readings = run.headroom.clone();
     let Some(begins) = book.flows.as_slice().first().map(|first| first.day) else { return readings };
     let mut read: Set<(Id<Law>, u32, Subject, Day)> =

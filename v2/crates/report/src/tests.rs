@@ -13,7 +13,7 @@ use axiom_engine::{Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted,
 use axiom_model::Effect as Consequence;
 use axiom_model::*;
 
-use crate::lens::Whose;
+use crate::lens::{Context, Lens, Whose};
 use crate::why::Found;
 use crate::{Cell, Query, Report, Row, Section, Style};
 
@@ -42,13 +42,17 @@ impl Household {
         self.book.entities.iter().find(|(_, entity)| self.book.name(entity.path) == name).map(|(id, _)| id).unwrap()
     }
 
+    pub(crate) fn cx(&self) -> Context<'_, 'static> {
+        Context::new(&self.book, &self.run)
+    }
+
     fn report_for(&self, query: Query, whose: Option<&str>) -> Result<Report<'static>, axiom_core::Diagnostic> {
         let whose = whose.map_or_else(Whose::default, |name| Whose::of(&self.book, self.entity(name)));
-        crate::views(&self.book, &self.run, &whose, &query)
+        crate::views(Lens::new(&self.cx(), &whose, self.run.today), &query)
     }
 
     fn why(&self, found: Found) -> Report<'static> {
-        crate::why::explain(&self.book, &self.run, &Whose::default(), found)
+        crate::why::explain(Lens::new(&self.cx(), &Whose::default(), self.run.today), found)
     }
 
     fn report(&self, query: Query) -> Report<'static> {
@@ -756,10 +760,10 @@ fn a_past_date_and_monthly_columns_read_the_same_flows() {
 fn today_from_the_run_and_from_the_flows_agree() {
     // The run's holdings answer for today; two days are one pass over the flows.
     let house = household();
-    let (everyone, today) = (Whose::default(), house.run.today);
-    let lens = crate::lens::Lens::new(&house.book, &everyone, today);
-    let from_holdings = crate::history::Snapshots::of(lens, &house.run, &[today], false);
-    let from_flows = crate::history::Snapshots::of(lens, &house.run, &[day(2026, 2, 1), today], false);
+    let (cx, everyone, today) = (house.cx(), Whose::default(), house.run.today);
+    let lens = Lens::new(&cx, &everyone, today);
+    let from_holdings = crate::history::Snapshots::of(lens, &[today], false);
+    let from_flows = crate::history::Snapshots::of(lens, &[day(2026, 2, 1), today], false);
     for place in house.book.places.ids() {
         let (held, replayed) =
             (from_holdings.subtree(&house.book, 0, place), from_flows.subtree(&house.book, 1, place));
@@ -824,12 +828,14 @@ fn flow_recognizes_a_spread_premium_a_little_each_day() {
 fn register_runs_a_balance_and_mutes_the_pending_check() {
     let house = household();
     let checking = house.place("assets/bank/checking");
-    let section = crate::register::section(&house.book, &house.run, checking, None, None);
+    let (cx, whose) = (house.cx(), Whose::default());
+    let lens = Lens::new(&cx, &whose, house.run.today);
+    let section = crate::register::section(lens, checking, None, None);
     let rows = lines(&section);
     assert_eq!(rows.len(), 11);
     assert_eq!(rows[6], "~2026-03-01 | expenses/repairs |  | #check-1041 · pending | -350.00 USD | 5,115.80 USD");
     // A window opens with the balance carried in.
-    let march = crate::register::section(&house.book, &house.run, checking, Some(day(2026, 3, 1)), None);
+    let march = crate::register::section(lens, checking, Some(day(2026, 3, 1)), None);
     assert_eq!(lines(&march)[0], "=2026-03-01 | opening balance |  |  |  | 5,115.80 USD");
 }
 
@@ -837,7 +843,8 @@ fn register_runs_a_balance_and_mutes_the_pending_check() {
 fn the_register_of_a_liability_reads_the_way_a_statement_does() {
     let house = household();
     let bills = house.place("liabilities/bills");
-    let section = crate::register::section(&house.book, &house.run, bills, None, None);
+    let (cx, whose) = (house.cx(), Whose::default());
+    let section = crate::register::section(Lens::new(&cx, &whose, house.run.today), bills, None, None);
     // A bill of 1,200 is owed; 500 paid leaves 700.
     assert_eq!(
         lines(&section),
@@ -987,18 +994,18 @@ fn claims_list_what_is_owed_with_its_age_and_what_is_overdue() {
 #[test]
 fn a_bill_is_netted_by_its_code_across_the_flows_that_made_and_settled_it() {
     let house = household();
-    let lens_owner = Whose::default();
-    let lens = crate::lens::Lens::new(&house.book, &lens_owner, day(2026, 3, 31));
-    let bills = crate::claims::owed_by_you(lens, &house.run, house.place("liabilities/bills"));
+    let (cx, lens_owner) = (house.cx(), Whose::default());
+    let lens = Lens::new(&cx, &lens_owner, day(2026, 3, 31));
+    let bills = crate::claims::owed_by_you(lens, house.place("liabilities/bills"));
     let [bill] = &bills[..] else { panic!("one bill is open") };
     assert_eq!(
         (bill.left.qty, bill.made, bill.due, bill.mine),
         (Qty(70_000), day(2026, 3, 5), Some(day(2026, 4, 4)), false)
     );
     // Paid in full, it is no longer open.
-    let paid = crate::lens::Lens::new(&house.book, &lens_owner, day(2026, 3, 5));
+    let paid = lens.on(day(2026, 3, 5));
     assert_eq!(
-        crate::claims::owed_by_you(paid, &house.run, house.place("liabilities/bills"))[0].left.qty,
+        crate::claims::owed_by_you(paid, house.place("liabilities/bills"))[0].left.qty,
         Qty(120_000)
     );
 }
@@ -1238,8 +1245,8 @@ fn claims_and_registers_are_about_whose_money_they_are() {
     let house = household();
     let claims = house.report_for(Query::Claims { at: None }, Some("jordan")).unwrap();
     assert!(claims.sections[0].rows.is_empty(), "the invoice is the first person's");
-    let me = house.entity("me");
-    let mine = crate::views(&house.book, &house.run, &Whose::of(&house.book, me), &Query::Claims { at: None }).unwrap();
+    let (cx, me) = (house.cx(), Whose::of(&house.book, house.entity("me")));
+    let mine = crate::views(Lens::new(&cx, &me, house.run.today), &Query::Claims { at: None }).unwrap();
     assert_eq!(mine.sections[0].rows.len(), 2);
 }
 

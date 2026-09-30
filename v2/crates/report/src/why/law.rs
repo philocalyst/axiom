@@ -1,14 +1,15 @@
 //! `why LAW`: where it applies, what it says, how often it ran, what it caused.
 
 use axiom_core::Id;
-use axiom_engine::Run;
 use axiom_model::{Book, Law, Owner};
 
 use super::{effects_table, recent, trigger_words};
+use crate::lens::Lens;
 use crate::table::{cause_cell, doc_headline, doc_lines, headline, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, id: Id<Law>) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'_, 's>, id: Id<Law>) -> Report<'s> {
+    let (book, run) = (lens.book, lens.run);
     let law = &book.laws[id];
     let violations: Vec<_> = run.violations.iter().filter(|violation| violation.law == id).collect();
     let effects: Vec<_> = run.effects.iter().filter(|effect| effect.law == id).collect();

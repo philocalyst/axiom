@@ -1,20 +1,61 @@
 //! One answer, for every view, to "whose is this, what is it worth, and how
 //! liquid is it".
 //!
-//! A [`Lens`] is a day and an owner scope over the book. `balance --value`,
+//! A [`Lens`] is a day and an owner scope over a [`Context`]: the book, its
+//! run, and the names views look for, found once. `balance --value`,
 //! `available`, `forecast` and the summary all read money through it, so a euro
 //! is worth the same in each, and a house is out of reach in each.
 
 use std::collections::BTreeMap;
 use std::iter;
+use std::ops::Deref;
 
 use axiom_core::num::{POW10, div_round, mul_div};
-use axiom_core::{Day, Diagnostic, Id, Qty, Span};
-use axiom_engine::Holding;
-use axiom_model::{Amount, Book, Class, Commodity, Entity, Kind, Place, Subject};
+use axiom_core::{Day, Diagnostic, Id, Qty, Span, Sym};
+use axiom_engine::{Holding, Run};
+use axiom_model::{Amount, Book, Class, Commodity, Entity, Kind, Law, Place, Subject};
 
 use crate::history::Held;
+use crate::places::Sides;
 use crate::resolve;
+
+/// What every view reads: the book and its run, and what the book calls the
+/// things views ask about, resolved here once so that no view searches by name
+/// while it works.
+pub struct Context<'b, 's> {
+    pub book: &'b Book<'s>,
+    pub run: &'b Run,
+    pub sides: Sides,
+    /// `currency`: the commodities of this kind are money.
+    currency: Option<Id<Kind>>,
+    /// A place's `maturity`: a debt with one is paid by its schedule.
+    pub maturity: Option<Sym>,
+    /// v3 bridge: places of this kind hold what the owner owes, by code.
+    pub payable: Option<Id<Kind>>,
+    /// v3 bridge: the name of the law a `budget` line writes. In v4 a law is a
+    /// budget when `Law::budget` says so.
+    budget: Option<Sym>,
+}
+
+impl<'b, 's> Context<'b, 's> {
+    pub fn new(book: &'b Book<'s>, run: &'b Run) -> Context<'b, 's> {
+        Context {
+            book,
+            run,
+            sides: Sides::new(book),
+            currency: book.kind("currency").ok(),
+            maturity: book.names.get("maturity"),
+            payable: book.kind("payable").ok(),
+            budget: book.names.get("budget"),
+        }
+    }
+
+    /// Whether a law reports a budget.
+    pub fn is_budget(&self, law: Id<Law>) -> bool {
+        let law = &self.book.laws[law];
+        law.budget.is_some() || Some(law.name) == self.budget
+    }
+}
 
 /// Whose money a view is about: everyone's, or one entity's, which for a
 /// household includes its members'.
@@ -61,22 +102,39 @@ pub enum Liquidity {
     Slow(Span),
 }
 
-/// The books on one day, seen for one owner scope.
+/// The books on one day, seen for one owner scope. It stands for its
+/// [`Context`], whose fields it reaches directly.
 #[derive(Clone, Copy)]
 pub struct Lens<'b, 's> {
-    pub book: &'b Book<'s>,
+    cx: &'b Context<'b, 's>,
     pub whose: &'b Whose,
     pub day: Day,
 }
 
+impl<'b, 's> Deref for Lens<'b, 's> {
+    type Target = Context<'b, 's>;
+
+    fn deref(&self) -> &Context<'b, 's> {
+        self.cx
+    }
+}
+
 impl<'b, 's> Lens<'b, 's> {
-    pub fn new(book: &'b Book<'s>, whose: &'b Whose, day: Day) -> Lens<'b, 's> {
-        Lens { book, whose, day }
+    pub fn new(cx: &'b Context<'b, 's>, whose: &'b Whose, day: Day) -> Lens<'b, 's> {
+        Lens { cx, whose, day }
     }
 
     /// The same books at another day's prices.
     pub fn on(self, day: Day) -> Lens<'b, 's> {
         Lens { day, ..self }
+    }
+
+    /// The same books for other owners.
+    pub fn scoped<'w>(self, whose: &'w Whose) -> Lens<'w, 's>
+    where
+        'b: 'w,
+    {
+        Lens { whose, ..self }
     }
 
     pub fn owns(self, place: Id<Place>) -> bool {
@@ -105,8 +163,7 @@ impl<'b, 's> Lens<'b, 's> {
 
     fn is_currency(self, unit: Id<Commodity>) -> bool {
         let book = self.book;
-        let currency: Option<Id<Kind>> = book.kind("currency").ok();
-        unit == book.base || currency.is_some_and(|kind| book.is_a(book.commodities[unit].kind, kind))
+        unit == book.base || self.currency.is_some_and(|kind| book.is_a(book.commodities[unit].kind, kind))
     }
 
     /// How spendable `unit` is in `place`, from what kind of place it is and

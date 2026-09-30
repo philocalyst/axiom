@@ -69,8 +69,8 @@ impl Expectation<'_> {
 
 /// Everything expected after `today` for the lens's owners: plans, and the
 /// rhythms in history that no plan already says.
-pub fn expected<'b>(lens: Lens<'b, '_>, run: &Run) -> Vec<Expectation<'b>> {
-    let book = lens.book;
+pub fn expected<'b>(lens: Lens<'b, '_>) -> Vec<Expectation<'b>> {
+    let (book, run) = (lens.book, lens.run);
     let mut expected = from_plans(book, run, run.today);
     let plans = expected.len();
     for habit in from_history(book, run) {
@@ -278,8 +278,8 @@ opening 2026-01-01
 2026-04-30 house.basis -> depreciation 300 USD
 ";
         crate::source_tests::with_run(source, day(2026, 5, 10), |book, run| {
-            let whose = crate::lens::Whose::default();
-            let found = expected(Lens::new(book, &whose, run.today), run);
+            let (cx, whose) = (crate::lens::Context::new(book, run), crate::lens::Whose::default());
+            let found = expected(Lens::new(&cx, &whose, run.today));
             assert_eq!(found.len(), 1, "the depreciation is a habit");
             assert_eq!(found[0].template.detail().basis_end, Some(End::From));
         });

@@ -6,8 +6,7 @@
 //! claims against it are what others (or it) owe.
 
 use axiom_core::{Id, Qty};
-use axiom_engine::Run;
-use axiom_model::{Amount, Book, Entity, Law, Subject};
+use axiom_model::{Amount, Entity, Law, Subject};
 
 use super::laws_table;
 use crate::claims;
@@ -15,10 +14,11 @@ use crate::lens::{Lens, Priced, Whose, on_balance_sheet};
 use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'_, 's>, entity: Id<Entity>) -> Report<'s> {
+    let (book, run) = (lens.book, lens.run);
     let name = book.name(book.entities[entity].path);
     let scope = Whose::of(book, entity);
-    let lens = Lens::new(book, &scope, run.today);
+    let lens = lens.on(run.today).scoped(&scope);
 
     let mut places = Section::new([Column::left("Place"), Column::right("Holds")]).headed("Places");
     for holding in run
@@ -47,7 +47,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> 
             .headed("Held for it");
     let mut remaining = Priced::default();
     let everyone = Whose::default();
-    let lens = Lens::new(book, &everyone, run.today);
+    let lens = lens.scoped(&everyone);
     for holding in &run.holdings {
         for lot in holding.lots.iter().filter(|lot| lot.tied == Some(entity)) {
             let held = Amount::new(lot.qty, holding.unit);
@@ -66,7 +66,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> 
     }
     ties.unpriced(remaining.missing(), "amount");
 
-    let open = claims::open(lens, run, run.holdings.iter());
+    let open = claims::open(lens, run.holdings.iter());
     let with_it: Vec<&claims::Claim> = open.iter().filter(|claim| claim.with(entity)).collect();
     Report::new(format!("Why {name}")).with(places).with(laws_table(book, &laws)).with(ties).with(claims::section(
         lens,

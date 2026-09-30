@@ -3,7 +3,6 @@
 use axiom_core::Id;
 use axiom_model::{Book, End, Flow, PathRoot, Place};
 
-
 /// A place's full path.
 pub fn path<'s>(book: &Book<'s>, place: Id<Place>) -> &'s str {
     book.name(book.places[place].path)
@@ -35,13 +34,6 @@ pub fn depth(book: &Book, place: Id<Place>) -> usize {
     book.places.depth(place) as usize
 }
 
-/// Whether the place is a path root: `assets`, `expenses`, … Roots group
-/// their places; nobody declares them.
-pub fn is_class_root(book: &Book, place: Id<Place>) -> bool {
-    book.name(book.places[place].path) == book.v3_root(place).path()
-}
-
-// v3 bridge: the report lane replaces `Side` and `v3_side` with purposes.
 /// Which side of the income statement a place is on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Side {
@@ -49,21 +41,59 @@ pub enum Side {
     Spending,
 }
 
-/// The side the path root a place sits under puts it on, if it is on one.
-pub fn v3_side(book: &Book, place: Id<Place>) -> Option<Side> {
-    match book.v3_root(place) {
-        PathRoot::Income => Some(Side::Income),
-        PathRoot::Expenses => Some(Side::Spending),
-        PathRoot::Assets | PathRoot::Liabilities | PathRoot::Equity => None,
-    }
+/// What a place's side of the books says about it.
+struct Sided {
+    /// What shows a balance the way people read it.
+    sign: i64,
+    side: Option<Side>,
+    /// A path root (`assets`, `expenses`, …) only groups places; nobody declares it.
+    root: bool,
 }
 
-/// The top-level category a place belongs to: the child of its class root
-/// (`expenses/food` for `expenses/food/groceries`).
-pub fn category(book: &Book, place: Id<Place>) -> Id<Place> {
-    let (mut top, mut below) = (place, place);
-    for ancestor in book.places.lineage(place) {
-        (below, top) = (top, ancestor);
+// v3 bridge: v4 places say what they are by `class`, and purposes tell income
+// from spending. `Sides` and `Side` go with the v3 model.
+/// The side of the books each place is on and the sign of its balance, read
+/// once from the path roots of a v3 book, so no view parses a path while it
+/// works. A place under no path root is a v4 one: its class gives its sign.
+pub struct Sides(Box<[Sided]>);
+
+impl Sides {
+    pub fn new(book: &Book) -> Sides {
+        let sided = |place: &Place| {
+            let path = book.name(place.path);
+            let Some(root) = PathRoot::of(path) else {
+                return Sided { sign: place.class.display_sign(), side: None, root: false };
+            };
+            let side = match root {
+                PathRoot::Income => Some(Side::Income),
+                PathRoot::Expenses => Some(Side::Spending),
+                PathRoot::Assets | PathRoot::Liabilities | PathRoot::Equity => None,
+            };
+            Sided { sign: root.display_sign(), side, root: path == root.path() }
+        };
+        Sides(book.places.values().map(sided).collect())
     }
-    if is_class_root(book, top) { below } else { top }
+
+    pub fn sign(&self, place: Id<Place>) -> i64 {
+        self.0[place.index()].sign
+    }
+
+    /// The side of the income statement the place is on, if it is on one.
+    pub fn side(&self, place: Id<Place>) -> Option<Side> {
+        self.0[place.index()].side
+    }
+
+    pub fn is_root(&self, place: Id<Place>) -> bool {
+        self.0[place.index()].root
+    }
+
+    /// The top-level category a place belongs to: the child of its root
+    /// (`expenses/food` for `expenses/food/groceries`).
+    pub fn category(&self, book: &Book, place: Id<Place>) -> Id<Place> {
+        let (mut top, mut below) = (place, place);
+        for ancestor in book.places.lineage(place) {
+            (below, top) = (top, ancestor);
+        }
+        if self.is_root(top) { below } else { top }
+    }
 }

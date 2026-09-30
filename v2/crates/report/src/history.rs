@@ -161,17 +161,17 @@ impl Snapshots {
     /// The books on `days` (ascending, at least one). One day, when the journal
     /// has nothing after it, is the run's final state and needs no replay;
     /// otherwise one pass over the flows fills every day at once.
-    pub fn of(lens: Lens, run: &Run, days: &[Day], valued: bool) -> Snapshots {
-        let book = lens.book;
+    pub fn of(lens: Lens, days: &[Day], valued: bool) -> Snapshots {
+        let (book, run) = (lens.book, lens.run);
         // Holdings do not remember what flows were worth, so a valued balance
         // of a foreign commodity in an expense place needs the flows.
         let foreign =
             |holding: &Holding| holding.unit != book.base && !on_balance_sheet(book.places[holding.place].class);
         match days {
             [day] if journal_ends_by(book, *day) && !(valued && run.holdings.iter().any(foreign)) => {
-                Snapshots::final_state(lens, run, *day)
+                Snapshots::final_state(lens, *day)
             }
-            _ => Snapshots::replay(lens, run, days, valued),
+            _ => Snapshots::replay(lens, days, valued),
         }
     }
 
@@ -180,9 +180,9 @@ impl Snapshots {
         Snapshots { cells: vec![Held::default(); days.len() * places * units], days, places, units, unpriced: Priced::default() }
     }
 
-    fn final_state(lens: Lens, run: &Run, day: Day) -> Snapshots {
+    fn final_state(lens: Lens, day: Day) -> Snapshots {
         let mut snapshots = Snapshots::empty(lens.book, vec![day]);
-        for holding in run.holdings.iter().filter(|holding| lens.owns(holding.place)) {
+        for holding in lens.run.holdings.iter().filter(|holding| lens.owns(holding.place)) {
             let qty = holding.qty();
             let booked = if holding.unit == lens.book.base { qty } else { Qty::ZERO };
             *snapshots.cell(0, holding.place, holding.unit.index()) = Held { qty, booked };
@@ -190,8 +190,8 @@ impl Snapshots {
         snapshots
     }
 
-    fn replay(lens: Lens, run: &Run, days: &[Day], valued: bool) -> Snapshots {
-        let book = lens.book;
+    fn replay(lens: Lens, days: &[Day], valued: bool) -> Snapshots {
+        let (book, run) = (lens.book, lens.run);
         // A split multiplies what stood on its day, so its day is a column too.
         let mut columns = days.to_vec();
         columns.extend(book.splits.iter().map(|split| split.day));

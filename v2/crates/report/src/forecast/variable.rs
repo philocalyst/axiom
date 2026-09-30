@@ -3,13 +3,12 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Id, Qty};
-use axiom_engine::Run;
 use axiom_model::{End, Flow, Period, Place};
 
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
 use crate::lens::Lens;
-use crate::places::{Side, category, v3_side};
+use crate::places::Side;
 
 /// What each top-level expense category cost in each full month of history,
 /// leaving out the flows that plans and habits already project. This is the
@@ -24,8 +23,8 @@ impl Variable {
     /// History runs from the first month anything was spent to the last full
     /// month: the current month is still going, and months before the books
     /// had any spending would only dilute it.
-    pub fn from_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
-        let book = lens.book;
+    pub fn from_history(lens: Lens, explained: impl Fn(&Flow) -> bool) -> Variable {
+        let (book, run) = (lens.book, lens.run);
         let none = Variable { categories: Vec::new(), months: 0 };
         let first_spent = postings(book, run).find(|posting| spending(lens, posting).next().is_some());
         let Some(first) = first_spent.map(|posting| posting.flow.day) else { return none };
@@ -41,7 +40,7 @@ impl Variable {
         for posting in real {
             let Some(month) = months.index_of(posting.flow.day) else { continue };
             for (place, qty) in spending(lens, &posting) {
-                categories.entry(category(book, place)).or_insert_with(|| vec![0; months.len()])[month] += qty.0;
+                categories.entry(lens.sides.category(book, place)).or_insert_with(|| vec![0; months.len()])[month] += qty.0;
             }
         }
         Variable { categories: categories.into_values().collect(), months: months.len() }
@@ -58,7 +57,7 @@ fn spending<'a>(lens: Lens<'a, '_>, posting: &Posting) -> impl Iterator<Item = (
     let refund = flow.moves_quantity(End::To).then(|| posting.out_in_base(lens).map(|qty| -qty)).flatten();
     [(flow.to, paid), (flow.from, refund)]
         .into_iter()
-        .filter(move |&(place, _)| v3_side(lens.book, place) == Some(Side::Spending) && lens.owns(place))
+        .filter(move |&(place, _)| lens.sides.side(place) == Some(Side::Spending) && lens.owns(place))
         .filter_map(|(place, qty)| Some((place, qty?)))
 }
 
@@ -67,7 +66,7 @@ mod tests {
     use axiom_core::Day;
 
     use super::*;
-    use crate::lens::Whose;
+    use crate::lens::{Context, Whose};
     use crate::source_tests::with_run;
 
     /// Groceries cost money each month; the house's depreciation is an expense
@@ -98,8 +97,8 @@ opening 2026-01-01
 2026-04-10 checking -> groceries 100 USD
 ";
         with_run(source, Day::from_ymd(2026, 5, 15).unwrap(), |book, run| {
-            let whose = Whose::default();
-            let variable = Variable::from_history(Lens::new(book, &whose, run.today), run, |_| false);
+            let (cx, whose) = (Context::new(book, run), Whose::default());
+            let variable = Variable::from_history(Lens::new(&cx, &whose, run.today), |_| false);
             assert_eq!(variable.categories, [vec![10_000; 4]], "four months of groceries, and no depreciation");
         });
     }
