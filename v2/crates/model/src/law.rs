@@ -454,6 +454,21 @@ pub struct Rules {
     pub timed: Vec<Rule>,
 }
 
+impl Rules {
+    /// The four tables of laws that watch a place: `on in`, `on out`, `on gain`
+    /// and `always`.
+    pub fn per_place(&self) -> [&Groups<Place, Rule>; 4] {
+        [&self.on_in, &self.on_out, &self.on_gain, &self.always]
+    }
+
+    /// Every rule that runs while the fold does, in each list it is in: the
+    /// per-place tables, `on spend`, and the timed rules.
+    pub fn all(&self) -> impl Iterator<Item = &Rule> {
+        let per_place = self.per_place().into_iter().flat_map(|table| table.values());
+        per_place.chain(self.on_spend.values()).chain(&self.timed)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Rule {
     pub law: Id<Law>,

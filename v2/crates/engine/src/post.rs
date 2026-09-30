@@ -53,10 +53,10 @@ fn restarts_basis(m: &Motion) -> bool {
     m.is_exchange() || from.deferred || !stays_with_owner(m)
 }
 
-impl<'b, 's> Ledger<'b, 's> {
+impl Ledger<'_, '_, '_> {
     /// Applies a flow: moves its value and fires every law that watches it.
     pub(crate) fn post(&mut self, m: &Motion) {
-        let book = self.book;
+        let book = self.plan.book;
         let on = Occasion::flow(m);
         let watched = !m.opening;
         // A `!` on an assertion accepts its gap: it is never unused.
@@ -90,17 +90,17 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Adds the flow to the totals some law reads, valuing only the sides
     /// that matter.
     fn count(&mut self, m: &Motion) {
-        let book = self.book;
-        let (leaves, enters) = self.world.totals.watched_sides(book, m.from, m.to);
+        let watch = &self.plan.watch;
+        let (leaves, enters) = watch.sides(m.from, m.to);
         let out = if leaves { self.base_value(m, m.out) } else { None };
         let arrive = if enters { self.base_value(m, m.arrive) } else { None };
-        self.world.totals.record(book, (m.from, m.to), (m.day, m.recognized), out, arrive);
+        self.world.totals.record(watch, (m.from, m.to), (m.day, m.recognized), out, arrive);
     }
 
     /// Takes `m.out` from the source, leaving the value in flight in
     /// `scratch.relief.slices`.
     fn relieve(&mut self, m: &Motion) {
-        let book = self.book;
+        let book = self.plan.book;
         let (unit, source, now) = (m.out.unit, m.source, (m.day, m.txn));
         let is_base = unit == book.base;
         self.scratch.relief.slices.clear();
@@ -217,7 +217,7 @@ impl<'b, 's> Ledger<'b, 's> {
         }
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let mut shares = Shares::new(cost, whole);
-        let sold = m.out.unit != self.book.base;
+        let sold = m.out.unit != self.plan.book.base;
         for slice in &mut self.scratch.relief.slices {
             let part = shares.take(slice.qty);
             match sold {
@@ -237,7 +237,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// fetched, less the selling cost that comes off it.
     fn realizes(&mut self, m: &Motion) -> Option<Qty> {
         let fetched = self.proceeds(m)?;
-        Some(if m.out.unit == self.book.base { fetched } else { fetched - self.exchange_cost(m) })
+        Some(if m.out.unit == self.plan.book.base { fetched } else { fetched - self.exchange_cost(m) })
     }
 
     /// Records a gain, and fires `on gain`, for every relieved lot. Plain money
@@ -245,7 +245,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// holding plain contributions and a zero-basis growth lot, a withdrawal
     /// relieves both and only the lot's share is a gain.
     fn realize(&mut self, m: &Motion) {
-        let book = self.book;
+        let book = self.plan.book;
         let ambiguous = self.scratch.relief.ambiguous;
         for at in 0..self.scratch.relief.slices.len() {
             let slice = self.scratch.relief.slices[at];
@@ -279,7 +279,7 @@ impl<'b, 's> Ledger<'b, 's> {
 
     /// Lands the slices at the target.
     fn arrive(&mut self, m: &Motion, keeps: bool) {
-        let book = self.book;
+        let book = self.plan.book;
         if m.moves == Moves::Basis(End::To) {
             return self.change_basis(m, m.to, 1);
         }
@@ -312,7 +312,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// basis unspent: it goes to the parcels that remain, in proportion to
     /// their quantity.
     fn keep_basis(&mut self, m: &Motion) {
-        let book = self.book;
+        let book = self.plan.book;
         let left: Qty = self.scratch.relief.slices.iter().filter(|s| s.origin != Origin::Fresh).map(|s| s.basis).sum();
         let selection = Selection { selectors: &[], txns: &book.txns };
         let slot = self.world.holdings.entry(m.from, m.out.unit);
@@ -323,7 +323,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// place holds (`sign` +1 raises it, -1 lowers it), spread by quantity, and
     /// nothing else about them. A place that holds nothing cannot carry it.
     fn change_basis(&mut self, m: &Motion, place: Id<axiom_model::Place>, sign: i64) {
-        let book = self.book;
+        let book = self.plan.book;
         let amount = self.base_value(m, if sign > 0 { m.arrive } else { m.out }).unwrap_or(Qty::ZERO);
         let selection = Selection { selectors: m.select, txns: &book.txns };
         let held: Qty = self.world.holdings.of(place).map(|slot| slot.basis(is_money(book, place, slot.unit))).sum();
@@ -340,7 +340,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Fires the `on spend` laws of every entity whose tied money just left
     /// its owner's places.
     fn fire_spend(&mut self, m: &Motion) {
-        let book = self.book;
+        let book = self.plan.book;
         if stays_with_owner(m) {
             return;
         }
@@ -359,7 +359,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// The restricted entity that money crossing to another owner is tied to:
     /// the payee if it is restricted, else the source place's owner.
     fn restricted_source(&self, m: &Motion) -> Option<Id<Entity>> {
-        let book = self.book;
+        let book = self.plan.book;
         let restricted = |entity: &Id<Entity>| book.entities[*entity].restricted;
         m.payee.filter(restricted).or(Some(m.source.owner).filter(restricted))
     }
@@ -368,7 +368,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// itself says so when one side is the base; otherwise prices at the flow's
     /// day do.
     fn proceeds(&mut self, m: &Motion) -> Option<Qty> {
-        let base = self.book.base;
+        let base = self.plan.book.base;
         match (m.arrive.unit == base, m.out.unit == base) {
             (true, _) => Some(m.arrive.qty),
             (_, true) => Some(m.out.qty),
@@ -380,7 +380,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// reported once per commodity: the first day it is missing, which is
     /// before the first price, since a price stands until the next.
     fn base_value(&mut self, m: &Motion, amount: Amount) -> Option<Qty> {
-        let book = self.book;
+        let book = self.plan.book;
         if amount.unit == book.base {
             return Some(amount.qty);
         }

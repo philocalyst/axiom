@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Span, Sym, par};
-use axiom_engine::{Effect, Holding, Ledger, Options, Run};
+use axiom_engine::{Effect, Holding, Ledger, Options, Plan, Run};
 use axiom_model::{Amount, Book, Class, Entity, Place};
 
 use crate::claims::{self, Claim};
@@ -34,7 +34,8 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
     // Deadlines fire up to the day the year is judged, so the laws that figure
     // its tax answer too, whether they run at its end or on a closing day.
     let horizon = closings::judged_through(book, at);
-    let mut ledger = Ledger::new(book, Options { today: horizon.max(run.today), relaxed: book.relaxed });
+    let plan = Plan::new(book);
+    let mut ledger = plan.start(Options { today: horizon.max(run.today), relaxed: book.relaxed });
     // A withdrawal is a fact of `at`, so it comes before what closes that day (a month's or a year's end).
     ledger.advance_to_closing(at);
 

@@ -10,7 +10,7 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Sym};
-use axiom_engine::{Holding, Ledger, Options, Run};
+use axiom_engine::{Holding, Options, Plan, Run};
 use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Select, Txn};
 
 use crate::history::{Posting, journal_ends_by};
@@ -53,7 +53,8 @@ pub fn holdings_at<'r>(book: &Book, run: &'r Run, day: Day) -> Cow<'r, [Holding]
     if journal_ends_by(book, day) {
         return Cow::Borrowed(&run.holdings);
     }
-    let mut ledger = Ledger::new(book, Options { today: day, relaxed: book.relaxed });
+    let plan = Plan::new(book);
+    let mut ledger = plan.start(Options { today: day, relaxed: book.relaxed });
     ledger.advance(day);
     Cow::Owned(ledger.holdings().cloned().collect())
 }

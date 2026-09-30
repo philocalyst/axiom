@@ -262,7 +262,8 @@ fn payment_on_the_closing_day(book: &Book) -> axiom_model::Flow {
 #[test]
 fn a_flow_applied_on_a_day_whose_closings_are_still_to_come_is_counted_by_them() {
     with_book(CLOSING, |book| {
-        let mut ledger = crate::Ledger::new(book, Options { today: day(2026, 1, 15), relaxed: false });
+        let plan = crate::Plan::new(book);
+        let mut ledger = plan.start(Options { today: day(2026, 1, 15), relaxed: false });
         ledger.advance_to_closing(day(2026, 1, 15));
         ledger.apply(&payment_on_the_closing_day(book));
         ledger.advance(day(2026, 1, 15));
@@ -275,7 +276,8 @@ fn a_flow_applied_on_a_day_whose_closings_are_still_to_come_is_counted_by_them()
 #[test]
 fn a_flow_applied_on_a_day_already_closed_is_late_for_its_closings() {
     with_book(CLOSING, |book| {
-        let mut ledger = crate::Ledger::new(book, Options { today: day(2026, 1, 15), relaxed: false });
+        let plan = crate::Plan::new(book);
+        let mut ledger = plan.start(Options { today: day(2026, 1, 15), relaxed: false });
         ledger.advance(day(2026, 1, 15));
         ledger.apply(&payment_on_the_closing_day(book));
         ledger.advance(day(2026, 12, 31));
@@ -582,7 +584,8 @@ fn a_range_reaches_each_month_it_covers_up_to_where_the_fold_has_got() {
 fn a_planned_flow_reaches_the_months_ahead_as_its_ledger_advances() {
     let text = format!("{INSURANCE}2025-12-01 checking -> rent 50 USD\n");
     with_book(&text, |book| {
-        let mut ledger = crate::Ledger::new(book, Options { today: day(2025, 12, 31), relaxed: false });
+        let plan = crate::Plan::new(book);
+        let mut ledger = plan.start(Options { today: day(2025, 12, 31), relaxed: false });
         ledger.advance(day(2025, 12, 31));
         // The rent flow again, 81 days from the tenth of January: 22, 28 and 31 of them.
         let mut prepaid = book.flows[axiom_core::Id::new(1)].clone();

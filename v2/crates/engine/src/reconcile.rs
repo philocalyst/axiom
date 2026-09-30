@@ -23,9 +23,9 @@ use crate::scope::display;
 use crate::state::Checkpoint;
 use crate::{Pad, explain};
 
-impl<'b, 's> Ledger<'b, 's> {
+impl Ledger<'_, '_, '_> {
     pub(crate) fn reconcile(&mut self, index: usize) {
-        let book = self.book;
+        let book = self.plan.book;
         let assert = &book.asserts[index];
         let (place, unit) = (assert.place, assert.amount.unit);
         let shown = display(book, place, self.world.holdings.qty(place, unit));
@@ -33,7 +33,7 @@ impl<'b, 's> Ledger<'b, 's> {
         let last = self.record.checkpoints.get(&(place, unit)).copied().unwrap_or_default();
         let now = Checkpoint { day: Some(assert.day), gap, unsolved_said: last.unsolved_said };
         let blame =
-            self.solved.unsolved.get(&(place, unit)).filter(|&&(day, _)| day <= assert.day).map(|&(_, flow)| flow);
+            self.plan.unsolved.get(&(place, unit)).filter(|&&(day, _)| day <= assert.day).map(|&(_, flow)| flow);
         let now = match (assert.gap, gap.is_zero()) {
             (_, true) => now,
             (Gap::Refused, false) => match blame.filter(|_| !last.unsolved_said) {
@@ -47,7 +47,7 @@ impl<'b, 's> Ledger<'b, 's> {
                         self.world.holdings.of(place).map(|slot| (slot.unit, display(book, place, slot.qty))).collect();
                     let report = explain::mismatch(
                         book,
-                        &self.solved.events,
+                        &self.plan.events,
                         assert,
                         (shown, gap - last.gap),
                         last.day,
@@ -71,7 +71,7 @@ impl<'b, 's> Ledger<'b, 's> {
 
     /// Posts the gap as a flow between the asserted place and `counter`.
     fn pad(&mut self, index: usize, gap: Qty, counter: Id<Place>, waive: Option<Waive>) {
-        let (book, assert) = (self.book, &self.book.asserts[index]);
+        let (book, assert) = (self.plan.book, &self.plan.book.asserts[index]);
         // What moves into the place, in balance terms.
         let moved = display(book, assert.place, gap);
         self.post(&Motion::pad(book, assert, counter, moved, waive));

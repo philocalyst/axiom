@@ -8,7 +8,7 @@ use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder, span};
-use crate::{Cause, Holding, Ledger, Options, Owed, Parcel, Run, State, run};
+use crate::{Cause, Holding, Options, Owed, Parcel, Plan, Run, State, run};
 
 fn options() -> Options {
     Options { today: Day(1000), relaxed: false }
@@ -32,7 +32,8 @@ fn diagnostic<'a>(run: &'a Run, code: &str) -> &'a Diagnostic {
 #[test]
 fn an_empty_book_folds_to_nothing() {
     let book = Fixture::new().book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(500));
     assert_eq!(ledger.day(), Day(500));
     let run = ledger.finish();
@@ -549,7 +550,8 @@ fn a_pending_flow_lands_on_its_settlement_day_and_a_typo_gets_a_suggestion() {
     f.event(5, "#c1", EventState::Settled);
     f.event(6, "#c2", EventState::Void);
     let book = f.book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(4));
     assert_eq!(ledger.balance(checking, usd), Qty(100_00), "pending money has not moved");
     ledger.advance(Day(5));
@@ -632,7 +634,8 @@ fn a_returned_flow_is_reversed_on_the_day_of_the_return() {
     f.event(5, "#b1", EventState::Returned);
     f.event(2, "#b2", EventState::Returned);
     let book = f.book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(4));
     assert_eq!(ledger.balance(checking, usd), Qty(70_00), "the returned flow counted until it was returned");
     ledger.advance(Day(5));
@@ -747,7 +750,8 @@ fn a_fork_reports_only_what_it_causes() {
     f.sell(3, 5, 600_00);
     f.flow(4, salary, retirement, 10_000_00);
     let book = f.book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(5));
     let mut withdrawal = book.flows[Id::new(3)].clone();
     (withdrawal.from, withdrawal.to, withdrawal.day) = (retirement, checking, Day(5));
@@ -769,7 +773,8 @@ fn a_clone_diverges_without_touching_the_original() {
     f.flow(1, equity, checking, 1_000_00);
     f.flow(9, checking, cash, 1_00);
     let book = f.book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(3));
     let mut fork = ledger.clone();
     let mut withdrawal = book.flows[Id::new(0)].clone();
@@ -1533,7 +1538,8 @@ fn a_million_flows() {
         let book = f.book();
         let options = Options { today: Day(5_000), relaxed: false };
         let started = std::time::Instant::now();
-        let mut ledger = Ledger::new(&book, options);
+        let plan = Plan::new(&book);
+        let mut ledger = plan.start(options);
         let solved = started.elapsed();
         ledger.advance(options.today);
         let folded = started.elapsed();

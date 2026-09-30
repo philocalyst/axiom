@@ -54,9 +54,10 @@ pub(crate) struct Reading {
 
 #[derive(Clone, Default)]
 pub(crate) struct Record {
-    /// The quantities of flows that were not fully written: solved from
-    /// assertions, or from the balance when the fold reached them.
-    pub amounts: Map<Id<Flow>, Amounts>,
+    /// The quantities the fold resolved when it reached the flows (`=` and
+    /// `all` depend on the balance), remembered because a reversal must undo
+    /// exactly what was done. The plan holds the `?` amounts solved before it began.
+    pub resolved: Map<Id<Flow>, Amounts>,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
     pub violations: Vec<Violation>,
@@ -104,8 +105,8 @@ pub(crate) enum Missing {
 }
 
 impl Record {
-    pub fn new(book: &Book, amounts: Map<Id<Flow>, Amounts>, diagnostics: Vec<Diagnostic>) -> Record {
-        Record { amounts, diagnostics, checks: vec![0; book.laws.len()], ..Record::default() }
+    pub fn new(laws: usize, diagnostics: Vec<Diagnostic>) -> Record {
+        Record { diagnostics, checks: vec![0; laws], ..Record::default() }
     }
 
     /// What the future depends on, without what happened so far: the resolved
@@ -113,7 +114,7 @@ impl Record {
     /// again), and empty records.
     pub fn forked(&self) -> Record {
         Record {
-            amounts: self.amounts.clone(),
+            resolved: self.resolved.clone(),
             checks: vec![0; self.checks.len()],
             checkpoints: self.checkpoints.clone(),
             failing: self.failing.clone(),

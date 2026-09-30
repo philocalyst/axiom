@@ -10,10 +10,12 @@
 //!
 //! # How a fold is arranged
 //!
-//! Before it starts, the book's loose ends are solved: `events` turns
-//! settlement events into flow states, and `infer` solves `? USD` amounts from
-//! the assertions around them, one place per thread. `timeline` then orders
-//! every fact into one total order of moments, and `ledger` consumes them.
+//! Before it starts, the book's loose ends are solved into a [`Plan`]: `events`
+//! turns settlement events into flow states, and `infer` solves `? USD`
+//! amounts from the assertions around them, one place per thread. The plan is
+//! immutable and shared: every ledger, fork and thread borrows the one.
+//! `timeline` then orders every fact into one total order of moments, and
+//! `ledger` consumes them.
 //!
 //! For each flow, `post` moves value: `lots` keeps what rests where and chooses
 //! which parcels leave, `totals` keeps the windowed sums laws
@@ -36,6 +38,7 @@ mod infer;
 mod ledger;
 mod lots;
 mod motion;
+mod plan;
 mod post;
 mod reconcile;
 mod scope;
@@ -54,7 +57,8 @@ mod tests;
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
 use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn};
 
-pub use ledger::{Ledger, run};
+pub use ledger::Ledger;
+pub use plan::{Plan, run};
 
 /// How to run.
 #[derive(Clone, Copy, Debug)]

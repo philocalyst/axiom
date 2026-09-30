@@ -24,18 +24,26 @@
 //! before the day", so a price is in force from its own day for everything
 //! that day.
 //!
-//! The facts are not stored as one sorted stream. Flows, assertions, splits,
-//! settlement changes and deadlines (periods included) are each already
-//! sorted, so [`Timeline`] merges five cursors: a clone copies five numbers.
+//! The facts are not stored as one sorted stream. Flows, assertions, splits and
+//! settlement changes are each already sorted, and deadlines come from a heap
+//! that holds the next one of every timed rule, worked out as the fold reaches
+//! it. [`Timeline`] merges those five, so a fork copies four numbers and a heap
+//! of a few entries, and the plan holds nothing that depends on the day the
+//! fold stops.
+
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 use axiom_core::calendar::Window;
-use axiom_core::{Day, Days, Id, Set};
-use axiom_model::{Book, Flow, Mode, Period, Trigger, Value};
+use axiom_core::{Day, Days, Id, Period};
+use axiom_model::{Book, Closing, Flow, Law, Mode, Rule, Subject, Trigger, Value};
 
 use crate::State;
 use crate::eval::{self, Env, Occasion};
 use crate::events::Events;
+use crate::plan::Plan;
 use crate::scope::owner_of;
+use crate::state::World;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Fact {
@@ -43,7 +51,9 @@ pub(crate) enum Fact {
     Settle(Id<Flow>),
     Flow(Id<Flow>),
     Assert(u32),
-    Deadline(u32),
+    /// A timed rule (an index into `Rules::timed`) and the days it runs for:
+    /// the deadline itself, or the month or year it closes.
+    Deadline(u32, Days),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
@@ -55,7 +65,7 @@ pub(crate) struct Moment {
 impl Moment {
     /// The last moment of `day`.
     pub fn end_of(day: Day) -> Moment {
-        Moment { day, fact: Fact::Deadline(u32::MAX) }
+        Moment { day, fact: Fact::Deadline(u32::MAX, Days::ALWAYS) }
     }
 
     /// After every journal flow of `day`, before its assertions: where a flow
@@ -69,7 +79,7 @@ impl Moment {
         Moment { day, fact: Fact::Assert(u32::MAX) }
     }
 
-    pub const LAST: Moment = Moment { day: Day::MAX, fact: Fact::Deadline(u32::MAX) };
+    pub const LAST: Moment = Moment { day: Day::MAX, fact: Fact::Deadline(u32::MAX, Days::ALWAYS) };
 }
 
 /// The day of the first fact that starts a period: a flow that moves value on
@@ -89,92 +99,115 @@ pub(crate) fn start(book: &Book, events: &Events) -> Option<Day> {
     others.into_iter().chain([flow]).flatten().min()
 }
 
-/// The last day the fold reaches: `today`, or the journal's last fact if that
-/// is later. Periods close and deadlines fire up to here and no further, so a
+/// The last day the journal has a fact on. Periods close and deadlines fire up
+/// to the later of this and the day the fold is run to, and no further, so a
 /// deadline the journal itself reaches (an assertion dated on it) fires even
-/// when `today` is earlier, and a book with nothing after `today` never
-/// closes a month in the future.
-pub(crate) fn horizon(book: &Book, events: &Events, today: Day) -> Day {
+/// when `today` is earlier, and a book with nothing after `today` never closes
+/// a month in the future.
+pub(crate) fn last_fact(book: &Book, events: &Events) -> Option<Day> {
     let last_flow = book.flows.as_slice().last().map(|flow| flow.day);
     let last_assert = book.asserts.last().map(|assert| assert.day);
     let last_change = events.changes.last().map(|&(day, _)| day);
-    [last_flow, last_assert, last_change].into_iter().flatten().fold(today, Day::max)
+    [last_flow, last_assert, last_change].into_iter().flatten().max()
 }
 
 /// A `by` law's date for one subject, or the day an `each` law closes a period.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) struct Deadline {
     pub day: Day,
     /// Index into `Rules::timed`.
-    pub rule: usize,
+    pub rule: u32,
     /// The days the law runs for: the deadline itself, or the month or year it closes.
     pub period: Days,
 }
 
-/// Every deadline that falls due by `horizon`, sorted. A rule whose date
-/// cannot be computed (an unset property) has no deadline; a period closes
-/// only if the rule was in force for some day of it. Periods begin with the
-/// month or year of `first`, the first fact that starts one: before it there
-/// is nothing to close.
-pub(crate) fn deadlines(env: Env, horizon: Day, first: Option<Day>, values: &mut Vec<Value>) -> Vec<Deadline> {
-    let book = env.book;
-    let mut due = Vec::new();
-    for (rule_index, rule) in book.rules.timed.iter().enumerate() {
-        let law = &book.laws[rule.law];
-        let mut close = |day: Day, period: Days| {
-            if rule.days.overlaps(period) {
-                due.push(Deadline { day, rule: rule_index, period });
-            }
-        };
-        // The months or years, whole, that the fold's days touch.
-        let windows = |period| {
-            let touched = first.and_then(|first| Days::new(first, horizon));
-            touched.into_iter().flat_map(move |days| Window::covering(period, days))
-        };
+/// When a timed rule falls due, as far as the plan can tell: everything but
+/// the horizon, which is the fold's to say.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Schedule {
+    /// A `by` whose date cannot be computed (an unset property), or a law that is not timed.
+    Never,
+    /// A `by` law's date, worked out once.
+    Once(Day),
+    /// A month closes on its last day.
+    Months,
+    /// A year closes on its last day, or on the `closing` day of the next.
+    Years(Option<Closing>),
+}
+
+impl Schedule {
+    /// How the rule falls due. A `by` date is read on the empty book, where no
+    /// balance or holding exists yet, so it depends on the laws' own terms only.
+    pub fn of(plan: &Plan, rule: &Rule, empty: &World, values: &mut Vec<Value>) -> Schedule {
+        let (book, law) = (plan.book, &plan.book.laws[rule.law]);
         match law.trigger {
             Trigger::By(when) => {
                 let day = rule.days.first();
                 let on = Occasion::time(day, Days::on(day));
                 let ctx = eval::Context::new(rule.subject, owner_of(book, rule.subject), &on);
-                let Value::Day(day) = eval::expression(env, law, when, &ctx, values) else { continue };
-                if day <= horizon {
-                    close(day, Days::on(day));
+                match eval::expression(Env { plan, world: empty }, law, when, &ctx, values) {
+                    Value::Day(day) => Schedule::Once(day),
+                    _ => Schedule::Never,
                 }
             }
-            // A month closes on its last day, once the fold has reached it.
-            Trigger::Each(Period::Month, _) => {
-                for month in windows(Period::Month).map(Window::days).filter(|month| month.last() <= horizon) {
-                    close(month.last(), month);
-                }
-            }
-            Trigger::Each(Period::Year, closing) => {
-                for year in windows(Period::Year) {
-                    let (period, year) = (year.days(), year.days().first().year());
-                    let closes = closing.map_or(Some(period.last()), |closing| closing.day_for(year));
-                    let closes = closes.unwrap_or(period.last().add_days(1).month_end());
-                    if closes <= horizon {
-                        close(closes, period);
-                    }
-                }
-            }
-            _ => {}
+            Trigger::Each(Period::Month, _) => Schedule::Months,
+            Trigger::Each(Period::Year, closing) => Schedule::Years(closing),
+            _ => Schedule::Never,
         }
     }
-    due.sort_unstable_by_key(|d| (d.day, d.rule));
-    // Two residences under one system bring its law twice: it runs once for each period.
-    let mut seen = Set::default();
-    due.retain(|d| {
-        let rule = &book.rules.timed[d.rule];
-        seen.insert((d.day, rule.law, rule.subject, d.period.first()))
-    });
-    due
+
+    /// The first deadline of `rule`, given the first day a period can start.
+    /// A period closes only if the rule was in force for some day of it, and
+    /// periods begin with the month or year of `first`: before it there is
+    /// nothing to close.
+    fn first(self, index: u32, rule: &Rule, first: Option<Day>) -> Option<Deadline> {
+        match self {
+            Schedule::Never => None,
+            Schedule::Once(day) => {
+                let period = Days::on(day);
+                rule.days.overlaps(period).then_some(Deadline { day, rule: index, period })
+            }
+            Schedule::Months => self.closing(index, rule, Window::containing(Period::Month, first?.max(rule.days.first()))),
+            Schedule::Years(_) => self.closing(index, rule, Window::containing(Period::Year, first?.max(rule.days.first()))),
+        }
+    }
+
+    /// The deadline after `done`.
+    fn after(self, index: u32, rule: &Rule, done: Deadline) -> Option<Deadline> {
+        let window = match self {
+            Schedule::Months => Window::containing(Period::Month, done.period.first()),
+            Schedule::Years(_) => Window::containing(Period::Year, done.period.first()),
+            Schedule::Never | Schedule::Once(_) => return None,
+        };
+        self.closing(index, rule, window.next())
+    }
+
+    /// The closing of the first window from `window` on that the rule is in force in.
+    fn closing(self, index: u32, rule: &Rule, mut window: Window) -> Option<Deadline> {
+        loop {
+            let period = window.days();
+            if period.first() > rule.days.last() {
+                return None;
+            }
+            if rule.days.overlaps(period) {
+                let day = match self {
+                    Schedule::Years(Some(closing)) => {
+                        let closes = closing.day_for(period.first().year());
+                        closes.unwrap_or(period.last().add_days(1).month_end())
+                    }
+                    _ => period.last(),
+                };
+                return Some(Deadline { day, rule: index, period });
+            }
+            window = window.next();
+        }
+    }
 }
 
-/// What the timeline merges.
-pub(crate) struct Sources<'a> {
-    pub book: &'a Book<'a>,
-    pub events: &'a Events,
-    pub deadlines: &'a [Deadline],
+/// What a deadline closes: a law for a subject over a period.
+fn key(plan: &Plan, due: Deadline) -> (Id<Law>, Subject, Day) {
+    let rule = &plan.book.rules.timed[due.rule as usize];
+    (rule.law, rule.subject, due.period.first())
 }
 
 /// The streams the timeline merges.
@@ -196,7 +229,7 @@ impl Stream {
             Fact::Flow(_) => Stream::Flow,
             Fact::Settle(_) => Stream::Change,
             Fact::Assert(_) => Stream::Assert,
-            Fact::Deadline(_) => Stream::Deadline,
+            Fact::Deadline(..) => Stream::Deadline,
         }
     }
 }
@@ -206,17 +239,30 @@ impl Stream {
 /// minimum over five values already in hand.
 #[derive(Clone)]
 pub(crate) struct Timeline {
-    /// How many facts of each stream were consumed.
-    done: [usize; 5],
+    /// How many facts of each stream but the deadlines were consumed.
+    done: [usize; 4],
     heads: [Option<Moment>; 5],
+    /// The next deadline of every timed rule that has one, soonest first.
+    due: BinaryHeap<Reverse<Deadline>>,
+    /// What closed on the day of the last deadline, by law, subject and the
+    /// period's first day: two residences under one system bring its law
+    /// twice, and it runs once for each period.
+    closed: (Day, Vec<(Id<Law>, Subject, Day)>),
 }
 
 impl Timeline {
     /// At the start.
-    pub fn new(s: &Sources) -> Timeline {
-        let mut timeline = Timeline { done: [0; 5], heads: [None; 5] };
-        timeline.skip_unreal(s);
-        Stream::ALL.into_iter().for_each(|stream| timeline.refresh(stream, s));
+    pub fn new(plan: &Plan) -> Timeline {
+        let rules = plan.book.rules.timed.iter().zip(plan.timed.iter());
+        let first = rules.enumerate().filter_map(|(at, (rule, schedule))| schedule.first(at as u32, rule, plan.period_start));
+        let mut timeline = Timeline {
+            done: [0; 4],
+            heads: [None; 5],
+            due: first.map(Reverse).collect(),
+            closed: (Day::MIN, Vec::new()),
+        };
+        timeline.skip_unreal(plan);
+        Stream::ALL.into_iter().for_each(|stream| timeline.refresh(stream, plan));
         timeline
     }
 
@@ -226,35 +272,67 @@ impl Timeline {
     }
 
     /// Steps past `moment`, which must be the one [`peek`](Self::peek) returned.
-    pub fn consume(&mut self, moment: Moment, s: &Sources) {
+    pub fn consume(&mut self, moment: Moment, plan: &Plan) {
         let stream = Stream::of(moment.fact);
-        self.done[stream as usize] += 1;
-        if stream == Stream::Flow {
-            self.skip_unreal(s);
+        match stream {
+            Stream::Deadline => self.close(plan),
+            _ => self.done[stream as usize] += 1,
         }
-        self.refresh(stream, s);
+        if stream == Stream::Flow {
+            self.skip_unreal(plan);
+        }
+        self.refresh(stream, plan);
     }
 
-    fn refresh(&mut self, stream: Stream, s: &Sources) {
-        let at = self.done[stream as usize];
+    fn refresh(&mut self, stream: Stream, plan: &Plan) {
+        let book = plan.book;
+        // Only the four streams read from tables have a cursor.
+        let at = || self.done[stream as usize];
         self.heads[stream as usize] = match stream {
-            Stream::Split => s.book.splits.get(at).map(|sp| Moment { day: sp.day, fact: Fact::Split(at as u32) }),
+            Stream::Split => book.splits.get(at()).map(|sp| Moment { day: sp.day, fact: Fact::Split(at() as u32) }),
             Stream::Flow => {
-                let id = Id::new(at as u32);
-                s.book.flows.get(id).map(|flow| Moment { day: flow.day, fact: Fact::Flow(id) })
+                let id = Id::new(at() as u32);
+                book.flows.get(id).map(|flow| Moment { day: flow.day, fact: Fact::Flow(id) })
             }
-            Stream::Change => s.events.changes.get(at).map(|&(day, id)| Moment { day, fact: Fact::Settle(id) }),
-            Stream::Assert => s.book.asserts.get(at).map(|a| Moment { day: a.day, fact: Fact::Assert(at as u32) }),
-            Stream::Deadline => s.deadlines.get(at).map(|d| Moment { day: d.day, fact: Fact::Deadline(at as u32) }),
+            Stream::Change => plan.events.changes.get(at()).map(|&(day, id)| Moment { day, fact: Fact::Settle(id) }),
+            Stream::Assert => book.asserts.get(at()).map(|a| Moment { day: a.day, fact: Fact::Assert(at() as u32) }),
+            Stream::Deadline => {
+                let next = self.due.peek();
+                next.map(|&Reverse(d)| Moment { day: d.day, fact: Fact::Deadline(d.rule, d.period) })
+            }
         };
+    }
+
+    /// Takes the soonest deadline off the heap, and drops what would only run
+    /// the same law again for the same period.
+    fn close(&mut self, plan: &Plan) {
+        let Some(Reverse(done)) = self.due.pop() else { return };
+        self.passed(plan, done);
+        while let Some(&Reverse(top)) = self.due.peek()
+            && self.closed.0 == top.day
+            && self.closed.1.contains(&key(plan, top))
+        {
+            self.due.pop();
+            self.passed(plan, top);
+        }
+    }
+
+    /// Puts the rule's next deadline on the heap, and notes that its period is closed.
+    fn passed(&mut self, plan: &Plan, done: Deadline) {
+        let rule = &plan.book.rules.timed[done.rule as usize];
+        self.due.extend(plan.timed[done.rule as usize].after(done.rule, rule, done).map(Reverse));
+        if self.closed.0 != done.day {
+            self.closed = (done.day, Vec::new());
+        }
+        self.closed.1.push(key(plan, done));
     }
 
     /// Skips flows that do not move value on their own day: pending, void, and
     /// settled ones (their `Settle` moment lands them).
-    fn skip_unreal(&mut self, s: &Sources) {
+    fn skip_unreal(&mut self, plan: &Plan) {
         let next = &mut self.done[Stream::Flow as usize];
-        while let Some(flow) = s.book.flows.get(Id::new(*next as u32)) {
-            if matches!(s.events.state(Id::new(*next as u32), flow), State::Actual | State::Returned(_)) {
+        while let Some(flow) = plan.book.flows.get(Id::new(*next as u32)) {
+            if matches!(plan.events.state(Id::new(*next as u32), flow), State::Actual | State::Returned(_)) {
                 break;
             }
             *next += 1;
@@ -276,7 +354,7 @@ mod tests {
             Moment { day, fact: Fact::Flow(a) },
             Moment { day, fact: Fact::Flow(b) },
             Moment { day, fact: Fact::Assert(0) },
-            Moment { day, fact: Fact::Deadline(3) },
+            Moment { day, fact: Fact::Deadline(3, Days::on(day)) },
             Moment { day: Day(101), fact: Fact::Split(0) },
         ];
         assert!(order.windows(2).all(|pair| pair[0] < pair[1]));

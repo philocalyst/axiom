@@ -23,14 +23,15 @@ use axiom_model::{
 use crate::calc::{Calc, progressive};
 use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
+use crate::plan::Plan;
 use crate::scope::{inside, is_money};
 use crate::state::World;
 use crate::{Cause, Owed};
 
-/// What laws read: the book and the state as of now.
+/// What laws read: the plan (and through it the book) and the state as of now.
 #[derive(Clone, Copy)]
 pub(crate) struct Env<'a, 's> {
-    pub book: &'a Book<'s>,
+    pub plan: &'a Plan<'a, 's>,
     pub world: &'a World,
 }
 
@@ -186,11 +187,11 @@ pub(crate) const V3: &str = "the v3 model compiles no asset laws";
 
 impl<'a, 's> Machine<'a, 's> {
     fn book(&self) -> &'a Book<'s> {
-        self.env.book
+        self.env.plan.book
     }
 
     fn calc(&self) -> Calc<'a, 's> {
-        Calc { book: self.env.book, day: self.ctx.day }
+        Calc { book: self.env.plan.book, day: self.ctx.day }
     }
 
     fn base(&self, qty: Qty) -> Value {

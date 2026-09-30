@@ -124,17 +124,17 @@ fn applies(book: &Book, rule: &Rule, on: &Occasion) -> bool {
     rule.days.overlaps(on.span) && !internal
 }
 
-impl<'b, 's> Ledger<'b, 's> {
+impl Ledger<'_, '_, '_> {
     /// Runs every rule in `rules` that applies to this occasion, in order.
     pub(crate) fn fire(&mut self, rules: &[Rule], on: &Occasion) {
         // Most places have no rule for most occasions: nothing to set up then.
         if rules.is_empty() {
             return;
         }
-        let (book, mut done) = (self.book, Vec::new());
+        let (book, mut done) = (self.plan.book, Vec::new());
         for rule in rules.iter().filter(|rule| applies(book, rule, &on)) {
             // A law that two rules bring to one subject runs once.
-            if self.solved.repeats {
+            if self.plan.repeats {
                 if done.contains(&(rule.law, rule.subject)) {
                     continue;
                 }
@@ -147,7 +147,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Whether the `on spend` laws of `entity` permit the flow: a dry run that
     /// records nothing. It is the same evaluation the real firing will do.
     pub(crate) fn permits_spend(&mut self, entity: Id<Entity>, m: &Motion) -> bool {
-        let book = self.book;
+        let book = self.plan.book;
         let on = Occasion { amount: Some(m.out), ..Occasion::flow(m) };
         book.rules.on_spend[entity].iter().filter(|rule| applies(book, rule, &on)).all(|rule| {
             self.evaluate(rule.law, &Context::new(rule.subject, owner_of(book, rule.subject), &on));
@@ -161,10 +161,9 @@ impl<'b, 's> Ledger<'b, 's> {
 
     /// Fires one `by` law whose date the journal has reached, or closes a
     /// month or year for an `each` law, if its rule was in force then.
-    pub(crate) fn deadline(&mut self, at: usize) {
-        let due = self.solved.deadlines[at];
-        let rule = &self.book.rules.timed[due.rule];
-        self.fire(std::slice::from_ref(rule), &Occasion::time(due.day, due.period));
+    pub(crate) fn deadline(&mut self, rule: usize, day: Day, period: Days) {
+        let rule = &self.plan.book.rules.timed[rule];
+        self.fire(std::slice::from_ref(rule), &Occasion::time(day, period));
     }
 
     /// Reads the laws about every month that begins by `day` with value
@@ -183,22 +182,21 @@ impl<'b, 's> Ledger<'b, 's> {
 
     #[cold]
     fn enter_months(&mut self, day: Day) {
+        let plan = self.plan;
         while let Some((subject, from)) = self.world.totals.reached(day) {
-            let readers = std::mem::take(&mut self.solved.readers);
             for window in [Window::Month, Window::Year] {
                 let period = window.around(from);
-                let rules = readers.get(&(subject, window));
+                let rules = plan.readers.get(&(subject, window));
                 if let Some(rules) = rules.filter(|_| period.first() == from) {
                     self.fire(rules, &Occasion::window(from, period));
                 }
             }
-            self.solved.readers = readers;
         }
     }
 
     pub(crate) fn evaluate(&mut self, law: Id<Law>, ctx: &Context) -> bool {
-        let env = Env { book: self.book, world: &self.world };
-        eval::run(env, &self.book.laws[law], ctx, &mut self.scratch.values, &mut self.scratch.outcomes)
+        let env = Env { plan: self.plan, world: &self.world };
+        eval::run(env, &self.plan.book.laws[law], ctx, &mut self.scratch.values, &mut self.scratch.outcomes)
     }
 
     /// Reads a cap that holds without evaluating it: the total in its window
@@ -206,7 +204,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// cap that is broken is evaluated in full, which explains why.
     fn within(&mut self, rule: &Rule, ctx: &Context, cap: Cap) -> bool {
         let read = self.world.totals.read(rule.subject, cap.dir, cap.window, ctx.anchor());
-        let counted = Amount::new(read, self.book.base);
+        let counted = Amount::new(read, self.plan.book.base);
         let holds = if cap.strict { counted.qty < cap.limit.qty } else { counted.qty <= cap.limit.qty };
         if holds {
             self.record.checks[rule.law.index()] += 1;
@@ -216,12 +214,12 @@ impl<'b, 's> Ledger<'b, 's> {
     }
 
     fn enforce(&mut self, rule: &Rule, ctx: &Context) {
-        if let Some(cap) = self.solved.caps[rule.law.index()]
+        if let Some(cap) = self.plan.caps[rule.law.index()]
             && self.within(rule, ctx, cap)
         {
             return;
         }
-        let (book, law) = (self.book, &self.book.laws[rule.law]);
+        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         if self.evaluate(rule.law, ctx) {
             self.record.checks[rule.law.index()] += 1;
         }
@@ -260,7 +258,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// What a law recorded for the day it belongs to: the tally line's year,
     /// and the year a report finds an obligation under, is that day's.
     fn effect(&self, rule: &Rule, ctx: &Context, day: Day, name: Sym, amount: Amount) -> Effect {
-        let law = &self.book.laws[rule.law];
+        let law = &self.plan.book.laws[rule.law];
         Effect {
             law: rule.law,
             subject: rule.subject,
@@ -287,7 +285,7 @@ impl<'b, 's> Ledger<'b, 's> {
                 return;
             }
         }
-        let (reads, warn) = require(&self.book.laws[rule.law], step);
+        let (reads, warn) = require(&self.plan.book.laws[rule.law], step);
         let window = reads.map_or(Days::on(ctx.anchor()), |reads| reads.window(ctx));
         let headroom = Headroom {
             law: rule.law,
@@ -314,7 +312,7 @@ impl<'b, 's> Ledger<'b, 's> {
                 self.record.waivers.insert(waive.loc, true);
                 Some(Waiver::Marked(waive))
             }
-            None if self.options.relaxed || self.book.relaxed => Some(Waiver::Relaxed),
+            None if self.options.relaxed || self.plan.book.relaxed => Some(Waiver::Relaxed),
             None => None,
         }
     }
@@ -322,7 +320,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Records a `require` or `warn` that does not hold. A lasting `always`
     /// condition is recorded when it begins, and a limit once per window.
     fn violate(&mut self, rule: &Rule, ctx: &Context, step: u32, warn: bool) {
-        let (book, law) = (self.book, &self.book.laws[rule.law]);
+        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         let waiver = self.waiver(ctx);
         let fresh = match (law.trigger, require(law, step).0) {
             (Trigger::Always, _) => self.record.failing.insert((rule.law, rule.subject)),
@@ -348,7 +346,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// A `require … else owe …` that does not hold costs what the law says,
     /// unless a `!` waives it.
     fn charge(&mut self, rule: &Rule, ctx: &Context, step: u32, (name, amount, owed): (Sym, Amount, Owed)) {
-        let (book, law) = (self.book, &self.book.laws[rule.law]);
+        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         let waive = ctx.motion.and_then(|m| m.waive);
         if let Some(waive) = waive {
             self.record.waivers.insert(waive.loc, true);
@@ -367,7 +365,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// price, a property of one thing, a param's rows), however many laws,
     /// steps and flows run into it.
     fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
-        let (book, law) = (self.book, &self.book.laws[rule.law]);
+        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         let frame = Frame { book, law, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let origin = explain::first_fault(&frame, step);
         let holder = origin.and_then(|at| frame.holder(at));
