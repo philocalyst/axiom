@@ -167,8 +167,12 @@ impl Schedule {
                 let period = Days::on(day);
                 rule.days.overlaps(period).then_some(Deadline { day, rule: index, period })
             }
-            Schedule::Months => self.closing(index, rule, Window::containing(Period::Month, first?.max(rule.days.first()))),
-            Schedule::Years(_) => self.closing(index, rule, Window::containing(Period::Year, first?.max(rule.days.first()))),
+            Schedule::Months => {
+                self.closing(index, rule, Window::containing(Period::Month, first?.max(rule.days.first())))
+            }
+            Schedule::Years(_) => {
+                self.closing(index, rule, Window::containing(Period::Year, first?.max(rule.days.first())))
+            }
         }
     }
 
@@ -254,13 +258,32 @@ impl Timeline {
     /// At the start.
     pub fn new(plan: &Plan) -> Timeline {
         let rules = plan.book.rules.timed.iter().zip(plan.timed.iter());
-        let first = rules.enumerate().filter_map(|(at, (rule, schedule))| schedule.first(at as u32, rule, plan.period_start));
+        let first =
+            rules.enumerate().filter_map(|(at, (rule, schedule))| schedule.first(at as u32, rule, plan.period_start));
         let mut timeline = Timeline {
             done: [0; 4],
             heads: [None; 5],
             due: first.map(Reverse).collect(),
             closed: (Day::MIN, Vec::new()),
         };
+        timeline.skip_unreal(plan);
+        Stream::ALL.into_iter().for_each(|stream| timeline.refresh(stream, plan));
+        timeline
+    }
+
+    /// As it stands once everything through the end of `day` is consumed,
+    /// found by search: each stream's cursor is a binary search, and only the
+    /// deadlines already passed are worked through.
+    pub fn after(plan: &Plan, day: Day) -> Timeline {
+        let (book, changes) = (plan.book, &plan.events.changes);
+        let mut timeline = Timeline::new(plan);
+        timeline.done[Stream::Split as usize] = book.splits.partition_point(|split| split.day <= day);
+        timeline.done[Stream::Flow as usize] = book.flows.as_slice().partition_point(|flow| flow.day <= day);
+        timeline.done[Stream::Change as usize] = changes.partition_point(|&(when, _)| when <= day);
+        timeline.done[Stream::Assert as usize] = book.asserts.partition_point(|assert| assert.day <= day);
+        while timeline.due.peek().is_some_and(|&Reverse(due)| due.day <= day) {
+            timeline.close(plan);
+        }
         timeline.skip_unreal(plan);
         Stream::ALL.into_iter().for_each(|stream| timeline.refresh(stream, plan));
         timeline

@@ -19,7 +19,7 @@ use axiom_model::{Amount, Gap, Place, Waive};
 
 use crate::ledger::Ledger;
 use crate::motion::Motion;
-use crate::state::Checkpoint;
+use crate::state::LastCheck;
 use crate::{Pad, explain};
 
 impl Ledger<'_, '_, '_> {
@@ -30,7 +30,7 @@ impl Ledger<'_, '_, '_> {
         let shown = self.plan.sides.display(place, self.world.holdings.qty(place, unit));
         let gap = assert.amount.qty - shown;
         let last = self.record.checkpoints.get(&(place, unit)).copied().unwrap_or_default();
-        let now = Checkpoint { day: Some(assert.day), gap, unsolved_said: last.unsolved_said };
+        let now = LastCheck { day: Some(assert.day), gap, unsolved_said: last.unsolved_said };
         let blame =
             self.plan.unsolved.get(&(place, unit)).filter(|&&(day, _)| day <= assert.day).map(|&(_, flow)| flow);
         let now = match (assert.gap, gap.is_zero()) {
@@ -38,7 +38,7 @@ impl Ledger<'_, '_, '_> {
             (Gap::Refused, false) => match blame.filter(|_| !last.unsolved_said) {
                 Some(unknown) => {
                     self.record.report(explain::unchecked(book, assert, book.flows[unknown].loc));
-                    Checkpoint { unsolved_said: true, ..now }
+                    LastCheck { unsolved_said: true, ..now }
                 }
                 None if gap == last.gap => now,
                 None => {
@@ -58,11 +58,11 @@ impl Ledger<'_, '_, '_> {
             },
             (Gap::Unexplained(waive), false) => {
                 self.pad(index, gap, book.roots.unknown, Some(waive));
-                Checkpoint { gap: Qty::ZERO, ..now }
+                LastCheck { gap: Qty::ZERO, ..now }
             }
             (Gap::Via { place: counter, .. }, false) => {
                 self.pad(index, gap, counter, None);
-                Checkpoint { gap: Qty::ZERO, ..now }
+                LastCheck { gap: Qty::ZERO, ..now }
             }
         };
         self.record.checkpoints.insert((place, unit), now);

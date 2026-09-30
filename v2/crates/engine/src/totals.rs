@@ -10,6 +10,7 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::hash::{Hash, Hasher};
 
 use axiom_core::calendar;
 use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Sym, spread};
@@ -18,6 +19,7 @@ use axiom_model::{Book, Dir, Entity, Place, Subject, Window};
 use crate::bridge::V3;
 use crate::facts::{LawFacts, TotalsRead};
 use crate::scope::containing;
+use crate::state::unordered;
 
 /// `amount` cut by the calendar years `over` touches: the first day of each
 /// year's part, and its share.
@@ -33,7 +35,7 @@ pub(crate) fn by_year(amount: Qty, over: Days) -> impl Iterator<Item = (Day, Qty
 }
 
 /// Value that entered and left, over one window.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Hash)]
 struct Flowed {
     incoming: Qty,
     outgoing: Qty,
@@ -49,7 +51,7 @@ impl Flowed {
 }
 
 /// One window's sums, and the days they belong to.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash)]
 struct Rolling {
     days: Days,
     flowed: Flowed,
@@ -72,7 +74,7 @@ impl Rolling {
 }
 
 /// Value recognized over days that had not come when its flow was counted.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash)]
 struct Accrual {
     dir: Dir,
     amount: Qty,
@@ -81,7 +83,7 @@ struct Accrual {
 
 /// One subject's windows. `closed` is the year that just ended, kept for the
 /// laws that close it late.
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 struct Windows {
     month: Rolling,
     year: Rolling,
@@ -210,6 +212,13 @@ pub(crate) struct Totals {
     reaching: Reaching,
 }
 
+/// What the running totals hold: the windows, which are all the future reads.
+impl Hash for Totals {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.windows.hash(state);
+    }
+}
+
 /// The first day of the next month that some subject enters with value already
 /// recognized into it, earliest first. A subject is here once, and again after
 /// each month for as long as value reaches on.
@@ -321,6 +330,12 @@ fn subject_at(places: usize, slot: usize) -> Subject {
 #[derive(Clone, Default)]
 pub(crate) struct Tallies {
     sums: Map<(Id<Entity>, i32, Sym), Qty>,
+}
+
+impl Hash for Tallies {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        unordered(self.sums.iter().filter(|(_, qty)| !qty.is_zero())).hash(state);
+    }
 }
 
 impl Tallies {

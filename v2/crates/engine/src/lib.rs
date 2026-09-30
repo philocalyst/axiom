@@ -31,6 +31,7 @@
 
 mod bridge;
 mod calc;
+mod checkpoint;
 mod eval;
 mod events;
 mod explain;
@@ -59,8 +60,19 @@ mod tests;
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
 use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn, Waive};
 
+pub use checkpoint::Checkpoint;
 pub use ledger::Ledger;
 pub use plan::{Known, Plan, run};
+
+/// What each phase hands on is shared by reference between threads: the plan
+/// every fold reads, the ledgers and checkpoints forked from it, and the run.
+const _: () = {
+    const fn is_sync<T: Sync>() {}
+    is_sync::<Plan<'static, 'static>>();
+    is_sync::<Ledger<'static, 'static, 'static>>();
+    is_sync::<Checkpoint>();
+    is_sync::<Run>();
+};
 
 /// How to run.
 #[derive(Clone, Copy, Debug)]
@@ -206,7 +218,7 @@ impl State {
 /// What one place holds of one commodity.
 ///
 /// Asset places hold parcels; every other class holds only `plain`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Hash, Debug)]
 pub struct Holding {
     pub place: Id<Place>,
     pub unit: Id<Commodity>,
@@ -235,7 +247,7 @@ impl Holding {
 
 /// Value at rest, remembered: a quantity with its basis, when and how it was
 /// acquired, and the restricted source it is still tied to.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Parcel {
     pub qty: Qty,
     /// Value already accounted for (cost, contributions, after-tax money), in
@@ -374,7 +386,7 @@ pub enum Waiver {
 /// What a limit had counted and what it allowed, the last time one of its
 /// comparisons ran in one window: `counted <= limit`, with the sides of a
 /// `>=` swapped, so the room left is always `limit - counted`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Hash, Debug)]
 pub struct Headroom {
     pub law: Id<Law>,
     /// The index of the `require` or `warn` step.

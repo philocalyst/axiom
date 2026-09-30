@@ -33,18 +33,18 @@ pub struct Ledger<'p, 'b, 's> {
     /// The last day whose deadlines fire: `options.today`, or the journal's
     /// last fact if that is later.
     horizon: Day,
-    clock: Clock,
+    pub(crate) clock: Clock,
     pub(crate) world: World,
     pub(crate) record: Record,
     pub(crate) scratch: Scratch,
 }
 
 #[derive(Clone)]
-struct Clock {
-    day: Day,
-    timeline: Timeline,
+pub(crate) struct Clock {
+    pub day: Day,
+    pub timeline: Timeline,
     /// How many flows `apply` has taken.
-    applied: u32,
+    pub applied: u32,
 }
 
 impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
@@ -52,13 +52,24 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     pub(crate) fn start(plan: &'p Plan<'b, 's>, options: Options) -> Ledger<'p, 'b, 's> {
         let timeline = Timeline::new(plan);
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
+        let (world, record) = (World::new(plan.book), Record::new(plan.book.laws.len(), plan.problems()));
+        Ledger::resumed(plan, options, Clock { day, timeline, applied: 0 }, (world, record))
+    }
+
+    /// Stands wherever the clock, the world and the record say.
+    pub(crate) fn resumed(
+        plan: &'p Plan<'b, 's>,
+        options: Options,
+        clock: Clock,
+        (world, record): (World, Record),
+    ) -> Ledger<'p, 'b, 's> {
         Ledger {
             plan,
             options,
             horizon: plan.horizon(options.today),
-            clock: Clock { day, timeline, applied: 0 },
-            world: World::new(plan.book),
-            record: Record::new(plan.book.laws.len(), plan.problems()),
+            clock,
+            world,
+            record,
             scratch: Scratch::default(),
         }
     }
@@ -184,7 +195,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let reports: Vec<Diagnostic> = overdue.chain(unused.into_iter().map(explain::unused_waiver)).collect();
         self.record.diagnostics.extend(reports);
         let mut headroom = std::mem::take(&mut self.record.passed);
-        headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading.headroom));
+        headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading));
         headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.days.first()));
         let Ledger { plan, options, horizon, world, record, .. } = self;
         let posted = book.flows.iter().map(|(id, flow)| {
@@ -323,8 +334,21 @@ fn settled(plan: &Plan, record: &Record, id: Id<Flow>, flow: &Flow) -> Option<Am
 
 /// The journal folded through `options.today` (and every later journal fact).
 pub(crate) fn fold(plan: &Plan, options: Options) -> Run {
+    conclude(plan.start(options))
+}
+
+/// Like [`fold`], and the ledger as it stood on `options.today` before that
+/// day's closings, with no records: a view forks it, and does not fold the
+/// journal again to get there.
+pub(crate) fn fold_to_view<'p, 'b, 's>(plan: &'p Plan<'b, 's>, options: Options) -> (Run, Ledger<'p, 'b, 's>) {
     let mut ledger = plan.start(options);
-    ledger.advance(options.today);
+    ledger.advance_to_closing(options.today);
+    let view = ledger.fork();
+    (conclude(ledger), view)
+}
+
+fn conclude(mut ledger: Ledger) -> Run {
+    ledger.advance(ledger.options.today);
     ledger.advance_through(Moment::LAST);
     ledger.finish()
 }

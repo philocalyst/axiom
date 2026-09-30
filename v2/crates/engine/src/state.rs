@@ -7,6 +7,9 @@
 //! flat copies, never a replay). The *scratch* buffers are reused between flows
 //! so nothing allocates in steady state, and are deliberately not cloned.
 
+use std::hash::{Hash, Hasher};
+
+use axiom_core::hash::FxHasher;
 use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
 use axiom_model::{Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Subject, Value};
 
@@ -30,8 +33,8 @@ impl World {
 }
 
 /// Where the assertions on one place and commodity left off.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct Checkpoint {
+#[derive(Clone, Copy, Default, Hash)]
+pub(crate) struct LastCheck {
     /// The last day one was checked.
     pub day: Option<Day>,
     /// How far the statement was from the ledger then (statement minus ledger,
@@ -41,15 +44,6 @@ pub(crate) struct Checkpoint {
     /// An amount the assertions depend on could not be solved, and one
     /// assertion has said so.
     pub unsolved_said: bool,
-}
-
-/// A limit's latest reading in its window. It is updated in place while the
-/// window lasts, and set aside when a reading falls in the next one.
-#[derive(Clone, Copy)]
-pub(crate) struct Reading {
-    pub headroom: Headroom,
-    /// The window is the year of what a tally counts, not the day a total is read.
-    pub tally: bool,
 }
 
 #[derive(Clone, Default)]
@@ -65,9 +59,11 @@ pub(crate) struct Record {
     pub diagnostics: Vec<Diagnostic>,
     /// How many times each law ran past its `when` filters.
     pub checks: Vec<u32>,
-    pub checkpoints: Map<(Id<Place>, Id<Commodity>), Checkpoint>,
-    /// By law, step and subject.
-    pub headroom: Map<(Id<Law>, u32, Subject), Reading>,
+    pub checkpoints: Map<(Id<Place>, Id<Commodity>), LastCheck>,
+    /// A limit's latest reading in its window, by law, step and subject: updated
+    /// in place while the window lasts, and set aside in `passed` when a reading
+    /// falls in the next one.
+    pub headroom: Map<(Id<Law>, u32, Subject), Headroom>,
     /// Readings of windows that have passed.
     pub passed: Vec<Headroom>,
     /// Every `!` a posted flow carried, and whether it waived anything.
@@ -174,5 +170,33 @@ pub(crate) struct Scratch {
 impl Clone for Scratch {
     fn clone(&self) -> Scratch {
         Scratch::default()
+    }
+}
+
+/// A hash of a map's or set's entries that does not depend on the order they
+/// are stored in, which is the order they were inserted in.
+pub(crate) fn unordered<T: Hash>(entries: impl IntoIterator<Item = T>) -> u64 {
+    let hashed = entries.into_iter().map(|entry| {
+        let mut hasher = FxHasher::default();
+        entry.hash(&mut hasher);
+        hasher.finish()
+    });
+    hashed.fold(0, u64::wrapping_add)
+}
+
+/// What the rest of a fold depends on that is not in the world: what was
+/// already reported (so it is not reported again), where the assertions left
+/// off, and the limits' current readings. The records themselves are only
+/// what happened, and are not part of it.
+impl Hash for Record {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        unordered(&self.resolved).hash(state);
+        unordered(&self.checkpoints).hash(state);
+        unordered(&self.headroom).hash(state);
+        unordered(&self.waivers).hash(state);
+        unordered(&self.failing).hash(state);
+        unordered(&self.reported).hash(state);
+        unordered(&self.ambiguous).hash(state);
+        unordered(&self.missing).hash(state);
     }
 }

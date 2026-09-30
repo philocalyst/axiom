@@ -805,6 +805,104 @@ fn a_clone_diverges_without_touching_the_original() {
     );
 }
 
+/// A year's first four months of a checking account: the salary in January
+/// and `spent` on food in each of the months after, then `extra` flows.
+fn four_months(spent: [i64; 3], extra: &[(Day, bool, i64)]) -> Book<'static> {
+    let mut f = Fixture::new();
+    let (equity, checking, food, cash) = (f.equity, f.checking, f.food, f.cash);
+    f.flow(date(2026, 1, 5), equity, checking, 1_000_00);
+    for (month, cents) in (2..=4).zip(spent) {
+        f.flow(date(2026, month, 10), checking, food, cents);
+        for &(day, out, cents) in extra.iter().filter(|(day, ..)| day.ymd().1 == month) {
+            let (from, to) = if out { (checking, cash) } else { (cash, checking) };
+            f.flow(day.0, from, to, cents);
+        }
+    }
+    f.book()
+}
+
+/// What each place holds, as a fold stands or ends.
+fn balances<'a>(holdings: impl Iterator<Item = &'a Holding>) -> Vec<(Id<Place>, i64)> {
+    holdings.map(|h| (h.place, h.qty().0)).collect()
+}
+
+#[test]
+fn a_refold_resumes_from_a_checkpoint_and_stops_where_it_meets_the_old_fold() {
+    let end = Day(date(2026, 4, 30));
+    let options = Options { today: end, relaxed: false };
+    let mut old_ends = Vec::new();
+    let original = four_months([100_00, 50_00, 20_00], &[]);
+    Plan::new(&original).start(options).advance_by_month(end, |checkpoint| {
+        old_ends.push(checkpoint);
+        true
+    });
+    assert_eq!(old_ends.iter().map(|c| c.day().ymd().1).collect::<Vec<_>>(), [1, 2, 3, 4], "one at each month's end");
+
+    // An edit in March that nets out by month's end: 30 out to cash on the 12th, and back on the 25th.
+    let edited = four_months([100_00, 50_00, 20_00], &[(Day(date(2026, 3, 12)), true, 30_00), (Day(date(2026, 3, 25)), false, 30_00)]);
+    let plan = Plan::new(&edited);
+    let before = old_ends.iter().rfind(|c| c.day() < Day(date(2026, 3, 12))).expect("a checkpoint before the edit");
+    let mut ledger = plan.resume(before, options);
+    let mut seen = Vec::new();
+    ledger.advance_by_month(end, |checkpoint| {
+        let old = old_ends.iter().find(|old| old.day() == checkpoint.day()).expect("the old fold's month end");
+        seen.push(checkpoint.day().ymd().1);
+        old.digest() != checkpoint.digest()
+    });
+    assert_eq!(seen, [3], "March ends as it did: nothing after it needs refolding");
+    let mut fresh = plan.start(options);
+    fresh.advance(Day(date(2026, 3, 31)));
+    assert_eq!(balances(ledger.holdings()), balances(fresh.holdings()), "and it stands where a full fold stands");
+
+    // An edit that changes what March ends with is followed to the end, and ends where a full fold does.
+    let changed = four_months([100_00, 60_00, 20_00], &[]);
+    let plan = Plan::new(&changed);
+    let mut ledger = plan.resume(before, options);
+    let mut seen = Vec::new();
+    ledger.advance_by_month(end, |checkpoint| {
+        let old = old_ends.iter().find(|old| old.day() == checkpoint.day()).expect("the old fold's month end");
+        seen.push(checkpoint.day().ymd().1);
+        old.digest() != checkpoint.digest()
+    });
+    assert_eq!(seen, [3, 4], "April differs too, because March did");
+    assert_eq!(balances(ledger.finish().holdings.iter()), balances(run(&changed, options).holdings.iter()));
+}
+
+#[test]
+fn a_resumed_fold_meets_the_deadlines_still_to_come_and_not_those_already_passed() {
+    let (book, each) = timed_book(None);
+    let options = Options { today: Day(70), relaxed: false };
+    let plan = Plan::new(&book);
+    let mut january = None;
+    plan.start(options).advance_by_month(Day(30), |checkpoint| {
+        january = Some(checkpoint);
+        true
+    });
+    let mut resumed = plan.resume(&january.expect("January's end"), options);
+    resumed.advance(Day(70));
+    let (resumed, whole) = (resumed.finish(), plan.run(options));
+    assert_eq!((resumed.checks[each.index()], whole.checks[each.index()]), (1, 2), "January closed before it");
+    assert_eq!((resumed.violations.len(), whole.violations.len()), (1, 1), "the deadline on February 10 came after");
+}
+
+#[test]
+fn a_view_forks_the_ledger_the_run_stood_at_instead_of_folding_again() {
+    let mut f = Fixture::new();
+    let (equity, checking, cash, usd) = (f.equity, f.checking, f.cash, f.usd);
+    f.flow(date(2026, 1, 5), equity, checking, 1_000_00);
+    f.flow(date(2026, 3, 1), checking, cash, 100_00);
+    let book = f.book();
+    let options = Options { today: Day(date(2026, 2, 1)), relaxed: false };
+    let plan = Plan::new(&book);
+    let (run, view) = plan.run_with_view(options);
+    assert_eq!(held(&run, cash, usd).map(|h| h.qty().0), Some(100_00), "the run goes on to the journal's last fact");
+    assert_eq!((view.balance(checking, usd), view.balance(cash, usd)), (Qty(1_000_00), Qty::ZERO), "the view stands at today");
+    let mut fork = view.fork();
+    fork.advance(Day(date(2026, 3, 31)));
+    assert_eq!(fork.balance(cash, usd), Qty(100_00));
+    assert_eq!(view.balance(cash, usd), Qty::ZERO, "and forking leaves it alone");
+}
+
 /// A small deterministic generator: xorshift64*.
 struct Dice(u64);
 

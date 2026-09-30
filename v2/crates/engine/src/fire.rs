@@ -21,7 +21,7 @@ use crate::ledger::Ledger;
 use crate::motion::Motion;
 use crate::plan::Plan;
 use crate::scope::owner_of;
-use crate::state::{Missing, Reading};
+use crate::state::Missing;
 use crate::totals::by_year;
 use crate::{Consequence, Effect, Headroom, Owed, Verdict, Violation, Waiver};
 
@@ -213,15 +213,15 @@ impl Ledger<'_, '_, '_> {
     /// window lasts, and kept apart from the next window's.
     fn read(&mut self, rule: &Rule, ctx: &Context, step: u32, counted: Amount, limit: Amount) {
         let key = (rule.law, step, rule.subject);
-        if let Some(reading) = self.record.headroom.get_mut(&key) {
-            let day = if reading.tally { ctx.over.first() } else { ctx.anchor() };
-            let h = &mut reading.headroom;
+        let facts = self.plan.laws[rule.law.index()].steps[step as usize];
+        if let Some(h) = self.record.headroom.get_mut(&key) {
+            // The window of a tally is the year of what it counts, not the day a total is read.
+            let day = if matches!(facts.reads, Some(Reads::Tally(_))) { ctx.over.first() } else { ctx.anchor() };
             if h.days.contains(day) {
                 (h.counted, h.limit, h.day) = (counted, limit, ctx.day);
                 return;
             }
         }
-        let facts = self.plan.laws[rule.law.index()].steps[step as usize];
         // Only a comparison of amounts in order is read, and it says which way it holds.
         let Some(bound) = facts.bound else { return };
         let window = facts.reads.map_or(Days::on(ctx.anchor()), |reads| reads.window(ctx));
@@ -237,9 +237,8 @@ impl Ledger<'_, '_, '_> {
             warn: facts.warn,
             bound,
         };
-        let tally = matches!(facts.reads, Some(Reads::Tally(_)));
-        if let Some(old) = self.record.headroom.insert(key, Reading { headroom, tally }) {
-            self.record.passed.push(old.headroom);
+        if let Some(old) = self.record.headroom.insert(key, headroom) {
+            self.record.passed.push(old);
         }
     }
 

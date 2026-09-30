@@ -19,6 +19,7 @@
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
+use std::hash::{Hash, Hasher};
 use std::iter::successors;
 use std::ops::{Deref, Range};
 
@@ -739,6 +740,15 @@ fn allocate(group: &[Candidate], take: Qty, prorata: bool, plan: &mut Vec<(Sourc
         if left.is_zero() {
             break;
         }
+    }
+}
+
+/// What is held, by place then commodity: the parcels, not the bookkeeping
+/// around them (empty slots, cursors, ranks).
+impl Hash for Holdings {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let held = self.iter().map(|slot| &slot.holding).filter(|holding| !holding.is_empty());
+        held.for_each(|holding| holding.hash(state));
     }
 }
 

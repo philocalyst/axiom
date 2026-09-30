@@ -11,7 +11,7 @@ use axiom_model::{Amount, Assert, Book, Class, Detail, End, Entity, Flow, Mode, 
 use crate::{Cause, bridge};
 
 /// What leaves and what arrives, once every `?`, `=` and `all` is solved.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Amounts {
     pub out: Qty,
     pub arrive: Qty,

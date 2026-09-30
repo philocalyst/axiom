@@ -15,7 +15,7 @@ use axiom_model::{Book, Commodity, Entity, Flow, Kind, Place, Rule, Subject};
 use crate::bridge::{Sides, V3};
 use crate::events::{self, Events};
 use crate::facts::{self, LawFacts, Readers};
-use crate::ledger::{Ledger, fold};
+use crate::ledger::{Ledger, fold, fold_to_view};
 use crate::motion::Amounts;
 use crate::scope::containing;
 use crate::state::World;
@@ -147,6 +147,14 @@ impl<'b, 's> Plan<'b, 's> {
         fold(self, options)
     }
 
+    /// [`run`](Plan::run), and with it the ledger as it stood on `options.today`
+    /// before that day's closings. A view that asks what a withdrawal would
+    /// cost, or what the year would owe, forks that ledger (from any number of
+    /// threads) instead of folding the journal again.
+    pub fn run_with_view(&self, options: Options) -> (Run, Ledger<'_, 'b, 's>) {
+        fold_to_view(self, options)
+    }
+
     /// Whether `place` lies within `subject`: a place's subtree is a stretch of
     /// the pre-order, and an entity's places are listed once.
     pub(crate) fn inside(&self, subject: Subject, place: Id<Place>) -> bool {
@@ -191,10 +199,3 @@ fn repeats(book: &Book) -> bool {
 pub fn run(book: &Book, options: Options) -> Run {
     Plan::new(book).run(options)
 }
-
-/// A plan is shared by every thread that folds from it.
-const _: () = {
-    const fn is_sync<T: Sync>() {}
-    is_sync::<Plan<'static, 'static>>();
-    is_sync::<Run>();
-};
