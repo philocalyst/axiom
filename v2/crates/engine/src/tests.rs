@@ -8,7 +8,7 @@ use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder, span};
-use crate::{Cause, Holding, Ledger, Options, Owed, Parcel, Run, State, run};
+use crate::{Bound, Cause, Holding, Options, Owed, Parcel, Plan, Run, State, Verdict, run};
 
 fn options() -> Options {
     Options { today: Day(1000), relaxed: false }
@@ -30,9 +30,22 @@ fn diagnostic<'a>(run: &'a Run, code: &str) -> &'a Diagnostic {
 }
 
 #[test]
+fn well_known_names_resolve_once_and_are_absent_where_the_book_never_says_them() {
+    let book = Fixture::new().book();
+    let known = Plan::new(&book).known();
+    assert!(known.born.is_none() && known.maturity.is_none() && known.budget.is_none() && known.currency.is_none());
+    let mut f = Fixture::new();
+    let born = f.sym("born");
+    let book = f.book();
+    let known = Plan::new(&book).known();
+    assert_eq!((known.born, known.maturity), (Some(born), None), "only what the book interned");
+}
+
+#[test]
 fn an_empty_book_folds_to_nothing() {
     let book = Fixture::new().book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(500));
     assert_eq!(ledger.day(), Day(500));
     let run = ledger.finish();
@@ -181,7 +194,7 @@ fn a_failed_law_explains_itself_power_assert_style() {
     assert_eq!(run.checks[law.index()], 2);
     assert_eq!(run.violations.len(), 1);
     let violation = run.violations[0];
-    assert_eq!((violation.cause, violation.warn, violation.waived), (Cause::Flow(over), false, false));
+    assert_eq!((violation.cause, violation.verdict), (Cause::Flow(over), Verdict::Blocks));
     let d = &run.diagnostics[violation.diagnostic as usize];
     assert_eq!((&*d.code, d.severity), ("deferral-limit", Severity::Error), "the code is the law's own name");
     assert_eq!(
@@ -237,7 +250,7 @@ fn a_waived_transaction_or_a_relaxed_book_demotes_the_error() {
     f.flows[over.index()].waive = Some(Waive { loc, reason: None });
     let book = f.book();
     let run = run(&book, options());
-    assert!(run.violations[0].waived);
+    assert!(run.violations[0].verdict.is_waived());
     assert_eq!(run.diagnostics[0].severity, Severity::Warning);
     assert!(run.diagnostics[0].labels.iter().any(|l| l.text == "waived here"));
 
@@ -415,7 +428,7 @@ fn deferred_money_has_no_basis_and_a_withdrawal_realizes_all_of_it() {
     assert_eq!(gain.cause, Cause::Flow(withdrawal));
     let effect = run.effects[0];
     assert_eq!((effect.amount.qty, effect.amount.unit, effect.name), (Qty(400_00), usd, penalty));
-    assert_eq!(effect.owe, Some(Owed { to: irs, due: Day(2) }));
+    assert_eq!(effect.owed(), Some(Owed { to: irs, due: Day(2) }));
     let left = held(&run, retirement, usd).unwrap();
     assert_eq!(
         (left.plain, left.lots.iter().map(|l| (l.qty.0, l.basis.0)).collect::<Vec<_>>()),
@@ -465,9 +478,10 @@ fn a_require_with_an_else_prices_the_violation_instead_of_failing() {
     let book = f.book();
     let run = run(&book, options());
     assert_eq!(run.effects.len(), 1);
-    assert_eq!((run.effects[0].amount.qty, run.effects[0].name, run.effects[0].priced), (Qty(100_00), penalty, true));
+    let [effect] = run.effects[..] else { panic!("{:?}", run.effects) };
+    assert_eq!((effect.amount.qty, effect.name, effect.is_penalty()), (Qty(100_00), penalty, true));
     let [violation] = run.violations[..] else { panic!("one priced violation: {:?}", run.violations) };
-    assert!(violation.priced && !violation.waived && !violation.warn);
+    assert_eq!(violation.verdict, Verdict::Priced { waived: false });
     let d = &run.diagnostics[violation.diagnostic as usize];
     assert_eq!((&*d.code, d.severity, d.disposition), ("early-withdrawal", Severity::Note, Disposition::Priced));
     assert_eq!(d.message, "100.00 USD owed to nsf-grant as penalty, due 1970-01-03", "what is owed, to whom, and by when");
@@ -549,7 +563,8 @@ fn a_pending_flow_lands_on_its_settlement_day_and_a_typo_gets_a_suggestion() {
     f.event(5, "#c1", EventState::Settled);
     f.event(6, "#c2", EventState::Void);
     let book = f.book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(4));
     assert_eq!(ledger.balance(checking, usd), Qty(100_00), "pending money has not moved");
     ledger.advance(Day(5));
@@ -632,7 +647,8 @@ fn a_returned_flow_is_reversed_on_the_day_of_the_return() {
     f.event(5, "#b1", EventState::Returned);
     f.event(2, "#b2", EventState::Returned);
     let book = f.book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(4));
     assert_eq!(ledger.balance(checking, usd), Qty(70_00), "the returned flow counted until it was returned");
     ledger.advance(Day(5));
@@ -732,7 +748,7 @@ fn a_warn_law_is_a_warning_and_says_how_much_room_is_left() {
     let book = f.book();
     let run = run(&book, options());
     assert_eq!(run.violations.len(), 1);
-    assert!(run.violations[0].warn);
+    assert_eq!(run.violations[0].verdict, Verdict::Warns);
     let d = &run.diagnostics[run.violations[0].diagnostic as usize];
     assert_eq!(d.severity, Severity::Warning);
     assert_eq!(d.help[0].text, "at most 20.00 USD more can go in this month");
@@ -747,7 +763,8 @@ fn a_fork_reports_only_what_it_causes() {
     f.sell(3, 5, 600_00);
     f.flow(4, salary, retirement, 10_000_00);
     let book = f.book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(5));
     let mut withdrawal = book.flows[Id::new(3)].clone();
     (withdrawal.from, withdrawal.to, withdrawal.day) = (retirement, checking, Day(5));
@@ -769,7 +786,8 @@ fn a_clone_diverges_without_touching_the_original() {
     f.flow(1, equity, checking, 1_000_00);
     f.flow(9, checking, cash, 1_00);
     let book = f.book();
-    let mut ledger = Ledger::new(&book, options());
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
     ledger.advance(Day(3));
     let mut fork = ledger.clone();
     let mut withdrawal = book.flows[Id::new(0)].clone();
@@ -785,6 +803,127 @@ fn a_clone_diverges_without_touching_the_original() {
         fork.finish().holdings.iter().filter(|h| h.unit == usd && h.place == checking).map(|h| h.qty().0).sum::<i64>(),
         749_00
     );
+}
+
+/// A year's first four months of a checking account: the salary in January
+/// and `spent` on food in each of the months after, then `extra` flows.
+fn four_months(spent: [i64; 3], extra: &[(Day, bool, i64)]) -> Book<'static> {
+    let mut f = Fixture::new();
+    let (equity, checking, food, cash) = (f.equity, f.checking, f.food, f.cash);
+    f.flow(date(2026, 1, 5), equity, checking, 1_000_00);
+    for (month, cents) in (2..=4).zip(spent) {
+        f.flow(date(2026, month, 10), checking, food, cents);
+        for &(day, out, cents) in extra.iter().filter(|(day, ..)| day.ymd().1 == month) {
+            let (from, to) = if out { (checking, cash) } else { (cash, checking) };
+            f.flow(day.0, from, to, cents);
+        }
+    }
+    f.book()
+}
+
+/// What each place holds, as a fold stands or ends.
+fn balances<'a>(holdings: impl Iterator<Item = &'a Holding>) -> Vec<(Id<Place>, i64)> {
+    holdings.map(|h| (h.place, h.qty().0)).collect()
+}
+
+#[test]
+fn a_refold_resumes_from_a_checkpoint_and_stops_where_it_meets_the_old_fold() {
+    let end = Day(date(2026, 4, 30));
+    let options = Options { today: end, relaxed: false };
+    let mut old_ends = Vec::new();
+    let original = four_months([100_00, 50_00, 20_00], &[]);
+    Plan::new(&original).start(options).advance_by_month(end, |checkpoint| {
+        old_ends.push(checkpoint);
+        true
+    });
+    assert_eq!(old_ends.iter().map(|c| c.day().ymd().1).collect::<Vec<_>>(), [1, 2, 3, 4], "one at each month's end");
+
+    // An edit in March that nets out by month's end: 30 out to cash on the 12th, and back on the 25th.
+    let edited = four_months([100_00, 50_00, 20_00], &[(Day(date(2026, 3, 12)), true, 30_00), (Day(date(2026, 3, 25)), false, 30_00)]);
+    let plan = Plan::new(&edited);
+    let before = old_ends.iter().rfind(|c| c.day() < Day(date(2026, 3, 12))).expect("a checkpoint before the edit");
+    let mut ledger = plan.resume(before, options);
+    let mut seen = Vec::new();
+    ledger.advance_by_month(end, |checkpoint| {
+        let old = old_ends.iter().find(|old| old.day() == checkpoint.day()).expect("the old fold's month end");
+        seen.push(checkpoint.day().ymd().1);
+        old.digest() != checkpoint.digest()
+    });
+    assert_eq!(seen, [3], "March ends as it did: nothing after it needs refolding");
+    let mut fresh = plan.start(options);
+    fresh.advance(Day(date(2026, 3, 31)));
+    assert_eq!(balances(ledger.holdings()), balances(fresh.holdings()), "and it stands where a full fold stands");
+
+    // An edit that changes what March ends with is followed to the end, and ends where a full fold does.
+    let changed = four_months([100_00, 60_00, 20_00], &[]);
+    let plan = Plan::new(&changed);
+    let mut ledger = plan.resume(before, options);
+    let mut seen = Vec::new();
+    ledger.advance_by_month(end, |checkpoint| {
+        let old = old_ends.iter().find(|old| old.day() == checkpoint.day()).expect("the old fold's month end");
+        seen.push(checkpoint.day().ymd().1);
+        old.digest() != checkpoint.digest()
+    });
+    assert_eq!(seen, [3, 4], "April differs too, because March did");
+    assert_eq!(balances(ledger.finish().holdings.iter()), balances(run(&changed, options).holdings.iter()));
+}
+
+#[test]
+fn deadlines_beyond_the_horizon_wait_until_the_ledger_is_asked_to_reach_them() {
+    let (book, _) = timed_book(None);
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(Options { today: Day(30), relaxed: false });
+    ledger.advance(Day(70));
+    assert!(ledger.recorded().violations.is_empty(), "the payoff date, February 10, is past today");
+    ledger.reach(Day(70));
+    ledger.advance(Day(70));
+    assert_eq!(ledger.recorded().violations.len(), 1);
+}
+
+#[test]
+fn a_resumed_fold_meets_the_deadlines_still_to_come_and_not_those_already_passed() {
+    let (book, each) = timed_book(None);
+    let options = Options { today: Day(70), relaxed: false };
+    let plan = Plan::new(&book);
+    let mut january = None;
+    plan.start(options).advance_by_month(Day(30), |checkpoint| {
+        january = Some(checkpoint);
+        true
+    });
+    let mut resumed = plan.resume(&january.expect("January's end"), options);
+    resumed.advance(Day(70));
+    let (resumed, whole) = (resumed.finish(), plan.run(options));
+    assert_eq!((resumed.checks[each.index()], whole.checks[each.index()]), (1, 2), "January closed before it");
+    assert_eq!((resumed.violations.len(), whole.violations.len()), (1, 1), "the deadline on February 10 came after");
+}
+
+#[test]
+fn a_view_forks_the_ledger_the_run_stood_at_instead_of_folding_again() {
+    let mut f = Fixture::new();
+    let (equity, checking, cash, usd) = (f.equity, f.checking, f.cash, f.usd);
+    f.flow(date(2026, 1, 5), equity, checking, 1_000_00);
+    f.flow(date(2026, 3, 1), checking, cash, 100_00);
+    let book = f.book();
+    let options = Options { today: Day(date(2026, 2, 1)), relaxed: false };
+    let plan = Plan::new(&book);
+    let (run, view) = plan.run_with_view(options);
+    assert_eq!(held(&run, cash, usd).map(|h| h.qty().0), Some(100_00), "the run goes on to the journal's last fact");
+    assert_eq!((view.balance(checking, usd), view.balance(cash, usd)), (Qty(1_000_00), Qty::ZERO), "the view stands at today");
+    let mut fork = view.fork();
+    fork.advance(Day(date(2026, 3, 31)));
+    assert_eq!(fork.balance(cash, usd), Qty(100_00));
+    assert_eq!(view.balance(cash, usd), Qty::ZERO, "and forking leaves it alone");
+
+    // Forks run side by side, each borrowing the one plan.
+    let template = book.flows[Id::new(1)].clone();
+    let moved = axiom_core::par::map_each(&[10_00, 20_00, 30_00], |&cents| {
+        let mut flow = template.clone();
+        (flow.day, flow.out.qty, flow.arrive.qty) = (Day(date(2026, 2, 1)), Qty(cents), Qty(cents));
+        let mut fork = view.fork();
+        fork.apply(&flow);
+        fork.balance(cash, usd)
+    });
+    assert_eq!(moved, [Qty(10_00), Qty(20_00), Qty(30_00)]);
 }
 
 /// A small deterministic generator: xorshift64*.
@@ -981,7 +1120,7 @@ fn a_flow_recognized_for_last_year_counts_in_last_years_tally_and_a_closing_law_
         ],
         "the January payment counts for 2025, and the closing law for 2025 sees it"
     );
-    assert_eq!(run.effects[2].owe, Some(Owed { to: irs, due: Day(date(2026, 4, 15)) }), "due the day the year closes");
+    assert_eq!(run.effects[2].owed(), Some(Owed { to: irs, due: Day(date(2026, 4, 15)) }), "due the day the year closes");
     assert_eq!(run.checks[law.index()], 1, "2026 has not closed yet");
 }
 
@@ -1272,7 +1411,7 @@ fn a_waiver_waives_a_priced_violation_and_a_waiver_that_waives_nothing_warns() {
     let run = run(&book, options());
     assert!(run.effects.is_empty(), "the penalty is waived, so it is not owed");
     let [violation] = run.violations[..] else { panic!("{:?}", run.violations) };
-    assert!(violation.priced && violation.waived);
+    assert_eq!(violation.verdict, Verdict::Priced { waived: true });
     let d = &run.diagnostics[violation.diagnostic as usize];
     assert_eq!((d.disposition, d.labels.iter().any(|l| l.text == "waived here")), (Disposition::Waived, true));
     let unused = diagnostic(&run, "unused-waiver");
@@ -1291,8 +1430,8 @@ fn every_comparison_keeps_its_last_reading_with_the_sides_of_a_floor_swapped() {
     let name = f.sym("bank");
     let mut law = LawBuilder::new(name, Trigger::Always);
     let balance = law.var(Var::Balance, Ty::AMOUNT);
-    let nothing = law.konst(Value::Empty, Ty::Empty);
-    let cond = law.bin(BinOp::Ge, balance, nothing, Ty::Bool);
+    let minimum = law.konst(Value::Amount(f.usd(100_00)), Ty::AMOUNT);
+    let cond = law.bin(BinOp::Ge, balance, minimum, Ty::Bool);
     let law = f.law(law.warn(cond));
     let rule = f.rule(law, Subject::Place(checking));
     f.always.push((checking, rule));
@@ -1302,8 +1441,8 @@ fn every_comparison_keeps_its_last_reading_with_the_sides_of_a_floor_swapped() {
     let run = run(&book, options());
     let [_, reading] = run.headroom[..] else { panic!("one reading a day: {:?}", run.headroom) };
     assert_eq!(
-        (reading.counted.qty, reading.limit.qty, reading.warn),
-        (Qty::ZERO, Qty(300_00), true),
+        (reading.counted.qty, reading.limit.qty, reading.warn, reading.bound),
+        (Qty(100_00), Qty(300_00), true, Bound::Floor),
         "room above the floor: limit - counted"
     );
     assert_eq!(
@@ -1311,6 +1450,46 @@ fn every_comparison_keeps_its_last_reading_with_the_sides_of_a_floor_swapped() {
         (Day(2), Day(2), Day(2)),
         "no total or tally: the day itself"
     );
+}
+
+#[test]
+fn a_floor_of_nothing_is_read_off_the_holdings_and_leaves_a_reading_only_when_it_fails() {
+    let mut f = Fixture::new();
+    let (equity, checking, food) = (f.equity, f.checking, f.food);
+    let name = f.sym("overdraft");
+    let mut law = LawBuilder::new(name, Trigger::Always);
+    let balance = law.var(Var::Balance, Ty::AMOUNT);
+    let nothing = law.konst(Value::Empty, Ty::Empty);
+    let cond = law.bin(BinOp::Ge, balance, nothing, Ty::Bool);
+    let law = f.law(law.warn(cond));
+    let rule = f.rule(law, Subject::Place(checking));
+    f.always.push((checking, rule));
+    f.flow(1, equity, checking, 500_00);
+    f.flow(2, checking, food, 200_00);
+    let book = f.book();
+    let held = run(&book, options());
+    assert!(held.headroom.is_empty() && held.violations.is_empty(), "it held both times, and said nothing");
+    assert_eq!(held.checks[law.index()], 2, "and was still counted as checked");
+
+    let mut f = Fixture::new();
+    let (equity, checking, food) = (f.equity, f.checking, f.food);
+    let name = f.sym("overdraft");
+    let mut law = LawBuilder::new(name, Trigger::Always);
+    let balance = law.var(Var::Balance, Ty::AMOUNT);
+    let nothing = law.konst(Value::Empty, Ty::Empty);
+    let cond = law.bin(BinOp::Ge, balance, nothing, Ty::Bool);
+    let law = f.law(law.warn(cond));
+    let rule = f.rule(law, Subject::Place(checking));
+    f.always.push((checking, rule));
+    f.flow(1, equity, checking, 500_00);
+    f.flow(2, checking, food, 700_00);
+    f.flow(3, equity, checking, 400_00);
+    let book = f.book();
+    let broke = run(&book, options());
+    let [violation] = broke.violations[..] else { panic!("{:?}", broke.violations) };
+    assert_eq!((violation.day, violation.verdict), (Day(2), Verdict::Warns));
+    let [reading] = broke.headroom[..] else { panic!("the failing reading only: {:?}", broke.headroom) };
+    assert_eq!((reading.limit.qty, reading.day, reading.bound), (Qty(-200_00), Day(2), Bound::Floor));
 }
 
 #[test]
@@ -1533,7 +1712,8 @@ fn a_million_flows() {
         let book = f.book();
         let options = Options { today: Day(5_000), relaxed: false };
         let started = std::time::Instant::now();
-        let mut ledger = Ledger::new(&book, options);
+        let plan = Plan::new(&book);
+        let mut ledger = plan.start(options);
         let solved = started.elapsed();
         ledger.advance(options.today);
         let folded = started.elapsed();

@@ -119,7 +119,7 @@ fn consequences<'s>(book: &Book<'s>, run: &Run, id: Id<Flow>, section: &mut Sect
     }
     for effect in run.effects.iter().filter(|effect| effect.cause == cause) {
         let name = book.name(effect.name);
-        let text = match effect.owe {
+        let text = match effect.owed() {
             Some(owed) => format!("owes {} to {}: {name}", book.show(effect.amount), creditor(book, owed)),
             None => format!("counts {} as {name}", book.show(effect.amount)),
         };
@@ -127,7 +127,7 @@ fn consequences<'s>(book: &Book<'s>, run: &Run, id: Id<Flow>, section: &mut Sect
     }
     for violation in run.violations.iter().filter(|violation| violation.cause == cause) {
         let message = run.diagnostics[violation.diagnostic as usize].message.clone();
-        let style = if violation.waived { Style::Muted } else { Style::Alert };
+        let style = if violation.verdict.is_waived() { Style::Muted } else { Style::Alert };
         section
             .push(Row::new([Cell::text(message), Cell::text(book.name(book.laws[violation.law].name))]).style(style));
     }

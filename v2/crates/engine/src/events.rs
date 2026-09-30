@@ -21,9 +21,11 @@ pub(crate) struct Events {
 }
 
 impl Events {
-    /// A flow's state after events.
+    /// A flow's state after events. An event names its flows by code, so a
+    /// flow without one has its natural state and nothing is looked up.
     pub fn state(&self, id: Id<Flow>, flow: &Flow) -> State {
-        self.states.get(&id).copied().unwrap_or(match flow.mode {
+        let touched = if flow.codes.is_empty() { None } else { self.states.get(&id).copied() };
+        touched.unwrap_or(match flow.mode {
             Mode::Actual | Mode::Opening => State::Actual,
             Mode::Pending => State::Pending,
             Mode::Planned => State::Planned,

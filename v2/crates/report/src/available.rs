@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Span, Sym, par};
-use axiom_engine::{Effect, Holding, Ledger, Options, Run};
+use axiom_engine::{Effect, Holding, Ledger, Options, Plan, Run, Verdict};
 use axiom_model::{Amount, Book, Class, Entity, Place};
 
 use crate::claims::{self, Claim};
@@ -34,7 +34,8 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
     // Deadlines fire up to the day the year is judged, so the laws that figure
     // its tax answer too, whether they run at its end or on a closing day.
     let horizon = closings::judged_through(book, at);
-    let mut ledger = Ledger::new(book, Options { today: horizon.max(run.today), relaxed: book.relaxed });
+    let plan = Plan::new(book);
+    let mut ledger = plan.start(Options { today: horizon.max(run.today), relaxed: book.relaxed });
     // A withdrawal is a fact of `at`, so it comes before what closes that day (a month's or a year's end).
     ledger.advance_to_closing(at);
 
@@ -147,7 +148,7 @@ fn due_soon(lens: Lens, run: &Run, claims: &[Claim]) -> Vec<(String, Qty)> {
     let soon = |day: Day| day >= at && day <= at.add(SOON);
     let recorded = run.effects.iter().filter(|effect| effect.day <= at && lens.whose.includes(effect.owner));
     let owed = recorded.filter_map(|effect: &Effect| {
-        let owed = effect.owe.filter(|owed| soon(owed.due))?;
+        let owed = effect.owed().filter(|owed| soon(owed.due))?;
         let label =
             format!("{}, to {} by {}", book.name(effect.name), book.name(book.entities[owed.to].path), owed.due);
         Some((label, lens.value(effect.amount)?))
@@ -167,7 +168,7 @@ type Owing = BTreeMap<(Sym, Id<Entity>, Day), Qty>;
 fn owing(lens: Lens, effects: &[Effect]) -> Owing {
     let mut owing = Owing::new();
     for effect in effects {
-        if let (Some(owed), Some(qty)) = (effect.owe, lens.value(effect.amount)) {
+        if let (Some(owed), Some(qty)) = (effect.owed(), lens.value(effect.amount)) {
             *owing.entry((effect.name, owed.to, owed.due)).or_default() += qty;
         }
     }
@@ -224,7 +225,7 @@ impl<'h> Reach<'h> {
         fork.advance(horizon);
         let recorded = fork.recorded();
         let mut forbidden =
-            recorded.violations[applied.violations].iter().filter(|v| !v.warn && !v.waived && !v.priced);
+            recorded.violations[applied.violations].iter().filter(|v| v.verdict == Verdict::Blocks);
         if let Some(violation) = forbidden.next() {
             let message = &recorded.diagnostics[violation.diagnostic as usize].message;
             (reach.blocked, reach.because) = (true, format!("blocked: {}", headline(message)));

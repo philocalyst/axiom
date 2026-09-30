@@ -11,130 +11,40 @@
 //! crossed the line (or, for a window that value recognized ahead of time
 //! broke by itself, as the window opens), and its diagnostic is built only then.
 
-use axiom_core::{Day, Days, Diagnostic, Id, Map, Set, Severity, Sym};
-use axiom_model::{
-    Amount, Book, Cap, Dir, Entity, Fault, Func, Law, NodeId, Op, Rule, StepKind, Subject, Trigger, Window,
-};
+use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
+use axiom_model::{Amount, Cap, Entity, Fault, Law, Rule, Subject, Trigger, Window};
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
-use crate::explain::{self, Frame, Waiver};
+use crate::explain::{self, Frame};
+use crate::facts::{Reads, Shortcut};
 use crate::ledger::Ledger;
 use crate::motion::Motion;
-use crate::scope::{inside, owner_of};
-use crate::state::{Missing, Reading};
+use crate::plan::Plan;
+use crate::scope::owner_of;
+use crate::state::Missing;
 use crate::totals::by_year;
-use crate::{Effect, Headroom, Owed, Violation};
-
-/// What a comparison reads, which decides the window its limit lives in: a
-/// total in its own window, or a tally in the year.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Reads {
-    Total(Dir, Window),
-    Tally(Sym),
-}
-
-impl Reads {
-    /// The finest total or tally the condition rooted at `cond` reads: the
-    /// window a comparison is about is the shortest it reads.
-    pub fn of(law: &Law, cond: NodeId) -> Option<Reads> {
-        let read = law.range(cond).filter_map(|at| match &law.nodes[at].op {
-            Op::Call(Func::Total(dir, window), _) => Some(Reads::Total(*dir, *window)),
-            // A tally of another year is settled, not a window this flow is adding to.
-            Op::Call(Func::Tally(name), args) if Func::tally_year(args).is_none() => Some(Reads::Tally(*name)),
-            _ => None,
-        });
-        read.min_by_key(|read| match read {
-            Reads::Total(_, Window::Month) => 0,
-            Reads::Total(_, Window::Year) | Reads::Tally(_) => 1,
-            Reads::Total(_, Window::Ever) => 2,
-        })
-    }
-
-    /// The days the reading covers on this occasion.
-    pub fn window(self, on: &Occasion) -> Days {
-        match self {
-            Reads::Total(_, window) => window.around(on.anchor()),
-            Reads::Tally(_) => Window::Year.around(on.over.first()),
-        }
-    }
-}
-
-/// What the `require` or `warn` at `step` reads, and whether it only warns.
-fn require(law: &Law, step: u32) -> (Option<Reads>, bool) {
-    match law.steps[step as usize].kind {
-        StepKind::Require { cond, severity, .. } => (Reads::of(law, cond), severity == Severity::Warning),
-        _ => (None, false),
-    }
-}
-
-/// Whether some list of rules brings one law to one subject twice, as two residences under one system do.
-pub(crate) fn repeats(book: &Book) -> bool {
-    let rules = &book.rules;
-    let mut lists: Vec<&[Rule]> = vec![&rules.timed];
-    for table in [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always] {
-        lists.extend(table.iter().map(|(_, list)| list));
-    }
-    lists.extend(rules.on_spend.iter().map(|(_, list)| list));
-    lists.into_iter().any(|list| {
-        let mut seen = Set::default();
-        list.iter().any(|rule| !seen.insert((rule.law, rule.subject)))
-    })
-}
-
-/// The laws that are one cap on a total (see [`Law::cap`]) in the base currency, by law id.
-pub(crate) fn caps(book: &Book) -> Vec<Option<Cap>> {
-    let cap = |law: &Law| law.cap().filter(|cap| cap.limit.unit == book.base && law.trigger != Trigger::Always);
-    book.laws.values().map(cap).collect()
-}
-
-/// The rules that read window totals, by what they watch and the window whose
-/// opening they want to see: the finest one they read.
-pub(crate) type Readers = Map<(Subject, Window), Vec<Rule>>;
-
-/// The finest window of flow total a law reads, month or year.
-fn window_read(law: &Law) -> Option<Window> {
-    let windows = law.nodes.iter().filter_map(|node| match node.op {
-        Op::Call(Func::Total(_, window), _) if window != Window::Ever => Some(window),
-        _ => None,
-    });
-    windows.min_by_key(|&window| window == Window::Year)
-}
-
-/// Every rule that reads a month's or a year's total, once each.
-pub(crate) fn readers(book: &Book) -> Readers {
-    let windows: Vec<Option<Window>> = book.laws.values().map(window_read).collect();
-    let rules = &book.rules;
-    let mut readers = Readers::default();
-    for (_, list) in [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always].into_iter().flat_map(|t| t.iter()) {
-        for &rule in list {
-            let Some(window) = windows[rule.law.index()] else { continue };
-            let known = readers.entry((rule.subject, window)).or_default();
-            if !known.contains(&rule) {
-                known.push(rule);
-            }
-        }
-    }
-    readers
-}
+use crate::{Consequence, Effect, Headroom, Owed, Verdict, Violation, Waiver};
 
 /// Whether the rule is in force for some day of the occasion.
-fn applies(book: &Book, rule: &Rule, on: &Occasion) -> bool {
+fn applies(plan: &Plan, rule: &Rule, on: &Occasion) -> bool {
     let internal = on.skip_internal
-        && on.motion.is_some_and(|m| inside(book, rule.subject, m.from) && inside(book, rule.subject, m.to));
+        && on.motion.is_some_and(|m| plan.inside(rule.subject, m.from) && plan.inside(rule.subject, m.to));
     rule.days.overlaps(on.span) && !internal
 }
 
-impl<'b, 's> Ledger<'b, 's> {
+impl Ledger<'_, '_, '_> {
     /// Runs every rule in `rules` that applies to this occasion, in order.
     pub(crate) fn fire(&mut self, rules: &[Rule], on: &Occasion) {
         // Most places have no rule for most occasions: nothing to set up then.
         if rules.is_empty() {
             return;
         }
-        let (book, mut done) = (self.book, Vec::new());
-        for rule in rules.iter().filter(|rule| applies(book, rule, &on)) {
+        let (plan, mut done) = (self.plan, std::mem::take(&mut self.scratch.done));
+        let book = plan.book;
+        done.clear();
+        for rule in rules.iter().filter(|rule| applies(plan, rule, &on)) {
             // A law that two rules bring to one subject runs once.
-            if self.solved.repeats {
+            if plan.repeats {
                 if done.contains(&(rule.law, rule.subject)) {
                     continue;
                 }
@@ -142,14 +52,15 @@ impl<'b, 's> Ledger<'b, 's> {
             }
             self.enforce(rule, &Context::new(rule.subject, owner_of(book, rule.subject), &on));
         }
+        self.scratch.done = done;
     }
 
     /// Whether the `on spend` laws of `entity` permit the flow: a dry run that
     /// records nothing. It is the same evaluation the real firing will do.
     pub(crate) fn permits_spend(&mut self, entity: Id<Entity>, m: &Motion) -> bool {
-        let book = self.book;
+        let (plan, book) = (self.plan, self.plan.book);
         let on = Occasion { amount: Some(m.out), ..Occasion::flow(m) };
-        book.rules.on_spend[entity].iter().filter(|rule| applies(book, rule, &on)).all(|rule| {
+        book.rules.on_spend[entity].iter().filter(|rule| applies(plan, rule, &on)).all(|rule| {
             self.evaluate(rule.law, &Context::new(rule.subject, owner_of(book, rule.subject), &on));
             let holds = !self.scratch.outcomes.iter().any(|o| {
                 matches!(o, Outcome::Broken { warn: false, .. } | Outcome::Priced { .. } | Outcome::Faulted { .. })
@@ -161,10 +72,9 @@ impl<'b, 's> Ledger<'b, 's> {
 
     /// Fires one `by` law whose date the journal has reached, or closes a
     /// month or year for an `each` law, if its rule was in force then.
-    pub(crate) fn deadline(&mut self, at: usize) {
-        let due = self.solved.deadlines[at];
-        let rule = &self.book.rules.timed[due.rule];
-        self.fire(std::slice::from_ref(rule), &Occasion::time(due.day, due.period));
+    pub(crate) fn deadline(&mut self, rule: usize, day: Day, period: Days) {
+        let rule = &self.plan.book.rules.timed[rule];
+        self.fire(std::slice::from_ref(rule), &Occasion::time(day, period));
     }
 
     /// Reads the laws about every month that begins by `day` with value
@@ -183,22 +93,21 @@ impl<'b, 's> Ledger<'b, 's> {
 
     #[cold]
     fn enter_months(&mut self, day: Day) {
+        let plan = self.plan;
         while let Some((subject, from)) = self.world.totals.reached(day) {
-            let readers = std::mem::take(&mut self.solved.readers);
             for window in [Window::Month, Window::Year] {
                 let period = window.around(from);
-                let rules = readers.get(&(subject, window));
+                let rules = plan.readers.get(&(subject, window));
                 if let Some(rules) = rules.filter(|_| period.first() == from) {
                     self.fire(rules, &Occasion::window(from, period));
                 }
             }
-            self.solved.readers = readers;
         }
     }
 
     pub(crate) fn evaluate(&mut self, law: Id<Law>, ctx: &Context) -> bool {
-        let env = Env { book: self.book, world: &self.world };
-        eval::run(env, &self.book.laws[law], ctx, &mut self.scratch.values, &mut self.scratch.outcomes)
+        let env = Env { plan: self.plan, world: &self.world };
+        eval::run(env, &self.plan.book.laws[law], ctx, &mut self.scratch.values, &mut self.scratch.outcomes)
     }
 
     /// Reads a cap that holds without evaluating it: the total in its window
@@ -206,7 +115,7 @@ impl<'b, 's> Ledger<'b, 's> {
     /// cap that is broken is evaluated in full, which explains why.
     fn within(&mut self, rule: &Rule, ctx: &Context, cap: Cap) -> bool {
         let read = self.world.totals.read(rule.subject, cap.dir, cap.window, ctx.anchor());
-        let counted = Amount::new(read, self.book.base);
+        let counted = Amount::new(read, self.plan.book.base);
         let holds = if cap.strict { counted.qty < cap.limit.qty } else { counted.qty <= cap.limit.qty };
         if holds {
             self.record.checks[rule.law.index()] += 1;
@@ -215,13 +124,41 @@ impl<'b, 's> Ledger<'b, 's> {
         holds
     }
 
+    /// Reads a floor of nothing (`balance >= empty`) straight off the holdings
+    /// without evaluating it: the subject's holdings, when all are in the base
+    /// currency, add up to no less than nothing. A subject that holds another
+    /// commodity, or that falls short, is evaluated in full, which prices it or
+    /// explains why. Nothing is recorded but that it held.
+    fn afloat(&mut self, rule: &Rule) -> bool {
+        let (plan, base) = (self.plan, self.plan.book.base);
+        let sign = eval::sign(plan, rule.subject);
+        let mut balance = Qty::ZERO;
+        for slot in eval::held(plan, &self.world, rule.subject) {
+            if slot.unit != base {
+                return false;
+            }
+            balance += Qty(slot.qty.0 * sign);
+        }
+        let holds = balance >= Qty::ZERO;
+        if holds {
+            self.record.checks[rule.law.index()] += 1;
+            if !self.record.failing.is_empty() {
+                self.record.failing.remove(&(rule.law, rule.subject));
+            }
+        }
+        holds
+    }
+
     fn enforce(&mut self, rule: &Rule, ctx: &Context) {
-        if let Some(cap) = self.solved.caps[rule.law.index()]
-            && self.within(rule, ctx, cap)
-        {
+        let held = match self.plan.laws[rule.law.index()].shortcut {
+            Some(Shortcut::Cap(cap)) => self.within(rule, ctx, cap),
+            Some(Shortcut::FloorOfNothing) => self.afloat(rule),
+            None => false,
+        };
+        if held {
             return;
         }
-        let (book, law) = (self.book, &self.book.laws[rule.law]);
+        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         if self.evaluate(rule.law, ctx) {
             self.record.checks[rule.law.index()] += 1;
         }
@@ -239,12 +176,13 @@ impl<'b, 's> Ledger<'b, 's> {
                         if let (Subject::Place(_), Some(house)) = (ctx.subject, book.entities[ctx.owner].member) {
                             self.world.tallies.add(house, day.year(), name, part);
                         }
-                        let effect = self.effect(rule, ctx, day, name, Amount::new(part, book.base));
+                        let amount = Amount::new(part, book.base);
+                        let effect = self.effect(rule, ctx, (day, name, amount), Consequence::Count);
                         self.record.effects.push(effect);
                     }
                 }
                 Outcome::Owe { name, amount, owed } if !ctx.checking => {
-                    let effect = Effect { owe: Some(owed), ..self.effect(rule, ctx, ctx.over.first(), name, amount) };
+                    let effect = self.effect(rule, ctx, (ctx.over.first(), name, amount), Consequence::Owe(owed));
                     self.record.effects.push(effect);
                 }
                 Outcome::Count { .. } | Outcome::Owe { .. } => {}
@@ -259,36 +197,34 @@ impl<'b, 's> Ledger<'b, 's> {
 
     /// What a law recorded for the day it belongs to: the tally line's year,
     /// and the year a report finds an obligation under, is that day's.
-    fn effect(&self, rule: &Rule, ctx: &Context, day: Day, name: Sym, amount: Amount) -> Effect {
-        let law = &self.book.laws[rule.law];
-        Effect {
-            law: rule.law,
-            subject: rule.subject,
-            owner: ctx.owner,
-            system: law.system,
-            day,
-            name,
-            amount,
-            owe: None,
-            cause: ctx.cause,
-            priced: false,
-        }
+    fn effect(
+        &self,
+        rule: &Rule,
+        ctx: &Context,
+        (day, name, amount): (Day, Sym, Amount),
+        consequence: Consequence,
+    ) -> Effect {
+        let law = &self.plan.book.laws[rule.law];
+        let (law, subject, owner, system, cause) = (rule.law, rule.subject, ctx.owner, law.system, ctx.cause);
+        Effect { law, subject, owner, system, day, name, amount, consequence, cause }
     }
 
     /// The last reading of a limit in its window: updated in place while the
     /// window lasts, and kept apart from the next window's.
     fn read(&mut self, rule: &Rule, ctx: &Context, step: u32, counted: Amount, limit: Amount) {
         let key = (rule.law, step, rule.subject);
-        if let Some(reading) = self.record.headroom.get_mut(&key) {
-            let day = if reading.tally { ctx.over.first() } else { ctx.anchor() };
-            let h = &mut reading.headroom;
+        let facts = self.plan.laws[rule.law.index()].steps[step as usize];
+        if let Some(h) = self.record.headroom.get_mut(&key) {
+            // The window of a tally is the year of what it counts, not the day a total is read.
+            let day = if matches!(facts.reads, Some(Reads::Tally(_))) { ctx.over.first() } else { ctx.anchor() };
             if h.days.contains(day) {
                 (h.counted, h.limit, h.day) = (counted, limit, ctx.day);
                 return;
             }
         }
-        let (reads, warn) = require(&self.book.laws[rule.law], step);
-        let window = reads.map_or(Days::on(ctx.anchor()), |reads| reads.window(ctx));
+        // Only a comparison of amounts in order is read, and it says which way it holds.
+        let Some(bound) = facts.bound else { return };
+        let window = facts.reads.map_or(Days::on(ctx.anchor()), |reads| reads.window(ctx));
         let headroom = Headroom {
             law: rule.law,
             step,
@@ -298,11 +234,11 @@ impl<'b, 's> Ledger<'b, 's> {
             counted,
             limit,
             day: ctx.day,
-            warn,
+            warn: facts.warn,
+            bound,
         };
-        let tally = matches!(reads, Some(Reads::Tally(_)));
-        if let Some(old) = self.record.headroom.insert(key, Reading { headroom, tally }) {
-            self.record.passed.push(old.headroom);
+        if let Some(old) = self.record.headroom.insert(key, headroom) {
+            self.record.passed.push(old);
         }
     }
 
@@ -314,7 +250,7 @@ impl<'b, 's> Ledger<'b, 's> {
                 self.record.waivers.insert(waive.loc, true);
                 Some(Waiver::Marked(waive))
             }
-            None if self.options.relaxed || self.book.relaxed => Some(Waiver::Relaxed),
+            None if self.options.relaxed || self.plan.book.relaxed => Some(Waiver::Relaxed),
             None => None,
         }
     }
@@ -322,9 +258,10 @@ impl<'b, 's> Ledger<'b, 's> {
     /// Records a `require` or `warn` that does not hold. A lasting `always`
     /// condition is recorded when it begins, and a limit once per window.
     fn violate(&mut self, rule: &Rule, ctx: &Context, step: u32, warn: bool) {
-        let (book, law) = (self.book, &self.book.laws[rule.law]);
+        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
+        let facts = &self.plan.laws[rule.law.index()];
         let waiver = self.waiver(ctx);
-        let fresh = match (law.trigger, require(law, step).0) {
+        let fresh = match (law.trigger, facts.steps[step as usize].reads) {
             (Trigger::Always, _) => self.record.failing.insert((rule.law, rule.subject)),
             (_, Some(reads)) => self.record.reported.insert((rule.law, step, rule.subject, reads.window(ctx).first())),
             _ => true,
@@ -332,33 +269,37 @@ impl<'b, 's> Ledger<'b, 's> {
         if !fresh {
             return;
         }
-        let frame = Frame { book, law, ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let frame = Frame { book, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::broken(&frame, step as usize, warn, waiver);
-        self.violation(rule, ctx, diagnostic, (warn, waiver.is_some(), false));
+        let verdict = match (waiver, warn) {
+            (Some(waiver), _) => Verdict::Waived(waiver),
+            (None, true) => Verdict::Warns,
+            (None, false) => Verdict::Blocks,
+        };
+        self.violation(rule, ctx, diagnostic, verdict);
     }
 
     /// Records a violation with its diagnostic.
-    fn violation(&mut self, rule: &Rule, ctx: &Context, diagnostic: Diagnostic, kind: (bool, bool, bool)) {
-        let (warn, waived, priced) = kind;
+    fn violation(&mut self, rule: &Rule, ctx: &Context, diagnostic: Diagnostic, verdict: Verdict) {
         let diagnostic = self.record.report(diagnostic);
         let (law, subject, day, cause) = (rule.law, rule.subject, ctx.day, ctx.cause);
-        self.record.violations.push(Violation { law, subject, day, cause, warn, waived, priced, diagnostic });
+        self.record.violations.push(Violation { law, subject, day, cause, verdict, diagnostic });
     }
 
     /// A `require … else owe …` that does not hold costs what the law says,
     /// unless a `!` waives it.
     fn charge(&mut self, rule: &Rule, ctx: &Context, step: u32, (name, amount, owed): (Sym, Amount, Owed)) {
-        let (book, law) = (self.book, &self.book.laws[rule.law]);
+        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         let waive = ctx.motion.and_then(|m| m.waive);
         if let Some(waive) = waive {
             self.record.waivers.insert(waive.loc, true);
         }
-        let frame = Frame { book, law, ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let facts = &self.plan.laws[rule.law.index()];
+        let frame = Frame { book, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::priced(&frame, step as usize, (name, amount, owed), waive);
-        self.violation(rule, ctx, diagnostic, (false, waive.is_some(), true));
+        self.violation(rule, ctx, diagnostic, Verdict::Priced { waived: waive.is_some() });
         if waive.is_none() {
-            let effect =
-                Effect { owe: Some(owed), priced: true, ..self.effect(rule, ctx, ctx.over.first(), name, amount) };
+            let effect = self.effect(rule, ctx, (ctx.over.first(), name, amount), Consequence::Penalty(owed));
             self.record.effects.push(effect);
         }
     }
@@ -367,8 +308,9 @@ impl<'b, 's> Ledger<'b, 's> {
     /// price, a property of one thing, a param's rows), however many laws,
     /// steps and flows run into it.
     fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
-        let (book, law) = (self.book, &self.book.laws[rule.law]);
-        let frame = Frame { book, law, ctx, values: &self.scratch.values, effects: &self.record.effects };
+        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
+        let facts = &self.plan.laws[rule.law.index()];
+        let frame = Frame { book, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let origin = explain::first_fault(&frame, step);
         let holder = origin.and_then(|at| frame.holder(at));
         let missing = match fault {

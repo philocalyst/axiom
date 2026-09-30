@@ -10,10 +10,9 @@
 //! checking enters `me` even though `me` owns both places. A household is the
 //! entity of everyone who is a member of it, so it owns what they own.
 
-use axiom_core::{Id, Qty};
+use axiom_core::Id;
 use axiom_model::{Book, Class, Entity, Place, Subject};
 
-use crate::eval::V3;
 use crate::motion::{Motion, Moves};
 
 /// The entities that own what `owner` owns: itself, what it belongs to in the
@@ -21,18 +20,6 @@ use crate::motion::{Motion, Moves};
 fn owners<'a>(book: &'a Book, owner: Id<Entity>) -> impl Iterator<Item = Id<Entity>> + 'a {
     let household = book.entities[owner].member.filter(move |&house| !book.entities.covers(house, owner));
     book.entities.lineage(owner).chain(household)
-}
-
-/// Whether `place` lies within `subject`.
-pub(crate) fn inside(book: &Book, subject: Subject, place: Id<Place>) -> bool {
-    match subject {
-        Subject::Place(root) => book.places.covers(root, place),
-        Subject::Entity(root) => {
-            let place = &book.places[place];
-            place.class == Class::Asset && owners(book, place.owner).any(|owner| owner == root)
-        }
-        Subject::Asset(_) => unreachable!("{V3}"),
-    }
 }
 
 /// Every subject `place` lies within: it and its ancestors, and, for an asset
@@ -51,14 +38,6 @@ pub(crate) fn owner_of(book: &Book, subject: Subject) -> Id<Entity> {
         Subject::Entity(entity) => entity,
         Subject::Asset(asset) => book.assets[asset].owner,
     }
-}
-
-/// A place's balance (inflow minus outflow) in the sign people write and read
-/// it: `visa = 1_234.56 USD` means 1,234.56 owed. Income, liabilities and
-/// equity are flipped, and flipping twice is the identity, so this converts
-/// both ways.
-pub(crate) fn display(book: &Book, place: Id<Place>, qty: Qty) -> Qty {
-    Qty(qty.0 * book.v3_root(place).display_sign())
 }
 
 /// Whether `unit` in `place` is money: base currency that is not a claim.

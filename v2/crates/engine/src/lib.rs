@@ -10,32 +10,42 @@
 //!
 //! # How a fold is arranged
 //!
-//! Before it starts, the book's loose ends are solved: `events` turns
-//! settlement events into flow states, and `infer` solves `? USD` amounts from
-//! the assertions around them, one place per thread. `timeline` then orders
-//! every fact into one total order of moments, and `ledger` consumes them.
+//! Before it starts, the book's loose ends are solved into a [`Plan`]: `events`
+//! turns settlement events into flow states, and `infer` solves `? USD`
+//! amounts from the assertions around them, one place per thread. The plan is
+//! immutable and shared: every ledger, fork and thread borrows the one, and
+//! `facts` holds what is true of each law whatever runs it. `timeline` then
+//! orders every fact into one total order of moments, and `ledger` consumes
+//! them.
 //!
 //! For each flow, `post` moves value: `lots` keeps what rests where and chooses
 //! which parcels leave, `totals` keeps the windowed sums laws
 //! read, `fire` runs the laws that watch the flow, `eval` (with `calc`)
 //! evaluates a law, and `explain` (with `show`) turns a failure into a
 //! diagnostic. `reconcile` checks balance assertions and `scope` says whose
-//! value a flow enters or leaves.
+//! value a flow enters or leaves. `bridge` is everything that only the v3
+//! model needs.
 //!
 //! The fold itself is sequential, because each flow's relief, totals and laws
-//! depend on every flow before it. Everything around it is not.
+//! depend on every flow before it. Everything around it is not: the plan is
+//! solved place by place, forks run side by side, and a [`Checkpoint`] at a
+//! month's end lets an edit refold only what it touched.
 
 #![forbid(unsafe_code)]
 
+mod bridge;
 mod calc;
+mod checkpoint;
 mod eval;
 mod events;
 mod explain;
+mod facts;
 mod fire;
 mod infer;
 mod ledger;
 mod lots;
 mod motion;
+mod plan;
 mod post;
 mod reconcile;
 mod scope;
@@ -52,9 +62,21 @@ mod source_tests;
 mod tests;
 
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
-use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn};
+use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn, Waive};
 
-pub use ledger::{Ledger, run};
+pub use checkpoint::Checkpoint;
+pub use ledger::Ledger;
+pub use plan::{Known, Plan, run};
+
+/// What each phase hands on is shared by reference between threads: the plan
+/// every fold reads, the ledgers and checkpoints forked from it, and the run.
+const _: () = {
+    const fn is_sync<T: Sync>() {}
+    is_sync::<Plan<'static, 'static>>();
+    is_sync::<Ledger<'static, 'static, 'static>>();
+    is_sync::<Checkpoint>();
+    is_sync::<Run>();
+};
 
 /// How to run.
 #[derive(Clone, Copy, Debug)]
@@ -200,7 +222,7 @@ impl State {
 /// What one place holds of one commodity.
 ///
 /// Asset places hold parcels; every other class holds only `plain`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Hash, Debug)]
 pub struct Holding {
     pub place: Id<Place>,
     pub unit: Id<Commodity>,
@@ -229,7 +251,7 @@ impl Holding {
 
 /// Value at rest, remembered: a quantity with its basis, when and how it was
 /// acquired, and the restricted source it is still tied to.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Parcel {
     pub qty: Qty,
     /// Value already accounted for (cost, contributions, after-tax money), in
@@ -284,10 +306,36 @@ pub struct Effect {
     pub day: Day,
     pub name: Sym,
     pub amount: Amount,
-    pub owe: Option<Owed>,
+    pub consequence: Consequence,
     pub cause: Cause,
+}
+
+impl Effect {
+    /// What is owed, and to whom and by when, if this is an obligation.
+    pub fn owed(&self) -> Option<Owed> {
+        match self.consequence {
+            Consequence::Count => None,
+            Consequence::Owe(owed) | Consequence::Penalty(owed) => Some(owed),
+        }
+    }
+
     /// The price of a violated `require … else owe …`.
-    pub priced: bool,
+    pub fn is_penalty(&self) -> bool {
+        matches!(self.consequence, Consequence::Penalty(_))
+    }
+}
+
+/// What a law's effect does. Being a penalty implies an obligation, so it
+/// cannot be one without the other.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Consequence {
+    /// A tally line: counted, owed to no one.
+    Count,
+    /// `owe`: an obligation.
+    Owe(Owed),
+    /// The price of a violated `require … else owe …`: an obligation the same
+    /// firing's violation is [`Verdict::Priced`] for.
+    Penalty(Owed),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -304,19 +352,45 @@ pub struct Violation {
     pub subject: Subject,
     pub day: Day,
     pub cause: Cause,
-    pub warn: bool,
-    /// By `!` or relaxed mode.
-    pub waived: bool,
-    /// A `require … else owe …`: the violation was priced, and its effects are
-    /// the ones with `priced` set that the same firing recorded.
-    pub priced: bool,
+    pub verdict: Verdict,
     pub diagnostic: u32,
+}
+
+/// What became of a failed `require` or `warn`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Verdict {
+    /// An error: the flow breaks the law.
+    Blocks,
+    /// A `warn`: reported, and stops nothing.
+    Warns,
+    /// Accepted, by a `!` or by `relaxed`.
+    Waived(Waiver),
+    /// A `require … else owe …`: the violation was priced, and the
+    /// [`Consequence::Penalty`] the same firing recorded is its price, unless a
+    /// `!` waived it.
+    Priced { waived: bool },
+}
+
+impl Verdict {
+    /// Whether a `!` or `relaxed` accepted it.
+    pub fn is_waived(self) -> bool {
+        matches!(self, Verdict::Waived(_) | Verdict::Priced { waived: true })
+    }
+}
+
+/// Why a violation is not an error.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Waiver {
+    /// `!` on the flow's leg or transaction.
+    Marked(Waive),
+    /// The book or the command line is `relaxed`.
+    Relaxed,
 }
 
 /// What a limit had counted and what it allowed, the last time one of its
 /// comparisons ran in one window: `counted <= limit`, with the sides of a
 /// `>=` swapped, so the room left is always `limit - counted`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Hash, Debug)]
 pub struct Headroom {
     pub law: Id<Law>,
     /// The index of the `require` or `warn` step.
@@ -331,6 +405,17 @@ pub struct Headroom {
     /// When it was last read.
     pub day: Day,
     pub warn: bool,
+    pub bound: Bound,
+}
+
+/// Which way a limit was written. A cap (`total <= 500 USD`) stays under what
+/// it allows; a floor (`balance >= empty`) stays above what it requires, and
+/// is stored with its sides swapped, so that the room is `limit - counted`
+/// either way.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Bound {
+    Cap,
+    Floor,
 }
 
 /// An assertion's gap, accepted with `!` as a flow from `unknown`, or with

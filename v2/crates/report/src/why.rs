@@ -88,7 +88,7 @@ fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &str) -> Sec
     section.heading = Some(heading.to_string());
     let (shown, left_out) = recent(effects);
     for effect in shown {
-        let owed = effect.owe.map_or(Cell::Blank, |owed| Cell::text(creditor(book, owed)));
+        let owed = effect.owed().map_or(Cell::Blank, |owed| Cell::text(creditor(book, owed)));
         let cells = [
             Cell::Day(effect.day),
             Cell::text(book.name(effect.name)),

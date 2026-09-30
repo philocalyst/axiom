@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Ratio};
-use axiom_engine::{Holding, Ledger, Options};
+use axiom_engine::{Holding, Ledger, Options, Plan};
 use axiom_model::{Book, Class, Commodity, End, Flow, Place, Value};
 
 use crate::history::Held;
@@ -22,9 +22,9 @@ pub struct Overdraft {
 }
 
 /// What running the expected flows produced.
-pub struct Trace<'b, 's> {
+pub struct Trace<'p, 'b, 's> {
     /// Everything the ledger recorded, history and projection alike.
-    pub ledger: Ledger<'b, 's>,
+    pub ledger: Ledger<'p, 'b, 's>,
     /// Money in hand less the debts with no term, at each checkpoint.
     pub liquid: Vec<Qty>,
     /// Everything owned less everything owed at each checkpoint, with
@@ -36,10 +36,16 @@ pub struct Trace<'b, 's> {
 /// Applies `flows` (in date order) to a ledger standing at `today`, reading
 /// the position at each checkpoint. Laws with deadlines fire all the way to
 /// the last checkpoint.
-pub fn project<'b, 's>(lens: Lens<'b, 's>, today: Day, flows: Vec<Flow>, checkpoints: &[Day]) -> Trace<'b, 's> {
+pub fn project<'p, 'b, 's>(
+    plan: &'p Plan<'b, 's>,
+    lens: Lens<'b, 's>,
+    today: Day,
+    flows: Vec<Flow>,
+    checkpoints: &[Day],
+) -> Trace<'p, 'b, 's> {
     let book = lens.book;
     let horizon = checkpoints.last().copied().unwrap_or(today);
-    let mut ledger = Ledger::new(book, Options { today: horizon, relaxed: book.relaxed });
+    let mut ledger = plan.start(Options { today: horizon, relaxed: book.relaxed });
     ledger.advance(today);
 
     let mut overdrawn: BTreeMap<Id<Place>, Overdraft> = BTreeMap::new();

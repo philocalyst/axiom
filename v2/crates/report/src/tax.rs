@@ -21,7 +21,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) ->
     let year = year.unwrap_or_else(|| run.today.year());
     // An effect belongs to the year of the day it was recorded.
     let effects = run.effects.iter().filter(|effect| whose.includes(effect.owner) && effect.day.year() == year);
-    let (owed, tallied): (Vec<&Effect>, Vec<&Effect>) = effects.partition(|effect| effect.owe.is_some());
+    let (owed, tallied): (Vec<&Effect>, Vec<&Effect>) = effects.partition(|effect| effect.owed().is_some());
     let owners: BTreeSet<Id<Entity>> = owed.iter().chain(&tallied).map(|effect| effect.owner).collect();
 
     let (tallied, owed) = (lines(&tallied), lines(&owed));
@@ -105,14 +105,14 @@ fn lines(effects: &[&Effect]) -> Vec<Line> {
     let mut at: Map<(Id<Entity>, Sym, Option<(Id<Entity>, Day)>, bool, Id<Commodity>), usize> = Map::default();
     for effect in effects {
         let key =
-            (effect.owner, effect.name, effect.owe.map(|owed| (owed.to, owed.due)), effect.priced, effect.amount.unit);
+            (effect.owner, effect.name, effect.owed().map(|owed| (owed.to, owed.due)), effect.is_penalty(), effect.amount.unit);
         let index = *at.entry(key).or_insert_with(|| {
             lines.push(Line {
                 owner: effect.owner,
                 system: effect.system,
                 name: effect.name,
-                owed: effect.owe,
-                priced: effect.priced,
+                owed: effect.owed(),
+                priced: effect.is_penalty(),
                 amount: Amount::zero(effect.amount.unit),
                 contributions: 0,
                 cause: effect.cause,

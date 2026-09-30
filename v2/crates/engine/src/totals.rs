@@ -10,13 +10,16 @@
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::hash::{Hash, Hasher};
 
 use axiom_core::calendar;
 use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Sym, spread};
-use axiom_model::{Book, Dir, Entity, Func, Law, NodeId, Op, Place, Subject, Ty, Window};
+use axiom_model::{Book, Dir, Entity, Place, Subject, Window};
 
-use crate::eval::V3;
-use crate::scope::{containing, inside};
+use crate::bridge::V3;
+use crate::facts::{LawFacts, TotalsRead};
+use crate::scope::containing;
+use crate::state::unordered;
 
 /// `amount` cut by the calendar years `over` touches: the first day of each
 /// year's part, and its share.
@@ -32,7 +35,7 @@ pub(crate) fn by_year(amount: Qty, over: Days) -> impl Iterator<Item = (Day, Qty
 }
 
 /// Value that entered and left, over one window.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Hash)]
 struct Flowed {
     incoming: Qty,
     outgoing: Qty,
@@ -48,7 +51,7 @@ impl Flowed {
 }
 
 /// One window's sums, and the days they belong to.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash)]
 struct Rolling {
     days: Days,
     flowed: Flowed,
@@ -71,7 +74,7 @@ impl Rolling {
 }
 
 /// Value recognized over days that had not come when its flow was counted.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Hash)]
 struct Accrual {
     dir: Dir,
     amount: Qty,
@@ -80,7 +83,7 @@ struct Accrual {
 
 /// One subject's windows. `closed` is the year that just ended, kept for the
 /// laws that close it late.
-#[derive(Clone)]
+#[derive(Clone, Hash)]
 struct Windows {
     month: Rolling,
     year: Rolling,
@@ -160,18 +163,60 @@ impl Windows {
     }
 }
 
-/// Flow totals for the subjects some law reads: places first (each including
-/// its subtree), then entities. A book whose laws never read `total(…)` keeps
-/// none, and a subject nobody reads costs nothing.
+/// The subjects some law reads flow totals of, and for each place the ones it
+/// lies within: fixed by the book's laws, so worked out once, in the plan. A
+/// book whose laws never read `total(…)` watches nothing, and a subject nobody
+/// reads costs nothing.
+pub(crate) struct Watch {
+    /// The watched subjects each place lies within: the only ones a flow at
+    /// that place can enter or leave.
+    through: Groups<Place, Subject>,
+}
+
+impl Watch {
+    pub fn of(book: &Book, laws: &[LawFacts]) -> Watch {
+        let places = book.places.len();
+        let mut watched = vec![false; places + book.entities.len()];
+        for rule in book.rules.all() {
+            match laws[rule.law.index()].totals {
+                TotalsRead::Nothing => {}
+                TotalsRead::Subject => watched[slot(places, rule.subject)] = true,
+                // A kind-wide total reads every place of that kind.
+                TotalsRead::Kind => watched[..places].fill(true),
+            }
+        }
+        let within = (0..places as u32).map(Id::new).flat_map(|place| containing(book, place).map(move |s| (place, s)));
+        let through = Groups::build(places, within.filter(|&(_, subject)| watched[slot(places, subject)]));
+        Watch { through }
+    }
+
+    /// The watched subjects that contain `here` but not `there`: a flow from
+    /// `here` to `there` leaves them, and one from `there` to `here` enters them.
+    fn crossed(&self, here: Id<Place>, there: Id<Place>) -> impl Iterator<Item = Subject> + '_ {
+        let beyond = &self.through[there];
+        self.through[here].iter().copied().filter(move |subject| !beyond.contains(subject))
+    }
+
+    /// Whether a flow from `from` to `to` leaves, and whether it enters, any
+    /// subject a law reads: only then is its value worth computing.
+    pub fn sides(&self, from: Id<Place>, to: Id<Place>) -> (bool, bool) {
+        (self.crossed(from, to).next().is_some(), self.crossed(to, from).next().is_some())
+    }
+}
+
+/// Running flow totals for the subjects a [`Watch`] names.
 #[derive(Clone)]
 pub(crate) struct Totals {
     places: usize,
-    watched: Vec<bool>,
-    /// The watched subjects each place lies within: the only ones a flow at
-    /// that place can enter or leave, found once instead of on every flow.
-    through: Groups<Place, Subject>,
     windows: Vec<Windows>,
     reaching: Reaching,
+}
+
+/// What the running totals hold: the windows, which are all the future reads.
+impl Hash for Totals {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.windows.hash(state);
+    }
 }
 
 /// The first day of the next month that some subject enters with value already
@@ -207,35 +252,7 @@ impl Reaching {
 impl Totals {
     pub fn new(book: &Book) -> Totals {
         let n = book.places.len() + book.entities.len();
-        let mut totals = Totals {
-            places: book.places.len(),
-            watched: vec![false; n],
-            through: Groups::default(),
-            windows: vec![Windows::NONE; n],
-            reaching: Reaching::new(),
-        };
-        let rules = &book.rules;
-        let all = [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always].into_iter().flat_map(|g| g.values());
-        for rule in all.chain(rules.on_spend.values()).chain(&rules.timed) {
-            match reads_total(&book.laws[rule.law]) {
-                None => {}
-                Some(false) => totals.watched[slot(totals.places, rule.subject)] = true,
-                // A kind-wide total reads every place of that kind.
-                Some(true) => totals.watched[..totals.places].fill(true),
-            }
-        }
-        let places = (0..book.places.len() as u32).map(Id::new);
-        let within = places.flat_map(|place| containing(book, place).map(move |subject| (place, subject)));
-        let watched = within.filter(|&(_, subject)| totals.watched[slot(totals.places, subject)]);
-        totals.through = Groups::build(book.places.len(), watched);
-        totals
-    }
-
-    /// Whether a flow from `from` to `to` leaves, and whether it enters, any
-    /// subject a law reads: only then is its value worth computing.
-    pub fn watched_sides(&self, book: &Book, from: Id<Place>, to: Id<Place>) -> (bool, bool) {
-        let watches = |here, there| self.through[here].iter().any(|&subject| !inside(book, subject, there));
-        (watches(from, to), watches(to, from))
+        Totals { places: book.places.len(), windows: vec![Windows::NONE; n], reaching: Reaching::new() }
     }
 
     /// Counts a flow moved on `day` and recognized over `over`: `out` leaves
@@ -244,7 +261,7 @@ impl Totals {
     /// whose value is unknown (`None`) is left out.
     pub fn record(
         &mut self,
-        book: &Book,
+        watch: &Watch,
         (from, to): (Id<Place>, Id<Place>),
         (day, over): (Day, Days),
         out: Option<Qty>,
@@ -253,7 +270,7 @@ impl Totals {
         let sides = [(Dir::Out, from, to, out), (Dir::In, to, from, arrive)];
         for (dir, here, there, value) in sides {
             let Some(value) = value else { continue };
-            for &subject in self.through[here].iter().filter(|&&subject| !inside(book, subject, there)) {
+            for subject in watch.crossed(here, there) {
                 let at = slot(self.places, subject);
                 let windows = &mut self.windows[at];
                 if windows.add(day, dir, value, over) && !windows.reaching {
@@ -307,23 +324,18 @@ fn subject_at(places: usize, slot: usize) -> Subject {
     }
 }
 
-/// Whether a law reads window totals, and whether any of its reads is
-/// widened to a kind.
-fn reads_total(law: &Law) -> Option<bool> {
-    let widened = |args: &[NodeId]| args.iter().any(|arg| law.nodes[arg.index()].ty == Ty::Kind);
-    let reads = law.nodes.iter().filter_map(|node| match &node.op {
-        Op::Call(Func::Total(..), args) => Some(widened(args)),
-        _ => None,
-    });
-    reads.reduce(|a, b| a || b)
-}
-
 /// What `count` effects have added up to, keyed by `(owner, year, name)`. A
 /// tally is a name in a year for one owner; which system's law counted it is
 /// kept on the [`Effect`](crate::Effect) for reports, not in the lookup.
 #[derive(Clone, Default)]
 pub(crate) struct Tallies {
     sums: Map<(Id<Entity>, i32, Sym), Qty>,
+}
+
+impl Hash for Tallies {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        unordered(self.sums.iter().filter(|(_, qty)| !qty.is_zero())).hash(state);
+    }
 }
 
 impl Tallies {

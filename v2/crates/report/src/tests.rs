@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree};
-use axiom_engine::{Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
+use axiom_engine::{Bound, Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
 use axiom_model::Effect as Consequence;
 use axiom_model::*;
 
@@ -465,7 +465,7 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
     // Names are one namespace per person-year: both systems add to `agi`.
     let (me, irs, usd) = (cast.me, cast.irs, cast.usd);
     let owed = |to| Some(Owed { to, due: day(2027, 4, 15) });
-    let mut effect = |system, when, name: &'static str, cents, owe, cause| Effect {
+    let mut effect = |system, when, name: &'static str, cents, owe: Option<Owed>, cause| Effect {
         law: wages,
         subject: Subject::Entity(me),
         owner: me,
@@ -473,9 +473,8 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
         day: when,
         name: cast.names.intern(name),
         amount: Amount::new(Qty(cents), usd),
-        owe,
+        consequence: owe.map_or(axiom_engine::Consequence::Count, axiom_engine::Consequence::Owe),
         cause,
-        priced: false,
     };
     let (us, ca) = (cast.us, cast.california);
     let effects = vec![
@@ -657,6 +656,7 @@ impl Household {
             limit: cents(limit),
             day: until,
             warn,
+            bound: Bound::Cap,
         };
         let (jan, feb) = ((day(2026, 1, 1), day(2026, 1, 31)), (day(2026, 2, 1), day(2026, 2, 28)));
         let year = (day(2026, 1, 1), day(2026, 12, 31));
@@ -669,7 +669,7 @@ impl Household {
             // The same cap for Jordan, who has used 900 of 18,000.
             reading(2, "assets/bank/jordan-checking", year.0, year.1, 90_000, 1_800_000, jordan, false),
             // A floor: the balance may not go below zero, and stands at 8,955.80.
-            reading(3, "assets/bank/checking", day(2026, 3, 31), day(2026, 3, 31), 0, 895_580, me, true),
+            Headroom { bound: Bound::Floor, ..reading(3, "assets/bank/checking", day(2026, 3, 31), day(2026, 3, 31), 0, 895_580, me, true) },
             // A yearly budget, over.
             reading(0, "expenses/insurance", year.0, year.1, 120_000, 100_000, me, true),
         ];
@@ -901,7 +901,8 @@ fn tax_groups_tallies_by_system_and_totals_each_jurisdiction() {
 #[test]
 fn a_priced_penalty_is_marked_as_one() {
     let mut house = household();
-    house.run.effects[4].priced = true;
+    let penalty = house.run.effects[4].owed().expect("an obligation");
+    house.run.effects[4].consequence = axiom_engine::Consequence::Penalty(penalty);
     let owed = table(&house, Query::Tax { year: None });
     assert!(owed.contains("federal-tax (penalty) | irs"));
     assert!(owed.contains("note: A penalty is the price of a violated law"));

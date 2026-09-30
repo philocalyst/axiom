@@ -1,14 +1,19 @@
-//! What a [`Ledger`](crate::Ledger) carries besides the book and its
+//! What a [`Ledger`](crate::Ledger) carries besides the plan and its
 //! timeline.
 //!
 //! The clonable *world* is what the future depends on: holdings, totals and
 //! tallies. The *record* is what happened, append-only: gains, effects,
-//! violations, diagnostics. Both are cloned with the ledger (a clone costs a few
-//! flat copies, never a replay). The *scratch* buffers are reused between flows
-//! so nothing allocates in steady state, and are deliberately not cloned.
+//! violations, diagnostics, and beside them what was already reported, so it is
+//! not reported again. Both are cloned with the ledger (a clone costs a few flat
+//! copies, never a replay), and a fork keeps only the world and what was
+//! reported. The *scratch* buffers are reused between flows so nothing
+//! allocates in steady state, and are deliberately not cloned.
 
+use std::hash::{Hash, Hasher};
+
+use axiom_core::hash::FxHasher;
 use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
-use axiom_model::{Book, Commodity, Entity, Flow, Law, Param, Place, Subject, Value};
+use axiom_model::{Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Subject, Value};
 
 use crate::eval::Outcome;
 use crate::lots::{Holdings, Relief};
@@ -30,8 +35,8 @@ impl World {
 }
 
 /// Where the assertions on one place and commodity left off.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct Checkpoint {
+#[derive(Clone, Copy, Default, Hash)]
+pub(crate) struct LastCheck {
     /// The last day one was checked.
     pub day: Option<Day>,
     /// How far the statement was from the ledger then (statement minus ledger,
@@ -43,20 +48,12 @@ pub(crate) struct Checkpoint {
     pub unsolved_said: bool,
 }
 
-/// A limit's latest reading in its window. It is updated in place while the
-/// window lasts, and set aside when a reading falls in the next one.
-#[derive(Clone, Copy)]
-pub(crate) struct Reading {
-    pub headroom: Headroom,
-    /// The window is the year of what a tally counts, not the day a total is read.
-    pub tally: bool,
-}
-
 #[derive(Clone, Default)]
 pub(crate) struct Record {
-    /// The quantities of flows that were not fully written: solved from
-    /// assertions, or from the balance when the fold reached them.
-    pub amounts: Map<Id<Flow>, Amounts>,
+    /// The quantities the fold resolved when it reached the flows (`=` and
+    /// `all` depend on the balance), remembered because a reversal must undo
+    /// exactly what was done. The plan holds the `?` amounts solved before it began.
+    pub resolved: Map<Id<Flow>, Amounts>,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
     pub violations: Vec<Violation>,
@@ -64,9 +61,11 @@ pub(crate) struct Record {
     pub diagnostics: Vec<Diagnostic>,
     /// How many times each law ran past its `when` filters.
     pub checks: Vec<u32>,
-    pub checkpoints: Map<(Id<Place>, Id<Commodity>), Checkpoint>,
-    /// By law, step and subject.
-    pub headroom: Map<(Id<Law>, u32, Subject), Reading>,
+    pub checkpoints: Map<(Id<Place>, Id<Commodity>), LastCheck>,
+    /// A limit's latest reading in its window, by law, step and subject: updated
+    /// in place while the window lasts, and set aside in `passed` when a reading
+    /// falls in the next one.
+    pub headroom: Map<(Id<Law>, u32, Subject), Headroom>,
     /// Readings of windows that have passed.
     pub passed: Vec<Headroom>,
     /// Every `!` a posted flow carried, and whether it waived anything.
@@ -104,8 +103,8 @@ pub(crate) enum Missing {
 }
 
 impl Record {
-    pub fn new(book: &Book, amounts: Map<Id<Flow>, Amounts>, diagnostics: Vec<Diagnostic>) -> Record {
-        Record { amounts, diagnostics, checks: vec![0; book.laws.len()], ..Record::default() }
+    pub fn new(laws: usize, diagnostics: Vec<Diagnostic>) -> Record {
+        Record { diagnostics, checks: vec![0; laws], ..Record::default() }
     }
 
     /// What the future depends on, without what happened so far: the resolved
@@ -113,7 +112,7 @@ impl Record {
     /// again), and empty records.
     pub fn forked(&self) -> Record {
         Record {
-            amounts: self.amounts.clone(),
+            resolved: self.resolved.clone(),
             checks: vec![0; self.checks.len()],
             checkpoints: self.checkpoints.clone(),
             failing: self.failing.clone(),
@@ -162,10 +161,44 @@ pub(crate) struct Scratch {
     pub relief: Relief,
     /// Entities parcels are tied to, and whether their laws permit the flow.
     pub permits: Vec<(Id<Entity>, bool)>,
+    /// What each amount of the flow being posted is worth in the base currency
+    /// on its day: the totals, the proceeds and the fee each ask, and a price
+    /// is looked up once.
+    pub worth: Vec<(Amount, Option<Qty>)>,
+    /// The rules of the list being fired that have run, when a law can reach one subject twice.
+    pub done: Vec<(Id<Law>, Subject)>,
 }
 
 impl Clone for Scratch {
     fn clone(&self) -> Scratch {
         Scratch::default()
+    }
+}
+
+/// A hash of a map's or set's entries that does not depend on the order they
+/// are stored in, which is the order they were inserted in.
+pub(crate) fn unordered<T: Hash>(entries: impl IntoIterator<Item = T>) -> u64 {
+    let hashed = entries.into_iter().map(|entry| {
+        let mut hasher = FxHasher::default();
+        entry.hash(&mut hasher);
+        hasher.finish()
+    });
+    hashed.fold(0, u64::wrapping_add)
+}
+
+/// What the rest of a fold depends on that is not in the world: what was
+/// already reported (so it is not reported again), where the assertions left
+/// off, and the limits' current readings. The records themselves are only
+/// what happened, and are not part of it.
+impl Hash for Record {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        unordered(&self.resolved).hash(state);
+        unordered(&self.checkpoints).hash(state);
+        unordered(&self.headroom).hash(state);
+        unordered(&self.waivers).hash(state);
+        unordered(&self.failing).hash(state);
+        unordered(&self.reported).hash(state);
+        unordered(&self.ambiguous).hash(state);
+        unordered(&self.missing).hash(state);
     }
 }

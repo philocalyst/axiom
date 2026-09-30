@@ -33,7 +33,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, id: Id<Law>) -> Report<'s> {
         .headed("Recent violations");
     for violation in recent(&violations).0 {
         let message = &run.diagnostics[violation.diagnostic as usize].message;
-        let style = if violation.waived { Style::Muted } else { Style::Alert };
+        let style = if violation.verdict.is_waived() { Style::Muted } else { Style::Alert };
         let cells =
             [Cell::Day(violation.day), Cell::text(headline(message).to_string()), cause_cell(book, violation.cause)];
         broken.push(Row::new(cells).style(style));

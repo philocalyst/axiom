@@ -8,10 +8,10 @@
 use axiom_core::{Day, Days, Id, Loc, Qty, Sym};
 use axiom_model::{Amount, Assert, Book, Class, Detail, End, Entity, Flow, Mode, Place, Select, Txn, Waive};
 
-use crate::Cause;
+use crate::{Cause, bridge};
 
 /// What leaves and what arrives, once every `?`, `=` and `all` is solved.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Amounts {
     pub out: Qty,
     pub arrive: Qty,
@@ -34,6 +34,7 @@ pub(crate) enum Moves {
     /// A market lowers it: parcels shrink and leave their basis behind, an
     /// unrealized loss. Nothing is realized, and nothing is spent.
     Loss,
+    // v3 bridge: the v4 model has no `.basis` places.
     /// `PLACE.basis` at this end: the parcels there change basis, not quantity.
     Basis(End),
 }
@@ -41,7 +42,7 @@ pub(crate) enum Moves {
 impl Moves {
     fn of(book: &Book, detail: &Detail, from: Id<Place>, to: Id<Place>) -> Moves {
         let market = book.entities[book.roots.market].place;
-        match detail.basis_end {
+        match bridge::basis_end(detail) {
             Some(end) => Moves::Basis(end),
             None if book.places[to].class == Class::Asset && Some(from) == market => Moves::Growth,
             None if book.places[from].class == Class::Asset && Some(to) == market => Moves::Loss,
@@ -53,8 +54,7 @@ impl Moves {
         match self {
             Moves::Growth => Moves::Loss,
             Moves::Loss => Moves::Growth,
-            Moves::Basis(End::From) => Moves::Basis(End::To),
-            Moves::Basis(End::To) => Moves::Basis(End::From),
+            Moves::Basis(end) => Moves::Basis(bridge::opposite(end)),
             Moves::Value => Moves::Value,
         }
     }
