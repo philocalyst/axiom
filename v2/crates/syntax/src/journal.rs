@@ -47,8 +47,10 @@ impl<'s> Parser<'s> {
         let spread = self.spread(line, date)?;
         let mut from = self.side(scope)?;
         // A quantity at a price is one amount, however the line goes on.
-        if let (true, Some(Quantity::Amount(Amount::Literal(quantity)))) = (self.at(Punct::At), from.amount) {
-            from.amount = Some(Quantity::Amount(self.at_price(quantity)?));
+        if self.at(Punct::At) {
+            if let Some(Quantity::Amount(Amount::Literal(quantity))) = from.amount {
+                from.amount = Some(Quantity::Amount(self.at_price(quantity)?));
+            }
         }
         if let (false, Some(end), false) = (spread, &from.end, self.at(Punct::Arrow)) {
             let amount = match from.amount {

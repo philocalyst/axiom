@@ -470,7 +470,8 @@ fn a_contract_has_a_schedule_properties_and_a_template() {
     assert_eq!((holding.direction, holding.name.0), (Direction::Into, "checking"));
     assert_eq!((job.purpose.map(|purpose| purpose.name.0), job.description.map(|text| text.0)), (Some("wages"), Some("gross")));
     let legs = &file[job.body.legs];
-    assert!(matches!(legs[0].amount, Quantity::Amount(Amount::Share(Dec { mantissa: 6, scale: 0 }))) && legs.len() == 2);
+    assert!(matches!(legs[0].amount, Quantity::Amount(Amount::Computed(root)) if matches!(file.exprs[root].kind, ExprKind::Pct(Dec { mantissa: 6, scale: 0 }))));
+    assert_eq!(legs.len(), 2);
     assert_eq!(legs[0].doc.unwrap().lines().collect::<Vec<_>>(), ["Six percent of the gross is deferred."]);
     // The match is an `also` flow, whose amount is an expression over the flow.
     let alsos = &file[job.alsos];
@@ -484,7 +485,7 @@ fn a_contract_has_a_schedule_properties_and_a_template() {
     assert_eq!(props(1), [line("share", &["12%", "for", "studio"]), line("until", &["2026-08-31"])]);
     let deadline = contracts[1].deadline.as_ref().unwrap();
     assert_eq!(deadline.span, Span::days(5));
-    assert!(deadline.otherwise.as_ref().is_some_and(|item| item.sign == Sign::Add && matches!(item.amount, Amount::Share(_))));
+    assert!(deadline.otherwise.as_ref().is_some_and(|item| item.sign == Sign::Add && matches!(item.amount, Amount::Computed(root) if matches!(file.exprs[root].kind, ExprKind::Pct(_)))));
     assert!(contracts[2].schedule.is_some_and(|schedule| schedule.terms.payment.is_none()));
     let loan = ["320_000 USD", "on", "2024-02-20", "at", "5.875%", "over", "30y", "for", "condo"];
     assert_eq!(props(2), [line("loan", &loan)]);
@@ -732,7 +733,8 @@ fn ends_may_be_commodities_and_an_exchange_may_name_only_its_source() {
 fn a_leg_may_be_a_share_of_the_header_and_an_opening_line_an_asset() {
     let file = parse_clean("2026-01-31 lumen -> 4_600 USD\n  retirement 6%\n  checking ...\n");
     let legs = &file[txns(&file)[0].flow.body.legs];
-    assert!(matches!(legs[0].amount, Quantity::Amount(Amount::Share(Dec { mantissa: 6, scale: 0 }))));
+    // A share alone is a node of the arena: the percent, of what the header says.
+    assert!(matches!(legs[0].amount, Quantity::Amount(Amount::Computed(root)) if matches!(file.exprs[root].kind, ExprKind::Pct(Dec { mantissa: 6, scale: 0 }))));
     only_error("2026-01-31 lumen -> 6%\n", "expected-end-of-line");
 
     let file = parse_clean("opening 2026-01-01\n  condo basis 402_000 USD since 2024-02-20\n  checking 5 USD\n");
@@ -1034,7 +1036,6 @@ fn shown_amounts(src: &str) -> Vec<String> {
     let mut show_amount = |amount: &Amount| {
         out.push(match amount {
             Amount::Literal(literal) => format!("literal {}", literal.0),
-            Amount::Share(percent) => format!("share {}", percent.mantissa),
             Amount::Computed(root) => show(&file, *root, src),
         })
     };
@@ -1081,7 +1082,7 @@ fn amounts_are_written_as_the_book_computes_them() {
     assert_eq!(items("1 USD up to 2 USD up to 3 USD"), ["((1 USD up to 2 USD) up to 3 USD)"]);
     // A literal and a lone share need no node of the arena.
     assert_eq!(items("5 USD"), ["literal 5 USD"]);
-    assert_eq!(items("10%"), ["share 10"]);
+    assert_eq!(items("10%"), ["10%"]);
 
     // A quantity of something at a price, on an occurrence or a claim, and a share of a reference in a flow.
     assert_eq!(shown_amounts("2026-04-05 jo owes me 1/3 of ^pge-jan\n"), ["(1/3 of ^pge-jan)"]);
@@ -1325,7 +1326,6 @@ fn items_of(src: &str) -> Vec<(Sign, String, usize)> {
     };
     let amount = |amount: &Amount| match amount {
         Amount::Literal(amount) => amount.0.to_string(),
-        Amount::Share(percent) => format!("{}%", percent.mantissa),
         Amount::Computed(root) => src[file.exprs[*root].loc.range()].to_string(),
     };
     file[body.items].iter().map(|item| (item.sign, amount(&item.amount), file[item.tail].len())).collect()
@@ -1350,7 +1350,7 @@ fn a_line_that_names_no_end_is_an_item_of_the_flow_above_it() {
     let Amount::Computed(root) = items[2].amount else { panic!("a share of an amount") };
     assert_eq!(&src[file.exprs[root].loc.range()], "5% of 100.00 USD");
     assert!(matches!(kinds[3], (Sign::Less, Amount::Literal(_))));
-    assert!(matches!(kinds[4], (Sign::Carve, Amount::Share(percent)) if percent.mantissa == 10));
+    assert!(matches!(kinds[4], (Sign::Carve, Amount::Computed(root)) if matches!(file.exprs[*root].kind, ExprKind::Pct(percent) if percent.mantissa == 10)));
     let tail = clauses(&file, items[1].tail);
     assert!(matches!(tail[..], [ClauseKind::Purpose(_), ClauseKind::Description(Text("for jo's birthday"))]));
     assert!(flow.body.legs.is_empty());
@@ -2562,8 +2562,9 @@ fn the_tree_is_compact() {
     assert!(size_of::<Expr>() <= 48, "Expr is {}", size_of::<Expr>());
     assert!(size_of::<Statement>() <= 168, "Statement is {}", size_of::<Statement>());
     assert!(size_of::<LineItem>() <= 96, "LineItem is {}", size_of::<LineItem>());
-    // An amount is a tag and the 16 bytes of the literal or share it holds.
-    assert!(size_of::<Many<Leg>>() == 8 && size_of::<Amount>() == 24 && size_of::<Literal>() == 16 && size_of::<Name>() == 16);
+    // An amount is two words: a literal's text, or an expression's id in the space a null text leaves.
+    assert!(size_of::<Many<Leg>>() == 8 && size_of::<Amount>() == 16 && size_of::<Literal>() == 16 && size_of::<Name>() == 16);
+    assert!(size_of::<Quantity>() <= 24 && size_of::<Side>() <= 48, "Quantity is {}", size_of::<Quantity>());
 }
 
 /// An expression written out: its leaves as they are, and the other nodes by

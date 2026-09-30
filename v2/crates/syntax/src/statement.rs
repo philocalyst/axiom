@@ -55,10 +55,12 @@ impl<'s> Parser<'s> {
         let scope = Scope::Statement(date);
         let verb = self.verb(scope, subject, amount)?;
         let tail = self.tail(scope, self.mark::<Clause>())?;
-        for clause in self.slice(tail) {
-            if !takes(&verb, &clause.kind) {
-                let diag = clause_not_taken(clause, what_it_says(&verb));
-                return self.fail(diag);
+        if !tail.is_empty() {
+            for clause in self.slice(tail) {
+                if !takes(&verb, &clause.kind) {
+                    let diag = clause_not_taken(clause, what_it_says(&verb));
+                    return self.fail(diag);
+                }
             }
         }
         Ok(Statement { date, subject, verb, tail, body: Body::default() })
@@ -220,6 +222,11 @@ impl<'s> Parser<'s> {
 
     /// What the lines under a statement may say, and that it says something.
     fn check_lines(&mut self, statement: &Statement<'s>, header: Loc) -> Parse<()> {
+        // Most statements have no lines, and say all they need to.
+        let needs_lines = matches!(statement.verb, Verb::Owes { amount: None, .. } | Verb::Now(Change::Amendment));
+        if !needs_lines && statement.body.legs.is_empty() && statement.body.items.is_empty() {
+            return Ok(());
+        }
         let (legs, items) = (self.slice(statement.body.legs), statement.body.items);
         let legs_only = matches!(statement.verb, Verb::Filed(_));
         let items_only = matches!(statement.verb, Verb::Owes { .. } | Verb::Waived | Verb::Now(Change::Amendment));

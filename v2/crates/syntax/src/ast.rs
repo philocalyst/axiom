@@ -455,17 +455,16 @@ pub enum Rates<'s> {
 
 // ─── Amounts ────────────────────────────────────────────────────────────────
 
-/// An amount as LANGUAGE §4 writes it. The commonest by far is a literal, and
-/// a share of the header's amount is nearly as common, so neither takes a node
-/// of the expression arena; every other form does.
+/// An amount as LANGUAGE §4 writes it. The commonest by far is a literal, which
+/// takes no node of the expression arena (and keeps an amount two words wide);
+/// every other form does.
 #[derive(Clone, Copy, Debug)]
 pub enum Amount<'s> {
     /// `84.20 USD`, `empty`, or, after `=`, `-50 USD`.
     Literal(Literal<'s>),
-    /// `12%`, alone: of the amount of the header it is under.
-    Share(Dec),
-    /// Anything else, as the root of an expression: `12% of ^bldg-water`, `1/3
-    /// of ^pge-jan`, `^inv-12[HR] @ 150 USD/HR`, `X up to Y`; and, in a
+    /// Anything else, as the root of an expression: `12%` (an [`ExprKind::Pct`]
+    /// alone is of the amount of the header it is under), `12% of ^bldg-water`,
+    /// `1/3 of ^pge-jan`, `^inv-12[HR] @ 150 USD/HR`, `X up to Y`; and, in a
     /// declaration, any expression of the law grammar.
     Computed(ExprId),
 }

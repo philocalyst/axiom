@@ -89,16 +89,41 @@ impl<'s> Parser<'s> {
         }
         let simple = match (&self.expr(root).kind, last) {
             (ExprKind::Amount(literal), true) => Some(Amount::Literal(*literal)),
-            (ExprKind::Pct(percent), true) => Some(Amount::Share(*percent)),
             _ => None,
         };
         Ok(simple.inspect(|_| drop(self.exprs.pop())).unwrap_or(Amount::Computed(root)))
     }
 
     /// The journal's amounts: `TERM [up to TERM]…`.
+    // Inlined: the commonest amount by far is a literal, which needs no more than this.
+    #[inline(always)]
     fn journal_amount(&mut self, priced: bool) -> Parse<Amount<'s>> {
-        let start = self.peek().loc.start as usize;
+        if let Tok::Number(_) = self.tok() {
+            let literal = self.measured()?;
+            if !matches!(self.tok(), Tok::Name("up") | Tok::Punct(Punct::At)) {
+                return Ok(Amount::Literal(literal));
+            }
+            return self.more_amount(Amount::Literal(literal), priced);
+        }
+        let start = self.peek().loc;
         let (first, loc) = self.term(priced)?;
+        self.more_of(first, loc, start.start as usize, priced)
+    }
+
+    /// What follows a literal that `up to` or `@` may continue.
+    #[inline(never)]
+    fn more_amount(&mut self, first: Amount<'s>, priced: bool) -> Parse<Amount<'s>> {
+        let Amount::Literal(literal) = first else { unreachable!("a literal") };
+        let loc = self.loc_of(&literal);
+        let (amount, loc) = match priced && self.at(Punct::At) {
+            true => (self.at_price(literal)?, self.loc_from(loc.start as usize)),
+            false => (first, loc),
+        };
+        self.more_of(amount, loc, loc.start as usize, priced)
+    }
+
+    /// `[up to TERM]…` after a first term.
+    fn more_of(&mut self, first: Amount<'s>, loc: Loc, start: usize, priced: bool) -> Parse<Amount<'s>> {
         if !self.at_up_to() {
             return Ok(first);
         }
@@ -117,7 +142,7 @@ impl<'s> Parser<'s> {
 
     /// `up to`, which is two words.
     fn at_up_to(&mut self) -> bool {
-        matches!((self.tok(), self.lexer.peek_second().tok), (Tok::Name("up"), Tok::Name("to")))
+        matches!(self.tok(), Tok::Name("up")) && matches!(self.lexer.peek_second().tok, Tok::Name("to"))
     }
 
     /// One term of a journal amount: a literal, a share (`12%`, alone or `of`
@@ -127,18 +152,15 @@ impl<'s> Parser<'s> {
     fn term(&mut self, priced: bool) -> Parse<(Amount<'s>, Loc)> {
         let token = self.peek();
         let amount = match token.tok {
-            Tok::Percent(percent) => match self.share(token, ExprKind::Pct(percent))? {
-                Some(root) => Amount::Computed(root),
-                None => Amount::Share(percent),
-            },
+            Tok::Percent(percent) => Amount::Computed(self.share(token, ExprKind::Pct(percent))?.0),
             Tok::Fraction(top, bottom) => {
                 if bottom == 0 {
                     return self.fail(zero_fraction(token.loc));
                 }
                 let of = "`of` and what it is a share of, like `1/3 of ^pge-jan`";
                 match self.share(token, ExprKind::Fraction(top, bottom))? {
-                    Some(root) => Amount::Computed(root),
-                    None => return Err(self.expected("expected-of", of)),
+                    (root, true) => Amount::Computed(root),
+                    (_, false) => return Err(self.expected("expected-of", of)),
                 }
             }
             Tok::Code(_) => Amount::Computed(self.primary()?),
@@ -171,15 +193,16 @@ impl<'s> Parser<'s> {
         Ok(Amount::Computed(self.node(ExprKind::At(quantity, price_node), self.loc_from(start as usize), first)))
     }
 
-    /// After a percent or fraction: `of REF` makes it a share of that, whose
-    /// root is returned, and nothing after it leaves it a share alone.
-    fn share(&mut self, token: Token<'s>, share: ExprKind<'s>) -> Parse<Option<ExprId>> {
+    /// After a percent or fraction: `of REF` makes it a share of that; nothing
+    /// after it leaves it a share of what the amount is for, a lone node. The
+    /// root, and whether there was an `of`.
+    fn share(&mut self, token: Token<'s>, share: ExprKind<'s>) -> Parse<(ExprId, bool)> {
         let first = self.next_expr();
         self.bump();
-        if !self.at_word("of") {
-            return Ok(None);
-        }
         let share = self.node(share, token.loc, first);
+        if !self.at_word("of") {
+            return Ok((share, false));
+        }
         self.bump();
         let what = "what it is a share of: a code such as `^bldg-water`, a name, or an amount";
         if !matches!(self.tok(), Tok::Code(_) | Tok::Name(_) | Tok::Number(_)) {
@@ -193,7 +216,7 @@ impl<'s> Parser<'s> {
             }
             _ => self.primary()?,
         };
-        Ok(Some(self.node(ExprKind::Of(share, of), self.loc_from(token.loc.start as usize), first)))
+        Ok((self.node(ExprKind::Of(share, of), self.loc_from(token.loc.start as usize), first), true))
     }
 
     /// The amount as a node of the expression arena, for an operator to hold.
@@ -202,7 +225,6 @@ impl<'s> Parser<'s> {
         let kind = match amount {
             Amount::Computed(root) => return root,
             Amount::Literal(literal) => ExprKind::Amount(literal),
-            Amount::Share(percent) => ExprKind::Pct(percent),
         };
         self.node_at(kind, loc)
     }

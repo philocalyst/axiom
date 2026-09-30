@@ -236,7 +236,16 @@ impl<'s> Parser<'s> {
     /// `[#PURPOSE [of NAME]] [STRING] CODE* [via PARTY] [for WHAT] [due WHEN]
     /// [basis AMOUNT] [@ PRICE] [! [STRING]]`, in any order; the waiver ends
     /// it. Clauses are kept in the order written, from `mark`.
+    // Inlined: most lines end here, and need not enter the loop.
+    #[inline(always)]
     pub fn tail(&mut self, scope: Scope, mark: usize) -> Parse<Many<Clause<'s>>> {
+        match self.tok() {
+            Tok::Eol => Ok(self.since(mark)),
+            _ => self.clauses(scope, mark),
+        }
+    }
+
+    fn clauses(&mut self, scope: Scope, mark: usize) -> Parse<Many<Clause<'s>>> {
         loop {
             let token = self.peek();
             let kind = match token.tok {
