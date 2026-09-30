@@ -8,6 +8,7 @@
 use axiom_core::{Dec, Diagnostic, Loc};
 
 use crate::ast::*;
+use crate::amount::zero_fraction;
 use crate::lex::{Punct, Tok, Token};
 use crate::parser::{Parse, Parser};
 
@@ -17,9 +18,11 @@ use crate::parser::{Parse, Parser};
 const OR: u8 = 1;
 const AND: u8 = 2;
 const COMPARE: u8 = 4;
-const ADD: u8 = 5;
-const MUL: u8 = 6;
-const NEGATE: u8 = 7;
+const UP_TO: u8 = 5;
+const ADD: u8 = 6;
+const MUL: u8 = 7;
+const OF: u8 = 8;
+const NEGATE: u8 = 9;
 
 /// How tightly an infix operator binds. (`is` is not one of them: its right
 /// side is a list of alternatives.)
@@ -28,6 +31,7 @@ fn power(op: BinOp) -> u8 {
         BinOp::Or => OR,
         BinOp::And => AND,
         BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => COMPARE,
+        BinOp::UpTo => UP_TO,
         BinOp::Add | BinOp::Sub => ADD,
         BinOp::Mul | BinOp::Div => MUL,
     }
@@ -42,6 +46,8 @@ enum Infix {
     Binary(BinOp),
     /// `x is a | b | c`
     Is,
+    /// `12% of ^bldg-water`
+    Of,
 }
 
 impl<'s> Parser<'s> {
@@ -95,11 +101,13 @@ impl<'s> Parser<'s> {
         Ok(lhs)
     }
 
-    fn infix(&self) -> Option<(Infix, u8)> {
+    fn infix(&mut self) -> Option<(Infix, u8)> {
         let op = match self.tok() {
             Tok::Name("is") => return Some((Infix::Is, COMPARE)),
+            Tok::Name("of") => return Some((Infix::Of, OF)),
             Tok::Name("or") => BinOp::Or,
             Tok::Name("and") => BinOp::And,
+            Tok::Name("up") if matches!(self.lexer.peek_second().tok, Tok::Name("to")) => BinOp::UpTo,
             Tok::Punct(punct) => punct.infix()?,
             _ => return None,
         };
@@ -111,7 +119,14 @@ impl<'s> Parser<'s> {
         let (first, start) = (self.expr(lhs).first, self.expr(lhs).loc.start as usize);
         let kind = match op {
             Infix::Is => ExprKind::Is(lhs, self.alternatives()?),
-            Infix::Binary(op) => ExprKind::Binary(op, lhs, self.binary(power + 1)?),
+            Infix::Of => ExprKind::Of(lhs, self.binary(power + 1)?),
+            Infix::Binary(op) => {
+                // `up to` is two words, and the first was consumed.
+                if op == BinOp::UpTo {
+                    self.bump();
+                }
+                ExprKind::Binary(op, lhs, self.binary(power + 1)?)
+            }
         };
         let node = self.node(kind, self.loc_from(start), first);
         if power == COMPARE && matches!(self.infix(), Some((_, COMPARE))) {
@@ -142,6 +157,15 @@ impl<'s> Parser<'s> {
             Tok::Number(num) => self.number(token, num),
             Tok::Percent(num) => self.leaf(token, ExprKind::Pct(num)),
             Tok::Date(day) => self.leaf(token, ExprKind::Date(day)),
+            Tok::Month(day) => self.leaf(token, ExprKind::Month(day)),
+            Tok::Fraction(_, 0) => self.fail(zero_fraction(token.loc)),
+            Tok::Fraction(top, bottom) => self.leaf(token, ExprKind::Fraction(top, bottom)),
+            Tok::Punct(Punct::LBracket) => {
+                let first = self.next_expr();
+                self.bump();
+                let keys = self.list(token.loc, Punct::RBracket)?;
+                Ok(self.node(ExprKind::Select(keys), self.loc_from(token.loc.start as usize), first))
+            }
             Tok::MonthDay(..) => {
                 let (first, day) = (self.next_expr(), self.date("a date")?);
                 Ok(self.node(ExprKind::Date(day), token.loc, first))
@@ -179,7 +203,7 @@ impl<'s> Parser<'s> {
         let Tok::Unit(_) = next.tok else { return Ok(self.node(ExprKind::Num(num), token.loc, first)) };
         self.bump();
         let loc = token.loc.to(next.loc);
-        Ok(self.node(ExprKind::Amount(Amount(self.text(loc))), loc, first))
+        Ok(self.node(ExprKind::Amount(Literal(self.text(loc))), loc, first))
     }
 
     /// A name, or a call when `(` touches it: `total(in, year)`. The callee is

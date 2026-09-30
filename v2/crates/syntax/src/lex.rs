@@ -31,7 +31,7 @@ pub(crate) enum Tok<'s> {
     /// The written number of `10%`, not yet divided by 100.
     Percent(Dec),
     /// `1/3`: numerator and denominator as written, the latter unchecked.
-    Fraction(Dec, Dec),
+    Fraction(u32, u32),
     Span(Span),
     /// A lowercase word or `/`-separated path, possibly a glob. Keywords are
     /// names too: only the grammar knows where they count.
@@ -282,10 +282,14 @@ impl<'s> Lexer<'s> {
         self.prev_end
     }
 
-    /// The rest of the line, raw, comments included: what a command is.
+    /// The rest of the line, raw, up to a trailing comment: what a command is.
     pub fn raw_rest(&mut self) -> Option<Name<'s>> {
         let start = self.raw_start()?;
-        Some(self.resume(start, start + self.src[start..self.bytes.len()].trim_end().len()))
+        let rest = &self.src[start..self.bytes.len()];
+        // A `//` ends the text only where it would start a comment: after a blank.
+        let comment = rest.match_indices("//").find(|&(at, _)| at > 0 && matches!(rest.as_bytes()[at - 1], b' ' | b'\t'));
+        let text = &rest[..comment.map_or(rest.len(), |(at, _)| at)];
+        Some(self.resume(start, start + text.trim_end().len()))
     }
 
     /// Where raw text starts: the next token, unless the line is over.
@@ -662,10 +666,11 @@ fn is_rate(text: &str) -> bool {
 }
 
 /// `1/3`: two whole numbers around one slash.
-fn fraction_of(text: &str) -> Option<(Dec, Dec)> {
+fn fraction_of(text: &str) -> Option<(u32, u32)> {
     let number = |part: &str| {
         let digits = part.bytes().all(|b| matches!(b, b'0'..=b'9' | b'_'));
-        Dec::parse(part.as_bytes()).filter(|_| digits && (!part.contains('_') || underscores_between_digits(part.as_bytes())))
+        let whole = Dec::parse(part.as_bytes()).filter(|_| digits && (!part.contains('_') || underscores_between_digits(part.as_bytes())));
+        whole.and_then(|dec| u32::try_from(dec.mantissa).ok())
     };
     let (top, bottom) = text.split_once('/')?;
     Some((number(top)?, number(bottom)?))

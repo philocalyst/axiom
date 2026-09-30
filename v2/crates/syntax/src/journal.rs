@@ -6,22 +6,32 @@ use crate::ast::*;
 use crate::dates::empty_range;
 use crate::lex::{Punct, Tok};
 use crate::lines::Line;
-use crate::parser::{Parse, Parser, Scope};
+use crate::parser::{Parse, Parser, Reported, Scope};
 
 impl<'s> Parser<'s> {
     /// A line that began with a date. What follows it says which it is: a
-    /// `^code` or a commodity is what a statement is about, and anything else
-    /// is a flow unless its first end is not followed by an arrow.
+    /// `^code`, a `#purpose` or a commodity is what a statement is about, and
+    /// anything else is a flow unless its first end is not followed by an arrow.
     pub fn journal_entry(&mut self, line: &mut Line<'s>, date: Day) -> Parse<()> {
         match self.tok() {
             Tok::Code(code) => {
                 self.bump();
                 self.statement(line, date, Subject::Code(code), None)
             }
-            Tok::Purpose(_) => Err(self.hash_code(self.peek().loc)),
+            // v3 wrote `DATE #code settled`; a purpose is the subject of a change.
+            Tok::Purpose(_) if matches!(self.lexer.peek_second().tok, Tok::Name("settled" | "void" | "returned")) => {
+                Err(self.hash_code(self.peek().loc))
+            }
+            Tok::Purpose(purpose) => {
+                self.bump();
+                self.statement(line, date, Subject::Purpose(purpose), None)
+            }
             // A commodity that starts a flow is a party: `VTI -> fidelity 198.12 USD`.
             Tok::Unit(unit) if !matches!(self.lexer.peek_second().tok, Tok::Punct(Punct::Arrow)) => {
                 self.bump();
+                if let Tok::Number(_) = self.tok() {
+                    return Err(self.price_needs_equals());
+                }
                 self.statement(line, date, Subject::Unit(Name(unit)), None)
             }
             _ => self.transaction(line, date),
@@ -33,39 +43,34 @@ impl<'s> Parser<'s> {
     /// first end before deciding is what lets one pass tell them apart.
     fn transaction(&mut self, line: &mut Line<'s>, date: Day) -> Parse<()> {
         let clauses = self.mark::<Clause>();
+        let scope = Scope::Dated(date);
         let spread = self.spread(line, date)?;
-        let from = self.side()?;
+        let from = self.side(scope)?;
         if let (false, Some(end), false) = (spread, &from.end, self.at(Punct::Arrow)) {
             let amount = match from.amount {
                 None => Some(None),
-                Some(Quantity::Fixed(amount)) => Some(Some(amount)),
+                Some(Quantity::Amount(amount)) => Some(Some(amount)),
                 Some(_) => None,
             };
             // A lot selector belongs to a flow, and is reported as a missing arrow.
             if let (true, Some(amount)) = (end.select.is_empty(), amount) {
-                let subject = self.subject(end.name, amount);
-                return self.statement(line, date, subject, amount);
+                return self.statement(line, date, Subject::Name(end.name), amount);
             }
         }
-        let (mut flow, arrow) = self.flow_head(from, date, clauses)?;
+        let (mut flow, arrow) = self.flow_head(from, scope, clauses)?;
         let header = self.end_header(line)?;
-        self.flow_legs(line, &mut flow, date, arrow)?;
+        self.flow_legs(line, &mut flow, scope, arrow)?;
         self.emit(&header, Txn { date, flow }, ItemKind::Txn);
         Ok(())
     }
 
-    /// What a statement is about: the name written, or `budget PURPOSE` when a
-    /// name follows `budget` and a limit follows that.
-    fn subject(&mut self, name: Name<'s>, amount: Option<Amount<'s>>) -> Subject<'s> {
-        if amount.is_none()
-            && &*name == "budget"
-            && let Tok::Name(purpose) = self.tok()
-            && matches!(self.lexer.peek_second().tok, Tok::Number(_) | Tok::Percent(_) | Tok::Name("empty"))
-        {
-            self.bump();
-            return Subject::Budget(Name(purpose));
-        }
-        Subject::Name(name)
+    /// v4's first form of a price, `DATE VTI 280.14 USD`: a price is a value now.
+    fn price_needs_equals(&mut self) -> Reported {
+        let number = self.peek().loc;
+        let diag = Diagnostic::error("price-needs-equals", "a price is a value: `VTI = 280.14 USD`")
+            .label(number, "a commodity's price is written after `=`")
+            .fix("insert `=`", self.point(number.start), "= ");
+        self.report(diag)
     }
 
     /// `..DATE` after a transaction's date: it is paid that day and recognized
@@ -99,7 +104,7 @@ impl<'s> Parser<'s> {
             }
             let leg = parser.leg(opening_line, Scope::Opening(date))?;
             match parser.get(leg).amount {
-                Quantity::Fixed(_) | Quantity::Whole => Ok(()),
+                Quantity::Amount(_) | Quantity::Whole => Ok(()),
                 _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),
             }
         });

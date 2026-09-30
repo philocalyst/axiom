@@ -2,37 +2,57 @@
 
 use axiom_core::{Dec, Diagnostic, Loc};
 
-use crate::ast::Amount;
+use crate::ast::*;
 use crate::lex::{Punct, Tok, Token};
-use crate::parser::{Parse, Parser};
+use crate::parser::{Parse, Parser, Scope};
 
 /// How much of a file is read to learn which commodities it writes.
 const SURVEY: usize = 1 << 20;
 
 impl<'s> Parser<'s> {
-    /// `NUMBER COMMODITY`, or `empty`.
+    /// An amount of §4, in the journal or, in a declaration, as any expression.
+    /// A `@ PRICE` is not part of it: a flow's header and legs say their price
+    /// as a clause. See [`Parser::priced_amount`] for the lines that do not.
     // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
-    pub fn amount(&mut self) -> Parse<Amount<'s>> {
+    pub fn amount(&mut self, scope: Scope) -> Parse<Amount<'s>> {
+        match scope {
+            Scope::Undated => self.declared_amount(),
+            _ => self.journal_amount(false),
+        }
+    }
+
+    /// An amount that may say what it is worth at a price: `^inv-12[HR] @ 150 USD/HR`.
+    pub fn priced_amount(&mut self, scope: Scope) -> Parse<Amount<'s>> {
+        match scope {
+            Scope::Undated => self.declared_amount(),
+            _ => self.journal_amount(true),
+        }
+    }
+
+    /// `NUMBER UNIT`, or `empty`.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
+    pub fn literal(&mut self) -> Parse<Literal<'s>> {
         let token = self.peek();
         match token.tok {
-            Tok::Name("empty") => Ok(self.bump_as(Amount(self.text(token.loc)))),
+            Tok::Name("empty") => Ok(self.bump_as(Literal(self.text(token.loc)))),
             _ => self.measured(),
         }
     }
 
-    /// An amount that may be negative, as after `=` in an assertion: an
-    /// overdrawn account is `-50 USD`.
-    pub fn signed_amount(&mut self) -> Parse<Amount<'s>> {
-        let Some(minus) = self.eat(Punct::Minus) else { return self.amount() };
+    /// A literal that may be negative, as after `=` in a value: an overdrawn
+    /// account is `-50 USD`.
+    pub fn signed_literal(&mut self) -> Parse<Literal<'s>> {
+        let Some(minus) = self.eat(Punct::Minus) else { return self.literal() };
         let amount = self.measured()?;
-        Ok(Amount(self.text(minus.to(self.loc_of(&amount)))))
+        Ok(Literal(self.text(minus.to(self.loc_of(&amount)))))
     }
 
-    /// `NUMBER COMMODITY`: a quantity of something. Prices are always this.
+    /// `NUMBER UNIT`: a quantity of something. Prices are always this.
     // Inlined: what it returns is built where it is wanted, not copied up out of a call.
     #[inline(always)]
-    pub fn measured(&mut self) -> Parse<Amount<'s>> {
+    pub fn measured(&mut self) -> Parse<Literal<'s>> {
         let token = self.peek();
         let Tok::Number(num) = token.tok else {
             let refund = self.at(Punct::Minus) && matches!(self.lexer.peek_second().tok, Tok::Number(_));
@@ -46,10 +66,130 @@ impl<'s> Parser<'s> {
         let next = self.peek();
         if let Tok::Unit(_) = next.tok {
             self.bump();
-            return Ok(Amount(self.text(token.loc.to(next.loc))));
+            return Ok(Literal(self.text(token.loc.to(next.loc))));
         }
         let diag = self.missing_commodity(token, num, next);
         self.fail(diag)
+    }
+
+    /// In a declaration an amount is any expression of the law grammar; a lone
+    /// literal or share is still what it says, so a declaration and a journal
+    /// give the same amount the same form.
+    fn declared_amount(&mut self) -> Parse<Amount<'s>> {
+        if self.at_eol() {
+            return Err(self.expected("expected-amount", "an amount such as `50 USD`, or an expression"));
+        }
+        let start = self.peek();
+        let root = self.expression()?;
+        let last = root.local() + 1 == self.exprs.len();
+        // A number alone is no amount: it says which commodity is missing.
+        if let (ExprKind::Num(num), true) = (&self.expr(root).kind, last) {
+            let diag = self.missing_commodity(start, *num, self.peek());
+            return self.fail(diag);
+        }
+        let simple = match (&self.expr(root).kind, last) {
+            (ExprKind::Amount(literal), true) => Some(Amount::Literal(*literal)),
+            (ExprKind::Pct(percent), true) => Some(Amount::Share(*percent)),
+            _ => None,
+        };
+        Ok(simple.inspect(|_| drop(self.exprs.pop())).unwrap_or(Amount::Computed(root)))
+    }
+
+    /// The journal's amounts: `TERM [up to TERM]…`.
+    fn journal_amount(&mut self, priced: bool) -> Parse<Amount<'s>> {
+        let start = self.peek().loc.start as usize;
+        let (first, loc) = self.term(priced)?;
+        if !self.at_up_to() {
+            return Ok(first);
+        }
+        let mut left = self.node_of(first, loc);
+        while self.at_up_to() {
+            let first_node = self.expr(left).first;
+            // `up to` is two words.
+            self.bump();
+            self.bump();
+            let (right, right_loc) = self.term(priced)?;
+            let right = self.node_of(right, right_loc);
+            left = self.node(ExprKind::Binary(BinOp::UpTo, left, right), self.loc_from(start), first_node);
+        }
+        Ok(Amount::Computed(left))
+    }
+
+    /// `up to`, which is two words.
+    fn at_up_to(&mut self) -> bool {
+        matches!((self.tok(), self.lexer.peek_second().tok), (Tok::Name("up"), Tok::Name("to")))
+    }
+
+    /// One term of a journal amount: a literal, a share (`12%`, alone or `of`
+    /// something), or a reference (`^bldg-water`); and, when a price is wanted, `@ PRICE`.
+    // Inlined: what it returns is built where it is wanted, not copied up out of a call.
+    #[inline(always)]
+    fn term(&mut self, priced: bool) -> Parse<(Amount<'s>, Loc)> {
+        let token = self.peek();
+        let amount = match token.tok {
+            Tok::Percent(percent) => match self.share(token, ExprKind::Pct(percent))? {
+                Some(root) => Amount::Computed(root),
+                None => Amount::Share(percent),
+            },
+            Tok::Fraction(top, bottom) => {
+                if bottom == 0 {
+                    return self.fail(zero_fraction(token.loc));
+                }
+                let of = "`of` and what it is a share of, like `1/3 of ^pge-jan`";
+                match self.share(token, ExprKind::Fraction(top, bottom))? {
+                    Some(root) => Amount::Computed(root),
+                    None => return Err(self.expected("expected-of", of)),
+                }
+            }
+            Tok::Code(_) => Amount::Computed(self.primary()?),
+            _ => Amount::Literal(self.literal()?),
+        };
+        let loc = self.loc_from(token.loc.start as usize);
+        if priced && self.at(Punct::At) {
+            let quantity = self.node_of(amount, loc);
+            let first = self.expr(quantity).first;
+            self.bump();
+            let price = self.measured()?;
+            let price_node = self.node_at(ExprKind::Amount(price), self.loc_of(&price));
+            let at = self.node(ExprKind::At(quantity, price_node), self.loc_from(token.loc.start as usize), first);
+            return Ok((Amount::Computed(at), self.loc_from(token.loc.start as usize)));
+        }
+        Ok((amount, loc))
+    }
+
+    /// After a percent or fraction: `of REF` makes it a share of that, whose
+    /// root is returned, and nothing after it leaves it a share alone.
+    fn share(&mut self, token: Token<'s>, share: ExprKind<'s>) -> Parse<Option<ExprId>> {
+        let first = self.next_expr();
+        self.bump();
+        if !self.at_word("of") {
+            return Ok(None);
+        }
+        let share = self.node(share, token.loc, first);
+        self.bump();
+        let what = "what it is a share of: a code such as `^bldg-water`, a name, or an amount";
+        if !matches!(self.tok(), Tok::Code(_) | Tok::Name(_) | Tok::Number(_)) {
+            return Err(self.expected("expected-reference", what));
+        }
+        let of = self.primary()?;
+        Ok(Some(self.node(ExprKind::Of(share, of), self.loc_from(token.loc.start as usize), first)))
+    }
+
+    /// The amount as a node of the expression arena, for an operator to hold.
+    /// `loc` is where the amount was written.
+    fn node_of(&mut self, amount: Amount<'s>, loc: Loc) -> ExprId {
+        let kind = match amount {
+            Amount::Computed(root) => return root,
+            Amount::Literal(literal) => ExprKind::Amount(literal),
+            Amount::Share(percent) => ExprKind::Pct(percent),
+        };
+        self.node_at(kind, loc)
+    }
+
+    /// A node with no children.
+    fn node_at(&mut self, kind: ExprKind<'s>, loc: Loc) -> ExprId {
+        let first = self.next_expr();
+        self.node(kind, loc, first)
     }
 
     /// Explains a number that is not followed by a commodity, guessing what
@@ -163,6 +303,12 @@ fn bare_zero(number: Token<'_>, num: Dec) -> Option<Diagnostic> {
         .note("`empty` is the zero of every commodity, so it needs no unit")
         .fix("write `empty`", number.loc, "empty");
     num.is_zero().then_some(diag)
+}
+
+/// `1/0`: a fraction of nothing.
+pub(crate) fn zero_fraction(loc: Loc) -> Diagnostic {
+    Diagnostic::error("zero-fraction", "a fraction cannot have zero as its denominator")
+        .label(loc, "nothing is divided into zero parts")
 }
 
 /// `-50 USD`: amounts have no sign; the arrow says which way the money goes.

@@ -1,5 +1,6 @@
 //! Declarations and the other block items: `account`, `entity`, `asset`,
-//! `purpose`, `commodity`, `kind`, `budget`, `code`, `param`, and `sync`.
+//! `purpose`, `commodity`, `kind`, `budget`, `code` and `param`. (The sources
+//! that feed a book, `sync`, `format` and `pattern`, are in `source`.)
 //!
 //! A declaration keeps its good lines when one line is bad: dropping it would
 //! turn every later use of what it declares into an error of its own.
@@ -9,16 +10,23 @@ use axiom_core::{Diagnostic, Loc};
 use crate::ast::*;
 use crate::lex::{Punct, Tok};
 use crate::lines::Line;
-use crate::parser::{Parse, Parser};
+use crate::parser::{Parse, Parser, Scope};
 
 /// Where v3's chart put the accounts that v4 has no accounts for.
 const CHART_ROOTS: [&str; 3] = ["income/", "expenses/", "equity/"];
 
+/// What a declaration's lines have said so far.
+#[derive(Default)]
+struct Found<'s> {
+    budget: Option<(Ref<Allowance<'s>>, Loc)>,
+}
+
 impl<'s> Parser<'s> {
     /// `account NAME [: KIND [at NAME]]`, `entity NAME[, NAME…] [: KIND] [#PURPOSE]`, `asset`,
     /// `purpose`, `commodity SYMBOL [: KIND]` or `kind NAME [: PARENT]`, with its
-    /// indented properties and nested laws. Several entities on a line are one
-    /// declaration each, all sharing what is written under them.
+    /// indented properties, `also` lines, `known-as` lines and nested laws.
+    /// Several entities on a line are one declaration each, all sharing what is
+    /// written under them.
     pub fn decl(&mut self, line: &mut Line<'s>, what: DeclKind) -> Parse<()> {
         let mut names = vec![match what {
             DeclKind::Commodity => self.unit("expected-commodity", "a commodity symbol such as `USD`")?,
@@ -39,82 +47,132 @@ impl<'s> Parser<'s> {
             _ => None,
         };
         let header = self.keep_header(line);
-        let (props, laws) = (self.mark::<Prop>(), self.mark::<Law>());
-        let _ = self.children(line, |parser, child| match parser.eat_word("law") {
-            Some(_) => parser.law(child).map(drop),
-            None => parser.property(child),
-        });
-        let (props, laws) = (self.since(props), self.since(laws));
+        let (props, laws, alsos, patterns) =
+            (self.mark::<Prop>(), self.mark::<Law>(), self.mark::<Also>(), self.mark::<Pattern>());
+        let mut found = Found::default();
+        let _ = self.children(line, |parser, child| parser.decl_line(child, what, &mut found));
+        let (props, laws, alsos, known_as) =
+            (self.since(props), self.since(laws), self.since(alsos), self.since(patterns));
+        let budget = found.budget.map(|(allowance, _)| allowance);
         for name in names {
-            self.emit(&header, Decl { what, name, kind, at, purpose, props, laws }, ItemKind::Decl);
+            let decl = Decl { what, name, kind, at, purpose, budget, known_as, alsos, props, laws };
+            self.emit(&header, decl, ItemKind::Decl);
         }
         Ok(())
     }
 
-    /// `budget PURPOSE LIMIT monthly|yearly [carries]`
+    /// One line of a declaration's body.
+    fn decl_line(&mut self, line: &mut Line<'s>, what: DeclKind, found: &mut Found<'s>) -> Parse<()> {
+        match self.tok() {
+            Tok::Name("law") => {
+                let implied = (what == DeclKind::Purpose).then_some(Trigger::Flow);
+                self.then(|parser| parser.law(line, implied)).map(drop)
+            }
+            Tok::Name("also") => self.also(line).map(drop),
+            Tok::Name("known-as") => self.known_as(),
+            Tok::Name("budget") if what == DeclKind::Purpose => {
+                self.bump();
+                let allowance = self.allowance(Scope::Undated)?;
+                self.expect_eol()?;
+                let at = self.loc_from(line.body);
+                match found.budget.replace((self.push(allowance), at)) {
+                    Some((_, first)) => Err(self.duplicate("`budget` line", at, first)),
+                    None => Ok(()),
+                }
+            }
+            _ => self.property(line, Scope::Undated),
+        }
+    }
+
+    /// `budget PURPOSE LIMIT monthly|yearly [carries] [funded from H into H]`
     pub fn budget(&mut self, line: &mut Line<'s>) -> Parse<()> {
         let purpose = self.name("expected-name", "the purpose it is for, such as `food`")?;
-        let allowance = self.allowance()?;
+        let allowance = self.allowance(Scope::Undated)?;
         let header = self.end_header(line)?;
         self.emit(&header, Budget { purpose, allowance }, ItemKind::Budget);
         Ok(())
     }
 
-    /// A property line of a declaration: `NAME ARG*`.
-    pub fn property(&mut self, line: &Line<'s>) -> Parse<()> {
-        let prop = self.prop(false)?;
+    /// A property line of a declaration, and the lines under it: `NAME ARG*`.
+    /// The property is kept when a line under it is bad.
+    pub fn property(&mut self, line: &Line<'s>, scope: Scope) -> Parse<()> {
+        let mut prop = self.prop(scope)?;
+        self.expect_eol()?;
         debug_assert_eq!(prop.loc.start as usize, line.body);
+        let nested = self.mark::<Nested>();
+        let lines = self.children(line, |parser, _| {
+            let inner = parser.prop(scope)?;
+            parser.expect_eol()?;
+            parser.push(Nested(inner));
+            Ok(())
+        });
+        prop.lines = self.since(nested);
         self.push(prop);
-        Ok(())
+        lines
     }
 
-    /// `NAME ARG*`: arguments are primary expressions, commas optional. In a
-    /// statement they stop at what ends one: a string, a code or `until`.
-    pub fn prop(&mut self, in_statement: bool) -> Parse<Prop<'s>> {
+    /// `NAME ARG*`: arguments are expressions, commas optional. In a statement
+    /// they stop at what ends one: a string, a code or `until`, and the short
+    /// dates of `due` and `until` count forward from the statement's day.
+    pub fn prop(&mut self, scope: Scope) -> Parse<Prop<'s>> {
         let start = self.peek().loc.start as usize;
         let name = self.name("expected-property", "a property name")?;
+        let in_statement = matches!(scope, Scope::Statement(_));
+        let forward = in_statement && matches!(name.0, "due" | "until");
         let roots = self.roots.len();
         while !self.at_eol() {
             if in_statement && matches!(self.tok(), Tok::Str(_) | Tok::Code(_) | Tok::Name("until")) {
                 break;
             }
-            if self.eat(Punct::Comma).is_none() {
-                let arg = self.primary()?;
-                self.roots.push(arg);
+            if self.eat(Punct::Comma).is_some() {
+                continue;
             }
+            let token = self.peek();
+            let arg = match (self.tok(), forward) {
+                (Tok::MonthDay(..), true) => {
+                    let first = self.next_expr();
+                    let day = self.date_from(scope.day(), "a date")?;
+                    self.node(ExprKind::Date(day), token.loc, first)
+                }
+                _ => self.expression()?,
+            };
+            self.roots.push(arg);
         }
         let args = self.roots_since(roots);
-        Ok(Prop { name, args, loc: self.loc_from(start) })
+        Ok(Prop { name, args, lines: Many::EMPTY, loc: self.loc_from(start) })
     }
 
-    /// `code GLOB [GLOB…]` with `on PLACE-GLOB | KIND …` lines.
+    /// `code GLOB [GLOB…]` with `on PLACE-GLOB | KIND …` and `known-as PATTERN` lines.
     pub fn code_rule(&mut self, line: &mut Line<'s>) -> Parse<()> {
-        let mut patterns = vec![self.pattern()?];
+        let mut globs = vec![self.glob()?];
         while !self.at_eol() {
-            patterns.push(self.pattern()?);
+            globs.push(self.glob()?);
         }
         let header = self.end_header(line)?;
-        let mark = self.mark::<Name>();
-        let _ = self.children(line, |parser, _| {
-            parser.expect_word("on", "expected-on", "`on` and where the code may be used")?;
-            loop {
-                let place = parser.pattern()?;
-                parser.push(place);
-                parser.eat(Punct::Pipe);
-                if parser.at_eol() {
-                    return Ok(());
+        let (on, patterns) = (self.mark::<Name>(), self.mark::<Pattern>());
+        let _ = self.children(line, |parser, _| match parser.tok() {
+            Tok::Name("known-as") => parser.known_as(),
+            _ => {
+                parser.expect_word("on", "expected-on", "`on` and where the code may be used, or `known-as`")?;
+                loop {
+                    let place = parser.glob()?;
+                    parser.push(place);
+                    parser.eat(Punct::Pipe);
+                    if parser.at_eol() {
+                        return Ok(());
+                    }
                 }
             }
         });
-        let on = self.since(mark);
-        for pattern in patterns {
-            self.emit(&header, CodeRule { pattern, on }, ItemKind::Code);
+        let (on, known_as) = (self.since(on), self.since(patterns));
+        for pattern in globs {
+            self.emit(&header, CodeRule { pattern, on, known_as }, ItemKind::Code);
         }
         Ok(())
     }
 
-    /// A glob over places, kinds or codes; a lone `*` is the pattern for all.
-    fn pattern(&mut self) -> Parse<Name<'s>> {
+    /// A glob over places, kinds or codes; a lone `*` is the glob for all.
+    fn glob(&mut self) -> Parse<Name<'s>> {
         let token = self.peek();
         match token.tok {
             Tok::Punct(Punct::Star) => Ok(self.bump_as(Name(self.text(token.loc)))),
@@ -129,14 +187,18 @@ impl<'s> Parser<'s> {
         }
     }
 
-    /// `param NAME` with `KEY+ VALUE` rows.
+    /// `param NAME [UNIT]` with `KEY+ VALUE` rows.
     pub fn param(&mut self, line: &mut Line<'s>) -> Parse<()> {
         let name = self.name("expected-name", "a parameter name")?;
+        let unit = match self.tok() {
+            Tok::Unit(unit) => Some(self.bump_as(Name(unit))),
+            _ => None,
+        };
         let header = self.keep_header(line);
         let mark = self.mark::<ParamRow>();
         let _ = self.children(line, |parser, row| parser.param_row(row));
         let rows = self.since(mark);
-        self.emit(&header, Param { name, rows }, ItemKind::Param);
+        self.emit(&header, Param { name, unit, rows }, ItemKind::Param);
         Ok(())
     }
 
@@ -208,55 +270,6 @@ impl<'s> Parser<'s> {
         self.bump();
         Ok(self.node(ExprKind::Pct(num), token.loc, first))
     }
-
-    /// `sync NAME` with a `run COMMAND…` line, and perhaps `into PATH`, which
-    /// are raw text (a command has anything in it, and a path has dots and
-    /// braces), and any other lines, which are properties.
-    pub fn sync(&mut self, line: &mut Line<'s>) -> Parse<()> {
-        let name = self.name("expected-name", "what it feeds, such as `checking`")?;
-        if self.at(Punct::Dot) && self.peek().loc.start == self.lexer.prev_end() {
-            return self.fail(self.sync_file(name));
-        }
-        let header = self.end_header(line)?;
-        let (mut run, mut into) = (None, None);
-        let props = self.mark::<Prop>();
-        self.children(line, |parser, child| match parser.tok() {
-            Tok::Name("run") => parser.raw_line("run", "the command to run", &mut run),
-            Tok::Name("into") => parser.raw_line("into", "where to write, like `prices/{year}.ax`", &mut into),
-            _ => parser.property(child),
-        })?;
-        let Some(run) = run else { return self.fail(missing_run(header.loc)) };
-        let props = self.since(props);
-        self.emit(&header, Sync { name, run: run.0, into: into.map(|(text, _)| text), props }, ItemKind::Sync);
-        Ok(())
-    }
-
-    /// A `sync` line that is a word and the raw text after it, once.
-    fn raw_line(&mut self, word: &str, what: &str, slot: &mut Option<(Text<'s>, Loc)>) -> Parse<()> {
-        let keyword = self.bump().loc;
-        let Some(text) = self.lexer.raw_rest() else {
-            return Err(self.expected(if word == "run" { "expected-command" } else { "expected-path" }, what));
-        };
-        let at = keyword.to(self.loc_of(&text));
-        match slot.replace((Text(text.0), at)) {
-            Some((_, first)) => Err(self.duplicate(&format!("`{word}` line"), at, first)),
-            None => Ok(()),
-        }
-    }
-
-    /// v3's `sync prices/2026.ax`, which named the file it wrote. A sync is
-    /// named for what it feeds now, and says where it writes with `into`.
-    fn sync_file(&self, name: Name<'s>) -> Diagnostic {
-        let start = self.loc_of(&name);
-        let len = self.src[start.start as usize..].find([' ', '\t', '\r', '\n']).unwrap_or(self.src.len() - start.start as usize);
-        let file = Loc::new(self.id, start.start, start.start + len as u32);
-        let written = self.text(file);
-        let feeds = name.split('/').next().unwrap_or(&name);
-        Diagnostic::error("sync-file", format!("a sync is named for what it feeds, not for the file `{written}` it writes"))
-            .label(file, "a file is `into`, on a line of its own")
-            .note("`sync prices` names the source, and its lines say `run` a command and `into` a file")
-            .fix(format!("name it `{feeds}` and say where it writes"), file, format!("{feeds}\n  into {written}"))
-    }
 }
 
 /// An account under one of [`CHART_ROOTS`]. Whether it is a chart account is for the
@@ -272,10 +285,4 @@ fn abbreviated_schedule(loc: Loc) -> Diagnostic {
     Diagnostic::error("abbreviated-schedule", "a schedule cannot be abbreviated with `...`")
         .label(loc, "write out the remaining brackets")
         .help("every bracket is a threshold and a rate: `105_700 USD 24% | 201_775 USD 32%`")
-}
-
-fn missing_run(header: Loc) -> Diagnostic {
-    Diagnostic::error("missing-run", "this sync has no command to run")
-        .label(header, "nothing below says how to produce this file")
-        .help("add an indented line: `run python3 fetch_prices.py`")
 }

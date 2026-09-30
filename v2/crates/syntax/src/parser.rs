@@ -27,17 +27,21 @@ pub(crate) struct Reported;
 
 pub(crate) type Parse<T> = Result<T, Reported>;
 
-/// Where a leg or a header's tail is written: what it may add to the common
-/// clauses, and the day a short `due` date counts forward from.
+/// Where a leg, an item or a tail is written: what it may add to the common
+/// clauses, the day a short `due` or `until` date counts forward from, and
+/// whether its amounts are the journal's or a declaration's.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Scope {
-    /// A flow, a statement, or the lines under one, on this day.
+    /// A flow, or the lines under one, on this day.
     Dated(Day),
+    /// A statement, or the lines under one, on this day: its tail may say `until`.
+    Statement(Day),
     /// The lines of an `opening` on this day, which say `since` when their
     /// parcels were acquired, and which an asset has with a `basis` and no
     /// amount.
     Opening(Day),
-    /// A contract's template: no day, so no short dates.
+    /// A declaration's line (a contract's template, an `also`): no day, so no
+    /// short dates, and amounts that are any expression of the law grammar.
     Undated,
 }
 
@@ -45,7 +49,7 @@ impl Scope {
     /// The day it is written on, if it has one.
     pub fn day(self) -> Option<Day> {
         match self {
-            Scope::Dated(day) | Scope::Opening(day) => Some(day),
+            Scope::Dated(day) | Scope::Statement(day) | Scope::Opening(day) => Some(day),
             Scope::Undated => None,
         }
     }
@@ -258,6 +262,10 @@ impl<'s> Parser<'s> {
         let Some(value) = pick(self.tok()) else { return Err(self.expected(code, what)) };
         self.bump();
         Ok(value)
+    }
+
+    pub fn code(&mut self, code: &'static str, what: &str) -> Parse<Code<'s>> {
+        self.take(|tok| if let Tok::Code(text) = tok { Some(text) } else { None }, code, what)
     }
 
     pub fn name(&mut self, code: &'static str, what: &str) -> Parse<Name<'s>> {

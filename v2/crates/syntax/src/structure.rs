@@ -37,9 +37,13 @@ enum Keyword {
     Use,
     Base,
     Relaxed,
+    Currency,
+    Rates,
+    Pattern,
+    Format,
 }
 
-const KEYWORDS: [(&str, Keyword); 17] = [
+const KEYWORDS: [(&str, Keyword); 21] = [
     ("account", Keyword::Account),
     ("entity", Keyword::Entity),
     ("asset", Keyword::Asset),
@@ -57,12 +61,17 @@ const KEYWORDS: [(&str, Keyword); 17] = [
     ("use", Keyword::Use),
     ("base", Keyword::Base),
     ("relaxed", Keyword::Relaxed),
+    ("currency", Keyword::Currency),
+    ("rates", Keyword::Rates),
+    ("pattern", Keyword::Pattern),
+    ("format", Keyword::Format),
 ];
 
 /// Words that start a line inside a block, and what owns such a block. Written
 /// at column 0 they are a block's line whose block was forgotten.
-const BLOCK_WORDS: [(&str, &str); 11] = [
+const BLOCK_WORDS: [(&str, &str); 16] = [
     ("when", "law"),
+    ("unless", "law"),
     ("let", "law"),
     ("require", "law"),
     ("warn", "law"),
@@ -73,7 +82,14 @@ const BLOCK_WORDS: [(&str, &str); 11] = [
     ("always", "law"),
     ("each", "law"),
     ("run", "sync"),
+    ("read", "sync"),
+    ("into", "sync"),
+    ("known-as", "declaration"),
+    ("also", "declaration"),
 ];
+
+/// The ways a system converts that are one word; `param NAME` is the other.
+const RATES: [(&str, Rates<'static>); 1] = [("spot", Rates::Spot)];
 
 /// The indentation a block has settled on, and the line before, for context.
 struct Block {
@@ -147,6 +163,8 @@ impl<'s> Parser<'s> {
             Keyword::Contract => self.contract(line),
             Keyword::Opening => self.opening(line),
             Keyword::Sync => self.sync(line),
+            Keyword::Pattern => self.named_pattern(line),
+            Keyword::Format => self.format(line),
             Keyword::System if !first => self.fail(system_not_first(keyword.loc)),
             Keyword::System | Keyword::Use => {
                 let path = self.name("expected-path", "a system path such as `us/401k`")?;
@@ -157,6 +175,20 @@ impl<'s> Parser<'s> {
                 self.setting(line, Setting::Base(unit))
             }
             Keyword::Relaxed => self.setting(line, Setting::Relaxed),
+            Keyword::Currency => {
+                let unit = self.unit("expected-commodity", "the commodity its laws count in, such as `USD`")?;
+                self.setting(line, Setting::Currency(unit))
+            }
+            Keyword::Rates => {
+                let rates = match self.tok() {
+                    Tok::Name("param") => {
+                        self.bump();
+                        Rates::Param(self.name("expected-name", "the param that holds the rates, such as `irs-rates`")?)
+                    }
+                    _ => self.choose(&RATES, "unknown-rates", "way to convert").map(|(rates, _)| rates)?,
+                };
+                self.setting(line, Setting::Rates(rates))
+            }
         }
     }
 

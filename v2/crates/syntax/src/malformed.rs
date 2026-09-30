@@ -55,7 +55,11 @@ fn malformed_date(loc: Loc, text: &str) -> Diagnostic {
 pub(crate) fn not_a_date(loc: Loc, text: &str, (year, month, day): (i32, u32, u32)) -> Diagnostic {
     // The shorter shapes are the end of the whole one, and so are its fields.
     let left_out = if text.len() > 5 { 0 } else { 10 - text.len() as u32 };
-    let field = |from: u32| Loc::new(loc.file, loc.start + from - left_out, loc.start + from - left_out + 2);
+    // A field the date leaves out was given by its place, so it is the whole date that is wrong.
+    let field = |from: u32| match from.checked_sub(left_out) {
+        Some(offset) => Loc::new(loc.file, loc.start + offset, loc.start + offset + 2),
+        None => loc,
+    };
     let Some(month_name) = month.checked_sub(1).and_then(|index| MONTHS.get(index as usize)) else {
         return Diagnostic::error("bad-date", format!("`{text}` is not a date: there is no month {month}"))
             .label(field(5), "months run from 01 to 12");

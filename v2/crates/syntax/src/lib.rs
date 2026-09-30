@@ -39,6 +39,7 @@ mod lines;
 mod malformed;
 mod parser;
 mod refs;
+mod source;
 mod statement;
 mod structure;
 

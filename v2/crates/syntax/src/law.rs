@@ -17,7 +17,7 @@ const ON_TRIGGERS: [(&str, Trigger); 5] = [
 pub(crate) const PERIODS: [(&str, Period); 2] = [("month", Period::Month), ("year", Period::Year)];
 
 const TRIGGER_WORDS: [&str; 4] = ["on", "each", "by", "always"];
-const STEP_WORDS: [&str; 4] = ["when", "let", "require", "warn"];
+const STEP_WORDS: [&str; 5] = ["when", "unless", "let", "require", "warn"];
 /// The steps that do something to the world, which `require … else` may name too.
 const EFFECTS: [&str; 4] = ["owe", "count", "consume", "carry"];
 
@@ -28,26 +28,32 @@ impl<'s> Parser<'s> {
     /// A top-level `law`, documented by the `///` block above it. The doc is on
     /// the item and on the law, so a reader needs only one of them.
     pub fn law_item(&mut self, line: &mut Line<'s>) -> Parse<()> {
-        let id = self.law(line)?;
+        let id = self.law(line, None)?;
         let law = self.get(id);
         self.items.push(Item { doc: law.doc, loc: law.loc, kind: ItemKind::Law(id) });
         Ok(())
     }
 
-    /// The rest of `law NAME`, after the keyword, and its body. A law keeps its
-    /// good steps when one is bad; without a trigger it is nothing.
-    pub fn law(&mut self, line: &mut Line<'s>) -> Parse<Ref<Law<'s>>> {
+    /// The rest of `law NAME [overrides NAME]`, after the keyword, and its
+    /// body. A law keeps its good steps when one is bad; without a trigger it is
+    /// nothing, unless the place it is written gives it one (`implied`: a law in
+    /// a purpose is `on flow`).
+    pub fn law(&mut self, line: &mut Line<'s>, implied: Option<Trigger>) -> Parse<Ref<Law<'s>>> {
         let name = self.name("expected-name", "a law name")?;
+        let overrides = match self.eat_word("overrides") {
+            Some(_) => Some(self.name("expected-name", "the law it wins over, such as `flat-rate`")?),
+            None => None,
+        };
         let header = self.end_header(line)?;
         let mut trigger: Triggered = None;
         let mark = self.mark::<Step>();
         let children = self.children(line, |parser, child| parser.law_line(child, &mut trigger, mark));
-        let Some((trigger, trigger_loc)) = trigger else {
+        let Some((trigger, trigger_loc)) = trigger.or(implied.map(|trigger| (trigger, header.loc))) else {
             return Err(if children.is_err() { Reported } else { self.report(missing_trigger(header.loc)) });
         };
         let steps = self.since(mark);
         let damaged = children.is_err();
-        Ok(self.push(Law { doc: header.doc, name, trigger, trigger_loc, steps, damaged, loc: header.loc }))
+        Ok(self.push(Law { doc: header.doc, name, overrides, trigger, trigger_loc, steps, damaged, loc: header.loc }))
     }
 
     /// One line of a law's body: its trigger, or a step. `mark` is where the
@@ -59,7 +65,7 @@ impl<'s> Parser<'s> {
         };
         self.bump();
         if !TRIGGER_WORDS.contains(&word) {
-            let kind = self.step(keyword, word)?;
+            let kind = self.step(line, keyword, word)?;
             self.expect_eol()?;
             self.push(Step { loc: self.loc_from(line.body), kind });
             return Ok(());
@@ -115,24 +121,48 @@ impl<'s> Parser<'s> {
         Ok(Some(Step { loc, kind: StepKind::When(filter) }))
     }
 
-    fn step(&mut self, keyword: Token<'s>, word: &str) -> Parse<StepKind<'s>> {
+    fn step(&mut self, line: &Line<'s>, keyword: Token<'s>, word: &str) -> Parse<StepKind<'s>> {
         match word {
             "when" => self.expression().map(StepKind::When),
+            "unless" => self.expression().map(StepKind::Unless),
             "let" => {
                 let name = self.name("expected-name", "a name to bind")?;
                 self.expect(Punct::Eq, "expected-equals", "`=` and the value to bind")?;
                 Ok(StepKind::Let(name, self.expression()?))
             }
-            "require" | "warn" => {
+            "require" => self.require(line),
+            "warn" => {
                 let cond = self.expression()?;
-                let otherwise =
-                    if word == "require" { self.eat_word("else").map(|_| self.effect()).transpose()? } else { None };
                 let message = self.take_message();
-                Ok(StepKind::Require { cond, otherwise, message, warn: word == "warn" })
+                Ok(StepKind::Require { cond, otherwise: Many::EMPTY, message, warn: true })
             }
             _ if EFFECTS.contains(&word) => self.effect_after(word).map(StepKind::Effect),
             _ => Err(self.unknown_step(keyword, word)),
         }
+    }
+
+    /// `require EXPR [else EFFECT]* [STRING]`, whose `else`s may also be lines
+    /// of their own under it, the message ending the last of them.
+    fn require(&mut self, line: &Line<'s>) -> Parse<StepKind<'s>> {
+        let cond = self.expression()?;
+        let mark = self.mark::<Effect>();
+        while self.eat_word("else").is_some() {
+            let effect = self.effect()?;
+            self.push(effect);
+        }
+        let mut message = self.take_message();
+        self.expect_eol()?;
+        self.children(line, |parser, _| {
+            let keyword = parser.expect_word("else", "expected-else", "`else` and what is owed instead")?;
+            if message.is_some() {
+                return parser.fail(else_after_message(keyword));
+            }
+            let effect = parser.effect()?;
+            parser.push(effect);
+            message = parser.take_message();
+            Ok(())
+        })?;
+        Ok(StepKind::Require { cond, otherwise: self.since(mark), message, warn: false })
     }
 
     fn take_message(&mut self) -> Option<Text<'s>> {
@@ -181,10 +211,16 @@ impl<'s> Parser<'s> {
             .label(keyword.loc, "not a step of a law");
         let diag = match closest(word, STEP_WORDS.into_iter().chain(EFFECTS).chain(TRIGGER_WORDS)) {
             Some(near) => diag.fix(format!("did you mean `{near}`?"), keyword.loc, near),
-            None => diag.note("steps are `when`, `let`, `require`, `warn`, `owe`, `count`, `consume` and `carry`"),
+            None => diag.note("steps are `when`, `unless`, `let`, `require`, `warn`, `owe`, `count`, `consume` and `carry`"),
         };
         self.report(diag)
     }
+}
+
+fn else_after_message(keyword: Loc) -> Diagnostic {
+    Diagnostic::error("else-after-message", "the message ends what a `require` says")
+        .label(keyword, "another `else` after the message")
+        .help("write the message after the last `else`")
 }
 
 fn missing_trigger(header: Loc) -> Diagnostic {
