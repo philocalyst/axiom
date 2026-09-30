@@ -233,6 +233,20 @@ impl Sources {
         Some(format!("{}:{}", file.path, file.line_of(loc.start as usize) + 1))
     }
 
+    /// The line and column, both counted from 1 (the column in characters), of
+    /// byte `offset` of a file.
+    pub fn position(&self, file: FileId, offset: u32) -> Option<(usize, usize)> {
+        let file = self.get(file)?;
+        let line = file.line_of(offset as usize);
+        let before = file.text.get(file.line_start(line)..offset as usize)?;
+        Some((line + 1, before.chars().count() + 1))
+    }
+
+    /// The files of the project itself, without the systems that come with it.
+    pub fn own(&self) -> impl Iterator<Item = &SourceFile> {
+        self.files.iter().filter(|file| !file.embedded)
+    }
+
     /// The bytes of line `number` (counted from 1) of the file at `path`.
     pub fn locate(&self, path: &str, number: usize) -> Option<Loc> {
         let file = self.find(path)?;

@@ -36,6 +36,8 @@ pub enum Opt {
     By,
     Until,
     Paths,
+    Json,
+    Check,
 }
 
 /// An option, as parsing and the help screen see it.
@@ -71,6 +73,8 @@ pub const OPTIONS: &[OptionSpec] = &[
     option(Opt::Today, "today", Some("DATE"), "treat this as today (default: the system date)").everywhere(),
     option(Opt::Color, "color", Some("WHEN"), "auto, always, or never").everywhere(),
     option(Opt::All, "all", None, "show every diagnostic, however many").everywhere(),
+    option(Opt::Json, "json", None, "write the answer as JSON: one document, or a line for each diagnostic")
+        .everywhere(),
     option(Opt::For, "for", Some("ENTITY"), "whose money (default: everyone's; a household has its members')")
         .everywhere(),
     option(Opt::For, "entity", Some("NAME"), "the old name of --for").everywhere(),
@@ -84,6 +88,7 @@ pub const OPTIONS: &[OptionSpec] = &[
     option(Opt::By, "by", Some("month|year"), "the length of a period (default: month)"),
     option(Opt::Until, "until", Some("DATE"), "run the forecast up to this day"),
     option(Opt::Paths, "paths", Some("N"), "how many Monte Carlo paths (default: 1000)"),
+    option(Opt::Check, "check", None, "say which files are not in the house style, and change none"),
 ];
 
 /// What a command does, for dispatch after parsing.
@@ -103,6 +108,7 @@ enum Verb {
     Forecast,
     Why,
     Sync,
+    Fmt,
 }
 
 /// What operands a command takes, and what to call them.
@@ -178,6 +184,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     command(Verb::Forecast, "forecast", Operands::None, &[Opt::Until, Opt::Paths], "where the money is heading"),
     command(Verb::Why, "why", Operands::One("TARGET"), &[], "a place, entity, system, #code, law, tax line, file:line"),
     command(Verb::Sync, "sync", Operands::Any("FILE"), &[], "run the sync scripts, keep what they print"),
+    command(Verb::Fmt, "fmt", Operands::Any("FILE"), &[Opt::Check], "lay files out in the house style"),
 ];
 
 /// What was asked for: the options every command shares, and the command.
@@ -190,6 +197,8 @@ pub struct Invocation<'a> {
     pub project: Option<&'a Path>,
     /// Every diagnostic is shown, however many.
     pub all: bool,
+    /// The answer is JSON.
+    pub json: bool,
     pub command: Command<'a>,
 }
 
@@ -199,6 +208,11 @@ pub enum Command<'a> {
     Version,
     Check,
     Sync(Vec<&'a str>),
+    /// Lay the named files (default: all) out in the house style, or only say which are not.
+    Fmt {
+        files: Vec<&'a str>,
+        check: bool,
+    },
     /// A view, about the money of an entity (`--for`) or of everyone.
     Report(Query<'a>, Option<&'a str>),
 }
@@ -214,6 +228,7 @@ pub fn parse(args: &[String]) -> Result<Invocation<'_>, Diagnostic> {
         color: values.choice(Opt::Color, &colors)?.unwrap_or(ColorChoice::Auto),
         project: values.text(Opt::Project).map(Path::new),
         all: values.has(Opt::All),
+        json: values.has(Opt::Json),
         // Until a command is found, it is help that is asked for.
         command: Command::Help,
     };
@@ -253,6 +268,7 @@ fn build<'a>(spec: &CommandSpec, operands: &[&'a str], values: &Values<'a>) -> R
     let query = match spec.verb {
         Verb::Check => return Ok(Command::Check),
         Verb::Sync => return Ok(Command::Sync(operands.to_vec())),
+        Verb::Fmt => return Ok(Command::Fmt { files: operands.to_vec(), check: has(Check) }),
         Verb::Balance => {
             Query::Balance { globs: operands.to_vec(), at: day(At)?, value: has(Value), monthly: has(Monthly) }
         }

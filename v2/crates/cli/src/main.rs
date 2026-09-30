@@ -11,7 +11,9 @@
 
 mod args;
 mod commands;
+mod fmt;
 mod help;
+mod json;
 mod project;
 mod render;
 mod style;

@@ -14,7 +14,7 @@ use crate::project::{Project, Sources};
 use crate::render::{Renderer, Tally};
 use crate::style::{Ink, Line};
 use crate::text::plural;
-use crate::{Outcome, Terminals, help, sync, table};
+use crate::{Outcome, Terminals, fmt, help, json, sync, table};
 
 /// Runs the command. An `Err` means there was nothing to run it on: the
 /// project could not be found or read.
@@ -27,6 +27,9 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     }
     let project = Project::find(invocation.project.unwrap_or(Path::new(".")))?;
     let sources = project.load()?;
+    if let Command::Fmt { files, check } = command {
+        return fmt::execute(&sources, &project.root, files, *check);
+    }
     let (parsed, mut diagnostics) = sources.parse();
     let (book, built) = axiom_model::build(&parsed);
     // The syntax trees are done with; the book borrows only the source text.
@@ -45,6 +48,7 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
         diagnostics: diagnostics.iter().chain(&run.diagnostics).collect(),
         terminals,
         all: invocation.all,
+        json: invocation.json,
     };
     Ok(if let Command::Report(query, whose) = command { session.report(query, *whose) } else { session.check() })
 }
@@ -65,11 +69,16 @@ struct Session<'a, 's> {
     terminals: Terminals,
     /// Show every diagnostic, however many.
     all: bool,
+    /// Answer, and report the diagnostics, as JSON.
+    json: bool,
 }
 
 impl Session<'_, '_> {
     /// Every diagnostic; and if none is an error, the book in one line.
     fn check(&self) -> Outcome {
+        if self.json {
+            return self.machine(&self.diagnostics, |_| None);
+        }
         let (diagnostics, tally) = self.show(&self.diagnostics);
         if tally.errors > 0 {
             return Outcome { answer: String::new(), diagnostics, failed: true };
@@ -85,6 +94,10 @@ impl Session<'_, '_> {
         let result = axiom_report::report(self.book, self.run, &self.pinpoint(query), whose);
         let mut shown: Vec<&Diagnostic> = self.diagnostics.iter().copied().filter(|found| found.is_error()).collect();
         shown.extend(result.as_ref().err());
+        if self.json {
+            let report = result.as_ref().ok();
+            return self.machine(&shown, |errors| Some(json::report(report?, self.sources, errors).line()));
+        }
         let (diagnostics, tally) = self.show(&shown);
         let Ok(report) = result else { return Outcome { answer: String::new(), diagnostics, failed: true } };
         let mut answer = table::render(&report, self.terminals.out, self.sources);
@@ -98,6 +111,19 @@ impl Session<'_, '_> {
             answer.insert_str(0, &self.terminals.out.painter.paint(&[line, Line::new()]));
         }
         Outcome { answer, diagnostics, failed: tally.errors > 0 }
+    }
+
+    /// The outcome for a machine: every diagnostic as a line of JSON, on standard
+    /// error beside the answer (given how many errors there are), or on standard
+    /// output when there is none, which is how `check --json` writes them.
+    fn machine(&self, diagnostics: &[&Diagnostic], answer: impl FnOnce(usize) -> Option<String>) -> Outcome {
+        let errors = Tally::of(diagnostics.iter().copied()).errors;
+        let lines: String = diagnostics.iter().map(|found| json::diagnostic(found, self.sources).line()).collect();
+        let (answer, diagnostics) = match answer(errors) {
+            Some(answer) => (answer, lines),
+            None => (lines, String::new()),
+        };
+        Outcome { answer, diagnostics, failed: errors > 0 }
     }
 
     /// `why journal/2026/01.ax:14` asks about a line, which only the sources

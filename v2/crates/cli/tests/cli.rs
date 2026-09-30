@@ -46,6 +46,7 @@ fn help_lists_the_commands_and_exits_cleanly() {
         "forecast",
         "why",
         "sync",
+        "fmt",
     ] {
         assert!(screen.contains(command), "{command} is missing from\n{screen}");
     }
@@ -191,5 +192,57 @@ fn a_net_capital_loss_beyond_the_limit_is_carried_into_the_next_years_return() {
     // The next year's 1,000 USD of gain meets the 2,000 USD short-term loss, then the long-term one:
     // 5,000 USD is lost again, 3,000 deducted, and only long-term loss is left to carry.
     assert_eq!(lines("2026"), ["long-loss-carried 2,000.00 USD", "agi -3,000.00 USD"]);
+    let _ = fs::remove_dir_all(folder);
+}
+
+#[test]
+fn check_writes_a_line_of_json_for_each_diagnostic_with_its_fix_as_an_edit() {
+    let folder = project_with_a_typo("check-json");
+    let output = axiom(&["check", "--json"]).current_dir(&folder).output().expect("axiom runs");
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty(), "{}", text(&output.stderr));
+    let answer = text(&output.stdout);
+    let [line] = answer.lines().collect::<Vec<_>>()[..] else { panic!("one diagnostic, one line: {answer}") };
+    let expected = concat!(
+        r#"{"code":"unknown-place","severity":"error","disposition":"open","#,
+        r#""headline":"there is no place `fod`","message":"there is no place `fod`","#,
+        r#""labels":[{"file":"journal.ax","line":3,"column":24,"end_line":3,"end_column":27,"#,
+        r#""text":"not a known place","primary":true}],"notes":[],"helps":["did you mean `food`?"],"#,
+        r#""fixes":[{"help":"did you mean `food`?","edits":[{"file":"journal.ax","line":3,"column":24,"#,
+        r#""end_line":3,"end_column":27,"replacement":"food"}]}]}"#
+    );
+    assert_eq!(line, expected);
+    let _ = fs::remove_dir_all(folder);
+}
+
+#[test]
+fn a_view_written_as_json_has_the_sections_a_reader_sees_and_its_figures_as_facts() {
+    let folder = empty_folder("report-json");
+    let book = "base USD\nuse std\naccount assets/cash : cash\nopening 2025-01-01\n  cash 100 USD\n";
+    fs::write(folder.join("axiom.ax"), book).expect("write project");
+    let output = axiom(&["balance", "cash", "--json", "--today", "2025-03-01"]).current_dir(&folder).output().unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let answer = text(&output.stdout);
+    assert!(answer.contains(r#""title":["Balances at",{"day":"2025-03-01"}]"#), "{answer}");
+    let row = r#"{"style":"normal","depth":1,"cells":["cash",{"amount":"100.00","unit":"USD"}]}"#;
+    assert!(answer.contains(row), "{answer}");
+    let fact = r#"{"concept":"balance","of":"assets/cash","entity":"everyone","period":{"instant":"2025-03-01"},"unit":"USD","value":"100.00"}"#;
+    assert!(answer.contains(fact), "{answer}");
+    assert_eq!(answer.lines().count(), 1, "one document");
+    let _ = fs::remove_dir_all(folder);
+}
+
+#[test]
+fn fmt_names_a_file_that_is_not_there_and_leaves_a_formatted_project_alone() {
+    let folder = project_with_a_typo("fmt");
+    let project = folder.to_str().expect("a UTF-8 path");
+    let asked = run(&["-C", project, "fmt", "--check", "journal.ax"]);
+    assert_eq!((asked.status.code(), asked.stdout.len()), (Some(0), 0));
+    let stray = run(&["-C", project, "fmt", "jurnal.ax"]);
+    assert_eq!(stray.status.code(), Some(2));
+    assert_eq!(
+        text(&stray.stderr),
+        "error[unknown-file]: no source file named `jurnal.ax`\n  = help: did you mean `journal.ax`?\n"
+    );
     let _ = fs::remove_dir_all(folder);
 }

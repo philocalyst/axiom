@@ -274,16 +274,16 @@ fn net_worth_section<'s>(lens: Lens<'_, 's>, snapshots: &Snapshots) -> Section<'
         .collect();
     let columns = amount_columns(book, snapshots, true);
     let mut section = Section::new(iter::once(Column::left("Net worth")).chain(columns));
-    let rows: [(&'static str, Style, fn(&NetWorth) -> Qty); 3] = [
-        ("Assets", Style::Normal, |worth| worth.assets),
-        ("Liabilities", Style::Normal, |worth| -worth.liabilities),
-        ("Net worth", Style::Total, |worth| worth.total()),
+    let rows: [(&'static str, &'static str, Style, fn(&NetWorth) -> Qty); 3] = [
+        ("Assets", "assets", Style::Normal, |worth| worth.assets),
+        ("Liabilities", "liabilities", Style::Normal, |worth| -worth.liabilities),
+        ("Net worth", "net-worth", Style::Total, |worth| worth.total()),
     ];
-    for (label, style, pick) in rows {
+    for (label, concept, style, pick) in rows {
         let cells = worths.iter().map(|worth| Cell::base(book, pick(worth)));
         section.push(Row::new(iter::once(label.into()).chain(cells)).style(style));
         for (worth, &day) in worths.iter().zip(snapshots.days()) {
-            section.fact(label, None, lens.whose.label(book), When::Instant(day), Money::base(book, pick(worth)));
+            section.fact(concept, None, lens.whose.label(book), When::Instant(day), Money::base(book, pick(worth)));
         }
     }
     section.unpriced(worths.iter().map(|worth| worth.unpriced).max().unwrap_or(0), "holding");
