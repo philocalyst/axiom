@@ -869,6 +869,18 @@ fn a_refold_resumes_from_a_checkpoint_and_stops_where_it_meets_the_old_fold() {
 }
 
 #[test]
+fn deadlines_beyond_the_horizon_wait_until_the_ledger_is_asked_to_reach_them() {
+    let (book, _) = timed_book(None);
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(Options { today: Day(30), relaxed: false });
+    ledger.advance(Day(70));
+    assert!(ledger.recorded().violations.is_empty(), "the payoff date, February 10, is past today");
+    ledger.reach(Day(70));
+    ledger.advance(Day(70));
+    assert_eq!(ledger.recorded().violations.len(), 1);
+}
+
+#[test]
 fn a_resumed_fold_meets_the_deadlines_still_to_come_and_not_those_already_passed() {
     let (book, each) = timed_book(None);
     let options = Options { today: Day(70), relaxed: false };
@@ -901,6 +913,17 @@ fn a_view_forks_the_ledger_the_run_stood_at_instead_of_folding_again() {
     fork.advance(Day(date(2026, 3, 31)));
     assert_eq!(fork.balance(cash, usd), Qty(100_00));
     assert_eq!(view.balance(cash, usd), Qty::ZERO, "and forking leaves it alone");
+
+    // Forks run side by side, each borrowing the one plan.
+    let template = book.flows[Id::new(1)].clone();
+    let moved = axiom_core::par::map_each(&[10_00, 20_00, 30_00], |&cents| {
+        let mut flow = template.clone();
+        (flow.day, flow.out.qty, flow.arrive.qty) = (Day(date(2026, 2, 1)), Qty(cents), Qty(cents));
+        let mut fork = view.fork();
+        fork.apply(&flow);
+        fork.balance(cash, usd)
+    });
+    assert_eq!(moved, [Qty(10_00), Qty(20_00), Qty(30_00)]);
 }
 
 /// A small deterministic generator: xorshift64*.

@@ -129,10 +129,8 @@ pub(crate) enum Schedule {
     Never,
     /// A `by` law's date, worked out once.
     Once(Day),
-    /// A month closes on its last day.
-    Months,
-    /// A year closes on its last day, or on the `closing` day of the next.
-    Years(Option<Closing>),
+    /// Each month or year closes on its last day, or a year on the `closing` day of the next.
+    Every(Period, Option<Closing>),
 }
 
 impl Schedule {
@@ -150,8 +148,7 @@ impl Schedule {
                     _ => Schedule::Never,
                 }
             }
-            Trigger::Each(Period::Month, _) => Schedule::Months,
-            Trigger::Each(Period::Year, closing) => Schedule::Years(closing),
+            Trigger::Each(period, closing) => Schedule::Every(period, closing.filter(|_| period == Period::Year)),
             _ => Schedule::Never,
         }
     }
@@ -167,23 +164,16 @@ impl Schedule {
                 let period = Days::on(day);
                 rule.days.overlaps(period).then_some(Deadline { day, rule: index, period })
             }
-            Schedule::Months => {
-                self.closing(index, rule, Window::containing(Period::Month, first?.max(rule.days.first())))
-            }
-            Schedule::Years(_) => {
-                self.closing(index, rule, Window::containing(Period::Year, first?.max(rule.days.first())))
+            Schedule::Every(period, _) => {
+                self.closing(index, rule, Window::containing(period, first?.max(rule.days.first())))
             }
         }
     }
 
     /// The deadline after `done`.
     fn after(self, index: u32, rule: &Rule, done: Deadline) -> Option<Deadline> {
-        let window = match self {
-            Schedule::Months => Window::containing(Period::Month, done.period.first()),
-            Schedule::Years(_) => Window::containing(Period::Year, done.period.first()),
-            Schedule::Never | Schedule::Once(_) => return None,
-        };
-        self.closing(index, rule, window.next())
+        let Schedule::Every(period, _) = self else { return None };
+        self.closing(index, rule, Window::containing(period, done.period.first()).next())
     }
 
     /// The closing of the first window from `window` on that the rule is in force in.
@@ -195,7 +185,7 @@ impl Schedule {
             }
             if rule.days.overlaps(period) {
                 let day = match self {
-                    Schedule::Years(Some(closing)) => {
+                    Schedule::Every(_, Some(closing)) => {
                         let closes = closing.day_for(period.first().year());
                         closes.unwrap_or(period.last().add_days(1).month_end())
                     }

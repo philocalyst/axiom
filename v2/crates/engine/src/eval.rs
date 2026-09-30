@@ -16,8 +16,8 @@ use std::ops::Deref;
 use axiom_core::glob::glob;
 use axiom_core::{Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
-    Amount, BinOp, Book, Dir, Effect as LawEffect, Entity, Fault, Field, Func, Law, NodeId, Op, Param, Prop,
-    StepKind, Subject, Value, Var, Window,
+    Amount, BinOp, Book, Dir, Effect as LawEffect, Entity, Fault, Field, Func, Law, NodeId, Op, Param, Prop, StepKind,
+    Subject, Value, Var, Window,
 };
 
 use crate::bridge::V3;
@@ -64,35 +64,19 @@ pub(crate) struct Occasion<'a> {
 }
 
 impl<'a> Occasion<'a> {
+    /// Something that happened on `day`, with nothing more said about it yet.
+    fn on(day: Day, over: Days, span: Days, cause: Cause, motion: Option<&'a Motion<'a>>) -> Occasion<'a> {
+        let (amount, realized, skip_internal, checking) = (None, None, false, false);
+        Occasion { day, over, span, cause, motion, amount, realized, skip_internal, checking }
+    }
+
     pub fn flow(m: &'a Motion<'a>) -> Occasion<'a> {
-        let (over, span) = (m.recognized, Days::on(m.day));
-        Occasion {
-            day: m.day,
-            over,
-            span,
-            cause: m.cause,
-            motion: Some(m),
-            amount: None,
-            realized: None,
-            skip_internal: false,
-            checking: false,
-        }
+        Occasion::on(m.day, m.recognized, Days::on(m.day), m.cause, Some(m))
     }
 
     /// A period ending, or a deadline passing, on `day`.
     pub fn time(day: Day, period: Days) -> Occasion<'static> {
-        let over = Days::on(period.last());
-        Occasion {
-            day,
-            over,
-            span: period,
-            cause: Cause::Time,
-            motion: None,
-            amount: None,
-            realized: None,
-            skip_internal: false,
-            checking: false,
-        }
+        Occasion::on(day, Days::on(period.last()), period, Cause::Time, None)
     }
 
     /// A window that some flow recognized value into ahead of time, entered on
