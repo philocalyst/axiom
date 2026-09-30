@@ -15,6 +15,23 @@
 //! a named pattern; and a group. A repeat takes all it can and never gives it
 //! back, as in every PEG. A capture named `payee`, `code`, `amount` or `date`
 //! fills that part of the record ([`Capture`]).
+//!
+//! # The program
+//!
+//! A program is a flat list of ops, in the shape the book's own patterns have
+//! (`axiom_model::sync::Op`): literal, class, choice, repeat, capture and call.
+//! Ops run in order, and an op that has others under it says how many ops that
+//! follow it are its body:
+//!
+//! - `Repeat { min, max, len }` and `Capture { name, len }` take the next `len`
+//!   ops. A group that is a choice is a `Repeat { 1, Some(1), len }` around it, so
+//!   that what follows the group is not taken for one more way.
+//! - `Choice { len }` says the next `len` ops are one way, and the ops after
+//!   them, to the end of the body, are the others, each the same way in turn: the
+//!   first that matches wins. `A / B / C` is `Choice A Choice B C`.
+//! - `Call(n)` runs the `n`th pattern the ledger declared, as a whole.
+//!
+//! A program that is not well formed matches nothing; it never panics.
 
 use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Loc};
@@ -76,8 +93,8 @@ pub type Parts = [Option<(usize, usize)>; 4];
 pub enum CharClass {
     Digit,
     Letter,
-    Alnum,
     Space,
+    Alnum,
     /// One character.
     Any,
     /// Everything up to the end, which may be nothing.
@@ -91,8 +108,8 @@ pub enum CharClass {
 const CLASSES: [(&str, CharClass); 8] = [
     ("digit", CharClass::Digit),
     ("letter", CharClass::Letter),
-    ("alnum", CharClass::Alnum),
     ("space", CharClass::Space),
+    ("alnum", CharClass::Alnum),
     ("any", CharClass::Any),
     ("rest", CharClass::Rest),
     ("start", CharClass::Start),
@@ -127,49 +144,49 @@ fn char_width(lead: u8) -> usize {
     }
 }
 
-/// One op of a program. A program is a tree written out in order: an op that has
-/// others under it says how many ops they are, and those follow it.
-#[derive(Clone, Debug)]
+/// One op of a program (see the module docs for how they nest).
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Op {
     /// Lowercased: what is matched is lowercased too.
     Literal(Box<[u8]>),
     Class(CharClass),
-    /// Each of the ops beneath, in order.
-    Seq {
-        len: u32,
-    },
-    /// The first of the ops beneath that matches.
+    /// The next `len` ops are one way; the rest of the body are the others.
     Choice {
-        len: u32,
+        len: u16,
     },
+    /// The next `len` ops, as many times as fit: `max` `None` is as many as there are.
     Repeat {
-        min: u32,
-        max: u32,
-        len: u32,
+        min: u8,
+        max: Option<u8>,
+        len: u16,
     },
+    /// The next `len` ops, and where they matched, for the part of the record it
+    /// names. `None` is a name the record has no part for.
     Capture {
-        name: u32,
-        len: u32,
+        name: Option<Capture>,
+        len: u16,
     },
+    /// The ledger's own pattern, by its number in [`Patterns`].
+    Call(usize),
 }
 
 /// A compiled pattern.
 #[derive(Clone, Debug)]
 pub struct Pattern {
     program: Box<[Op]>,
-    /// The names its captures go by.
-    names: Box<[String]>,
     /// The literals a match begins with, one for each way it can; `None` if it
     /// may begin with anything.
     starts: Option<Vec<Vec<u8>>>,
+    /// Whether it captures anything at all, itself or through a pattern it calls.
+    captures: bool,
 }
 
 /// What a match has done so far; kept between matches, to be reused.
 #[derive(Default)]
 pub struct Run {
     literal: usize,
-    /// Each capture's name, and the bytes it took.
-    captures: Vec<(u32, usize, usize)>,
+    /// Each capture, and the bytes it took.
+    captures: Vec<(Capture, usize, usize)>,
 }
 
 /// Where a match is, and how many of its bytes were literals: the measure of
@@ -184,24 +201,29 @@ pub struct Found {
 impl Pattern {
     /// The pattern `source` says, calling the ledger's own `named` patterns.
     pub fn new(source: &str, named: &Patterns) -> Result<Pattern, PatternError> {
-        let mut parser = Parser { text: source, at: 0, depth: 0, ops: Vec::new(), names: Vec::new(), named };
+        let mut parser = Parser { text: source, at: 0, depth: 0, ops: Vec::new(), named };
         parser.choice()?;
         parser.skip_space();
         if parser.at < source.len() {
             return Err(parser.error(1, "there is nothing to close here"));
         }
-        Ok(Pattern::from(parser.ops, parser.names))
+        Ok(Pattern::from(parser.ops, named))
     }
 
     /// The pattern that is exactly this text, in any case.
     pub fn literal(text: &str) -> Pattern {
-        Pattern::from(vec![Op::Literal(text.to_ascii_lowercase().into_bytes().into())], Vec::new())
+        Pattern::from(vec![Op::Literal(text.to_ascii_lowercase().into_bytes().into())], &Patterns::default())
     }
 
-    fn from(program: Vec<Op>, names: Vec<String>) -> Pattern {
-        let mut pattern = Pattern { program: program.into(), names: names.into(), starts: None };
-        pattern.starts = pattern.starts_of(0);
-        pattern
+    fn from(program: Vec<Op>, named: &Patterns) -> Pattern {
+        let starts = starts_of(&program, named);
+        let calls = |op: &Op| match op {
+            Op::Capture { name, .. } => name.is_some(),
+            Op::Call(callee) => named.compiled.get(*callee).is_some_and(|(_, callee)| callee.captures),
+            _ => false,
+        };
+        let captures = program.iter().any(calls);
+        Pattern { program: program.into(), starts, captures }
     }
 
     /// The literals a match begins with, one for each way it can. `None` if it
@@ -210,37 +232,9 @@ impl Pattern {
         self.starts.as_deref()
     }
 
-    /// How many ops the op at `at` takes with those beneath it.
-    fn extent(&self, at: usize) -> usize {
-        match self.program[at] {
-            Op::Literal(_) | Op::Class(_) => 1,
-            Op::Seq { len } | Op::Choice { len } | Op::Repeat { len, .. } | Op::Capture { len, .. } => 1 + len as usize,
-        }
-    }
-
-    /// The ops directly beneath the one at `at`, whose body is `len` ops long.
-    fn children(&self, at: usize, len: u32) -> impl Iterator<Item = usize> + '_ {
-        let end = at + 1 + len as usize;
-        let next = move |child: usize| Some(child).filter(|&child| child < end);
-        std::iter::successors(next(at + 1), move |&child| next(child + self.extent(child)))
-    }
-
-    fn starts_of(&self, at: usize) -> Option<Vec<Vec<u8>>> {
-        match &self.program[at] {
-            Op::Literal(bytes) => Some(vec![bytes.to_vec()]),
-            Op::Seq { len } => {
-                let mut first =
-                    self.children(at, *len).skip_while(|&c| matches!(self.program[c], Op::Class(CharClass::Start)));
-                first.next().and_then(|child| self.starts_of(child))
-            }
-            Op::Capture { .. } => self.starts_of(at + 1),
-            Op::Repeat { min, .. } if *min > 0 => self.starts_of(at + 1),
-            Op::Choice { len } => {
-                let each: Option<Vec<_>> = self.children(at, *len).map(|child| self.starts_of(child)).collect();
-                each.map(|each| each.concat())
-            }
-            Op::Class(_) | Op::Repeat { .. } => None,
-        }
+    /// Whether a match can have captures to read.
+    pub fn captures(&self) -> bool {
+        self.captures
     }
 
     /// The literal every match begins with, if there is only one way to.
@@ -252,21 +246,21 @@ impl Pattern {
     }
 
     /// The match that starts exactly at `at` in lowercased `hay`, if there is one.
-    pub fn matches_at(&self, hay: &[u8], at: usize, run: &mut Run) -> Option<Found> {
+    pub fn matches_at(&self, hay: &[u8], at: usize, run: &mut Run, named: &Patterns) -> Option<Found> {
         run.literal = 0;
         run.captures.clear();
-        let end = self.step(0, hay, at, run)?;
+        let end = body(&self.program, hay, at, run, named)?;
         Some(Found { start: at, end, literal: run.literal })
     }
 
     /// The first match at or after `from`, looking for the leading literal.
-    pub fn find(&self, hay: &[u8], from: usize, run: &mut Run) -> Option<Found> {
+    pub fn find(&self, hay: &[u8], from: usize, run: &mut Run, named: &Patterns) -> Option<Found> {
         let (mut at, prefix) = (from, self.prefix());
         loop {
             if !prefix.is_empty() {
                 at += memmem::find(hay.get(at..)?, prefix)?;
             }
-            if let Some(found) = self.matches_at(hay, at, run) {
+            if let Some(found) = self.matches_at(hay, at, run, named) {
                 return Some(found);
             }
             at += 1;
@@ -275,56 +269,121 @@ impl Pattern {
             }
         }
     }
+}
 
-    /// Where the capture that fills `part` was, in the last match `run` made.
-    pub fn capture(&self, part: Capture, run: &Run) -> Option<(usize, usize)> {
-        let word = CAPTURES.iter().find(|(_, known)| *known == part)?.0;
-        let index = self.names.iter().position(|name| name == word)? as u32;
-        run.captures.iter().rev().find(|capture| capture.0 == index).map(|&(_, start, end)| (start, end))
+impl Run {
+    /// Where the capture that fills `part` was, in the last match.
+    pub fn capture(&self, part: Capture) -> Option<(usize, usize)> {
+        self.captures.iter().rev().find(|capture| capture.0 == part).map(|&(_, start, end)| (start, end))
     }
 
-    /// Where every capture was, in the last match `run` made.
-    pub fn parts(&self, run: &Run) -> Parts {
-        CAPTURES.map(|(_, part)| self.capture(part, run))
-    }
-
-    /// Where the op at `at` ends if it matches at position `pos`. An op that
-    /// fails has left nothing behind.
-    fn step(&self, at: usize, hay: &[u8], pos: usize, run: &mut Run) -> Option<usize> {
-        let (literal, captured) = (run.literal, run.captures.len());
-        let ended = match &self.program[at] {
-            Op::Literal(bytes) => hay[pos..].starts_with(bytes).then(|| {
-                run.literal += bytes.len();
-                pos + bytes.len()
-            }),
-            Op::Class(class) => class.step(hay, pos),
-            Op::Seq { len } => self.children(at, *len).try_fold(pos, |pos, child| self.step(child, hay, pos, run)),
-            Op::Choice { len } => self.children(at, *len).find_map(|child| self.step(child, hay, pos, run)),
-            Op::Repeat { min, max, .. } => {
-                let (mut end, mut count) = (pos, 0);
-                while count < *max {
-                    match self.step(at + 1, hay, end, run) {
-                        // A body that matches nothing would go on forever.
-                        Some(next) if next > end => (end, count) = (next, count + 1),
-                        _ => break,
-                    }
-                }
-                (count >= *min).then_some(end)
-            }
-            Op::Capture { name, .. } => {
-                self.step(at + 1, hay, pos, run).inspect(|&end| run.captures.push((*name, pos, end)))
-            }
-        };
-        if ended.is_none() {
-            run.literal = literal;
-            run.captures.truncate(captured);
-        }
-        ended
+    /// Where every capture was, in the last match.
+    pub fn parts(&self) -> Parts {
+        CAPTURES.map(|(_, part)| self.capture(part))
     }
 }
 
+/// The literals a body begins with, one for each way it can, or `None` if it may
+/// begin with anything.
+fn starts_of(ops: &[Op], named: &Patterns) -> Option<Vec<Vec<u8>>> {
+    // An anchor matches nowhere, so a match begins after it.
+    let mut ops = ops;
+    while let [Op::Class(CharClass::Start), rest @ ..] = ops {
+        ops = rest;
+    }
+    let (first, rest) = ops.split_first()?;
+    match first {
+        Op::Literal(bytes) => Some(vec![bytes.to_vec()]),
+        Op::Choice { len } => {
+            let (mut way, mut rest, mut all) = (usize::from(*len), rest, Vec::new());
+            loop {
+                let (one, others) = rest.split_at_checked(way)?;
+                all.extend(starts_of(one, named)?);
+                match others {
+                    [Op::Choice { len }, next @ ..] => (way, rest) = (usize::from(*len), next),
+                    last => {
+                        all.extend(starts_of(last, named)?);
+                        return Some(all);
+                    }
+                }
+            }
+        }
+        Op::Capture { len, .. } => starts_of(rest.get(..usize::from(*len))?, named),
+        Op::Repeat { min, len, .. } if *min > 0 => starts_of(rest.get(..usize::from(*len))?, named),
+        Op::Call(callee) => starts_of(&named.compiled.get(*callee)?.1.program, named),
+        Op::Class(_) | Op::Repeat { .. } => None,
+    }
+}
+
+/// Where a body ends if it matches at `pos`. A body that fails has left nothing
+/// behind: not the literals it counted, nor the captures it made.
+fn body(ops: &[Op], hay: &[u8], pos: usize, run: &mut Run, named: &Patterns) -> Option<usize> {
+    let (literal, captured) = (run.literal, run.captures.len());
+    let ended = sequence(ops, hay, pos, run, named);
+    if ended.is_none() {
+        run.literal = literal;
+        run.captures.truncate(captured);
+    }
+    ended
+}
+
+fn sequence(ops: &[Op], hay: &[u8], mut pos: usize, run: &mut Run, named: &Patterns) -> Option<usize> {
+    let mut at = 0;
+    while let Some(op) = ops.get(at) {
+        at += 1;
+        match op {
+            Op::Literal(bytes) => {
+                hay.get(pos..)?.starts_with(bytes).then_some(())?;
+                run.literal += bytes.len();
+                pos += bytes.len();
+            }
+            Op::Class(class) => pos = class.step(hay, pos)?,
+            Op::Choice { len } => {
+                // The ways are a chain to the end of the body: this one, then whatever follows.
+                let (mut way, mut rest) = (usize::from(*len), ops.get(at..)?);
+                loop {
+                    let (one, others) = rest.split_at_checked(way)?;
+                    if let Some(end) = body(one, hay, pos, run, named) {
+                        return Some(end);
+                    }
+                    match others {
+                        [Op::Choice { len }, next @ ..] => (way, rest) = (usize::from(*len), next),
+                        last => return body(last, hay, pos, run, named),
+                    }
+                }
+            }
+            Op::Repeat { min, max, len } => {
+                let inner = ops.get(at..at + usize::from(*len))?;
+                at += usize::from(*len);
+                let (mut end, mut count) = (pos, 0u32);
+                while max.is_none_or(|max| count < u32::from(max)) {
+                    let Some(next) = body(inner, hay, end, run, named) else { break };
+                    count += 1;
+                    // A body that matches nothing would go on forever, and satisfies any minimum.
+                    if next == end {
+                        count = count.max(u32::from(*min));
+                        break;
+                    }
+                    end = next;
+                }
+                (count >= u32::from(*min)).then_some(())?;
+                pos = end;
+            }
+            Op::Capture { name, len } => {
+                let inner = ops.get(at..at + usize::from(*len))?;
+                at += usize::from(*len);
+                let end = body(inner, hay, pos, run, named)?;
+                run.captures.extend(name.map(|part| (part, pos, end)));
+                pos = end;
+            }
+            Op::Call(callee) => pos = body(&named.compiled.get(*callee)?.1.program, hay, pos, run, named)?,
+        }
+    }
+    Some(pos)
+}
+
 /// The patterns a ledger declares by name (`pattern ach = …`), for others to call.
-#[derive(Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Patterns {
     compiled: Vec<(String, Pattern)>,
 }
@@ -374,8 +433,13 @@ impl Patterns {
         if errors.is_empty() { Ok(patterns) } else { Err(errors) }
     }
 
+    /// The pattern that has this name.
     fn get(&self, name: &str) -> Option<&Pattern> {
         self.compiled.iter().find(|(known, _)| known == name).map(|(_, pattern)| pattern)
+    }
+
+    fn number(&self, name: &str) -> Option<usize> {
+        self.compiled.iter().position(|(known, _)| known == name)
     }
 }
 
@@ -386,7 +450,6 @@ struct Parser<'t, 'n> {
     /// How many groups deep the parser is.
     depth: usize,
     ops: Vec<Op>,
-    names: Vec<String>,
     named: &'n Patterns,
 }
 
@@ -410,48 +473,49 @@ impl<'t> Parser<'t, '_> {
         &rest[..rest.find(|c| !accept(c)).unwrap_or(rest.len())]
     }
 
+    /// How many ops a body has, as a `len`.
+    fn length(&self, ops: usize) -> Result<u16, PatternError> {
+        u16::try_from(ops).map_err(|_| self.error(1, "this pattern is too long"))
+    }
+
     /// Puts `op` before the ops written since `start`, over them all.
-    fn wrap(&mut self, start: usize, op: impl FnOnce(u32) -> Op) {
-        let len = (self.ops.len() - start) as u32;
+    fn wrap(&mut self, start: usize, op: impl FnOnce(u16) -> Op) -> Result<(), PatternError> {
+        let len = self.length(self.ops.len() - start)?;
         self.ops.insert(start, op(len));
+        Ok(())
     }
 
-    fn name_index(&mut self, name: &str) -> u32 {
-        let known = self.names.iter().position(|known| known == name);
-        known.unwrap_or_else(|| {
-            self.names.push(name.to_string());
-            self.names.len() - 1
-        }) as u32
-    }
-
+    /// Ways to match, the first that does: each is a sequence, and all but the
+    /// last are marked with a `Choice` in front.
     fn choice(&mut self) -> Result<(), PatternError> {
-        let start = self.ops.len();
-        self.sequence()?;
-        let mut alternatives = 1;
-        while self.peek() == Some('/') {
-            self.at += 1;
+        // Each way is read into ops of its own, and the ways are joined at the end.
+        let mut ways: Vec<Vec<Op>> = Vec::new();
+        loop {
+            let before = std::mem::take(&mut self.ops);
             self.sequence()?;
-            alternatives += 1;
+            ways.push(std::mem::replace(&mut self.ops, before));
+            if self.peek() != Some('/') {
+                break;
+            }
+            self.at += 1;
         }
-        if alternatives > 1 {
-            self.wrap(start, |len| Op::Choice { len });
+        let last = ways.pop().unwrap_or_default();
+        for way in ways {
+            let len = self.length(way.len())?;
+            self.ops.push(Op::Choice { len });
+            self.ops.extend(way);
         }
+        self.ops.extend(last);
         Ok(())
     }
 
     fn sequence(&mut self) -> Result<(), PatternError> {
-        let (start, mut items) = (self.ops.len(), 0);
         loop {
             self.item()?;
-            items += 1;
             if matches!(self.peek(), None | Some('/' | ')')) {
-                break;
+                return Ok(());
             }
         }
-        if items > 1 {
-            self.wrap(start, |len| Op::Seq { len });
-        }
-        Ok(())
     }
 
     /// An atom, with the repeat that follows it and the name it captures under.
@@ -465,18 +529,18 @@ impl<'t> Parser<'t, '_> {
         }
         self.atom()?;
         let repeat = match self.text[self.at..].chars().next() {
-            Some('*') => Some((0, u32::MAX)),
-            Some('+') => Some((1, u32::MAX)),
-            Some('?') => Some((0, 1)),
+            Some('*') => Some((0, None)),
+            Some('+') => Some((1, None)),
+            Some('?') => Some((0, Some(1))),
             _ => None,
         };
         if let Some((min, max)) = repeat {
             self.at += 1;
-            self.wrap(start, |len| Op::Repeat { min, max, len });
+            self.wrap(start, |len| Op::Repeat { min, max, len })?;
         }
         if let Some(name) = name {
-            let index = self.name_index(name);
-            self.wrap(start, |len| Op::Capture { name: index, len });
+            let part = CAPTURES.iter().find(|(word, _)| *word == name).map(|&(_, part)| part);
+            self.wrap(start, |len| Op::Capture { name: part, len })?;
         }
         Ok(())
     }
@@ -488,15 +552,18 @@ impl<'t> Parser<'t, '_> {
                 if self.depth == MAX_DEPTH {
                     return Err(self.error(1, format!("groups nest at most {MAX_DEPTH} deep")));
                 }
+                let start = self.ops.len();
                 (self.at, self.depth) = (self.at + 1, self.depth + 1);
                 self.choice()?;
                 self.depth -= 1;
                 match self.peek() {
-                    Some(')') => {
-                        self.at += 1;
-                        Ok(())
-                    }
-                    _ => Err(self.error(1, "this group is never closed")),
+                    Some(')') => self.at += 1,
+                    _ => return Err(self.error(1, "this group is never closed")),
+                }
+                // Ways run to the end of their body: a group of ways is a body of its own.
+                match self.ops.get(start) {
+                    Some(Op::Choice { .. }) => self.wrap(start, |len| Op::Repeat { min: 1, max: Some(1), len }),
+                    _ => Ok(()),
                 }
             }
             Some(c) if c.is_ascii_alphabetic() => self.name(),
@@ -535,22 +602,13 @@ impl<'t> Parser<'t, '_> {
         Err(self.error(1, "this literal is never closed"))
     }
 
-    /// A class, or the pattern of the ledger that has this name, written in.
+    /// A class, or a call of the pattern of the ledger that has this name.
     fn name(&mut self) -> Result<(), PatternError> {
         let word = self.word(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
         if let Some(&(_, class)) = CLASSES.iter().find(|(name, _)| *name == word) {
             self.ops.push(Op::Class(class));
-        } else if let Some(callee) = self.named.get(word) {
-            for op in callee.program.iter() {
-                let op = match op {
-                    Op::Capture { name, len } => {
-                        let name = self.name_index(&callee.names[*name as usize]);
-                        Op::Capture { name, len: *len }
-                    }
-                    other => other.clone(),
-                };
-                self.ops.push(op);
-            }
+        } else if let Some(callee) = self.named.number(word) {
+            self.ops.push(Op::Call(callee));
         } else {
             let known =
                 CLASSES.iter().map(|(name, _)| *name).chain(self.named.compiled.iter().map(|(n, _)| n.as_str()));
@@ -580,12 +638,10 @@ mod tests {
         let pattern = compile(pattern);
         let hay = memo.to_ascii_lowercase().into_bytes();
         let mut run = Run::default();
-        let found = pattern.find(&hay, 0, &mut run)?;
+        let found = pattern.find(&hay, 0, &mut run, &Patterns::default())?;
         let text = |(start, end): (usize, usize)| String::from_utf8_lossy(&hay[start..end]).into_owned();
-        let captures = CAPTURES
-            .iter()
-            .filter_map(|&(name, part)| Some((name.to_string(), text(pattern.capture(part, &run)?))))
-            .collect();
+        let captures =
+            CAPTURES.iter().filter_map(|&(name, part)| Some((name.to_string(), text(run.capture(part)?)))).collect();
         Some((text((found.start, found.end)), found.literal, captures))
     }
 
@@ -664,8 +720,8 @@ mod tests {
         // Found by the one literal there is.
         let (hay, mut run) = (b"xx inv-12 inv-34".to_vec(), Run::default());
         let pattern = compile("code:(\"inv-\" digit+)");
-        assert_eq!(pattern.find(&hay, 0, &mut run).map(|found| found.start), Some(3));
-        assert_eq!(pattern.find(&hay, 4, &mut run).map(|found| found.start), Some(10));
+        assert_eq!(pattern.find(&hay, 0, &mut run, &Patterns::default()).map(|found| found.start), Some(3));
+        assert_eq!(pattern.find(&hay, 4, &mut run, &Patterns::default()).map(|found| found.start), Some(10));
     }
 
     #[test]
@@ -679,10 +735,9 @@ mod tests {
         let call = |source: &str, memo: &str| {
             let pattern = Pattern::new(source, &named).unwrap_or_else(|error| panic!("{}", error.message));
             let mut run = Run::default();
-            let found = pattern.find(memo.to_ascii_lowercase().as_bytes(), 0, &mut run)?;
-            let payee = pattern
-                .capture(Capture::Payee, &run)
-                .map(|(start, end)| memo.to_ascii_lowercase()[start..end].to_string());
+            let found = pattern.find(memo.to_ascii_lowercase().as_bytes(), 0, &mut run, &named)?;
+            let payee =
+                run.capture(Capture::Payee).map(|(start, end)| memo.to_ascii_lowercase()[start..end].to_string());
             Some((memo[found.start..found.end].to_string(), found.literal, payee))
         };
         assert_eq!(call("ach", "ACH CREDIT  x"), Some(("ACH CREDIT  ".to_string(), 10, None)));
@@ -744,5 +799,66 @@ mod tests {
             diagnostic.anchor().map(|loc| (loc.file, loc.start, loc.end)),
             Some((axiom_core::FileId(2), 104, 108))
         );
+    }
+
+    #[test]
+    fn the_program_is_flat_and_a_choice_is_a_chain() {
+        let ops = |source: &str| compile(source).program.to_vec();
+        let lit = |text: &str| Op::Literal(text.as_bytes().into());
+        assert_eq!(
+            ops("\"a\" / \"b\" / \"c\""),
+            [Op::Choice { len: 1 }, lit("a"), Op::Choice { len: 1 }, lit("b"), lit("c")]
+        );
+        assert_eq!(
+            ops("(\"a\" / \"b\") \"c\""),
+            [Op::Repeat { min: 1, max: Some(1), len: 3 }, Op::Choice { len: 1 }, lit("a"), lit("b"), lit("c")],
+            "a group of ways is a body of its own, and what follows it is not one more way"
+        );
+        assert_eq!(
+            ops("code:(\"x\" digit+)"),
+            [
+                Op::Capture { name: Some(Capture::Code), len: 3 },
+                lit("x"),
+                Op::Repeat { min: 1, max: None, len: 1 },
+                Op::Class(CharClass::Digit)
+            ]
+        );
+        assert_eq!(ops("(\"a\" \"b\")+"), [Op::Repeat { min: 1, max: None, len: 2 }, lit("a"), lit("b")]);
+        assert_eq!(ops("(\"a\" \"b\")"), [lit("a"), lit("b")], "a group that is only a sequence is that sequence");
+        assert_eq!(ops("who:digit"), [Op::Capture { name: None, len: 1 }, Op::Class(CharClass::Digit)]);
+        let named = Patterns::new(&[("ach", "\"ach\"")]).unwrap();
+        assert_eq!(
+            Pattern::new("ach digit", &named).unwrap().program.to_vec(),
+            [Op::Call(0), Op::Class(CharClass::Digit)]
+        );
+    }
+
+    #[test]
+    fn a_program_that_is_not_well_formed_matches_nothing() {
+        let lit = Op::Literal(b"a".as_slice().into());
+        let malformed = [
+            vec![Op::Choice { len: 5 }],
+            vec![Op::Repeat { min: 1, max: None, len: 9 }, lit.clone()],
+            vec![Op::Capture { name: None, len: 1 }],
+            vec![Op::Call(3)],
+            vec![Op::Choice { len: 1 }, lit.clone(), Op::Choice { len: 4 }],
+        ];
+        for program in malformed {
+            let pattern = Pattern::from(program.clone(), &Patterns::default());
+            let mut run = Run::default();
+            assert!(
+                pattern.find(b"a a a", 0, &mut run, &Patterns::default()).is_none()
+                    || matches!(program[0], Op::Choice { len: 1 }),
+                "{program:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_thousand_ways_are_not_a_thousand_frames() {
+        let source = (0..20_000).map(|n| format!("\"w{n}\"")).collect::<Vec<_>>().join(" / ");
+        let pattern = compile(&source);
+        let mut run = Run::default();
+        assert_eq!(pattern.find(b"a w19999 b", 0, &mut run, &Patterns::default()).map(|found| found.start), Some(2));
     }
 }

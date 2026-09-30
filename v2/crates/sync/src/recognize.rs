@@ -159,6 +159,8 @@ pub struct Recognizer<'a> {
     /// The declared `code` patterns. What one captures as `code`, or else all
     /// it matches, is a code.
     codes: Vec<Pattern>,
+    /// The ledger's own patterns, which the others call.
+    named: Patterns,
 }
 
 /// The text between two offsets of the lowercased memo.
@@ -202,7 +204,7 @@ impl<'a> Recognizer<'a> {
                 None => floating.push(at),
             }
         }
-        Ok(Recognizer { known, entries, starts, floating, codes: compiled })
+        Ok(Recognizer { known, entries, starts, floating, codes: compiled, named: named.clone() })
     }
 
     /// The account of the book called `name`, if the recognizer knows one.
@@ -242,11 +244,12 @@ impl<'a> Recognizer<'a> {
             let mut try_entry = |entry: usize| {
                 let Entry { pattern, whole, .. } = &self.entries[entry];
                 // A match of nothing says nothing about who it was.
-                let found = pattern.matches_at(hay, at, run).filter(|found| found.end > found.start);
+                let found = pattern.matches_at(hay, at, run, &self.named).filter(|found| found.end > found.start);
                 let word = |at: usize| hay.get(at).is_some_and(|byte| byte.is_ascii_alphanumeric());
                 let bounded = |found: &Found| !*whole || !(found.start > 0 && word(found.start - 1) || word(found.end));
                 if let Some(found) = found.filter(bounded) {
-                    hits.push(Hit { entry, found, parts: pattern.parts(run) });
+                    let parts = if pattern.captures() { run.parts() } else { Parts::default() };
+                    hits.push(Hit { entry, found, parts });
                 }
             };
             self.starts.walk(hay, at, &mut try_entry);
@@ -311,8 +314,8 @@ impl<'a> Recognizer<'a> {
         let mut codes = Vec::new();
         for pattern in &self.codes {
             let mut from = 0;
-            while let Some(found) = pattern.find(hay, from, run) {
-                let (start, end) = pattern.capture(Capture::Code, run).unwrap_or((found.start, found.end));
+            while let Some(found) = pattern.find(hay, from, run, &self.named) {
+                let (start, end) = run.capture(Capture::Code).unwrap_or((found.start, found.end));
                 codes.extend(text(hay, start, end));
                 from = found.end.max(found.start + 1);
             }

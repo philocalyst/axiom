@@ -1,4 +1,4 @@
-//! Sync: how a book stays current without being typed (LANGUAGE §13).
+//! Sync: how a book stays current without being typed (LANGUAGE §14).
 //!
 //! Axiom never touches the network. A source is a folder of files it reads, or
 //! a command whose output it reads; what it reads is recognized, reconciled
@@ -6,22 +6,36 @@
 //! would have typed. Everything here works on this crate's own small types, so
 //! it is testable without a book; the `axiom` binary binds them to one.
 //!
-//! | module      | job                                                        |
-//! |-------------|------------------------------------------------------------|
-//! | `format`    | declared columns and tags to records, or a diagnostic at the cell |
-//! | `csv`, `tagged` | rows of cells; OFX and XML records of cells            |
-//! | `date`, `amount` | dates and amounts as banks write them                 |
-//! | `peg`       | the patterns the ledger writes: a small PEG                |
-//! | `recognize` | `known-as` patterns, compiled once; `via`; codes           |
-//! | `reconcile` | records already written: same amount, within three days    |
-//! | `promise`   | records that keep a contract's occurrence                  |
-//! | `world`     | one feed: recognize, reconcile, keep, write                |
-//! | `sink`      | Axiom output merged into the journal, a file or a param    |
-//! | `write`     | the file a day belongs to, day order, short dates          |
-//! | `diff`      | what would be written, as a unified diff                   |
-//! | `command`   | running commands, all at once                              |
-//! | `session`   | all of it, source by source                                |
-//! | `unknown`   | memos nothing recognized, grouped, for `check`             |
+//! | module          | job                                                              |
+//! |-----------------|------------------------------------------------------------------|
+//! | `format`        | declared columns and tags to records, or a diagnostic at the cell |
+//! | `csv`, `tagged` | rows of cells; OFX and XML records of cells                      |
+//! | `date`, `amount`| dates and amounts as banks write them                            |
+//! | `peg`           | the patterns the ledger writes: a small PEG                      |
+//! | `recognize`     | `known-as` patterns and names, compiled once; `via`; codes       |
+//! | `reconcile`     | records already written: same amount, within three days          |
+//! | `promise`       | records that keep a contract's occurrence                        |
+//! | `world`         | one feed: recognize, reconcile, keep, write                      |
+//! | `sink`          | Axiom output merged into the journal, a file or a param          |
+//! | `write`         | the file a day belongs to, day order, short dates                |
+//! | `diff`          | what would be written, as a unified diff                         |
+//! | `command`       | running commands, all at once                                    |
+//! | `session`       | all of it, source by source, documents before bank lines         |
+//! | `unknown`       | memos nothing recognized, grouped, for `check`                   |
+//!
+//! # What binding to a book fills
+//!
+//! | the book says                                        | this crate takes                     |
+//! |------------------------------------------------------|--------------------------------------|
+//! | entities, accounts and their `known-as` (never `me`) | [`Known`], `account` for a place     |
+//! | `pattern NAME = …`                                   | [`Patterns`]                         |
+//! | `code NAME` with `known-as`                          | the `codes` of [`Recognizer::new`]   |
+//! | flows on an account, each leg of a split, derived flows | one [`Existing`] each, in its unit |
+//! | a batch of flows sharing a code                      | its members and its total, [`Batch`] |
+//! | occurrences due and unwritten (`Contract::due_days`) | [`Due`]                              |
+//! | open claims that carry a code                        | `World::claims`: code to party       |
+//! | the units the book has                               | `World::units`                       |
+//! | `sync NAME`, its `read` or `run`, its `format`, `into` | [`Source`], [`Feed`], [`Format`], [`Sink`] |
 
 mod amount;
 mod command;
@@ -50,7 +64,7 @@ pub use format::{Field, Format, Place, Rule, Shape, Spec};
 pub use peg::{Pattern, PatternError, Patterns};
 pub use promise::Due;
 pub use recognize::{BadPattern, Known, Recognizer, Scratch};
-pub use reconcile::{Existing, WINDOW};
+pub use reconcile::{Batch, Existing, WINDOW};
 pub use session::{Env, Failure, Input, Kind, Outcome, Source, sync};
 pub use sink::Sink;
 pub use unknown::{Group, group as unrecognized};
