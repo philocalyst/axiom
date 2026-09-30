@@ -7,6 +7,7 @@
 //! line is read by that word and never by what the subject's name means: `01
 //! flat` is an occurrence whether or not `flat` is a contract.
 
+use axiom_core::diag::closest;
 use axiom_core::{Day, Dec, Diagnostic, Loc};
 
 use crate::ast::*;
@@ -16,6 +17,10 @@ use crate::parser::{Parse, Parser, Scope};
 
 const EVENT_STATES: [(&str, EventState); 3] =
     [("settled", EventState::Settled), ("void", EventState::Void), ("returned", EventState::Returned)];
+
+/// The words that follow a subject and say what a line is.
+const VERBS: [&str; 12] =
+    ["owes", "now", "worked", "used", "waived", "ends", "settled", "void", "returned", "split", "basis", "filed"];
 
 pub(crate) const BUDGET_PERIODS: [(&str, Period); 2] = [("monthly", Period::Month), ("yearly", Period::Year)];
 
@@ -97,10 +102,17 @@ impl<'s> Parser<'s> {
 
     /// No verb: a promise kept, which only a name can be.
     fn occurrence(&mut self, subject: Subject<'s>) -> Parse<Verb<'s>> {
-        match subject {
-            Subject::Name(_) => Ok(Verb::Occurrence(None)),
-            _ => Err(self.expected("expected-verb", "what the line says of it: `=`, `now`, `owes`, `ends` or another verb")),
+        if let Subject::Name(_) = subject {
+            return Ok(Verb::Occurrence(None));
         }
+        let token = self.peek();
+        let mut diag = self.unexpected(token, "expected-verb", "what the line says of it: `=`, `now`, `owes`, `ends` or another verb");
+        if let Tok::Name(word) = token.tok {
+            if let Some(near) = closest(word, VERBS) {
+                diag = diag.fix(format!("did you mean `{near}`?"), token.loc, near);
+            }
+        }
+        self.fail(diag)
     }
 
     /// `owes CREDITOR [AMOUNT]`, the rest of a claim being the statement's tail.

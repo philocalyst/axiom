@@ -147,14 +147,28 @@ impl<'s> Parser<'s> {
         let loc = self.loc_from(token.loc.start as usize);
         if priced && self.at(Punct::At) {
             let quantity = self.node_of(amount, loc);
-            let first = self.expr(quantity).first;
-            self.bump();
-            let price = self.measured()?;
-            let price_node = self.node_at(ExprKind::Amount(price), self.loc_of(&price));
-            let at = self.node(ExprKind::At(quantity, price_node), self.loc_from(token.loc.start as usize), first);
-            return Ok((Amount::Computed(at), self.loc_from(token.loc.start as usize)));
+            let at = self.price(quantity, token.loc.start)?;
+            return Ok((at, self.loc_from(token.loc.start as usize)));
         }
         Ok((amount, loc))
+    }
+
+    /// `QTY @ PRICE`, after the quantity that starts at `start` was read as a
+    /// literal: the same amount at a price, for the statements that read the
+    /// quantity as the header of a flow first.
+    pub fn at_price(&mut self, quantity: Literal<'s>) -> Parse<Amount<'s>> {
+        let loc = self.loc_of(&quantity);
+        let node = self.node_at(ExprKind::Amount(quantity), loc);
+        self.price(node, loc.start)
+    }
+
+    /// `@ PRICE` after `quantity`, a node that starts at byte `start`.
+    fn price(&mut self, quantity: ExprId, start: u32) -> Parse<Amount<'s>> {
+        let first = self.expr(quantity).first;
+        self.bump();
+        let price = self.measured()?;
+        let price_node = self.node_at(ExprKind::Amount(price), self.loc_of(&price));
+        Ok(Amount::Computed(self.node(ExprKind::At(quantity, price_node), self.loc_from(start as usize), first)))
     }
 
     /// After a percent or fraction: `of REF` makes it a share of that, whose
@@ -171,7 +185,14 @@ impl<'s> Parser<'s> {
         if !matches!(self.tok(), Tok::Code(_) | Tok::Name(_) | Tok::Number(_)) {
             return Err(self.expected("expected-reference", what));
         }
-        let of = self.primary()?;
+        // A number is the share's amount: it needs its commodity.
+        let of = match self.tok() {
+            Tok::Number(_) => {
+                let literal = self.measured()?;
+                self.node_at(ExprKind::Amount(literal), self.loc_of(&literal))
+            }
+            _ => self.primary()?,
+        };
         Ok(Some(self.node(ExprKind::Of(share, of), self.loc_from(token.loc.start as usize), first)))
     }
 
