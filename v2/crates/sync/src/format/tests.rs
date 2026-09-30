@@ -35,34 +35,58 @@ fn chase(date: &str, pattern: &str) -> Format {
     ])
 }
 
-/// `format ofx` as std declares it (crates/sync/std/formats.ax).
-fn ofx() -> Format {
-    Format {
-        shape: Shape::Tagged { records: "STMTTRN".into() },
-        specs: vec![
-            Spec::new(Field::Date, [path("DTPOSTED")]).layout(layout("YYYYMMDD")),
-            Spec::new(Field::Amount, [path("TRNAMT")]),
-            Spec::new(Field::Memo, [path("NAME"), path("MEMO")]),
-            Spec::new(Field::Code, [path("CHECKNUM")]),
-        ],
-        categories: Vec::new(),
+/// std's own text: the formats every project may name.
+const STD: &str = include_str!("../../std/formats.ax");
+
+/// `format NAME` of `text`, read as the declaration says: a small reader for the
+/// tagged forms, so that these tests run on what std declares and not on a copy.
+fn declared(text: &str, name: &str) -> Format {
+    let header = format!("format {name}");
+    let lines = text.lines().map(|line| line.split("//").next().unwrap_or("").trim_end());
+    let body = lines.skip_while(|line| *line != header).skip(1).take_while(|line| line.starts_with(' '));
+    let mut format = Format { shape: Shape::Rows, specs: Vec::new(), categories: Vec::new() };
+    for line in body {
+        let (word, rest) = line.trim().split_once(char::is_whitespace).expect("a word and what follows");
+        if word == "records" {
+            format.shape = Shape::Tagged { records: rest.trim().into() };
+            continue;
+        }
+        let field = [
+            ("date", Field::Date),
+            ("amount", Field::Amount),
+            ("memo", Field::Memo),
+            ("pending", Field::Pending),
+            ("code", Field::Code),
+            ("via", Field::Via),
+        ];
+        let field = field.iter().find(|(known, _)| *known == word).unwrap_or_else(|| panic!("{word}")).1;
+        let mut parts = rest.split(',').map(str::trim);
+        let first: Vec<&str> = parts.next().expect("a place").split_whitespace().collect();
+        let mut spec = Spec::new(field, [path(first[0])]);
+        match (&first[1..], field) {
+            ([], _) => {}
+            ([layout_text], Field::Date) => spec = spec.layout(layout(layout_text.trim_matches('"'))),
+            ([value], Field::Pending) => spec = spec.rule(Rule::Is((*value).into())),
+            other => panic!("{other:?}"),
+        }
+        for part in parts {
+            match part.split_whitespace().collect::<Vec<_>>()[..] {
+                ["sign", place, into] => spec.rule = Rule::Sign { place: path(place), into: into.into() },
+                [place] => spec.places.push(path(place)),
+                ref other => panic!("{other:?}"),
+            }
+        }
+        format.specs.push(spec);
     }
+    format
 }
 
-/// `format camt053` as std declares it.
+fn ofx() -> Format {
+    declared(STD, "ofx")
+}
+
 fn camt053() -> Format {
-    Format {
-        shape: Shape::Tagged { records: "Ntry".into() },
-        specs: vec![
-            Spec::new(Field::Date, [path("BookgDt/Dt")]),
-            Spec::new(Field::Amount, [path("Amt")]).rule(Rule::Sign { place: path("CdtDbtInd"), into: "CRDT".into() }),
-            Spec::new(Field::Memo, [path("AddtlNtryInf"), path("RmtInf/Ustrd")]),
-            Spec::new(Field::Pending, [path("Sts")]).rule(Rule::Is("PDNG".into())),
-            Spec::new(Field::Code, [path("NtryDtls/TxDtls/RmtInf/Strd/CdtrRefInf/Ref")]),
-            Spec::new(Field::Via, [path("NtryDtls/TxDtls/RltdPties/UltmtCdtr/Nm")]),
-        ],
-        categories: Vec::new(),
-    }
+    declared(STD, "camt053")
 }
 
 fn read<'t>(format: &Format, text: &'t str) -> Vec<Record<'t>> {

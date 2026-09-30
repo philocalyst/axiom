@@ -1,0 +1,25 @@
+// Formats every project may name (LANGUAGE §14): `sync visa` reads "imports/*.qfx"
+// with `format ofx`. They are declarations, not code, and belong in std beside
+// the kinds; they live here until the systems crate takes them in. The sync
+// crate's tests read this file and read statements with what it declares.
+
+/// OFX and QFX, which banks and card issuers let one download. Version 1 is SGML
+/// (a value runs to the next tag; only aggregates close), version 2 is XML.
+format ofx
+  records STMTTRN
+  date    DTPOSTED "YYYYMMDD"                 // a time and a zone may follow
+  amount  TRNAMT
+  memo    NAME, MEMO
+  code    CHECKNUM
+
+/// ISO 20022 bank-to-customer statements. The amount has no sign of its own:
+/// CRDT is money into the account. What a path names is found at any depth, and
+/// its first value in the entry is the entry's.
+format camt053
+  records Ntry
+  date    BookgDt/Dt
+  amount  Amt, sign CdtDbtInd CRDT
+  memo    AddtlNtryInf, RmtInf/Ustrd
+  pending Sts PDNG
+  code    NtryDtls/TxDtls/RmtInf/Strd/CdtrRefInf/Ref
+  via     NtryDtls/TxDtls/RltdPties/UltmtCdtr/Nm

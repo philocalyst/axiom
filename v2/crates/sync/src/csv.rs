@@ -160,4 +160,26 @@ mod tests {
             let _ = rows(text);
         }
     }
+
+    #[test]
+    #[ignore = "a timing, alone: cargo test -p axiom-sync --release -- --ignored --test-threads=1"]
+    fn cutting_a_million_rows_into_cells_alone() {
+        let mut text = String::from("Posting Date,Description,Amount,Balance\n");
+        for row in 0..1_000_000u32 {
+            let quoted = if row % 5 == 0 { "\"TRADER JOE'S, #634 \"\"SF\"\"\"" } else { "SHELL OIL 5741" };
+            text += &format!(
+                "{:02}/{:02}/2026,{quoted},-{}.{:02},\"1,234.56\"\n",
+                row % 12 + 1,
+                row % 28 + 1,
+                row % 900,
+                row % 100
+            );
+        }
+        let started = std::time::Instant::now();
+        let (mut reader, mut cells, mut count) = (Reader::new(&text), Vec::new(), 0usize);
+        while reader.next(&mut cells).is_some() {
+            count += cells.len();
+        }
+        eprintln!("cut {} cells ({} MB) in {:?}", count, text.len() >> 20, started.elapsed());
+    }
 }

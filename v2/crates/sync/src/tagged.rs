@@ -215,4 +215,29 @@ mod tests {
             let _ = read(text, "R", &["a", "a/b"]);
         }
     }
+
+    #[test]
+    #[ignore = "a timing, alone: cargo test -p axiom-sync --release -- --ignored --test-threads=1"]
+    fn finding_a_hundred_thousand_records_alone() {
+        let mut text = String::from("<OFX><BANKTRANLIST>\n");
+        for at in 0..100_000u32 {
+            text += &format!(
+                "<STMTTRN><TRNTYPE>DEBIT<DTPOSTED>20260105120000<TRNAMT>-{}.{:02}<FITID>{at}<NAME>SHELL OIL {at}<MEMO>SAN FRANCISCO CA</STMTTRN>\n",
+                at % 900,
+                at % 100
+            );
+        }
+        let started = std::time::Instant::now();
+        let (mut count, mut tags) = (0, 0);
+        scan(&text, "STMTTRN", &["DTPOSTED", "TRNAMT", "NAME", "MEMO"], |_| {
+            count += 1;
+            true
+        });
+        tags += super::tags(&text).count();
+        eprintln!(
+            "found {count} records ({} MB, {tags} tags) in {:?}, tags alone included",
+            text.len() >> 20,
+            started.elapsed()
+        );
+    }
 }

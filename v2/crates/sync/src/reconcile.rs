@@ -5,7 +5,7 @@
 //! nearest day is taken first, and a flow is taken at most once, so two
 //! identical coffees on one day are two.
 
-use axiom_core::{Day, Map, Qty};
+use axiom_core::{Day, Map, Qty, Set};
 
 use crate::Record;
 
@@ -76,13 +76,16 @@ pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Ve
             }) as u16
         }
     };
+    let unit_of: Vec<u16> = records.iter().map(|record| key(record.facts().currency.as_deref())).collect();
+    // Only a flow of an amount some record has can be one: most of a book is not.
+    let wanted: Set<(u16, Qty)> = records.iter().zip(&unit_of).map(|(record, &unit)| (unit, record.qty)).collect();
     let mut slots: Vec<Slot> = existing
         .iter()
         .enumerate()
         .filter(|(_, flow)| near.contains(&flow.day))
         .map(|(index, flow)| Slot { unit: key(flow.unit), qty: flow.qty, day: flow.day, index: index as u32 })
+        .filter(|slot| wanted.contains(&(slot.unit, slot.qty)))
         .collect();
-    let unit_of: Vec<u16> = records.iter().map(|record| key(record.facts().currency.as_deref())).collect();
     slots.sort_unstable();
     let batch_of = |slot: &Slot| existing[slot.index as usize].batch;
     // The slots of each batch: what is taken along with a flow.
@@ -252,5 +255,16 @@ mod tests {
         seen.sort();
         seen.dedup();
         assert_eq!(seen.len(), found, "a flow is taken at most once");
+        // What a person syncs: a month of records against the same book.
+        let month: Vec<_> = (0..300).map(|_| record(1_000 + next(30) as i32, -(next(50_000) as i64) - 1)).collect();
+        let started = Instant::now();
+        let matched = reconcile(&month, &flows, "USD");
+        eprintln!(
+            "reconciled a month of {} records against {} flows in {:?}",
+            month.len(),
+            flows.len(),
+            started.elapsed()
+        );
+        assert_eq!(matched.len(), month.len());
     }
 }
