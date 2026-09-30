@@ -997,6 +997,9 @@ Also decided along the way:
 
 ## 12. The v4 rework (in progress)
 
+**Status and everything that remains: [REMAINING.md](REMAINING.md)** (as of
+2026-09-30). The lane briefs, audits and research are in [briefs/](briefs/README.md).
+
 v4 moves from a chart of accounts to agents, resources, events and promises
 (DESIGN §1). After the first v4 spec, the user asked for four more things:
 - changes to terms written inline (a free month, a promotion and its
