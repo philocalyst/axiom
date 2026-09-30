@@ -15,14 +15,14 @@
 
 use axiom_core::{Day, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
-    Amount, Assert, BinOp, Book, Commodity, Dir, Effect as Consequence, End, Fault, Flow, Func, Law, NodeId, Op, Param,
-    Place, StepKind, Subject, System, Trigger, Value, Var, Waive, Window,
+    Amount, Assert, BinOp, Book, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param,
+    Place, StepKind, Subject, System, Trigger, Value, Waive, Window,
 };
 
 use crate::calc::Calc;
 use crate::eval::{Context, compared};
 use crate::events::Events;
-use crate::fire::Reads;
+use crate::facts::{Follows, LawFacts, Reads};
 use crate::lots::Candidate;
 use crate::motion::Motion;
 use crate::show;
@@ -35,6 +35,8 @@ const SHOWN: usize = 8;
 pub(crate) struct Frame<'a, 's> {
     pub book: &'a Book<'s>,
     pub law: &'a Law,
+    /// What is true of the law whatever runs it: what each step reads and compares.
+    pub facts: &'a LawFacts,
     pub ctx: &'a Context<'a>,
     /// Every node's value from the run that just ended.
     pub values: &'a [Value],
@@ -96,12 +98,12 @@ impl Frame<'_, '_> {
     }
 
     /// The comparison a step failed on, when it compares amounts.
-    fn bound(&self, cond: NodeId) -> Option<Bound> {
+    fn comparison(&self, cond: NodeId) -> Option<Comparison> {
         let (cmp, counted, limit) = compared(self.law, self.values, cond)?;
         let upper = matches!(cmp, BinOp::Lt | BinOp::Le);
         let counted_in_limit = Calc { book: self.book, day: self.ctx.day }.convert(counted, limit.unit).ok()?;
         let off = if upper { counted_in_limit.qty - limit.qty } else { limit.qty - counted_in_limit.qty };
-        Some(Bound { counted, limit, upper, off: Amount::new(off, limit.unit) })
+        Some(Comparison { counted, limit, upper, off: Amount::new(off, limit.unit) })
     }
 
     /// The two sides of the failing comparison with their values; for any
@@ -226,7 +228,7 @@ impl Frame<'_, '_> {
 }
 
 /// What a limit compared: `counted` against `limit`, and by how much it is off.
-struct Bound {
+struct Comparison {
     counted: Amount,
     limit: Amount,
     /// `counted <= limit` (a cap), else `counted >= limit` (a floor).
@@ -242,7 +244,7 @@ pub(crate) fn broken(f: &Frame, step: usize, warn: bool, waiver: Option<Waiver>)
         unreachable!("only a require or warn step breaks")
     };
     let (what, fix) = f.doc();
-    let (bound, reads) = (f.bound(cond), Reads::of(f.law, cond));
+    let (bound, reads) = (f.comparison(cond), f.facts.steps[step].reads);
     let headline = match (message.map(|text| f.book.name(text).to_owned()), &bound) {
         (message, Some(bound)) => {
             let lead = message.unwrap_or_else(|| show::subject(f.book, f.ctx.subject).to_owned());
@@ -261,7 +263,7 @@ pub(crate) fn broken(f: &Frame, step: usize, warn: bool, waiver: Option<Waiver>)
 }
 
 /// "27,000.00 USD in 2026 against a limit of 24,500.00 USD, over by 2,500.00 USD"
-fn fact(f: &Frame, bound: &Bound, reads: Option<Reads>) -> String {
+fn fact(f: &Frame, bound: &Comparison, reads: Option<Reads>) -> String {
     let when = match reads {
         None => String::new(),
         Some(Reads::Total(_, Window::Ever)) => " in total".to_owned(),
@@ -385,10 +387,10 @@ pub(crate) fn first_fault(f: &Frame, step: usize) -> Option<usize> {
         StepKind::When(root) | StepKind::Unless(root) | StepKind::Let(root) => *root,
         StepKind::Require { cond, .. } => *cond,
         StepKind::Effect(
-            Consequence::Owe { amount, .. }
-            | Consequence::Count { amount, .. }
-            | Consequence::Consume { amount }
-            | Consequence::Carry { amount, .. },
+            LawEffect::Owe { amount, .. }
+            | LawEffect::Count { amount, .. }
+            | LawEffect::Consume { amount }
+            | LawEffect::Carry { amount, .. },
         ) => *amount,
     };
     origin(f, root)
@@ -405,9 +407,8 @@ fn origin(f: &Frame, root: NodeId) -> Option<usize> {
 /// When the condition is `lhs <= rhs` (or `<`, `>=`, `>`) and `lhs` moves
 /// one-for-one with this flow, how much would satisfy it.
 fn suggestion(f: &Frame, step: usize, cond: NodeId) -> Option<String> {
-    let bound = f.bound(cond)?;
-    let Op::Bin(_, lhs, _) = f.law.nodes[cond.index()].op else { return None };
-    let moves = follows_flow(f, step, lhs)?;
+    let bound = f.comparison(cond)?;
+    let moves = f.facts.steps[step].follows?;
     let calc = Calc { book: f.book, day: f.ctx.day };
     let flow = calc.convert(f.ctx.amount?, bound.limit.unit).ok()?.qty;
     let show = |qty: Qty| f.money(Amount::new(qty, bound.limit.unit));
@@ -415,51 +416,21 @@ fn suggestion(f: &Frame, step: usize, cond: NodeId) -> Option<String> {
     let off = bound.off.qty;
     // What the counted side is a running sum of, in the words of the advice.
     let of = match moves {
-        Moves::Flow => {
+        Follows::Flow => {
             return Some(match (bound.upper, flow > off) {
                 (true, true) => format!("lower this flow to at most {}", show(flow - off)),
                 (true, false) => "no amount of this flow satisfies it".to_owned(),
                 (false, _) => format!("this flow must be at least {}", show(flow + off)),
             });
         }
-        Moves::Total(dir, window) => format!("{} {}", if dir == Dir::In { "go in" } else { "come out" }, span(window)),
-        Moves::Tally(name) => format!("count toward `{}` this year", f.book.name(name)),
+        Follows::Total(dir, window) => format!("{} {}", if dir == Dir::In { "go in" } else { "come out" }, span(window)),
+        Follows::Tally(name) => format!("count toward `{}` this year", f.book.name(name)),
     };
     Some(match (bound.upper, flow > off) {
         (true, true) => format!("at most {} more can {of}", show(flow - off)),
         (true, false) => format!("nothing more can {of}: it is already {} over", show(off - flow)),
         (false, _) => format!("at least {} more must {of}", show(off)),
     })
-}
-
-/// What a comparison's left side is a running sum of, so that this flow moves
-/// it by its own amount.
-#[derive(Clone, Copy)]
-enum Moves {
-    /// The flow's own amount.
-    Flow,
-    /// A window total the flow was just added to.
-    Total(Dir, Window),
-    /// A tally an earlier step of the same law counted this flow's amount into.
-    Tally(Sym),
-}
-
-fn follows_flow(f: &Frame, step: usize, lhs: NodeId) -> Option<Moves> {
-    match (&f.law.nodes[lhs.index()].op, f.law.trigger) {
-        (Op::Var(Var::Amount), _) => Some(Moves::Flow),
-        (Op::Call(Func::Total(Dir::In, window), _), Trigger::In) => Some(Moves::Total(Dir::In, *window)),
-        (Op::Call(Func::Total(Dir::Out, window), _), Trigger::Out) => Some(Moves::Total(Dir::Out, *window)),
-        (Op::Call(Func::Tally(name), args), _) if Func::tally_year(args).is_none() => {
-            let counts_amount = |kind: &StepKind| match kind {
-                StepKind::Effect(Consequence::Count { amount, name: counted }) => {
-                    counted == name && matches!(f.law.nodes[amount.index()].op, Op::Var(Var::Amount))
-                }
-                _ => false,
-            };
-            f.law.steps[..step].iter().any(|s| counts_amount(&s.kind)).then_some(Moves::Tally(*name))
-        }
-        _ => None,
-    }
 }
 
 fn span(window: Window) -> &'static str {

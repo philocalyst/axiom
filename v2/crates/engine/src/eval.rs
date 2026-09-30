@@ -16,7 +16,7 @@ use std::ops::Deref;
 use axiom_core::glob::glob;
 use axiom_core::{Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
-    Amount, BinOp, Book, Dir, Effect as Consequence, Entity, Fault, Field, Func, Law, NodeId, Op, Param, Prop,
+    Amount, BinOp, Book, Dir, Effect as LawEffect, Entity, Fault, Field, Func, Law, NodeId, Op, Param, Prop,
     StepKind, Subject, Value, Var, Window,
 };
 
@@ -24,7 +24,7 @@ use crate::calc::{Calc, progressive};
 use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
 use crate::plan::Plan;
-use crate::scope::{inside, is_money};
+use crate::scope::is_money;
 use crate::state::World;
 use crate::{Cause, Owed};
 
@@ -258,7 +258,7 @@ impl<'a, 's> Machine<'a, 's> {
     }
 
     /// A `require … else owe …` that failed: the violation is priced.
-    fn price(&mut self, step: u32, effect: &Consequence) {
+    fn price(&mut self, step: u32, effect: &LawEffect) {
         let before = self.out.len();
         self.effect(step, effect);
         if let Some(&Outcome::Owe { name, amount, owed }) = self.out.get(before) {
@@ -266,16 +266,16 @@ impl<'a, 's> Machine<'a, 's> {
         }
     }
 
-    fn effect(&mut self, step: u32, effect: &Consequence) {
+    fn effect(&mut self, step: u32, effect: &LawEffect) {
         match *effect {
-            Consequence::Count { amount, name } => {
+            LawEffect::Count { amount, name } => {
                 let Some(amount) = self.nonzero_amount(step, amount) else { return };
                 match self.calc().convert(amount, self.book().base) {
                     Ok(base) => self.out.push(Outcome::Count { name, amount: base.qty }),
                     Err(fault) => self.out.push(Outcome::Faulted { step, fault }),
                 }
             }
-            Consequence::Owe { amount, to, due, name } => {
+            LawEffect::Owe { amount, to, due, name } => {
                 let Some(amount) = self.nonzero_amount(step, amount) else { return };
                 let due = match due.map(|node| self.scan(node)) {
                     None => self.ctx.day,
@@ -285,7 +285,7 @@ impl<'a, 's> Machine<'a, 's> {
                 };
                 self.out.push(Outcome::Owe { name, amount, owed: Owed { to, due } });
             }
-            Consequence::Consume { .. } | Consequence::Carry { .. } => unreachable!("{V3}"),
+            LawEffect::Consume { .. } | LawEffect::Carry { .. } => unreachable!("{V3}"),
         }
     }
 
@@ -560,38 +560,20 @@ impl<'a, 's> Machine<'a, 's> {
         }
     }
 
-    /// The holdings within the subject: a place's subtree, or the asset places
-    /// an entity owns.
     fn held(&self, subject: Subject) -> impl Iterator<Item = &'a Slot> {
-        let (book, holdings): (&'a Book<'s>, &'a Holdings) = (self.book(), &self.env.world.holdings);
-        let span = match subject {
-            Subject::Place(root) => root.index()..book.places.end(root).index(),
-            Subject::Entity(_) => 0..book.places.len(),
-            Subject::Asset(_) => unreachable!("{V3}"),
-        };
-        holdings.within(span).filter(move |slot| inside(book, subject, slot.place))
-    }
-
-    /// The sign people read a subject's balance in: a credit card's balance is
-    /// what is owed, as an assertion writes it. An entity's is natural.
-    fn sign(&self, subject: Subject) -> i64 {
-        match subject {
-            Subject::Place(place) => self.book().v3_root(place).display_sign(),
-            Subject::Entity(_) => 1,
-            Subject::Asset(_) => unreachable!("{V3}"),
-        }
+        held(self.env.plan, self.env.world, subject)
     }
 
     /// Everything the subject holds, valued in the base currency.
     fn balance(&self, subject: Subject) -> Value {
-        let sign = self.sign(subject);
+        let sign = sign(self.book(), subject);
         self.sum_in_base(self.held(subject).map(|slot| Amount::new(Qty(slot.qty.0 * sign), slot.unit)))
     }
 
     /// What everything the subject holds has already accounted for, in the base
     /// currency: the total basis of its parcels.
     fn basis(&self, subject: Subject) -> Value {
-        let (book, sign) = (self.book(), self.sign(subject));
+        let (book, sign) = (self.book(), sign(self.book(), subject));
         let basis: Qty = self.held(subject).map(|slot| slot.basis(is_money(book, slot.place, slot.unit))).sum();
         self.base(Qty(basis.0 * sign))
     }
@@ -615,6 +597,29 @@ impl<'a, 's> Machine<'a, 's> {
             }
         }
         self.base(total)
+    }
+}
+
+/// The holdings within the subject: a place's subtree, which is one stretch of
+/// the holdings, or the asset places an entity holds.
+pub(crate) fn held<'a>(plan: &'a Plan, world: &'a World, subject: Subject) -> impl Iterator<Item = &'a Slot> {
+    let holdings: &'a Holdings = &world.holdings;
+    let (subtree, places) = match subject {
+        Subject::Place(root) => (root.index()..plan.book.places.end(root).index(), &[][..]),
+        Subject::Entity(entity) => (0..0, plan.places_of(entity)),
+        Subject::Asset(_) => unreachable!("{V3}"),
+    };
+    let entity_places = places.iter().flat_map(move |&place| holdings.of(place));
+    holdings.within(subtree).chain(entity_places)
+}
+
+/// The sign people read a subject's balance in: a credit card's balance is
+/// what is owed, as an assertion writes it. An entity's is natural.
+pub(crate) fn sign(book: &Book, subject: Subject) -> i64 {
+    match subject {
+        Subject::Place(place) => book.v3_root(place).display_sign(),
+        Subject::Entity(_) => 1,
+        Subject::Asset(_) => unreachable!("{V3}"),
     }
 }
 

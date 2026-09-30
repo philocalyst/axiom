@@ -8,7 +8,7 @@ use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder, span};
-use crate::{Cause, Holding, Options, Owed, Parcel, Plan, Run, State, run};
+use crate::{Bound, Cause, Holding, Options, Owed, Parcel, Plan, Run, State, run};
 
 fn options() -> Options {
     Options { today: Day(1000), relaxed: false }
@@ -1296,8 +1296,8 @@ fn every_comparison_keeps_its_last_reading_with_the_sides_of_a_floor_swapped() {
     let name = f.sym("bank");
     let mut law = LawBuilder::new(name, Trigger::Always);
     let balance = law.var(Var::Balance, Ty::AMOUNT);
-    let nothing = law.konst(Value::Empty, Ty::Empty);
-    let cond = law.bin(BinOp::Ge, balance, nothing, Ty::Bool);
+    let minimum = law.konst(Value::Amount(f.usd(100_00)), Ty::AMOUNT);
+    let cond = law.bin(BinOp::Ge, balance, minimum, Ty::Bool);
     let law = f.law(law.warn(cond));
     let rule = f.rule(law, Subject::Place(checking));
     f.always.push((checking, rule));
@@ -1307,8 +1307,8 @@ fn every_comparison_keeps_its_last_reading_with_the_sides_of_a_floor_swapped() {
     let run = run(&book, options());
     let [_, reading] = run.headroom[..] else { panic!("one reading a day: {:?}", run.headroom) };
     assert_eq!(
-        (reading.counted.qty, reading.limit.qty, reading.warn),
-        (Qty::ZERO, Qty(300_00), true),
+        (reading.counted.qty, reading.limit.qty, reading.warn, reading.bound),
+        (Qty(100_00), Qty(300_00), true, Bound::Floor),
         "room above the floor: limit - counted"
     );
     assert_eq!(
@@ -1316,6 +1316,46 @@ fn every_comparison_keeps_its_last_reading_with_the_sides_of_a_floor_swapped() {
         (Day(2), Day(2), Day(2)),
         "no total or tally: the day itself"
     );
+}
+
+#[test]
+fn a_floor_of_nothing_is_read_off_the_holdings_and_leaves_a_reading_only_when_it_fails() {
+    let mut f = Fixture::new();
+    let (equity, checking, food) = (f.equity, f.checking, f.food);
+    let name = f.sym("overdraft");
+    let mut law = LawBuilder::new(name, Trigger::Always);
+    let balance = law.var(Var::Balance, Ty::AMOUNT);
+    let nothing = law.konst(Value::Empty, Ty::Empty);
+    let cond = law.bin(BinOp::Ge, balance, nothing, Ty::Bool);
+    let law = f.law(law.warn(cond));
+    let rule = f.rule(law, Subject::Place(checking));
+    f.always.push((checking, rule));
+    f.flow(1, equity, checking, 500_00);
+    f.flow(2, checking, food, 200_00);
+    let book = f.book();
+    let held = run(&book, options());
+    assert!(held.headroom.is_empty() && held.violations.is_empty(), "it held both times, and said nothing");
+    assert_eq!(held.checks[law.index()], 2, "and was still counted as checked");
+
+    let mut f = Fixture::new();
+    let (equity, checking, food) = (f.equity, f.checking, f.food);
+    let name = f.sym("overdraft");
+    let mut law = LawBuilder::new(name, Trigger::Always);
+    let balance = law.var(Var::Balance, Ty::AMOUNT);
+    let nothing = law.konst(Value::Empty, Ty::Empty);
+    let cond = law.bin(BinOp::Ge, balance, nothing, Ty::Bool);
+    let law = f.law(law.warn(cond));
+    let rule = f.rule(law, Subject::Place(checking));
+    f.always.push((checking, rule));
+    f.flow(1, equity, checking, 500_00);
+    f.flow(2, checking, food, 700_00);
+    f.flow(3, equity, checking, 400_00);
+    let book = f.book();
+    let broke = run(&book, options());
+    let [violation] = broke.violations[..] else { panic!("{:?}", broke.violations) };
+    assert_eq!((violation.day, violation.warn), (Day(2), true));
+    let [reading] = broke.headroom[..] else { panic!("the failing reading only: {:?}", broke.headroom) };
+    assert_eq!((reading.limit.qty, reading.day, reading.bound), (Qty(-200_00), Day(2), Bound::Floor));
 }
 
 #[test]

@@ -1,21 +1,23 @@
 //! The plan: everything the fold decides before it begins, once.
 //!
 //! A book has loose ends. `?` amounts are solved from the assertions around
-//! them, settlement events change flows' states, and the laws' static shape (which
-//! ones only cap a total, which totals must be counted, when the timed ones
-//! fall due) can be read off before the first flow. None of it depends on the
-//! day the fold stops or on what the fold finds, so a [`Plan`] is built once,
-//! never changes, and is shared by reference: every [`Ledger`] borrows it, a
-//! fork copies only the world, the clock and the records, and any number of
-//! threads can fold from it at once.
+//! them, settlement events change flows' states, and the laws' static shape
+//! (which ones only cap a total, which totals must be counted, when the timed
+//! ones fall due) and who contains what can be read off before the first flow.
+//! None of it depends on the day the fold stops or on what the fold finds, so
+//! a [`Plan`] is built once, never changes, and is shared by reference: every
+//! [`Ledger`] borrows it, a fork copies only the world, the clock and the
+//! records, and any number of threads can fold from it at once.
 
-use axiom_core::{Day, Diagnostic, Id, Map};
-use axiom_model::{Book, Cap, Commodity, Flow, Place};
+use axiom_core::{Day, Diagnostic, Groups, Id, Map, Set};
+use axiom_model::{Book, Commodity, Entity, Flow, Place, Rule, Subject};
 
+use crate::eval::V3;
 use crate::events::{self, Events};
-use crate::fire::{self, Readers};
+use crate::facts::{self, LawFacts, Readers};
 use crate::ledger::{Ledger, fold};
 use crate::motion::Amounts;
+use crate::scope::containing;
 use crate::state::World;
 use crate::timeline::{self, Schedule};
 use crate::totals::Watch;
@@ -34,14 +36,17 @@ pub struct Plan<'b, 's> {
     pub(crate) unsolved: Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>,
     /// What reading the events and solving reported: every ledger starts with them.
     problems: Vec<Diagnostic>,
+    /// By law id: what is true of the law whatever runs it.
+    pub(crate) laws: Box<[LawFacts]>,
     /// Some list of rules brings one law to one subject twice: `fire` must not run it twice.
     pub(crate) repeats: bool,
-    /// By law id: the laws that are one cap on a total in the base currency.
-    pub(crate) caps: Vec<Option<Cap>>,
     /// The laws to read as a window opens with value already recognized into it.
     pub(crate) readers: Readers,
     /// The subjects whose flow totals some law reads.
     pub(crate) watch: Watch,
+    /// The asset places each entity holds: its own, its subsidiaries' and its
+    /// members', in place order.
+    members: Groups<Entity, Id<Place>>,
     /// The day of the first fact that starts a period; before it there is nothing to close.
     pub(crate) period_start: Option<Day>,
     last_fact: Option<Day>,
@@ -65,18 +70,27 @@ impl<'b, 's> Plan<'b, 's> {
         for (key, first) in unsolved {
             blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
+        let laws: Box<[LawFacts]> = book.laws.values().map(|law| LawFacts::of(book, law)).collect();
+        let places = (0..book.places.len() as u32).map(Id::new);
+        let held = places.flat_map(|place| {
+            containing(book, place).filter_map(move |subject| match subject {
+                Subject::Entity(entity) => Some((entity, place)),
+                _ => None,
+            })
+        });
         let mut plan = Plan {
             book,
             amounts: solution.amounts,
             unsolved: blocked,
             problems,
-            repeats: fire::repeats(book),
-            caps: fire::caps(book),
-            readers: fire::readers(book),
-            watch: Watch::of(book),
+            repeats: repeats(book),
+            readers: facts::readers(book, &laws),
+            watch: Watch::of(book, &laws),
+            members: Groups::build(book.entities.len(), held),
             period_start: timeline::start(book, &events),
             last_fact: timeline::last_fact(book, &events),
             events,
+            laws,
             timed: Box::default(),
         };
         let (world, mut values) = (World::new(book), Vec::new());
@@ -98,6 +112,21 @@ impl<'b, 's> Plan<'b, 's> {
         fold(self, options)
     }
 
+    /// Whether `place` lies within `subject`: a place's subtree is a stretch of
+    /// the pre-order, and an entity's places are listed once.
+    pub(crate) fn inside(&self, subject: Subject, place: Id<Place>) -> bool {
+        match subject {
+            Subject::Place(root) => self.book.places.covers(root, place),
+            Subject::Entity(root) => self.members[root].binary_search(&place).is_ok(),
+            Subject::Asset(_) => unreachable!("{V3}"),
+        }
+    }
+
+    /// The asset places an entity holds, in place order.
+    pub(crate) fn places_of(&self, entity: Id<Entity>) -> &[Id<Place>] {
+        &self.members[entity]
+    }
+
     /// The last day the fold reaches when it is run for `today`: `today`, or
     /// the journal's last fact if that is later.
     pub(crate) fn horizon(&self, today: Day) -> Day {
@@ -108,6 +137,18 @@ impl<'b, 's> Plan<'b, 's> {
     pub(crate) fn problems(&self) -> Vec<Diagnostic> {
         self.problems.clone()
     }
+}
+
+/// Whether some list of rules brings one law to one subject twice, as two
+/// residences under one system do.
+fn repeats(book: &Book) -> bool {
+    let rules = &book.rules;
+    let per_place = rules.per_place().into_iter().flat_map(|table| table.iter().map(|(_, list)| list));
+    let lists = per_place.chain(rules.on_spend.iter().map(|(_, list)| list)).chain([&rules.timed[..]]);
+    lists.into_iter().any(|list: &[Rule]| {
+        let mut seen = Set::default();
+        list.iter().any(|rule| !seen.insert((rule.law, rule.subject)))
+    })
 }
 
 /// The journal folded through `options.today` (and every later journal fact):

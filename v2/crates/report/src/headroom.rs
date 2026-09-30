@@ -6,8 +6,8 @@
 
 use axiom_core::calendar::Window as Calendar;
 use axiom_core::{Day, Days, Id, Map, Qty, Ratio, Set, Severity};
-use axiom_engine::{Headroom, Run};
-use axiom_model::{Amount, BinOp, Book, Law, Op, Period, StepKind, Subject, Window};
+use axiom_engine::{Bound, Headroom, Run};
+use axiom_model::{Amount, Book, Law, Period, StepKind, Subject, Window};
 
 use crate::calendar::Periods;
 
@@ -38,7 +38,7 @@ pub fn current(book: &Book, run: &Run, from: Day, to: Day) -> Vec<Headroom> {
             if in_force && begins <= days.last() && read.insert((rule.law, step, rule.subject, days.first())) {
                 let (owner, counted) = (book.places[place].owner, Amount::new(Qty::ZERO, limit.unit));
                 let (law, subject, day) = (rule.law, rule.subject, days.last().min(to));
-                readings.push(Headroom { law, step, subject, owner, days, counted, limit, day, warn });
+                readings.push(Headroom { law, step, subject, owner, days, counted, limit, day, warn, bound: Bound::Cap });
             }
         }
     }
@@ -59,10 +59,8 @@ pub fn latest<'a>(readings: impl Iterator<Item = &'a Headroom>) -> Vec<&'a Headr
 
 /// Whether the limit is a floor (`balance >= empty`): its room is what stands
 /// above it, where a cap's room is what is left below it.
-pub fn is_floor(book: &Book, reading: &Headroom) -> bool {
-    let law = &book.laws[reading.law];
-    let StepKind::Require { cond, .. } = law.steps[reading.step as usize].kind else { return false };
-    matches!(law.nodes[cond.index()].op, Op::Bin(BinOp::Ge | BinOp::Gt, ..))
+pub fn is_floor(reading: &Headroom) -> bool {
+    reading.bound == Bound::Floor
 }
 
 /// Room left: what the limit allows, less what is counted.

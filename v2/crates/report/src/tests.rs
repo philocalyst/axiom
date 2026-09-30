@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree};
-use axiom_engine::{Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
+use axiom_engine::{Bound, Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
 use axiom_model::Effect as Consequence;
 use axiom_model::*;
 
@@ -657,6 +657,7 @@ impl Household {
             limit: cents(limit),
             day: until,
             warn,
+            bound: Bound::Cap,
         };
         let (jan, feb) = ((day(2026, 1, 1), day(2026, 1, 31)), (day(2026, 2, 1), day(2026, 2, 28)));
         let year = (day(2026, 1, 1), day(2026, 12, 31));
@@ -669,7 +670,7 @@ impl Household {
             // The same cap for Jordan, who has used 900 of 18,000.
             reading(2, "assets/bank/jordan-checking", year.0, year.1, 90_000, 1_800_000, jordan, false),
             // A floor: the balance may not go below zero, and stands at 8,955.80.
-            reading(3, "assets/bank/checking", day(2026, 3, 31), day(2026, 3, 31), 0, 895_580, me, true),
+            Headroom { bound: Bound::Floor, ..reading(3, "assets/bank/checking", day(2026, 3, 31), day(2026, 3, 31), 0, 895_580, me, true) },
             // A yearly budget, over.
             reading(0, "expenses/insurance", year.0, year.1, 120_000, 100_000, me, true),
         ];

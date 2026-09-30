@@ -13,7 +13,6 @@
 use axiom_core::{Id, Qty};
 use axiom_model::{Book, Class, Entity, Place, Subject};
 
-use crate::eval::V3;
 use crate::motion::{Motion, Moves};
 
 /// The entities that own what `owner` owns: itself, what it belongs to in the
@@ -21,18 +20,6 @@ use crate::motion::{Motion, Moves};
 fn owners<'a>(book: &'a Book, owner: Id<Entity>) -> impl Iterator<Item = Id<Entity>> + 'a {
     let household = book.entities[owner].member.filter(move |&house| !book.entities.covers(house, owner));
     book.entities.lineage(owner).chain(household)
-}
-
-/// Whether `place` lies within `subject`.
-pub(crate) fn inside(book: &Book, subject: Subject, place: Id<Place>) -> bool {
-    match subject {
-        Subject::Place(root) => book.places.covers(root, place),
-        Subject::Entity(root) => {
-            let place = &book.places[place];
-            place.class == Class::Asset && owners(book, place.owner).any(|owner| owner == root)
-        }
-        Subject::Asset(_) => unreachable!("{V3}"),
-    }
 }
 
 /// Every subject `place` lies within: it and its ancestors, and, for an asset

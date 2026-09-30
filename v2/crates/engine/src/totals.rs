@@ -13,9 +13,10 @@ use std::collections::BinaryHeap;
 
 use axiom_core::calendar;
 use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Sym, spread};
-use axiom_model::{Book, Dir, Entity, Func, Law, NodeId, Op, Place, Subject, Ty, Window};
+use axiom_model::{Book, Dir, Entity, Place, Subject, Window};
 
 use crate::eval::V3;
+use crate::facts::{LawFacts, TotalsRead};
 use crate::scope::containing;
 
 /// `amount` cut by the calendar years `over` touches: the first day of each
@@ -171,15 +172,15 @@ pub(crate) struct Watch {
 }
 
 impl Watch {
-    pub fn of(book: &Book) -> Watch {
+    pub fn of(book: &Book, laws: &[LawFacts]) -> Watch {
         let places = book.places.len();
         let mut watched = vec![false; places + book.entities.len()];
         for rule in book.rules.all() {
-            match reads_total(&book.laws[rule.law]) {
-                None => {}
-                Some(false) => watched[slot(places, rule.subject)] = true,
+            match laws[rule.law.index()].totals {
+                TotalsRead::Nothing => {}
+                TotalsRead::Subject => watched[slot(places, rule.subject)] = true,
                 // A kind-wide total reads every place of that kind.
-                Some(true) => watched[..places].fill(true),
+                TotalsRead::Kind => watched[..places].fill(true),
             }
         }
         let within = (0..places as u32).map(Id::new).flat_map(|place| containing(book, place).map(move |s| (place, s)));
@@ -312,17 +313,6 @@ fn subject_at(places: usize, slot: usize) -> Subject {
         None => Subject::Place(Id::new(slot as u32)),
         Some(entity) => Subject::Entity(Id::new(entity as u32)),
     }
-}
-
-/// Whether a law reads window totals, and whether any of its reads is
-/// widened to a kind.
-fn reads_total(law: &Law) -> Option<bool> {
-    let widened = |args: &[NodeId]| args.iter().any(|arg| law.nodes[arg.index()].ty == Ty::Kind);
-    let reads = law.nodes.iter().filter_map(|node| match &node.op {
-        Op::Call(Func::Total(..), args) => Some(widened(args)),
-        _ => None,
-    });
-    reads.reduce(|a, b| a || b)
 }
 
 /// What `count` effects have added up to, keyed by `(owner, year, name)`. A

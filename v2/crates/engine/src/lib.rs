@@ -33,6 +33,7 @@ mod calc;
 mod eval;
 mod events;
 mod explain;
+mod facts;
 mod fire;
 mod infer;
 mod ledger;
@@ -335,6 +336,17 @@ pub struct Headroom {
     /// When it was last read.
     pub day: Day,
     pub warn: bool,
+    pub bound: Bound,
+}
+
+/// Which way a limit was written. A cap (`total <= 500 USD`) stays under what
+/// it allows; a floor (`balance >= empty`) stays above what it requires, and
+/// is stored with its sides swapped, so that the room is `limit - counted`
+/// either way.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Bound {
+    Cap,
+    Floor,
 }
 
 /// An assertion's gap, accepted with `!` as a flow from `unknown`, or with
