@@ -8,7 +8,7 @@
 mod bands;
 mod expected;
 mod projection;
-mod recurrence;
+pub(crate) mod recurrence;
 mod variable;
 
 use std::iter;

@@ -2,7 +2,7 @@
 
 use axiom_core::{Day, Days, Qty, Sym, calendar};
 use axiom_engine::{Cause, Owed, Pad};
-use axiom_model::{Amount, Book, Period};
+use axiom_model::{Amount, Book, Flow, Object, Period};
 
 use crate::places::path;
 use crate::{Align, Cell, Column, Fact, Money, Report, Row, Section, Style, When};
@@ -171,6 +171,21 @@ impl<'s> Cell<'s> {
 pub fn year_days(year: i32) -> Option<Days> {
     let first = Day::from_ymd(year, 1, 1)?;
     Some(calendar::Window::containing(Period::Year, first).days())
+}
+
+/// What a flow is for: its purpose, and the thing it is of, else what it says
+/// of itself, else that nothing says.
+pub fn purpose_cell<'s>(book: &Book<'s>, flow: &Flow) -> Cell<'s> {
+    let Some(purposed) = flow.purpose else {
+        return flow.description.map_or("unclassified".into(), |words| Cell::Text(book.name(words)));
+    };
+    let purpose = Cell::Name(book.name(book.purposes[purposed.purpose].name));
+    let object = purposed.of.map(|object| match object {
+        Object::Asset(asset) => book.name(book.assets[asset].name),
+        Object::Place(place) => path(book, place),
+        Object::Entity(entity) => book.name(book.entities[entity].path),
+    });
+    object.map_or(purpose.clone(), |object| [purpose, "of".into(), Cell::Name(object)].into())
 }
 
 /// A doc block as plain lines: the `///` markers and one space of indent

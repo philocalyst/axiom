@@ -40,6 +40,7 @@ fn help_lists_the_commands_and_exits_cleanly() {
         "budget",
         "limits",
         "claims",
+        "contracts",
         "tax",
         "gains",
         "lots",

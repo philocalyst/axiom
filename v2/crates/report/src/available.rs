@@ -21,6 +21,7 @@ use crate::closings;
 use crate::history::{Held, postings};
 use crate::lens::{Basket, Lens, Liquidity, Priced};
 use crate::places::path;
+use crate::promises::{comes_in, coming, late, late_section, main_flow};
 use crate::synth::hypothetical;
 use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
@@ -61,6 +62,7 @@ pub fn view<'s>(lens: Lens<'_, 's>, at: Option<Day>) -> Report<'s> {
     Report::new(["Available on".into(), Cell::Day(at)])
         .with(spendable_section(lens, &cash, &claims))
         .with(claims::section(lens, "Coming in", &mine))
+        .with(late_section(lens, "Late promises coming in", |late| late.coming_in))
         .with(reach_section(lens, reach, to, horizon))
 }
 
@@ -143,23 +145,41 @@ fn place_label<'s>(lens: Lens<'_, 's>, holding: &Holding) -> Cell<'s> {
     }
 }
 
-/// What falls due within a month: obligations the laws recorded, and debts
-/// with a due day.
+/// What falls due within a month: obligations the laws recorded, debts with a
+/// due day, and what contracts promise to pay, late or coming.
 fn due_soon<'s>(lens: Lens<'_, 's>, claims: &[Claim]) -> Vec<(Cell<'s>, Qty)> {
     let (book, at) = (lens.book, lens.day);
     let soon = |day: Day| day >= at && day <= at.add(SOON);
+    // `Rent, to greystar, by 2026-04-01`.
+    let to = |name: Sym, to: Id<Entity>, by: &'static str, day: Day| -> Cell<'s> {
+        [
+            Cell::Name(book.name(name)),
+            ", to".into(),
+            Cell::Name(book.name(book.entities[to].path)),
+            by.into(),
+            Cell::Day(day),
+        ]
+        .into()
+    };
     let recorded = lens.run.effects.iter().filter(|effect| effect.day <= at && lens.whose.includes(effect.owner));
     let owed = recorded.filter_map(|effect: &Effect| {
         let owed = effect.owe.filter(|owed| soon(owed.due))?;
-        let to = Cell::Name(book.name(book.entities[owed.to].path));
-        let label = [Cell::Name(book.name(effect.name)), ", to".into(), to, "by".into(), Cell::Day(owed.due)];
-        Some((label.into(), lens.value(effect.amount)?))
+        Some((to(effect.name, owed.to, "by", owed.due), lens.value(effect.amount)?))
+    });
+    let promised = late(lens).into_iter().filter(|late| !late.coming_in).filter_map(|late| {
+        let contract = &book.contracts[late.contract];
+        Some((to(contract.name, contract.party, "since", late.due), lens.value(late.amount)?))
+    });
+    let upcoming = coming(lens, at.add(SOON)).into_iter().filter(|next| !comes_in(lens, next.terms));
+    let upcoming = upcoming.filter_map(|next| {
+        let contract = &book.contracts[next.contract];
+        Some((to(contract.name, contract.party, "by", next.due), lens.value(main_flow(next.terms)?.out)?))
     });
     let debts = claims.iter().filter(|claim| !claim.mine && claim.due.is_some_and(soon)).filter_map(|claim| {
         let label = [Cell::Name(claim.counterparty(book)), "by".into(), Cell::Day(claim.due?)];
         Some((label.into(), lens.value(claim.left)?))
     });
-    owed.chain(debts).collect()
+    owed.chain(debts).chain(promised).chain(upcoming).collect()
 }
 
 // ─── Everything else ────────────────────────────────────────────────────────

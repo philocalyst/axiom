@@ -16,7 +16,8 @@ use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Select, Txn};
 use crate::history::{Posting, journal_ends_by};
 use crate::lens::{Lens, Priced};
 use crate::places::path;
-use crate::table::doc_headline;
+use crate::promises::late_section;
+use crate::table::{doc_headline, purpose_cell};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// One open claim.
@@ -133,8 +134,11 @@ pub fn view<'s>(lens: Lens<'_, 's>, at: Option<Day>) -> Report<'s> {
     let claims = open(lens, holdings.iter());
     let (mine, theirs): (Vec<&Claim>, Vec<&Claim>) = claims.iter().partition(|claim| claim.mine);
     let report = Report::new(["Claims on".into(), Cell::Day(at)]).with(section(lens, "Owed to you", &mine));
-    let report = report.with(section(lens, "Owed by you", &theirs));
-    match claims.is_empty() {
+    let (report, late) =
+        (report.with(section(lens, "Owed by you", &theirs)), late_section(lens, "Late promises", |_| true));
+    let nothing = claims.is_empty() && late.rows.is_empty();
+    let report = report.with(late);
+    match nothing {
         true => report.with(Section::note_only(
             "Nothing is owed either way. A flow with `due` into a receivable place makes one.",
         )),
@@ -176,6 +180,12 @@ pub fn section<'s>(lens: Lens<'_, 's>, heading: &'static str, claims: &[&Claim])
         } else {
             Style::Normal
         }));
+        // An itemized claim shows its items, each for its own purpose.
+        let items: Vec<&Flow> = book.flows[txn.flows].iter().filter(|flow| flow.to == claim.place).collect();
+        for item in items.iter().filter(|_| items.len() > 1) {
+            let cells = [Cell::Blank, purpose_cell(book, item), Cell::amount(book, item.out)];
+            section.push(Row::new(cells).depth(1).style(Style::Muted));
+        }
     }
     if !claims.is_empty() {
         section.total(["Total".into(), Cell::Blank, Cell::base(book, worth.total)]);

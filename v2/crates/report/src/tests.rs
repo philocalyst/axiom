@@ -38,7 +38,7 @@ impl Household {
     }
 
     /// The entity called `name`: the book's name lookup is the model's, so it is found by hand.
-    fn entity(&self, name: &str) -> Id<Entity> {
+    pub(crate) fn entity(&self, name: &str) -> Id<Entity> {
         self.book.entities.iter().find(|(_, entity)| self.book.name(entity.path) == name).map(|(id, _)| id).unwrap()
     }
 
@@ -46,16 +46,16 @@ impl Household {
         Context::new(&self.book, &self.run)
     }
 
-    fn report_for(&self, query: Query, whose: Option<&str>) -> Result<Report<'static>, axiom_core::Diagnostic> {
+    pub(crate) fn report_for(&self, query: Query, whose: Option<&str>) -> Result<Report<'static>, axiom_core::Diagnostic> {
         let whose = whose.map_or_else(Whose::default, |name| Whose::of(&self.book, self.entity(name)));
         crate::views(Lens::new(&self.cx(), &whose, self.run.today), &query)
     }
 
-    fn why(&self, found: Found) -> Report<'static> {
+    pub(crate) fn why(&self, found: Found) -> Report<'static> {
         crate::why::explain(Lens::new(&self.cx(), &Whose::default(), self.run.today), found)
     }
 
-    fn report(&self, query: Query) -> Report<'static> {
+    pub(crate) fn report(&self, query: Query) -> Report<'static> {
         self.report_for(query, None).expect("the query resolves")
     }
 }
@@ -227,7 +227,7 @@ impl Cast {
     }
 }
 
-fn kind(name: Sym) -> Kind {
+pub(crate) fn kind(name: Sym) -> Kind {
     Kind {
         name,
         sort: Sort::Entity,

@@ -13,6 +13,7 @@ mod budget;
 mod calendar;
 mod claims;
 mod closings;
+mod contracts;
 mod flow;
 mod forecast;
 mod gains;
@@ -22,6 +23,7 @@ mod lens;
 mod limits;
 mod lots;
 mod places;
+mod promises;
 mod register;
 mod resolve;
 mod synth;
@@ -33,6 +35,8 @@ mod why;
 mod source_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod v4_tests;
 
 use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Ratio, Span};
 use axiom_engine::Run;
@@ -62,6 +66,9 @@ pub enum Query<'a> {
     /// What others owe and what is owed to them: open claims with their
     /// counterparty, age and due day.
     Claims { at: Option<Day> },
+    /// Every promise: its terms today, what falls due next, how many were kept,
+    /// what is late and whom it blames, and what a loan still owes.
+    Contracts { at: Option<Day> },
     /// Tallies and obligations per system for a year.
     Tax { year: Option<i32> },
     /// Every disposal in a year: acquired, sold, proceeds, basis, gain, term.
@@ -212,6 +219,7 @@ fn views<'s>(lens: Lens<'_, 's>, query: &Query) -> Result<Report<'s>, Diagnostic
         Query::Budget { at, by } => Ok(budget::view(lens, *at, *by)),
         Query::Limits { year } => Ok(limits::view(lens, *year)),
         Query::Claims { at } => Ok(claims::view(lens, *at)),
+        Query::Contracts { at } => Ok(contracts::view(lens, *at)),
         Query::Tax { year } => Ok(tax::view(lens, *year)),
         Query::Gains { year } => Ok(gains::view(lens, *year)),
         Query::Lots { place, at } => lots::view(lens, *place, *at),

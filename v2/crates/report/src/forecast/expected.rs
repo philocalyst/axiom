@@ -74,7 +74,7 @@ pub fn expected<'b>(lens: Lens<'b, '_>) -> Vec<Expectation<'b>> {
     let mut expected = from_plans(book, run, run.today);
     let plans = expected.len();
     for habit in from_history(book, run) {
-        if !expected[..plans].iter().any(|plan| plan.describes(&habit)) && !has_ended(book, run, &habit) {
+        if !expected[..plans].iter().any(|plan| plan.describes(&habit)) && !has_ended(lens, &habit) {
             expected.push(habit);
         }
     }
@@ -176,13 +176,9 @@ fn spread(series: &[(Day, Qty)]) -> i64 {
 /// A habit whose reason is gone: an account it moves value through holds
 /// nothing, and nothing else has touched it for two periods (a loan repaid, a
 /// prepaid cost used up, a claim settled).
-fn has_ended(book: &Book, run: &Run, habit: &Expectation) -> bool {
-    let (every, flow) = (habit.schedule.every, habit.template);
-    let since = run.today.add_days(-2 * (every.months * 31 + every.days));
-    let held = |place, unit| {
-        let found = run.holdings.binary_search_by_key(&(place, unit), |holding| (holding.place, holding.unit));
-        found.map_or(Qty::ZERO, |at| run.holdings[at].qty())
-    };
+fn has_ended(lens: Lens, habit: &Expectation) -> bool {
+    let (book, every, flow) = (lens.book, habit.schedule.every, habit.template);
+    let since = lens.run.today.add_days(-2 * (every.months * 31 + every.days));
     // A basis end moves nothing through its account, so an empty account says nothing there.
     let ends = [(End::From, flow.from, flow.out.unit), (End::To, flow.to, flow.arrive.unit)];
     let on_sheet = |&(end, place, _): &(End, _, _)| {
@@ -191,7 +187,7 @@ fn has_ended(book: &Book, run: &Run, habit: &Expectation) -> bool {
     ends.into_iter().filter(on_sheet).any(|(_, place, unit)| {
         let recent = book.touching[place].iter().rev().map(|&id| &book.flows[id]);
         let mut others = recent.take_while(|other| other.day >= since);
-        held(place, unit).is_zero()
+        lens.held(place, unit).is_zero()
             && !others.any(|other| (other.from, other.to, other.payee) != (flow.from, flow.to, flow.payee))
     })
 }
@@ -247,12 +243,16 @@ mod tests {
             out: template.out,
             arrive: template.arrive,
         };
-        assert!(!has_ended(&house.book, &house.run, &habit), "3,000 is still owed");
+        let ended = |house: &crate::tests::Household, habit: &Expectation| {
+            let (cx, whose) = (house.cx(), crate::lens::Whose::default());
+            has_ended(Lens::new(&cx, &whose, house.run.today), habit)
+        };
+        assert!(!ended(&house, &habit), "3,000 is still owed");
         house.run.holdings.retain(|holding| holding.place != clients);
-        assert!(has_ended(&house.book, &house.run, &habit), "settled, and quiet for two months");
+        assert!(ended(&house, &habit), "settled, and quiet for two months");
         // Recent activity elsewhere on the account keeps it alive.
         house.run.today = day(2026, 4, 10);
-        assert!(!has_ended(&house.book, &house.run, &habit), "an invoice was written on it this month");
+        assert!(!ended(&house, &habit), "an invoice was written on it this month");
     }
 
     /// The house holds no dollars, and depreciation never moves any through it:

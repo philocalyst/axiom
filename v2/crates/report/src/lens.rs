@@ -50,6 +50,12 @@ impl<'b, 's> Context<'b, 's> {
         }
     }
 
+    /// What a place holds of a commodity at the end of the run.
+    pub fn held(&self, place: Id<Place>, unit: Id<Commodity>) -> Qty {
+        let found = self.run.holdings.binary_search_by_key(&(place, unit), |holding| (holding.place, holding.unit));
+        found.map_or(Qty::ZERO, |at| self.run.holdings[at].qty())
+    }
+
     /// Whether a law reports a budget.
     pub fn is_budget(&self, law: Id<Law>) -> bool {
         let law = &self.book.laws[law];

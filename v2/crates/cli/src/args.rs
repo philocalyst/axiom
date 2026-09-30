@@ -102,6 +102,7 @@ enum Verb {
     Budget,
     Limits,
     Claims,
+    Contracts,
     Tax,
     Gains,
     Lots,
@@ -178,6 +179,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     command(Verb::Budget, "budget", Operands::Optional("MONTH|YEAR"), &[], "spending against each budget"),
     command(Verb::Limits, "limits", Operands::Optional("YEAR"), &[], "every cap and budget: counted, limit, room left"),
     command(Verb::Claims, "claims", Operands::None, &[Opt::At], "what is owed to you and by you, and how old"),
+    command(Verb::Contracts, "contracts", Operands::None, &[Opt::At], "every promise: terms, next due, kept, late"),
     command(Verb::Tax, "tax", Operands::Optional("YEAR"), &[], "what you owe, line by line"),
     command(Verb::Gains, "gains", Operands::Optional("YEAR"), &[], "each disposal: acquired, sold, proceeds, gain"),
     command(Verb::Lots, "lots", Operands::Optional("PLACE"), &[Opt::At], "what you hold: cost, value, and gain"),
@@ -283,6 +285,7 @@ fn build<'a>(spec: &CommandSpec, operands: &[&'a str], values: &Values<'a>) -> R
         }
         Verb::Limits => Query::Limits { year: year()? },
         Verb::Claims => Query::Claims { at: day(At)? },
+        Verb::Contracts => Query::Contracts { at: day(At)? },
         Verb::Tax => Query::Tax { year: year()? },
         Verb::Gains => Query::Gains { year: year()? },
         Verb::Lots => Query::Lots { place: first, at: day(At)? },
@@ -520,6 +523,8 @@ mod tests {
         assert!(matches!(query_of(&["limits", "2026"]).0, Query::Limits { year: Some(2026) }));
         assert!(matches!(query_of(&["gains", "2025"]).0, Query::Gains { year: Some(2025) }));
         assert!(matches!(query_of(&["claims", "--at", "2026-06-01"]).0, Query::Claims { at: Some(_) }));
+        assert!(matches!(query_of(&["contracts", "--at", "2026-06-01"]).0, Query::Contracts { at: Some(_) }));
+        assert!(matches!(query_of(&["contracts"]).0, Query::Contracts { at: None }));
         let (lots, whose) = query_of(&["lots", "brokerage", "--at", "2026-06-01", "--for", "me"]);
         assert!(matches!(lots, Query::Lots { place: Some("brokerage"), at: Some(_) }));
         assert_eq!(whose, Some("me"));
