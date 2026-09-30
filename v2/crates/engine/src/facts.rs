@@ -8,8 +8,8 @@
 
 use axiom_core::{Days, Map, Severity, Sym};
 use axiom_model::{
-    BinOp, Book, Cap, Dir, Effect as LawEffect, Func, Law, NodeId, Op, Rule, StepKind, Subject, Trigger, Ty, Value, Var,
-    Window,
+    BinOp, Book, Cap, Dir, Effect as LawEffect, Func, Law, NodeId, Op, Rule, StepKind, Subject, Trigger, Ty, Value,
+    Var, Window,
 };
 
 use crate::Bound;

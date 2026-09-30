@@ -9,8 +9,8 @@
 //! [`Ledger`] borrows it, a fork copies only the world, the clock and the
 //! records, and any number of threads can fold from it at once.
 
-use axiom_core::{Day, Diagnostic, Groups, Id, Map, Set};
-use axiom_model::{Book, Commodity, Entity, Flow, Place, Rule, Subject};
+use axiom_core::{Day, Diagnostic, Groups, Id, Map, Set, Sym};
+use axiom_model::{Book, Commodity, Entity, Flow, Kind, Place, Rule, Subject};
 
 use crate::eval::V3;
 use crate::events::{self, Events};
@@ -22,6 +22,30 @@ use crate::state::World;
 use crate::timeline::{self, Schedule};
 use crate::totals::Watch;
 use crate::{Options, Run, infer};
+
+/// The names the fold and the views look for by spelling, resolved once: what
+/// a law reads (`born`), what marks a currency, a loan's term (`maturity`) and
+/// the law a `budget` line compiles to. Each is `None` in a book that never
+/// mentions it, and is compared as a `Sym` or an id, never as text.
+#[derive(Clone, Copy, Debug)]
+pub struct Known {
+    pub born: Option<Sym>,
+    pub maturity: Option<Sym>,
+    pub budget: Option<Sym>,
+    pub currency: Option<Id<Kind>>,
+}
+
+impl Known {
+    pub fn of(book: &Book) -> Known {
+        let name = |text| book.names.get(text);
+        Known {
+            born: name("born"),
+            maturity: name("maturity"),
+            budget: name("budget"),
+            currency: book.kind("currency").ok(),
+        }
+    }
+}
 
 /// What the solve pass decided about a book. Immutable and `Sync`.
 pub struct Plan<'b, 's> {
@@ -36,6 +60,7 @@ pub struct Plan<'b, 's> {
     pub(crate) unsolved: Map<(Id<Place>, Id<Commodity>), (Day, Id<Flow>)>,
     /// What reading the events and solving reported: every ledger starts with them.
     problems: Vec<Diagnostic>,
+    pub(crate) known: Known,
     /// By law id: what is true of the law whatever runs it.
     pub(crate) laws: Box<[LawFacts]>,
     /// Some list of rules brings one law to one subject twice: `fire` must not run it twice.
@@ -83,6 +108,7 @@ impl<'b, 's> Plan<'b, 's> {
             amounts: solution.amounts,
             unsolved: blocked,
             problems,
+            known: Known::of(book),
             repeats: repeats(book),
             readers: facts::readers(book, &laws),
             watch: Watch::of(book, &laws),
@@ -100,6 +126,11 @@ impl<'b, 's> Plan<'b, 's> {
 
     pub fn book(&self) -> &'b Book<'s> {
         self.book
+    }
+
+    /// The names looked up by spelling, resolved once.
+    pub fn known(&self) -> Known {
+        self.known
     }
 
     /// A ledger at the day before the first fact, ready to fold.

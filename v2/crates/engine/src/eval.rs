@@ -415,7 +415,7 @@ impl<'a, 's> Machine<'a, 's> {
 
     /// From the entity's `born` date to the day of evaluation.
     fn age(&self, entity: Id<Entity>) -> Value {
-        let born = self.book().names.get("born").expect("a law that reads `.age` makes the model intern `born`");
+        let born = self.env.plan.known.born.expect("a law that reads `.age` makes the model intern `born`");
         match self.book().entities[entity].props.iter().find(|p| p.name == born) {
             Some(Prop { value: Value::Day(day), .. }) => Value::Span(self.ctx.day.since(*day)),
             _ => Value::Fault(Fault::Unset(born)),

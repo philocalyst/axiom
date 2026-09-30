@@ -30,6 +30,18 @@ fn diagnostic<'a>(run: &'a Run, code: &str) -> &'a Diagnostic {
 }
 
 #[test]
+fn well_known_names_resolve_once_and_are_absent_where_the_book_never_says_them() {
+    let book = Fixture::new().book();
+    let known = Plan::new(&book).known();
+    assert!(known.born.is_none() && known.maturity.is_none() && known.budget.is_none() && known.currency.is_none());
+    let mut f = Fixture::new();
+    let born = f.sym("born");
+    let book = f.book();
+    let known = Plan::new(&book).known();
+    assert_eq!((known.born, known.maturity), (Some(born), None), "only what the book interned");
+}
+
+#[test]
 fn an_empty_book_folds_to_nothing() {
     let book = Fixture::new().book();
     let plan = Plan::new(&book);

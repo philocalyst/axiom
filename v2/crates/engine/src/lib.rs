@@ -59,7 +59,7 @@ use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
 use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn, Waive};
 
 pub use ledger::Ledger;
-pub use plan::{Plan, run};
+pub use plan::{Known, Plan, run};
 
 /// How to run.
 #[derive(Clone, Copy, Debug)]
