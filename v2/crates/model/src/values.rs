@@ -16,7 +16,7 @@ impl Value {
             Value::Empty => Ty::Empty,
             Value::Bool(_) => Ty::Bool,
             Value::Num(_) => Ty::Num,
-            Value::Amount(_) => Ty::Amount,
+            Value::Amount(_) => Ty::AMOUNT,
             Value::Day(_) => Ty::Day,
             Value::Span(_) => Ty::Span,
             Value::Text(_) => Ty::Text,
@@ -39,7 +39,7 @@ impl Value {
 /// Whether a value of type `found` may stand where `wanted` is expected:
 /// equal types, and `empty`, which is the zero of every amount.
 pub(crate) fn fits(wanted: Ty, found: Ty) -> bool {
-    wanted == found || matches!((wanted, found), (Ty::Amount, Ty::Empty) | (Ty::Empty, Ty::Amount))
+    wanted == found || matches!((wanted, found), (Ty::Amount(_), Ty::Empty) | (Ty::Empty, Ty::Amount(_)))
 }
 
 /// What an expression is, for messages: `an amount`, `a date`.
@@ -79,7 +79,7 @@ impl<'s> World<'s> {
             ExprKind::Amount(amount) => match amount.unit() {
                 Some(unit) => {
                     let unit = self.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) })?;
-                    (Value::Amount(self.amount(amount.num(), unit, expr.loc)?), Ty::Amount)
+                    (Value::Amount(self.amount(amount.num(), unit, expr.loc)?), Ty::AMOUNT)
                 }
                 None => (Value::Empty, Ty::Empty),
             },

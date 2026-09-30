@@ -131,7 +131,7 @@ const POLICIES: [(&str, Policy); 4] =
 
 const TYPES: [(&str, Ty); 12] = [
     ("date", Ty::Day),
-    ("amount", Ty::Amount),
+    ("amount", Ty::AMOUNT),
     ("number", Ty::Num),
     ("percent", Ty::Num),
     ("span", Ty::Span),

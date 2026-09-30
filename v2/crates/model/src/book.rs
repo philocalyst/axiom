@@ -6,11 +6,14 @@
 //! place under that one", "is this kind a 401k", and "does this jurisdiction
 //! include that one" are all interval tests.
 
-use axiom_core::{Arena, Day, Days, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Timeline, Tree, calendar};
+use axiom_core::{
+    Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Timeline, Tree, calendar,
+};
 
-use crate::journal::{Assert, Event, Flow, Plan, Prices, Split, Txn};
-use crate::law::{Law, Rules, Ty, Value};
+use crate::journal::{Assert, Event, Filed, Flow, Measure, Plan, Prices, Purposed, Reading, Split, Txn};
+use crate::law::{Law, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
+use crate::sync::{Format, Pattern, Source};
 
 pub use axiom_core::{Cadence, On, Period};
 pub use axiom_syntax::{EventState, Policy};
@@ -35,6 +38,8 @@ pub struct Book<'s> {
     pub assets: Arena<Asset>,
     /// Promises of flows: `phone with mint`, `mortgage with rocket`.
     pub contracts: Arena<Contract>,
+    /// `also ITEM | FLOW`: what every matching flow implies, declared once.
+    pub also: Arena<Also>,
 
     pub laws: Arena<Law>,
     pub rules: Rules,
@@ -43,6 +48,11 @@ pub struct Book<'s> {
     pub params: Arena<Param>,
     pub schedules: Arena<Schedule>,
     pub codes: Vec<CodeRule>,
+    /// Every pattern that recognizes a memo: named ones (`pattern ach = …`) and
+    /// the `known-as` of things.
+    pub patterns: Arena<Pattern>,
+    /// `format NAME`: how a source's records read.
+    pub formats: Arena<Format>,
 
     pub txns: Arena<Txn>,
     /// Sorted by day; within a day, in declaration order (files in path order,
@@ -57,6 +67,12 @@ pub struct Book<'s> {
     pub prices: Prices,
     /// Sorted by day, then declaration order.
     pub splits: Vec<Split>,
+    /// Work done and things used, sorted by day, then declaration order.
+    pub measures: Arena<Measure>,
+    /// Named values, sorted by code, then day.
+    pub readings: Vec<Reading>,
+    /// Returns as filed, in the order they were written.
+    pub filed: Vec<Filed>,
     /// v3's plans. The v3 model still fills it; the v4 model leaves it empty,
     /// and it is deleted once nothing reads it.
     pub plans: Arena<Plan>,
@@ -227,9 +243,11 @@ pub struct Place {
     pub liquidity: Option<Span>,
     pub opened: Option<Day>,
     pub closed: Option<Day>,
-    /// `known-as "TRADER JOE*"`: globs matched against statement memos, in any
-    /// case (LANGUAGE §13).
-    pub known_as: Box<[Sym]>,
+    /// `owner me 50%, jordan 50%`: who owns it, in what shares. Empty for one
+    /// owner, which is `owner`.
+    pub shares: Box<[Share]>,
+    /// `known-as PATTERN, …`: what recognizes it in a statement's memo (§14).
+    pub known_as: Box<[Id<Pattern>]>,
     /// Own properties first, then defaults inherited from the kind chain.
     pub props: Props,
     pub doc: Option<Sym>,
@@ -273,12 +291,31 @@ pub struct Entity {
     pub owner: Option<Id<Entity>>,
     /// `of studio` on a client: what it pays is that owner's.
     pub client_of: Option<Id<Entity>>,
-    /// `known-as "TRADER JOE*"`: globs matched against statement memos, in any
-    /// case (LANGUAGE §13).
-    pub known_as: Box<[Sym]>,
+    /// `owner me 60%, theo 40%` on a business: its tallies reach them in these
+    /// shares. Empty for a sole owner (`owner`).
+    pub owned_by: Box<[Share]>,
+    /// Its own `currency`, else its residence's system's, else the book's base:
+    /// resolved at build time.
+    pub currency: Id<Commodity>,
+    /// `citizen SYSTEM`: taxed by these wherever it lives.
+    pub citizen: Box<[Id<System>]>,
+    /// When a claim is income or spending.
+    pub books: Books,
+    /// `known-as PATTERN, …`: what recognizes it in a statement's memo (§14).
+    pub known_as: Box<[Id<Pattern>]>,
     pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Option<Loc>,
+}
+
+/// `books cash|accrual`: when a claim counts as income or spending.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Books {
+    /// When it is settled.
+    #[default]
+    Cash,
+    /// When it is due.
+    Accrual,
 }
 
 /// `lives us/ca from 2025-01-01 until 2025-06-30`: inclusive, and open-ended
@@ -442,14 +479,20 @@ pub enum PurposeRoot {
     /// Value that joins something they keep: an improvement, a purchase of a
     /// thing. A flow of a capital purpose with an object adds a part to it.
     Capital,
+    /// What only passes through the owners: a gift received, tax withheld, a
+    /// distribution, a reimbursement.
+    Transfer,
 }
 
-/// `business 60% for studio`: that share of each flow is borne (or, for
-/// income, earned) by that owner.
+/// `share 60% for studio`: that share of each flow. A weight is resolved to a
+/// rate at build time; `measure` keeps what it was written as, for `why`
+/// (`120 SQFT` of `1,000 SQFT`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Share {
     pub rate: Ratio,
-    pub owner: Id<Entity>,
+    /// An owner bears it (an allocation); a party owes it (a claim).
+    pub entity: Id<Entity>,
+    pub measure: Option<(Amount, Amount)>,
     pub loc: Loc,
 }
 
@@ -463,6 +506,9 @@ pub struct Asset {
     pub place: Id<Place>,
     /// Its own commodity: one unit, precision 0, named after it.
     pub unit: Id<Commodity>,
+    /// `part of building`: a unit of it, a room of it. What is `of` the whole is
+    /// shared among its parts by their measures (`area`), which are props.
+    pub part_of: Option<Id<Asset>>,
     pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Loc,
@@ -500,26 +546,83 @@ pub struct Contract {
 pub struct Terms {
     /// `monthly` is one month, `twice monthly` is `TwiceMonthly`, `every 2w` 14 days.
     pub every: Cadence,
-    /// `on 15, last`: the days of the period each occurrence lands on.
+    /// Several days are each due (`yearly on 04-15, 06-15, 09-15, 01-15`).
     pub on: Box<[On]>,
     /// Occurrences step from here: the contract's first day, or the day a
     /// statement changed the cadence.
     pub anchor: Day,
     /// One occurrence's flows, dated `anchor`. An occurrence re-dates a copy,
-    /// with the journal's overrides. Empty while waived: nothing is expected.
+    /// with the journal's overrides. An item reading an input the occurrence
+    /// does not state is left out; an input it does state is bound for that
+    /// occurrence. Empty while waived: nothing is expected.
     pub template: Box<[Flow]>,
+    /// `input water USD`: names occurrences may state (`water = 155.00 USD`).
+    pub inputs: Box<[Input]>,
     /// `about`: each occurrence states its own amount; the template's is the
     /// forecast's estimate, and promises do not compare amounts.
     pub estimate: bool,
-    /// `covers 1y`: each occurrence is recognized over this span from its day.
-    pub covers: Option<Span>,
+    /// `due 5d else + 5% #late-fee`.
+    pub due: Option<Deadline>,
+    /// How late an occurrence may come and still keep its due day. Default:
+    /// half a cadence.
+    pub grace: Span,
+    /// `for last month`: each occurrence recognized over a period relative to
+    /// its day.
+    pub period: Option<Relative>,
+    pub covers: Option<Coverage>,
+    /// `prorated`: an occurrence that starts or ends inside its period is that
+    /// share of it, by days.
+    pub prorated: bool,
+    /// `rising 3% yearly`, `indexed to cpi yearly`.
+    pub escalation: Option<Escalation>,
     pub shares: Box<[Share]>,
-    /// `escrow 410 USD into escrow`: added to each occurrence.
-    pub escrow: Option<(Amount, Id<Place>)>,
+    /// `also …` lines of this contract.
+    pub also: Box<[Id<Also>]>,
     /// A loan's yearly rate while these terms hold.
     pub rate: Option<Ratio>,
     /// The statement that set these terms; `None` for the declaration's.
     pub change: Option<Change>,
+}
+
+/// A name an occurrence may state: `water = 155.00 USD`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Input {
+    pub name: Sym,
+    pub unit: Option<Id<Commodity>>,
+    pub loc: Loc,
+}
+
+/// A deadline after the due day, and what its passing adds.
+#[derive(Clone, PartialEq, Debug)]
+pub struct Deadline {
+    pub after: Span,
+    /// The `else` item, compiled like a template item; `None` if the deadline
+    /// only makes the claim late.
+    pub otherwise: Option<Box<Flow>>,
+}
+
+/// `for last month|last quarter|last year`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Relative {
+    Last(Period),
+    LastQuarter,
+}
+
+/// `covers the month` (the calendar period containing the due day) or
+/// `covers 6m` (a span from it).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Coverage {
+    Calendar(Period),
+    Quarter,
+    Span(Span),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Escalation {
+    /// `rising 3% yearly`: from each anniversary of `Contract.days.first()`.
+    Rising(Ratio),
+    /// `indexed to cpi yearly`: scaled by the param's ratio between anniversaries.
+    Indexed(Id<Param>),
 }
 
 impl Terms {
@@ -568,6 +671,77 @@ pub struct Loan {
     pub asset: Option<Id<Asset>>,
     /// The owner's debt to the party: a `Tab`, `Debt`-class place.
     pub debt: Id<Place>,
+    /// `resets yearly from 2029-03-01 to sofr + 2.75% cap 2% life 5%`.
+    pub resets: Option<Reset>,
+    /// What a flow to the contract does: the default `Shortens`.
+    pub prepay: Prepay,
+}
+
+/// A loan's rate follows an index.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Reset {
+    pub every: Span,
+    pub from: Day,
+    pub index: Id<Param>,
+    pub margin: Ratio,
+    /// Largest change at one reset, and over the life, as rates.
+    pub cap: Option<Ratio>,
+    pub life: Option<Ratio>,
+}
+
+/// What a flow to a loan's contract does.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Prepay {
+    /// The loan ends sooner and the payment stays.
+    #[default]
+    Shortens,
+    /// The payment is lowered.
+    Recasts,
+}
+
+/// `also ITEM | FLOW [when EXPR]` (LANGUAGE §10): what every matching flow
+/// implies, declared once. Escrow and an employer's match are `also` lines.
+pub struct Also {
+    pub on: AlsoOn,
+    pub what: Implied,
+    /// Compiled like a law's `when`: a node of `law`.
+    pub when: Option<NodeId>,
+    /// The expressions (amounts, `when`) live in this law's node arena, with no
+    /// steps: one expression language for laws and declarations.
+    pub law: Id<Law>,
+    pub purpose: Option<Purposed>,
+    pub description: Option<Sym>,
+    pub loc: Loc,
+}
+
+/// What an `also` was written under.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AlsoOn {
+    Contract(Id<Contract>),
+    Entity(Id<Entity>),
+    Kind(Id<Kind>),
+    Purpose(Id<Purpose>),
+}
+
+/// What an `also` implies.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Implied {
+    /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow, between its ends.
+    Item { sign: Sign, amount: NodeId },
+    /// `lumen -> retirement 50% of …`, `-> escrow 410 USD`: a flow of its own.
+    /// `None` ends mean the implying flow's own ends (`issuer -> self`).
+    Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: NodeId },
+}
+
+/// How a line item bears on the flow it is under (LANGUAGE §3).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Sign {
+    /// Carved out of the header's amount.
+    Carve,
+    /// Comes on top of it.
+    Add,
+    /// Taken off it.
+    Less,
 }
 
 /// `match 50% of retirement up to 6%`.
@@ -593,6 +767,9 @@ pub struct Budget {
     /// headroom and `why` treat a budget as every other cap. Its `Law::budget`
     /// points back here.
     pub law: Id<Law>,
+    /// `funded from HOLDING into HOLDING`: its limit moves each window into
+    /// money held for it, which what the purpose spends is drawn from first.
+    pub funded: Option<(Id<Place>, Id<Place>)>,
     pub loc: Loc,
 }
 
@@ -613,14 +790,29 @@ pub struct System {
     pub path: Sym,
     /// Top-level laws, which govern residents and every place they own.
     pub laws: Box<[Id<Law>]>,
+    /// `currency UNIT`: what its laws count in.
+    pub currency: Option<Id<Commodity>>,
+    /// `rates POLICY`: how it converts.
+    pub rates: Option<RatePolicy>,
     pub doc: Option<Sym>,
     /// `None` for an ancestor implied by a deeper path.
     pub loc: Option<Loc>,
 }
 
+/// How a system converts between commodities.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RatePolicy {
+    /// The day's price.
+    Spot,
+    /// A param's rates, such as the IRS's yearly averages.
+    Param(Id<Param>),
+}
+
 /// `param limit`: values by time and name keys.
 pub struct Param {
     pub name: Sym,
+    /// `param mileage-rate USD/MI`: what its values are counted in.
+    pub unit: Option<Dim<Id<Commodity>>>,
     pub system: Option<Id<System>>,
     /// Sorted by names, then `since`.
     pub rows: Box<[ParamRow]>,
@@ -653,6 +845,8 @@ pub struct Bracket {
 pub struct CodeRule {
     pub pattern: Sym,
     pub on: Box<[CodeScope]>,
+    /// `known-as PATTERN`: how the code appears in memos (§14).
+    pub known_as: Box<[Id<Pattern>]>,
     pub loc: Loc,
 }
 
@@ -660,67 +854,6 @@ pub struct CodeRule {
 pub enum CodeScope {
     Places(Sym),
     Kind(Id<Kind>),
-}
-
-/// `sync NAME` (LANGUAGE §13): a command whose output Axiom reads, and where
-/// what it recognizes goes. Not the [`crate::Source`] that `build` takes, a
-/// parsed file.
-#[derive(Clone, Copy, Debug)]
-pub struct Source {
-    pub name: Sym,
-    /// The command, with `{since}`, `{today}`, `{units}` and `{year}` unexpanded.
-    pub run: Sym,
-    pub sink: Sink,
-    pub doc: Option<Sym>,
-    pub loc: Loc,
-}
-
-/// Where a source's facts go.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Sink {
-    /// A sync named after an account: its records, reconciled into the
-    /// journal. `csv: None` means the command prints Axiom.
-    Feed { account: Id<Place>, csv: Option<Csv> },
-    /// `into PATH`: Axiom text, merged into that file (`{year}` splits it).
-    File(Sym),
-    /// `into param NAME`: rows merged into that param.
-    Param(Id<Param>),
-    /// Neither: Axiom statements (invoices, bills) into the journal.
-    Journal,
-}
-
-/// How the columns of a statement export read.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Csv {
-    pub date: Column,
-    /// `"MM/DD/YYYY"`; ISO when absent.
-    pub date_format: Option<Sym>,
-    pub amount: Money,
-    pub memo: Option<Column>,
-    pub balance: Option<Column>,
-    pub pending: Option<Column>,
-}
-
-/// How an export writes what moved.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Money {
-    /// Money into the account is positive, unless the export is `flipped`.
-    Signed {
-        column: Column,
-        flipped: bool,
-    },
-    Split {
-        debit: Column,
-        credit: Column,
-    },
-}
-
-/// A column of an export.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Column {
-    Header(Sym),
-    /// 1-based, as written.
-    Index(u16),
 }
 
 /// A quantity of one commodity. 16 bytes, `Copy`.

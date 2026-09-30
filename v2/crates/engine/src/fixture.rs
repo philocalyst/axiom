@@ -5,7 +5,7 @@
 //! laws and rules are added by the test. Flows must be added in day order (the
 //! book's contract), and `book()` assembles the tables the engine reads.
 
-use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Run, Sym, Tree};
+use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Run, Severity, Sym, Tree};
 use axiom_model::*;
 
 /// The days from `first` to `last`, as day numbers.
@@ -67,6 +67,10 @@ impl Fixture {
             member: None,
             owner: None,
             client_of: None,
+            owned_by: Box::new([]),
+            currency: Id::new(0),
+            citizen: Box::new([]),
+            books: Books::Cash,
             known_as: Box::new([]),
             props: Box::new([]),
             doc: None,
@@ -94,6 +98,7 @@ impl Fixture {
             liquidity: None,
             opened: None,
             closed: None,
+            shares: Box::new([]),
             known_as: Box::new([]),
             props: Box::new([]),
             doc: None,
@@ -461,12 +466,15 @@ impl Fixture {
             commodities: self.commodities,
             assets: Arena::new(),
             contracts: Arena::new(),
+            also: Arena::new(),
             laws: self.laws,
             rules,
             budgets: Arena::new(),
             params: Arena::new(),
             schedules: Arena::new(),
             codes: Vec::new(),
+            patterns: Arena::new(),
+            formats: Arena::new(),
             txns,
             flows,
             touching,
@@ -474,6 +482,9 @@ impl Fixture {
             events: self.events,
             prices: Prices::default(),
             splits: self.splits,
+            measures: Arena::new(),
+            readings: Vec::new(),
+            filed: Vec::new(),
             plans: Arena::new(),
             sources: Vec::new(),
             lookup: Default::default(),
@@ -565,17 +576,17 @@ impl LawBuilder {
     }
 
     pub fn require(self, cond: NodeId, message: Option<Sym>) -> LawBuilder {
-        self.step(StepKind::Require { cond, otherwise: None, message, warn: false })
+        self.step(StepKind::Require { cond, otherwise: Box::default(), message, severity: Severity::Error })
     }
 
     /// `require cond else owe amount to who as name`
     pub fn require_else_owe(self, cond: NodeId, amount: NodeId, to: Id<Entity>, name: Sym) -> LawBuilder {
-        let otherwise = Some(Effect::Owe { amount, to, due: None, name });
-        self.step(StepKind::Require { cond, otherwise, message: None, warn: false })
+        let otherwise = Box::new([Effect::Owe { amount, to, due: None, name }]);
+        self.step(StepKind::Require { cond, otherwise, message: None, severity: Severity::Error })
     }
 
     pub fn warn(self, cond: NodeId) -> LawBuilder {
-        self.step(StepKind::Require { cond, otherwise: None, message: None, warn: true })
+        self.step(StepKind::Require { cond, otherwise: Box::default(), message: None, severity: Severity::Warning })
     }
 
     pub fn when(self, cond: NodeId) -> LawBuilder {
@@ -598,6 +609,8 @@ impl LawBuilder {
             system: None,
             trigger: self.trigger,
             budget: None,
+            overrides: None,
+            rank: Rank(0),
             steps: self.steps.into(),
             nodes: self.nodes.into(),
             loc: Loc::new(FileId(1), 0, 1000),

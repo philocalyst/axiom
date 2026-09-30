@@ -15,6 +15,7 @@
 pub mod book;
 pub mod journal;
 pub mod law;
+pub mod sync;
 
 mod collect;
 mod cx;

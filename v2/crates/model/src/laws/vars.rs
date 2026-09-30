@@ -99,7 +99,7 @@ impl Var {
     /// Its type, given what `self` is in this law.
     pub(crate) fn ty(self, subject: Ty) -> Ty {
         match self {
-            Var::Amount | Var::Gain | Var::Proceeds | Var::Basis | Var::Balance | Var::Remaining => Ty::Amount,
+            Var::Amount | Var::Gain | Var::Proceeds | Var::Basis | Var::Balance | Var::Remaining => Ty::AMOUNT,
             Var::From | Var::To => Ty::Place,
             Var::Payee | Var::Owner => Ty::Entity,
             Var::Date => Ty::Day,

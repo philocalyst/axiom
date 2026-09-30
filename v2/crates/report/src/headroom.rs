@@ -5,7 +5,7 @@
 //! breaks.
 
 use axiom_core::calendar::Window as Calendar;
-use axiom_core::{Day, Days, Id, Map, Qty, Ratio, Set};
+use axiom_core::{Day, Days, Id, Map, Qty, Ratio, Set, Severity};
 use axiom_engine::Headroom;
 use axiom_model::{Amount, BinOp, Book, Law, Op, Period, StepKind, Subject, Window};
 
@@ -28,7 +28,7 @@ pub fn current(lens: Lens, from: Day, to: Day) -> Vec<Headroom> {
         let law = &book.laws[rule.law];
         let (Subject::Place(place), Some(cap)) = (rule.subject, law.cap()) else { continue };
         let (step, limit) = (0, cap.limit);
-        let warn = matches!(law.steps[0].kind, StepKind::Require { warn: true, .. });
+        let warn = matches!(law.steps[0].kind, StepKind::Require { severity: Severity::Warning, .. });
         let windows = match cap.window {
             Window::Month => &months,
             Window::Year => &years,
