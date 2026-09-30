@@ -14,14 +14,16 @@
 //! | `parser`    | parser state and the helpers every rule shares             |
 //! | `structure` | item dispatch, one-line directives, indented blocks        |
 //! | `journal`   | dated lines: flows and what statements are about, openings |
-//! | `statement` | statements: subject, predicate, `until`, description, codes |
+//! | `statement` | statements: subject, verb, what each verb takes            |
 //! | `refs`      | typed indices: which piece of the file, and where in it    |
 //! | `dates`     | dates in full or short of what the folder or heading gives |
-//! | `flow`      | flow headers, ends, legs, tails, lot selectors             |
-//! | `contract`  | contracts: schedule, properties, template legs             |
-//! | `amount`    | amounts, and what is said about the ones that are wrong    |
-//! | `decl`, `law` | declarations, params, syncs, laws                        |
+//! | `flow`      | flow headers, ends, legs, items, tails, lot selectors      |
+//! | `contract`  | contracts: schedule, deadline, `also`, properties, template |
+//! | `amount`    | amounts and references, and the mistakes made writing them |
+//! | `decl`, `law` | declarations, params, laws                               |
+//! | `source`    | `sync`, `format`, `pattern` and `known-as`                 |
 //! | `expr`      | the expression grammar                                     |
+//! | `style`     | `axiom fmt`: the house style of a journal                  |
 //! | `malformed` | diagnostics for words that are not tokens                  |
 
 mod ast;
@@ -42,12 +44,14 @@ mod refs;
 mod source;
 mod statement;
 mod structure;
+mod style;
 
 #[cfg(test)]
 mod tests;
 
 pub use ast::*;
 pub use dates::MONTHS;
+pub use style::format;
 
 use std::ops::Range;
 

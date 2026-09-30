@@ -2374,6 +2374,182 @@ account food : expense
     assert_eq!((file.iter::<Decl>().count(), diags.len()), (2, 2));
 }
 
+// ─── The house style ────────────────────────────────────────────────────────
+
+/// What a file says, and nothing of how it is laid out: the tree with the places
+/// and the blanks taken out.
+fn shape(src: &str, folder: Folder) -> String {
+    let (file, diags) = crate::parse(FileId(0), src, folder);
+    assert!(diags.is_empty(), "unexpected diagnostics:\n{}", render(src, &diags));
+    let mut text = dump(&file);
+    while let Some(start) = text.find("Loc {") {
+        let end = start + text[start..].find('}').unwrap() + 1;
+        text.replace_range(start..end, "");
+    }
+    // A tab between a number and its commodity is a blank the formatter makes one, and Debug writes it `\t`.
+    text.retain(|c| !c.is_whitespace());
+    text.replace("\\t", "").replace('\\', "")
+}
+
+/// Formats `src`, which must parse without error, and checks what formatting promises.
+fn formatted(src: &str, folder: Folder) -> String {
+    let file = crate::parse(FileId(0), src, folder).0;
+    let once = crate::format(src, &file);
+    let (after, before) = (shape(&once, folder), shape(src, folder));
+    if after != before {
+        let at = after.bytes().zip(before.bytes()).position(|(a, b)| a != b).unwrap_or(after.len().min(before.len()));
+        let around = |text: &str| text[at.saturating_sub(100)..(at + 100).min(text.len())].to_string();
+        panic!("formatting changed what is said, near\n  before: {}\n  after:  {}", around(&before), around(&after));
+    }
+    let again = crate::format(&once, &crate::parse(FileId(0), &once, folder).0);
+    assert_eq!(again, once, "formatting is not idempotent");
+    // What is not a journal line is left as it was, and nothing is added or lost.
+    assert_eq!(once.lines().count(), src.lines().count());
+    once
+}
+
+#[test]
+fn the_house_style_puts_subjects_verbs_and_amounts_in_columns() {
+    let src = r#"// A month.
+
+2026-01-05 checking -> me 100 USD
+2026-01-05   me  ->   taqueria-cancun 18.50 USD  #dining   "lunch"   // cash
+2026-01-06 visa->trader-joes 84.20 USD via paypal for 2026-01 ^b ^a !
+2026-01-31 checking = 8_828.87 USD
+2026-01-31   visa =   2_333.99  USD   // owed
+2026-01-31 retirement = 58_420.18 USD via market
+
+2026-01-08 phone  47.30 USD "bill"
+2026-01-09 flat
+2026-01-10 checking -> savings 400 USD for emergency
+2026-01-11 flat now 3_050 USD monthly until 05-31 "renewed" ^promo
+2026-01-12 halcyon owes studio due 30d ^inv-1
+  3_000 USD #design "brand refresh"
+      800 USD #design "icon set"    // small
+    + 5% of ^inv-1 #tax
+2026-01-15 job
+  retirement 276.00 USD ^x #y
+  blue-shield    184.20 USD // note
+  /// documented
+  checking ...
+  dana = 5 USD
+
+opening 2026-01-01
+  checking 6_062.55 USD
+  fidelity 210 VTI basis 48_300 USD since 2021-06-01
+  condo basis 402_000 USD since 2024-02-20
+  jo owes me 600 USD due 04-01
+"#;
+    let expected = r#"// A month.
+
+2026-01-05 checking   -> me              100 USD
+2026-01-05 me         -> taqueria-cancun 18.50 USD #dining "lunch"  // cash
+2026-01-06 visa       -> trader-joes     84.20 USD ^b ^a for 2026-01 via paypal !
+2026-01-31 checking   =  8_828.87 USD
+2026-01-31 visa       =  2_333.99 USD                               // owed
+2026-01-31 retirement =  58_420.18 USD             via market
+
+2026-01-08 phone    47.30 USD "bill"
+2026-01-09 flat
+2026-01-10 checking ->   savings           400 USD for emergency
+2026-01-11 flat     now  3_050 USD monthly         until 05-31 "renewed" ^promo
+2026-01-12 halcyon  owes studio                    ^inv-1 due 30d
+  3_000 USD #design "brand refresh"
+    800 USD #design "icon set"      // small
+  + 5% of ^inv-1 #tax
+2026-01-15 job
+  retirement  276.00 USD #y ^x
+  blue-shield 184.20 USD    // note
+  /// documented
+  checking ...
+  dana     = 5 USD
+
+opening 2026-01-01
+  checking 6_062.55 USD
+  fidelity      210 VTI basis 48_300 USD since 2021-06-01
+  condo                 basis 402_000 USD since 2024-02-20
+  jo owes me 600 USD due 04-01
+"#;
+    assert_eq!(formatted(src, Folder::default()), expected);
+}
+
+#[test]
+fn formatting_keeps_what_is_not_a_journal_line_and_what_has_no_tree() {
+    // A file with an error: what parsed is laid out, the rest is left alone.
+    let src = "// kept\nbase USD\n\n2026-01-05   a ->   b 5 USD  \"x\"\n2026-01-05 a -> b 5\n\n  stray\n2026-01-06 a -> b 6 USD   #food\n";
+    let (file, diags) = parse(FileId(0), src);
+    assert!(!diags.is_empty());
+    let once = crate::format(src, &file);
+    assert_eq!(
+        once,
+        "// kept\nbase USD\n\n2026-01-05 a -> b 5 USD \"x\"\n2026-01-05 a -> b 5\n\n  stray\n2026-01-06 a -> b 6 USD #food\n"
+    );
+    // Line endings and a last line with none stay as written.
+    let src = "2026-01-05   a -> b 5 USD\r\n2026-01-06 a -> b 6 USD  // c\r\n2026-01-07  a -> b 7 USD";
+    let once = formatted(src, Folder::default());
+    assert_eq!(once, "2026-01-05 a -> b 5 USD\r\n2026-01-06 a -> b 6 USD  // c\r\n2026-01-07 a -> b 7 USD");
+    assert_eq!(formatted("", Folder::default()), "");
+    // A blank or a comment between lines makes two blocks, each as wide as it needs.
+    let once = formatted("2026-01-05 a -> b 5 USD\n// x\n2026-01-05 long-name -> b 5 USD\n", Folder::default());
+    assert_eq!(once, "2026-01-05 a -> b 5 USD\n// x\n2026-01-05 long-name -> b 5 USD\n");
+}
+
+#[test]
+fn a_tail_says_its_clauses_in_one_order() {
+    let src = "2026-01-05 a -> b 5 USD via c basis 1 USD against ^z due 30d for 2025 ^k ^j \"why\" #food of x ! \"ok\"\n";
+    let once = formatted(src, Folder::default());
+    assert_eq!(once, "2026-01-05 a -> b 5 USD #food of x \"why\" ^k ^j for 2025 due 30d against ^z via c basis 1 USD ! \"ok\"\n");
+    // A price stays with the amount, a change's span before the rest, and a spread is part of the date.
+    let src = "2026-01-05 a -> b 7 VTI ^k @ 285.70 USD #buy\n\n2026-01-05 a now 5 USD monthly ^k \"x\" until 05-31\n\n2026-01-01..2026-12-31 a -> b 5 USD ^k #food\n";
+    let once = formatted(src, Folder::default());
+    assert_eq!(
+        once,
+        "2026-01-05 a -> b 7 VTI @ 285.70 USD #buy ^k\n\n2026-01-05 a now 5 USD monthly until 05-31 \"x\" ^k\n\n2026-01-01..2026-12-31 a -> b 5 USD #food ^k\n"
+    );
+}
+
+/// Files that must format to what they say, and to themselves.
+#[test]
+fn the_sketch_the_examples_and_every_verb_format_idempotently() {
+    formatted(EXAMPLE, Folder::default());
+    formatted(STATEMENTS, Folder::default());
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/v4-sketch");
+    for path in ax_files(&root, &root) {
+        let src = std::fs::read_to_string(root.join(&path)).unwrap();
+        let folder = Folder::of(path.to_str().unwrap());
+        let once = formatted(&src, folder);
+        // Comments and blank lines are all still there, in order.
+        let others = |text: &str| -> Vec<String> {
+            text.lines().filter(|line| line.trim().is_empty() || line.trim_start().starts_with("//")).map(str::to_string).collect()
+        };
+        let comments = |text: &str| text.lines().filter(|line| line.contains("//")).count();
+        assert_eq!(comments(&once), comments(&src), "{}", path.display());
+        assert_eq!(others(&once).len(), others(&src).len(), "{}", path.display());
+    }
+}
+
+/// Whatever a damaged file leaves of its tree formats without a panic, and one
+/// that still parses formats to what it says.
+#[test]
+fn damaged_files_format_without_panicking_and_without_changing_what_they_say() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/v4-sketch");
+    let mut sources = vec![EXAMPLE.to_string(), STATEMENTS.to_string()];
+    for name in ["journal/2026/01.ax", "journal/2026/03.ax"] {
+        sources.push(std::fs::read_to_string(root.join(name)).unwrap());
+    }
+    for source in sources {
+        damaged(&source, 300, |text| {
+            let (file, diags) = parse(FileId(0), text);
+            let once = crate::format(text, &file);
+            if !diags.iter().any(Diagnostic::is_error) {
+                formatted(text, Folder::default());
+            } else {
+                assert_eq!(once.lines().count(), text.lines().count());
+            }
+        });
+    }
+}
+
 // ─── Size and the parallel parse ────────────────────────────────────────────
 
 #[test]
@@ -2418,12 +2594,19 @@ fn dump_quantity(file: &File, quantity: &Quantity) -> String {
     }
 }
 
+/// A tail's clauses, by what they say and not in the order they were written:
+/// that is what a formatter may change.
 fn dump_tail(file: &File, tail: Many<Clause>) -> String {
-    let clause = |clause: &Clause| match clause.kind {
-        ClauseKind::Basis(amount) => format!("{:?} Basis({})", clause.at, dump_amount(file, &amount)),
-        other => format!("{:?} {other:?}", clause.at),
+    let clause = |clause: &Clause| {
+        let says = match clause.kind {
+            ClauseKind::Basis(amount) => format!("Basis({})", dump_amount(file, &amount)),
+            other => format!("{other:?}"),
+        };
+        (says.clone(), format!("{:?} {says}", clause.at))
     };
-    file[tail].iter().map(clause).collect::<Vec<_>>().join(", ")
+    let mut clauses: Vec<(String, String)> = file[tail].iter().map(clause).collect();
+    clauses.sort();
+    clauses.into_iter().map(|(_, written)| written).collect::<Vec<_>>().join(", ")
 }
 
 fn dump_item(file: &File, item: &LineItem) -> String {
