@@ -15,7 +15,7 @@ use axiom_core::calendar;
 use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Sym, spread};
 use axiom_model::{Book, Dir, Entity, Place, Subject, Window};
 
-use crate::eval::V3;
+use crate::bridge::V3;
 use crate::facts::{LawFacts, TotalsRead};
 use crate::scope::containing;
 

@@ -12,7 +12,7 @@
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Set, Sym};
 use axiom_model::{Book, Commodity, Entity, Flow, Kind, Place, Rule, Subject};
 
-use crate::eval::V3;
+use crate::bridge::{Sides, V3};
 use crate::events::{self, Events};
 use crate::facts::{self, LawFacts, Readers};
 use crate::ledger::{Ledger, fold};
@@ -61,6 +61,8 @@ pub struct Plan<'b, 's> {
     /// What reading the events and solving reported: every ledger starts with them.
     problems: Vec<Diagnostic>,
     pub(crate) known: Known,
+    /// The sign each place's balance is shown in.
+    pub(crate) sides: Sides,
     /// By law id: what is true of the law whatever runs it.
     pub(crate) laws: Box<[LawFacts]>,
     /// Some list of rules brings one law to one subject twice: `fire` must not run it twice.
@@ -85,7 +87,8 @@ impl<'b, 's> Plan<'b, 's> {
     /// works out what the laws need before the first flow.
     pub fn new(book: &'b Book<'s>) -> Plan<'b, 's> {
         let (events, mut problems) = events::read(book);
-        let solution = infer::solve(book, &events);
+        let sides = Sides::of(book);
+        let solution = infer::solve(book, &events, &sides);
         problems.extend(solution.problems);
         let unsolved = solution.unsolved.iter().flat_map(|&id| {
             let flow = &book.flows[id];
@@ -109,6 +112,7 @@ impl<'b, 's> Plan<'b, 's> {
             unsolved: blocked,
             problems,
             known: Known::of(book),
+            sides,
             repeats: repeats(book),
             readers: facts::readers(book, &laws),
             watch: Watch::of(book, &laws),

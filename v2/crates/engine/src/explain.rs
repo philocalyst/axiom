@@ -19,6 +19,7 @@ use axiom_model::{
     Place, StepKind, Subject, System, Trigger, Value, Waive, Window,
 };
 
+use crate::bridge;
 use crate::calc::Calc;
 use crate::eval::{Context, compared};
 use crate::events::Events;
@@ -461,7 +462,7 @@ fn swapped(a: Qty, b: Qty) -> bool {
 pub(crate) fn mismatch(
     book: &Book,
     events: &Events,
-    assert: &Assert,
+    (assert, sign): (&Assert, i64),
     (held, new): (Qty, Qty),
     since: Option<Day>,
     others: &[(Id<Commodity>, Qty)],
@@ -469,7 +470,7 @@ pub(crate) fn mismatch(
     let (place, unit, day, stated) =
         (show::place(book, assert.place), assert.amount.unit, assert.day, assert.amount.qty);
     let money = |qty: Qty| book.show(Amount::new(qty, unit)).to_string();
-    let sign = book.v3_root(assert.place).display_sign();
+
 
     // The flows since the last checkpoint that moved this commodity, as the assertion reads them.
     let flows = &book.touching[assert.place];
@@ -483,7 +484,7 @@ pub(crate) fn mismatch(
         let (moved, inflow) = if flow.to == assert.place { (flow.arrive, true) } else { (flow.out, false) };
         let state = events.state(id, flow);
         let end = if inflow { End::To } else { End::From };
-        if moved.unit != unit || !flow.moves_quantity(end) {
+        if moved.unit != unit || !bridge::moves_quantity(flow, end) {
             continue;
         }
         // Signed the way the assertion is written: `+` raises the shown balance.

@@ -17,7 +17,7 @@ use axiom_model::{Assert, Book, Commodity, End, Flow, Gap, Infer, Place};
 use crate::State;
 use crate::events::Events;
 use crate::motion::Amounts;
-use crate::scope::display;
+use crate::bridge::{self, Sides};
 use crate::timeline::{Fact, Moment};
 
 /// What the solve pass found.
@@ -31,7 +31,7 @@ pub(crate) struct Solution {
 }
 
 /// Solves every `?` amount it can.
-pub(crate) fn solve(book: &Book, events: &Events) -> Solution {
+pub(crate) fn solve(book: &Book, events: &Events, sides: &Sides) -> Solution {
     let unknown: Vec<Id<Flow>> = book
         .flows
         .iter()
@@ -46,7 +46,7 @@ pub(crate) fn solve(book: &Book, events: &Events) -> Solution {
     places.dedup();
     let anchors = Groups::build(book.places.len(), book.asserts.iter().enumerate().map(|(i, a)| (a.place, i as u32)));
 
-    let world = Stretches { book, events, anchors: &anchors };
+    let world = Stretches { book, events, sides, anchors: &anchors };
     let results = par::map(&places, |&place| world.solve_place(place));
 
     let mut solved: Map<Id<Flow>, Amounts> = Map::default();
@@ -140,6 +140,7 @@ enum Step {
 struct Stretches<'a> {
     book: &'a Book<'a>,
     events: &'a Events,
+    sides: &'a Sides,
     anchors: &'a Groups<Place, u32>,
 }
 
@@ -198,7 +199,7 @@ impl Stretches<'_> {
         for &index in &self.anchors[place] {
             let Assert { day, amount, gap, .. } = self.book.asserts[index as usize];
             if amount.unit == unit {
-                let balance = display(self.book, place, amount.qty);
+                let balance = self.sides.display(place, amount.qty);
                 let step = if matches!(gap, Gap::Refused) { Step::Anchor(balance) } else { Step::Accepted(balance) };
                 steps.push((Moment { day, fact: Fact::Assert(index) }, step));
             }
@@ -210,7 +211,7 @@ impl Stretches<'_> {
     /// arriving here and -1 for leaving, negated on a reversal.
     fn step_of(&self, place: Id<Place>, flow: &Flow, id: Id<Flow>, end: End, sign: i64) -> Step {
         // A basis end changes what parcels cost and leaves the balance alone.
-        if !flow.moves_quantity(end) {
+        if !bridge::moves_quantity(flow, end) {
             return Step::Delta(Qty::ZERO);
         }
         let known = match end {
@@ -227,7 +228,7 @@ impl Stretches<'_> {
             Infer::All if end == End::To && flow.is_exchange() => Step::Delta(Qty(sign * known.0)),
             // A `=` leg pins its own end's balance, written in display sign.
             Infer::Target { end: pinned, balance } if pinned == end && forward => {
-                Step::Anchor(display(self.book, place, balance))
+                Step::Anchor(self.sides.display(place, balance))
             }
             Infer::All | Infer::Target { .. } => Step::Opaque,
         }
@@ -356,7 +357,7 @@ mod tests {
         f.flow(4, f.checking, f.food, 20_00);
         f.assert(5, f.checking, 700_00);
         let book = f.book();
-        let Solution { amounts: solved, problems, .. } = solve(&book, &Events::default());
+        let Solution { amounts: solved, problems, .. } = solve(&book, &Events::default(), &Sides::of(&book));
         assert!(problems.is_empty());
         assert_eq!(solved[&atm], Amounts { out: Qty(280_00), arrive: Qty(280_00) });
         let _ = Day(0);
@@ -370,7 +371,7 @@ mod tests {
         let b = f.unknown(3, f.checking, f.food);
         f.assert(4, f.checking, 100_00);
         let book = f.book();
-        let Solution { amounts: solved, problems, .. } = solve(&book, &Events::default());
+        let Solution { amounts: solved, problems, .. } = solve(&book, &Events::default(), &Sides::of(&book));
         assert!(solved.is_empty());
         assert_eq!(problems.len(), 2);
         assert!(problems[0].labels.iter().any(|l| l.loc == book.flows[b].loc && l.text == "also unknown"));

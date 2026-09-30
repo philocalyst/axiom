@@ -20,6 +20,7 @@ use axiom_model::{
     StepKind, Subject, Value, Var, Window,
 };
 
+use crate::bridge::V3;
 use crate::calc::{Calc, progressive};
 use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
@@ -180,10 +181,6 @@ struct Machine<'a, 's> {
 }
 
 const TYPED: &str = "the model type-checks operands";
-
-/// v3 bridge: the v3 model compiles no law of an asset, and none that consumes
-/// or carries basis, so the v3 fold never meets them.
-pub(crate) const V3: &str = "the v3 model compiles no asset laws";
 
 impl<'a, 's> Machine<'a, 's> {
     fn book(&self) -> &'a Book<'s> {
@@ -566,14 +563,14 @@ impl<'a, 's> Machine<'a, 's> {
 
     /// Everything the subject holds, valued in the base currency.
     fn balance(&self, subject: Subject) -> Value {
-        let sign = sign(self.book(), subject);
+        let sign = sign(self.env.plan, subject);
         self.sum_in_base(self.held(subject).map(|slot| Amount::new(Qty(slot.qty.0 * sign), slot.unit)))
     }
 
     /// What everything the subject holds has already accounted for, in the base
     /// currency: the total basis of its parcels.
     fn basis(&self, subject: Subject) -> Value {
-        let (book, sign) = (self.book(), sign(self.book(), subject));
+        let (book, sign) = (self.book(), sign(self.env.plan, subject));
         let basis: Qty = self.held(subject).map(|slot| slot.basis(is_money(book, slot.place, slot.unit))).sum();
         self.base(Qty(basis.0 * sign))
     }
@@ -615,9 +612,9 @@ pub(crate) fn held<'a>(plan: &'a Plan, world: &'a World, subject: Subject) -> im
 
 /// The sign people read a subject's balance in: a credit card's balance is
 /// what is owed, as an assertion writes it. An entity's is natural.
-pub(crate) fn sign(book: &Book, subject: Subject) -> i64 {
+pub(crate) fn sign(plan: &Plan, subject: Subject) -> i64 {
     match subject {
-        Subject::Place(place) => book.v3_root(place).display_sign(),
+        Subject::Place(place) => plan.sides.sign(place),
         Subject::Entity(_) => 1,
         Subject::Asset(_) => unreachable!("{V3}"),
     }

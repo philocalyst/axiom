@@ -19,7 +19,6 @@ use axiom_model::{Amount, Gap, Place, Waive};
 
 use crate::ledger::Ledger;
 use crate::motion::Motion;
-use crate::scope::display;
 use crate::state::Checkpoint;
 use crate::{Pad, explain};
 
@@ -28,7 +27,7 @@ impl Ledger<'_, '_, '_> {
         let book = self.plan.book;
         let assert = &book.asserts[index];
         let (place, unit) = (assert.place, assert.amount.unit);
-        let shown = display(book, place, self.world.holdings.qty(place, unit));
+        let shown = self.plan.sides.display(place, self.world.holdings.qty(place, unit));
         let gap = assert.amount.qty - shown;
         let last = self.record.checkpoints.get(&(place, unit)).copied().unwrap_or_default();
         let now = Checkpoint { day: Some(assert.day), gap, unsolved_said: last.unsolved_said };
@@ -44,11 +43,11 @@ impl Ledger<'_, '_, '_> {
                 None if gap == last.gap => now,
                 None => {
                     let others: Vec<_> =
-                        self.world.holdings.of(place).map(|slot| (slot.unit, display(book, place, slot.qty))).collect();
+                        self.world.holdings.of(place).map(|slot| (slot.unit, self.plan.sides.display(place, slot.qty))).collect();
                     let report = explain::mismatch(
                         book,
                         &self.plan.events,
-                        assert,
+                        (assert, self.plan.sides.sign(place)),
                         (shown, gap - last.gap),
                         last.day,
                         &others,
@@ -73,7 +72,7 @@ impl Ledger<'_, '_, '_> {
     fn pad(&mut self, index: usize, gap: Qty, counter: Id<Place>, waive: Option<Waive>) {
         let (book, assert) = (self.plan.book, &self.plan.book.asserts[index]);
         // What moves into the place, in balance terms.
-        let moved = display(book, assert.place, gap);
+        let moved = self.plan.sides.display(assert.place, gap);
         self.post(&Motion::pad(book, assert, counter, moved, waive));
         let amount = Amount::new(moved, assert.amount.unit);
         self.record.pads.push(Pad { assert: index as u32, place: assert.place, counter, amount, day: assert.day });

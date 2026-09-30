@@ -41,6 +41,7 @@ use crate::{Cause, Gain, Parcel, show};
 /// basis, fetch nothing.
 fn restarts_basis(m: &Motion) -> bool {
     let (from, to) = (m.source, m.target);
+    // v3 bridge: a change of basis fetches nothing.
     if matches!(m.moves, Moves::Loss | Moves::Basis(_)) {
         return false;
     }
@@ -104,6 +105,7 @@ impl Ledger<'_, '_, '_> {
         let (unit, source, now) = (m.out.unit, m.source, (m.day, m.txn));
         let is_base = unit == book.base;
         self.scratch.relief.slices.clear();
+        // v3 bridge: `PLACE.basis` at the source lowers its parcels' basis, and only value leaves.
         if m.moves == Moves::Basis(End::From) {
             self.change_basis(m, m.from, -1);
             self.scratch.relief.slices.push(Slice::fresh(m.out.qty, is_base, now));
@@ -280,6 +282,7 @@ impl Ledger<'_, '_, '_> {
     /// Lands the slices at the target.
     fn arrive(&mut self, m: &Motion, keeps: bool) {
         let book = self.plan.book;
+        // v3 bridge: `PLACE.basis` at the target changes its parcels' basis, and nothing arrives.
         if m.moves == Moves::Basis(End::To) {
             return self.change_basis(m, m.to, 1);
         }
@@ -317,24 +320,6 @@ impl Ledger<'_, '_, '_> {
         let selection = Selection { selectors: &[], txns: &book.txns };
         let slot = self.world.holdings.entry(m.from, m.out.unit);
         slot.rebase(left, &selection, is_money(book, m.from, m.out.unit), (m.day, m.txn));
-    }
-
-    /// `PLACE.basis`: what the flow moved changes the basis of the parcels the
-    /// place holds (`sign` +1 raises it, -1 lowers it), spread by quantity, and
-    /// nothing else about them. A place that holds nothing cannot carry it.
-    fn change_basis(&mut self, m: &Motion, place: Id<axiom_model::Place>, sign: i64) {
-        let book = self.plan.book;
-        let amount = self.base_value(m, if sign > 0 { m.arrive } else { m.out }).unwrap_or(Qty::ZERO);
-        let selection = Selection { selectors: m.select, txns: &book.txns };
-        let held: Qty = self.world.holdings.of(place).map(|slot| slot.basis(is_money(book, place, slot.unit))).sum();
-        let moved = if sign > 0 { amount } else { amount.min(held) };
-        let money = |unit| is_money(book, place, unit);
-        let carried = moved.is_zero()
-            || self.world.holdings.rebase(place, Qty(moved.0 * sign), &selection, money, (m.day, m.txn));
-        if !carried || moved < amount {
-            let diagnostic = explain::basis_shortfall(book, m, place, held, amount, carried);
-            self.record.report(diagnostic);
-        }
     }
 
     /// Fires the `on spend` laws of every entity whose tied money just left
@@ -379,7 +364,7 @@ impl Ledger<'_, '_, '_> {
     /// `amount` in the base currency at the flow's day. A missing price is
     /// reported once per commodity: the first day it is missing, which is
     /// before the first price, since a price stands until the next.
-    fn base_value(&mut self, m: &Motion, amount: Amount) -> Option<Qty> {
+    pub(crate) fn base_value(&mut self, m: &Motion, amount: Amount) -> Option<Qty> {
         let book = self.plan.book;
         if amount.unit == book.base {
             return Some(amount.qty);

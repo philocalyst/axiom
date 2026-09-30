@@ -20,7 +20,7 @@ use axiom_model::{Book, Commodity, End, Flow, Infer, Place};
 
 use crate::motion::{Amounts, Motion};
 use crate::plan::Plan;
-use crate::scope::{display, is_money};
+use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
 use crate::timeline::{Fact, Moment, Timeline};
 use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain};
@@ -299,10 +299,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             End::To => (flow.to, flow.arrive.unit),
         };
         // The target is written in the place's display sign.
-        let (held, target) = (self.world.holdings.qty(place, unit), display(book, place, balance));
+        let (held, target) = (self.world.holdings.qty(place, unit), self.plan.sides.display(place, balance));
         let gap = if end == End::From { held - target } else { target - held };
         let qty = if gap.is_negative() {
-            let shown = (display(book, place, held), balance);
+            let shown = (self.plan.sides.display(place, held), balance);
             self.record.report(explain::past_target(book, flow, place, unit, shown, end));
             Qty::ZERO
         } else {

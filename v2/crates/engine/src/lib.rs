@@ -29,6 +29,7 @@
 
 #![forbid(unsafe_code)]
 
+mod bridge;
 mod calc;
 mod eval;
 mod events;

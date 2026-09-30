@@ -10,7 +10,7 @@
 //! checking enters `me` even though `me` owns both places. A household is the
 //! entity of everyone who is a member of it, so it owns what they own.
 
-use axiom_core::{Id, Qty};
+use axiom_core::Id;
 use axiom_model::{Book, Class, Entity, Place, Subject};
 
 use crate::motion::{Motion, Moves};
@@ -38,14 +38,6 @@ pub(crate) fn owner_of(book: &Book, subject: Subject) -> Id<Entity> {
         Subject::Entity(entity) => entity,
         Subject::Asset(asset) => book.assets[asset].owner,
     }
-}
-
-/// A place's balance (inflow minus outflow) in the sign people write and read
-/// it: `visa = 1_234.56 USD` means 1,234.56 owed. Income, liabilities and
-/// equity are flipped, and flipping twice is the identity, so this converts
-/// both ways.
-pub(crate) fn display(book: &Book, place: Id<Place>, qty: Qty) -> Qty {
-    Qty(qty.0 * book.v3_root(place).display_sign())
 }
 
 /// Whether `unit` in `place` is money: base currency that is not a claim.

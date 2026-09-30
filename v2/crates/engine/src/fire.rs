@@ -129,7 +129,7 @@ impl Ledger<'_, '_, '_> {
     /// explains why. Nothing is recorded but that it held.
     fn afloat(&mut self, rule: &Rule) -> bool {
         let (plan, base) = (self.plan, self.plan.book.base);
-        let sign = eval::sign(plan.book, rule.subject);
+        let sign = eval::sign(plan, rule.subject);
         let mut balance = Qty::ZERO;
         for slot in eval::held(plan, &self.world, rule.subject) {
             if slot.unit != base {
