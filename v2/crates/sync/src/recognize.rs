@@ -205,6 +205,11 @@ impl<'a> Recognizer<'a> {
         Ok(Recognizer { known, entries, starts, floating, codes: compiled })
     }
 
+    /// The account of the book called `name`, if the recognizer knows one.
+    pub fn account(&self, name: &str) -> Option<&'a str> {
+        self.known.iter().find(|known| known.account && known.name == name).map(|known| known.name)
+    }
+
     /// Reads every record's memo, in parallel.
     pub fn read_all(&self, records: &[&Record]) -> Vec<Reading<'a>> {
         let chunks: Vec<&[&Record]> = records.chunks(CHUNK).collect();
@@ -453,14 +458,7 @@ mod tests {
                     2 => format!("CHECKCARD {:04} NOBODY IN PARTICULAR {}", next(9999), next(99_999)),
                     _ => format!("TRANSFER TO SOMEWHERE ELSE {}", next(99_999)),
                 };
-                Record {
-                    day: axiom_core::Day(0),
-                    qty: axiom_core::Qty(0),
-                    memo: memo.into(),
-                    balance: None,
-                    pending: false,
-                    at: axiom_core::Loc::default(),
-                }
+                Record::new(axiom_core::Day(0), axiom_core::Qty(0), memo)
             })
             .collect();
         let started = std::time::Instant::now();
@@ -476,14 +474,7 @@ mod tests {
     fn reading_in_parallel_is_reading_one_by_one() {
         let memos = ["TRADER JOE'S", "SHELL OIL", "PAYPAL *UBER", "nothing", "INV-9-9"];
         let records: Vec<Record> = (0..10_000)
-            .map(|at| Record {
-                day: axiom_core::Day(0),
-                qty: axiom_core::Qty(0),
-                memo: memos[at % memos.len()].into(),
-                balance: None,
-                pending: false,
-                at: axiom_core::Loc::default(),
-            })
+            .map(|at| Record::new(axiom_core::Day(0), axiom_core::Qty(0), memos[at % memos.len()]))
             .collect();
         let recognizer = recognizer();
         let read = recognizer.read_all(&records.iter().collect::<Vec<_>>());

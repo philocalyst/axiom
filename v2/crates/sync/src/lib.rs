@@ -8,8 +8,9 @@
 //!
 //! | module      | job                                                        |
 //! |-------------|------------------------------------------------------------|
-//! | `csv`, `ofx`| a bank's export to records, or to a diagnostic at the cell |
-//! | `amount`    | amounts as banks write them                                |
+//! | `format`    | declared columns and tags to records, or a diagnostic at the cell |
+//! | `csv`, `tagged` | rows of cells; OFX and XML records of cells            |
+//! | `date`, `amount` | dates and amounts as banks write them                 |
 //! | `peg`       | the patterns the ledger writes: a small PEG                |
 //! | `recognize` | `known-as` patterns, compiled once; `via`; codes           |
 //! | `reconcile` | records already written: same amount, within three days    |
@@ -25,15 +26,16 @@
 mod amount;
 mod command;
 mod csv;
+mod date;
 mod diff;
-mod ofx;
+mod format;
 mod peg;
 mod promise;
 mod recognize;
 mod reconcile;
 mod session;
 mod sink;
-mod statement;
+mod tagged;
 mod unknown;
 mod world;
 mod write;
@@ -43,14 +45,14 @@ use std::borrow::Cow;
 use axiom_core::{Day, FileId, Loc, Qty};
 
 pub use command::{Failed, substitute};
-pub use csv::{Amounts, Column, Csv, DateFormat};
+pub use date::DateFormat;
+pub use format::{Field, Format, Place, Rule, Shape, Spec};
 pub use peg::{Pattern, PatternError, Patterns};
 pub use promise::Due;
 pub use recognize::{BadPattern, Known, Recognizer, Scratch};
 pub use reconcile::{Existing, WINDOW};
 pub use session::{Env, Failure, Input, Kind, Outcome, Source, sync};
 pub use sink::Sink;
-pub use statement::{Format, Statement};
 pub use unknown::{Group, group as unrecognized};
 pub use world::{Account, Feed, World, money};
 pub use write::{Change, Layout};
@@ -69,6 +71,52 @@ pub struct Record<'t> {
     pub pending: bool,
     /// Where the memo is in the export.
     pub at: Loc,
+    /// What else the export says of it, if it says anything.
+    pub facts: Option<Box<Facts<'t>>>,
+}
+
+/// What a format may say of a record besides its day, amount and memo.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Facts<'t> {
+    /// A code, as the language writes one (`check-1041`, lowercase).
+    pub code: Option<Cow<'t, str>>,
+    /// Records that share one are one flow.
+    pub id: Option<Cow<'t, str>>,
+    pub party: Option<Cow<'t, str>>,
+    pub via: Option<Cow<'t, str>>,
+    /// The unit the amount is in, when it is not the account's, uppercase.
+    pub currency: Option<Cow<'t, str>>,
+    pub category: Option<Cow<'t, str>>,
+    pub object: Option<Cow<'t, str>>,
+    /// The account it belongs to, as the export names it.
+    pub route: Option<Cow<'t, str>>,
+    /// What a payout was before its fee, and the fee; both positive.
+    pub gross: Option<Qty>,
+    pub fee: Option<Qty>,
+}
+
+static NO_FACTS: Facts<'static> = Facts {
+    code: None,
+    id: None,
+    party: None,
+    via: None,
+    currency: None,
+    category: None,
+    object: None,
+    route: None,
+    gross: None,
+    fee: None,
+};
+
+impl<'t> Record<'t> {
+    /// A record that says nothing but its day, amount and memo.
+    pub fn new(day: Day, qty: Qty, memo: impl Into<Cow<'t, str>>) -> Record<'t> {
+        Record { day, qty, memo: memo.into(), balance: None, pending: false, at: Loc::default(), facts: None }
+    }
+
+    pub fn facts(&self) -> &Facts<'t> {
+        self.facts.as_deref().unwrap_or(&NO_FACTS)
+    }
 }
 
 /// The commodity an account is counted in.
@@ -80,7 +128,7 @@ pub struct Unit<'a> {
 }
 
 /// A range of the text a source gave, for a label.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Span {
     pub start: usize,
     pub end: usize,

@@ -73,7 +73,8 @@ pub struct Outcome {
 
 /// Reads the sources, the commands all at once, and plans their changes one
 /// after another: what an earlier source writes, a later one recognizes as
-/// written.
+/// written. What prints Axiom (invoices, payouts) goes first, so that the bank's
+/// line for the same money is the document's and is not written twice.
 pub fn sync<'a>(
     world: &mut World<'a>,
     sources: &[Source<'a>],
@@ -88,28 +89,39 @@ pub fn sync<'a>(
         })
         .collect();
     let mut ran = run_all(&commands, env.root, env.timeout).into_iter();
-    let (mut inserts, mut results) = (Vec::new(), Vec::new());
-    for source in sources {
-        let pieces = match source.input {
+    // The text of each source, or of each file of one that reads files.
+    let texts: Vec<Vec<(String, Result<String, Failed>)>> = sources
+        .iter()
+        .map(|source| match source.input {
             Input::Run(_) => vec![(source.name.to_string(), ran.next().expect("a result for each command"))],
             Input::Read(pattern) => files(env.root, pattern, source.name),
-        };
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..sources.len()).collect();
+    order.sort_by_key(|&at| matches!(sources[at].kind, Kind::Feed(_)));
+    let mut inserts = Vec::new();
+    let mut results: Vec<Vec<(String, Result<usize, Failure>)>> = sources.iter().map(|_| Vec::new()).collect();
+    for at in order {
+        let (source, pieces) = (&sources[at], &texts[at]);
         if pieces.is_empty() {
-            results.push((source.name.to_string(), Ok(0)));
+            results[at].push((source.name.to_string(), Ok(0)));
         }
         for (label, text) in pieces {
-            let planned = text.map_err(Failure::Command).and_then(|text| {
-                plan(world, source, &text, read).map_err(|problems| Failure::Output { text, problems })
-            });
+            let planned = match text {
+                Err(failed) => Err(Failure::Command(failed.clone())),
+                Ok(text) => {
+                    plan(world, source, text, read).map_err(|problems| Failure::Output { text: text.clone(), problems })
+                }
+            };
             let counted = planned.map(|added: Vec<Insert>| {
                 let count = added.len();
                 inserts.extend(added);
                 count
             });
-            results.push((label, counted));
+            results[at].push((label.clone(), counted));
         }
     }
-    Outcome { sources: results, changes: changes(&inserts, read) }
+    Outcome { sources: results.into_iter().flatten().collect(), changes: changes(&inserts, read) }
 }
 
 fn plan<'a>(
@@ -120,7 +132,11 @@ fn plan<'a>(
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     match &source.kind {
         Kind::Feed(feed) => world.feed(feed, text),
-        Kind::Sink(sink) => sink::merge(*sink, text, &world.layout, read),
+        Kind::Sink(sink) => {
+            let added = sink::merge(*sink, text, &world.layout, read)?;
+            world.learn(&added);
+            Ok(added)
+        }
     }
 }
 

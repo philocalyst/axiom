@@ -1,16 +1,31 @@
-//! Which records are already written. A record matches a flow the account
-//! already has when the amount is the same and the days are within three; the
+//! Which records are already written. A record matches what the account
+//! already has when the amount is the same and the days are within three: a
+//! whole flow, one leg of a split, the total of a batch of flows that share a
+//! code, or a derived flow, whichever the book offers as an [`Existing`]. The
 //! nearest day is taken first, and a flow is taken at most once, so two
 //! identical coffees on one day are two.
 
-use axiom_core::{Day, Qty};
+use axiom_core::{Day, Map, Qty};
 
 use crate::Record;
 
 /// How far apart the bank's day and the journal's may be.
 pub const WINDOW: i32 = 3;
 
-/// A flow the book already has on an account.
+/// How a flow the book has belongs to a batch: flows that share a code, which
+/// a bank may show as their total or one by one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Batch {
+    #[default]
+    Alone,
+    /// One of batch `n`. Taking it leaves the total no longer whole.
+    Member(u32),
+    /// The total of batch `n`. Taking it takes every member.
+    Total(u32),
+}
+
+/// A flow the book already has on an account: a whole flow, one leg of a split,
+/// a derived flow, or the [total](Batch::Total) of a batch.
 #[derive(Clone, Copy, Debug)]
 pub struct Existing<'a> {
     pub day: Day,
@@ -19,11 +34,21 @@ pub struct Existing<'a> {
     /// The code that settles this flow, if it is pending and carries one: the
     /// record that posts it is written as `DD ^code settled`.
     pub settle: Option<&'a str>,
+    /// The unit, when it is not the one the account's feed is in.
+    pub unit: Option<&'a str>,
+    pub batch: Batch,
 }
 
-/// A flow's amount and day, ordered for lookup by amount, then day.
+impl<'a> Existing<'a> {
+    pub fn new(day: Day, qty: Qty) -> Existing<'a> {
+        Existing { day, qty, settle: None, unit: None, batch: Batch::Alone }
+    }
+}
+
+/// A flow's unit, amount and day, ordered for lookup by them in that order.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Slot {
+    unit: u16,
     qty: Qty,
     day: Day,
     index: u32,
@@ -31,19 +56,42 @@ struct Slot {
 
 /// For each record, the index in `existing` of the flow it is. Exact days go
 /// first, so that a record never takes the flow another one is on top of.
-pub fn reconcile(records: &[Record], existing: &[Existing]) -> Vec<Option<usize>> {
+pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Vec<Option<usize>> {
     let mut matched = vec![None; records.len()];
     let days = records.iter().map(|record| record.day);
     let (Some(first), Some(last)) = (days.clone().min(), days.max()) else { return matched };
     // A book is far longer than a statement: only the flows near it can match.
     let near = first.add_days(-WINDOW)..=last.add_days(WINDOW);
+    // Units are compared as small numbers; the account's own, which a flow or a
+    // record may also name outright, is 0.
+    let mut units: Vec<String> = Vec::new();
+    let mut key = |name: Option<&str>| match name.filter(|name| !name.eq_ignore_ascii_case(default)) {
+        None => 0,
+        Some(name) => {
+            let name = name.to_ascii_lowercase();
+            let known = units.iter().position(|known| *known == name);
+            1 + known.unwrap_or_else(|| {
+                units.push(name);
+                units.len() - 1
+            }) as u16
+        }
+    };
     let mut slots: Vec<Slot> = existing
         .iter()
         .enumerate()
         .filter(|(_, flow)| near.contains(&flow.day))
-        .map(|(index, flow)| Slot { qty: flow.qty, day: flow.day, index: index as u32 })
+        .map(|(index, flow)| Slot { unit: key(flow.unit), qty: flow.qty, day: flow.day, index: index as u32 })
         .collect();
+    let unit_of: Vec<u16> = records.iter().map(|record| key(record.facts().currency.as_deref())).collect();
     slots.sort_unstable();
+    let batch_of = |slot: &Slot| existing[slot.index as usize].batch;
+    // The slots of each batch: what is taken along with a flow.
+    let mut batches: Map<u32, Vec<usize>> = Map::default();
+    for (at, slot) in slots.iter().enumerate() {
+        if let Batch::Member(n) | Batch::Total(n) = batch_of(slot) {
+            batches.entry(n).or_default().push(at);
+        }
+    }
     let mut taken = vec![false; slots.len()];
     let mut order: Vec<usize> = (0..records.len()).collect();
     order.sort_by_key(|&at| records[at].day);
@@ -52,18 +100,26 @@ pub fn reconcile(records: &[Record], existing: &[Existing]) -> Vec<Option<usize>
             if matched[at].is_some() {
                 continue;
             }
-            let record = &records[at];
-            let from = slots.partition_point(|slot| (slot.qty, slot.day) < (record.qty, record.day.add_days(-radius)));
+            let (record, unit) = (&records[at], unit_of[at]);
+            let key = |slot: &Slot| (slot.unit, slot.qty, slot.day);
+            let from = slots.partition_point(|slot| key(slot) < (unit, record.qty, record.day.add_days(-radius)));
             let nearest = slots[from..]
                 .iter()
                 .enumerate()
-                .take_while(|(_, slot)| slot.qty == record.qty && slot.day <= record.day.add_days(radius))
+                .take_while(|(_, slot)| {
+                    (slot.unit, slot.qty) == (unit, record.qty) && slot.day <= record.day.add_days(radius)
+                })
                 .filter(|(offset, _)| !taken[from + offset])
                 .min_by_key(|(_, slot)| (slot.day.0 - record.day.0).abs())
                 .map(|(offset, slot)| (from + offset, slot.index));
-            if let Some((slot, index)) = nearest {
-                taken[slot] = true;
-                matched[at] = Some(index as usize);
+            let Some((slot, index)) = nearest else { continue };
+            taken[slot] = true;
+            matched[at] = Some(index as usize);
+            // A total takes every member; a member leaves the total no longer whole.
+            let (Batch::Member(n) | Batch::Total(n)) = existing[index as usize].batch else { continue };
+            let total = matches!(existing[index as usize].batch, Batch::Total(_));
+            for &other in &batches[&n] {
+                taken[other] |= total || matches!(batch_of(&slots[other]), Batch::Total(_));
             }
         }
     }
@@ -74,23 +130,25 @@ pub fn reconcile(records: &[Record], existing: &[Existing]) -> Vec<Option<usize>
 mod tests {
     use std::time::Instant;
 
-    use axiom_core::Loc;
-
     use super::*;
 
     fn record(day: i32, cents: i64) -> Record<'static> {
-        Record { day: Day(day), qty: Qty(cents), memo: "".into(), balance: None, pending: false, at: Loc::default() }
+        Record::new(Day(day), Qty(cents), "")
     }
 
     fn flow(day: i32, cents: i64) -> Existing<'static> {
-        Existing { day: Day(day), qty: Qty(cents), settle: None }
+        Existing::new(Day(day), Qty(cents))
+    }
+
+    fn part(day: i32, cents: i64, batch: Batch) -> Existing<'static> {
+        Existing { batch, ..flow(day, cents) }
     }
 
     #[test]
     fn same_amount_within_three_days_is_written() {
         let flows = [flow(10, -450), flow(10, -500), flow(20, -450)];
         let records = [record(13, -450), record(14, -450), record(10, -501), record(20, 450)];
-        assert_eq!(reconcile(&records, &flows), [Some(0), None, None, None]);
+        assert_eq!(reconcile(&records, &flows, "USD"), [Some(0), None, None, None]);
     }
 
     #[test]
@@ -98,28 +156,70 @@ mod tests {
         let one = [flow(5, -450)];
         let two = [flow(5, -450), flow(6, -450)];
         let coffees = [record(5, -450), record(5, -450)];
-        assert_eq!(reconcile(&coffees, &one), [Some(0), None]);
-        assert_eq!(reconcile(&coffees, &two), [Some(0), Some(1)]);
+        assert_eq!(reconcile(&coffees, &one, "USD"), [Some(0), None]);
+        assert_eq!(reconcile(&coffees, &two, "USD"), [Some(0), Some(1)]);
     }
 
     #[test]
     fn the_exact_day_goes_before_the_nearest_and_the_earlier_before_the_later() {
         // The record on the 1st would take the flow on the 2nd, which the record on the 2nd is on top of.
         let flows = [flow(2, -450)];
-        assert_eq!(reconcile(&[record(1, -450), record(2, -450)], &flows), [None, Some(0)]);
+        assert_eq!(reconcile(&[record(1, -450), record(2, -450)], &flows, "USD"), [None, Some(0)]);
         let flows = [flow(4, -450), flow(2, -450)];
-        assert_eq!(reconcile(&[record(3, -450)], &flows), [Some(1)], "a tie goes to the earlier day");
+        assert_eq!(reconcile(&[record(3, -450)], &flows, "USD"), [Some(1)], "a tie goes to the earlier day");
     }
 
     #[test]
     fn the_answer_does_not_depend_on_the_order_of_the_export() {
         let flows: Vec<_> = (0..20).map(|day| flow(day, -450)).collect();
         let records: Vec<_> = (0..20).map(|day| record(day + 1, -450)).collect();
-        let forward = reconcile(&records, &flows);
-        let mut backward: Vec<_> = reconcile(&records.iter().rev().cloned().collect::<Vec<_>>(), &flows);
+        let forward = reconcile(&records, &flows, "USD");
+        let mut backward: Vec<_> = reconcile(&records.iter().rev().cloned().collect::<Vec<_>>(), &flows, "USD");
         backward.reverse();
         assert_eq!(forward, backward);
         assert_eq!(forward.iter().flatten().count(), 19, "the last record has no flow left within three days");
+    }
+
+    #[test]
+    fn a_batch_is_matched_as_its_total_or_member_by_member_and_never_both() {
+        // A payroll run of 1,000 and 500 that the bank may show as 1,500.
+        let parts = |total: bool| {
+            let mut all = vec![part(5, 100_000, Batch::Member(1)), part(5, 50_000, Batch::Member(1))];
+            if total {
+                all.push(part(5, 150_000, Batch::Total(1)));
+            }
+            all
+        };
+        let flows = parts(true);
+        assert_eq!(reconcile(&[record(6, 150_000)], &flows, "USD"), [Some(2)], "the total");
+        assert_eq!(
+            reconcile(&[record(6, 150_000), record(6, 100_000)], &flows, "USD"),
+            [Some(2), None],
+            "members went with it"
+        );
+        assert_eq!(
+            reconcile(&[record(6, 100_000), record(6, 50_000)], &flows, "USD"),
+            [Some(0), Some(1)],
+            "one by one"
+        );
+        assert_eq!(
+            reconcile(&[record(6, 100_000), record(6, 150_000)], &flows, "USD"),
+            [Some(0), None],
+            "no longer whole"
+        );
+        assert_eq!(reconcile(&[record(6, 150_000)], &parts(false), "USD"), [None], "a total nobody offered");
+    }
+
+    #[test]
+    fn a_unit_is_part_of_the_amount() {
+        let eur = Existing { unit: Some("EUR"), ..flow(5, -450) };
+        let euros = Record {
+            facts: Some(Box::new(crate::Facts { currency: Some("EUR".into()), ..Default::default() })),
+            ..record(5, -450)
+        };
+        assert_eq!(reconcile(&[record(5, -450)], &[eur], "USD"), [None], "dollars are not euros");
+        assert_eq!(reconcile(&[euros.clone()], &[flow(5, -450)], "USD"), [None]);
+        assert_eq!(reconcile(&[euros], &[eur], "USD"), [Some(0)]);
     }
 
     #[test]
@@ -142,7 +242,7 @@ mod tests {
             })
             .collect();
         let started = Instant::now();
-        let matched = reconcile(&records, &flows);
+        let matched = reconcile(&records, &flows, "USD");
         let took = started.elapsed();
         let found = matched.iter().flatten().count();
         eprintln!("reconciled {} records against {} flows in {took:?}: {found} written", records.len(), flows.len());

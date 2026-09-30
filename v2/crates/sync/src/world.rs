@@ -1,39 +1,46 @@
-//! A statement's way into the journal (LANGUAGE §13): which records are already
-//! written, who the rest are, which keep a promise, and what is left is written.
+//! A statement's way into the journal (LANGUAGE §14): which records are already
+//! written, who the rest are, which keep a promise or name a claim, and what is
+//! left is written in the house style.
 
 use std::fmt::Write;
 
 use axiom_core::num::POW10;
 use axiom_core::{Day, Diagnostic, FileId, Map, Qty};
 
+use crate::amount::amount;
+use crate::date::iso_day;
+use crate::format::Format;
 use crate::promise::{Due, keep};
-use crate::recognize::{Reading, Recognizer, Tie, Who};
+use crate::recognize::{Reading, Recognizer, Scratch, Tie, Who};
 use crate::reconcile::{Existing, reconcile};
-use crate::statement::{Format, Statement};
 use crate::write::Layout;
 use crate::{Form, Insert, Record, Unit};
 
 /// What the book says about one account.
 #[derive(Default)]
 pub struct Account<'a> {
+    /// Every flow, leg, derived flow and batch total the account has.
     pub flows: Vec<Existing<'a>>,
     /// The days it has an assertion on.
     pub asserted: Vec<Day>,
 }
 
 impl Account<'_> {
-    /// The day of the latest flow: what a sync of it has reached.
-    pub fn last_day(&self) -> Option<Day> {
-        self.flows.iter().map(|flow| flow.day).max()
+    /// The day a source of this account should start from: the day after its
+    /// latest flow, or `first` if it has none.
+    pub fn since(&self, first: Day) -> Day {
+        self.flows.iter().map(|flow| flow.day).max().map_or(first, |last| last.add_days(1))
     }
 }
 
-/// Everything the book knows that sync reads. Each feed adds what it writes, so
-/// that a transfer both accounts show is written once.
+/// Everything the book knows that sync reads. Each source adds what it writes,
+/// so that a transfer both accounts show is written once.
 pub struct World<'a> {
     pub recognizer: Recognizer<'a>,
     pub layout: Layout<'a>,
     pub accounts: Map<&'a str, Account<'a>>,
+    /// Every unit the book has, for a record that names its own currency.
+    pub units: Vec<Unit<'a>>,
     /// Occurrences that are due and not written.
     pub dues: Vec<Due<'a>>,
     /// Open claims that carry a code: the code, and the party it is with.
@@ -42,6 +49,7 @@ pub struct World<'a> {
 
 /// A source of records for one account.
 pub struct Feed<'a> {
+    /// The account its records are of, unless a record says otherwise (`route`).
     pub account: &'a str,
     pub unit: Unit<'a>,
     pub format: Format,
@@ -51,8 +59,8 @@ pub struct Feed<'a> {
 struct Line<'a> {
     day: Day,
     body: String,
-    /// The accounts it touches, and by how much, money into them positive.
-    moved: Vec<(&'a str, Qty)>,
+    /// The accounts it touches, in what unit, and by how much, money into them positive.
+    moved: Vec<(&'a str, Option<&'a str>, Qty)>,
 }
 
 impl<'a> Line<'a> {
@@ -61,49 +69,156 @@ impl<'a> Line<'a> {
     }
 }
 
-/// The other end of a record: whom it was with, through whom, and which open
-/// claims it names.
+/// The other end of a record: whom it was with, through whom, what it is for,
+/// and which codes it carries.
+#[derive(Default)]
 struct Other<'a> {
     who: Option<Who<'a>>,
     via: Option<&'a str>,
-    codes: Vec<&'a str>,
+    codes: Vec<String>,
+    /// A purpose the export's own category maps to, and the thing it is of.
+    purpose: Option<(String, Option<String>)>,
+}
+
+/// What the memo and the export's own `party` and `via` say of a record.
+struct Told<'a> {
+    memo: Reading<'a>,
+    party: Option<Reading<'a>>,
+    via: Option<Reading<'a>>,
 }
 
 impl<'a> World<'a> {
     /// The inserts that bring the book up to a statement, or what is wrong with
     /// it. Nothing is changed unless all of it can be read.
     pub fn feed(&mut self, feed: &Feed<'a>, text: &str) -> Result<Vec<Insert>, Vec<Diagnostic>> {
-        let (Statement { mut records, closing }, problems) = feed.format.read(text, FileId(0), feed.unit);
+        let (records, problems) = feed.format.read(text, FileId(0), feed.unit, &self.units);
         if !problems.is_empty() {
             return Err(problems);
         }
-        // Stable, so that a day's records keep the export's order.
-        records.sort_by_key(|record| record.day);
-        let (lines, asserted) = self.plan(feed, &records, closing)?;
-        for line in &lines {
-            for &(name, qty) in &line.moved {
-                self.accounts.entry(name).or_default().flows.push(Existing { day: line.day, qty, settle: None });
+        let mut planned = Vec::new();
+        for (account, records) in self.routed(feed, records)? {
+            planned.push((account, self.plan(account, feed, records)?));
+        }
+        let mut inserts = Vec::new();
+        for (account, (lines, asserted)) in planned {
+            for line in &lines {
+                for &(name, unit, qty) in &line.moved {
+                    let flow = Existing { unit, ..Existing::new(line.day, qty) };
+                    self.accounts.entry(name).or_default().flows.push(flow);
+                }
             }
+            if let Some(day) = asserted {
+                self.accounts.entry(account).or_default().asserted.push(day);
+            }
+            let insert = |line: Line| Insert {
+                path: self.layout.file_for(line.day),
+                day: line.day,
+                form: Form::Item(line.body),
+            };
+            inserts.extend(lines.into_iter().map(insert));
         }
-        if let Some(day) = asserted {
-            self.accounts.entry(feed.account).or_default().asserted.push(day);
-        }
-        let insert =
-            |line: Line| Insert { path: self.layout.file_for(line.day), day: line.day, form: Form::Item(line.body) };
-        Ok(lines.into_iter().map(insert).collect())
+        Ok(inserts)
     }
 
-    /// The lines a statement adds, and the day it is asserted on, if it is.
-    fn plan(
+    /// What lines the book's own flows say of the accounts it has: a document a
+    /// source printed (an invoice paid, a payout with its fee) is a flow the
+    /// bank's line for the same money is then matched with.
+    pub fn learn(&mut self, inserts: &[Insert]) {
+        for insert in inserts {
+            let Form::Item(body) = &insert.form else { continue };
+            for (name, unit, qty) in self.moved_by(body) {
+                let flow = Existing { unit: Some(unit), ..Existing::new(insert.day, qty) };
+                self.accounts.entry(name).or_default().flows.push(flow);
+            }
+        }
+    }
+
+    /// `FROM -> TO 970 USD` and the `+` and `-` items under it: what it moves on
+    /// each end that is an account of the book. Pending, unpriced and unknown
+    /// units move nothing.
+    fn moved_by(&self, body: &str) -> Vec<(&'a str, &'a str, Qty)> {
+        let mut lines = body.lines();
+        let words: Vec<&str> = lines.next().unwrap_or("").split_whitespace().collect();
+        let [from, "->", to, number, unit, ..] = words.as_slice() else { return Vec::new() };
+        let Some(unit) = self.units.iter().find(|known| known.name == *unit) else { return Vec::new() };
+        let parse = |number: &str| amount(&number.replace('_', ""), unit.scale).ok().flatten();
+        let Some(mut net) = parse(number) else { return Vec::new() };
+        for item in lines {
+            let words: Vec<&str> = item.split_whitespace().collect();
+            match words.as_slice() {
+                ["+", number, name, ..] if *name == unit.name => net += parse(number).unwrap_or_default(),
+                ["-", number, name, ..] if *name == unit.name => net -= parse(number).unwrap_or_default(),
+                _ => {}
+            }
+        }
+        let ends = [(*from, -net), (*to, net)];
+        ends.iter().filter_map(|&(name, qty)| Some((self.recognizer.account(name)?, unit.name, qty))).collect()
+    }
+
+    /// The records of each account they belong to: the feed's, unless a record's
+    /// `route` names another.
+    fn routed<'t>(
         &self,
         feed: &Feed<'a>,
-        records: &[Record],
-        closing: Option<(Day, Qty)>,
+        records: Vec<Record<'t>>,
+    ) -> Result<Vec<(&'a str, Vec<Record<'t>>)>, Vec<Diagnostic>> {
+        let (mut groups, mut problems): (Vec<(&'a str, Vec<Record<'t>>)>, Vec<Diagnostic>) = (Vec::new(), Vec::new());
+        let mut scratch = Scratch::default();
+        for record in records {
+            let account = match record.facts().route.as_deref() {
+                None => feed.account,
+                Some(route) => {
+                    let named = self.recognizer.read(route, &mut scratch).who.ok().and_then(|found| found.who);
+                    match named.filter(|who| who.account) {
+                        Some(who) => who.name,
+                        None => {
+                            let headline = format!("`{route}` is not an account the book knows");
+                            problems.push(Diagnostic::error("unknown-route", headline).label(record.at, "this row").help(
+                                "give the account a `known-as` that matches how the export names it, or name it as the export does",
+                            ));
+                            continue;
+                        }
+                    }
+                }
+            };
+            match groups.iter_mut().find(|(name, _)| *name == account) {
+                Some((_, group)) => group.push(record),
+                None => groups.push((account, vec![record])),
+            }
+        }
+        if problems.is_empty() { Ok(groups) } else { Err(problems) }
+    }
+
+    /// The unit a record is counted in.
+    fn unit_of(&self, feed: &Feed<'a>, record: &Record) -> Unit<'a> {
+        let named = record.facts().currency.as_deref();
+        let found = named.and_then(|name| self.units.iter().find(|unit| unit.name.eq_ignore_ascii_case(name)));
+        found.copied().unwrap_or(feed.unit)
+    }
+
+    /// The lines an account's records add, and the day it is asserted on, if it is.
+    fn plan(
+        &self,
+        account: &'a str,
+        feed: &Feed<'a>,
+        mut records: Vec<Record>,
     ) -> Result<(Vec<Line<'a>>, Option<Day>), Vec<Diagnostic>> {
-        let account = self.accounts.get(feed.account);
-        let flows = account.map_or(&[][..], |account| &account.flows);
-        let matched = reconcile(records, flows);
-        let others = self.others(records, &matched)?;
+        // A memo may say its own amount or day: what the record has to be matched by.
+        let mut readings = self.recognizer.read_all(&records.iter().collect::<Vec<_>>());
+        self.adopt(feed, &mut records, &readings)?;
+        // Stable, so that a day's records keep the export's order.
+        let mut order: Vec<usize> = (0..records.len()).collect();
+        order.sort_by_key(|&at| records[at].day);
+        let mut slots: Vec<Option<(Record, Reading)>> = records.into_iter().zip(readings.drain(..)).map(Some).collect();
+        let (records, readings): (Vec<Record>, Vec<Reading>) = order.iter().filter_map(|&at| slots[at].take()).unzip();
+
+        let existing = self.accounts.get(account);
+        let flows = existing.map_or(&[][..], |account| &account.flows);
+        let matched = reconcile(&records, flows, feed.unit.name);
+        let told = self.told(&records, readings, &matched)?;
+        let others: Vec<Option<Other<'a>>> = (0..records.len())
+            .map(|at| told[at].as_ref().map(|told| self.other(feed, account, &records[at], told)))
+            .collect();
         // Only a record that is neither written nor pending can keep a promise.
         let parties: Vec<Option<&str>> = (0..records.len())
             .map(|at| {
@@ -111,8 +226,8 @@ impl<'a> World<'a> {
                 who.filter(|who| !who.account).map(|who| who.name)
             })
             .collect();
-        let dues: Vec<Due> = self.dues.iter().filter(|due| due.account == feed.account).cloned().collect();
-        let kept = keep(records, &parties, &dues);
+        let dues: Vec<Due> = self.dues.iter().filter(|due| due.account == account).cloned().collect();
+        let kept = keep(&records, &parties, &dues);
 
         // Pending flows carry a code of their own, for the record that posts
         // them to settle. It counts on from the flows the account has that day.
@@ -125,6 +240,7 @@ impl<'a> World<'a> {
             *number += 1;
             format!("pending-{}-{number}", day.to_string().replace('-', ""))
         };
+        let exchanges = self.exchanges(&records, &others, &kept);
         let mut lines = Vec::new();
         for (at, record) in records.iter().enumerate().filter(|(_, record)| !record.qty.is_zero()) {
             let line = match (matched[at], kept[at], &others[at]) {
@@ -132,63 +248,228 @@ impl<'a> World<'a> {
                     let settles = flows[flow].settle.filter(|_| !record.pending);
                     settles.map(|code| Line::statement(record.day, format!("^{code} settled")))
                 }
-                (None, Some(due), _) => Some(occurrence(&dues[due], record, feed)),
-                (None, None, Some(other)) => {
-                    let code = record.pending.then(|| pending_code(record.day));
-                    Some(new_flow(feed, record, other, code.as_deref()))
-                }
+                (None, Some(due), _) => Some(occurrence(&dues[due], record, account, self.unit_of(feed, record))),
+                (None, None, Some(other)) => match exchanges[at] {
+                    Exchange::Second => None,
+                    Exchange::First(with) => Some(self.exchange(account, feed, record, &records[with], other)),
+                    Exchange::No => {
+                        let code = record.pending.then(|| pending_code(record.day));
+                        Some(self.new_flow(account, feed, record, other, code.as_deref()))
+                    }
+                },
                 (None, None, None) => None,
             };
             lines.extend(line);
         }
-        let closing = closing.or_else(|| closing_of(records));
-        let closing = closing.filter(|(day, _)| account.is_none_or(|account| !account.asserted.contains(day)));
+        let closing = closing_of(&records).filter(|(day, _)| existing.is_none_or(|acct| !acct.asserted.contains(day)));
         if let Some((day, balance)) = closing {
             let shown = match balance.is_negative() {
                 true => format!("-{}", money(balance.abs(), feed.unit)),
                 false => money(balance, feed.unit),
             };
-            lines.push(Line::statement(day, format!("{} = {shown}", feed.account)));
+            lines.push(Line::statement(day, format!("{account} = {shown}")));
         }
         Ok((lines, closing.map(|(day, _)| day)))
     }
 
-    /// Who each record that is not yet written was with; ties are errors. A
-    /// written record, or one that moves nothing, is not read at all.
-    fn others(&self, records: &[Record], matched: &[Option<usize>]) -> Result<Vec<Option<Other<'a>>>, Vec<Diagnostic>> {
-        let open: Vec<usize> =
-            (0..records.len()).filter(|&at| matched[at].is_none() && !records[at].qty.is_zero()).collect();
-        let readings = self.recognizer.read_all(&open.iter().map(|&at| &records[at]).collect::<Vec<_>>());
-        let ties: Vec<Diagnostic> = open
-            .iter()
-            .zip(&readings)
-            .filter_map(|(&at, reading)| reading.who.as_ref().err().map(|tie| tie_error(&records[at], tie)))
-            .collect();
-        if !ties.is_empty() {
-            return Err(ties);
+    /// Gives a record the amount and the day its memo says of itself, when a
+    /// pattern captured them: the record is matched by them, and written with them.
+    fn adopt(&self, feed: &Feed<'a>, records: &mut [Record], readings: &[Reading]) -> Result<(), Vec<Diagnostic>> {
+        let mut problems = Vec::new();
+        for (record, reading) in records.iter_mut().zip(readings) {
+            let unit = self.unit_of(feed, record);
+            let bad = |what: &str, text: &str, record: &Record| {
+                let headline = format!("`{text}`, which a pattern took for the {what}, is not one");
+                Diagnostic::error("bad-capture", headline).label(record.at, "in this memo")
+            };
+            if let Some(text) = &reading.amount {
+                match amount(&text.replace('_', ""), unit.scale) {
+                    Ok(Some(qty)) if !qty.is_zero() => {
+                        record.qty = if record.qty.is_negative() { -qty.abs() } else { qty.abs() }
+                    }
+                    _ => problems.push(bad("amount", text, record)),
+                }
+            }
+            if let Some(text) = &reading.date {
+                match feed.format.date_layout().map_or_else(|| iso_day(text), |layout| layout.read(text)) {
+                    Some(day) => record.day = day,
+                    None => problems.push(bad("day", text, record)),
+                }
+            }
         }
-        let mut others: Vec<Option<Other<'a>>> = records.iter().map(|_| None).collect();
-        for (&at, reading) in open.iter().zip(&readings) {
-            others[at] = Some(self.other(reading));
-        }
-        Ok(others)
+        if problems.is_empty() { Ok(()) } else { Err(problems) }
     }
 
-    /// Who a record was with: the memo's party, else the party of the claim
-    /// whose code it names. Only codes of the claims of that party are carried.
-    fn other(&self, reading: &Reading<'a>) -> Other<'a> {
-        let found = reading.who.as_ref().ok().copied().unwrap_or_default();
-        let mut other = Other { who: found.who, via: found.via, codes: Vec::new() };
-        for code in &reading.codes {
-            let Some((&claim, &party)) = self.claims.get_key_value(code.as_str()) else { continue };
+    /// What the memo, and the export's own `party` and `via`, say of each record
+    /// that is not yet written; ties are errors. A written record, or one that
+    /// moves nothing, is not in the way of anything.
+    fn told(
+        &self,
+        records: &[Record],
+        readings: Vec<Reading<'a>>,
+        matched: &[Option<usize>],
+    ) -> Result<Vec<Option<Told<'a>>>, Vec<Diagnostic>> {
+        let (mut scratch, mut problems) = (Scratch::default(), Vec::new());
+        let mut told = Vec::with_capacity(records.len());
+        for ((record, memo), matched) in records.iter().zip(readings).zip(matched) {
+            if matched.is_some() || record.qty.is_zero() {
+                told.push(None);
+                continue;
+            }
+            let mut read = |text: &Option<std::borrow::Cow<str>>| {
+                text.as_deref().map(|text| self.recognizer.read(text, &mut scratch))
+            };
+            let (party, via) = (read(&record.facts().party), read(&record.facts().via));
+            let all = [Some(&memo), party.as_ref(), via.as_ref()];
+            problems.extend(
+                all.into_iter().flatten().filter_map(|read| read.who.as_ref().err()).map(|tie| tie_error(record, tie)),
+            );
+            told.push(Some(Told { memo, party, via }));
+        }
+        if problems.is_empty() { Ok(told) } else { Err(problems) }
+    }
+
+    /// Who a record was with. What the export says of it beats what patterns
+    /// find in its memo: first the party of the open claim its own `code` names,
+    /// then its `party`, then its `via`, and last the memo. Whoever the export
+    /// names, the memo's party is the go-between. Only the codes of the claims
+    /// of that party are carried, and the record's own code.
+    fn other(&self, feed: &Feed<'a>, account: &str, record: &Record, told: &Told<'a>) -> Other<'a> {
+        let recognized = |reading: &Reading<'a>| reading.who.as_ref().ok().copied().unwrap_or_default();
+        let memo = recognized(&told.memo);
+        let named = |reading: &Option<Reading<'a>>| reading.as_ref().and_then(|reading| recognized(reading).who);
+        let facts = record.facts();
+        let own_claim = facts
+            .code
+            .as_deref()
+            .and_then(|code| self.claims.get(code))
+            .map(|&party| Who { name: party, account: false });
+        let structured = own_claim.or(named(&told.party)).or(named(&told.via));
+        let mut other = Other::default();
+        (other.who, other.via) = match structured {
+            Some(who) => (
+                Some(who),
+                memo.who.filter(|go_between| !go_between.account && go_between.name != who.name).map(|w| w.name),
+            ),
+            None => (memo.who, memo.via),
+        };
+        // Money with the account itself is no other end.
+        if other.who.is_some_and(|who| who.name == account) {
+            (other.who, other.via) = (None, None);
+        }
+        for code in told.memo.codes.iter().map(String::as_str).chain(facts.code.as_deref()) {
+            let Some((&claim, &party)) = self.claims.get_key_value(code) else { continue };
             match other.who {
                 None => other.who = Some(Who { name: party, account: false }),
                 Some(who) if who.name != party => continue,
                 Some(_) => {}
             }
-            other.codes.push(claim);
+            other.codes.push(claim.to_string());
         }
+        if let Some(code) = facts.code.as_deref().filter(|code| !other.codes.iter().any(|known| known == code)) {
+            other.codes.push(code.to_string());
+        }
+        let purpose = facts.category.as_deref().and_then(|category| feed.format.purpose(category));
+        other.purpose = purpose.map(|purpose| (purpose.to_string(), facts.object.as_deref().map(str::to_string)));
         other
+    }
+
+    /// Which records are the two sides of one exchange: the same `id`, one
+    /// unit out and another in, both new and neither pending.
+    fn exchanges(&self, records: &[Record], others: &[Option<Other>], kept: &[Option<usize>]) -> Vec<Exchange> {
+        let mut by_id: Map<&str, Vec<usize>> = Map::default();
+        for (at, record) in records.iter().enumerate() {
+            let free = others[at].is_some() && kept[at].is_none() && !record.pending && !record.qty.is_zero();
+            if let Some(id) = record.facts().id.as_deref().filter(|_| free) {
+                by_id.entry(id).or_default().push(at);
+            }
+        }
+        let mut exchanges = vec![Exchange::No; records.len()];
+        for ends in by_id.values() {
+            let [a, b] = ends[..] else { continue };
+            let (units, signs) =
+                ((&records[a].facts().currency, &records[b].facts().currency), (records[a].qty, records[b].qty));
+            if units.0 != units.1 && signs.0.is_negative() != signs.1.is_negative() {
+                // The side that leaves is the first of the two, so the line says out then in.
+                let (out, into) = if signs.0.is_negative() { (a, b) } else { (b, a) };
+                (exchanges[out], exchanges[into]) = (Exchange::First(into), Exchange::Second);
+            }
+        }
+        exchanges
+    }
+
+    /// `checking 100 USD -> 92 EUR "memo"`: the two sides of an exchange on one account.
+    fn exchange(&self, account: &'a str, feed: &Feed<'a>, out: &Record, into: &Record, other: &Other<'a>) -> Line<'a> {
+        let (unit_out, unit_in) = (self.unit_of(feed, out), self.unit_of(feed, into));
+        let mut body = format!("{account} {} -> {}", money(out.qty.abs(), unit_out), money(into.qty.abs(), unit_in));
+        tail(&mut body, other, Some(out));
+        let moved = vec![(account, Some(unit_out.name), out.qty), (account, Some(unit_in.name), into.qty)];
+        Line { day: out.day.min(into.day), body, moved }
+    }
+
+    /// `checking -> trader-joes 84.20 USD`: the flow a record is, with the other
+    /// end it was with, or `?` and its memo as a description if nobody is known.
+    /// A payout with its fee is the gross, and the fee an item under it.
+    fn new_flow(
+        &self,
+        account: &'a str,
+        feed: &Feed<'a>,
+        record: &Record,
+        other: &Other<'a>,
+        pending: Option<&str>,
+    ) -> Line<'a> {
+        let unit = self.unit_of(feed, record);
+        let end = other.who.map_or("?", |who| who.name);
+        let (from, to) = if record.qty.is_negative() { (account, end) } else { (end, account) };
+        let facts = record.facts();
+        let fee = facts.fee.filter(|fee| !fee.is_zero());
+        let header = fee.map_or(record.qty.abs(), |fee| facts.gross.unwrap_or(record.qty.abs() + fee));
+        let amount = money(header, unit);
+        let mut body = format!("{from} -> {to} {}", if record.pending { format!("({amount})") } else { amount });
+        tail(&mut body, other, Some(record).filter(|_| other.who.is_none()));
+        if let Some(code) = pending {
+            let _ = write!(body, " ^{code}");
+        }
+        if let Some(via) = other.via {
+            let _ = write!(body, " via {via}");
+        }
+        if let Some(fee) = fee {
+            let sign = if record.qty.is_negative() { '+' } else { '-' };
+            let _ = write!(body, "\n  {sign} {} #fees via {account}", money(fee, unit));
+        }
+        // What arrives at the other end, if that is an account of the book too.
+        let transfer = other.who.filter(|who| who.account).map(|who| (who.name, Some(unit.name), -record.qty));
+        let moved = [Some((account, Some(unit.name), record.qty)), transfer].into_iter().flatten().collect();
+        Line { day: record.day, body, moved }
+    }
+}
+
+/// Whether a record is one side of an exchange, and which.
+#[derive(Clone, Copy)]
+enum Exchange {
+    No,
+    /// The side that leaves, with the record that arrives.
+    First(usize),
+    /// The side that arrives: written with the first.
+    Second,
+}
+
+/// The tail of a written line, in the order of the language: `#purpose of
+/// THING`, `"description"`, `^codes`. A description is what the memo says, when
+/// nobody is known to say it for.
+fn tail(body: &mut String, other: &Other, describe: Option<&Record>) {
+    if let Some((purpose, object)) = &other.purpose {
+        let _ = write!(body, " #{purpose}");
+        if let Some(object) = object {
+            let _ = write!(body, " of {object}");
+        }
+    }
+    if let Some(record) = describe {
+        let memo = record.memo.split_whitespace().collect::<Vec<_>>().join(" ");
+        let _ = write!(body, " \"{}\"", memo.replace('\\', "\\\\").replace('"', "\\\""));
+    }
+    for code in &other.codes {
+        let _ = write!(body, " ^{code}");
     }
 }
 
@@ -206,36 +487,13 @@ fn tie_error(record: &Record, tie: &Tie) -> Diagnostic {
 }
 
 /// `01 flat`, or `08 phone 47.30 USD` when the record was for another amount.
-fn occurrence<'a>(due: &Due, record: &Record, feed: &Feed<'a>) -> Line<'a> {
+fn occurrence<'a>(due: &Due, record: &Record, account: &'a str, unit: Unit<'a>) -> Line<'a> {
     let amount = match record.qty == due.qty {
         true => String::new(),
-        false => format!(" {}", money(record.qty.abs(), feed.unit)),
+        false => format!(" {}", money(record.qty.abs(), unit)),
     };
-    let moved = vec![(feed.account, record.qty)];
+    let moved = vec![(account, Some(unit.name), record.qty)];
     Line { day: record.day, body: format!("{}{amount}", due.contract), moved }
-}
-
-/// `checking -> trader-joes 84.20 USD`: the flow a record is, with the other
-/// end it was with, or `?` and its memo as a description if nobody is known.
-fn new_flow<'a>(feed: &Feed<'a>, record: &Record, other: &Other<'a>, pending: Option<&str>) -> Line<'a> {
-    let end = other.who.map_or("?", |who| who.name);
-    let (from, to) = if record.qty.is_negative() { (feed.account, end) } else { (end, feed.account) };
-    let amount = money(record.qty.abs(), feed.unit);
-    let mut body = format!("{from} -> {to} {}", if record.pending { format!("({amount})") } else { amount });
-    if let Some(via) = other.via {
-        let _ = write!(body, " via {via}");
-    }
-    for code in other.codes.iter().copied().chain(pending) {
-        let _ = write!(body, " ^{code}");
-    }
-    if other.who.is_none() {
-        let memo = record.memo.split_whitespace().collect::<Vec<_>>().join(" ");
-        let _ = write!(body, " \"{}\"", memo.replace('\\', "\\\\").replace('"', "\\\""));
-    }
-    // What arrives at the other end, if that is an account of the book too.
-    let transfer = other.who.filter(|who| who.account).map(|who| (who.name, -record.qty));
-    let moved = [Some((feed.account, record.qty)), transfer].into_iter().flatten().collect();
-    Line { day: record.day, body, moved }
 }
 
 /// `2_900 USD`, `84.20 USD`: a whole amount without decimals, any other to the
@@ -252,12 +510,15 @@ pub fn money(qty: Qty, unit: Unit) -> String {
 /// The balance a statement ends on: that of the last day that has one, when
 /// the day's posted records agree on it. Records can come in either order, so
 /// the closing balance is the one that the day's opening balance plus
-/// everything the day moved leads to.
+/// everything the day moved leads to. Records in another currency are not on
+/// the account's own balance.
 fn closing_of(records: &[Record]) -> Option<(Day, Qty)> {
-    let day = records.iter().rev().find(|record| !record.pending && record.balance.is_some())?.day;
+    let own = |record: &&Record| !record.pending && record.facts().currency.is_none();
+    let day = records.iter().rev().filter(own).find(|record| record.balance.is_some())?.day;
     let today: Vec<(Qty, Qty)> = records
         .iter()
-        .filter(|record| record.day == day && !record.pending)
+        .filter(own)
+        .filter(|record| record.day == day)
         .filter_map(|record| Some((record.qty, record.balance?)))
         .collect();
     let moved: Qty = today.iter().map(|(qty, _)| *qty).sum();
@@ -272,220 +533,4 @@ fn closing_of(records: &[Record]) -> Option<(Day, Qty)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::csv::{Amounts, Column, Csv, DateFormat};
-    use crate::peg::Patterns;
-    use crate::recognize::Known;
-
-    use super::*;
-
-    const USD: Unit = Unit { name: "USD", scale: 2 };
-
-    fn day(text: &str) -> Day {
-        Day::parse(text.as_bytes()).unwrap()
-    }
-
-    /// Rows are `date,amount,memo,balance,pending`, with no header.
-    fn feed() -> Feed<'static> {
-        let at = Column::Index;
-        let csv = Csv {
-            date: at(1),
-            format: DateFormat::new("YYYY-MM-DD").unwrap(),
-            amount: Amounts::Signed { column: at(2), flipped: false },
-            memo: at(3),
-            balance: Some(at(4)),
-            pending: Some(at(5)),
-        };
-        Feed { account: "checking", unit: USD, format: Format::Csv(csv) }
-    }
-
-    fn world(known: Vec<Known<'static>>) -> World<'static> {
-        let codes = ["code:(\"inv-\" digit+ \"-\" digit+)"];
-        World {
-            recognizer: Recognizer::new(known, &codes, &Patterns::default()).unwrap(),
-            layout: Layout::new(["journal/2026/01.ax"]),
-            accounts: Map::default(),
-            dues: Vec::new(),
-            claims: Map::default(),
-        }
-    }
-
-    fn party(name: &'static str, pattern: &'static str) -> Known<'static> {
-        Known { name, account: false, patterns: vec![pattern] }
-    }
-
-    /// The lines a statement adds, dated as they are written.
-    fn written(world: &mut World<'static>, text: &str) -> Vec<String> {
-        let inserts = world.feed(&feed(), text).unwrap_or_else(|problems| panic!("{}", problems[0].message));
-        inserts
-            .iter()
-            .map(|insert| match &insert.form {
-                Form::Item(body) => format!("{} {body}", insert.day.to_string().split_at(8).1),
-                Form::Row { .. } => unreachable!("a statement adds journal lines"),
-            })
-            .collect()
-    }
-
-    #[test]
-    fn a_pending_record_is_written_in_parentheses_and_settled_when_it_posts() {
-        let mut world = world(vec![]);
-        let pending = "2026-01-05,-12.50,CORNER STORE,,pending\n2026-01-05,-3.00,COFFEE,,pending\n";
-        assert_eq!(
-            written(&mut world, pending),
-            [
-                "05 checking -> ? (12.50 USD) ^pending-20260105-1 \"CORNER STORE\"",
-                "05 checking -> ? (3 USD) ^pending-20260105-2 \"COFFEE\"",
-            ]
-        );
-        // The book now has the flow, still pending, with its code; the bank posts it a day later.
-        let mut world = self::world(vec![]);
-        let account = world.accounts.entry("checking").or_default();
-        account.flows.push(Existing { day: day("2026-01-05"), qty: Qty(-1250), settle: Some("pending-20260105-1") });
-        account.flows.push(Existing { day: day("2026-01-05"), qty: Qty(-300), settle: None });
-        let posted = "2026-01-06,-12.50,CORNER STORE 1234,,\n2026-01-06,-3.00,COFFEE,,\n";
-        assert_eq!(
-            written(&mut world, posted),
-            ["06 ^pending-20260105-1 settled"],
-            "the flow with no code has nothing to say"
-        );
-    }
-
-    #[test]
-    fn an_invoice_code_finds_its_party_and_only_its_partys_codes_are_carried() {
-        let mut world = world(vec![party("halcyon", "\"HALCYON\"")]);
-        world.claims.insert("inv-2026-01", "halcyon");
-        world.claims.insert("inv-2026-09", "northwind");
-        let text = "2026-01-08,3800.00,WIRE FROM SOMEONE PAYING INV-2026-01,,\n\
-                    2026-01-09,100.00,HALCYON RE INV-2026-09,,\n\
-                    2026-01-10,5.00,INV-2026-77 UNKNOWN,,\n";
-        assert_eq!(
-            written(&mut world, text),
-            [
-                "08 halcyon -> checking 3_800 USD ^inv-2026-01",
-                "09 halcyon -> checking 100 USD",
-                "10 ? -> checking 5 USD \"INV-2026-77 UNKNOWN\"",
-            ]
-        );
-    }
-
-    #[test]
-    fn an_occurrence_that_differs_says_so_and_a_pending_one_waits() {
-        let mut world = world(vec![party("mint", "\"MINT MOBILE\"")]);
-        let due = |on: &str| Due {
-            contract: "phone",
-            party: "mint",
-            account: "checking",
-            day: day(on),
-            qty: Qty(-4500),
-            window: 15,
-        };
-        world.dues = vec![due("2026-01-08"), due("2026-02-08")];
-        let text = "2026-01-09,-47.30,MINT MOBILE,,\n2026-02-08,-45.00,MINT MOBILE,,pending\n";
-        assert_eq!(
-            written(&mut world, text),
-            ["09 phone 47.30 USD", "08 checking -> mint (45 USD) ^pending-20260208-1"]
-        );
-        let mut world = self::world(vec![party("mint", "\"MINT MOBILE\"")]);
-        world.dues = vec![due("2026-01-08")];
-        assert_eq!(written(&mut world, "2026-01-08,-45.00,MINT MOBILE,,\n"), ["08 phone"]);
-    }
-
-    #[test]
-    fn a_statement_ends_in_an_assertion_however_its_days_are_ordered() {
-        let asserted = |text: &str| {
-            written(&mut world(vec![]), text).into_iter().filter(|line| line.contains(" = ")).collect::<Vec<_>>()
-        };
-        let oldest_first = "2026-01-05,-10.00,A,90.00,\n2026-01-06,-5.00,B,85.00,\n2026-01-06,-1.00,C,84.00,\n";
-        let newest_first = "2026-01-06,-1.00,C,84.00,\n2026-01-06,-5.00,B,85.00,\n2026-01-05,-10.00,A,90.00,\n";
-        assert_eq!(asserted(oldest_first), ["06 checking = 84 USD"]);
-        assert_eq!(asserted(newest_first), ["06 checking = 84 USD"]);
-        assert_eq!(asserted("2026-01-06,-1.00,C,-84.00,\n"), ["06 checking = -84 USD"]);
-        assert!(
-            asserted("2026-01-06,-5.00,B,85.00,\n2026-01-06,-1.00,C,50.00,\n").is_empty(),
-            "balances that do not add up are no assertion"
-        );
-        assert!(asserted("2026-01-06,-5.00,B,,\n").is_empty());
-        let mut world = world(vec![]);
-        world.accounts.entry("checking").or_default().asserted.push(day("2026-01-06"));
-        assert!(written(&mut world, oldest_first).iter().all(|line| !line.contains(" = ")), "one assertion to a day");
-    }
-
-    #[test]
-    fn a_memo_nobody_is_known_as_is_a_description_that_reads_back() {
-        let mut world = world(vec![]);
-        let lines = written(
-            &mut world,
-            "2026-01-05,-9.99,\"  SQ   *CAFE \"\"LUNA\"\" \\ ETC \",,\n2026-01-05,0.00,NOTHING MOVED,,\n",
-        );
-        assert_eq!(lines, ["05 checking -> ? 9.99 USD \"SQ *CAFE \\\"LUNA\\\" \\\\ ETC\""]);
-    }
-
-    #[test]
-    fn two_memos_that_tie_are_an_error_naming_both_and_nothing_is_written() {
-        let mut world = world(vec![party("shell-oil", "\"SHELL\""), party("shell-station", "\"SHELL\" any*")]);
-        let problems = world.feed(&feed(), "2026-01-05,-9.99,SHELL 1234,,\n").err().expect("refused");
-        assert_eq!(problems[0].message, "`SHELL 1234` is known as both shell-oil and shell-station");
-        assert!(problems[0].help[0].text.contains("matches more of the memo"));
-        assert!(world.accounts.is_empty(), "nothing is remembered from a source that failed");
-    }
-
-    #[test]
-    fn a_record_already_written_is_not_read_again() {
-        let mut world = world(vec![party("shell-oil", "\"SHELL\""), party("shell-station", "\"SHELL\" any*")]);
-        let account = world.accounts.entry("checking").or_default();
-        account.flows.push(Existing { day: day("2026-01-05"), qty: Qty(-999), settle: None });
-        assert!(
-            written(&mut world, "2026-01-05,-9.99,SHELL 1234,,\n").is_empty(),
-            "a tie in what is written is not in the way"
-        );
-    }
-
-    #[test]
-    #[ignore = "a timing, alone: cargo test -p axiom-sync --release -- --ignored --test-threads=1"]
-    fn a_statement_of_a_hundred_thousand_records_against_an_account_of_a_million_flows() {
-        let mut seed = 11u64;
-        let mut next = |bound: u64| {
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
-            (seed >> 33) % bound
-        };
-        let names: Vec<String> = (0..100).map(|n| format!("merchant-{n}")).collect();
-        let patterns: Vec<String> = (0..100).map(|n| format!("\"SHOP {n:03}\"")).collect();
-        let known = names.iter().zip(&patterns).map(|(name, pattern)| Known {
-            name: Box::leak(name.clone().into_boxed_str()),
-            account: false,
-            patterns: vec![Box::leak(pattern.clone().into_boxed_str())],
-        });
-        let mut world = world(known.collect());
-        let first = day("2016-01-01");
-        let account = world.accounts.entry("checking").or_default();
-        account.flows = (0..1_000_000)
-            .map(|_| Existing {
-                day: first.add_days(next(3650) as i32),
-                qty: Qty(-(next(50_000) as i64) - 1),
-                settle: None,
-            })
-            .collect();
-        let mut text = String::new();
-        for at in 0..100_000 {
-            // A fifth are on the book already, a few days off; the rest are new.
-            let (day, cents) = match at % 5 {
-                0 => {
-                    let known = account.flows[next(1_000_000) as usize];
-                    (known.day.add_days(next(3) as i32), known.qty.0)
-                }
-                _ => (first.add_days(next(3650) as i32), -(next(50_000) as i64) - 1),
-            };
-            let (whole, fraction) = (cents.abs() / 100, cents.abs() % 100);
-            text += &format!("{day},-{whole}.{fraction:02},POS PURCHASE SHOP {:03} SAN FRANCISCO,,\n", next(120));
-        }
-        let started = std::time::Instant::now();
-        let lines = world.feed(&feed(), &text).unwrap_or_else(|problems| panic!("{}", problems[0].message));
-        eprintln!(
-            "a statement of 100,000 records against 1,000,000 flows: {} lines in {:?}",
-            lines.len(),
-            started.elapsed()
-        );
-        assert!(started.elapsed().as_millis() < 1000, "{:?}", started.elapsed());
-        assert!(lines.len() > 70_000 && lines.len() < 85_000, "{}", lines.len());
-    }
-}
+mod tests;

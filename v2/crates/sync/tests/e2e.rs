@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use axiom_core::{Day, Map, Qty};
 use axiom_sync::{
-    Account, Amounts, Column, Csv, DateFormat, Due, Env, Existing, Failure, Feed, Format, Input, Kind, Known, Layout,
-    Patterns, Recognizer, Sink, Source, Unit, World, sync,
+    Account, DateFormat, Due, Env, Existing, Failure, Feed, Field, Format, Input, Kind, Known, Layout, Patterns, Place,
+    Recognizer, Rule, Shape, Sink, Source, Spec, Unit, World, sync,
 };
 
 const USD: Unit = Unit { name: "USD", scale: 2 };
@@ -79,35 +79,72 @@ opening 01
 06 visa -> trader-joes 84.20 USD
 ";
 
-fn column(name: &str) -> Column {
-    Column::Name(name.into())
+fn column(name: &str) -> Place {
+    Place::Name(name.into())
 }
 
-fn checking_csv() -> Csv {
-    Csv {
-        date: column("Posting Date"),
-        format: DateFormat::new("MM/DD/YYYY").unwrap(),
-        amount: Amounts::Signed { column: column("Amount"), flipped: false },
-        memo: column("Description"),
-        balance: Some(column("Balance")),
-        pending: None,
+fn rows(specs: Vec<Spec>) -> Format {
+    Format { shape: Shape::Rows, specs, categories: Vec::new() }
+}
+
+fn us_dates() -> DateFormat {
+    DateFormat::new("MM/DD/YYYY").unwrap()
+}
+
+/// `format csv` with `date "Posting Date" "MM/DD/YYYY"`, `amount "Amount"`, `memo "Description"`, `balance "Balance"`.
+fn checking_csv() -> Format {
+    rows(vec![
+        Spec::new(Field::Date, [column("Posting Date")]).layout(us_dates()),
+        Spec::new(Field::Amount, [column("Amount")]),
+        Spec::new(Field::Memo, [column("Description")]),
+        Spec::new(Field::Balance, [column("Balance")]),
+    ])
+}
+
+/// The card shows charges as positive: `amount "Amount" flipped`.
+fn visa_csv() -> Format {
+    rows(vec![
+        Spec::new(Field::Date, [column("Transaction Date")]).layout(us_dates()),
+        Spec::new(Field::Amount, [column("Amount")]).rule(Rule::Flipped),
+        Spec::new(Field::Memo, [column("Description")]),
+    ])
+}
+
+/// `format ofx`, as std declares it.
+fn ofx() -> Format {
+    let path = |text: &str| Place::Path(text.into());
+    Format {
+        shape: Shape::Tagged { records: "STMTTRN".into() },
+        specs: vec![
+            Spec::new(Field::Date, [path("DTPOSTED")]).layout(DateFormat::new("YYYYMMDD").unwrap()),
+            Spec::new(Field::Amount, [path("TRNAMT")]),
+            Spec::new(Field::Memo, [path("NAME"), path("MEMO")]),
+            Spec::new(Field::Code, [path("CHECKNUM")]),
+        ],
+        categories: Vec::new(),
     }
 }
 
-fn visa_csv() -> Csv {
-    Csv {
-        date: column("Transaction Date"),
-        format: DateFormat::new("MM/DD/YYYY").unwrap(),
-        amount: Amounts::Signed { column: column("Amount"), flipped: true },
-        memo: column("Description"),
-        balance: None,
-        pending: None,
+/// `format camt053`, as std declares it.
+fn camt053() -> Format {
+    let path = |text: &str| Place::Path(text.into());
+    Format {
+        shape: Shape::Tagged { records: "Ntry".into() },
+        specs: vec![
+            Spec::new(Field::Date, [path("BookgDt/Dt")]),
+            Spec::new(Field::Amount, [path("Amt")]).rule(Rule::Sign { place: path("CdtDbtInd"), into: "CRDT".into() }),
+            Spec::new(Field::Memo, [path("AddtlNtryInf"), path("RmtInf/Ustrd")]),
+            Spec::new(Field::Pending, [path("Sts")]).rule(Rule::Is("PDNG".into())),
+            Spec::new(Field::Code, [path("NtryDtls/TxDtls/RmtInf/Strd/CdtrRefInf/Ref")]),
+            Spec::new(Field::Via, [path("NtryDtls/TxDtls/RltdPties/UltmtCdtr/Nm")]),
+        ],
+        categories: Vec::new(),
     }
 }
 
 fn sources<'a>(order: &[&str]) -> Vec<Source<'a>> {
     let first = Day::from_ymd(2026, 1, 1).unwrap();
-    let feed = |name: &'static str, csv: Csv| Source {
+    let feed = |name: &'static str, format: Format| Source {
         name,
         input: Input::Run(if name == "checking" {
             "printf '%s' {since} > since-checking.txt; cat feeds/checking.csv"
@@ -115,7 +152,7 @@ fn sources<'a>(order: &[&str]) -> Vec<Source<'a>> {
             "cat feeds/visa.csv"
         }),
         since: first,
-        kind: Kind::Feed(Feed { account: name, unit: USD, format: Format::Csv(csv) }),
+        kind: Kind::Feed(Feed { account: name, unit: USD, format }),
     };
     order
         .iter()
@@ -130,6 +167,7 @@ fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World
         recognizer: Recognizer::new(known, &["code:(\"inv-\" digit+ \"-\" digit+)"], &Patterns::default()).unwrap(),
         layout: Layout::new(files.keys().map(String::as_str)),
         accounts: Map::default(),
+        units: vec![USD],
         dues: Vec::new(),
         claims: Map::default(),
     };
@@ -146,11 +184,7 @@ fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World
             let account = |name: &str| ["checking", "visa"].into_iter().find(|account| *account == name);
             let mut flow = |name: &str, qty: i64| {
                 if let Some(account) = account(name) {
-                    world.accounts.entry(account).or_default().flows.push(Existing {
-                        day,
-                        qty: Qty(qty),
-                        settle: None,
-                    });
+                    world.accounts.entry(account).or_default().flows.push(Existing::new(day, Qty(qty)));
                 }
             };
             match words.as_slice() {
@@ -165,7 +199,7 @@ fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World
                     claims.push((words.iter().find(|w| w.starts_with('^')).unwrap()[1..].to_string(), *party))
                 }
                 [_, from, "->", to, amount, ..] => {
-                    let cents = amount.replace('_', "");
+                    let cents = amount.replace('_', "").replace('(', "");
                     let (whole, fraction) = cents.split_once('.').unwrap_or((&cents, "00"));
                     let qty = whole.parse::<i64>().unwrap() * 100 + fraction.parse::<i64>().unwrap();
                     flow(from, -qty);
@@ -208,12 +242,17 @@ fn known<'a>(recognizes_visa_from_checking: bool) -> Vec<Known<'a>> {
         party("trader-joes", "\"TRADER JOE\""),
         party("amazon", "\"AMAZON\""),
     ];
-    let account = |name: &'a str, pattern: &'a str| Known { name, account: true, patterns: vec![pattern] };
-    known.push(if recognizes_visa_from_checking {
-        account("visa", "\"CHASE CREDIT CRD AUTOPAY\"")
-    } else {
-        account("checking", "\"PAYMENT THANK YOU\"")
-    });
+    // Every account is known by its own name; one is also known as the bank writes it.
+    let account = |name: &'a str, pattern: Option<&'a str>| Known {
+        name,
+        account: true,
+        patterns: pattern.into_iter().collect(),
+    };
+    let (visa, checking) = match recognizes_visa_from_checking {
+        true => (Some("\"CHASE CREDIT CRD AUTOPAY\""), None),
+        false => (None, Some("\"PAYMENT THANK YOU\"")),
+    };
+    known.extend([account("visa", visa), account("checking", checking), account("stripe", None)]);
     known
 }
 
@@ -359,7 +398,7 @@ fn a_drop_folder_is_read_where_it_lies() {
         name: "checking",
         input: Input::Read(pattern),
         since: Day(0),
-        kind: Kind::Feed(Feed { account: "checking", unit: USD, format: Format::Ofx }),
+        kind: Kind::Feed(Feed { account: "checking", unit: USD, format: ofx() }),
     };
     let root = project.root.clone();
     let env =
@@ -374,14 +413,13 @@ fn a_drop_folder_is_read_where_it_lies() {
     };
 
     let (labels, written) = sync_once(&project, "imports/chase/*.qfx");
-    assert_eq!(labels, [("imports/chase/2026-01.qfx".to_string(), Some(4))]);
+    assert_eq!(labels, [("imports/chase/2026-01.qfx".to_string(), Some(3))]);
     let expected = JANUARY.replace(
         "06 visa -> trader-joes 84.20 USD\n",
         "05 checking -> trader-joes 84.20 USD\n\
 06 visa -> trader-joes 84.20 USD\n\
-06 checking -> ? 350 USD \"BAY PLUMBING & HEATING CHECK 1041\"\n\
-08 halcyon -> checking 3_800 USD\n\
-12 checking = 3_162.55 USD\n",
+06 checking -> ? 350 USD \"BAY PLUMBING & HEATING\" ^1041\n\
+08 halcyon -> checking 3_800 USD\n",
     );
     assert_eq!(written, [("journal/2026/01.ax".to_string(), expected.clone())]);
 
@@ -446,4 +484,93 @@ fn invoices_and_prices_are_merged_by_their_sinks() {
     let mut world = book(&files, known(true));
     let read = |path: &str| project.read(path);
     assert!(sync(&mut world, &sources, &env, &read).changes.is_empty(), "the second sync writes nothing");
+}
+
+/// An ISO 20022 statement: a payout through PayPal to an ultimate party, with its own reference, and a charge still pending.
+const CAMT: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:camt.053.001.02\"><BkToCstmrStmt><Stmt><Id>S1</Id>\n\
+<Ntry><Amt Ccy=\"USD\">1250.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>2026-01-05</Dt></BookgDt>\n\
+<AddtlNtryInf>PAYPAL PAYOUT</AddtlNtryInf><NtryDtls><TxDtls><Amt Ccy=\"USD\">1250.00</Amt><RltdPties><UltmtCdtr><Nm>Etsy Seller</Nm></UltmtCdtr></RltdPties>\n\
+<RmtInf><Ustrd>ORDER 77</Ustrd><Strd><CdtrRefInf><Ref>PO-77</Ref></CdtrRefInf></Strd></RmtInf></TxDtls></NtryDtls></Ntry>\n\
+<Ntry><Amt Ccy=\"USD\">47.30</Amt><CdtDbtInd>DBIT</CdtDbtInd><Sts>PDNG</Sts><BookgDt><Dt>2026-01-06</Dt></BookgDt><AddtlNtryInf>MINT MOBILE</AddtlNtryInf></Ntry>\n\
+</Stmt></BkToCstmrStmt></Document>";
+
+#[test]
+fn an_iso_20022_statement_is_read_by_its_declared_format() {
+    let mut project =
+        Project::new("camt", &[("axiom.ax", ""), ("journal/2026/01.ax", JANUARY), ("imports/bank/2026-01.xml", CAMT)]);
+    let source = Source {
+        name: "checking",
+        input: Input::Read("imports/bank/*.xml"),
+        since: Day(0),
+        kind: Kind::Feed(Feed { account: "checking", unit: USD, format: camt053() }),
+    };
+    let root = project.root.clone();
+    let env =
+        Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
+    let sync_once = |project: &Project| {
+        let party = |name: &'static str, pattern: &'static str| Known { name, account: false, patterns: vec![pattern] };
+        let mut known = known(true);
+        known.extend([
+            party("paypal", "\"PAYPAL\""),
+            party("etsy-seller", "\"ETSY\""),
+            party("mint", "\"MINT MOBILE\""),
+        ]);
+        let mut world = book(&project.files, known);
+        let read = |path: &str| project.read(path);
+        let outcome = sync(&mut world, std::slice::from_ref(&source), &env, &read);
+        outcome.changes.into_iter().map(|change| (change.path, change.after)).collect::<Vec<_>>()
+    };
+    let written = sync_once(&project);
+    let expected = JANUARY.replace(
+        "06 visa -> trader-joes 84.20 USD\n",
+        "05 etsy-seller -> checking 1_250 USD ^po-77 via paypal\n\
+06 visa -> trader-joes 84.20 USD\n\
+06 checking -> mint (47.30 USD) ^pending-20260106-1\n",
+    );
+    assert_eq!(written, [("journal/2026/01.ax".to_string(), expected.clone())]);
+    project.write("journal/2026/01.ax", &expected);
+    assert!(sync_once(&project).is_empty(), "the second sync writes nothing");
+}
+
+#[test]
+fn a_document_a_source_prints_is_written_once_whichever_source_comes_first() {
+    let project = Project::new(
+        "documents",
+        &[
+            ("axiom.ax", ""),
+            ("journal/2026/01.ax", JANUARY),
+            (
+                "feeds/small.csv",
+                "Posting Date,Description,Amount,Balance\n01/06/2026,STRIPE PAYOUT 8841,970.00,\n01/07/2026,COFFEE,-4.00,\n",
+            ),
+            ("payouts.txt", "2026-01-05 stripe -> checking 1_000 USD ^po-1\n  - 30 USD #fees via stripe\n"),
+        ],
+    );
+    let bank = Source {
+        name: "checking",
+        input: Input::Run("cat feeds/small.csv"),
+        since: Day(0),
+        kind: Kind::Feed(Feed { account: "checking", unit: USD, format: checking_csv() }),
+    };
+    let payouts = Source {
+        name: "payouts",
+        input: Input::Run("cat payouts.txt"),
+        since: Day(0),
+        kind: Kind::Sink(Sink::Journal),
+    };
+    let root = project.root.clone();
+    let env =
+        Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
+    let mut world = book(&project.files, known(true));
+    let read = |path: &str| project.read(path);
+    // The bank is declared first, but the document is read before it.
+    let outcome = sync(&mut world, &[bank, payouts], &env, &read);
+    let counts: Vec<_> =
+        outcome.sources.iter().map(|(name, result)| (name.as_str(), result.as_ref().ok().copied())).collect();
+    assert_eq!(counts, [("checking", Some(1)), ("payouts", Some(1))], "reported in the order declared");
+    let journal = &outcome.changes[0].after;
+    assert!(journal.contains("05 stripe -> checking 1_000 USD ^po-1\n  - 30 USD #fees via stripe\n"), "{journal}");
+    assert!(journal.contains("07 checking -> ? 4 USD \"COFFEE\"\n"), "{journal}");
+    assert!(!journal.contains("STRIPE PAYOUT"), "the bank's line for the same money is the document's: {journal}");
 }

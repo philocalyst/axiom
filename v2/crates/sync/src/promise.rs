@@ -50,12 +50,11 @@ pub fn keep(records: &[Record], parties: &[Option<&str>], dues: &[Due]) -> Vec<O
 
 #[cfg(test)]
 mod tests {
-    use axiom_core::Loc;
 
     use super::*;
 
     fn record(day: i32, cents: i64) -> Record<'static> {
-        Record { day: Day(day), qty: Qty(cents), memo: "".into(), balance: None, pending: false, at: Loc::default() }
+        Record::new(Day(day), Qty(cents), "")
     }
 
     fn due(party: &'static str, day: i32, cents: i64) -> Due<'static> {

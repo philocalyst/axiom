@@ -1,5 +1,5 @@
 //! Running a source's command: from the project root, with `{since}`,
-//! `{today}` and `{units}` filled in, every source at once. Axiom opens no
+//! `{today}`, `{year}` and `{units}` filled in, every source at once. Axiom opens no
 //! connection of its own; whatever a command reaches, it reaches itself.
 
 use std::fs::{self, File};
@@ -15,7 +15,7 @@ use axiom_core::{Day, par};
 const POLL: Duration = Duration::from_millis(20);
 
 /// Why a command's output is not to be used, and what it said on the way.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Failed {
     pub summary: String,
     pub stderr: String,
@@ -27,12 +27,13 @@ impl Failed {
     }
 }
 
-/// `template` with `{since}`, `{today}` and `{units}` (the commodities held,
+/// `template` with `{since}`, `{today}`, `{year}` (that of today) and `{units}` (the commodities held,
 /// separated by spaces) replaced.
 pub fn substitute(template: &str, since: Day, today: Day, units: &[&str]) -> String {
     template
         .replace("{since}", &since.to_string())
         .replace("{today}", &today.to_string())
+        .replace("{year}", &format!("{:04}", today.ymd().0))
         .replace("{units}", &units.join(" "))
 }
 
@@ -122,7 +123,7 @@ mod tests {
         let command =
             substitute("quotes {units} --since {since} --until {today} {since}", since, today, &["VTI", "VXUS"]);
         assert_eq!(command, "quotes VTI VXUS --since 2026-03-01 --until 2026-03-31 2026-03-01");
-        assert_eq!(substitute("echo {a,b} {year}", since, today, &[]), "echo {a,b} {year}");
+        assert_eq!(substitute("echo {a,b} {year} {years}", since, today, &[]), "echo {a,b} 2026 {years}");
     }
 
     #[test]

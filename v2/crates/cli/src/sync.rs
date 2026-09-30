@@ -66,6 +66,7 @@ pub fn execute(
             .unwrap_or_else(|_| unreachable!("no patterns, none can be wrong")),
         layout: Layout::new(paths),
         accounts: Default::default(),
+        units: Vec::new(),
         dues: Vec::new(),
         claims: Default::default(),
     };
@@ -233,6 +234,7 @@ mod tests {
             recognizer: Recognizer::new(Vec::new(), &[], &Patterns::default()).unwrap(),
             layout: Layout::new(["prices/2026.ax"]),
             accounts: Default::default(),
+            units: Vec::new(),
             dues: Vec::new(),
             claims: Default::default(),
         };
