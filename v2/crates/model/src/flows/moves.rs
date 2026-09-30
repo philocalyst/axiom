@@ -8,7 +8,7 @@
 //! one leg's place, and the others are paid to or from it.
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Diagnostic, Id, Loc, Qty, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Sym};
 use axiom_syntax::Due;
 
 use super::faults::{self, Written};
@@ -16,7 +16,7 @@ use super::pairing::{self, Share};
 use super::shape::{Elab, Leg, Placed, Shape, Slot, Stated, Tail};
 use crate::book::{Amount, Class, CodeScope, Commodity, PathRoot, Place};
 use crate::errors::{count, iso, list, list_and};
-use crate::journal::{End, Flow, Infer, Mode, Origin, Recognition, Terms};
+use crate::journal::{Detail, End, Flow, Infer, Mode, Origin};
 
 /// One flow, before its transaction's facts are added.
 pub(super) struct Move {
@@ -426,11 +426,12 @@ impl Elab<'_, '_> {
             || spender.is_some()
             || mv.cost.is_some()
             || due.is_some();
-        let terms = said.then(|| {
+        let detail = said.then(|| {
             let (basis, hold, since, cost) = (tail.basis, tail.hold, tail.since, mv.cost);
-            Box::new(Terms { basis, hold, basis_end, since, spender, cost, due })
+            // v3 bridge: no v3 line refunds another (`against`) or computes an amount from a reference (`reckoned`).
+            Box::new(Detail { basis, hold, basis_end, since, spender, cost, due, against: None, reckoned: None })
         });
-        let recognized = tail.period.map_or(Recognition::on(day), |(from, until)| Recognition { from, until });
+        let recognized = tail.period.unwrap_or(Days::on(day));
         // v3 bridge: the owner of the first end that is an account, else `me`. Nothing reads it yet.
         let book = &self.world.book;
         let owner = [mv.from.end.place, mv.to.end.place]
@@ -458,7 +459,7 @@ impl Elab<'_, '_> {
             codes,
             loc: mv.loc,
             waive: tail.waive,
-            terms,
+            detail,
         })
     }
 

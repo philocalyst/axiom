@@ -7,7 +7,6 @@
 //! [`headroom`] what every limit has counted, [`calendar`] cuts time into
 //! periods, and [`table`] builds sections so the views stay declarative.
 
-mod apportion;
 mod available;
 mod balance;
 mod budget;

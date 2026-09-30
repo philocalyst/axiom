@@ -530,7 +530,7 @@ opening 2025-09-01
 fn read(book: &Book, run: &Run, place: &str) -> Vec<(String, i64)> {
     let subject = axiom_model::Subject::Place(book.place(place).unwrap());
     let readings = run.headroom.iter().filter(|reading| reading.subject == subject);
-    readings.map(|reading| (reading.from.to_string(), reading.counted.qty.0)).collect()
+    readings.map(|reading| (reading.days.first().to_string(), reading.counted.qty.0)).collect()
 }
 
 fn broken<'r>(book: &Book, run: &'r Run) -> Vec<&'r str> {
@@ -587,7 +587,7 @@ fn a_planned_flow_reaches_the_months_ahead_as_its_ledger_advances() {
         // The rent flow again, 81 days from the tenth of January: 22, 28 and 31 of them.
         let mut prepaid = book.flows[axiom_core::Id::new(1)].clone();
         prepaid.day = day(2026, 1, 10);
-        prepaid.recognized = axiom_model::Recognition { from: day(2026, 1, 10), until: day(2026, 3, 31) };
+        prepaid.recognized = axiom_core::Days::new(day(2026, 1, 10), day(2026, 3, 31)).unwrap();
         prepaid.out.qty = axiom_core::Qty(1_200_00);
         prepaid.arrive = prepaid.out;
         let mut fork = ledger.fork();

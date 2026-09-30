@@ -7,11 +7,12 @@ use axiom_core::{Day, Diagnostic, Id};
 use axiom_syntax::{self as ast, EventState, Item};
 
 use super::shape::{Elab, Priced};
-use crate::book::{Amount, CodeRule, CodeScope, PathRoot, Place, SyncSpec};
+use crate::book::{Amount, CodeRule, CodeScope, PathRoot, Place};
 use crate::collect::Entry;
 use crate::declare::World;
 use crate::journal::{Assert, Gap, Quote, Split, Waive};
 use crate::scope::Home;
+use crate::sync::{Fetch, Sink, Source};
 
 /// A settlement event, before its code is checked against the flows.
 pub(crate) struct RawEvent<'s> {
@@ -131,20 +132,34 @@ pub(super) fn code_rules<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], d
         }
         if world.scopes.of(Home::Project).sees(written.home()) {
             let pattern = world.book.names.intern(rule.pattern.0.strip_prefix('#').unwrap_or(rule.pattern.0));
-            world.book.codes.push(CodeRule { pattern, on: scopes.into(), loc: written.item.loc });
+            // v3 bridge: no v3 code says how it appears in a memo.
+            world.book.codes.push(CodeRule {
+                pattern,
+                on: scopes.into(),
+                known_as: Box::default(),
+                loc: written.item.loc,
+            });
         }
     }
 }
 
-pub(super) fn syncs<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>]) -> Vec<SyncSpec> {
+pub(super) fn sources<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>]) -> Vec<Source> {
     let names = &mut world.book.names;
-    let syncs = entries.iter().filter_map(|entry| match entry {
-        Entry::Sync(written) => Some(SyncSpec {
-            file: names.intern(written.node.file.0),
-            run: names.intern(written.node.run.0),
-            loc: written.item.loc,
-        }),
+    let sources = entries.iter().filter_map(|entry| match entry {
+        Entry::Sync(written) => {
+            let file = names.intern(written.node.file.0);
+            // v3 bridge: `sync FILE` / `run COMMAND` names the file the command's Axiom is merged into.
+            Some(Source {
+                name: file,
+                fetch: Fetch::Run(names.intern(written.node.run.0)),
+                format: None,
+                sink: Sink::File(file),
+                system: None,
+                doc: None,
+                loc: written.item.loc,
+            })
+        }
         _ => None,
     });
-    syncs.collect()
+    sources.collect()
 }

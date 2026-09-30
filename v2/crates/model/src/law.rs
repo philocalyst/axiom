@@ -10,13 +10,14 @@
 //! [`Value::Fault`], not an early exit. `if`, `and` and `or` pick among values
 //! already computed, so a fault in a branch not taken is never observed.
 
+use axiom_core::calendar;
 use axiom_core::day::days_in_month;
-use axiom_core::{Day, Groups, Id, Loc, Ratio, Span, Sym};
+use axiom_core::{Day, Days, Dim, Groups, Id, Loc, Period, Ratio, Severity, Span, Sym};
 
-use crate::book::{Amount, Asset, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System};
+use crate::book::{Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System};
 use crate::journal::Object;
 
-pub use axiom_syntax::{BinOp, Period};
+pub use axiom_syntax::BinOp;
 
 pub struct Law {
     pub name: Sym,
@@ -26,10 +27,23 @@ pub struct Law {
     /// are scoped here.
     pub system: Option<Id<System>>,
     pub trigger: Trigger,
+    /// The `budget` item that reports through this law: its cap reads the
+    /// budget's limits and `carries` rather than a constant.
+    pub budget: Option<Id<Budget>>,
+    /// `overrides NAME`: the law it replaces where both govern.
+    pub overrides: Option<Id<Law>>,
+    /// Specificity, for conflicts (LANGUAGE §8): thing over kind over parent
+    /// kind, project over child system over parent system. Computed at build
+    /// time.
+    pub rank: Rank,
     pub steps: Box<[Step]>,
     pub nodes: Box<[Node]>,
     pub loc: Loc,
 }
+
+/// How specific a law is: the greater wins a conflict.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Rank(pub u16);
 
 impl Law {
     /// The nodes of `root`'s expression, in evaluation order: `first..=root`.
@@ -42,7 +56,10 @@ impl Law {
     /// `budget 500 USD monthly` means. A total is read straight from the
     /// ledger, so a cap that holds takes no evaluating.
     pub fn cap(&self) -> Option<Cap> {
-        let [Step { kind: StepKind::Require { cond, otherwise: None, .. }, .. }] = &*self.steps else { return None };
+        let [Step { kind: StepKind::Require { cond, otherwise, .. }, .. }] = &*self.steps else { return None };
+        if !otherwise.is_empty() {
+            return None;
+        }
         let Op::Bin(cmp @ (BinOp::Le | BinOp::Lt), total, limit) = self.nodes[cond.index()].op else { return None };
         match (&self.nodes[total.index()].op, &self.nodes[limit.index()].op) {
             // A kind among the arguments widens the total to every place of that kind.
@@ -129,13 +146,17 @@ pub struct Step {
 #[derive(Debug)]
 pub enum StepKind {
     When(NodeId),
+    /// An exception the law itself knows: while it holds, the law does not apply.
+    Unless(NodeId),
     /// The bound value is the node's; later nodes read it with [`Op::Local`].
     Let(NodeId),
     Require {
         cond: NodeId,
-        otherwise: Option<Effect>,
+        /// `else B else C`: reparations, in order.
+        otherwise: Box<[Effect]>,
         message: Option<Sym>,
-        warn: bool,
+        /// `warn` is a `require` whose failure costs nothing.
+        severity: Severity,
     },
     Effect(Effect),
 }
@@ -299,10 +320,24 @@ pub enum Window {
     Ever,
 }
 
+impl Window {
+    /// The days this window is on the day `day` falls in: its calendar month or
+    /// year, or all of time.
+    pub fn around(self, day: Day) -> Days {
+        let period = match self {
+            Window::Month => Period::Month,
+            Window::Year => Period::Year,
+            Window::Ever => return Days::ALWAYS,
+        };
+        calendar::Window::containing(period, day).days()
+    }
+}
+
 /// A static type.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Ty {
-    Amount,
+    /// In a dimension: what it is counted in, known before anything runs.
+    Amount(Dim<Id<Commodity>>),
     Num,
     Bool,
     Day,
@@ -324,10 +359,14 @@ pub enum Ty {
 }
 
 impl Ty {
+    /// An amount of some commodity. v3 bridge: the v3 compiler knows no units,
+    /// so every amount it types is this, and mixing them is never an error.
+    pub const AMOUNT: Ty = Ty::Amount(Dim::Any);
+
     /// The word used in `has NAME TYPE` and in type errors.
     pub fn word(self) -> &'static str {
         match self {
-            Ty::Amount => "amount",
+            Ty::Amount(_) => "amount",
             Ty::Num => "number",
             Ty::Bool => "bool",
             Ty::Day => "date",
@@ -422,9 +461,8 @@ pub struct Rule {
     /// the place itself for kind laws, the resident for system laws, and the
     /// flow's owner for purpose laws.
     pub subject: Subject,
-    /// Inclusive: the rule applies on days in `from..=until`.
-    pub from: Day,
-    pub until: Day,
+    /// The days the rule applies on.
+    pub days: Days,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]

@@ -106,6 +106,9 @@ pub(crate) fn arrange<'a, 's>(
         System {
             path: names.intern(path),
             laws: Box::default(),
+            // v3 bridge: no v3 system says what its laws count in or how it converts.
+            currency: None,
+            rates: None,
             doc: source.and_then(|source| source.file.items[0].doc).map(|doc| names.intern(doc.0)),
             loc: source.and_then(|source| defined_by(source).map(|text| source.file.loc(text))),
         }

@@ -4,8 +4,8 @@
 //! so `limits`, `budget` and `why` can say how close anyone is before anything
 //! breaks.
 
-use axiom_core::day::days_in_month;
-use axiom_core::{Day, Id, Map, Qty, Ratio, Set};
+use axiom_core::calendar::Window as Calendar;
+use axiom_core::{Day, Days, Id, Map, Qty, Ratio, Set, Severity};
 use axiom_engine::{Headroom, Run};
 use axiom_model::{Amount, BinOp, Book, Law, Op, Period, StepKind, Subject, Window};
 
@@ -19,37 +19,26 @@ pub fn current(book: &Book, run: &Run, from: Day, to: Day) -> Vec<Headroom> {
     let mut readings = run.headroom.clone();
     let Some(begins) = book.flows.as_slice().first().map(|first| first.day) else { return readings };
     let mut read: Set<(Id<Law>, u32, Subject, Day)> =
-        readings.iter().map(|reading| (reading.law, reading.step, reading.subject, reading.from)).collect();
+        readings.iter().map(|reading| (reading.law, reading.step, reading.subject, reading.days.first())).collect();
     let (months, years) = (Periods::covering(Period::Month, from, to), Periods::covering(Period::Year, from, to));
     let rules = book.rules.on_in.values().iter().chain(book.rules.on_out.values());
     for rule in rules {
         let law = &book.laws[rule.law];
         let (Subject::Place(place), Some(cap)) = (rule.subject, law.cap()) else { continue };
         let (step, limit) = (0, cap.limit);
-        let warn = matches!(law.steps[0].kind, StepKind::Require { warn: true, .. });
+        let warn = matches!(law.steps[0].kind, StepKind::Require { severity: Severity::Warning, .. });
         let windows = match cap.window {
             Window::Month => &months,
             Window::Year => &years,
             Window::Ever => continue,
         };
         for index in 0..windows.len() {
-            let (start, until) = (windows.start(index), windows.end(index));
-            let in_force = rule.from <= until && start <= rule.until;
-            if in_force && begins <= until && read.insert((rule.law, step, rule.subject, start)) {
+            let days = windows.window(index).days();
+            let in_force = rule.days.overlaps(days);
+            if in_force && begins <= days.last() && read.insert((rule.law, step, rule.subject, days.first())) {
                 let (owner, counted) = (book.places[place].owner, Amount::new(Qty::ZERO, limit.unit));
-                let (law, subject, day) = (rule.law, rule.subject, until.min(to));
-                readings.push(Headroom {
-                    law,
-                    step,
-                    subject,
-                    owner,
-                    from: start,
-                    until,
-                    counted,
-                    limit,
-                    day,
-                    warn,
-                });
+                let (law, subject, day) = (rule.law, rule.subject, days.last().min(to));
+                readings.push(Headroom { law, step, subject, owner, days, counted, limit, day, warn });
             }
         }
     }
@@ -61,7 +50,7 @@ pub fn latest<'a>(readings: impl Iterator<Item = &'a Headroom>) -> Vec<&'a Headr
     let mut latest: Map<(Id<Law>, u32, Subject), &Headroom> = Map::default();
     for reading in readings {
         let slot = latest.entry((reading.law, reading.step, reading.subject)).or_insert(reading);
-        if reading.until > slot.until {
+        if reading.days.last() > slot.days.last() {
             *slot = reading;
         }
     }
@@ -92,30 +81,13 @@ pub fn used(reading: &Headroom) -> Option<Ratio> {
         .flatten()
 }
 
-/// The calendar month or year the reading's window is exactly, if it is one.
-pub fn period(reading: &Headroom) -> Option<Period> {
-    let (year, month, _) = reading.from.ymd();
-    let window = |first: u32, last: u32| {
-        let (from, until) = (Day::from_ymd(year, first, 1), Day::from_ymd(year, last, days_in_month(year, last)));
-        (from, until) == (Some(reading.from), Some(reading.until))
-    };
-    if window(month, month) {
-        Some(Period::Month)
-    } else if window(1, 12) {
-        Some(Period::Year)
-    } else {
-        None
-    }
-}
-
 /// `2026-03`, `2026`, `on 2026-03-31`, `ever`, or the range itself.
 pub fn window_words(reading: &Headroom) -> String {
-    let (year, month, _) = reading.from.ymd();
-    match period(reading) {
-        Some(Period::Month) => format!("{year:04}-{month:02}"),
-        Some(Period::Year) => format!("{year:04}"),
-        None if reading.from == reading.until => format!("on {}", reading.from),
-        None if (reading.from.0, reading.until.0) == (i32::MIN, i32::MAX) => "ever".to_string(),
-        None => format!("{}..{}", reading.from, reading.until),
+    let days = reading.days;
+    match (Calendar::exactly(days), days.single()) {
+        (Some(window), _) => window.to_string(),
+        (None, Some(day)) => format!("on {day}"),
+        (None, None) if days == Days::ALWAYS => "ever".to_string(),
+        (None, None) => format!("{}..{}", days.first(), days.last()),
     }
 }

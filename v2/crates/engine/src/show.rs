@@ -1,7 +1,7 @@
 //! Words for values: every place the engine prints one goes through here.
 
 use axiom_core::{Day, Id};
-use axiom_model::{Book, Fault, Place, Subject, Value};
+use axiom_model::{Book, Commodity, Fault, Place, Subject, Value};
 
 /// A value the way a person writes it: `24,500.00 USD`, `2026-04-15`, `59y6m`.
 /// `day` is the day being evaluated, which a missing price names.
@@ -52,7 +52,7 @@ pub(crate) fn subject_key(subject: Subject) -> (u8, usize) {
 /// Why a value could not be computed, and the fix. `day` is the day the law
 /// was evaluated for, which the missing-price message names.
 pub(crate) fn fault(book: &Book, fault: Fault, day: Day) -> (String, Option<String>) {
-    let symbol = |unit| book.name(book.commodities[unit].symbol);
+    let symbol = |unit: Id<Commodity>| book.name(book.commodities[unit].symbol);
     match fault {
         Fault::NoPrice { unit, quote } => {
             let (unit, quote) = (symbol(unit), symbol(quote));

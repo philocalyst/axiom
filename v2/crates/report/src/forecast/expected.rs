@@ -98,9 +98,8 @@ fn from_plans<'b>(book: &'b Book, run: &Run, today: Day) -> Vec<Expectation<'b>>
         // What each flow moves, and the day the schedule is counted from.
         let (legs, anchor): (Vec<(&Flow, Amount, Amount)>, Option<Day>) = match latest.get(&id) {
             Some(&(day, txn)) => {
-                let txn = &book.txns[txn];
-                let flows = (txn.first.index()..txn.first.index() + txn.len as usize).map(|at| {
-                    let (flow, posted) = (&book.flows[Id::new(at as u32)], &run.posted[at]);
+                let flows = book.txns[txn].flows.ids().map(|id| {
+                    let (flow, posted) = (&book.flows[id], &run.posted[id.index()]);
                     (flow, Amount::new(posted.out, flow.out.unit), Amount::new(posted.arrive, flow.arrive.unit))
                 });
                 (flows.collect(), Some(day))
@@ -282,7 +281,7 @@ opening 2026-01-01
             let whose = crate::lens::Whose::default();
             let found = expected(Lens::new(book, &whose, run.today), run);
             assert_eq!(found.len(), 1, "the depreciation is a habit");
-            assert_eq!(found[0].template.terms().basis_end, Some(End::From));
+            assert_eq!(found[0].template.detail().basis_end, Some(End::From));
         });
     }
 }

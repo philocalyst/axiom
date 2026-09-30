@@ -1,10 +1,12 @@
 //! Typed indices into typed arenas.
 //!
 //! An `Id<Place>` cannot index the entity arena. Ids are `u32`, `Copy`, and
-//! carry their type only at compile time.
+//! carry their type only at compile time. A [`Run`] is a contiguous stretch of
+//! them: what one transaction made, or one node's subtree.
 
 use std::fmt;
 use std::hash::{Hash, Hasher};
+use std::iter::FusedIterator;
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 
@@ -74,15 +76,6 @@ impl<T> Arena<T> {
         Arena { items: Vec::new() }
     }
 
-    pub fn with_capacity(capacity: usize) -> Arena<T> {
-        Arena { items: Vec::with_capacity(capacity) }
-    }
-
-    /// Room for `more` items beyond those held.
-    pub fn reserve(&mut self, more: usize) {
-        self.items.reserve(more);
-    }
-
     pub fn push(&mut self, item: T) -> Id<T> {
         let id = Id::new(u32::try_from(self.items.len()).expect("fewer than 2^32 items"));
         self.items.push(item);
@@ -101,8 +94,8 @@ impl<T> Arena<T> {
         self.items.is_empty()
     }
 
-    pub fn ids(&self) -> impl ExactSizeIterator<Item = Id<T>> + use<T> {
-        (0..self.items.len() as u32).map(Id::new)
+    pub fn ids(&self) -> Ids<T> {
+        Ids { next: 0, end: self.items.len() as u32, of: PhantomData }
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &T)> {
@@ -148,5 +141,123 @@ impl<T> Index<Id<T>> for Arena<T> {
 impl<T> IndexMut<Id<T>> for Arena<T> {
     fn index_mut(&mut self, id: Id<T>) -> &mut T {
         &mut self.items[id.index()]
+    }
+}
+
+/// A contiguous run of ids in one arena: the flows a transaction made are
+/// `first .. first + len` of the book's flows. A run is one value where a
+/// pair of numbers was, and indexing the arena by it gives the slice.
+pub struct Run<T> {
+    start: u32,
+    len: u32,
+    of: PhantomData<fn() -> T>,
+}
+
+impl<T> Run<T> {
+    /// The `len` ids from `start` on.
+    pub const fn new(start: Id<T>, len: u32) -> Run<T> {
+        Run { start: start.raw, len, of: PhantomData }
+    }
+
+    /// The first id of the run; where an empty run would be.
+    pub const fn start(self) -> Id<T> {
+        Id::new(self.start)
+    }
+
+    pub const fn len(self) -> u32 {
+        self.len
+    }
+
+    pub const fn is_empty(self) -> bool {
+        self.len == 0
+    }
+
+    /// The ids in the run, in order.
+    pub fn ids(self) -> Ids<T> {
+        Ids { next: self.start, end: self.start + self.len, of: PhantomData }
+    }
+
+    pub fn contains(self, id: Id<T>) -> bool {
+        id.raw.wrapping_sub(self.start) < self.len
+    }
+}
+
+impl<T> Clone for Run<T> {
+    fn clone(&self) -> Run<T> {
+        *self
+    }
+}
+
+impl<T> Copy for Run<T> {}
+
+impl<T> PartialEq for Run<T> {
+    fn eq(&self, other: &Run<T>) -> bool {
+        (self.start, self.len) == (other.start, other.len)
+    }
+}
+
+impl<T> Eq for Run<T> {}
+
+impl<T> fmt::Debug for Run<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = std::any::type_name::<T>().rsplit("::").next().unwrap_or("?");
+        write!(f, "{name}#{}..{}", self.start, self.start + self.len)
+    }
+}
+
+impl<T> Index<Run<T>> for Arena<T> {
+    type Output = [T];
+    fn index(&self, run: Run<T>) -> &[T] {
+        &self.items[run.start as usize..(run.start + run.len) as usize]
+    }
+}
+
+/// The ids of a [`Run`], of a whole arena, or of a subtree, in order.
+pub struct Ids<T> {
+    next: u32,
+    end: u32,
+    of: PhantomData<fn() -> T>,
+}
+
+impl<T> Iterator for Ids<T> {
+    type Item = Id<T>;
+    fn next(&mut self) -> Option<Id<T>> {
+        (self.next < self.end).then(|| {
+            self.next += 1;
+            Id::new(self.next - 1)
+        })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let n = (self.end - self.next) as usize;
+        (n, Some(n))
+    }
+}
+
+impl<T> ExactSizeIterator for Ids<T> {}
+impl<T> FusedIterator for Ids<T> {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_run_is_a_slice_of_its_arena() {
+        let arena = Arena::from(vec!['a', 'b', 'c', 'd', 'e']);
+        let run = Run::new(Id::new(1), 3);
+        assert_eq!(&arena[run], &['b', 'c', 'd']);
+        assert_eq!(run.ids().map(|id| arena[id]).collect::<String>(), "bcd");
+        assert_eq!((run.len(), run.ids().len()), (3, 3));
+        let inside = |at: u32| run.contains(Id::new(at));
+        assert_eq!([0, 1, 2, 3, 4].map(inside), [false, true, true, true, false]);
+    }
+
+    #[test]
+    fn an_empty_run_holds_nothing() {
+        let arena = Arena::from(vec![1, 2, 3]);
+        let none = Run::new(Id::new(3), 0);
+        assert!(none.is_empty() && arena[none].is_empty() && none.ids().next().is_none());
+        assert!(!none.contains(Id::new(3)) && !none.contains(Id::new(0)));
+        assert_eq!(arena.ids().len(), 3);
     }
 }

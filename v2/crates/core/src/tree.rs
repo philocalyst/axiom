@@ -8,7 +8,8 @@
 use std::iter::FusedIterator;
 use std::ops::{Index, IndexMut};
 
-use crate::id::Id;
+use crate::groups::bucket;
+use crate::id::{Id, Ids, Run};
 
 const NONE: u32 = u32::MAX;
 
@@ -34,22 +35,9 @@ impl<T> Tree<T> {
     pub fn build(items: Vec<T>, parents: &[Option<usize>]) -> Result<(Tree<T>, Vec<Id<T>>), Vec<usize>> {
         let n = items.len();
         assert_eq!(parents.len(), n, "one parent slot per item");
-        // Children grouped by parent (a counting sort); roots sit under a
-        // virtual parent `n`. `kids[starts[p]..starts[p + 1]]` are p's children.
-        let mut starts = vec![0u32; n + 2];
-        for parent in parents {
-            starts[parent.unwrap_or(n) + 1] += 1;
-        }
-        for i in 1..starts.len() {
-            starts[i] += starts[i - 1];
-        }
-        let mut kids = vec![0u32; n];
-        let mut fill = starts.clone();
-        for (child, parent) in parents.iter().enumerate() {
-            let slot = &mut fill[parent.unwrap_or(n)];
-            kids[*slot as usize] = child as u32;
-            *slot += 1;
-        }
+        // Children grouped by parent; roots sit under a virtual parent `n`.
+        // `kids[starts[p]..starts[p + 1]]` are p's children.
+        let (starts, kids) = bucket(n + 1, n, |child| parents[child].unwrap_or(n));
 
         // Depth-first from the virtual root. Each stack frame is a node and the
         // cursor of its next unvisited child.
@@ -101,6 +89,14 @@ impl<T> Tree<T> {
         (parent != NONE).then(|| Id::new(parent))
     }
 
+    /// `id`'s parent to read and `id` to change, at once: pre-order puts a
+    /// parent before its children, so the two never overlap. `None` for a root.
+    pub fn with_parent_mut(&mut self, id: Id<T>) -> Option<(&T, &mut T)> {
+        let parent = self.parent(id)?;
+        let (before, from) = self.items.split_at_mut(id.index());
+        Some((&before[parent.index()], &mut from[0]))
+    }
+
     /// Roots have depth zero.
     pub fn depth(&self, id: Id<T>) -> u32 {
         self.links[id.index()].depth
@@ -118,7 +114,7 @@ impl<T> Tree<T> {
 
     /// `id` and everything beneath it, in pre-order.
     pub fn subtree(&self, id: Id<T>) -> Ids<T> {
-        Ids { next: id.index() as u32, end: self.links[id.index()].end, of: std::marker::PhantomData }
+        Run::new(id, self.links[id.index()].end - id.index() as u32).ids()
     }
 
     /// `id`, then its parent, and so on up to its root.
@@ -137,7 +133,7 @@ impl<T> Tree<T> {
     }
 
     pub fn ids(&self) -> Ids<T> {
-        Ids { next: 0, end: self.items.len() as u32, of: std::marker::PhantomData }
+        Run::new(Id::new(0), self.items.len() as u32).ids()
     }
 
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &T)> {
@@ -171,31 +167,6 @@ impl<T> IndexMut<Id<T>> for Tree<T> {
         &mut self.items[id.index()]
     }
 }
-
-/// A contiguous run of ids.
-pub struct Ids<T> {
-    next: u32,
-    end: u32,
-    of: std::marker::PhantomData<fn() -> T>,
-}
-
-impl<T> Iterator for Ids<T> {
-    type Item = Id<T>;
-    fn next(&mut self) -> Option<Id<T>> {
-        (self.next < self.end).then(|| {
-            self.next += 1;
-            Id::new(self.next - 1)
-        })
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        let n = (self.end - self.next) as usize;
-        (n, Some(n))
-    }
-}
-
-impl<T> ExactSizeIterator for Ids<T> {}
-impl<T> FusedIterator for Ids<T> {}
 
 pub struct Lineage<'t, T> {
     tree: &'t Tree<T>,
@@ -244,14 +215,29 @@ mod tests {
         let parents = [Some(2), None, None, Some(0), Some(2), Some(1)];
         let (tree, ids) = Tree::build(items, &parents).unwrap();
         let names: Vec<_> = tree.values().copied().collect();
-        assert_eq!(names, ["expenses", "expenses/food", "assets", "assets/bank", "assets/bank/checking", "assets/broker"]);
+        assert_eq!(
+            names,
+            ["expenses", "expenses/food", "assets", "assets/bank", "assets/bank/checking", "assets/broker"]
+        );
         let assets = ids[2];
         assert_eq!(tree.subtree(assets).count(), 4);
         assert!(tree.covers(assets, ids[3]) && !tree.covers(ids[0], ids[4]));
-        assert_eq!(tree.lineage(ids[3]).map(|id| tree[id]).collect::<Vec<_>>(), ["assets/bank/checking", "assets/bank", "assets"]);
+        assert_eq!(
+            tree.lineage(ids[3]).map(|id| tree[id]).collect::<Vec<_>>(),
+            ["assets/bank/checking", "assets/bank", "assets"]
+        );
         assert_eq!(tree.children(assets).map(|id| tree[id]).collect::<Vec<_>>(), ["assets/bank", "assets/broker"]);
         assert_eq!(tree.roots().count(), 2);
         assert_eq!(tree.depth(ids[3]), 2);
+    }
+
+    #[test]
+    fn a_child_changes_beside_its_parent() {
+        let (mut tree, ids) = Tree::build(vec![1, 10, 100], &[None, Some(0), Some(1)]).unwrap();
+        let (parent, child) = tree.with_parent_mut(ids[2]).unwrap();
+        *child += *parent;
+        assert_eq!(tree.as_slice(), [1, 10, 110]);
+        assert!(tree.with_parent_mut(ids[0]).is_none());
     }
 
     #[test]

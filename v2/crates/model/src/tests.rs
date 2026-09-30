@@ -1,6 +1,6 @@
 //! End to end: text in, book and diagnostics out.
 
-use axiom_core::{Diagnostic, FileId};
+use axiom_core::{Day, Diagnostic, FileId};
 use axiom_syntax::parse;
 
 use crate::{Book, Miss, Source, build};
@@ -206,7 +206,7 @@ fn the_expense_legs_of_an_exchange_are_its_costs_and_no_other_split_has_any() {
 ";
     with_book(text, |book, diags| {
         assert!(diags.is_empty(), "{diags:?}");
-        let costs: Vec<_> = book.flows.iter().map(|(_, flow)| flow.terms().cost.map(|cost| cost.qty.0)).collect();
+        let costs: Vec<_> = book.flows.iter().map(|(_, flow)| flow.detail().cost.map(|cost| cost.qty.0)).collect();
         // The sale, its payment of the fee, the purchase, its fee, and a paycheck that has none.
         assert_eq!(costs, [Some(10), None, Some(5), None, None, None]);
         let exchanges: Vec<_> = book.flows.iter().filter(|(_, flow)| flow.is_exchange()).map(|(_, f)| f.day).collect();
@@ -411,7 +411,7 @@ fn flows_of<'a>(book: &'a Book) -> Vec<&'a crate::Flow> {
 
 /// The first and last day a flow is recognized over, as text.
 fn recognized(flow: &crate::Flow) -> String {
-    format!("{}..{}", flow.recognized.from, flow.recognized.until)
+    format!("{}..{}", flow.recognized.first(), flow.recognized.last())
 }
 
 #[test]
@@ -458,9 +458,9 @@ fn for_a_code_selects_and_links_and_for_an_entity_holds() {
         let code = book.names.get("inv-12").unwrap();
         assert!(matches!(&*flows[1].select, [crate::Select::Code(sym)] if *sym == code));
         assert_eq!(&*flows[1].codes, [code], "the link is the code on the flow");
-        assert_eq!(flows[2].terms().hold, Some(book.entity("acme").unwrap()));
-        assert_eq!(flows[3].terms().hold, None);
-        assert!(flows[3].terms.is_none(), "a flow that says nothing carries nothing");
+        assert_eq!(flows[2].detail().hold, Some(book.entity("acme").unwrap()));
+        assert_eq!(flows[3].detail().hold, None);
+        assert!(flows[3].detail.is_none(), "a flow that says nothing carries nothing");
     });
 }
 
@@ -476,15 +476,15 @@ fn due_basis_and_basis_ends_are_kept() {
     with_book(text, |book, diags| {
         assert!(diags.is_empty(), "{diags:?}");
         let flows = flows_of(book);
-        let dues: Vec<_> = flows.iter().map(|flow| flow.terms().due.map(|day| day.to_string())).collect();
+        let dues: Vec<_> = flows.iter().map(|flow| flow.detail().due.map(|day| day.to_string())).collect();
         assert_eq!(dues, [Some("2026-03-31".into()), Some("2026-05-01".into()), None, None, None]);
         let usd = book.commodity("USD").unwrap();
         assert_eq!(
-            flows[2].terms().basis.map(|qty| book.show(crate::Amount::new(qty, usd)).to_string()),
+            flows[2].detail().basis.map(|qty| book.show(crate::Amount::new(qty, usd)).to_string()),
             Some("40 USD".into())
         );
-        assert_eq!(flows[3].terms().basis_end, Some(crate::End::To));
-        assert_eq!(flows[4].terms().basis_end, Some(crate::End::From));
+        assert_eq!(flows[3].detail().basis_end, Some(crate::End::To));
+        assert_eq!(flows[4].detail().basis_end, Some(crate::End::From));
         // Quantity crosses every end but the basis one.
         let crosses = |flow: &crate::Flow| [flow.moves_quantity(crate::End::From), flow.moves_quantity(crate::End::To)];
         assert_eq!(crosses(flows[0]), [true, true]);
@@ -598,7 +598,7 @@ opening 2024-12-31
         );
         assert!(book.flows.iter().all(|(_, flow)| flow.mode == crate::Mode::Opening));
         assert_eq!(book.txns.len(), 1, "one transaction per block");
-        let terms = flows_of(book)[2].terms();
+        let terms = flows_of(book)[2].detail();
         assert_eq!(terms.since.map(|day| day.to_string()), Some("2019-03-04".into()));
         assert!(terms.basis.is_some());
     });
@@ -790,10 +790,10 @@ entity narcissus : person
         let (family, alex) = (book.entity("family").unwrap(), &book.entities[book.entity("alex").unwrap()]);
         assert_eq!(alex.member, Some(family));
         let path = |system: axiom_core::Id<crate::System>| book.name(book.systems[system].path);
-        let lives: Vec<_> = alex.lives.iter().map(|res| (res.from.0 == i32::MIN, path(res.system))).collect();
+        let lives: Vec<_> = alex.lives.iter().map(|res| (res.days.first() == Day::MIN, path(res.system))).collect();
         assert_eq!(lives, [(true, "us/ca"), (false, "de")], "sorted by their start, not chained");
-        assert_eq!(alex.lives[0].until.to_string(), "2025-06-30");
-        assert_eq!(alex.lives[1].until.0, i32::MAX);
+        assert_eq!(alex.lives[0].days.last().to_string(), "2025-06-30");
+        assert_eq!(alex.lives[1].days.last(), Day::MAX);
     });
 }
 
@@ -1004,7 +1004,7 @@ fn inflow_rules(book: &Book, place: &str) -> Vec<String> {
         .iter()
         .map(|rule| {
             let law = book.name(book.laws[rule.law].name);
-            format!("{law} for {} {}~{}", subject(rule.subject), day(rule.from), day(rule.until))
+            format!("{law} for {} {}~{}", subject(rule.subject), day(rule.days.first()), day(rule.days.last()))
         })
         .collect()
 }
@@ -1168,7 +1168,8 @@ entity aldi : grocer
         assert!(diags.is_empty(), "{diags:?}");
         let name = |flow: &crate::Flow| flow.payee.map(|entity| book.name(book.entities[entity].path));
         let flows = flows_of(book);
-        let says: Vec<_> = flows.iter().map(|flow| (name(flow), flow.terms().due.map(|day| day.to_string()))).collect();
+        let due = |flow: &crate::Flow| flow.detail().due.map(|day| day.to_string());
+        let says: Vec<_> = flows.iter().map(|flow| (name(flow), due(flow))).collect();
         assert_eq!(
             says,
             [
@@ -1361,39 +1362,126 @@ fn a_v3_book_fits_the_v4_types() {
         // The flow is its account's owner's, and nothing says what it is for.
         let flow = &book.flows[axiom_core::Id::new(0)];
         assert_eq!((flow.owner, flow.origin, flow.purpose), (roots.me, Origin::Written, None));
+
+        // What the v3 model cannot say is empty or default: an owner counts in the base, on cash books.
+        let me = &book.entities[roots.me];
+        assert_eq!((me.currency, me.books), (book.base, crate::Books::Cash));
+        assert!(me.owned_by.is_empty() && me.citizen.is_empty() && me.known_as.is_empty());
+        assert!(place("checking").shares.is_empty() && place("checking").known_as.is_empty());
+        let (promised, derived) = (book.contracts.len() + book.also.len(), book.budgets.len() + book.patterns.len());
+        assert_eq!((promised, derived, book.formats.len()), (0, 0, 0));
+        assert_eq!((book.measures.len(), book.readings.len(), book.filed.len()), (0, 0, 0));
+        assert!(book.laws.values().all(|law| law.overrides.is_none() && law.rank == crate::Rank(0)));
+    });
+}
+
+/// What a contract's terms need to be built by hand: one flow to be the template.
+fn terms(every: crate::Cadence, on: &[crate::On], anchor: axiom_core::Day, template: &[crate::Flow]) -> crate::Terms {
+    crate::Terms {
+        every,
+        on: on.into(),
+        anchor,
+        template: template.into(),
+        inputs: Box::default(),
+        estimate: false,
+        due: None,
+        grace: axiom_core::Span::default(),
+        period: None,
+        covers: None,
+        prorated: false,
+        escalation: None,
+        shares: Box::default(),
+        also: Box::default(),
+        rate: None,
+        change: None,
+    }
+}
+
+fn contract(days: axiom_core::Days, terms: axiom_core::Timeline<crate::Terms>) -> crate::Contract {
+    let loc = axiom_core::Loc::new(FileId(0), 0, 0);
+    crate::Contract {
+        name: axiom_core::Interner::default().intern("rent"),
+        party: axiom_core::Id::new(0),
+        owner: axiom_core::Id::new(0),
+        days,
+        terms,
+        buys: None,
+        deposit: None,
+        loan: None,
+        matching: None,
+        ended: None,
+        laws: Box::default(),
+        doc: None,
+        loc,
+    }
+}
+
+// v3 bridge: `sync FILE` with its `run COMMAND` is a source whose sink is that file.
+#[test]
+fn a_v3_sync_is_a_source_that_merges_into_its_file() {
+    use crate::sync::{Fetch, Sink};
+    with_book("sync prices/2026.ax\n  run ./scripts/quotes.py VTI BND\n", |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let [source] = &book.sources[..] else { panic!("one source") };
+        assert!(matches!(source.fetch, Fetch::Run(command) if book.name(command) == "./scripts/quotes.py VTI BND"));
+        assert!(matches!(source.sink, Sink::File(file) if book.name(file) == "prices/2026.ax"));
+        assert_eq!(book.name(source.name), "prices/2026.ax");
+        assert_eq!((source.doc, source.format, source.system), (None, None, None));
     });
 }
 
 #[test]
-fn a_contract_falls_due_from_its_start_until_it_ends() {
-    use crate::{Cadence, Contract, On, Recur};
-    use axiom_core::{Day, Id, Interner, Loc, Span};
+fn a_contract_falls_due_by_the_terms_in_force_over_its_days() {
+    use crate::{Cadence, On};
+    use axiom_core::{Day, Days, Span, Timeline};
     let day = |month, day| Day::from_ymd(2026, month, day).unwrap();
-    let loc = Loc::new(FileId(0), 0, 0);
-    let contract = |on, until, ended: Option<Day>| Contract {
-        name: Interner::default().intern("rent"),
-        party: Id::new(0),
-        owner: Id::new(0),
-        schedule: Recur { every: Cadence::Every(Span::months(1)), on, from: day(1, 31), until },
-        template: Box::default(),
-        buys: None,
-        covers: None,
-        shares: Box::default(),
-        deposit: None,
-        loan: None,
-        escrow: None,
-        matching: None,
-        ended: ended.map(|ended| (ended, loc)),
-        laws: Box::default(),
-        doc: None,
-        loc,
-    };
-    // A month's end does not drag the months after it, and `from` cuts the start off.
-    let days = contract(None, None, None).due_days(day(2, 1), day(4, 30));
-    assert_eq!(days, [day(2, 28), day(3, 31), day(4, 30)]);
-    // `until` and `ended` bound it, whichever comes first, and the start comes before every occurrence.
-    let days = contract(Some(On::MonthDay(15)), Some(day(4, 20)), Some(day(3, 20))).due_days(day(1, 1), day(12, 31));
-    assert_eq!(days, [day(2, 15), day(3, 15)]);
+    let days = |from: (u32, u32), to: (u32, u32)| Days::new(day(from.0, from.1), day(to.0, to.1)).unwrap();
+    let (monthly, fortnightly) = (Cadence::Every(Span::months(1)), Cadence::Every(Span::days(14)));
+    with_book("2026-01-05 checking -> food 10 USD\n", |book, _| {
+        let template = [book.flows[axiom_core::Id::new(0)].clone()];
+        // A month's end does not drag the months after it, and `within` cuts the start off.
+        let rent = contract(Days::ALWAYS, Timeline::new(terms(monthly, &[], day(1, 31), &template)));
+        assert_eq!(rent.due_days(days((2, 1), (4, 30))), [day(2, 28), day(3, 31), day(4, 30)]);
+        // The contract's own days bound it, and nothing falls due before its first.
+        let on_the_15th = terms(monthly, &[On::MonthDay(15)], day(1, 31), &template);
+        let short = contract(days((1, 31), (3, 20)), Timeline::new(on_the_15th));
+        assert_eq!(short.due_days(Days::ALWAYS), [day(2, 15), day(3, 15)]);
+        assert_eq!(short.due_days(days((4, 1), (4, 30))), Vec::<Day>::new(), "it ended before");
+        // A statement changes the terms from its day: each stretch steps on its own schedule.
+        let mut changing = Timeline::new(terms(monthly, &[], day(1, 1), &template));
+        changing.paint(Days::new(day(3, 1), Day::MAX).unwrap(), terms(fortnightly, &[], day(3, 1), &template));
+        let changing = contract(Days::ALWAYS, changing);
+        assert_eq!(changing.terms_on(day(2, 1)).every, monthly);
+        assert_eq!(changing.terms_on(day(3, 1)).every, fortnightly);
+        assert_eq!(
+            changing.due_days(days((1, 1), (4, 30))),
+            [day(1, 1), day(2, 1), day(3, 1), day(3, 15), day(3, 29), day(4, 12), day(4, 26)]
+        );
+        // A waived stretch expects nothing, and the terms before it resume after it.
+        let mut waived = Timeline::new(terms(monthly, &[], day(1, 1), &template));
+        waived.paint(days((2, 1), (2, 28)), terms(monthly, &[], day(1, 1), &[]));
+        let waived = contract(Days::ALWAYS, waived);
+        assert!(waived.terms_on(day(2, 10)).is_waived() && !waived.terms_on(day(3, 1)).is_waived());
+        assert_eq!(waived.due_days(days((1, 1), (4, 1))), [day(1, 1), day(3, 1), day(4, 1)]);
+    });
+}
+
+#[test]
+fn the_row_of_a_property_in_force_is_the_latest_that_has_begun() {
+    use crate::{Prop, Value, prop};
+    use axiom_core::{Day, Interner};
+    let mut names = Interner::default();
+    let (rate, other) = (names.intern("rate"), names.intern("other"));
+    let day = |month, day| Day::from_ymd(2026, month, day).unwrap();
+    let row = |name, since, whole| Prop { name, value: Value::Num(axiom_core::Ratio::int(whole)), since, loc: None };
+    let props = [row(other, Day::MIN, 9), row(rate, Day::MIN, 1), row(rate, day(6, 15), 2), row(rate, day(9, 1), 3)];
+    let at = |on: Day| prop(&props, rate, on).map(|found| found.value);
+    let want = |whole| Some(Value::Num(axiom_core::Ratio::int(whole)));
+    let asked = [Day::MIN, day(6, 14), day(6, 15), day(8, 31), Day::MAX];
+    assert_eq!(asked.map(at), [want(1), want(1), want(2), want(2), want(3)]);
+    assert!(prop(&props, names.intern("absent"), day(6, 15)).is_none());
+    let two_at_once = [row(rate, Day::MIN, 1), row(rate, Day::MIN, 2)];
+    assert_eq!(prop(&two_at_once, rate, day(1, 1)).map(|found| found.value), want(1), "own before inherited");
 }
 
 #[test]

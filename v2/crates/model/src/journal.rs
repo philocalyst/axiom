@@ -1,19 +1,22 @@
 //! What the journal records: flows grouped into transactions, balance
-//! assertions, settlement events, prices, and plans.
+//! assertions, measures, settlement events, prices, returns as filed, and plans.
 
-use axiom_core::{Day, Id, Loc, Qty, Ratio, Span, Sym};
+use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Span, Sym};
 
-use crate::book::{Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose};
+use crate::book::{
+    Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose, System,
+};
+use crate::law::{Law, Subject};
 
 /// Value moving once, from one place to another. Balanced by construction.
-#[derive(Clone, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Flow {
     /// The day value moves: balances, relief and settlement follow it.
     pub day: Day,
     /// The period the flow belongs to: tallies, window totals, budgets and
     /// every report about a period follow it. `day..=day` unless the flow is
     /// spread (`DATE..DATE`) or says `for PERIOD`.
-    pub recognized: Recognition,
+    pub recognized: Days,
     pub from: Id<Place>,
     pub to: Id<Place>,
     /// What leaves `from`.
@@ -47,7 +50,7 @@ pub struct Flow {
     pub waive: Option<Waive>,
     /// What few flows say about the parcels they move. Boxed: most flows say
     /// nothing, and a flow is copied into every place that reads the journal.
-    pub terms: Option<Box<Terms>>,
+    pub detail: Option<Box<Detail>>,
 }
 
 impl Flow {
@@ -55,16 +58,16 @@ impl Flow {
         self.out.unit != self.arrive.unit
     }
 
-    /// The flow's terms, or the terms of a flow that says nothing.
-    pub fn terms(&self) -> &Terms {
-        self.terms.as_deref().unwrap_or(&Terms::NONE)
+    /// The flow's detail, or the detail of a flow that says nothing.
+    pub fn detail(&self) -> &Detail {
+        self.detail.as_deref().unwrap_or(&Detail::NONE)
     }
 
     /// Whether quantity crosses `end`. At a `PLACE.basis` end none does: the
     /// flow changes what the place's parcels cost, and nothing arrives there or
     /// leaves it. Everything that reads a flow as money asks this first.
     pub fn moves_quantity(&self, end: End) -> bool {
-        self.terms().basis_end != Some(end)
+        self.detail().basis_end != Some(end)
     }
 }
 
@@ -91,6 +94,8 @@ pub enum Provenance {
     /// On the leg or its header: the flow's own line says where.
     Written,
     Contract(Id<Contract>),
+    /// The party's own `#purpose` (`entity corner-store #groceries`).
+    Entity(Id<Entity>),
     /// The kind of the party at the flow's other end.
     Party(Id<Kind>),
     /// The kind of the commodity paying, in party position.
@@ -117,8 +122,6 @@ pub enum Derivation {
     /// A loan payment's interest, or its principal.
     Interest(Id<Contract>),
     Principal(Id<Contract>),
-    Escrow(Id<Contract>),
-    Match(Id<Contract>),
     /// An owner's share of a flow: `business 60% for studio`, declared on
     /// a contract, a party kind or a purpose.
     Share(Sharer),
@@ -130,6 +133,21 @@ pub enum Derivation {
     PassThrough,
     /// A contract deposit or a missing occurrence: a claim.
     Claim(Id<Contract>),
+    /// An `also` line: escrow, an employer's match, a card's cash back.
+    Also(Id<Also>),
+    /// A deadline's `else`, when it passed (a late fee).
+    Otherwise(Id<Contract>),
+    /// A law's reparation (`require … else …`).
+    Reparation(Id<Law>),
+    /// The unused part of a `covers` promise that ended early.
+    Refund(Id<Contract>),
+    /// `for PARTY` on a payment: the party owes it, and the payment is its,
+    /// passed through the owner.
+    PaidFor(Id<Entity>),
+    /// `^code waived` on a claim: what remained of it is forgiven.
+    WriteOff,
+    /// `DATE ASSET ends`: the asset leaves the owners for nothing.
+    Disposal(Id<Asset>),
 }
 
 /// What declared a share, so `why` can point at its line.
@@ -140,27 +158,9 @@ pub enum Sharer {
     Purpose(Id<Purpose>),
 }
 
-/// An inclusive range of days over which a flow is recognized.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub struct Recognition {
-    pub from: Day,
-    pub until: Day,
-}
-
-impl Recognition {
-    pub fn on(day: Day) -> Recognition {
-        Recognition { from: day, until: day }
-    }
-
-    /// Whether the whole flow belongs to one day.
-    pub fn is_instant(self) -> bool {
-        self.from == self.until
-    }
-}
-
 /// What a flow says about the parcels it moves, beyond how many.
 #[derive(Clone, Default, PartialEq, Eq, Debug)]
-pub struct Terms {
+pub struct Detail {
     /// `basis 3_000 USD`: the total basis the arriving parcels take, in
     /// base-currency quanta, overriding the target kind's arrival rule.
     pub basis: Option<Qty>,
@@ -188,15 +188,37 @@ pub struct Terms {
     /// parcel stays apart, and it is this flow's `due` and payee that say who
     /// owes it and by when.
     pub due: Option<Day>,
+    /// `against ^code`: the transaction it refunds or reimburses.
+    pub against: Option<Id<Txn>>,
+    /// How a computed amount was reckoned (`12% of ^bldg-water`), for `why` and
+    /// hints: the share and what it was of, with where that was stated.
+    pub reckoned: Option<Reckoning>,
 }
 
-impl Terms {
-    pub const NONE: Terms =
-        Terms { basis: None, hold: None, basis_end: None, since: None, spender: None, cost: None, due: None };
+/// A computed amount's arithmetic: `rate` of `of`, as stated at `from`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Reckoning {
+    pub rate: Ratio,
+    pub of: Amount,
+    pub from: Loc,
+}
 
-    /// The same terms `days` later: a due day goes with the flow that carries it.
-    pub fn moved(&self, days: i32) -> Terms {
-        Terms { due: self.due.map(|due| due.add_days(days)), ..self.clone() }
+impl Detail {
+    pub const NONE: Detail = Detail {
+        basis: None,
+        hold: None,
+        basis_end: None,
+        since: None,
+        spender: None,
+        cost: None,
+        due: None,
+        against: None,
+        reckoned: None,
+    };
+
+    /// The same detail `days` later: a due day goes with the flow that carries it.
+    pub fn moved(&self, days: i32) -> Detail {
+        Detail { due: self.due.map(|due| due.add_days(days)), ..self.clone() }
     }
 }
 
@@ -239,7 +261,7 @@ pub enum End {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Select {
     /// Parcels acquired within these days, inclusive.
-    Range(Day, Day),
+    Range(Days),
     /// Parcels acquired by transactions marked with this code.
     Code(Sym),
     Policy(Policy),
@@ -248,9 +270,8 @@ pub enum Select {
 /// Flows written together.
 pub struct Txn {
     pub day: Day,
-    /// The flows it produced: `first .. first + len` in `Book::flows`.
-    pub first: Id<Flow>,
-    pub len: u32,
+    /// The flows it produced, in `Book::flows`.
+    pub flows: Run<Flow>,
     pub codes: Box<[Sym]>,
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,
@@ -265,7 +286,7 @@ pub struct Txn {
     pub loc: Loc,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Waive {
     pub loc: Loc,
     pub reason: Option<Sym>,
@@ -305,6 +326,52 @@ pub struct Split {
     pub unit: Id<Commodity>,
     /// New units per old unit: 2 for `2 for 1`, 1/10 for `1 for 10`.
     pub ratio: Ratio,
+    pub loc: Loc,
+}
+
+/// `12 me worked 6.5 HR for halcyon ^inv-12`, `21 car used 44 MI
+/// #business-travel for studio` (LANGUAGE §5): an event that moves nothing.
+/// Purpose laws fire on it, and `total` counts it in its unit.
+pub struct Measure {
+    pub day: Day,
+    pub action: Action,
+    /// Who worked, or what was used.
+    pub subject: Subject,
+    /// In a unit of a `measure` kind.
+    pub quantity: Amount,
+    /// Whom it was for: its owner, as a flow's.
+    pub owner: Id<Entity>,
+    /// A party it was done for (`for halcyon`).
+    pub party: Option<Id<Entity>>,
+    pub purpose: Option<Purposed>,
+    pub description: Option<Sym>,
+    pub codes: Box<[Sym]>,
+    pub loc: Loc,
+}
+
+/// What a measure records.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Action {
+    Work,
+    Use,
+}
+
+/// `01 ^bldg-water = 155.00 USD`: a named value on a day, for references.
+#[derive(Clone, Copy, Debug)]
+pub struct Reading {
+    pub day: Day,
+    pub code: Sym,
+    pub amount: Amount,
+    pub loc: Loc,
+}
+
+/// `2026-04-15 us filed 2025` with its tally lines (LANGUAGE §11).
+pub struct Filed {
+    pub day: Day,
+    pub system: Id<System>,
+    pub year: i32,
+    pub owner: Id<Entity>,
+    pub lines: Box<[(Sym, Amount, Loc)]>,
     pub loc: Loc,
 }
 

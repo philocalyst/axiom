@@ -10,7 +10,7 @@ use axiom_core::diag::distance;
 use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Set, Sym, Tree};
 use axiom_syntax::{DeclKind, ExprKind, Setting};
 
-use crate::book::{Book, Class, Commodity, Entity, Kind, Lookup, PathRoot, Place, Purpose, Role, Roots, Sort};
+use crate::book::{Book, Books, Class, Commodity, Entity, Kind, Lookup, PathRoot, Place, Purpose, Role, Roots, Sort};
 use crate::collect::{Entry, Seen, Surveyed, Written, decls};
 use crate::cx::Cx;
 use crate::errors::{Word, duplicate, list_and, unknown};
@@ -142,7 +142,7 @@ pub(crate) fn declare<'a, 's>(
     let entries = &surveyed.entries;
     let kinds = kinds::declare(entries, &mut cx);
     let commodities = commodities(entries, &surveyed.units, settings, &kinds, &mut cx);
-    let mut entities = entities(entries, &kinds, &mut cx);
+    let mut entities = entities(entries, &kinds, commodities.base, &mut cx);
     let places = places(entries, &surveyed.paths, &kinds, &entities, &mut cx);
     entities.tree[entities.market].place = Some(places.market);
     let (purposes, [income, spending, capital]) = Purpose::roots(cx.names);
@@ -173,12 +173,19 @@ pub(crate) fn declare<'a, 's>(
         systems: tree,
         commodities: commodities.arena,
         assets: Arena::new(),
+        // v3 bridge: the v3 model makes plans, and no contract.
         contracts: Arena::new(),
+        // v3 bridge: the v3 model has no `also`, measures, readings, returns as filed, patterns or formats.
+        also: Arena::new(),
         laws: Arena::new(),
         rules: Rules::default(),
+        // v3 bridge: a v3 budget is a property that makes a law, not an item of its own.
+        budgets: Arena::new(),
         params: Arena::new(),
         schedules: Arena::new(),
         codes: Vec::new(),
+        patterns: Arena::new(),
+        formats: Arena::new(),
         txns: Arena::new(),
         flows: Arena::new(),
         touching: Groups::default(),
@@ -186,8 +193,11 @@ pub(crate) fn declare<'a, 's>(
         events: Vec::new(),
         prices: Default::default(),
         splits: Vec::new(),
+        measures: Arena::new(),
+        readings: Vec::new(),
+        filed: Vec::new(),
         plans: Arena::new(),
-        syncs: Vec::new(),
+        sources: Vec::new(),
         lookup: Lookup {
             places: places.names,
             entities: entities.index,
@@ -396,7 +406,7 @@ struct Entities {
 
 /// Entities form a path tree (`paypal/john` sits under `paypal`), with `me`
 /// and the market always present.
-fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, cx: &mut Cx<'_, 's>) -> Entities {
+fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, base: Id<Commodity>, cx: &mut Cx<'_, 's>) -> Entities {
     let written = decls(entries, DeclKind::Entity).map(|written| written.node.name.0).chain(["me", "market"]);
     let (mut tree, by_path) = paths::build(written, |path| Entity {
         path: cx.names.intern(path),
@@ -407,6 +417,13 @@ fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, cx: &mut Cx<'_, 's>) -
         member: None,
         owner: None,
         client_of: None,
+        // v3 bridge: no v3 entity has several owners, a citizenship, a currency of its own or accrual books,
+        // and none is known by a name on statements.
+        owned_by: Box::default(),
+        currency: base,
+        citizen: Box::default(),
+        books: Books::default(),
+        known_as: Box::default(),
         props: Box::default(),
         doc: None,
         loc: None,
@@ -506,6 +523,9 @@ fn places<'s>(
             liquidity: None,
             opened: None,
             closed: None,
+            // v3 bridge: no v3 place has several owners, or is known by a name on statements.
+            shares: Box::default(),
+            known_as: Box::default(),
             props: Box::default(),
             doc: None,
             loc: None,

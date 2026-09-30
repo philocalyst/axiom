@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Arena, Day, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Span, Sym, Tree};
+use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree};
 use axiom_engine::{Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
 use axiom_model::Effect as Consequence;
 use axiom_model::*;
@@ -129,6 +129,11 @@ impl Cast {
             member: matches!(name, "me" | "jordan").then(|| Id::new(2)),
             owner: None,
             client_of: None,
+            owned_by: Box::default(),
+            currency: Id::new(0),
+            citizen: Box::default(),
+            books: Books::Cash,
+            known_as: Box::default(),
             props: Box::default(),
             doc: None,
             loc: None,
@@ -157,6 +162,8 @@ impl Cast {
             liquidity: (path == "assets/retirement").then_some(Span::months(1)),
             opened: None,
             closed: None,
+            shares: Box::default(),
+            known_as: Box::default(),
             props: Box::default(),
             doc: None,
             loc: (!path.starts_with("assets/vault")).then(|| line(1)),
@@ -180,8 +187,14 @@ impl Cast {
         };
         let (usd, vti) = (commodity("USD", 2), commodity("VTI", 3));
 
-        let jurisdictions =
-            ["us", "us/ca"].map(|path| System { path: names.intern(path), laws: Box::default(), doc: None, loc: None });
+        let jurisdictions = ["us", "us/ca"].map(|path| System {
+            path: names.intern(path),
+            laws: Box::default(),
+            currency: None,
+            rates: None,
+            doc: None,
+            loc: None,
+        });
         let (systems, system_ids) = Tree::build(jurisdictions.into(), &[None, Some(0)]).unwrap();
 
         Cast {
@@ -287,8 +300,7 @@ fn journal(cast: &mut Cast) -> Journal {
         };
         let txn = journal.txns.push(Txn {
             day: when,
-            first: Id::new(index as u32),
-            len: 1,
+            flows: axiom_core::Run::new(Id::new(index as u32), 1),
             codes: codes.clone(),
             waive: None,
             plan: None,
@@ -303,7 +315,7 @@ fn journal(cast: &mut Cast) -> Journal {
         journal.flows.push(Flow {
             day: when,
             // The insurance is paid for the whole year.
-            recognized: Recognition { from: when, until: if row == 1 { day(2026, 12, 31) } else { when } },
+            recognized: Days::new(when, if row == 1 { day(2026, 12, 31) } else { when }).unwrap(),
             from: cast.id(from),
             to: cast.id(to),
             out: amount,
@@ -320,7 +332,7 @@ fn journal(cast: &mut Cast) -> Journal {
             codes,
             loc: line(row),
             waive: None,
-            terms: due.map(|due| Box::new(Terms { due: Some(due), ..Terms::default() })),
+            detail: due.map(|due| Box::new(Detail { due: Some(due), ..Detail::default() })),
         });
         journal.posted.push(Posted { out: Qty(cents), arrive: Qty(cents), state });
     }
@@ -332,7 +344,7 @@ fn rent_plan(cast: &Cast) -> Plan {
     let amount = Amount::new(Qty(180_000), cast.usd);
     let once = Flow {
         day: day(2026, 4, 1),
-        recognized: Recognition::on(day(2026, 4, 1)),
+        recognized: Days::on(day(2026, 4, 1)),
         from: cast.id("assets/bank/checking"),
         to: cast.id("expenses/rent"),
         out: amount,
@@ -349,7 +361,7 @@ fn rent_plan(cast: &Cast) -> Plan {
         codes: Box::default(),
         loc: line(60),
         waive: None,
-        terms: None,
+        detail: None,
     };
     Plan {
         name: None,
@@ -367,8 +379,8 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
     let node = |op, ty, first| Node { op, ty, loc: line(80), first: NodeId(first) };
     let limit = Amount::new(Qty(50_000), cast.usd);
     let nodes = vec![
-        node(Op::Call(Func::Total(Dir::In, Window::Month), Box::default()), Ty::Amount, 0),
-        node(Op::Const(Value::Amount(limit)), Ty::Amount, 1),
+        node(Op::Call(Func::Total(Dir::In, Window::Month), Box::default()), Ty::AMOUNT, 0),
+        node(Op::Const(Value::Amount(limit)), Ty::AMOUNT, 1),
         node(Op::Bin(op, NodeId(0), NodeId(1)), Ty::Bool, 0),
     ];
     Law {
@@ -377,9 +389,17 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
         owner,
         system: None,
         trigger: Trigger::In,
+        budget: None,
+        overrides: None,
+        rank: Rank(0),
         steps: Box::new([Step {
             loc: line(80),
-            kind: StepKind::Require { cond: NodeId(2), otherwise: None, message: None, warn },
+            kind: StepKind::Require {
+                cond: NodeId(2),
+                otherwise: Box::default(),
+                message: None,
+                severity: if warn { Severity::Warning } else { Severity::Error },
+            },
         }]),
         nodes: nodes.into(),
         loc: line(80),
@@ -390,9 +410,9 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
 fn early_withdrawal(cast: &mut Cast) -> Law {
     let node = |op, ty, first| Node { op, ty, loc: line(85), first: NodeId(first) };
     let nodes = vec![
-        node(Op::Var(Var::Amount), Ty::Amount, 0),
+        node(Op::Var(Var::Amount), Ty::AMOUNT, 0),
         node(Op::Const(Value::Num(Ratio::percent(10, 0).unwrap())), Ty::Num, 1),
-        node(Op::Bin(BinOp::Mul, NodeId(0), NodeId(1)), Ty::Amount, 0),
+        node(Op::Bin(BinOp::Mul, NodeId(0), NodeId(1)), Ty::AMOUNT, 0),
     ];
     let owe =
         Consequence::Owe { amount: NodeId(2), to: cast.irs, due: None, name: cast.names.intern("early-withdrawal") };
@@ -402,6 +422,9 @@ fn early_withdrawal(cast: &mut Cast) -> Law {
         owner: Owner::Place(cast.id("assets/retirement")),
         system: None,
         trigger: Trigger::Out,
+        budget: None,
+        overrides: None,
+        rank: Rank(0),
         steps: Box::new([Step { loc: line(85), kind: StepKind::Effect(owe) }]),
         nodes: nodes.into(),
         loc: line(85),
@@ -426,6 +449,9 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
         owner: Owner::System(cast.us),
         system: Some(cast.us),
         trigger: Trigger::In,
+        budget: None,
+        overrides: None,
+        rank: Rank(0),
         steps: Box::default(),
         nodes: Box::default(),
         loc: line(90),
@@ -529,16 +555,13 @@ pub(crate) fn household() -> Household {
     let records = records(&mut cast, &journal);
 
     let food = cast.id("expenses/food");
-    let budget_rule =
-        Rule { law: Id::new(0), subject: Subject::Place(food), from: Day(i32::MIN), until: Day(i32::MAX) };
+    let budget_rule = Rule { law: Id::new(0), subject: Subject::Place(food), days: Days::ALWAYS };
     // The deferral limit governs the retirement place only until the end of 2025.
     let retirement = cast.id("assets/retirement");
-    let lapsed =
-        Rule { law: Id::new(2), subject: Subject::Place(retirement), from: Day(i32::MIN), until: day(2025, 12, 31) };
-    let in_force =
-        Rule { law: Id::new(3), subject: Subject::Place(retirement), from: Day(i32::MIN), until: Day(i32::MAX) };
-    let penalty =
-        Rule { law: Id::new(4), subject: Subject::Place(retirement), from: Day(i32::MIN), until: Day(i32::MAX) };
+    let ends_2025 = Days::new(Day::MIN, day(2025, 12, 31)).unwrap();
+    let lapsed = Rule { law: Id::new(2), subject: Subject::Place(retirement), days: ends_2025 };
+    let in_force = Rule { law: Id::new(3), subject: Subject::Place(retirement), days: Days::ALWAYS };
+    let penalty = Rule { law: Id::new(4), subject: Subject::Place(retirement), days: Days::ALWAYS };
     let rules = Rules {
         on_in: Groups::build(cast.places.len(), [(food, budget_rule), (retirement, lapsed), (retirement, in_force)]),
         on_out: Groups::build(cast.places.len(), [(retirement, penalty)]),
@@ -576,11 +599,15 @@ pub(crate) fn household() -> Household {
         commodities: cast.commodities,
         assets: Arena::new(),
         contracts: Arena::new(),
+        also: Arena::new(),
         laws: records.laws,
         rules,
+        budgets: Arena::new(),
         params: Arena::new(),
         schedules: Arena::new(),
         codes: Vec::new(),
+        patterns: Arena::new(),
+        formats: Arena::new(),
         txns: journal.txns,
         flows: journal.flows,
         touching,
@@ -589,8 +616,11 @@ pub(crate) fn household() -> Household {
         prices: Prices::default(),
         lookup: Default::default(),
         splits: Vec::new(),
+        measures: Arena::new(),
+        readings: Vec::new(),
+        filed: Vec::new(),
         plans,
-        syncs: Vec::new(),
+        sources: Vec::new(),
     };
     let run = Run {
         today: day(2026, 3, 31),
@@ -622,8 +652,7 @@ impl Household {
             step: 0,
             subject: Subject::Place(self.place(place)),
             owner,
-            from,
-            until,
+            days: Days::new(from, until).unwrap(),
             counted: cents(counted),
             limit: cents(limit),
             day: until,
@@ -1260,8 +1289,7 @@ fn tax_lines_are_kept_apart_by_person_when_several_have_them() {
 #[test]
 fn a_window_of_all_time_is_named_and_never_panics() {
     let mut house = household().with_headroom();
-    house.run.headroom[0].from = Day(i32::MIN);
-    house.run.headroom[0].until = Day(i32::MAX);
+    house.run.headroom[0].days = Days::ALWAYS;
     let report = house.report(Query::Limits { year: Some(2026) });
     assert!(lines(&report.sections[0]).iter().any(|row| row.contains("| ever |")));
 }

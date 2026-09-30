@@ -219,7 +219,7 @@ impl<'b, 's> Ledger<'b, 's> {
         self.record.diagnostics.extend(reports);
         let mut headroom = std::mem::take(&mut self.record.passed);
         headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading.headroom));
-        headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.from));
+        headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.days.first()));
         let Ledger { book, options, solved, world, record, .. } = self;
         let posted = book.flows.iter().map(|(id, flow)| {
             let amounts = record.amounts.get(&id).copied().unwrap_or_else(|| Amounts::written(flow));

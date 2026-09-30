@@ -13,7 +13,7 @@ mod order;
 mod types;
 mod vars;
 
-use axiom_core::{Diagnostic, Id, Set};
+use axiom_core::{Diagnostic, Id, Set, Severity};
 use axiom_syntax::{self as ast, BinOp, DeclKind, Trigger as Written};
 
 use self::compile::{Placement, compile};
@@ -184,13 +184,18 @@ fn budget_law(world: &mut World, budget: &Budget) -> Law {
     let nodes = [
         node(Op::Const(Value::Name(in_word)), Ty::Name, 0),
         node(Op::Const(Value::Name(window_word)), Ty::Name, 1),
-        node(Op::Call(Func::Total(Dir::In, budget.window), Box::new([NodeId(0), NodeId(1)])), Ty::Amount, 0),
-        node(Op::Const(Value::Amount(budget.amount)), Ty::Amount, 3),
+        node(Op::Call(Func::Total(Dir::In, budget.window), Box::new([NodeId(0), NodeId(1)])), Ty::AMOUNT, 0),
+        node(Op::Const(Value::Amount(budget.amount)), Ty::AMOUNT, 3),
         node(Op::Bin(BinOp::Le, NodeId(2), NodeId(3)), Ty::Bool, 0),
     ];
     let step = Step {
         loc: budget.loc,
-        kind: StepKind::Require { cond: NodeId(4), otherwise: None, message: None, warn: true },
+        kind: StepKind::Require {
+            cond: NodeId(4),
+            otherwise: Box::default(),
+            message: None,
+            severity: Severity::Warning,
+        },
     };
     Law {
         name: names.intern("budget"),
@@ -198,6 +203,10 @@ fn budget_law(world: &mut World, budget: &Budget) -> Law {
         owner: Owner::Place(budget.place),
         system: None,
         trigger: Trigger::In,
+        // v3 bridge: a v3 budget is a property; the law holds its limit as a constant.
+        budget: None,
+        overrides: None,
+        rank: crate::law::Rank(0),
         steps: Box::new([step]),
         nodes: Box::new(nodes),
         loc: budget.loc,

@@ -14,13 +14,10 @@
 //! the place's owner, and a member who lives somewhere of their own is governed
 //! there as themselves.
 
-use axiom_core::{Day, Groups, Id};
+use axiom_core::{Days, Groups, Id};
 
 use crate::book::{Book, Entity, Place, Sort, System};
 use crate::law::{Law, Owner, Rule, Rules, Subject, Trigger};
-
-/// The span of a rule that has always applied and always will.
-const FOREVER: (Day, Day) = (Day(i32::MIN), Day(i32::MAX));
 
 pub(crate) fn govern(book: &mut Book, rank: &[u32]) {
     book.rules = Rules::of(book, rank);
@@ -29,19 +26,23 @@ pub(crate) fn govern(book: &mut Book, rank: &[u32]) {
 /// The laws of every system that governs one entity, dated: each system of
 /// every residence's lineage, ancestors first, with residences of one system
 /// merged so that its laws never run twice on a day.
-type Governing = Vec<(Id<System>, Day, Day)>;
+type Governing = Vec<(Id<System>, Days)>;
 
 fn governing(book: &Book, entity: Id<Entity>) -> Governing {
     let mut spans: Governing = Vec::new();
     for residence in book.entities[entity].lives.iter() {
-        spans.extend(book.systems.lineage(residence.system).map(|system| (system, residence.from, residence.until)));
+        spans.extend(book.systems.lineage(residence.system).map(|system| (system, residence.days)));
     }
-    spans.sort_by_key(|&(system, from, _)| (system, from));
+    spans.sort();
     let mut merged: Governing = Vec::with_capacity(spans.len());
-    for (system, from, until) in spans {
-        match merged.last_mut() {
-            Some((last, _, end)) if *last == system && from.0 <= end.0.saturating_add(1) => *end = (*end).max(until),
-            _ => merged.push((system, from, until)),
+    for (system, days) in spans {
+        if let Some((last, held)) = merged.last_mut()
+            && *last == system
+            && let Some(both) = held.merge(days)
+        {
+            *held = both;
+        } else {
+            merged.push((system, days));
         }
     }
     merged
@@ -53,7 +54,7 @@ struct Residents {
 }
 
 fn always(law: Id<Law>, subject: Subject) -> Rule {
-    Rule { law, subject, from: FOREVER.0, until: FOREVER.1 }
+    Rule { law, subject, days: Days::ALWAYS }
 }
 
 impl Residents {
@@ -72,9 +73,9 @@ impl Residents {
         let own = except.map_or(&[][..], |other| &self.governing[other.index()][..]);
         let spans = self.governing[entity.index()].iter();
         spans.filter(move |(system, ..)| !own.iter().any(|(theirs, ..)| theirs == system)).flat_map(
-            move |&(system, from, until)| {
+            move |&(system, days)| {
                 let laws = book.systems[system].laws.iter();
-                laws.map(move |&law| Rule { law, subject: Subject::Entity(entity), from, until })
+                laws.map(move |&law| Rule { law, subject: Subject::Entity(entity), days })
             },
         )
     }
