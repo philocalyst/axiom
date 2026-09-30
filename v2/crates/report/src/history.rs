@@ -8,7 +8,7 @@ use std::ops::{AddAssign, Range};
 
 use axiom_core::{Day, Id, Qty, Ratio};
 use axiom_engine::{Holding, Pad, Posted, Run, State};
-use axiom_model::{Amount, Book, End, Flow, Place};
+use axiom_model::{Amount, Book, Commodity, End, Flow, Place};
 
 use crate::lens::{Basket, Lens, Priced, on_balance_sheet};
 
@@ -146,15 +146,24 @@ impl AddAssign for Held {
 
 /// What every place held on each of several days, for the lens's owners.
 ///
-/// A dense grid over days, places and commodities. Places are numbered in
-/// pre-order, so a subtree is one contiguous range of it.
+/// Only the `(place, commodity)` pairs that ever held anything have cells: a
+/// place holds one or two commodities, not all of them. Pairs are sorted, and
+/// places are numbered in pre-order, so a subtree is a run of pairs.
 pub struct Snapshots {
     days: Vec<Day>,
-    places: usize,
-    units: usize,
+    pairs: Vec<(Id<Place>, Id<Commodity>)>,
+    /// A cell for every pair, a day at a time.
     cells: Vec<Held>,
     /// Flows with no price on their day, left out of `booked`.
     pub unpriced: Priced,
+}
+
+/// A flow's, or a pad's, effect on one pair: `held` from column `columns.start`
+/// until `columns.end`.
+struct Delta {
+    pair: (Id<Place>, Id<Commodity>),
+    columns: Range<usize>,
+    held: Held,
 }
 
 impl Snapshots {
@@ -175,19 +184,20 @@ impl Snapshots {
         }
     }
 
-    fn empty(book: &Book, days: Vec<Day>) -> Snapshots {
-        let (places, units) = (book.places.len(), book.commodities.len());
-        Snapshots { cells: vec![Held::default(); days.len() * places * units], days, places, units, unpriced: Priced::default() }
-    }
-
     fn final_state(lens: Lens, day: Day) -> Snapshots {
-        let mut snapshots = Snapshots::empty(lens.book, vec![day]);
-        for holding in lens.run.holdings.iter().filter(|holding| lens.owns(holding.place)) {
-            let qty = holding.qty();
-            let booked = if holding.unit == lens.book.base { qty } else { Qty::ZERO };
-            *snapshots.cell(0, holding.place, holding.unit.index()) = Held { qty, booked };
+        let held = lens.run.holdings.iter().filter(|holding| lens.owns(holding.place));
+        let mut cells: Vec<_> = held.map(|holding| ((holding.place, holding.unit), holding.qty())).collect();
+        cells.sort_unstable_by_key(|&(pair, _)| pair);
+        let base = lens.book.base;
+        Snapshots {
+            days: vec![day],
+            pairs: cells.iter().map(|&(pair, _)| pair).collect(),
+            cells: cells
+                .iter()
+                .map(|&((_, unit), qty)| Held { qty, booked: if unit == base { qty } else { Qty::ZERO } })
+                .collect(),
+            unpriced: Priced::default(),
         }
-        snapshots
     }
 
     fn replay(lens: Lens, days: &[Day], valued: bool) -> Snapshots {
@@ -197,10 +207,11 @@ impl Snapshots {
         columns.extend(book.splits.iter().map(|split| split.day));
         columns.sort_unstable();
         columns.dedup();
-        let mut snapshots = Snapshots::empty(book, columns);
+        let mut snapshots = Snapshots { days: columns, pairs: Vec::new(), cells: Vec::new(), unpriced: Priced::default() };
 
         // Each flow changes every column from the one it stands on until it is
         // returned: a difference at each edge, summed across columns after.
+        let mut deltas = Vec::new();
         for posting in postings(book, run) {
             let Some((start, past)) = posting.standing() else { continue };
             let (lo, hi) = (snapshots.column_from(start), snapshots.column_from(past));
@@ -212,7 +223,7 @@ impl Snapshots {
                     && let Change::Moved(amount) = posting.change(end)
                 {
                     let held = snapshots.held(lens.on(posting.flow.day), place, amount, valued);
-                    snapshots.change(lo..hi, place, amount.unit, held);
+                    deltas.push(Delta { pair: (place, amount.unit), columns: lo..hi, held });
                 }
             }
         }
@@ -224,20 +235,45 @@ impl Snapshots {
             for (place, amount) in pad_ends(pad) {
                 if lo < snapshots.days.len() && lens.owns(place) {
                     let held = snapshots.held(lens.on(pad.day), place, amount, valued);
-                    snapshots.change(lo..snapshots.days.len(), place, amount.unit, held);
+                    deltas.push(Delta { pair: (place, amount.unit), columns: lo..snapshots.days.len(), held });
                 }
             }
         }
-        snapshots.accumulate();
+        snapshots.fill(&deltas);
         for split in book.splits.iter() {
             snapshots.split(split.day, split.unit, split.ratio);
         }
         snapshots.keep(days)
     }
 
+    /// Allocates a cell for every pair the deltas touch, and sums them up.
+    fn fill(&mut self, deltas: &[Delta]) {
+        self.pairs = deltas.iter().map(|delta| delta.pair).collect();
+        self.pairs.sort_unstable();
+        self.pairs.dedup();
+        let width = self.pairs.len();
+        self.cells = vec![Held::default(); self.days.len() * width];
+        for delta in deltas {
+            let at = self.pair(delta.pair);
+            self.cells[delta.columns.start * width + at] += delta.held;
+            if delta.columns.end < self.days.len() {
+                self.cells[delta.columns.end * width + at] += Held { qty: -delta.held.qty, booked: -delta.held.booked };
+            }
+        }
+        for at in width..self.cells.len() {
+            let before = self.cells[at - width];
+            self.cells[at] += before;
+        }
+    }
+
     /// The first column on or after `day`.
     fn column_from(&self, day: Day) -> usize {
         self.days.partition_point(|&column| column < day)
+    }
+
+    /// Where a pair's cells are in a day.
+    fn pair(&self, pair: (Id<Place>, Id<Commodity>)) -> usize {
+        self.pairs.binary_search(&pair).expect("every pair a delta touches has a cell")
     }
 
     /// What `moved` adds to a place: its quantity, and, off the balance sheet,
@@ -250,35 +286,14 @@ impl Snapshots {
         held
     }
 
-    fn cell(&mut self, column: usize, place: Id<Place>, unit: usize) -> &mut Held {
-        &mut self.cells[(column * self.places + place.index()) * self.units + unit]
-    }
-
-    /// Adds `held` to `columns`, as a difference at each edge.
-    fn change(&mut self, columns: Range<usize>, place: Id<Place>, unit: Id<axiom_model::Commodity>, held: Held) {
-        self.cell(columns.start, place, unit.index()).add_assign(held);
-        if columns.end < self.days.len() {
-            self.cell(columns.end, place, unit.index()).add_assign(Held { qty: -held.qty, booked: -held.booked });
-        }
-    }
-
-    /// Turns differences into what stood on each column.
-    fn accumulate(&mut self) {
-        let stride = self.places * self.units;
-        for at in stride..self.cells.len() {
-            let before = self.cells[at - stride];
-            self.cells[at] += before;
-        }
-    }
-
     /// Multiplies what stood of `unit` in every place on `day`, and on the columns after.
-    fn split(&mut self, day: Day, unit: Id<axiom_model::Commodity>, ratio: Ratio) {
-        let column = self.column_from(day);
-        for place in (0..self.places).map(|place| Id::new(place as u32)) {
-            let standing = self.cell(column, place, unit.index()).qty;
+    fn split(&mut self, day: Day, unit: Id<Commodity>, ratio: Ratio) {
+        let (column, width) = (self.column_from(day), self.pairs.len());
+        for at in (0..width).filter(|&at| self.pairs[at].1 == unit) {
+            let standing = self.cells[column * width + at].qty;
             let more = standing.scale(ratio).map_or(Qty::ZERO, |scaled| scaled - standing);
             for later in column..self.days.len() {
-                self.cell(later, place, unit.index()).qty += more;
+                self.cells[later * width + at].qty += more;
             }
         }
     }
@@ -288,12 +303,12 @@ impl Snapshots {
         if self.days == days {
             return self;
         }
-        let stride = self.places * self.units;
+        let width = self.pairs.len();
         let cells = days
             .iter()
             .flat_map(|day| {
                 let column = self.column_from(*day);
-                self.cells[column * stride..(column + 1) * stride].iter().copied()
+                self.cells[column * width..(column + 1) * width].iter().copied()
             })
             .collect();
         Snapshots { days: days.to_vec(), cells, ..self }
@@ -305,12 +320,13 @@ impl Snapshots {
 
     /// What `place` and everything beneath it held on `days()[column]`.
     pub fn subtree(&self, book: &Book, column: usize, place: Id<Place>) -> Basket {
-        let first = (column * self.places + place.index()) * self.units;
-        let past = (column * self.places + book.places.end(place).index()) * self.units;
+        let first = self.pairs.partition_point(|&(other, _)| other < place);
+        let past = self.pairs.partition_point(|&(other, _)| other < book.places.end(place));
         let mut basket = Basket::default();
-        for (at, held) in self.cells[first..past].iter().enumerate() {
+        let cells = &self.cells[column * self.pairs.len()..][first..past];
+        for (&(_, unit), held) in self.pairs[first..past].iter().zip(cells) {
             if held.qty != Qty::ZERO || held.booked != Qty::ZERO {
-                basket.add(Id::new((at % self.units) as u32), *held);
+                basket.add(unit, *held);
             }
         }
         basket
