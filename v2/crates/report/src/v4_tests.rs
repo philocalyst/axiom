@@ -790,8 +790,8 @@ fn holdings(sam: &Sam) -> Vec<Holding> {
 #[cfg(test)]
 mod views {
     use super::*;
-    use crate::Query;
     use crate::tests::{Household, lines};
+    use crate::{Group, Query};
 
     /// The rows of the section headed `heading` in a view of Sam.
     fn rows(house: &Household, query: Query, heading: &str) -> Vec<String> {
@@ -878,6 +878,112 @@ mod views {
         assert_eq!(
             rows(&sam, Query::Available { at: None }, "Late promises coming in"),
             ["!lease | dana | 2026-03-01 | 4d | dana | 2,350.00 USD"]
+        );
+    }
+
+    /// The first section of Sam's `flow` over the first quarter of 2026, for whom (everyone by default).
+    fn flow(group: Group, whose: Option<&str>) -> Vec<String> {
+        let query = Query::Flow { by: Period::Month, group, from: Some(day(2026, 1, 1)), to: None };
+        lines(&sam().report_for(query, whose).unwrap().sections[0])
+    }
+
+    #[test]
+    fn flow_reads_income_spending_and_capital_from_the_purpose_tree() {
+        assert_eq!(
+            flow(Group::Purpose, None),
+            [
+                "=income | 6,950.00 USD | 6,950.00 USD | 8,400.00 USD | 22,300.00 USD",
+                "  wages | 4,600.00 USD | 4,600.00 USD | 4,600.00 USD | 13,800.00 USD",
+                "  design |  |  | 3,000.00 USD | 3,000.00 USD",
+                "  rent-received | 2,350.00 USD | 2,350.00 USD |  | 4,700.00 USD",
+                "  licensing |  |  | 800.00 USD | 800.00 USD",
+                "=spending | 3,309.20 USD | 3,185.00 USD | 4,547.88 USD | 11,042.08 USD",
+                "  food | 84.20 USD |  |  | 84.20 USD",
+                "    groceries | 84.20 USD |  |  | 84.20 USD",
+                "  rent | 2,900.00 USD | 2,900.00 USD | 2,900.00 USD | 8,700.00 USD",
+                "  phone | 45.00 USD | 45.00 USD |  | 90.00 USD",
+                "  interest |  |  | 1,527.88 USD | 1,527.88 USD",
+                "~    of condo |  |  | 1,527.88 USD | 1,527.88 USD",
+                "  fitness | 240.00 USD | 240.00 USD | 120.00 USD | 600.00 USD",
+                "  the flea market | 40.00 USD |  |  | 40.00 USD",
+                "=Net | 3,640.80 USD | 3,765.00 USD | 3,852.12 USD | 11,257.92 USD",
+                "=capital |  | 1,480.00 USD |  | 1,480.00 USD",
+                "  improvement |  | 1,480.00 USD |  | 1,480.00 USD",
+                "~    of condo |  | 1,480.00 USD |  | 1,480.00 USD",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_shared_flow_shows_each_owners_share_under_the_owner_and_the_whole_under_everyone() {
+        let rent = |rows: &[String]| rows.iter().find(|row| row.starts_with("  rent |")).cloned().unwrap();
+        assert_eq!(
+            rent(&flow(Group::Purpose, None)),
+            "  rent | 2,900.00 USD | 2,900.00 USD | 2,900.00 USD | 8,700.00 USD"
+        );
+        assert_eq!(
+            rent(&flow(Group::Purpose, Some("me"))),
+            "  rent | 2,552.00 USD | 2,552.00 USD | 2,552.00 USD | 7,656.00 USD"
+        );
+        assert_eq!(
+            rent(&flow(Group::Purpose, Some("studio"))),
+            "  rent | 348.00 USD | 348.00 USD | 348.00 USD | 1,044.00 USD"
+        );
+        // The studio bears its invoice's items, each under its own purpose, and none of Sam's pay.
+        let studio = flow(Group::Purpose, Some("studio"));
+        assert!(studio.iter().any(|row| row.starts_with("  licensing |  |  | 800.00 USD")), "{studio:?}");
+        assert!(studio.iter().all(|row| !row.starts_with("  wages")), "{studio:?}");
+    }
+
+    #[test]
+    fn flow_by_party_lists_who_the_money_went_to_and_came_from_biggest_first() {
+        let rows = flow(Group::Party, None);
+        let names: Vec<&str> =
+            rows.iter().map(|row| row.split(" | ").next().unwrap().trim_start_matches(['=', ' '])).collect();
+        assert_eq!(
+            names,
+            [
+                "income",
+                "lumen",
+                "dana",
+                "halcyon",
+                "spending",
+                "greystar",
+                "rocket",
+                "fitclub",
+                "mint",
+                "trader-joes",
+                "unknown",
+                "Net",
+                "capital",
+                "bay-plumbing"
+            ]
+        );
+        assert_eq!(rows[1], "  lumen | 4,600.00 USD | 4,600.00 USD | 4,600.00 USD | 13,800.00 USD");
+    }
+
+    #[test]
+    fn flow_counts_hours_and_miles_by_purpose_and_owner_in_their_own_units() {
+        let query = Query::Flow { by: Period::Month, group: Group::Purpose, from: Some(day(2026, 1, 1)), to: None };
+        let report = sam().report(query);
+        assert_eq!(
+            lines(&report.sections[1]),
+            ["design for studio | 6.5 HR | 3.0 HR |  | 9.5 HR", "business-travel for studio | 44 MI |  |  | 44 MI"]
+        );
+        let facts: Vec<_> = report.sections[1].facts.iter().map(|fact| (fact.concept, fact.of, fact.entity)).collect();
+        assert_eq!(facts[0], ("worked", Some("design"), "studio"));
+        assert!(facts.iter().any(|&(concept, ..)| concept == "used"));
+    }
+
+    #[test]
+    fn flow_facts_say_what_was_earned_or_spent_of_which_purpose() {
+        let query = Query::Flow { by: Period::Month, group: Group::Purpose, from: Some(day(2026, 1, 1)), to: None };
+        let report = sam().report_for(query, Some("studio")).unwrap();
+        let rent: Vec<_> = report.sections[0].facts.iter().filter(|fact| fact.of == Some("rent")).collect();
+        assert_eq!(rent.len(), 3);
+        assert!(
+            rent.iter()
+                .all(|fact| fact.concept == "spending" && fact.entity == "studio" && fact.value.qty == Qty(34_800))
         );
     }
 }

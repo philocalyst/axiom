@@ -57,7 +57,11 @@ struct Sided {
 /// The side of the books each place is on and the sign of its balance, read
 /// once from the path roots of a v3 book, so no view parses a path while it
 /// works. A place under no path root is a v4 one: its class gives its sign.
-pub struct Sides(Box<[Sided]>);
+pub struct Sides {
+    places: Box<[Sided]>,
+    /// Some place sits under no path root: the book has purposes, not income and expense places.
+    v4: bool,
+}
 
 impl Sides {
     pub fn new(book: &Book) -> Sides {
@@ -73,20 +77,25 @@ impl Sides {
             };
             Sided { sign: root.display_sign(), side, root: path == root.path() }
         };
-        Sides(book.places.values().map(sided).collect())
+        let v4 = book.places.values().any(|place| PathRoot::of(book.name(place.path)).is_none());
+        Sides { places: book.places.values().map(sided).collect(), v4 }
+    }
+
+    pub fn is_v4(&self) -> bool {
+        self.v4
     }
 
     pub fn sign(&self, place: Id<Place>) -> i64 {
-        self.0[place.index()].sign
+        self.places[place.index()].sign
     }
 
     /// The side of the income statement the place is on, if it is on one.
     pub fn side(&self, place: Id<Place>) -> Option<Side> {
-        self.0[place.index()].side
+        self.places[place.index()].side
     }
 
     pub fn is_root(&self, place: Id<Place>) -> bool {
-        self.0[place.index()].root
+        self.places[place.index()].root
     }
 
     /// The top-level category a place belongs to: the child of its root

@@ -10,7 +10,7 @@ use std::path::Path;
 use axiom_core::diag::closest;
 use axiom_core::{Day, Diagnostic};
 use axiom_model::Period;
-use axiom_report::Query;
+use axiom_report::{Group, Query};
 
 use crate::style::ColorChoice;
 
@@ -85,7 +85,7 @@ pub const OPTIONS: &[OptionSpec] = &[
     option(Opt::Monthly, "monthly", None, "one column per month"),
     option(Opt::From, "from", Some("DATE"), "start on this day"),
     option(Opt::To, "to", Some("DATE"), "end on this day"),
-    option(Opt::By, "by", Some("month|year"), "the length of a period (default: month)"),
+    option(Opt::By, "by", Some("month|year|party"), "the length of a period (default: month), or group by party"),
     option(Opt::Until, "until", Some("DATE"), "run the forecast up to this day"),
     option(Opt::Paths, "paths", Some("N"), "how many Monte Carlo paths (default: 1000)"),
     option(Opt::Check, "check", None, "say which files are not in the house style, and change none"),
@@ -266,7 +266,11 @@ fn build<'a>(spec: &CommandSpec, operands: &[&'a str], values: &Values<'a>) -> R
     let first = operands.first().copied();
     let (day, has) = (|opt| values.day(opt), |opt| values.has(opt));
     let year = || first.map(parse_year).transpose();
-    let periods = [("month", Period::Month), ("year", Period::Year)];
+    let groupings = [
+        ("month", (Period::Month, Group::Purpose)),
+        ("year", (Period::Year, Group::Purpose)),
+        ("party", (Period::Month, Group::Party)),
+    ];
     let query = match spec.verb {
         Verb::Check => return Ok(Command::Check),
         Verb::Sync => return Ok(Command::Sync(operands.to_vec())),
@@ -276,7 +280,8 @@ fn build<'a>(spec: &CommandSpec, operands: &[&'a str], values: &Values<'a>) -> R
         }
         Verb::Register => Query::Register { place: first.unwrap_or_default(), from: day(From)?, to: day(To)? },
         Verb::Flow => {
-            Query::Flow { by: values.choice(By, &periods)?.unwrap_or(Period::Month), from: day(From)?, to: day(To)? }
+            let (by, group) = values.choice(By, &groupings)?.unwrap_or((Period::Month, Group::Purpose));
+            Query::Flow { by, group, from: day(From)?, to: day(To)? }
         }
         Verb::Available => Query::Available { at: day(At)? },
         Verb::Budget => {
@@ -511,7 +516,10 @@ mod tests {
     fn defaults() {
         let (command, relaxed) = parse_words(&["flow"]).unwrap();
         assert!(!relaxed);
-        assert!(matches!(command, Command::Report(Query::Flow { by: Period::Month, from: None, to: None }, None)));
+        assert!(matches!(
+            command,
+            Command::Report(Query::Flow { by: Period::Month, group: Group::Purpose, from: None, to: None }, None)
+        ));
         assert!(matches!(parse_words(&[]).unwrap().0, Command::Help));
         assert!(matches!(parse_words(&["balance", "--help"]).unwrap().0, Command::Help));
         assert!(matches!(parse_words(&["-V"]).unwrap().0, Command::Version));
@@ -525,6 +533,8 @@ mod tests {
         assert!(matches!(query_of(&["claims", "--at", "2026-06-01"]).0, Query::Claims { at: Some(_) }));
         assert!(matches!(query_of(&["contracts", "--at", "2026-06-01"]).0, Query::Contracts { at: Some(_) }));
         assert!(matches!(query_of(&["contracts"]).0, Query::Contracts { at: None }));
+        assert!(matches!(query_of(&["flow", "--by", "party"]).0, Query::Flow { group: Group::Party, .. }));
+        assert!(matches!(query_of(&["flow", "--by", "year"]).0, Query::Flow { by: Period::Year, .. }));
         let (lots, whose) = query_of(&["lots", "brokerage", "--at", "2026-06-01", "--for", "me"]);
         assert!(matches!(lots, Query::Lots { place: Some("brokerage"), at: Some(_) }));
         assert_eq!(whose, Some("me"));

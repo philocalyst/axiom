@@ -42,6 +42,7 @@ use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Ratio, Span};
 use axiom_engine::Run;
 use axiom_model::{Amount, Book, Period, Place, Trigger};
 
+pub use crate::flow::Group;
 use crate::history::Snapshots;
 use crate::lens::{Context, Lens, Whose};
 
@@ -54,7 +55,7 @@ pub enum Query<'a> {
     /// A place's flows with a running balance.
     Register { place: &'a str, from: Option<Day>, to: Option<Day> },
     /// Income and spending by period; spread flows recognized per day.
-    Flow { by: Period, from: Option<Day>, to: Option<Day> },
+    Flow { by: Period, group: Group, from: Option<Day>, to: Option<Day> },
     /// What can be spent now, and what drawing on each other place would net.
     Available { at: Option<Day> },
     /// Each budget (a `warn` law over a window total): spent against limit,
@@ -214,7 +215,7 @@ fn views<'s>(lens: Lens<'_, 's>, query: &Query) -> Result<Report<'s>, Diagnostic
     match query {
         Query::Balance { globs, at, value, monthly } => balance::view(lens, globs, *at, *value, *monthly),
         Query::Register { place, from, to } => register::view(lens, place, *from, *to),
-        Query::Flow { by, from, to } => Ok(flow::view(lens, *by, *from, *to)),
+        Query::Flow { by, group, from, to } => Ok(flow::view(lens, *by, *group, *from, *to)),
         Query::Available { at } => Ok(available::view(lens, *at)),
         Query::Budget { at, by } => Ok(budget::view(lens, *at, *by)),
         Query::Limits { year } => Ok(limits::view(lens, *year)),

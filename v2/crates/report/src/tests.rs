@@ -13,6 +13,7 @@ use axiom_engine::{Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted,
 use axiom_model::Effect as Consequence;
 use axiom_model::*;
 
+use crate::flow::Group;
 use crate::lens::{Context, Lens, Whose};
 use crate::why::Found;
 use crate::{Cell, Query, Report, Row, Section, Style};
@@ -863,7 +864,7 @@ fn a_view_can_be_about_one_person_or_their_household() {
     let everyone = house.report(balance(vec![], None, false, false));
     assert_eq!(lines(&together.sections[0]), lines(&everyone.sections[0]));
     // Spending is scoped the same way.
-    let pay = house.report_for(Query::Flow { by: Period::Month, from: None, to: None }, Some("jordan")).unwrap();
+    let pay = house.report_for(Query::Flow { by: Period::Month, group: Group::Purpose, from: None, to: None }, Some("jordan")).unwrap();
     assert!(
         lines(&pay.sections[0]).iter().any(|line| line.starts_with("  jordan-pay") && line.contains("3,000.00 USD"))
     );
@@ -877,7 +878,7 @@ fn flow_recognizes_a_spread_premium_a_little_each_day() {
     let house = household();
     // 1,200 over 365 days: January's 31 days are 101.92, February's 28 are 92.05,
     // and half-even rounding at each month boundary keeps the year exact.
-    let flow = house.report(Query::Flow { by: Period::Month, from: None, to: None });
+    let flow = house.report(Query::Flow { by: Period::Month, group: Group::Purpose, from: None, to: None });
     let insurance = lines(&flow.sections[0]).into_iter().find(|row| row.trim_start().starts_with("insurance")).unwrap();
     assert_eq!(insurance.trim_start(), "insurance | 101.92 USD | 92.05 USD | 101.92 USD | 295.89 USD");
     let gains = lines(&flow.sections[0]).into_iter().find(|row| row.contains("realized gains")).unwrap();

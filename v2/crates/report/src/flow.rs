@@ -7,7 +7,7 @@
 
 use std::iter;
 
-use axiom_core::{Day, Days, Id, Qty, spread};
+use axiom_core::{Day, Days, Id, Qty, Tree, spread};
 use axiom_model::{Book, Period, Place};
 
 use crate::calendar::Periods;
@@ -19,7 +19,16 @@ use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 /// How many periods to show when the window is not given.
 const DEFAULT_PERIODS: usize = 12;
 
-pub fn view<'s>(lens: Lens<'_, 's>, by: Period, from: Option<Day>, to: Option<Day>) -> Report<'s> {
+mod purposes;
+
+/// What the statement's rows are: the purpose tree, or the parties the money went to.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Group {
+    Purpose,
+    Party,
+}
+
+pub fn view<'s>(lens: Lens<'_, 's>, by: Period, group: Group, from: Option<Day>, to: Option<Day>) -> Report<'s> {
     let book = lens.book;
     let to = to.unwrap_or(lens.day);
     let lens = lens.on(to);
@@ -30,6 +39,10 @@ pub fn view<'s>(lens: Lens<'_, 's>, by: Period, from: Option<Day>, to: Option<Da
             Periods::covering(by, first, to).last(DEFAULT_PERIODS)
         }
     };
+    // v3 bridge: a v4 book has purposes, and no income or expense places.
+    if lens.sides.is_v4() {
+        return purposes::report(lens, periods, group, to);
+    }
     let statement = Statement::compile(lens, periods, to);
     Report::new("Income and spending").with(statement.section(lens))
 }
@@ -46,13 +59,13 @@ impl Grid {
         Grid { columns, cells: vec![Qty::ZERO; rows * columns] }
     }
 
-    fn add(&mut self, place: Id<Place>, column: usize, qty: Qty) {
-        self.cells[place.index() * self.columns + column] += qty;
+    fn add<T>(&mut self, row: Id<T>, column: usize, qty: Qty) {
+        self.cells[row.index() * self.columns + column] += qty;
     }
 
-    /// Per-period totals for `place` and everything beneath it.
-    fn subtree(&self, book: &Book, place: Id<Place>) -> Vec<Qty> {
-        let rows = place.index() * self.columns..book.places.end(place).index() * self.columns;
+    /// Per-period totals for `row` and everything beneath it.
+    fn subtree<T>(&self, tree: &Tree<T>, row: Id<T>) -> Vec<Qty> {
+        let rows = row.index() * self.columns..tree.end(row).index() * self.columns;
         let mut totals = vec![Qty::ZERO; self.columns];
         for row in self.cells[rows].chunks(self.columns) {
             add_into(&mut totals, row);
@@ -143,24 +156,17 @@ impl Statement {
 
     fn section<'s>(&self, lens: Lens<'_, 's>) -> Section<'s> {
         let book = lens.book;
-        let periods =
-            (0..self.periods.len()).map(|period| Column::right(Cell::Period(self.periods.window(period).days())));
-        let total = (self.periods.len() > 1).then(|| Column::right("Total"));
-        let mut section = Section::new(iter::once(Column::left("Place")).chain(periods).chain(total));
+        let mut section = table("Place", &self.periods);
 
         let gains = Derived { label: "realized gains ≈", side: "income", values: &self.gains, style: Style::Muted };
-        let unexplained = self.grid.subtree(book, book.roots.unknown);
+        let unexplained = self.grid.subtree(&book.places, book.roots.unknown);
         let unexplained =
             Derived { label: "unexplained (?)", side: "spending", values: &unexplained, style: Style::Normal };
         let income = self.side_rows(lens, &mut section, Side::Income, &gains);
         let spending = self.side_rows(lens, &mut section, Side::Spending, &unexplained);
         // Spending that vanished into `?` is still spending.
         let net: Vec<Qty> = income.iter().zip(&spending).map(|(&earned, &spent)| earned - spent).collect();
-        let cells = net
-            .iter()
-            .map(|&qty| Cell::base(book, qty))
-            .chain((self.periods.len() > 1).then(|| Cell::base(book, net.iter().copied().sum())));
-        section.push(Row::new(iter::once("Net".into()).chain(cells)).style(Style::Total));
+        section.push(net_row(book, &net));
 
         if !is_zero(&self.gains) {
             section.note(
@@ -182,7 +188,7 @@ impl Statement {
         let mut total = derived.values.to_vec();
         for root in book.places.roots().filter(|&root| lens.sides.side(root) == Some(side)) {
             for place in book.places.subtree(root) {
-                let values = self.grid.subtree(book, place);
+                let values = self.grid.subtree(&book.places, place);
                 if place == root {
                     add_into(&mut total, &values);
                 }
@@ -201,21 +207,36 @@ impl Statement {
                         Money::base(book, qty),
                     );
                 }
-                section.push(self.row(book, Cell::Name(leaf(book, place)), depth(book, place), &values, style));
+                section.push(row(book, Cell::Name(leaf(book, place)), depth(book, place), &values, style));
             }
         }
         if has_derived {
-            section.push(self.row(book, derived.label.into(), 1, derived.values, derived.style));
-            section.push(self.row(book, ["Total".into(), derived.side.into()].into(), 0, &total, Style::Total));
+            section.push(row(book, derived.label.into(), 1, derived.values, derived.style));
+            section.push(row(book, ["Total".into(), derived.side.into()].into(), 0, &total, Style::Total));
         }
         total
     }
+}
 
-    fn row<'s>(&self, book: &Book<'s>, label: Cell<'s>, depth: usize, values: &[Qty], style: Style) -> Row<'s> {
-        let cells = values.iter().map(|&qty| Cell::base_or_blank(book, qty));
-        let total = (values.len() > 1).then(|| Cell::base_or_blank(book, values.iter().copied().sum()));
-        Row::new(iter::once(label).chain(cells).chain(total)).depth(depth).style(style)
-    }
+/// An empty statement: a column for the rows' names, one for each period, and a total.
+fn table<'s>(title: &'static str, periods: &Periods) -> Section<'s> {
+    let columns = (0..periods.len()).map(|period| Column::right(Cell::Period(periods.window(period).days())));
+    let total = (periods.len() > 1).then(|| Column::right("Total"));
+    Section::new(iter::once(Column::left(title)).chain(columns).chain(total))
+}
+
+/// The bottom line: every period's figure, shown even when it is nothing.
+fn net_row<'s>(book: &Book<'s>, net: &[Qty]) -> Row<'s> {
+    let cells = net.iter().map(|&qty| Cell::base(book, qty));
+    let total = (net.len() > 1).then(|| Cell::base(book, net.iter().copied().sum()));
+    Row::new(iter::once("Net".into()).chain(cells).chain(total)).style(Style::Total)
+}
+
+/// A statement's row: what it is about, its figure in each period, and their total.
+fn row<'s>(book: &Book<'s>, label: Cell<'s>, depth: usize, values: &[Qty], style: Style) -> Row<'s> {
+    let cells = values.iter().map(|&qty| Cell::base_or_blank(book, qty));
+    let total = (values.len() > 1).then(|| Cell::base_or_blank(book, values.iter().copied().sum()));
+    Row::new(iter::once(label).chain(cells).chain(total)).depth(depth).style(style)
 }
 
 /// A line the journal never wrote, added to a side: gains, or unexplained value.
