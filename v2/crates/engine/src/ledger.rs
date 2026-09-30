@@ -15,7 +15,7 @@
 //!
 //! [`fork`]: Ledger::fork
 
-use axiom_core::{Day, Diagnostic, Id, Qty};
+use axiom_core::{Day, Diagnostic, Id, Qty, par};
 use axiom_model::{Book, Commodity, End, Flow, Infer, Place};
 
 use crate::motion::{Amounts, Motion};
@@ -198,14 +198,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading));
         headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.days.first()));
         let Ledger { plan, options, horizon, world, record, .. } = self;
-        let posted = book.flows.iter().map(|(id, flow)| {
-            let amounts = settled(plan, &record, id, flow).unwrap_or_else(|| Amounts::written(flow));
-            Posted { out: amounts.out, arrive: amounts.arrive, state: plan.events.state(id, flow) }
-        });
         Run {
             today: options.today,
             horizon,
-            posted: posted.collect(),
+            posted: posted(plan, &record),
             holdings: world.holdings.into_sorted(),
             gains: record.gains,
             effects: record.effects,
@@ -319,6 +315,27 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             (End::To, true) => Amounts { arrive: qty, ..written },
         }
     }
+}
+
+/// Every journal flow as solved and settled. Each depends on nothing but the
+/// plan and the record, so they are made side by side, a stretch of flows to a
+/// worker.
+fn posted(plan: &Plan, record: &Record) -> Box<[Posted]> {
+    const STRETCH: usize = 4096;
+    let book = plan.book;
+    let stretches: Vec<usize> = (0..book.flows.len()).step_by(STRETCH).collect();
+    let mut all = Vec::with_capacity(book.flows.len());
+    let post = |id: Id<Flow>| {
+        let flow = &book.flows[id];
+        let amounts = settled(plan, record, id, flow).unwrap_or_else(|| Amounts::written(flow));
+        Posted { out: amounts.out, arrive: amounts.arrive, state: plan.events.state(id, flow) }
+    };
+    let stretch = |&first: &usize| {
+        let ids = (first..(first + STRETCH).min(book.flows.len())).map(|at| Id::new(at as u32));
+        ids.map(post).collect::<Vec<_>>()
+    };
+    par::map_each_ordered(&stretches, stretch, |made| all.extend(made));
+    all.into()
 }
 
 /// A flow's quantities where they are already settled: as written, as the

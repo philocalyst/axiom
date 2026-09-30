@@ -1,11 +1,13 @@
-//! What a [`Ledger`](crate::Ledger) carries besides the book and its
+//! What a [`Ledger`](crate::Ledger) carries besides the plan and its
 //! timeline.
 //!
 //! The clonable *world* is what the future depends on: holdings, totals and
 //! tallies. The *record* is what happened, append-only: gains, effects,
-//! violations, diagnostics. Both are cloned with the ledger (a clone costs a few
-//! flat copies, never a replay). The *scratch* buffers are reused between flows
-//! so nothing allocates in steady state, and are deliberately not cloned.
+//! violations, diagnostics, and beside them what was already reported, so it is
+//! not reported again. Both are cloned with the ledger (a clone costs a few flat
+//! copies, never a replay), and a fork keeps only the world and what was
+//! reported. The *scratch* buffers are reused between flows so nothing
+//! allocates in steady state, and are deliberately not cloned.
 
 use std::hash::{Hash, Hasher};
 
