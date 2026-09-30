@@ -15,8 +15,8 @@
 
 use axiom_core::{Day, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
-    Amount, Assert, BinOp, Book, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param,
-    Place, StepKind, Subject, System, Trigger, Value, Waive, Window,
+    Amount, Assert, BinOp, Book, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param, Place,
+    StepKind, Subject, System, Trigger, Value, Waive, Window,
 };
 
 use crate::bridge;
@@ -415,7 +415,9 @@ fn suggestion(f: &Frame, step: usize, cond: NodeId) -> Option<String> {
                 (false, _) => format!("this flow must be at least {}", show(flow + off)),
             });
         }
-        Follows::Total(dir, window) => format!("{} {}", if dir == Dir::In { "go in" } else { "come out" }, span(window)),
+        Follows::Total(dir, window) => {
+            format!("{} {}", if dir == Dir::In { "go in" } else { "come out" }, span(window))
+        }
         Follows::Tally(name) => format!("count toward `{}` this year", f.book.name(name)),
     };
     Some(match (bound.upper, flow > off) {
@@ -431,6 +433,59 @@ fn span(window: Window) -> &'static str {
         Window::Year => "this year",
         Window::Ever => "in total",
     }
+}
+
+/// What an assertion said and what the ledger held, in the sign the assertion
+/// is written in.
+#[derive(Clone, Copy)]
+struct Disagreement {
+    unit: Id<Commodity>,
+    stated: Qty,
+    held: Qty,
+    /// How far the gap has moved since the last assertion on the place was
+    /// checked. What the gap already was then is carried, and not explained again.
+    new: Qty,
+}
+
+impl Disagreement {
+    fn carried(self) -> Qty {
+        self.stated - self.held - self.new
+    }
+}
+
+/// The flows on an assertion's place since the last one was checked that moved
+/// its commodity, as the assertion reads them.
+struct Since {
+    /// Flows that moved value by the assertion's day, signed the way the assertion
+    /// is written: `+` raises the shown balance.
+    real: Vec<(Id<Flow>, Qty)>,
+    /// Flows written but not yet real, which count against nothing yet.
+    pending: Vec<Id<Flow>>,
+}
+
+fn since(book: &Book, events: &Events, (assert, sign): (&Assert, i64), checked: Option<Day>) -> Since {
+    let flows = &book.touching[assert.place];
+    let (from, to) = (
+        flows.partition_point(|&id| checked.is_some_and(|last| book.flows[id].day <= last)),
+        flows.partition_point(|&id| book.flows[id].day <= assert.day),
+    );
+    let mut found = Since { real: Vec::new(), pending: Vec::new() };
+    for &id in &flows[from..to] {
+        let flow = &book.flows[id];
+        let (moved, inflow) = if flow.to == assert.place { (flow.arrive, true) } else { (flow.out, false) };
+        let end = if inflow { End::To } else { End::From };
+        if moved.unit != assert.amount.unit || !bridge::moves_quantity(flow, end) {
+            continue;
+        }
+        let state = events.state(id, flow);
+        let signed = if inflow == (sign > 0) { moved.qty } else { -moved.qty };
+        if state.is_real_on(assert.day) {
+            found.real.push((id, signed));
+        } else if state.is_pending_on(assert.day) {
+            found.pending.push(id);
+        }
+    }
+    found
 }
 
 /// What most likely went wrong when a statement and the ledger disagree.
@@ -454,8 +509,77 @@ fn swapped(a: Qty, b: Qty) -> bool {
     a.len() == b.len() && at.len() == 2 && at[1] == at[0] + 1 && a[at[0]] == b[at[1]] && a[at[1]] == b[at[0]]
 }
 
+impl Suspect {
+    /// The likeliest cause, given the flows that built the gap and what the
+    /// place holds of other commodities. It reads numbers, not the book.
+    fn find(gap: Disagreement, real: &[(Id<Flow>, Qty)], others: &[(Id<Commodity>, Qty)]) -> Suspect {
+        // A flow written backwards is off by twice its amount.
+        if let Some(&(id, _)) = real.iter().rev().find(|&&(_, signed)| signed.0 * 2 == -gap.new.0) {
+            return Suspect::Backwards(id);
+        }
+        if gap.carried().is_zero() && swapped(gap.held, gap.stated) {
+            return Suspect::Swapped;
+        }
+        if !gap.held.is_zero() && gap.stated == -gap.held {
+            return Suspect::Sign;
+        }
+        let elsewhere = others.iter().filter(|&&(other, qty)| other != gap.unit && !qty.is_zero());
+        let alike = elsewhere.clone().find(|&&(_, qty)| qty == gap.stated).or_else(|| elsewhere.clone().next());
+        match alike {
+            Some(&(other, qty)) if gap.held.is_zero() => Suspect::Unit(other, qty),
+            _ => Suspect::Missing,
+        }
+    }
+
+    /// What the diagnostic says about the suspect: a note on why, the flow it
+    /// points at, and the edit that would fix it.
+    fn advise(self, d: Diagnostic, book: &Book, gap: Disagreement) -> Diagnostic {
+        let money = |qty: Qty| book.show(Amount::new(qty, gap.unit)).to_string();
+        match self {
+            Suspect::Backwards(id) => {
+                let flow = &book.flows[id];
+                let (from, to) = (show::place(book, flow.from), show::place(book, flow.to));
+                d.note(format!(
+                    "the gap is exactly twice this flow (2 × {}): it is probably written backwards",
+                    money(Qty(gap.new.0.abs() / 2))
+                ))
+                .context(flow.loc, "probably written the wrong way round")
+                .help(format!("write it the other way: `{to} -> {from}`"))
+            }
+            Suspect::Swapped => d
+                .note(format!(
+                    "{} and {} differ only by two neighbouring digits swapped",
+                    money(gap.held),
+                    money(gap.stated)
+                ))
+                .help(format!("if the statement says {}, correct the amount", money(gap.held))),
+            Suspect::Sign => d
+                .note(format!(
+                    "the ledger holds {}, the opposite of {}: the sign may be wrong",
+                    money(gap.held),
+                    money(gap.stated)
+                ))
+                .help(format!(
+                    "if the balance is {}, write it with its sign: `= {}`",
+                    money(gap.held),
+                    money(gap.held)
+                )),
+            Suspect::Unit(other, qty) => {
+                let (symbol, shown) = (book.name(book.commodities[other].symbol), book.show(Amount::new(qty, other)));
+                d.help(format!("assert in {symbol}: {shown}"))
+            }
+            Suspect::Missing => d
+                .note(format!(
+                    "{} is neither twice a flow nor a transposition: most likely a flow is missing",
+                    money(gap.new.abs())
+                ))
+                .help("record the missing flow"),
+        }
+    }
+}
+
 /// An assertion that does not hold. `held` is the place's balance and `new`
-/// how far the gap has moved since `since`, the last time an assertion on the
+/// how far the gap has moved since `checked`, the last time an assertion on the
 /// place was checked (both in the sign the assertion is written in); what
 /// the gap already was then is carried, and not explained again. `others` is
 /// what the place holds of other commodities.
@@ -464,116 +588,56 @@ pub(crate) fn mismatch(
     events: &Events,
     (assert, sign): (&Assert, i64),
     (held, new): (Qty, Qty),
-    since: Option<Day>,
+    checked: Option<Day>,
     others: &[(Id<Commodity>, Qty)],
 ) -> Diagnostic {
-    let (place, unit, day, stated) =
-        (show::place(book, assert.place), assert.amount.unit, assert.day, assert.amount.qty);
-    let money = |qty: Qty| book.show(Amount::new(qty, unit)).to_string();
-
-
-    // The flows since the last checkpoint that moved this commodity, as the assertion reads them.
-    let flows = &book.touching[assert.place];
-    let (from, to) = (
-        flows.partition_point(|&id| since.is_some_and(|last| book.flows[id].day <= last)),
-        flows.partition_point(|&id| book.flows[id].day <= day),
-    );
-    let (mut real, mut pending) = (Vec::new(), Vec::new());
-    for &id in &flows[from..to] {
-        let flow = &book.flows[id];
-        let (moved, inflow) = if flow.to == assert.place { (flow.arrive, true) } else { (flow.out, false) };
-        let state = events.state(id, flow);
-        let end = if inflow { End::To } else { End::From };
-        if moved.unit != unit || !bridge::moves_quantity(flow, end) {
-            continue;
-        }
-        // Signed the way the assertion is written: `+` raises the shown balance.
-        let signed = if inflow == (sign > 0) { moved.qty } else { -moved.qty };
-        if state.is_real_on(day) {
-            real.push((id, signed));
-        } else if state.is_pending_on(day) {
-            pending.push(id);
-        }
-    }
-
-    let carried = stated - held - new;
-    // A flow written backwards is off by twice its amount.
-    let backwards = real.iter().rev().find(|&&(_, signed)| signed.0 * 2 == -new.0).map(|&(id, _)| id);
-    let elsewhere = others.iter().filter(|&&(other, qty)| other != unit && !qty.is_zero());
-    let suspect = match (backwards, elsewhere.clone().find(|&&(_, qty)| qty == stated).or(elsewhere.clone().next())) {
-        (Some(id), _) => Suspect::Backwards(id),
-        _ if carried.is_zero() && swapped(held, stated) => Suspect::Swapped,
-        _ if !held.is_zero() && stated == -held => Suspect::Sign,
-        (_, Some(&(other, qty))) if held.is_zero() => Suspect::Unit(other, qty),
-        _ => Suspect::Missing,
-    };
+    let gap = Disagreement { unit: assert.amount.unit, stated: assert.amount.qty, held, new };
+    let money = |qty: Qty| book.show(Amount::new(qty, gap.unit)).to_string();
+    let place = show::place(book, assert.place);
+    let flows = since(book, events, (assert, sign), checked);
+    let suspect = Suspect::find(gap, &flows.real, others);
 
     let headline = match suspect {
         Suspect::Unit(other, qty) => {
-            let (was, is) = (book.name(book.commodities[unit].symbol), book.show(Amount::new(qty, other)));
+            let (was, is) = (book.name(book.commodities[gap.unit].symbol), book.show(Amount::new(qty, other)));
             format!("{place} has never held {was}; it holds {is}")
         }
-        _ => format!("{place} holds {}, not {}", money(held), money(stated)),
+        _ => format!("{place} holds {}, not {}", money(held), money(gap.stated)),
     };
     let direction = if new > Qty::ZERO { "more" } else { "less" };
-    let label = match carried.is_zero() {
+    let label = match gap.carried().is_zero() {
         true => format!("{} {direction} than the ledger holds", money(new.abs())),
         false => format!("another {} {direction} than the ledger holds", money(new.abs())),
     };
     let mut d = Diagnostic::error("assertion", headline).label(assert.loc, label);
-    if !carried.is_zero() {
+    if !gap.carried().is_zero() {
         d = d.note(format!(
             "the {} gap reported at an earlier assertion is carried; only what is new is explained here",
-            money(carried.abs())
+            money(gap.carried().abs())
         ));
     }
-
-    let hidden = real.len().saturating_sub(SHOWN);
-    for &(id, signed) in &real[hidden..] {
+    let hidden = flows.real.len().saturating_sub(SHOWN);
+    for &(id, signed) in &flows.real[hidden..] {
         let flow = &book.flows[id];
-        let (peer, inflow) = if flow.to == assert.place { (flow.from, "from") } else { (flow.to, "to") };
+        let (peer, direction) = if flow.to == assert.place { (flow.from, "from") } else { (flow.to, "to") };
         let plus = if signed >= Qty::ZERO { '+' } else { '-' };
-        d = d.context(flow.loc, format!("{plus}{} {inflow} {}", money(signed.abs()), show::place(book, peer)));
+        d = d.context(flow.loc, format!("{plus}{} {direction} {}", money(signed.abs()), show::place(book, peer)));
     }
-    let window = since.map_or("the start of the book".to_owned(), |last| format!("the assertion on {last}"));
+    let window = checked.map_or("the start of the book".to_owned(), |last| format!("the assertion on {last}"));
     if hidden > 0 {
         d = d.note(format!("{hidden} earlier flows since {window} are not shown"));
     }
-    if !pending.is_empty() {
-        let names: Vec<String> = pending.iter().map(|&id| show::place(book, book.flows[id].to).to_owned()).collect();
-        d = d.note(format!("not counted, because still pending: {} flows to {}", pending.len(), names.join(", ")));
+    if !flows.pending.is_empty() {
+        let names: Vec<String> =
+            flows.pending.iter().map(|&id| show::place(book, book.flows[id].to).to_owned()).collect();
+        d = d.note(format!(
+            "not counted, because still pending: {} flows to {}",
+            flows.pending.len(),
+            names.join(", ")
+        ));
     }
-
-    d = match suspect {
-        Suspect::Backwards(id) => {
-            let flow = &book.flows[id];
-            let (from, to) = (show::place(book, flow.from), show::place(book, flow.to));
-            d.note(format!(
-                "the gap is exactly twice this flow (2 × {}): it is probably written backwards",
-                money(Qty(new.0.abs() / 2))
-            ))
-            .context(flow.loc, "probably written the wrong way round")
-            .help(format!("write it the other way: `{to} -> {from}`"))
-        }
-        Suspect::Swapped => d
-            .note(format!("{} and {} differ only by two neighbouring digits swapped", money(held), money(stated)))
-            .help(format!("if the statement says {}, correct the amount", money(held))),
-        Suspect::Sign => d
-            .note(format!("the ledger holds {}, the opposite of {}: the sign may be wrong", money(held), money(stated)))
-            .help(format!("if the balance is {}, write it with its sign: `= {}`", money(held), money(held))),
-        Suspect::Unit(other, qty) => {
-            let (symbol, shown) = (book.name(book.commodities[other].symbol), book.show(Amount::new(qty, other)));
-            d.help(format!("assert in {symbol}: {shown}"))
-        }
-        Suspect::Missing => d
-            .note(format!(
-                "{} is neither twice a flow nor a transposition: most likely a flow is missing",
-                money(new.abs())
-            ))
-            .help("record the missing flow"),
-    };
     let end = assert.loc.end;
-    d.fix(
+    suspect.advise(d, book, gap).fix(
         "or accept the gap: it is booked from `equity/unknown` and shown in every report",
         Loc::new(assert.loc.file, end, end),
         " !",
@@ -728,4 +792,52 @@ pub(crate) fn unused_waiver(at: Loc) -> Diagnostic {
     Diagnostic::warning("unused-waiver", "this `!` waives nothing")
         .label(at, "no law objected to this transaction")
         .help("delete the `!`, or move it to the flow that needs it")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const USD: Id<Commodity> = Id::new(0);
+    const EUR: Id<Commodity> = Id::new(1);
+
+    /// The ledger held `held` where `stated` was written, with `new` of the gap new.
+    fn gap(stated: i64, held: i64, new: i64) -> Disagreement {
+        Disagreement { unit: USD, stated: Qty(stated), held: Qty(held), new: Qty(new) }
+    }
+
+    fn found(gap: Disagreement, real: &[(u32, i64)], others: &[(Id<Commodity>, i64)]) -> Suspect {
+        let real: Vec<_> = real.iter().map(|&(id, signed)| (Id::new(id), Qty(signed))).collect();
+        let others: Vec<_> = others.iter().map(|&(unit, qty)| (unit, Qty(qty))).collect();
+        Suspect::find(gap, &real, &others)
+    }
+
+    #[test]
+    fn a_gap_of_twice_a_flow_points_at_the_latest_such_flow() {
+        // 50 was entered as -50: 100 short, and three flows of 50.
+        let suspect = found(gap(500, 400, 100), &[(1, 50), (2, -50), (3, -50)], &[]);
+        assert!(matches!(suspect, Suspect::Backwards(id) if id == Id::new(3)));
+    }
+
+    #[test]
+    fn two_swapped_digits_are_noticed_only_when_nothing_older_is_carried() {
+        assert!(matches!(found(gap(1_234, 1_324, -90), &[], &[]), Suspect::Swapped));
+        assert!(matches!(found(gap(1_234, 1_324, -50), &[], &[]), Suspect::Missing), "part of the gap is carried");
+    }
+
+    #[test]
+    fn the_opposite_of_what_is_held_is_a_sign_slip() {
+        assert!(matches!(found(gap(-700, 700, -1_400), &[], &[]), Suspect::Sign));
+        assert!(matches!(found(gap(0, 0, 0), &[], &[]), Suspect::Missing), "nothing held has no opposite");
+    }
+
+    #[test]
+    fn an_account_that_holds_another_commodity_was_asserted_in_the_wrong_one() {
+        let others = [(USD, 900), (EUR, 300), (Id::new(2), 700)];
+        let suspect = found(gap(700, 0, 700), &[], &others);
+        assert!(matches!(suspect, Suspect::Unit(other, qty) if other == Id::new(2) && qty == Qty(700)));
+        let suspect = found(gap(500, 0, 500), &[], &others);
+        assert!(matches!(suspect, Suspect::Unit(other, _) if other == EUR), "else the first it holds");
+        assert!(matches!(found(gap(500, 100, 400), &[], &others), Suspect::Missing), "it did hold this one");
+    }
 }
