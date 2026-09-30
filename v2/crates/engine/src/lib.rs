@@ -13,19 +13,23 @@
 //! Before it starts, the book's loose ends are solved into a [`Plan`]: `events`
 //! turns settlement events into flow states, and `infer` solves `? USD`
 //! amounts from the assertions around them, one place per thread. The plan is
-//! immutable and shared: every ledger, fork and thread borrows the one.
-//! `timeline` then orders every fact into one total order of moments, and
-//! `ledger` consumes them.
+//! immutable and shared: every ledger, fork and thread borrows the one, and
+//! `facts` holds what is true of each law whatever runs it. `timeline` then
+//! orders every fact into one total order of moments, and `ledger` consumes
+//! them.
 //!
 //! For each flow, `post` moves value: `lots` keeps what rests where and chooses
 //! which parcels leave, `totals` keeps the windowed sums laws
 //! read, `fire` runs the laws that watch the flow, `eval` (with `calc`)
 //! evaluates a law, and `explain` (with `show`) turns a failure into a
 //! diagnostic. `reconcile` checks balance assertions and `scope` says whose
-//! value a flow enters or leaves.
+//! value a flow enters or leaves. `bridge` is everything that only the v3
+//! model needs.
 //!
 //! The fold itself is sequential, because each flow's relief, totals and laws
-//! depend on every flow before it. Everything around it is not.
+//! depend on every flow before it. Everything around it is not: the plan is
+//! solved place by place, forks run side by side, and a [`Checkpoint`] at a
+//! month's end lets an edit refold only what it touched.
 
 #![forbid(unsafe_code)]
 
