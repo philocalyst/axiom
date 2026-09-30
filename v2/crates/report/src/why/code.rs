@@ -22,7 +22,7 @@ pub fn report<'s>(lens: Lens<'_, 's>, pattern: &str) -> Result<Report<'s>, Diagn
     let mut happened =
         Section::new([Column::left("Date"), Column::left("Event"), Column::left("From")]).headed("Events");
     for event in book.events.iter().filter(|event| marked(event.code)) {
-        happened.push(Row::new([Cell::Day(event.day), Cell::text(event_words(event.state)), Cell::Source(event.loc)]));
+        happened.push(Row::new([Cell::Day(event.day), event_words(event.state), Cell::Source(event.loc)]));
     }
 
     if flows.is_empty() && happened.rows.is_empty() {
@@ -36,7 +36,8 @@ pub fn report<'s>(lens: Lens<'_, 's>, pattern: &str) -> Result<Report<'s>, Diagn
             .collect();
         return Err(resolve::nothing_named("code", pattern, known));
     }
-    Ok(Report::new(format!("Why #{pattern}")).with(flows_table(book, run, &flows, "Flows")).with(happened))
+    let title = ["Why".into(), Cell::Join("", vec!["#".into(), Cell::Said(pattern.to_string())])];
+    Ok(Report::new(title).with(flows_table(book, run, &flows, "Flows")).with(happened))
 }
 
 /// Codes may be stored with or without their `#`.

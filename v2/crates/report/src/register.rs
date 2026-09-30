@@ -3,7 +3,6 @@
 //! Amounts and balances are in the place's display sign, the way a statement
 //! shows them: what a card owes is positive, and a charge adds to it.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Diagnostic, Id, Qty};
@@ -14,7 +13,7 @@ use crate::history::{Change, Posting, pad_ends};
 use crate::lens::Lens;
 use crate::places::path;
 use crate::resolve;
-use crate::table::{code_labels, gap_words};
+use crate::table::gap_words;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn view<'s>(lens: Lens<'_, 's>, place: &str, from: Option<Day>, to: Option<Day>) -> Result<Report<'s>, Diagnostic> {
@@ -24,13 +23,14 @@ pub fn view<'s>(lens: Lens<'_, 's>, place: &str, from: Option<Day>, to: Option<D
     let owner = book.places[place].owner;
     let register = match lens.whose.includes(owner) {
         true => section(lens, place, from, to),
-        false => Section::note_only(format!(
-            "{} belongs to {}, whose money this is not.",
-            path(book, place),
-            book.name(book.entities[owner].path)
-        )),
+        false => Section::note_only([
+            Cell::Name(path(book, place)),
+            "belongs to".into(),
+            Cell::Name(book.name(book.entities[owner].path)),
+            ", whose money this is not.".into(),
+        ]),
     };
-    Ok(Report::new(format!("Register: {}", path(book, place))).with(register))
+    Ok(Report::new(["Register:".into(), Cell::Name(path(book, place))]).with(register))
 }
 
 /// The flows touching `place` from `from` to `to` (default: everything up to
@@ -64,14 +64,8 @@ pub fn section<'s>(lens: Lens<'_, 's>, place: Id<Place>, from: Option<Day>, to: 
     }
     if let Some(from) = from {
         for (&unit, &qty) in running.iter().filter(|(_, qty)| !qty.is_zero()) {
-            let cells = [
-                Cell::Day(from),
-                Cell::text("opening balance"),
-                Cell::Blank,
-                Cell::Blank,
-                Cell::Blank,
-                shown(qty, unit),
-            ];
+            let cells =
+                [Cell::Day(from), "opening balance".into(), Cell::Blank, Cell::Blank, Cell::Blank, shown(qty, unit)];
             section.push(Row::new(cells).style(Style::Total));
         }
     }
@@ -87,9 +81,9 @@ pub fn section<'s>(lens: Lens<'_, 's>, place: Id<Place>, from: Option<Day>, to: 
         let payee = step.source.posting().and_then(|posting| posting.flow.payee);
         let cells = [
             Cell::Day(step.day),
-            Cell::text(path(book, step.with)),
-            payee.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path))),
-            note(book, step).map_or(Cell::Blank, Cell::text),
+            Cell::Name(path(book, step.with)),
+            payee.map_or(Cell::Blank, |entity| Cell::Name(book.name(book.entities[entity].path))),
+            note(book, step),
             amount,
             balance,
         ];
@@ -97,7 +91,7 @@ pub fn section<'s>(lens: Lens<'_, 's>, place: Id<Place>, from: Option<Day>, to: 
     }
 
     if section.rows.is_empty() {
-        section.note(format!("Nothing touches {} in this window.", path(book, place)));
+        section.note(["Nothing touches".into(), Cell::Name(path(book, place)), "in this window.".into()]);
     }
     if section.rows.iter().any(|row| row.style == Style::Muted) {
         section.note("Muted lines are pending, void or returned: they do not move the balance.");
@@ -173,25 +167,25 @@ fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec
 }
 
 /// A change of basis, codes, and settlement, as one line of small print.
-fn note(book: &Book, step: &Step) -> Option<Cow<'static, str>> {
+fn note<'s>(book: &Book<'s>, step: &Step) -> Cell<'s> {
+    let sign = |by: Amount| Cell::Word(if by.qty.is_negative() { "" } else { "+" });
     let rebased = match step.change {
-        Change::Rebased(by) => Some(format!("basis {}{}", if by.qty.is_negative() { "" } else { "+" }, book.show(by))),
+        Change::Rebased(by) => Some(["basis".into(), Cell::Join("", vec![sign(by), Cell::amount(book, by)])].into()),
         Change::Moved(_) => None,
     };
-    let details: Vec<String> = match step.source {
+    let details: Vec<Cell> = match step.source {
         Source::Gap(pad) => vec![gap_words(book, pad)],
         Source::Flow(posting) => {
             let status = match posting.posted.state {
                 State::Actual | State::Planned => None,
-                State::Pending => Some("pending".to_string()),
-                State::Void => Some("void".to_string()),
-                State::Settled(on) if !step.counts => Some(format!("pending until {on}")),
-                State::Settled(on) => Some(format!("settled {on}")),
-                State::Returned(on) => Some(format!("returned {on}")),
+                State::Pending => Some("pending".into()),
+                State::Void => Some("void".into()),
+                State::Settled(on) if !step.counts => Some(["pending until".into(), Cell::Day(on)].into()),
+                State::Settled(on) => Some(["settled".into(), Cell::Day(on)].into()),
+                State::Returned(on) => Some(["returned".into(), Cell::Day(on)].into()),
             };
-            code_labels(book, &posting.flow.codes).chain(status).collect()
+            posting.flow.codes.iter().map(|&code| Cell::code(book, code)).chain(status).collect()
         }
     };
-    let parts: Vec<String> = rebased.into_iter().chain(details).collect();
-    (!parts.is_empty()).then(|| parts.join(" · ").into())
+    Cell::list_or_blank(" · ", rebased.into_iter().chain(details))
 }

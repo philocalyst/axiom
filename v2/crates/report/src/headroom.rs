@@ -4,8 +4,7 @@
 //! so `limits`, `budget` and `why` can say how close anyone is before anything
 //! breaks.
 
-use axiom_core::calendar::Window as Calendar;
-use axiom_core::{Day, Days, Id, Map, Qty, Ratio, Set, Severity};
+use axiom_core::{Day, Id, Map, Qty, Ratio, Set, Severity};
 use axiom_engine::Headroom;
 use axiom_model::{Amount, BinOp, Book, Law, Op, Period, StepKind, Subject, Window};
 
@@ -81,15 +80,4 @@ pub fn used(reading: &Headroom) -> Option<Ratio> {
     (reading.counted.unit == reading.limit.unit)
         .then(|| Ratio::new(reading.counted.qty.0.into(), reading.limit.qty.0.into()))
         .flatten()
-}
-
-/// `2026-03`, `2026`, `on 2026-03-31`, `ever`, or the range itself.
-pub fn window_words(reading: &Headroom) -> String {
-    let days = reading.days;
-    match (Calendar::exactly(days), days.single()) {
-        (Some(window), _) => window.to_string(),
-        (None, Some(day)) => format!("on {day}"),
-        (None, None) if days == Days::ALWAYS => "ever".to_string(),
-        (None, None) => format!("{}..{}", days.first(), days.last()),
-    }
 }

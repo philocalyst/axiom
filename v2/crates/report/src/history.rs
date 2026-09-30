@@ -207,7 +207,8 @@ impl Snapshots {
         columns.extend(book.splits.iter().map(|split| split.day));
         columns.sort_unstable();
         columns.dedup();
-        let mut snapshots = Snapshots { days: columns, pairs: Vec::new(), cells: Vec::new(), unpriced: Priced::default() };
+        let mut snapshots =
+            Snapshots { days: columns, pairs: Vec::new(), cells: Vec::new(), unpriced: Priced::default() };
 
         // Each flow changes every column from the one it stands on until it is
         // returned: a difference at each edge, summed across columns after.

@@ -1,4 +1,4 @@
-//! Reports as tables.
+//! Reports as text tables.
 //!
 //! ```text
 //! Balances at 2026-03-31
@@ -12,13 +12,18 @@
 //!   Total                 7,935.30 USD
 //!   · VTI is not priced, so it is left out.
 //! ```
+//!
+//! This is one of the renderers of a report, which is data: every word a
+//! reader sees of a typed cell is chosen here.
 
-use axiom_core::{Qty, Ratio};
+use axiom_core::calendar::Window;
+use axiom_core::{Days, Qty, Ratio};
+use axiom_model::{Closing, Period, Trigger};
 use axiom_report::{Align, Cell, Column, Report, Row, Section, Style};
 
 use crate::project::Sources;
 use crate::style::{Ink, Line, Terminal};
-use crate::text::wrap;
+use crate::text::{plural, wrap};
 
 /// Columns before every table row.
 const INDENT: usize = 2;
@@ -31,7 +36,7 @@ const MIN_NOTE_WIDTH: usize = 20;
 
 /// Draws a report: its title, then each section with its table and notes.
 pub fn render(report: &Report, terminal: Terminal, sources: &Sources) -> String {
-    let mut lines = vec![Line::text(&report.title, Ink::BOLD)];
+    let mut lines = vec![Line::text(&text(&report.title, sources), Ink::BOLD)];
     for section in &report.sections {
         lines.push(Line::new());
         lines.extend(section_lines(section, terminal.width, sources));
@@ -41,7 +46,7 @@ pub fn render(report: &Report, terminal: Terminal, sources: &Sources) -> String 
 
 fn section_lines(section: &Section, width: usize, sources: &Sources) -> Vec<Line> {
     let mut lines = Vec::new();
-    if let Some(heading) = &section.heading {
+    if let Some(heading) = section.heading {
         lines.push(Line::text(heading, Ink::BOLD));
     }
     if !section.columns.is_empty() {
@@ -49,7 +54,7 @@ fn section_lines(section: &Section, width: usize, sources: &Sources) -> Vec<Line
     }
     let room = width.saturating_sub(INDENT + 2).max(MIN_NOTE_WIDTH);
     for note in &section.notes {
-        for (at, part) in wrap(note, room).iter().enumerate() {
+        for (at, part) in wrap(&text(note, sources), room).iter().enumerate() {
             let mut line = Line::new();
             if at == 0 {
                 line.put(INDENT, "·", Ink::DIM);
@@ -64,7 +69,8 @@ fn section_lines(section: &Section, width: usize, sources: &Sources) -> Vec<Line
 /// The column titles, a rule, and the rows, with a rule above each total.
 fn table_lines(section: &Section, sources: &Sources) -> Vec<Line> {
     let units = unit_widths(section);
-    let titles: Vec<Line> = section.columns.iter().map(|column| Line::text(&column.title, Ink::DIM)).collect();
+    let titles: Vec<Line> =
+        section.columns.iter().map(|column| Line::text(&text(&column.title, sources), Ink::DIM)).collect();
     let rows: Vec<Vec<Line>> =
         section.rows.iter().map(|row| row_cells(row, &section.columns, &units, sources)).collect();
     let widths: Vec<usize> = (0..section.columns.len())
@@ -127,7 +133,7 @@ fn row_cells(row: &Row, columns: &[Column], units: &[usize], sources: &Sources) 
 /// numbers of `12.00 USD` and `3.5 VTI` end in the same column.
 fn unit_widths(section: &Section) -> Vec<usize> {
     let unit = |cell: Option<&Cell>| match cell {
-        Some(Cell::Amount { unit, .. }) => unit.chars().count(),
+        Some(Cell::Amount(money)) => money.unit.chars().count(),
         _ => 0,
     };
     (0..section.columns.len())
@@ -137,21 +143,79 @@ fn unit_widths(section: &Section) -> Vec<usize> {
 
 fn cell_line(cell: &Cell, ink: Ink, unit_width: usize, sources: &Sources) -> Line {
     match cell {
-        Cell::Blank => Line::new(),
-        Cell::Text(text) => Line::text(text, ink),
-        Cell::Day(day) => Line::text(&day.to_string(), ink),
-        Cell::Percent(ratio) => Line::text(&percent(*ratio), ink),
-        Cell::Amount { qty, scale, unit } => {
-            let ink = if qty.is_negative() { ink.colored(Ink::RED) } else { ink };
-            let padding = unit_width.saturating_sub(unit.chars().count());
-            Line::text(&format!("{} {unit}{}", qty.show(*scale), " ".repeat(padding)), ink)
+        Cell::Amount(money) => {
+            let ink = if money.qty.is_negative() { ink.colored(Ink::RED) } else { ink };
+            let padding = unit_width.saturating_sub(money.unit.chars().count());
+            Line::text(&format!("{} {}{}", money.qty.show(money.scale), money.unit, " ".repeat(padding)), ink)
         }
         Cell::Source(loc) => Line::text(&sources.describe(*loc).unwrap_or_default(), Ink::DIM),
+        _ => Line::text(&text(cell, sources), ink),
+    }
+}
+
+/// What a cell says, in words: an amount in a sentence drops the zeros a table keeps to line
+/// up. Parts of a sentence are joined by spaces, except
+/// that punctuation stays with the word before it.
+pub fn text(cell: &Cell, sources: &Sources) -> String {
+    match cell {
+        Cell::Blank => String::new(),
+        Cell::Word(word) => word.to_string(),
+        Cell::Text(text) | Cell::Name(text) => text.to_string(),
+        Cell::Said(text) => text.clone(),
+        // v3 bridge: v4 writes codes `^inv-12`.
+        Cell::Code(code) => format!("#{code}"),
+        Cell::Amount(money) => format!("{} {}", money.qty.brief(money.scale), money.unit),
+        Cell::Day(day) => day.to_string(),
+        Cell::Span(span) => span.to_string(),
+        Cell::Period(days) => period_words(*days),
+        Cell::Percent(ratio) => percent(*ratio),
+        Cell::Number(ratio) => ratio.to_string(),
+        Cell::Count(count, "") => Qty(*count as i64).show(0).to_string(),
+        Cell::Count(count, noun) => plural(*count, noun),
+        Cell::Trigger(trigger) => trigger_words(*trigger),
+        Cell::Source(loc) => sources.describe(*loc).unwrap_or_default(),
+        Cell::Join(between, parts) => {
+            let mut said = String::new();
+            for part in parts.iter().map(|part| text(part, sources)).filter(|part| !part.is_empty()) {
+                let attaches = *between == " " && part.starts_with([',', ';', ':', '.', ')']);
+                if !said.is_empty() && !attaches {
+                    said.push_str(between);
+                }
+                said.push_str(&part);
+            }
+            said
+        }
+    }
+}
+
+/// `2026-03`, `2026`, `on 2026-03-31`, `ever`, or the range itself.
+pub fn period_words(days: Days) -> String {
+    match (Window::exactly(days), days.single()) {
+        (Some(window), _) => window.to_string(),
+        (None, Some(day)) => format!("on {day}"),
+        (None, None) if days == Days::ALWAYS => "ever".to_string(),
+        (None, None) => format!("{}..{}", days.first(), days.last()),
+    }
+}
+
+/// When a law fires, in the words it is written with.
+pub fn trigger_words(trigger: Trigger) -> String {
+    match trigger {
+        Trigger::In => "on in".to_string(),
+        Trigger::Out => "on out".to_string(),
+        Trigger::Gain => "on gain".to_string(),
+        Trigger::Spend => "on spend".to_string(),
+        Trigger::Flow => "on flow".to_string(),
+        Trigger::Each(Period::Month, _) => "each month".to_string(),
+        Trigger::Each(Period::Year, None) => "each year".to_string(),
+        Trigger::Each(Period::Year, Some(Closing { month, day })) => format!("each year closing {month:02}-{day:02}"),
+        Trigger::By(_) => "by a date".to_string(),
+        Trigger::Always => "always".to_string(),
     }
 }
 
 /// `12%`, `3.5%`, `0.25%`: to hundredths of a percent, without trailing zeros.
-fn percent(ratio: Ratio) -> String {
+pub fn percent(ratio: Ratio) -> String {
     let Some(hundredths) = Qty(10_000).scale(ratio) else {
         return ratio.to_string();
     };
@@ -161,15 +225,14 @@ fn percent(ratio: Ratio) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::borrow::Cow;
-
     use axiom_core::Day;
+    use axiom_report::Money;
 
     use super::*;
     use crate::project::Sources;
 
-    fn column(title: &'static str, align: Align) -> Column {
-        Column { title: Cow::Borrowed(title), align }
+    fn column(title: &'static str, align: Align) -> Column<'static> {
+        Column { title: Cell::Word(title), align }
     }
 
     fn row<'s>(depth: u8, style: Style, cells: Vec<Cell<'s>>) -> Row<'s> {
@@ -177,37 +240,38 @@ mod tests {
     }
 
     fn amount(qty: i64, unit: &str) -> Cell<'_> {
-        Cell::Amount { qty: Qty(qty), scale: 2, unit }
+        Cell::Amount(Money { qty: Qty(qty), scale: 2, unit })
     }
 
-    fn text(text: &'static str) -> Cell<'static> {
-        Cell::Text(Cow::Borrowed(text))
+    fn word(word: &'static str) -> Cell<'static> {
+        Cell::Word(word)
     }
 
     #[test]
     fn a_balance_sheet() {
         let section = Section {
-            heading: Some("Assets".to_string()),
+            heading: Some("Assets"),
             columns: vec![column("Place", Align::Left), column("Balance", Align::Right), column("Since", Align::Left)],
             rows: vec![
-                row(0, Style::Normal, vec![text("assets/bank"), Cell::Blank, Cell::Blank]),
+                row(0, Style::Normal, vec![word("assets/bank"), Cell::Blank, Cell::Blank]),
                 row(
                     1,
                     Style::Normal,
-                    vec![text("checking"), amount(792_130, "USD"), Cell::Day(Day::from_ymd(2026, 1, 15).unwrap())],
+                    vec![word("checking"), amount(792_130, "USD"), Cell::Day(Day::from_ymd(2026, 1, 15).unwrap())],
                 ),
-                row(1, Style::Normal, vec![text("brokerage"), amount(1_400, "VTI"), Cell::Blank]),
-                row(1, Style::Alert, vec![text("visa"), amount(-12_345_600, "USD"), Cell::Blank]),
-                row(0, Style::Total, vec![text("Total"), amount(793_530, "USD"), Cell::Blank]),
+                row(1, Style::Normal, vec![word("brokerage"), amount(1_400, "VTI"), Cell::Blank]),
+                row(1, Style::Alert, vec![word("visa"), amount(-12_345_600, "USD"), Cell::Blank]),
+                row(0, Style::Total, vec![word("Total"), amount(793_530, "USD"), Cell::Blank]),
                 row(
                     0,
                     Style::Muted,
-                    vec![text("≈ gains"), amount(0, "USD"), Cell::Percent(Ratio::percent(35, 1).unwrap())],
+                    vec![word("≈ gains"), amount(0, "USD"), Cell::Percent(Ratio::percent(35, 1).unwrap())],
                 ),
             ],
-            notes: vec!["VTI is not priced, so it is left out of the total.".to_string()],
+            notes: vec![word("VTI is not priced, so it is left out of the total.")],
+            facts: Vec::new(),
         };
-        let report = Report { title: "Balances at 2026-03-31".to_string(), sections: vec![section] };
+        let report = Report { title: word("Balances at 2026-03-31"), sections: vec![section] };
         assert_eq!(
             render(&report, Terminal::plain(80), &Sources::default()),
             "\

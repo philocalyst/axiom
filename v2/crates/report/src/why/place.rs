@@ -13,7 +13,6 @@ use crate::lens::Lens;
 use crate::limits;
 use crate::places::path;
 use crate::register;
-use crate::table::plural;
 use crate::{Cell, Column, Report, Row, Section};
 
 /// How many recent flows to show.
@@ -32,12 +31,12 @@ pub fn report<'s>(lens: Lens<'_, 's>, place: Id<Place>) -> Report<'s> {
     let (governing, elsewhere) = governing(book, run, place);
     let mut laws = laws_table(book, &governing);
     if elsewhere > 0 {
-        laws.note(format!(
-            "{} not in force today: their residence has ended, or has not begun.",
-            plural(elsewhere, "law")
-        ));
+        laws.note([
+            Cell::Count(elsewhere, "law"),
+            "not in force today: their residence has ended, or has not begun.".into(),
+        ]);
     }
-    Report::new(format!("Why {}", path(book, place)))
+    Report::new(["Why".into(), Cell::Name(path(book, place))])
         .with(composition(book, &held))
         .with(parcels(book, &held))
         .with(limits)
@@ -59,10 +58,10 @@ fn composition<'s>(book: &Book<'s>, held: &[&Holding]) -> Section<'s> {
     let mut section = Section::new(columns).headed("Composition");
     for (unit, (total, plain, parcels)) in units {
         let cells = [
-            Cell::text(book.name(book.commodities[unit].symbol)),
+            Cell::Name(book.name(book.commodities[unit].symbol)),
             Cell::amount(book, Amount::new(total, unit)),
             if plain.is_zero() { Cell::Blank } else { Cell::amount(book, Amount::new(plain, unit)) },
-            if parcels == 0 { Cell::Blank } else { Cell::text(parcels.to_string()) },
+            if parcels == 0 { Cell::Blank } else { Cell::Count(parcels, "") },
         ];
         section.push(Row::new(cells));
     }
@@ -82,9 +81,9 @@ fn parcels<'s>(book: &Book<'s>, held: &[&Holding]) -> Section<'s> {
     let mut section = Section::new(columns).headed("Parcels");
     for holding in held {
         for lot in &holding.lots {
-            let tie = lot.tied.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path)));
+            let tie = lot.tied.map_or(Cell::Blank, |entity| Cell::Name(book.name(book.entities[entity].path)));
             let cells = [
-                Cell::text(path(book, holding.place)),
+                Cell::Name(path(book, holding.place)),
                 Cell::amount(book, Amount::new(lot.qty, holding.unit)),
                 Cell::base(book, lot.basis),
                 Cell::Day(lot.acquired),

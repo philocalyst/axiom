@@ -9,8 +9,6 @@ use crate::lens::Lens;
 use crate::table::doc_headline;
 use crate::{Cell, Column, Report, Row, Section};
 
-use super::trigger_words;
-
 pub fn report<'s>(lens: Lens<'_, 's>, system: Id<System>) -> Report<'s> {
     let (book, run, whose) = (lens.book, lens.run, lens.whose);
     let columns =
@@ -23,27 +21,19 @@ pub fn report<'s>(lens: Lens<'_, 's>, system: Id<System>) -> Report<'s> {
         for effect in run.effects.iter().filter(|effect| effect.law == id && whose.includes(effect.owner)) {
             *totals.entry((effect.name, effect.owe.is_some(), effect.amount.unit)).or_default() += effect.amount.qty;
         }
-        let did: Vec<String> = totals
-            .into_iter()
-            .map(|((name, owes, unit), qty)| {
-                let amount = book.show(Amount::new(qty, unit));
-                if owes {
-                    format!("owes {} {amount}", book.name(name))
-                } else {
-                    format!("{} {amount}", book.name(name))
-                }
-            })
-            .collect();
-        let doc = doc_headline(book, law.doc).unwrap_or_default();
+        let did = totals.into_iter().map(|((name, owes, unit), qty)| {
+            let (name, amount) = (Cell::Name(book.name(name)), Cell::amount(book, Amount::new(qty, unit)));
+            if owes { ["owes".into(), name, amount].into() } else { [name, amount].into() }
+        });
         let cells = [
-            Cell::text(book.name(law.name)),
-            Cell::text(trigger_words(law.trigger)),
-            Cell::text(did.join(" · ")),
+            Cell::Name(book.name(law.name)),
+            Cell::Trigger(law.trigger),
+            Cell::list(" · ", did),
             Cell::Source(law.loc),
         ];
         laws.push(Row::new(cells));
-        if !doc.is_empty() {
-            laws.push(Row::new([Cell::text(doc)]).depth(1).style(crate::Style::Muted));
+        if let Some(doc) = doc_headline(book, law.doc) {
+            laws.push(Row::new([doc]).depth(1).style(crate::Style::Muted));
         }
     }
     let residents: Vec<&str> = book
@@ -54,9 +44,9 @@ pub fn report<'s>(lens: Lens<'_, 's>, system: Id<System>) -> Report<'s> {
         .collect();
     let mut who = Section::new([]);
     who.note(if residents.is_empty() {
-        "Nobody in this book lives here.".to_string()
+        Cell::from("Nobody in this book lives here.")
     } else {
-        format!("Lives here: {}.", residents.join(", "))
+        ["Lives here:".into(), Cell::list(", ", residents.into_iter().map(Cell::Name)), ".".into()].into()
     });
-    Report::new(format!("Why {}", book.name(book.systems[system].path))).with(who).with(laws)
+    Report::new(["Why".into(), Cell::Name(book.name(book.systems[system].path))]).with(who).with(laws)
 }

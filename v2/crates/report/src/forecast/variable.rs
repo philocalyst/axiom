@@ -40,7 +40,8 @@ impl Variable {
         for posting in real {
             let Some(month) = months.index_of(posting.flow.day) else { continue };
             for (place, qty) in spending(lens, &posting) {
-                categories.entry(lens.sides.category(book, place)).or_insert_with(|| vec![0; months.len()])[month] += qty.0;
+                categories.entry(lens.sides.category(book, place)).or_insert_with(|| vec![0; months.len()])[month] +=
+                    qty.0;
             }
         }
         Variable { categories: categories.into_values().collect(), months: months.len() }

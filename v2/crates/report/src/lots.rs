@@ -9,8 +9,7 @@ use crate::gains::Term;
 use crate::lens::{Lens, Priced};
 use crate::places::path;
 use crate::resolve;
-use crate::table::code_labels;
-use crate::{Cell, Column, Report, Row, Section, Style};
+use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 pub fn view<'s>(lens: Lens<'_, 's>, place: Option<&str>, at: Option<Day>) -> Result<Report<'s>, Diagnostic> {
     let book = lens.book;
@@ -48,7 +47,7 @@ pub fn view<'s>(lens: Lens<'_, 's>, place: Option<&str>, at: Option<Day>) -> Res
         section.note("No parcels: everything held is plain money.");
     } else {
         let cells = [
-            Cell::text("Total"),
+            "Total".into(),
             Cell::Blank,
             Cell::base(book, basis),
             Cell::Blank,
@@ -57,25 +56,28 @@ pub fn view<'s>(lens: Lens<'_, 's>, place: Option<&str>, at: Option<Day>) -> Res
             Cell::base(book, unrealized),
         ];
         section.total(cells);
+        for (concept, qty) in [("basis", basis), ("value", value.total), ("unrealized", unrealized)] {
+            section.fact(concept, None, lens.whose.label(book), When::Instant(at), Money::base(book, qty));
+        }
     }
     section.unpriced(value.missing(), "parcel");
-    Ok(Report::new(format!("Lots at {at}")).with(section))
+    Ok(Report::new(["Lots at".into(), Cell::Day(at)]).with(section))
 }
 
 fn row<'s>(lens: Lens<'_, 's>, holding: &Holding, lot: &Parcel, worth: Option<Qty>) -> Row<'s> {
     let book = lens.book;
-    let tie = lot.tied.map(|entity| format!("tied to {}", book.name(book.entities[entity].path)));
-    let notes: Vec<String> = code_labels(book, &book.txns[lot.txn].codes).chain(tie).collect();
+    let tie = lot.tied.map(|entity| ["tied to".into(), Cell::Name(book.name(book.entities[entity].path))].into());
+    let codes = book.txns[lot.txn].codes.iter().map(|&code| Cell::code(book, code));
     let cells = [
-        Cell::text(path(book, holding.place)),
+        Cell::Name(path(book, holding.place)),
         Cell::amount(book, Amount::new(lot.qty, holding.unit)),
         Cell::base(book, lot.basis),
         Cell::Day(lot.acquired),
-        Cell::text(lens.day.since(lot.acquired).to_string()),
+        Cell::Span(lens.day.since(lot.acquired)),
         worth.map_or(Cell::Blank, |worth| Cell::base(book, worth)),
         worth.map_or(Cell::Blank, |worth| Cell::base(book, worth - lot.basis)),
-        Cell::text(Term::of(book, holding.unit, lot.acquired, lens.day).word()),
-        if notes.is_empty() { Cell::Blank } else { Cell::text(notes.join(" · ")) },
+        Term::of(book, holding.unit, lot.acquired, lens.day).cell(),
+        Cell::list_or_blank(" · ", codes.chain(tie)),
     ];
     Row::new(cells).style(if worth.is_some() { Style::Normal } else { Style::Muted })
 }

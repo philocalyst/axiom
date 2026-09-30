@@ -26,9 +26,8 @@ pub fn report<'s>(lens: Lens<'_, 's>, entity: Id<Entity>) -> Report<'s> {
         .iter()
         .filter(|holding| lens.owns(holding.place) && on_balance_sheet(book.places[holding.place].class))
     {
-        let sign = book.places[holding.place].class.display_sign();
-        let held = Amount::new(Qty(holding.qty().0 * sign), holding.unit);
-        places.push(Row::new([Cell::text(path(book, holding.place)), Cell::amount(book, held)]));
+        let held = Amount::new(Qty(holding.qty().0 * lens.sides.sign(holding.place)), holding.unit);
+        places.push(Row::new([Cell::Name(path(book, holding.place)), Cell::amount(book, held)]));
     }
 
     // What governs the entity itself: its `on spend` laws while it holds money for others, and its own timed laws.
@@ -53,7 +52,7 @@ pub fn report<'s>(lens: Lens<'_, 's>, entity: Id<Entity>) -> Report<'s> {
             let held = Amount::new(lot.qty, holding.unit);
             remaining.add(lens.value(held));
             let cells = [
-                Cell::text(path(book, holding.place)),
+                Cell::Name(path(book, holding.place)),
                 Cell::amount(book, held),
                 Cell::Day(lot.acquired),
                 Cell::Source(book.txns[lot.txn].loc),
@@ -62,15 +61,15 @@ pub fn report<'s>(lens: Lens<'_, 's>, entity: Id<Entity>) -> Report<'s> {
         }
     }
     if !ties.rows.is_empty() {
-        ties.total([Cell::text("Remaining"), Cell::base(book, remaining.total)]);
+        ties.total(["Remaining".into(), Cell::base(book, remaining.total)]);
     }
     ties.unpriced(remaining.missing(), "amount");
 
     let open = claims::open(lens, run.holdings.iter());
     let with_it: Vec<&claims::Claim> = open.iter().filter(|claim| claim.with(entity)).collect();
-    Report::new(format!("Why {name}")).with(places).with(laws_table(book, &laws)).with(ties).with(claims::section(
-        lens,
-        "Claims with it",
-        &with_it,
-    ))
+    Report::new(["Why".into(), Cell::Name(name)])
+        .with(places)
+        .with(laws_table(book, &laws))
+        .with(ties)
+        .with(claims::section(lens, "Claims with it", &with_it))
 }

@@ -8,7 +8,7 @@ use axiom_engine::{Options, Run};
 use axiom_model::{Book, Source};
 
 use crate::Query;
-use crate::tests::{lines, show};
+use crate::tests::{cell, lines, show};
 
 fn day(y: i32, m: u32, d: u32) -> Day {
     Day::from_ymd(y, m, d).unwrap()
@@ -188,7 +188,7 @@ fn a_planned_occurrence_keeps_the_terms_of_its_template_and_moves_its_period_alo
         let depreciation = template(2);
         let next = crate::synth::planned(depreciation, day(2026, 5, 28), usd(depreciation), usd(depreciation));
         assert_eq!(next.detail().basis_end, Some(axiom_model::End::From));
-        assert_eq!(crate::places::route(book, &next), "assets/house.basis → expenses/depreciation");
+        assert_eq!(cell(&crate::places::route(book, &next)), "assets/house.basis → expenses/depreciation");
     });
 }
 
@@ -302,7 +302,7 @@ fn tax_says_the_return_is_not_closed_and_leaves_what_it_owes_out_instead_of_at_z
         assert_eq!(lines(counted), ["=project |  |", "  pay | 2,000.00 USD | 2 sources"]);
         assert!(owed.rows.is_empty(), "no line of the return is figured yet");
         assert_eq!(
-            owed.notes,
+            owed.notes.iter().map(cell).collect::<Vec<_>>(),
             ["The 2026 return closes on 2027-04-15; what it owes is not figured yet; the tallies are counted so far."]
         );
     });
@@ -315,7 +315,7 @@ fn tax_after_the_return_closes_shows_what_it_owes() {
         let report = crate::report(book, run, &tax, None).unwrap();
         let [_, owed] = &report.sections[..] else { panic!("two sections: {}", show(&report)) };
         assert_eq!(lines(owed)[1], "  income-tax | treasury | 2027-04-15 | 200.00 USD | period end");
-        assert!(owed.notes.iter().all(|note| !note.contains("not figured")), "{:?}", owed.notes);
+        assert!(owed.notes.iter().all(|note| !cell(note).contains("not figured")), "{:?}", owed.notes);
     });
 }
 
@@ -337,7 +337,7 @@ fn tax_with_one_return_closed_and_one_not_totals_what_is_owed_so_far() {
             ]
         );
         assert_eq!(
-            owed.notes[0],
+            cell(&owed.notes[0]),
             "The 2026 return closes on 2027-06-15; what it owes is not figured yet; the tallies are counted so far."
         );
     });
@@ -517,13 +517,13 @@ fn the_forecast_goes_on_to_the_next_closing_day_when_it_is_close_after_its_horiz
     with_run(SALARY, day(2026, 1, 10), |book, run| {
         let forecast = |until| Query::Forecast { until, paths: 1 };
         let report = crate::report(book, run, &forecast(None), None).unwrap();
-        assert_eq!(report.title, "Forecast to 2027-04-15");
+        assert_eq!(cell(&report.title), "Forecast to 2027-04-15");
         let owed = report.sections.iter().find(|s| s.heading.as_deref() == Some("Obligations coming due")).unwrap();
         assert_eq!(lines(owed), ["2027-04-15 | income-tax | treasury | 1,200.00 USD"]);
 
         // What was asked for is what is shown.
         let asked = crate::report(book, run, &forecast(Some(day(2027, 1, 10))), None).unwrap();
-        assert_eq!(asked.title, "Forecast to 2027-01-10");
+        assert_eq!(cell(&asked.title), "Forecast to 2027-01-10");
     });
 }
 
@@ -532,7 +532,7 @@ fn the_forecast_goes_on_to_the_next_closing_day_when_it_is_close_after_its_horiz
 fn the_forecast_stops_at_a_year_when_the_next_closing_day_is_far() {
     with_run(SALARY, day(2026, 5, 10), |book, run| {
         let report = crate::report(book, run, &Query::Forecast { until: None, paths: 1 }, None).unwrap();
-        assert_eq!(report.title, "Forecast to 2027-05-10");
+        assert_eq!(cell(&report.title), "Forecast to 2027-05-10");
     });
 }
 

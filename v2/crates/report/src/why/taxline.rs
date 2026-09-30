@@ -6,9 +6,9 @@ use axiom_engine::{Cause, Effect, Gain};
 use axiom_model::Flow;
 
 use super::{effects_table, flows_table};
-use crate::Report;
 use crate::gains;
 use crate::lens::Lens;
+use crate::{Cell, Report};
 
 pub fn report<'s>(lens: Lens<'_, 's>, name: Sym) -> Report<'s> {
     let (book, run) = (lens.book, lens.run);
@@ -28,5 +28,8 @@ pub fn report<'s>(lens: Lens<'_, 's>, name: Sym) -> Report<'s> {
         tallied.note("Effects from a period ending were computed from the tallies counted during it.");
     }
     let gains = gains::section(book, &sold).headed("Gains realized");
-    Report::new(format!("Why {}", book.name(name))).with(tallied).with(flows_table(book, run, &flows, "Flows behind it")).with(gains)
+    Report::new(["Why".into(), Cell::Name(book.name(name))])
+        .with(tallied)
+        .with(flows_table(book, run, &flows, "Flows behind it"))
+        .with(gains)
 }

@@ -9,14 +9,14 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use axiom_core::{Day, Id, Qty, Sym};
+use axiom_core::{Day, Id, Qty, Span, Sym};
 use axiom_engine::{Holding, Ledger, Options};
 use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Select, Txn};
 
 use crate::history::{Posting, journal_ends_by};
 use crate::lens::{Lens, Priced};
 use crate::places::path;
-use crate::table::{code_labels, doc_headline};
+use crate::table::doc_headline;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// One open claim.
@@ -132,7 +132,7 @@ pub fn view<'s>(lens: Lens<'_, 's>, at: Option<Day>) -> Report<'s> {
     let holdings = holdings_at(lens);
     let claims = open(lens, holdings.iter());
     let (mine, theirs): (Vec<&Claim>, Vec<&Claim>) = claims.iter().partition(|claim| claim.mine);
-    let report = Report::new(format!("Claims on {at}")).with(section(lens, "Owed to you", &mine));
+    let report = Report::new(["Claims on".into(), Cell::Day(at)]).with(section(lens, "Owed to you", &mine));
     let report = report.with(section(lens, "Owed by you", &theirs));
     match claims.is_empty() {
         true => report.with(Section::note_only(
@@ -144,7 +144,7 @@ pub fn view<'s>(lens: Lens<'_, 's>, at: Option<Day>) -> Report<'s> {
 
 /// Claims with what each is, when it was made and how old it is, when it is due
 /// and whether it is late, and what they come to.
-pub fn section<'s>(lens: Lens<'_, 's>, heading: &str, claims: &[&Claim]) -> Section<'s> {
+pub fn section<'s>(lens: Lens<'_, 's>, heading: &'static str, claims: &[&Claim]) -> Section<'s> {
     let (book, at) = (lens.book, lens.day);
     let columns = ["Counterparty", "What"].map(Column::left).into_iter();
     let columns = columns.chain([Column::right("Left")]).chain(["Made", "Age", "Due", "Status"].map(Column::left));
@@ -152,20 +152,24 @@ pub fn section<'s>(lens: Lens<'_, 's>, heading: &str, claims: &[&Claim]) -> Sect
     let mut worth = Priced::default();
     for claim in claims {
         let txn = &book.txns[claim.txn];
-        let what: Vec<String> = code_labels(book, &txn.codes).chain(doc_headline(book, txn.doc)).collect();
+        let codes = txn.codes.iter().map(|&code| Cell::code(book, code));
+        let what: Vec<Cell> = codes.chain(doc_headline(book, txn.doc)).collect();
         // What it is: its codes and doc, or where it was written when it has neither.
-        let what = if what.is_empty() { Cell::Source(txn.loc) } else { Cell::text(what.join(" · ")) };
+        let what = if what.is_empty() { Cell::Source(txn.loc) } else { Cell::list(" · ", what) };
         let days_left = claim.due.map(|due| due.0 - at.0);
-        let status = days_left.map(|days| if days < 0 { format!("overdue {}d", -days) } else { format!("in {days}d") });
+        let status = days_left.map(|days| {
+            let word = if days < 0 { "overdue" } else { "in" };
+            [word.into(), Cell::Span(Span::days(days.abs()))].into()
+        });
         worth.add(lens.value(claim.left));
         let cells = [
-            Cell::text(claim.counterparty(book)),
+            Cell::Name(claim.counterparty(book)),
             what,
             Cell::amount(book, claim.left),
             Cell::Day(claim.made),
-            Cell::text(at.since(claim.made).to_string()),
+            Cell::Span(at.since(claim.made)),
             claim.due.map_or(Cell::Blank, Cell::Day),
-            status.map_or(Cell::Blank, Cell::text),
+            status.unwrap_or(Cell::Blank),
         ];
         section.push(Row::new(cells).style(if days_left.is_some_and(|days| days < 0) {
             Style::Alert
@@ -174,7 +178,7 @@ pub fn section<'s>(lens: Lens<'_, 's>, heading: &str, claims: &[&Claim]) -> Sect
         }));
     }
     if !claims.is_empty() {
-        section.total([Cell::text("Total"), Cell::Blank, Cell::base(book, worth.total)]);
+        section.total(["Total".into(), Cell::Blank, Cell::base(book, worth.total)]);
     }
     section.unpriced(worth.missing(), "claim");
     section

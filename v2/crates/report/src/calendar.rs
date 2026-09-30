@@ -54,11 +54,6 @@ impl Periods {
     pub fn index_of(&self, day: Day) -> Option<usize> {
         self.overlapping(day, day).next()
     }
-
-    /// `2026-03` for a month, `2026` for a year.
-    pub fn title(&self, index: usize) -> String {
-        self.window(index).to_string()
-    }
 }
 
 #[cfg(test)]
@@ -73,11 +68,11 @@ mod tests {
     fn periods_cover_and_overlap() {
         let months = Periods::covering(Period::Month, day(2025, 11, 20), day(2026, 2, 3));
         assert_eq!(months.len(), 4);
-        assert_eq!(months.title(3), "2026-02");
+        assert_eq!(months.window(3).to_string(), "2026-02");
         assert_eq!(months.end(1), day(2025, 12, 31));
         assert_eq!(months.overlapping(day(2025, 12, 15), day(2026, 1, 15)), 1..3);
         assert_eq!(months.overlapping(day(2024, 1, 1), day(2024, 2, 1)), 0..0);
-        assert_eq!(months.last(2).title(0), "2026-01");
+        assert_eq!(months.last(2).window(0).to_string(), "2026-01");
     }
 
     #[test]

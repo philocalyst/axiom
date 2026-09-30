@@ -8,15 +8,15 @@
 use std::collections::BTreeMap;
 
 use axiom_core::calendar::Window;
-use axiom_core::{Day, Id, Ratio};
+use axiom_core::{Day, Days, Id, Ratio};
 use axiom_engine::Headroom;
 use axiom_model::{Amount, Book, Law, Period, Place, Subject};
 
 use crate::calendar::Periods;
-use crate::headroom::{current, window_words};
+use crate::headroom::current;
 use crate::lens::Lens;
 use crate::places::{Side, path};
-use crate::{Cell, Column, Report, Row, Section, Style};
+use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 pub fn view<'s>(lens: Lens<'_, 's>, at: Option<Day>, by: Period) -> Report<'s> {
     let (book, whose, today) = (lens.book, lens.whose, lens.day);
@@ -36,35 +36,34 @@ pub fn view<'s>(lens: Lens<'_, 's>, at: Option<Day>, by: Period) -> Report<'s> {
     let mut table = Section::new(columns.chain(["Spent", "Limit", "Left", "Used"].map(Column::right)));
     for ((place, law, _), mut months) in envelopes {
         months.sort_by_key(|reading| reading.days.first());
-        let label = |window: String| {
-            [Cell::text(path(book, place)), Cell::text(book.name(book.laws[law].name)), Cell::text(window)]
+        let label = |window: Days| {
+            [Cell::Name(path(book, place)), Cell::Name(book.name(book.laws[law].name)), Cell::Period(window)]
         };
+        for reading in &months {
+            let (of, owner) = (Some(path(book, place)), book.name(book.entities[reading.owner].path));
+            table.fact("counted", of, owner, When::During(reading.days), Money::of(book, reading.counted));
+            table.fact("limit", of, owner, When::During(reading.days), Money::of(book, reading.limit));
+        }
         if by == Period::Year && months.len() > 1 {
             // A year of months adds up to one row, with the months beneath it.
             let sum = |pick: fn(&Headroom) -> Amount| {
                 Amount::new(months.iter().map(|month| pick(month).qty).sum(), months[0].limit.unit)
             };
-            table.push(line(
-                book,
-                label(periods.title(0)),
-                sum(|month| month.counted),
-                sum(|month| month.limit),
-                Style::Normal,
-            ));
+            table.push(line(book, label(window), sum(|month| month.counted), sum(|month| month.limit), Style::Normal));
             for month in months {
-                let blank = [Cell::Blank, Cell::Blank, Cell::text(window_words(month))];
+                let blank = [Cell::Blank, Cell::Blank, Cell::Period(month.days)];
                 table.push(line(book, blank, month.counted, month.limit, Style::Muted).depth(1));
             }
         } else {
             for reading in months {
-                table.push(line(book, label(window_words(reading)), reading.counted, reading.limit, Style::Normal));
+                table.push(line(book, label(reading.days), reading.counted, reading.limit, Style::Normal));
             }
         }
     }
     if table.rows.is_empty() {
         table.note("No budgets. A line like `budget 500 USD monthly` under an account makes one.");
     }
-    Report::new(format!("Budgets for {}", periods.title(0))).with(table)
+    Report::new(["Budgets for".into(), Cell::Period(window)]).with(table)
 }
 
 /// The place an envelope watches, if the reading is one.

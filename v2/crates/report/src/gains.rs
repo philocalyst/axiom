@@ -2,13 +2,13 @@
 //! sold, when it was acquired and sold, what it fetched, what it cost, and
 //! what was gained, with short-term and long-term subtotals.
 
-use axiom_core::{Day, Id, Qty, Span};
+use axiom_core::{Day, Days, Id, Qty, Span};
 use axiom_engine::Gain;
 use axiom_model::{Amount, Book, Commodity};
 
 use crate::lens::Lens;
 use crate::places::path;
-use crate::{Cell, Column, Report, Row, Section, Style};
+use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 /// Held longer than this, a gain is long-term. The boundary is the US one;
 /// systems that draw it elsewhere still see their own `held` in laws.
@@ -35,11 +35,11 @@ impl Term {
         }
     }
 
-    pub fn word(self) -> &'static str {
+    pub fn cell<'s>(self) -> Cell<'s> {
         match self {
-            Term::Short => "short",
-            Term::Long => "long",
-            Term::Untimed => "",
+            Term::Short => "short".into(),
+            Term::Long => "long".into(),
+            Term::Untimed => Cell::Blank,
         }
     }
 }
@@ -53,9 +53,9 @@ pub fn view<'s>(lens: Lens<'_, 's>, year: Option<i32>) -> Report<'s> {
         run.gains.iter().filter(|gain| gain.day.year() == year && lens.owns(gain.from)).filter(realized).collect();
     let mut table = section(book, &disposals);
     if table.rows.is_empty() {
-        table.note(format!("Nothing was sold in {year}."));
+        table.note(["Nothing was sold in".into(), Cell::year(year), ".".into()]);
     }
-    Report::new(format!("Gains realized in {year}")).with(table)
+    Report::new(["Gains realized in".into(), Cell::year(year)]).with(table)
 }
 
 /// Disposals as Form 8949 lays them out: short-term, then long-term, then
@@ -80,15 +80,25 @@ pub fn section<'s>(book: &Book<'s>, disposals: &[&Gain]) -> Section<'s> {
             disposals.iter().filter(|gain| Term::of(book, gain.unit, gain.acquired, gain.day) == term).collect();
         group.sort_by_key(|gain| (gain.day, gain.acquired));
         for gain in &group {
+            let owner = book.name(book.entities[book.places[gain.from].owner].path);
+            for (concept, qty) in [("proceeds", gain.proceeds), ("basis", gain.basis), ("gain", gain.gain())] {
+                table.fact(
+                    concept,
+                    Some(path(book, gain.from)),
+                    owner,
+                    When::During(Days::on(gain.day)),
+                    Money::base(book, qty),
+                );
+            }
             let cells = [
                 Cell::Day(gain.day),
                 Cell::Day(gain.acquired),
                 Cell::amount(book, Amount::new(gain.qty, gain.unit)),
-                Cell::text(path(book, gain.from)),
+                Cell::Name(path(book, gain.from)),
                 Cell::base(book, gain.proceeds),
                 Cell::base(book, gain.basis),
                 Cell::base(book, gain.gain()),
-                Cell::text(term.word()),
+                term.cell(),
             ];
             table.push(Row::new(cells).style(if gain.ambiguous { Style::Muted } else { Style::Normal }));
         }
@@ -109,7 +119,7 @@ pub fn section<'s>(book: &Book<'s>, disposals: &[&Gain]) -> Section<'s> {
 
 fn subtotal<'s>(book: &Book<'s>, label: &'static str, (proceeds, basis): (Qty, Qty)) -> Row<'s> {
     let cells = [
-        Cell::text(label),
+        label.into(),
         Cell::Blank,
         Cell::Blank,
         Cell::Blank,

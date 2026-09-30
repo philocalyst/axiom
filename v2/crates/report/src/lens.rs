@@ -69,6 +69,14 @@ impl Whose {
         Ok(Whose::of(book, resolve::entity(book, name)?))
     }
 
+    /// Whose books these are, as a name: the entity asked for, or everyone.
+    pub fn label<'s>(&self, book: &Book<'s>) -> &'s str {
+        match &self.0 {
+            Some(owners) => book.name(book.entities[owners[0]].path),
+            None => "everyone",
+        }
+    }
+
     /// One entity's, and its members' if it is a household.
     pub fn of(book: &Book, entity: Id<Entity>) -> Whose {
         let members = book.entities.iter().filter(|(_, other)| other.member == Some(entity)).map(|(id, _)| id);

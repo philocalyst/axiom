@@ -13,8 +13,8 @@ use axiom_model::{Book, Period, Place};
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
 use crate::lens::{Lens, Priced};
-use crate::places::{Side, depth, leaf};
-use crate::{Cell, Column, Report, Row, Section, Style};
+use crate::places::{Side, depth, leaf, path};
+use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 /// How many periods to show when the window is not given.
 const DEFAULT_PERIODS: usize = 12;
@@ -143,7 +143,8 @@ impl Statement {
 
     fn section<'s>(&self, lens: Lens<'_, 's>) -> Section<'s> {
         let book = lens.book;
-        let periods = (0..self.periods.len()).map(|period| Column::right(self.periods.title(period)));
+        let periods =
+            (0..self.periods.len()).map(|period| Column::right(Cell::Period(self.periods.window(period).days())));
         let total = (self.periods.len() > 1).then(|| Column::right("Total"));
         let mut section = Section::new(iter::once(Column::left("Place")).chain(periods).chain(total));
 
@@ -159,7 +160,7 @@ impl Statement {
             .iter()
             .map(|&qty| Cell::base(book, qty))
             .chain((self.periods.len() > 1).then(|| Cell::base(book, net.iter().copied().sum())));
-        section.push(Row::new(iter::once(Cell::text("Net")).chain(cells)).style(Style::Total));
+        section.push(Row::new(iter::once("Net".into()).chain(cells)).style(Style::Total));
 
         if !is_zero(&self.gains) {
             section.note(
@@ -189,12 +190,23 @@ impl Statement {
                     continue;
                 }
                 let style = if place == root && !has_derived { Style::Total } else { Style::Normal };
-                section.push(self.row(book, Cell::text(leaf(book, place)), depth(book, place), &values, style));
+                for (index, &qty) in values.iter().enumerate().filter(|(_, qty)| !qty.is_zero()) {
+                    let during = When::During(self.periods.window(index).days());
+                    let concept = if side == Side::Income { "income" } else { "spending" };
+                    section.fact(
+                        concept,
+                        Some(path(book, place)),
+                        lens.whose.label(book),
+                        during,
+                        Money::base(book, qty),
+                    );
+                }
+                section.push(self.row(book, Cell::Name(leaf(book, place)), depth(book, place), &values, style));
             }
         }
         if has_derived {
-            section.push(self.row(book, Cell::text(derived.label), 1, derived.values, derived.style));
-            section.push(self.row(book, Cell::text(format!("Total {}", derived.side)), 0, &total, Style::Total));
+            section.push(self.row(book, derived.label.into(), 1, derived.values, derived.style));
+            section.push(self.row(book, ["Total".into(), derived.side.into()].into(), 0, &total, Style::Total));
         }
         total
     }

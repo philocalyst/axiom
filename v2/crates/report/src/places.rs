@@ -3,6 +3,8 @@
 use axiom_core::Id;
 use axiom_model::{Book, End, Flow, PathRoot, Place};
 
+use crate::Cell;
+
 /// A place's full path.
 pub fn path<'s>(book: &Book<'s>, place: Id<Place>) -> &'s str {
     book.name(book.places[place].path)
@@ -15,12 +17,12 @@ pub fn names<'a, 's>(book: &'a Book<'s>) -> impl Iterator<Item = &'s str> + 'a {
 
 /// `assets/bank/checking → expenses/rent`. An end that only changes basis is
 /// written the way the journal writes it: `assets/house.basis`.
-pub fn route(book: &Book, flow: &Flow) -> String {
+pub fn route<'s>(book: &Book<'s>, flow: &Flow) -> Cell<'s> {
     let end = |end: End, place: Id<Place>| {
-        let path = path(book, place);
-        if flow.moves_quantity(end) { path.to_string() } else { format!("{path}.basis") }
+        let name = Cell::Name(path(book, place));
+        if flow.moves_quantity(end) { name } else { Cell::Join("", vec![name, Cell::Word(".basis")]) }
     };
-    format!("{} → {}", end(End::From, flow.from), end(End::To, flow.to))
+    Cell::Join(" → ", vec![end(End::From, flow.from), end(End::To, flow.to)])
 }
 
 /// The last segment of a path: a tree's indentation supplies the rest.

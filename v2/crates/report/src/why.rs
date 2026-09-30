@@ -15,20 +15,15 @@ mod taxline;
 
 pub use self::line::line;
 
-use std::borrow::Cow;
-
 use axiom_core::{Diagnostic, Id, Sym};
 use axiom_engine::{Effect, Run, State};
-use axiom_model::{
-    Book, Closing, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place, StepKind, System,
-    Trigger,
-};
+use axiom_model::{Book, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Place, StepKind, System};
 
 use crate::history::Posting;
 use crate::lens::Lens;
 use crate::places::{names, route};
 use crate::resolve;
-use crate::table::{cause_cell, creditor, doc_headline, plural};
+use crate::table::{cause_cell, creditor, doc_headline};
 use crate::{Cell, Column, Report, Row, Section};
 
 /// How many of the latest records a page lists; the rest are counted in a note.
@@ -41,7 +36,7 @@ fn recent<T>(items: &[T]) -> (&[T], usize) {
 }
 
 /// Flows, dated, with where each stands.
-fn flows_table<'s>(book: &Book<'s>, run: &Run, ids: &[Id<Flow>], heading: &str) -> Section<'s> {
+fn flows_table<'s>(book: &Book<'s>, run: &Run, ids: &[Id<Flow>], heading: &'static str) -> Section<'s> {
     let columns = [
         Column::left("Date"),
         Column::left("Flow"),
@@ -56,43 +51,43 @@ fn flows_table<'s>(book: &Book<'s>, run: &Run, ids: &[Id<Flow>], heading: &str) 
         let flow = posting.flow;
         let cells = [
             Cell::Day(flow.day),
-            Cell::text(route(book, flow)),
+            route(book, flow),
             Cell::amount(book, posting.out()),
-            Cell::text(state_words(posting.posted.state)),
+            state_words(posting.posted.state),
             Cell::Source(flow.loc),
         ];
         section.push(Row::new(cells));
     }
     if left_out > 0 {
-        section.note(format!("{left_out} earlier flows not shown."));
+        section.note([Cell::Count(left_out, "earlier flow"), "not shown.".into()]);
     }
     section
 }
 
-fn state_words(state: State) -> Cow<'static, str> {
+fn state_words<'s>(state: State) -> Cell<'s> {
     match state {
         State::Actual => "actual".into(),
         State::Pending => "pending".into(),
-        State::Settled(on) => format!("settled {on}").into(),
+        State::Settled(on) => ["settled".into(), Cell::Day(on)].into(),
         State::Void => "void".into(),
-        State::Returned(on) => format!("returned {on}").into(),
+        State::Returned(on) => ["returned".into(), Cell::Day(on)].into(),
         State::Planned => "planned".into(),
     }
 }
 
 /// What laws counted or owed, when, and for whom.
-fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &str) -> Section<'s> {
+fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &'static str) -> Section<'s> {
     let columns = ["Date", "Effect", "Owner"].map(Column::left).into_iter();
     let mut section =
         Section::new(columns.chain([Column::right("Amount")]).chain(["Owed to", "From"].map(Column::left)));
-    section.heading = Some(heading.to_string());
+    section.heading = Some(heading);
     let (shown, left_out) = recent(effects);
     for effect in shown {
-        let owed = effect.owe.map_or(Cell::Blank, |owed| Cell::text(creditor(book, owed)));
+        let owed = effect.owe.map_or(Cell::Blank, |owed| creditor(book, owed));
         let cells = [
             Cell::Day(effect.day),
-            Cell::text(book.name(effect.name)),
-            Cell::text(book.name(book.entities[effect.owner].path)),
+            Cell::Name(book.name(effect.name)),
+            Cell::Name(book.name(book.entities[effect.owner].path)),
             Cell::amount(book, effect.amount),
             owed,
             cause_cell(book, effect.cause),
@@ -100,7 +95,7 @@ fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &str) -> Sec
         section.push(Row::new(cells));
     }
     if left_out > 0 {
-        section.note(format!("{left_out} earlier effects not shown."));
+        section.note([Cell::Count(left_out, "earlier effect"), "not shown.".into()]);
     }
     section
 }
@@ -226,16 +221,11 @@ fn laws_table<'s>(book: &Book<'s>, ids: &[Id<Law>]) -> Section<'s> {
         if group.is_empty() {
             continue;
         }
-        section.total([Cell::text(heading)]);
+        section.total([heading.into()]);
         for &id in group {
             let law = &book.laws[id];
-            let explains = doc_headline(book, law.doc).map_or(Cell::Blank, Cell::text);
-            let cells = [
-                Cell::text(book.name(law.name)),
-                Cell::text(trigger_words(law.trigger)),
-                explains,
-                Cell::Source(law.loc),
-            ];
+            let explains = doc_headline(book, law.doc).unwrap_or(Cell::Blank);
+            let cells = [Cell::Name(book.name(law.name)), Cell::Trigger(law.trigger), explains, Cell::Source(law.loc)];
             section.push(Row::new(cells).depth(1));
         }
     }
@@ -244,34 +234,21 @@ fn laws_table<'s>(book: &Book<'s>, ids: &[Id<Law>]) -> Section<'s> {
         let mut names: Vec<&str> = tallies.iter().flat_map(|law| counted(law)).map(|name| book.name(name)).collect();
         names.sort_unstable();
         names.dedup();
-        section.note(format!("{} only count, into {}.", plural(tallies.len(), "more law"), names.join(", ")));
+        section.note([
+            Cell::Count(tallies.len(), "more law"),
+            "only count, into".into(),
+            Cell::list(", ", names.into_iter().map(Cell::Name)),
+            ".".into(),
+        ]);
     }
     section
 }
 
 /// What an event did to its flows, in the word it is written with.
-fn event_words(state: EventState) -> &'static str {
+fn event_words<'s>(state: EventState) -> Cell<'s> {
     match state {
-        EventState::Settled => "settled",
-        EventState::Void => "void",
-        EventState::Returned => "returned",
-    }
-}
-
-/// When a law fires, in the words it is written with.
-fn trigger_words(trigger: Trigger) -> Cow<'static, str> {
-    match trigger {
-        Trigger::In => "on in".into(),
-        Trigger::Out => "on out".into(),
-        Trigger::Gain => "on gain".into(),
-        Trigger::Spend => "on spend".into(),
-        Trigger::Flow => "on flow".into(),
-        Trigger::Each(Period::Month, _) => "each month".into(),
-        Trigger::Each(Period::Year, None) => "each year".into(),
-        Trigger::Each(Period::Year, Some(Closing { month, day })) => {
-            format!("each year closing {month:02}-{day:02}").into()
-        }
-        Trigger::By(_) => "by a date".into(),
-        Trigger::Always => "always".into(),
+        EventState::Settled => "settled".into(),
+        EventState::Void => "void".into(),
+        EventState::Returned => "returned".into(),
     }
 }

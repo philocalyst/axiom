@@ -26,7 +26,6 @@ use crate::calendar::Periods;
 use crate::closings;
 use crate::lens::{Lens, Whose};
 use crate::places::{path, route};
-use crate::table::{headline, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// A fixed seed: the same books always give the same bands.
@@ -49,8 +48,7 @@ pub fn view<'s>(lens: Lens<'_, 's>, until: Option<Day>, paths: u32) -> Report<'s
 
     let due = coming_due(&trace, whose, today);
     let committed = committed(lens, &checkpoints, &trace.liquid, &due);
-    let variable =
-        Variable::from_history(lens, |flow| expected.iter().any(|expectation| expectation.covers(flow)));
+    let variable = Variable::from_history(lens, |flow| expected.iter().any(|expectation| expectation.covers(flow)));
     let bands = simulate(&checkpoints, &committed, &variable, paths);
 
     let mut outlook = outlook_section(book, &checkpoints, &committed, &trace.worth, bands.as_ref());
@@ -58,7 +56,7 @@ pub fn view<'s>(lens: Lens<'_, 's>, until: Option<Day>, paths: u32) -> Report<'s
         outlook.note(note);
     }
 
-    Report::new(format!("Forecast to {until}"))
+    Report::new(["Forecast to".into(), Cell::Day(until)])
         .with(outlook)
         .with(expected_section(book, &expected, today, until))
         .with(owed_section(book, &due))
@@ -125,24 +123,36 @@ fn simulate(checkpoints: &[Day], committed: &[Qty], variable: &Variable, paths: 
 // ─── Sections ───────────────────────────────────────────────────────────────
 
 /// How the outlook was worked out, in plain words.
-fn method_notes(book: &Book, bands: Option<&Bands>, history_months: usize, paths: u32) -> [String; 2] {
-    let committed = format!(
-        "Committed: money in hand, less what is owed on debts with no term and on obligations as they fall due, in {}, \
-         after plans, recurring flows found in history and what they can still give. Investments and property are net \
-         worth, not liquid. Variable spending is not in it.",
-        book.name(book.commodities[book.base].symbol)
-    );
+fn method_notes<'s>(book: &Book<'s>, bands: Option<&Bands>, history_months: usize, paths: u32) -> [Cell<'s>; 2] {
+    let committed = [
+        "Committed: money in hand, less what is owed on debts with no term and on obligations as they fall due, in"
+            .into(),
+        Cell::Name(book.name(book.commodities[book.base].symbol)),
+        ", after plans, recurring flows found in history and what they can still give. Investments and property \
+         are net worth, not liquid. Variable spending is not in it."
+            .into(),
+    ];
     let spread = match bands {
-        Some(bands) => format!(
-            "p10, p50 and p90 are the 10th, 50th and 90th percentile of {} paths. Each path takes the committed figure and subtracts, month \
-             by month, a random past month of spending for every top-level expense category (from {history_months} months of history, without \
-             the flows already projected). The seed is fixed, so the bands are reproducible.",
-            bands.paths()
-        ),
-        None if paths == 0 => "Bands are off (--paths 0).".to_string(),
-        None => format!("Bands need {MIN_HISTORY_MONTHS} full months of spending history; there is not enough yet."),
+        Some(bands) => [
+            "p10, p50 and p90 are the 10th, 50th and 90th percentile of".into(),
+            Cell::Count(bands.paths(), "path"),
+            ". Each path takes the committed figure and subtracts, month by month, a random past month of spending \
+             for every top-level expense category (from"
+                .into(),
+            Cell::Count(history_months, "month"),
+            "of history, without the flows already projected). The seed is fixed, so the bands are reproducible."
+                .into(),
+        ]
+        .into(),
+        None if paths == 0 => "Bands are off (--paths 0).".into(),
+        None => [
+            "Bands need".into(),
+            Cell::Count(MIN_HISTORY_MONTHS, "full month"),
+            "of spending history; there is not enough yet.".into(),
+        ]
+        .into(),
     };
-    [committed, spread]
+    [committed.into(), spread]
 }
 
 fn outlook_section<'s>(
@@ -187,21 +197,24 @@ fn expected_section<'s>(book: &Book<'s>, expected: &[Expectation], today: Day, u
     for legs in expected.chunk_by(|a, b| a.group() == b.group()) {
         let Some(main) = legs.iter().max_by_key(|leg| leg.out.qty.abs()) else { continue };
         let flow = main.template;
-        let payee = flow.payee.map(|entity| format!(" ({})", book.name(book.entities[entity].path)));
-        let more = (legs.len() > 1).then(|| format!(", and {}", plural(legs.len() - 1, "more leg")));
-        let what = format!("{}{}{}", route(book, flow), payee.unwrap_or_default(), more.unwrap_or_default());
+        let payee = flow.payee.map(|entity| {
+            Cell::Join("", vec![" (".into(), Cell::Name(book.name(book.entities[entity].path)), ")".into()])
+        });
+        let more =
+            (legs.len() > 1).then(|| Cell::Join("", vec![", and ".into(), Cell::Count(legs.len() - 1, "more leg")]));
+        let what = Cell::Join("", iter::once(route(book, flow)).chain(payee).chain(more).collect());
         let total = legs.iter().filter(|leg| leg.out.unit == main.out.unit).map(|leg| leg.out.qty).sum();
         let next = legs.iter().filter_map(|leg| leg.schedule.days(today, until).first().copied()).min();
         let source = match main.origin {
-            Origin::Plan(_) => "plan".to_string(),
-            Origin::Habit { occurrences } => format!("seen {occurrences} times"),
+            Origin::Plan(_) => "plan".into(),
+            Origin::Habit { occurrences } => ["seen".into(), Cell::Count(occurrences, "time")].into(),
         };
         let cells = [
-            Cell::text(what),
-            Cell::text(recurrence::describe(main.schedule.every)),
+            what,
+            recurrence::describe(main.schedule.every),
             Cell::amount(book, Amount::new(total, main.out.unit)),
             next.map_or(Cell::Blank, Cell::Day),
-            Cell::text(source),
+            source,
         ];
         rows.push((next, Row::new(cells)));
     }
@@ -225,8 +238,8 @@ fn owed_section<'s>(book: &Book<'s>, due: &[&Effect]) -> Section<'s> {
         let Some(owed) = effect.owe else { continue };
         let cells = [
             Cell::Day(owed.due),
-            Cell::text(book.name(effect.name)),
-            Cell::text(book.name(book.entities[owed.to].path)),
+            Cell::Name(book.name(effect.name)),
+            Cell::Name(book.name(book.entities[owed.to].path)),
             Cell::amount(book, effect.amount),
         ];
         section.push(Row::new(cells));
@@ -241,26 +254,27 @@ fn problems_section<'s>(book: &Book<'s>, trace: &Trace, today: Day) -> Section<'
     for violation in recorded.violations.iter().filter(|violation| violation.day > today) {
         repeats.entry((violation.law, violation.subject)).or_insert((0, violation)).0 += 1;
     }
-    let mut problems: Vec<(Day, String, Style)> = Vec::new();
+    // Each problem by its day, the name it is about, what to say, and how to show it.
+    let mut problems: Vec<(Day, &str, Cell, Style)> = Vec::new();
     for (count, first) in repeats.into_values() {
-        let message = &recorded.diagnostics[first.diagnostic as usize].message;
-        let more = if count > 1 { format!(" (and {} more)", count - 1) } else { String::new() };
-        let text = format!("{}: {}{more}", book.name(book.laws[first.law].name), headline(message));
-        problems.push((first.day, text, if first.waived { Style::Muted } else { Style::Alert }));
+        let (law, message) =
+            (book.name(book.laws[first.law].name), &recorded.diagnostics[first.diagnostic as usize].message);
+        let more =
+            (count > 1).then(|| Cell::Join("", vec![" (and ".into(), Cell::Count(count - 1, ""), " more)".into()]));
+        let text =
+            Cell::Join("", [Cell::Name(law), ": ".into(), Cell::headline(message)].into_iter().chain(more).collect());
+        problems.push((first.day, law, text, if first.waived { Style::Muted } else { Style::Alert }));
     }
     for overdraft in &trace.overdrafts {
-        let lowest = book.show(Amount::new(overdraft.lowest, book.base));
-        problems.push((
-            overdraft.first,
-            format!("{} is overdrawn, down to {lowest}", path(book, overdraft.place)),
-            Style::Alert,
-        ));
+        let (place, lowest) = (path(book, overdraft.place), Amount::new(overdraft.lowest, book.base));
+        let text = [Cell::Name(place), "is overdrawn, down to".into(), Cell::amount(book, lowest)].into();
+        problems.push((overdraft.first, place, text, Style::Alert));
     }
-    problems.sort_by(|a, b| (a.0, &a.1).cmp(&(b.0, &b.1)));
+    problems.sort_by_key(|&(day, name, ..)| (day, name));
 
     let mut section = Section::new([Column::left("Date"), Column::left("Problem")]).headed("Problems ahead");
-    for (day, text, style) in problems {
-        section.push(Row::new([Cell::Day(day), Cell::text(text)]).style(style));
+    for (day, _, text, style) in problems {
+        section.push(Row::new([Cell::Day(day), text]).style(style));
     }
     if section.rows.is_empty() {
         section.note("No law violations or overdrafts are projected.");

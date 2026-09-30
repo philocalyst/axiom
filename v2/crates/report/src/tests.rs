@@ -684,14 +684,46 @@ impl Household {
 
 // ─── Rendering, so figures can be compared as text ──────────────────────────
 
-fn cell(cell: &Cell) -> String {
-    match cell {
+/// A cell as plain text: the command line words cells its own way, and this is a small stand-in.
+pub(crate) fn cell(one: &Cell) -> String {
+    match one {
         Cell::Blank => String::new(),
-        Cell::Text(text) => text.to_string(),
-        Cell::Amount { qty, scale, unit } => format!("{} {unit}", qty.show(*scale)),
+        Cell::Word(text) | Cell::Text(text) | Cell::Name(text) => text.to_string(),
+        Cell::Said(text) => text.clone(),
+        Cell::Code(code) => format!("#{code}"),
+        Cell::Amount(money) => format!("{} {}", money.qty.show(money.scale), money.unit),
         Cell::Day(day) => day.to_string(),
+        Cell::Span(span) => span.to_string(),
+        Cell::Period(days) => match (axiom_core::calendar::Window::exactly(*days), days.single()) {
+            (Some(window), _) => window.to_string(),
+            (None, Some(day)) => format!("on {day}"),
+            (None, None) if *days == Days::ALWAYS => "ever".to_string(),
+            (None, None) => format!("{}..{}", days.first(), days.last()),
+        },
         Cell::Percent(ratio) => format!("{}%", Ratio::new(ratio.num() as i128 * 100, ratio.den() as i128).unwrap()),
+        Cell::Number(ratio) => ratio.to_string(),
+        Cell::Count(count, "") => count.to_string(),
+        Cell::Count(count, noun) => format!("{count} {noun}{}", if *count == 1 { "" } else { "s" }),
+        Cell::Trigger(trigger) => match trigger {
+            Trigger::In => "on in".to_string(),
+            Trigger::Out => "on out".to_string(),
+            Trigger::Each(Period::Year, Some(Closing { month, day })) => {
+                format!("each year closing {month:02}-{day:02}")
+            }
+            Trigger::Each(Period::Year, None) => "each year".to_string(),
+            other => format!("{other:?}"),
+        },
         Cell::Source(loc) => format!("@{}", loc.start / 100),
+        Cell::Join(between, parts) => {
+            let parts: Vec<String> = parts.iter().map(cell).filter(|part| !part.is_empty()).collect();
+            let mut said = parts.join(between);
+            if *between == " " {
+                for mark in [",", ";", ":", "."] {
+                    said = said.replace(&format!(" {mark}"), mark);
+                }
+            }
+            said
+        }
     }
 }
 
@@ -713,11 +745,11 @@ pub(crate) fn lines(section: &Section) -> Vec<String> {
 }
 
 pub(crate) fn show(report: &Report) -> String {
-    let mut out = format!("# {}\n", report.title);
+    let mut out = format!("# {}\n", cell(&report.title));
     for section in &report.sections {
-        out += &format!("##{}\n", section.heading.as_ref().map_or(String::new(), |heading| format!(" {heading}")));
+        out += &format!("##{}\n", section.heading.map_or(String::new(), |heading| format!(" {heading}")));
         out += &lines(section).join("\n");
-        out += &section.notes.iter().map(|note| format!("\n  note: {note}")).collect::<String>();
+        out += &section.notes.iter().map(|note| format!("\n  note: {}", cell(note))).collect::<String>();
         out += "\n";
     }
     out
@@ -779,7 +811,7 @@ fn a_past_date_and_monthly_columns_read_the_same_flows() {
     let january = table(&house, balance(vec!["checking"], Some(day(2026, 1, 20)), false, false));
     assert!(january.contains("checking | 1,915.80 USD"));
     let monthly = house.report(balance(vec!["checking"], None, true, true));
-    let titles: Vec<_> = monthly.sections[0].columns.iter().map(|column| column.title.to_string()).collect();
+    let titles: Vec<_> = monthly.sections[0].columns.iter().map(|column| cell(&column.title)).collect();
     assert_eq!(titles, ["Place", "2026-01-31", "2026-02-28", "2026-03-31"]);
     assert_eq!(lines(&monthly.sections[0])[2], "    checking | 1,915.80 USD | 5,115.80 USD | 8,955.80 USD");
 }
@@ -976,7 +1008,7 @@ fn limits_are_per_owner_and_per_year() {
     let jordan = house.report_for(Query::Limits { year: Some(2026) }, Some("jordan")).unwrap();
     assert_eq!(lines(&jordan.sections[0]).len(), 1);
     let none = house.report(Query::Limits { year: Some(2024) });
-    assert!(none.sections[0].notes[0].contains("No limit was read in 2024"));
+    assert!(cell(&none.sections[0].notes[0]).contains("No limit was read in 2024"));
 }
 
 #[test]
@@ -1032,10 +1064,7 @@ fn a_bill_is_netted_by_its_code_across_the_flows_that_made_and_settled_it() {
     );
     // Paid in full, it is no longer open.
     let paid = lens.on(day(2026, 3, 5));
-    assert_eq!(
-        crate::claims::owed_by_you(paid, house.place("liabilities/bills"))[0].left.qty,
-        Qty(120_000)
-    );
+    assert_eq!(crate::claims::owed_by_you(paid, house.place("liabilities/bills"))[0].left.qty, Qty(120_000));
 }
 
 // ─── Codes, lines and the summary ───────────────────────────────────────────
@@ -1084,7 +1113,7 @@ fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed()
             "  early-withdrawal | on out |  | @85"
         ]
     );
-    assert!(report.sections[3].notes[0].starts_with("1 law not in force today"));
+    assert!(cell(&report.sections[3].notes[0]).starts_with("1 law not in force today"));
 }
 
 #[test]
@@ -1106,7 +1135,7 @@ fn why_a_system_says_what_each_of_its_laws_counted() {
     let house = household();
     let us = house.book.systems.iter().next().unwrap().0;
     let report = house.why(Found::System(us));
-    assert_eq!(report.sections[0].notes, ["Nobody in this book lives here."]);
+    assert_eq!(cell(&report.sections[0].notes[0]), "Nobody in this book lives here.");
     assert_eq!(
         lines(&report.sections[1]),
         [
@@ -1119,7 +1148,7 @@ fn why_a_system_says_what_each_of_its_laws_counted() {
 fn several_laws_with_one_name_are_listed_with_where_each_is_written() {
     let house = household();
     let report = house.why(Found::Laws(Box::new([Id::new(0), Id::new(3)])));
-    assert_eq!(report.title, "`budget` is written in 2 places");
+    assert_eq!(cell(&report.title), "`budget` is written in 2 places");
     assert_eq!(
         lines(&report.sections[0]),
         [
@@ -1127,7 +1156,7 @@ fn several_laws_with_one_name_are_listed_with_where_each_is_written() {
             "overdraft | project | @80 | assets/bank/checking and everything beneath it | The overdraft law says what it says."
         ]
     );
-    assert!(report.sections[0].notes[0].contains("axiom why FILE:LINE"));
+    assert!(cell(&report.sections[0].notes[0]).contains("axiom why FILE:LINE"));
 }
 
 // ─── Views that run the ledger ──────────────────────────────────────────────

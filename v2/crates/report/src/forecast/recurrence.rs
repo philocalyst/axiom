@@ -1,10 +1,10 @@
 //! Regular flows: finding a rhythm in history, and the calendar rule that
 //! projects a plan or a rhythm forward.
 
-use std::borrow::Cow;
-
 use axiom_core::{Day, Days, Qty, Span, due};
 use axiom_model::On;
+
+use crate::Cell;
 
 /// A rhythm needs at least this many occurrences to be believed.
 const MIN_OCCURRENCES: usize = 3;
@@ -34,10 +34,10 @@ impl Cadence {
 }
 
 /// A step between occurrences, in words: `monthly`, `every 3d`.
-pub fn describe(every: Span) -> Cow<'static, str> {
+pub fn describe<'s>(every: Span) -> Cell<'s> {
     match CADENCES.into_iter().find(|cadence| cadence.every == every) {
         Some(cadence) => cadence.word.into(),
-        None => format!("every {every}").into(),
+        None => ["every".into(), Cell::Span(every)].into(),
     }
 }
 

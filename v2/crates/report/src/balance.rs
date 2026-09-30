@@ -10,9 +10,9 @@ use axiom_model::{Amount, Book, Class, Commodity, Period, Place};
 use crate::calendar::Periods;
 use crate::history::Snapshots;
 use crate::lens::{Basket, Lens, Valued};
-use crate::places::{depth, leaf, names};
+use crate::places::{depth, leaf, names, path};
 use crate::resolve;
-use crate::{Cell, Column, Report, Row, Section, Style};
+use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 /// How many month-end columns `--monthly` shows.
 const MONTHLY_COLUMNS: usize = 12;
@@ -39,15 +39,15 @@ pub fn view<'s>(
         }
     }
     if table.rows.is_empty() {
-        table.note(format!("Nothing is held on {at}."));
+        table.note(["Nothing is held on".into(), Cell::Day(at), ".".into()]);
     }
     if unpriced > 0 {
         table.note("Holdings without a price are muted, in their own commodity, and left out of every total.");
     }
     table.unpriced(snapshots.unpriced.missing(), "flow");
 
-    let title = if monthly { format!("Balances by month to {at}") } else { format!("Balances at {at}") };
-    let mut report = Report::new(title).with(table);
+    let title = if monthly { "Balances by month to" } else { "Balances at" };
+    let mut report = Report::new([title.into(), Cell::Day(at)]).with(table);
     if globs.is_empty() {
         report = report.with(net_worth_section(lens, &snapshots));
     }
@@ -99,12 +99,16 @@ fn column_days(book: &Book, at: Day, monthly: bool) -> Vec<Day> {
     Periods::covering(Period::Month, first, at).last(MONTHLY_COLUMNS).ends().map(|end| end.min(at)).collect()
 }
 
-fn amount_columns(book: &Book, snapshots: &Snapshots, value: bool) -> Vec<Column> {
+fn amount_columns<'s>(book: &Book<'s>, snapshots: &Snapshots, value: bool) -> Vec<Column<'s>> {
     if let [_] = snapshots.days() {
-        let title = if value { format!("Value ({})", base_symbol(book)) } else { "Balance".to_string() };
+        let title = if value {
+            Cell::Join("", vec!["Value (".into(), Cell::Name(base_symbol(book)), ")".into()])
+        } else {
+            "Balance".into()
+        };
         return vec![Column::right(title)];
     }
-    snapshots.days().iter().map(|day| Column::right(day.to_string())).collect()
+    snapshots.days().iter().map(|&day| Column::right(Cell::Day(day))).collect()
 }
 
 fn base_symbol<'s>(book: &Book<'s>) -> &'s str {
@@ -195,8 +199,15 @@ fn push_place<'s>(
     };
     let unpriced = lines.iter().filter(|line| line.style == Style::Muted).count();
     let is_root = depth(book, place) == 0;
+    for line in &lines {
+        for (cell, &day) in line.cells.iter().zip(snapshots.days()) {
+            if let Cell::Amount(money) = cell {
+                table.fact("balance", Some(path(book, place)), lens.whose.label(book), When::Instant(day), *money);
+            }
+        }
+    }
     for (index, line) in lines.into_iter().enumerate() {
-        let label = if index == 0 { Cell::text(leaf(book, place)) } else { Cell::Blank };
+        let label = if index == 0 { Cell::Name(leaf(book, place)) } else { Cell::Blank };
         let style = if is_root && line.style == Style::Normal { Style::Total } else { line.style };
         table.push(Row::new(iter::once(label).chain(line.cells)).depth(depth(book, place)).style(style));
     }
@@ -204,7 +215,7 @@ fn push_place<'s>(
 }
 
 fn context_row<'s>(book: &Book<'s>, place: Id<Place>, columns: usize) -> Row<'s> {
-    Row::new(iter::once(Cell::text(leaf(book, place))).chain((0..columns).map(|_| Cell::Blank)))
+    Row::new(iter::once(Cell::Name(leaf(book, place))).chain((0..columns).map(|_| Cell::Blank)))
         .depth(depth(book, place))
         .style(Style::Muted)
 }
@@ -263,14 +274,17 @@ fn net_worth_section<'s>(lens: Lens<'_, 's>, snapshots: &Snapshots) -> Section<'
         .collect();
     let columns = amount_columns(book, snapshots, true);
     let mut section = Section::new(iter::once(Column::left("Net worth")).chain(columns));
-    let rows: [(&str, Style, fn(&NetWorth) -> Qty); 3] = [
+    let rows: [(&'static str, Style, fn(&NetWorth) -> Qty); 3] = [
         ("Assets", Style::Normal, |worth| worth.assets),
         ("Liabilities", Style::Normal, |worth| -worth.liabilities),
         ("Net worth", Style::Total, |worth| worth.total()),
     ];
     for (label, style, pick) in rows {
         let cells = worths.iter().map(|worth| Cell::base(book, pick(worth)));
-        section.push(Row::new(iter::once(Cell::text(label)).chain(cells)).style(style));
+        section.push(Row::new(iter::once(label.into()).chain(cells)).style(style));
+        for (worth, &day) in worths.iter().zip(snapshots.days()) {
+            section.fact(label, None, lens.whose.label(book), When::Instant(day), Money::base(book, pick(worth)));
+        }
     }
     section.unpriced(worths.iter().map(|worth| worth.unpriced).max().unwrap_or(0), "holding");
     section

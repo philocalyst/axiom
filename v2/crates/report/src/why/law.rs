@@ -3,9 +3,9 @@
 use axiom_core::Id;
 use axiom_model::{Book, Law, Owner};
 
-use super::{effects_table, recent, trigger_words};
+use super::{effects_table, recent};
 use crate::lens::Lens;
-use crate::table::{cause_cell, doc_headline, doc_lines, headline, plural};
+use crate::table::{cause_cell, doc_headline, doc_lines};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn report<'s>(lens: Lens<'_, 's>, id: Id<Law>) -> Report<'s> {
@@ -14,20 +14,20 @@ pub fn report<'s>(lens: Lens<'_, 's>, id: Id<Law>) -> Report<'s> {
     let violations: Vec<_> = run.violations.iter().filter(|violation| violation.law == id).collect();
     let effects: Vec<_> = run.effects.iter().filter(|effect| effect.law == id).collect();
 
-    let mut about = Section::new([Column::left("Law"), Column::left(book.name(law.name).to_string())]);
+    let mut about = Section::new([Column::left("Law"), Column::left(Cell::Name(book.name(law.name)))]);
     let ran = run.checks.get(id.index()).copied().unwrap_or(0) as usize;
-    let recorded = format!("{}, {}", plural(violations.len(), "violation"), plural(effects.len(), "effect"));
+    let recorded = Cell::list(", ", [Cell::Count(violations.len(), "violation"), Cell::Count(effects.len(), "effect")]);
     for (what, cell) in [
-        ("When", Cell::text(trigger_words(law.trigger))),
-        ("Governs", Cell::text(governs(book, law.owner))),
+        ("When", Cell::Trigger(law.trigger)),
+        ("Governs", governs(book, law.owner)),
         ("Written", Cell::Source(law.loc)),
-        ("Ran", Cell::text(plural(ran, "time"))),
-        ("Recorded", Cell::text(recorded)),
+        ("Ran", Cell::Count(ran, "time")),
+        ("Recorded", recorded),
     ] {
-        about.push(Row::new([Cell::text(what), cell]));
+        about.push(Row::new([what.into(), cell]));
     }
     for line in law.doc.iter().flat_map(|&doc| doc_lines(book.name(doc))) {
-        about.note(line);
+        about.note(Cell::Text(line));
     }
 
     let mut broken = Section::new([Column::left("Date"), Column::left("Violation"), Column::left("From")])
@@ -35,12 +35,11 @@ pub fn report<'s>(lens: Lens<'_, 's>, id: Id<Law>) -> Report<'s> {
     for violation in recent(&violations).0 {
         let message = &run.diagnostics[violation.diagnostic as usize].message;
         let style = if violation.waived { Style::Muted } else { Style::Alert };
-        let cells =
-            [Cell::Day(violation.day), Cell::text(headline(message).to_string()), cause_cell(book, violation.cause)];
+        let cells = [Cell::Day(violation.day), Cell::headline(message), cause_cell(book, violation.cause)];
         broken.push(Row::new(cells).style(style));
     }
     let caused = effects_table(book, &effects, "Recent effects");
-    Report::new(format!("Why {}", book.name(law.name))).with(about).with(broken).with(caused)
+    Report::new(["Why".into(), Cell::Name(book.name(law.name))]).with(about).with(broken).with(caused)
 }
 
 /// Several laws answer to one name, in different systems or files: each one
@@ -57,33 +56,43 @@ pub fn which<'s>(book: &Book<'s>, candidates: &[Id<Law>]) -> Report<'s> {
     let mut section = Section::new(columns);
     for &id in candidates {
         let law = &book.laws[id];
-        let system = law.system.map_or("project", |system| book.name(book.systems[system].path));
-        let explains = doc_headline(book, law.doc).map_or(Cell::Blank, Cell::text);
-        let cells = [
-            Cell::text(book.name(law.name)),
-            Cell::text(system),
-            Cell::Source(law.loc),
-            Cell::text(governs(book, law.owner)),
-            explains,
-        ];
+        let system = law.system.map_or("project".into(), |system| Cell::Name(book.name(book.systems[system].path)));
+        let explains = doc_headline(book, law.doc).unwrap_or(Cell::Blank);
+        let cells =
+            [Cell::Name(book.name(law.name)), system, Cell::Source(law.loc), governs(book, law.owner), explains];
         section.push(Row::new(cells));
     }
     section.note("Ask about the one you mean with `axiom why FILE:LINE`, using the location in Written.");
-    Report::new(format!("`{name}` is written in {}", plural(candidates.len(), "place"))).with(section)
+    let title = [
+        Cell::Join("", vec!["`".into(), Cell::Name(name), "`".into()]),
+        "is written in".into(),
+        Cell::Count(candidates.len(), "place"),
+    ];
+    Report::new(title).with(section)
 }
 
 /// Who a law governs, as the sentence that explains it.
-fn governs<'s>(book: &Book<'s>, owner: Owner) -> String {
+fn governs<'s>(book: &Book<'s>, owner: Owner) -> Cell<'s> {
     match owner {
-        Owner::Kind(kind) => format!("every {}", book.name(book.kinds[kind].name)),
-        Owner::Place(place) => format!("{} and everything beneath it", book.name(book.places[place].path)),
-        Owner::Entity(entity) => book.name(book.entities[entity].path).to_string(),
-        Owner::Purpose(purpose) => format!("every flow of {}, and beneath it", book.name(book.purposes[purpose].name)),
-        Owner::Asset(asset) => book.name(book.assets[asset].name).to_string(),
-        Owner::Contract(contract) => format!("every flow of {}", book.name(book.contracts[contract].name)),
-        Owner::System(system) => {
-            format!("everyone living under {}, and all they own", book.name(book.systems[system].path))
+        Owner::Kind(kind) => ["every".into(), Cell::Name(book.name(book.kinds[kind].name))].into(),
+        Owner::Place(place) => {
+            [Cell::Name(book.name(book.places[place].path)), "and everything beneath it".into()].into()
         }
-        Owner::Book => "everything in this book".to_string(),
+        Owner::Entity(entity) => Cell::Name(book.name(book.entities[entity].path)),
+        Owner::Purpose(purpose) => {
+            ["every flow of".into(), Cell::Name(book.name(book.purposes[purpose].name)), ", and beneath it".into()]
+                .into()
+        }
+        Owner::Asset(asset) => Cell::Name(book.name(book.assets[asset].name)),
+        Owner::Contract(contract) => {
+            ["every flow of".into(), Cell::Name(book.name(book.contracts[contract].name))].into()
+        }
+        Owner::System(system) => [
+            "everyone living under".into(),
+            Cell::Name(book.name(book.systems[system].path)),
+            ", and all they own".into(),
+        ]
+        .into(),
+        Owner::Book => "everything in this book".into(),
     }
 }

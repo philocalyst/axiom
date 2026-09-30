@@ -34,11 +34,9 @@ mod source_tests;
 #[cfg(test)]
 mod tests;
 
-use std::borrow::Cow;
-
-use axiom_core::{Day, Diagnostic, Id, Loc, Qty, Ratio};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Ratio, Span};
 use axiom_engine::Run;
-use axiom_model::{Amount, Book, Period, Place};
+use axiom_model::{Amount, Book, Period, Place, Trigger};
 
 use crate::history::Snapshots;
 use crate::lens::{Context, Lens, Whose};
@@ -81,20 +79,29 @@ pub enum Query<'a> {
     Line { loc: Loc },
 }
 
+/// What a view says: a title, and sections of typed cells. Nothing here is
+/// laid out or worded for a reader; the command line draws it as text or JSON,
+/// and an editor or a GUI could draw it as anything else.
+#[derive(Clone, Debug)]
 pub struct Report<'s> {
-    pub title: String,
+    pub title: Cell<'s>,
     pub sections: Vec<Section<'s>>,
 }
 
+#[derive(Clone, Debug)]
 pub struct Section<'s> {
-    pub heading: Option<String>,
-    pub columns: Vec<Column>,
+    pub heading: Option<&'static str>,
+    pub columns: Vec<Column<'s>>,
     pub rows: Vec<Row<'s>>,
-    pub notes: Vec<String>,
+    pub notes: Vec<Cell<'s>>,
+    /// The figures the rows show, one by one, in the shape of an XBRL fact:
+    /// what was measured, of whom, when, in what unit, and its value.
+    pub facts: Vec<Fact<'s>>,
 }
 
-pub struct Column {
-    pub title: Cow<'static, str>,
+#[derive(Clone, Debug)]
+pub struct Column<'s> {
+    pub title: Cell<'s>,
     pub align: Align,
 }
 
@@ -104,6 +111,7 @@ pub enum Align {
     Right,
 }
 
+#[derive(Clone, Debug)]
 pub struct Row<'s> {
     /// Indentation for tree-shaped tables.
     pub depth: u8,
@@ -122,20 +130,69 @@ pub enum Style {
     Alert,
 }
 
+/// One thing a table, a title or a note says. A view builds these from the
+/// book and the run and never formats a string: what is fixed wording is
+/// `Word`, and everything else is typed, so a renderer can word, align, colour
+/// or link each kind as it likes.
+#[derive(Clone, Debug)]
 pub enum Cell<'s> {
     Blank,
-    Text(Cow<'s, str>),
-    /// Quanta, the commodity's decimal places, and its symbol.
-    Amount {
-        qty: Qty,
-        scale: u8,
-        unit: &'s str,
-    },
+    /// Fixed wording: a label, or the words of a sentence.
+    Word(&'static str),
+    /// Words the book wrote: a description, a doc.
+    Text(&'s str),
+    /// Words someone else said: a diagnostic's message, or what the reader asked about.
+    Said(String),
+    /// A declared thing, by name: a place, an entity, a law.
+    Name(&'s str),
+    /// The code a fact goes by, without its sigil.
+    Code(&'s str),
+    Amount(Money<'s>),
     Day(Day),
+    /// A calendar length: an age, a liquidity.
+    Span(Span),
+    /// A month, a year, one day, all time, or the days between two.
+    Period(Days),
     Percent(Ratio),
+    /// A plain number: a rate, a ratio.
+    Number(Ratio),
+    /// How many of a noun there are: `3 flows`.
+    Count(usize, &'static str),
+    /// When a law fires.
+    Trigger(Trigger),
     /// Where in the sources a line comes from. The command line prints it as
     /// `file:line`, which `why` accepts, so every figure can be traced.
     Source(Loc),
+    /// Parts of one thing, or of a sentence, put together with this between them.
+    Join(&'static str, Vec<Cell<'s>>),
+}
+
+/// A quantity with its commodity: quanta, the commodity's decimal places, and
+/// its symbol.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Money<'s> {
+    pub qty: Qty,
+    pub scale: u8,
+    pub unit: &'s str,
+}
+
+/// A measurement: `concept` (of something, when it is a kind of measure) of
+/// `entity` over `when`, worth `value`.
+#[derive(Clone, Copy, Debug)]
+pub struct Fact<'s> {
+    pub concept: &'s str,
+    /// What it measures, when the concept is a kind of measure: `balance` of a place.
+    pub of: Option<&'s str>,
+    pub entity: &'s str,
+    pub when: When,
+    pub value: Money<'s>,
+}
+
+/// When a fact holds: at the end of a day, or over a period.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum When {
+    Instant(Day),
+    During(Days),
 }
 
 /// Builds the view `query` asks for, about the money of `whose` (`--for`: an
