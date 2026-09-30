@@ -188,8 +188,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.days.first()));
         let Ledger { plan, options, horizon, world, record, .. } = self;
         let posted = book.flows.iter().map(|(id, flow)| {
-            let amounts = record.resolved.get(&id).or_else(|| plan.amounts.get(&id)).copied();
-            let amounts = amounts.unwrap_or_else(|| Amounts::written(flow));
+            let amounts = settled(plan, &record, id, flow).unwrap_or_else(|| Amounts::written(flow));
             Posted { out: amounts.out, arrive: amounts.arrive, state: plan.events.state(id, flow) }
         });
         Run {
@@ -257,19 +256,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// the plan's; `=` and `all` depend on the balance and are resolved now,
     /// once, and remembered (a reversal must undo exactly what was done).
     fn amounts(&mut self, flow: &Flow, id: Option<Id<Flow>>) -> Amounts {
+        if let Some(done) = id.and_then(|id| settled(self.plan, &self.record, id, flow)) {
+            return done;
+        }
         let written = Amounts::written(flow);
         let resolved = match flow.infer {
-            Infer::Known => return written,
-            Infer::Unknown => return id.and_then(|id| self.plan.amounts.get(&id)).copied().unwrap_or(written),
-            Infer::All | Infer::Target { .. } => {
-                if let Some(&done) = id.and_then(|id| self.record.resolved.get(&id)) {
-                    return done;
-                }
-                match flow.infer {
-                    Infer::Target { end, balance } => self.resolve_target(flow, end, balance, written),
-                    _ => self.everything(flow, written),
-                }
-            }
+            Infer::Known | Infer::Unknown => return written,
+            Infer::Target { end, balance } => self.resolve_target(flow, end, balance, written),
+            Infer::All => self.everything(flow, written),
         };
         if let Some(id) = id {
             self.record.resolved.insert(id, resolved);
@@ -313,6 +307,17 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             (End::From, true) => Amounts { out: qty, ..written },
             (End::To, true) => Amounts { arrive: qty, ..written },
         }
+    }
+}
+
+/// A flow's quantities where they are already settled: as written, as the
+/// plan solved a `?`, or as the fold resolved an `=` or `all`. Only the last
+/// depends on the fold, and only it is looked up in the record.
+fn settled(plan: &Plan, record: &Record, id: Id<Flow>, flow: &Flow) -> Option<Amounts> {
+    match flow.infer {
+        Infer::Known => Some(Amounts::written(flow)),
+        Infer::Unknown => Some(plan.amounts.get(&id).copied().unwrap_or_else(|| Amounts::written(flow))),
+        Infer::All | Infer::Target { .. } => record.resolved.get(&id).copied(),
     }
 }
 

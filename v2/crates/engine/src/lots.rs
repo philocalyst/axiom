@@ -150,8 +150,9 @@ pub(crate) struct Request<'a> {
     pub spender: Option<Id<Entity>>,
     /// The moment, which is when and by what plain money is acquired.
     pub now: (Day, Id<Txn>),
-    /// List the candidates if the choice turns out to be ambiguous.
-    pub explain: bool,
+    /// Whether to list the candidates if the choice turns out to be ambiguous:
+    /// asked only then, since it is a lookup.
+    pub explain: &'a dyn Fn() -> bool,
 }
 
 /// What a parcel's tie says about when relief takes it. The variants are in
@@ -418,7 +419,7 @@ impl Slot {
         let takeable = self.qty - self.holding.plain.min(Qty::ZERO);
         let candidates = usize::from(self.holding.plain > Qty::ZERO) + self.live();
         out.ambiguous = policy.is_none() && candidates > 1 && req.need < takeable;
-        if out.ambiguous && req.explain {
+        if out.ambiguous && (req.explain)() {
             self.gather(req.money, &Selection { selectors: &[], txns: req.txns }, &mut out.candidates);
         }
         let mut left = req.need;
@@ -530,7 +531,7 @@ impl Slot {
             let take = left.min(total);
             if take < total && policy.is_none() && !interchangeable(group) {
                 out.ambiguous = true;
-                if req.explain {
+                if (req.explain)() {
                     out.candidates.extend_from_slice(group);
                 }
             }
@@ -896,7 +897,7 @@ mod tests {
         let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
         let (spender, now) = (ask.spender, (Day(1_000), Id::new(0)));
         let request =
-            Request { need: Qty(need), money, selectors, policy, txns: &txns, permits, spender, now, explain: true };
+            Request { need: Qty(need), money, selectors, policy, txns: &txns, permits, spender, now, explain: &|| true };
         slot.relieve(&request, &mut relief);
         relief
     }

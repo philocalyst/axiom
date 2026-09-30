@@ -8,7 +8,7 @@
 //! so nothing allocates in steady state, and are deliberately not cloned.
 
 use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
-use axiom_model::{Book, Commodity, Entity, Flow, Law, Param, Place, Subject, Value};
+use axiom_model::{Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Subject, Value};
 
 use crate::eval::Outcome;
 use crate::lots::{Holdings, Relief};
@@ -163,6 +163,12 @@ pub(crate) struct Scratch {
     pub relief: Relief,
     /// Entities parcels are tied to, and whether their laws permit the flow.
     pub permits: Vec<(Id<Entity>, bool)>,
+    /// What each amount of the flow being posted is worth in the base currency
+    /// on its day: the totals, the proceeds and the fee each ask, and a price
+    /// is looked up once.
+    pub worth: Vec<(Amount, Option<Qty>)>,
+    /// The rules of the list being fired that have run, when a law can reach one subject twice.
+    pub done: Vec<(Id<Law>, Subject)>,
 }
 
 impl Clone for Scratch {

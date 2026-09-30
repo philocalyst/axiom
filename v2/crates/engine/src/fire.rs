@@ -39,11 +39,12 @@ impl Ledger<'_, '_, '_> {
         if rules.is_empty() {
             return;
         }
-        let (plan, mut done) = (self.plan, Vec::new());
+        let (plan, mut done) = (self.plan, std::mem::take(&mut self.scratch.done));
         let book = plan.book;
+        done.clear();
         for rule in rules.iter().filter(|rule| applies(plan, rule, &on)) {
             // A law that two rules bring to one subject runs once.
-            if self.plan.repeats {
+            if plan.repeats {
                 if done.contains(&(rule.law, rule.subject)) {
                     continue;
                 }
@@ -51,6 +52,7 @@ impl Ledger<'_, '_, '_> {
             }
             self.enforce(rule, &Context::new(rule.subject, owner_of(book, rule.subject), &on));
         }
+        self.scratch.done = done;
     }
 
     /// Whether the `on spend` laws of `entity` permit the flow: a dry run that

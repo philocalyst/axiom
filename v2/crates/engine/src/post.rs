@@ -60,6 +60,7 @@ impl Ledger<'_, '_, '_> {
         let book = self.plan.book;
         let on = Occasion::flow(m);
         let watched = !m.opening;
+        self.scratch.worth.clear();
         // A `!` on an assertion accepts its gap: it is never unused.
         if let (Cause::Flow(_) | Cause::Applied(_), true, Some(waive)) = (m.cause, watched, m.waive) {
             self.record.waivers.entry(waive.loc).or_insert(false);
@@ -127,7 +128,7 @@ impl Ledger<'_, '_, '_> {
             permits: &self.scratch.permits,
             spender: m.detail.spender,
             now,
-            explain: !self.record.ambiguous.contains(&m.from),
+            explain: &|| !self.record.ambiguous.contains(&m.from),
         };
         self.world.holdings.relieve(m.from, unit, &request, &mut self.scratch.relief);
         if self.scratch.relief.ambiguous && self.record.ambiguous.insert(m.from) {
@@ -369,7 +370,11 @@ impl Ledger<'_, '_, '_> {
         if amount.unit == book.base {
             return Some(amount.qty);
         }
+        if let Some(&(_, worth)) = self.scratch.worth.iter().find(|&&(seen, _)| seen == amount) {
+            return worth;
+        }
         let value = book.convert(amount, book.base, m.day).map(|priced| priced.qty);
+        self.scratch.worth.push((amount, value));
         if value.is_none() && self.record.missing.insert(Missing::Price(amount.unit, book.base)) {
             let fault = Fault::NoPrice { unit: amount.unit, quote: book.base };
             let (what, help) = show::fault(book, fault, m.day);
