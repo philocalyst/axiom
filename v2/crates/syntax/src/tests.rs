@@ -1670,6 +1670,41 @@ fn fractions_and_rates_are_tokens() {
 }
 
 #[test]
+fn malformed_unicode_escapes_keep_utf8_boundaries() {
+    assert_eq!(tokens(r#""\é""#).first(), Some(&Tok::Invalid(Malformed::Escape(1))));
+
+    let src = "2026-01-15 checking -> groceries 5 USD \"cash\\é\"\n";
+    let (file, diagnostics) = parse(FileId(0), src);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "bad-escape");
+    for label in &diagnostics[0].labels {
+        assert!(src.is_char_boundary(label.loc.start as usize));
+        assert!(src.is_char_boundary(label.loc.end as usize));
+    }
+    assert_eq!(crate::format(src, &file), src);
+
+    let malformed_format = "format csv\n  memo \"a\\界\n";
+    let (file, diagnostics) = parse(FileId(0), malformed_format);
+    assert!(diagnostics.iter().any(|diag| diag.code == "unterminated-string"));
+    assert_eq!(crate::format(malformed_format, &file), malformed_format);
+}
+
+#[test]
+fn a_piece_larger_than_its_reference_space_is_rejected() {
+    let prefix = "// comment before the oversized block\n";
+    let src = format!("{prefix}2026-01-15 a -> b\n  {}\n", "x".repeat(crate::refs::MAX_LOCAL_NODES + 1));
+    let (file, diagnostics) = parse(FileId(0), &src);
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "piece-too-large");
+    assert!(file.items.is_empty());
+    let location = diagnostics[0].labels[0].loc;
+    assert_eq!(location.start, prefix.len() as u32);
+    assert_eq!(location.start, location.end);
+    assert!(src.is_char_boundary(location.start as usize));
+    assert_eq!(file.format(), crate::format(&src, &file));
+}
+
+#[test]
 fn hyphens_and_slashes_join_names_but_arrows_and_comments_do_not() {
     assert_eq!(tokens("trader-joes"), [Tok::Name("trader-joes")]);
     assert_eq!(tokens("a - b"), [Tok::Name("a"), Tok::Punct(Punct::Minus), Tok::Name("b")]);
@@ -2405,6 +2440,7 @@ fn shape(src: &str, folder: Folder) -> String {
 fn formatted(src: &str, folder: Folder) -> String {
     let file = crate::parse(FileId(0), src, folder).0;
     let once = crate::format(src, &file);
+    assert_eq!(file.format(), once);
     let (after, before) = (shape(&once, folder), shape(src, folder));
     if after != before {
         let at = after.bytes().zip(before.bytes()).position(|(a, b)| a != b).unwrap_or(after.len().min(before.len()));

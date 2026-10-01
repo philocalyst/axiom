@@ -13,6 +13,8 @@ use std::ops::Range;
 /// The bits of a reference that give the position in its piece's table.
 const LOCAL_BITS: u32 = 24;
 const LOCAL_MASK: u32 = (1 << LOCAL_BITS) - 1;
+/// The number of local positions the 24-bit part of a reference can name.
+pub(crate) const MAX_LOCAL_NODES: usize = 1 << LOCAL_BITS;
 
 /// How many pieces a file can be cut into.
 pub(crate) const MAX_PIECES: usize = 1 << (32 - LOCAL_BITS);
@@ -29,7 +31,7 @@ impl<T> Ref<T> {
     /// any one node, which its size (at most 16 MiB) guarantees: a node takes a
     /// byte of source.
     pub(crate) fn new(piece: usize, local: usize) -> Ref<T> {
-        debug_assert!(piece < MAX_PIECES && local <= LOCAL_MASK as usize);
+        debug_assert!(piece < MAX_PIECES && local < MAX_LOCAL_NODES);
         Ref { raw: (piece as u32) << LOCAL_BITS | local as u32, of: PhantomData }
     }
 

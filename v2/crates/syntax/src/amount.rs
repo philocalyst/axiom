@@ -103,7 +103,7 @@ impl<'s> Parser<'s> {
             if !matches!(self.tok(), Tok::Name("up") | Tok::Punct(Punct::At)) {
                 return Ok(Amount::Literal(literal));
             }
-            return self.more_amount(Amount::Literal(literal), priced);
+            return self.more_amount(literal, priced);
         }
         let start = self.peek().loc;
         let (first, loc) = self.term(priced)?;
@@ -112,12 +112,11 @@ impl<'s> Parser<'s> {
 
     /// What follows a literal that `up to` or `@` may continue.
     #[inline(never)]
-    fn more_amount(&mut self, first: Amount<'s>, priced: bool) -> Parse<Amount<'s>> {
-        let Amount::Literal(literal) = first else { unreachable!("a literal") };
+    fn more_amount(&mut self, literal: Literal<'s>, priced: bool) -> Parse<Amount<'s>> {
         let loc = self.loc_of(&literal);
         let (amount, loc) = match priced && self.at(Punct::At) {
             true => (self.at_price(literal)?, self.loc_from(loc.start as usize)),
-            false => (first, loc),
+            false => (Amount::Literal(literal), loc),
         };
         self.more_of(amount, loc, loc.start as usize, priced)
     }

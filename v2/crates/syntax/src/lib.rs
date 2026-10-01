@@ -62,7 +62,7 @@ use crate::ast::Piece;
 use crate::dates::heading;
 use crate::lines::{Tabs, unattached_doc};
 use crate::parser::Parser;
-use crate::refs::MAX_PIECES;
+use crate::refs::{MAX_LOCAL_NODES, MAX_PIECES};
 
 /// A file smaller than this is parsed by one thread: cutting and joining would
 /// cost more than it saves.
@@ -88,7 +88,9 @@ const FILE_MAX: usize = MAX_PIECES * PIECE_TARGET;
 /// convention of where files are kept, not a law (§10).
 ///
 /// A large file is cut at item boundaries and its pieces are parsed on every
-/// core. They keep their tables, and the file is their items in order.
+/// core. They keep their tables, and the file is their items in order. Each
+/// piece must fit the 24-bit local positions of its references; a block too
+/// large to fit one piece is rejected.
 pub fn parse(file: FileId, src: &str, folder: Folder) -> (File<'_>, Vec<Diagnostic>) {
     if src.len() > FILE_MAX {
         let diag = Diagnostic::error("file-too-large", "source files are limited to 2 GiB")
@@ -106,6 +108,16 @@ pub fn parse(file: FileId, src: &str, folder: Folder) -> (File<'_>, Vec<Diagnost
 /// [`parse`] with the file cut into about `pieces` pieces.
 pub(crate) fn parse_in(file: FileId, src: &str, folder: Folder, pieces: usize) -> (File<'_>, Vec<Diagnostic>) {
     let ranges = cut(src, pieces);
+    // A stored node takes at least one byte of source, so no table in a piece
+    // can exceed the number of byte positions its references can name.
+    if let Some(range) = ranges.iter().find(|range| range.len() > MAX_LOCAL_NODES) {
+        let at = first_item(src.as_bytes(), range);
+        let diag = Diagnostic::error("piece-too-large", "one parser piece is limited to 16 MiB")
+            .label(Loc::new(file, at as u32, at as u32), "this block cannot fit the syntax index")
+            .note("syntax references have a 24-bit position within each piece")
+            .help("split this block into smaller top-level items");
+        return (File::new(file, src, Vec::new()), vec![diag]);
+    }
     // What each piece holds is read first, because what a piece's dates leave
     // out depends on the last heading before it, in whichever piece that was.
     let scans = par::map_each(&ranges, |range| Scan::of(&src.as_bytes()[range.clone()]));
@@ -130,6 +142,20 @@ pub(crate) fn parse_in(file: FileId, src: &str, folder: Folder, pieces: usize) -
     diags.extend(tabs.diagnostic());
     diags.sort_by_key(|diag| diag.anchor().map(|loc| loc.start));
     (File::new(file, src, pieces), diags)
+}
+
+/// The first item line in a piece, after any comments and blank lines.
+fn first_item(bytes: &[u8], range: &Range<usize>) -> usize {
+    let mut start = range.start;
+    while start < range.end {
+        let end = memchr(b'\n', &bytes[start..range.end]).map_or(range.end, |newline| start + newline);
+        let line = bytes[start..end].trim_ascii();
+        if !(line.is_empty() || line.starts_with(b"//")) {
+            return start;
+        }
+        start = (end + 1).min(range.end);
+    }
+    range.start
 }
 
 /// A parsed piece, what it found wrong, and its lines that were indented with tabs.

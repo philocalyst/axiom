@@ -23,7 +23,7 @@
 //!             let txn = &file[id];
 //!             for leg in &file[txn.flow.body.legs] { /* … */ }
 //!         }
-//!         ItemKind::Statement(id) => match file[id].predicate { /* … */ },
+//!         ItemKind::Statement(id) => match file[id].verb { /* … */ },
 //!         _ => {}
 //!     }
 //! }
@@ -38,8 +38,8 @@
 //! A dated line is a **flow** (`->`, a [`Txn`]) or a **statement** (a
 //! [`Statement`]): one thing said about one thing on a day. What a statement
 //! says is read from the shape of what follows its subject, so the parser knows
-//! that `01 flat` is an occurrence and `07-01 flat 3_050 USD monthly` new terms
-//! without knowing what a `flat` is; that is for the model.
+//! that `01 flat` is an occurrence and `07-01 flat now 3_050 USD monthly` new
+//! terms without knowing what a `flat` is; that is for the model.
 //!
 //! # Text and locations
 //!
@@ -234,6 +234,11 @@ impl<'s> File<'s> {
     /// Where a slice of the source was written.
     pub fn loc(&self, text: &str) -> Loc {
         locate(self.id, self.src, text)
+    }
+
+    /// This file laid out in the house style, using the source it borrows.
+    pub fn format(&self) -> String {
+        crate::style::format(self.src, self)
     }
 }
 
