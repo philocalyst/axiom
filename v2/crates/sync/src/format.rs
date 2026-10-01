@@ -49,38 +49,6 @@ impl<'t> MemoJoin<'t> {
     }
 
     fn finish(self) -> Option<(Cow<'t, str>, Span)> {
-        let span = self.span.unwrap_or(ABSENT);
-        match (self.first, self.joined) {
-            (None, _) => None,
-            (Some(first), None) => Some((first, span)),
-            (Some(_), Some(joined)) => Some((Cow::Owned(joined), span)),
-        }
-    }
-}
-
-#[derive(Default)]
-struct MemoJoin<'t> {
-    first: Option<Cow<'t, str>>,
-    joined: Option<String>,
-    span: Option<Span>,
-}
-
-impl<'t> MemoJoin<'t> {
-    fn push(&mut self, cell: &Cell<'t>) {
-        if cell.text.is_empty() {
-            return;
-        }
-        if let Some(first) = &self.first {
-            let joined = self.joined.get_or_insert_with(|| first.to_string());
-            joined.push(' ');
-            joined.push_str(&cell.text);
-        } else {
-            self.first = Some(cell.text.clone());
-            self.span = Some(cell.span);
-        }
-    }
-
-    fn finish(self) -> Option<(Cow<'t, str>, Span)> {
         match (self.first, self.joined) {
             (None, _) => None,
             (Some(first), None) => Some((first, self.span.unwrap_or(ABSENT))),
