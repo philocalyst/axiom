@@ -16,11 +16,10 @@ use std::ops::Deref;
 use axiom_core::glob::glob;
 use axiom_core::{Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
-    self, Amount, BinOp, Book, Dir, Effect as LawEffect, Entity, Fault, Field, Func, Law, NodeId, Object, Op, Param,
-    Prop, Purposed, StepKind, Subject, Text, Value, Var, Window,
+    self, Amount, BinOp, Book, Dir, Effect as LawEffect, Entity, Fault, Field, Func, Law, NodeId,
+    Object, Op, Param, Prop, Purposed, StepKind, Subject, Text, Ty, Value, Var, Window,
 };
 
-use crate::bridge::V3;
 use crate::calc::{Calc, progressive};
 use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
@@ -54,7 +53,7 @@ pub(crate) struct Occasion<'a> {
     /// What the triggering flow was for, if it had a purpose.
     pub purpose: Option<Purposed>,
     /// The triggering flow's description, if written.
-    pub description: Option<Sym>,
+    pub description: Option<Text>,
     /// `amount`: what the trigger says is moving.
     pub amount: Option<Amount>,
     /// `gain`, `proceeds`, `basis`, `held`, for `on gain`.
@@ -72,7 +71,13 @@ pub(crate) struct Occasion<'a> {
 
 impl<'a> Occasion<'a> {
     /// Something that happened on `day`, with nothing more said about it yet.
-    fn on(day: Day, over: Days, span: Days, cause: Cause, motion: Option<&'a Motion<'a>>) -> Occasion<'a> {
+    fn on(
+        day: Day,
+        over: Days,
+        span: Days,
+        cause: Cause,
+        motion: Option<&'a Motion<'a>>,
+    ) -> Occasion<'a> {
         let (amount, realized, skip_internal, checking) = (None, None, false, false);
         Occasion {
             day,
@@ -106,18 +111,28 @@ impl<'a> Occasion<'a> {
     /// A window that some flow recognized value into ahead of time, entered on
     /// `day`: the laws about its total are read as no flow will make them.
     pub fn window(day: Day, period: Days) -> Occasion<'static> {
-        Occasion { checking: true, ..Occasion::time(day, period) }
+        Occasion {
+            checking: true,
+            ..Occasion::time(day, period)
+        }
     }
 
     /// A purpose total reaches a new month or year before its flows land.
     pub fn purpose_window(day: Day, period: Days, window: Window) -> Occasion<'static> {
-        Occasion { purpose_window: Some(window), ..Occasion::window(day, period) }
+        Occasion {
+            purpose_window: Some(window),
+            ..Occasion::window(day, period)
+        }
     }
 
     /// The day whose window totals are read: the day a flow moved, or the last
     /// day of the period a law closes.
     pub fn anchor(&self) -> Day {
-        if self.motion.is_some() { self.day } else { self.over.first() }
+        if self.motion.is_some() {
+            self.day
+        } else {
+            self.over.first()
+        }
     }
 }
 
@@ -126,12 +141,32 @@ pub(crate) struct Context<'a> {
     /// What `self` is.
     pub subject: Subject,
     pub owner: Id<Entity>,
+    /// Governing purpose for purpose-law or template expression evaluation.
+    pub governing_purpose: Option<Id<axiom_model::Purpose>>,
+    /// Declaration-order bindings for a contract occurrence.
+    pub inputs: Option<&'a [Option<Amount>]>,
     on: &'a Occasion<'a>,
 }
 
 impl<'a> Context<'a> {
     pub fn new(subject: Subject, owner: Id<Entity>, on: &'a Occasion<'a>) -> Context<'a> {
-        Context { subject, owner, on }
+        Context {
+            subject,
+            owner,
+            governing_purpose: None,
+            inputs: None,
+            on,
+        }
+    }
+
+    pub fn with_inputs(mut self, inputs: &'a [Option<Amount>]) -> Self {
+        self.inputs = Some(inputs);
+        self
+    }
+
+    pub fn for_purpose(mut self, purpose: Id<axiom_model::Purpose>) -> Self {
+        self.governing_purpose = Some(purpose);
+        self
     }
 }
 
@@ -157,23 +192,49 @@ pub(crate) enum Outcome {
     /// A `require` or `warn` that does not hold.
     Broken { step: u32, warn: bool },
     /// A `require … else owe …` that did not hold: priced, and owed.
-    Priced { step: u32, name: Sym, amount: Amount, owed: Owed },
+    Priced {
+        step: u32,
+        name: Sym,
+        amount: Amount,
+        owed: Owed,
+    },
     /// A fault reached a step.
     Faulted { step: u32, fault: Fault },
     /// `count`: adds `amount` (base currency) to a tally.
     Count { name: Sym, amount: Qty },
     /// `owe`.
-    Owe { name: Sym, amount: Amount, owed: Owed },
+    Owe {
+        name: Sym,
+        amount: Amount,
+        owed: Owed,
+    },
     /// What a `require` or `warn` compared: `counted <= limit`, the sides of a
     /// `>=` swapped.
-    Read { step: u32, counted: Amount, limit: Amount },
+    Read {
+        step: u32,
+        counted: Amount,
+        limit: Amount,
+    },
 }
 
 /// Runs `law`'s steps in order. Returns whether it ran to the end rather than
 /// stopping at a `when` that was false (or faulted).
-pub(crate) fn run(env: Env, law: &Law, ctx: &Context, values: &mut Vec<Value>, out: &mut Vec<Outcome>) -> bool {
+pub(crate) fn run(
+    env: Env,
+    law: &Law,
+    ctx: &Context,
+    values: &mut Vec<Value>,
+    out: &mut Vec<Outcome>,
+) -> bool {
     values.resize(law.nodes.len(), Value::Empty);
-    let mut machine = Machine { env, law, ctx, values, out };
+    let mut machine = Machine {
+        env,
+        nodes: &law.nodes,
+        law: Some(law),
+        ctx,
+        values,
+        out,
+    };
     if let Some(window) = ctx.purpose_window {
         let last = law
             .steps
@@ -201,7 +262,7 @@ fn purpose_reader_step(law: &Law, index: usize, window: Window) -> bool {
         StepKind::When(_) | StepKind::Unless(_) | StepKind::Let(_) => true,
         StepKind::Require { cond, .. } => law.range(*cond).any(|at| {
             matches!(
-                law.nodes[at].op,
+                law.nodes[NodeId(at as u32)].op,
                 Op::Call(Func::PurposeTotal { window: read, .. }, _) if read == window
             )
         }),
@@ -210,14 +271,50 @@ fn purpose_reader_step(law: &Law, index: usize, window: Window) -> bool {
 }
 
 /// Evaluates one expression of `law` (a `by` date, say).
-pub(crate) fn expression(env: Env, law: &Law, root: NodeId, ctx: &Context, values: &mut Vec<Value>) -> Value {
+pub(crate) fn expression(
+    env: Env,
+    law: &Law,
+    root: NodeId,
+    ctx: &Context,
+    values: &mut Vec<Value>,
+) -> Value {
     values.resize(law.nodes.len(), Value::Empty);
-    Machine { env, law, ctx, values, out: &mut Vec::new() }.scan(root)
+    Machine {
+        env,
+        nodes: &law.nodes,
+        law: Some(law),
+        ctx,
+        values,
+        out: &mut Vec::new(),
+    }
+    .scan(root)
+}
+
+/// Evaluate a typed expression program for a journal, assertion or contract
+/// occurrence using caller-owned context and scratch storage.
+pub(crate) fn program_expression(
+    env: Env,
+    program: &axiom_model::TemplateProgram,
+    root: NodeId,
+    ctx: &Context,
+    values: &mut Vec<Value>,
+) -> Value {
+    values.resize(program.nodes.len(), Value::Empty);
+    Machine {
+        env,
+        nodes: &program.nodes,
+        law: None,
+        ctx,
+        values,
+        out: &mut Vec::new(),
+    }
+    .scan(root)
 }
 
 struct Machine<'a, 's> {
     env: Env<'a, 's>,
-    law: &'a Law,
+    nodes: &'a axiom_core::Arena<axiom_model::Node>,
+    law: Option<&'a Law>,
     ctx: &'a Context<'a>,
     values: &'a mut Vec<Value>,
     /// What the steps so far found. A later step's `tally(…)` sees the `count`s
@@ -233,7 +330,10 @@ impl<'a, 's> Machine<'a, 's> {
     }
 
     fn calc(&self) -> Calc<'a, 's> {
-        Calc { book: self.env.plan.book, day: self.ctx.day }
+        Calc {
+            book: self.env.plan.book,
+            day: self.ctx.day,
+        }
     }
 
     fn base(&self, qty: Qty) -> Value {
@@ -246,17 +346,22 @@ impl<'a, 's> Machine<'a, 's> {
 
     /// Evaluates a step's expression: one forward scan, each node stored.
     fn scan(&mut self, root: NodeId) -> Value {
-        for at in self.law.range(root) {
+        for at in self.nodes[root].first.index()..=root.index() {
+            let Some(ty) = self.nodes[NodeId(at as u32)].typed_ty() else {
+                self.values[at] = Value::Fault(Fault::InvalidProgram);
+                continue;
+            };
             let value = self.node(at);
-            self.values[at] = self.calc().typed_value(value, self.law.nodes[at].ty);
+            self.values[at] = self.calc().typed_value(value, ty);
         }
         self.at(root)
     }
 
     /// Runs one step. `false` stops the law.
     fn step(&mut self, index: usize) -> bool {
+        let law = self.law.expect("only law programs have steps");
         let step = index as u32;
-        match &self.law.steps[index].kind {
+        match &law.steps[index].kind {
             StepKind::When(cond) => match self.scan(*cond) {
                 Value::Bool(pass) => pass,
                 Value::Fault(fault) => {
@@ -277,7 +382,12 @@ impl<'a, 's> Machine<'a, 's> {
                 }
                 _ => unreachable!("{TYPED}"),
             },
-            StepKind::Require { cond, otherwise, severity, .. } => {
+            StepKind::Require {
+                cond,
+                otherwise,
+                severity,
+                ..
+            } => {
                 let held = self.scan(*cond);
                 self.read(step, *cond);
                 match held {
@@ -285,7 +395,10 @@ impl<'a, 's> Machine<'a, 's> {
                     // v3 bridge: a v3 `require` has one reparation at most.
                     Value::Bool(false) => match otherwise.first() {
                         Some(effect) => self.price(step, effect),
-                        None => self.out.push(Outcome::Broken { step, warn: *severity == Severity::Warning }),
+                        None => self.out.push(Outcome::Broken {
+                            step,
+                            warn: *severity == Severity::Warning,
+                        }),
                     },
                     Value::Fault(fault) => self.out.push(Outcome::Faulted { step, fault }),
                     _ => unreachable!("{TYPED}"),
@@ -301,9 +414,23 @@ impl<'a, 's> Machine<'a, 's> {
 
     /// Notes what a comparison of amounts compared: the counted side and its limit.
     fn read(&mut self, step: u32, cond: NodeId) {
-        let Some((cmp, left, right)) = compared(self.law, self.values, cond) else { return };
-        let (counted, limit) = if matches!(cmp, BinOp::Lt | BinOp::Le) { (left, right) } else { (right, left) };
-        self.out.push(Outcome::Read { step, counted, limit });
+        let Some((cmp, left, right)) = compared(
+            self.law.expect("only law steps produce comparisons"),
+            self.values,
+            cond,
+        ) else {
+            return;
+        };
+        let (counted, limit) = if matches!(cmp, BinOp::Lt | BinOp::Le) {
+            (left, right)
+        } else {
+            (right, left)
+        };
+        self.out.push(Outcome::Read {
+            step,
+            counted,
+            limit,
+        });
     }
 
     /// A `require … else owe …` that failed: the violation is priced.
@@ -311,30 +438,60 @@ impl<'a, 's> Machine<'a, 's> {
         let before = self.out.len();
         self.effect(step, effect);
         if let Some(&Outcome::Owe { name, amount, owed }) = self.out.get(before) {
-            self.out[before] = Outcome::Priced { step, name, amount, owed };
+            self.out[before] = Outcome::Priced {
+                step,
+                name,
+                amount,
+                owed,
+            };
         }
     }
 
     fn effect(&mut self, step: u32, effect: &LawEffect) {
         match *effect {
             LawEffect::Count { amount, name } => {
-                let Some(amount) = self.nonzero_amount(step, amount) else { return };
+                let Some(amount) = self.nonzero_amount(step, amount) else {
+                    return;
+                };
                 match self.calc().convert(amount, self.book().base) {
-                    Ok(base) => self.out.push(Outcome::Count { name, amount: base.qty }),
+                    Ok(base) => self.out.push(Outcome::Count {
+                        name,
+                        amount: base.qty,
+                    }),
                     Err(fault) => self.out.push(Outcome::Faulted { step, fault }),
                 }
             }
-            LawEffect::Owe { amount, to, due, name } => {
-                let Some(amount) = self.nonzero_amount(step, amount) else { return };
+            LawEffect::Owe {
+                amount,
+                to,
+                due,
+                name,
+            } => {
+                let Some(amount) = self.nonzero_amount(step, amount) else {
+                    return;
+                };
                 let due = match due.map(|node| self.scan(node)) {
                     None => self.ctx.day,
                     Some(Value::Day(day)) => day,
-                    Some(Value::Fault(fault)) => return self.out.push(Outcome::Faulted { step, fault }),
+                    Some(Value::Fault(fault)) => {
+                        return self.out.push(Outcome::Faulted { step, fault });
+                    }
                     Some(_) => unreachable!("{TYPED}"),
                 };
-                self.out.push(Outcome::Owe { name, amount, owed: Owed { to, due } });
+                self.out.push(Outcome::Owe {
+                    name,
+                    amount,
+                    owed: Owed { to, due },
+                });
             }
-            LawEffect::Consume { .. } | LawEffect::Carry { .. } => unreachable!("{V3}"),
+            // These effects are applied by the native asset/claim monitor. A
+            // law cannot silently fall back to the removed v3 asset bridge.
+            LawEffect::Consume { .. } | LawEffect::Carry { .. } => {
+                self.out.push(Outcome::Faulted {
+                    step,
+                    fault: Fault::InvalidProgram,
+                });
+            }
         }
     }
 
@@ -367,16 +524,21 @@ impl<'a, 's> Machine<'a, 's> {
             Some(_) => unreachable!("{TYPED}"),
         };
         let counted = self.out.iter().filter_map(|o| match *o {
-            Outcome::Count { name: counted, amount } if counted == name && year == this_year => {
-                Some(spread(amount, ctx.over, Window::Year.around(ctx.over.first())))
-            }
+            Outcome::Count {
+                name: counted,
+                amount,
+            } if counted == name && year == this_year => Some(spread(
+                amount,
+                ctx.over,
+                Window::Year.around(ctx.over.first()),
+            )),
             _ => None,
         });
         self.base(tallies.read(ctx.owner, year, name) + counted.sum())
     }
 
     fn node(&self, at: usize) -> Value {
-        match &self.law.nodes[at].op {
+        match &self.nodes[NodeId(at as u32)].op {
             Op::Const(value) => *value,
             Op::Var(var) => self.var(*var),
             Op::Local(bound) => self.at(*bound),
@@ -396,21 +558,43 @@ impl<'a, 's> Machine<'a, 's> {
                 *op,
                 self.at(*l),
                 self.at(*r),
-                self.law.nodes[l.index()].ty,
-                self.law.nodes[r.index()].ty,
-                self.law.nodes[at].ty,
+                self.nodes[*l].typed_ty().unwrap_or(Ty::Empty),
+                self.nodes[*r].typed_ty().unwrap_or(Ty::Empty),
+                self.nodes[NodeId(at as u32)]
+                    .typed_ty()
+                    .unwrap_or(Ty::Empty),
             ),
             Op::At(quantity, price) => self.calc().binary_typed(
                 BinOp::Mul,
                 self.at(*quantity),
                 self.at(*price),
-                self.law.nodes[quantity.index()].ty,
-                self.law.nodes[price.index()].ty,
-                self.law.nodes[at].ty,
+                self.nodes[*quantity].typed_ty().unwrap_or(Ty::Empty),
+                self.nodes[*price].typed_ty().unwrap_or(Ty::Empty),
+                self.nodes[NodeId(at as u32)]
+                    .typed_ty()
+                    .unwrap_or(Ty::Empty),
             ),
+            Op::Of(purpose, object) => match (self.at(*purpose), self.at(*object)) {
+                (Value::Fault(fault), _) | (_, Value::Fault(fault)) => Value::Fault(fault),
+                (Value::Purpose(purpose, _), Value::Asset(asset)) => {
+                    Value::Purpose(purpose, Some(Object::Asset(asset)))
+                }
+                (Value::Purpose(purpose, _), Value::Place(place)) => {
+                    Value::Purpose(purpose, Some(Object::Place(place)))
+                }
+                (Value::Purpose(purpose, _), Value::Entity(entity)) => {
+                    Value::Purpose(purpose, Some(Object::Entity(entity)))
+                }
+                _ => Value::Fault(Fault::InvalidProgram),
+            },
+            Op::Select(_) => Value::Fault(Fault::InvalidProgram),
             Op::Is(x, alternatives) => match self.at(*x) {
                 fault @ Value::Fault(_) => fault,
-                left => Value::Bool(alternatives.iter().any(|&alt| self.matches(left, self.at(alt)))),
+                left => Value::Bool(
+                    alternatives
+                        .iter()
+                        .any(|&alt| self.matches(left, self.at(alt))),
+                ),
             },
             Op::If(cond, then, otherwise) => match self.at(*cond) {
                 Value::Bool(true) => self.at(*then),
@@ -425,7 +609,8 @@ impl<'a, 's> Machine<'a, 's> {
     fn var(&self, var: Var) -> Value {
         let ctx = self.ctx;
         let flow = |pick: fn(&Motion) -> Value| ctx.motion.map_or(Value::Empty, pick);
-        let realized = |pick: fn(&Realized) -> Qty| ctx.realized.map_or(Value::Empty, |r| self.base(pick(&r)));
+        let realized =
+            |pick: fn(&Realized) -> Qty| ctx.realized.map_or(Value::Empty, |r| self.base(pick(&r)));
         match var {
             Var::Amount => ctx.amount.map_or(Value::Empty, Value::Amount),
             Var::From => flow(|m| Value::Place(m.from)),
@@ -438,6 +623,7 @@ impl<'a, 's> Machine<'a, 's> {
                 Subject::Place(place) => Value::Place(place),
                 Subject::Entity(entity) => Value::Entity(entity),
                 Subject::Asset(asset) => Value::Asset(asset),
+                Subject::Contract(_) => Value::Flow,
             },
             Var::Owner => Value::Entity(ctx.owner),
             Var::Gain => realized(|r| r.gain),
@@ -448,8 +634,19 @@ impl<'a, 's> Machine<'a, 's> {
             Var::Remaining => self.remaining(),
             Var::Flow => Value::Flow,
             // v3 bridge: no v3 trigger says what a flow is for.
-            Var::Purpose => ctx.purpose.map_or(Value::Empty, |purpose| Value::Purpose(purpose.purpose, purpose.of)),
+            Var::Purpose => ctx.purpose.map_or(Value::Empty, |purpose| {
+                Value::Purpose(purpose.purpose, purpose.of)
+            }),
             Var::Description => ctx.description.map_or(Value::Empty, Value::Text),
+            Var::Input(index) => match ctx
+                .inputs
+                .and_then(|inputs| inputs.get(index as usize))
+                .copied()
+                .flatten()
+            {
+                Some(amount) => Value::Amount(amount),
+                None => Value::Fault(Fault::MissingInput(index)),
+            },
         }
     }
 
@@ -481,9 +678,17 @@ impl<'a, 's> Machine<'a, 's> {
 
     /// From the entity's `born` date to the day of evaluation.
     fn age(&self, entity: Id<Entity>) -> Value {
-        let born = self.env.plan.known.born.expect("a law that reads `.age` makes the model intern `born`");
+        let born = self
+            .env
+            .plan
+            .known
+            .born
+            .expect("a law that reads `.age` makes the model intern `born`");
         match axiom_model::prop(&self.book().entities[entity].props, born, self.ctx.day) {
-            Some(Prop { value: Value::Day(day), .. }) => Value::Span(self.ctx.day.since(*day)),
+            Some(Prop {
+                value: Value::Day(day),
+                ..
+            }) => Value::Span(self.ctx.day.since(*day)),
             _ => Value::Fault(Fault::Unset(born)),
         }
     }
@@ -521,6 +726,12 @@ impl<'a, 's> Machine<'a, 's> {
                 _ => return Value::Fault(Fault::NoRow(param)),
             }
         }
+        if keys.iter().enumerate().any(|(index, &key)| {
+            !(index == 0 && matches!(self.at(key), Value::Num(_) | Value::Day(_)))
+                && self.key_name(self.at(key)).is_none()
+        }) {
+            return Value::Fault(Fault::NoRow(param));
+        }
         self.book().params[param]
             .row_index_by(when, |row_names| {
                 if row_names.len() != name_count {
@@ -534,7 +745,7 @@ impl<'a, 's> Machine<'a, 's> {
                     }
                 });
                 for (row_name, requested) in row_names.iter().zip(&mut names) {
-                    match row_name.cmp(requested) {
+                    match row_name.cmp(&requested) {
                         std::cmp::Ordering::Equal => {}
                         different => return different,
                     }
@@ -566,18 +777,23 @@ impl<'a, 's> Machine<'a, 's> {
             (Value::Kind(a), Value::Kind(k)) => book.is_a(a, k),
             (Value::Purpose(actual, actual_of), Value::Purpose(wanted, wanted_of)) => {
                 book.purposes.covers(wanted, actual)
-                    && wanted_of.is_none_or(|wanted| actual_of.is_some_and(|actual| object_matches(book, actual, wanted)))
+                    && wanted_of.is_none_or(|wanted| {
+                        actual_of.is_some_and(|actual| object_matches(book, actual, wanted))
+                    })
             }
             (Value::Place(p), Value::Place(root)) => book.places.covers(root, p),
-            (Value::Place(p), Value::Entity(root)) => book.entities.covers(root, book.places[p].owner),
+            (Value::Place(p), Value::Entity(root)) => {
+                book.entities.covers(root, book.places[p].owner)
+            }
             (Value::Entity(e), Value::Entity(root)) => book.entities.covers(root, e),
             (Value::Unit(a), Value::Unit(b)) => a == b,
             (Value::Place(p), Value::Glob(pattern)) => named(pattern, book.places[p].path),
             (Value::Entity(e), Value::Glob(pattern)) => named(pattern, book.entities[e].path),
             (Value::Unit(u), Value::Glob(pattern)) => named(pattern, book.commodities[u].symbol),
-            (Value::Flow, Value::Code(code)) => {
-                self.ctx.motion.is_some_and(|m| m.codes().any(|mark| named(code, mark)))
-            }
+            (Value::Flow, Value::Code(code)) => self
+                .ctx
+                .motion
+                .is_some_and(|m| m.codes().any(|mark| named(code, mark))),
             _ => false,
         }
     }
@@ -585,8 +801,16 @@ impl<'a, 's> Machine<'a, 's> {
     fn call(&self, func: Func, args: &[NodeId]) -> Value {
         let arg = |i: usize| self.at(args[i]);
         // `total` and `tally` take their operands from the function itself.
-        let operands = !matches!(func, Func::Total(..) | Func::PurposeTotal { .. } | Func::Tally(_));
-        if operands && let Some(fault) = args.iter().map(|&a| self.at(a)).find(|v| matches!(v, Value::Fault(_))) {
+        let operands = !matches!(
+            func,
+            Func::Total(..) | Func::PurposeTotal { .. } | Func::Tally(_)
+        );
+        if operands
+            && let Some(fault) = args
+                .iter()
+                .map(|&a| self.at(a))
+                .find(|v| matches!(v, Value::Fault(_)))
+        {
             return fault;
         }
         match func {
@@ -602,42 +826,54 @@ impl<'a, 's> Machine<'a, 's> {
             },
             Func::Progressive => self.progressive(arg(0), arg(1)),
             Func::Value => match (arg(0), arg(1)) {
-                (Value::Amount(a), Value::Unit(unit)) => {
-                    self.calc().convert(a, unit).map_or_else(Value::Fault, Value::Amount)
-                }
+                (Value::Amount(a), Value::Unit(unit)) => self
+                    .calc()
+                    .convert(a, unit)
+                    .map_or_else(Value::Fault, Value::Amount),
                 (Value::Empty, Value::Unit(unit)) => Value::Amount(Amount::zero(unit)),
                 _ => unreachable!("{TYPED}"),
             },
             Func::Date => civil_date(arg(0), arg(1), arg(2)).map_or_else(Value::Fault, Value::Day),
             Func::StraightLine => self.straight_line(args),
+            Func::Open(code) => self.open(code),
+            // Extrema and day counts need the occurrence-history recorder.
+            // Do not silently substitute the current sample for a historical answer.
+            Func::Peak | Func::Low | Func::Days => Value::Fault(Fault::InvalidProgram),
         }
     }
 
     fn purpose_total(&self, purpose: Option<Id<axiom_model::Purpose>>, window: Window) -> Value {
-        let purpose = purpose.or_else(|| match self.law.owner {
-            axiom_model::Owner::Purpose(purpose) => Some(purpose),
-            _ => None,
-        }).expect("a purpose total without an explicit purpose belongs to a purpose law");
+        let purpose = purpose
+            .or(self.ctx.governing_purpose)
+            .or_else(|| {
+                self.law.and_then(|law| match law.owner {
+                    axiom_model::Owner::Purpose(purpose) => Some(purpose),
+                    _ => None,
+                })
+            })
+            .expect("a purpose total without an explicit purpose requires a purpose context");
         let root = self.book().purposes[purpose].root;
-        let (incoming, outgoing) = self.env.world.totals.read_purpose(
-            self.ctx.owner,
-            purpose,
-            window,
-            self.ctx.anchor(),
-        );
+        let (incoming, outgoing) =
+            self.env
+                .world
+                .totals
+                .read_purpose(self.ctx.owner, purpose, window, self.ctx.anchor());
         let total = match root {
             axiom_model::PurposeRoot::Income => incoming - outgoing,
-            axiom_model::PurposeRoot::Spending | axiom_model::PurposeRoot::Capital | axiom_model::PurposeRoot::Transfer => {
-                outgoing - incoming
-            }
+            axiom_model::PurposeRoot::Spending
+            | axiom_model::PurposeRoot::Capital
+            | axiom_model::PurposeRoot::Transfer => outgoing - incoming,
         };
         self.base(total)
     }
 
     fn straight_line(&self, args: &[NodeId]) -> Value {
-        let (Value::Amount(cost), Value::Span(life), Value::Day(from), Value::Name(period)) =
-            (self.at(args[0]), self.at(args[1]), self.at(args[2]), self.at(args[3]))
-        else {
+        let (Value::Amount(cost), Value::Span(life), Value::Day(from), Value::Name(period)) = (
+            self.at(args[0]),
+            self.at(args[1]),
+            self.at(args[2]),
+            self.at(args[3]),
+        ) else {
             unreachable!("{TYPED}");
         };
         let window = match self.book().name(period) {
@@ -649,7 +885,40 @@ impl<'a, 's> Machine<'a, 's> {
             matches!(self.at(node), Value::Name(name) if self.book().name(name) == "mid-month")
         });
         crate::calc::straight_line(cost.qty, life, from, self.ctx.over, window, mid_month)
-            .map_or(Value::Fault(Fault::Overflow), |qty| Value::Amount(Amount::new(qty, cost.unit)))
+            .map_or(Value::Fault(Fault::Overflow), |qty| {
+                Value::Amount(Amount::new(qty, cost.unit))
+            })
+    }
+
+    fn open(&self, code: Sym) -> Value {
+        let book = self.book();
+        let unit = book.entities[self.ctx.owner].currency;
+        let mut total = Qty::ZERO;
+        for (place, declaration) in book.places.iter() {
+            if !declaration.claim {
+                continue;
+            }
+            for slot in self.env.world.holdings.of(place) {
+                for lot in &slot.lots {
+                    let matches = |run: axiom_core::Run<Sym>| book.codes[run].contains(&code);
+                    if matches(lot.codes.header) || matches(lot.codes.local) {
+                        // Claims are physical parcels, but `open(^code)` is
+                        // read in one owner's currency. Allocate each parcel
+                        // once using the same cent boundaries as reports.
+                        for (owner, qty) in self.env.plan.allocate(place, lot.qty) {
+                            if owner.owner != self.ctx.owner || qty.is_zero() {
+                                continue;
+                            }
+                            match self.calc().convert(Amount::new(qty, slot.unit), unit) {
+                                Ok(converted) => total += converted.qty,
+                                Err(fault) => return Value::Fault(fault),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Value::Amount(Amount::new(total, unit))
     }
 
     /// `min` and `max`: whichever operand `op` (`<=` or `>=`) puts first.
@@ -665,27 +934,34 @@ impl<'a, 's> Machine<'a, 's> {
     /// kind argument widens it to every place of that kind the owner has.
     fn total(&self, dir: Dir, window: Window, args: &[NodeId]) -> Value {
         let (book, ctx, totals) = (self.book(), self.ctx, &self.env.world.totals);
-        let widen = args.iter().find_map(|&a| if let Value::Kind(kind) = self.at(a) { Some(kind) } else { None });
+        let widen = args.iter().find_map(|&a| {
+            if let Value::Kind(kind) = self.at(a) {
+                Some(kind)
+            } else {
+                None
+            }
+        });
         let read = |subject| totals.read(&self.env.plan.watch, subject, dir, window, ctx.anchor());
         let sum = match widen {
             None => read(ctx.subject),
-            Some(kind) => {
-                self.env
-                    .plan
-                    .kind_places
-                    .get(&kind)
-                    .into_iter()
-                    .flat_map(|places| places.iter())
-                    .filter(|&&place| book.places[place].owner == ctx.owner)
-                    .map(|&place| read(Subject::Place(place)))
-                    .sum()
-            }
+            Some(kind) => self
+                .env
+                .plan
+                .kind_places
+                .get(&kind)
+                .into_iter()
+                .flat_map(|places| places.iter())
+                .filter(|&&place| book.places[place].owner == ctx.owner)
+                .map(|&place| read(Subject::Place(place)))
+                .sum(),
         };
         self.base(sum)
     }
 
     fn progressive(&self, schedule: Value, income: Value) -> Value {
-        let Value::Schedule(id) = schedule else { unreachable!("{TYPED}") };
+        let Value::Schedule(id) = schedule else {
+            unreachable!("{TYPED}")
+        };
         let schedule = &self.book().schedules[id];
         let income = match income {
             Value::Amount(a) => self.calc().convert(a, schedule.unit).map(|a| a.qty),
@@ -693,7 +969,9 @@ impl<'a, 's> Machine<'a, 's> {
         };
         match income {
             Ok(income) => progressive(&schedule.brackets, income)
-                .map_or(Value::Fault(Fault::Overflow), |tax| Value::Amount(Amount::new(tax, schedule.unit))),
+                .map_or(Value::Fault(Fault::Overflow), |tax| {
+                    Value::Amount(Amount::new(tax, schedule.unit))
+                }),
             Err(fault) => Value::Fault(fault),
         }
     }
@@ -705,22 +983,33 @@ impl<'a, 's> Machine<'a, 's> {
     /// Everything the subject holds, valued in the base currency.
     fn balance(&self, subject: Subject) -> Value {
         let sign = sign(self.env.plan, subject);
-        self.sum_in_base(self.held(subject).map(|slot| Amount::new(Qty(slot.qty.0 * sign), slot.unit)))
+        self.sum_in_base(
+            self.held(subject)
+                .map(|slot| Amount::new(Qty(slot.qty.0 * sign), slot.unit)),
+        )
     }
 
     /// What everything the subject holds has already accounted for, in the base
     /// currency: the total basis of its parcels.
     fn basis(&self, subject: Subject) -> Value {
         let (book, sign) = (self.book(), sign(self.env.plan, subject));
-        let basis: Qty = self.held(subject).map(|slot| slot.basis(is_money(book, slot.place, slot.unit))).sum();
+        let basis: Qty = self
+            .held(subject)
+            .map(|slot| slot.basis(is_money(book, slot.place, slot.unit)))
+            .sum();
         self.base(Qty(basis.0 * sign))
     }
 
     /// Money still tied to the subject, a restricted entity.
     fn remaining(&self) -> Value {
-        let Subject::Entity(entity) = self.ctx.subject else { return Value::Empty };
+        let Subject::Entity(entity) = self.ctx.subject else {
+            return Value::Empty;
+        };
         let tied = self.env.world.holdings.iter().flat_map(|h| {
-            h.lots.iter().filter(move |lot| lot.tied == Some(entity)).map(move |lot| Amount::new(lot.qty, h.unit))
+            h.lots
+                .iter()
+                .filter(move |lot| lot.tied == Some(entity))
+                .map(move |lot| Amount::new(lot.qty, h.unit))
         });
         self.sum_in_base(tied)
     }
@@ -756,7 +1045,7 @@ fn object_matches(book: &Book, actual: Object, wanted: Object) -> bool {
                 if asset == wanted {
                     return true;
                 }
-                at = book.assets[asset].part_of;
+                at = book.assets[asset].part_of.map(|part| part.value);
             }
             false
         }
@@ -766,12 +1055,18 @@ fn object_matches(book: &Book, actual: Object, wanted: Object) -> bool {
 
 /// The holdings within the subject: a place's subtree, which is one stretch of
 /// the holdings, or the asset places an entity holds.
-pub(crate) fn held<'a>(plan: &'a Plan, world: &'a World, subject: Subject) -> impl Iterator<Item = &'a Slot> {
+pub(crate) fn held<'a>(
+    plan: &'a Plan,
+    world: &'a World,
+    subject: Subject,
+) -> impl Iterator<Item = &'a Slot> {
     let holdings: &'a Holdings = &world.holdings;
+    let book = plan.book;
     let (subtree, places) = match subject {
         Subject::Place(root) => (root.index()..plan.book.places.end(root).index(), &[][..]),
         Subject::Entity(entity) => (0..0, plan.places_of(entity)),
-        Subject::Asset(_) => unreachable!("{V3}"),
+        Subject::Asset(asset) => (0..0, plan.places_of_asset(asset)),
+        Subject::Contract(contract) => (0..0, plan.places_of(book.contracts[contract].owner)),
     };
     let entity_places = places.iter().flat_map(move |&place| holdings.of(place));
     holdings.within(subtree).chain(entity_places)
@@ -783,14 +1078,20 @@ pub(crate) fn sign(plan: &Plan, subject: Subject) -> i64 {
     match subject {
         Subject::Place(place) => plan.sides.sign(place),
         Subject::Entity(_) => 1,
-        Subject::Asset(_) => unreachable!("{V3}"),
+        Subject::Asset(_) | Subject::Contract(_) => 1,
     }
 }
 
 /// What an ordering comparison (`<`, `<=`, `>`, `>=`) compared, an `empty` side as zero. `None` for any other
 /// condition, or one whose sides are not amounts.
-pub(crate) fn compared(law: &Law, values: &[Value], cond: NodeId) -> Option<(BinOp, Amount, Amount)> {
-    let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), left, right) = law.nodes[cond.index()].op else {
+pub(crate) fn compared(
+    law: &Law,
+    values: &[Value],
+    cond: NodeId,
+) -> Option<(BinOp, Amount, Amount)> {
+    let Op::Bin(cmp @ (BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge), left, right) =
+        law.nodes[cond].op
+    else {
         return None;
     };
     match (values[left.index()], values[right.index()]) {
@@ -809,7 +1110,12 @@ fn civil_date(year: Value, month: Value, day: Value) -> Result<Day, Fault> {
         _ => Err(Fault::Overflow),
     };
     let (year, month, day) = (int(year)?, int(month)?, int(day)?);
-    let month = u32::try_from(month).ok().filter(|m| (1..=12).contains(m)).ok_or(Fault::Overflow)?;
-    let day = u32::try_from(day.max(1)).unwrap_or(1).min(days_in_month(year, month));
+    let month = u32::try_from(month)
+        .ok()
+        .filter(|m| (1..=12).contains(m))
+        .ok_or(Fault::Overflow)?;
+    let day = u32::try_from(day.max(1))
+        .unwrap_or(1)
+        .min(days_in_month(year, month));
     Day::from_ymd(year, month, day).ok_or(Fault::Overflow)
 }

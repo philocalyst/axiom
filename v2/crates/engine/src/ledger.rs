@@ -18,12 +18,12 @@
 use axiom_core::{Arena, Day, Diagnostic, Id, Qty, par};
 use axiom_model::{Book, Commodity, End, Flow, FlowView, Infer, Place, RuntimeDetail, RuntimeFlow};
 
+use crate::checkpoint::CheckpointPhase;
 use crate::motion::{Amounts, Motion};
 use crate::plan::Plan;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
 use crate::timeline::{Fact, Moment, Timeline};
-use crate::checkpoint::CheckpointPhase;
 use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain};
 
 /// The book's state as of some day. Cheap to clone relative to a replay.
@@ -53,12 +53,22 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// Stands at the day before the first fact.
     pub(crate) fn start(plan: &'p Plan<'b, 's>, options: Options) -> Ledger<'p, 'b, 's> {
         let timeline = Timeline::new(plan);
-        let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
-        let (world, record) = (World::new(plan.book, &plan.watch), Record::new(plan.book.laws.len(), plan.problems()));
+        let day = timeline
+            .peek()
+            .map_or(Day::default(), |first| first.day.add_days(-1));
+        let (world, record) = (
+            World::new(plan.book, &plan.watch),
+            Record::new(plan.book.laws.len(), plan.problems()),
+        );
         Ledger::resumed(
             plan,
             options,
-            Clock { day, phase: CheckpointPhase::EndOfDay, timeline, applied: 0 },
+            Clock {
+                day,
+                phase: CheckpointPhase::EndOfDay,
+                timeline,
+                applied: 0,
+            },
             (world, record),
         )
     }
@@ -128,7 +138,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// The holdings are the same as at the end of the day, since a closing
     /// counts and owes and moves nothing.
     pub fn advance_to_closing(&mut self, day: Day) {
-        self.fold_through(day, Moment::before_closings(day), CheckpointPhase::BeforeClosings);
+        self.fold_through(
+            day,
+            Moment::before_closings(day),
+            CheckpointPhase::BeforeClosings,
+        );
     }
 
     fn fold_through(&mut self, day: Day, limit: Moment, phase: CheckpointPhase) {
@@ -159,7 +173,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// ignored, since applying is what makes it real.
     pub fn apply(&mut self, flow: &Flow) -> Applied {
         let view = self.plan.book.flow_view(flow);
-        let txn = axiom_model::RuntimeTxn::journal(flow.txn).expect("a Book flow cannot use the template transaction sentinel");
+        let txn = axiom_model::RuntimeTxn::journal(flow.txn)
+            .expect("a Book flow cannot use the template transaction sentinel");
         self.apply_view(flow, view, txn)
     }
 
@@ -170,18 +185,34 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         self.apply_view(&flow.flow, view, flow.txn)
     }
 
-    fn apply_view(&mut self, flow: &Flow, view: FlowView<'_>, txn: axiom_model::RuntimeTxn) -> Applied {
+    fn apply_view(
+        &mut self,
+        flow: &Flow,
+        view: FlowView<'_>,
+        txn: axiom_model::RuntimeTxn,
+    ) -> Applied {
         let (was, before) = (self.clock.day, self.clock.phase);
         let day = flow.day.max(self.clock.day);
         self.advance_through(Moment::after_flows(day));
         self.clock.day = day;
-        self.clock.phase = if day > was { CheckpointPhase::AfterFlows } else { before.max(CheckpointPhase::AfterFlows) };
+        self.clock.phase = if day > was {
+            CheckpointPhase::AfterFlows
+        } else {
+            before.max(CheckpointPhase::AfterFlows)
+        };
         self.enter(day);
         let marks = self.record.marks();
         let number = self.clock.applied;
         self.clock.applied += 1;
         let amounts = self.amounts(flow, None);
-        self.post(&Motion::from_view(self.plan.book, view, txn, Cause::Applied(number), day, amounts));
+        self.post(&Motion::from_view(
+            self.plan.book,
+            view,
+            txn,
+            Cause::Applied(number),
+            day,
+            amounts,
+        ));
         self.world.holdings.tidy();
         self.record.since(marks)
     }
@@ -193,7 +224,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
 
     /// Every non-empty holding, by place then commodity.
     pub fn holdings(&self) -> impl Iterator<Item = &Holding> {
-        self.world.holdings.iter().map(|slot| &slot.holding).filter(|holding| !holding.is_empty())
+        self.world
+            .holdings
+            .iter()
+            .map(|slot| &slot.holding)
+            .filter(|holding| !holding.is_empty())
     }
 
     /// What has been recorded since this ledger began, or was forked: the
@@ -216,18 +251,47 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     pub fn finish(mut self) -> Run {
         self.world.holdings.tidy();
         let (book, today) = (self.plan.book, self.options.today);
-        let overdue = self.world.holdings.iter().filter(|slot| book.places[slot.place].claim).flat_map(|slot| {
-            let claims = slot.holding.lots.iter().filter(|lot| lot.qty > Qty::ZERO);
-            claims.filter_map(move |lot| explain::overdue(book, slot.place, slot.unit, lot, today))
-        });
-        let mut unused: Vec<_> = self.record.waivers.iter().filter(|&(_, &used)| !used).map(|(&loc, _)| loc).collect();
+        let overdue = self
+            .world
+            .holdings
+            .iter()
+            .filter(|slot| book.places[slot.place].claim)
+            .flat_map(|slot| {
+                let claims = slot.holding.lots.iter().filter(|lot| lot.qty > Qty::ZERO);
+                claims.filter_map(move |lot| {
+                    explain::overdue(book, slot.place, slot.unit, lot, today)
+                })
+            });
+        let mut unused: Vec<_> = self
+            .record
+            .waivers
+            .iter()
+            .filter(|&(_, &used)| !used)
+            .map(|(&loc, _)| loc)
+            .collect();
         unused.sort_unstable();
-        let reports: Vec<Diagnostic> = overdue.chain(unused.into_iter().map(explain::unused_waiver)).collect();
+        let reports: Vec<Diagnostic> = overdue
+            .chain(unused.into_iter().map(explain::unused_waiver))
+            .collect();
         self.record.diagnostics.extend(reports);
         let mut headroom = std::mem::take(&mut self.record.passed);
         headroom.extend(self.record.headroom.drain().map(|(_, reading)| reading));
-        headroom.sort_unstable_by_key(|h| (h.law, h.step, crate::show::subject_key(h.subject), h.days.first()));
-        let Ledger { plan, options, horizon, world, record, .. } = self;
+        headroom.sort_unstable_by_key(|h| {
+            (
+                h.law,
+                h.step,
+                crate::show::subject_key(h.subject),
+                h.days.first(),
+            )
+        });
+        let Ledger {
+            plan,
+            options,
+            horizon,
+            world,
+            record,
+            ..
+        } = self;
         Run {
             today: options.today,
             horizon,
@@ -238,13 +302,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             violations: record.violations,
             headroom,
             pads: record.pads,
-            // v3 bridge: the v3 fold keeps no assets, promises or adjustments.
+            // These collections are populated by the native state monitors.
             assets: Vec::new(),
             promises: Vec::new(),
             promised_flows: Box::default(),
             runtime_details: Arena::new(),
             missing_inputs: Box::default(),
             open_claims: Box::default(),
+            monitor_complete: false,
             adjustments: Vec::new(),
             checks: record.checks.into(),
             diagnostics: record.diagnostics,
@@ -256,7 +321,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     pub(crate) fn advance_through(&mut self, limit: Moment) {
         let limit = limit.min(Moment::end_of(self.horizon));
         loop {
-            let Some(moment) = self.clock.timeline.peek().filter(|&moment| moment <= limit) else { return };
+            let Some(moment) = self.clock.timeline.peek().filter(|&moment| moment <= limit) else {
+                return;
+            };
             self.clock.timeline.consume(moment, self.plan);
             self.clock.day = moment.day;
             self.enter(moment.day);
@@ -277,7 +344,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             // A settlement lands a pending flow; a return runs an actual one backwards.
             Fact::Settle(id) => {
                 let motion = self.journal_motion(id, moment.day);
-                let returned = matches!(self.plan.events.state(id, &self.plan.book.flows[id]), State::Returned(_));
+                let returned = matches!(
+                    self.plan.events.state(id, &self.plan.book.flows[id]),
+                    State::Returned(_)
+                );
                 self.post(&if returned { motion.reversed() } else { motion });
             }
             Fact::Assert(index) => self.reconcile(index as usize),
@@ -319,11 +389,20 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let qty = if book.places[flow.from].class.holds_parcels() {
             let money = is_money(book, flow.from, flow.out.unit);
             let view = book.flow_view(flow);
-            slot.map_or(Qty::ZERO, |slot| slot.admitted(money, view.select(), &book.codes))
+            slot.map_or(Qty::ZERO, |slot| {
+                slot.admitted(money, view.select(), &book.codes)
+            })
         } else {
             slot.map_or(Qty::ZERO, |slot| slot.plain.max(Qty::ZERO))
         };
-        Amounts { out: qty, arrive: if flow.is_exchange() { written.arrive } else { qty } }
+        Amounts {
+            out: qty,
+            arrive: if flow.is_exchange() {
+                written.arrive
+            } else {
+                qty
+            },
+        }
     }
 
     /// `= 5_000 USD`: whatever leaves the source, or arrives at the target,
@@ -335,19 +414,36 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             End::To => (flow.to, flow.arrive.unit),
         };
         // The target is written in the place's display sign.
-        let (held, target) = (self.world.holdings.qty(place, unit), self.plan.sides.display(place, balance));
-        let gap = if end == End::From { held - target } else { target - held };
+        let (held, target) = (
+            self.world.holdings.qty(place, unit),
+            self.plan.sides.display(place, balance),
+        );
+        let gap = if end == End::From {
+            held - target
+        } else {
+            target - held
+        };
         let qty = if gap.is_negative() {
             let shown = (self.plan.sides.display(place, held), balance);
-            self.record.report(explain::past_target(book, flow, place, unit, shown, end));
+            self.record
+                .report(explain::past_target(book, flow, place, unit, shown, end));
             Qty::ZERO
         } else {
             gap
         };
         match (end, flow.is_exchange()) {
-            (_, false) => Amounts { out: qty, arrive: qty },
-            (End::From, true) => Amounts { out: qty, ..written },
-            (End::To, true) => Amounts { arrive: qty, ..written },
+            (_, false) => Amounts {
+                out: qty,
+                arrive: qty,
+            },
+            (End::From, true) => Amounts {
+                out: qty,
+                ..written
+            },
+            (End::To, true) => Amounts {
+                arrive: qty,
+                ..written
+            },
         }
     }
 }
@@ -363,7 +459,11 @@ fn posted(plan: &Plan, record: &Record) -> Box<[Posted]> {
     let post = |id: Id<Flow>| {
         let flow = &book.flows[id];
         let amounts = settled(plan, record, id, flow).unwrap_or_else(|| Amounts::written(flow));
-        Posted { out: amounts.out, arrive: amounts.arrive, state: plan.events.state(id, flow) }
+        Posted {
+            out: amounts.out,
+            arrive: amounts.arrive,
+            state: plan.events.state(id, flow),
+        }
     };
     let stretch = |&first: &usize| {
         let ids = (first..(first + STRETCH).min(book.flows.len())).map(|at| Id::new(at as u32));
@@ -379,7 +479,12 @@ fn posted(plan: &Plan, record: &Record) -> Box<[Posted]> {
 fn settled(plan: &Plan, record: &Record, id: Id<Flow>, flow: &Flow) -> Option<Amounts> {
     match flow.infer {
         Infer::Known => Some(Amounts::written(flow)),
-        Infer::Unknown => Some(plan.amounts.get(&id).copied().unwrap_or_else(|| Amounts::written(flow))),
+        Infer::Unknown => Some(
+            plan.amounts
+                .get(&id)
+                .copied()
+                .unwrap_or_else(|| Amounts::written(flow)),
+        ),
         Infer::All | Infer::Target { .. } => record.resolved.get(&id).copied(),
     }
 }
@@ -392,7 +497,10 @@ pub(crate) fn fold(plan: &Plan, options: Options) -> Run {
 /// Like [`fold`], and the ledger as it stood on `options.today` before that
 /// day's closings, with no records: a view forks it, and does not fold the
 /// journal again to get there.
-pub(crate) fn fold_to_view<'p, 'b, 's>(plan: &'p Plan<'b, 's>, options: Options) -> (Run, Ledger<'p, 'b, 's>) {
+pub(crate) fn fold_to_view<'p, 'b, 's>(
+    plan: &'p Plan<'b, 's>,
+    options: Options,
+) -> (Run, Ledger<'p, 'b, 's>) {
     let (run, view, _) = fold_to_view_and_effects_prefix(plan, options);
     (run, view)
 }

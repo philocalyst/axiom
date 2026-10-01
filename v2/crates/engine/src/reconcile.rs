@@ -27,23 +27,47 @@ impl Ledger<'_, '_, '_> {
         let book = self.plan.book;
         let assert = &book.asserts[index];
         let (place, unit) = (assert.place, assert.amount.unit);
-        let shown = self.plan.sides.display(place, self.world.holdings.qty(place, unit));
+        let shown = self
+            .plan
+            .sides
+            .display(place, self.world.holdings.qty(place, unit));
         let gap = assert.amount.qty - shown;
-        let last = self.record.checkpoints.get(&(place, unit)).copied().unwrap_or_default();
-        let now = LastCheck { day: Some(assert.day), gap, unsolved_said: last.unsolved_said };
-        let blame =
-            self.plan.unsolved.get(&(place, unit)).filter(|&&(day, _)| day <= assert.day).map(|&(_, flow)| flow);
+        let last = self
+            .record
+            .checkpoints
+            .get(&(place, unit))
+            .copied()
+            .unwrap_or_default();
+        let now = LastCheck {
+            day: Some(assert.day),
+            gap,
+            unsolved_said: last.unsolved_said,
+        };
+        let blame = self
+            .plan
+            .unsolved
+            .get(&(place, unit))
+            .filter(|&&(day, _)| day <= assert.day)
+            .map(|&(_, flow)| flow);
         let now = match (assert.gap, gap.is_zero()) {
             (_, true) => now,
             (Gap::Refused, false) => match blame.filter(|_| !last.unsolved_said) {
                 Some(unknown) => {
-                    self.record.report(explain::unchecked(book, assert, book.flows[unknown].loc));
-                    LastCheck { unsolved_said: true, ..now }
+                    self.record
+                        .report(explain::unchecked(book, assert, book.flows[unknown].loc));
+                    LastCheck {
+                        unsolved_said: true,
+                        ..now
+                    }
                 }
                 None if gap == last.gap => now,
                 None => {
-                    let others: Vec<_> =
-                        self.world.holdings.of(place).map(|slot| (slot.unit, self.plan.sides.display(place, slot.qty))).collect();
+                    let others: Vec<_> = self
+                        .world
+                        .holdings
+                        .of(place)
+                        .map(|slot| (slot.unit, self.plan.sides.display(place, slot.qty)))
+                        .collect();
                     let report = explain::mismatch(
                         book,
                         &self.plan.events,
@@ -57,12 +81,25 @@ impl Ledger<'_, '_, '_> {
                 }
             },
             (Gap::Unexplained(waive), false) => {
-                self.pad(index, gap, book.roots.unknown, Some(waive));
-                LastCheck { gap: Qty::ZERO, ..now }
+                self.pad(
+                    index,
+                    gap,
+                    book.entities[book.roots.unknown]
+                        .place
+                        .expect("the unknown entity owns its balancing place"),
+                    Some(waive),
+                );
+                LastCheck {
+                    gap: Qty::ZERO,
+                    ..now
+                }
             }
             (Gap::Via { place: counter, .. }, false) => {
                 self.pad(index, gap, counter, None);
-                LastCheck { gap: Qty::ZERO, ..now }
+                LastCheck {
+                    gap: Qty::ZERO,
+                    ..now
+                }
             }
         };
         self.record.checkpoints.insert((place, unit), now);
@@ -75,7 +112,13 @@ impl Ledger<'_, '_, '_> {
         let moved = self.plan.sides.display(assert.place, gap);
         self.post(&Motion::pad(book, assert, counter, moved, waive));
         let amount = Amount::new(moved, assert.amount.unit);
-        self.record.pads.push(Pad { assert: index as u32, place: assert.place, counter, amount, day: assert.day });
+        self.record.pads.push(Pad {
+            assert: index as u32,
+            place: assert.place,
+            counter,
+            amount,
+            day: assert.day,
+        });
         if let Some(waive) = waive {
             let note = explain::padded(book, assert, waive, amount);
             self.record.report(note);

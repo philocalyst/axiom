@@ -23,8 +23,9 @@
 //! read, `fire` runs the laws that watch the flow, `eval` (with `calc`)
 //! evaluates a law, and `explain` (with `show`) turns a failure into a
 //! diagnostic. `reconcile` checks balance assertions and `scope` says whose
-//! value a flow enters or leaves. `bridge` is everything that only the v3
-//! model needs.
+//! value a flow enters or leaves. Contract occurrences use the same ledger
+//! path as journal and hypothetical flows, with their monitor state reported
+//! separately from physical holdings.
 //!
 //! The fold itself is sequential, because each flow's relief, totals and laws
 //! depend on every flow before it. Everything around it is not: the plan is
@@ -48,8 +49,8 @@ mod plan;
 mod post;
 mod reconcile;
 mod scope;
-mod sides;
 mod show;
+mod sides;
 mod state;
 mod timeline;
 mod totals;
@@ -65,8 +66,8 @@ use std::hash::{Hash, Hasher};
 
 use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, Ratio, Sym};
 use axiom_model::{
-    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot, RuntimeDetail, RuntimeFlow,
-    RuntimeTxn, ScheduleKind, Subject, System, Txn, Waive,
+    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot,
+    RuntimeDetail, RuntimeFlow, RuntimeTxn, ScheduleKind, Subject, System, Txn, Waive,
 };
 
 pub use checkpoint::Checkpoint;
@@ -137,23 +138,25 @@ pub struct Run {
     /// Every asset's parts at the end of the fold, by asset.
     pub assets: Vec<AssetState>,
     /// Every occurrence a contract expected up to the horizon, and whether and
-    /// when the journal kept it. The currently wired legacy fold leaves this
-    /// empty; the native occurrence monitor populates it.
+    /// when the journal kept it. These are complete only when
+    /// `monitor_complete` is true.
     pub promises: Vec<Promise>,
     /// Item-level instantiated flows for promises, in promise order. The range
-    /// on each Promise indexes this shared pool. Empty until native monitor
-    /// population is wired.
+    /// on each Promise indexes this shared pool.
     pub promised_flows: Box<[RuntimeFlow]>,
     /// Runtime detail overrides used by `promised_flows`.
     pub runtime_details: Arena<RuntimeDetail>,
     /// Unbound required inputs, stored as declaration-order indices. A promise
-    /// range identifies only the inputs omitted by that occurrence. Empty until
-    /// native monitor population is wired.
+    /// range identifies only the inputs omitted by that occurrence.
     pub missing_inputs: Box<[u16]>,
     /// Claims still open after all settlements, as projected by the same
-    /// monitor that produced the fold's holdings. Empty until native monitor
-    /// population is wired.
+    /// monitor that produced the fold's holdings. These are complete only
+    /// when `monitor_complete` is true.
     pub open_claims: Box<[OpenClaim]>,
+    /// Whether native contract occurrences and claims were monitored for this
+    /// run. Empty result vectors alone do not mean the book has no promises or
+    /// claims.
+    pub monitor_complete: bool,
     /// Basis the laws moved: consumed (depreciation) or carried (wash sales).
     pub adjustments: Vec<Adjustment>,
     /// How many times each law ran past its `when` filters, by law id.
@@ -232,14 +235,18 @@ impl Run {
     pub fn promise_flows(&self, promise: &Promise) -> &[RuntimeFlow] {
         let start = promise.flows.start as usize;
         let end = start + promise.flows.len as usize;
-        self.promised_flows.get(start..end).expect("promise flow range belongs to this Run")
+        self.promised_flows
+            .get(start..end)
+            .expect("promise flow range belongs to this Run")
     }
 
     /// Input declaration indices omitted from one expected occurrence.
     pub fn promise_missing_inputs(&self, promise: &Promise) -> &[u16] {
         let start = promise.missing_inputs.start as usize;
         let end = start + promise.missing_inputs.len as usize;
-        self.missing_inputs.get(start..end).expect("promise input range belongs to this Run")
+        self.missing_inputs
+            .get(start..end)
+            .expect("promise input range belongs to this Run")
     }
 }
 
@@ -285,7 +292,10 @@ pub enum AdjustmentKind {
     Consumed { asset: Id<Asset>, part: u32 },
     /// A disallowed loss held from a sale and added to a later (or earlier)
     /// acquisition: a wash sale.
-    Carried { from: Id<Flow>, to: Option<Id<Flow>> },
+    Carried {
+        from: Id<Flow>,
+        to: Option<Id<Flow>>,
+    },
 }
 
 /// A journal flow with its quantities solved and its settlement known.

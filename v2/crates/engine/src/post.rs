@@ -21,7 +21,7 @@
 //!   and acquisition day it gives.
 
 use axiom_core::{Diagnostic, Id, Qty};
-use axiom_model::{Amount, Basis, Class, Dir, End, Entity, Fault, Object, RuntimeTxn, Subject};
+use axiom_model::{Amount, Basis, Class, Dir, Entity, Fault, Object, RuntimeTxn, Subject};
 
 use crate::eval::{Occasion, Realized};
 use crate::explain;
@@ -32,12 +32,7 @@ use crate::scope::{is_money, stays_with_owner};
 use crate::state::Missing;
 use crate::{Cause, Gain, Parcel, show};
 
-fn fresh_slice(
-    m: &Motion,
-    qty: Qty,
-    is_base: bool,
-    now: (axiom_core::Day, RuntimeTxn),
-) -> Slice {
+fn fresh_slice(m: &Motion, qty: Qty, is_base: bool, now: (axiom_core::Day, RuntimeTxn)) -> Slice {
     let mut slice = Slice::fresh(qty, is_base, now);
     slice.codes = m.code_runs;
     slice
@@ -73,14 +68,25 @@ impl Ledger<'_, '_, '_> {
         let watched = !m.opening;
         self.scratch.worth.clear();
         // A `!` on an assertion accepts its gap: it is never unused.
-        if let (Cause::Flow(_) | Cause::Applied(_), true, Some(waive)) = (m.cause, watched, m.waive) {
+        if let (Cause::Flow(_) | Cause::Applied(_), true, Some(waive)) = (m.cause, watched, m.waive)
+        {
             self.record.waivers.entry(waive.loc).or_insert(false);
         }
         if watched {
             self.count(m);
-            self.fire(&book.rules.on_out[m.from], &Occasion { amount: Some(m.out), skip_internal: true, ..on });
+            self.fire(
+                &book.rules.on_out[m.from],
+                &Occasion {
+                    amount: Some(m.out),
+                    skip_internal: true,
+                    ..on
+                },
+            );
         }
-        if m.source.class.holds_parcels() || m.target.class.holds_parcels() || m.moves != Moves::Value {
+        if m.source.class.holds_parcels()
+            || m.target.class.holds_parcels()
+            || m.moves != Moves::Value
+        {
             self.relieve(m);
             let keeps = self.price(m);
             self.arrive(m, keeps);
@@ -88,10 +94,19 @@ impl Ledger<'_, '_, '_> {
             // Places that hold only a plain balance have no parcels to move, and nothing was relieved.
             self.scratch.relief.slices.clear();
             self.world.holdings.credit(m.from, m.out.unit, -m.out.qty);
-            self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
+            self.world
+                .holdings
+                .credit(m.to, m.arrive.unit, m.arrive.qty);
         }
         if watched {
-            self.fire(&book.rules.on_in[m.to], &Occasion { amount: Some(m.arrive), skip_internal: true, ..on });
+            self.fire(
+                &book.rules.on_in[m.to],
+                &Occasion {
+                    amount: Some(m.arrive),
+                    skip_internal: true,
+                    ..on
+                },
+            );
             self.fire_purpose(m, &on);
             self.fire_spend(m);
             self.fire(&book.rules.always[m.from], &on);
@@ -107,7 +122,10 @@ impl Ledger<'_, '_, '_> {
     fn fire_purpose(&mut self, m: &Motion, on: &Occasion) {
         let Some(purpose) = m.purpose else { return };
         let book = self.plan.book;
-        let purpose_on = Occasion { amount: Some(m.out), ..*on };
+        let purpose_on = Occasion {
+            amount: Some(m.out),
+            ..*on
+        };
         self.fire_as(
             &book.rules.purposes[purpose.purpose],
             &purpose_on,
@@ -124,13 +142,66 @@ impl Ledger<'_, '_, '_> {
     fn count(&mut self, m: &Motion) {
         let watch = &self.plan.watch;
         let (leaves, enters) = watch.sides(m.from, m.to);
-        let out = if leaves { self.base_value(m, m.out) } else { None };
-        let arrive = if enters { self.base_value(m, m.arrive) } else { None };
-        self.world.totals.record(watch, (m.from, m.to), (m.day, m.recognized), out, arrive);
+        let out = if leaves {
+            self.base_value(m, m.out)
+        } else {
+            None
+        };
+        let arrive = if enters {
+            self.base_value(m, m.arrive)
+        } else {
+            None
+        };
+        self.world
+            .totals
+            .record(watch, (m.from, m.to), (m.day, m.recognized), out, arrive);
 
-        if let Some(purpose) = m.purpose.map(|purpose| purpose.purpose).filter(|&purpose| watch.reads_purpose(purpose)) {
+        // Contract-scoped totals describe that contract's occurrences, not
+        // all activity of its owner. Runtime future flows already carry their
+        // contract identity; journal occurrences resolve through their Txn.
+        let contract = match m.txn {
+            RuntimeTxn::Journal(txn) => self.plan.book.txns[txn.id()].contract,
+            RuntimeTxn::ContractOccurrence { contract, .. } => Some(contract),
+            RuntimeTxn::Adjustment { .. } => None,
+        };
+        if let Some(contract) = contract {
+            let owner = self.plan.book.contracts[contract].owner;
+            let within_owner = Subject::Entity(owner);
+            let (source_owned, target_owned) = (
+                self.plan.inside(within_owner, m.from),
+                self.plan.inside(within_owner, m.to),
+            );
+            let movement = match (source_owned, target_owned) {
+                (true, false) => self.base_value(m, m.out).map(|amount| (Dir::Out, amount)),
+                (false, true) => self.base_value(m, m.arrive).map(|amount| (Dir::In, amount)),
+                _ => None,
+            };
+            if let Some((dir, amount)) = movement {
+                self.world.totals.record_contract(
+                    watch,
+                    contract,
+                    m.day,
+                    m.recognized,
+                    dir,
+                    amount,
+                );
+            }
+        }
+
+        if let Some(purpose) = m
+            .purpose
+            .map(|purpose| purpose.purpose)
+            .filter(|&purpose| watch.reads_purpose(purpose))
+        {
             if let Some((dir, amount)) = self.purpose_flow(m, purpose) {
-                self.world.totals.record_purpose(watch, m.owner, purpose, (m.day, m.recognized), dir, amount);
+                self.world.totals.record_purpose(
+                    watch,
+                    m.owner,
+                    purpose,
+                    (m.day, m.recognized),
+                    dir,
+                    amount,
+                );
             }
         }
     }
@@ -139,7 +210,11 @@ impl Ledger<'_, '_, '_> {
     /// The written flow direction is what matters here: paying an expense from
     /// a card is an outflow, and a refund from that expense into the card is an
     /// inflow. The debt balance's display sign must not reverse that meaning.
-    fn purpose_flow(&mut self, m: &Motion, purpose: axiom_core::Id<axiom_model::Purpose>) -> Option<(Dir, Qty)> {
+    fn purpose_flow(
+        &mut self,
+        m: &Motion,
+        purpose: axiom_core::Id<axiom_model::Purpose>,
+    ) -> Option<(Dir, Qty)> {
         let (source_owned, target_owned) = (
             m.source.owner == m.owner && m.source.class != Class::Outside,
             m.target.owner == m.owner && m.target.class != Class::Outside,
@@ -162,7 +237,10 @@ impl Ledger<'_, '_, '_> {
         self.scratch.relief.slices.clear();
         if source.class != Class::Asset {
             self.world.holdings.credit(m.from, unit, -m.out.qty);
-            self.scratch.relief.slices.push(fresh_slice(m, m.out.qty, is_base, now));
+            self.scratch
+                .relief
+                .slices
+                .push(fresh_slice(m, m.out.qty, is_base, now));
             return;
         }
         self.ask_ties(m);
@@ -178,7 +256,9 @@ impl Ledger<'_, '_, '_> {
             now,
             explain: &|| !self.record.ambiguous.contains(&m.from),
         };
-        self.world.holdings.relieve(m.from, unit, &request, &mut self.scratch.relief);
+        self.world
+            .holdings
+            .relieve(m.from, unit, &request, &mut self.scratch.relief);
         if self.scratch.relief.ambiguous && self.record.ambiguous.insert(m.from) {
             let proceeds = self.realizes(m);
             let diagnostic = explain::ambiguous(book, m, &self.scratch.relief.candidates, proceeds);
@@ -195,9 +275,15 @@ impl Ledger<'_, '_, '_> {
         // What arrives must land even when nothing left (`all` of an empty
         // holding): value never vanishes from a balanced flow.
         if shortfall > Qty::ZERO {
-            self.scratch.relief.slices.push(fresh_slice(m, shortfall, is_base, now));
+            self.scratch
+                .relief
+                .slices
+                .push(fresh_slice(m, shortfall, is_base, now));
         } else if self.scratch.relief.slices.is_empty() {
-            self.scratch.relief.slices.push(fresh_slice(m, m.out.qty, is_base, now));
+            self.scratch
+                .relief
+                .slices
+                .push(fresh_slice(m, m.out.qty, is_base, now));
         }
     }
 
@@ -209,9 +295,21 @@ impl Ledger<'_, '_, '_> {
     /// asked.
     fn ask_ties(&mut self, m: &Motion) {
         self.scratch.permits.clear();
-        let Some(slot) = self.world.holdings.get(m.from, m.out.unit).filter(|slot| slot.is_tied()) else { return };
+        let Some(slot) = self
+            .world
+            .holdings
+            .get(m.from, m.out.unit)
+            .filter(|slot| slot.is_tied())
+        else {
+            return;
+        };
         for entity in slot.holding.lots.iter().filter_map(|lot| lot.tied) {
-            if !self.scratch.permits.iter().any(|&(known, _)| known == entity) {
+            if !self
+                .scratch
+                .permits
+                .iter()
+                .any(|&(known, _)| known == entity)
+            {
                 self.scratch.permits.push((entity, false));
             }
         }
@@ -232,13 +330,18 @@ impl Ledger<'_, '_, '_> {
         // Value from outside takes the target's arrival rule; a market's growth has no basis.
         let unbased = m.target.basis == Basis::Zero || m.moves == Moves::Growth;
         // What was fetched matters to what a sale realizes, and to a basis nobody stated.
-        let priced = restarts && (m.source.class == Class::Asset || (m.detail().basis.is_none() && !unbased));
+        let priced = restarts
+            && (m.source.class == Class::Asset || (m.detail().basis.is_none() && !unbased));
         let proceeds = if priced { self.proceeds(m) } else { None };
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
-        let (mut worth, mut fixed) =
-            (proceeds.map(|p| Shares::new(p, whole)), m.detail().basis.map(|b| Shares::new(b, whole)));
+        let (mut worth, mut fixed) = (
+            proceeds.map(|p| Shares::new(p, whole)),
+            m.detail().basis.map(|b| Shares::new(b, whole)),
+        );
         for slice in &mut self.scratch.relief.slices {
-            slice.worth = worth.as_mut().map_or(Qty::ZERO, |shares| shares.take(slice.qty));
+            slice.worth = worth
+                .as_mut()
+                .map_or(Qty::ZERO, |shares| shares.take(slice.qty));
             let stated = fixed.as_mut().map(|shares| shares.take(slice.qty));
             slice.carried = match (stated, restarts, proceeds.is_some(), slice.origin) {
                 (Some(basis), ..) => basis,
@@ -283,14 +386,21 @@ impl Ledger<'_, '_, '_> {
 
     /// What the exchange's fee legs cost it, in the base currency.
     fn exchange_cost(&mut self, m: &Motion) -> Qty {
-        m.detail().cost.and_then(|cost| self.base_value(m, cost)).unwrap_or(Qty::ZERO)
+        m.detail()
+            .cost
+            .and_then(|cost| self.base_value(m, cost))
+            .unwrap_or(Qty::ZERO)
     }
 
     /// What the parcels that leave realize against their basis: what they
     /// fetched, less the selling cost that comes off it.
     fn realizes(&mut self, m: &Motion) -> Option<Qty> {
         let fetched = self.proceeds(m)?;
-        Some(if m.out.unit == self.plan.book.base { fetched } else { fetched - self.exchange_cost(m) })
+        Some(if m.out.unit == self.plan.book.base {
+            fetched
+        } else {
+            fetched - self.exchange_cost(m)
+        })
     }
 
     /// Records a gain, and fires `on gain`, for every relieved lot. Plain money
@@ -319,8 +429,12 @@ impl Ledger<'_, '_, '_> {
             };
             self.record.gains.push(row);
             let held = m.day.since(slice.acquired);
-            let realized =
-                Realized { gain: slice.worth - slice.basis, proceeds: slice.worth, basis: slice.basis, held };
+            let realized = Realized {
+                gain: slice.worth - slice.basis,
+                proceeds: slice.worth,
+                basis: slice.basis,
+                held,
+            };
             let on = Occasion {
                 amount: Some(Amount::new(slice.qty, m.out.unit)),
                 realized: Some(realized),
@@ -334,7 +448,9 @@ impl Ledger<'_, '_, '_> {
     fn arrive(&mut self, m: &Motion, keeps: bool) {
         let book = self.plan.book;
         if m.target.class != Class::Asset {
-            self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
+            self.world
+                .holdings
+                .credit(m.to, m.arrive.unit, m.arrive.qty);
             if m.moves == Moves::Loss {
                 self.keep_basis(m);
             }
@@ -343,20 +459,39 @@ impl Ledger<'_, '_, '_> {
         let (stays, restricted) = (stays_with_owner(m), self.restricted_source(m));
         // `for` an entity ties what arrives to it; `for` the owner (or its household) unties it.
         let owner = m.target.owner;
-        let hold =
-            m.detail().hold.map(|entity| Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e)));
-        let (money, since) = (is_money(book, m.to, m.arrive.unit), m.detail().since.unwrap_or(m.day));
+        let hold = m.detail().hold.map(|entity| {
+            Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e))
+        });
+        let (money, since) = (
+            is_money(book, m.to, m.arrive.unit),
+            m.detail().since.unwrap_or(m.day),
+        );
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let mut shares = Shares::new(m.arrive.qty, whole);
         let slot = self.world.holdings.entry(m.to, m.arrive.unit);
         for slice in &self.scratch.relief.slices {
             let qty = shares.take(slice.qty);
-            let kept = if keeps || (stays && slice.origin != Origin::Fresh) { slice.tied } else { restricted };
+            let kept = if keeps || (stays && slice.origin != Origin::Fresh) {
+                slice.tied
+            } else {
+                restricted
+            };
             // Parcels that keep their identity keep their day and purchase; the rest start over.
-            let (acquired, txn) = if keeps { (slice.acquired, slice.txn) } else { (since, m.txn) };
+            let (acquired, txn) = if keeps {
+                (slice.acquired, slice.txn)
+            } else {
+                (since, m.txn)
+            };
             let codes = if keeps { slice.codes } else { m.code_runs };
             slot.land_with_codes(
-                Parcel { qty, basis: slice.carried, acquired, txn, codes, tied: hold.unwrap_or(kept) },
+                Parcel {
+                    qty,
+                    basis: slice.carried,
+                    acquired,
+                    txn,
+                    codes,
+                    tied: hold.unwrap_or(kept),
+                },
                 money,
                 &book.codes,
             );
@@ -368,10 +503,25 @@ impl Ledger<'_, '_, '_> {
     /// their quantity.
     fn keep_basis(&mut self, m: &Motion) {
         let book = self.plan.book;
-        let left: Qty = self.scratch.relief.slices.iter().filter(|s| s.origin != Origin::Fresh).map(|s| s.basis).sum();
-        let selection = Selection { selectors: &[], codes: &book.codes };
+        let left: Qty = self
+            .scratch
+            .relief
+            .slices
+            .iter()
+            .filter(|s| s.origin != Origin::Fresh)
+            .map(|s| s.basis)
+            .sum();
+        let selection = Selection {
+            selectors: &[],
+            codes: &book.codes,
+        };
         let slot = self.world.holdings.entry(m.from, m.out.unit);
-        slot.rebase(left, &selection, is_money(book, m.from, m.out.unit), (m.day, m.txn));
+        slot.rebase(
+            left,
+            &selection,
+            is_money(book, m.from, m.out.unit),
+            (m.day, m.txn),
+        );
     }
 
     /// Fires the `on spend` laws of every entity whose tied money just left
@@ -382,13 +532,22 @@ impl Ledger<'_, '_, '_> {
             return;
         }
         for at in 0..self.scratch.relief.slices.len() {
-            let Some(entity) = self.scratch.relief.slices[at].tied else { continue };
+            let Some(entity) = self.scratch.relief.slices[at].tied else {
+                continue;
+            };
             let slices = &self.scratch.relief.slices;
             if slices[..at].iter().any(|s| s.tied == Some(entity)) {
                 continue;
             }
-            let spent: Qty = slices.iter().filter(|s| s.tied == Some(entity)).map(|s| s.qty).sum();
-            let on = Occasion { amount: Some(Amount::new(spent, m.out.unit)), ..Occasion::flow(m) };
+            let spent: Qty = slices
+                .iter()
+                .filter(|s| s.tied == Some(entity))
+                .map(|s| s.qty)
+                .sum();
+            let on = Occasion {
+                amount: Some(Amount::new(spent, m.out.unit)),
+                ..Occasion::flow(m)
+            };
             self.fire(&book.rules.on_spend[entity], &on);
         }
     }
@@ -398,7 +557,9 @@ impl Ledger<'_, '_, '_> {
     fn restricted_source(&self, m: &Motion) -> Option<Id<Entity>> {
         let book = self.plan.book;
         let restricted = |entity: &Id<Entity>| book.entities[*entity].restricted;
-        m.payee.filter(restricted).or(Some(m.source.owner).filter(restricted))
+        m.payee
+            .filter(restricted)
+            .or(Some(m.source.owner).filter(restricted))
     }
 
     /// What the flow's parcels fetched, in the base currency. The exchange
@@ -409,7 +570,9 @@ impl Ledger<'_, '_, '_> {
         match (m.arrive.unit == base, m.out.unit == base) {
             (true, _) => Some(m.arrive.qty),
             (_, true) => Some(m.out.qty),
-            _ => self.base_value(m, m.out).or_else(|| self.base_value(m, m.arrive)),
+            _ => self
+                .base_value(m, m.out)
+                .or_else(|| self.base_value(m, m.arrive)),
         }
     }
 
@@ -424,13 +587,23 @@ impl Ledger<'_, '_, '_> {
         if let Some(&(_, worth)) = self.scratch.worth.iter().find(|&&(seen, _)| seen == amount) {
             return worth;
         }
-        let value = book.convert(amount, book.base, m.day).map(|priced| priced.qty);
+        let value = book
+            .convert(amount, book.base, m.day)
+            .map(|priced| priced.qty);
         self.scratch.worth.push((amount, value));
-        if value.is_none() && self.record.missing.insert(Missing::Price(amount.unit, book.base)) {
-            let fault = Fault::NoPrice { unit: amount.unit, quote: book.base };
+        if value.is_none()
+            && self
+                .record
+                .missing
+                .insert(Missing::Price(amount.unit, book.base))
+        {
+            let fault = Fault::NoPrice {
+                unit: amount.unit,
+                quote: book.base,
+            };
             let (what, help) = show::fault(book, fault, m.day);
-            let mut d =
-                Diagnostic::error("no-price", what).label(m.loc, format!("needed to value {}", book.show(amount)));
+            let mut d = Diagnostic::error("no-price", what)
+                .label(m.loc, format!("needed to value {}", book.show(amount)));
             if let Some(help) = help {
                 d = d.help(help);
             }

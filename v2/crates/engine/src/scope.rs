@@ -18,16 +18,24 @@ use crate::motion::{Motion, Moves};
 /// The entities that own what `owner` owns: itself, what it belongs to in the
 /// entity tree, and the household it is a member of.
 fn owners<'a>(book: &'a Book, owner: Id<Entity>) -> impl Iterator<Item = Id<Entity>> + 'a {
-    let household = book.entities[owner].member.filter(move |&house| !book.entities.covers(house, owner));
+    let household = book.entities[owner]
+        .member
+        .filter(move |&house| !book.entities.covers(house, owner));
     book.entities.lineage(owner).chain(household)
 }
 
 /// Every subject `place` lies within: it and its ancestors, and, for an asset
 /// place, the entities that own what its owner owns.
-pub(crate) fn containing<'a>(book: &'a Book, place: Id<Place>) -> impl Iterator<Item = Subject> + 'a {
+pub(crate) fn containing<'a>(
+    book: &'a Book,
+    place: Id<Place>,
+) -> impl Iterator<Item = Subject> + 'a {
     let this = &book.places[place];
     let places = book.places.lineage(place).map(Subject::Place);
-    let owners = (this.class == Class::Asset).then(|| owners(book, this.owner)).into_iter().flatten();
+    let owners = (this.class == Class::Asset)
+        .then(|| owners(book, this.owner))
+        .into_iter()
+        .flatten();
     places.chain(owners.map(Subject::Entity))
 }
 
@@ -37,6 +45,7 @@ pub(crate) fn owner_of(book: &Book, subject: Subject) -> Id<Entity> {
         Subject::Place(place) => book.places[place].owner,
         Subject::Entity(entity) => entity,
         Subject::Asset(asset) => book.assets[asset].owner,
+        Subject::Contract(contract) => book.contracts[contract].owner,
     }
 }
 
