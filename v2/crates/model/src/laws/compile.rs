@@ -218,7 +218,7 @@ pub(crate) fn compile<'s>(
         owner: Some(site.owner),
         subject: site.subject,
         law_name,
-        first: 0,
+        first: None,
         base: 0,
         nodes: Vec::new(),
         poisoned: Vec::new(),
@@ -252,7 +252,7 @@ pub(crate) fn compile_template<'s>(
         owner: None,
         subject,
         law_name: name,
-        first: 0,
+        first: None,
         base: 0,
         nodes: Vec::new(),
         poisoned: Vec::new(),
@@ -287,7 +287,7 @@ struct Compiler<'w, 'a, 's> {
     law_name: Sym,
     /// The source index of the first node of the run being compiled, and the
     /// index the first node of it got.
-    first: usize,
+    first: Option<ExprId>,
     base: usize,
     nodes: Vec<Node>,
     poisoned: Vec<bool>,
@@ -351,6 +351,7 @@ impl<'s> Compiler<'_, '_, 's> {
     fn step(&mut self, step: &ast::Step<'s>) -> Option<Step> {
         let kind = match &step.kind {
             WrittenStep::When(root) => StepKind::When(self.condition(*root)?),
+            WrittenStep::Unless(root) => StepKind::Unless(self.condition(*root)?),
             WrittenStep::Let(name, root) => {
                 // Bound even if it failed, so its uses do not report it again.
                 let bound = self.compile(*root);
@@ -364,11 +365,11 @@ impl<'s> Compiler<'_, '_, 's> {
                 warn,
             } => {
                 let cond = self.condition(*cond)?;
-                // v3 bridge: a v3 `require` has one reparation at most.
-                let otherwise: Box<[Effect]> = match otherwise {
-                    Some(effect) => Box::new([self.effect(effect)?]),
-                    None => Box::default(),
-                };
+                let otherwise: Box<[Effect]> = self.file[*otherwise]
+                    .iter()
+                    .map(|effect| self.effect(effect, step.loc))
+                    .collect::<Option<Vec<_>>>()?
+                    .into();
                 let message = message.map(|text| self.world.book.names.intern(text.0));
                 let severity = if *warn {
                     Severity::Warning
@@ -382,7 +383,7 @@ impl<'s> Compiler<'_, '_, 's> {
                     severity,
                 }
             }
-            WrittenStep::Effect(effect) => StepKind::Effect(self.effect(effect)?),
+            WrittenStep::Effect(effect) => StepKind::Effect(self.effect(effect, step.loc)?),
         };
         Some(Step {
             loc: step.loc,
@@ -390,7 +391,7 @@ impl<'s> Compiler<'_, '_, 's> {
         })
     }
 
-    fn effect(&mut self, effect: &WrittenEffect<'s>) -> Option<Effect> {
+    fn effect(&mut self, effect: &WrittenEffect<'s>, loc: Loc) -> Option<Effect> {
         match effect {
             WrittenEffect::Owe {
                 amount,
@@ -419,6 +420,26 @@ impl<'s> Compiler<'_, '_, 's> {
                     name: self.world.book.names.intern(name.0),
                 })
             }
+            WrittenEffect::Consume(amount) => Some(Effect::Consume {
+                amount: self.expression(*amount, Ty::AMOUNT)?,
+            }),
+            WrittenEffect::Carry { amount, to, within } => {
+                let amount = self.expression(*amount, Ty::AMOUNT)?;
+                let unit = self.expression(*to, Ty::Unit)?;
+                let node = NodeId(self.nodes.len() as u32);
+                self.nodes.push(Node {
+                    op: Op::Const(Value::Span(*within)),
+                    ty: Ty::Span,
+                    loc,
+                    first: node,
+                });
+                self.poisoned.push(false);
+                Some(Effect::Carry {
+                    amount,
+                    unit,
+                    within: node,
+                })
+            }
         }
     }
 
@@ -444,10 +465,10 @@ impl<'s> Compiler<'_, '_, 's> {
     /// node.
     fn compile(&mut self, root: ExprId) -> NodeId {
         let subtree = self.file.exprs.subtree(root);
-        (self.first, self.base) = (self.file.exprs[root].first.index(), self.nodes.len());
+        (self.first, self.base) = (Some(self.file.exprs[root].first), self.nodes.len());
         self.roles = self.roles_of(subtree);
         for (offset, expr) in subtree.iter().enumerate() {
-            self.node(self.first + offset, expr);
+            self.node(offset, expr);
         }
         NodeId(self.nodes.len() as u32 - 1)
     }
@@ -456,12 +477,11 @@ impl<'s> Compiler<'_, '_, 's> {
     /// decide, and children come first, so it is settled before compiling.
     fn roles_of(&self, subtree: &[ast::Expr<'s>]) -> Vec<Role> {
         let mut roles = vec![Role::Normal; subtree.len()];
+        let first = self
+            .first
+            .expect("roles are assigned while compiling an expression");
         let mut mark = |id: ExprId, role: Role| {
-            if let Some(slot) = id
-                .index()
-                .checked_sub(self.first)
-                .and_then(|at| roles.get_mut(at))
-            {
+            if let Some(slot) = roles.get_mut(id.offset_from(first)) {
                 *slot = role;
             }
         };
@@ -531,7 +551,10 @@ impl<'s> Compiler<'_, '_, 's> {
 
     /// The node an expression of the run being compiled became.
     fn node_id(&self, id: ExprId) -> NodeId {
-        NodeId((self.base + id.index() - self.first) as u32)
+        NodeId(
+            (self.base + id.offset_from(self.first.expect("expression node has an active root")))
+                as u32,
+        )
     }
 
     fn node(&mut self, at: usize, expr: &ast::Expr<'s>) {
@@ -640,7 +663,7 @@ impl<'s> Compiler<'_, '_, 's> {
     // ─── Names ──────────────────────────────────────────────────────────────
 
     fn name(&mut self, at: usize, word: Word<'s>) -> Check<(Op, Ty)> {
-        match self.roles[at - self.first] {
+        match self.roles[at] {
             Role::Keyword | Role::ParamBase => {
                 let sym = self.world.book.names.intern(word.text);
                 Ok((Op::Const(Value::Name(sym)), Ty::Name))

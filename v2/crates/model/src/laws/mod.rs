@@ -417,7 +417,7 @@ fn register(world: &mut World) {
     let mut of_system: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.systems.len()];
     let mut of_purpose: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.purposes.len()];
     let mut of_contract: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.contracts.len()];
-    let auxiliary: Set<Id<Law>> = book.also.iter().map(|also| also.law).collect();
+    let auxiliary: Set<Id<Law>> = book.also.iter().map(|(_, also)| also.law).collect();
     for (id, law) in book.laws.iter() {
         if auxiliary.contains(&id) {
             continue;

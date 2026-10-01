@@ -101,7 +101,7 @@ impl Residents {
 
 impl Rules {
     fn of(book: &Book, rank: &[u32]) -> Rules {
-        let auxiliary: Set<Id<Law>> = book.also.iter().map(|also| also.law).collect();
+        let auxiliary: Set<Id<Law>> = book.also.iter().map(|(_, also)| also.law).collect();
         let written = WrittenIn::of(book, &auxiliary);
         let residents = Residents::of(book);
         let (mut on_in, mut on_out, mut on_gain, mut always_on) =
