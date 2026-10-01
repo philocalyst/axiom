@@ -420,6 +420,42 @@ kind deferred-account : missing-kind
 }
 
 #[test]
+fn a_near_miss_kind_parent_has_one_source_anchored_edit() {
+    let project = "\
+use std
+base USD
+commodity USD : currency
+kind checking : bankk
+";
+    let (_, diagnostics) = build_project(project);
+
+    assert_eq!(codes(&diagnostics), ["unknown-kind"], "{diagnostics:?}");
+    let diagnostic = &diagnostics[0];
+    let edit = diagnostic
+        .help
+        .iter()
+        .find_map(|help| help.edit.as_ref())
+        .expect("near miss should have an exact source edit");
+    assert_eq!(&project[edit.0.start as usize..edit.0.end as usize], "bankk");
+    assert_eq!(edit.1, "bank");
+}
+
+#[test]
+fn reserved_entity_names_are_refused_at_the_declared_word() {
+    let project = "\
+use std
+base USD
+commodity USD : currency
+entity opening : person
+";
+    let (_, diagnostics) = build_project(project);
+
+    assert_eq!(codes(&diagnostics), ["reserved-entity-name"], "{diagnostics:?}");
+    let loc = diagnostics[0].anchor().unwrap();
+    assert_eq!(&project[loc.start as usize..loc.end as usize], "opening");
+}
+
+#[test]
 fn a_base_is_required_when_no_default_currency_is_declared() {
     let project = "\
 use std
