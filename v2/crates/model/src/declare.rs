@@ -522,7 +522,9 @@ pub(crate) fn declare<'a, 's>(
     // `vendors/acme`; adding a second `acme` entity would make that reference
     // ambiguous. Preserve all full paths so genuinely ambiguous suffixes are
     // diagnosed by the normal scoped entity resolver.
-    let implicit_paths: Vec<&'s str> = implicit_party_locs.keys().copied().collect();
+    let mut implicit_paths: Vec<&'s str> = implicit_party_locs.keys().copied().collect();
+    implicit_paths.sort_unstable();
+    let shadowed_suffixes = strict_path_suffixes(&implicit_paths);
     for &path in &implicit_paths {
         entity_spellings.insert(path);
         add_path_spellings(&mut entity_spellings, path);
@@ -540,7 +542,7 @@ pub(crate) fn declare<'a, 's>(
         }
     }
     for path in implicit_paths {
-        if explicit_entities.contains_key(path) || path_is_suffix_of_other(path, &implicit_party_locs) {
+        if explicit_entities.contains_key(path) || shadowed_suffixes.contains(path) {
             continue;
         }
         entity_drafts.push(EntityDraft {
@@ -1320,13 +1322,32 @@ fn add_path_spellings<'s>(spellings: &mut Set<&'s str>, path: &'s str) {
     }
 }
 
-fn path_is_suffix_of_other(path: &str, candidates: &Map<&str, Loc>) -> bool {
-    candidates.keys().any(|&other| {
-        other != path
-            && other
+/// Find candidate paths shadowed by a longer path with the same final
+/// component. Sorting by reversed spelling makes each suffix range contiguous,
+/// avoiding a quadratic scan when a journal introduces many parties.
+fn strict_path_suffixes<'s>(paths: &[&'s str]) -> Set<&'s str> {
+    let mut reversed: Vec<&str> = paths.to_vec();
+    reversed.sort_unstable_by(|left, right| left.bytes().rev().cmp(right.bytes().rev()));
+
+    let mut shadowed = Set::default();
+    for &path in paths {
+        let after_prefix = reversed.partition_point(|candidate| {
+            candidate
+                .bytes()
+                .rev()
+                .cmp(path.bytes().rev().chain(std::iter::once(b'/')))
+                .is_lt()
+        });
+        if let Some(&candidate) = reversed.get(after_prefix)
+            && candidate != path
+            && candidate
                 .strip_suffix(path)
                 .is_some_and(|prefix| prefix.ends_with('/'))
-    })
+        {
+            shadowed.insert(path);
+        }
+    }
+    shadowed
 }
 
 fn is_path_child(parent: &str, child: &str) -> bool {
@@ -1345,6 +1366,30 @@ fn duplicate_decl(kind: &str, name: &str, again: Loc, first: Option<Loc>) -> Dia
         diagnostic = diagnostic.context(first, "first declared here");
     }
     diagnostic
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strict_path_suffixes;
+
+    #[test]
+    fn implicit_party_suffixes_are_found_without_prefix_collisions() {
+        let paths = [
+            "acme",
+            "vendors/acme",
+            "archive/vendors/acme",
+            "acme2",
+            "other/acme2",
+            "vendor/acme/branch",
+        ];
+        let shadowed = strict_path_suffixes(&paths);
+
+        assert!(shadowed.contains("acme"));
+        assert!(shadowed.contains("vendors/acme"));
+        assert!(shadowed.contains("acme2"));
+        assert!(!shadowed.contains("other/acme2"));
+        assert!(!shadowed.contains("vendor/acme/branch"));
+    }
 }
 
 fn resolve_kind<'s>(

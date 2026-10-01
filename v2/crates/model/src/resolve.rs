@@ -261,9 +261,6 @@ impl<'s> World<'s> {
                 .help("loan contracts name their debt tab; other contracts are not places"),
             );
         }
-        if let Some(place) = self.seek_place(word)? {
-            return Ok(End { place, entity: None });
-        }
         if self.book.asset(word.text).is_some() {
             return Err(
                 Diagnostic::error(
@@ -273,6 +270,9 @@ impl<'s> World<'s> {
                 .label(word.loc, "this names the asset itself")
                 .help(format!("use `#purchase of {}` to acquire the asset", word.text)),
             );
+        }
+        if let Some(place) = self.seek_place(word)? {
+            return Ok(End { place, entity: None });
         }
         let entity = self.entity(home, word)?;
         self.entity_end(entity, word)
@@ -327,7 +327,12 @@ impl<'s> World<'s> {
     /// stands for its `via` place.
     pub fn find_end(&self, text: &str) -> Result<End, Cause> {
         if text == "?" {
-            return Ok(End { place: self.book.roots.unknown, entity: None });
+            return Ok(End {
+                place: self.book.entities[self.book.roots.unknown]
+                    .place
+                    .expect("unknown has an endpoint"),
+                entity: None,
+            });
         }
         if self.any_taken()
             && let Some(Taken { entity, .. }) = self.taken(text)
