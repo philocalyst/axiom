@@ -3,7 +3,7 @@
 
 use axiom_core::{Diagnostic, Id, Map, Qty};
 use axiom_engine::{Run, State};
-use axiom_model::{Book, Commodity, Flow, Place, Role, Select};
+use axiom_model::{Book, Commodity, Flow, Place, Role};
 
 use crate::reconcile::{Batch, Existing};
 use crate::world::{Account, World};
@@ -52,10 +52,7 @@ pub(crate) fn world<'b, 's>(
             }
             let view = book.flow(flow_id);
             let settle = if flow.mode == axiom_model::Mode::Pending {
-                view.select().iter().find_map(|selector| match selector {
-                    Select::Code(code) => Some(book.name(*code)),
-                    _ => None,
-                })
+                view.codes().next().map(|code| book.name(code))
             } else {
                 None
             };

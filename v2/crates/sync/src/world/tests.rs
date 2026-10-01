@@ -182,10 +182,15 @@ fn pending_rows_settle_only_the_matching_book_flow() {
     assert!(pending[1].contains("^pending-20260105-2"), "{pending:?}");
     drop(world);
 
-    // Exercise settlement against the canonical native account index. The
-    // pending code is input to reconciliation here because Book→World's
-    // pending-code adapter is still a separate owner task.
-    let mut book = native_book(BASE);
+    // The book-owned pending flow and its transaction code must be the source
+    // of the settlement candidate, not a test-only Existing row.
+    let source = format!(
+        "{BASE}\
+entity plumber : merchant\n  known-as \"PLUMBER\"\n\
+2026-01-05 checking -> plumber (12.50 USD) ^pending-20260105-1\n\
+2026-01-05 checking -> shell 3 USD\n"
+    );
+    let mut book = native_book(&source);
     let format = make_format(
         &mut book,
         &[
@@ -197,21 +202,6 @@ fn pending_rows_settle_only_the_matching_book_flow() {
     );
     let run = engine_run(&book);
     let mut world = native_world(&book, &run);
-    world
-        .accounts
-        .entry("assets/checking")
-        .or_default()
-        .flows
-        .push(Existing {
-            settle: Some("pending-20260105-1"),
-            ..Existing::new(day("2026-01-05"), Qty(-1_250))
-        });
-    world
-        .accounts
-        .entry("assets/checking")
-        .or_default()
-        .flows
-        .push(Existing::new(day("2026-01-05"), Qty(-300)));
     let feed = test_feed(&book, format, "assets/checking", "USD");
     let posted = inserts(
         &mut world,
