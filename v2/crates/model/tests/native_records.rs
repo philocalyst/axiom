@@ -101,6 +101,84 @@ opening 2026-01-01
 }
 
 #[test]
+fn commodity_payers_get_distinct_issuer_places_and_nearest_pays_provenance() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose dividend : income
+purpose interest : income
+kind fund : commodity
+  pays dividend
+kind bond-fund : fund
+  pays interest
+commodity VTI : fund
+commodity BND : fund
+commodity QQQ : bond-fund
+account assets/fidelity
+2026-01-01 VTI -> fidelity 10 USD
+2026-01-02 BND -> fidelity 20 USD
+2026-01-03 QQQ -> fidelity 30 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let vti = book.commodity("VTI").unwrap();
+    let bnd = book.commodity("BND").unwrap();
+    let qqq = book.commodity("QQQ").unwrap();
+    let vti_place = book.issuer_place(vti).unwrap();
+    let bnd_place = book.issuer_place(bnd).unwrap();
+    let qqq_place = book.issuer_place(qqq).unwrap();
+    assert_ne!(vti_place, bnd_place);
+    assert_eq!(book.places[vti_place].role, axiom_model::Role::Issuer(vti));
+    assert_eq!(book.places[bnd_place].role, axiom_model::Role::Issuer(bnd));
+    assert_eq!(book.places[qqq_place].role, axiom_model::Role::Issuer(qqq));
+
+    let dividend = book.purpose("dividend").unwrap();
+    let interest = book.purpose("interest").unwrap();
+    let flows: Vec<_> = book.flows.iter().map(|(_, flow)| flow).collect();
+    let dividend_source = book.kind("fund").unwrap();
+    let interest_source = book.kind("bond-fund").unwrap();
+    assert_eq!(flows[0].from, vti_place);
+    assert_eq!(flows[0].purpose.unwrap().purpose, dividend);
+    assert_eq!(flows[0].purpose.unwrap().source, axiom_model::Provenance::Commodity(dividend_source));
+    assert_eq!(flows[1].from, bnd_place);
+    assert_eq!(flows[1].purpose.unwrap().purpose, dividend);
+    assert_eq!(flows[1].purpose.unwrap().source, axiom_model::Provenance::Commodity(dividend_source));
+    assert_eq!(flows[2].from, qqq_place);
+    assert_eq!(flows[2].purpose.unwrap().purpose, interest);
+    assert_eq!(flows[2].purpose.unwrap().source, axiom_model::Provenance::Commodity(interest_source));
+    assert_record_indices(&book);
+}
+
+#[test]
+fn commodity_without_pays_cannot_be_used_as_a_party() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity VTI
+account assets/fidelity
+2026-01-01 VTI -> fidelity 10 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (_, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "commodity-endpoint"), "{diagnostics:?}");
+}
+
+#[test]
 fn syntax_rejects_split_flow_legs_under_a_claim() {
     let path = "journal/2026/01.ax";
     let text = "\

@@ -37,6 +37,9 @@ pub struct Book<'s> {
     pub roots: Roots,
 
     pub places: Tree<Place>,
+    /// Sparse outside endpoints for commodities whose kind chain declares
+    /// `pays`, keyed by commodity id.
+    pub issuer_places: Map<Id<Commodity>, Id<Place>>,
     pub entities: Tree<Entity>,
     pub kinds: Tree<Kind>,
     /// What flows are for: `income`, `spending`, `capital` and the tree beneath
@@ -262,6 +265,9 @@ pub enum Role {
     /// A party as a flow's end. `None` for `?`, the opening, and (until the v4
     /// model lands) v3's income, expense and equity places.
     Outside(Option<Id<Entity>>),
+    /// A commodity issuer is a party in its own right, distinct for each
+    /// commodity even when several commodities share the same kind.
+    Issuer(Id<Commodity>),
     /// Claims between a party and an owner: an `Asset`-class tab holds what the
     /// party owes, a `Debt`-class tab what the owner owes it. Tabs are `claim`
     /// places: each claim stays its own parcel.
@@ -1712,6 +1718,12 @@ impl<'s> Book<'s> {
 
     pub fn commodity(&self, symbol: &str) -> Option<Id<Commodity>> {
         self.names.get(symbol).and_then(|sym| self.lookup.commodities.get(&sym).copied())
+    }
+
+    /// The outside endpoint for this commodity when its kind chain declares
+    /// what the issuer pays. `None` for commodities with no such rule.
+    pub fn issuer_place(&self, unit: Id<Commodity>) -> Option<Id<Place>> {
+        self.issuer_places.get(&unit).copied()
     }
 
     /// A kind by name (`401k`), qualified by its system (`us/401k/401k`), or by

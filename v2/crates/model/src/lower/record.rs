@@ -2784,6 +2784,7 @@ fn make_resolved_flow(
     let select = from.select;
     let owner = world.book.places[from.place].owner;
     let payee = tail.payee.or(to.entity).or(from.entity);
+    let purpose = tail.purpose.or_else(|| commodity_purpose(world, from.place));
     let recognized = tail.recognized.unwrap_or(Days::on(day));
     Some(Flow {
         day,
@@ -2797,7 +2798,7 @@ fn make_resolved_flow(
         txn,
         payee,
         owner,
-        purpose: tail.purpose,
+        purpose,
         description: tail.description,
         origin: Origin::Written,
         select,
@@ -2806,6 +2807,29 @@ fn make_resolved_flow(
         loc,
         waive: tail.waive,
         detail,
+    })
+}
+
+/// A commodity in party position contributes the `pays` purpose inherited by
+/// its kind. The provenance names the nearest kind that actually wrote it,
+/// rather than the commodity's kind when that rule came from an ancestor.
+fn commodity_purpose(world: &World<'_>, source: Id<crate::book::Place>) -> Option<Purposed> {
+    let crate::book::Role::Issuer(unit) = world.book.places[source].role else {
+        return None;
+    };
+    let mut kind = world.book.commodities[unit].kind;
+    let pays = world.book.kinds[kind].pays?;
+    while let Some(parent) = world.book.kinds.parent(kind) {
+        if world.book.kinds[parent].pays == Some(pays) {
+            kind = parent;
+        } else {
+            break;
+        }
+    }
+    Some(Purposed {
+        purpose: pays.value,
+        of: None,
+        source: Provenance::Commodity(kind),
     })
 }
 

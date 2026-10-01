@@ -1254,7 +1254,47 @@ pub(crate) fn declare<'a, 's>(
         .enumerate()
         .map(|(at, &key)| (key, at))
         .collect();
-    let mut place_nodes = Vec::with_capacity(paths.len() + account_drafts.len() + tab_drafts.len());
+
+    // `pays` is inherited after the place tree is frozen, so determine which
+    // commodity endpoints are needed from the same first declarations that
+    // the property pass will use. This retains per-commodity issuer identity
+    // without allocating one endpoint per kind.
+    let mut own_pays = vec![false; native_kinds.tree.len()];
+    let mut seen_kind_declarations = Set::default();
+    let mut kind_declaration_at = 0;
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            let ItemKind::Decl(decl_id) = item.kind else { continue };
+            let decl = &file[decl_id];
+            if decl.what != DeclKind::Kind {
+                continue;
+            }
+            let kind = native_kinds.declarations[kind_declaration_at];
+            kind_declaration_at += 1;
+            if seen_kind_declarations.insert(kind)
+                && native_kinds.tree[kind].sort == Sort::Commodity
+            {
+                own_pays[kind.index()] = file[decl.props].iter().any(|prop| prop.name.0 == "pays");
+            }
+        }
+    }
+    let mut inherited_pays = vec![false; native_kinds.tree.len()];
+    for (kind, _) in native_kinds.tree.iter() {
+        inherited_pays[kind.index()] = own_pays[kind.index()]
+            || native_kinds
+                .tree
+                .parent(kind)
+                .is_some_and(|parent| inherited_pays[parent.index()]);
+    }
+    let issuer_units: Vec<_> = commodities
+        .iter()
+        .filter_map(|(unit, commodity)| inherited_pays[commodity.kind.index()].then_some(unit))
+        .collect();
+
+    let mut place_nodes = Vec::with_capacity(
+        paths.len() + account_drafts.len() + tab_drafts.len() + issuer_units.len(),
+    );
     let mut parents = Vec::with_capacity(place_nodes.capacity());
     let mut place_index = Map::default();
     let account_by_path: Map<&str, &AccountDraft<'s>> = account_drafts
@@ -1397,6 +1437,35 @@ pub(crate) fn declare<'a, 's>(
         parents.push(parent);
         place_index.insert((namespace, path), (at, indexed));
     }
+    let issuer_node_indices: Vec<_> = issuer_units
+        .iter()
+        .map(|&unit| {
+            let commodity = &commodities[unit];
+            let at = place_nodes.len();
+            place_nodes.push(Place {
+                path: commodity.symbol,
+                class: Class::Outside,
+                role: Role::Issuer(unit),
+                kind: native_kinds.roots.entity,
+                owner: me,
+                holds: None,
+                select: None,
+                deferred: false,
+                basis: Basis::Cost,
+                claim: false,
+                liquidity: None,
+                opened: None,
+                closed: None,
+                shares: Box::default(),
+                known_as: Box::default(),
+                props: Box::default(),
+                doc: commodity.doc,
+                loc: commodity.loc,
+            });
+            parents.push(None);
+            (unit, at)
+        })
+        .collect();
     // Tabs have no source path of their own; their printed label is the party
     // name, while identity is the typed (party, owner, class) tuple.
     let tab_node_indices: Vec<_> = tab_drafts
@@ -1433,6 +1502,11 @@ pub(crate) fn declare<'a, 's>(
         .collect();
     let (places, remap) =
         Tree::build(place_nodes, &parents).expect("place parents are prefixes without cycles");
+
+    let issuer_places = issuer_node_indices
+        .into_iter()
+        .map(|(unit, old)| (unit, remap[old]))
+        .collect();
 
     let mut place_names = Names::default();
     for (&(namespace, path), &(old, indexed)) in &place_index {
@@ -1519,6 +1593,7 @@ pub(crate) fn declare<'a, 's>(
         relaxed: settings.relaxed,
         roots,
         places,
+        issuer_places,
         entities,
         kinds: native_kinds.tree,
         purposes: native_purposes.tree,

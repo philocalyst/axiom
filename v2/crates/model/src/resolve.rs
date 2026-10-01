@@ -291,6 +291,19 @@ impl<'s> World<'s> {
             }
             return Ok(End { place, entity: None });
         }
+        if let Some(unit) = self.book.commodity(word.text) {
+            if let Some(place) = self.book.issuer_place(unit) {
+                return Ok(End { place, entity: None });
+            }
+            return Err(
+                Diagnostic::error(
+                    "commodity-endpoint",
+                    format!("commodity `{}` has no issuer endpoint", word.text),
+                )
+                .label(word.loc, "this commodity's kind chain declares no `pays` purpose")
+                .help("write `pays PURPOSE` on its commodity kind before using it as a party"),
+            );
+        }
         let entity = self.entity(home, word)?;
         self.entity_end(entity, word)
     }
