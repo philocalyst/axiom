@@ -133,8 +133,12 @@ pub struct Pattern {
 /// One step of a pattern's program.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
-    /// Case-insensitive literal (stored uppercased).
+    /// User-written literal, kept borrowed and matched case-insensitively.
     Literal(Sym),
+    /// A generated entity or account name, matched case-insensitively with
+    /// path separators and hyphens equivalent to spaces (`trader-joes` matches
+    /// `TRADER JOES`). User-written `Literal` patterns remain exact.
+    Name(Sym),
     Class(CharClass),
     /// Try the next `len` ops; on failure jump past them to the alternative.
     Choice {

@@ -1448,6 +1448,7 @@ fn contract(days: axiom_core::Days, terms: axiom_core::Timeline<crate::Terms>) -
         terms,
         buys: None,
         deposit: None,
+        deposit_holding: None,
         loan: None,
         matching: None,
         ended: None,

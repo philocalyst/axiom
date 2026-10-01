@@ -582,6 +582,8 @@ pub struct Contract {
     /// `deposit 2_350 USD`: a claim the party holds, and money held for it,
     /// over `days`.
     pub deposit: Option<Amount>,
+    /// The holding account named by `deposit ... into HOLDING`.
+    pub deposit_holding: Option<Id<Place>>,
     pub loan: Option<Loan>,
     /// `match 50% of retirement up to 6%`.
     pub matching: Option<Match>,
@@ -676,9 +678,9 @@ pub struct TemplateFlow {
 #[derive(Clone, PartialEq, Debug)]
 pub struct Deadline {
     pub after: Span,
-    /// The `else` item, compiled like a template item; `None` if the deadline
-    /// only makes the claim late.
-    pub otherwise: Option<Box<Flow>>,
+    /// The `else` flow, compiled into the enclosing term's shared program;
+    /// `None` if the deadline only makes the claim late.
+    pub otherwise: Option<TemplateFlow>,
 }
 
 /// `for last month|last quarter|last year`.
