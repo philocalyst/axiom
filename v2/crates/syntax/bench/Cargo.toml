@@ -1,0 +1,11 @@
+[package]
+name = "axiom-syntax-counting-bench"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+axiom-core = { path = "../../core" }
+axiom-syntax = { path = ".." }
