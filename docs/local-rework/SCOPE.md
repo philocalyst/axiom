@@ -31,8 +31,9 @@ reported 399 passed and two ignored. The divergent report, sync and v4 branches
 are reference material only. The v4 syntax alternative has 85 recorded model
 compilation errors; it is not silently substituted for the coherent baseline.
 
-The integration repository is an independent local clone, on
-`rework/recovered-client-boundaries`. Worker worktrees belong to that clone.
+The integration repository is an independent local clone. The first bounded
+rework is preserved on `rework/recovered-client-boundaries`; the native cutover
+continues on `cutover/promote-workspace`. Worker worktrees belong to that clone.
 The original Downloads repository and recovery repositories, refs, bundles and
 evidence are read-only inputs. No backend changes, push or publication are in
 scope. Native Codex UI access and previous recovery denials remain respected.
@@ -69,7 +70,9 @@ The prompts specify goals, not exact patches. Reusable report Context, a paired
 engine view/checkpoint, typed source lookup and JSON rendering, borrowed contract
 occurrences, sparse snapshots and precomputed membership are new design choices
 that serve those goals. They are not descriptions of the lost implementation.
-Current v3 behavior is retained where v4 model parsing has not landed.
+The first bounded checkpoint retained v3 behavior. The subsequent cutover is new
+native implementation and fixture migration; passing counts from the earlier
+checkpoint are not evidence that the native execution or corpus is complete.
 
 ## Verification and final status
 

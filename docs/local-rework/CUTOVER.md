@@ -116,8 +116,9 @@ after checking its exact path and confirming it was not a symlink: 610 files,
 `verification/cutover/removed-build-artifacts.json` outside the repository. The
 active native build directory and all source/evidence repositories were retained.
 
-All remaining acceptance rows are pending until verified. This document is an
-active work record, not a completion claim.
+Acceptance rows close only after verification. This document is an active work
+record, not a completion claim; later dated checkpoints supersede earlier
+compiler and test observations.
 
 ## Allocation baseline
 
@@ -307,3 +308,66 @@ remain unchanged. The pre-occurrence source count was 49,986 non-test lines;
 the historical size target remains unmet. Root promotion, legacy source
 deletion, full financial corpus verification and checklist completion are
 still pending.
+
+## Native execution checkpoint, 2026-10-01 13:35 UTC
+
+The coordinator integrated exact written-occurrence identity (`b7d86bc`), the
+CLI fixture correction (`bf465f9`), removal of the old Sync session and its
+public adapters (`dfc8901`, `3b3ce4e`), and the faithful native benchmark
+generator (`151452e`). Workspace checking passed after the Sync API removal.
+The full Sync package then passed 94 unit and seven end-to-end tests, with five
+explicit timing/stress tests ignored. Pending settlement codes now come from
+the native Book and already settled flows are not replayed.
+
+Computed journal execution and its native source fixtures were integrated in
+`3d832ea`, `2b84da2`, `77fed62`, `99cf234`, and `052dce3`. The engine now borrows
+call-local details instead of allocating one-entry detail arenas. Native sale
+and purchase fee items retain their posted spending flow while contributing
+their cost to the exchange. The full engine release suite passed 165 tests,
+with four failures and one ignored test. The failures are recognition of a
+range in its first month, a future year's budget breach, recognition after
+applying a future flow to a fork, and the still unwired asset improvement hook.
+They are implementation obligations; source tests keep their financial
+assertions. The native paid-for split retains one grouped source, header and
+leg due dates, and debtor metadata, but its current model-only structure test
+does not establish runtime claim behavior.
+
+The core/model release suite at `052dce3` passed 53 core, 57 model unit, seven
+native-law and 21 native-record tests. The CLI passed all 54 unit tests; its
+integration suite passed eleven and failed three on remaining source fixtures.
+A worker reports corrections for those fixtures, awaiting root integration and
+rerun. Report unit fixture migration and the canonical materializer/monitor are
+still pending. No empty promise/claim vectors are interpreted as monitor
+completion.
+
+Commodity issuers now have separate typed identities (`83f6480`): VTI and BND
+never share a single fund-kind endpoint. Review also identified a general
+income-flow ownership defect: an outside source's default owner can replace
+the receiving account's actual owner. Its correction and source-level tests
+are assigned before financial verification. Per-owner nonlinear law effects
+must be weighted before evaluating the law; scoped report rendering alone is
+insufficient.
+
+The calendar correction in `ea674f2` retains zero allocation over 100,000
+ordinary schedules, with the same checksum as the old implementation. The
+coordinator's allocator-instrumented run measured 38.744 ms before and 40.905 ms
+after; this is not a demonstrated wall-time speedup. Seeking from Day::MIN
+also terminates with zero heap allocation. A separate structural review found
+that carried-budget history reads repeatedly scan all earlier facts; indexed,
+same-day aggregated range reads are under implementation with arithmetic and
+allocation comparisons required before acceptance.
+
+The native benchmark converter keeps the original deterministic simulation,
+daily quotes, lot trades, FX, payroll splits, pending checks, growth, grants,
+unknown amounts and balance assertions. A coordinator-generated 10k workload
+has 10,009 flows and 9,970 journal lines. Its first actual CLI execution reports
+102 errors and six warnings, primarily unposted grouped payroll, inherited
+property lookup, recognition and inference. This is useful failure evidence,
+not a correctness or performance pass. The original financial assertions are
+not waived or removed to manufacture parity.
+
+At this checkpoint the native source count is 51,074 non-test lines, including
+18,435 in model, 8,333 in engine and 8,216 in report. The historical 24,000-line
+target remains unmet. Native examples, mistakes and goldens still need their
+full source and financial migration. Root promotion and legacy removal have
+not yet occurred, and REMAINING is not marked complete.
