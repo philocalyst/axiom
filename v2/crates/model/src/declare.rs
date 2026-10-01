@@ -348,6 +348,22 @@ pub(crate) fn declare<'a, 's>(
         commodity_by_name.insert("USD", id);
         synthetic_base = Some(id);
     }
+    if settings.base.is_none()
+        && synthetic_base.is_none()
+        && !commodity_by_name.contains_key("USD")
+        && commodity_by_name.len() > 1
+    {
+        let first = commodity_by_name
+            .values()
+            .next()
+            .and_then(|&id| commodities[id].loc)
+            .unwrap_or_default();
+        diags.push(
+            Diagnostic::error("base-currency-required", "a book with several currencies needs a base currency")
+                .label(first, "choose the currency amounts are converted into")
+                .help("write `base UNIT` once, such as `base USD`"),
+        );
+    }
     let base = settings
         .base
         .and_then(|word| {

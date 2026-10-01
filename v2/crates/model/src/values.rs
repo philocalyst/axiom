@@ -1,6 +1,6 @@
 //! Constants: the literal values written in properties, params and laws.
 
-use axiom_core::{Diagnostic, Id, Loc, Qty, Ratio};
+use axiom_core::{Diagnostic, Dim, Id, Loc, Qty, Ratio};
 use axiom_syntax::{Bracket as WrittenBracket, Expr, ExprId, ExprKind, File, Many};
 
 use crate::book::{Bracket, Commodity, Schedule};
@@ -16,7 +16,7 @@ impl Value {
             Value::Empty => Ty::Empty,
             Value::Bool(_) => Ty::Bool,
             Value::Num(_) => Ty::Num,
-            Value::Amount(_) => Ty::AMOUNT,
+            Value::Amount(amount) => Ty::Amount(Dim::Of(amount.unit)),
             Value::Day(_) => Ty::Day,
             Value::Span(_) => Ty::Span,
             Value::Text(_) => Ty::Text,
@@ -79,7 +79,7 @@ impl<'s> World<'s> {
             ExprKind::Amount(amount) => match amount.unit() {
                 Some(unit) => {
                     let unit = self.commodity_of(Word { text: unit.0, loc: file.loc(unit.0) })?;
-                    (Value::Amount(self.amount(amount.num(), unit, expr.loc)?), Ty::AMOUNT)
+                    (Value::Amount(self.amount(amount.num(), unit, expr.loc)?), Ty::Amount(Dim::Of(unit)))
                 }
                 None => (Value::Empty, Ty::Empty),
             },
