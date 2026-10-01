@@ -5,6 +5,10 @@
 //! in their syntax tables and are resolved by the recording pass; this survey
 //! does not copy the journal into a second per-item plan.
 
+mod contracts;
+
+pub(crate) use contracts::contracts;
+
 use axiom_core::{Diagnostic, Loc, Map};
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Direction, End, ExprKind, ItemKind, Name, Subject, Verb};
