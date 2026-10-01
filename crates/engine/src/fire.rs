@@ -462,7 +462,14 @@ impl Ledger<'_, '_, '_> {
             self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
             return;
         }
-        let Some(sold) = ctx.amount.filter(|amount| amount.unit == unit && amount.qty > Qty::ZERO) else {
+        let Some(sold) = ctx
+            .amount
+            .filter(|amount| amount.unit == unit)
+            .and_then(|_| ctx
+            .realized
+            .filter(|realized| realized.quantity > Qty::ZERO)
+            .map(|realized| realized.quantity))
+        else {
             self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
             return;
         };
@@ -500,21 +507,42 @@ impl Ledger<'_, '_, '_> {
             return;
         }
         candidates.sort_by_key(|(day, _, _)| std::cmp::Reverse(*day));
+        for (_, part, quantity) in &mut candidates {
+            let Some(reserved) = self
+                .scratch
+                .carry_used
+                .iter()
+                .filter(|(seen, _)| seen == part)
+                .try_fold(Qty::ZERO, |sum, (_, used)| {
+                    sum.0.checked_add(used.0).map(Qty)
+                })
+            else {
+                self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+                return;
+            };
+            let Some(remaining) = quantity.0.checked_sub(reserved.0) else {
+                self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+                return;
+            };
+            quantity.0 = remaining.max(0);
+        }
         let Some(available) = candidates.iter().try_fold(Qty::ZERO, |sum, (_, _, qty)| {
             sum.0.checked_add(qty.0).map(Qty)
         }) else {
             self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
             return;
         };
-        let matched_qty = available.min(sold.qty);
+        let matched_qty = available.min(sold);
         let mut quantity_left = matched_qty;
-        let mut shares = crate::lots::Shares::new(amount.qty, sold.qty);
+        let mut shares = crate::lots::Shares::new(amount.qty, sold);
         let mut additions = Vec::new();
+        let mut used = Vec::new();
         for (_, part, available) in candidates {
             if quantity_left.is_zero() { break; }
             let quantity = available.min(quantity_left);
             let basis = shares.take(quantity);
             if !basis.is_zero() { additions.push((part, basis)); }
+            if !quantity.is_zero() { used.push((part, quantity)); }
             quantity_left -= quantity;
         }
         if !additions.is_empty() {
@@ -531,7 +559,8 @@ impl Ledger<'_, '_, '_> {
                 });
             }
         }
-        let unmatched_qty = sold.qty - matched_qty;
+        self.scratch.carry_used.extend(used);
+        let unmatched_qty = sold - matched_qty;
         if !unmatched_qty.is_zero() {
             let matched_amount = additions.iter().map(|(_, basis)| *basis).fold(Qty::ZERO, |sum, amount| sum + amount);
             let unmatched_amount = amount.qty - matched_amount;

@@ -69,6 +69,7 @@ impl Ledger<'_, '_, '_> {
         let on = Occasion::flow(m);
         let watched = !m.opening;
         self.scratch.worth.clear();
+        self.scratch.carry_used.clear();
         // A `!` on an assertion accepts its gap: it is never unused.
         if let (Cause::Flow(_) | Cause::Applied(_), true, Some(waive)) = (m.cause, watched, m.waive)
         {
@@ -441,6 +442,7 @@ impl Ledger<'_, '_, '_> {
                 proceeds: slice.worth,
                 basis: slice.basis,
                 held,
+                quantity: slice.qty,
                 part: slice.part,
                 codes: m.code_runs,
             };
@@ -925,6 +927,7 @@ impl Ledger<'_, '_, '_> {
                     proceeds: fetched,
                     basis: slice.basis,
                     held: m.day.since(slice.acquired),
+                    quantity: slice.qty,
                     part: slice.part,
                     codes: m.code_runs,
                 }),

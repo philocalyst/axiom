@@ -839,6 +839,70 @@ fn a_purchase_that_states_its_basis_keeps_it() {
     });
 }
 
+#[test]
+fn wash_sale_carries_a_loss_into_a_later_replacement_lot() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind security : commodity
+kind brokerage : asset
+  law wash-sale
+    on gain
+    when amount.unit is security
+    when gain < empty
+    carry -gain to amount.unit within 30d
+commodity VTI : security
+  precision 3
+account assets/checking
+account assets/fidelity-brokerage : brokerage
+  select fifo
+
+opening 2026-01-01
+  checking 1_000 USD
+  fidelity-brokerage 5.000 VTI basis 270 USD since 2026-01-01
+  fidelity-brokerage 5.000 VTI basis 330 USD since 2026-01-02
+
+2026-01-20 checking 250 USD -> fidelity-brokerage 2.500 VTI basis 125 USD
+2026-02-05 fidelity-brokerage 10.000 VTI -> checking 500 USD
+2026-02-20 checking 250 USD -> fidelity-brokerage 2.500 VTI basis 125 USD
+";
+    with_run(text, day(2026, 2, 28), |book, run| {
+        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+        let mut sales: Vec<_> = run.gains.iter().filter(|gain| gain.day == day(2026, 2, 5)).collect();
+        sales.sort_by_key(|gain| gain.acquired);
+        assert_eq!(sales.len(), 2);
+        assert_eq!(
+            sales.iter().map(|gain| (gain.proceeds.0, gain.basis.0, gain.gain().0)).collect::<Vec<_>>(),
+            [(25_000, 27_000, -2_000), (25_000, 33_000, -8_000)],
+            "each of the two sold parcels carries its own loss amount"
+        );
+        let carried: Vec<_> = run
+            .adjustments
+            .iter()
+            .filter_map(|adjustment| match adjustment.kind {
+                crate::AdjustmentKind::Carried { from, to: Some(to) } => Some((from, to, adjustment.amount.0)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(carried.len(), 2, "prior and future replacement portions are each matched once: {carried:?}");
+        assert_eq!(
+            carried.iter().map(|(_, _, amount)| *amount).collect::<Vec<_>>(),
+            [1_000, 1_000],
+            "the first $20 parcel loss is split over the prior and future replacement shares"
+        );
+        let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
+        assert_eq!(broker.lots.len(), 2);
+        assert_eq!(
+            broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0)).collect::<Vec<_>>(),
+            [(2_500, 13_500), (2_500, 13_500)],
+            "each 2.5-share replacement gets only its apportioned $10 loss"
+        );
+        assert_eq!(run.pending_carries.len(), 1, "the unmatched second lot loss remains pending through its window");
+        assert_eq!((run.pending_carries[0].quantity.0, run.pending_carries[0].amount.0), (5_000, 8_000));
+    });
+}
+
 // ─── Value recognized ahead of the window it belongs to ─────────────────────
 
 const INSURANCE: &str = "\
