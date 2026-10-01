@@ -72,6 +72,22 @@ fn effective_owners_compose_place_shares_through_nested_entities() {
 }
 
 #[test]
+fn invalid_entity_ownership_is_reported_without_recursing_or_dropping_into_self() {
+    let mut f = Fixture::new();
+    let (me, grant) = (f.me, f.grant);
+    let share = |entity| Share { entity, rate: Ratio::ONE, measure: None, loc: Loc::default() };
+    f.entities[me].owned_by = vec![share(grant)].into();
+    f.entities[grant].owned_by = vec![share(me)].into();
+
+    let book = f.book();
+    let plan = Plan::new(&book);
+    assert!(plan.owners_of_entity(me).is_empty());
+    assert!(plan.owners_of_entity(grant).is_empty());
+    let run = plan.run(options());
+    assert!(run.diagnostics.iter().any(|problem| problem.code == "ownership-cycle"));
+}
+
+#[test]
 fn an_empty_book_folds_to_nothing() {
     let book = Fixture::new().book();
     let plan = Plan::new(&book);
