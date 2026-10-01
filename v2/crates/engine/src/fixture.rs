@@ -267,9 +267,12 @@ impl Fixture {
         let txn = Txn {
             day,
             flows: Run::new(id, 1),
+            inputs: Run::new(Id::new(0), 0),
+            program: None,
             codes: Run::new(Id::new(0), 0),
             waive: None,
             contract: None,
+            contract_schedule: None,
             ends: false,
             doc: None,
             loc,

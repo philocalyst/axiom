@@ -72,6 +72,7 @@ impl<'a, 's> Elab<'a, 's> {
             day,
             flows: Run::new(Id::new(first as u32), (self.sink.flows.len() - first) as u32),
             inputs: Run::new(Id::new(0), 0),
+            program: None,
             codes: header.map_or_else(Box::default, |header| header.codes.iter().map(|&(code, _)| code).collect()),
             waive: header.and_then(|header| header.waive),
             plan,

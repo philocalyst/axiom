@@ -12,8 +12,8 @@ use axiom_core::{
 };
 
 use crate::journal::{
-    Assert, Detail, Event, Filed, Flow, FlowView, Infer, Measure, Mode, Origin, Plan, Prices, Purposed, Reading,
-    RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive,
+    Assert, Detail, Event, Filed, Flow, FlowView, Infer, JournalProgram, Measure, Mode, Origin, Plan, Prices,
+    Purposed, Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive,
 };
 use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
@@ -71,6 +71,9 @@ pub struct Book<'s> {
     pub formats: Arena<Format>,
 
     pub txns: Arena<Txn>,
+    /// Computed journal expressions and grouped line items. Only transactions
+    /// that need them have a program handle in `Txn`.
+    pub journal_programs: Arena<JournalProgram>,
     /// Occurrence inputs in the order of the contract terms' `inputs` list.
     /// Each transaction stores a range so the common case of no named inputs
     /// does not allocate, and forecasts can borrow the bindings directly.

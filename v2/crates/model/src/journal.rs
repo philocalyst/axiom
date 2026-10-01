@@ -5,10 +5,10 @@ use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Span, Sym};
 use std::hash::{Hash, Hasher};
 
 use crate::book::{
-    Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose, ScheduleKind,
-    System, Text,
+    Also, Amount, Asset, Commodity, Contract, Entity, EventState, FlowSide, Kind, On, Place,
+    Policy, Purpose, ScheduleKind, Sign, System, TemplateAmount, TemplateItemParent, TemplateProgram, Text,
 };
-use crate::law::{Law, Subject};
+use crate::law::{Law, NodeId, Subject};
 
 /// Value moving once, from one place to another. Balanced by construction.
 #[derive(Clone, PartialEq, Debug)]
@@ -298,6 +298,17 @@ mod flow_view_tests {
     }
 }
 
+#[cfg(test)]
+mod journal_program_tests {
+    use super::{Flow, Txn};
+
+    #[test]
+    fn sparse_program_handles_do_not_grow_the_common_flow_record() {
+        assert_eq!(std::mem::size_of::<Flow>(), 200);
+        assert!(std::mem::size_of::<Txn>() <= 96);
+    }
+}
+
 /// A flow's purpose, its object, and where it came from.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Purposed {
@@ -494,6 +505,10 @@ pub struct Txn {
     /// Occurrence input bindings, indexed by the active terms' input order.
     /// Empty for ordinary transactions and occurrences without inputs.
     pub inputs: Run<Option<Amount>>,
+    /// Sparse typed roots and grouping for a transaction with computed
+    /// amounts or line items. Literal ungrouped transactions pay no program
+    /// allocation and carry `None`.
+    pub program: Option<Id<JournalProgram>>,
     pub codes: Run<Sym>,
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,
@@ -504,6 +519,44 @@ pub struct Txn {
     /// `DATE NAME ends`: it ends the contract, and has no flows.
     pub ends: bool,
     pub doc: Option<Sym>,
+    pub loc: Loc,
+}
+
+/// Expression roots and allocation groups for one written transaction.
+/// Roots and members are indexed by offsets in the owning `Txn::flows` run.
+#[derive(Clone, PartialEq, Debug)]
+pub struct JournalProgram {
+    pub program: TemplateProgram,
+    pub flow_roots: Box<[FlowExpressions]>,
+    pub groups: Box<[JournalGroup]>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FlowExpressions {
+    pub flow: u32,
+    pub out: Option<NodeId>,
+    pub arrive: Option<NodeId>,
+}
+
+/// A split header and its source-ordered legs and items.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct JournalGroup {
+    pub header: u32,
+    pub legs: Box<[u32]>,
+    pub items: Box<[JournalItem]>,
+}
+
+/// A source-ordered line item attached to the header remainder or one leg.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct JournalItem {
+    /// The materialized purpose-bearing flow, if this item has one.
+    pub flow: Option<u32>,
+    pub sign: Sign,
+    pub parent: TemplateItemParent,
+    pub side: FlowSide,
+    /// Exactly one typed literal magnitude or computed root. A purposeless
+    /// Less item still retains its amount here while `flow` is `None`.
+    pub amount: TemplateAmount,
     pub loc: Loc,
 }
 

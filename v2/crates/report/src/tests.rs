@@ -483,10 +483,13 @@ fn journal(cast: &mut Cast) -> Journal {
         let txn = journal.txns.push(Txn {
             day: when,
             flows: axiom_core::Run::new(Id::new(index as u32), 1),
+            inputs: axiom_core::Run::new(Id::new(0), 0),
+            program: None,
             codes: codes.clone(),
             waive: None,
             plan: None,
             contract: None,
+            contract_schedule: None,
             ends: false,
             doc: (row == 13).then(|| cast.names.intern("/// The March design invoice.")),
             loc: line(row),
