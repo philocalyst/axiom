@@ -36,7 +36,7 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
             terminals.out,
         ));
     }
-    let (parsed, mut diagnostics) = sources.parse();
+    let (parsed, mut diagnostics) = Sources::parse_files(&sources.files);
     let (book, built) = axiom_model::build(&parsed);
     // The syntax trees are done with; the book borrows only the source text.
     drop(parsed);
