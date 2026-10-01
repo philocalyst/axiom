@@ -210,58 +210,6 @@ impl Class {
     }
 }
 
-// v3 bridge: deleted with the v3 model, whose path roots the v4 model does not have.
-/// The five roots of v3's chart of accounts. A path root gives a place its
-/// class and its kind its root kind.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-pub enum PathRoot {
-    Assets,
-    Liabilities,
-    Income,
-    Expenses,
-    Equity,
-}
-
-impl PathRoot {
-    pub const ALL: [PathRoot; 5] =
-        [PathRoot::Assets, PathRoot::Liabilities, PathRoot::Income, PathRoot::Expenses, PathRoot::Equity];
-
-    /// The root a full path starts at, if it starts at one.
-    pub fn of(path: &str) -> Option<PathRoot> {
-        let root = PathRoot::ALL.into_iter().find(|root| path.starts_with(root.path()))?;
-        let rest = &path[root.path().len()..];
-        (rest.is_empty() || rest.starts_with('/')).then_some(root)
-    }
-
-    /// The path that opens places under this root: `assets`, `liabilities`, …
-    pub fn path(self) -> &'static str {
-        match self {
-            PathRoot::Assets => "assets",
-            PathRoot::Liabilities => "liabilities",
-            PathRoot::Income => "income",
-            PathRoot::Expenses => "expenses",
-            PathRoot::Equity => "equity",
-        }
-    }
-
-    pub fn class(self) -> Class {
-        match self {
-            PathRoot::Assets => Class::Asset,
-            PathRoot::Liabilities => Class::Debt,
-            PathRoot::Income | PathRoot::Expenses | PathRoot::Equity => Class::Outside,
-        }
-    }
-
-    /// Balances are inflow minus outflow. Liabilities, income and equity are
-    /// naturally negative; this sign shows them the way people read them.
-    pub fn display_sign(self) -> i64 {
-        match self {
-            PathRoot::Assets | PathRoot::Expenses => 1,
-            PathRoot::Liabilities | PathRoot::Income | PathRoot::Equity => -1,
-        }
-    }
-}
-
 /// A place value can be: `assets/bank/checking`, `expenses/food`, `income/salary`.
 pub struct Place {
     /// The full path.
@@ -1738,13 +1686,6 @@ impl<'s> Book<'s> {
             Ok(entity) => self.entities[entity].place.ok_or(miss),
             Err(_) => Err(miss),
         }
-    }
-
-    // v3 bridge: deleted with the v3 model, whose places all sit under a path root. So are the callers that read
-    // `v3_root(place).display_sign()`, where the class `Outside` would show income and equity the wrong way round.
-    /// The root of `place`'s path: which of v3's five sides of the books it is on.
-    pub fn v3_root(&self, place: Id<Place>) -> PathRoot {
-        PathRoot::of(self.name(self.places[place].path)).expect("every v3 place sits under a path root")
     }
 
     pub fn entity(&self, text: &str) -> Result<Id<Entity>, Miss<Entity>> {
