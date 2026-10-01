@@ -78,6 +78,17 @@ an agreed exception or as completed work.
 | Integration commit | Change | Verification |
 |---|---|---|
 | `df76d70` | Promote recovered S5 v4 parser/AST; reject legacy chart account blocks; document raw run/into comments | Lane and coordinator: 81 syntax tests passed; one pre-existing ignored doctest |
+| `1b337eb`, `1320743` | Bound packed piece indices, tighten parser contracts and fold parallel results in source order | Coordinator: 84 syntax tests passed; one ignored doctest. Allocation candidate measured in PARSER-EXPERIMENTS; ordinary release timing gate remains pending |
+| `1c54f5c`, `b613f3f` | Pooled journal metadata, borrowed flow views, runtime detail association, canonical sync types and M4a/M4b handoff | Coordinator: 50 core and 84 syntax tests passed. Full model build remains red in the old v3 lowering pipeline |
+| `67c2302` | Reject absent parameter key tuples and dates before their first row | Reviewed arithmetic correction and regression cases; model tests await native lowering |
+| `914f4aa` | Flow-owner purpose rules, dated properties, asset scopes and sparse rolling totals | Lane: 124 engine tests passed before adopting the schema dependency; native integrated engine checks pending |
+| `1a2c09f`, `e9cf758` | Sam native source fixture and independent financial oracle with source-derived inputs | Lane: all 12 Axiom files parse, 144 items, no diagnostics. Coordinator: verify11 passes. Engine agreement remains pending |
+
+The six old completed implementation worktrees were clean before removal. Their
+branches and commits remain available; exact paths and heads are in
+`verification/cutover/removed-worktrees.json` outside the repository. Current
+cutover lanes use private worktrees. Cleanup has not touched original repositories
+or recovery evidence.
 
 All remaining acceptance rows are pending until verified. This document is an
 active work record, not a completion claim.
