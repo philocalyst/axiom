@@ -3,12 +3,14 @@
 //! already there (the same day and subject, the same row key) is kept as
 //! written, and the rest is added in order.
 
+use std::borrow::Cow;
+
 use axiom_core::{Day, Diagnostic, FileId, Loc, Map};
 
-use crate::write::{
-    Context, Item, Layout, row_key, row_keys, scan, validate_item, validate_row,
-};
 use crate::paths::is_project_path;
+use crate::write::{
+    Context, Item, Layout, row_key, row_keys, scan, validate_item_at, validate_row_at,
+};
 use crate::{Form, Insert};
 
 /// Where a source's Axiom goes.
@@ -29,8 +31,19 @@ pub fn merge(
     layout: &Layout,
     read: &mut dyn FnMut(&str) -> Option<String>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
+    let mut borrowed = |path: &str| read(path).map(Cow::Owned);
+    merge_at(sink, output, layout, FileId(0), &mut borrowed)
+}
+
+pub(crate) fn merge_at<'a>(
+    sink: Sink,
+    output: &str,
+    layout: &Layout,
+    file: FileId,
+    read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
+) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     match sink {
-        Sink::Journal => items(output, |day| layout.file_for(day), read),
+        Sink::Journal => items(output, |day| layout.file_for(day), file, read),
         Sink::File(pattern) => items(
             output,
             |day| {
@@ -39,16 +52,52 @@ pub fn merge(
                     .replace("{year}", &format!("{year:04}"))
                     .replace("{month}", &format!("{month:02}"))
             },
+            file,
             read,
         ),
-        Sink::Param { name, path } => rows(name, path, output, read),
+        Sink::Param { name, path } => rows(name, path, output, file, read),
     }
 }
 
-fn items(
+/// Existing files that `merge` may inspect for this output. The planner uses
+/// this to load targets before it borrows input text from its source catalog.
+pub(crate) fn target_paths(sink: Sink<'_>, output: &str, layout: &Layout) -> Vec<String> {
+    let paths = match sink {
+        Sink::Journal => dated_targets(output, |day| layout.file_for(day)),
+        Sink::File(pattern) => dated_targets(output, |day| {
+            let (year, month, _) = day.ymd();
+            pattern
+                .replace("{year}", &format!("{year:04}"))
+                .replace("{month}", &format!("{month:02}"))
+        }),
+        Sink::Param { path, .. } => vec![path.to_string()],
+    };
+    let mut unique = std::collections::BTreeSet::new();
+    paths
+        .into_iter()
+        .filter(|path| is_project_path(path))
+        .filter(|path| unique.insert(path.clone()))
+        .collect()
+}
+
+fn dated_targets(output: &str, path_of: impl Fn(Day) -> String) -> Vec<String> {
+    let lines: Vec<&str> = output.split_inclusive('\n').collect();
+    scan(&lines, Context::default())
+        .0
+        .into_iter()
+        .filter_map(|item| {
+            item.day
+                .filter(|_| !lines[item.head].starts_with("opening"))
+                .map(path_of)
+        })
+        .collect()
+}
+
+fn items<'a>(
     output: &str,
     path_of: impl Fn(Day) -> String,
-    read: &mut dyn FnMut(&str) -> Option<String>,
+    file: FileId,
+    read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     let lines: Vec<&str> = output.split_inclusive('\n').collect();
     let (found, _) = scan(&lines, Context::default());
@@ -63,7 +112,7 @@ fn items(
             problems.push(
                 Diagnostic::error("undated-line", headline)
                     .label(
-                        line_loc(&lines, item.head),
+                        line_loc(&lines, item.head, file),
                         "expected a date such as 2026-03-05",
                     )
                     .help("print full dates: sync files each line by its day"),
@@ -79,7 +128,7 @@ fn items(
             continue;
         }
         let item_body = body(&lines, item);
-        if let Err(bad) = validate_item(&path, day, &item_body) {
+        if let Err(bad) = validate_item_at(&path, day, &item_body, file) {
             problems.extend(bad);
             continue;
         }
@@ -103,10 +152,10 @@ fn items(
 }
 
 /// Where line `at` of what a command printed is, without its line ending.
-fn line_loc(lines: &[&str], at: usize) -> Loc {
+fn line_loc(lines: &[&str], at: usize, file: FileId) -> Loc {
     let start: usize = lines[..at].iter().map(|line| line.len()).sum();
     Loc::new(
-        FileId(0),
+        file,
         start as u32,
         (start + lines[at].trim_end().len()) as u32,
     )
@@ -157,11 +206,12 @@ fn body(lines: &[&str], item: &Item) -> String {
     body
 }
 
-fn rows(
+fn rows<'a>(
     name: &str,
     path: &str,
     output: &str,
-    read: &mut dyn FnMut(&str) -> Option<String>,
+    file: FileId,
+    read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     if !is_project_path(path) {
         return Err(vec![Diagnostic::error(
@@ -170,7 +220,7 @@ fn rows(
         )]);
     }
     let existing = read(path)
-        .and_then(|text| row_keys(&text, name))
+        .and_then(|text| row_keys(text.as_ref(), name))
         .ok_or_else(|| {
             vec![
                 Diagnostic::error(
@@ -195,11 +245,12 @@ fn rows(
             let headline =
                 "the output has a row that does not start with a year or a date".to_string();
             let label = "expected `2026`, `2026-03` or `2026-03-05` here";
-            problems
-                .push(Diagnostic::error("bad-row", headline).label(line_loc(&lines, at), label));
+            problems.push(
+                Diagnostic::error("bad-row", headline).label(line_loc(&lines, at, file), label),
+            );
             continue;
         };
-        if let Err(bad) = validate_row(path, name, row) {
+        if let Err(bad) = validate_row_at(path, name, row, file) {
             problems.extend(bad);
             continue;
         }

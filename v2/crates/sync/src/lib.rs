@@ -66,7 +66,7 @@ pub use axiom_model::sync::{Column, Field, Format, Rule, Shape, Spec};
 pub use command::{Failed, substitute};
 pub use format::read_memos;
 pub use peg::Patterns;
-pub use planner::{GeneratedSource, PlanOutcome, SourceFailure, SourceResult, plan};
+pub use planner::{GeneratedSource, PlanOutcome, SourceFailure, SourceRegistry, SourceResult, plan};
 pub use promise::Due;
 pub use paths::matching_paths;
 pub use recognize::{KnownId, Reading, Recognized, Recognizer, Scratch, Tie, Who};

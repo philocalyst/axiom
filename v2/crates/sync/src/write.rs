@@ -2,6 +2,7 @@
 //! day belongs to, in day order, dated as briefly as that spot allows, and
 //! without touching anything already there.
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Diagnostic, FileId};
@@ -371,8 +372,17 @@ fn format_item(path: &str, day: Day, date: String, body: &str) -> Result<String,
 
 /// Parse one generated item with a complete date before planning a file change.
 pub(crate) fn validate_item(path: &str, day: Day, body: &str) -> Result<(), Vec<Diagnostic>> {
+    validate_item_at(path, day, body, FileId(0))
+}
+
+pub(crate) fn validate_item_at(
+    path: &str,
+    day: Day,
+    body: &str,
+    file: FileId,
+) -> Result<(), Vec<Diagnostic>> {
     let source = format!("{day} {body}\n");
-    let (_, problems) = axiom_syntax::parse(FileId(0), &source, Folder::of(path));
+    let (_, problems) = axiom_syntax::parse(file, &source, Folder::of(path));
     if problems.is_empty() {
         Ok(())
     } else {
@@ -385,8 +395,17 @@ pub(crate) fn validate_item(path: &str, day: Day, body: &str) -> Result<(), Vec<
 
 /// Parse a generated row in the native declaration shape that will contain it.
 pub(crate) fn validate_row(path: &str, name: &str, row: &str) -> Result<(), Vec<Diagnostic>> {
+    validate_row_at(path, name, row, FileId(0))
+}
+
+pub(crate) fn validate_row_at(
+    path: &str,
+    name: &str,
+    row: &str,
+    file: FileId,
+) -> Result<(), Vec<Diagnostic>> {
     let source = format!("param {name}\n  {row}\n");
-    let (_, problems) = axiom_syntax::parse(FileId(0), &source, Folder::of(path));
+    let (_, problems) = axiom_syntax::parse(file, &source, Folder::of(path));
     if problems.is_empty() {
         Ok(())
     } else {
@@ -533,6 +552,17 @@ pub fn changes(
     inserts: &[Insert],
     read: &mut dyn FnMut(&str) -> Option<String>,
 ) -> Result<Vec<Change>, Vec<Diagnostic>> {
+    let mut read_borrowed = |path: &str| read(path).map(Cow::Owned);
+    changes_borrowed(inserts, &mut read_borrowed)
+}
+
+/// Plan intermediate writes while borrowing existing target contents. The
+/// returned updates own only the new text; callers can retain them in an
+/// overlay without cloning the old target file.
+pub(crate) fn preview<'a>(
+    inserts: &[Insert],
+    read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
+) -> Result<Vec<Update>, Vec<Diagnostic>> {
     let mut by_path: BTreeMap<&str, Vec<&Insert>> = BTreeMap::new();
     for insert in inserts {
         if !is_project_path(&insert.path) {
@@ -543,7 +573,7 @@ pub fn changes(
         }
         by_path.entry(&insert.path).or_default().push(insert);
     }
-    let change = |(path, inserts): (&str, Vec<&Insert>)| -> Result<Change, Vec<Diagnostic>> {
+    let update = |(path, inserts): (&str, Vec<&Insert>)| -> Result<Update, Vec<Diagnostic>> {
         let before = read(path);
         let after = apply(before.as_deref().unwrap_or(""), path, &inserts)?;
         let (_, problems) = axiom_syntax::parse(FileId(0), &after, Folder::of(path));
@@ -553,13 +583,34 @@ pub fn changes(
                 .map(|problem| problem.note("sync refused to plan a file with invalid Axiom syntax"))
                 .collect());
         }
-        Ok(Change {
+        Ok(Update {
             path: path.to_string(),
-            before,
             after,
         })
     };
-    by_path.into_iter().map(change).collect()
+    by_path.into_iter().map(update).collect()
+}
+
+/// Make final changes, owning a target's previous text only when it is part of
+/// the returned change set.
+pub(crate) fn changes_borrowed<'a>(
+    inserts: &[Insert],
+    read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
+) -> Result<Vec<Change>, Vec<Diagnostic>> {
+    let updates = preview(inserts, read)?;
+    Ok(updates
+        .into_iter()
+        .map(|update| Change {
+            before: read(&update.path).map(Cow::into_owned),
+            path: update.path,
+            after: update.after,
+        })
+        .collect())
+}
+
+pub(crate) struct Update {
+    pub path: String,
+    pub after: String,
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@
 
 use axiom_core::{Diagnostic, Id, Map, Qty};
 use axiom_engine::{Run, State};
-use axiom_model::{Book, Flow, Place, Role, Select};
+use axiom_model::{Book, Commodity, Flow, Place, Role, Select};
 
 use crate::reconcile::{Batch, Existing};
 use crate::world::{Account, Unit, World};
@@ -39,6 +39,7 @@ pub(crate) fn world<'b, 's>(
         }
         let name = book.name(place.path);
         let account = accounts.entry(name).or_default();
+        let mut flow_ids = Vec::new();
         for &flow_id in book.touching[place_id].iter() {
             let flow = &book.flows[flow_id];
             let posted = run.posted[flow_id.index()];
@@ -65,7 +66,9 @@ pub(crate) fn world<'b, 's>(
                 unit: Some(book.name(book.commodities[unit].symbol)),
                 batch: Batch::Alone,
             });
+            flow_ids.push(flow_id);
         }
+        assign_batches(book, place_id, &flow_ids, &mut account.flows)?;
         account.asserted.extend(
             book.asserts
                 .iter()
@@ -84,6 +87,90 @@ pub(crate) fn world<'b, 's>(
         dues: Vec::<Due<'s>>::new(),
         claims: Map::default(),
     })
+}
+
+/// A bank may show a coded split as its one total or as its separate flows.
+/// Only group flows from the same written transaction and account commodity,
+/// and only when every member carries a common typed code.
+fn assign_batches<'s>(
+    book: &Book<'s>,
+    place: Id<Place>,
+    flow_ids: &[Id<Flow>],
+    existing: &mut Vec<Existing<'s>>,
+) -> Result<(), Diagnostic> {
+    let mut txn_start = 0;
+    let mut next_batch = 0usize;
+    let mut units = Vec::<Id<Commodity>>::new();
+    let mut members = Vec::<usize>::new();
+    let mut totals = Vec::new();
+    while txn_start < flow_ids.len() {
+        let txn = book.flows[flow_ids[txn_start]].txn;
+        let mut txn_end = txn_start + 1;
+        while txn_end < flow_ids.len() && book.flows[flow_ids[txn_end]].txn == txn {
+            txn_end += 1;
+        }
+        units.clear();
+        for first in txn_start..txn_end {
+            let flow = &book.flows[flow_ids[first]];
+            let unit = unit_on(flow, place);
+            if units.contains(&unit) {
+                continue;
+            }
+            units.push(unit);
+            members.clear();
+            for at in first..txn_end {
+                if unit_on(&book.flows[flow_ids[at]], place) == unit {
+                    members.push(at);
+                }
+            }
+            if members.len() < 2 {
+                continue;
+            }
+            let first_codes = book.flow(flow_ids[members[0]]).codes();
+            let shares_code = first_codes.into_iter().any(|code| {
+                members[1..]
+                    .iter()
+                    .all(|&at| book.flow(flow_ids[at]).codes().any(|other| other == code))
+            });
+            if !shares_code {
+                continue;
+            }
+            let batch = u32::try_from(next_batch).map_err(|_| {
+                Diagnostic::error("sync-batch-limit", "too many coded flow batches")
+            })?;
+            next_batch += 1;
+            let mut total = 0i128;
+            for &at in &members {
+                existing[at].batch = Batch::Member(batch);
+                total += existing[at].qty.0 as i128;
+            }
+            let total = i64::try_from(total).map_err(|_| {
+                Diagnostic::error(
+                    "sync-batch-overflow",
+                    "the coded flow total is outside the supported quantity range",
+                )
+            })?;
+            let day = existing[members[0]].day;
+            totals.push(Existing {
+                day,
+                qty: Qty(total),
+                settle: None,
+                unit: Some(book.name(book.commodities[unit].symbol)),
+                batch: Batch::Total(batch),
+            });
+        }
+        txn_start = txn_end;
+    }
+    existing.extend(totals);
+    Ok(())
+}
+
+fn unit_on(flow: &Flow, place: Id<Place>) -> Id<Commodity> {
+    if flow.from == place {
+        flow.out.unit
+    } else {
+        flow.arrive.unit
+    }
 }
 
 fn account_side(
