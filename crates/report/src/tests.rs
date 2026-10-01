@@ -527,6 +527,7 @@ fn journal(cast: &mut Cast) -> Journal {
             codes: header_codes,
             waive: None,
             contract: None,
+            loan_origin: None,
             contract_schedule: None,
             occurrence: None,
             ends: false,

@@ -1174,6 +1174,7 @@ contract mortgage with rocket
   loan 320_000 USD on 2024-02-20 at 5.875% over 30y for condo
     prepay recasts
   monthly on 1 from checking
+2024-02-20 mortgage
 2026-01-31 mortgage = 300_000 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
@@ -1202,12 +1203,62 @@ contract mortgage with rocket
         book.asserts[0].subject,
         axiom_model::law::Subject::Place(place) if place == loan.debt
     ));
+    let txn = &book.txns[Id::new(0)];
+    assert_eq!(txn.loan_origin, Some(Id::new(0)));
+    assert_eq!(txn.contract, Some(Id::new(0)));
+    assert_eq!(txn.contract_schedule, None);
+    assert_eq!(txn.occurrence, None);
+    let flow = &book.flows[txn.flows.start()];
+    assert_eq!(flow.from, loan.debt);
+    assert_eq!(flow.to, book.place("assets/checking").unwrap());
+    assert_eq!(flow.out, loan.principal);
+    assert_eq!(flow.arrive, loan.principal);
+    assert_eq!(flow.owner, book.roots.me);
+    assert_eq!(flow.payee, Some(book.entity("rocket").unwrap()));
+    assert!(matches!(
+        flow.origin,
+        axiom_model::journal::Origin::Occurrence(contract) if contract == Id::new(0)
+    ));
     let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
     assert_eq!(terms.rate, Some(axiom_core::Ratio::percent(5_875, 3).unwrap()));
     assert!(matches!(
         terms.template[0].out,
         axiom_model::TemplateQuantity::Derived
     ));
+}
+
+#[test]
+fn loan_origination_rejects_a_second_amount_without_partial_flows() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+kind property : thing
+asset condo : property
+entity rocket
+account assets/checking
+contract mortgage with rocket
+  loan 320_000 USD on 2024-02-20 at 5.875% over 30y for condo
+  monthly on 1 from checking
+2024-02-20 mortgage 10 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.clone())
+            .collect::<Vec<_>>(),
+        ["loan-origination-shape"]
+    );
+    assert!(book.txns.is_empty());
+    assert!(book.flows.is_empty());
 }
 
 fn assert_record_indices(book: &axiom_model::book::Book<'_>) {

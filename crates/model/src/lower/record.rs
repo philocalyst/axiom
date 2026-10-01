@@ -627,6 +627,7 @@ fn lower_txn<'a, 's>(
         codes: header_codes,
         waive: txn_waive,
         contract: None,
+        loan_origin: None,
         contract_schedule: None,
         occurrence: None,
         ends: false,
@@ -827,6 +828,7 @@ fn lower_opening<'a, 's>(
         ),
         waive: None,
         contract: None,
+        loan_origin: None,
         contract_schedule: None,
         occurrence: None,
         ends: false,
@@ -985,6 +987,23 @@ fn lower_occurrence<'a, 's>(
         );
         return;
     };
+    if world.book.contracts[contract_id]
+        .loan
+        .is_some_and(|loan| loan.on == statement.date)
+    {
+        lower_loan_origin(
+            world,
+            site,
+            doc,
+            loc,
+            statement,
+            amount,
+            contract_id,
+            code_index,
+            diags,
+        );
+        return;
+    }
     let contract = &world.book.contracts[contract_id];
     let (schedule, due, terms) = match nearest_occurrence(contract, statement.date) {
         Ok(Some(found)) => found,
@@ -1607,8 +1626,269 @@ fn lower_occurrence<'a, 's>(
         codes,
         waive: header_tail.waive,
         contract: Some(contract_id),
+        loan_origin: None,
         contract_schedule: Some(schedule),
         occurrence: Some(occurrence_id),
+        ends: false,
+        doc: doc.map(|doc| world.book.names.intern(doc.0)),
+        loc,
+    });
+}
+
+/// Record the source loan's funding as one balanced debt-to-cash flow. It is
+/// deliberately separate from the first scheduled payment, which may begin
+/// months after the origination date.
+fn lower_loan_origin<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    doc: Option<ast::Doc<'s>>,
+    loc: Loc,
+    statement: &ast::Statement<'s>,
+    amount: Option<ast::Amount<'s>>,
+    contract_id: Id<crate::book::Contract>,
+    code_index: &CodeIndex,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    if amount.is_some()
+        || !file[statement.body.legs].is_empty()
+        || !file[statement.body.items].is_empty()
+    {
+        diags.push(
+            Diagnostic::error(
+                "loan-origination-shape",
+                "a loan origination uses the principal declared by the contract",
+            )
+            .label(
+                loc,
+                "do not add a second amount or split body to the origination marker",
+            ),
+        );
+        return;
+    }
+    let (loan, party, owner, funding) = {
+        let contract = &world.book.contracts[contract_id];
+        let Some(loan) = contract.loan else {
+            diags.push(
+                Diagnostic::error(
+                    "loan-origination-contract",
+                    "this contract has no loan principal to originate",
+                )
+                .label(loc, "only a declared loan can have an origination record"),
+            );
+            return;
+        };
+        let template = contract
+            .terms
+            .as_ref()
+            .map(|timeline| timeline.at(loan.on))
+            .filter(|terms| !terms.template.is_empty())
+            .or_else(|| {
+                contract
+                    .standing
+                    .as_ref()
+                    .map(|timeline| timeline.at(loan.on))
+                    .filter(|terms| !terms.template.is_empty())
+            })
+            .and_then(|terms| terms.template.first());
+        let Some(template) = template else {
+            diags.push(
+                Diagnostic::error(
+                    "loan-origination-holding",
+                    "the loan schedule does not identify a cash holding for its principal",
+                )
+                .label(
+                    loc,
+                    "add a payment schedule from the account that receives the loan",
+                ),
+            );
+            return;
+        };
+        let mut candidates = [template.flow.from, template.flow.to]
+            .into_iter()
+            .filter(|&place| {
+                let place = &world.book.places[place];
+                place.owner == contract.owner
+                    && place.class == crate::book::Class::Asset
+                    && matches!(
+                        place.role,
+                        crate::book::Role::Account { .. } | crate::book::Role::Holding(_)
+                    )
+            });
+        let Some(funding) = candidates.next() else {
+            diags.push(
+                Diagnostic::error(
+                    "loan-origination-holding",
+                    "the loan schedule does not identify an owner cash account",
+                )
+                .label(loc, "the origination needs the owner-side payment holding"),
+            );
+            return;
+        };
+        if candidates.next().is_some() {
+            diags.push(
+                Diagnostic::error(
+                    "loan-origination-holding",
+                    "the loan schedule names more than one owner holding",
+                )
+                .label(loc, "the principal destination is ambiguous"),
+            );
+            return;
+        }
+        (loan, contract.party, contract.owner, funding)
+    };
+    if world.book.entities[party].place.is_none() {
+        diags.push(
+            Diagnostic::error("loan-origination-party", "the lender has no flow endpoint")
+                .label(loc, "cannot identify the source of this principal"),
+        );
+        return;
+    }
+
+    let first_flow = world.book.flows.len();
+    let code_start = world.book.codes.len();
+    let selector_start = world.book.selectors.len();
+    let detail_start = world.book.details.len();
+    let program_start = world.book.journal_programs.len();
+    let diagnostic_start = diags.len();
+    let mut expressions = Vec::new();
+    push_tail_roots(file, statement.tail, &mut expressions);
+    let name = world.book.names.intern("journal");
+    let compiled = if expressions.is_empty() {
+        Some((
+            crate::book::TemplateProgram::default(),
+            Box::<[NodeId]>::default(),
+        ))
+    } else {
+        crate::laws::compile_template(
+            world,
+            diags,
+            file,
+            site.home,
+            Ty::Flow,
+            name,
+            &[],
+            &expressions,
+        )
+    };
+    let Some((program, root_ids)) = compiled else {
+        rollback(
+            world,
+            first_flow,
+            code_start,
+            selector_start,
+            detail_start,
+            program_start,
+        );
+        return;
+    };
+    let roots: Map<_, _> = expressions
+        .iter()
+        .zip(root_ids.iter())
+        .map(|(&(expr, _), &node)| (expr, node))
+        .collect();
+    let (codes, mut tail) = lower_tail(
+        world,
+        site.home,
+        file,
+        statement.tail,
+        statement.date,
+        &roots,
+        code_index,
+        diags,
+    );
+    let basis_root = tail.basis_root;
+    let waive = tail.waive;
+    if tail.price.is_some() {
+        diags.push(
+            Diagnostic::error(
+                "loan-origination-price",
+                "loan principal is transferred in the loan's declared unit",
+            )
+            .label(loc, "a loan origination cannot add a detached price"),
+        );
+        tail.valid = false;
+    }
+    if !tail.valid || diags.len() != diagnostic_start {
+        rollback(
+            world,
+            first_flow,
+            code_start,
+            selector_start,
+            detail_start,
+            program_start,
+        );
+        return;
+    }
+
+    // The debt tab's outflow records the owner's new liability; the same
+    // principal arrives in the account named by the payment schedule.
+    tail.payee = Some(party);
+    let txn_id = Id::new(world.book.txns.len() as u32);
+    let empty = Run::new(Id::new(0), 0);
+    let from = ResolvedEnd {
+        place: loan.debt,
+        entity: None,
+        select: empty,
+    };
+    let to = ResolvedEnd {
+        place: funding,
+        entity: None,
+        select: empty,
+    };
+    let no_local_codes = Run::new(Id::new(world.book.codes.len() as u32), 0);
+    let Some(mut flow) = make_resolved_flow(
+        world,
+        loan.on,
+        from,
+        to,
+        loan.principal,
+        loan.principal,
+        Infer::Known,
+        Mode::Actual,
+        tail,
+        codes,
+        no_local_codes,
+        txn_id,
+        loc,
+        diags,
+    ) else {
+        rollback(
+            world,
+            first_flow,
+            code_start,
+            selector_start,
+            detail_start,
+            program_start,
+        );
+        return;
+    };
+    flow.owner = owner;
+    flow.payee = Some(party);
+    flow.origin = Origin::Occurrence(contract_id);
+    world.book.flows.push(flow);
+    let mut flow_roots = Vec::new();
+    if let Some(basis) = basis_root {
+        push_flow_expressions(&mut flow_roots, 0, None, None, Some(basis));
+    }
+    let program = (!program.nodes.is_empty() || !flow_roots.is_empty()).then(|| {
+        world.book.journal_programs.push(JournalProgram {
+            program,
+            flow_roots: flow_roots.into_boxed_slice(),
+            groups: Box::default(),
+        })
+    });
+    world.book.txns.push(crate::journal::Txn {
+        day: loan.on,
+        flows: Run::new(Id::new(first_flow as u32), 1),
+        inputs: Run::new(Id::new(world.book.input_values.len() as u32), 0),
+        program,
+        codes,
+        waive,
+        contract: Some(contract_id),
+        loan_origin: Some(contract_id),
+        contract_schedule: None,
+        occurrence: None,
         ends: false,
         doc: doc.map(|doc| world.book.names.intern(doc.0)),
         loc,
@@ -1961,6 +2241,7 @@ fn lower_owes<'a, 's>(
         codes: header_codes,
         waive: header_tail.waive,
         contract: None,
+        loan_origin: None,
         contract_schedule: None,
         occurrence: None,
         ends: false,
@@ -2186,6 +2467,7 @@ fn lower_basis<'a, 's>(
             codes: header_codes,
             waive,
             contract: None,
+            loan_origin: None,
             contract_schedule: None,
             occurrence: None,
             ends: false,
@@ -4102,6 +4384,7 @@ fn push_empty_txn<'s>(
         ),
         waive: None,
         contract: None,
+        loan_origin: None,
         contract_schedule: None,
         occurrence: None,
         ends: false,

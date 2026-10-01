@@ -619,6 +619,10 @@ pub struct Txn {
     pub waive: Option<Waive>,
     /// The contract this transaction is an occurrence of (`DATE phone`).
     pub contract: Option<Id<Contract>>,
+    /// The source loan's principal disbursement (`DATE home-loan` on
+    /// `Loan::on`). This is distinct from a scheduled payment occurrence and
+    /// has no schedule or `WrittenOccurrence` handle.
+    pub loan_origin: Option<Id<Contract>>,
     /// Which independent contract schedule this occurrence keeps.
     pub contract_schedule: Option<ScheduleKind>,
     /// Sparse exact identity of a written occurrence. Its due day is distinct
