@@ -7,7 +7,10 @@ use super::compile;
 use crate::book::{Amount, Budget, BudgetTerms, Limit};
 use crate::declare::World;
 use crate::errors::Word;
-use crate::law::{BinOp, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var, Window};
+use crate::law::{
+    BinOp, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var,
+    Window,
+};
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -152,9 +155,11 @@ pub(super) fn declare<'a, 's>(
                         }
                     };
                     let mut until = None;
+                    let mut invalid_until = false;
                     for clause in &file[statement.tail] {
                         if let axiom_syntax::ClauseKind::Until(day) = clause.kind {
                             if until.replace(day).is_some() {
+                                invalid_until = true;
                                 diags.push(
                                     Diagnostic::error(
                                         "duplicate-until",
@@ -164,6 +169,9 @@ pub(super) fn declare<'a, 's>(
                                 );
                             }
                         }
+                    }
+                    if invalid_until {
+                        continue;
                     }
                     let last = until.unwrap_or(Day::MAX);
                     let Some(days) = Days::new(statement.date, last) else {
@@ -224,6 +232,7 @@ fn lower_budget<'s>(
         funded: None,
     };
     let mut timeline = Timeline::new(initial_terms);
+    let mut has_starting_terms = false;
     for entry in entries.iter().copied() {
         let Some(days) = entry.days else {
             if !entry.declared {
@@ -239,6 +248,7 @@ fn lower_budget<'s>(
             // A declaration is active from the beginning of the timeline.
             // Its own values replace the initial zero/default terms.
             let prior = *timeline.at(Day::MIN);
+            let nodes_before = nodes.len();
             let Some(terms) = lower_budget_terms(
                 world,
                 purpose,
@@ -248,12 +258,15 @@ fn lower_budget<'s>(
                 &mut nodes,
                 diags,
             ) else {
-                continue;
+                nodes.truncate(nodes_before);
+                return None;
             };
             timeline = Timeline::new(terms);
+            has_starting_terms = true;
             continue;
         };
         let prior = *timeline.at(days.first());
+        let nodes_before = nodes.len();
         let Some(terms) = lower_budget_terms(
             world,
             purpose,
@@ -263,9 +276,14 @@ fn lower_budget<'s>(
             &mut nodes,
             diags,
         ) else {
+            nodes.truncate(nodes_before);
+            if !has_starting_terms {
+                return None;
+            }
             continue;
         };
         timeline.paint(days, terms);
+        has_starting_terms = true;
     }
 
     // The Plan subscribes to every `Share.of` in this terms timeline. Keep

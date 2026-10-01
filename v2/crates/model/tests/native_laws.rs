@@ -29,7 +29,11 @@ fn native_budget_and_declaration_also_are_linked() {
     let (book, diagnostics) = build(&[std, project]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(book.budgets.len(), 3);
-    let purpose_order: Vec<_> = book.budgets.iter().map(|(_, budget)| budget.purpose.index()).collect();
+    let purpose_order: Vec<_> = book
+        .budgets
+        .iter()
+        .map(|(_, budget)| budget.purpose.index())
+        .collect();
     assert!(purpose_order.windows(2).all(|pair| pair[0] <= pair[1]));
     let (budget_id, budget) = book
         .budgets
@@ -148,6 +152,75 @@ fn native_budget_and_declaration_also_are_linked() {
         selectors[0],
         axiom_model::Select::Code(code) if book.name(code) == "invoice"
     ));
+}
+
+#[test]
+fn invalid_budget_until_does_not_install_a_zero_budget_law() {
+    let std = source(
+        "std.ax",
+        "system std\ncommodity USD\n  precision 2\n",
+        true,
+        0,
+    );
+    let (project_file, syntax_diagnostics) = parse(
+        FileId(1),
+        "use std\nbase USD\npurpose grocery : spending\n2026-03-01 #grocery now budget 100 USD monthly until 04-30 until 05-31\n",
+        Folder::of("axiom.ax"),
+    );
+    assert!(
+        syntax_diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "duplicate-clause")
+    );
+    let project = Source {
+        path: "axiom.ax",
+        file: project_file,
+        embedded: false,
+    };
+    let (book, diagnostics) = build(&[std, project]);
+    assert!(
+        diagnostics.is_empty(),
+        "the malformed statement was rejected by parsing: {diagnostics:?}"
+    );
+    assert!(
+        book.budgets.is_empty(),
+        "invalid terms must not install a budget"
+    );
+    assert!(
+        book.laws.iter().all(|(_, law)| law.budget.is_none()),
+        "the rejected budget must not leave a reachable zero-limit warning law"
+    );
+}
+
+#[test]
+fn invalid_initial_budget_terms_do_not_leave_a_zero_budget_law() {
+    let std = source(
+        "std.ax",
+        "system std\ncommodity USD\n  precision 2\nkind bank : asset\n",
+        true,
+        0,
+    );
+    let project = source(
+        "axiom.ax",
+        "use std\nbase USD\naccount checking : bank\npurpose grocery : spending\n  budget 100 USD monthly funded from missing into checking\n",
+        false,
+        1,
+    );
+    let (book, diagnostics) = build(&[std, project]);
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "unknown-place"),
+        "bad funding is refused: {diagnostics:?}"
+    );
+    assert!(
+        book.budgets.is_empty(),
+        "failed initial terms must not install a budget"
+    );
+    assert!(
+        book.laws.iter().all(|(_, law)| law.budget.is_none()),
+        "a failed initial term must not leave a zero-limit warning law"
+    );
 }
 
 #[test]
