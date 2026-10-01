@@ -400,7 +400,7 @@ fn contract_loan<'s>(
         return None;
     };
     let term = match file.exprs[args[6]].kind {
-        ExprKind::Span(span) if span.months > 0 || span.days > 0 => span,
+        ExprKind::Span(span) if positive_loan_term(span) => span,
         _ => {
             diags.push(
                 Diagnostic::error("contract-loan-term", "a loan term must be a positive span")
@@ -499,6 +499,10 @@ fn contract_loan<'s>(
         },
         rate,
     )))
+}
+
+fn positive_loan_term(span: Span) -> bool {
+    span.months >= 0 && span.days >= 0 && (span.months > 0 || span.days > 0)
 }
 
 fn lower_terms<'a, 's>(
@@ -1552,4 +1556,25 @@ fn asset_area(world: &World<'_>, asset: Id<crate::book::Asset>, day: Day) -> Opt
             })
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::positive_loan_term;
+    use axiom_core::Span;
+
+    #[test]
+    fn loan_term_requires_nonnegative_components_and_positive_total() {
+        assert!(positive_loan_term(Span::months(360)));
+        assert!(positive_loan_term(Span::days(30)));
+        assert!(!positive_loan_term(Span::default()));
+        assert!(!positive_loan_term(Span {
+            months: 1,
+            days: -2,
+        }));
+        assert!(!positive_loan_term(Span {
+            months: -1,
+            days: 32,
+        }));
+    }
 }
