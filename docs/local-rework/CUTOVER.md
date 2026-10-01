@@ -90,6 +90,9 @@ an agreed exception or as completed work.
 | `340ee96` | Correct Sam's cumulative depreciation oracle from source dates | Coordinator: independent Python oracle passes. Engine agreement still pending |
 | `0816097`, `3c30b35` | Scoped native report metadata, explicit register targets, grouped contract descriptions and owner-scoped source queries | Reviewed source. Book-borrow lifetime migration and native report tests pending |
 | `6a80014`, `35399af`, `f430513`, `3a50d56` | Canonical sync declaration lowering, readers, typed original-currency captures and bounded matching | Reviewed source. Text adaptation, remaining reader/output corrections, Book/Run monitor binding and integrated tests pending |
+| `2dfe40a`, `be3a4d6` | Native declaration trees, ownership shares, surveyed claim tabs, place-first endpoints; build now reaches custom properties, parameters and contracts | Reviewed source. Workspace check still fails in legacy model adapters; native law and journal execution are not yet wired |
+| `e4bc7db`, `6932fb9` | Pooled implied-flow metadata and explicit journal versus contract-occurrence runtime identity | Reviewed source. Engine propagation and integrated model tests pending |
+| `88c5dcc`, `2b21863`, `d918dae` | One forecast-history allocation with stable category indices | Coordinator: actual integrated bands module passes all five release tests, including every sample against the previous nested-row sampling loop; full report tests still blocked by model |
 
 The six old completed implementation worktrees were clean before removal. Their
 branches and commits remain available; exact paths and heads are in
