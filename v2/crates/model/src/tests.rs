@@ -1409,7 +1409,7 @@ fn a_v3_book_fits_the_v4_types() {
         let (promised, derived) = (book.contracts.len() + book.also.len(), book.budgets.len() + book.patterns.len());
         assert_eq!((promised, derived, book.formats.len()), (0, 0, 0));
         assert_eq!((book.measures.len(), book.readings.len(), book.filed.len()), (0, 0, 0));
-        assert!(book.laws.values().all(|law| law.overrides.is_none() && law.rank == crate::Rank(0)));
+        assert!(book.laws.values().all(|law| law.overrides.is_none() && law.rank == crate::Rank::ZERO));
     });
 }
 

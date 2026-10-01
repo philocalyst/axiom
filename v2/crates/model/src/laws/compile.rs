@@ -11,7 +11,7 @@
 //! any error is dropped whole.
 
 use axiom_core::glob::is_pattern;
-use axiom_core::{Diagnostic, Dim, Id, Loc, Severity, Sym};
+use axiom_core::{Days, Diagnostic, Dim, Id, Loc, Period, Severity, Sym};
 use axiom_syntax::{
     self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep,
     UnOp,
@@ -23,8 +23,8 @@ use crate::book::{Entity, Input, Param, TemplateProgram};
 use crate::declare::World;
 use crate::errors::{Word, article, count, list, suggest};
 use crate::law::{
-    Closing, Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger,
-    Ty, Value, Var, Window,
+    Closing, Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Rank, SelectKey, Step,
+    StepKind, Trigger, Ty, Value, Var, Window,
 };
 use crate::params::Shape;
 use crate::scope::Home;
@@ -324,7 +324,7 @@ impl<'s> Compiler<'_, '_, 's> {
             override_name: law
                 .overrides
                 .map(|name| self.world.book.names.intern(name.0)),
-            rank: Rank(0),
+            rank: Rank::ZERO,
             steps: steps.into(),
             nodes: std::mem::take(&mut self.nodes).into(),
             loc: law.loc,
@@ -510,6 +510,9 @@ impl<'s> Compiler<'_, '_, 's> {
                     }
                 }
                 ExprKind::Index(base, _) => mark(base, Role::ParamBase),
+                ExprKind::Select(keys) => self.file[keys]
+                    .iter()
+                    .for_each(|&key| mark(key, Role::Keyword)),
                 ExprKind::Is(_, alternatives) => self.file[alternatives]
                     .iter()
                     .for_each(|&alt| mark(alt, Role::Pattern)),
@@ -644,14 +647,16 @@ impl<'s> Compiler<'_, '_, 's> {
                 let purpose = self.world.purpose(self.home, word)?;
                 Ok((Op::Const(Value::Purpose(purpose, None)), Ty::Purpose))
             }
-            ExprKind::Month(_) | ExprKind::Fraction(..) | ExprKind::Select(_) => Err(
-                Diagnostic::error("law-expression", "this expression is not supported here")
-                    .label(
-                        expr.loc,
-                        "use a date, amount, name or supported law expression",
-                    )
-                    .into(),
-            ),
+            ExprKind::Select(keys) => self.select(&file[keys]),
+            ExprKind::Month(_) | ExprKind::Fraction(..) => Err(Diagnostic::error(
+                "law-expression",
+                "this expression is not supported here",
+            )
+            .label(
+                expr.loc,
+                "use a date, amount, name or supported law expression",
+            )
+            .into()),
             _ => Err(
                 Diagnostic::error("law-expression", "this expression is not supported here")
                     .label(expr.loc, "use a supported law expression")
@@ -861,6 +866,47 @@ impl<'s> Compiler<'_, '_, 's> {
             return Ok((Op::Field(node, Field::Prop(sym)), has.ty));
         }
         Err(self.unknown_field(ty, field, receiver).into())
+    }
+
+    /// Compiles the selector on an expression such as `50% of [retirement]`.
+    /// The ids and keys are fixed now; the engine applies them to the borrowed,
+    /// materialized occurrence groups when the template runs.
+    fn select(&mut self, keys: &[ExprId]) -> Check<(Op, Ty)> {
+        let mut resolved = Vec::with_capacity(keys.len());
+        for &key in keys {
+            let expr = &self.file.exprs[key];
+            let word = |text| Word {
+                text,
+                loc: expr.loc,
+            };
+            let selected = match expr.kind {
+                ExprKind::Purpose(name) => {
+                    SelectKey::Purpose(self.world.purpose(self.home, word(name.0))?)
+                }
+                ExprKind::Code(code) => SelectKey::Code(self.world.book.names.intern(code.name())),
+                ExprKind::Unit(name) => SelectKey::Unit(self.world.commodity_of(word(name.0))?),
+                ExprKind::Date(day) => SelectKey::Range(Days::on(day)),
+                ExprKind::Month(day) => SelectKey::Range(
+                    axiom_core::calendar::Window::containing(Period::Month, day).days(),
+                ),
+                ExprKind::Name(name) => {
+                    SelectKey::End(self.world.end(self.home, word(name.0))?.place)
+                }
+                _ => {
+                    return Err(Diagnostic::error(
+                        "selector-key",
+                        "this expression cannot select parts of a flow",
+                    )
+                    .label(
+                        expr.loc,
+                        "use a purpose, endpoint, code, unit, date, month or year",
+                    )
+                    .into());
+                }
+            };
+            resolved.push(selected);
+        }
+        Ok((Op::Select(resolved.into()), Ty::AMOUNT))
     }
 
     /// Currency used for this law's owner-scoped amounts. A kind, purpose,

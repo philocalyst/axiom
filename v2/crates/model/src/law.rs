@@ -49,7 +49,48 @@ pub struct Law {
 
 /// How specific a law is: the greater wins a conflict.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub struct Rank(pub u16);
+pub struct Rank {
+    class: RankClass,
+    depth: u32,
+}
+
+/// Lexicographic owner scope, then ancestry depth. A deeper hierarchy can
+/// never overtake a more specific owner class.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub(crate) enum RankClass {
+    System,
+    Book,
+    Kind,
+    Purpose,
+    Explicit,
+    Contract,
+}
+
+impl Rank {
+    /// Placeholder before law registration calculates scope and depth.
+    pub const ZERO: Rank = Rank {
+        class: RankClass::System,
+        depth: 0,
+    };
+
+    pub(crate) const fn scoped(class: RankClass, depth: u32) -> Rank {
+        Rank { class, depth }
+    }
+}
+
+#[cfg(test)]
+mod rank_tests {
+    use super::{Rank, RankClass};
+
+    #[test]
+    fn owner_specificity_is_lexicographic_and_never_saturates() {
+        assert!(Rank::scoped(RankClass::System, 8) > Rank::scoped(RankClass::System, 7));
+        assert!(Rank::scoped(RankClass::Book, 0) > Rank::scoped(RankClass::System, u32::MAX));
+        assert!(Rank::scoped(RankClass::Kind, u32::MAX) < Rank::scoped(RankClass::Purpose, 0));
+        assert!(Rank::scoped(RankClass::Purpose, u32::MAX) < Rank::scoped(RankClass::Explicit, 0));
+        assert!(Rank::scoped(RankClass::Explicit, 0) < Rank::scoped(RankClass::Contract, 0));
+    }
+}
 
 impl Law {
     /// The nodes of `root`'s expression, in evaluation order: `first..=root`.
@@ -252,6 +293,10 @@ pub enum Op {
     Of(NodeId, NodeId),
     /// Price a quantity (`44 MI @ 0.70 USD/MI`).
     At(NodeId, NodeId),
+    /// Select the amount of the current contract occurrence's materialized
+    /// native groups (`50% of [retirement]`). Keys are resolved while the book
+    /// is built; evaluation only filters the already available groups.
+    Select(Box<[SelectKey]>),
     Neg(NodeId),
     Not(NodeId),
     Bin(BinOp, NodeId, NodeId),
@@ -259,6 +304,17 @@ pub enum Op {
     /// entity, glob or code.
     Is(NodeId, Box<[NodeId]>),
     If(NodeId, NodeId, NodeId),
+}
+
+/// A compile-resolved selector over a contract occurrence's native groups.
+/// Multiple keys are conjunctive and retain their source order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SelectKey {
+    Purpose(Id<Purpose>),
+    Code(Sym),
+    Unit(Id<Commodity>),
+    End(Id<Place>),
+    Range(Days),
 }
 
 /// What the triggering event provides. The compiler rejects a variable its

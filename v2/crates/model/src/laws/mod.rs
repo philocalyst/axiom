@@ -22,7 +22,7 @@ pub(crate) use self::order::rank;
 use crate::book::{Input, Kind, Sort, System};
 use crate::declare::World;
 use crate::errors::{Word, suggest, unknown};
-use crate::law::{Law, NodeId, Owner, Rank, Trigger, Ty};
+use crate::law::{Law, NodeId, Owner, Rank, RankClass, Trigger, Ty};
 use crate::names::{Found, Rank as NameRank};
 use crate::scope::Home;
 use crate::sources::Site;
@@ -206,16 +206,23 @@ fn set_specificity(world: &mut World<'_>) {
     let ranks: Vec<_> = book
         .laws
         .iter()
-        .map(|(_, law)| {
-            let raw = match law.owner {
-                Owner::Book => 500,
-                Owner::System(system) => 100 + book.systems.lineage(system).count() as u32,
-                Owner::Kind(kind) => 1_000 + book.kinds.lineage(kind).count() as u32,
-                Owner::Purpose(purpose) => 4_000 + book.purposes.lineage(purpose).count() as u32,
-                Owner::Place(_) | Owner::Entity(_) | Owner::Asset(_) => 8_000,
-                Owner::Contract(_) => 9_000,
-            };
-            Rank(raw.min(u32::from(u16::MAX)) as u16)
+        .map(|(_, law)| match law.owner {
+            Owner::Book => Rank::scoped(RankClass::Book, 0),
+            Owner::System(system) => Rank::scoped(
+                RankClass::System,
+                book.systems.lineage(system).count() as u32,
+            ),
+            Owner::Kind(kind) => {
+                Rank::scoped(RankClass::Kind, book.kinds.lineage(kind).count() as u32)
+            }
+            Owner::Purpose(purpose) => Rank::scoped(
+                RankClass::Purpose,
+                book.purposes.lineage(purpose).count() as u32,
+            ),
+            Owner::Place(_) | Owner::Entity(_) | Owner::Asset(_) => {
+                Rank::scoped(RankClass::Explicit, 0)
+            }
+            Owner::Contract(_) => Rank::scoped(RankClass::Contract, 0),
         })
         .collect();
     for (index, rank) in ranks.into_iter().enumerate() {
@@ -254,7 +261,7 @@ pub(crate) fn compile_also<'s>(
         budget: None,
         overrides: None,
         override_name: None,
-        rank: crate::law::Rank(0),
+        rank: Rank::ZERO,
         steps: Box::default(),
         nodes,
         loc,
