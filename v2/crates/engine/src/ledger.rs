@@ -15,12 +15,12 @@
 //!
 //! [`fork`]: Ledger::fork
 
-use axiom_core::{Arena, Cadence, Day, Diagnostic, Id, Qty, Ratio, Span, par};
+use axiom_core::{par, Arena, Cadence, Day, Diagnostic, Id, Qty, Ratio, Span};
 use axiom_model::{
     Amount, Book, Commodity, Contract, End, Fault, Flow, FlowExpressions, FlowSide, FlowView,
-    Infer, JournalGroup, JournalItem, Mode, Origin, Place, PurposeRoot, RuntimeDetail, RuntimeFlow,
-    RuntimeTxn, ScheduleKind, Sign, Subject, TemplateAmount, TemplateFlow, TemplateItemParent,
-    TemplateProgram, TemplateQuantity, Terms, Value,
+    Infer, JournalGroup, JournalItem, Mode, OccurrenceTail, Origin, Place, PurposeRoot,
+    RuntimeDetail, RuntimeFlow, RuntimeTxn, ScheduleKind, Sign, Subject, TemplateAmount,
+    TemplateFlow, TemplateItemParent, TemplateProgram, TemplateQuantity, Terms, Value,
 };
 
 use crate::checkpoint::CheckpointPhase;
@@ -29,7 +29,7 @@ use crate::plan::Plan;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
 use crate::timeline::{Fact, Moment, Timeline};
-use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain};
+use crate::{explain, Applied, Cause, Holding, Options, Posted, Recorded, Run, State};
 
 /// Why one native contract occurrence could not be materialized.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -66,6 +66,20 @@ struct ResolvedQuantity {
     amount: Amount,
     infer: Infer,
     mode: Mode,
+}
+
+#[derive(Clone, Copy)]
+enum ResolvedLeg {
+    Rest,
+    Omitted,
+    Value(ResolvedQuantity),
+}
+
+#[derive(Clone, Copy)]
+enum OccurrenceAmount {
+    Inherit,
+    Omitted,
+    Value(Amount),
 }
 
 /// The book's state as of some day. Cheap to clone relative to a replay.
@@ -268,7 +282,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 due,
             )));
         }
-        let source_day = if let Some(txn_id) = source {
+        let (source_day, written) = if let Some(txn_id) = source {
             let txn = book.txns.get(txn_id).ok_or(TemplateError::OutsideTerms {
                 contract: contract_id,
                 day: due,
@@ -287,9 +301,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     day: due,
                 });
             }
-            txn.day
+            (txn.day, exact)
         } else {
-            due
+            (due, None)
         };
         let inputs = source.map_or(&[][..], |txn| book.txn_inputs(txn));
         let ratio = contract
@@ -300,8 +314,53 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let (flow_start, detail_start, missing_start) =
             (flows.len(), details.len(), missing_inputs.len());
 
+        if written.is_some_and(|written| !written.groups.is_empty()) {
+            // Grouped body replacements must be applied atomically with their
+            // template groups. Do not silently post the inherited version.
+            return Err(TemplateError::InvalidTemplate { loc: contract.loc });
+        }
+        let occurrence_program = written
+            .and_then(|written| written.program)
+            .and_then(|program| book.journal_programs.get(program))
+            .map(|journal| &journal.program);
+        let amount_override = match written.and_then(|written| written.amount) {
+            None => OccurrenceAmount::Inherit,
+            Some(TemplateAmount::Literal(amount)) => OccurrenceAmount::Value(amount),
+            Some(TemplateAmount::Computed(root)) => {
+                let Some(program) = occurrence_program else {
+                    return Err(TemplateError::InvalidTemplate { loc: contract.loc });
+                };
+                let Some(template) = terms.template.first() else {
+                    return Err(TemplateError::InvalidTemplate { loc: contract.loc });
+                };
+                match self.evaluate_program_root(
+                    program,
+                    &template.flow,
+                    root,
+                    source_day,
+                    runtime_txn,
+                    0,
+                    inputs,
+                    Ratio::ONE,
+                    missing_inputs,
+                )? {
+                    Some(amount) => OccurrenceAmount::Value(amount),
+                    None => OccurrenceAmount::Omitted,
+                }
+            }
+        };
+        let tail = written.map(|written| &written.tail);
+
+        let mut ordinal_base = 0u32;
         let result = (|| {
-            for template in terms.template.iter() {
+            for (group_index, template) in terms.template.iter().enumerate() {
+                let width = 1usize
+                    .checked_add(template.legs.len())
+                    .and_then(|width| width.checked_add(template.items.len()))
+                    .and_then(|width| u32::try_from(width).ok())
+                    .ok_or(TemplateError::InvalidTemplate {
+                        loc: template.flow.loc,
+                    })?;
                 self.materialize_group(
                     contract_id,
                     schedule,
@@ -310,12 +369,23 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     runtime_txn,
                     terms,
                     template,
+                    group_index,
+                    ordinal_base,
                     ratio,
+                    amount_override,
+                    tail,
+                    occurrence_program,
                     inputs,
                     flows,
                     details,
                     missing_inputs,
                 )?;
+                ordinal_base =
+                    ordinal_base
+                        .checked_add(width)
+                        .ok_or(TemplateError::InvalidTemplate {
+                            loc: template.flow.loc,
+                        })?;
             }
             Ok(())
         })();
@@ -356,7 +426,12 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         runtime_txn: RuntimeTxn,
         terms: &Terms,
         template: &TemplateFlow,
+        group_index: usize,
+        ordinal_base: u32,
         ratio: axiom_core::Ratio,
+        amount_override: OccurrenceAmount,
+        tail: Option<&OccurrenceTail>,
+        occurrence_program: Option<&TemplateProgram>,
         inputs: &[Option<Amount>],
         out: &mut Vec<RuntimeFlow>,
         details: &mut Arena<RuntimeDetail>,
@@ -369,14 +444,33 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             .map_err(TemplateError::Forecast)?;
 
         let mut header = template.flow.clone();
-        header.recognized = recognized;
+        header.recognized = tail.and_then(|tail| tail.recognized).unwrap_or(recognized);
         header.origin = Origin::Occurrence(contract_id);
         header.mode = if runtime_txn.source_txn().is_some() {
             Mode::Actual
         } else {
             Mode::Planned
         };
-        let header_ordinal = 0;
+        if let Some(tail) = tail {
+            if tail.codes.len() > 0 {
+                header.header_codes = tail.codes;
+            }
+            if let Some(waive) = tail.waive {
+                header.waive = Some(waive);
+            }
+            if group_index == 0 {
+                if let Some(purpose) = tail.purpose {
+                    header.purpose = Some(purpose);
+                }
+                if let Some(description) = tail.description {
+                    header.description = Some(description);
+                }
+                if let Some(payee) = tail.payee {
+                    header.payee = Some(payee);
+                }
+            }
+        }
+        let header_ordinal = ordinal_base;
         let out_value = self.template_quantity(
             contract_id,
             terms,
@@ -408,6 +502,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         if (has_computed_quantity(template.out) && out_value.is_none())
             || (has_computed_quantity(template.arrive) && arrive_value.is_none())
         {
+            return Ok(());
+        }
+        if group_index == 0 && matches!(amount_override, OccurrenceAmount::Omitted) {
             return Ok(());
         }
         if let Some(value) = out_value {
@@ -442,6 +539,21 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         {
             header.arrive = header.out;
         }
+        if group_index == 0 {
+            if let OccurrenceAmount::Value(amount) = amount_override {
+                apply_occurrence_amount(
+                    book,
+                    &mut header,
+                    book.contracts[contract_id].buys,
+                    due,
+                    amount,
+                )
+                .map_err(|fault| TemplateError::Expression {
+                    fault,
+                    loc: template.flow.loc,
+                })?;
+            }
+        }
         if let Some(value) = bought_quantity(
             book,
             book.contracts[contract_id].buys,
@@ -455,33 +567,88 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             header.infer = Infer::Known;
         }
 
-        self.push_occurrence_flow(header, source_day, runtime_txn, 0, details, out);
+        let mut detail_override = None;
+        if group_index == 0 {
+            if let Some(tail) = tail {
+                let base = *book.flow_view(&header).detail();
+                let mut detail = merge_detail(base, tail.detail);
+                if let Some(root) = tail.basis {
+                    let Some(program) = occurrence_program else {
+                        return Err(TemplateError::InvalidTemplate { loc: header.loc });
+                    };
+                    let Some(amount) = self.evaluate_program_root(
+                        program,
+                        &header,
+                        root,
+                        source_day,
+                        runtime_txn,
+                        header_ordinal,
+                        inputs,
+                        Ratio::ONE,
+                        missing,
+                    )?
+                    else {
+                        return Ok(());
+                    };
+                    if amount.unit != book.base {
+                        return Err(TemplateError::Expression {
+                            fault: Fault::UnitMismatch {
+                                found: amount.unit,
+                                expected: book.base,
+                            },
+                            loc: header.loc,
+                        });
+                    }
+                    detail.basis = Some(amount.qty);
+                }
+                detail_override = Some(detail);
+            }
+        }
+        self.push_occurrence_flow(
+            header,
+            source_day,
+            runtime_txn,
+            header_ordinal,
+            detail_override,
+            details,
+            out,
+        );
 
-        let mut leg_positions = Vec::with_capacity(template.legs.len());
+        let mut leg_values = Vec::with_capacity(template.legs.len());
+        let mut rest_ends = [None; 2];
         for (leg_index, leg) in template.legs.iter().enumerate() {
-            let flow_ordinal = u32::try_from(leg_index + 1).unwrap_or(u32::MAX);
+            let flow_ordinal = ordinal_base
+                .checked_add(1)
+                .and_then(|base| base.checked_add(u32::try_from(leg_index).ok()?))
+                .ok_or(TemplateError::InvalidTemplate { loc: leg.flow.loc })?;
             let mut flow = leg.flow.clone();
-            flow.recognized = recognized;
+            flow.recognized = tail.and_then(|tail| tail.recognized).unwrap_or(recognized);
             flow.origin = Origin::Occurrence(contract_id);
             flow.mode = if runtime_txn.source_txn().is_some() {
                 Mode::Actual
             } else {
                 Mode::Planned
             };
+            if let Some(tail) = tail {
+                if tail.codes.len() > 0 {
+                    flow.header_codes = tail.codes;
+                }
+                if let Some(waive) = tail.waive {
+                    flow.waive = Some(waive);
+                }
+            }
             let value = match leg.quantity {
                 TemplateQuantity::Rest => {
-                    let header = &out[group_start].flow;
-                    let amount = match leg.side {
-                        FlowSide::Out => header.out,
-                        FlowSide::Arrive => header.arrive,
+                    let side = match leg.side {
+                        FlowSide::Out => 0,
+                        FlowSide::Arrive => 1,
                     };
-                    Some(ResolvedQuantity {
-                        amount,
-                        infer: Infer::Known,
-                        mode: flow.mode,
-                    })
+                    if rest_ends[side].replace(leg_index).is_some() {
+                        return Err(TemplateError::InvalidTemplate { loc: leg.flow.loc });
+                    }
+                    ResolvedLeg::Rest
                 }
-                quantity => self.template_quantity(
+                quantity => match self.template_quantity(
                     contract_id,
                     terms,
                     &flow,
@@ -496,23 +663,18 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     inputs,
                     ratio,
                     missing,
-                )?,
+                )? {
+                    Some(value) => ResolvedLeg::Value(value),
+                    None if has_computed_quantity(leg.quantity) => ResolvedLeg::Omitted,
+                    None => return Err(TemplateError::InvalidTemplate { loc: leg.flow.loc }),
+                },
             };
-            if value.is_none() && has_computed_quantity(leg.quantity) {
-                leg_positions.push(None);
-                continue;
-            }
-            if let Some(value) = value {
-                match leg.side {
-                    FlowSide::Out => flow.out = value.amount,
-                    FlowSide::Arrive => flow.arrive = value.amount,
-                }
-                if !flow.is_exchange() {
-                    flow.out = value.amount;
-                    flow.arrive = value.amount;
-                }
-                flow.infer = value.infer;
-                flow.mode = value.mode;
+            leg_values.push(value);
+        }
+        // Resolve every explicit carve before Rest, even when the remainder
+        // was written earlier in the source. Emission below stays source-ordered.
+        for (leg, value) in template.legs.iter().zip(&leg_values) {
+            if let ResolvedLeg::Value(value) = value {
                 subtract_parent(&mut out[group_start].flow, leg.side, value.amount).map_err(
                     |fault| TemplateError::Expression {
                         fault,
@@ -520,8 +682,77 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     },
                 )?;
             }
+        }
+        for (leg_index, leg) in template.legs.iter().enumerate() {
+            if let ResolvedLeg::Rest = leg_values[leg_index] {
+                let amount = match leg.side {
+                    FlowSide::Out => out[group_start].flow.out,
+                    FlowSide::Arrive => out[group_start].flow.arrive,
+                };
+                leg_values[leg_index] = ResolvedLeg::Value(ResolvedQuantity {
+                    amount,
+                    infer: Infer::Known,
+                    mode: if runtime_txn.source_txn().is_some() {
+                        Mode::Actual
+                    } else {
+                        Mode::Planned
+                    },
+                });
+                subtract_parent(&mut out[group_start].flow, leg.side, amount).map_err(|fault| {
+                    TemplateError::Expression {
+                        fault,
+                        loc: leg.flow.loc,
+                    }
+                })?;
+            }
+        }
+
+        let mut leg_positions = Vec::with_capacity(template.legs.len());
+        for (leg_index, (leg, value)) in template.legs.iter().zip(leg_values).enumerate() {
+            let flow_ordinal = ordinal_base
+                .checked_add(1)
+                .and_then(|base| base.checked_add(u32::try_from(leg_index).ok()?))
+                .ok_or(TemplateError::InvalidTemplate { loc: leg.flow.loc })?;
+            let mut flow = leg.flow.clone();
+            flow.recognized = tail.and_then(|tail| tail.recognized).unwrap_or(recognized);
+            flow.origin = Origin::Occurrence(contract_id);
+            flow.mode = if runtime_txn.source_txn().is_some() {
+                Mode::Actual
+            } else {
+                Mode::Planned
+            };
+            if let Some(tail) = tail {
+                if tail.codes.len() > 0 {
+                    flow.header_codes = tail.codes;
+                }
+                if let Some(waive) = tail.waive {
+                    flow.waive = Some(waive);
+                }
+            }
+            let ResolvedLeg::Value(value) = value else {
+                leg_positions.push(None);
+                continue;
+            };
+            match leg.side {
+                FlowSide::Out => flow.out = value.amount,
+                FlowSide::Arrive => flow.arrive = value.amount,
+            }
+            if !flow.is_exchange() {
+                flow.out = value.amount;
+                flow.arrive = value.amount;
+            }
+            flow.infer = value.infer;
+            flow.mode = value.mode;
             let leg_position = out.len();
-            self.push_occurrence_flow(flow, source_day, runtime_txn, flow_ordinal, details, out);
+            self.push_occurrence_flow(
+                flow,
+                source_day,
+                runtime_txn,
+                flow_ordinal,
+                None,
+                details,
+                out,
+            );
             debug_assert!(leg_position >= group_start + 1);
             leg_positions.push(Some(leg_position));
         }
@@ -544,8 +775,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             let Some(parent) = out.get(parent_index).map(|runtime| runtime.flow.clone()) else {
                 return Err(TemplateError::InvalidTemplate { loc: item.loc });
             };
-            let flow_ordinal =
-                u32::try_from(1 + template.legs.len() + item_index).unwrap_or(u32::MAX);
+            let flow_ordinal = ordinal_base
+                .checked_add(1)
+                .and_then(|base| base.checked_add(u32::try_from(template.legs.len()).ok()?))
+                .and_then(|base| base.checked_add(u32::try_from(item_index).ok()?))
+                .ok_or(TemplateError::InvalidTemplate { loc: item.loc })?;
             let amount =
                 match item.amount {
                     TemplateAmount::Literal(amount) => scale_template_amount(amount, ratio)
@@ -571,7 +805,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                         amount
                     }
                 };
-            if item.sign != Sign::Add {
+            if item.sign == Sign::Carve {
                 subtract_parent(&mut out[parent_index].flow, item.side, amount).map_err(
                     |fault| TemplateError::Expression {
                         fault,
@@ -584,13 +818,21 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             };
             let mut flow = parent;
             flow.day = due;
-            flow.recognized = recognized;
+            flow.recognized = tail.and_then(|tail| tail.recognized).unwrap_or(recognized);
             flow.mode = if runtime_txn.source_txn().is_some() {
                 Mode::Actual
             } else {
                 Mode::Planned
             };
             flow.origin = Origin::Occurrence(contract_id);
+            if let Some(tail) = tail {
+                if tail.codes.len() > 0 {
+                    flow.header_codes = tail.codes;
+                }
+                if let Some(waive) = tail.waive {
+                    flow.waive = Some(waive);
+                }
+            }
             flow.purpose = Some(purpose);
             flow.description = item.description.or(flow.description);
             flow.codes = item.codes;
@@ -604,7 +846,15 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             flow.out = amount;
             flow.arrive = amount;
             flow.infer = Infer::Known;
-            self.push_occurrence_flow(flow, source_day, runtime_txn, flow_ordinal, details, out);
+            self.push_occurrence_flow(
+                flow,
+                source_day,
+                runtime_txn,
+                flow_ordinal,
+                None,
+                details,
+                out,
+            );
         }
         Ok(())
     }
@@ -633,7 +883,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 Some(root) => self.evaluate_template_root(
                     terms, flow, root, due, txn, ordinal, inputs, ratio, missing,
                 )?,
-                None => Some(source),
+                None => Some(
+                    scale_template_amount(source, ratio)
+                        .map_err(|fault| TemplateError::Expression { fault, loc })?,
+                ),
             }
             .map(|amount| ResolvedQuantity {
                 amount,
@@ -644,7 +897,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 Some(root) => self.evaluate_template_root(
                     terms, flow, root, due, txn, ordinal, inputs, ratio, missing,
                 )?,
-                None => Some(source),
+                None => Some(
+                    scale_template_amount(source, ratio)
+                        .map_err(|fault| TemplateError::Expression { fault, loc })?,
+                ),
             }
             .map(|amount| ResolvedQuantity {
                 amount,
@@ -655,7 +911,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 Some(root) => self.evaluate_template_root(
                     terms, flow, root, due, txn, ordinal, inputs, ratio, missing,
                 )?,
-                None => Some(source),
+                None => Some(
+                    scale_template_amount(source, ratio)
+                        .map_err(|fault| TemplateError::Expression { fault, loc })?,
+                ),
             }
             .map(|amount| ResolvedQuantity {
                 amount,
@@ -708,9 +967,33 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         ratio: axiom_core::Ratio,
         missing: &mut Vec<u16>,
     ) -> Result<Option<Amount>, TemplateError> {
+        self.evaluate_program_root(
+            &terms.program,
+            flow,
+            root,
+            due,
+            txn,
+            ordinal,
+            inputs,
+            ratio,
+            missing,
+        )
+    }
+
+    fn evaluate_program_root(
+        &mut self,
+        program: &TemplateProgram,
+        flow: &Flow,
+        root: axiom_model::NodeId,
+        due: Day,
+        txn: RuntimeTxn,
+        ordinal: u32,
+        inputs: &[Option<Amount>],
+        ratio: axiom_core::Ratio,
+        missing: &mut Vec<u16>,
+    ) -> Result<Option<Amount>, TemplateError> {
         let book = self.plan.book;
-        let node = terms
-            .program
+        let node = program
             .nodes
             .as_slice()
             .get(root.0 as usize)
@@ -735,7 +1018,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 plan: self.plan,
                 world: &self.world,
             },
-            &terms.program,
+            program,
             root,
             &context,
             &mut self.scratch.values,
@@ -770,18 +1053,20 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         source_day: Day,
         txn: RuntimeTxn,
         ordinal: u32,
+        detail_override: Option<axiom_model::Detail>,
         details: &mut Arena<RuntimeDetail>,
         out: &mut Vec<RuntimeFlow>,
     ) {
         let book = self.plan.book;
-        let original = *book.flow_view(&flow).detail();
+        let stored = *book.flow_view(&flow).detail();
+        let original = detail_override.unwrap_or(stored);
         let shifted = if source_day == flow.day {
             original
         } else {
             original.moved(source_day.0 - flow.day.0)
         };
         flow.day = source_day;
-        let detail = (shifted != original).then(|| details.push(RuntimeDetail(shifted)));
+        let detail = (shifted != stored).then(|| details.push(RuntimeDetail(shifted)));
         out.push(RuntimeFlow {
             flow,
             detail,
@@ -1411,9 +1696,9 @@ fn set_quantity(flow: &mut Flow, end: End, quantity: ResolvedQuantity) {
 }
 
 fn subtract_parent(flow: &mut Flow, side: FlowSide, amount: Amount) -> Result<(), Fault> {
-    let parent = match side {
-        FlowSide::Out => &mut flow.out,
-        FlowSide::Arrive => &mut flow.arrive,
+    let (parent, opposite) = match side {
+        FlowSide::Out => (&mut flow.out, &mut flow.arrive),
+        FlowSide::Arrive => (&mut flow.arrive, &mut flow.out),
     };
     if parent.unit != amount.unit {
         return Err(Fault::UnitMismatch {
@@ -1427,7 +1712,81 @@ fn subtract_parent(flow: &mut Flow, side: FlowSide, amount: Amount) -> Result<()
         .checked_sub(amount.qty.0)
         .map(Qty)
         .ok_or(Fault::Overflow)?;
+    // An ordinary transfer has one magnitude on both sides. Splitting an
+    // arrival leg must reduce the corresponding outflow as well; an exchange
+    // keeps its distinct opposite-side amount.
+    if parent.unit == opposite.unit {
+        opposite.qty = opposite
+            .qty
+            .0
+            .checked_sub(amount.qty.0)
+            .map(Qty)
+            .ok_or(Fault::Overflow)?;
+    }
     Ok(())
+}
+
+fn apply_occurrence_amount(
+    book: &Book<'_>,
+    flow: &mut Flow,
+    buys: Option<Id<Commodity>>,
+    day: Day,
+    amount: Amount,
+) -> Result<(), Fault> {
+    if let Some(unit) = buys {
+        if amount.unit == unit {
+            let spend = book
+                .convert(amount, flow.out.unit, day)
+                .ok_or(Fault::NoPrice {
+                    unit,
+                    quote: flow.out.unit,
+                })?;
+            flow.out = spend;
+            flow.arrive = amount;
+            flow.infer = Infer::Known;
+            return Ok(());
+        }
+    }
+
+    if amount.unit == flow.out.unit {
+        flow.out = amount;
+        if flow.arrive.unit == amount.unit {
+            flow.arrive = amount;
+        }
+        // A buy occurrence stated in its spend unit still has to derive the
+        // acquired quantity using the contract's active price.
+        flow.infer = if buys.is_some() && flow.arrive.unit != amount.unit {
+            Infer::Unknown
+        } else {
+            Infer::Known
+        };
+        return Ok(());
+    }
+    if amount.unit == flow.arrive.unit {
+        flow.arrive = amount;
+        if flow.out.unit == amount.unit {
+            flow.out = amount;
+        }
+        flow.infer = Infer::Known;
+        return Ok(());
+    }
+    Err(Fault::UnitMismatch {
+        found: amount.unit,
+        expected: flow.out.unit,
+    })
+}
+
+fn merge_detail(base: axiom_model::Detail, over: axiom_model::Detail) -> axiom_model::Detail {
+    axiom_model::Detail {
+        basis: over.basis.or(base.basis),
+        hold: over.hold.or(base.hold),
+        since: over.since.or(base.since),
+        spender: over.spender.or(base.spender),
+        cost: over.cost.or(base.cost),
+        due: over.due.or(base.due),
+        against: over.against.or(base.against),
+        reckoned: over.reckoned.or(base.reckoned),
+    }
 }
 
 fn bought_quantity(
@@ -1606,6 +1965,88 @@ contract rent with landlord
     }
 
     #[test]
+    fn written_amount_and_header_tail_override_only_the_kept_occurrence() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+account checking
+entity landlord
+contract rent with landlord
+  100 USD monthly on 1 from checking
+  from 2026-01-01
+  rising 10% yearly
+2027-01-01 rent 50% of 110 USD ^paid \"January rent\"
+";
+        let book = source_book(source);
+        let rent = book.contract("rent").expect("contract id");
+        let due = Day::from_ymd(2027, 1, 1).unwrap();
+        let written = book
+            .txns
+            .iter()
+            .find_map(|(id, txn)| (txn.contract == Some(rent)).then_some(id))
+            .expect("written occurrence transaction");
+        let plan = Plan::new(&book);
+        let mut ledger = plan.start(Options {
+            today: due,
+            relaxed: false,
+        });
+        let (mut flows, mut details, mut missing) =
+            (Vec::new(), Arena::<RuntimeDetail>::new(), Vec::new());
+        let made = ledger
+            .instantiate_occurrence(
+                rent,
+                ScheduleKind::Regular,
+                due,
+                0,
+                Some(written),
+                &mut flows,
+                &mut details,
+                &mut missing,
+            )
+            .expect("computed written amount materializes");
+        let materialized = made.flows(&flows).expect("output belongs to shared pool");
+        assert_eq!(materialized.len(), 1);
+        assert_eq!(materialized[0].flow.out.qty, Qty(5_500));
+        assert_eq!(materialized[0].flow.arrive.qty, Qty(5_500));
+        assert_eq!(materialized[0].flow.mode, Mode::Actual);
+        assert_eq!(materialized[0].txn.source_txn(), Some(written));
+        let view = book.runtime_flow_view(&materialized[0], &details);
+        assert_eq!(
+            view.codes().map(|code| book.name(code)).collect::<Vec<_>>(),
+            ["paid"]
+        );
+        assert_eq!(
+            book.text(materialized[0].flow.description.expect("tail description")),
+            "January rent"
+        );
+        assert!(made.missing(&missing).unwrap().is_empty());
+
+        let mut forecast = plan.start(Options {
+            today: due,
+            relaxed: false,
+        });
+        let (mut forecast_flows, mut forecast_details, mut forecast_missing) =
+            (Vec::new(), Arena::<RuntimeDetail>::new(), Vec::new());
+        let forecasted = forecast
+            .instantiate_occurrence(
+                rent,
+                ScheduleKind::Regular,
+                due,
+                1,
+                None,
+                &mut forecast_flows,
+                &mut forecast_details,
+                &mut forecast_missing,
+            )
+            .expect("forecast uses the escalated contract amount");
+        assert_eq!(
+            forecasted.flows(&forecast_flows).unwrap()[0].flow.out.qty,
+            Qty(12_100)
+        );
+    }
+
+    #[test]
     fn occurrence_inputs_drive_computed_items_and_missing_inputs_omit_only_that_item() {
         let source = "\
 base USD
@@ -1697,6 +2138,103 @@ contract flat with landlord
             .expect("the same shared pools accept another occurrence");
         assert_eq!(repeated.flows(&forecast_flows).unwrap().len(), 1);
         assert_eq!(repeated.missing(&missing).unwrap(), [0]);
+    }
+
+    #[test]
+    fn escalation_scales_literal_header_and_item_amounts() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+account checking
+entity landlord
+purpose fees : spending
+contract rent with landlord
+  100 USD monthly on 1 from checking
+  + 10 USD #fees
+  from 2026-01-01
+  rising 10% yearly
+";
+        let book = source_book(source);
+        let rent = book.contract("rent").expect("contract id");
+        let due = Day::from_ymd(2027, 1, 1).unwrap();
+        let plan = Plan::new(&book);
+        let mut ledger = plan.start(Options {
+            today: due,
+            relaxed: false,
+        });
+        let (mut flows, mut details, mut missing) =
+            (Vec::new(), Arena::<RuntimeDetail>::new(), Vec::new());
+        let made = ledger
+            .instantiate_occurrence(
+                rent,
+                ScheduleKind::Regular,
+                due,
+                0,
+                None,
+                &mut flows,
+                &mut details,
+                &mut missing,
+            )
+            .expect("anniversary terms materialize");
+        let flows = made.flows(&flows).unwrap();
+        assert_eq!(flows.len(), 2);
+        assert_eq!(flows[0].flow.out.qty, Qty(11_000));
+        assert_eq!(flows[0].ordinal, 0);
+        assert_eq!(flows[1].flow.out.qty, Qty(1_100));
+        assert_eq!(flows[1].ordinal, 1);
+    }
+
+    #[test]
+    fn rest_leg_uses_the_amount_left_by_later_written_legs() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+account checking
+account savings
+entity landlord
+contract split with landlord
+  100 USD monthly on 1 from checking
+  ... to landlord
+  30 USD to savings
+  from 2026-01-01
+";
+        let book = source_book(source);
+        let split = book.contract("split").expect("contract id");
+        let due = Day::from_ymd(2026, 2, 1).unwrap();
+        let plan = Plan::new(&book);
+        let mut ledger = plan.start(Options {
+            today: due,
+            relaxed: false,
+        });
+        let (mut flows, mut details, mut missing) =
+            (Vec::new(), Arena::<RuntimeDetail>::new(), Vec::new());
+        let made = ledger
+            .instantiate_occurrence(
+                split,
+                ScheduleKind::Regular,
+                due,
+                0,
+                None,
+                &mut flows,
+                &mut details,
+                &mut missing,
+            )
+            .expect("the remainder can precede its explicit carve");
+        let flows = made.flows(&flows).unwrap();
+        assert_eq!(flows.len(), 3);
+        assert_eq!(flows[0].flow.out.qty, Qty::ZERO);
+        assert_eq!(flows[0].flow.arrive.qty, Qty::ZERO);
+        assert_eq!(flows[1].flow.arrive.qty, Qty(7_000));
+        assert_eq!(flows[2].flow.arrive.qty, Qty(3_000));
+        assert_eq!(flows[0].ordinal, 0);
+        assert_eq!(flows[1].ordinal, 1);
+        assert_eq!(flows[2].ordinal, 2);
+        assert_eq!(
+            flows.iter().map(|flow| flow.flow.out.qty.0).sum::<i64>(),
+            10_000
+        );
     }
 }
 
