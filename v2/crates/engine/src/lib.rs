@@ -63,10 +63,10 @@ mod tests;
 
 use std::hash::{Hash, Hasher};
 
-use axiom_core::{Day, Days, Diagnostic, Id, Qty, Ratio, Sym};
+use axiom_core::{Arena, Day, Days, Diagnostic, Id, Qty, Ratio, Sym};
 use axiom_model::{
-    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot, RuntimeTxn, Subject, System, Txn,
-    Waive,
+    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot, RuntimeDetail, RuntimeFlow,
+    RuntimeTxn, ScheduleKind, Subject, System, Txn, Waive,
 };
 
 pub use checkpoint::Checkpoint;
@@ -137,8 +137,23 @@ pub struct Run {
     /// Every asset's parts at the end of the fold, by asset.
     pub assets: Vec<AssetState>,
     /// Every occurrence a contract expected up to the horizon, and whether and
-    /// when the journal kept it.
+    /// when the journal kept it. The currently wired legacy fold leaves this
+    /// empty; the native occurrence monitor populates it.
     pub promises: Vec<Promise>,
+    /// Item-level instantiated flows for promises, in promise order. The range
+    /// on each Promise indexes this shared pool. Empty until native monitor
+    /// population is wired.
+    pub promised_flows: Box<[RuntimeFlow]>,
+    /// Runtime detail overrides used by `promised_flows`.
+    pub runtime_details: Arena<RuntimeDetail>,
+    /// Unbound required inputs, stored as declaration-order indices. A promise
+    /// range identifies only the inputs omitted by that occurrence. Empty until
+    /// native monitor population is wired.
+    pub missing_inputs: Box<[u16]>,
+    /// Claims still open after all settlements, as projected by the same
+    /// monitor that produced the fold's holdings. Empty until native monitor
+    /// population is wired.
+    pub open_claims: Box<[OpenClaim]>,
     /// Basis the laws moved: consumed (depreciation) or carried (wash sales).
     pub adjustments: Vec<Adjustment>,
     /// How many times each law ran past its `when` filters, by law id.
@@ -167,13 +182,40 @@ pub struct Part {
 }
 
 /// One expected occurrence of a contract.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct RuntimeRange {
+    start: u32,
+    len: u32,
+}
+
+impl RuntimeRange {
+    pub(crate) fn new(start: usize, len: usize) -> RuntimeRange {
+        RuntimeRange {
+            start: u32::try_from(start).expect("runtime result pool index fits u32"),
+            len: u32::try_from(len).expect("runtime result range fits u32"),
+        }
+    }
+
+    pub fn is_empty(self) -> bool {
+        self.len == 0
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Promise {
     pub contract: Id<Contract>,
+    pub schedule: ScheduleKind,
+    /// Stable ordinal within this contract schedule.
+    pub ordinal: u32,
     pub due: Day,
     /// The occurrence that kept it (its transaction), or `None` if the journal
     /// has not written it by the horizon.
     pub kept: Option<(Day, Id<Txn>)>,
+    /// The contract occurrence was explicitly waived by the active terms.
+    pub waived: bool,
+    /// Runtime flow and omitted-input ranges in the parent Run's pools.
+    pub flows: RuntimeRange,
+    pub missing_inputs: RuntimeRange,
 }
 
 impl Promise {
@@ -181,6 +223,50 @@ impl Promise {
     pub fn late(&self, horizon: Day) -> i32 {
         let seen = self.kept.map_or(horizon, |(day, _)| day);
         (seen.0 - self.due.0).max(0)
+    }
+}
+
+impl Run {
+    /// Instantiated item flows for one expected occurrence, borrowed from the
+    /// shared run pool. Group order and source order are preserved.
+    pub fn promise_flows(&self, promise: &Promise) -> &[RuntimeFlow] {
+        let start = promise.flows.start as usize;
+        let end = start + promise.flows.len as usize;
+        self.promised_flows.get(start..end).expect("promise flow range belongs to this Run")
+    }
+
+    /// Input declaration indices omitted from one expected occurrence.
+    pub fn promise_missing_inputs(&self, promise: &Promise) -> &[u16] {
+        let start = promise.missing_inputs.start as usize;
+        let end = start + promise.missing_inputs.len as usize;
+        self.missing_inputs.get(start..end).expect("promise input range belongs to this Run")
+    }
+}
+
+/// One canonical open claim parcel. `origin` is the stable runtime identity;
+/// source ids are present only for journal flows, so future occurrences never
+/// masquerade as Book arena indices. `codes` borrows the source's pooled code
+/// ranges and does not copy strings.
+#[derive(Clone, Copy, Debug)]
+pub struct OpenClaim {
+    pub origin: RuntimeTxn,
+    pub source: Option<Id<Flow>>,
+    pub ordinal: u32,
+    pub due: Day,
+    pub claimant: Id<Place>,
+    pub counterpart: Id<Place>,
+    pub debtor: Id<Entity>,
+    pub creditor: Id<Entity>,
+    pub owner: Id<Entity>,
+    pub unit: Id<Commodity>,
+    pub amount: Qty,
+    pub codes: FlowCodes,
+}
+
+impl OpenClaim {
+    /// Actual journal transaction provenance, if this claim came from one.
+    pub fn source_txn(&self) -> Option<Id<Txn>> {
+        self.origin.source_txn()
     }
 }
 

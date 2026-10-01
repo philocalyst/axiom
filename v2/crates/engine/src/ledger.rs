@@ -241,6 +241,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             // v3 bridge: the v3 fold keeps no assets, promises or adjustments.
             assets: Vec::new(),
             promises: Vec::new(),
+            promised_flows: Box::default(),
+            runtime_details: Arena::new(),
+            missing_inputs: Box::default(),
+            open_claims: Box::default(),
             adjustments: Vec::new(),
             checks: record.checks.into(),
             diagnostics: record.diagnostics,
