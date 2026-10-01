@@ -906,10 +906,7 @@ impl<'a, 's> Machine<'a, 's> {
             .expect("a purpose total without an explicit purpose requires a purpose context");
         let root = self.book().purposes[purpose].root;
         let (incoming, outgoing) = if self.ctx.budget_history {
-            let days = window.around(self.ctx.anchor());
-            let Some(span) = Days::new(days.first(), days.last().min(self.ctx.anchor())) else {
-                return Value::Fault(Fault::InvalidProgram);
-            };
+            let span = window.around(self.ctx.anchor());
             match self.env.world.totals.read_purpose_between(self.ctx.owner, purpose, span) {
                 Ok(flowed) => flowed,
                 Err(fault) => return Value::Fault(fault),
@@ -942,7 +939,13 @@ impl<'a, 's> Machine<'a, 's> {
         } else {
             budget_segment_start(budget, start, anchor)
         };
-        let Some(span) = Days::new(first, anchor) else {
+        let active_start = budget_segment_start(budget, start, anchor);
+        let active_end = budget_segment_end(
+            budget,
+            active_start,
+            budget_window(terms.period).around(anchor).last(),
+        );
+        let Some(span) = Days::new(first, active_end) else {
             return Value::Fault(Fault::InvalidProgram);
         };
         let (incoming, outgoing) = match self.env.world.totals.read_purpose_between(self.ctx.owner, budget.purpose, span) {
@@ -973,7 +976,9 @@ impl<'a, 's> Machine<'a, 's> {
         }
         let terms = *budget.terms.at(day);
         if !terms.carries {
-            let span = Days::new(budget_segment_start(budget, start, day), day);
+            let first = budget_segment_start(budget, start, day);
+            let last = budget_segment_end(budget, first, budget_window(terms.period).around(day).last());
+            let span = Days::new(first, last);
             let Some(span) = span else {
                 return Value::Fault(Fault::InvalidProgram);
             };
@@ -983,17 +988,21 @@ impl<'a, 's> Machine<'a, 's> {
         let mut cursor = budget_carry_start(budget, start, day).unwrap_or(start);
         let mut total = Qty::ZERO;
         while cursor <= day {
-            let end = budget_segment_end(budget, cursor, day);
+            let period_end = budget_window(budget.terms.at(cursor).period)
+                .around(cursor)
+                .last();
+            let end = budget_segment_end(budget, cursor, period_end);
             let Some(span) = Days::new(cursor, end) else {
                 return Value::Fault(Fault::InvalidProgram);
             };
             // A limit restatement replaces the allowance of this open segment.
-            let effective = *budget.terms.at(end);
-            let value = self.one_budget_limit(id, effective.limit, span, at, end);
+            let on = end.min(day);
+            let effective = *budget.terms.at(on);
+            let value = self.one_budget_limit(id, effective.limit, span, at, on);
             let Value::Amount(amount) = value else {
                 return value;
             };
-            let calc = Calc { book: self.book(), day: end };
+            let calc = Calc { book: self.book(), day: on };
             match calc.convert(amount, self.book().base) {
                 Ok(amount) => {
                     let Some(sum) = total.0.checked_add(amount.qty.0) else {
@@ -1136,9 +1145,7 @@ impl<'a, 's> Machine<'a, 's> {
         let (book, ctx, totals) = (self.book(), self.ctx, &self.env.world.totals);
         let read = |subject| -> Result<Qty, Fault> {
             if ctx.budget_history {
-                let days = window.around(ctx.anchor());
-                Days::new(days.first(), days.last().min(ctx.anchor()))
-                    .map_or(Ok(Qty::ZERO), |span| totals.read_subject_between(subject, dir, span))
+                totals.read_subject_between(subject, dir, window.around(ctx.anchor()))
             } else {
                 Ok(totals.read(&self.env.plan.watch, subject, dir, window, ctx.anchor()))
             }
