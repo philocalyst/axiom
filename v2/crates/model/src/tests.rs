@@ -40,7 +40,7 @@ account income/salary
 
 /// Builds the files of a project beside the tiny standard system, and hands the
 /// book and the diagnostics to `then`.
-fn with_files<R>(project: &[(&str, &str)], then: impl FnOnce(&Book, &[Diagnostic]) -> R) -> R {
+fn with_files<R>(project: &[(&str, &str)], then: impl FnOnce(&mut Book, &[Diagnostic]) -> R) -> R {
     let files = std::iter::once(("std.ax", STD, true)).chain(project.iter().map(|&(path, text)| (path, text, false)));
     let parsed: Vec<_> = files
         .enumerate()
@@ -50,12 +50,12 @@ fn with_files<R>(project: &[(&str, &str)], then: impl FnOnce(&Book, &[Diagnostic
             Source { path, file, embedded }
         })
         .collect();
-    let (book, diags) = build(&parsed);
-    then(&book, &diags)
+    let (mut book, diags) = build(&parsed);
+    then(&mut book, &diags)
 }
 
 /// Builds one project file with the accounts every test uses, then `text`.
-fn with_book<R>(text: &str, then: impl FnOnce(&Book, &[Diagnostic]) -> R) -> R {
+fn with_book<R>(text: &str, then: impl FnOnce(&mut Book, &[Diagnostic]) -> R) -> R {
     let text = format!("{ACCOUNTS}\n{text}");
     with_files(&[("axiom.ax", &text)], then)
 }
@@ -1051,7 +1051,7 @@ const COUNTRIES: [(&str, &str); 2] = [
     ("systems/de.ax", "system de\nlaw de-law\n  on in\n  count amount as inflow\n"),
 ];
 
-fn in_countries<R>(project: &str, then: impl FnOnce(&Book, &[Diagnostic]) -> R) -> R {
+fn in_countries<R>(project: &str, then: impl FnOnce(&mut Book, &[Diagnostic]) -> R) -> R {
     let project = format!("base USD\naccount assets/bank/joint : bank\naccount assets/bank/alex : bank\n{project}");
     let files = [COUNTRIES[0], COUNTRIES[1], ("axiom.ax", project.as_str())];
     with_files(&files, then)
@@ -1415,6 +1415,7 @@ fn a_v3_book_fits_the_v4_types() {
 /// What a contract's terms need to be built by hand: one flow to be the template.
 fn terms(every: crate::Cadence, on: &[crate::On], anchor: axiom_core::Day, template: &[crate::Flow]) -> crate::Terms {
     crate::Terms {
+        state: crate::TermsState::Active,
         every,
         on: on.into(),
         anchor,
@@ -1469,7 +1470,7 @@ fn a_v3_sync_is_a_source_that_merges_into_its_file() {
 
 #[test]
 fn a_contract_falls_due_by_the_terms_in_force_over_its_days() {
-    use crate::{Cadence, On};
+    use crate::{Cadence, ForecastError, On};
     use axiom_core::{Day, Days, Span, Timeline};
     let day = |month, day| Day::from_ymd(2026, month, day).unwrap();
     let days = |from: (u32, u32), to: (u32, u32)| Days::new(day(from.0, from.1), day(to.0, to.1)).unwrap();
@@ -1480,6 +1481,29 @@ fn a_contract_falls_due_by_the_terms_in_force_over_its_days() {
         let rent = contract(Days::ALWAYS, Timeline::new(terms(monthly, &[], day(1, 31), &template)));
         assert_eq!(rent.due_days(days((2, 1), (4, 30))), [day(2, 28), day(3, 31), day(4, 30)]);
         // The contract's own days bound it, and nothing falls due before its first.
+        let mut mortgage_terms = terms(monthly, &[On::MonthDay(15)], day(1, 1), &[]);
+        mortgage_terms.rate = Some(axiom_core::Ratio::percent(5, 0).unwrap());
+        let mut mortgage = contract(Days::ALWAYS, Timeline::new(mortgage_terms));
+        mortgage.loan = Some(crate::Loan {
+            principal: crate::Amount::new(axiom_core::Qty(100_000), book.base),
+            on: day(1, 1),
+            term: Span::months(360),
+            asset: None,
+            debt: axiom_core::Id::new(0),
+            resets: None,
+            prepay: crate::Prepay::default(),
+        });
+        assert_eq!(
+            mortgage.occurrences(days((2, 1), (3, 31))).map(|occurrence| occurrence.day).collect::<Vec<_>>(),
+            [day(2, 15), day(3, 15)],
+            "a loan's empty explicit template does not waive its payment schedule"
+        );
+        let mortgage_id = book.contracts.push(mortgage);
+        assert_eq!(
+            book.contracts[mortgage_id].forecast_flows(book, mortgage_id, days((2, 1), (2, 28))).next(),
+            Some(Err(ForecastError::UnsupportedLoan(day(2, 15)))),
+            "a scheduled loan is not silently forecast without its payment derivation"
+        );
         let on_the_15th = terms(monthly, &[On::MonthDay(15)], day(1, 31), &template);
         let short = contract(days((1, 31), (3, 20)), Timeline::new(on_the_15th));
         assert_eq!(short.due_days(Days::ALWAYS), [day(2, 15), day(3, 15)]);
@@ -1496,10 +1520,298 @@ fn a_contract_falls_due_by_the_terms_in_force_over_its_days() {
         );
         // A waived stretch expects nothing, and the terms before it resume after it.
         let mut waived = Timeline::new(terms(monthly, &[], day(1, 1), &template));
-        waived.paint(days((2, 1), (2, 28)), terms(monthly, &[], day(1, 1), &[]));
+        let mut waiver = terms(monthly, &[], day(1, 1), &[]);
+        waiver.state = crate::TermsState::Waived;
+        waived.paint(days((2, 1), (2, 28)), waiver);
         let waived = contract(Days::ALWAYS, waived);
         assert!(waived.terms_on(day(2, 10)).is_waived() && !waived.terms_on(day(3, 1)).is_waived());
         assert_eq!(waived.due_days(days((1, 1), (4, 1))), [day(1, 1), day(3, 1), day(4, 1)]);
+    });
+}
+
+#[test]
+fn a_contract_forecasts_typed_flows_and_reports_bad_escalation_inputs() {
+    use crate::{Cadence, Escalation, ForecastError, On, Param, ParamRow, TermsState, Value};
+    use axiom_core::{Day, Days, Ratio, Span, Timeline};
+    let day = |year, month, day| Day::from_ymd(year, month, day).unwrap();
+    with_book("2026-01-05 checking -> food 1_000 USD\n", |book, _| {
+        let template = book.flows[axiom_core::Id::new(0)].clone();
+        let first = day(2026, 1, 15);
+        let after_one_year = day(2027, 1, 15);
+        let end = day(2028, 1, 15);
+        let days = Days::new(first, end).unwrap();
+
+        let mut rising = terms(
+            Cadence::Every(Span::months(1)),
+            &[On::MonthDay(15)],
+            first,
+            &[template.clone()],
+        );
+        rising.escalation = Some(Escalation::Rising(Ratio::percent(3, 0).unwrap()));
+        let rising_id = book.contracts.push(contract(days, Timeline::new(rising)));
+        let projected: Vec<_> = book.contracts[rising_id]
+            .forecast_flows(book, rising_id, Days::on(after_one_year))
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].day, after_one_year);
+        assert_eq!(
+            projected[0].out.qty,
+            axiom_core::Qty(1_030),
+            "3% at the anniversary"
+        );
+        assert_eq!(projected[0].recognized, Days::on(after_one_year));
+        assert_eq!(projected[0].mode, crate::Mode::Planned);
+        assert_eq!(projected[0].origin, crate::Origin::Occurrence(rising_id));
+
+        let index_id = book.params.push(Param {
+            name: book.names.intern("cpi"),
+            unit: None,
+            system: None,
+            rows: vec![
+                ParamRow {
+                    since: Some(first),
+                    names: Box::default(),
+                    value: Value::Num(Ratio::int(100)),
+                    loc: axiom_core::Loc::default(),
+                },
+                ParamRow {
+                    since: Some(day(2026, 7, 15)),
+                    names: Box::default(),
+                    value: Value::Num(Ratio::int(120)),
+                    loc: axiom_core::Loc::default(),
+                },
+                ParamRow {
+                    since: Some(after_one_year),
+                    names: Box::default(),
+                    value: Value::Num(Ratio::int(125)),
+                    loc: axiom_core::Loc::default(),
+                },
+                ParamRow {
+                    since: Some(day(2027, 7, 15)),
+                    names: Box::default(),
+                    value: Value::Num(Ratio::int(150)),
+                    loc: axiom_core::Loc::default(),
+                },
+            ]
+            .into(),
+            loc: axiom_core::Loc::default(),
+        });
+        let mut indexed = terms(
+            Cadence::Every(Span::months(1)),
+            &[On::MonthDay(15)],
+            first,
+            &[template],
+        );
+        indexed.escalation = Some(Escalation::Indexed(index_id));
+        let indexed_id = book.contracts.push(contract(days, Timeline::new(indexed)));
+        assert_eq!(
+            book.contracts[indexed_id].amount_on(book, after_one_year),
+            Ok(Ratio::new(5, 4).unwrap())
+        );
+        assert_eq!(
+            book.contracts[indexed_id].amount_on(book, day(2026, 8, 15)),
+            Ok(Ratio::ONE),
+            "index rows between anniversaries do not change a yearly escalation"
+        );
+        assert_eq!(
+            book.contracts[indexed_id].amount_on(book, day(2027, 8, 15)),
+            Ok(Ratio::new(5, 4).unwrap()),
+            "the next index value applies only at the next anniversary"
+        );
+
+        let mut missing = terms(
+            Cadence::Every(Span::months(1)),
+            &[],
+            first,
+            &[book.flows[axiom_core::Id::new(0)].clone()],
+        );
+        missing.state = TermsState::Active;
+        missing.escalation = Some(Escalation::Indexed(axiom_core::Id::new(99)));
+        let missing_id = book.contracts.push(contract(days, Timeline::new(missing)));
+        assert_eq!(
+            book.contracts[missing_id].amount_on(book, after_one_year),
+            Err(ForecastError::MissingIndex {
+                param: axiom_core::Id::new(99),
+                day: first
+            })
+        );
+        assert_eq!(
+            book.contracts[missing_id]
+                .forecast_flows(book, missing_id, Days::on(after_one_year))
+                .next(),
+            Some(Err(ForecastError::MissingIndex {
+                param: axiom_core::Id::new(99),
+                day: first
+            })),
+            "an unavailable index is surfaced instead of becoming an absent forecast"
+        );
+
+        let mut no_template = terms(Cadence::Every(Span::months(1)), &[], first, &[]);
+        no_template.state = TermsState::Active;
+        let no_template_id = book
+            .contracts
+            .push(contract(days, Timeline::new(no_template)));
+        assert_eq!(
+            book.contracts[no_template_id]
+                .forecast_flows(book, no_template_id, Days::on(after_one_year))
+                .next(),
+            Some(Err(ForecastError::MissingTemplate(after_one_year)))
+        );
+
+        let missing_name = book.names.intern("water");
+        let mut needs_input = terms(
+            Cadence::Every(Span::months(1)),
+            &[],
+            first,
+            &[book.flows[axiom_core::Id::new(0)].clone()],
+        );
+        needs_input.inputs = vec![crate::Input {
+            name: missing_name,
+            unit: None,
+            loc: axiom_core::Loc::default(),
+        }]
+        .into();
+        let needs_input_id = book.contracts.push(contract(days, Timeline::new(needs_input)));
+        assert_eq!(
+            book.contracts[needs_input_id]
+                .forecast_flows(book, needs_input_id, Days::on(after_one_year))
+                .next(),
+            Some(Err(ForecastError::MissingInput {
+                input: missing_name,
+                day: after_one_year,
+            }))
+        );
+
+        let mut unresolved_flow = book.flows[axiom_core::Id::new(0)].clone();
+        unresolved_flow.infer = crate::Infer::Unknown;
+        let unresolved = terms(Cadence::Every(Span::months(1)), &[], first, &[unresolved_flow]);
+        let unresolved_id = book.contracts.push(contract(days, Timeline::new(unresolved)));
+        assert_eq!(
+            book.contracts[unresolved_id]
+                .forecast_flows(book, unresolved_id, Days::on(after_one_year))
+                .next(),
+            Some(Err(ForecastError::UnresolvedAmount(after_one_year)))
+        );
+    });
+}
+
+#[test]
+fn contract_occurrences_use_calendar_recognition_windows_and_proration() {
+    use crate::{Cadence, Coverage, Relative};
+    use axiom_core::{Day, Days, Period, Ratio, Span, Timeline};
+    let day = |year, month, day| Day::from_ymd(year, month, day).unwrap();
+    with_book("2026-01-05 checking -> food 1_000 USD\n", |book, _| {
+        let template = book.flows[axiom_core::Id::new(0)].clone();
+        let every_month = Cadence::Every(Span::months(1));
+        let feb15 = day(2024, 2, 15);
+        let mar15 = day(2024, 3, 15);
+        let mut previous_month = terms(every_month, &[crate::On::MonthDay(15)], feb15, &[template.clone()]);
+        previous_month.period = Some(Relative::Last(Period::Month));
+        let mut changed = Timeline::new(previous_month);
+        let mut current_month = terms(
+            every_month,
+            &[crate::On::MonthDay(15)],
+            day(2024, 4, 15),
+            &[template.clone()],
+        );
+        current_month.covers = Some(Coverage::Calendar(Period::Month));
+        changed.paint(Days::new(day(2024, 4, 15), Day::MAX).unwrap(), current_month);
+        let rent = contract(Days::new(feb15, day(2024, 5, 15)).unwrap(), changed);
+        assert_eq!(
+            rent.recognition_on(&template, feb15),
+            Ok(Days::new(day(2024, 1, 1), day(2024, 1, 31)).unwrap())
+        );
+        assert_eq!(
+            rent.recognition_on(&template, mar15),
+            Ok(Days::new(day(2024, 2, 1), day(2024, 2, 29)).unwrap()),
+            "last-month rent in March recognizes the leap February"
+        );
+
+        let april15 = day(2024, 4, 15);
+        assert_eq!(
+            rent.recognition_on(&template, april15),
+            Ok(Days::new(day(2024, 4, 1), day(2024, 4, 30)).unwrap()),
+            "terms changes switch recognition to the new coverage"
+        );
+        let days = Days::new(april15, day(2025, 4, 15)).unwrap();
+        let recognition = |relative, covers| {
+            let mut terms = terms(every_month, &[crate::On::MonthDay(15)], april15, &[template.clone()]);
+            terms.period = relative;
+            terms.covers = covers;
+            contract(days, Timeline::new(terms)).recognition_on(&template, april15)
+        };
+        assert_eq!(
+            recognition(Some(Relative::LastQuarter), None),
+            Ok(Days::new(day(2024, 1, 1), day(2024, 3, 31)).unwrap())
+        );
+        assert_eq!(
+            recognition(None, Some(Coverage::Quarter)),
+            Ok(Days::new(day(2024, 4, 1), day(2024, 6, 30)).unwrap())
+        );
+        assert_eq!(
+            recognition(None, Some(Coverage::Span(Span::months(6)))),
+            Ok(Days::new(april15, day(2024, 10, 14)).unwrap())
+        );
+
+        let feb10 = day(2024, 2, 10);
+        let feb20 = day(2024, 2, 20);
+        let mut prorated = terms(every_month, &[crate::On::MonthDay(15)], feb10, &[template.clone()]);
+        prorated.covers = Some(Coverage::Calendar(Period::Month));
+        prorated.prorated = true;
+        let partial = contract(Days::new(feb10, feb20).unwrap(), Timeline::new(prorated));
+        assert_eq!(partial.amount_on(book, day(2024, 2, 15)), Ok(Ratio::new(11, 29).unwrap()));
+        assert_eq!(
+            partial.recognition_on(&template, day(2024, 2, 15)),
+            Ok(Days::new(day(2024, 2, 1), day(2024, 2, 29)).unwrap())
+        );
+
+        let mut unbounded_proration = terms(every_month, &[], feb10, &[template.clone()]);
+        unbounded_proration.prorated = true;
+        let unbounded_proration = contract(Days::new(feb10, feb20).unwrap(), Timeline::new(unbounded_proration));
+        assert_eq!(
+            unbounded_proration.amount_on(book, day(2024, 2, 15)),
+            Err(crate::ForecastError::UnsupportedProration(day(2024, 2, 15)))
+        );
+
+        let mut conflicting = terms(every_month, &[], feb10, &[template.clone()]);
+        conflicting.period = Some(Relative::Last(Period::Month));
+        conflicting.covers = Some(Coverage::Calendar(Period::Month));
+        let conflicting = contract(Days::new(feb10, feb20).unwrap(), Timeline::new(conflicting));
+        assert_eq!(
+            conflicting.recognition_on(&template, day(2024, 2, 15)),
+            Err(crate::ForecastError::ConflictingRecognition(day(2024, 2, 15)))
+        );
+
+        let earliest = day(-999_999, 1, 15);
+        let mut at_boundary = terms(every_month, &[], earliest, &[template.clone()]);
+        at_boundary.period = Some(Relative::Last(Period::Year));
+        let boundary = contract(Days::on(earliest), Timeline::new(at_boundary));
+        assert_eq!(
+            boundary.recognition_on(&template, earliest),
+            Err(crate::ForecastError::Overflow),
+            "the previous civil year is outside the supported calendar"
+        );
+    });
+}
+
+#[test]
+fn contract_anniversaries_clamp_leap_days_without_drifting() {
+    use crate::{Cadence, Escalation};
+    use axiom_core::{Day, Days, Ratio, Span, Timeline};
+    let day = |year, month, day| Day::from_ymd(year, month, day).unwrap();
+    with_book("2026-01-05 checking -> food 10 USD\n", |book, _| {
+        let first = day(2024, 2, 29);
+        let mut rent = terms(Cadence::Every(Span::months(1)), &[], first, &[]);
+        rent.escalation = Some(Escalation::Rising(Ratio::percent(3, 0).unwrap()));
+        let rent = contract(Days::new(first, day(2028, 3, 1)).unwrap(), Timeline::new(rent));
+        let yearly = Ratio::new(103, 100).unwrap();
+        let three_years = yearly.checked_mul(yearly).unwrap().checked_mul(yearly).unwrap();
+        let four_years = three_years.checked_mul(yearly).unwrap();
+        assert_eq!(rent.amount_on(book, day(2025, 2, 27)), Ok(Ratio::ONE));
+        assert_eq!(rent.amount_on(book, day(2025, 2, 28)), Ok(yearly));
+        assert_eq!(rent.amount_on(book, day(2028, 2, 28)), Ok(three_years));
+        assert_eq!(rent.amount_on(book, day(2028, 2, 29)), Ok(four_years));
     });
 }
 

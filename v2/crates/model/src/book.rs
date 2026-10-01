@@ -6,12 +6,13 @@
 //! place under that one", "is this kind a 401k", and "does this jurisdiction
 //! include that one" are all interval tests.
 
+use axiom_core::day::days_in_month;
 use axiom_core::{
     Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Timeline, Tree, calendar,
 };
 
-use crate::journal::{Assert, Event, Filed, Flow, Measure, Plan, Prices, Purposed, Reading, Split, Txn};
-use crate::law::{Law, NodeId, Rules, Ty, Value};
+use crate::journal::{Assert, Event, Filed, Flow, Infer, Measure, Mode, Origin, Plan, Prices, Purposed, Reading, Split, Txn};
+use crate::law::{Fault, Law, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
 use crate::sync::{Format, Pattern, Source};
 
@@ -544,6 +545,8 @@ pub struct Contract {
 /// What a contract says for a while.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Terms {
+    /// Whether these terms make a promise or explicitly waive one.
+    pub state: TermsState,
     /// `monthly` is one month, `twice monthly` is `TwiceMonthly`, `every 2w` 14 days.
     pub every: Cadence,
     /// Several days are each due (`yearly on 04-15, 06-15, 09-15, 01-15`).
@@ -552,9 +555,9 @@ pub struct Terms {
     /// statement changed the cadence.
     pub anchor: Day,
     /// One occurrence's flows, dated `anchor`. An occurrence re-dates a copy,
-    /// with the journal's overrides. An item reading an input the occurrence
-    /// does not state is left out; an input it does state is bound for that
-    /// occurrence. Empty while waived: nothing is expected.
+    /// with the journal's overrides. Input-dependent amounts need a supplied
+    /// occurrence value; forecasting returns `MissingInput` while it is absent.
+    /// Loan flows may be derived and have no explicit template.
     pub template: Box<[Flow]>,
     /// `input water USD`: names occurrences may state (`water = 155.00 USD`).
     pub inputs: Box<[Input]>,
@@ -582,6 +585,16 @@ pub struct Terms {
     pub rate: Option<Ratio>,
     /// The statement that set these terms; `None` for the declaration's.
     pub change: Option<Change>,
+}
+
+/// Whether a stretch of a contract expects scheduled occurrences.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum TermsState {
+    /// The terms describe a promise, even when its payment is derived (as for a loan).
+    #[default]
+    Active,
+    /// No occurrences are expected while this state holds.
+    Waived,
 }
 
 /// A name an occurrence may state: `water = 155.00 USD`.
@@ -625,10 +638,42 @@ pub enum Escalation {
     Indexed(Id<Param>),
 }
 
+/// Why a contract's forecast amount could not be derived for a day.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ForecastError {
+    OutsideContract(Day),
+    Waived(Day),
+    MissingInput {
+        input: Sym,
+        day: Day,
+    },
+    MissingIndex {
+        param: Id<Param>,
+        day: Day,
+    },
+    InvalidIndex {
+        param: Id<Param>,
+        day: Day,
+    },
+    IndexFault {
+        param: Id<Param>,
+        day: Day,
+        fault: Fault,
+    },
+    InvalidRate,
+    UnresolvedAmount(Day),
+    ConflictingRecognition(Day),
+    InvalidCoverage(Day),
+    UnsupportedProration(Day),
+    MissingTemplate(Day),
+    UnsupportedLoan(Day),
+    Overflow,
+}
+
 impl Terms {
     /// Nothing is expected while these terms hold (`waived`).
     pub fn is_waived(&self) -> bool {
-        self.template.is_empty()
+        self.state == TermsState::Waived
     }
 }
 
@@ -645,20 +690,375 @@ pub struct Change {
 }
 
 impl Contract {
-    /// The days occurrences fall due in `within`, in order: each stretch of
-    /// terms steps on its own schedule, waived ones expect nothing, and nothing
-    /// is due outside the contract's `days`. Either it or `within` must end.
+    /// The scheduled occurrences in `within`, borrowing the terms that govern
+    /// each one. Terms changes split the schedule; waived stretches yield none.
+    pub fn occurrences(&self, within: Days) -> impl Iterator<Item = ContractOccurrence<'_>> + '_ {
+        within
+            .intersect(self.days)
+            .into_iter()
+            .flat_map(move |within| {
+                self.terms
+                    .within(within)
+                    .filter(|(_, terms)| !terms.is_waived())
+                    .flat_map(move |(stretch, terms)| {
+                        let days = stretch
+                            .intersect(within)
+                            .expect("timeline stretch intersects its window");
+                        calendar::due(terms.every, &terms.on, terms.anchor, days)
+                            .map(move |day| ContractOccurrence { day, terms })
+                    })
+            })
+    }
+
+    /// The days occurrences fall due in `within`, in order. Kept as a
+    /// collecting convenience for callers that need owned dates.
     pub fn due_days(&self, within: Days) -> Vec<Day> {
-        let Some(within) = within.intersect(self.days) else { return Vec::new() };
-        let stretches = self.terms.within(within).filter(|(_, terms)| !terms.is_waived());
-        let due = stretches.filter_map(|(stretch, terms)| Some((stretch.intersect(within)?, terms)));
-        due.flat_map(|(days, terms)| calendar::due(terms.every, &terms.on, terms.anchor, days)).collect()
+        self.occurrences(within)
+            .map(|occurrence| occurrence.day)
+            .collect()
+    }
+
+    /// The multiplier for the terms in force on `day`, including any
+    /// anniversary rise or the named index's movement since the contract began.
+    pub fn amount_on(&self, book: &Book<'_>, day: Day) -> Result<Ratio, ForecastError> {
+        if !self.days.contains(day) {
+            return Err(ForecastError::OutsideContract(day));
+        }
+        let terms = self.terms_on(day);
+        if terms.is_waived() {
+            return Err(ForecastError::Waived(day));
+        }
+        let amount = match terms.escalation {
+            None => Ok(Ratio::ONE),
+            Some(Escalation::Rising(rate)) => {
+                let yearly = Ratio::ONE
+                    .checked_add(rate)
+                    .ok_or(ForecastError::Overflow)?;
+                if yearly.is_negative() {
+                    return Err(ForecastError::InvalidRate);
+                }
+                ratio_pow(yearly, anniversary_count(self.days.first(), day)?)
+            }
+            Some(Escalation::Indexed(param)) => {
+                let first = self.days.first();
+                let anniversary = anniversary_on(first, day)?;
+                let base = index_at(book, param, first)?;
+                let current = index_at(book, param, anniversary)?;
+                current.checked_div(base).ok_or(ForecastError::Overflow)
+            }
+        }?;
+        if !terms.prorated {
+            return Ok(amount);
+        }
+        let period = self
+            .recognition_period(day)?
+            .ok_or(ForecastError::UnsupportedProration(day))?;
+        amount
+            .checked_mul(prorated_share(self.days, period)?)
+            .ok_or(ForecastError::Overflow)
+    }
+
+    /// The recognition window for one occurrence, including its relative
+    /// `for` period or `covers` rule when present.
+    pub fn recognition_on(&self, template: &Flow, day: Day) -> Result<Days, ForecastError> {
+        if !self.days.contains(day) {
+            return Err(ForecastError::OutsideContract(day));
+        }
+        if self.terms_on(day).is_waived() {
+            return Err(ForecastError::Waived(day));
+        }
+        if let Some(period) = self.recognition_period(day)? {
+            return Ok(period);
+        }
+        let shift = day
+            .0
+            .checked_sub(template.day.0)
+            .ok_or(ForecastError::Overflow)?;
+        move_days(template.recognized, shift)
+    }
+
+    /// Forecast flows directly from the contract's scheduled terms. The
+    /// iterator borrows the book and contract, allocating only each owned flow
+    /// that the ledger projection must apply.
+    pub fn forecast_flows<'a>(
+        &'a self,
+        book: &'a Book<'_>,
+        id: Id<Contract>,
+        within: Days,
+    ) -> impl Iterator<Item = Result<Flow, ForecastError>> + 'a {
+        self.occurrences(within).flat_map(move |occurrence| {
+            let amount = self.amount_on(book, occurrence.day);
+            let input = occurrence.terms.inputs.first().map(|input| input.name);
+            let terms = occurrence.terms;
+            let template_count = if self.loan.is_some() {
+                1
+            } else {
+                terms.template.len().max(1)
+            };
+            std::iter::repeat(())
+                .take(template_count)
+                .enumerate()
+                .map(move |(index, ())| {
+                    if self.loan.is_some() {
+                        return Err(ForecastError::UnsupportedLoan(occurrence.day));
+                    }
+                    let Some(template) = terms.template.get(index) else {
+                        return Err(ForecastError::MissingTemplate(occurrence.day));
+                    };
+                    if let Some(input) = input {
+                        return Err(ForecastError::MissingInput {
+                            input,
+                            day: occurrence.day,
+                        });
+                    }
+                    if template.infer != Infer::Known {
+                        return Err(ForecastError::UnresolvedAmount(occurrence.day));
+                    }
+                    let recognized = self.recognition_on(template, occurrence.day)?;
+                    amount.and_then(|factor| {
+                        forecast_flow(template, occurrence.day, recognized, id, factor)
+                    })
+                })
+        })
+    }
+
+    fn recognition_period(&self, day: Day) -> Result<Option<Days>, ForecastError> {
+        let terms = self.terms_on(day);
+        if terms.period.is_some() && terms.covers.is_some() {
+            return Err(ForecastError::ConflictingRecognition(day));
+        }
+        match (terms.period, terms.covers) {
+            (Some(Relative::Last(period)), None) => Ok(Some(previous_window(period, day)?)),
+            (Some(Relative::LastQuarter), None) => Ok(Some(quarter_window(day, true)?)),
+            (None, Some(Coverage::Calendar(period))) => Ok(Some(calendar_window(period, day)?)),
+            (None, Some(Coverage::Quarter)) => Ok(Some(quarter_window(day, false)?)),
+            (None, Some(Coverage::Span(span))) => Ok(Some(covered_span(day, span)?)),
+            (None, None) => Ok(None),
+            (Some(_), Some(_)) => Err(ForecastError::ConflictingRecognition(day)),
+        }
     }
 
     /// The terms in force on `day`.
     pub fn terms_on(&self, day: Day) -> &Terms {
         self.terms.at(day)
     }
+}
+
+fn anniversary_count(start: Day, day: Day) -> Result<u32, ForecastError> {
+    let anniversary = anniversary_on(start, day)?;
+    let years = anniversary
+        .ymd()
+        .0
+        .checked_sub(start.ymd().0)
+        .ok_or(ForecastError::Overflow)?;
+    u32::try_from(years).map_err(|_| ForecastError::Overflow)
+}
+
+/// The latest anniversary not after `day`, clamping Feb 29 in non-leap years.
+fn anniversary_on(start: Day, day: Day) -> Result<Day, ForecastError> {
+    let year_delta = day
+        .ymd()
+        .0
+        .checked_sub(start.ymd().0)
+        .ok_or(ForecastError::Overflow)?;
+    let month_delta = year_delta.checked_mul(12).ok_or(ForecastError::Overflow)?;
+    let candidate = add_months(start, month_delta)?;
+    if candidate <= day {
+        Ok(candidate)
+    } else {
+        let previous = month_delta.checked_sub(12).ok_or(ForecastError::Overflow)?;
+        add_months(start, previous)
+    }
+}
+
+fn ratio_pow(mut base: Ratio, mut exponent: u32) -> Result<Ratio, ForecastError> {
+    let mut result = Ratio::ONE;
+    while exponent > 0 {
+        if exponent & 1 == 1 {
+            result = result.checked_mul(base).ok_or(ForecastError::Overflow)?;
+        }
+        exponent >>= 1;
+        if exponent > 0 {
+            base = base.checked_mul(base).ok_or(ForecastError::Overflow)?;
+        }
+    }
+    Ok(result)
+}
+
+fn index_at(book: &Book<'_>, param: Id<Param>, day: Day) -> Result<Ratio, ForecastError> {
+    let Some(param_data) = book.params.get(param) else {
+        return Err(ForecastError::MissingIndex { param, day });
+    };
+    let Some(row) = param_data
+        .rows
+        .iter()
+        .filter(|row| row.names.is_empty() && row.since.is_none_or(|since| since <= day))
+        .reduce(|best, row| if row.since > best.since { row } else { best })
+    else {
+        return Err(ForecastError::MissingIndex { param, day });
+    };
+    match row.value {
+        Value::Num(value) if value > Ratio::ZERO => Ok(value),
+        Value::Fault(fault) => Err(ForecastError::IndexFault { param, day, fault }),
+        _ => Err(ForecastError::InvalidIndex { param, day }),
+    }
+}
+
+fn prorated_share(contract: Days, period: Days) -> Result<Ratio, ForecastError> {
+    let Some(overlap) = contract.intersect(period) else {
+        return Ok(Ratio::ZERO);
+    };
+    let part = i64::from(overlap.last().0) - i64::from(overlap.first().0) + 1;
+    let whole = i64::from(period.last().0) - i64::from(period.first().0) + 1;
+    Ratio::new(i128::from(part), i128::from(whole)).ok_or(ForecastError::Overflow)
+}
+
+fn calendar_window(period: Period, day: Day) -> Result<Days, ForecastError> {
+    let (year, month, _) = day.ymd();
+    let (first_month, last_month) = match period {
+        Period::Month => (month, month),
+        Period::Year => (1, 12),
+    };
+    let first = Day::from_ymd(year, first_month, 1).ok_or(ForecastError::Overflow)?;
+    let last = Day::from_ymd(year, last_month, days_in_month(year, last_month))
+        .ok_or(ForecastError::Overflow)?;
+    Days::new(first, last).ok_or(ForecastError::Overflow)
+}
+
+fn previous_window(period: Period, day: Day) -> Result<Days, ForecastError> {
+    let first = calendar_window(period, day)?.first();
+    let months = period.months().checked_neg().ok_or(ForecastError::Overflow)?;
+    calendar_window(period, add_months(first, months)?)
+}
+
+fn quarter_window(day: Day, previous: bool) -> Result<Days, ForecastError> {
+    let (year, month, _) = day.ymd();
+    let first_month = ((month - 1) / 3) * 3 + 1;
+    let first = Day::from_ymd(year, first_month, 1).ok_or(ForecastError::Overflow)?;
+    let start = if previous {
+        add_months(first, -3)?
+    } else {
+        first
+    };
+    let after = add_months(start, 3)?;
+    let last = after
+        .0
+        .checked_sub(1)
+        .map(Day)
+        .ok_or(ForecastError::Overflow)?;
+    Days::new(start, last).ok_or(ForecastError::Overflow)
+}
+
+fn covered_span(start: Day, span: Span) -> Result<Days, ForecastError> {
+    let after = add_span(start, span)?;
+    if after <= start {
+        return Err(ForecastError::InvalidCoverage(start));
+    }
+    let last = after
+        .0
+        .checked_sub(1)
+        .map(Day)
+        .ok_or(ForecastError::Overflow)?;
+    Days::new(start, last).ok_or(ForecastError::InvalidCoverage(start))
+}
+
+fn add_months(start: Day, months: i32) -> Result<Day, ForecastError> {
+    add_span(start, Span::months(months))
+}
+
+fn add_span(start: Day, span: Span) -> Result<Day, ForecastError> {
+    let (year, month, date) = start.ymd();
+    let absolute_month = i64::from(year) * 12 + i64::from(month - 1) + i64::from(span.months);
+    let year = i32::try_from(absolute_month.div_euclid(12)).map_err(|_| ForecastError::Overflow)?;
+    let month =
+        u32::try_from(absolute_month.rem_euclid(12) + 1).map_err(|_| ForecastError::Overflow)?;
+    let date = date.min(days_in_month(year, month));
+    let first = Day::from_ymd(year, month, date).ok_or(ForecastError::Overflow)?;
+    let value = i64::from(first.0) + i64::from(span.days);
+    i32::try_from(value)
+        .map(Day)
+        .map_err(|_| ForecastError::Overflow)
+}
+
+fn forecast_flow(
+    template: &Flow,
+    day: Day,
+    recognized: Days,
+    contract: Id<Contract>,
+    factor: Ratio,
+) -> Result<Flow, ForecastError> {
+    let shift = day
+        .0
+        .checked_sub(template.day.0)
+        .ok_or(ForecastError::Overflow)?;
+    let scale = |amount: Amount| {
+        amount
+            .qty
+            .scale(factor)
+            .map(|qty| Amount::new(qty, amount.unit))
+            .ok_or(ForecastError::Overflow)
+    };
+    let moved_detail = template
+        .detail
+        .as_deref()
+        .map(|detail| {
+            let mut moved = detail.clone();
+            moved.due = detail
+                .due
+                .map(|due| {
+                    due.0
+                        .checked_add(shift)
+                        .map(Day)
+                        .ok_or(ForecastError::Overflow)
+                })
+                .transpose()?;
+            Ok::<_, ForecastError>(Box::new(moved))
+        })
+        .transpose()?;
+    Ok(Flow {
+        day,
+        recognized,
+        from: template.from,
+        to: template.to,
+        out: scale(template.out)?,
+        arrive: scale(template.arrive)?,
+        mode: Mode::Planned,
+        infer: template.infer,
+        txn: template.txn,
+        payee: template.payee,
+        owner: template.owner,
+        purpose: template.purpose,
+        description: template.description,
+        origin: Origin::Occurrence(contract),
+        select: template.select.clone(),
+        codes: Box::default(),
+        loc: template.loc,
+        waive: template.waive,
+        detail: moved_detail,
+    })
+}
+
+fn move_days(days: Days, shift: i32) -> Result<Days, ForecastError> {
+    let move_bound = |day: Day| {
+        if day == Day::MIN || day == Day::MAX {
+            Ok(day)
+        } else {
+            day.0
+                .checked_add(shift)
+                .map(Day)
+                .ok_or(ForecastError::Overflow)
+        }
+    };
+    Days::new(move_bound(days.first())?, move_bound(days.last())?).ok_or(ForecastError::Overflow)
+}
+
+/// One contract occurrence and the terms that govern its flow template.
+#[derive(Clone, Copy, Debug)]
+pub struct ContractOccurrence<'a> {
+    /// The day this scheduled payment falls due.
+    pub day: Day,
+    /// The terms that supply this occurrence's flows and escalation.
+    pub terms: &'a Terms,
 }
 
 /// `loan 320_000 USD on 2024-02-20 at 5.875% over 30y for condo`.
