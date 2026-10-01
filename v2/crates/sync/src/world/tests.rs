@@ -114,7 +114,7 @@ fn test_feed<'b, 's>(
 
 fn inserts<'b, 's>(world: &mut World<'b, 's>, feed: &Feed<'b, 's>, text: &str) -> Vec<String> {
     world
-        .feed(feed, text)
+        .feed_at(feed, text, FileId(2))
         .unwrap_or_else(|problems| panic!("{}", problems[0].message))
         .iter()
         .map(|insert| match &insert.form {
@@ -228,7 +228,7 @@ entity plumber : merchant\n  known-as \"PLUMBER\"\n\
     let feed = test_feed(&book, format, "assets/checking", "USD");
     assert!(
         world
-            .feed(&feed, "2026-01-06,-12.50,CORNER STORE 1234,\n2026-01-06,-3.00,COFFEE,\n")
+            .feed_at(&feed, "2026-01-06,-12.50,CORNER STORE 1234,\n2026-01-06,-3.00,COFFEE,\n", FileId(2))
             .unwrap()
             .is_empty(),
         "a code whose flow is already settled should not produce a second settlement"
@@ -308,7 +308,7 @@ fn unknown_memos_round_trip_as_escaped_descriptions_and_tied_names_are_atomic_er
     let mut world = native_world(&book, &run);
     let feed = test_feed(&book, format, "assets/checking", "USD");
     let error = world
-        .feed(&feed, "2026-01-05,-9.99,SHELL 1234\n")
+        .feed_at(&feed, "2026-01-05,-9.99,SHELL 1234\n", FileId(2))
         .unwrap_err();
     assert!(
         error[0].message.contains("known as both"),
@@ -535,7 +535,7 @@ fn a_routed_export_sends_rows_to_their_named_account_and_rejects_unknown_routes(
     assert!(lines.iter().any(|line| line.contains("visa -> ? 5 USD")));
     assert!(lines.iter().any(|line| line.contains("amex -> ? 6 USD")));
     let problem = world
-        .feed(&feed, "2026-01-07,-7.00,C,diners\n")
+        .feed_at(&feed, "2026-01-07,-7.00,C,diners\n", FileId(2))
         .unwrap_err();
     assert!(problem[0].message.contains("not an account"));
 }

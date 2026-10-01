@@ -13,26 +13,15 @@ use crate::write::{
 };
 use crate::{Form, Insert};
 
-/// Where a source's Axiom goes.
+/// Internal adapter from the model sink declaration to the shared merger.
 #[derive(Clone, Copy, Debug)]
-pub enum Sink<'a> {
+pub(crate) enum Sink<'a> {
     /// Into the journal, each item into the file its day belongs to.
     Journal,
     /// Into one file; `{year}` and `{month}` in the path split it by the item's day.
     File(&'a str),
     /// Into the rows of `param NAME`, declared in the file at `path`.
     Param { name: &'a str, path: &'a str },
-}
-
-/// The inserts that add what `output` says and the book does not.
-pub fn merge(
-    sink: Sink,
-    output: &str,
-    layout: &Layout,
-    read: &mut dyn FnMut(&str) -> Option<String>,
-) -> Result<Vec<Insert>, Vec<Diagnostic>> {
-    let mut borrowed = |path: &str| read(path).map(Cow::Owned);
-    merge_at(sink, output, layout, FileId(0), &mut borrowed)
 }
 
 pub(crate) fn merge_at<'a>(
@@ -288,7 +277,7 @@ fn rows<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::write::changes;
+    use crate::write::changes_at;
 
     const INVOICES: &str = "\
 2026-03-27 halcyon owes studio 3_800 USD due 30d ^inv-2026-01
@@ -314,9 +303,14 @@ mod tests {
                 .find(|(name, _)| *name == path)
                 .map(|(_, text)| text.to_string())
         };
-        let mut read = read;
-        let inserts = merge(sink, output, &layout(), &mut read)?;
-        Ok(changes(&inserts, &mut read)
+        let read = read;
+        let mut borrowed = |path: &str| read(path).map(Cow::Owned);
+        let inserts = merge_at(sink, output, &layout(), FileId(40), &mut borrowed)?;
+        Ok(changes_at(
+            &inserts,
+            FileId(41),
+            &mut |path| read(path).map(Cow::Owned),
+        )
             .unwrap()
             .into_iter()
             .map(|change| (change.path, change.after))
@@ -360,35 +354,48 @@ mod tests {
     #[test]
     fn malformed_native_output_is_refused_before_a_change_is_planned() {
         let bad_item = "2026-03-27 someone owes 3 USD";
-        let result = merge(Sink::Journal, bad_item, &layout(), &mut |_| None);
+        let mut read = |_: &str| -> Option<Cow<'_, str>> { None };
+        let result = merge_at(Sink::Journal, bad_item, &layout(), FileId(40), &mut read);
         assert!(result.is_err(), "incomplete native item must not pass through raw");
 
         let bad_row = "2026 3_00 USD ???\n";
-        let result = merge(
+        let mut read = |path: &str| {
+            (path == "settings.ax").then(|| Cow::Owned("param rates\n".to_string()))
+        };
+        let result = merge_at(
             Sink::Param {
                 name: "rates",
                 path: "settings.ax",
             },
             bad_row,
             &layout(),
-            &mut |path| (path == "settings.ax").then(|| "param rates\n".to_string()),
+            FileId(40),
+            &mut read,
         );
         assert!(result.is_err(), "unparseable param output must be refused");
     }
 
     #[test]
     fn sink_paths_cannot_escape_the_project_or_trigger_external_reads() {
-        let mut read = |_: &str| panic!("unsafe sink path must be rejected before reading");
-        let result = merge(Sink::File("../outside/{year}.ax"), "2026-03-27 a -> b 1 USD", &layout(), &mut read);
+        let read = |_: &str| -> Option<String> { panic!("unsafe sink path must be rejected before reading") };
+        let mut borrowed = |path: &str| read(path).map(Cow::Owned);
+        let result = merge_at(
+            Sink::File("../outside/{year}.ax"),
+            "2026-03-27 a -> b 1 USD",
+            &layout(),
+            FileId(40),
+            &mut borrowed,
+        );
         assert!(result.is_err());
-        let result = merge(
+        let result = merge_at(
             Sink::Param {
                 name: "rates",
                 path: "/tmp/settings.ax",
             },
             "2026 3 USD\n",
             &layout(),
-            &mut read,
+            FileId(40),
+            &mut |path| read(path).map(Cow::Owned),
         );
         assert!(result.is_err());
     }
@@ -401,14 +408,20 @@ mod tests {
             None
         };
         let output = "2026-03-27 a -> b 1 USD";
-        let inserts = merge(
+        let inserts = merge_at(
             Sink::File("invoices/{year}.ax"),
             output,
             &layout(),
-            &mut read,
+            FileId(40),
+            &mut |path| read(path).map(Cow::Owned),
         )
         .unwrap();
-        let changes = changes(&inserts, &mut read).unwrap();
+        let changes = changes_at(
+            &inserts,
+            FileId(41),
+            &mut |path| read(path).map(Cow::Owned),
+        )
+        .unwrap();
         drop(read);
         assert_eq!(changes.len(), 1);
         assert_eq!(reads, ["invoices/2026.ax", "invoices/2026.ax"]);

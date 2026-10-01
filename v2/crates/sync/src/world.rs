@@ -6,7 +6,6 @@ use std::fmt::Write;
 
 use axiom_core::num::POW10;
 use axiom_core::{Day, Diagnostic, FileId, Map, Qty};
-use axiom_engine::Run as EngineRun;
 use axiom_model::sync::Format;
 use axiom_model::Book;
 
@@ -51,7 +50,6 @@ impl Account<'_> {
 /// so that a transfer both accounts show is written once.
 pub struct World<'b, 's> {
     pub book: &'b Book<'s>,
-    pub run: &'b EngineRun,
     pub recognizer: Recognizer<'b, 's>,
     pub layout: Layout,
     pub accounts: Map<&'s str, Account<'s>>,
@@ -108,20 +106,10 @@ struct Told<'r, 's> {
 }
 
 impl<'b, 's> World<'b, 's> {
-    /// The inserts that bring the book up to a statement, or what is wrong with
-    /// it. Nothing is changed unless all of it can be read.
-    pub fn feed(
-        &mut self,
-        feed: &Feed<'b, 's>,
-        text: &str,
-    ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
-        self.feed_at(feed, text, FileId(0))
-    }
-
-    /// As [`feed`](Self::feed), with the file identity that owns the imported
-    /// text. Local imports and captured command output use auxiliary files so
-    /// diagnostics point into the actual input, not an arbitrary source file.
-    pub fn feed_at(
+    /// Validate and plan feed inserts against a registered source file, then
+    /// commit the in-memory reconciliation delta only after all records pass.
+    #[cfg(test)]
+    pub(crate) fn feed_at(
         &mut self,
         feed: &Feed<'b, 's>,
         text: &str,

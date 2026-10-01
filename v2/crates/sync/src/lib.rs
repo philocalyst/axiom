@@ -1,10 +1,10 @@
 //! Sync: how a book stays current without being typed (LANGUAGE §14).
 //!
-//! Axiom never touches the network. A source is a folder of files it reads, or
-//! a command whose output it reads; what it reads is recognized, reconciled
-//! with what the book already says, and written back as the lines a person
-//! would have typed. Everything here works on this crate's own small types, so
-//! it is testable without a book; the `axiom` binary binds them to one.
+//! The model owns source declarations and their typed formats. This crate
+//! binds those declarations to the engine's run, reads local files or runs
+//! declared commands, and plans changes against an append-only source catalog.
+//! It never writes files itself; the caller decides whether to show a dry run
+//! or apply the returned changes.
 //!
 //! | module          | job                                                              |
 //! |-----------------|------------------------------------------------------------------|
@@ -15,27 +15,24 @@
 //! | `recognize`     | `known-as` patterns and names, compiled once; `via`; codes       |
 //! | `reconcile`     | records already written: same amount, within three days          |
 //! | `promise`       | records that keep a contract's occurrence                        |
-//! | `world`         | one feed: recognize, reconcile, keep, write                      |
+//! | `world`         | borrowed reconciliation state bound from the book and run      |
 //! | `sink`          | Axiom output merged into the journal, a file or a param          |
 //! | `write`         | the file a day belongs to, day order, short dates                |
 //! | `diff`          | what would be written, as a unified diff                         |
 //! | `command`       | running commands, all at once                                    |
-//! | `session`       | all of it, source by source, documents before bank lines         |
+//! | `planner`       | model-native source selection, reads, reconciliation and changes |
 //! | `unknown`       | memos nothing recognized, grouped, for `check`                   |
 //!
 //! # What binding to a book fills
 //!
 //! | the book says                                        | this crate takes                     |
 //! |------------------------------------------------------|--------------------------------------|
-//! | entities, accounts and their `known-as` (never `me`) | [`Known`], `account` for a place     |
-//! | `pattern NAME = …`                                   | [`Patterns`]                         |
-//! | `code NAME` with `known-as`                          | the `codes` of [`Recognizer::new`]   |
-//! | flows on an account, each leg of a split, derived flows | one [`Existing`] each, in its unit |
-//! | a batch of flows sharing a code                      | its members and its total, [`Batch`] |
-//! | occurrences due and unwritten (`Contract::due_days`) | [`Due`]                              |
-//! | open claims that carry a code                        | `World::claims`: code to party       |
-//! | the units the book has                               | `World::units`                       |
-//! | `sync NAME`, its `read` or `run`, its `format`, `into` | [`Source`], [`Feed`], [`Format`], [`Sink`] |
+//! | declared `sync` sources and formats                  | [`axiom_model::sync`]                |
+//! | book and run flows                                   | borrowed reconciliation candidates   |
+//! | local imports and command output                     | [`SourceRegistry`]                   |
+//! | plan a selected source or all sources                | [`plan`]                             |
+//! | pending changes and source diagnostics               | [`PlanOutcome`]                      |
+//! | records and their typed export facts                 | [`Record`], [`Facts`]                |
 
 mod amount;
 mod binding;
@@ -51,7 +48,6 @@ mod planner;
 mod promise;
 mod recognize;
 mod reconcile;
-mod session;
 mod sink;
 mod tagged;
 mod unknown;
@@ -71,10 +67,7 @@ pub use promise::Due;
 pub use paths::matching_paths;
 pub use recognize::{KnownId, Reading, Recognized, Recognizer, Scratch, Tie, Who};
 pub use reconcile::{Batch, Existing, WINDOW};
-pub use session::{Env, Failure, Input, Kind, Outcome, Source, sync};
-pub use sink::Sink;
 pub use unknown::{Group, group as unrecognized};
-pub use world::{Account, Feed, World, money};
 pub use write::{Change, Layout};
 
 /// One line of a statement, in the terms of the account it is for.

@@ -76,7 +76,6 @@ pub(crate) fn world<'b, 's>(
 
     Ok(World {
         book,
-        run,
         recognizer: Recognizer::new(book),
         layout: crate::Layout::new(project_paths.iter().copied()),
         accounts,
