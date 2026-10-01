@@ -303,6 +303,8 @@ pub enum Role {
 pub struct Entity {
     pub path: Sym,
     pub kind: Id<Kind>,
+    /// The entity's own purpose, before the purpose on its kind.
+    pub purpose: Option<At<Id<Purpose>>>,
     /// Its place as a flow's end: an owner's `Holding`, a party's `Outside`.
     pub place: Option<Id<Place>>,
     /// Resolved from the kind chain: money from this entity stays tied to it.
@@ -379,12 +381,12 @@ pub struct Kind {
     pub liquidity: Option<Span>,
     /// On a party kind: what flows with its parties are for (`grocer`:
     /// groceries).
-    pub purpose: Option<Id<Purpose>>,
+    pub purpose: Option<At<Id<Purpose>>>,
     /// On a commodity kind: what its issuer pays is for (`fund`: dividend).
-    pub pays: Option<Id<Purpose>>,
+    pub pays: Option<At<Id<Purpose>>>,
     /// On an account kind: what arrives from flows of the second purpose is
     /// the first (`401k`: pre-tax-deferral from wages).
-    pub takes: Box<[(Id<Purpose>, Id<Purpose>)]>,
+    pub takes: Box<[At<Take>]>,
     /// On a party kind: the tax inside every price paid to its parties.
     pub sales_tax: Option<Ratio>,
     /// `business 60% for studio` on a party kind: every flow with its parties
@@ -410,6 +412,14 @@ pub enum Sort {
     Entity,
 }
 
+/// An account-kind purpose mapping: incoming flows with `from` purpose become
+/// `to` purpose while reaching this kind of account.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Take {
+    pub to: Id<Purpose>,
+    pub from: Id<Purpose>,
+}
+
 /// A declared property: `has beneficiary entity`.
 #[derive(Clone, Copy, Debug)]
 pub struct Has {
@@ -431,6 +441,15 @@ pub struct Prop {
     /// `Day::MIN` for a declaration's.
     pub since: Day,
     pub loc: Option<Loc>,
+}
+
+/// A declared relationship together with the line that established it.
+/// Keeping the source beside its resolved value lets diagnostics identify the
+/// actual setting even after declarations have been lowered.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct At<T> {
+    pub value: T,
+    pub loc: Loc,
 }
 
 /// The row of `name` in force on `day`: the latest that has begun, the first
@@ -465,7 +484,7 @@ pub struct Purpose {
     pub root: PurposeRoot,
     pub system: Option<Id<System>>,
     /// `of KIND`: it takes an object of this kind (`improvement of thing`).
-    pub of: Option<Id<Kind>>,
+    pub of: Option<At<Id<Kind>>>,
     /// `business 12% for studio`: every flow of this purpose is shared.
     pub shares: Box<[Share]>,
     /// Only this purpose's own laws; ancestors' laws are found through the tree.
@@ -533,7 +552,7 @@ pub struct Asset {
     pub unit: Id<Commodity>,
     /// `part of building`: a unit of it, a room of it. What is `of` the whole is
     /// shared among its parts by their measures (`area`), which are props.
-    pub part_of: Option<Id<Asset>>,
+    pub part_of: Option<At<Id<Asset>>>,
     pub props: Props,
     pub doc: Option<Sym>,
     pub loc: Loc,
@@ -545,6 +564,10 @@ pub struct Contract {
     pub party: Id<Entity>,
     /// Whose promise: the owner of the holding it pays from or into.
     pub owner: Id<Entity>,
+    /// The purpose inferred for each promised flow, when declared.
+    pub purpose: Option<At<crate::journal::Purposed>>,
+    /// The promised flow's description.
+    pub description: Option<Sym>,
     /// `from … until …`, cut short by `ends` or extended by a statement: the
     /// days anything is expected at all.
     pub days: Days,

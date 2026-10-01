@@ -2,6 +2,7 @@
 //! assertions, measures, settlement events, prices, returns as filed, and plans.
 
 use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Span, Sym};
+use std::hash::{Hash, Hasher};
 
 use crate::book::{
     Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose, System,
@@ -62,6 +63,29 @@ impl Flow {
         self.out.unit != self.arrive.unit
     }
 
+    /// The immutable pooled identity used to match selectors against source
+    /// transaction and local codes, including after a flow is forecast.
+    pub fn code_runs(&self) -> FlowCodes {
+        FlowCodes { header: self.header_codes, local: self.codes }
+    }
+
+}
+
+/// Two ranges in the book-wide code arena: transaction header first, then the
+/// originating flow's own codes. Copying this value never copies code text.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct FlowCodes {
+    pub header: Run<Sym>,
+    pub local: Run<Sym>,
+}
+
+impl Hash for FlowCodes {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.header.start().hash(state);
+        self.header.len().hash(state);
+        self.local.start().hash(state);
+        self.local.len().hash(state);
+    }
 }
 
 /// A changed detail owned by an engine's runtime arena, such as a contract
@@ -109,6 +133,12 @@ impl<'a> FlowView<'a> {
     /// Codes in source order: transaction header first, then this leg or item.
     pub fn codes(self) -> impl Iterator<Item = Sym> + 'a {
         self.transaction_codes.iter().chain(self.local_codes).copied()
+    }
+
+    /// The two pooled ranges in source order, suitable for a compact parcel
+    /// selector key.
+    pub fn code_runs(self) -> FlowCodes {
+        self.flow.code_runs()
     }
 
     /// The resolved selectors applied at the flow's source.
@@ -165,6 +195,10 @@ mod flow_view_tests {
 
         let view = FlowView::new(&flow, &header, &local, &[], &Detail::NONE);
         assert_eq!(view.codes().collect::<Vec<_>>(), [header[0], header[1], local[0]]);
+        assert_eq!(view.code_runs(), FlowCodes { header: flow.header_codes, local: flow.codes });
+        let mut by_codes = std::collections::HashMap::new();
+        by_codes.insert(view.code_runs(), 1);
+        assert_eq!(by_codes.get(&flow.code_runs()), Some(&1));
         assert!(view.select().is_empty());
         assert_eq!(*view.detail(), Detail::NONE);
         assert_eq!(view.from, Id::new(0));

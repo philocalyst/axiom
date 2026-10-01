@@ -411,6 +411,7 @@ fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, base: Id<Commodity>, c
     let (mut tree, by_path) = paths::build(written, |path| Entity {
         path: cx.names.intern(path),
         kind: kinds.roots.entity(),
+        purpose: None,
         place: None,
         restricted: false,
         lives: Box::default(),

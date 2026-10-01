@@ -1441,6 +1441,8 @@ fn contract(days: axiom_core::Days, terms: axiom_core::Timeline<crate::Terms>) -
         name: axiom_core::Interner::default().intern("rent"),
         party: axiom_core::Id::new(0),
         owner: axiom_core::Id::new(0),
+        purpose: None,
+        description: None,
         days,
         terms,
         buys: None,
