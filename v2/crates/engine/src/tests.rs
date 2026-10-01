@@ -204,6 +204,7 @@ fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
         owner: book.roots.me,
         purpose: None,
         description: None,
+        area: None,
         days: Days::ALWAYS,
         terms: None,
         standing: None,
