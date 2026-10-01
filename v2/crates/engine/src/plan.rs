@@ -483,7 +483,9 @@ fn place_owners(
             pairs.extend(sorted_shares(rates).into_iter().map(|share| (place, share)));
         }
     }
-    Groups::build(book.places.len(), pairs.into_iter())
+    let owners = Groups::build(book.places.len(), pairs.iter().copied());
+    drop(pairs);
+    owners
 }
 
 fn sorted_shares(rates: Map<Id<Entity>, Ratio>) -> Vec<OwnerShare> {
@@ -530,7 +532,9 @@ fn asset_places(book: &Book) -> Groups<Asset, Id<Place>> {
     }
     within.sort_unstable();
     within.dedup();
-    Groups::build(book.assets.len(), within.into_iter())
+    let places = Groups::build(book.assets.len(), within.iter().copied());
+    drop(within);
+    places
 }
 
 /// Builds the static place set for every kind a `total` reads. If a typed

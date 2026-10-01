@@ -345,7 +345,7 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
     book.roots.purposes.spending = ids[1];
     book.roots.purposes.capital = ids[3];
     book.roots.purposes.transfer = ids[4];
-    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule)]);
+    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule)].into_iter());
 
     let run = run(&book, options());
     assert_eq!(run.checks[law.index()], 1);
@@ -378,7 +378,7 @@ fn purpose_rules_use_each_flows_owner_for_scope_and_sparse_totals() {
     f.laws[law].owner = Owner::Purpose(purpose);
     let placeholder = Rule { law, subject: Subject::Entity(me), days: Days::ALWAYS };
     let mut book = f.book();
-    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, placeholder)]);
+    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, placeholder)].into_iter());
 
     let run = run(&book, options());
     assert_eq!(run.violations.len(), 1, "only the grant owner's 150.00 total exceeds 100.00");
@@ -436,7 +436,8 @@ fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
     let mut book = f.book();
     let rule = Rule { law, subject: Subject::Entity(me), days: Days::ALWAYS };
     let flow_rule = Rule { law: flow_only, ..rule };
-    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule), (purpose, flow_rule)]);
+    book.rules.purposes =
+        Groups::build(book.purposes.len(), [(purpose, rule), (purpose, flow_rule)].into_iter());
     let run = run(&book, Options { today: Day(date(2026, 2, 28)), relaxed: false });
 
     assert_eq!(run.violations.len(), 1, "only January's recognized share exceeds the monthly cap");
@@ -503,7 +504,7 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
         law,
         subject: Subject::Entity(me),
         days: span(3, 3),
-    })]);
+    })].into_iter());
 
     let run = run(&book, options());
     assert!(run.violations.is_empty(), "84.00 charge less a 40.00 refund is 44.00");

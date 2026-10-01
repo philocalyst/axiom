@@ -909,9 +909,10 @@ pub(crate) fn household() -> Household {
                 (food, budget_rule),
                 (retirement, lapsed),
                 (retirement, in_force),
-            ],
+            ]
+            .into_iter(),
         ),
-        on_out: Groups::build(cast.places.len(), [(retirement, penalty)]),
+        on_out: Groups::build(cast.places.len(), [(retirement, penalty)].into_iter()),
         ..Rules::default()
     };
     let touching = Groups::build(

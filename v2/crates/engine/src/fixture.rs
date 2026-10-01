@@ -488,11 +488,11 @@ impl Fixture {
         };
         let touching = Groups::build(places, self.flows.iter().enumerate().flat_map(ends).flatten());
         let rules = Rules {
-            on_in: Groups::build(places, self.on_in),
-            on_out: Groups::build(places, self.on_out),
-            on_gain: Groups::build(places, self.on_gain),
-            always: Groups::build(places, self.always),
-            on_spend: Groups::build(self.entities.len(), self.on_spend),
+            on_in: Groups::build(places, self.on_in.iter().copied()),
+            on_out: Groups::build(places, self.on_out.iter().copied()),
+            on_gain: Groups::build(places, self.on_gain.iter().copied()),
+            always: Groups::build(places, self.always.iter().copied()),
+            on_spend: Groups::build(self.entities.len(), self.on_spend.iter().copied()),
             purposes: Groups::default(),
             about: Groups::default(),
             contracts: Groups::default(),
