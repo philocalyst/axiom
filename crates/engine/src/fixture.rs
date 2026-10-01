@@ -272,10 +272,9 @@ impl Fixture {
             codes: Run::new(Id::new(0), 0),
             waive: None,
             contract: None,
-            loan_origin: None,
             contract_schedule: None,
             occurrence: None,
-            ends: false,
+            kind: axiom_model::journal::TxnKind::Journal,
             doc: None,
             loc,
         };

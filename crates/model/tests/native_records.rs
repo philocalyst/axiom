@@ -1204,7 +1204,12 @@ contract mortgage with rocket
         axiom_model::law::Subject::Place(place) if place == loan.debt
     ));
     let txn = &book.txns[Id::new(0)];
-    assert_eq!(txn.loan_origin, Some(Id::new(0)));
+    assert!(
+        std::mem::size_of::<axiom_model::journal::Txn>() <= 96,
+        "ordinary transaction records should remain compact"
+    );
+    assert_eq!(txn.loan_origin(), Some(Id::new(0)));
+    assert!(!txn.is_end());
     assert_eq!(txn.contract, Some(Id::new(0)));
     assert_eq!(txn.contract_schedule, None);
     assert_eq!(txn.occurrence, None);

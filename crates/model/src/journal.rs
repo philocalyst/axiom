@@ -619,19 +619,41 @@ pub struct Txn {
     pub waive: Option<Waive>,
     /// The contract this transaction is an occurrence of (`DATE phone`).
     pub contract: Option<Id<Contract>>,
-    /// The source loan's principal disbursement (`DATE home-loan` on
-    /// `Loan::on`). This is distinct from a scheduled payment occurrence and
-    /// has no schedule or `WrittenOccurrence` handle.
-    pub loan_origin: Option<Id<Contract>>,
     /// Which independent contract schedule this occurrence keeps.
     pub contract_schedule: Option<ScheduleKind>,
     /// Sparse exact identity of a written occurrence. Its due day is distinct
     /// from the day it was recorded, which matters across terms restatements.
     pub occurrence: Option<Id<WrittenOccurrence>>,
-    /// `DATE NAME ends`: it ends the contract, and has no flows.
-    pub ends: bool,
+    /// The source row kind. The contract ID is kept only once above.
+    pub kind: TxnKind,
     pub doc: Option<Sym>,
     pub loc: Loc,
+}
+
+/// Mutually exclusive kinds of dated source rows.
+#[repr(u8)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub enum TxnKind {
+    #[default]
+    Journal,
+    ContractEnd,
+    LoanOrigin,
+}
+
+impl Txn {
+    /// Whether the transaction row ends its named contract.
+    pub fn is_end(&self) -> bool {
+        self.kind == TxnKind::ContractEnd
+    }
+
+    /// The contract whose principal is disbursed on its loan date.
+    pub fn loan_origin(&self) -> Option<Id<Contract>> {
+        if self.kind == TxnKind::LoanOrigin {
+            self.contract
+        } else {
+            None
+        }
+    }
 }
 
 /// The selected scheduled instance kept by one written contract occurrence.

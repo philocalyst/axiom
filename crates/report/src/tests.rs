@@ -527,10 +527,9 @@ fn journal(cast: &mut Cast) -> Journal {
             codes: header_codes,
             waive: None,
             contract: None,
-            loan_origin: None,
             contract_schedule: None,
             occurrence: None,
-            ends: false,
+            kind: axiom_model::journal::TxnKind::Journal,
             doc: (row == 13).then(|| cast.names.intern("/// The March design invoice.")),
             loc: line(row),
         });
