@@ -6,11 +6,11 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
-use axiom_core::glob::{glob, is_pattern};
 use axiom_core::{Day, Diagnostic};
 
 use crate::Insert;
 use crate::command::{Failed, run_all, substitute};
+use crate::paths::matching_paths;
 use crate::sink::{self, Sink};
 use crate::world::{Feed, World};
 use crate::write::{Change, changes};
@@ -161,50 +161,38 @@ fn plan<'a>(
 /// The text of each file a pattern names, in path order, labelled with its
 /// path. A pattern that would leave the project names nothing but a failure.
 fn files(root: &Path, pattern: &str, name: &str) -> Vec<(String, Result<String, Failed>)> {
-    let outside = pattern.starts_with('/') || pattern.split('/').any(|part| part == "..");
-    if outside {
-        let failed = Failed {
-            summary: format!("`{pattern}` leaves the project"),
-            stderr: String::new(),
-        };
-        return vec![(name.to_string(), Err(failed))];
-    }
-    let mut found = vec![String::new()];
-    for part in pattern.split('/').filter(|part| !part.is_empty()) {
-        let mut next = Vec::new();
-        for folder in &found {
-            let joined = |entry: &str| {
-                if folder.is_empty() {
-                    entry.to_string()
-                } else {
-                    format!("{folder}/{entry}")
-                }
-            };
-            if !is_pattern(part) {
-                next.push(joined(part));
-                continue;
-            }
-            let entries = fs::read_dir(root.join(folder))
-                .into_iter()
-                .flatten()
-                .flatten();
-            let names = entries.map(|entry| entry.file_name().to_string_lossy().into_owned());
-            next.extend(
-                names
-                    .filter(|entry| !entry.starts_with('.') && glob(part, entry))
-                    .map(|entry| joined(&entry)),
-            );
+    let paths = match matching_paths(root, pattern) {
+        Ok(paths) => paths,
+        Err(problem) => {
+            return vec![(
+                name.to_string(),
+                Err(Failed {
+                    summary: problem.message,
+                    stderr: String::new(),
+                }),
+            )];
         }
-        found = next;
-    }
-    found.retain(|path| root.join(path).is_file());
-    found.sort();
-    let read = |path: String| {
-        let text = fs::read_to_string(root.join(&path)).map_err(|error| Failed {
-            summary: format!("could not read {path}: {error}"),
-            stderr: String::new(),
-        });
-        (path, text)
     };
-    found.into_iter().map(read).collect()
+    let root = match fs::canonicalize(root) {
+        Ok(root) => root,
+        Err(error) => {
+            return vec![(
+                name.to_string(),
+                Err(Failed {
+                    summary: format!("could not resolve project root: {error}"),
+                    stderr: String::new(),
+                }),
+            )];
+        }
+    };
+    paths
+        .into_iter()
+        .map(|path| {
+            let text = fs::read_to_string(root.join(&path)).map_err(|error| Failed {
+                summary: format!("could not read {path}: {error}"),
+                stderr: String::new(),
+            });
+            (path, text)
+        })
+        .collect()
 }

@@ -3,11 +3,11 @@
 //! without touching anything already there.
 
 use std::collections::BTreeMap;
-use std::path::Path;
 
 use axiom_core::{Day, Diagnostic, FileId};
 use axiom_syntax::{Folder, format};
 
+use crate::paths::is_project_path;
 use crate::{Form, Insert};
 
 /// What a short date can lean on: the year, and the month, where they are known.
@@ -367,22 +367,6 @@ fn format_item(path: &str, day: Day, date: String, body: &str) -> Result<String,
         )]);
     }
     Ok(format!("{date}{rest}"))
-}
-
-/// Whether a path names a file beneath the project root. A sync declaration
-/// cannot read or propose a change outside the project.
-pub(crate) fn is_project_path(path: &str) -> bool {
-    use std::path::Component;
-
-    let drive_prefix = path.as_bytes().get(..2).is_some_and(|head| {
-        head[0].is_ascii_alphabetic() && head[1] == b':'
-    });
-    if path.is_empty() || path.starts_with('/') || path.contains('\\') || drive_prefix {
-        return false;
-    }
-    Path::new(path)
-        .components()
-        .all(|part| matches!(part, Component::Normal(_)))
 }
 
 /// Parse one generated item with a complete date before planning a file change.

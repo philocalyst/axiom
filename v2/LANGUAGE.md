@@ -1010,6 +1010,11 @@ format camt053                                // ISO 20022 bank statements, in s
   via     NtryDtls/TxDtls/RltdPties/UltmtCdtr/Nm
 ```
 
+When a tagged format names more than one memo path, the reader joins the
+non-empty values in declaration order with one space. Thus the CAMT memo above
+keeps both `AddtlNtryInf` and `RmtInf/Ustrd`, just as a row format can join
+multiple memo columns.
+
 **Patterns** recognize memos. A pattern is a parsing expression, matched anywhere
 in the memo, in any case:
 
@@ -1039,18 +1044,23 @@ and account is known by its own name too (`ashgrove` matches "ASHGROVE",
 pattern. The entity or account whose pattern matches the longest part of the
 memo is the other end; two that tie are an error naming both.
 
-A structured `code` is the canonical code as written in the book, with letter
-case ignored. Sync does not add a prefix from a `code` rule's pattern. A code
-pattern controls where that code may be used; `known-as` patterns recognize its
-memo spelling. A structured `via` value names the party the money was for. If
-the memo also identifies a party, that memo party is recorded as the
-intermediary (`via`) in the flow. The same rule applies when the structured
-field is named `party`.
+A structured `code` is the canonical code as written in the book (an optional
+leading `^` is accepted), with letter case ignored. A `code` rule's pattern
+does not supply a prefix: it controls which memos can name the code, and the
+code's `known-as` pattern recognizes its spelling. A structured code that names
+an open claim selects that claim's party. Otherwise, a structured `party`, then
+a structured `via`, then the recognized memo supply the other party, in that
+order. `party` names who the transaction was with; `via` may name who the money
+was for and is used as the other party when `party` is absent or unresolved. If
+a structured field selects that party and the memo also identifies a different
+party, the memo party is written as the intermediary (`via`). A memo tie does
+not override an unambiguous structured party; an ambiguous structured value is
+still an error.
 
 **Each record** of a feed then goes through:
 
 1. **Recognition** by the patterns, or by the record's own structured fields
-   (a `code`, a `via`), which win.
+   (a code for an open claim, `party`, or `via`), which win in that order.
 2. **Reconciliation.** A record matches what the account already saw within three
    days, by amount: a whole flow, one leg of a split (a refinance's wire), the flows
    that share a code (a payroll batch), or a derived flow (a rebate). Matched
@@ -1065,9 +1075,12 @@ field is named `party`.
 5. **Writing.** Each new line goes, in day order, into the file its day belongs to
    (§11), in the house style of `axiom fmt`. A record no pattern recognizes goes to
    `?`, with its memo as its description. A `balance` belongs to its record; the
-   last balance in a feed is written as an assertion. Tagged formats have no
-   statement-level balance. A `pending` record is written in parentheses and
-   settles when its posted record arrives.
+   latest posted, own-currency day with a balance is written as an assertion only
+   when its reported balances imply one unambiguous day-end amount. Conflicting
+   balances produce no assertion. Pending and foreign-currency rows do not
+   determine that assertion. Tagged formats have no statement-level balance. A
+   `pending` record is written in parentheses and settles when its posted record
+   arrives.
 
 **Rules.** Nothing already written is ever changed: sync only adds facts. What a
 file or param already has (the same day and subject, the same row key) is kept as

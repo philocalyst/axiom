@@ -216,6 +216,34 @@ fn a_statement_ends_in_an_assertion_however_its_days_are_ordered() {
 }
 
 #[test]
+fn a_balance_assertion_ignores_pending_and_foreign_currency_rows() {
+    let feed = Feed {
+        account: "checking",
+        unit: USD,
+        format: format(vec![
+            Spec::new(Field::Date, [name("Date")]),
+            Spec::new(Field::Amount, [name("Amount")]),
+            Spec::new(Field::Memo, [name("Memo")]),
+            Spec::new(Field::Balance, [name("Balance")]),
+            Spec::new(Field::Pending, [name("Pending")]),
+            Spec::new(Field::Currency, [name("Currency")]),
+        ]),
+    };
+    let text = "Date,Amount,Memo,Balance,Pending,Currency\n\
+                2026-01-05,-5.00,POSTED,95.00,,\n\
+                2026-01-05,-30.00,PENDING,65.00,pending,\n\
+                2026-01-05,100.00,FOREIGN,195.00,,EUR\n";
+    let (first, second) = twice(&mut world(vec![]), &feed, text);
+    let assertions: Vec<_> = first
+        .iter()
+        .filter(|line| line.contains(" = "))
+        .map(String::as_str)
+        .collect();
+    assert_eq!(assertions, ["05 checking = 95 USD"]);
+    assert!(second.is_empty());
+}
+
+#[test]
 fn a_memo_nobody_is_known_as_is_a_description_that_reads_back() {
     let mut world = world(vec![]);
     let lines = written(

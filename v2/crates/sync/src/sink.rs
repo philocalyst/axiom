@@ -6,8 +6,9 @@
 use axiom_core::{Day, Diagnostic, FileId, Loc, Map};
 
 use crate::write::{
-    Context, Item, Layout, is_project_path, row_key, row_keys, scan, validate_item, validate_row,
+    Context, Item, Layout, row_key, row_keys, scan, validate_item, validate_row,
 };
+use crate::paths::is_project_path;
 use crate::{Form, Insert};
 
 /// Where a source's Axiom goes.
