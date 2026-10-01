@@ -67,6 +67,7 @@ impl<T> fmt::Debug for Id<T> {
 }
 
 /// A vector indexed by `Id<T>`.
+#[derive(Clone, PartialEq)]
 pub struct Arena<T> {
     items: Vec<T>,
 }

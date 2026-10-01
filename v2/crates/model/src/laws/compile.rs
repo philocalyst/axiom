@@ -11,7 +11,7 @@
 //! any error is dropped whole.
 
 use axiom_core::glob::is_pattern;
-use axiom_core::{Days, Diagnostic, Dim, Id, Loc, Period, Severity, Sym};
+use axiom_core::{Arena, Days, Diagnostic, Dim, Id, Loc, Period, Ratio, Severity, Sym};
 use axiom_syntax::{
     self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep,
     UnOp,
@@ -220,8 +220,7 @@ pub(crate) fn compile<'s>(
         law_name,
         first: None,
         base: 0,
-        nodes: Vec::new(),
-        poisoned: Vec::new(),
+        nodes: Arena::new(),
         roles: Vec::new(),
         locals: Vec::new(),
         inputs: &[],
@@ -254,8 +253,7 @@ pub(crate) fn compile_template<'s>(
         law_name: name,
         first: None,
         base: 0,
-        nodes: Vec::new(),
-        poisoned: Vec::new(),
+        nodes: Arena::new(),
         roles: Vec::new(),
         locals: Vec::new(),
         inputs,
@@ -271,7 +269,7 @@ pub(crate) fn compile_template<'s>(
     }
     Some((
         TemplateProgram {
-            nodes: std::mem::take(&mut compiler.nodes).into(),
+            nodes: std::mem::take(&mut compiler.nodes),
         },
         compiled.into(),
     ))
@@ -289,8 +287,7 @@ struct Compiler<'w, 'a, 's> {
     /// index the first node of it got.
     first: Option<ExprId>,
     base: usize,
-    nodes: Vec<Node>,
-    poisoned: Vec<bool>,
+    nodes: Arena<Node>,
     /// The role of each node of the run being compiled.
     roles: Vec<Role>,
     /// `let` bindings in scope, and the node holding each value.
@@ -326,7 +323,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 .map(|name| self.world.book.names.intern(name.0)),
             rank: Rank::ZERO,
             steps: steps.into(),
-            nodes: std::mem::take(&mut self.nodes).into(),
+            nodes: std::mem::take(&mut self.nodes),
             loc: law.loc,
         })
     }
@@ -356,7 +353,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 // Bound even if it failed, so its uses do not report it again.
                 let bound = self.compile(*root);
                 self.locals.push((name.0, bound));
-                StepKind::Let((!self.poisoned[bound.index()]).then_some(bound)?)
+                StepKind::Let(self.nodes[bound].typed_ty().map(|_| bound)?)
             }
             WrittenStep::Require {
                 cond,
@@ -429,11 +426,10 @@ impl<'s> Compiler<'_, '_, 's> {
                 let node = NodeId(self.nodes.len() as u32);
                 self.nodes.push(Node {
                     op: Op::Const(Value::Span(*within)),
-                    ty: Ty::Span,
+                    ty: Some(Ty::Span),
                     loc,
                     first: node,
                 });
-                self.poisoned.push(false);
                 Some(Effect::Carry {
                     amount,
                     unit,
@@ -525,28 +521,34 @@ impl<'s> Compiler<'_, '_, 's> {
     /// The node of `root`, unless it or something beneath it failed.
     fn value(&mut self, root: ExprId) -> Option<NodeId> {
         let node = self.compile(root);
-        (!self.poisoned[node.index()]).then_some(node)
+        self.nodes[node].typed_ty().map(|_| node)
     }
 
     /// A root that must have the type `want`: an amount or a date.
     fn expression(&mut self, root: ExprId, want: Ty) -> Option<NodeId> {
         let node = self.value(root)?;
-        let found = &self.nodes[node.index()];
-        if fits(want, found.ty) {
+        let found = &self.nodes[node];
+        let Some(found_ty) = found.typed_ty() else {
+            return None;
+        };
+        if fits(want, found_ty) {
             return Some(node);
         }
-        let diagnostic = expected(&article(want.word()), found.ty, found.loc);
+        let diagnostic = expected(&article(want.word()), found_ty, found.loc);
         self.report(diagnostic);
         None
     }
 
     fn condition(&mut self, root: ExprId) -> Option<NodeId> {
         let node = self.value(root)?;
-        let found = &self.nodes[node.index()];
-        if found.ty == Ty::Bool {
+        let found = &self.nodes[node];
+        let Some(found_ty) = found.typed_ty() else {
+            return None;
+        };
+        if found_ty == Ty::Bool {
             return Some(node);
         }
-        let diagnostic = expected("a condition", found.ty, found.loc)
+        let diagnostic = expected("a condition", found_ty, found.loc)
             .note("a condition compares things, as in `amount <= 500 USD`, or tests them, as in `to is expenses/food`");
         self.report(diagnostic);
         None
@@ -562,13 +564,13 @@ impl<'s> Compiler<'_, '_, 's> {
 
     fn node(&mut self, at: usize, expr: &ast::Expr<'s>) {
         let first = self.node_id(expr.first);
-        let (op, ty, ok) = match self.check(at, expr) {
-            Ok((op, ty)) => (op, ty, true),
+        let (op, ty) = match self.check(at, expr) {
+            Ok((op, ty)) => (op, Some(ty)),
             Err(Bad::Report(diagnostic)) => {
                 self.report(diagnostic);
-                (Op::Const(Value::Empty), Ty::Empty, false)
+                (Op::Const(Value::Empty), None)
             }
-            Err(Bad::Cascade) => (Op::Const(Value::Empty), Ty::Empty, false),
+            Err(Bad::Cascade) => (Op::Const(Value::Empty), None),
         };
         self.nodes.push(Node {
             op,
@@ -576,17 +578,15 @@ impl<'s> Compiler<'_, '_, 's> {
             loc: expr.loc,
             first,
         });
-        self.poisoned.push(!ok);
     }
 
     /// The typed child, or the reason it has none.
     fn child(&self, id: ExprId) -> Check<(NodeId, Ty)> {
         let node = self.node_id(id);
-        if self.poisoned[node.index()] {
-            Err(Bad::Cascade)
-        } else {
-            Ok((node, self.nodes[node.index()].ty))
-        }
+        self.nodes[node]
+            .typed_ty()
+            .map(|ty| (node, ty))
+            .ok_or(Bad::Cascade)
     }
 
     fn children(&self, ids: &[ExprId]) -> Check<Vec<(NodeId, Ty)>> {
@@ -594,11 +594,12 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn check(&mut self, at: usize, expr: &ast::Expr<'s>) -> Check<(Op, Ty)> {
-        if let Some((value, ty)) = self.world.literal(self.home, self.file, expr)? {
+        if let Some((value, ty)) = self.world.literal(self.file, expr)? {
             return Ok((Op::Const(value), ty));
         }
         let file = self.file;
         match expr.kind {
+            ExprKind::Year(year) => Ok((Op::Const(Value::Num(Ratio::int(i64::from(year)))), Ty::Num)),
             ExprKind::Name(name) => self.name(
                 at,
                 Word {
@@ -708,10 +709,10 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn local(&self, bound: NodeId) -> Check<(Op, Ty)> {
-        if self.poisoned[bound.index()] {
-            return Err(Bad::Cascade);
-        }
-        Ok((Op::Local(bound), self.nodes[bound.index()].ty))
+        self.nodes[bound]
+            .typed_ty()
+            .map(|ty| (Op::Local(bound), ty))
+            .ok_or(Bad::Cascade)
     }
 
     fn variable(&self, var: Var, word: Word) -> Check<(Op, Ty)> {
@@ -889,6 +890,13 @@ impl<'s> Compiler<'_, '_, 's> {
                 ExprKind::Month(day) => SelectKey::Range(
                     axiom_core::calendar::Window::containing(Period::Month, day).days(),
                 ),
+                ExprKind::Year(year) => {
+                    let first = axiom_core::Day::from_ymd(year, 1, 1)
+                        .expect("a four-digit year is a valid calendar year");
+                    SelectKey::Range(
+                        axiom_core::calendar::Window::containing(Period::Year, first).days(),
+                    )
+                }
                 ExprKind::Name(name) => {
                     SelectKey::End(self.world.end(self.home, word(name.0))?.place)
                 }
@@ -937,7 +945,7 @@ impl<'s> Compiler<'_, '_, 's> {
     /// Currency of an explicitly named subject, or the law owner's currency
     /// for `self`; a generic expression stays dynamic.
     fn value_amount_ty(&self, node: NodeId) -> Ty {
-        let currency = match self.nodes[node.index()].op {
+        let currency = match self.nodes[node].op {
             Op::Const(Value::Place(place)) => {
                 let owner = self.world.book.places[place].owner;
                 Some(self.world.book.entities[owner].currency)
@@ -1121,7 +1129,7 @@ impl<'s> Compiler<'_, '_, 's> {
             };
             if !fine {
                 let wanted = if timed { "a year or a date" } else { "a name" };
-                return Err(expected(wanted, ty, self.nodes[node.index()].loc).into());
+                return Err(expected(wanted, ty, self.nodes[node].loc).into());
             }
         }
         Ok(())
@@ -1156,7 +1164,7 @@ impl<'s> Compiler<'_, '_, 's> {
         };
         let nodes: Box<[NodeId]> = typed.iter().map(|&(node, _)| node).collect();
         let ty_at = |at: usize| typed.get(at).map_or(Ty::Empty, |&(_, ty)| ty);
-        let arg_loc = |at: usize| self.nodes[typed[at].0.index()].loc;
+        let arg_loc = |at: usize| self.nodes[typed[at].0].loc;
         arity(spec.min, spec.max)?;
         let owner_currency = self.owner_amount_ty();
         let (func, ty) = match spec.signature {
@@ -1194,7 +1202,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 if !matches!(ty_at(1), Ty::Amount(_) | Ty::Empty) {
                     return Err(expected("an amount", ty_at(1), arg_loc(1)).into());
                 }
-                let schedule_unit = match self.nodes[typed[0].0.index()].op {
+                let schedule_unit = match self.nodes[typed[0].0].op {
                     Op::Const(Value::Schedule(schedule)) => {
                         Some(self.world.book.schedules[schedule].unit)
                     }
@@ -1228,7 +1236,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 if args.len() == 3 && ty_at(2) != Ty::Name {
                     return Err(expected("a rate policy name", ty_at(2), arg_loc(2)).into());
                 }
-                let target = match self.nodes[typed[1].0.index()].op {
+                let target = match self.nodes[typed[1].0].op {
                     Op::Const(Value::Unit(unit)) => Ty::Amount(Dim::Of(unit)),
                     _ => Ty::AMOUNT,
                 };
@@ -1314,7 +1322,7 @@ impl<'s> Compiler<'_, '_, 's> {
 
     /// `total(in|out, month|year|ever[, KIND])`
     fn total(&self, args: &[(NodeId, Ty)]) -> Check<Func> {
-        let word = |at: usize| match self.nodes[args[at].0.index()].op {
+        let word = |at: usize| match self.nodes[args[at].0].op {
             Op::Const(Value::Name(sym)) => self.world.book.name(sym),
             _ => "",
         };
@@ -1335,7 +1343,7 @@ impl<'s> Compiler<'_, '_, 's> {
             });
         }
         if args.len() == 2 && args[0].1 == Ty::Purpose {
-            let purpose = match self.nodes[args[0].0.index()].op {
+            let purpose = match self.nodes[args[0].0].op {
                 Op::Const(Value::Purpose(purpose, None)) => purpose,
                 _ => {
                     return Err(self
@@ -1371,7 +1379,7 @@ impl<'s> Compiler<'_, '_, 's> {
         if let Some(&(node, ty)) = args.get(2)
             && ty != Ty::Kind
         {
-            return Err(expected("a kind", ty, self.nodes[node.index()].loc).into());
+            return Err(expected("a kind", ty, self.nodes[node].loc).into());
         }
         Ok(Func::Total(dir, window))
     }
@@ -1401,7 +1409,7 @@ impl<'s> Compiler<'_, '_, 's> {
 
     fn keyword_error(&self, node: NodeId, function: &str, wanted: &str) -> Diagnostic {
         Diagnostic::error("call-keyword", format!("`{function}` needs {wanted} here"))
-            .label(self.nodes[node.index()].loc, format!("expected {wanted}"))
+            .label(self.nodes[node].loc, format!("expected {wanted}"))
     }
 
     /// `tally(name)` or `tally(name, year)`: the name must be counted by some law.
@@ -1441,7 +1449,7 @@ impl<'s> Compiler<'_, '_, 's> {
 
     fn unary(&mut self, op: UnOp, operand: ExprId) -> Check<(Op, Ty)> {
         let (node, ty) = self.child(operand)?;
-        let loc = self.nodes[node.index()].loc;
+        let loc = self.nodes[node].loc;
         match op {
             UnOp::Neg => {
                 let ty = negate(ty).ok_or_else(|| expected("an amount or a number", ty, loc))?;
@@ -1457,7 +1465,7 @@ impl<'s> Compiler<'_, '_, 's> {
         match binary(op, lt, rt) {
             Some(ty) => Ok((Op::Bin(op, l, r), ty)),
             None => {
-                let locs = (self.nodes[l.index()].loc, self.nodes[r.index()].loc);
+                let locs = (self.nodes[l].loc, self.nodes[r].loc);
                 Err(mismatch(op, (lt, locs.0), (rt, locs.1)).into())
             }
         }
@@ -1477,7 +1485,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 Ok((Op::Bin(BinOp::Mul, l, r), ty))
             }
             _ => {
-                let locs = (self.nodes[l.index()].loc, self.nodes[r.index()].loc);
+                let locs = (self.nodes[l].loc, self.nodes[r].loc);
                 Err(Diagnostic::error("type-mismatch", "`of` needs a purpose and object, or a share and amount")
                     .label(locs.1, format!("this is {}", article(rt.word())))
                     .context(locs.0, format!("this is {}", article(lt.word())))
@@ -1493,7 +1501,7 @@ impl<'s> Compiler<'_, '_, 's> {
         match binary(BinOp::Mul, qt, pt) {
             Some(ty @ Ty::Amount(_)) => Ok((Op::At(q, p), ty)),
             _ => {
-                let locs = (self.nodes[q.index()].loc, self.nodes[p.index()].loc);
+                let locs = (self.nodes[q].loc, self.nodes[p].loc);
                 Err(
                     Diagnostic::error("type-mismatch", "a quantity needs a price per its unit")
                         .label(locs.1, format!("this is {}", article(pt.word())))
@@ -1510,10 +1518,10 @@ impl<'s> Compiler<'_, '_, 's> {
         let alts = self.children(alternatives)?;
         for &(alt, alt_ty) in &alts {
             if !is_test(ty, alt_ty) {
-                let loc = self.nodes[alt.index()].loc;
+                let loc = self.nodes[alt].loc;
                 return Err(Diagnostic::error("type-mismatch", format!("cannot test {} against {}", article(ty.word()), article(alt_ty.word())))
                     .label(loc, format!("this is {}", article(alt_ty.word())))
-                    .context(self.nodes[node.index()].loc, format!("this is {}", article(ty.word())))
+                    .context(self.nodes[node].loc, format!("this is {}", article(ty.word())))
                     .note("`is` tests a place, entity or commodity against a kind, a place, an entity or a pattern, and a flow against a `#code`")
                     .into());
             }
@@ -1536,7 +1544,7 @@ impl<'s> Compiler<'_, '_, 's> {
             self.child(otherwise)?,
         );
         if ct != Ty::Bool {
-            return Err(expected("a condition", ct, self.nodes[c.index()].loc).into());
+            return Err(expected("a condition", ct, self.nodes[c].loc).into());
         }
         let Some(ty) = unify(tt, ot) else {
             return Err(Diagnostic::error(
@@ -1544,11 +1552,11 @@ impl<'s> Compiler<'_, '_, 's> {
                 "the two branches of `if` must be of one type",
             )
             .label(
-                self.nodes[o.index()].loc,
+                self.nodes[o].loc,
                 format!("this is {}", article(ot.word())),
             )
             .context(
-                self.nodes[t.index()].loc,
+                self.nodes[t].loc,
                 format!("this is {}", article(tt.word())),
             )
             .into());

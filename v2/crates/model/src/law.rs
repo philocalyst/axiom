@@ -10,9 +10,11 @@
 //! [`Value::Fault`], not an early exit. `if`, `and` and `or` pick among values
 //! already computed, so a fault in a branch not taken is never observed.
 
+use std::ops::{Index, IndexMut};
+
 use axiom_core::calendar;
 use axiom_core::day::days_in_month;
-use axiom_core::{Day, Days, Dim, Groups, Id, Loc, Period, Ratio, Severity, Span, Sym};
+use axiom_core::{Arena, Day, Days, Dim, Groups, Id, Loc, Period, Ratio, Severity, Span, Sym};
 
 use crate::book::{
     Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule,
@@ -43,7 +45,7 @@ pub struct Law {
     /// time.
     pub rank: Rank,
     pub steps: Box<[Step]>,
-    pub nodes: Box<[Node]>,
+    pub nodes: Arena<Node>,
     pub loc: Loc,
 }
 
@@ -95,7 +97,7 @@ mod rank_tests {
 impl Law {
     /// The nodes of `root`'s expression, in evaluation order: `first..=root`.
     pub fn range(&self, root: NodeId) -> std::ops::RangeInclusive<usize> {
-        self.nodes[root.index()].first.index()..=root.index()
+        self.nodes[root].first.index()..=root.index()
     }
 
     /// The cap this law is, if all it says is that a flow total stays under a
@@ -117,16 +119,16 @@ impl Law {
         if !otherwise.is_empty() {
             return None;
         }
-        let Op::Bin(cmp @ (BinOp::Le | BinOp::Lt), total, limit) = self.nodes[cond.index()].op
+        let Op::Bin(cmp @ (BinOp::Le | BinOp::Lt), total, limit) = self.nodes[*cond].op
         else {
             return None;
         };
-        match (&self.nodes[total.index()].op, &self.nodes[limit.index()].op) {
+        match (&self.nodes[total].op, &self.nodes[limit].op) {
             // A kind among the arguments widens the total to every place of that kind.
             (Op::Call(Func::Total(dir, window), args), Op::Const(Value::Amount(limit)))
                 if args
                     .iter()
-                    .all(|arg| self.nodes[arg.index()].ty != Ty::Kind) =>
+                    .all(|arg| self.nodes[*arg].typed_ty() != Some(Ty::Kind)) =>
             {
                 Some(Cap {
                     dir: *dir,
@@ -270,10 +272,32 @@ impl NodeId {
 pub struct Node {
     pub op: Op,
     /// Statically checked: evaluation never meets a type it did not expect.
-    pub ty: Ty,
+    pub ty: Option<Ty>,
     pub loc: Loc,
     /// The first node of this node's subtree.
     pub first: NodeId,
+}
+
+impl Node {
+    /// The statically checked result type. `None` marks a poisoned compiler
+    /// node; completed laws and templates contain no such nodes.
+    pub fn typed_ty(&self) -> Option<Ty> {
+        self.ty
+    }
+}
+
+impl Index<NodeId> for Arena<Node> {
+    type Output = Node;
+
+    fn index(&self, id: NodeId) -> &Self::Output {
+        &self[Id::new(id.0)]
+    }
+}
+
+impl IndexMut<NodeId> for Arena<Node> {
+    fn index_mut(&mut self, id: NodeId) -> &mut Self::Output {
+        &mut self[Id::new(id.0)]
+    }
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -530,6 +554,9 @@ pub enum Value {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fault {
+    /// A public, hand-built book contains a node the compiler left untyped.
+    /// Native compilation drops poisoned laws before they can run.
+    InvalidProgram,
     NoPrice {
         unit: Id<Commodity>,
         quote: Id<Commodity>,

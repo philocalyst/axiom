@@ -692,7 +692,7 @@ pub struct Input {
 /// immutable after lowering and can be evaluated with reusable engine scratch.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct TemplateProgram {
-    pub nodes: Box<[Node]>,
+    pub nodes: Arena<Node>,
 }
 
 /// A contract's grouped flow template. Computed amounts refer into the owning

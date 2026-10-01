@@ -31,7 +31,7 @@ fn occasion(trigger: Trigger) -> u8 {
 
 /// The tallies a law reads.
 fn reads(law: &Law) -> Vec<Sym> {
-    let tallies = law.nodes.iter().filter_map(|node| match node.op {
+    let tallies = law.nodes.values().filter_map(|node| match node.op {
         Op::Call(Func::Tally(name), _) => Some(name),
         _ => None,
     });
