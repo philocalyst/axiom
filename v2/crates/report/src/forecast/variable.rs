@@ -120,7 +120,7 @@ fn spending_purpose(lens: Lens, posting: &Posting) -> Option<(Id<Purpose>, Qty)>
 /// money into one counts, and a refund out of one takes it back. A flow whose
 /// other end only changed basis paid nothing (depreciation is an expense that
 /// nobody paid), so it is not spending.
-fn spending<'a>(lens: Lens<'a, '_>, posting: &Posting) -> impl Iterator<Item = (Id<Place>, Qty)> + 'a {
+fn spending<'a>(lens: Lens<'a, '_, '_, '_>, posting: &Posting) -> impl Iterator<Item = (Id<Place>, Qty)> + 'a {
     let flow = posting.flow;
     let paid = flow.moves_quantity(End::From).then(|| posting.arrive_in_base(lens)).flatten();
     let refund = flow.moves_quantity(End::To).then(|| posting.out_in_base(lens).map(|qty| -qty)).flatten();

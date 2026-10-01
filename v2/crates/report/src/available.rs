@@ -28,7 +28,7 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 /// Obligations falling due within this long count against what can be spent.
 const SOON: Span = Span::days(30);
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {
+pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {
     let at = at.unwrap_or(run.today);
     let lens = Lens::new(book, whose, at);
     // Deadlines fire up to the day the year is judged, so the laws that figure
@@ -42,7 +42,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
 }
 
 /// Builds the view from the shared report context's checkpoint fork.
-pub(crate) fn from_ledger<'s>(lens: Lens<'_, 's>, run: &Run, ledger: &Ledger, horizon: Day) -> Report<'s> {
+pub(crate) fn from_ledger<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ledger: &Ledger, horizon: Day) -> Report<'s> {
     let (book, at) = (lens.book, lens.day);
 
     let holdings: Vec<&Holding> = ledger.holdings().collect();
@@ -73,7 +73,7 @@ pub(crate) fn from_ledger<'s>(lens: Lens<'_, 's>, run: &Run, ledger: &Ledger, ho
 
 // ─── What you can spend ─────────────────────────────────────────────────────
 
-fn spendable_section<'s>(lens: Lens<'_, 's>, run: &Run, cash: &[&Holding], claims: &[Claim]) -> Section<'s> {
+fn spendable_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, cash: &[&Holding], claims: &[Claim]) -> Section<'s> {
     let (book, at) = (lens.book, lens.day);
     let mut section = Section::new([Column::left("In hand"), Column::right("Amount")]).headed("What you can spend");
     let mut unpriced = 0;
@@ -258,7 +258,7 @@ impl<'h> Reach<'h> {
 
 /// One line per holding that is not cash. `judged` is the day the books were
 /// run on to.
-fn reach_section<'s>(lens: Lens<'_, 's>, reach: &[Reach], to: Option<Id<Place>>, judged: Day) -> Section<'s> {
+fn reach_section<'s>(lens: Lens<'s, '_, '_, '_>, reach: &[Reach], to: Option<Id<Place>>, judged: Day) -> Section<'s> {
     let (book, at) = (lens.book, lens.day);
     let columns = ["Holding", "Liquid in"].map(Column::left).into_iter();
     let columns = columns.chain(["Value", "Cost", "Net"].map(Column::right)).chain([Column::left("Because")]);

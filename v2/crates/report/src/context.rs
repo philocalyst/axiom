@@ -60,7 +60,7 @@ impl<'b, 's> Context<'b, 's> {
     }
 
     /// Builds a report using the shared run state wherever possible.
-    pub fn report(&self, query: &Query<'_>) -> Result<Report<'s>, Diagnostic> {
+    pub fn report(&self, query: &Query<'_>) -> Result<Report<'b>, Diagnostic> {
         match query {
             Query::Balance {
                 globs,
@@ -175,7 +175,7 @@ impl<'b, 's> Context<'b, 's> {
         &self,
         query: &Query<'_>,
         sources: &dyn SourceProvider,
-    ) -> Result<Report<'s>, Diagnostic> {
+    ) -> Result<Report<'b>, Diagnostic> {
         if let Some(loc) = super::resolve_source_line(query, sources) {
             self.report(&Query::Line { loc })
         } else {
@@ -183,7 +183,7 @@ impl<'b, 's> Context<'b, 's> {
         }
     }
 
-    pub(crate) fn lens(&self, day: Day) -> Lens<'_, 's> {
+    pub(crate) fn lens<'a>(&'a self, day: Day) -> Lens<'b, 's, 'a, 'a> {
         Lens::with_plan(
             self.book,
             &self.whose,

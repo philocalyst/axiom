@@ -8,7 +8,7 @@ use crate::lens::{Lens, Whose};
 use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, asset_id: Id<Asset>) -> Report<'s> {
+pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, asset_id: Id<Asset>) -> Report<'s> {
     let asset = &book.assets[asset_id];
     let name = book.name(asset.name);
     if !whose.includes(asset.owner) {

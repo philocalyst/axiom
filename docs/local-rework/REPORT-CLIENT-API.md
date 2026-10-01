@@ -24,9 +24,10 @@ function; that compatibility path continues to use the supplied run.
 
 `Query` is the client-facing description of the current report views:
 balance, register, flow, available, budget, limits, claims, tax, gains, lots,
-contracts, forecast, and why. `register` and `why` accept `entity:NAME` to
-select an entity when its name is also used by a contract; bare ambiguous
-names select the contract consistently. `Query::Why` can also express
+contracts, forecast, and why. `register` and `why` accept `entity:NAME`,
+`asset:NAME`, and `contract:NAME`; `entity:NAME` selects an entity when its
+name is also used by a contract, and bare ambiguous names select the contract
+consistently. `Query::Why` can also express
 `why FILE:LINE`; the source provider resolves it to a `Loc` without requiring
 the report crate to read files or depend on CLI code.
 

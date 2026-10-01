@@ -13,7 +13,7 @@ use crate::lens::Whose;
 use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose) -> Report<'s> {
+pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose) -> Report<'s> {
     let mut section = Section::new([
         Column::left("Contract"),
         Column::left("Party"),
@@ -77,7 +77,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose) -> Report<'s> {
     Report::new("Contracts").with(section)
 }
 
-pub(crate) fn terms_cell<'s>(book: &Book<'s>, contract: &Contract, terms: &Terms) -> Cell<'s> {
+pub(crate) fn terms_cell<'s>(book: &'s Book<'_>, contract: &Contract, terms: &Terms) -> Cell<'s> {
     if terms.state == TermsState::Waived {
         return Cell::Word("waived");
     }
@@ -89,7 +89,7 @@ pub(crate) fn terms_cell<'s>(book: &Book<'s>, contract: &Contract, terms: &Terms
         ));
     }
     if let Some(description) = contract.description {
-        parts.push(Cell::text(book.name(description)));
+        parts.push(Cell::text(book.text(description)));
     }
     parts.extend(terms.inputs.iter().map(|input| {
         Cell::list(
@@ -106,7 +106,7 @@ pub(crate) fn terms_cell<'s>(book: &Book<'s>, contract: &Contract, terms: &Terms
     Cell::list(" ", parts)
 }
 
-fn loan_balance<'s>(book: &Book<'s>, run: &Run, contract: &Contract) -> Cell<'s> {
+fn loan_balance<'s>(book: &'s Book<'_>, run: &Run, contract: &Contract) -> Cell<'s> {
     let Some(loan) = contract.loan else {
         return Cell::Blank;
     };
@@ -128,9 +128,8 @@ fn loan_balance<'s>(book: &Book<'s>, run: &Run, contract: &Contract) -> Cell<'s>
 
 /// Never render placeholder values for a term expression that the engine must
 /// evaluate at the occurrence date.
-pub(crate) fn template_flow_cell<'s>(book: &Book<'s>, template: &TemplateFlow) -> Cell<'s> {
+pub(crate) fn template_flow_cell<'s>(book: &'s Book<'_>, template: &TemplateFlow) -> Cell<'s> {
     let flow = &template.flow;
-    let codes = crate::table::code_labels(book, book.flow_view(flow).codes()).collect::<Vec<_>>();
     let header = Cell::list(
         " ",
         [
@@ -139,7 +138,7 @@ pub(crate) fn template_flow_cell<'s>(book: &Book<'s>, template: &TemplateFlow) -
             flow.is_exchange().then(|| template_quantity(book, template.arrive, flow.arrive)).unwrap_or(Cell::Blank),
         ]
         .into_iter()
-        .chain(codes),
+        .chain(crate::table::code_labels(book, book.flow_view(flow).codes())),
     );
     let legs = template.legs.iter().map(|leg| {
         let side = match leg.side {
@@ -160,7 +159,7 @@ pub(crate) fn template_flow_cell<'s>(book: &Book<'s>, template: &TemplateFlow) -
     Cell::list("; ", std::iter::once(header).chain(legs).chain(items))
 }
 
-fn template_quantity<'s>(book: &Book<'s>, quantity: TemplateQuantity, literal: axiom_model::Amount) -> Cell<'s> {
+fn template_quantity<'s>(book: &'s Book<'_>, quantity: TemplateQuantity, literal: axiom_model::Amount) -> Cell<'s> {
     match quantity {
         TemplateQuantity::Amount(None) => Cell::amount(book, literal),
         TemplateQuantity::Amount(Some(_)) => Cell::Word("computed per occurrence"),
@@ -178,7 +177,7 @@ fn template_quantity<'s>(book: &Book<'s>, quantity: TemplateQuantity, literal: a
     }
 }
 
-fn template_item_cell<'s>(book: &Book<'s>, item: &TemplateItem) -> Cell<'s> {
+fn template_item_cell<'s>(book: &'s Book<'_>, item: &TemplateItem) -> Cell<'s> {
     let sign = match item.sign {
         axiom_model::Sign::Carve => "carves",
         axiom_model::Sign::Add => "adds",
@@ -186,7 +185,7 @@ fn template_item_cell<'s>(book: &Book<'s>, item: &TemplateItem) -> Cell<'s> {
     };
     let parent = match item.parent {
         TemplateItemParent::Header => Cell::Word("header"),
-        TemplateItemParent::Leg(index) => Cell::text(format!("split {}", index + 1)),
+        TemplateItemParent::Leg(index) => Cell::text(format!("split {}", u32::from(index) + 1)),
     };
     let side = match item.side {
         FlowSide::Out => "out",
@@ -199,13 +198,12 @@ fn template_item_cell<'s>(book: &Book<'s>, item: &TemplateItem) -> Cell<'s> {
     let purpose = item.purpose.map_or(Cell::Blank, |purpose| {
         Cell::Purpose(book.name(book.purposes[purpose.purpose].name))
     });
-    let codes = crate::table::code_labels(book, book.codes[item.codes].iter().copied()).collect::<Vec<_>>();
     Cell::list(
         " ",
         [Cell::Word(sign), parent, Cell::Word(side), amount, purpose]
             .into_iter()
             .chain(item.description.map(|description| Cell::text(book.name(description))))
-            .chain(codes)
+            .chain(crate::table::code_labels(book, book.codes[item.codes].iter().copied()))
             .chain(std::iter::once(Cell::Source(item.loc))),
     )
 }

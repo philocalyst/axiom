@@ -5,12 +5,12 @@ use axiom_model::{Book, End, Flow, PathRoot, Place};
 
 
 /// A place's full path.
-pub fn path<'s>(book: &Book<'s>, place: Id<Place>) -> &'s str {
+pub fn path<'s>(book: &'s Book<'_>, place: Id<Place>) -> &'s str {
     book.name(book.places[place].path)
 }
 
 /// Every name someone might type for a place: full paths and last segments.
-pub fn names<'a, 's>(book: &'a Book<'s>) -> impl Iterator<Item = &'s str> + 'a {
+pub fn names<'a>(book: &'a Book<'_>) -> impl Iterator<Item = &'a str> + 'a {
     book.places.ids().flat_map(|place| [path(book, place), leaf(book, place)])
 }
 
@@ -25,7 +25,7 @@ pub fn route(book: &Book, flow: &Flow) -> String {
 }
 
 /// The last segment of a path: a tree's indentation supplies the rest.
-pub fn leaf<'s>(book: &Book<'s>, place: Id<Place>) -> &'s str {
+pub fn leaf<'s>(book: &'s Book<'_>, place: Id<Place>) -> &'s str {
     let full = path(book, place);
     full.rsplit('/').next().unwrap_or(full)
 }

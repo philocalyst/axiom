@@ -15,7 +15,7 @@ use crate::lens::{Lens, Whose, on_balance_sheet};
 use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, entity: Id<Entity>) -> Report<'s> {
+pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, entity: Id<Entity>) -> Report<'s> {
     let name = book.name(book.entities[entity].path);
     let lens = Lens::new(book, whose, run.today);
 

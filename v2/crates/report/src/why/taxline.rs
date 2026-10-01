@@ -10,7 +10,7 @@ use super::{effects_table, flows_table};
 use crate::Report;
 use crate::gains;
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, name: &str) -> Report<'s> {
+pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, name: &str) -> Report<'s> {
     let effects: Vec<&Effect> = run
         .effects
         .iter()

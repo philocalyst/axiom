@@ -5,9 +5,9 @@
 //! A flow spread over a range is recognized a little each day, so a year's
 //! premium lands in every month it covers.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use axiom_core::{Day, Days, Id, Qty, Sym, spread};
+use axiom_core::{Day, Days, Id, Qty, spread};
 use axiom_engine::Run;
 use axiom_model::{
     Action, Book, Class, Commodity, Entity, Object, Period, Place, Purpose, PurposeRoot,
@@ -23,7 +23,7 @@ use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 const DEFAULT_PERIODS: usize = 12;
 
 pub fn view<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     by: Period,
@@ -36,7 +36,7 @@ pub fn view<'s>(
 
 /// The same statement grouped by the other end of each flow.
 pub fn view_by_party<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     from: Option<Day>,
@@ -47,7 +47,7 @@ pub fn view_by_party<'s>(
 }
 
 pub(crate) fn view_by_party_with_lens<'s>(
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     from: Option<Day>,
     cutoff: Day,
@@ -192,7 +192,7 @@ fn table<'s>(first: &'static str, periods: &Periods) -> Section<'s> {
 }
 
 fn row<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     label: Cell<'s>,
     depth: usize,
     values: &[Qty],
@@ -205,14 +205,14 @@ fn row<'s>(
         .style(style)
 }
 
-fn net_row<'s>(book: &Book<'s>, values: &[Qty]) -> Row<'s> {
+fn net_row<'s>(book: &'s Book<'_>, values: &[Qty]) -> Row<'s> {
     let cells = values.iter().map(|&qty| Cell::base(book, qty));
     let total = (values.len() > 1).then(|| Cell::base(book, values.iter().copied().sum()));
     Row::new(std::iter::once(Cell::Word("Net")).chain(cells).chain(total)).style(Style::Total)
 }
 
 impl Party {
-    fn label<'s>(self, book: &Book<'s>) -> &'s str {
+    fn label<'s>(self, book: &'s Book<'_>) -> &'s str {
         match self {
             Party::Entity(entity) => book.name(book.entities[entity].path),
             Party::Place(place) => path(book, place),
@@ -222,7 +222,7 @@ impl Party {
 
 /// Builds an income statement with names resolved by a shared report context.
 pub(crate) fn view_with_lens<'s>(
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     by: Period,
     from: Option<Day>,
@@ -233,7 +233,7 @@ pub(crate) fn view_with_lens<'s>(
 /// Income, spending and capital, grouped by the purpose tree. The matrix is
 /// indexed by purpose and period; parent rows are accumulated once, from the
 /// leaves up, rather than rescanning every flow for each subtree.
-fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>) -> Report<'s> {
+fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Option<Day>) -> Report<'s> {
     let (book, cutoff) = (lens.book, lens.day);
     let periods = match from {
         Some(from) => Periods::covering(by, from, cutoff),
@@ -247,7 +247,7 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
     let mut totals = vec![Qty::ZERO; purpose_count * period_count];
     let mut objects: HashMap<(Id<Purpose>, Object), Vec<Qty>> = HashMap::new();
     let mut purpose_activity = vec![false; purpose_count];
-    let mut descriptions: BTreeMap<Option<axiom_core::Sym>, Vec<Qty>> = BTreeMap::new();
+    let mut descriptions: BTreeMap<Option<&'s str>, Vec<Qty>> = BTreeMap::new();
     let mut description_activity = HashSet::new();
     let mut unclassified = vec![Qty::ZERO; period_count];
     let mut unpriced = 0;
@@ -266,16 +266,17 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
                 continue;
             };
             add_recognized(&mut unclassified, periods, flow.recognized, cutoff, amount);
+            let description = flow.description.map(|text| book.text(text));
             if !amount.is_zero()
                 && periods
                     .overlapping(flow.recognized.first(), flow.recognized.last())
                     .next()
                     .is_some()
             {
-                description_activity.insert(flow.description);
+                description_activity.insert(description);
             }
             let values = descriptions
-                .entry(flow.description)
+                .entry(description)
                 .or_insert_with(|| vec![Qty::ZERO; period_count]);
             add_recognized(values, periods, flow.recognized, cutoff, amount);
             continue;
@@ -411,16 +412,14 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
             if !description_activity.contains(&description) {
                 continue;
             }
-            let label = description.map_or(Cell::Word("unclassified"), |text| {
-                Cell::Name(book.name(text))
-            });
+            let label = description.map_or(Cell::Word("unclassified"), Cell::text);
             section.push(period_row(book, label, 1, &values, Style::Normal));
             add_facts(
                 &mut section,
                 lens,
                 periods,
                 "unclassified",
-                description.map(|text| book.name(text)),
+                description,
                 &values,
             );
         }
@@ -454,7 +453,7 @@ struct MeasureKey {
 }
 
 /// Events have units rather than money, so they have their own rows and facts.
-fn measure_section<'s>(lens: Lens<'_, 's>, periods: Periods, cutoff: Day) -> Option<Section<'s>> {
+fn measure_section<'s>(lens: Lens<'s, '_, '_, '_>, periods: Periods, cutoff: Day) -> Option<Section<'s>> {
     let book = lens.book;
     let mut totals: BTreeMap<MeasureKey, Vec<Qty>> = BTreeMap::new();
     for measure in book.measures.iter().map(|(_, measure)| measure) {
@@ -540,7 +539,7 @@ fn measure_section<'s>(lens: Lens<'_, 's>, periods: Periods, cutoff: Day) -> Opt
 }
 
 pub(crate) fn movement_in_base(
-    lens: Lens<'_, '_>,
+    lens: Lens<'_, '_ , '_, '_>,
     posting: Posting<'_>,
     root: Option<PurposeRoot>,
 ) -> Option<Qty> {
@@ -601,7 +600,7 @@ fn first_activity(book: &Book, cutoff: Day, whose: &Whose) -> Day {
 }
 
 fn period_row<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     label: Cell<'s>,
     depth: usize,
     values: &[Qty],
@@ -618,7 +617,7 @@ fn period_row<'s>(
 
 fn add_purpose_facts<'s>(
     section: &mut Section<'s>,
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     periods: Periods,
     purpose: Id<Purpose>,
     values: &[Qty],
@@ -638,7 +637,7 @@ fn add_purpose_facts<'s>(
 
 fn add_facts<'s>(
     section: &mut Section<'s>,
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     periods: Periods,
     concept: &'static str,
     of: Option<&str>,
@@ -661,7 +660,7 @@ fn add_facts<'s>(
 
 fn add_object_facts<'s>(
     section: &mut Section<'s>,
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     periods: Periods,
     object: &'s str,
     values: &[Qty],
@@ -693,7 +692,7 @@ fn root_concept(root: PurposeRoot) -> &'static str {
     }
 }
 
-fn object_name<'s>(book: &Book<'s>, object: Object) -> &'s str {
+fn object_name<'s>(book: &'s Book<'_>, object: Object) -> &'s str {
     match object {
         Object::Asset(asset) => book.name(book.assets[asset].name),
         Object::Place(place) => path(book, place),

@@ -56,22 +56,22 @@ impl Household {
             .unwrap()
     }
 
-    fn report_for(
-        &self,
+    fn report_for<'a>(
+        &'a self,
         query: Query,
         whose: Option<&str>,
-    ) -> Result<Report<'static>, axiom_core::Diagnostic> {
+    ) -> Result<Report<'a>, axiom_core::Diagnostic> {
         let whose = whose.map_or_else(Whose::default, |name| {
             Whose::of(&self.book, self.entity(name))
         });
         crate::views(&self.book, &self.run, &whose, &query)
     }
 
-    fn why(&self, found: Found) -> Report<'static> {
+    fn why<'a>(&'a self, found: Found) -> Report<'a> {
         crate::why::explain(&self.book, &self.run, &Whose::default(), found)
     }
 
-    fn report(&self, query: Query) -> Report<'static> {
+    fn report<'a>(&'a self, query: Query) -> Report<'a> {
         self.report_for(query, None).expect("the query resolves")
     }
 }

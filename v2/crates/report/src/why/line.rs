@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 
 use axiom_core::{Id, Loc};
 use axiom_engine::{Cause, Run};
-use axiom_model::{Amount, Book, Flow, Object, Provenance};
+use axiom_model::{Amount, Book, Flow, Object, Provenance, TemplateFlow, Terms};
 
 use super::event_words;
 use crate::history::Posting;
@@ -14,7 +14,7 @@ use crate::table::{creditor, gap_words};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Explains the items whose source overlaps `at`.
-pub fn line<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Loc) -> Report<'s> {
+pub fn line<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Loc) -> Report<'s> {
     let flows = flows_on(book, at, whose);
     let mut written = Section::new([Column::left("On this line"), Column::left("Source")]);
     for (text, loc) in items(book, run, whose, at, &flows) {
@@ -261,12 +261,31 @@ fn scoped_codes(book: &Book, whose: &Whose) -> BTreeSet<axiom_core::Sym> {
         .filter(|(_, contract)| whose.includes(contract.owner))
     {
         for (_, terms) in contract.terms.within(contract.days) {
-            for template in &terms.template {
-                codes.extend(book.flow_view(&template.flow).codes());
+            add_terms_codes(book, terms, &mut codes);
+        }
+        if let Some(standing) = &contract.standing {
+            for (_, terms) in standing.within(contract.days) {
+                add_terms_codes(book, terms, &mut codes);
             }
         }
     }
     codes
+}
+
+fn add_terms_codes(book: &Book, terms: &Terms, codes: &mut BTreeSet<axiom_core::Sym>) {
+    for template in &terms.template {
+        add_template_codes(book, template, codes);
+    }
+}
+
+fn add_template_codes(book: &Book, template: &TemplateFlow, codes: &mut BTreeSet<axiom_core::Sym>) {
+    codes.extend(book.flow_view(&template.flow).codes());
+    for leg in &template.legs {
+        codes.extend(book.flow_view(&leg.flow).codes());
+    }
+    for item in &template.items {
+        codes.extend(book.codes[item.codes].iter().copied());
+    }
 }
 
 /// Places, entities and commodities declared on the line.
@@ -311,7 +330,7 @@ fn declarations(book: &Book, at: Loc) -> Vec<(String, Loc)> {
 }
 
 /// What one flow did downstream: gains, obligations, tallies, violations.
-fn consequences<'s>(book: &Book<'s>, run: &Run, id: Id<Flow>, section: &mut Section<'s>) {
+fn consequences<'s>(book: &'s Book<'_>, run: &Run, id: Id<Flow>, section: &mut Section<'s>) {
     let cause = Cause::Flow(id);
     for gain in run.gains.iter().filter(|gain| gain.cause == cause) {
         let ambiguity = if gain.ambiguous {

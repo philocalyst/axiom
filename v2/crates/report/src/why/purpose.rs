@@ -17,7 +17,7 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Resolves a purpose and gathers its rules, budgets, year total and parties.
 pub fn report<'s>(
-    book: &'s Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     target: &str,
@@ -117,7 +117,7 @@ pub fn report<'s>(
 }
 
 fn budget_section<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     purpose: Id<Purpose>,
@@ -178,7 +178,7 @@ fn budget_section<'s>(
     section
 }
 
-fn budget_limit<'s>(book: &Book<'s>, limit: Limit) -> Cell<'s> {
+fn budget_limit<'s>(book: &'s Book<'_>, limit: Limit) -> Cell<'s> {
     match limit {
         Limit::Amount(amount) => Cell::amount(book, amount),
         Limit::Share { rate, of } => Cell::list(
@@ -192,7 +192,7 @@ fn budget_limit<'s>(book: &Book<'s>, limit: Limit) -> Cell<'s> {
     }
 }
 
-fn headroom_row<'s>(book: &Book<'s>, reading: &Headroom) -> Row<'s> {
+fn headroom_row<'s>(book: &'s Book<'_>, reading: &Headroom) -> Row<'s> {
     Row::new([
         Cell::Name(book.name(book.laws[reading.law].name)),
         Cell::text(window_words(reading)),
@@ -208,9 +208,9 @@ fn headroom_row<'s>(book: &Book<'s>, reading: &Headroom) -> Row<'s> {
 }
 
 fn totals<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     purpose: Id<Purpose>,
     periods: Periods,
     cutoff: Day,

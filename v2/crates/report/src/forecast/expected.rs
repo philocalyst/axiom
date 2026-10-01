@@ -70,7 +70,7 @@ impl Expectation<'_> {
 
 /// Everything expected after `today` for the lens's owners: plans, and the
 /// rhythms in history that no plan already says.
-pub fn expected<'b>(lens: Lens<'b, '_>, run: &Run) -> Vec<Expectation<'b>> {
+pub fn expected<'b>(lens: Lens<'b, '_, '_, '_>, run: &Run) -> Vec<Expectation<'b>> {
     let book = lens.book;
     let mut expected = from_plans(book, run, run.today);
     let plans = expected.len();

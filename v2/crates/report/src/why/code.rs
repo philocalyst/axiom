@@ -15,7 +15,7 @@ use crate::{Cell, Column, Report, Row, Section};
 
 /// `pattern` may be a glob: `check-*`.
 pub fn report<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     pattern: &str,

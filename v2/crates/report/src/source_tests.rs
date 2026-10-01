@@ -3,6 +3,8 @@
 //! What a view should say depends on what the engine made of a flow, so the
 //! behaviour that turns on it is tested from `.ax` text to report.
 
+use std::borrow::Cow;
+
 use axiom_core::{Day, FileId, Loc, Qty};
 use axiom_engine::{Options, Run};
 use axiom_model::{Book, Source};
@@ -195,6 +197,41 @@ opening 2026-01-01
     });
 }
 
+#[test]
+fn decoded_flow_descriptions_stay_borrowed_in_report_cells() {
+    let source = r#"base USD
+commodity USD
+  precision 2
+
+entity me : person
+entity cafe
+account checking : asset
+
+opening 2026-01-01
+  checking 100 USD
+
+2026-01-02 checking -> cafe 5 USD "line one\nline two"
+"#;
+    with_run(source, day(2026, 1, 3), |book, run| {
+        let report = crate::report(
+            book,
+            run,
+            &Query::Flow {
+                by: FlowBy::Period(axiom_model::Period::Month),
+                from: Some(day(2026, 1, 1)),
+                to: None,
+            },
+            None,
+        )
+        .unwrap();
+        assert!(report.sections[0].rows.iter().any(|row| {
+            row.cells.iter().any(|cell| {
+                matches!(cell, crate::Cell::Text(Cow::Borrowed(text)) if *text == "line one\nline two")
+            })
+        }));
+    });
+}
+
 /// A month with only a measure still starts the default flow window. Otherwise
 /// a measure-only project would be reported in a synthetic day at `today`.
 #[test]
@@ -258,6 +295,8 @@ account checking : asset
 
 contract figma with figma
   15 USD monthly on 3 from checking
+
+asset laptop : thing
 ";
 
     with_run(source, day(2026, 1, 5), |book, run| {
@@ -311,6 +350,16 @@ contract figma with figma
         )
         .unwrap();
         assert_eq!(why_party.sections[0].heading.as_deref(), Some("Places"));
+
+        let why_asset = crate::report(
+            book,
+            run,
+            &Query::Why { target: "asset:laptop" },
+            None,
+        )
+        .unwrap();
+        assert_eq!(why_asset.title, "Why laptop");
+        assert_eq!(why_asset.sections[0].heading.as_deref(), Some("Asset"));
     });
 }
 

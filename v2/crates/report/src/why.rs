@@ -45,7 +45,7 @@ fn recent<T>(items: &[T]) -> (&[T], usize) {
 }
 
 /// Flows, dated, with where each stands.
-fn flows_table<'s>(book: &Book<'s>, run: &Run, ids: &[Id<Flow>], heading: &str) -> Section<'s> {
+fn flows_table<'s>(book: &'s Book<'_>, run: &Run, ids: &[Id<Flow>], heading: &str) -> Section<'s> {
     let columns = [
         Column::left("Date"),
         Column::left("Flow"),
@@ -85,7 +85,7 @@ fn state_words(state: State) -> Cow<'static, str> {
 }
 
 /// What laws counted or owed, when, and for whom.
-fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &str) -> Section<'s> {
+fn effects_table<'s>(book: &'s Book<'_>, effects: &[&Effect], heading: &str) -> Section<'s> {
     let columns = ["Date", "Effect", "Owner"].map(Column::left).into_iter();
     let mut section = Section::new(
         columns
@@ -115,7 +115,7 @@ fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &str) -> Sec
 }
 
 pub fn target<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     text: &str,
@@ -127,6 +127,10 @@ pub fn target<'s>(
     if let Some(entity) = text.strip_prefix("entity:") {
         let entity = resolve::entity(book, entity)?;
         return Ok(entity::report(book, run, whose, entity));
+    }
+    if let Some(asset) = text.strip_prefix("asset:") {
+        let asset = resolve::asset(book, asset)?;
+        return Ok(asset::report(book, run, whose, asset));
     }
     if let Some(code) = text.strip_prefix('^') {
         return code::report(book, run, whose, code);
@@ -162,7 +166,7 @@ pub(crate) enum Found<'a> {
     TaxLine(&'a str),
 }
 
-pub(crate) fn explain<'s>(book: &Book<'s>, run: &Run, whose: &Whose, found: Found) -> Report<'s> {
+pub(crate) fn explain<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, found: Found) -> Report<'s> {
     match found {
         Found::Place(place) => place::report(book, run, whose, place),
         Found::Entity(entity) => entity::report(book, run, whose, entity),
@@ -218,7 +222,7 @@ fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diag
     let tallies = run.effects.iter().map(|effect| book.name(effect.name));
     let things = names(book).chain(book.entities.values().map(|entity| book.name(entity.path)));
     Err(resolve::nothing_named(
-        "place, entity, system, ^code, #purpose, asset, contract, law, tax line or description",
+        "place, entity:NAME, system, ^code, #purpose, asset:NAME, contract:NAME, law, tax line or description",
         text,
         things
             .chain(laws)
@@ -269,7 +273,7 @@ fn counted(law: &Law) -> impl Iterator<Item = Sym> + '_ {
 
 /// The laws as one table, grouped by what they do: limits, prices, and the
 /// tallies, which are one line however many laws there are.
-fn laws_table<'s>(book: &Book<'s>, ids: &[Id<Law>]) -> Section<'s> {
+fn laws_table<'s>(book: &'s Book<'_>, ids: &[Id<Law>]) -> Section<'s> {
     let columns = [
         Column::left("Law"),
         Column::left("When"),

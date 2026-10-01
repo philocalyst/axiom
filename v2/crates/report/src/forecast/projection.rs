@@ -38,7 +38,7 @@ pub struct Trace<'p, 'b, 's> {
 /// the last checkpoint.
 pub fn project<'p, 'b, 's>(
     plan: &'p Plan<'b, 's>,
-    lens: Lens<'b, 's>,
+    lens: Lens<'b, 's, '_, '_>,
     today: Day,
     flows: Vec<Flow>,
     checkpoints: &[Day],
@@ -62,7 +62,7 @@ pub fn project<'p, 'b, 's>(
 pub(crate) fn project_from<'p, 'b, 's>(
     plan: &'p Plan<'b, 's>,
     checkpoint: &Checkpoint,
-    lens: Lens<'b, 's>,
+    lens: Lens<'b, 's, '_, '_>,
     today: Day,
     relaxed: bool,
     flows: Vec<Flow>,
@@ -80,7 +80,7 @@ pub(crate) fn project_from<'p, 'b, 's>(
 /// The shared forecast fold once a ledger has reached the end of `today`.
 fn trace_from<'p, 'b, 's>(
     mut ledger: Ledger<'p, 'b, 's>,
-    lens: Lens<'b, 's>,
+    lens: Lens<'b, 's, '_, '_>,
     today: Day,
     flows: Vec<Flow>,
     checkpoints: &[Day],

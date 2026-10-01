@@ -35,7 +35,7 @@ pub struct Claim {
 
 impl Claim {
     /// Who owes it, or is owed: the payee, else the place the claim sits in.
-    pub fn counterparty<'s>(&self, book: &Book<'s>) -> &'s str {
+    pub fn counterparty<'s>(&self, book: &'s Book<'_>) -> &'s str {
         match self.payee {
             Some(payee) => book.name(book.entities[payee].path),
             None => path(book, self.place),
@@ -152,7 +152,7 @@ fn settled_codes<'a>(book: &'a Book, flow: &'a Flow) -> impl Iterator<Item = Sym
     view.codes().chain(selected)
 }
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {
+pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {
     let at = at.unwrap_or(run.today);
     let lens = Lens::new(book, whose, at);
     let holdings = holdings_at(book, run, at);
@@ -161,7 +161,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
 
 /// Builds a claims view from holdings supplied by a shared context ledger.
 pub(crate) fn view_from<'h, 's>(
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     holdings: impl IntoIterator<Item = &'h Holding>,
 ) -> Report<'s> {
@@ -180,7 +180,7 @@ pub(crate) fn view_from<'h, 's>(
 
 /// Claims with what each is, when it was made and how old it is, when it is due
 /// and whether it is late, and what they come to.
-pub fn section<'s>(lens: Lens<'_, 's>, heading: &str, claims: &[&Claim]) -> Section<'s> {
+pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &str, claims: &[&Claim]) -> Section<'s> {
     let (book, at) = (lens.book, lens.day);
     let columns = ["Counterparty", "What"].map(Column::left).into_iter();
     let columns = columns

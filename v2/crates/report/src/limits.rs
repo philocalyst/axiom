@@ -14,7 +14,7 @@ use crate::lens::Whose;
 use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) -> Report<'s> {
+pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, year: Option<i32>) -> Report<'s> {
     let year = year.unwrap_or_else(|| run.today.year());
     let window = Window::containing(Period::Year, Day::from_ymd(year, 1, 1).unwrap_or(run.today)).days();
     let today = window.last().min(run.today);
@@ -38,7 +38,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) ->
 
 /// The readings as a table, past their limit first, then by share used;
 /// floors, which have none, last.
-pub fn section<'s>(book: &Book<'s>, mut readings: Vec<&Headroom>) -> Section<'s> {
+pub fn section<'s>(book: &'s Book<'_>, mut readings: Vec<&Headroom>) -> Section<'s> {
     let key = |reading: &Headroom| {
         let share = used(reading).filter(|_| !is_floor(reading));
         (!is_over(reading), share.is_none(), share.map(|share| -share))
@@ -71,7 +71,7 @@ pub fn what(book: &Book, reading: &Headroom) -> String {
 }
 
 /// One reading as a row of the table.
-pub fn row<'s>(book: &Book<'s>, reading: &Headroom) -> Row<'s> {
+pub fn row<'s>(book: &'s Book<'_>, reading: &Headroom) -> Row<'s> {
     let floor = is_floor(reading);
     // A floor is written the other way about: what stands, and what it may not go below.
     let (counted, cap) = if floor {

@@ -19,7 +19,7 @@ use crate::{Cell, Column, Report, Row, Section};
 /// How many recent flows to show.
 const RECENT: usize = 8;
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, place: Id<Place>) -> Report<'s> {
+pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, place: Id<Place>) -> Report<'s> {
     let owner = book.places[place].owner;
     let name = path(book, place);
     if !whose.includes(owner) {
@@ -67,7 +67,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, place: Id<Place>) -
 }
 
 /// What is held, by commodity, and how much of it is plain money.
-fn composition<'s>(book: &Book<'s>, held: &[&Holding]) -> Section<'s> {
+fn composition<'s>(book: &'s Book<'_>, held: &[&Holding]) -> Section<'s> {
     let mut units: BTreeMap<Id<Commodity>, (Qty, Qty, usize)> = BTreeMap::new();
     for holding in held {
         let (total, plain, parcels) = units.entry(holding.unit).or_default();
@@ -91,7 +91,7 @@ fn composition<'s>(book: &Book<'s>, held: &[&Holding]) -> Section<'s> {
 }
 
 /// Parcels: what is remembered about value at rest, and the line that brought it.
-fn parcels<'s>(book: &Book<'s>, held: &[&Holding]) -> Section<'s> {
+fn parcels<'s>(book: &'s Book<'_>, held: &[&Holding]) -> Section<'s> {
     let columns = [
         Column::left("Place"),
         Column::right("Quantity"),

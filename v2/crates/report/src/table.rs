@@ -144,7 +144,7 @@ impl<'s> Cell<'s> {
         Cell::Text(text.into())
     }
 
-    pub fn amount(book: &Book<'s>, amount: Amount) -> Cell<'s> {
+    pub fn amount(book: &'s Book<'_>, amount: Amount) -> Cell<'s> {
         let unit = &book.commodities[amount.unit];
         Cell::Amount {
             qty: amount.qty,
@@ -154,12 +154,12 @@ impl<'s> Cell<'s> {
     }
 
     /// An amount of the base currency.
-    pub fn base(book: &Book<'s>, qty: Qty) -> Cell<'s> {
+    pub fn base(book: &'s Book<'_>, qty: Qty) -> Cell<'s> {
         Cell::amount(book, Amount::new(qty, book.base))
     }
 
     /// The amount, or nothing for zero: statements read better without rows of `0.00`.
-    pub fn base_or_blank(book: &Book<'s>, qty: Qty) -> Cell<'s> {
+    pub fn base_or_blank(book: &'s Book<'_>, qty: Qty) -> Cell<'s> {
         if qty.is_zero() {
             Cell::Blank
         } else {
@@ -169,7 +169,7 @@ impl<'s> Cell<'s> {
 }
 
 impl<'s> Money<'s> {
-    pub fn of(book: &Book<'s>, amount: Amount) -> Money<'s> {
+    pub fn of(book: &'s Book<'_>, amount: Amount) -> Money<'s> {
         let unit = &book.commodities[amount.unit];
         Money {
             qty: amount.qty,
@@ -178,7 +178,7 @@ impl<'s> Money<'s> {
         }
     }
 
-    pub fn base(book: &Book<'s>, qty: Qty) -> Money<'s> {
+    pub fn base(book: &'s Book<'_>, qty: Qty) -> Money<'s> {
         Money::of(book, Amount::new(qty, book.base))
     }
 }
@@ -212,7 +212,7 @@ impl<'s> Cell<'s> {
         year_days(year).map_or(Cell::Blank, Cell::Period)
     }
 
-    pub fn code(book: &Book<'s>, code: Sym) -> Cell<'s> {
+    pub fn code(book: &'s Book<'_>, code: Sym) -> Cell<'s> {
         Cell::Code(book.name(code))
     }
 
@@ -281,10 +281,10 @@ pub fn doc_headline(book: &Book, doc: Option<Sym>) -> Option<String> {
 }
 
 /// Typed codes in source order. Renderers choose their native sigil (`^`).
-pub fn code_labels<'a, 's>(
-    book: &'a Book<'s>,
+pub fn code_labels<'a>(
+    book: &'a Book<'_>,
     codes: impl Iterator<Item = Sym> + 'a,
-) -> impl Iterator<Item = Cell<'s>> + 'a {
+) -> impl Iterator<Item = Cell<'a>> + 'a {
     codes.map(|code| Cell::Code(book.name(code)))
 }
 
@@ -307,7 +307,7 @@ pub fn gap_words(book: &Book, pad: &Pad) -> String {
 
 /// Where a consequence comes from: the line that caused it, so it can be
 /// traced with `why`.
-pub fn cause_cell<'s>(book: &Book<'s>, cause: Cause) -> Cell<'s> {
+pub fn cause_cell<'s>(book: &'s Book<'_>, cause: Cause) -> Cell<'s> {
     match cause {
         Cause::Flow(flow) => Cell::Source(book.flows[flow].loc),
         Cause::Applied(_) => Cell::text("hypothetical flow"),

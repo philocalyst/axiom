@@ -8,7 +8,7 @@ use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn report<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     contract_id: axiom_core::Id<Contract>,
@@ -159,7 +159,7 @@ pub fn report<'s>(
         purpose,
         contract
             .description
-            .map_or(Cell::Blank, |text| Cell::text(book.name(text))),
+            .map_or(Cell::Blank, |text| Cell::text(book.text(text))),
     ]));
     Report::new(format!("Why {name}"))
         .with(about)

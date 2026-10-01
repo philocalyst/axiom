@@ -18,7 +18,7 @@ use crate::lens::Whose;
 use crate::places::{Side, path, v3_side};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>, by: Period) -> Report<'s> {
+pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Option<Day>, by: Period) -> Report<'s> {
     let at = at.unwrap_or(run.today);
     if !book.budgets.is_empty() {
         return purpose_budgets(book, run, whose, at, by);
@@ -30,7 +30,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>, by: 
 
 /// Budgets are typed declarations on purposes. Their law id ties the report to
 /// the exact headroom readings the engine produced, including the owner scope.
-fn purpose_budgets<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Day, by: Period) -> Report<'s> {
+fn purpose_budgets<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Day, by: Period) -> Report<'s> {
     let periods = Periods::covering(by, at, at);
     let window = periods.window(0).days();
     let mut table = Section::new(
@@ -75,7 +75,7 @@ fn purpose_budgets<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Day, by: P
 }
 
 // v3 bridge: place-based `warn` caps were the only budget representation.
-fn place_budgets<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Day, by: Period) -> Report<'s> {
+fn place_budgets<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Day, by: Period) -> Report<'s> {
     let periods = Periods::covering(by, at, at);
     let window = periods.window(0).days();
     // Every window of the period so far is read, those no flow reached included.
@@ -131,7 +131,7 @@ fn envelope(book: &Book, reading: &Headroom) -> Option<Id<Place>> {
 }
 
 /// One window of an envelope. Past the limit it is an alert, whatever its style.
-fn line<'s>(book: &Book<'s>, label: [Cell<'s>; 3], spent: Amount, limit: Amount, style: Style) -> Row<'s> {
+fn line<'s>(book: &'s Book<'_>, label: [Cell<'s>; 3], spent: Amount, limit: Amount, style: Style) -> Row<'s> {
     let left = Amount::new(limit.qty - spent.qty, limit.unit);
     let used = Ratio::new(spent.qty.0.into(), limit.qty.0.into());
     let cells = [

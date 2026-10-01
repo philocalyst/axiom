@@ -332,7 +332,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         "why",
         Operands::One("TARGET"),
         &[],
-        "a place, entity:NAME, system, ^code, #purpose, asset, contract, law, tax line, file:line or description",
+        "a place, entity:NAME, system, ^code, #purpose, asset:NAME, contract:NAME, law, tax line, file:line or description",
     ),
     command(
         Verb::Sync,

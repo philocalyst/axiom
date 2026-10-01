@@ -110,6 +110,9 @@ pub enum FlowBy {
 }
 
 /// A report view with its title and ordered sections.
+///
+/// The lifetime is the borrow of the model book used to build the view. Cells
+/// can borrow decoded model text from that book without cloning it per row.
 pub struct Report<'s> {
     pub title: Cell<'s>,
     pub sections: Vec<Section<'s>>,
@@ -164,6 +167,7 @@ pub enum Cell<'s> {
     Blank,
     /// Fixed wording supplied by a view.
     Word(&'static str),
+    /// Prose borrowed from the book or owned by a view-specific sentence.
     Text(Cow<'s, str>),
     /// A declared place, entity, law, asset, or contract name.
     Name(&'s str),
@@ -251,7 +255,7 @@ pub trait ReportRenderer {
 /// Builds the view `query` asks for, about the money of `whose` (`--for`: an
 /// entity, a household including its members; default everything).
 pub fn report<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     query: &Query,
     whose: Option<&str>,
@@ -259,10 +263,10 @@ pub fn report<'s>(
     views(book, run, &Whose::resolve(book, whose)?, query)
 }
 
-/// Builds a report with source-aware query resolution while borrowing source
-/// names and texts from the client's provider.
+/// Builds a report with source-aware query resolution through the client's
+/// source catalog. Report cells borrow the model book for the returned view.
 pub fn report_with_sources<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     query: &Query,
     whose: Option<&str>,
@@ -297,7 +301,7 @@ pub fn resolve_source_line(query: &Query<'_>, sources: &dyn SourceProvider) -> O
 
 /// The view `query` asks for, about the money of `whose`.
 fn views<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     query: &Query,

@@ -41,15 +41,15 @@ pub fn view_from<'p, 'b, 's>(
     checkpoint: &Checkpoint,
     run: &Run,
     historical_effects: &[Effect],
-    lens: Lens<'b, 's>,
+    lens: Lens<'b, 's, '_, '_>,
     relaxed: bool,
     until: Option<Day>,
     paths: u32,
-) -> Report<'s> {
+) -> Report<'b> {
     view_with(plan, Some(checkpoint), Some(historical_effects), run, lens, relaxed, until, paths)
 }
 
-pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: Option<Day>, paths: u32) -> Report<'s> {
+pub fn view<'s>(book: &'s Book<'_>, run: &axiom_engine::Run, whose: &Whose, until: Option<Day>, paths: u32) -> Report<'s> {
     let plan = Plan::new(book);
     let lens = Lens::new(book, whose, run.today);
     view_with(&plan, None, None, run, lens, book.relaxed, until, paths)
@@ -60,11 +60,11 @@ fn view_with<'p, 'b, 's>(
     checkpoint: Option<&Checkpoint>,
     historical_effects: Option<&[Effect]>,
     run: &Run,
-    lens: Lens<'b, 's>,
+    lens: Lens<'b, 's, '_, '_>,
     relaxed: bool,
     until: Option<Day>,
     paths: u32,
-) -> Report<'s> {
+) -> Report<'b> {
     let book = lens.book;
     let today = run.today;
     let until = until.unwrap_or_else(|| default_horizon(book, today)).max(today);
@@ -222,7 +222,7 @@ fn method_notes(book: &Book, bands: Option<&Bands>, history_months: usize, paths
 }
 
 fn outlook_section<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     checkpoints: &[Day],
     committed: &[Qty],
     worth: &[Qty],
@@ -250,7 +250,7 @@ fn outlook_section<'s>(
 
 /// One row for each thing that recurs, soonest first: a paycheck's legs are one
 /// row, shown under its biggest leg with what all of them come to.
-fn expected_section<'s>(book: &Book<'s>, expected: &[Expectation], today: Day, until: Day) -> Section<'s> {
+fn expected_section<'s>(book: &'s Book<'_>, expected: &[Expectation], today: Day, until: Day) -> Section<'s> {
     let columns = [
         Column::left("Expected"),
         Column::left("Every"),
@@ -317,7 +317,7 @@ struct ContractRow {
 /// occurrence cannot be derived, discard that contract's partial flows and
 /// retain the typed error for the report instead of forecasting a partial leg set.
 fn contract_forecasts<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     whose: &Whose,
     today: Day,
     until: Day,
@@ -391,7 +391,7 @@ fn describe_contract(every: axiom_model::Cadence) -> String {
 }
 
 fn contract_section<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     contracts: &[ContractRow],
     issues: &[(Id<Contract>, ForecastError)],
 ) -> Section<'s> {
@@ -471,7 +471,7 @@ fn describe_forecast_error(book: &Book<'_>, error: ForecastError) -> String {
     }
 }
 
-fn owed_section<'s>(book: &Book<'s>, due: &[&Effect]) -> Section<'s> {
+fn owed_section<'s>(book: &'s Book<'_>, due: &[&Effect]) -> Section<'s> {
     let columns = [Column::left("Due"), Column::left("Obligation"), Column::left("To"), Column::right("Amount")];
     let mut section = Section::new(columns).headed("Obligations coming due");
     for effect in due {
@@ -488,7 +488,7 @@ fn owed_section<'s>(book: &Book<'s>, due: &[&Effect]) -> Section<'s> {
 }
 
 /// Laws the projection breaks, and places it overdraws, by date.
-fn problems_section<'s>(book: &Book<'s>, trace: &Trace<'_, '_, '_>, today: Day) -> Section<'s> {
+fn problems_section<'s>(book: &'s Book<'_>, trace: &Trace<'_, '_, '_>, today: Day) -> Section<'s> {
     let recorded = trace.ledger.recorded();
     let mut repeats: Map<(Id<Law>, Subject), (usize, &Violation)> = Map::default();
     for violation in recorded.violations.iter().filter(|violation| violation.day > today) {

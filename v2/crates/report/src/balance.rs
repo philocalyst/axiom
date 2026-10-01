@@ -19,7 +19,7 @@ use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 const MONTHLY_COLUMNS: usize = 12;
 
 pub fn view<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     globs: &[&str],
@@ -33,7 +33,7 @@ pub fn view<'s>(
 
 /// Builds a balance view with names resolved by a shared report context.
 pub(crate) fn view_with_lens<'s>(
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     globs: &[&str],
     value: bool,
@@ -124,7 +124,7 @@ fn amount_columns(book: &Book, snapshots: &Snapshots, value: bool) -> Vec<Column
     snapshots.days().iter().map(|day| Column::right(day.to_string())).collect()
 }
 
-fn base_symbol<'s>(book: &Book<'s>) -> &'s str {
+fn base_symbol<'s>(book: &'s Book<'_>) -> &'s str {
     book.name(book.commodities[book.base].symbol)
 }
 
@@ -196,7 +196,7 @@ struct Line<'s> {
 /// Adds the place's lines to the table; returns how many were unpriced.
 fn push_place<'s>(
     table: &mut Section<'s>,
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     place: Id<Place>,
     snapshots: &Snapshots,
     value: bool,
@@ -254,14 +254,14 @@ fn push_place<'s>(
     unpriced
 }
 
-fn context_row<'s>(book: &Book<'s>, place: Id<Place>, columns: usize) -> Row<'s> {
+fn context_row<'s>(book: &'s Book<'_>, place: Id<Place>, columns: usize) -> Row<'s> {
     Row::new(iter::once(Cell::Name(leaf(book, place))).chain((0..columns).map(|_| Cell::Blank)))
         .depth(depth(book, place))
         .style(Style::Muted)
 }
 
 /// One line per commodity held anywhere in the subtree, at its own units.
-fn native_lines<'s>(book: &Book<'s>, sign: i64, baskets: &[Basket]) -> Vec<Line<'s>> {
+fn native_lines<'s>(book: &'s Book<'_>, sign: i64, baskets: &[Basket]) -> Vec<Line<'s>> {
     let units: BTreeSet<Id<Commodity>> =
         baskets.iter().flat_map(|basket| basket.amounts().map(|held| held.unit)).collect();
     units
@@ -275,7 +275,7 @@ fn native_lines<'s>(book: &Book<'s>, sign: i64, baskets: &[Basket]) -> Vec<Line<
 
 /// One line valuing everything priceable in the base currency, then a muted
 /// line for each commodity that has no price.
-fn market_lines<'s>(lens: Lens<'_, 's>, class: Class, sign: i64, days: &[Day], baskets: &[Basket]) -> Vec<Line<'s>> {
+fn market_lines<'s>(lens: Lens<'s, '_, '_, '_>, class: Class, sign: i64, days: &[Day], baskets: &[Basket]) -> Vec<Line<'s>> {
     let book = lens.book;
     let valued: Vec<Valued> =
         baskets.iter().zip(days).map(|(basket, &day)| basket.value(lens.on(day), class)).collect();
@@ -298,13 +298,13 @@ fn market_lines<'s>(lens: Lens<'_, 's>, class: Class, sign: i64, days: &[Day], b
     lines
 }
 
-fn amount_cell<'s>(book: &Book<'s>, qty: Qty, unit: Id<Commodity>, sign: i64) -> Cell<'s> {
+fn amount_cell<'s>(book: &'s Book<'_>, qty: Qty, unit: Id<Commodity>, sign: i64) -> Cell<'s> {
     if qty.is_zero() { Cell::Blank } else { Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit)) }
 }
 
 // ─── Net worth ──────────────────────────────────────────────────────────────
 
-fn net_worth_section<'s>(lens: Lens<'_, 's>, snapshots: &Snapshots) -> Section<'s> {
+fn net_worth_section<'s>(lens: Lens<'s, '_, '_, '_>, snapshots: &Snapshots) -> Section<'s> {
     let book = lens.book;
     let worths: Vec<NetWorth> = snapshots
         .days()

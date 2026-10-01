@@ -20,7 +20,7 @@ use crate::table::{code_labels, gap_words};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn view<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     place: &str,
@@ -38,7 +38,7 @@ pub fn view<'s>(
 
 /// Builds a register using owner scope and display signs from the shared lens.
 pub(crate) fn view_with_lens<'s>(
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     place: &str,
     from: Option<Day>,
@@ -95,7 +95,7 @@ pub(crate) fn view_with_lens<'s>(
 /// A party or owner register is a history of everything it touched, including
 /// flows it owns that have no account end under its name.
 fn entity_view<'s>(
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     entity: axiom_core::Id<Entity>,
     target: &str,
@@ -143,7 +143,7 @@ fn entity_view<'s>(
             .map(|code| Cell::Code(book.name(code)))
             .collect::<Vec<_>>();
         if let Some(description) = flow.description {
-            note.push(Cell::text(book.name(description)));
+            note.push(Cell::text(book.text(description)));
         }
         if let Some(doc) = book.txns[flow.txn].doc {
             if let Some(headline) = crate::table::doc_headline(book, Some(doc)) {
@@ -175,7 +175,7 @@ fn entity_view<'s>(
 }
 
 fn asset_register<'s>(
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     asset_id: axiom_core::Id<Asset>,
     from: Option<Day>,
@@ -257,7 +257,7 @@ fn asset_register<'s>(
 }
 
 fn contract_register<'s>(
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     contract_id: axiom_core::Id<Contract>,
     from: Option<Day>,
@@ -390,7 +390,7 @@ fn in_window(day: Day, from: Option<Day>, cutoff: Day) -> bool {
 /// or out of `PLACE.basis` is listed with the change it made to the basis, and
 /// leaves the balance alone: no quantity moved.
 pub fn section<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     place: Id<Place>,
     from: Option<Day>,
@@ -409,7 +409,7 @@ pub fn section<'s>(
 
 /// Builds a register for a place within an owner's view.
 pub(crate) fn section_for<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     place: Id<Place>,
     from: Option<Day>,
@@ -428,7 +428,7 @@ pub(crate) fn section_for<'s>(
 }
 
 fn section_with_sign<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     place: Id<Place>,
     from: Option<Day>,
@@ -596,7 +596,7 @@ fn steps<'a>(
 }
 
 /// A change of basis, codes, and settlement, as one line of small print.
-fn note<'s>(book: &Book<'s>, step: &Step<'_>) -> Option<Cell<'s>> {
+fn note<'s>(book: &'s Book<'_>, step: &Step<'_>) -> Option<Cell<'s>> {
     let rebased = match step.change {
         Change::Rebased(by) => Some(Cell::text(format!(
             "basis {}{}",

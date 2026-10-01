@@ -9,7 +9,7 @@ use super::{effects_table, recent, trigger_words};
 use crate::table::{cause_cell, doc_headline, doc_lines, headline, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, id: Id<Law>) -> Report<'s> {
+pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, id: Id<Law>) -> Report<'s> {
     let law = &book.laws[id];
     let violations: Vec<_> = run
         .violations
@@ -56,7 +56,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, id: Id<Law>) -> Rep
 
 /// Several laws answer to one name, in different systems or files: each one
 /// with where it is written, so the reader can ask about the one meant.
-pub fn which<'s>(book: &Book<'s>, candidates: &[Id<Law>]) -> Report<'s> {
+pub fn which<'s>(book: &'s Book<'_>, candidates: &[Id<Law>]) -> Report<'s> {
     let name = book.name(book.laws[candidates[0]].name);
     let columns = [
         Column::left("Law"),
@@ -84,7 +84,7 @@ pub fn which<'s>(book: &Book<'s>, candidates: &[Id<Law>]) -> Report<'s> {
 }
 
 /// Who a law governs, as the sentence that explains it.
-fn governs<'s>(book: &Book<'s>, owner: Owner) -> String {
+fn governs<'s>(book: &'s Book<'_>, owner: Owner) -> String {
     match owner {
         Owner::Kind(kind) => format!("every {}", book.name(book.kinds[kind].name)),
         Owner::Place(place) => format!("{} and everything beneath it", book.name(book.places[place].path)),

@@ -13,7 +13,7 @@ use crate::table::code_labels;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn view<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     place: Option<&str>,
@@ -28,7 +28,7 @@ pub fn view<'s>(
 
 /// Builds a lots view from holdings supplied by a shared context ledger.
 pub(crate) fn view_from<'h, 's>(
-    lens: Lens<'_, 's>,
+    lens: Lens<'s, '_, '_, '_>,
     scope: Option<axiom_core::Id<Place>>,
     holdings: impl IntoIterator<Item = &'h Holding>,
 ) -> Report<'s> {
@@ -88,7 +88,7 @@ pub(crate) fn view_from<'h, 's>(
     Report::new(format!("Lots at {at}")).with(section)
 }
 
-fn row<'s>(lens: Lens<'_, 's>, holding: &Holding, lot: &Parcel, worth: Option<Qty>) -> Row<'s> {
+fn row<'s>(lens: Lens<'s, '_, '_, '_>, holding: &Holding, lot: &Parcel, worth: Option<Qty>) -> Row<'s> {
     let book = lens.book;
     let tie = lot
         .tied

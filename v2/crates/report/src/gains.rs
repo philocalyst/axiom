@@ -44,7 +44,7 @@ impl Term {
     }
 }
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) -> Report<'s> {
+pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, year: Option<i32>) -> Report<'s> {
     let year = year.unwrap_or_else(|| run.today.year());
     let lens = Lens::new(book, whose, run.today);
     // Money leaving at its own basis (a grant spent, a deposit returned) realized nothing.
@@ -60,7 +60,7 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) ->
 
 /// Disposals as Form 8949 lays them out: short-term, then long-term, then
 /// money withdrawn from tax-deferred places, each with its subtotal.
-pub fn section<'s>(book: &Book<'s>, disposals: &[&Gain]) -> Section<'s> {
+pub fn section<'s>(book: &'s Book<'_>, disposals: &[&Gain]) -> Section<'s> {
     let columns = [
         Column::left("Sold"),
         Column::left("Acquired"),
@@ -107,7 +107,7 @@ pub fn section<'s>(book: &Book<'s>, disposals: &[&Gain]) -> Section<'s> {
     table
 }
 
-fn subtotal<'s>(book: &Book<'s>, label: &'static str, (proceeds, basis): (Qty, Qty)) -> Row<'s> {
+fn subtotal<'s>(book: &'s Book<'_>, label: &'static str, (proceeds, basis): (Qty, Qty)) -> Row<'s> {
     let cells = [
         Cell::text(label),
         Cell::Blank,

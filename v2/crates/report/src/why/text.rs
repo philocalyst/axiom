@@ -9,7 +9,7 @@ use crate::lens::Whose;
 use crate::{Cell, Column, Report, Row, Section};
 
 pub fn report<'s>(
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     run: &Run,
     whose: &Whose,
     description: &str,
@@ -20,7 +20,7 @@ pub fn report<'s>(
                 && posting
                     .flow
                     .description
-                    .is_some_and(|text| book.name(text) == description)
+                    .is_some_and(|text| book.text(text) == description)
         })
         .map(|posting| posting.id)
         .collect::<Vec<_>>();
@@ -40,7 +40,7 @@ pub fn report<'s>(
         };
         matches.push(Row::new([
             Cell::Day(flow.day),
-            Cell::Text(book.name(text).into()),
+            Cell::Text(book.text(text).into()),
             Cell::Source(flow.loc),
         ]));
     }

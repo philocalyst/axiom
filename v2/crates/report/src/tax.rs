@@ -17,7 +17,7 @@ use crate::lens::Whose;
 use crate::table::{cause_cell, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, year: Option<i32>) -> Report<'s> {
+pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, year: Option<i32>) -> Report<'s> {
     let year = year.unwrap_or_else(|| run.today.year());
     // An effect belongs to the year of the day it was recorded.
     let effects = run.effects.iter().filter(|effect| whose.includes(effect.owner) && effect.day.year() == year);
@@ -127,7 +127,7 @@ fn lines(effects: &[&Effect]) -> Vec<Line> {
     lines
 }
 
-fn tallies<'s>(book: &Book<'s>, lines: &[Line], several: bool) -> Section<'s> {
+fn tallies<'s>(book: &'s Book<'_>, lines: &[Line], several: bool) -> Section<'s> {
     let mut section =
         Section::new([Column::left("Tally"), Column::right("Amount"), Column::left("From")]).headed("Counted");
     let cells =
@@ -138,7 +138,7 @@ fn tallies<'s>(book: &Book<'s>, lines: &[Line], several: bool) -> Section<'s> {
 
 /// Obligations, and what each jurisdiction is owed. `unfinished`: a law that
 /// owes has not judged the year yet, so the totals are what is owed so far.
-fn obligations<'s>(book: &Book<'s>, lines: &[Line], several: bool, unfinished: bool) -> Section<'s> {
+fn obligations<'s>(book: &'s Book<'_>, lines: &[Line], several: bool, unfinished: bool) -> Section<'s> {
     let columns =
         [Column::left("Owed"), Column::left("To"), Column::left("Due"), Column::right("Amount"), Column::left("From")];
     let mut section = Section::new(columns).headed("Owed");
@@ -163,7 +163,7 @@ fn obligations<'s>(book: &Book<'s>, lines: &[Line], several: bool, unfinished: b
 }
 
 /// A total row per commodity: what `lines` come to.
-fn totals<'s>(book: &Book<'s>, lines: &[Line], label: &str) -> Vec<Row<'s>> {
+fn totals<'s>(book: &'s Book<'_>, lines: &[Line], label: &str) -> Vec<Row<'s>> {
     let mut totals: BTreeMap<Id<Commodity>, Qty> = BTreeMap::new();
     for line in lines {
         *totals.entry(line.amount.unit).or_default() += line.amount.qty;
@@ -182,7 +182,7 @@ fn totals<'s>(book: &Book<'s>, lines: &[Line], label: &str) -> Vec<Row<'s>> {
 }
 
 /// Where a line comes from: the one flow behind it, or how many there are.
-fn source<'s>(book: &Book<'s>, line: &Line) -> Cell<'s> {
+fn source<'s>(book: &'s Book<'_>, line: &Line) -> Cell<'s> {
     match line.contributions {
         1 => cause_cell(book, line.cause),
         many => Cell::text(plural(many, "source")),
@@ -193,7 +193,7 @@ fn source<'s>(book: &Book<'s>, line: &Line) -> Cell<'s> {
 /// are several), indented by how deep the system sits in the jurisdiction tree.
 fn grouped<'s>(
     section: &mut Section<'s>,
-    book: &Book<'s>,
+    book: &'s Book<'_>,
     lines: &[Line],
     several: bool,
     cells: impl Fn(&Line) -> Vec<Cell<'s>>,

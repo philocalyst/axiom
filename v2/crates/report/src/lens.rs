@@ -60,7 +60,7 @@ impl Whose {
     }
 
     /// The entity under which machine-readable facts are reported.
-    pub fn label<'s>(&self, book: &Book<'s>) -> &'s str {
+    pub fn label<'b>(&self, book: &'b Book<'_>) -> &'b str {
         self.label
             .map_or("everyone", |entity| book.name(book.entities[entity].path))
     }
@@ -90,28 +90,28 @@ pub enum Liquidity {
 
 /// The books on one day, seen for one owner scope.
 #[derive(Clone, Copy)]
-pub struct Lens<'b, 's> {
+pub struct Lens<'b, 's, 'w, 'p> {
     pub book: &'b Book<'s>,
-    pub whose: &'b Whose,
+    pub whose: &'w Whose,
     pub day: Day,
     /// Names and kinds looked up once by the report context or this lens.
     pub known: Known,
     /// Prepared display signs from the report context's plan, when available.
-    sides: Option<&'b Sides>,
+    sides: Option<&'p Sides>,
 }
 
-impl<'b, 's> Lens<'b, 's> {
-    pub fn new(book: &'b Book<'s>, whose: &'b Whose, day: Day) -> Lens<'b, 's> {
+impl<'b, 's, 'w> Lens<'b, 's, 'w, 'b> {
+    pub fn new(book: &'b Book<'s>, whose: &'w Whose, day: Day) -> Lens<'b, 's, 'w, 'b> {
         Lens::with_known(book, whose, day, Known::of(book))
     }
 
     /// Uses the engine plan's pre-resolved names and kinds.
     pub fn with_known(
         book: &'b Book<'s>,
-        whose: &'b Whose,
+        whose: &'w Whose,
         day: Day,
         known: Known,
-    ) -> Lens<'b, 's> {
+    ) -> Lens<'b, 's, 'w, 'b> {
         Lens {
             book,
             whose,
@@ -121,14 +121,17 @@ impl<'b, 's> Lens<'b, 's> {
         }
     }
 
+}
+
+impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
     /// Uses names, kinds and display signs prepared by one engine plan.
     pub fn with_plan(
         book: &'b Book<'s>,
-        whose: &'b Whose,
+        whose: &'w Whose,
         day: Day,
         known: Known,
-        sides: &'b Sides,
-    ) -> Lens<'b, 's> {
+        sides: &'p Sides,
+    ) -> Lens<'b, 's, 'w, 'p> {
         Lens {
             book,
             whose,
@@ -139,7 +142,7 @@ impl<'b, 's> Lens<'b, 's> {
     }
 
     /// The same books at another day's prices.
-    pub fn on(self, day: Day) -> Lens<'b, 's> {
+    pub fn on(self, day: Day) -> Lens<'b, 's, 'w, 'p> {
         Lens { day, ..self }
     }
 
