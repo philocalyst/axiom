@@ -38,7 +38,9 @@ struct Change<'a> {
 
 fn plan<'a>(sources: &'a Sources, wanted: &[&str]) -> Result<Vec<Change<'a>>, Diagnostic> {
     let paths: Vec<&str> = sources.project_paths().collect();
-    let normalize = |path: &str| path.strip_prefix("./").unwrap_or(path);
+    fn normalize(path: &str) -> &str {
+        path.strip_prefix("./").unwrap_or(path)
+    }
     if let Some(&unknown) = wanted
         .iter()
         .find(|&&path| !paths.contains(&normalize(path)))
@@ -55,7 +57,14 @@ fn plan<'a>(sources: &'a Sources, wanted: &[&str]) -> Result<Vec<Change<'a>>, Di
     } else {
         wanted
             .iter()
-            .map(|path| normalize(path))
+            .map(|path| {
+                let name = normalize(path);
+                paths
+                    .iter()
+                    .copied()
+                    .find(|candidate| *candidate == name)
+                    .expect("requested source was checked above")
+            })
             .fold(Vec::new(), |mut selected, path| {
                 if !selected.contains(&path) {
                     selected.push(path);

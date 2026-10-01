@@ -141,7 +141,14 @@ fn write_table(
         if row.style == Style::Total && at > 0 && !continues {
             write_rule(output, terminal, table_width);
         }
-        table_row(&mut line, Some(row), &section.columns, &widths, &units, sources);
+        table_row(
+            &mut line,
+            Some(row),
+            &section.columns,
+            &widths,
+            &units,
+            sources,
+        );
         terminal.painter.paint_line(output, &line);
     }
 }
@@ -187,7 +194,7 @@ fn table_row(
         };
         line.push_repeat(' ', depth, Ink::PLAIN);
         write_cell(
-            &mut StyledLine::new(&mut line, cell_ink),
+            &mut StyledLine::new(line, cell_ink),
             cell,
             sources,
             cell_ink,

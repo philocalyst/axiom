@@ -3,13 +3,16 @@
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::path::Path;
+use std::fs::{self, OpenOptions};
+use std::io::Write as IoWrite;
+use std::path::{Component, Path};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axiom_core::{Day, Diagnostic, FileId};
 use axiom_engine::{Options, Run};
 use axiom_model::{Book, sync::Fetch};
 use axiom_report::{Context, Query, ReportRenderer, Summary, json::JsonRenderer};
+use axiom_sync::{Change, PlanOutcome, SourceFailure};
 
 use crate::args::{Command, Invocation};
 use crate::project::{Project, SourceFile, Sources};
@@ -44,13 +47,35 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     drop(parsed);
     diagnostics.extend(built);
 
-    if let Command::Sync { names, dry } = command {
-        return sync::execute(&book, names, &project.root, terminals.out, *dry);
-    }
     let options = Options {
         today: invocation.today.unwrap_or_else(system_today),
         relaxed: invocation.relaxed,
     };
+    if let Command::Sync { names, dry } = command {
+        let run = axiom_engine::run(&book, options);
+        let planned = {
+            let (files, auxiliary) = (&sources.files, &mut sources.auxiliary);
+            sync::plan(
+                &book,
+                &run,
+                &project,
+                options.today,
+                names,
+                files,
+                auxiliary,
+            )?
+        };
+        let mut sync_diagnostics = diagnostics;
+        sync_diagnostics.extend(run.diagnostics);
+        return Ok(render_sync(
+            planned,
+            &mut sources,
+            &project.root,
+            *dry,
+            terminals,
+            &sync_diagnostics,
+        ));
+    }
     if let Command::Report(query, whose) = command {
         let context = match Context::new(&book, options, *whose) {
             Ok(context) => context,
@@ -183,7 +208,11 @@ fn check_memos(
     (diagnostics, suggestions)
 }
 
-fn source_by_id(files: &[SourceFile], auxiliary: &[SourceFile], id: FileId) -> Option<&SourceFile> {
+fn source_by_id<'a>(
+    files: &'a [SourceFile],
+    auxiliary: &'a [SourceFile],
+    id: FileId,
+) -> Option<&'a SourceFile> {
     let index = usize::from(id.0);
     files
         .get(index)
@@ -282,6 +311,274 @@ fn report_error(
         diagnostics: text,
         failed: true,
     }
+}
+
+/// Presents a no-write sync plan, and applies its changes only when the user
+/// did not ask for `--dry`.
+fn render_sync(
+    planned: PlanOutcome,
+    sources: &mut Sources,
+    root: &Path,
+    dry: bool,
+    terminals: Terminals,
+    prior: &[Diagnostic],
+) -> Outcome {
+    let write_problems = if dry {
+        Vec::new()
+    } else {
+        apply_changes(root, &planned.changes)
+    };
+    let mut diagnostics: Vec<&Diagnostic> = prior
+        .iter()
+        .chain(&planned.problems)
+        .chain(&planned.incomplete)
+        .collect();
+    for source in &planned.sources {
+        match source.failure.as_ref() {
+            Some(SourceFailure::Read(problem) | SourceFailure::Generated(problem)) => {
+                diagnostics.push(problem);
+            }
+            Some(SourceFailure::Output(problems)) => diagnostics.extend(problems),
+            Some(SourceFailure::Command(_)) | None => {}
+        }
+    }
+    diagnostics.extend(&write_problems);
+
+    let mut answer = String::new();
+    for source in &planned.sources {
+        let mut line = match &source.failure {
+            None => Line::text("✓ ", Ink::GREEN.bold()),
+            Some(_) => Line::text("✗ ", Ink::RED.bold()),
+        };
+        line.push(&source.path, Ink::BOLD);
+        line.push("  ", Ink::PLAIN);
+        match &source.failure {
+            None if source.added == 0 => line.push("no new items", Ink::DIM),
+            None => line.push(
+                &format!("{} added", plural(source.added, "item")),
+                Ink::PLAIN,
+            ),
+            Some(SourceFailure::Command(failure)) => {
+                line.push(&failure.summary, Ink::RED);
+                if !failure.stderr.trim().is_empty() {
+                    answer.push_str(&failure.stderr);
+                    if !failure.stderr.ends_with('\n') {
+                        answer.push('\n');
+                    }
+                }
+            }
+            Some(
+                SourceFailure::Read(_) | SourceFailure::Generated(_) | SourceFailure::Output(_),
+            ) => {
+                line.push("see diagnostics", Ink::RED);
+            }
+        }
+        answer.push_str(&terminals.out.painter.paint(&[line]));
+    }
+
+    if dry {
+        for change in &planned.changes {
+            answer.push_str(&change_diff(change));
+        }
+    } else {
+        if write_problems.is_empty() {
+            for change in &planned.changes {
+                answer.push_str(&format!("updated {}\n", change.path));
+            }
+        }
+    }
+    if planned.sources.is_empty() && planned.changes.is_empty() {
+        answer.push_str("no sync sources selected\n");
+    } else if planned.changes.is_empty() {
+        answer.push_str("no changes\n");
+    }
+
+    let (diagnostic_text, tally) =
+        Renderer::new(sources, terminals.err).present(&diagnostics, true);
+    let failed = tally.errors > 0
+        || !write_problems.is_empty()
+        || planned
+            .sources
+            .iter()
+            .any(|source| source.failure.is_some());
+    Outcome {
+        answer,
+        diagnostics: diagnostic_text,
+        failed,
+    }
+}
+
+/// Writes planned targets through sibling temporary files. The canonical
+/// parent check catches symlinked folders that would otherwise leave the
+/// project, and rename replaces a final symlink without following it.
+fn apply_changes(root: &Path, changes: &[Change]) -> Vec<Diagnostic> {
+    let canonical_root = match fs::canonicalize(root) {
+        Ok(root) => root,
+        Err(error) => {
+            return vec![Diagnostic::error(
+                "sync-project-root",
+                format!("cannot resolve the project root: {error}"),
+            )];
+        }
+    };
+    let mut problems = Vec::new();
+    for (index, change) in changes.iter().enumerate() {
+        let relative = Path::new(&change.path);
+        if change.path.is_empty()
+            || !relative
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+        {
+            problems.push(Diagnostic::error(
+                "sync-path-outside-project",
+                format!("`{}` is not a project-relative path", change.path),
+            ));
+            continue;
+        }
+        let target = canonical_root.join(relative);
+        let Some(parent) = target.parent() else {
+            problems.push(Diagnostic::error(
+                "sync-path-outside-project",
+                format!("`{}` has no project directory", change.path),
+            ));
+            continue;
+        };
+        if let Err(error) = fs::create_dir_all(parent) {
+            problems.push(Diagnostic::error(
+                "sync-write",
+                format!("cannot create the folder for `{}`: {error}", change.path),
+            ));
+            continue;
+        }
+        let canonical_parent = match fs::canonicalize(parent) {
+            Ok(parent) if parent.starts_with(&canonical_root) => parent,
+            Ok(_) => {
+                problems.push(Diagnostic::error(
+                    "sync-path-outside-project",
+                    format!("`{}` leaves the project through a symlink", change.path),
+                ));
+                continue;
+            }
+            Err(error) => {
+                problems.push(Diagnostic::error(
+                    "sync-write",
+                    format!("cannot resolve the folder for `{}`: {error}", change.path),
+                ));
+                continue;
+            }
+        };
+        let Some(name) = target.file_name() else {
+            continue;
+        };
+        let target = canonical_parent.join(name);
+        let mut temporary = None;
+        for suffix in 0..100 {
+            let candidate = canonical_parent.join(format!(
+                ".{}.axiom-sync-{}-{index}-{suffix}",
+                name.to_string_lossy(),
+                std::process::id(),
+            ));
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&candidate)
+            {
+                Ok(mut file) => {
+                    if let Err(error) = file.write_all(change.after.as_bytes()) {
+                        let _ = fs::remove_file(&candidate);
+                        problems.push(Diagnostic::error(
+                            "sync-write",
+                            format!("cannot write `{}`: {error}", change.path),
+                        ));
+                    } else {
+                        temporary = Some(candidate);
+                    }
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    problems.push(Diagnostic::error(
+                        "sync-write",
+                        format!("cannot prepare `{}`: {error}", change.path),
+                    ));
+                    break;
+                }
+            }
+        }
+        let Some(temporary) = temporary else {
+            continue;
+        };
+        if let Err(error) = fs::rename(&temporary, &target) {
+            let _ = fs::remove_file(&temporary);
+            problems.push(Diagnostic::error(
+                "sync-write",
+                format!("cannot replace `{}`: {error}", change.path),
+            ));
+        }
+    }
+    problems
+}
+
+/// A compact unified hunk: the common prefix and suffix stay context, and the
+/// changed middle is shown once, regardless of how much text the target has.
+fn change_diff(change: &Change) -> String {
+    let before = change.before.as_deref().unwrap_or("");
+    let old: Vec<&str> = before.split_inclusive('\n').collect();
+    let new: Vec<&str> = change.after.split_inclusive('\n').collect();
+    let mut prefix = 0;
+    while prefix < old.len() && prefix < new.len() && old[prefix] == new[prefix] {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < old.len().saturating_sub(prefix)
+        && suffix < new.len().saturating_sub(prefix)
+        && old[old.len() - suffix - 1] == new[new.len() - suffix - 1]
+    {
+        suffix += 1;
+    }
+    let old_end = old.len() - suffix;
+    let new_end = new.len() - suffix;
+    let start = prefix.saturating_sub(1);
+    let old_count = old_end.saturating_sub(start) + usize::from(suffix > 0);
+    let new_count = new_end.saturating_sub(start) + usize::from(suffix > 0);
+    let mut out = format!(
+        "--- a/{}\n+++ b/{}\n@@ -{},{} +{},{} @@\n",
+        change.path,
+        change.path,
+        start + 1,
+        old_count,
+        start + 1,
+        new_count,
+    );
+    if start < prefix {
+        out.push(' ');
+        out.push_str(old[start]);
+        if !old[start].ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    for line in &old[prefix..old_end] {
+        out.push('-');
+        out.push_str(line);
+        if !line.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    for line in &new[prefix..new_end] {
+        out.push('+');
+        out.push_str(line);
+        if !line.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    if suffix > 0 {
+        out.push(' ');
+        out.push_str(old[old.len() - suffix]);
+        if !old[old.len() - suffix].ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    out
 }
 
 /// The current day, by the system clock, in UTC.
@@ -495,5 +792,80 @@ mod tests {
             !marker.exists(),
             "check must never execute a declared run command"
         );
+    }
+
+    #[test]
+    fn sync_dry_shows_a_change_without_writing_it() {
+        let dir = TempDir::new("sync-dry");
+        dir.write("axiom.ax", "base USD\n");
+        dir.write("prices.ax", "old\n");
+        let project = Project::find(dir.path()).unwrap();
+        let mut sources = project.load().unwrap();
+        let outcome = render_sync(
+            PlanOutcome {
+                sources: Vec::new(),
+                changes: vec![Change {
+                    path: "prices.ax".to_owned(),
+                    before: Some("old\n".to_owned()),
+                    after: "new\n".to_owned(),
+                }],
+                problems: Vec::new(),
+                incomplete: Vec::new(),
+                generated: Vec::new(),
+            },
+            &mut sources,
+            &project.root,
+            true,
+            Terminals {
+                out: crate::style::Terminal::plain(80),
+                err: crate::style::Terminal::plain(80),
+            },
+            &[],
+        );
+
+        assert!(!outcome.failed);
+        assert!(outcome.answer.contains("-old\n"));
+        assert!(outcome.answer.contains("+new\n"));
+        assert_eq!(
+            fs::read_to_string(dir.path().join("prices.ax")).unwrap(),
+            "old\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sync_refuses_to_write_through_a_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let dir = TempDir::new("sync-symlink");
+        let outside = TempDir::new("sync-symlink-outside");
+        dir.write("axiom.ax", "base USD\n");
+        symlink(outside.path(), dir.path().join("link")).unwrap();
+        let project = Project::find(dir.path()).unwrap();
+        let mut sources = project.load().unwrap();
+        let outcome = render_sync(
+            PlanOutcome {
+                sources: Vec::new(),
+                changes: vec![Change {
+                    path: "link/prices.ax".to_owned(),
+                    before: None,
+                    after: "new\n".to_owned(),
+                }],
+                problems: Vec::new(),
+                incomplete: Vec::new(),
+                generated: Vec::new(),
+            },
+            &mut sources,
+            &project.root,
+            false,
+            Terminals {
+                out: crate::style::Terminal::plain(80),
+                err: crate::style::Terminal::plain(80),
+            },
+            &[],
+        );
+
+        assert!(outcome.failed);
+        assert!(!outside.path().join("prices.ax").exists());
     }
 }
