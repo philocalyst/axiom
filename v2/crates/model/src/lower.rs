@@ -65,6 +65,105 @@ pub(crate) struct JournalSurvey<'s> {
     pub mentions: Vec<Mention<'s>>,
 }
 
+/// Where a raw endpoint occurred, so declaration preallocation can distinguish
+/// ordinary journal counterparties from contextual contract/opening names.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum EndpointContext {
+    Transaction,
+    Statement,
+    Opening,
+    Contract,
+}
+
+/// Visits every endpoint candidate without allocating or interning it. The
+/// declaration builder filters names already declared as places/entities,
+/// then preallocates only genuinely novel parties before place ids freeze.
+pub(crate) fn visit_endpoints<'s>(
+    sites: &[Site<'_, 's>],
+    mut visit: impl FnMut(Home, Name<'s>, Loc, EndpointContext),
+) {
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            match item.kind {
+                ItemKind::Txn(id) => visit_flow_ends(
+                    file,
+                    &file[id].flow,
+                    site.home,
+                    EndpointContext::Transaction,
+                    &mut visit,
+                ),
+                ItemKind::Statement(id) => {
+                    visit_statement_ends(file, &file[id], site.home, &mut visit)
+                }
+                ItemKind::Opening(id) => {
+                    let opening = &file[id];
+                    for leg in &file[opening.lines] {
+                        visit(site.home, leg.end.name, leg.loc, EndpointContext::Opening);
+                    }
+                    for statement in &file[opening.claims] {
+                        visit_statement_ends(file, statement, site.home, &mut visit);
+                    }
+                }
+                ItemKind::Contract(id) => {
+                    let contract = &file[id];
+                    for schedule in [contract.schedule, contract.standing].into_iter().flatten() {
+                        if let Some(holding) = schedule.terms.holding {
+                            visit(
+                                site.home,
+                                holding.name,
+                                schedule.at,
+                                EndpointContext::Contract,
+                            );
+                        }
+                    }
+                    for leg in &file[contract.body.legs] {
+                        visit(site.home, leg.end.name, leg.loc, EndpointContext::Contract);
+                    }
+                    for also in &file[contract.alsos] {
+                        if let ast::AlsoLine::Flow(flow) = &also.line {
+                            visit_flow_ends(
+                                file,
+                                flow,
+                                site.home,
+                                EndpointContext::Contract,
+                                &mut visit,
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn visit_statement_ends<'s>(
+    file: &ast::File<'s>,
+    statement: &ast::Statement<'s>,
+    home: Home,
+    visit: &mut impl FnMut(Home, Name<'s>, Loc, EndpointContext),
+) {
+    for leg in &file[statement.body.legs] {
+        visit(home, leg.end.name, leg.loc, EndpointContext::Statement);
+    }
+}
+
+fn visit_flow_ends<'s>(
+    file: &ast::File<'s>,
+    flow: &ast::Flow<'s>,
+    home: Home,
+    context: EndpointContext,
+    visit: &mut impl FnMut(Home, Name<'s>, Loc, EndpointContext),
+) {
+    for end in [flow.from.end, flow.to.end].into_iter().flatten() {
+        visit(home, end.name, file.loc(end.name.0), context);
+    }
+    for leg in &file[flow.body.legs] {
+        visit(home, leg.end.name, leg.loc, context);
+    }
+}
+
 /// Finds tab and promise relationships before declarations freeze the place
 /// tree. The scan borrows each syntax node directly and retains no ordinary
 /// flow or statement records.
