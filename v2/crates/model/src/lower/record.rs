@@ -8,7 +8,7 @@ use axiom_syntax::{ClauseKind, ItemKind, Quantity, Subject};
 use super::push_amount_root;
 use crate::book::{
     Amount, Change as BookChange, FlowSide, Sign, TemplateAmount, TemplateItemParent, TermsState,
-    Text,
+    ScheduleKind, Text,
 };
 use crate::declare::World;
 use crate::errors::Word;
@@ -234,7 +234,7 @@ pub(crate) fn record<'a, 's>(
                 lower_opening(world, site, item, &file[id], &code_index, diags)
             }
             ItemKind::Statement(id) => {
-                lower_statement(world, site, item.loc, &file[id], &code_index, false, diags)
+                lower_statement(world, site, item.loc, item.doc, &file[id], &code_index, false, diags)
             }
             _ => unreachable!("dated index only contains journal records"),
         }
@@ -821,6 +821,7 @@ fn lower_opening<'a, 's>(
             world,
             site,
             super::subject_loc(file, claim.subject),
+            None,
             claim,
             code_index,
             true,
@@ -833,6 +834,7 @@ fn lower_statement<'a, 's>(
     world: &mut World<'s>,
     site: &Site<'a, 's>,
     loc: Loc,
+    doc: Option<ast::Doc<'s>>,
     statement: &ast::Statement<'s>,
     code_index: &CodeIndex,
     opening: bool,
@@ -919,11 +921,250 @@ fn lower_statement<'a, 's>(
         }
         ast::Verb::Waived => lower_contract_change(world, site, loc, statement, diags),
         ast::Verb::Ends => lower_end(world, site, loc, statement, diags),
-        ast::Verb::Occurrence(_) | ast::Verb::Now(_) => unsupported_statement(
+        ast::Verb::Occurrence(amount) => lower_occurrence(
+            world,
+            site,
+            doc,
+            loc,
+            statement,
+            *amount,
+            diags,
+        ),
+        ast::Verb::Now(_) => unsupported_statement(
             loc,
             "this statement kind does not yet have a native record lowering",
             diags,
         ),
+    }
+}
+
+fn lower_occurrence<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    doc: Option<ast::Doc<'s>>,
+    loc: Loc,
+    statement: &ast::Statement<'s>,
+    amount: Option<ast::Amount<'s>>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    let Subject::Name(name) = statement.subject else {
+        unsupported_statement(loc, "a contract occurrence needs a named subject", diags);
+        return;
+    };
+    let Some(contract_id) = world.book.contract(name.0) else {
+        diags.push(
+            Diagnostic::error("unknown-contract-occurrence", "this occurrence names no contract")
+                .label(file.loc(name.0), format!("`{}` is not a declared contract", name.0))
+                .help("declare a contract with this name before recording an occurrence"),
+        );
+        return;
+    };
+    let contract = &world.book.contracts[contract_id];
+    let (schedule, terms) = match nearest_occurrence(contract, statement.date) {
+        Ok(Some(found)) => found,
+        Ok(None) => {
+            diags.push(
+                Diagnostic::error("contract-occurrence-date", "this day is outside every contract schedule's grace window")
+                    .label(loc, "no active scheduled occurrence is close enough to this date"),
+            );
+            return;
+        }
+        Err((regular, standing)) => {
+            diags.push(
+                Diagnostic::error("ambiguous-contract-occurrence", "this occurrence is equally close to two contract schedules")
+                    .label(loc, "write it on a date that identifies one schedule")
+                    .note(format!("nearest regular due day: {regular}; nearest standing due day: {standing}")),
+            );
+            return;
+        }
+    };
+    if amount.is_some() {
+        unsupported_statement(
+            loc,
+            "a written occurrence amount is not yet retained by the native journal record",
+            diags,
+        );
+        return;
+    }
+
+    let code_start = world.book.codes.len();
+    let diagnostic_start = diags.len();
+    let mut occurrence_codes = Vec::new();
+    for clause in &file[statement.tail] {
+        match clause.kind {
+            ClauseKind::Code(code) => occurrence_codes.push(world.book.names.intern(code.name())),
+            _ => {
+                diags.push(
+                    Diagnostic::error("contract-occurrence-tail", "this clause is not retained on a contract occurrence")
+                        .label(clause.at, "remove the clause or put it on a written flow"),
+                );
+            }
+        }
+    }
+
+    let mut input_values: Vec<Option<Amount>> = vec![None; terms.inputs.len()];
+    let mut bound = vec![false; terms.inputs.len()];
+    for leg in &file[statement.body.legs] {
+        let input = terms.inputs.iter().position(|input| world.book.name(input.name) == leg.end.name.0);
+        let Some(input_at) = input else {
+            diags.push(
+                Diagnostic::error("contract-occurrence-body", "written flow overrides are not yet lowered for this occurrence")
+                    .label(leg.loc, "this line does not bind a declared contract input"),
+            );
+            continue;
+        };
+        if bound[input_at] {
+            diags.push(
+                Diagnostic::error("contract-input-duplicate", "this contract input is supplied twice")
+                    .label(leg.loc, "remove the repeated binding")
+                    .context(terms.inputs[input_at].loc, "the input is declared here"),
+            );
+            continue;
+        }
+        if !file[leg.tail].is_empty() {
+            diags.push(
+                Diagnostic::error("contract-input-tail", "a contract input binding cannot have flow clauses")
+                    .label(leg.loc, "put clauses on the occurrence's actual flow"),
+            );
+            continue;
+        }
+        let literal = match leg.amount {
+            Quantity::Amount(ast::Amount::Literal(literal))
+            | Quantity::Target(ast::Amount::Literal(literal)) => literal,
+            _ => {
+                diags.push(
+                    Diagnostic::error("contract-input-value", "a contract input needs a literal amount")
+                        .label(leg.loc, "write `input-name = 155 USD`"),
+                );
+                continue;
+            }
+        };
+        let input_unit = terms.inputs[input_at].unit;
+        let unit = match literal.unit() {
+            Some(unit) => match world.commodity_of(Word {
+                text: unit.0,
+                loc: file.loc(unit.0),
+            }) {
+                Ok(unit) => unit,
+                Err(problem) => {
+                    diags.push(problem);
+                    continue;
+                }
+            },
+            None => match input_unit {
+                Some(unit) => unit,
+                None => {
+                    diags.push(
+                        Diagnostic::error("contract-input-unit", "this input has no declared unit to infer")
+                            .label(leg.loc, "state the amount's commodity"),
+                    );
+                    continue;
+                }
+            },
+        };
+        if input_unit.is_some_and(|expected| expected != unit) {
+            diags.push(
+                Diagnostic::error("contract-input-unit", "this input amount has the wrong commodity")
+                    .label(leg.loc, "use the unit declared by this input")
+                    .context(terms.inputs[input_at].loc, "the input's expected unit is declared here"),
+            );
+            continue;
+        }
+        match world.amount(literal.num(), unit, leg.loc) {
+            Ok(value) => {
+                input_values[input_at] = Some(value);
+                bound[input_at] = true;
+            }
+            Err(problem) => diags.push(problem),
+        }
+    }
+    if !file[statement.body.items].is_empty() {
+        diags.push(
+            Diagnostic::error("contract-occurrence-items", "written line items are not yet lowered on an occurrence")
+                .label(loc, "move the item to the contract terms or wait for item override lowering"),
+        );
+    }
+    if diags.len() != diagnostic_start {
+        return;
+    }
+    for code in occurrence_codes {
+        world.book.codes.push(code);
+    }
+    let code_count = world.book.codes.len() - code_start;
+    let input_start = world.book.input_values.len();
+    for value in input_values {
+        world.book.input_values.push(value);
+    }
+    world.book.txns.push(crate::journal::Txn {
+        day: statement.date,
+        flows: Run::new(Id::new(world.book.flows.len() as u32), 0),
+        inputs: Run::new(Id::new(input_start as u32), terms.inputs.len() as u32),
+        program: None,
+        codes: Run::new(Id::new(code_start as u32), code_count as u32),
+        waive: None,
+        contract: Some(contract_id),
+        contract_schedule: Some(schedule),
+        ends: false,
+        doc: doc.map(|doc| world.book.names.intern(doc.0)),
+        loc,
+    });
+}
+
+fn nearest_occurrence<'a>(
+    contract: &'a crate::book::Contract,
+    day: Day,
+) -> Result<Option<(ScheduleKind, &'a crate::book::Terms)>, (Day, Day)> {
+    if !contract.days.contains(day) {
+        return Ok(None);
+    }
+    let mut radius = 0i64;
+    for timeline in [contract.terms.as_ref(), contract.standing.as_ref()].into_iter().flatten() {
+        let max_grace = std::iter::once(timeline.at(Day::MIN)).chain(timeline.changes().map(|(_, terms)| terms));
+        for terms in max_grace {
+            radius = radius.max(i64::from(terms.grace.months).saturating_mul(31).saturating_add(i64::from(terms.grace.days)));
+        }
+    }
+    let radius = radius.clamp(0, i64::from(i32::MAX)) as i32;
+    let Some(search) = Days::new(Day(day.0.saturating_sub(radius)), Day(day.0.saturating_add(radius))) else {
+        return Ok(None);
+    };
+    let mut regular = None;
+    let mut standing = None;
+    for occurrence in contract.occurrences(search) {
+        let delta = if day >= occurrence.day {
+            day.since(occurrence.day)
+        } else {
+            occurrence.day.since(day)
+        };
+        if delta > occurrence.terms.grace {
+            continue;
+        }
+        let distance = (i64::from(day.0) - i64::from(occurrence.day.0)).abs();
+        let candidate = (distance, occurrence.day > day, occurrence.day, occurrence.terms);
+        let best = match occurrence.schedule {
+            ScheduleKind::Regular => &mut regular,
+            ScheduleKind::Standing => &mut standing,
+        };
+        if best.is_none_or(|(best_distance, best_future, _, _)| {
+            (distance, candidate.1) < (best_distance, best_future)
+        }) {
+            *best = Some(candidate);
+        }
+    }
+    match (regular, standing) {
+        (Some((r_distance, _, r_day, regular_terms)), Some((s_distance, _, s_day, standing_terms))) => {
+            if r_distance == s_distance {
+                Err((r_day, s_day))
+            } else if r_distance < s_distance {
+                Ok(Some((ScheduleKind::Regular, regular_terms)))
+            } else {
+                Ok(Some((ScheduleKind::Standing, standing_terms)))
+            }
+        }
+        (Some((_, _, _, terms)), None) => Ok(Some((ScheduleKind::Regular, terms))),
+        (None, Some((_, _, _, terms))) => Ok(Some((ScheduleKind::Standing, terms))),
+        (None, None) => Ok(None),
     }
 }
 

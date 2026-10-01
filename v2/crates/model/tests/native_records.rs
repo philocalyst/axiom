@@ -366,6 +366,87 @@ fn measured_shares_reject_missing_and_mismatched_denominators() {
 }
 
 #[test]
+fn contract_occurrence_uses_nearest_grace_day_and_binds_inputs_in_order() {
+    let path = "journal/2026/02.ax";
+    let text = "\
+base USD
+commodity USD
+kind person : entity
+entity greystar : person
+account assets/checking
+contract flat with greystar
+  2_900 USD monthly on 1 from checking
+  grace 3d
+  input water USD
+2026-02-03 flat
+  water = 155 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    let contract_id = book.contract("flat").unwrap();
+    let contract = &book.contracts[contract_id];
+    let due_window = axiom_core::Days::new(
+        axiom_core::Day::from_ymd(2026, 1, 31).unwrap(),
+        axiom_core::Day::from_ymd(2026, 2, 6).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(contract.terms.as_ref().unwrap().at(due_window.first()).grace, axiom_core::Span::days(3));
+    let terms = contract.terms.as_ref().unwrap().at(due_window.first());
+    assert_eq!(terms.anchor, axiom_core::Day::MIN);
+    assert_eq!(terms.every, axiom_model::Cadence::Every(axiom_core::Span::months(1)));
+    assert_eq!(terms.on.as_ref(), &[axiom_model::On::MonthDay(1)]);
+    assert_eq!(
+        axiom_core::calendar::due(terms.every, &terms.on, terms.anchor, due_window).collect::<Vec<_>>(),
+        [axiom_core::Day::from_ymd(2026, 2, 1).unwrap()]
+    );
+    assert_eq!(contract.due_days(due_window), [axiom_core::Day::from_ymd(2026, 2, 1).unwrap()]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let txn = book.txns.iter().map(|(id, txn)| (id, txn)).find(|(_, txn)| txn.contract.is_some()).unwrap();
+    assert_eq!(txn.1.contract, Some(contract_id));
+    assert_eq!(txn.1.contract_schedule, Some(axiom_model::ScheduleKind::Regular));
+    assert_eq!(txn.1.flows.len(), 0, "the occurrence marker does not invent actual flows");
+    assert_eq!(
+        book.txn_inputs(txn.0),
+        &[Some(axiom_model::Amount::new(
+            axiom_core::Qty(155),
+            book.commodity("USD").unwrap(),
+        ))]
+    );
+}
+
+#[test]
+fn equally_near_regular_and_standing_occurrences_are_ambiguous() {
+    let path = "journal/2026/02.ax";
+    let text = "\
+base USD
+commodity USD
+commodity VTI
+kind person : entity
+entity broker : person
+account assets/checking
+contract invest with broker
+  50 USD monthly on 1 from checking
+  buy VTI for 500 USD monthly on 1 from checking
+2026-02-01 invest
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (_book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "ambiguous-contract-occurrence"), "{diagnostics:?}");
+}
+
+#[test]
 fn computed_balance_assertions_keep_a_sparse_typed_program() {
     let path = "journal/2026/01.ax";
     let text = "\
