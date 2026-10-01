@@ -17,9 +17,9 @@ use axiom_syntax::{
 };
 
 use crate::book::{
-    Amount, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, RatePolicy, Residence, Sort,
+    Amount, Asset, At, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, Purpose, RatePolicy,
+    Residence, Share, Sort, Take,
 };
-use crate::collect::{Entry, Written, decls};
 use crate::declare::{MAX_SCALE, PropTarget, World};
 use crate::errors::{Word, article, list, suggest};
 use crate::law::{Ty, Value, Window};
@@ -32,6 +32,7 @@ enum Target {
     Place,
     Entity,
     Commodity,
+    Asset,
     Kind,
 }
 
@@ -41,6 +42,7 @@ impl Target {
             Target::Place => "account",
             Target::Entity => "entity",
             Target::Commodity => "commodity",
+            Target::Asset => "asset",
             Target::Kind => "kind",
         }
     }
@@ -48,8 +50,8 @@ impl Target {
     /// What the instances of a kind of this sort are.
     fn of(sort: Sort) -> Target {
         match sort {
-            // v3 bridge: no v3 thing has properties.
-            Sort::Place(_) | Sort::Thing => Target::Place,
+            Sort::Place(_) => Target::Place,
+            Sort::Thing => Target::Asset,
             Sort::Entity => Target::Entity,
             Sort::Commodity => Target::Commodity,
         }
@@ -59,12 +61,10 @@ impl Target {
 /// One property line, read: a setting for whatever it is applied to.
 #[derive(Clone, Debug)]
 enum Assign {
-    Owner(Id<Entity>),
     Holds(Option<Box<[Id<Commodity>]>>, Loc),
     Select(Policy),
     Opened(Day, Loc),
     Closed(Day, Loc),
-    Budget(Amount, Window, Loc),
     Liquidity(Span),
     Via(Id<Place>),
     Lives(Residence),
@@ -72,6 +72,12 @@ enum Assign {
     Currency(Id<Commodity>),
     Citizen(Box<[Id<crate::book::System>]>),
     Books(Books),
+    Purpose(At<Id<Purpose>>),
+    Pays(At<Id<Purpose>>),
+    Takes(At<Take>),
+    SalesTax(Ratio),
+    Share(Share),
+    PartOf(At<Id<Asset>>),
     Precision(u8),
     Title(Sym),
     Grows(Ratio),
@@ -94,6 +100,12 @@ impl Assign {
                 | Assign::Claim
                 | Assign::Basis(_)
                 | Assign::Has(_)
+                | Assign::Purpose(_)
+                | Assign::Pays(_)
+                | Assign::Takes(_)
+                | Assign::SalesTax(_)
+                | Assign::Share(_)
+                | Assign::PartOf(_)
         )
     }
 }
@@ -103,12 +115,11 @@ type Reader = fn(&mut Args<'_, '_, '_>) -> Result<Assign, Diagnostic>;
 
 /// The properties the language defines itself, what each may be written
 /// under, and how it reads.
-const BUILTINS: [(&str, &[Target], Reader); 21] = [
-    ("owner", &[Target::Place], |a| a.entity().map(Assign::Owner)),
+const BUILTINS: [(&str, &[Target], Reader); 25] = [
     ("holds", &[Target::Place], |a| {
         Ok(Assign::Holds(a.holds()?, a.line.loc))
     }),
-    ("select", &[Target::Place, Target::Commodity], |a| {
+    ("select", &[Target::Place, Target::Commodity, Target::Asset], |a| {
         a.policy().map(Assign::Select)
     }),
     ("opened", &[Target::Place], |a| {
@@ -117,16 +128,7 @@ const BUILTINS: [(&str, &[Target], Reader); 21] = [
     ("closed", &[Target::Place], |a| {
         Ok(Assign::Closed(a.day()?, a.line.loc))
     }),
-    ("budget", &[Target::Place], |a| {
-        let amount = a.amount()?;
-        let monthly = a.word(&["monthly", "yearly"])? == "monthly";
-        Ok(Assign::Budget(
-            amount,
-            if monthly { Window::Month } else { Window::Year },
-            a.line.loc,
-        ))
-    }),
-    ("liquidity", &[Target::Place, Target::Commodity], |a| {
+    ("liquidity", &[Target::Place, Target::Commodity, Target::Asset], |a| {
         a.span().map(Assign::Liquidity)
     }),
     ("via", &[Target::Entity], |a| a.place().map(Assign::Via)),
@@ -141,6 +143,12 @@ const BUILTINS: [(&str, &[Target], Reader); 21] = [
         a.citizens().map(Assign::Citizen)
     }),
     ("books", &[Target::Entity], |a| a.books().map(Assign::Books)),
+    ("purpose", &[Target::Kind, Target::Entity], |a| a.purpose().map(Assign::Purpose)),
+    ("pays", &[Target::Kind], |a| a.purpose().map(Assign::Pays)),
+    ("takes", &[Target::Kind], |a| a.takes().map(Assign::Takes)),
+    ("sales-tax", &[Target::Kind], |a| a.percent().map(Assign::SalesTax)),
+    ("share", &[Target::Kind], |a| a.share().map(Assign::Share)),
+    ("part", &[Target::Asset], |a| a.part_of().map(Assign::PartOf)),
     ("precision", &[Target::Commodity], |a| {
         a.count(MAX_SCALE).map(Assign::Precision)
     }),
@@ -258,6 +266,11 @@ impl Kind {
         self.basis = self.basis.or(above.basis);
         self.select = self.select.or(above.select);
         self.liquidity = self.liquidity.or(above.liquidity);
+        self.purpose = self.purpose.or(above.purpose);
+        self.pays = self.pays.or(above.pays);
+        self.sales_tax = self.sales_tax.or(above.sales_tax);
+        self.takes = merge_takes(&above.takes, &self.takes);
+        self.shares = merge_shares(&above.shares, &self.shares);
         self.props = above.props.clone();
     }
 
@@ -269,10 +282,37 @@ impl Kind {
             Assign::Basis(basis) => self.basis = Some(*basis),
             Assign::Select(policy) => self.select = Some(*policy),
             Assign::Liquidity(span) => self.liquidity = Some(*span),
+            Assign::Purpose(purpose) => self.purpose = Some(*purpose),
+            Assign::Pays(pays) => self.pays = Some(*pays),
+            Assign::Takes(take) => self.takes = merge_takes(&self.takes, std::slice::from_ref(take)),
+            Assign::SalesTax(rate) => self.sales_tax = Some(*rate),
+            Assign::Share(share) => self.shares = merge_shares(&self.shares, std::slice::from_ref(share)),
             Assign::Prop(prop) => put(&mut self.props, *prop),
             _ => {}
         }
     }
+}
+
+fn merge_takes(inherited: &[At<Take>], own: &[At<Take>]) -> Box<[At<Take>]> {
+    let mut merged = inherited.to_vec();
+    for take in own {
+        match merged.iter_mut().find(|held| held.value.from == take.value.from) {
+            Some(held) => *held = *take,
+            None => merged.push(*take),
+        }
+    }
+    merged.into_boxed_slice()
+}
+
+fn merge_shares(inherited: &[Share], own: &[Share]) -> Box<[Share]> {
+    let mut merged = inherited.to_vec();
+    for share in own {
+        match merged.iter_mut().find(|held| held.entity == share.entity) {
+            Some(held) => *held = *share,
+            None => merged.push(*share),
+        }
+    }
+    merged.into_boxed_slice()
 }
 
 /// Defaults written by each kind itself. Ancestors are walked when an instance
@@ -325,6 +365,7 @@ impl Commodity {
 impl Entity {
     fn set(&mut self, assign: &Assign) {
         match assign {
+            Assign::Purpose(purpose) => self.purpose = Some(*purpose),
             Assign::Via(place) => self.place = Some(*place),
             Assign::Lives(residence) => {
                 self.lives = self.lives.iter().copied().chain([*residence]).collect()
@@ -342,7 +383,6 @@ impl Entity {
 impl Place {
     fn set(&mut self, assign: &Assign) {
         match assign {
-            Assign::Owner(owner) => self.owner = *owner,
             Assign::Holds(holds, _) => self.holds = holds.clone(),
             Assign::Select(policy) => self.select = Some(*policy),
             Assign::Opened(day, _) => self.opened = Some(*day),
@@ -350,6 +390,14 @@ impl Place {
             Assign::Liquidity(span) => self.liquidity = Some(*span),
             Assign::Prop(prop) => put(&mut self.props, *prop),
             _ => {}
+        }
+    }
+}
+
+impl Asset {
+    fn set(&mut self, assign: &Assign) {
+        if let Assign::PartOf(parent) = assign {
+            self.part_of = Some(*parent);
         }
     }
 }
@@ -535,12 +583,68 @@ impl<'a, 's> Args<'_, 'a, 's> {
         })
     }
 
-    fn amount(&mut self) -> Result<Amount, Diagnostic> {
-        let expr = &self.file.exprs[self.next_id("an amount")?];
-        match self.world.literal(self.file, expr)? {
-            Some((Value::Amount(amount), _)) => Ok(amount),
-            _ => Err(self.wrong(expr, "an amount such as `500 USD`")),
+    fn purpose(&mut self) -> Result<At<Id<Purpose>>, Diagnostic> {
+        let word = self.name("a purpose")?;
+        Ok(At {
+            value: self.world.purpose(self.home, word)?,
+            loc: word.loc,
+        })
+    }
+
+    fn takes(&mut self) -> Result<At<Take>, Diagnostic> {
+        let to = self.purpose()?;
+        self.word(&["from"])?;
+        let from = self.purpose()?;
+        Ok(At {
+            value: Take {
+                to: to.value,
+                from: from.value,
+            },
+            loc: self.line.loc,
+        })
+    }
+
+    fn share(&mut self) -> Result<Share, Diagnostic> {
+        let expr = &self.file.exprs[self.next_id("a percentage or fraction")?];
+        let rate = match expr.kind {
+            ExprKind::Pct(number) => Ratio::percent(number.mantissa.into(), number.scale),
+            ExprKind::Fraction(top, bottom) => Ratio::new(i128::from(top), i128::from(bottom)),
+            _ => None,
         }
+        .ok_or_else(|| {
+            Diagnostic::error("share-rate", "a share must be a percentage or fraction")
+                .label(expr.loc, "write `60%` or `3/5`")
+        })?;
+        self.word(&["for"])?;
+        let word = self.name("an entity")?;
+        let entity = self.world.entity(self.home, word)?;
+        Ok(Share {
+            rate,
+            entity,
+            measure: None,
+            loc: self.line.loc,
+        })
+    }
+
+    fn part_of(&mut self) -> Result<At<Id<Asset>>, Diagnostic> {
+        self.word(&["of"])?;
+        let word = self.name("an asset")?;
+        let Some(asset) = self.world.book.asset(word.text) else {
+            let suggestion = axiom_core::diag::closest(
+                word.text,
+                self.world.book.assets.iter().map(|(_, asset)| self.world.book.name(asset.name)),
+            );
+            return Err(crate::errors::unknown(
+                "unknown-asset",
+                "asset",
+                word,
+                suggestion,
+            ));
+        };
+        Ok(At {
+            value: asset,
+            loc: word.loc,
+        })
     }
 
     fn policy(&mut self) -> Result<Policy, Diagnostic> {
@@ -653,15 +757,6 @@ struct Lines<'a, 's> {
 }
 
 impl<'a, 's> Lines<'a, 's> {
-    fn of(written: &Written<'a, 's, Decl<'s>>) -> Lines<'a, 's> {
-        let file = written.file();
-        Lines {
-            home: written.home(),
-            file,
-            lines: &file[written.node.props],
-        }
-    }
-
     fn from_native(written: NativeDecl<'a, 's>) -> Lines<'a, 's> {
         Lines {
             home: written.home,
@@ -763,265 +858,6 @@ fn unknown_property(
         None => error,
     }
     .note(format!("its properties are {}", list(&valid)))
-}
-
-/// The settings a declaration's lines make. `has` lines belong to the kind,
-/// which reads them first.
-fn read_lines<'s>(
-    world: &mut World<'s>,
-    at: &Lines<'_, 's>,
-    targets: &[Target],
-    has: &[Has],
-    kind: Id<Kind>,
-    diags: &mut Vec<Diagnostic>,
-) -> Vec<Assign> {
-    let own = at
-        .lines
-        .iter()
-        .filter(|line| line.name.0 != "has" || !targets.contains(&Target::Kind));
-    let read = own.map(|line| read_line(world, at, line, targets, has, kind));
-    read.filter_map(|read| read.map_err(|error| diags.push(error)).ok())
-        .collect()
-}
-
-/// The first declaration of each thing: a repeat is an error, and its lines
-/// are not read.
-fn first_of<'a, 's, T>(
-    written: impl Iterator<Item = Written<'a, 's, Decl<'s>>>,
-    ids: impl Iterator<Item = Option<Id<T>>>,
-) -> Map<Id<T>, Written<'a, 's, Decl<'s>>> {
-    let mut first = Map::default();
-    for (written, id) in written.zip(ids) {
-        if let Some(id) = id {
-            first.entry(id).or_insert(written);
-        }
-    }
-    first
-}
-
-pub(crate) fn apply<'s>(
-    world: &mut World<'s>,
-    entries: &[Entry<'_, 's>],
-    diags: &mut Vec<Diagnostic>,
-) -> Vec<Budget> {
-    let mut budgets = Vec::new();
-    for target in [Target::Commodity, Target::Entity, Target::Place] {
-        let defaults = kinds(world, entries, target, diags);
-        match target {
-            Target::Commodity => commodities(world, entries, &defaults, diags),
-            Target::Entity => entities(world, entries, &defaults, diags),
-            _ => places(world, entries, &defaults, &mut budgets, diags),
-        }
-    }
-    budgets
-}
-
-/// Reads the kinds of one sort, parents first, and returns what each hands
-/// down to its instances.
-fn kinds<'s>(
-    world: &mut World<'s>,
-    entries: &[Entry<'_, 's>],
-    target: Target,
-    diags: &mut Vec<Diagnostic>,
-) -> Defaults {
-    let ids: Vec<Id<Kind>> = world
-        .book
-        .kinds
-        .ids()
-        .filter(|&id| Target::of(world.book.kinds[id].sort) == target)
-        .collect();
-    let written = first_of(
-        decls(entries, DeclKind::Kind),
-        world.declared.kinds.iter().map(|&id| Some(id)),
-    );
-    // What each kind may set on its instances comes first: its own `has`
-    // lines, then the ones it inherits.
-    for &id in &ids {
-        let mut own = Vec::new();
-        if let Some(w) = written.get(&id) {
-            let at = Lines::of(w);
-            for line in at.lines.iter().filter(|line| line.name.0 == "has") {
-                match read_line(world, &at, line, &[Target::Kind], &[], id) {
-                    Ok(Assign::Has(has)) => own.push(has),
-                    Ok(_) => {}
-                    Err(error) => diags.push(error),
-                }
-            }
-        }
-        let inherited = world
-            .book
-            .kinds
-            .parent(id)
-            .map_or(Box::default(), |parent| {
-                world.book.kinds[parent].has.clone()
-            });
-        let sort = world.book.kinds[id].sort;
-        world.declare_props(sort, &own, diags);
-        let unshadowed = inherited
-            .iter()
-            .filter(|theirs| !own.iter().any(|mine| mine.name == theirs.name));
-        world.book.kinds[id].has = own.iter().chain(unshadowed).copied().collect();
-    }
-    let mut defaults = Defaults::empty(world.book.kinds.len());
-    for &id in &ids {
-        if world.book.kinds.parent(id).is_some() {
-            let (above, kind) = world
-                .book
-                .kinds
-                .with_parent_mut(id)
-                .expect("parent was checked");
-            kind.inherit(above);
-        }
-        let Some(w) = written.get(&id) else { continue };
-        let has = world.book.kinds[id].has.clone();
-        for assign in read_lines(
-            world,
-            &Lines::of(w),
-            &[Target::Kind, target],
-            &has,
-            id,
-            diags,
-        ) {
-            world.book.kinds[id].set(&assign);
-            if assign.is_default() {
-                defaults.by_kind[id.index()].push(assign);
-            }
-        }
-    }
-    defaults
-}
-
-/// Reads only this thing's own lines. Kind defaults stay borrowed in `Defaults`
-/// and are applied directly by each target-specific setter.
-fn own_settings<'a, 's>(
-    world: &mut World<'s>,
-    (kind, target): (Id<Kind>, Target),
-    written: Option<&Written<'a, 's, Decl<'s>>>,
-    diags: &mut Vec<Diagnostic>,
-) -> Vec<Assign> {
-    let has = world.book.kinds[kind].has.clone();
-    written.map_or_else(Vec::new, |w| {
-        read_lines(world, &Lines::of(w), &[target], &has, kind, diags)
-    })
-}
-
-fn commodities<'s>(
-    world: &mut World<'s>,
-    entries: &[Entry<'_, 's>],
-    defaults: &Defaults,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let written = first_of(
-        decls(entries, DeclKind::Commodity),
-        world.declared.commodities.iter().map(|&id| Some(id)),
-    );
-    let mut path = Vec::new();
-    for id in world.book.commodities.ids().collect::<Vec<_>>() {
-        let kind = world.book.commodities[id].kind;
-        let own = own_settings(world, (kind, Target::Commodity), written.get(&id), diags);
-        let (kinds, commodities) = (&world.book.kinds, &mut world.book.commodities);
-        defaults.apply(kinds, kind, &mut path, |assign| commodities[id].set(assign));
-        for assign in &own {
-            commodities[id].set(assign);
-        }
-    }
-}
-
-fn entities<'s>(
-    world: &mut World<'s>,
-    entries: &[Entry<'_, 's>],
-    defaults: &Defaults,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let written = first_of(
-        decls(entries, DeclKind::Entity),
-        world.declared.entities.iter().map(|&id| Some(id)),
-    );
-    let mut path = Vec::new();
-    for id in world.book.entities.ids().collect::<Vec<_>>() {
-        let kind = world.book.entities[id].kind;
-        let own = own_settings(world, (kind, Target::Entity), written.get(&id), diags);
-        let restricted = world.book.kinds[kind].restricted;
-        let (kinds, entities) = (&world.book.kinds, &mut world.book.entities);
-        let entity = &mut entities[id];
-        entity.restricted = restricted;
-        let mut apply = |assign: &Assign| match assign {
-            Assign::Member(member, loc) if *member == id => diags.push(
-                Diagnostic::error("member-self", "an entity cannot be a member of itself")
-                    .label(*loc, "name the household this person belongs to"),
-            ),
-            _ => entity.set(assign),
-        };
-        defaults.apply(kinds, kind, &mut path, &mut apply);
-        for assign in &own {
-            apply(assign);
-        }
-        let mut lives = std::mem::take(&mut entity.lives).into_vec();
-        lives.sort_by_key(|residence| residence.days);
-        entity.lives = lives.into();
-    }
-}
-
-fn places<'s>(
-    world: &mut World<'s>,
-    entries: &[Entry<'_, 's>],
-    defaults: &Defaults,
-    budgets: &mut Vec<Budget>,
-    diags: &mut Vec<Diagnostic>,
-) {
-    let written = first_of(
-        decls(entries, DeclKind::Account),
-        world.declared.places.iter().copied(),
-    );
-    let mut path = Vec::new();
-    for id in world.book.places.ids().collect::<Vec<_>>() {
-        let kind = world.book.places[id].kind;
-        let own = own_settings(world, (kind, Target::Place), written.get(&id), diags);
-        let facts = &world.book.kinds[kind];
-        // Money in a `deferred` place is untaxed until it leaves, so unless its kind
-        // says otherwise, none of it counts as already accounted for.
-        let default = if facts.deferred {
-            Basis::Zero
-        } else {
-            Basis::Cost
-        };
-        let (deferred, basis, claim) =
-            (facts.deferred, facts.basis.unwrap_or(default), facts.claim);
-        let (kinds, places) = (&world.book.kinds, &mut world.book.places);
-        let place = &mut places[id];
-        (place.deferred, place.basis, place.claim) = (deferred, basis, claim);
-        let lines = &mut world.lines;
-        let mut apply = |assign: &Assign| {
-            match *assign {
-                Assign::Budget(amount, window, loc) => budgets.push(Budget {
-                    place: id,
-                    amount,
-                    window,
-                    loc,
-                }),
-                Assign::Holds(_, loc) => drop(lines.insert((id, "holds"), loc)),
-                Assign::Opened(_, loc) => drop(lines.insert((id, "opened"), loc)),
-                Assign::Closed(_, loc) => drop(lines.insert((id, "closed"), loc)),
-                _ => {}
-            }
-            place.set(assign);
-        };
-        defaults.apply(kinds, kind, &mut path, &mut apply);
-        for assign in &own {
-            apply(assign);
-        }
-        if let (Some(opened), Some(closed), Some(loc)) = (place.opened, place.closed, place.loc)
-            && closed < opened
-        {
-            diags.push(
-                Diagnostic::error(
-                    "closed-before-opened",
-                    "this account closes before it opens",
-                )
-                .label(loc, "opened and closed the wrong way round"),
-            );
-        }
-    }
 }
 
 impl<'s> World<'s> {
@@ -1275,6 +1111,7 @@ fn native_builtins<'a, 's>(
     let mut entities_written = Map::default();
     let mut commodities_written = Map::default();
     let mut places_written = Map::default();
+    let mut assets_written = Map::default();
     for site in sites {
         let file = &site.source.file;
         for item in &file.items {
@@ -1284,7 +1121,11 @@ fn native_builtins<'a, 's>(
             let decl = &file[id];
             if !matches!(
                 decl.what,
-                DeclKind::Kind | DeclKind::Entity | DeclKind::Commodity | DeclKind::Account
+                DeclKind::Kind
+                    | DeclKind::Entity
+                    | DeclKind::Commodity
+                    | DeclKind::Account
+                    | DeclKind::Asset
             ) {
                 continue;
             }
@@ -1310,12 +1151,14 @@ fn native_builtins<'a, 's>(
                 PropTarget::Place(id) => {
                     places_written.entry(id).or_insert(written);
                 }
-                PropTarget::Asset(_) => {}
+                PropTarget::Asset(id) => {
+                    assets_written.entry(id).or_insert(written);
+                }
             }
         }
     }
 
-    for target in [Target::Commodity, Target::Entity, Target::Place] {
+    for target in [Target::Commodity, Target::Entity, Target::Place, Target::Asset] {
         let kind_ids: Vec<Id<Kind>> = world
             .book
             .kinds
@@ -1404,6 +1247,7 @@ fn native_builtins<'a, 's>(
                         }
                         entity.set(assign);
                     }
+                    entity.purpose = entity.purpose.or(kinds[kind].purpose);
                     entity.restricted = kinds[kind].restricted;
                     let mut lives = entity.lives.to_vec();
                     lives.sort_by_key(|residence| residence.days.first());
@@ -1438,7 +1282,53 @@ fn native_builtins<'a, 's>(
                     for assign in &own {
                         places[id].set(assign);
                     }
+                    let kind = &kinds[kind];
+                    places[id].deferred = kind.deferred;
+                    places[id].basis = kind.basis.unwrap_or(if kind.deferred {
+                        Basis::Zero
+                    } else {
+                        Basis::Cost
+                    });
+                    places[id].claim = kind.claim;
                 }
+            }
+            Target::Asset => {
+                let ids: Vec<_> = world.book.assets.ids().collect();
+                let mut path = Vec::new();
+                for id in ids {
+                    let kind = world.book.assets[id].kind;
+                    let own = assets_written
+                        .get(&id)
+                        .copied()
+                        .map_or_else(Vec::new, |written| {
+                            let at = Lines::from_native(written);
+                            let has = world.book.kinds[kind].has.clone();
+                            read_builtin_lines(world, &at, &[Target::Asset], &has, kind, diags)
+                        });
+                    let (kinds, assets) = (&world.book.kinds, &mut world.book.assets);
+                    let (places, assets) = (&mut world.book.places, assets);
+                    let asset = &mut assets[id];
+                    let place = &mut places[asset.place];
+                    defaults.apply(kinds, kind, &mut path, |assign| match assign {
+                        Assign::PartOf(_) => asset.set(assign),
+                        _ => place.set(assign),
+                    });
+                    for assign in &own {
+                        match assign {
+                            Assign::PartOf(_) => asset.set(assign),
+                            _ => place.set(assign),
+                        }
+                    }
+                    let kind = &kinds[kind];
+                    place.deferred = kind.deferred;
+                    place.basis = kind.basis.unwrap_or(if kind.deferred {
+                        Basis::Zero
+                    } else {
+                        Basis::Cost
+                    });
+                    place.claim = kind.claim;
+                }
+                diagnose_asset_cycles(&mut world.book.assets, &world.book.names, diags);
             }
             Target::Kind => unreachable!(),
         }
@@ -1455,9 +1345,30 @@ fn read_builtin_lines<'s>(
 ) -> Vec<Assign> {
     let mut assigns = Vec::new();
     for line in at.lines {
-        if !BUILTINS.iter().any(|(name, owners, _)| {
-            *name == line.name.0 && owners.iter().any(|owner| targets.contains(owner))
-        }) {
+        if line.name.0 == "has" {
+            continue;
+        }
+        if line.name.0 == "owner" {
+            if targets.len() != 1
+                || !matches!(targets[0], Target::Entity | Target::Place | Target::Asset)
+            {
+                diags.push(
+                    Diagnostic::error("unknown-property", "`owner` is not a property of this kind")
+                        .label(line.loc, "owner is set on an entity, account, or asset"),
+                );
+            }
+            continue;
+        }
+        if !BUILTINS.iter().any(|(name, _, _)| *name == line.name.0) {
+            continue;
+        }
+        if targets.contains(&Target::Kind) && targets.iter().any(|target| *target == Target::Asset)
+            && line.name.0 == "part"
+        {
+            diags.push(
+                Diagnostic::error("kind-property-target", "`part` is specific to an asset")
+                    .label(line.loc, "write this under an `asset`, not its `kind`"),
+            );
             continue;
         }
         match read_line(world, at, line, targets, has, kind) {
@@ -1466,6 +1377,56 @@ fn read_builtin_lines<'s>(
         }
     }
     assigns
+}
+
+/// Asset `part of` edges are followed by the engine when it walks an asset's
+/// ancestry. Diagnose and cut a cycle here so that traversal stays bounded.
+fn diagnose_asset_cycles(
+    assets: &mut axiom_core::Arena<Asset>,
+    names: &axiom_core::Interner<'_>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let mut state = vec![0u8; assets.len()];
+    let ids: Vec<_> = assets.ids().collect();
+    for start in ids {
+        let mut path = Vec::new();
+        let mut current = Some(start);
+        while let Some(id) = current {
+            match state[id.index()] {
+                0 => {
+                    state[id.index()] = 1;
+                    path.push(id);
+                    current = assets[id].part_of.map(|parent| parent.value);
+                }
+                1 => {
+                    let from = path.iter().position(|&member| member == id).unwrap_or(0);
+                    let members = &path[from..];
+                    let route = members
+                        .iter()
+                        .chain(members.first())
+                        .map(|member| names.name(assets[*member].name))
+                        .collect::<Vec<_>>();
+                    let edge = *path.last().expect("a cycle has a preceding edge");
+                    let part = assets[edge].part_of.take();
+                    let mut diagnostic = Diagnostic::error(
+                        "asset-part-cycle",
+                        format!("asset `{}` is part of itself", route[0]),
+                    )
+                    .note(format!("the chain is {}", route.join(" -> ")))
+                    .help("make one asset a whole, outside this part-of chain");
+                    if let Some(part) = part {
+                        diagnostic = diagnostic.label(part.loc, "this part-of relationship closes the cycle");
+                    }
+                    diags.push(diagnostic);
+                    break;
+                }
+                _ => break,
+            }
+        }
+        for id in path {
+            state[id.index()] = 2;
+        }
+    }
 }
 
 fn native_system_currencies<'a, 's>(
@@ -1972,7 +1933,6 @@ fn is_builtin_line(name: &str) -> bool {
             | "select"
             | "opened"
             | "closed"
-            | "budget"
             | "liquidity"
             | "via"
             | "lives"
@@ -1989,17 +1949,11 @@ fn is_builtin_line(name: &str) -> bool {
             | "pays"
             | "takes"
             | "sales-tax"
-            | "shares"
             | "share"
-            | "known-as"
             | "citizen"
             | "books"
-            | "of"
             | "currency"
             | "part"
-            | "at"
-            | "also"
-            | "allowance"
     )
 }
 
@@ -2230,5 +2184,86 @@ mod native_property_tests {
                 (restore, Value::Empty, Loc::default()),
             ]
         );
+    }
+
+    #[test]
+    fn deep_kind_defaults_apply_oldest_to_nearest_and_keep_the_nearest_source() {
+        let mut names = axiom_core::Interner::default();
+        let property = names.intern("rate");
+        let kinds = (0..3)
+            .map(|at| Kind {
+                name: names.intern(["base", "middle", "leaf"][at]),
+                sort: Sort::Thing,
+                system: None,
+                restricted: false,
+                deferred: false,
+                basis: None,
+                claim: false,
+                select: None,
+                liquidity: None,
+                purpose: None,
+                pays: None,
+                takes: Box::default(),
+                sales_tax: None,
+                shares: Box::default(),
+                has: Box::default(),
+                props: Box::default(),
+                laws: Box::default(),
+                doc: None,
+                loc: None,
+            })
+            .collect::<Vec<_>>();
+        let (tree, ids) = Tree::build(kinds, &[None, Some(0), Some(1)]).unwrap();
+        let mut defaults = Defaults::empty(3);
+        for (at, value) in [10, 20, 30].into_iter().enumerate() {
+            defaults.by_kind[at].push(Assign::Prop(Prop {
+                name: property,
+                value: Value::Num(Ratio::int(value)),
+                since: Day::MIN,
+                loc: Some(Loc::new(axiom_core::FileId(0), at as u32, at as u32 + 1)),
+            }));
+        }
+
+        let mut path = Vec::new();
+        let mut props = Box::<[Prop]>::default();
+        defaults.apply(&tree, ids[2], &mut path, |assign| {
+            if let Assign::Prop(prop) = assign {
+                put(&mut props, *prop);
+            }
+        });
+
+        assert_eq!(path, [ids[0], ids[1], ids[2]]);
+        assert_eq!(props.len(), 1);
+        assert_eq!(props[0].value, Value::Num(Ratio::int(30)));
+        assert_eq!(props[0].loc, Some(Loc::new(axiom_core::FileId(0), 2, 3)));
+    }
+
+    #[test]
+    fn asset_part_cycles_are_reported_and_cut_before_engine_walks() {
+        let mut names = axiom_core::Interner::default();
+        let a_name = names.intern("a");
+        let b_name = names.intern("b");
+        let mut assets = axiom_core::Arena::new();
+        let empty = |name| Asset {
+            name,
+            kind: Id::new(0),
+            owner: Id::new(0),
+            place: Id::new(0),
+            unit: Id::new(0),
+            part_of: None,
+            props: Box::default(),
+            doc: None,
+            loc: Loc::default(),
+        };
+        let a = assets.push(empty(a_name));
+        let b = assets.push(empty(b_name));
+        assets[a].part_of = Some(At { value: b, loc: Loc::default() });
+        assets[b].part_of = Some(At { value: a, loc: Loc::default() });
+
+        let mut diagnostics = Vec::new();
+        diagnose_asset_cycles(&mut assets, &names, &mut diagnostics);
+
+        assert_eq!(diagnostics.iter().filter(|diag| diag.code == "asset-part-cycle").count(), 1);
+        assert!(assets.ids().any(|id| assets[id].part_of.is_none()));
     }
 }
