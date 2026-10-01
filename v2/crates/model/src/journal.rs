@@ -415,6 +415,11 @@ pub struct Txn {
     pub loc: Loc,
 }
 
+/// An id used only by contract template flows before an occurrence is
+/// instantiated. It is deliberately outside the transaction arena; engines
+/// must replace it before flow lookup or ledger insertion.
+pub const TEMPLATE_TXN: Id<Txn> = Id::new(u32::MAX);
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Waive {
     pub loc: Loc,

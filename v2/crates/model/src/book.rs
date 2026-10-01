@@ -693,8 +693,9 @@ pub struct TemplateProgram {
 /// `Terms.program` and are evaluated for each occurrence.
 #[derive(Clone, PartialEq, Debug)]
 pub struct TemplateFlow {
-    /// The header endpoints and metadata. The typed quantities below specify
-    /// how each side is produced.
+    /// The header endpoints and metadata. `txn` is [`crate::journal::TEMPLATE_TXN`]
+    /// until instantiation; engines replace it before reading transaction data.
+    /// The typed quantities below specify how each side is produced.
     pub flow: Flow,
     /// The header quantities on both sides; exchanges may use two units.
     pub out: TemplateQuantity,
