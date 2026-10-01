@@ -26,7 +26,7 @@ pub(crate) fn view_with_lens<'s>(
     value: bool,
     monthly: bool,
 ) -> Result<Report<'s>, Diagnostic> {
-    let (book, at) = (lens.book, lens.day);
+    let (book, at) = (lens.book(), lens.day);
     let selection = Selection::new(book, globs)?;
     let snapshots = Snapshots::of(lens, run, &column_days(book, at, monthly), value);
 
@@ -72,7 +72,7 @@ pub struct NetWorth {
 impl NetWorth {
     /// The books on `snapshots`' `column`, at the lens's prices.
     pub fn of(lens: Lens, snapshots: &Snapshots, column: usize) -> NetWorth {
-        let book = lens.book;
+        let book = lens.book();
         let side = |class: Class| -> Valued {
             let mut basket = Basket::default();
             for root in book.places.roots().filter(|&root| book.places[root].class == class) {
@@ -188,7 +188,7 @@ fn push_place<'s>(
     snapshots: &Snapshots,
     value: bool,
 ) -> usize {
-    let book = lens.book;
+    let book = lens.book();
     let baskets: Vec<Basket> =
         (0..snapshots.days().len()).map(|column| snapshots.subtree(book, column, place)).collect();
     let (class, sign) = (book.places[place].class, lens.display_sign(place));
@@ -263,7 +263,7 @@ fn native_lines<'s>(book: &'s Book<'_>, sign: i64, baskets: &[Basket]) -> Vec<Li
 /// One line valuing everything priceable in the base currency, then a muted
 /// line for each commodity that has no price.
 fn market_lines<'s>(lens: Lens<'s, '_, '_, '_>, class: Class, sign: i64, days: &[Day], baskets: &[Basket]) -> Vec<Line<'s>> {
-    let book = lens.book;
+    let book = lens.book();
     let valued: Vec<Valued> =
         baskets.iter().zip(days).map(|(basket, &day)| basket.value(lens.on(day), class)).collect();
     let mut lines = Vec::new();
@@ -292,7 +292,7 @@ fn amount_cell<'s>(book: &'s Book<'_>, qty: Qty, unit: Id<Commodity>, sign: i64)
 // ─── Net worth ──────────────────────────────────────────────────────────────
 
 fn net_worth_section<'s>(lens: Lens<'s, '_, '_, '_>, snapshots: &Snapshots) -> Section<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let worths: Vec<NetWorth> = snapshots
         .days()
         .iter()

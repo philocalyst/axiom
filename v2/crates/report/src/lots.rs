@@ -16,7 +16,7 @@ pub(crate) fn view_from<'h, 's>(
     scope: Option<axiom_core::Id<Place>>,
     holdings: impl IntoIterator<Item = &'h Holding>,
 ) -> Report<'s> {
-    let (book, at) = (lens.book, lens.day);
+    let (book, at) = (lens.book(), lens.day);
 
     let mut section = Section::new([
         Column::left("Place"),
@@ -73,7 +73,7 @@ pub(crate) fn view_from<'h, 's>(
 }
 
 fn row<'s>(lens: Lens<'s, '_, '_, '_>, holding: &Holding, lot: &Parcel, worth: Option<Qty>) -> Row<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let tie = lot
         .tied
         .map(|entity| format!("tied to {}", book.name(book.entities[entity].path)));

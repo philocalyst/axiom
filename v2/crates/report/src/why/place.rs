@@ -20,7 +20,7 @@ use crate::{Cell, Column, Report, Row, Section};
 const RECENT: usize = 8;
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let owner = book.places[place].owner;
     let name = path(book, place);
     if !lens.owns(place) {

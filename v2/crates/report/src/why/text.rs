@@ -11,7 +11,7 @@ pub fn report<'s>(
     run: &Run,
     description: &str,
 ) -> Option<Report<'s>> {
-    let book = lens.book;
+    let book = lens.book();
     let ids = postings(book, run)
         .filter(|posting| {
             lens.owns_entity(posting.flow.owner)

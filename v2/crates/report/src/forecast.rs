@@ -70,7 +70,7 @@ pub(crate) fn view_with_lens<'b, 's>(
         None,
         run,
         lens,
-        lens.book.relaxed,
+        lens.book().relaxed,
         until,
         paths,
     )
@@ -86,7 +86,7 @@ fn view_with<'p, 'b, 's>(
     until: Option<Day>,
     paths: u32,
 ) -> Report<'b> {
-    let book = lens.book;
+    let book = lens.book();
     let today = run.today;
     let until = until
         .unwrap_or_else(|| default_horizon(book, today))

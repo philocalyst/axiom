@@ -9,7 +9,7 @@ use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let asset = &book.assets[asset_id];
     let name = book.name(asset.name);
     if !lens.owns_entity(asset.owner) {

@@ -14,7 +14,7 @@ use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let mut section = Section::new([
         Column::left("Contract"),
         Column::left("Party"),
@@ -108,7 +108,7 @@ pub(crate) fn terms_cell<'s>(book: &'s Book<'_>, contract: &'s Contract, terms: 
 }
 
 fn loan_balance<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract: &Contract) -> Cell<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let Some(loan) = contract.loan else {
         return Cell::Blank;
     };

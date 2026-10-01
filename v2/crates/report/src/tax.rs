@@ -18,7 +18,7 @@ use crate::table::{cause_cell, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Option<i32>) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let year = year.unwrap_or_else(|| run.today.year());
     // An effect belongs to the year of the day it was recorded.
     let effects = run.effects.iter().filter(|effect| lens.whose.includes(effect.owner) && effect.day.year() == year);
@@ -63,7 +63,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Op
 /// The days after the run's end on which closing laws written for `whose`
 /// will judge `year`.
 fn pending_closings(lens: Lens<'_, '_, '_, '_>, run: &Run, year: i32) -> Vec<Day> {
-    let mut days = closings::days_for(lens.book, year, |rule| lens.governs(rule.subject));
+    let mut days = closings::days_for(lens.book(), year, |rule| lens.governs(rule.subject));
     days.retain(|&day| day > run.horizon);
     days
 }

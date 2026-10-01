@@ -10,7 +10,7 @@ use crate::table::{cause_cell, doc_headline, doc_lines, headline, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, id: Id<Law>) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let law = &book.laws[id];
     let violations: Vec<_> = run
         .violations

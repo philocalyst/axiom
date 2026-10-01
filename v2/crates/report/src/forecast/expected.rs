@@ -54,7 +54,7 @@ impl Expectation<'_> {
 /// Everything expected after `today` for the lens's owners: plans, and the
 /// rhythms in history that no plan already says.
 pub fn expected<'b>(lens: Lens<'b, '_, '_, '_>, run: &Run) -> Vec<Expectation<'b>> {
-    let book = lens.book;
+    let book = lens.book();
     let mut expected: Vec<_> = from_history(book, run)
         .into_iter()
         .filter(|habit| !has_ended(book, run, habit))

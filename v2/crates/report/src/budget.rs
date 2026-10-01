@@ -20,7 +20,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Opti
 /// Budgets are typed declarations on purposes. Their law id ties the report to
 /// the exact headroom readings the engine produced, including the owner scope.
 fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Period) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let periods = Periods::covering(by, at, at);
     let window = periods.window(0).days();
     let mut table = Section::new(

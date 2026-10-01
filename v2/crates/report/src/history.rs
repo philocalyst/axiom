@@ -160,7 +160,7 @@ impl Snapshots {
     /// has nothing after it, is the run's final state and needs no replay;
     /// otherwise two passes over the flows discover pairs and fill every day.
     pub fn of(lens: Lens, run: &Run, days: &[Day], valued: bool) -> Snapshots {
-        let book = lens.book;
+        let book = lens.book();
         // Holdings do not remember what flows were worth, so a valued balance
         // of a foreign commodity in an expense place needs the flows.
         let foreign =
@@ -194,17 +194,17 @@ impl Snapshots {
             .filter(|holding| lens.owns(holding.place))
             .map(|holding| (holding.place, holding.unit))
             .collect();
-        let mut snapshots = Snapshots::empty(lens.book, vec![day], pairs);
+        let mut snapshots = Snapshots::empty(lens.book(), vec![day], pairs);
         for holding in run.holdings.iter().filter(|holding| lens.owns(holding.place)) {
             let qty = lens.place_qty(holding.place, holding.qty());
-            let booked = if holding.unit == lens.book.base { qty } else { Qty::ZERO };
+            let booked = if holding.unit == lens.book().base { qty } else { Qty::ZERO };
             *snapshots.cell(0, holding.place, holding.unit) = Held { qty, booked };
         }
         snapshots
     }
 
     fn replay(lens: Lens, run: &Run, days: &[Day], valued: bool) -> Snapshots {
-        let book = lens.book;
+        let book = lens.book();
         let mut pairs: Set<_> = run
             .holdings
             .iter()
@@ -295,7 +295,7 @@ impl Snapshots {
     /// its worth at the prices of `lens`'s day.
     fn held(&mut self, lens: Lens, place: Id<Place>, moved: Amount, valued: bool) -> Held {
         let mut held = Held { qty: moved.qty, booked: Qty::ZERO };
-        if valued && !on_balance_sheet(lens.book.places[place].class) {
+        if valued && !on_balance_sheet(lens.book().places[place].class) {
             match lens.value(moved) {
                 Some(worth) => held.booked = worth,
                 None => self.unpriced += 1,

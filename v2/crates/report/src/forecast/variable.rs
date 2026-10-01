@@ -35,7 +35,7 @@ impl Variable {
 /// recognized flow is spread across the months it belongs to, so a refund
 /// offsets its purpose in the month it is recognized.
 fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
-    let book = lens.book;
+    let book = lens.book();
     let none = Variable {
         amounts: Vec::new(),
         categories: Vec::new(),
@@ -90,7 +90,7 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
 /// The first purpose beneath `spending` and this flow's signed amount, if the
 /// flow moved value and belongs to the selected owner scope.
 fn spending_purpose(lens: Lens, posting: &Posting<'_>) -> Option<(Id<Purpose>, Qty)> {
-    let book = lens.book;
+    let book = lens.book();
     let flow = posting.flow;
     if !lens.owns_entity(flow.owner) {
         return None;

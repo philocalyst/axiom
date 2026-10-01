@@ -13,7 +13,7 @@ use crate::{Cell, Column, Report, Row, Section};
 use super::trigger_words;
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, system: Id<System>) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let columns =
         [Column::left("Law"), Column::left("When"), Column::left("Counted for residents"), Column::left("Written")];
     let mut laws = Section::new(columns).headed("Laws");

@@ -15,7 +15,7 @@ use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Option<i32>) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let year = year.unwrap_or_else(|| run.today.year());
     let window = Window::containing(Period::Year, Day::from_ymd(year, 1, 1).unwrap_or(run.today)).days();
     let today = window.last().min(run.today);

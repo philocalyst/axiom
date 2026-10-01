@@ -27,7 +27,7 @@ pub(crate) fn view_with_lens<'s>(
     from: Option<Day>,
     to: Option<Day>,
 ) -> Result<Report<'s>, Diagnostic> {
-    let book = lens.book;
+    let book = lens.book();
     if let Some(contract) = place.strip_prefix("contract:") {
         let contract = resolve::contract(book, contract)?;
         return Ok(contract_register(lens, run, contract, from, to));
@@ -84,7 +84,7 @@ fn entity_view<'s>(
     from: Option<Day>,
     to: Option<Day>,
 ) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let cutoff = to.unwrap_or(run.today);
     let is_owner = book.entities[entity]
         .place
@@ -163,7 +163,7 @@ fn asset_register<'s>(
     from: Option<Day>,
     to: Option<Day>,
 ) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let asset = &book.assets[asset_id];
     let name = book.name(asset.name);
     if !lens.whose.includes(asset.owner) {
@@ -245,7 +245,7 @@ fn contract_register<'s>(
     from: Option<Day>,
     to: Option<Day>,
 ) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let contract = &book.contracts[contract_id];
     let name = book.name(contract.name);
     if !lens.whose.includes(contract.owner) {
@@ -383,7 +383,7 @@ fn section_with_sign<'s>(
     to: Option<Day>,
     sign: i64,
 ) -> Section<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let steps = steps(lens, run, place, to.unwrap_or(run.today));
     let split = from.map_or(0, |from| steps.partition_point(|step| step.day < from));
     let shown =
@@ -514,7 +514,7 @@ fn steps<'a>(
     place: Id<Place>,
     cutoff: Day,
 ) -> Vec<Step<'a>> {
-    let book = lens.book;
+    let book = lens.book();
     let flows = book.touching[place].iter().flat_map(|&id| {
         let posting = Posting::at(book, run, id);
         let in_scope = lens.owns(place);

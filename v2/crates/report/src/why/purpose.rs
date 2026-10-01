@@ -21,7 +21,7 @@ pub fn report<'s>(
     run: &Run,
     target: &str,
 ) -> Result<Report<'s>, axiom_core::Diagnostic> {
-    let book = lens.book;
+    let book = lens.book();
     let purpose = book.purpose(target).map_err(|_| {
         resolve::nothing_named(
             "purpose",

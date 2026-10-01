@@ -119,7 +119,7 @@ pub(crate) fn target_with_lens<'s>(
     run: &Run,
     text: &str,
 ) -> Result<Report<'s>, Diagnostic> {
-    let book = lens.book;
+    let book = lens.book();
     if let Some(contract) = text.strip_prefix("contract:") {
         let contract = resolve::contract(book, contract)?;
         return Ok(contract::report(lens, run, contract));
@@ -171,7 +171,7 @@ pub(crate) fn explain_with_lens<'s>(
     run: &Run,
     found: Found,
 ) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     match found {
         Found::Place(place) => place::report(lens, run, place),
         Found::Entity(entity) => entity::report(lens, run, entity),
@@ -187,7 +187,7 @@ pub(crate) fn line_with_lens<'s>(
     run: &Run,
     at: axiom_core::Loc,
 ) -> Report<'s> {
-    line::line(lens.book, run, &lens.whose, at)
+    line::line(lens.book(), run, &lens.whose, at)
 }
 
 /// A name is a place if it can be one, else an entity, a system, a law, or

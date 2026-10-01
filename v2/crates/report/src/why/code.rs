@@ -18,7 +18,7 @@ pub fn report<'s>(
     run: &Run,
     pattern: &str,
 ) -> Result<Report<'s>, Diagnostic> {
-    let book = lens.book;
+    let book = lens.book();
     let marked = |code: Sym| glob(pattern, book.name(code));
     let flows: Vec<_> = postings(book, run)
         .filter(|posting| {

@@ -307,7 +307,7 @@ fn views<'s>(
     run: &Run,
     query: &Query,
 ) -> Result<Report<'s>, Diagnostic> {
-    let book = lens.book;
+    let book = lens.book();
     match query {
         Query::Balance {
             globs,

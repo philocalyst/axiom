@@ -65,7 +65,7 @@ pub(crate) fn project_runtime<'p, 'b, 's>(
     details: &Arena<RuntimeDetail>,
     checkpoints: &[Day],
 ) -> Trace<'p, 'b, 's> {
-    let book = lens.book;
+    let book = lens.book();
     let horizon = checkpoints.last().copied().unwrap_or(today);
     let mut ledger = plan.start(Options {
         today: horizon,
@@ -171,8 +171,8 @@ fn trace_from<'p, 'b, 's>(
 /// owed on debts with no term (a card, a tab). A loan with a term is paid by
 /// the payments the projection already makes.
 fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
-    let place = &lens.book.places[holding.place];
-    let has_term = lens.known.maturity.is_some_and(|name| {
+    let place = &lens.book().places[holding.place];
+    let has_term = lens.known().maturity.is_some_and(|name| {
         place
             .props
             .iter()
@@ -192,7 +192,7 @@ fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qt
     let on_sheet = |holding: &&Holding| {
         lens.owns(holding.place)
             && matches!(
-                lens.book.places[holding.place].class,
+                lens.book().places[holding.place].class,
                 Class::Asset | Class::Debt
             )
     };
@@ -209,7 +209,7 @@ fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qt
         .amounts()
         .filter_map(|amount| {
             Some(compound(
-                lens.book,
+                lens.book(),
                 amount.unit,
                 lens.value(amount)?,
                 months,
@@ -238,7 +238,7 @@ fn within_means(lens: Lens, ledger: &Ledger, mut flow: RuntimeFlow) -> Option<Ru
     );
     let room = if held_back {
         Some(ledger.balance(from, out_unit))
-    } else if lens.book.places[to].class == Class::Debt {
+    } else if lens.book().places[to].class == Class::Debt {
         Some(-ledger.balance(to, arrive_unit))
     } else {
         None
@@ -264,7 +264,7 @@ fn note_overdrafts(
     flow: &Flow,
     overdrawn: &mut BTreeMap<Id<Place>, Overdraft>,
 ) {
-    let book = lens.book;
+    let book = lens.book();
     let cash = |&place: &Id<Place>| lens.liquidity(place, book.base) == Some(Liquidity::Cash);
     for place in [flow.from, flow.to].into_iter().filter(cash) {
         let balance = ledger.balance(place, book.base);
@@ -344,7 +344,7 @@ mod tests {
         let checkpoint = view.checkpoint();
 
         let whose = crate::lens::Whose::default();
-        let lens = Lens::with_plan(&house.book, &whose, tomorrow, plan.known(), plan.sides());
+        let lens = Lens::new(&plan, &whose, tomorrow);
         let resumed = project_from(
             &plan,
             &checkpoint,

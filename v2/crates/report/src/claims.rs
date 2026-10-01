@@ -69,7 +69,7 @@ pub fn open<'h>(
     run: &Run,
     holdings: impl IntoIterator<Item = &'h Holding>,
 ) -> Vec<Claim> {
-    let book = lens.book;
+    let book = lens.book();
     let claimed = holdings
         .into_iter()
         .filter(|holding| book.places[holding.place].claim && lens.owns(holding.place));
@@ -104,7 +104,7 @@ pub fn open<'h>(
 /// (a bill) names its debt by its first code, and a flow into it (a payment)
 /// settles the debts of the codes it names.
 pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim> {
-    let book = lens.book;
+    let book = lens.book();
     let mut debts: BTreeMap<Sym, Claim> = BTreeMap::new();
     for &id in &book.touching[place] {
         let posting = Posting::at(book, run, id);
@@ -174,7 +174,7 @@ pub(crate) fn view_from<'h, 's>(
 /// Claims with what each is, when it was made and how old it is, when it is due
 /// and whether it is late, and what they come to.
 pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Claim]) -> Section<'s> {
-    let (book, at) = (lens.book, lens.day);
+    let (book, at) = (lens.book(), lens.day);
     let columns = ["Counterparty", "What"].map(Column::left).into_iter();
     let columns = columns
         .chain([Column::right("Left")])

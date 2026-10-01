@@ -45,7 +45,7 @@ impl Term {
 }
 
 pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Option<i32>) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let year = year.unwrap_or_else(|| run.today.year());
     // Money leaving at its own basis (a grant spent, a deposit returned) realized nothing.
     let realized = |gain: &&Gain| gain.unit != book.base || gain.proceeds != gain.basis;

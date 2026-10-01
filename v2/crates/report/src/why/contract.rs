@@ -8,7 +8,7 @@ use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: axiom_core::Id<Contract>) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let contract = &book.contracts[contract_id];
     let name = book.name(contract.name);
     if !lens.owns_entity(contract.owner) {

@@ -29,7 +29,7 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 const SOON: Span = Span::days(30);
 
 pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Report<'s> {
-    let (book, at) = (lens.book, lens.day);
+    let (book, at) = (lens.book(), lens.day);
     // Deadlines fire up to the day the year is judged, so the laws that figure
     // its tax answer too, whether they run at its end or on a closing day.
     let horizon = closings::judged_through(book, at);
@@ -41,7 +41,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
 
 /// Builds the view from the shared report context's checkpoint fork.
 pub(crate) fn from_ledger<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ledger: &Ledger, horizon: Day) -> Report<'s> {
-    let (book, at) = (lens.book, lens.day);
+    let (book, at) = (lens.book(), lens.day);
 
     let holdings: Vec<&Holding> = ledger.holdings().collect();
     let (mut cash, mut slow) = (Vec::new(), Vec::new());
@@ -72,7 +72,7 @@ pub(crate) fn from_ledger<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, ledger: &Le
 // ─── What you can spend ─────────────────────────────────────────────────────
 
 fn spendable_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, cash: &[&Holding], claims: &[Claim]) -> Section<'s> {
-    let (book, at) = (lens.book, lens.day);
+    let (book, at) = (lens.book(), lens.day);
     let mut section = Section::new([Column::left("In hand"), Column::right("Amount")]).headed("What you can spend");
     let mut unpriced = 0;
     let mut line = |section: &mut Section<'s>, label: String, worth: Option<Qty>, depth: usize| match worth {
@@ -138,7 +138,7 @@ fn spendable_section<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, cash: &[&Holding
 
 /// A holding's place, with its own amount when it is not in the base currency.
 fn place_label(lens: Lens, holding: &Holding) -> String {
-    let book = lens.book;
+    let book = lens.book();
     match holding.unit == book.base {
         true => path(book, holding.place).to_string(),
         false => format!("{} ({})", path(book, holding.place), book.show(Amount::new(holding.qty(), holding.unit))),
@@ -148,7 +148,7 @@ fn place_label(lens: Lens, holding: &Holding) -> String {
 /// What falls due within a month: obligations the laws recorded, and debts
 /// with a due day.
 fn due_soon(lens: Lens, run: &Run, claims: &[Claim]) -> Vec<(String, Qty)> {
-    let (book, at) = (lens.book, lens.day);
+    let (book, at) = (lens.book(), lens.day);
     let soon = |day: Day| day >= at && day <= at.add(SOON);
     let recorded = run.effects.iter().filter(|effect| effect.day <= at && lens.whose.includes(effect.owner));
     let owed = recorded.filter_map(|effect: &Effect| {
@@ -210,7 +210,7 @@ impl<'h> Reach<'h> {
         baseline: &Owing,
         horizon: Day,
     ) -> Reach<'h> {
-        let book = lens.book;
+        let book = lens.book();
         let held = Amount::new(holding.qty(), holding.unit);
         let value = lens.value(held);
         let mut reach = Reach { holding, liquid_in, value, cost: Qty::ZERO, because: String::new(), blocked: false };
@@ -257,7 +257,7 @@ impl<'h> Reach<'h> {
 /// One line per holding that is not cash. `judged` is the day the books were
 /// run on to.
 fn reach_section<'s>(lens: Lens<'s, '_, '_, '_>, reach: &[Reach], to: Option<Id<Place>>, judged: Day) -> Section<'s> {
-    let (book, at) = (lens.book, lens.day);
+    let (book, at) = (lens.book(), lens.day);
     let columns = ["Holding", "Liquid in"].map(Column::left).into_iter();
     let columns = columns.chain(["Value", "Cost", "Net"].map(Column::right)).chain([Column::left("Because")]);
     let mut section = Section::new(columns).headed("What it would take to reach the rest");

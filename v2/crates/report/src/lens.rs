@@ -92,11 +92,8 @@ pub enum Liquidity {
 /// The books on one day, seen for one owner scope.
 #[derive(Clone, Copy)]
 pub struct Lens<'b, 's, 'w, 'p> {
-    pub(crate) book: &'b Book<'s>,
     pub whose: &'w Whose,
     pub day: Day,
-    /// Names and kinds looked up once by the report context or this lens.
-    pub known: Known,
     /// The exact plan that owns the book view, ownership map and display signs.
     plan: &'p Plan<'b, 's>,
 }
@@ -109,13 +106,17 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
         whose: &'w Whose,
         day: Day,
     ) -> Lens<'b, 's, 'w, 'p> {
-        Lens {
-            book: plan.book(),
-            whose,
-            day,
-            known: plan.known(),
-            plan,
-        }
+        Lens { whose, day, plan }
+    }
+
+    /// The immutable model owned by this lens's exact prepared plan.
+    pub fn book(&self) -> &'b Book<'s> {
+        self.plan.book()
+    }
+
+    /// Names and kinds resolved with the same plan as this lens.
+    pub fn known(&self) -> Known {
+        self.plan.known()
     }
 
     /// The same books at another day's prices.
@@ -142,8 +143,8 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
         match subject {
             Subject::Place(place) => self.owns(place),
             Subject::Entity(entity) => self.owns_entity(entity),
-            Subject::Asset(asset) => self.owns_entity(self.book.assets[asset].owner),
-            Subject::Contract(contract) => self.owns_entity(self.book.contracts[contract].owner),
+            Subject::Asset(asset) => self.owns_entity(self.book().assets[asset].owner),
+            Subject::Contract(contract) => self.owns_entity(self.book().contracts[contract].owner),
         }
     }
 
@@ -151,9 +152,9 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
         match subject {
             Subject::Place(place) => self.place_qty(place, qty),
             Subject::Entity(entity) => self.entity_qty(entity, qty),
-            Subject::Asset(asset) => self.entity_qty(self.book.assets[asset].owner, qty),
+            Subject::Asset(asset) => self.entity_qty(self.book().assets[asset].owner, qty),
             Subject::Contract(contract) => {
-                self.entity_qty(self.book.contracts[contract].owner, qty)
+                self.entity_qty(self.book().contracts[contract].owner, qty)
             }
         }
     }
@@ -187,8 +188,8 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
         root: axiom_model::PurposeRoot,
     ) -> Option<axiom_model::Dir> {
         axiom_engine::purpose_direction(
-            self.book.places[from].class != Class::Outside && self.owns(from),
-            self.book.places[to].class != Class::Outside && self.owns(to),
+            self.book().places[from].class != Class::Outside && self.owns(from),
+            self.book().places[to].class != Class::Outside && self.owns(to),
             root,
         )
     }
@@ -212,7 +213,7 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
     /// The same, in millionths of a base quantum, so that values can be added
     /// before anything is rounded.
     fn exact(self, amount: Amount) -> Option<i128> {
-        let book = self.book;
+        let book = self.book();
         if amount.unit == book.base || amount.qty.is_zero() {
             return Some(i128::from(amount.qty.0) * POW10[EXTRA_DIGITS]);
         }
@@ -232,10 +233,10 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
     }
 
     fn is_currency(self, unit: Id<Commodity>) -> bool {
-        let book = self.book;
+        let book = self.book();
         unit == book.base
             || self
-                .known
+                .known()
                 .currency
                 .is_some_and(|kind| book.is_a(book.commodities[unit].kind, kind))
     }
@@ -243,7 +244,8 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
     /// How spendable `unit` is in `place`, from what kind of place it is and
     /// what kind of thing it is. Only assets are spendable at all.
     pub fn liquidity(self, place: Id<Place>, unit: Id<Commodity>) -> Option<Liquidity> {
-        let (book, place) = (self.book, &self.book.places[place]);
+        let book = self.book();
+        let place = &book.places[place];
         if place.class != Class::Asset {
             return None;
         }

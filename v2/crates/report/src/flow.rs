@@ -28,7 +28,7 @@ pub(crate) fn view_by_party_with_lens<'s>(
     from: Option<Day>,
     cutoff: Day,
 ) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let periods = match from {
         Some(from) => Periods::covering(Period::Month, from, cutoff),
         None => {
@@ -227,7 +227,7 @@ fn purpose_view<'s>(
     by: Period,
     from: Option<Day>,
 ) -> Report<'s> {
-    let (book, cutoff) = (lens.book, lens.day);
+    let (book, cutoff) = (lens.book(), lens.day);
     let periods = match from {
         Some(from) => Periods::covering(by, from, cutoff),
         None => {
@@ -468,7 +468,7 @@ fn measure_section<'s>(
     periods: Periods,
     cutoff: Day,
 ) -> Option<Section<'s>> {
-    let book = lens.book;
+    let book = lens.book();
     // Store period rows contiguously rather than allocating a Vec for each
     // owner/purpose/unit combination.
     let mut totals: BTreeMap<MeasureKey, usize> = BTreeMap::new();
@@ -565,8 +565,8 @@ pub(crate) fn movement_in_base(
     root: Option<PurposeRoot>,
 ) -> Option<Qty> {
     let flow = posting.flow;
-    let from_outside = lens.book.places[flow.from].class == Class::Outside;
-    let to_outside = lens.book.places[flow.to].class == Class::Outside;
+    let from_outside = lens.book().places[flow.from].class == Class::Outside;
+    let to_outside = lens.book().places[flow.to].class == Class::Outside;
     let inbound = from_outside && !to_outside;
     let amount = if inbound {
         posting.arrive_in_base(lens)
@@ -604,7 +604,7 @@ fn purpose_values(totals: &[Qty], periods: usize, purpose: Id<Purpose>) -> &[Qty
 }
 
 fn first_activity(lens: Lens<'_, '_, '_, '_>, cutoff: Day) -> Day {
-    let book = lens.book;
+    let book = lens.book();
     book.flows
         .iter()
         .filter(|(_, flow)| lens.owns_entity(flow.owner))
@@ -643,7 +643,7 @@ fn add_purpose_facts<'s>(
     purpose: Id<Purpose>,
     values: &[Qty],
 ) {
-    let book = lens.book;
+    let book = lens.book();
     let item = &book.purposes[purpose];
     let name = book.name(item.name);
     add_facts(
@@ -672,9 +672,9 @@ fn add_facts<'s>(
         section.fact(
             concept,
             of,
-            lens.whose.label(lens.book),
+            lens.whose.label(lens.book()),
             crate::When::During(periods.window(index).days()),
-            crate::Money::base(lens.book, amount),
+            crate::Money::base(lens.book(), amount),
         );
     }
 }
@@ -688,7 +688,7 @@ fn add_object_facts<'s>(
     root: PurposeRoot,
 ) {
     let concept = root_concept(root);
-    let book = lens.book;
+    let book = lens.book();
     for (index, &amount) in values
         .iter()
         .enumerate()

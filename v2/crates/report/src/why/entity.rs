@@ -16,7 +16,7 @@ use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let name = book.name(book.entities[entity].path);
 
     let mut places = Section::new([Column::left("Place"), Column::right("Holds")]).headed("Places");

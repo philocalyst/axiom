@@ -11,7 +11,7 @@ use crate::Report;
 use crate::gains;
 
 pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, name: &str) -> Report<'s> {
-    let book = lens.book;
+    let book = lens.book();
     let effects: Vec<&Effect> = run
         .effects
         .iter()
