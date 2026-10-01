@@ -190,8 +190,8 @@ impl<'s> Parser<'s> {
                 Ok(Effect::Count { amount, name })
             }
             "carry" => {
-                self.expect_word("to", "expected-to", "`to` and the commodity whose basis takes it")?;
-                let to = self.unit("expected-commodity", "the commodity, such as `VTI`")?;
+                self.expect_word("to", "expected-to", "`to` and the unit expression whose commodity basis takes it")?;
+                let to = self.expression()?;
                 self.keyword("within")?;
                 let within = |tok| if let Tok::Span(span) = tok { Some(span) } else { None };
                 Ok(Effect::Carry { amount, to, within: self.take(within, "expected-span", "a span such as `30d`")? })

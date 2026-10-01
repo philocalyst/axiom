@@ -1972,7 +1972,8 @@ fn children(file: &File, kind: &ExprKind) -> Vec<ExprId> {
 fn effect_roots(effect: &Effect) -> Vec<ExprId> {
     match effect {
         Effect::Owe { amount, due, .. } => [*amount].into_iter().chain(*due).collect(),
-        Effect::Count { amount, .. } | Effect::Consume(amount) | Effect::Carry { amount, .. } => vec![*amount],
+        Effect::Count { amount, .. } | Effect::Consume(amount) => vec![*amount],
+        Effect::Carry { amount, to, .. } => vec![*amount, *to],
     }
 }
 
@@ -2251,7 +2252,18 @@ fn laws_may_fire_on_flows_and_consume_or_carry() {
     let wash = laws.iter().find(|law| law.name.0 == "wash-sale").unwrap();
     let StepKind::Require { otherwise, .. } = file[wash.steps][1].kind else { panic!("a require that carries a loss") };
     let [Effect::Carry { to, within, .. }] = file[otherwise] else { panic!("one effect: carry") };
-    assert_eq!((to.0, within), ("VTI", Span::days(30)));
+    assert_eq!(show(&file, to, EXAMPLE), "VTI");
+    assert_eq!(within, Span::days(30));
+
+    let dynamic = parse_clean("law l\n  on flow\n  carry -gain to amount.unit within 30d\n");
+    let law = dynamic.iter::<Law>().next().unwrap();
+    let [Step { kind: StepKind::Effect(Effect::Carry { amount, to, within }), .. }] = &dynamic[law.steps][..] else {
+        panic!("one dynamic-unit carry effect")
+    };
+    assert_eq!(show(&dynamic, *amount, dynamic.src), "(-gain)");
+    assert_eq!(show(&dynamic, *to, dynamic.src), "amount.unit");
+    assert_eq!(&dynamic.src[dynamic.exprs[*to].loc.range()], "amount.unit");
+    assert_eq!(*within, Span::days(30));
 
     only_error("law l\n  on flow\n  consume\n", "expected-expression");
     only_error("law l\n  on flow\n  carry a to VTI\n", "expected-keyword");

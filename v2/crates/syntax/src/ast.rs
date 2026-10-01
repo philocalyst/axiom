@@ -1390,10 +1390,11 @@ pub enum Effect<'s> {
     /// `consume EXPR`: lowers the basis of the governed asset (or its part)
     /// by `amount`: depreciation, depletion.
     Consume(ExprId),
-    /// `carry EXPR to UNIT within SPAN`: holds a disallowed loss and adds it to
-    /// the basis of the nearest acquisition of `to` within `within`, before or
-    /// after (a wash sale).
-    Carry { amount: ExprId, to: Name<'s>, within: Span },
+    /// `carry EXPR to UNIT_EXPR within SPAN`: holds a disallowed loss and
+    /// adds it to the basis of the nearest acquisition of the commodity named
+    /// by `to` within `within`, before or after (a wash sale). The model checks
+    /// its unit type in context; the expression's `Loc` preserves provenance.
+    Carry { amount: ExprId, to: ExprId, within: Span },
 }
 
 // ─── Expressions ────────────────────────────────────────────────────────────

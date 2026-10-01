@@ -666,8 +666,11 @@ law NAME [overrides NAME]
   owe EXPR to ENTITY [by EXPR] [as NAME]
   count EXPR as NAME
   consume EXPR                     // on an asset: lowers its basis (depreciation)
-  carry EXPR to UNIT within SPAN   // a disallowed loss joins a nearby purchase's basis
+  carry EXPR to UNIT_EXPR within SPAN   // a disallowed loss joins a nearby purchase's basis
 ```
+
+`UNIT_EXPR` is a full expression whose checked type is `unit`: either a written
+commodity such as `VTI`, or a computed unit such as `amount.unit`.
 
 | trigger | fires | context |
 |---------|-------|---------|
