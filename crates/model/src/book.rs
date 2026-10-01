@@ -602,9 +602,9 @@ pub struct Terms {
     pub estimate: bool,
     /// `due 5d else + 5% #late-fee`.
     pub due: Option<Deadline>,
-    /// How late an occurrence may come and still keep its due day. Default:
-    /// half a cadence.
-    pub grace: Span,
+    /// Explicit tolerance for a late occurrence. `None` derives half the
+    /// actual adjacent due-date interval for this schedule.
+    pub grace: Option<Span>,
     /// `for last month`: each occurrence recognized over a period relative to
     /// its day.
     pub period: Option<Relative>,

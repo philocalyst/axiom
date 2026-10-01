@@ -484,6 +484,8 @@ contract c with p
     let day = Day::from_ymd(2026, 1, 1).unwrap();
     let regular = contract.terms.as_ref().unwrap().at(day);
     let standing = contract.standing.as_ref().unwrap().at(day);
+    assert_eq!(regular.grace, None);
+    assert_eq!(standing.grace, None);
     assert_eq!(regular.also, standing.also);
     assert_eq!(regular.also.len(), 1);
 
@@ -631,7 +633,10 @@ contract flat with greystar
         axiom_core::Day::from_ymd(2026, 2, 6).unwrap(),
     )
     .unwrap();
-    assert_eq!(contract.terms.as_ref().unwrap().at(due_window.first()).grace, axiom_core::Span::days(3));
+    assert_eq!(
+        contract.terms.as_ref().unwrap().at(due_window.first()).grace,
+        Some(axiom_core::Span::days(3))
+    );
     let terms = contract.terms.as_ref().unwrap().at(due_window.first());
     assert_eq!(terms.anchor, axiom_core::Day::MIN);
     assert_eq!(terms.every, axiom_model::Cadence::Every(axiom_core::Span::months(1)));

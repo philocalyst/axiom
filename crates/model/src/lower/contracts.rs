@@ -640,10 +640,7 @@ fn lower_terms<'a, 's>(
         ast::Cadence::Every(span) => Cadence::Every(span),
         ast::Cadence::TwiceMonthly => Cadence::TwiceMonthly,
     };
-    let default_grace = match every {
-        Cadence::Every(span) => span.months.saturating_mul(31).saturating_add(span.days) / 2,
-        Cadence::TwiceMonthly => 7,
-    };
+    let grace = grace_property(file, written.node.props, diags)?;
     Some(Terms {
         state: TermsState::Active,
         every,
@@ -654,8 +651,7 @@ fn lower_terms<'a, 's>(
         inputs: inputs.to_vec().into_boxed_slice(),
         estimate: schedule.terms.about,
         due,
-        grace: span_property(file, written.node.props, "grace", diags)
-            .unwrap_or_else(|| Span::days(default_grace)),
+        grace,
         period: relative_property(file, written.node.props, diags),
         covers: coverage_property(file, written.node.props, diags),
         prorated: has_property(file, written.node.props, "prorated"),
@@ -1138,6 +1134,34 @@ fn span_property(
         );
     }
     value
+}
+
+fn grace_property(
+    file: &ast::File<'_>,
+    props: axiom_syntax::Many<ast::Prop<'_>>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Span>> {
+    let mut written = file[props].iter().filter(|prop| prop.name.0 == "grace");
+    let Some(first) = written.next() else {
+        return Some(None);
+    };
+    if let Some(second) = written.next() {
+        diags.push(
+            Diagnostic::error("duplicate-contract-grace", "a contract has one grace interval")
+                .label(second.loc, "a second interval cannot replace the first")
+                .context(first.loc, "the first interval is here"),
+        );
+        return None;
+    }
+    let span = span_property(file, props, "grace", diags)?;
+    if span.months < 0 || span.days < 0 {
+        diags.push(
+            Diagnostic::error("contract-grace", "a grace interval cannot be negative")
+                .label(first.loc, "write a nonnegative span such as `5d`"),
+        );
+        return None;
+    }
+    Some(Some(span))
 }
 
 fn has_property(
