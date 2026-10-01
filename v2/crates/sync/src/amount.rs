@@ -78,6 +78,9 @@ fn sign(cell: &str) -> Result<(bool, &str), Why> {
     };
     if parenthesized {
         rest = rest.trim();
+        if let Some(ch @ ('$' | '€' | '£' | '¥')) = rest.chars().next() {
+            rest = rest[ch.len_utf8()..].trim_start();
+        }
         if rest.starts_with(['+', '-', '$', '€', '£', '¥']) {
             return Err(Why::Malformed {
                 comma_decimal: false,
@@ -176,6 +179,9 @@ mod tests {
         let qty = |text: &str| amount(text, 2).ok().flatten().map(|q| q.0);
         assert_eq!(qty("1,234.56"), Some(123_456));
         assert_eq!(qty("(12.00)"), Some(-1200));
+        assert_eq!(qty("($12.00)"), Some(-1200));
+        assert_eq!(qty("(£ 12.00)"), Some(-1200));
+        assert_eq!(qty("(€12.00)"), Some(-1200));
         assert_eq!(qty("$12"), Some(1200));
         assert_eq!(qty("-$12.50"), Some(-1250));
         assert_eq!(qty("$-12.50"), Some(-1250));
@@ -189,7 +195,7 @@ mod tests {
                 "{bad}"
             );
         }
-        for bad in ["+-12", "-+12", "--12", "++12", "-$-12", "(-12)"] {
+        for bad in ["+-12", "-+12", "--12", "++12", "-$-12", "(-12)", "($-12)"] {
             assert!(matches!(amount(bad, 2), Err(Why::Malformed { .. })), "{bad}");
         }
         assert!(matches!(amount("0.005", 2), Err(Why::Precision)));
