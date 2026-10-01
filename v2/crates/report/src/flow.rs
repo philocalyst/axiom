@@ -481,7 +481,10 @@ struct MeasureKey {
 /// Events have units rather than money, so they have their own rows and facts.
 fn measure_section<'s>(lens: Lens<'s, '_, '_, '_>, periods: Periods, cutoff: Day) -> Option<Section<'s>> {
     let book = lens.book;
-    let mut totals: BTreeMap<MeasureKey, Vec<Qty>> = BTreeMap::new();
+    // Store period rows contiguously rather than allocating a Vec for each
+    // owner/purpose/unit combination.
+    let mut totals: BTreeMap<MeasureKey, usize> = BTreeMap::new();
+    let mut amounts = Vec::new();
     for measure in book.measures.iter().map(|(_, measure)| measure) {
         if measure.day > cutoff || !lens.whose.includes(measure.owner) {
             continue;
@@ -499,9 +502,12 @@ fn measure_section<'s>(lens: Lens<'s, '_, '_, '_>, periods: Periods, cutoff: Day
             owner: measure.owner,
             unit: measure.quantity.unit,
         };
-        totals
-            .entry(key)
-            .or_insert_with(|| vec![Qty::ZERO; periods.len()])[period] += measure.quantity.qty;
+        let index = *totals.entry(key).or_insert_with(|| {
+            let index = amounts.len() / periods.len();
+            amounts.resize(index * periods.len() + periods.len(), Qty::ZERO);
+            index
+        });
+        amounts[index * periods.len() + period] += measure.quantity.qty;
     }
     if totals.is_empty() {
         return None;
@@ -520,7 +526,8 @@ fn measure_section<'s>(lens: Lens<'s, '_, '_, '_>, periods: Periods, cutoff: Day
         .chain((periods.len() > 1).then(|| Column::right("Total"))),
     )
     .headed("Measures");
-    for (key, values) in totals {
+    for (key, index) in totals {
+        let values = &amounts[index * periods.len()..][..periods.len()];
         let action = match key.action {
             MeasureAction::Work => "work",
             MeasureAction::Use => "use",
