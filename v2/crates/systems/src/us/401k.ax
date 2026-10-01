@@ -24,6 +24,7 @@ use std
 kind 401k : tax-deferred
   basis zero
   liquidity 5d
+  takes pre-tax-deferral from wages
   has employer entity
 
   /// Elective deferrals are capped for each person and calendar year, across
@@ -37,7 +38,7 @@ kind 401k : tax-deferred
   /// excess.
   law deferral-limit
     on in
-    when purpose is #wages
+    when purpose is #pre-tax-deferral
     count amount as elective-deferrals
     let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[year] else if owner.age >= 50y then catch-up[year] else empty
     require value(tally(elective-deferrals), USD) <= limit[year] + extra "401(k) deferrals over the yearly limit"

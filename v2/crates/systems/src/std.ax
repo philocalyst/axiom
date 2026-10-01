@@ -48,10 +48,13 @@ kind currency : commodity
 kind security : commodity
 kind stock : security
   liquidity 1d
+  pays dividend
 kind fund : security
   liquidity 2d
+  pays dividend
 kind bond : security
   liquidity 2d
+  pays interest-income
 kind crypto : commodity
   liquidity 1d
 kind real-estate : commodity
@@ -87,7 +90,12 @@ purpose improvement : capital
 purpose purchase : capital
 purpose contribution : transfer
 purpose wages : income
+purpose pre-tax-deferral : transfer
 purpose dividend : income
+purpose claim-payout : income
+purpose software : spending
+purpose streaming : spending
+purpose fitness : spending
 purpose interest-income : income
 purpose gain : capital
 purpose tax-paid : spending
@@ -107,16 +115,21 @@ kind phone-company : merchant
 kind utility : org
   purpose utilities
 kind employer : org
-  purpose wages
+  pays wages
 kind government : org
 kind tax-authority : government
   purpose tax-paid
 kind store : merchant
 kind contractor : merchant
 kind software : merchant
+  purpose software
 kind streaming : merchant
+  purpose streaming
 kind gym : merchant
+  purpose fitness
 kind insurer : org
+  purpose insurance
+  pays claim-payout
 kind health-insurer : insurer
 kind client : org
 kind lender : org
