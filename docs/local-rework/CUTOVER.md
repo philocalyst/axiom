@@ -85,6 +85,11 @@ an agreed exception or as completed work.
 | `1a2c09f`, `e9cf758` | Sam native source fixture and independent financial oracle with source-derived inputs | Lane: all 12 Axiom files parse, 144 items, no diagnostics. Coordinator: verify11 passes. Engine agreement remains pending |
 | `c37881b`, `9e9345a`, `046c068` | Native settings/scopes, forward kind hierarchy and dimensional parameter lowering | Reviewed source checkpoints. Model tests remain blocked by old build wiring and contract API migration |
 | `ba75dde`, `86fd5d8` | Cumulative depreciation, borrowed pooled flow metadata, exact partial-lot quantities and transferred lot codes | Reviewed source and regression cases. Integrated engine tests await the native model build |
+| `983277a`, `25e112a`, `fb2af99` | Copyable text handles backed by borrowed source or a book-owned decoded string arena; explicit uninstantiated template identity | Reviewed source. Consumer lifetime migration and native template execution still pending |
+| `7c12884` | Custom property declarations, dimensional values, shared kind defaults and layered dated overrides | Reviewed source and focused regression cases. Native build wiring and integrated tests pending; review corrections remain assigned |
+| `340ee96` | Correct Sam's cumulative depreciation oracle from source dates | Coordinator: independent Python oracle passes. Engine agreement still pending |
+| `0816097`, `3c30b35` | Scoped native report metadata, explicit register targets, grouped contract descriptions and owner-scoped source queries | Reviewed source. Book-borrow lifetime migration and native report tests pending |
+| `6a80014`, `35399af`, `f430513`, `3a50d56` | Canonical sync declaration lowering, readers, typed original-currency captures and bounded matching | Reviewed source. Text adaptation, remaining reader/output corrections, Book/Run monitor binding and integrated tests pending |
 
 The six old completed implementation worktrees were clean before removal. Their
 branches and commits remain available; exact paths and heads are in
