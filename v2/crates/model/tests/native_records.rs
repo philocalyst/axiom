@@ -93,6 +93,7 @@ opening 2026-01-01
     assert_eq!(flow.mode, axiom_model::Mode::Opening);
     let jo = book.entity("jo").unwrap();
     assert_eq!(book.places[flow.to].role, axiom_model::Role::Tab(jo));
+    assert!(book.places[flow.to].claim, "claim tabs retain their built-in trait");
     assert_eq!(book.name(book.codes[flow.header_codes.start()]), "loan");
     let detail = &book.details[flow.detail.unwrap()];
     assert_eq!(detail.due, Some(Day::from_ymd(2026, 1, 20).unwrap()));
