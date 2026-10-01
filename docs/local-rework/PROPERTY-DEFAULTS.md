@@ -33,8 +33,9 @@ The fixture builds a five-kind chain. The root, an intermediate kind and a
 nearer kind set the same `nickname` property; an instance without its own value
 must receive `near`, while another instance's `instance` value takes precedence.
 The test also checks each resulting property's `Loc` against the exact source
-span of the winning line. The focused test passed, as did
-`cargo test --offline --locked --workspace --release` (400 passed, 1 ignored).
+span of the winning line. The focused test and the worker's workspace release
+tests passed. The coordinator's final aggregate totals, including doctests and
+ignored tests, are recorded in [RESULTS.md](RESULTS.md).
 
 `python3 v2/briefs/loc.py v2` counted 7,584 model and 22,327 workspace
 non-test lines before the change, and 7,621 model and 22,364 workspace lines
