@@ -173,6 +173,12 @@ pub struct Lineage<'t, T> {
     next: Option<Id<T>>,
 }
 
+impl<T> Clone for Lineage<'_, T> {
+    fn clone(&self) -> Self {
+        Self { tree: self.tree, next: self.next }
+    }
+}
+
 impl<T> Iterator for Lineage<'_, T> {
     type Item = Id<T>;
     fn next(&mut self) -> Option<Id<T>> {

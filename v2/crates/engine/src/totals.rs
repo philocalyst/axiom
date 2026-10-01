@@ -268,7 +268,7 @@ impl Watch {
             (place, subject_key(places, entities, assets, subject))
         });
         within.dedup();
-        let through = Groups::build(places, within);
+        let through = Groups::build(places, within.into_iter());
         let mut purpose_reads = Set::default();
         for law in book.laws.values() {
             for node in law.nodes.values() {

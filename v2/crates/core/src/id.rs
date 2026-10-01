@@ -113,7 +113,7 @@ impl<T> Arena<T> {
         Ids { next: 0, end: self.items.len() as u32, of: PhantomData }
     }
 
-    pub fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &T)> {
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (Id<T>, &T)> + Clone {
         self.items.iter().enumerate().map(|(i, item)| (Id::new(i as u32), item))
     }
 
@@ -232,6 +232,12 @@ pub struct Ids<T> {
     next: u32,
     end: u32,
     of: PhantomData<fn() -> T>,
+}
+
+impl<T> Clone for Ids<T> {
+    fn clone(&self) -> Self {
+        Self { next: self.next, end: self.end, of: PhantomData }
+    }
 }
 
 impl<T> Iterator for Ids<T> {

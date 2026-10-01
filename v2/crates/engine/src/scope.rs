@@ -17,7 +17,7 @@ use crate::motion::{Motion, Moves};
 
 /// The entities that own what `owner` owns: itself, what it belongs to in the
 /// entity tree, and the household it is a member of.
-fn owners<'a>(book: &'a Book, owner: Id<Entity>) -> impl Iterator<Item = Id<Entity>> + 'a {
+fn owners<'a>(book: &'a Book, owner: Id<Entity>) -> impl Iterator<Item = Id<Entity>> + Clone + 'a {
     let household = book.entities[owner]
         .member
         .filter(move |&house| !book.entities.covers(house, owner));
@@ -29,7 +29,7 @@ fn owners<'a>(book: &'a Book, owner: Id<Entity>) -> impl Iterator<Item = Id<Enti
 pub(crate) fn containing<'a>(
     book: &'a Book,
     place: Id<Place>,
-) -> impl Iterator<Item = Subject> + 'a {
+) -> impl Iterator<Item = Subject> + Clone + 'a {
     let this = &book.places[place];
     let places = book.places.lineage(place).map(Subject::Place);
     let owners = (this.class == Class::Asset)

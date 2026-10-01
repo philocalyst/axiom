@@ -42,11 +42,34 @@ pub struct Groups<K, V> {
 
 impl<K, V: Copy> Groups<K, V> {
     /// Groups `pairs` under `keys` keys. Values under one key keep their input
-    /// order.
-    pub fn build(keys: usize, pairs: impl IntoIterator<Item = (Id<K>, V)>) -> Groups<K, V> {
-        let pairs: Vec<(Id<K>, V)> = pairs.into_iter().collect();
-        let (starts, order) = bucket(keys, pairs.len(), |at| pairs[at].0.index());
-        let values = order.iter().map(|&at| pairs[at as usize].1).collect();
+    /// order. The iterator must be cloneable so the first pass can count each
+    /// bucket and the second can fill the initialized output directly; callers
+    /// with borrowed input can pass a cheap cloned iterator such as
+    /// `items.iter().copied()`.
+    pub fn build(
+        keys: usize,
+        pairs: impl Iterator<Item = (Id<K>, V)> + Clone,
+    ) -> Groups<K, V> {
+        let mut starts = vec![0u32; keys + 1];
+        let mut count = 0;
+        let mut first = None;
+        for (key, value) in pairs.clone() {
+            starts[key.index() + 1] += 1;
+            first.get_or_insert(value);
+            count += 1;
+        }
+        for at in 1..starts.len() {
+            starts[at] += starts[at - 1];
+        }
+
+        let mut values = first.map_or_else(Vec::new, |seed| vec![seed; count]);
+        for (key, value) in pairs {
+            let next = &mut starts[key.index()];
+            values[*next as usize] = value;
+            *next += 1;
+        }
+        starts.copy_within(..keys, 1);
+        starts[0] = 0;
         Groups { starts, values, of: std::marker::PhantomData }
     }
 }
@@ -96,7 +119,7 @@ mod tests {
     #[test]
     fn groups_are_stable() {
         let pairs = [(2, 'a'), (0, 'b'), (2, 'c'), (1, 'd')].map(|(k, v)| (Id::<()>::new(k), v));
-        let g = Groups::build(4, pairs);
+        let g = Groups::build(4, pairs.into_iter());
         assert_eq!(&g[Id::new(2)], &['a', 'c']);
         assert_eq!(&g[Id::new(0)], &['b']);
         assert!(g[Id::new(3)].is_empty() && g[Id::new(9)].is_empty());
@@ -114,7 +137,7 @@ mod tests {
     fn nothing_grouped_is_a_table_of_empty_keys() {
         let (starts, order) = bucket(0, 0, |_| unreachable!("no items"));
         assert_eq!((starts, order), (vec![0], vec![]));
-        let g = Groups::<(), char>::build(3, []);
+        let g = Groups::<(), char>::build(3, [].into_iter());
         assert_eq!((g.keys(), g.values().len()), (3, 0));
         assert!(g[Id::new(0)].is_empty() && g[Id::new(2)].is_empty());
     }
