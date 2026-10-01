@@ -8,12 +8,12 @@
 
 use axiom_core::day::days_in_month;
 use axiom_core::{
-    Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Timeline, Tree, calendar,
+    Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline, Tree, calendar,
 };
 
 use crate::journal::{
     Assert, Detail, Event, Filed, Flow, FlowView, Infer, Measure, Mode, Origin, Plan, Prices, Purposed, Reading,
-    RuntimeDetail, RuntimeFlow, Select, Split, Txn,
+    RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive,
 };
 use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
@@ -1511,6 +1511,11 @@ pub struct Also {
     pub law: Id<Law>,
     pub purpose: Option<Purposed>,
     pub description: Option<Text>,
+    /// Pooled metadata written on the implied item or flow.
+    pub codes: Run<Sym>,
+    pub select: Run<Select>,
+    pub detail: Option<Id<Detail>>,
+    pub waive: Option<Waive>,
     pub loc: Loc,
 }
 
@@ -1527,10 +1532,10 @@ pub enum AlsoOn {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Implied {
     /// `+ 5%`, `- 2.9% + 0.30 USD`: an item of the flow, between its ends.
-    Item { sign: Sign, amount: NodeId },
+    Item { sign: Sign, amount: TemplateAmount },
     /// `lumen -> retirement 50% of …`, `-> escrow 410 USD`: a flow of its own.
     /// `None` ends mean the implying flow's own ends (`issuer -> self`).
-    Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: NodeId },
+    Flow { from: Option<Id<Place>>, to: Option<Id<Place>>, amount: TemplateAmount },
 }
 
 /// How a line item bears on the flow it is under (LANGUAGE §3).
