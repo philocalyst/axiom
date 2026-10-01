@@ -302,23 +302,21 @@ impl<'b, 's> World<'b, 's> {
         &self,
         account: &'s str,
         feed: &Feed<'b, 's>,
-        mut records: Vec<Record<'t>>,
+        records: Vec<Record<'t>>,
     ) -> Result<(Vec<Line<'s>>, Option<Day>), Vec<Diagnostic>> {
         // A memo may say its own amount or day: what the record has to be matched by.
-        let mut readings = self
-            .recognizer
-            .read_all(&records.iter().collect::<Vec<_>>());
-        self.adopt(feed, &mut records, &readings)?;
-        // Stable, so that a day's records keep the export's order.
-        let mut order: Vec<usize> = (0..records.len()).collect();
-        order.sort_by_key(|&at| records[at].day);
-        let mut slots: Vec<Option<(Record<'t>, Reading<'s>)>> = records
-            .into_iter()
-            .zip(readings.drain(..))
-            .map(Some)
-            .collect();
-        let (records, readings): (Vec<Record<'t>>, Vec<Reading<'s>>) =
-            order.iter().filter_map(|&at| slots[at].take()).unzip();
+        let readings = self.recognizer.read_all(&records);
+        let mut paired: Vec<_> = records.into_iter().zip(readings).collect();
+        self.adopt(feed, &mut paired)?;
+        // Stable, so that a day's records keep the export's order. Keep each
+        // reading beside its memo until the final consumers need record slices.
+        paired.sort_by_key(|(record, _)| record.day);
+        let mut records = Vec::with_capacity(paired.len());
+        let mut readings = Vec::with_capacity(paired.len());
+        for (record, reading) in paired {
+            records.push(record);
+            readings.push(reading);
+        }
 
         let existing = self.accounts.get(account);
         let flows = existing.map_or(&[][..], |account| &account.flows);
@@ -411,11 +409,10 @@ impl<'b, 's> World<'b, 's> {
     fn adopt<'t>(
         &self,
         feed: &Feed<'b, 's>,
-        records: &mut [Record<'t>],
-        readings: &[Reading<'s>],
+        records: &mut [(Record<'t>, Reading<'s>)],
     ) -> Result<(), Vec<Diagnostic>> {
         let mut problems = Vec::new();
-        for (record, reading) in records.iter_mut().zip(readings) {
+        for (record, reading) in records {
             let unit = self.unit_of(feed, record);
             let bad = |what: &str, text: &str, record: &Record| {
                 let headline = format!("`{text}`, which a pattern took for the {what}, is not one");
@@ -441,8 +438,8 @@ impl<'b, 's> World<'b, 's> {
                     None => problems.push(bad("day", text, record)),
                 }
             }
-            if let Some(text) = reading.original.as_ref().and_then(|span| record.memo.get(span.clone())) {
-                match original(text, &self.units) {
+            if let Some(span) = reading.original.clone() {
+                match original_capture(&record.memo, span.clone(), &self.units) {
                     Some(mut original) => {
                         // The memo may omit a sign because the statement's
                         // amount supplies the direction of the converted leg.
@@ -453,7 +450,10 @@ impl<'b, 's> World<'b, 's> {
                         };
                         record.facts.get_or_insert_with(Default::default).original = Some(original);
                     }
-                    None => problems.push(bad("original amount and unit", text, record)),
+                    None => {
+                        let text = record.memo.get(span).unwrap_or("");
+                        problems.push(bad("original amount and unit", text, record));
+                    }
                 }
             }
         }
@@ -718,9 +718,26 @@ impl<'b, 's> World<'b, 's> {
     }
 }
 
-/// Parse a typed `CUR amount` captured by an `original` pattern. Store the
-/// canonical known unit name so captured fields don't borrow an owned memo.
-fn original(text: &str, units: &[Unit<'_>]) -> Option<crate::Original<'static>> {
+/// Parse a typed `CUR amount` captured by an `original` pattern. The unit must
+/// be known, but its spelling can stay borrowed from a normal source memo.
+fn original_capture<'t>(
+    memo: &std::borrow::Cow<'t, str>,
+    span: std::ops::Range<usize>,
+    units: &[Unit<'_>],
+) -> Option<crate::Original<'t>> {
+    match memo {
+        std::borrow::Cow::Borrowed(text) => original(text.get(span)?, units),
+        std::borrow::Cow::Owned(text) => {
+            let parsed = original(text.get(span)?, units)?;
+            Some(crate::Original {
+                qty: parsed.qty,
+                unit: std::borrow::Cow::Owned(parsed.unit.into_owned()),
+            })
+        }
+    }
+}
+
+fn original<'t>(text: &'t str, units: &[Unit<'_>]) -> Option<crate::Original<'t>> {
     let text = text.trim();
     let split = text.find(char::is_whitespace)?;
     let (unit, amount_text) = text.split_at(split);
@@ -730,7 +747,7 @@ fn original(text: &str, units: &[Unit<'_>]) -> Option<crate::Original<'static>> 
     let qty = amount(amount_text.trim(), unit_spec.scale).ok().flatten()?;
     Some(crate::Original {
         qty,
-        unit: std::borrow::Cow::Owned(unit_spec.name.to_string()),
+        unit: std::borrow::Cow::Borrowed(unit),
     })
 }
 
@@ -739,16 +756,21 @@ mod original_tests {
     use super::*;
 
     #[test]
-    fn original_capture_is_a_typed_currency_amount_and_keeps_its_text_borrowed() {
+    fn original_capture_is_typed_and_borrows_the_currency_from_the_memo() {
         let units = [Unit {
             name: "CHF",
             scale: 2,
         }];
         let text = "CHF 3,290.00";
-        let parsed = original(text, &units).expect("known unit and valid amount");
+        let parsed = original_capture(
+            &std::borrow::Cow::Borrowed(text),
+            0..text.len(),
+            &units,
+        )
+        .expect("known unit and valid amount");
         assert_eq!(parsed.qty, Qty(329_000));
         assert_eq!(parsed.unit.as_ref(), "CHF");
-        assert!(matches!(parsed.unit, std::borrow::Cow::Owned(_)));
+        assert!(matches!(parsed.unit, std::borrow::Cow::Borrowed("CHF")));
         assert!(original("CHF 3,290.001", &units).is_none());
         assert!(original("EUR 3,290.00", &units).is_none());
     }
@@ -890,14 +912,14 @@ mod output_tests {
 
     #[test]
     fn a_structured_code_is_written_even_when_a_party_suppresses_the_memo() {
-        let std = include_str!("../../systems/src/std.ax");
-        let sources = [("std.ax", std, true), ("axiom.ax", "base USD\n", false)].map(
-            |(path, text, embedded)| {
-                let (file, problems) = axiom_syntax::parse(FileId(0), text, Folder::default());
-                assert!(problems.is_empty(), "{path}: {problems:?}");
-                Source { path, file, embedded }
-            },
-        );
+        let (file, problems) =
+            axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
+        assert!(problems.is_empty(), "axiom.ax: {problems:?}");
+        let sources = [Source {
+            path: "axiom.ax",
+            file,
+            embedded: false,
+        }];
         let (book, problems) = axiom_model::build(&sources);
         assert!(problems.is_empty(), "{problems:?}");
         let other = Other {

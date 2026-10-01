@@ -289,16 +289,15 @@ impl<'b, 's> Recognizer<'b, 's> {
             })
     }
 
-    pub fn read_all<'t>(&self, records: &[&Record<'t>]) -> Vec<Reading<'s>> {
-        let chunks: Vec<&[&Record]> = records.chunks(CHUNK).collect();
-        let read = |chunk: &&[&Record]| {
+    pub fn read_all<'t>(&self, records: &[Record<'t>]) -> Vec<Reading<'s>> {
+        let chunks: Vec<&[Record<'t>]> = records.chunks(CHUNK).collect();
+        let read = |chunk: &&[Record<'t>]| {
             let mut scratch = Scratch::default();
-            chunk
-                .iter()
-                .map(|record| self.read(&record.memo, &mut scratch))
-                .collect::<Vec<_>>()
+            chunk.iter().map(|record| self.read(&record.memo, &mut scratch)).collect::<Vec<_>>()
         };
-        par::map_each(&chunks, read).into_iter().flatten().collect()
+        let mut readings = Vec::with_capacity(records.len());
+        par::map_each_ordered(&chunks, read, |chunk| readings.extend(chunk));
+        readings
     }
 
     pub fn read(&self, memo: &str, scratch: &mut Scratch) -> Reading<'s> {

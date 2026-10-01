@@ -398,15 +398,14 @@ mod tests {
     use axiom_syntax::Folder;
 
     fn book() -> Book<'static> {
-        let std = include_str!("../../systems/src/std.ax");
-        let sources = [("std.ax", std, true), ("axiom.ax", "base USD\n", false)].map(
-            |(path, text, embedded)| {
-                let (file, diagnostics) =
-                    axiom_syntax::parse(FileId(0), text, Folder::default());
-                assert!(diagnostics.is_empty(), "{path}: {diagnostics:?}");
-                axiom_model::Source { path, file, embedded }
-            },
-        );
+        let (file, diagnostics) =
+            axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
+        assert!(diagnostics.is_empty(), "axiom.ax: {diagnostics:?}");
+        let sources = [axiom_model::Source {
+            path: "axiom.ax",
+            file,
+            embedded: false,
+        }];
         let (book, diagnostics) = axiom_model::build(&sources);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         book
@@ -432,7 +431,7 @@ mod tests {
                 Op::Call(called),
                 Op::Capture {
                     name: Capture::Original,
-                    len: 4,
+                    len: 6,
                 },
                 Op::Class(CharClass::Digit),
                 Op::Repeat {

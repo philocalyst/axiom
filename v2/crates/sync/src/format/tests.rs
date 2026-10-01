@@ -19,19 +19,14 @@ fn spec(field: Field, places: impl Into<Box<[Column]>>) -> Spec {
 }
 
 fn book() -> axiom_model::Book<'static> {
-    let std = include_str!("../../systems/src/std.ax");
-    let sources = [("std.ax", std, true), ("axiom.ax", "base USD\n", false)].map(
-        |(path, text, embedded)| {
-            let (file, diagnostics) =
-                axiom_syntax::parse(FileId(0), text, Folder::default());
-            assert!(diagnostics.is_empty(), "{path}: {diagnostics:?}");
-            axiom_model::Source {
-                path,
-                file,
-                embedded,
-            }
-        },
-    );
+    let (file, diagnostics) =
+        axiom_syntax::parse(FileId(0), "base USD\n", Folder::default());
+    assert!(diagnostics.is_empty(), "axiom.ax: {diagnostics:?}");
+    let sources = [axiom_model::Source {
+        path: "axiom.ax",
+        file,
+        embedded: false,
+    }];
     let (book, diagnostics) = axiom_model::build(&sources);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     book
@@ -205,7 +200,7 @@ fn malformed_amounts_are_diagnosed_at_the_source_cell() {
         categories: Box::default(),
         loc: Loc::default(),
     };
-    let source = "Date,Amount,Memo\n2026-03-04,12,50,Shop\n";
+    let source = "Date,Amount,Memo\n2026-03-04,12.501,Shop\n";
     let (_, problems) = read(&book, &format, source, FileId(3), USD, &[USD]);
     assert!(!problems.is_empty());
     assert_eq!(problems[0].anchor().unwrap().file, FileId(3));
