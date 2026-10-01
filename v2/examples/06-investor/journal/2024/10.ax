@@ -1,25 +1,25 @@
-2024-10-01 checking -> rent 2_650 USD / landlord
-2024-10-05 checking -> fidelity 5.4840 VTI @ 273.52 USD
+2024-10-01 checking -> landlord 2_650 USD
+2024-10-05 checking 1_499.98 USD -> fidelity 5.4840 VTI @ 273.52 USD
 
 /// A first lot of Microsoft.
-2024-10-08 checking -> fidelity 14.6511 MSFT @ 430.00 USD
-2024-10-09 checking -> utilities 163.03 USD
-2024-10-12 checking -> groceries 324.65 USD
+2024-10-08 checking 6_299.97 USD -> fidelity 14.6511 MSFT @ 430.00 USD
+2024-10-09 checking -> utility-co 163.03 USD
+2024-10-12 checking -> grocer 324.65 USD
 
 /// First bitcoin, on Coinbase.
-2024-10-14 checking -> coinbase 0.2 BTC @ 65_068.31 USD
-2024-10-16 checking -> dining 357.53 USD
-2024-10-20 checking -> groceries 267.17 USD
-2024-10-24 checking -> misc 397.25 USD
-2024-10-28 dividends -> fidelity 75.53 USD
-2024-10-31 income/salary -> 14_000.00 USD
+2024-10-14 checking 13_013.66 USD -> coinbase 0.2 BTC @ 65_068.31 USD
+2024-10-16 checking -> cafe 357.53 USD
+2024-10-20 checking -> grocer 267.17 USD
+2024-10-24 checking -> misc-vendor 397.25 USD
+2024-10-28 dividend-source -> fidelity 75.53 USD
+2024-10-31 northwind -> 14_000.00 USD
   retirement          1_958.33 USD   // 401(k) deferral
   espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
-  taxes/federal       2_650.00 USD
-  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  irs       2_650.00 USD
+  payroll-office       1_071.00 USD   // Social Security and Medicare
   checking            ...
-2024-10-31 interest -> savings 444.81 USD
-2024-10-31 interest -> fidelity 45.86 USD
+2024-10-31 interest-source -> savings 444.81 USD
+2024-10-31 interest-source -> fidelity 45.86 USD
 2024-10-31 checking = 8_123.88 USD
 2024-10-31 savings = 133_888.14 USD
 2024-10-31 espp-cash = 7_000.00 USD

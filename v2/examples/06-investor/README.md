@@ -20,6 +20,14 @@ journal/2025/*    January-December 2025
 outputs/          every command, run with --today 2026-04-16 unless it says otherwise
 ```
 
+`accounts.ax` uses named counterparties and flat native accounts, not the old
+income/expense/equity place hierarchy. The former staking-income account is now a
+staking purpose carried by its issuer party; savings interest and dividends also
+have explicit payer parties. Price-table rows use native `DATE UNIT = PRICE` syntax.
+Each quoted journal exchange now states its source cash amount as well as the
+received quantity, retaining the original `@` quote as evidence. USD amounts are
+rounded to cents using the same half-even rule as the independent verifier.
+
 `tax.ax` is 26 lines. Everything else a return needs is `us`: the lines it counts
 (wages, interest, dividends, short- and long-term gains), the netting of the year's
 gains and losses, the standard deduction, the brackets with the lower rates for
@@ -35,8 +43,8 @@ income at their value on arrival, and a wash sale's disallowed loss has to be ad
   2021-08-11 (25,500.00). No law sees an opening, and no year-end law is run for the
   years before the first flow. The old VTI is long-term when it is sold, with no
   flow dated 2020 to fake it.
-- **A monthly habit**: 1,500 USD of VTI on the 5th, each purchase its own lot
-  (`checking -> fidelity 5.5851 VTI @ 268.57 USD`), and reinvested dividends that add a small lot
+- **A monthly habit**: about 1,500 USD of VTI on the 5th, each purchase its own lot
+  (`checking 1,499.99 USD -> fidelity 5.5851 VTI`), and reinvested dividends that add a small lot
   every quarter.
 - **Specific lots and a policy.** `fidelity[2024-09-05, 2024-10-05] 10 VTI` picks two
   lots by date (both past a year, so long-term); the plain sale of 8 VTI in December
@@ -48,15 +56,15 @@ income at their value on arrival, and a wash sale's disallowed loss has to be ad
   old units, so the April statement (`fidelity = 50.9847 FAST`) and the July one
   (`= 101.9694 FAST`) both reconcile.
 - **RSUs**: 60 shares vest each quarter, booked as wages at the market price on the day
-  (`northwind -> etrade 60 NWND @ 157.54 USD`), and shares are sold to cover the tax: a sale to a
+  (`northwind 9,452.40 USD -> etrade 60 NWND`), and shares are sold to cover the tax: a sale to a
   `federal-tax` place counts as withholding (8,691.54 USD of it in 2025).
 - **The employee stock purchase plan is held money.** Each paycheck sends 1,400.00 USD to
   `espp-cash` marked `for espp`, so the money is tied to the plan: it shows in the balance but not
   in `axiom available`. The purchase is `espp-cash 8_400.01 USD -> etrade 69.3814 NWND for me`,
   which unties it: the money becomes shares Sam owns. The plan buys at 85% of the lower of the
   offering-date and purchase-date prices, so the shares are worth 3,325.45 USD more than they cost.
-  That is pay, a second line: a flow from `espp-discount` (a wages place) into the basis of the
-  lot, `etrade[2025-06-30].basis 3_325.45 USD`. The lot's cost is the market value, and the
+  That is pay, recorded from Northwind as a separate basis adjustment at
+  `etrade[2025-06-30].basis 3_325.45 USD`. The lot's cost is the market value, and the
   discount is counted once, as wages.
 - **Crypto**: bitcoin bought twice, swapped for ether inside the exchange (with its 0.6% in the
   rate), 6 ETH moved to a wallet with a network fee paid in ETH, monthly staking rewards taxed at
@@ -75,7 +83,9 @@ income at their value on arrival, and a wash sale's disallowed loss has to be ad
 
 `python3 ../verify/verify06.py` reads the journal text, without Axiom, and works the return
 and the net worth; the realized gains come from `oracle06.json`, the lot engine's own books.
-Every line agrees with Axiom to the cent.
+The independent calculation agrees with the preserved baseline output to the
+cent. `outputs/` is historical v3 evidence and has not yet been regenerated from the
+native v4 pipeline; do not treat those terminal captures as v4 verification.
 
 | line | by hand | Axiom |
 |---|---|---|
@@ -145,6 +155,20 @@ same lines), F10 (the plan's contributions are held `for espp` until the purchas
 than the ledger, in an opening block, with no laws run for the years before the first flow), F19 (`us` has slots
 for deductions, credits, payments and a total: a refund is booked, negative), F25 (`all VXUS`, and an opening that
 states cost and day).
+
+## Native v4 migration status
+
+The financial source facts and independent 2025 tax/net-worth oracle are retained.
+The native journal now uses named parties and native accounts, and price-list syntax
+is native. The offline model inventory reaches all 33 project files and reports
+three remaining parser errors, all on the two historical ESPP basis adjustment
+flows and one wash-sale basis adjustment. The v4 language represents wash-sale basis
+with `carry` and supports a basis at acquisition; it does not accept the old direct
+`.basis` balancing-flow notation. The two ESPP basis adjustments and one wash-sale
+adjustment remain visible until this project expresses their compensation and basis
+facts through supported semantics.
+Native engine tax/lot outputs have not yet been accepted against this example's
+independent oracle.
 
 ## Still open
 

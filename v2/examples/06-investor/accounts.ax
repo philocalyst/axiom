@@ -1,26 +1,30 @@
-// What is held, where, and what each kind of place means for tax. The two laws
-// the shipped systems lack are in tax.ax.
+// Native v4 holdings and counterparties. Purpose and party identify a flow's
+// meaning; there are no income, expense, or equity chart accounts.
 
-// ─── Kinds ──────────────────────────────────────────────────────────────────
+// Project-specific recognition tags.
+purpose staking : income
+purpose misc : spending
+purpose network-fee : spending
+purpose payroll-tax : tax-paid
 
-/// Crypto rewards for validating a network. Income at the value the day they
-/// arrive (Rev. Rul. 2023-14); tax.ax counts them.
-kind staking-income : income
+// The owner records the one replacement-share adjustment that Axiom cannot
+// infer in this project. The source is retained pending native carry semantics.
+kind wash-adjustment : asset
 
-/// Where a wash sale's disallowed loss is parked. Axiom does not see the 30-day
-/// window, so the owner says so: a flow from a place of this kind into the basis
-/// of the replacement shares. tax.ax adds what leaves it back to the year's
-/// short-term gains.
-kind wash-adjustment : equity
+// Income counterparties say what they pay. Employers and built-in issuers also
+// carry their purposes through std.
+kind dividend-payer : org
+  pays dividend
+kind interest-payer : org
+  pays interest-income
+kind staking-payer : org
+  pays staking
 
-
-/// The employee stock purchase plan. Pay set aside for it is tied to it: `for espp`
-/// on the paycheck leg. It is not available to spend until it buys shares `for me`.
+/// Pay set aside for the employee stock purchase plan stays restricted until
+/// shares are bought for the owner.
 entity espp : envelope
 
-
-// ─── Securities and coins ───────────────────────────────────────────────────
-
+// Traded units and their native precision.
 commodity VTI : fund
   name "Vanguard Total Stock Market ETF"
   precision 4
@@ -36,96 +40,54 @@ commodity VNQ : fund
 commodity SCHH : fund
   name "Schwab U.S. REIT ETF"
   precision 4
-
 commodity MSFT : stock
   precision 4
 commodity UNH : stock
   precision 4
-/// Fastenal split 2-for-1 on 2025-05-22 (see the journal): prices before that day
-/// are in the old units.
+/// Fastenal split 2-for-1 on 2025-05-22; prices before the split use the old units.
 commodity FAST : stock
   name "Fastenal"
   precision 4
 commodity NWND : stock
   name "Northwind Systems"
   precision 4
-
 commodity BTC : crypto
   precision 8
 commodity ETH : crypto
   precision 8
 
-
-// ─── Cash and brokerage places ──────────────────────────────────────────────
-
-account assets/bank/checking : bank
-account assets/bank/savings  : bank
-
-/// Contributions to the employee stock purchase plan wait here, taken from pay
-/// after tax, until the purchase date.
-account assets/espp-cash : cash
-
-/// The 401(k) at work: 14% of pay, pre-tax.
-account assets/retirement : 401k
+// Cash, retirement, brokerage, and self-custody places.
+account checking : bank
+account savings : bank
+account espp-cash : cash
+account retirement : 401k
   employer northwind
-
-/// The main taxable brokerage. No lot is named on a plain sale, so the account
-/// sells the highest-cost lot first.
-account assets/fidelity : broker
+/// HIFO relief minimizes realized gains on sales without a named lot.
+account fidelity : brokerage
   select hifo
-
-/// A second broker, where the international fund and the bonds were moved in
-/// kind. Its lots carry their basis and dates from Fidelity.
-account assets/schwab : broker
+/// Moved lots retain their purchase day and basis; this account uses FIFO.
+account schwab : brokerage
   select fifo
-
-/// Employer stock: vested restricted stock units and ESPP purchases.
-account assets/etrade : broker
+account etrade : brokerage
   select fifo
-
-account assets/coinbase : broker
+account coinbase : brokerage
   holds BTC, ETH, USD
   select fifo
-
-/// Self-custody wallet: ether that is staked.
-account assets/wallet : broker
+account wallet : brokerage
   holds ETH
   select fifo
+account wash-sale : wash-adjustment
 
-
-// ─── Income and equity ──────────────────────────────────────────────────────
-
-account income/salary       : wages
-account income/rsu          : wages
-account income/espp-discount : wages
-account income/dividends    : dividends
-account income/interest     : interest
-account income/staking      : staking-income
-
-/// The disallowed losses. What has left it is in the basis of replacement shares.
-account equity/wash-sale    : wash-adjustment
-
-
-// ─── Expenses ───────────────────────────────────────────────────────────────
-
-account expenses/rent
-account expenses/utilities
-account expenses/groceries
-account expenses/dining
-account expenses/misc
-
-/// Blockchain fees, paid in ether: each one is a small sale of the coin.
-account expenses/network-fees
-
-account expenses/taxes/federal : federal-tax
-account expenses/taxes/payroll
-
-
-// ─── People ─────────────────────────────────────────────────────────────────
-
-/// The employer. RSU vests arrive from here.
+// Counterparties. A party's kind or declared purpose assigns the ordinary
+// reason for payments and receipts.
 entity northwind : employer
-  via income/rsu
-
-entity landlord : org
-  via expenses/rent
+entity landlord : landlord
+entity utility-co : utility
+entity grocer : grocer
+entity cafe #dining
+entity misc-vendor #misc
+entity dividend-source : dividend-payer
+entity interest-source : interest-payer
+entity staking-source : staking-payer
+entity payroll-office #payroll-tax
+entity network-fees #network-fee

@@ -8,7 +8,7 @@
 /// To fix: if a coin arrives that is not a reward, book it from another place.
 law count-staking
   on in
-  when from is staking-income
+  when purpose is #staking
   count value(amount, USD) as staking
   count value(amount, USD) as total-income
 

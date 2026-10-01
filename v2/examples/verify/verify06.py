@@ -32,30 +32,32 @@ def value(f):
     """What arrived, in dollars: the amount, or quantity times the price written after `@`."""
     if f.price:
         return cents(f.into * f.price[0])
+    if f.out_unit == "USD":
+        return f.out
     return f.into if f.into_unit == "USD" else None
 
 
 # ── the return ─────────────────────────────────────────────────────────────────
 wages = pretax = federal = interest = dividends = staking = rsu = espp_discount = D(0)
 for f in flows:
-    if f.src == "income/salary" and f.legs:
+    if f.src == "northwind" and f.legs:
         wages += f.into
         for place, amt, unit in f.legs:
             if place == "retirement":
                 pretax += amt
-            elif place == "taxes/federal":
+            elif place == "irs":
                 federal += amt
+    elif f.src == "northwind" and f.dst.endswith(".basis"):
+        espp_discount += f.into
     elif f.src == "northwind":
         rsu += value(f)
-    elif f.src == "espp-discount":
-        espp_discount += f.into
-    elif f.dst == "taxes/federal":
+    elif f.dst == "irs":
         federal += f.into
-    elif f.src == "interest":
+    elif f.src == "interest-source":
         interest += value(f)
-    elif f.src == "dividends":
+    elif f.src == "dividend-source":
         dividends += value(f)
-    elif f.src == "income/staking":
+    elif f.src == "staking-source":
         staking += value(f)
 wages += rsu + espp_discount
 
@@ -158,7 +160,7 @@ for f in all_flows:
 prices = {}
 for name in sorted(os.listdir(os.path.join(ROOT, "prices"))):
     for l in open(os.path.join(ROOT, "prices", name)):
-        m = re.match(r"^(\d{4}-\d\d-\d\d) ([A-Z]+) ([\d_.]+) USD", l)
+        m = re.match(r"^(\d{4}-\d\d-\d\d) ([A-Z]+) = ([\d_.]+) USD", l)
         if m and m.group(1) <= TODAY:
             prices[m.group(2)] = D(m.group(3).replace("_", ""))
 units = defaultdict(D)

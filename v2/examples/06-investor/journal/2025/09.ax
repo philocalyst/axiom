@@ -1,29 +1,29 @@
-2025-09-01 checking -> rent 2_650 USD / landlord
-2025-09-01 income/staking -> wallet 0.01006557 ETH @ 4300.15 USD
+2025-09-01 checking -> landlord 2_650 USD
+2025-09-01 staking-source 43.28 USD -> wallet 0.01006557 ETH @ 4300.15 USD
 2025-09-02 fidelity 60 FAST -> checking 2_748.60 USD
-2025-09-05 checking -> fidelity 4.7690 VTI @ 314.53 USD
-2025-09-09 checking -> utilities 182.36 USD
-2025-09-11 dividends -> fidelity 30.15 USD
-2025-09-12 checking -> groceries 351.65 USD
+2025-09-05 checking 1_499.99 USD -> fidelity 4.7690 VTI @ 314.53 USD
+2025-09-09 checking -> utility-co 182.36 USD
+2025-09-11 dividend-source -> fidelity 30.15 USD
+2025-09-12 checking -> grocer 351.65 USD
 
 /// Selling the December ESPP shares: held under a year, so it is a disqualifying disposition.
 2025-09-15 etrade[2024-12-31] 99.0799 NWND -> checking 16_704.87 USD
-2025-09-16 checking -> dining 239.59 USD
-2025-09-16 checking -> fidelity 33.3689 VXUS @ 74.92 USD
-2025-09-20 checking -> groceries 267.93 USD
-2025-09-24 checking -> misc 260.10 USD
-2025-09-24 dividends -> schwab 27.51 USD
-2025-09-26 dividends -> fidelity 0.2642 VTI @ 321.17 USD   // reinvested: 84.86 USD dividend
-2025-09-26 dividends -> fidelity 0.01 USD
-2025-09-28 dividends -> schwab 30.23 USD
-2025-09-30 income/salary -> 14_000.00 USD
+2025-09-16 checking -> cafe 239.59 USD
+2025-09-16 checking 2_500.00 USD -> fidelity 33.3689 VXUS @ 74.92 USD
+2025-09-20 checking -> grocer 267.93 USD
+2025-09-24 checking -> misc-vendor 260.10 USD
+2025-09-24 dividend-source -> schwab 27.51 USD
+2025-09-26 dividend-source 84.85 USD -> fidelity 0.2642 VTI @ 321.17 USD // reinvested: 84.86 USD dividend
+2025-09-26 dividend-source -> fidelity 0.01 USD
+2025-09-28 dividend-source -> schwab 30.23 USD
+2025-09-30 northwind -> 14_000.00 USD
   retirement          1_958.33 USD   // 401(k) deferral
   espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
-  taxes/federal       2_650.00 USD
-  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  irs       2_650.00 USD
+  payroll-office       1_071.00 USD   // Social Security and Medicare
   checking            ...
-2025-09-30 interest -> savings 273.34 USD
-2025-09-30 interest -> fidelity 228.55 USD
+2025-09-30 interest-source -> savings 273.34 USD
+2025-09-30 interest-source -> fidelity 228.55 USD
 2025-09-30 checking = 65_997.29 USD
 2025-09-30 savings = 82_275.29 USD
 2025-09-30 espp-cash = 4_200.00 USD

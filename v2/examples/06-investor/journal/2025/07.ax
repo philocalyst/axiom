@@ -1,20 +1,20 @@
-2025-07-01 checking -> rent 2_650 USD / landlord
-2025-07-01 income/staking -> wallet 0.00950374 ETH @ 2491.17 USD
-2025-07-05 checking -> fidelity 4.9804 VTI @ 301.18 USD
-2025-07-09 checking -> utilities 163.02 USD
-2025-07-12 checking -> groceries 296.21 USD
-2025-07-16 checking -> dining 211.02 USD
-2025-07-20 checking -> groceries 287.07 USD
-2025-07-24 checking -> misc 169.72 USD
-2025-07-28 dividends -> schwab 75.53 USD
-2025-07-31 income/salary -> 14_000.00 USD
+2025-07-01 checking -> landlord 2_650 USD
+2025-07-01 staking-source 23.68 USD -> wallet 0.00950374 ETH @ 2491.17 USD
+2025-07-05 checking 1_500.00 USD -> fidelity 4.9804 VTI @ 301.18 USD
+2025-07-09 checking -> utility-co 163.02 USD
+2025-07-12 checking -> grocer 296.21 USD
+2025-07-16 checking -> cafe 211.02 USD
+2025-07-20 checking -> grocer 287.07 USD
+2025-07-24 checking -> misc-vendor 169.72 USD
+2025-07-28 dividend-source -> schwab 75.53 USD
+2025-07-31 northwind -> 14_000.00 USD
   retirement          1_958.33 USD   // 401(k) deferral
   espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
-  taxes/federal       2_650.00 USD
-  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  irs       2_650.00 USD
+  payroll-office       1_071.00 USD   // Social Security and Medicare
   checking            ...
-2025-07-31 interest -> savings 271.53 USD
-2025-07-31 interest -> fidelity 209.42 USD
+2025-07-31 interest-source -> savings 271.53 USD
+2025-07-31 interest-source -> fidelity 209.42 USD
 2025-07-31 checking = 31_334.46 USD
 2025-07-31 savings = 81_729.52 USD
 2025-07-31 espp-cash = 1_400.00 USD

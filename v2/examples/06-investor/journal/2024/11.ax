@@ -1,25 +1,25 @@
-2024-11-01 checking -> rent 2_650 USD / landlord
+2024-11-01 checking -> landlord 2_650 USD
 2024-11-02 savings -> checking 20_000 USD
-2024-11-05 checking -> fidelity 5.4108 VTI @ 277.22 USD
-2024-11-09 checking -> utilities 131.82 USD
-2024-11-12 checking -> groceries 384.34 USD
+2024-11-05 checking 1_499.98 USD -> fidelity 5.4108 VTI @ 277.22 USD
+2024-11-09 checking -> utility-co 131.82 USD
+2024-11-12 checking -> grocer 384.34 USD
 
 /// Restricted stock units vest: 60 shares at the market price, taxed as pay on the day.
-2024-11-15 northwind -> etrade 60 NWND @ 135.51 USD
-2024-11-15 etrade 13.2000 NWND -> taxes/federal 1_788.73 USD   // sold to cover: 22% supplemental
-2024-11-15 etrade 1.1445 NWND -> taxes/payroll 155.09 USD   // sold to cover: FICA
-2024-11-16 checking -> dining 349.75 USD
-2024-11-20 checking -> groceries 274.52 USD
-2024-11-24 checking -> misc 313.79 USD
-2024-11-28 dividends -> fidelity 75.53 USD
-2024-11-30 income/salary -> 14_000.00 USD
+2024-11-15 northwind 8_130.60 USD -> etrade 60 NWND @ 135.51 USD
+2024-11-15 etrade 13.2000 NWND -> irs 1_788.73 USD   // sold to cover: 22% supplemental
+2024-11-15 etrade 1.1445 NWND -> payroll-office 155.09 USD   // sold to cover: FICA
+2024-11-16 checking -> cafe 349.75 USD
+2024-11-20 checking -> grocer 274.52 USD
+2024-11-24 checking -> misc-vendor 313.79 USD
+2024-11-28 dividend-source -> fidelity 75.53 USD
+2024-11-30 northwind -> 14_000.00 USD
   retirement          1_958.33 USD   // 401(k) deferral
   espp-cash           1_400.00 USD for espp   // ESPP contribution, after tax
-  taxes/federal       2_650.00 USD
-  taxes/payroll       1_071.00 USD   // Social Security and Medicare
+  irs       2_650.00 USD
+  payroll-office       1_071.00 USD   // Social Security and Medicare
   checking            ...
-2024-11-30 interest -> savings 379.63 USD
-2024-11-30 interest -> fidelity 50.99 USD
+2024-11-30 interest-source -> savings 379.63 USD
+2024-11-30 interest-source -> fidelity 50.99 USD
 2024-11-30 checking = 29_440.35 USD
 2024-11-30 savings = 114_267.77 USD
 2024-11-30 espp-cash = 8_400.00 USD
