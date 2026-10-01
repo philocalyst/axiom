@@ -6,7 +6,7 @@
 //! `Motion`, so exactly one code path moves value.
 
 use axiom_core::{Day, Days, Id, Loc, Qty, Sym};
-use axiom_model::{Amount, Assert, Book, Class, Detail, End, Entity, Flow, Mode, Place, Select, Txn, Waive};
+use axiom_model::{Amount, Assert, Book, Class, Detail, End, Entity, Flow, Mode, Place, Purposed, Select, Txn, Waive};
 
 use crate::{Cause, bridge};
 
@@ -72,7 +72,10 @@ pub(crate) struct Motion<'f> {
     pub out: Amount,
     pub arrive: Amount,
     pub txn: Id<Txn>,
+    pub owner: Id<Entity>,
     pub payee: Option<Id<Entity>>,
+    pub purpose: Option<Purposed>,
+    pub description: Option<Sym>,
     pub select: &'f [Select],
     pub codes: &'f [Sym],
     pub detail: &'f Detail,
@@ -97,7 +100,10 @@ impl<'f> Motion<'f> {
             out: Amount::new(amounts.out, flow.out.unit),
             arrive: Amount::new(amounts.arrive, flow.arrive.unit),
             txn: flow.txn,
+            owner: flow.owner,
             payee: flow.payee,
+            purpose: flow.purpose,
+            description: flow.description,
             select: &flow.select,
             codes: &flow.codes,
             detail: flow.detail(),
@@ -129,7 +135,10 @@ impl<'f> Motion<'f> {
             out: amount,
             arrive: amount,
             txn,
+            owner: source.owner,
             payee: None,
+            purpose: None,
+            description: None,
             select: &[],
             codes: &[],
             detail: &Detail::NONE,

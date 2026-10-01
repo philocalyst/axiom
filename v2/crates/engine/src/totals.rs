@@ -16,7 +16,6 @@ use axiom_core::calendar;
 use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Sym, spread};
 use axiom_model::{Book, Dir, Entity, Place, Subject, Window};
 
-use crate::bridge::V3;
 use crate::facts::{LawFacts, TotalsRead};
 use crate::scope::containing;
 use crate::state::unordered;
@@ -171,23 +170,81 @@ pub(crate) struct Watch {
     /// The watched subjects each place lies within: the only ones a flow at
     /// that place can enter or leave.
     through: Groups<Place, Subject>,
+    /// Sparse index into `Totals::windows`; most subjects have no law that
+    /// reads a flow total and need no rolling state.
+    slots: Box<[u32]>,
+    subjects: Box<[Subject]>,
+    places: usize,
+    entities: usize,
 }
 
 impl Watch {
     pub fn of(book: &Book, laws: &[LawFacts]) -> Watch {
-        let places = book.places.len();
-        let mut watched = vec![false; places + book.entities.len()];
+        let (places, entities, assets) = (book.places.len(), book.entities.len(), book.assets.len());
+        let mut watched = vec![false; places + entities + assets];
         for rule in book.rules.all() {
             match laws[rule.law.index()].totals {
                 TotalsRead::Nothing => {}
-                TotalsRead::Subject => watched[slot(places, rule.subject)] = true,
+                TotalsRead::Subject => watched[slot(places, entities, rule.subject)] = true,
                 // A kind-wide total reads every place of that kind.
                 TotalsRead::Kind => watched[..places].fill(true),
             }
         }
-        let within = (0..places as u32).map(Id::new).flat_map(|place| containing(book, place).map(move |s| (place, s)));
-        let through = Groups::build(places, within.filter(|&(_, subject)| watched[slot(places, subject)]));
-        Watch { through }
+        // Purpose rules are evaluated once for each flow owner at run time;
+        // their stored subject is only a placeholder. Reserve owner slots for
+        // each such read so a non-placeholder owner's total is never missing.
+        for rule in book.rules.purposes.values() {
+            match laws[rule.law.index()].totals {
+                TotalsRead::Nothing => {}
+                TotalsRead::Subject => watched[places..places + entities].fill(true),
+                TotalsRead::Kind => watched[..places].fill(true),
+            }
+        }
+        for rule in book.rules.about.values() {
+            match laws[rule.law.index()].totals {
+                TotalsRead::Nothing => {}
+                TotalsRead::Subject => watched[slot(places, entities, rule.subject)] = true,
+                TotalsRead::Kind => watched[..places].fill(true),
+            }
+        }
+        let mut slots = vec![u32::MAX; watched.len()];
+        let mut subjects = Vec::new();
+        for (at, &yes) in watched.iter().enumerate() {
+            if yes {
+                slots[at] = subjects.len() as u32;
+                subjects.push(subject_at(places, entities, at));
+            }
+        }
+        let mut within: Vec<_> = (0..places as u32)
+            .map(Id::new)
+            .flat_map(|place| containing(book, place).map(move |subject| (place, subject)))
+            .filter(|&(_, subject)| watched[slot(places, entities, subject)])
+            .collect();
+        // An asset's totals follow its asset place and its parts. Keep the
+        // relation in the plan so posting a flow never scans the asset table.
+        for (asset, _) in book.assets.iter() {
+            let mut part = Some(asset);
+            while let Some(current) = part {
+                let subject = Subject::Asset(current);
+                if watched[slot(places, entities, subject)] {
+                    within.extend(book.places.subtree(book.assets[asset].place).map(|place| (place, subject)));
+                }
+                part = book.assets[current].part_of;
+            }
+        }
+        within.sort_unstable_by_key(|&(place, subject)| (place, subject_key(places, entities, subject)));
+        within.dedup();
+        let through = Groups::build(places, within);
+        Watch { through, slots: slots.into(), subjects: subjects.into(), places, entities }
+    }
+
+    fn slot(&self, subject: Subject) -> Option<usize> {
+        let slot = self.slots[slot(self.places, self.entities, subject)];
+        (slot != u32::MAX).then_some(slot as usize)
+    }
+
+    pub(crate) fn subjects(&self) -> &[Subject] {
+        &self.subjects
     }
 
     /// The watched subjects that contain `here` but not `there`: a flow from
@@ -207,7 +264,6 @@ impl Watch {
 /// Running flow totals for the subjects a [`Watch`] names.
 #[derive(Clone)]
 pub(crate) struct Totals {
-    places: usize,
     windows: Vec<Windows>,
     reaching: Reaching,
 }
@@ -250,9 +306,11 @@ impl Reaching {
 }
 
 impl Totals {
-    pub fn new(book: &Book) -> Totals {
-        let n = book.places.len() + book.entities.len();
-        Totals { places: book.places.len(), windows: vec![Windows::NONE; n], reaching: Reaching::new() }
+    pub fn new(watch: &Watch) -> Totals {
+        Totals {
+            windows: vec![Windows::NONE; watch.subjects().len()],
+            reaching: Reaching::new(),
+        }
     }
 
     /// Counts a flow moved on `day` and recognized over `over`: `out` leaves
@@ -271,7 +329,7 @@ impl Totals {
         for (dir, here, there, value) in sides {
             let Some(value) = value else { continue };
             for subject in watch.crossed(here, there) {
-                let at = slot(self.places, subject);
+                let Some(at) = watch.slot(subject) else { continue };
                 let windows = &mut self.windows[at];
                 if windows.add(day, dir, value, over) && !windows.reaching {
                     windows.reaching = true;
@@ -290,7 +348,7 @@ impl Totals {
     /// The next month that begins by `day` with value recognized into it ahead
     /// of time, and the subject it is for. Each month is handed out once, and
     /// the subject comes back for the month after while value still reaches it.
-    pub fn reached(&mut self, day: Day) -> Option<(Subject, Day)> {
+    pub fn reached(&mut self, watch: &Watch, day: Day) -> Option<(Subject, Day)> {
         let (from, at) = self.reaching.pop(day)?;
         let month = Window::Month.around(from);
         let windows = &mut self.windows[at as usize];
@@ -298,30 +356,35 @@ impl Totals {
         if windows.reaching {
             self.reaching.push(month.last().add_days(1), at);
         }
-        Some((subject_at(self.places, at as usize), from))
+        Some((watch.subjects[at as usize], from))
     }
 
     /// What entered or left `subject` in the window containing `day`.
-    pub fn read(&self, subject: Subject, dir: Dir, window: Window, day: Day) -> Qty {
-        self.windows[slot(self.places, subject)].read(dir, window, day)
+    pub fn read(&self, watch: &Watch, subject: Subject, dir: Dir, window: Window, day: Day) -> Qty {
+        watch.slot(subject).map_or(Qty::ZERO, |at| self.windows[at].read(dir, window, day))
     }
 }
 
 /// Where a subject's totals are kept: places first, then entities.
-fn slot(places: usize, subject: Subject) -> usize {
+fn slot(places: usize, entities: usize, subject: Subject) -> usize {
     match subject {
         Subject::Place(place) => place.index(),
         Subject::Entity(entity) => places + entity.index(),
-        Subject::Asset(_) => unreachable!("{V3}"),
+        Subject::Asset(asset) => places + entities + asset.index(),
     }
 }
 
 /// The subject whose totals are kept at `slot`.
-fn subject_at(places: usize, slot: usize) -> Subject {
-    match slot.checked_sub(places) {
-        None => Subject::Place(Id::new(slot as u32)),
-        Some(entity) => Subject::Entity(Id::new(entity as u32)),
+fn subject_at(places: usize, entities: usize, slot: usize) -> Subject {
+    match slot {
+        at if at < places => Subject::Place(Id::new(at as u32)),
+        at if at < places + entities => Subject::Entity(Id::new((at - places) as u32)),
+        at => Subject::Asset(Id::new((at - places - entities) as u32)),
     }
+}
+
+fn subject_key(places: usize, entities: usize, subject: Subject) -> usize {
+    slot(places, entities, subject)
 }
 
 /// What `count` effects have added up to, keyed by `(owner, year, name)`. A

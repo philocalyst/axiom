@@ -384,6 +384,13 @@ impl Fixture {
         self.laws.push(law.build())
     }
 
+    pub fn property(&mut self, place: Id<Place>, name: Sym, since: i32, value: Value) {
+        let mut props = self.places[place].props.to_vec();
+        props.push(Prop { name, value, since: Day(since), loc: None });
+        props.sort_by_key(|prop| (prop.name, prop.since));
+        self.places[place].props = props.into();
+    }
+
     /// A rule that applies for all time.
     pub fn rule(&self, law: Id<Law>, subject: Subject) -> Rule {
         Rule { law, subject, days: Days::ALWAYS }
@@ -596,6 +603,10 @@ impl LawBuilder {
 
     pub fn when(self, cond: NodeId) -> LawBuilder {
         self.step(StepKind::When(cond))
+    }
+
+    pub fn unless(self, cond: NodeId) -> LawBuilder {
+        self.step(StepKind::Unless(cond))
     }
 
     pub fn count(self, amount: NodeId, name: Sym) -> LawBuilder {

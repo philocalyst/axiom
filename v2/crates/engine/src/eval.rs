@@ -16,8 +16,8 @@ use std::ops::Deref;
 use axiom_core::glob::glob;
 use axiom_core::{Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
-    Amount, BinOp, Book, Dir, Effect as LawEffect, Entity, Fault, Field, Func, Law, NodeId, Op, Param, Prop, StepKind,
-    Subject, Value, Var, Window,
+    self, Amount, BinOp, Book, Dir, Effect as LawEffect, Entity, Fault, Field, Func, Law, NodeId, Object, Op, Param,
+    Prop, Purposed, StepKind, Subject, Value, Var, Window,
 };
 
 use crate::bridge::V3;
@@ -51,6 +51,10 @@ pub(crate) struct Occasion<'a> {
     pub cause: Cause,
     /// The flow that fired the law, if one did (not for `each` and `by`).
     pub motion: Option<&'a Motion<'a>>,
+    /// What the triggering flow was for, if it had a purpose.
+    pub purpose: Option<Purposed>,
+    /// The triggering flow's description, if written.
+    pub description: Option<Sym>,
     /// `amount`: what the trigger says is moving.
     pub amount: Option<Amount>,
     /// `gain`, `proceeds`, `basis`, `held`, for `on gain`.
@@ -67,11 +71,15 @@ impl<'a> Occasion<'a> {
     /// Something that happened on `day`, with nothing more said about it yet.
     fn on(day: Day, over: Days, span: Days, cause: Cause, motion: Option<&'a Motion<'a>>) -> Occasion<'a> {
         let (amount, realized, skip_internal, checking) = (None, None, false, false);
-        Occasion { day, over, span, cause, motion, amount, realized, skip_internal, checking }
+        Occasion { day, over, span, cause, motion, purpose: None, description: None, amount, realized, skip_internal, checking }
     }
 
     pub fn flow(m: &'a Motion<'a>) -> Occasion<'a> {
-        Occasion::on(m.day, m.recognized, Days::on(m.day), m.cause, Some(m))
+        Occasion {
+            purpose: m.purpose,
+            description: m.description,
+            ..Occasion::on(m.day, m.recognized, Days::on(m.day), m.cause, Some(m))
+        }
     }
 
     /// A period ending, or a deadline passing, on `day`.
@@ -208,7 +216,14 @@ impl<'a, 's> Machine<'a, 's> {
                 self.scan(*bound);
                 true
             }
-            StepKind::Unless(_) => unreachable!("the v3 model compiles no `unless`"),
+            StepKind::Unless(cond) => match self.scan(*cond) {
+                Value::Bool(unless) => !unless,
+                Value::Fault(fault) => {
+                    self.out.push(Outcome::Faulted { step, fault });
+                    false
+                }
+                _ => unreachable!("{TYPED}"),
+            },
             StepKind::Require { cond, otherwise, severity, .. } => {
                 let held = self.scan(*cond);
                 self.read(step, *cond);
@@ -365,7 +380,8 @@ impl<'a, 's> Machine<'a, 's> {
             Var::Remaining => self.remaining(),
             Var::Flow => Value::Flow,
             // v3 bridge: no v3 trigger says what a flow is for.
-            Var::Purpose | Var::Description => Value::Empty,
+            Var::Purpose => ctx.purpose.map_or(Value::Empty, |purpose| Value::Purpose(purpose.purpose, purpose.of)),
+            Var::Description => ctx.description.map_or(Value::Empty, Value::Text),
         }
     }
 
@@ -387,6 +403,7 @@ impl<'a, 's> Machine<'a, 's> {
             (Field::Kind, Value::Entity(entity)) => Value::Kind(book.entities[entity].kind),
             (Field::Kind, Value::Unit(unit)) => Value::Kind(book.commodities[unit].kind),
             (Field::Age, Value::Entity(entity)) => self.age(entity),
+            (Field::Of, Value::Purpose(_, object)) => object.map_or(Value::Empty, object_value),
             (Field::Year, Value::Day(day)) => Value::Num(Ratio::int(day.year() as i64)),
             (Field::Month, Value::Day(day)) => Value::Num(Ratio::int(day.ymd().1 as i64)),
             (Field::Prop(name), base) => self.prop(base, name),
@@ -397,7 +414,7 @@ impl<'a, 's> Machine<'a, 's> {
     /// From the entity's `born` date to the day of evaluation.
     fn age(&self, entity: Id<Entity>) -> Value {
         let born = self.env.plan.known.born.expect("a law that reads `.age` makes the model intern `born`");
-        match self.book().entities[entity].props.iter().find(|p| p.name == born) {
+        match axiom_model::prop(&self.book().entities[entity].props, born, self.ctx.day) {
             Some(Prop { value: Value::Day(day), .. }) => Value::Span(self.ctx.day.since(*day)),
             _ => Value::Fault(Fault::Unset(born)),
         }
@@ -411,9 +428,11 @@ impl<'a, 's> Machine<'a, 's> {
             Value::Entity(entity) => &book.entities[entity].props,
             Value::Unit(unit) => &book.commodities[unit].props,
             Value::Kind(kind) => &book.kinds[kind].props,
+            Value::Asset(asset) => &book.assets[asset].props,
             _ => unreachable!("{TYPED}"),
         };
-        props.iter().find(|p| p.name == name).map_or(Value::Fault(Fault::Unset(name)), |p| p.value)
+        axiom_model::prop(props, name, self.ctx.day)
+            .map_or(Value::Fault(Fault::Unset(name)), |property| property.value)
     }
 
     /// `limit[year]`: among rows whose name keys equal the lookup's, the latest
@@ -458,6 +477,10 @@ impl<'a, 's> Machine<'a, 's> {
             (Value::Entity(e), Value::Kind(k)) => book.is_a(book.entities[e].kind, k),
             (Value::Unit(u), Value::Kind(k)) => book.is_a(book.commodities[u].kind, k),
             (Value::Kind(a), Value::Kind(k)) => book.is_a(a, k),
+            (Value::Purpose(actual, actual_of), Value::Purpose(wanted, wanted_of)) => {
+                book.purposes.covers(wanted, actual)
+                    && wanted_of.is_none_or(|wanted| actual_of.is_some_and(|actual| object_matches(book, actual, wanted)))
+            }
             (Value::Place(p), Value::Place(root)) => book.places.covers(root, p),
             (Value::Place(p), Value::Entity(root)) => book.entities.covers(root, book.places[p].owner),
             (Value::Entity(e), Value::Entity(root)) => book.entities.covers(root, e),
@@ -516,7 +539,7 @@ impl<'a, 's> Machine<'a, 's> {
     fn total(&self, dir: Dir, window: Window, args: &[NodeId]) -> Value {
         let (book, ctx, totals) = (self.book(), self.ctx, &self.env.world.totals);
         let widen = args.iter().find_map(|&a| if let Value::Kind(kind) = self.at(a) { Some(kind) } else { None });
-        let read = |subject| totals.read(subject, dir, window, ctx.anchor());
+        let read = |subject| totals.read(&self.env.plan.watch, subject, dir, window, ctx.anchor());
         let sum = match widen {
             None => read(ctx.subject),
             Some(kind) => {
@@ -585,6 +608,32 @@ impl<'a, 's> Machine<'a, 's> {
             }
         }
         self.base(total)
+    }
+}
+
+fn object_value(object: Object) -> Value {
+    match object {
+        Object::Asset(asset) => Value::Asset(asset),
+        Object::Place(place) => Value::Place(place),
+        Object::Entity(entity) => Value::Entity(entity),
+    }
+}
+
+fn object_matches(book: &Book, actual: Object, wanted: Object) -> bool {
+    match (actual, wanted) {
+        (Object::Place(actual), Object::Place(wanted)) => book.places.covers(wanted, actual),
+        (Object::Entity(actual), Object::Entity(wanted)) => book.entities.covers(wanted, actual),
+        (Object::Asset(actual), Object::Asset(wanted)) => {
+            let mut at = Some(actual);
+            while let Some(asset) = at {
+                if asset == wanted {
+                    return true;
+                }
+                at = book.assets[asset].part_of;
+            }
+            false
+        }
+        _ => false,
     }
 }
 

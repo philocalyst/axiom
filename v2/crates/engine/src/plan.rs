@@ -10,9 +10,9 @@
 //! records, and any number of threads can fold from it at once.
 
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Set, Sym};
-use axiom_model::{Book, Commodity, Entity, Flow, Func, Kind, Op, Place, Rule, Subject, Ty, Value};
+use axiom_model::{Asset, Book, Commodity, Entity, Flow, Func, Kind, Op, Place, Rule, Subject, Ty, Value};
 
-use crate::bridge::{Sides, V3};
+use crate::bridge::Sides;
 use crate::events::{self, Events};
 use crate::facts::{self, LawFacts, Readers};
 use crate::ledger::{Ledger, fold, fold_to_view, fold_to_view_and_effects_prefix};
@@ -74,6 +74,8 @@ pub struct Plan<'b, 's> {
     /// The asset places each entity holds: its own, its subsidiaries' and its
     /// members', in place order.
     members: Groups<Entity, Id<Place>>,
+    /// Places inside each identified asset, including every part's place.
+    asset_places: Groups<Asset, Id<Place>>,
     /// Places under kinds read by a widened total. Only law-referenced kinds
     /// are indexed, so books without those reads pay no grouping cost.
     pub(crate) kind_places: Map<Id<Kind>, Box<[Id<Place>]>>,
@@ -102,6 +104,7 @@ impl<'b, 's> Plan<'b, 's> {
             blocked.entry(key).and_modify(|known| *known = (*known).min(first)).or_insert(first);
         }
         let laws: Box<[LawFacts]> = book.laws.values().map(|law| LawFacts::of(book, law)).collect();
+        let watch = Watch::of(book, &laws);
         let places = (0..book.places.len() as u32).map(Id::new);
         let held = places.flat_map(|place| {
             containing(book, place).filter_map(move |subject| match subject {
@@ -119,8 +122,9 @@ impl<'b, 's> Plan<'b, 's> {
             sides,
             repeats: repeats(book),
             readers: facts::readers(book, &laws),
-            watch: Watch::of(book, &laws),
+            watch,
             members: Groups::build(book.entities.len(), held),
+            asset_places: asset_places(book),
             kind_places,
             period_start: timeline::start(book, &events),
             last_fact: timeline::last_fact(book, &events),
@@ -128,7 +132,7 @@ impl<'b, 's> Plan<'b, 's> {
             laws,
             timed: Box::default(),
         };
-        let (world, mut values) = (World::new(book), Vec::new());
+        let (world, mut values) = (World::new(book, &plan.watch), Vec::new());
         plan.timed = book.rules.timed.iter().map(|rule| Schedule::of(&plan, rule, &world, &mut values)).collect();
         plan
     }
@@ -179,7 +183,7 @@ impl<'b, 's> Plan<'b, 's> {
         match subject {
             Subject::Place(root) => self.book.places.covers(root, place),
             Subject::Entity(root) => self.members[root].binary_search(&place).is_ok(),
-            Subject::Asset(_) => unreachable!("{V3}"),
+            Subject::Asset(asset) => self.asset_places[asset].binary_search(&place).is_ok(),
         }
     }
 
@@ -210,6 +214,24 @@ fn repeats(book: &Book) -> bool {
         let mut seen = Set::default();
         list.iter().any(|rule| !seen.insert((rule.law, rule.subject)))
     })
+}
+
+/// Builds each identified thing's place scope, including the places of its
+/// parts. Asset boundaries are fixed by the book, so law filtering need not
+/// walk the asset table for every flow.
+fn asset_places(book: &Book) -> Groups<Asset, Id<Place>> {
+    let mut within = Vec::new();
+    for (part, asset) in book.assets.iter() {
+        let places: Vec<_> = book.places.subtree(asset.place).collect();
+        let mut whole = Some(part);
+        while let Some(root) = whole {
+            within.extend(places.iter().copied().map(|place| (root, place)));
+            whole = book.assets[root].part_of;
+        }
+    }
+    within.sort_unstable();
+    within.dedup();
+    Groups::build(book.assets.len(), within)
 }
 
 /// Builds the static place set for every kind a `total` reads. If a typed

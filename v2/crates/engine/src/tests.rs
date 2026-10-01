@@ -4,7 +4,7 @@
 //! clippy reads as inconsistent digit grouping.
 #![allow(clippy::inconsistent_digit_grouping)]
 
-use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity, Tree};
+use axiom_core::{Day, Diagnostic, Disposition, Days, FileId, Groups, Id, Loc, Qty, Ratio, Severity, Tree};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder, span};
@@ -52,6 +52,137 @@ fn an_empty_book_folds_to_nothing() {
     assert_eq!(ledger.day(), Day(500));
     let run = ledger.finish();
     assert!(run.posted.is_empty() && run.holdings.is_empty() && run.diagnostics.is_empty());
+}
+
+#[test]
+fn unless_suppresses_the_law_only_when_its_exception_holds() {
+    let mut f = Fixture::new();
+    let retirement = f.retirement;
+    let make = |f: &mut Fixture, name: &'static str, unless: bool| {
+        let name = f.sym(name);
+        let mut builder = LawBuilder::new(name, Trigger::In);
+        let exception = builder.konst(Value::Bool(unless), Ty::Bool);
+        let failure = builder.konst(Value::Bool(false), Ty::Bool);
+        let law = builder.unless(exception).require(failure, None);
+        let law = f.law(law);
+        f.on_in.push((retirement, f.rule(law, Subject::Place(retirement))));
+        law
+    };
+    let suppressed = make(&mut f, "suppressed", true);
+    let active = make(&mut f, "active", false);
+    let salary = f.salary;
+    f.flow(10, salary, retirement, 100_00);
+
+    let run = run(&f.book(), options());
+    assert_eq!(run.checks[suppressed.index()], 0);
+    assert_eq!(run.checks[active.index()], 1);
+    assert_eq!(run.violations.len(), 1);
+    assert_eq!(run.violations[0].law, active);
+}
+
+#[test]
+fn a_property_uses_the_value_in_force_on_the_day_judged() {
+    let mut f = Fixture::new();
+    let (retirement, salary) = (f.retirement, f.salary);
+    let (name, limit) = (f.sym("limit"), f.sym("limit"));
+    f.property(retirement, name, 0, Value::Amount(f.usd(100_00)));
+    f.property(retirement, name, 20, Value::Amount(f.usd(200_00)));
+
+    let mut law = LawBuilder::new(f.sym("dated-limit"), Trigger::In);
+    let amount = law.var(Var::Amount, Ty::AMOUNT);
+    let subject = law.var(Var::Subject, Ty::Place);
+    let limit = law.field(subject, Field::Prop(limit), Ty::AMOUNT);
+    let condition = law.bin(BinOp::Le, amount, limit, Ty::Bool);
+    let law = f.law(law.require(condition, None));
+    f.on_in.push((retirement, f.rule(law, Subject::Place(retirement))));
+    f.flow(10, salary, retirement, 150_00);
+    f.flow(20, salary, retirement, 150_00);
+
+    let run = run(&f.book(), options());
+    assert_eq!(run.violations.len(), 1, "the first limit is exceeded; the later value is in force for the second flow");
+    assert_eq!(run.violations[0].cause, Cause::Flow(Id::new(0)));
+}
+
+#[test]
+fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
+    let mut f = Fixture::new();
+    let (salary, retirement, owner) = (f.salary, f.retirement, f.me);
+    let purpose_name = f.sym("retirement-contribution");
+    let payroll = f.sym("payroll");
+    let law_name = f.sym("purpose-classification");
+    let flow = f.flow(10, salary, retirement, 100_00);
+    let mut builder = LawBuilder::new(law_name, Trigger::Flow);
+    let actual_purpose = builder.var(Var::Purpose, Ty::Purpose);
+    let spending = builder.konst(Value::Purpose(Id::new(1), Some(Object::Entity(owner))), Ty::Purpose);
+    let belongs = builder.is(actual_purpose, &[spending]);
+    let actual_object = builder.field(actual_purpose, Field::Of, Ty::Entity);
+    let owner_value = builder.konst(Value::Entity(owner), Ty::Entity);
+    let about_owner = builder.bin(BinOp::Eq, actual_object, owner_value, Ty::Bool);
+    let actual_description = builder.var(Var::Description, Ty::Text);
+    let description = builder.konst(Value::Text(payroll), Ty::Text);
+    let described = builder.bin(BinOp::Eq, actual_description, description, Ty::Bool);
+    let with_object = builder.bin(BinOp::And, belongs, about_owner, Ty::Bool);
+    let both = builder.bin(BinOp::And, with_object, described, Ty::Bool);
+    let law = f.law(builder.require(both, None));
+    let purpose = Id::new(2);
+    f.laws[law].owner = Owner::Purpose(purpose);
+    let rule = Rule { law, subject: Subject::Entity(owner), days: Days::ALWAYS };
+    f.flows[flow.index()].purpose =
+        Some(Purposed { purpose, of: Some(Object::Entity(owner)), source: Provenance::Written });
+    f.flows[flow.index()].description = Some(payroll);
+    let mut book = f.book();
+    let roots = [book.roots.income, book.roots.spending, book.roots.capital];
+    let names = roots.map(|root| book.purposes[root].name);
+    let purposes = vec![
+        Purpose { name: names[0], root: PurposeRoot::Income, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose { name: names[1], root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose { name: purpose_name, root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose { name: names[2], root: PurposeRoot::Capital, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+    ];
+    let (tree, ids) = Tree::build(purposes, &[None, None, Some(1), None]).unwrap();
+    book.purposes = tree;
+    book.roots.income = ids[0];
+    book.roots.spending = ids[1];
+    book.roots.capital = ids[3];
+    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule)]);
+
+    let run = run(&book, options());
+    assert_eq!(run.checks[law.index()], 1);
+    assert!(run.violations.is_empty());
+}
+
+#[test]
+fn purpose_rules_use_each_flows_owner_for_scope_and_sparse_totals() {
+    let mut f = Fixture::new();
+    let (salary, checking, grants, savings, me, grant) =
+        (f.salary, f.checking, f.grants, f.savings, f.me, f.grant);
+    f.places[savings].owner = grant;
+    let from_me = f.flow(10, salary, checking, 80_00);
+    let from_grant = f.flow(11, grants, savings, 150_00);
+    let purpose = Id::new(2);
+    for flow in [from_me, from_grant] {
+        f.flows[flow.index()].purpose = Some(Purposed {
+            purpose,
+            of: None,
+            source: Provenance::Written,
+        });
+    }
+    f.flows[from_grant.index()].owner = grant;
+
+    let mut builder = LawBuilder::new(f.sym("owner-budget"), Trigger::Flow);
+    let total = builder.call(Func::Total(Dir::In, Window::Year), &[], Ty::AMOUNT);
+    let limit = builder.konst(Value::Amount(f.usd(100_00)), Ty::AMOUNT);
+    let below_limit = builder.bin(BinOp::Le, total, limit, Ty::Bool);
+    let law = f.law(builder.warn(below_limit));
+    f.laws[law].owner = Owner::Purpose(purpose);
+    let placeholder = Rule { law, subject: Subject::Entity(me), days: Days::ALWAYS };
+    let mut book = f.book();
+    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, placeholder)]);
+
+    let run = run(&book, options());
+    assert_eq!(run.violations.len(), 1, "only the grant owner's 150.00 total exceeds 100.00");
+    assert_eq!(run.violations[0].subject, Subject::Entity(grant));
+    assert_eq!(run.violations[0].cause, Cause::Flow(from_grant));
 }
 
 #[test]
@@ -1249,6 +1380,51 @@ fn a_spread_flow_counts_in_each_month_it_touches_as_the_fold_reaches_it() {
         [(12, 11_83, 30_00), (1, 31_56, 30_00), (2, 27_61, 30_00)],
         "the last reading of each month's window, February's with no flow in it"
     );
+}
+
+#[test]
+fn plan_allocates_rolling_totals_only_for_subjects_a_law_reads() {
+    let mut f = Fixture::new();
+    let food = f.food;
+    month_budget(&mut f, food, 30_00);
+    let book = f.book();
+    let plan = Plan::new(&book);
+    assert_eq!(plan.watch.subjects(), &[Subject::Place(food)]);
+}
+
+#[test]
+fn asset_law_scope_contains_each_parts_place_subtree() {
+    let mut f = Fixture::new();
+    let (checking, savings, food, usd, me) = (f.checking, f.savings, f.food, f.usd, f.me);
+    let house_name = f.sym("house");
+    let improvement_name = f.sym("improvement");
+    let mut book = f.book();
+    let house = book.assets.push(Asset {
+        name: house_name,
+        kind: book.roots.thing,
+        owner: me,
+        place: checking,
+        unit: usd,
+        part_of: None,
+        props: Box::default(),
+        doc: None,
+        loc: Loc::new(FileId(0), 1, 2),
+    });
+    book.assets.push(Asset {
+        name: improvement_name,
+        kind: book.roots.thing,
+        owner: me,
+        place: savings,
+        unit: usd,
+        part_of: Some(house),
+        props: Box::default(),
+        doc: None,
+        loc: Loc::new(FileId(0), 3, 4),
+    });
+    let plan = Plan::new(&book);
+    assert!(plan.inside(Subject::Asset(house), checking));
+    assert!(plan.inside(Subject::Asset(house), savings));
+    assert!(!plan.inside(Subject::Asset(house), food));
 }
 
 #[test]

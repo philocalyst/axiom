@@ -21,7 +21,7 @@
 //!   and acquisition day it gives.
 
 use axiom_core::{Diagnostic, Id, Qty};
-use axiom_model::{Amount, Basis, Class, End, Entity, Fault};
+use axiom_model::{Amount, Basis, Class, End, Entity, Fault, Object, Subject};
 
 use crate::eval::{Occasion, Realized};
 use crate::explain;
@@ -81,11 +81,30 @@ impl Ledger<'_, '_, '_> {
         }
         if watched {
             self.fire(&book.rules.on_in[m.to], &Occasion { amount: Some(m.arrive), skip_internal: true, ..on });
+            self.fire_purpose(m, &on);
             self.fire_spend(m);
             self.fire(&book.rules.always[m.from], &on);
             if m.to != m.from {
                 self.fire(&book.rules.always[m.to], &on);
             }
+        }
+    }
+
+    /// Purpose laws see the event after its value has moved and its window
+    /// total has been counted. Their `self` is the flow's owner. When the
+    /// purpose names an asset, laws about that asset also see the flow.
+    fn fire_purpose(&mut self, m: &Motion, on: &Occasion) {
+        let Some(purpose) = m.purpose else { return };
+        let book = self.plan.book;
+        let purpose_on = Occasion { amount: Some(m.out), ..*on };
+        self.fire_as(
+            &book.rules.purposes[purpose.purpose],
+            &purpose_on,
+            Some(Subject::Entity(m.owner)),
+        );
+        if let Some(Object::Asset(asset)) = purpose.of {
+            let place = book.assets[asset].place;
+            self.fire(&book.rules.about[place], &purpose_on);
         }
     }
 

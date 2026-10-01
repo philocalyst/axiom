@@ -18,7 +18,7 @@ use axiom_model::{Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Subj
 use crate::eval::Outcome;
 use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
-use crate::totals::{Tallies, Totals};
+use crate::totals::{Tallies, Totals, Watch};
 use crate::{Applied, Effect, Gain, Headroom, Pad, Violation};
 
 #[derive(Clone)]
@@ -29,8 +29,8 @@ pub(crate) struct World {
 }
 
 impl World {
-    pub fn new(book: &Book) -> World {
-        World { holdings: Holdings::new(book.places.len()), totals: Totals::new(book), tallies: Tallies::default() }
+    pub fn new(book: &Book, watch: &Watch) -> World {
+        World { holdings: Holdings::new(book.places.len()), totals: Totals::new(watch), tallies: Tallies::default() }
     }
 }
 

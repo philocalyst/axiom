@@ -54,7 +54,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     pub(crate) fn start(plan: &'p Plan<'b, 's>, options: Options) -> Ledger<'p, 'b, 's> {
         let timeline = Timeline::new(plan);
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
-        let (world, record) = (World::new(plan.book), Record::new(plan.book.laws.len(), plan.problems()));
+        let (world, record) = (World::new(plan.book, &plan.watch), Record::new(plan.book.laws.len(), plan.problems()));
         Ledger::resumed(
             plan,
             options,

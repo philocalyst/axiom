@@ -35,6 +35,13 @@ fn applies(plan: &Plan, rule: &Rule, on: &Occasion) -> bool {
 impl Ledger<'_, '_, '_> {
     /// Runs every rule in `rules` that applies to this occasion, in order.
     pub(crate) fn fire(&mut self, rules: &[Rule], on: &Occasion) {
+        self.fire_as(rules, on, None);
+    }
+
+    /// A purpose rule's subject is the owner of this particular flow, not the
+    /// purpose declaration. The model's rule table has already expanded the
+    /// purpose ancestors, so the same firing path handles both scopes.
+    pub(crate) fn fire_as(&mut self, rules: &[Rule], on: &Occasion, subject: Option<Subject>) {
         // Most places have no rule for most occasions: nothing to set up then.
         if rules.is_empty() {
             return;
@@ -42,15 +49,22 @@ impl Ledger<'_, '_, '_> {
         let (plan, mut done) = (self.plan, std::mem::take(&mut self.scratch.done));
         let book = plan.book;
         done.clear();
-        for rule in rules.iter().filter(|rule| applies(plan, rule, &on)) {
+        for written in rules {
+            // Purpose rules use the flow owner at run time. It must govern
+            // filtering, de-duplication, headroom and diagnostics alike.
+            let rule = Rule { subject: subject.unwrap_or(written.subject), ..*written };
+            if !applies(plan, &rule, &on) {
+                continue;
+            }
             // A law that two rules bring to one subject runs once.
+            let subject = rule.subject;
             if plan.repeats {
-                if done.contains(&(rule.law, rule.subject)) {
+                if done.contains(&(rule.law, subject)) {
                     continue;
                 }
-                done.push((rule.law, rule.subject));
+                done.push((rule.law, subject));
             }
-            self.enforce(rule, &Context::new(rule.subject, owner_of(book, rule.subject), &on));
+            self.enforce(&rule, &Context::new(subject, owner_of(book, subject), &on));
         }
         self.scratch.done = done;
     }
@@ -94,7 +108,7 @@ impl Ledger<'_, '_, '_> {
     #[cold]
     fn enter_months(&mut self, day: Day) {
         let plan = self.plan;
-        while let Some((subject, from)) = self.world.totals.reached(day) {
+        while let Some((subject, from)) = self.world.totals.reached(&plan.watch, day) {
             for window in [Window::Month, Window::Year] {
                 let period = window.around(from);
                 let rules = plan.readers.get(&(subject, window));
@@ -114,7 +128,7 @@ impl Ledger<'_, '_, '_> {
     /// against the limit is all the law compares. Returns whether it held; a
     /// cap that is broken is evaluated in full, which explains why.
     fn within(&mut self, rule: &Rule, ctx: &Context, cap: Cap) -> bool {
-        let read = self.world.totals.read(rule.subject, cap.dir, cap.window, ctx.anchor());
+        let read = self.world.totals.read(&self.plan.watch, rule.subject, cap.dir, cap.window, ctx.anchor());
         let counted = Amount::new(read, self.plan.book.base);
         let holds = if cap.strict { counted.qty < cap.limit.qty } else { counted.qty <= cap.limit.qty };
         if holds {
