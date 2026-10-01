@@ -97,12 +97,24 @@ an agreed exception or as completed work.
 | `a511cd2` | Iterative memoized effective ownership, with cycle and overflow diagnostics | Reviewed source and nested-share/cycle regression cases; integrated engine tests await the native model |
 | `dab2b66`, `01bc510`, `da1f56d` | Named sync selection, dry option and auxiliary reader sources held separately from borrowed parsed input | Reviewed API and borrow-lifetime regression case; CLI tests await model and sync adapter completion |
 | `b2f2e4b` | Validate generated sync items with a full date before emitting the destination's short date | Coordinator: actual integrated core/syntax, CSV, tagged, amount, memo-cell and writer modules pass 28 release tests; three timing tests ignored. Both heading-dependent date regressions pass |
+| `c1d1eb0`, `0f17b1b`, `7d28acf` | Strict dimensional inference, owner currency, typed selector keys and lexicographic law specificity | Reviewed compiler checkpoints; runtime and native corpus evidence remains pending |
+| `d822b11`, `8a59c0c` | Confine local source paths, borrow mutable read callbacks and join split CAMT text | Coordinator: path and primitive suite reached 31 passing tests; the next exact-source review run found an indentation-dependent nested CAMT memo failure (32 passed, one failed, three timing tests ignored). The correction is assigned; this row is not green |
+| `6bb370a`, `2b4bd5e`, `d90f913`, `686311b` | Native property defaults, borrowed endpoint survey, deterministic implicit parties and asset-first endpoint refusal | Reviewed source and regression cases. Native model execution evidence awaits journal wiring |
+| `67ee82a`, `01476f5` | Typed runtime transaction provenance, dimensional evaluation, conserved owner allocations and borrowed promise/claim ranges | Reviewed source and regression cases. Runtime pools remain empty until native monitor population; engine tests have not passed on the integrated native model |
+| `5e611a4` | Remove 2,831 lines of obsolete S3 collection, flow and folder-date lowering; wire native law and sync declarations | Coordinator: workspace check now reaches seven model errors (three old forecast adapter errors, two contract root-shape errors, two sync lowering errors). Core and syntax pass 134 release tests, with one pre-existing ignored doctest |
+| `63f744e` | Distinguish calendar-year selector keys from numeric expressions | Lane: 85 syntax tests pass. Coordinator's rerun on the integrated revision is pending |
 
 The six old completed implementation worktrees were clean before removal. Their
 branches and commits remain available; exact paths and heads are in
 `verification/cutover/removed-worktrees.json` outside the repository. Current
 cutover lanes use private worktrees. Cleanup has not touched original repositories
 or recovery evidence.
+
+The obsolete ignored v1 build directory in this isolated checkout was removed
+after checking its exact path and confirming it was not a symlink: 610 files,
+222,276,721 bytes. The removal inventory is
+`verification/cutover/removed-build-artifacts.json` outside the repository. The
+active native build directory and all source/evidence repositories were retained.
 
 All remaining acceptance rows are pending until verified. This document is an
 active work record, not a completion claim.
