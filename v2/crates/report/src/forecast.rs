@@ -418,9 +418,6 @@ fn contract_section<'s>(
             describe_forecast_error(book, error)
         ));
     }
-    section.note(
-        "These rows use typed model contracts; source v4 contract parsing and loan-payment derivation are not yet implemented.",
-    );
     if section.rows.is_empty() && issues.is_empty() {
         section.note("No active contract occurrence falls within this forecast window.");
     }

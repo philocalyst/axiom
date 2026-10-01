@@ -719,7 +719,7 @@ impl Contract {
     /// this contract's timeline (preferring the prior stretch when equally
     /// near); that template's identity is then compared with `template`.
     /// This keeps a suspension from reviving a fallback schedule for the
-    /// promise that was active immediately before it.
+    /// promise identified by those terms.
     pub fn covers(&self, template: &Flow, day: Day) -> ContractCoverage {
         if !self.days.contains(day) {
             return ContractCoverage::None;
