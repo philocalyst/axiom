@@ -36,6 +36,7 @@
 
 mod calc;
 mod checkpoint;
+mod assets;
 mod eval;
 mod events;
 mod explain;
@@ -71,6 +72,7 @@ use axiom_model::{
 };
 
 pub use checkpoint::Checkpoint;
+pub use assets::{AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey, Part, PartId, PartKind};
 pub use ledger::Ledger;
 pub use plan::{Known, Plan, run};
 pub use sides::Sides;
@@ -162,26 +164,6 @@ pub struct Run {
     /// How many times each law ran past its `when` filters, by law id.
     pub checks: Box<[u32]>,
     pub diagnostics: Vec<Diagnostic>,
-}
-
-/// An asset and its parts.
-pub struct AssetState {
-    pub asset: Id<Asset>,
-    pub parts: Vec<Part>,
-    /// When it left the owners, and to whom.
-    pub disposed: Option<(Day, Id<Flow>)>,
-}
-
-/// One part of an asset: its acquisition, or an improvement.
-#[derive(Clone, Copy, Debug)]
-pub struct Part {
-    /// The flow that made it.
-    pub flow: Id<Flow>,
-    pub day: Day,
-    /// What it cost, in base quanta.
-    pub cost: Qty,
-    /// What remains of its cost after what the laws consumed.
-    pub basis: Qty,
 }
 
 /// One expected occurrence of a contract.
@@ -289,13 +271,10 @@ pub struct Adjustment {
 #[derive(Clone, Copy, Debug)]
 pub enum AdjustmentKind {
     /// A part's basis consumed: depreciation.
-    Consumed { asset: Id<Asset>, part: u32 },
+    Consumed { asset: Id<Asset>, part: PartId },
     /// A disallowed loss held from a sale and added to a later (or earlier)
     /// acquisition: a wash sale.
-    Carried {
-        from: Id<Flow>,
-        to: Option<Id<Flow>>,
-    },
+    Carried { from: PartId, to: Option<PartId> },
 }
 
 /// A journal flow with its quantities solved and its settlement known.
