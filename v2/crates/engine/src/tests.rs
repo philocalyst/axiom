@@ -1136,6 +1136,7 @@ fn restricted_money_stays_tied_and_is_spent_first_only_where_its_laws_permit() {
         basis: Qty(amount),
         acquired: Day(2),
         txn: RuntimeTxn::journal(Id::new(txn)).unwrap(),
+        part: None,
         codes: FlowCodes {
             header: axiom_core::Run::new(Id::new(0), 0),
             local: axiom_core::Run::new(Id::new(0), 0),

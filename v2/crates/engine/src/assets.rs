@@ -240,6 +240,19 @@ impl Assets {
     /// acquisition; all later parts are improvements. Basis/cost inputs must
     /// already be converted to base-currency quanta.
     pub fn add_part(&mut self, asset: Id<Asset>, part: Part) -> Result<(), AssetError> {
+        self.validate_part(asset, &part)?;
+        let state = &mut self.states[asset.index()];
+        let index = state.parts.len();
+        let id = part.id;
+        state.parts.push(part);
+        self.part_index.insert(id, (asset, index));
+        Ok(())
+    }
+
+    /// Checks the stable ordering and uniqueness constraints without changing
+    /// the table. A ledger can call this before it lands the matching parcel,
+    /// then commit the part after that parcel is in place.
+    pub fn validate_part(&self, asset: Id<Asset>, part: &Part) -> Result<(), AssetError> {
         if part.cost.is_negative() {
             return Err(AssetError::NegativeCost);
         }
@@ -251,7 +264,7 @@ impl Assets {
         }
         let state = self
             .states
-            .get_mut(asset.index())
+            .get(asset.index())
             .filter(|state| state.asset == asset)
             .ok_or(AssetError::UnknownAsset)?;
         if state.disposed.is_some() {
@@ -270,10 +283,6 @@ impl Assets {
         {
             return Err(AssetError::OutOfOrder);
         }
-        let index = state.parts.len();
-        let id = part.id;
-        state.parts.push(part);
-        self.part_index.insert(id, (asset, index));
         Ok(())
     }
 
@@ -337,6 +346,9 @@ impl Assets {
             .get_mut(asset.index())
             .filter(|state| state.asset == asset)
             .ok_or(AssetError::UnknownAsset)?;
+        if state.disposed.is_some() {
+            return Err(AssetError::Disposed);
+        }
         let part = state
             .parts
             .iter_mut()
@@ -531,6 +543,7 @@ pub enum AssetError {
     Disposed,
     AlreadyDisposed,
     NotHeldAtBoundary,
+    ParcelBasisMismatch,
     Overflow,
 }
 

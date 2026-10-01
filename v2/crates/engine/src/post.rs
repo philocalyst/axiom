@@ -490,6 +490,11 @@ impl Ledger<'_, '_, '_> {
                     basis: slice.carried,
                     acquired,
                     txn,
+                    // An ordinary asset-place transfer carries the same
+                    // acquisition part through the split parcel. A flow that
+                    // restarts basis will be registered as a new part by the
+                    // ledger's acquisition hook.
+                    part: if keeps { slice.part } else { None },
                     codes,
                     tied: hold.unwrap_or(kept),
                 },

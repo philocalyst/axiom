@@ -26,7 +26,7 @@ use std::ops::{Deref, Range};
 use axiom_core::{Arena, Day, Id, Qty, Ratio, Sym};
 use axiom_model::{Commodity, Entity, FlowCodes, Place, Policy, RuntimeTxn, Select};
 
-use crate::{Holding, Parcel};
+use crate::{AssetError, Holding, Parcel, PartId};
 
 const NONE: u32 = u32::MAX;
 
@@ -57,22 +57,28 @@ pub(crate) enum Identity {
     /// Money: what matters is who it is tied to and how much of each unit is
     /// already accounted for. Where and when it arrived does not matter, so a
     /// 401k's hundreds of zero-basis deferrals are one lot.
-    Money { tied: Option<Id<Entity>>, basis: Qty, qty: Qty },
+    Money { tied: Option<Id<Entity>>, basis: Qty, qty: Qty, part: Option<PartId> },
     /// Anything else: each purchase is its own lot, for selectors and for how
     /// long it has been held.
-    Lot { acquired: Day, txn: RuntimeTxn, tied: Option<Id<Entity>> },
+    Lot { acquired: Day, txn: RuntimeTxn, tied: Option<Id<Entity>>, part: Option<PartId> },
 }
 
 impl PartialEq for Identity {
     fn eq(&self, other: &Identity) -> bool {
         match (*self, *other) {
             (Identity::Plain { basis: ab, qty: aq }, Identity::Plain { basis: bb, qty: bq }) => (ab, aq) == (bb, bq),
-            (Identity::Money { tied: a, basis: ab, qty: aq }, Identity::Money { tied: b, basis: bb, qty: bq }) => {
+            (
+                Identity::Money { tied: a, basis: ab, qty: aq, part: ap },
+                Identity::Money { tied: b, basis: bb, qty: bq, part: bp },
+            ) => {
                 // Basis per unit, compared exactly: ab/aq == bb/bq.
-                a == b && ab.0 as i128 * bq.0 as i128 == bb.0 as i128 * aq.0 as i128
+                a == b && ap == bp && ab.0 as i128 * bq.0 as i128 == bb.0 as i128 * aq.0 as i128
             }
-            (Identity::Lot { acquired: a, txn: at, tied: ap }, Identity::Lot { acquired: b, txn: bt, tied: bp }) => {
-                (a, at, ap) == (b, bt, bp)
+            (
+                Identity::Lot { acquired: a, txn: at, tied: ap, part: apart },
+                Identity::Lot { acquired: b, txn: bt, tied: bp, part: bpart },
+            ) => {
+                (a, at, ap, apart) == (b, bt, bp, bpart)
             }
             _ => false,
         }
@@ -83,9 +89,9 @@ impl PartialEq for Identity {
 /// their basis per unit; every other parcel by the purchase that made it.
 pub(crate) fn identity(parcel: &Parcel, money: bool) -> Identity {
     if money {
-        Identity::Money { tied: parcel.tied, basis: parcel.basis, qty: parcel.qty }
+        Identity::Money { tied: parcel.tied, basis: parcel.basis, qty: parcel.qty, part: parcel.part }
     } else {
-        Identity::Lot { acquired: parcel.acquired, txn: parcel.txn, tied: parcel.tied }
+        Identity::Lot { acquired: parcel.acquired, txn: parcel.txn, tied: parcel.tied, part: parcel.part }
     }
 }
 
@@ -97,6 +103,7 @@ pub(crate) struct Slice {
     pub basis: Qty,
     pub acquired: Day,
     pub txn: RuntimeTxn,
+    pub part: Option<PartId>,
     pub codes: FlowCodes,
     pub tied: Option<Id<Entity>>,
     pub origin: Origin,
@@ -125,6 +132,7 @@ impl Slice {
             basis,
             acquired,
             txn,
+            part: None,
             codes: empty_codes(),
             tied: None,
             origin,
@@ -401,6 +409,7 @@ impl Slot {
                 };
                 let slice = Slice {
                     tied: lot.tied,
+                    part: lot.part,
                     codes: lot.codes,
                     ..Slice::new(qty, basis, Origin::Lot, (lot.acquired, lot.txn))
                 };
@@ -599,7 +608,7 @@ impl Slot {
                 acquired: Day::MIN,
                 txn: None,
                 tied: None,
-                identity: if money { Identity::Money { tied: None, basis, qty: plain } } else {
+                identity: if money { Identity::Money { tied: None, basis, qty: plain, part: None } } else {
                     Identity::Plain { basis, qty: plain }
                 },
             });
@@ -629,7 +638,7 @@ impl Slot {
         if plain > Qty::ZERO && !selection.constrains() {
             let basis = if money { plain } else { Qty::ZERO };
             self.holding.plain = Qty::ZERO;
-            self.insert(Parcel { qty: plain, basis, acquired: now.0, txn: now.1, codes: empty_codes(), tied: None });
+            self.insert(Parcel { qty: plain, basis, acquired: now.0, txn: now.1, part: None, codes: empty_codes(), tied: None });
         }
         let lots = &mut self.holding.lots[self.first..];
         let whole: Qty = lots.iter().filter(|lot| selection.admits(lot)).map(|lot| lot.qty).sum();
@@ -861,6 +870,79 @@ impl Holdings {
         self.within(0..self.heads.len())
     }
 
+    /// The total basis carried by every live slice of one canonical part.
+    pub(crate) fn part_basis(&self, part: PartId) -> Result<Qty, AssetError> {
+        let mut found = false;
+        self.slots
+            .iter()
+            .flat_map(|slot| slot.holding.lots.iter())
+            .filter(|parcel| parcel.part == Some(part) && parcel.qty > Qty::ZERO)
+            .try_fold(Qty::ZERO, |basis, parcel| {
+                found = true;
+                basis.0
+                    .checked_add(parcel.basis.0)
+                    .map(Qty)
+                    .ok_or(AssetError::Overflow)
+            })
+            .and_then(|basis| if found { Ok(basis) } else { Err(AssetError::UnknownPart) })
+    }
+
+    /// Applies a basis change to all live slices of a part in proportion to
+    /// their current basis (consumption) or quantity (capital carry). Shares
+    /// are rounded once across the whole part, so their sum stays exact.
+    pub(crate) fn adjust_part_basis(&mut self, part: PartId, delta: Qty) -> Result<(), AssetError> {
+        if delta.is_zero() {
+            return Ok(());
+        }
+        let basis = self.part_basis(part)?;
+        let magnitude = if delta.is_negative() {
+            delta.0.checked_neg().map(Qty).ok_or(AssetError::Overflow)?
+        } else {
+            delta
+        };
+        let weights = if delta.is_negative() {
+            if magnitude > basis {
+                return Err(AssetError::ParcelBasisMismatch);
+            }
+            basis
+        } else {
+            self.slots
+                .iter()
+                .flat_map(|slot| slot.holding.lots.iter())
+                .filter(|parcel| parcel.part == Some(part) && parcel.qty > Qty::ZERO)
+                .try_fold(Qty::ZERO, |qty, parcel| {
+                    qty.0.checked_add(parcel.qty.0).map(Qty).ok_or(AssetError::Overflow)
+                })?
+        };
+        if weights.is_zero() {
+            return Err(AssetError::UnknownPart);
+        }
+        if !delta.is_negative() {
+            basis.0.checked_add(magnitude.0).ok_or(AssetError::Overflow)?;
+        }
+        let mut shares = Shares::new(magnitude, weights);
+        for slot in &mut self.slots {
+            let mut changed = false;
+            for parcel in &mut slot.holding.lots {
+                if parcel.part != Some(part) || parcel.qty <= Qty::ZERO {
+                    continue;
+                }
+                let weight = if delta.is_negative() { parcel.basis } else { parcel.qty };
+                let share = shares.take(weight);
+                if delta.is_negative() {
+                    parcel.basis -= share;
+                } else {
+                    parcel.basis += share;
+                }
+                changed = true;
+            }
+            if changed {
+                slot.ranked = None;
+            }
+        }
+        Ok(())
+    }
+
     /// The slots of the places whose ids lie in `places`: a subtree.
     pub fn within(&self, places: Range<usize>) -> impl Iterator<Item = &Slot> {
         self.heads[places].iter().flat_map(|&head| self.chain(head))
@@ -937,6 +1019,7 @@ mod tests {
             basis: Qty(basis),
             acquired: Day(acquired),
             txn: journal(acquired as u32),
+            part: None,
             codes: empty_codes(),
             tied: None,
         }
@@ -1254,6 +1337,7 @@ mod tests {
             basis: slice.basis,
             acquired: slice.acquired,
             txn: slice.txn,
+            part: slice.part,
             codes: slice.codes,
             tied: slice.tied,
         };
@@ -1289,6 +1373,73 @@ mod tests {
         assert_eq!(slot.holding.lots.len(), 2);
         assert_eq!(slot.holding.lots[0].qty, Qty(5));
         assert_eq!(slot.holding.lots[1].qty, Qty(1));
+    }
+
+    #[test]
+    fn asset_part_identity_survives_partial_relief_and_is_not_merged() {
+        let origin = RuntimeTxn::Adjustment { place: Id::new(1), day: Day(10) };
+        let (first, second) = (
+            PartId { origin, ordinal: 0 },
+            PartId { origin, ordinal: 1 },
+        );
+        let mut a = lot(4, 40, 10);
+        a.part = Some(first);
+        let mut b = a;
+        b.part = Some(second);
+        let mut slot = slot_of(1, 0, &[a, b], false);
+
+        assert_eq!(slot.holding.lots.len(), 2, "distinct cost-basis parts remain addressable");
+        let mut relief = Relief::default();
+        let codes = Arena::new();
+        let request = Request {
+            need: Qty(2),
+            money: false,
+            selectors: &[],
+            policy: Some(Policy::Fifo),
+            codes: &codes,
+            permits: &[],
+            spender: None,
+            now: (Day(20), journal(20)),
+            explain: &|| false,
+        };
+        slot.relieve(&request, &mut relief);
+        assert_eq!(relief.slices[0].part, Some(first));
+
+        let slice = relief.slices[0];
+        let moved = Parcel {
+            qty: slice.qty,
+            basis: slice.carried,
+            acquired: slice.acquired,
+            txn: slice.txn,
+            part: slice.part,
+            codes: slice.codes,
+            tied: slice.tied,
+        };
+        assert_eq!(moved.part, Some(first), "ordinary transfer carries the part key");
+    }
+
+    #[test]
+    fn part_basis_adjustments_span_held_slices_without_changing_other_parts() {
+        let origin = RuntimeTxn::Adjustment { place: Id::new(1), day: Day(10) };
+        let (part, other) = (PartId { origin, ordinal: 0 }, PartId { origin, ordinal: 1 });
+        let mut holdings = Holdings::new(2);
+        let mut first = lot(3, 60, 10);
+        first.part = Some(part);
+        let mut second = lot(2, 40, 10);
+        second.part = Some(part);
+        let mut independent = lot(1, 80, 10);
+        independent.part = Some(other);
+        holdings.entry(Id::new(0), Id::new(0)).land(first, false);
+        holdings.entry(Id::new(1), Id::new(0)).land(second, false);
+        holdings.entry(Id::new(1), Id::new(0)).land(independent, false);
+
+        assert_eq!(holdings.part_basis(part), Ok(Qty(100)));
+        holdings.adjust_part_basis(part, Qty(-25)).unwrap();
+        assert_eq!(holdings.part_basis(part), Ok(Qty(75)));
+        assert_eq!(holdings.part_basis(other), Ok(Qty(80)));
+        holdings.adjust_part_basis(part, Qty(20)).unwrap();
+        assert_eq!(holdings.part_basis(part), Ok(Qty(95)));
+        assert_eq!(holdings.part_basis(other), Ok(Qty(80)));
     }
 
     #[test]

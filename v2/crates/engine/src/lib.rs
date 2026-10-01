@@ -37,6 +37,7 @@
 mod calc;
 mod checkpoint;
 mod assets;
+mod assets_runtime;
 mod budget;
 mod eval;
 mod events;
@@ -362,6 +363,9 @@ pub struct Parcel {
     pub basis: Qty,
     pub acquired: Day,
     pub txn: RuntimeTxn,
+    /// The canonical asset part this parcel belongs to, if it came from an
+    /// identified thing. Partial relief and transfers keep this identity.
+    pub part: Option<PartId>,
     /// The originating flow's pooled codes. Selectors can match a lot after
     /// it has moved or a forecast has copied its flow, without looking up a
     /// synthetic transaction id or cloning code text.
@@ -375,6 +379,7 @@ impl Hash for Parcel {
         self.basis.hash(state);
         self.acquired.hash(state);
         self.txn.hash(state);
+        self.part.hash(state);
         self.codes.header.start().hash(state);
         self.codes.header.len().hash(state);
         self.codes.local.start().hash(state);
