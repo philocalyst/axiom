@@ -159,17 +159,17 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// ignored, since applying is what makes it real.
     pub fn apply(&mut self, flow: &Flow) -> Applied {
         let view = self.plan.book.flow_view(flow);
-        self.apply_view(flow, view)
+        self.apply_view(flow, view, axiom_model::RuntimeTxn::journal(flow.txn))
     }
 
     /// Applies a forecast flow whose metadata is pooled in the Book and whose
     /// detail may be overridden in the forecast's immutable runtime arena.
     pub fn apply_runtime(&mut self, flow: &RuntimeFlow, details: &Arena<RuntimeDetail>) -> Applied {
         let view = self.plan.book.runtime_flow_view(flow, details);
-        self.apply_view(&flow.flow, view)
+        self.apply_view(&flow.flow, view, flow.txn)
     }
 
-    fn apply_view(&mut self, flow: &Flow, view: FlowView<'_>) -> Applied {
+    fn apply_view(&mut self, flow: &Flow, view: FlowView<'_>, txn: axiom_model::RuntimeTxn) -> Applied {
         let (was, before) = (self.clock.day, self.clock.phase);
         let day = flow.day.max(self.clock.day);
         self.advance_through(Moment::after_flows(day));
@@ -180,7 +180,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let number = self.clock.applied;
         self.clock.applied += 1;
         let amounts = self.amounts(flow, None);
-        self.post(&Motion::from_view(self.plan.book, view, Cause::Applied(number), day, amounts));
+        self.post(&Motion::from_view(self.plan.book, view, txn, Cause::Applied(number), day, amounts));
         self.world.holdings.tidy();
         self.record.since(marks)
     }

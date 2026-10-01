@@ -21,7 +21,7 @@
 //!   and acquisition day it gives.
 
 use axiom_core::{Diagnostic, Id, Qty};
-use axiom_model::{Amount, Basis, Class, Dir, End, Entity, Fault, Object, Subject};
+use axiom_model::{Amount, Basis, Class, Dir, End, Entity, Fault, Object, RuntimeTxn, Subject};
 
 use crate::eval::{Occasion, Realized};
 use crate::explain;
@@ -36,7 +36,7 @@ fn fresh_slice(
     m: &Motion,
     qty: Qty,
     is_base: bool,
-    now: (axiom_core::Day, axiom_core::Id<axiom_model::Txn>),
+    now: (axiom_core::Day, RuntimeTxn),
 ) -> Slice {
     let mut slice = Slice::fresh(qty, is_base, now);
     slice.codes = m.code_runs;

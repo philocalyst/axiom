@@ -6,7 +6,7 @@
 //! `Motion`, so exactly one code path moves value.
 
 use axiom_core::{Day, Days, Id, Loc, Qty, Sym};
-use axiom_model::{Amount, Assert, Book, Class, Detail, End, Entity, Flow, FlowCodes, FlowView, Mode, Place, Purposed, Select, Txn, Waive};
+use axiom_model::{Amount, Assert, Book, Class, Detail, End, Entity, Flow, FlowCodes, FlowView, Mode, Place, Purposed, RuntimeTxn, Select, Waive};
 
 use crate::Cause;
 
@@ -70,7 +70,7 @@ pub(crate) struct Motion<'f> {
     pub target: &'f Place,
     pub out: Amount,
     pub arrive: Amount,
-    pub txn: Id<Txn>,
+    pub txn: RuntimeTxn,
     pub owner: Id<Entity>,
     pub payee: Option<Id<Entity>>,
     pub purpose: Option<Purposed>,
@@ -84,10 +84,17 @@ pub(crate) struct Motion<'f> {
 
 impl<'f> Motion<'f> {
     pub fn new(book: &'f Book, flow: &'f Flow, cause: Cause, day: Day, amounts: Amounts) -> Motion<'f> {
-        Motion::from_view(book, book.flow_view(flow), cause, day, amounts)
+        Motion::from_view(book, book.flow_view(flow), RuntimeTxn::journal(flow.txn), cause, day, amounts)
     }
 
-    pub fn from_view(book: &'f Book, view: FlowView<'f>, cause: Cause, day: Day, amounts: Amounts) -> Motion<'f> {
+    pub fn from_view(
+        book: &'f Book,
+        view: FlowView<'f>,
+        txn: RuntimeTxn,
+        cause: Cause,
+        day: Day,
+        amounts: Amounts,
+    ) -> Motion<'f> {
         let flow = &*view;
         let (source, target) = (&book.places[flow.from], &book.places[flow.to]);
         Motion {
@@ -102,7 +109,7 @@ impl<'f> Motion<'f> {
             target,
             out: Amount::new(amounts.out, flow.out.unit),
             arrive: Amount::new(amounts.arrive, flow.arrive.unit),
-            txn: flow.txn,
+            txn,
             owner: flow.owner,
             payee: flow.payee,
             purpose: flow.purpose,
@@ -123,7 +130,9 @@ impl<'f> Motion<'f> {
         let amount = Amount::new(moved.abs(), assert.amount.unit);
         let touching = &book.touching[assert.place];
         let last = touching.partition_point(|&id| book.flows[id].day <= assert.day);
-        let txn = last.checked_sub(1).map_or(Id::new(0), |at| book.flows[touching[at]].txn);
+        let txn = last.checked_sub(1).map_or(RuntimeTxn::Adjustment { place: assert.place, day: assert.day }, |at| {
+            RuntimeTxn::journal(book.flows[touching[at]].txn)
+        });
         Motion {
             cause: Cause::Time,
             day: assert.day,

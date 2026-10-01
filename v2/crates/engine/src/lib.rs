@@ -65,7 +65,7 @@ use std::hash::{Hash, Hasher};
 
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Ratio, Sym};
 use axiom_model::{
-    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot, Subject, System, Txn,
+    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot, RuntimeTxn, Subject, System, Txn,
     Waive,
 };
 
@@ -285,7 +285,7 @@ pub struct Parcel {
     /// base-currency quanta.
     pub basis: Qty,
     pub acquired: Day,
-    pub txn: Id<Txn>,
+    pub txn: RuntimeTxn,
     /// The originating flow's pooled codes. Selectors can match a lot after
     /// it has moved or a forecast has copied its flow, without looking up a
     /// synthetic transaction id or cloning code text.

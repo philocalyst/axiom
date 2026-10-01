@@ -16,7 +16,7 @@
 use axiom_core::{Day, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
     Amount, Assert, BinOp, Book, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param, Place,
-    StepKind, Subject, System, Trigger, Value, Waive, Window,
+    RuntimeTxn, StepKind, Subject, System, Trigger, Value, Waive, Window,
 };
 
 use crate::calc::Calc;
@@ -693,7 +693,7 @@ pub(crate) fn ambiguous(book: &Book, m: &Motion, candidates: &[Candidate], proce
             base(candidate.basis),
             gain.unwrap_or_default()
         );
-        d = match candidate.txn.and_then(|id| book.txns.get(id)) {
+        d = match candidate.txn.and_then(RuntimeTxn::source_txn).and_then(|id| book.txns.get(id)) {
             Some(txn) => d.context(txn.loc, text),
             None => d.note(format!("plain money: {}", money(candidate.qty))),
         };
@@ -773,7 +773,7 @@ pub(crate) fn overdue(
     lot: &Parcel,
     today: Day,
 ) -> Option<Diagnostic> {
-    let claim = book.paid_into(lot.txn, place)?;
+    let claim = book.paid_into(lot.txn.source_txn()?, place)?;
     let due = book.flow_view(claim).detail().due.filter(|&due| due <= today)?;
     let who = claim.payee.map_or_else(|| show::place(book, place), |entity| book.name(book.entities[entity].path));
     let owed = book.show(Amount::new(lot.qty, unit));

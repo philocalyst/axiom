@@ -24,7 +24,7 @@ use std::iter::successors;
 use std::ops::{Deref, Range};
 
 use axiom_core::{Arena, Day, Id, Qty, Ratio, Sym};
-use axiom_model::{Commodity, Entity, FlowCodes, Place, Policy, Select, Txn};
+use axiom_model::{Commodity, Entity, FlowCodes, Place, Policy, RuntimeTxn, Select};
 
 use crate::{Holding, Parcel};
 
@@ -51,13 +51,16 @@ fn same_codes(left: FlowCodes, right: FlowCodes, pool: &Arena<Sym>) -> bool {
 /// never ambiguous: taking any of them is the same as taking any other.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Identity {
+    /// Plain value has no acquisition transaction and must not borrow a fake
+    /// journal key merely to participate in ambiguity checks.
+    Plain { basis: Qty, qty: Qty },
     /// Money: what matters is who it is tied to and how much of each unit is
     /// already accounted for. Where and when it arrived does not matter, so a
     /// 401k's hundreds of zero-basis deferrals are one lot.
     Money { tied: Option<Id<Entity>>, basis: Qty, qty: Qty },
     /// Anything else: each purchase is its own lot, for selectors and for how
     /// long it has been held.
-    Lot { acquired: Day, txn: Id<Txn>, tied: Option<Id<Entity>> },
+    Lot { acquired: Day, txn: RuntimeTxn, tied: Option<Id<Entity>> },
 }
 
 impl PartialEq for Identity {
@@ -92,7 +95,7 @@ pub(crate) struct Slice {
     /// Basis relieved with it at the source.
     pub basis: Qty,
     pub acquired: Day,
-    pub txn: Id<Txn>,
+    pub txn: RuntimeTxn,
     pub codes: FlowCodes,
     pub tied: Option<Id<Entity>>,
     pub origin: Origin,
@@ -115,7 +118,7 @@ pub(crate) enum Origin {
 }
 
 impl Slice {
-    fn new(qty: Qty, basis: Qty, origin: Origin, (acquired, txn): (Day, Id<Txn>)) -> Slice {
+    fn new(qty: Qty, basis: Qty, origin: Origin, (acquired, txn): (Day, RuntimeTxn)) -> Slice {
         Slice {
             qty,
             basis,
@@ -131,7 +134,7 @@ impl Slice {
 
     /// Value that nothing gave up: base currency is at its face, anything else
     /// has no basis of its own.
-    pub fn fresh(qty: Qty, is_base: bool, now: (Day, Id<Txn>)) -> Slice {
+    pub fn fresh(qty: Qty, is_base: bool, now: (Day, RuntimeTxn)) -> Slice {
         Slice::new(qty, if is_base { qty } else { Qty::ZERO }, Origin::Fresh, now)
     }
 }
@@ -152,7 +155,7 @@ pub(crate) struct Candidate {
     pub basis: Qty,
     pub acquired: Day,
     /// The transaction that made it; plain money has none.
-    pub txn: Option<Id<Txn>>,
+    pub txn: Option<RuntimeTxn>,
     pub tied: Option<Id<Entity>>,
     identity: Identity,
 }
@@ -173,7 +176,7 @@ pub(crate) struct Request<'a> {
     /// The entity the flow is written out of, whose own parcels leave first.
     pub spender: Option<Id<Entity>>,
     /// The moment, which is when and by what plain money is acquired.
-    pub now: (Day, Id<Txn>),
+    pub now: (Day, RuntimeTxn),
     /// Whether to list the candidates if the choice turns out to be ambiguous:
     /// asked only then, since it is a lookup.
     pub explain: &'a dyn Fn() -> bool,
@@ -588,8 +591,17 @@ impl Slot {
         if plain > Qty::ZERO && !selection.constrains() {
             // Plain money has no transaction or acquisition day of its own.
             let basis = if money { plain } else { Qty::ZERO };
-            let parcel = Parcel { qty: plain, basis, acquired: Day::MIN, txn: Id::new(0), codes: empty_codes(), tied: None };
-            out.push(Candidate { txn: None, ..Candidate::new(Source::Plain, &parcel, money) });
+            out.push(Candidate {
+                source: Source::Plain,
+                qty: plain,
+                basis,
+                acquired: Day::MIN,
+                txn: None,
+                tied: None,
+                identity: if money { Identity::Money { tied: None, basis, qty: plain } } else {
+                    Identity::Plain { basis, qty: plain }
+                },
+            });
         }
         let lots = self.holding.lots.iter().enumerate();
         let admitted = lots.filter(|(_, lot)| !lot.qty.is_zero() && selection.admits(lot));
@@ -611,7 +623,7 @@ impl Slot {
     /// their quantity. Quantities do not change. Plain money takes a share too,
     /// and stops being plain when it does. `false` if there is nothing to carry
     /// it: no admitted parcel.
-    pub fn rebase(&mut self, delta: Qty, selection: &Selection, money: bool, now: (Day, Id<Txn>)) -> bool {
+    pub fn rebase(&mut self, delta: Qty, selection: &Selection, money: bool, now: (Day, RuntimeTxn)) -> bool {
         let plain = self.holding.plain;
         if plain > Qty::ZERO && !selection.constrains() {
             let basis = if money { plain } else { Qty::ZERO };
@@ -868,7 +880,7 @@ impl Holdings {
         delta: Qty,
         selection: &Selection,
         money: impl Fn(Id<Commodity>) -> bool,
-        now: (Day, Id<Txn>),
+        now: (Day, RuntimeTxn),
     ) -> bool {
         let mut at = self.heads[place.index()];
         while at != NONE {
@@ -914,12 +926,16 @@ mod tests {
         Days::new(Day(first), Day(last)).unwrap()
     }
 
+    fn journal(txn: u32) -> RuntimeTxn {
+        RuntimeTxn::journal(Id::new(txn))
+    }
+
     fn lot(qty: i64, basis: i64, acquired: i32) -> Parcel {
         Parcel {
             qty: Qty(qty),
             basis: Qty(basis),
             acquired: Day(acquired),
-            txn: Id::new(acquired as u32),
+            txn: RuntimeTxn::journal(Id::new(acquired as u32)),
             codes: empty_codes(),
             tied: None,
         }
@@ -946,7 +962,7 @@ mod tests {
         let mut relief = Relief::default();
         let codes = Arena::new();
         let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
-        let (spender, now) = (ask.spender, (Day(1_000), Id::new(0)));
+        let (spender, now) = (ask.spender, (Day(1_000), RuntimeTxn::journal(Id::new(0))));
         let request =
             Request { need: Qty(need), money, selectors, policy, codes: &codes, permits, spender, now, explain: &|| true };
         slot.relieve(&request, &mut relief);
@@ -977,7 +993,7 @@ mod tests {
         slot.land(lot(5, 50, 20), false);
         slot.land(lot(2, 10, 10), false);
         slot.land(lot(3, 30, 20), false);
-        slot.land(Parcel { txn: Id::new(9), ..lot(1, 10, 20) }, false);
+        slot.land(Parcel { txn: journal(9), ..lot(1, 10, 20) }, false);
         let lots: Vec<_> = slot.holding.lots.iter().map(|l| (l.acquired.0, l.qty.0, l.basis.0)).collect();
         assert_eq!(lots, [(10, 2, 10), (20, 8, 80), (20, 1, 10)]);
         assert_eq!(held.qty(place, unit), Qty(11));
@@ -1062,7 +1078,7 @@ mod tests {
             Qty(9_000),
             &Selection { selectors: &[], codes: &Arena::new() },
             false,
-            (Day(9), Id::new(0))
+            (Day(9), journal(0))
         ));
         assert_eq!(
             taken(&relieve(&mut held, 1, &hifo)),
@@ -1091,7 +1107,7 @@ mod tests {
     fn only_lots_that_differ_are_ambiguous_without_a_policy() {
         let mut same = slot_of(1, 0, &[lot(10, 1_000, 5)], false);
         assert!(!relieve(&mut same, 6, &PLAIN).ambiguous);
-        let purchase = |txn| Parcel { txn: Id::new(txn), ..lot(10, 1_500, 5) };
+        let purchase = |txn| Parcel { txn: RuntimeTxn::journal(Id::new(txn)), ..lot(10, 1_500, 5) };
         let differ = slot_of(1, 0, &[lot(10, 1_000, 5), purchase(99)], false);
         let relief = relieve(&mut differ.clone(), 6, &PLAIN);
         assert!(relief.ambiguous);
@@ -1176,7 +1192,13 @@ mod tests {
         let (header_at, local_at, other_at) = (pool.push(header), pool.push(local), pool.push(other));
         let marks = FlowCodes { header: axiom_core::Run::new(header_at, 1), local: axiom_core::Run::new(local_at, 1) };
         let mut parcel = lot(5, 5, 10);
-        parcel.txn = Id::new(999); // A runtime flow need not name a Book transaction.
+        parcel.txn = RuntimeTxn::ContractOccurrence {
+            contract: Id::new(0),
+            schedule: axiom_model::ScheduleKind::Regular,
+            day: Day(10),
+            ordinal: 999,
+            source: None,
+        };
         parcel.codes = marks;
         let mut held = Slot::new(Id::new(0), Id::new(0), NONE);
         held.land_with_codes(parcel, false, &pool);
@@ -1207,7 +1229,7 @@ mod tests {
             codes: &pool,
             permits: &[],
             spender: None,
-            now: (Day(20), Id::new(20)),
+            now: (Day(20), journal(20)),
             explain: &|| false,
         };
         source.relieve(&request, &mut relief);

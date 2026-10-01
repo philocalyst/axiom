@@ -130,6 +130,9 @@ pub enum RuntimeTxn {
         ordinal: u32,
         source: Option<Id<Txn>>,
     },
+    /// A balance-closing or other runtime adjustment with no journal source.
+    /// It is local to a place and day, so it cannot masquerade as a Book ID.
+    Adjustment { place: Id<Place>, day: Day },
 }
 
 impl RuntimeTxn {
@@ -142,8 +145,9 @@ impl RuntimeTxn {
     /// this runtime flow came from one.
     pub fn source_txn(self) -> Option<Id<Txn>> {
         match self {
-            RuntimeTxn::Journal(txn) => Some(txn),
-            RuntimeTxn::ContractOccurrence { source, .. } => source,
+            RuntimeTxn::Journal(txn) => (txn != TEMPLATE_TXN).then_some(txn),
+            RuntimeTxn::ContractOccurrence { source, .. } => source.filter(|&txn| txn != TEMPLATE_TXN),
+            RuntimeTxn::Adjustment { .. } => None,
         }
     }
 }
@@ -156,6 +160,9 @@ impl PartialEq for RuntimeTxn {
                 RuntimeTxn::ContractOccurrence { contract: ac, schedule: as_, day: ad, ordinal: ao, .. },
                 RuntimeTxn::ContractOccurrence { contract: bc, schedule: bs, day: bd, ordinal: bo, .. },
             ) => (ac, as_, ad, ao) == (bc, bs, bd, bo),
+            (RuntimeTxn::Adjustment { place: ap, day: ad }, RuntimeTxn::Adjustment { place: bp, day: bd }) => {
+                (ap, ad) == (bp, bd)
+            }
             _ => false,
         }
     }
@@ -177,6 +184,11 @@ impl Hash for RuntimeTxn {
                 day.hash(state);
                 ordinal.hash(state);
             }
+            RuntimeTxn::Adjustment { place, day } => {
+                2u8.hash(state);
+                place.hash(state);
+                day.hash(state);
+            }
         }
     }
 }
@@ -197,6 +209,37 @@ mod runtime_txn_tests {
         assert_eq!(key(None), key(Some(Id::new(9))));
         assert_eq!(key(None).source_txn(), None);
         assert_eq!(key(Some(Id::new(9))).source_txn(), Some(Id::new(9)));
+    }
+
+    #[test]
+    fn occurrence_keys_include_schedule_and_ordinal_but_not_source_provenance() {
+        let base = RuntimeTxn::ContractOccurrence {
+            contract: Id::new(2),
+            schedule: ScheduleKind::Regular,
+            day: Day(42),
+            ordinal: 3,
+            source: None,
+        };
+        let kept = RuntimeTxn::ContractOccurrence { source: Some(Id::new(9)), ..base };
+        let standing = RuntimeTxn::ContractOccurrence { schedule: ScheduleKind::Standing, ..base };
+        let next = RuntimeTxn::ContractOccurrence { ordinal: 4, ..base };
+        assert_eq!(base, kept);
+        assert_ne!(base, standing);
+        assert_ne!(base, next);
+        let hash = |txn: RuntimeTxn| {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            txn.hash(&mut hasher);
+            hasher.finish()
+        };
+        assert_eq!(hash(base), hash(kept));
+        assert_ne!(hash(base), hash(standing));
+        assert_eq!(base.source_txn(), None);
+        assert_eq!(RuntimeTxn::Adjustment { place: Id::new(4), day: Day(42) }.source_txn(), None);
+        assert_eq!(RuntimeTxn::Journal(TEMPLATE_TXN).source_txn(), None);
+        assert_eq!(
+            RuntimeTxn::ContractOccurrence { source: Some(TEMPLATE_TXN), ..base }.source_txn(),
+            None
+        );
     }
 }
 

@@ -88,6 +88,38 @@ fn invalid_entity_ownership_is_reported_without_recursing_or_dropping_into_self(
 }
 
 #[test]
+fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
+    let mut f = Fixture::new();
+    let (equity, brokerage, savings, vti) = (f.equity, f.brokerage, f.savings, f.vti);
+    let source = f.exchange(1, equity, Amount::new(Qty(5), vti), brokerage, Amount::new(Qty(5), vti));
+    let book = f.book();
+    let mut flow = book.flows[source].clone();
+    flow.txn = TEMPLATE_TXN;
+    flow.day = Day(2);
+    flow.recognized = axiom_core::Days::on(Day(2));
+    flow.to = savings;
+    flow.out = Amount::new(Qty(7), vti);
+    flow.arrive = Amount::new(Qty(7), vti);
+    let txn = RuntimeTxn::ContractOccurrence {
+        contract: Id::new(0),
+        schedule: ScheduleKind::Regular,
+        day: Day(2),
+        ordinal: 0,
+        source: None,
+    };
+    let runtime = RuntimeFlow { flow, detail: None, txn };
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(Options { today: Day(3), relaxed: false });
+    ledger.apply_runtime(&runtime, &axiom_core::Arena::<RuntimeDetail>::new());
+    let run = ledger.finish();
+
+    let holding = held(&run, savings, vti).expect("the runtime flow posted its non-money lot");
+    assert_eq!(holding.lots.len(), 1);
+    assert_eq!(holding.lots[0].txn, txn);
+    assert_eq!(holding.lots[0].qty, Qty(7));
+}
+
+#[test]
 fn an_empty_book_folds_to_nothing() {
     let book = Fixture::new().book();
     let plan = Plan::new(&book);
@@ -961,7 +993,7 @@ fn restricted_money_stays_tied_and_is_spent_first_only_where_its_laws_permit() {
         qty: Qty(amount),
         basis: Qty(amount),
         acquired: Day(2),
-        txn: Id::new(txn),
+        txn: RuntimeTxn::journal(Id::new(txn)),
         codes: FlowCodes {
             header: axiom_core::Run::new(Id::new(0), 0),
             local: axiom_core::Run::new(Id::new(0), 0),
