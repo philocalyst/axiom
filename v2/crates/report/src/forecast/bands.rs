@@ -193,4 +193,51 @@ mod tests {
             assert_eq!(a.percentiles(month), b.percentiles(month));
         }
     }
+
+    /// The old implementation sampled an owned `Vec` per category. Keeping a
+    /// test-only reference makes the flat layout's fixed-seed compatibility
+    /// explicit for equal-width monthly histories.
+    fn original_sampling(
+        committed: &[i64],
+        shares: &[Share],
+        history: &[&[i64]],
+        paths: usize,
+        seed: u64,
+    ) -> Vec<i64> {
+        let groups = paths.div_ceil(LANES);
+        let width = groups * LANES;
+        let mut values = vec![0; committed.len() * width];
+        for group in 0..groups {
+            let mut streams = Streams::seeded(seed, group as u64);
+            let mut spent = [0i64; LANES];
+            for (month, (&standing, &share)) in committed.iter().zip(shares).enumerate() {
+                let mut drawn = [0i64; LANES];
+                for category in history.iter().filter(|category| !category.is_empty()) {
+                    let picks = streams.below(category.len());
+                    for lane in 0..LANES {
+                        drawn[lane] += category[picks[lane]];
+                    }
+                }
+                for lane in 0..LANES {
+                    spent[lane] += share.apply(drawn[lane]);
+                    values[month * width + group * LANES + lane] = standing - spent[lane];
+                }
+            }
+        }
+        values
+    }
+
+    #[test]
+    fn flat_history_keeps_the_original_fixed_seed_sample_sequence() {
+        let committed = [10_000; 6];
+        let shares = [WHOLE; 6];
+        let first = [0, 100, 200, 300, 400];
+        let second = [50, 50, 900, 75, 225];
+        let history = [0, 100, 200, 300, 400, 50, 50, 900, 75, 225];
+        let bands = simulate(&committed, &shares, &history, &[0, 1], 5, 1_000, 42);
+        assert_eq!(
+            bands.values,
+            original_sampling(&committed, &shares, &[&first, &second], 1_000, 42)
+        );
+    }
 }
