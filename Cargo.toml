@@ -1,21 +1,24 @@
-[package]
-name = "axiom-ledger"
-version = "0.1.0"
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.3.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-description = "A proof-producing, content-addressed economic ledger"
+rust-version = "1.90"
 
-[[bin]]
-name = "axiom"
-path = "src/main.rs"
+[workspace.dependencies]
+axiom-core = { path = "crates/core" }
+axiom-syntax = { path = "crates/syntax" }
+axiom-model = { path = "crates/model" }
+axiom-engine = { path = "crates/engine" }
+axiom-report = { path = "crates/report" }
+axiom-systems = { path = "crates/systems" }
+axiom-sync = { path = "crates/sync" }
+memchr = "2.8"
 
-[dependencies]
-blake3 = "1.8"
-libc = "0.2"
-num-bigint = "0.4"
-num-rational = "0.4"
-num-traits = "0.2"
-
-[dev-dependencies]
-serde_json = "1"
-tempfile = "3"
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
