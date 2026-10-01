@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use axiom_core::calendar::Window;
 use axiom_core::{Day, Id, Ratio};
 use axiom_engine::{Headroom, Run};
-use axiom_model::{Amount, Book, Law, Period, Place, Subject};
+use axiom_model::{Amount, Book, Budget, Law, Period, Place, Subject};
 
 use crate::calendar::Periods;
 use crate::headroom::{current, window_words};
@@ -20,6 +20,62 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 
 pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>, by: Period) -> Report<'s> {
     let at = at.unwrap_or(run.today);
+    if !book.budgets.is_empty() {
+        return purpose_budgets(book, run, whose, at, by);
+    }
+    // v3 bridge: v3 books have no typed budgets; retain their place-based caps
+    // until the v3 model is removed.
+    place_budgets(book, run, whose, at, by)
+}
+
+/// Budgets are typed declarations on purposes. Their law id ties the report to
+/// the exact headroom readings the engine produced, including the owner scope.
+fn purpose_budgets<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Day, by: Period) -> Report<'s> {
+    let periods = Periods::covering(by, at, at);
+    let window = periods.window(0).days();
+    let mut table = Section::new(
+        ["Purpose", "Owner", "Window"].map(Column::left)
+            .into_iter()
+            .chain(["Spent", "Limit", "Left", "Used"].map(Column::right)),
+    );
+
+    for (_, budget) in book.budgets.iter() {
+        let purpose = book.name(book.purposes[budget.purpose].name);
+        let mut readings: Vec<_> = run
+            .headroom
+            .iter()
+            .filter(|reading| {
+                reading.law == budget.law
+                    && whose.includes(reading.owner)
+                    && reading.days.overlaps(window)
+            })
+            .collect();
+        readings.sort_by_key(|reading| (reading.owner, reading.days.first()));
+        for reading in readings {
+            let left = Amount::new(reading.limit.qty - reading.counted.qty, reading.limit.unit);
+            let used = Ratio::new(reading.counted.qty.0.into(), reading.limit.qty.0.into());
+            table.push(
+                Row::new([
+                    Cell::Purpose(purpose),
+                    Cell::Name(book.name(book.entities[reading.owner].path)),
+                    Cell::text(window_words(reading)),
+                    Cell::amount(book, reading.counted),
+                    Cell::amount(book, reading.limit),
+                    Cell::amount(book, left),
+                    used.map_or(Cell::Blank, Cell::Percent),
+                ])
+                .style(if left.qty.is_negative() { Style::Alert } else { Style::Normal }),
+            );
+        }
+    }
+    if table.rows.is_empty() {
+        table.note("No budget headroom was recorded for this window.");
+    }
+    Report::new(format!("Budgets for {}", periods.title(0))).with(table)
+}
+
+// v3 bridge: place-based `warn` caps were the only budget representation.
+fn place_budgets<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Day, by: Period) -> Report<'s> {
     let periods = Periods::covering(by, at, at);
     let window = periods.window(0).days();
     // Every window of the period so far is read, those no flow reached included.

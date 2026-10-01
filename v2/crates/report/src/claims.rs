@@ -83,7 +83,7 @@ pub fn open<'h>(
                 left: Amount::new(lot.qty, holding.unit),
                 made: lot.acquired,
                 payee: made.and_then(|flow| flow.payee),
-                due: made.and_then(|flow| flow.detail().due),
+                due: made.and_then(|flow| book.flow_view(flow).detail().due),
             }
         })
     });
@@ -113,7 +113,7 @@ pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim>
         }
         let flow = posting.flow;
         if flow.from == place {
-            let Some(&code) = flow.codes.first() else {
+            let Some(code) = book.flow_view(flow).codes().next() else {
                 continue;
             };
             let debt = debts.entry(code).or_insert(Claim {
@@ -123,10 +123,10 @@ pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim>
                 left: Amount::zero(flow.out.unit),
                 made: flow.day,
                 payee: flow.payee,
-                due: flow.detail().due,
+                due: book.flow_view(flow).detail().due,
             });
             debt.left.qty += posting.out().qty;
-        } else if let Some(debt) = settled_codes(flow)
+        } else if let Some(debt) = settled_codes(book, flow)
             .find(|code| debts.contains_key(code))
             .and_then(|code| debts.get_mut(&code))
         {
@@ -140,15 +140,16 @@ pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim>
 }
 
 /// The codes a flow carries, and those it settles with `for #code`.
-fn settled_codes(flow: &Flow) -> impl Iterator<Item = Sym> + '_ {
-    let selected = flow.select.iter().filter_map(|select| {
+fn settled_codes<'a>(book: &'a Book, flow: &'a Flow) -> impl Iterator<Item = Sym> + 'a {
+    let view = book.flow_view(flow);
+    let selected = view.select().iter().filter_map(|select| {
         if let Select::Code(code) = select {
             Some(*code)
         } else {
             None
         }
     });
-    flow.codes.iter().copied().chain(selected)
+    view.codes().chain(selected)
 }
 
 pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {

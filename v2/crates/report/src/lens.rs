@@ -54,6 +54,11 @@ impl Whose {
             .is_none_or(|owners| owners.binary_search(&entity).is_ok())
     }
 
+    /// Whether this lens covers every owner in the book.
+    pub fn is_everyone(&self) -> bool {
+        self.owners.is_none()
+    }
+
     /// The entity under which machine-readable facts are reported.
     pub fn label<'s>(&self, book: &Book<'s>) -> &'s str {
         self.label
@@ -145,7 +150,7 @@ impl<'b, 's> Lens<'b, 's> {
     /// The display sign for a place, using the plan's table or the legacy path lookup.
     pub fn display_sign(self, place: Id<Place>) -> i64 {
         self.sides.map_or_else(
-            || self.book.v3_root(place).display_sign(),
+            || self.book.places[place].class.display_sign(),
             |sides| sides.sign(place),
         )
     }

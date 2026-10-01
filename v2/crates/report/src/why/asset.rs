@@ -8,9 +8,15 @@ use crate::lens::{Lens, Whose};
 use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, asset_id: Id<Asset>) -> Report<'s> {
+pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, asset_id: Id<Asset>) -> Report<'s> {
     let asset = &book.assets[asset_id];
     let name = book.name(asset.name);
+    if !whose.includes(asset.owner) {
+        return Report::new(format!("Why {name}")).with(Section::note_only(format!(
+            "{name} belongs to {}, whose money this is not.",
+            book.name(book.entities[asset.owner].path)
+        )));
+    }
     let state = run.assets.iter().find(|state| state.asset == asset_id);
     let mut overview = Section::new([
         Column::left("Owner"),
@@ -19,7 +25,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, asset_id: Id<Asset>) -> Report<'s>
         Column::right("Basis"),
     ])
     .headed("Asset");
-    let lens = Lens::new(book, &Whose::default(), run.today);
+    let lens = Lens::new(book, whose, run.today);
     let value = lens.value(Amount::new(Qty(1), asset.unit));
     let basis = state.map_or(Qty::ZERO, |state| {
         state.parts.iter().map(|part| part.basis).sum()
@@ -77,8 +83,10 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, asset_id: Id<Asset>) -> Report<'s>
     ])
     .headed("Flows about it");
     for (id, flow) in book.flows.iter().filter(|(_, flow)| {
-        flow.purpose
-            .is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
+        whose.includes(flow.owner)
+            && flow
+                .purpose
+                .is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
     }) {
         let posting = crate::history::Posting::at(book, run, id);
         let purpose = flow

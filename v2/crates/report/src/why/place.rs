@@ -9,6 +9,7 @@ use axiom_model::{Amount, Book, Commodity, Law, Place, Rule, Subject};
 
 use super::laws_table;
 use crate::headroom::{current, latest};
+use crate::lens::Whose;
 use crate::limits;
 use crate::places::path;
 use crate::register;
@@ -18,14 +19,36 @@ use crate::{Cell, Column, Report, Row, Section};
 /// How many recent flows to show.
 const RECENT: usize = 8;
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, place: Id<Place>) -> Report<'s> {
-    let held: Vec<&Holding> = run.holdings.iter().filter(|holding| book.places.covers(place, holding.place)).collect();
+pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, place: Id<Place>) -> Report<'s> {
+    let owner = book.places[place].owner;
+    let name = path(book, place);
+    if !whose.includes(owner) {
+        return Report::new(format!("Why {name}")).with(Section::note_only(format!(
+            "{name} belongs to {}, whose money this is not.",
+            book.name(book.entities[owner].path)
+        )));
+    }
+    let held: Vec<&Holding> = run
+        .holdings
+        .iter()
+        .filter(|holding| {
+            book.places.covers(place, holding.place)
+                && whose.includes(book.places[holding.place].owner)
+        })
+        .collect();
     let recent_from = book.touching[place].iter().rev().nth(RECENT - 1).map(|&flow| book.flows[flow].day);
 
     // A limit is about this place when it measures it, or a place around it, or one within it.
     let all = &current(book, run, run.today, run.today);
     let about = |subject: Subject| matches!(subject, Subject::Place(other) if book.places.covers(other, place) || book.places.covers(place, other));
-    let limits = limits::section(book, latest(all.iter().filter(|reading| about(reading.subject)))).headed("Limits");
+    let limits = limits::section(
+        book,
+        latest(
+            all.iter()
+                .filter(|reading| about(reading.subject) && whose.includes(reading.owner)),
+        ),
+    )
+    .headed("Limits");
 
     let (governing, elsewhere) = governing(book, run, place);
     let mut laws = laws_table(book, &governing);
@@ -40,7 +63,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, place: Id<Place>) -> Report<'s> {
         .with(parcels(book, &held))
         .with(limits)
         .with(laws)
-        .with(register::section(book, run, place, recent_from, None).headed("Recent flows"))
+        .with(register::section_for(book, run, place, recent_from, None, whose).headed("Recent flows"))
 }
 
 /// What is held, by commodity, and how much of it is plain money.

@@ -5,15 +5,22 @@ use axiom_model::Book;
 
 use super::flows_table;
 use crate::history::postings;
+use crate::lens::Whose;
 use crate::{Cell, Column, Report, Row, Section};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, description: &str) -> Option<Report<'s>> {
+pub fn report<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    whose: &Whose,
+    description: &str,
+) -> Option<Report<'s>> {
     let ids = postings(book, run)
         .filter(|posting| {
-            posting
-                .flow
-                .description
-                .is_some_and(|text| book.name(text) == description)
+            whose.includes(posting.flow.owner)
+                && posting
+                    .flow
+                    .description
+                    .is_some_and(|text| book.name(text) == description)
         })
         .map(|posting| posting.id)
         .collect::<Vec<_>>();

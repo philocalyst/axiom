@@ -3,12 +3,24 @@
 use axiom_engine::Run;
 use axiom_model::{Book, Contract, Derivation, Origin, TermsState};
 
+use crate::lens::Whose;
 use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, contract_id: axiom_core::Id<Contract>) -> Report<'s> {
+pub fn report<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    whose: &Whose,
+    contract_id: axiom_core::Id<Contract>,
+) -> Report<'s> {
     let contract = &book.contracts[contract_id];
     let name = book.name(contract.name);
+    if !whose.includes(contract.owner) {
+        return Report::new(format!("Why {name}")).with(Section::note_only(format!(
+            "{name} belongs to {}, whose money this is not.",
+            book.name(book.entities[contract.owner].path)
+        )));
+    }
     let mut terms = Section::new([
         Column::left("From"),
         Column::left("Through"),
@@ -22,12 +34,7 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, contract_id: axiom_core::Id<Contra
         let templates = value
             .template
             .iter()
-            .map(|flow| {
-                Cell::list(
-                    " ",
-                    [Cell::text(route(book, flow)), Cell::amount(book, flow.out)],
-                )
-            })
+            .map(|flow| crate::contracts::template_flow_cell(book, flow))
             .collect::<Vec<_>>();
         let state = match value.state {
             TermsState::Active => Cell::Word("active"),

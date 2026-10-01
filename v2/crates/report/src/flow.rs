@@ -56,7 +56,7 @@ pub(crate) fn view_by_party_with_lens<'s>(
     let periods = match from {
         Some(from) => Periods::covering(Period::Month, from, cutoff),
         None => {
-            let first = first_activity(book, cutoff);
+            let first = first_activity(book, cutoff, lens.whose);
             Periods::covering(Period::Month, first, cutoff).last(DEFAULT_PERIODS)
         }
     };
@@ -238,15 +238,17 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
     let periods = match from {
         Some(from) => Periods::covering(by, from, cutoff),
         None => {
-            let first = first_activity(book, cutoff);
+            let first = first_activity(book, cutoff, lens.whose);
             Periods::covering(by, first, cutoff).last(DEFAULT_PERIODS)
         }
     };
     let period_count = periods.len();
     let purpose_count = book.purposes.len();
     let mut totals = vec![Qty::ZERO; purpose_count * period_count];
-    let mut objects: HashMap<(Id<axiom_model::Purpose>, Object), Vec<Qty>> = HashMap::new();
+    let mut objects: HashMap<(Id<Purpose>, Object), Vec<Qty>> = HashMap::new();
+    let mut purpose_activity = vec![false; purpose_count];
     let mut descriptions: BTreeMap<Option<axiom_core::Sym>, Vec<Qty>> = BTreeMap::new();
+    let mut description_activity = HashSet::new();
     let mut unclassified = vec![Qty::ZERO; period_count];
     let mut unpriced = 0;
     let mut spread_seen = false;
@@ -264,6 +266,14 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
                 continue;
             };
             add_recognized(&mut unclassified, periods, flow.recognized, cutoff, amount);
+            if !amount.is_zero()
+                && periods
+                    .overlapping(flow.recognized.first(), flow.recognized.last())
+                    .next()
+                    .is_some()
+            {
+                description_activity.insert(flow.description);
+            }
             let values = descriptions
                 .entry(flow.description)
                 .or_insert_with(|| vec![Qty::ZERO; period_count]);
@@ -277,6 +287,13 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
         };
         let values = &mut totals[purpose.purpose.index() * period_count..][..period_count];
         add_recognized(values, periods, flow.recognized, cutoff, amount);
+        let in_window = periods
+            .overlapping(flow.recognized.first(), flow.recognized.last())
+            .next()
+            .is_some();
+        if in_window && !amount.is_zero() {
+            purpose_activity[purpose.purpose.index()] = true;
+        }
         if let Some(object) = purpose.of {
             let values = objects
                 .entry((purpose.purpose, object))
@@ -294,8 +311,23 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
             for period in 0..period_count {
                 totals[parent_start + period] += totals[child_start + period];
             }
+            purpose_activity[parent.index()] |= purpose_activity[purpose.index()];
         }
     }
+
+    // Keep one sparse object group per nonzero recognized amount. Visibility
+    // propagation below is linear in purposes, not a recursive tree rescan.
+    let mut object_rows: Vec<_> = objects
+        .into_iter()
+        .filter(|(_, values)| !is_zero(values))
+        .collect();
+    object_rows.sort_by(
+        |((left_purpose, left_object), _), ((right_purpose, right_object), _)| {
+            left_purpose
+                .cmp(right_purpose)
+                .then_with(|| object_name(book, *left_object).cmp(object_name(book, *right_object)))
+        },
+    );
 
     let columns = (0..period_count).map(|period| Column::right(periods.title(period)));
     let mut section = Section::new(
@@ -304,10 +336,10 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
             .chain((period_count > 1).then(|| Column::right("Total"))),
     );
     let roots = book.purposes.roots();
-    let mut children: Vec<(Object, &[Qty])> = Vec::new();
+    let mut next_object = 0;
     for root in roots {
         let root_values = purpose_values(&totals, period_count, root);
-        if !has_activity(book, &totals, period_count, root) {
+        if !purpose_activity[root.index()] {
             continue;
         }
         let purpose = &book.purposes[root];
@@ -320,34 +352,30 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
         ));
         add_purpose_facts(&mut section, lens, periods, root, root_values);
 
-        for id in book.purposes.subtree(root).skip(1) {
+        for id in book.purposes.subtree(root) {
             let values = purpose_values(&totals, period_count, id);
-            if !has_activity(book, &totals, period_count, id) {
+            if !purpose_activity[id.index()] {
                 continue;
             }
             let purpose = &book.purposes[id];
             let depth = book.purposes.depth(id) as usize;
-            section.push(period_row(
-                book,
-                Cell::Name(book.name(purpose.name)),
-                depth,
-                values,
-                Style::Normal,
-            ));
-            add_purpose_facts(&mut section, lens, periods, id, values);
+            if id != root {
+                section.push(period_row(
+                    book,
+                    Cell::Name(book.name(purpose.name)),
+                    depth,
+                    values,
+                    Style::Normal,
+                ));
+                add_purpose_facts(&mut section, lens, periods, id, values);
+            }
 
-            children.clear();
-            children.extend(
-                objects
-                    .iter()
-                    .filter(|((purpose_id, _), amounts)| *purpose_id == id && !is_zero(amounts))
-                    .map(|((_, object), amounts)| (*object, amounts.as_slice())),
-            );
-            children.sort_by(|(left, _), (right, _)| {
-                object_name(book, *left).cmp(object_name(book, *right))
-            });
-            for (object, amounts) in children {
-                let object_name = object_name(book, object);
+            while next_object < object_rows.len() && object_rows[next_object].0.0 < id {
+                next_object += 1;
+            }
+            while next_object < object_rows.len() && object_rows[next_object].0.0 == id {
+                let ((_, object), amounts) = &object_rows[next_object];
+                let object_name = object_name(book, *object);
                 let label = Cell::list(" ", [Cell::Word("of"), Cell::Name(object_name)]);
                 section.push(period_row(book, label, depth + 1, amounts, Style::Muted));
                 add_object_facts(
@@ -358,11 +386,12 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
                     amounts,
                     purpose.root,
                 );
+                next_object += 1;
             }
         }
     }
 
-    if !is_zero(&unclassified) {
+    if !is_zero(&unclassified) || !description_activity.is_empty() {
         section.push(period_row(
             book,
             Cell::Word("Unclassified"),
@@ -379,7 +408,7 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
             &unclassified,
         );
         for (description, values) in descriptions {
-            if is_zero(&values) {
+            if !description_activity.contains(&description) {
                 continue;
             }
             let label = description.map_or(Cell::Word("unclassified"), |text| {
@@ -555,17 +584,17 @@ fn purpose_values(totals: &[Qty], periods: usize, purpose: Id<Purpose>) -> &[Qty
     &totals[purpose.index() * periods..][..periods]
 }
 
-fn has_activity(book: &Book, totals: &[Qty], periods: usize, purpose: Id<Purpose>) -> bool {
-    book.purposes
-        .subtree(purpose)
-        .any(|id| !is_zero(purpose_values(totals, periods, id)))
-}
-
-fn first_activity(book: &Book, cutoff: Day) -> Day {
+fn first_activity(book: &Book, cutoff: Day, whose: &Whose) -> Day {
     book.flows
         .iter()
+        .filter(|(_, flow)| whose.includes(flow.owner))
         .map(|(_, flow)| flow.day)
-        .chain(book.measures.iter().map(|(_, measure)| measure.day))
+        .chain(
+            book.measures
+                .iter()
+                .filter(|(_, measure)| whose.includes(measure.owner))
+                .map(|(_, measure)| measure.day),
+        )
         .filter(|day| *day <= cutoff)
         .min()
         .unwrap_or(cutoff)

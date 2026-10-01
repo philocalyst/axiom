@@ -121,22 +121,22 @@ pub fn target<'s>(
     text: &str,
 ) -> Result<Report<'s>, Diagnostic> {
     if let Some(code) = text.strip_prefix('^') {
-        return code::report(book, run, code);
+        return code::report(book, run, whose, code);
     }
     if let Some(purpose) = text.strip_prefix('#') {
         return purpose::report(book, run, whose, purpose);
     }
     if let Some(asset) = book.asset(text) {
-        return Ok(asset::report(book, run, asset));
+        return Ok(asset::report(book, run, whose, asset));
     }
     if let Some(contract) = book.contract(text) {
-        return Ok(contract::report(book, run, contract));
+        return Ok(contract::report(book, run, whose, contract));
     }
     let quoted = text
         .strip_prefix('"')
         .and_then(|text| text.strip_suffix('"'))
         .unwrap_or(text);
-    if let Some(report) = self::text::report(book, run, quoted) {
+    if let Some(report) = self::text::report(book, run, whose, quoted) {
         return Ok(report);
     }
     Ok(explain(book, run, whose, identify(book, run, text)?))
@@ -156,12 +156,12 @@ pub(crate) enum Found<'a> {
 
 pub(crate) fn explain<'s>(book: &Book<'s>, run: &Run, whose: &Whose, found: Found) -> Report<'s> {
     match found {
-        Found::Place(place) => place::report(book, run, place),
-        Found::Entity(entity) => entity::report(book, run, entity),
+        Found::Place(place) => place::report(book, run, whose, place),
+        Found::Entity(entity) => entity::report(book, run, whose, entity),
         Found::System(system) => system::report(book, run, whose, system),
-        Found::Law(law) => law::report(book, run, law),
+        Found::Law(law) => law::report(book, run, whose, law),
         Found::Laws(candidates) => law::which(book, &candidates),
-        Found::TaxLine(name) => taxline::report(book, run, name),
+        Found::TaxLine(name) => taxline::report(book, run, whose, name),
     }
 }
 

@@ -165,7 +165,7 @@ impl<'b, 's> Context<'b, 's> {
                 *paths,
             )),
             Query::Why { target } => super::why::target(self.book, &self.run, &self.whose, target),
-            Query::Line { loc } => Ok(super::why::line(self.book, &self.run, *loc)),
+            Query::Line { loc } => Ok(super::why::line(self.book, &self.run, &self.whose, *loc)),
         }
     }
 

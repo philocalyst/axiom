@@ -6,15 +6,16 @@ use axiom_model::{Amount, Book, Flow, Object, Provenance};
 
 use super::event_words;
 use crate::history::Posting;
+use crate::lens::Whose;
 use crate::places::{path, route};
 use crate::table::{creditor, gap_words};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Explains the items whose source overlaps `at`.
-pub fn line<'s>(book: &Book<'s>, run: &Run, at: Loc) -> Report<'s> {
-    let flows = flows_on(book, at);
+pub fn line<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Loc) -> Report<'s> {
+    let flows = flows_on(book, at, whose);
     let mut written = Section::new([Column::left("On this line"), Column::left("Source")]);
-    for (text, loc) in items(book, run, at, &flows) {
+    for (text, loc) in items(book, run, whose, at, &flows) {
         written.push(Row::new([Cell::text(text), Cell::Source(loc)]));
     }
     if written.rows.is_empty() {
@@ -36,22 +37,31 @@ fn overlaps(a: Loc, b: Loc) -> bool {
 
 /// The flows written on the line. The header of a split transaction holds no
 /// flow of its own; its legs do, so it stands for all of them.
-fn flows_on(book: &Book, at: Loc) -> Vec<Id<Flow>> {
+fn flows_on(book: &Book, at: Loc, whose: &Whose) -> Vec<Id<Flow>> {
     let direct: Vec<Id<Flow>> = book
         .flows
         .iter()
-        .filter(|(_, flow)| overlaps(flow.loc, at))
+        .filter(|(_, flow)| overlaps(flow.loc, at) && whose.includes(flow.owner))
         .map(|(id, _)| id)
         .collect();
     if !direct.is_empty() {
         return direct;
     }
     let headers = book.txns.values().filter(|txn| overlaps(txn.loc, at));
-    headers.flat_map(|txn| txn.flows.ids()).collect()
+    headers
+        .flat_map(|txn| txn.flows.ids())
+        .filter(|&id| whose.includes(book.flows[id].owner))
+        .collect()
 }
 
 /// Everything whose source overlaps the line, described in a sentence.
-fn items(book: &Book, run: &Run, at: Loc, flows: &[Id<Flow>]) -> Vec<(String, Loc)> {
+fn items(
+    book: &Book,
+    run: &Run,
+    whose: &Whose,
+    at: Loc,
+    flows: &[Id<Flow>],
+) -> Vec<(String, Loc)> {
     let mut items = Vec::new();
     for &id in flows {
         let posting = Posting::at(book, run, id);
@@ -160,7 +170,7 @@ fn items(book: &Book, run: &Run, at: Loc, flows: &[Id<Flow>]) -> Vec<(String, Lo
     items.extend(
         book.measures
             .iter()
-            .filter(|measure| overlaps(measure.loc, at))
+            .filter(|measure| overlaps(measure.loc, at) && whose.includes(measure.owner))
             .map(|measure| {
                 let action = match measure.action {
                     axiom_model::Action::Work => "worked",
@@ -186,7 +196,7 @@ fn items(book: &Book, run: &Run, at: Loc, flows: &[Id<Flow>]) -> Vec<(String, Lo
     items.extend(
         book.filed
             .iter()
-            .filter(|filed| overlaps(filed.loc, at))
+            .filter(|filed| overlaps(filed.loc, at) && whose.includes(filed.owner))
             .map(|filed| {
                 (
                     format!(

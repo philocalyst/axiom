@@ -15,10 +15,9 @@ use crate::lens::{Lens, Whose, on_balance_sheet};
 use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> {
+pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, entity: Id<Entity>) -> Report<'s> {
     let name = book.name(book.entities[entity].path);
-    let scope = Whose::of(book, entity);
-    let lens = Lens::new(book, &scope, run.today);
+    let lens = Lens::new(book, whose, run.today);
 
     let mut places = Section::new([Column::left("Place"), Column::right("Holds")]).headed("Places");
     for holding in run
@@ -46,9 +45,10 @@ pub fn report<'s>(book: &Book<'s>, run: &Run, entity: Id<Entity>) -> Report<'s> 
         Section::new([Column::left("Place"), Column::right("Amount"), Column::left("Since"), Column::left("From")])
             .headed("Held for it");
     let mut remaining = Qty::ZERO;
-    let everyone = Whose::default();
-    let lens = Lens::new(book, &everyone, run.today);
     for holding in &run.holdings {
+        if !lens.owns(holding.place) {
+            continue;
+        }
         for lot in holding.lots.iter().filter(|lot| lot.tied == Some(entity)) {
             let held = Amount::new(lot.qty, holding.unit);
             remaining += lens.value(held).unwrap_or_default();

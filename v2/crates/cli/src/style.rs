@@ -224,6 +224,11 @@ impl Line {
         self.cells.len()
     }
 
+    /// Removes all columns while retaining the line's allocation for reuse.
+    pub fn clear(&mut self) {
+        self.cells.clear();
+    }
+
     /// Appends `text`, one cell per column (see [`columns`]).
     pub fn push(&mut self, text: &str, ink: Ink) {
         self.cells.extend(columns(text).map(|ch| Cell { ch, ink }));

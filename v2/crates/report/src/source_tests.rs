@@ -141,6 +141,108 @@ opening 2026-01-01
     });
 }
 
+/// A parent purpose's total can be zero while two child purposes remain useful
+/// facts. Keep the hierarchy visible from those nonzero child rows.
+#[test]
+fn purpose_tree_keeps_offsetting_children_when_the_parent_nets_to_zero() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+
+entity me
+entity grocer
+entity diner
+account checking : asset
+
+purpose food : spending
+purpose groceries : food
+purpose dining : food
+
+opening 2026-01-01
+  checking 500.00 USD
+
+2026-01-02 checking -> grocer 50.00 USD #groceries
+2026-01-03 diner -> checking 50.00 USD #dining
+";
+
+    with_run(source, day(2026, 1, 4), |book, run| {
+        let report = crate::report(
+            book,
+            run,
+            &Query::Flow {
+                by: FlowBy::Period(axiom_model::Period::Month),
+                from: Some(day(2026, 1, 1)),
+                to: None,
+            },
+            None,
+        )
+        .unwrap();
+        let rows = &report.sections[0].rows;
+        let amount = |purpose: &str| {
+            rows.iter()
+                .find(|row| row.cells.first().is_some_and(|cell| matches!(cell, crate::Cell::Name(name) if *name == purpose)))
+                .and_then(|row| row.cells.get(1))
+        };
+        let crate::Cell::Amount { qty: groceries, .. } = amount("groceries").unwrap() else {
+            panic!("groceries has a nonzero amount cell")
+        };
+        let crate::Cell::Amount { qty: dining, .. } = amount("dining").unwrap() else {
+            panic!("dining has a nonzero amount cell")
+        };
+        assert_eq!((*groceries, *dining), (Qty(5_000), Qty(-5_000)));
+        assert!(amount("food").is_none_or(|cell| matches!(cell, crate::Cell::Blank)));
+    });
+}
+
+/// A month with only a measure still starts the default flow window. Otherwise
+/// a measure-only project would be reported in a synthetic day at `today`.
+#[test]
+fn a_measure_only_book_anchors_flow_to_its_first_measure() {
+    let source = "\
+base USD
+entity me
+entity halcyon
+commodity HR : measure
+
+2026-03-04 me worked 6 HR for halcyon
+";
+
+    with_run(source, day(2026, 4, 10), |book, run| {
+        let report = crate::report(
+            book,
+            run,
+            &Query::Flow {
+                by: FlowBy::Period(axiom_model::Period::Month),
+                from: None,
+                to: None,
+            },
+            None,
+        )
+        .unwrap();
+        let measures = report
+            .sections
+            .iter()
+            .find(|section| section.heading.as_deref() == Some("Measures"))
+            .expect("measure section");
+        let headers: Vec<_> = measures
+            .columns
+            .iter()
+            .map(|column| match &column.title {
+                crate::Cell::Text(text) => text.as_ref(),
+                _ => "",
+            })
+            .collect();
+        let march = headers.iter().position(|&header| header == "2026-03").unwrap();
+        let april = headers.iter().position(|&header| header == "2026-04").unwrap();
+        assert!(march < april, "the earlier measure anchors the displayed range");
+        assert!(measures.rows.iter().any(|row| {
+            row.cells.iter().any(|cell| matches!(cell, crate::Cell::Name("HR")))
+                && row.cells.iter().any(|cell| matches!(cell, crate::Cell::Amount { qty, unit: "HR", .. } if !qty.is_zero()))
+        }));
+    });
+}
+
 // ─── Basis flows ────────────────────────────────────────────────────────────
 
 /// An improvement to a holding: 100 USD paid into the basis of ten shares.
@@ -700,6 +802,27 @@ opening 2026-01-01
         assert!(!show(&mine).contains("theirs | 200.00 USD"));
         assert!(show(&jordan).contains("theirs | 200.00 USD"));
         assert!(!show(&jordan).contains("mine | 100.00 USD"));
+
+        let register = crate::report(
+            book,
+            run,
+            &Query::Register {
+                place: "jordan",
+                from: None,
+                to: None,
+            },
+            Some("me"),
+        )
+        .unwrap();
+        assert!(!show(&register).contains("200.00 USD"));
+        let explanation = crate::report(
+            book,
+            run,
+            &Query::Why { target: "jordan" },
+            Some("me"),
+        )
+        .unwrap();
+        assert!(!show(&explanation).contains("theirs | 200.00 USD"));
     });
 }
 

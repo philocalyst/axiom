@@ -4,25 +4,37 @@ use axiom_core::Id;
 use axiom_engine::Run;
 use axiom_model::{Book, Law, Owner};
 
+use crate::lens::Whose;
 use super::{effects_table, recent, trigger_words};
 use crate::table::{cause_cell, doc_headline, doc_lines, headline, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, id: Id<Law>) -> Report<'s> {
+pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, id: Id<Law>) -> Report<'s> {
     let law = &book.laws[id];
-    let violations: Vec<_> = run.violations.iter().filter(|violation| violation.law == id).collect();
-    let effects: Vec<_> = run.effects.iter().filter(|effect| effect.law == id).collect();
+    let violations: Vec<_> = run
+        .violations
+        .iter()
+        .filter(|violation| violation.law == id && whose.governs(book, violation.subject))
+        .collect();
+    let effects: Vec<_> = run
+        .effects
+        .iter()
+        .filter(|effect| effect.law == id && whose.includes(effect.owner))
+        .collect();
 
     let mut about = Section::new([Column::left("Law"), Column::left(book.name(law.name).to_string())]);
     let ran = run.checks.get(id.index()).copied().unwrap_or(0) as usize;
     let recorded = format!("{}, {}", plural(violations.len(), "violation"), plural(effects.len(), "effect"));
-    for (what, cell) in [
+    let mut facts = vec![
         ("When", Cell::text(trigger_words(law.trigger))),
         ("Governs", Cell::text(governs(book, law.owner))),
         ("Written", Cell::Source(law.loc)),
-        ("Ran", Cell::text(plural(ran, "time"))),
         ("Recorded", Cell::text(recorded)),
-    ] {
+    ];
+    if whose.is_everyone() {
+        facts.insert(3, ("Ran", Cell::text(plural(ran, "time"))));
+    }
+    for (what, cell) in facts {
         about.push(Row::new([Cell::text(what), cell]));
     }
     for line in law.doc.iter().flat_map(|&doc| doc_lines(book.name(doc))) {

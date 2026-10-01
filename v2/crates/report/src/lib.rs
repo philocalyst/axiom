@@ -330,7 +330,7 @@ fn views<'s>(
         Query::Lots { place, at } => lots::view(book, run, whose, *place, *at),
         Query::Forecast { until, paths } => Ok(forecast::view(book, run, whose, *until, *paths)),
         Query::Why { target } => why::target(book, run, whose, target),
-        Query::Line { loc } => Ok(why::line(book, run, *loc)),
+        Query::Line { loc } => Ok(why::line(book, run, whose, *loc)),
     }
 }
 

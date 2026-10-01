@@ -126,8 +126,10 @@ fn write_table(
         })
         .collect();
     let table_width = widths.iter().sum::<usize>() + GAP * (widths.len() - 1);
-    let titles = table_row(None, &section.columns, &widths, &units, sources);
-    terminal.painter.paint_line(output, &titles);
+    let capacity = INDENT + widths.iter().sum::<usize>() + GAP * section.columns.len();
+    let mut line = Line::with_capacity(capacity);
+    table_row(&mut line, None, &section.columns, &widths, &units, sources);
+    terminal.painter.paint_line(output, &line);
     write_rule(output, terminal, table_width);
     for (at, row) in section.rows.iter().enumerate() {
         // A total without a label of its own continues the one above it (the
@@ -139,7 +141,7 @@ fn write_table(
         if row.style == Style::Total && at > 0 && !continues {
             write_rule(output, terminal, table_width);
         }
-        let line = table_row(Some(row), &section.columns, &widths, &units, sources);
+        table_row(&mut line, Some(row), &section.columns, &widths, &units, sources);
         terminal.painter.paint_line(output, &line);
     }
 }
@@ -151,15 +153,16 @@ fn write_rule(output: &mut String, terminal: Terminal, width: usize) {
     terminal.painter.paint_line(output, &rule);
 }
 
-/// Measures and writes a row directly into one output line. The first pass
-/// computes widths; this pass doesn't build a temporary line for every cell.
+/// Measures and writes a row directly into a reusable output line. The first
+/// pass computes widths; this pass doesn't build a temporary line for every cell.
 fn table_row(
+    line: &mut Line,
     row: Option<&Row<'_>>,
     columns: &[Column<'_>],
     widths: &[usize],
     units: &[usize],
     sources: &dyn SourceProvider,
-) -> Line {
+) {
     let style = row.map_or(Style::Normal, |row| row.style);
     let ink = match style {
         Style::Normal => Ink::PLAIN,
@@ -167,8 +170,7 @@ fn table_row(
         Style::Muted => Ink::DIM,
         Style::Alert => Ink::RED,
     };
-    let capacity = INDENT + widths.iter().sum::<usize>() + GAP * columns.len();
-    let mut line = Line::with_capacity(capacity);
+    line.clear();
     line.push_repeat(' ', INDENT, Ink::PLAIN);
     for (at, (column, &width)) in columns.iter().zip(widths).enumerate() {
         let cell = if let Some(row) = row {
@@ -200,7 +202,6 @@ fn table_row(
         }
         line.push_repeat(' ', GAP, Ink::PLAIN);
     }
-    line
 }
 
 /// The widest unit in each column. Amounts pad their unit to it, so that the

@@ -9,14 +9,22 @@ use axiom_model::Book;
 
 use super::{event_words, flows_table};
 use crate::history::postings;
+use crate::lens::Whose;
 use crate::resolve;
 use crate::{Cell, Column, Report, Row, Section};
 
 /// `pattern` may be a glob: `check-*`.
-pub fn report<'s>(book: &Book<'s>, run: &Run, pattern: &str) -> Result<Report<'s>, Diagnostic> {
+pub fn report<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    whose: &Whose,
+    pattern: &str,
+) -> Result<Report<'s>, Diagnostic> {
     let marked = |code: Sym| glob(pattern, book.name(code));
     let flows: Vec<_> = postings(book, run)
-        .filter(|posting| book.flow_view(posting.flow).codes().any(marked))
+        .filter(|posting| {
+            whose.includes(posting.flow.owner) && book.flow_view(posting.flow).codes().any(marked)
+        })
         .map(|posting| posting.id)
         .collect();
     let mut happened = Section::new([

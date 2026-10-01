@@ -5,12 +5,17 @@ use axiom_core::Id;
 use axiom_engine::{Cause, Effect, Gain, Run};
 use axiom_model::{Book, Flow};
 
+use crate::lens::Whose;
 use super::{effects_table, flows_table};
 use crate::Report;
 use crate::gains;
 
-pub fn report<'s>(book: &Book<'s>, run: &Run, name: &str) -> Report<'s> {
-    let effects: Vec<&Effect> = run.effects.iter().filter(|effect| book.name(effect.name) == name).collect();
+pub fn report<'s>(book: &Book<'s>, run: &Run, whose: &Whose, name: &str) -> Report<'s> {
+    let effects: Vec<&Effect> = run
+        .effects
+        .iter()
+        .filter(|effect| book.name(effect.name) == name && whose.includes(effect.owner))
+        .collect();
     let mut flows: Vec<Id<Flow>> = effects
         .iter()
         .filter_map(|effect| if let Cause::Flow(flow) = effect.cause { Some(flow) } else { None })
