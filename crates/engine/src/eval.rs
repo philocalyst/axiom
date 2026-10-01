@@ -18,7 +18,7 @@ use axiom_core::{Arena, Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::day
 use axiom_model::{
     self, Amount, Asset, BinOp, Book, Commodity, Dir, Effect as LawEffect, Entity, Fault, Field,
     Func, Law, NodeId, Object, Op, Param, Prop, Purposed, RuntimeDetail, RuntimeFlow, SelectKey,
-    StepKind, Subject, Text, Ty, Value, Var, Window,
+    FlowCodes, StepKind, Subject, Text, Ty, Value, Var, Window,
 };
 
 use crate::calc::{Calc, progressive};
@@ -243,6 +243,8 @@ pub(crate) struct Realized {
     pub proceeds: Qty,
     pub basis: Qty,
     pub held: Span,
+    pub part: Option<PartId>,
+    pub codes: FlowCodes,
 }
 
 /// What evaluating a law found.
