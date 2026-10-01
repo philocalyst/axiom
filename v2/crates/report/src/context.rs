@@ -12,7 +12,7 @@ use axiom_model::Book;
 use crate::closings;
 use crate::lens::{Lens, Whose};
 use crate::resolve;
-use crate::{Query, Report, SourceProvider};
+use crate::{FlowBy, Query, Report, SourceProvider};
 
 /// Reusable report inputs from one plan and one run.
 pub struct Context<'b, 's> {
@@ -78,13 +78,30 @@ impl<'b, 's> Context<'b, 's> {
                 *from,
                 *to,
             ),
-            Query::Flow { by, from, to } => {
+            Query::Flow {
+                by: FlowBy::Period(by),
+                from,
+                to,
+            } => {
                 let to = to.unwrap_or(self.run.today);
                 Ok(super::flow::view_with_lens(
                     self.lens(to),
                     &self.run,
                     *by,
                     *from,
+                ))
+            }
+            Query::Flow {
+                by: FlowBy::Party,
+                from,
+                to,
+            } => {
+                let cutoff = to.unwrap_or(self.run.today);
+                Ok(super::flow::view_by_party_with_lens(
+                    self.lens(cutoff),
+                    &self.run,
+                    *from,
+                    cutoff,
                 ))
             }
             Query::Available { at } => {
@@ -136,18 +153,16 @@ impl<'b, 's> Context<'b, 's> {
                     ledger.holdings(),
                 ))
             }
-            Query::Forecast { until, paths } => {
-                Ok(super::forecast::view_from(
-                    &self.plan,
-                    &self.checkpoint,
-                    &self.run,
-                    &self.run.effects[..self.effects_prefix_len],
-                    self.lens(self.run.today),
-                    self.relaxed,
-                    *until,
-                    *paths,
-                ))
-            }
+            Query::Forecast { until, paths } => Ok(super::forecast::view_from(
+                &self.plan,
+                &self.checkpoint,
+                &self.run,
+                &self.run.effects[..self.effects_prefix_len],
+                self.lens(self.run.today),
+                self.relaxed,
+                *until,
+                *paths,
+            )),
             Query::Why { target } => super::why::target(self.book, &self.run, &self.whose, target),
             Query::Line { loc } => Ok(super::why::line(self.book, &self.run, *loc)),
         }
@@ -168,7 +183,13 @@ impl<'b, 's> Context<'b, 's> {
     }
 
     pub(crate) fn lens(&self, day: Day) -> Lens<'_, 's> {
-        Lens::with_plan(self.book, &self.whose, day, self.plan.known(), self.plan.sides())
+        Lens::with_plan(
+            self.book,
+            &self.whose,
+            day,
+            self.plan.known(),
+            self.plan.sides(),
+        )
     }
 
     /// A ledger at `day` before that day's closings. Future views resume the

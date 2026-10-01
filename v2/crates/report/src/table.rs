@@ -2,31 +2,40 @@
 
 use std::borrow::Cow;
 
-use axiom_core::{Qty, Ratio, Sym};
+use axiom_core::{Day, Days, Qty, Ratio, Sym, calendar};
 use axiom_engine::{Cause, Owed, Pad};
 use axiom_model::{Amount, Book};
 
 use crate::places::path;
-use crate::{Align, Cell, Column, Report, Row, Section, Style};
+use crate::{Align, Cell, Column, Fact, Money, Report, Row, Section, Style, When};
 
-impl Column {
-    pub fn left(title: impl Into<Cow<'static, str>>) -> Column {
-        Column { title: title.into(), align: Align::Left }
+impl<'s> Column<'s> {
+    pub fn left(title: impl Into<Cell<'s>>) -> Column<'s> {
+        Column {
+            title: title.into(),
+            align: Align::Left,
+        }
     }
 
-    pub fn right(title: impl Into<Cow<'static, str>>) -> Column {
-        Column { title: title.into(), align: Align::Right }
+    pub fn right(title: impl Into<Cell<'s>>) -> Column<'s> {
+        Column {
+            title: title.into(),
+            align: Align::Right,
+        }
     }
 }
 
 impl<'s> Report<'s> {
-    pub fn new(title: impl Into<String>) -> Report<'s> {
-        Report { title: title.into(), sections: Vec::new() }
+    pub fn new(title: impl Into<Cell<'s>>) -> Report<'s> {
+        Report {
+            title: title.into(),
+            sections: Vec::new(),
+        }
     }
 
     /// Adds a section, skipping one that has nothing to show.
     pub fn with(mut self, section: Section<'s>) -> Report<'s> {
-        if !section.rows.is_empty() || !section.notes.is_empty() {
+        if !section.rows.is_empty() || !section.notes.is_empty() || !section.facts.is_empty() {
             self.sections.push(section);
         }
         self
@@ -34,35 +43,82 @@ impl<'s> Report<'s> {
 }
 
 impl<'s> Section<'s> {
-    pub fn new(columns: impl IntoIterator<Item = Column>) -> Section<'s> {
-        Section { heading: None, columns: columns.into_iter().collect(), rows: Vec::new(), notes: Vec::new() }
+    pub fn new(columns: impl IntoIterator<Item = Column<'s>>) -> Section<'s> {
+        Section {
+            heading: None,
+            columns: columns.into_iter().collect(),
+            rows: Vec::new(),
+            notes: Vec::new(),
+            facts: Vec::new(),
+        }
     }
 
     /// A section that is only prose.
-    pub fn note_only(note: impl Into<String>) -> Section<'s> {
+    pub fn note_only(note: impl Into<Cell<'s>>) -> Section<'s> {
         let mut section = Section::new([]);
         section.note(note);
         section
     }
 
-    pub fn headed(mut self, heading: impl Into<String>) -> Section<'s> {
+    pub fn headed(mut self, heading: impl Into<Cell<'s>>) -> Section<'s> {
         self.heading = Some(heading.into());
         self
     }
 
     pub fn push(&mut self, row: Row<'s>) {
-        debug_assert_eq!(row.cells.len(), self.columns.len(), "a cell for every column");
+        debug_assert!(
+            row.cells.len() <= self.columns.len(),
+            "a column for every cell"
+        );
+        let mut row = row;
+        row.cells.resize_with(self.columns.len(), || Cell::Blank);
         self.rows.push(row);
     }
 
-    pub fn note(&mut self, note: impl Into<String>) {
+    /// Adds a total padded to this table's columns.
+    pub fn total(&mut self, cells: impl IntoIterator<Item = Cell<'s>>) {
+        self.push(Row::new(cells).style(Style::Total));
+    }
+
+    pub fn note(&mut self, note: impl Into<Cell<'s>>) {
         self.notes.push(note.into());
+    }
+
+    pub fn fact(
+        &mut self,
+        concept: &'s str,
+        of: Option<&'s str>,
+        entity: &'s str,
+        when: When,
+        value: Money<'s>,
+    ) {
+        self.facts.push(Fact {
+            concept,
+            of,
+            entity,
+            when,
+            value,
+        });
+    }
+
+    /// Describes the count omitted from a total because no price was available.
+    pub fn unpriced(&mut self, count: usize, noun: &'static str) {
+        if count > 0 {
+            self.note([
+                Cell::Count(count, noun),
+                Cell::Word("left out for lack of a price."),
+            ]);
+        }
     }
 }
 
 impl<'s> Row<'s> {
     pub fn new(cells: impl IntoIterator<Item = Cell<'s>>) -> Row<'s> {
-        Row { depth: 0, style: Style::Normal, cells: cells.into_iter().collect() }
+        Row {
+            depth: 0,
+            style: Style::Normal,
+            cells: cells.into_iter().collect(),
+        }
     }
 
     /// The leading cells, padded with blanks to `columns`.
@@ -90,7 +146,11 @@ impl<'s> Cell<'s> {
 
     pub fn amount(book: &Book<'s>, amount: Amount) -> Cell<'s> {
         let unit = &book.commodities[amount.unit];
-        Cell::Amount { qty: amount.qty, scale: unit.scale, unit: book.name(unit.symbol) }
+        Cell::Amount {
+            qty: amount.qty,
+            scale: unit.scale,
+            unit: book.name(unit.symbol),
+        }
     }
 
     /// An amount of the base currency.
@@ -100,8 +160,82 @@ impl<'s> Cell<'s> {
 
     /// The amount, or nothing for zero: statements read better without rows of `0.00`.
     pub fn base_or_blank(book: &Book<'s>, qty: Qty) -> Cell<'s> {
-        if qty.is_zero() { Cell::Blank } else { Cell::base(book, qty) }
+        if qty.is_zero() {
+            Cell::Blank
+        } else {
+            Cell::base(book, qty)
+        }
     }
+}
+
+impl<'s> Money<'s> {
+    pub fn of(book: &Book<'s>, amount: Amount) -> Money<'s> {
+        let unit = &book.commodities[amount.unit];
+        Money {
+            qty: amount.qty,
+            scale: unit.scale,
+            unit: book.name(unit.symbol),
+        }
+    }
+
+    pub fn base(book: &Book<'s>, qty: Qty) -> Money<'s> {
+        Money::of(book, Amount::new(qty, book.base))
+    }
+}
+
+impl<'s> From<&'static str> for Cell<'s> {
+    fn from(word: &'static str) -> Cell<'s> {
+        Cell::Word(word)
+    }
+}
+
+impl<'s> From<String> for Cell<'s> {
+    fn from(text: String) -> Cell<'s> {
+        Cell::Said(Cow::Owned(text))
+    }
+}
+
+impl<'s> From<Cow<'s, str>> for Cell<'s> {
+    fn from(text: Cow<'s, str>) -> Cell<'s> {
+        Cell::Text(text)
+    }
+}
+
+impl<'s, const N: usize> From<[Cell<'s>; N]> for Cell<'s> {
+    fn from(parts: [Cell<'s>; N]) -> Cell<'s> {
+        Cell::Join(" ", parts.into())
+    }
+}
+
+impl<'s> Cell<'s> {
+    pub fn year(year: i32) -> Cell<'s> {
+        year_days(year).map_or(Cell::Blank, Cell::Period)
+    }
+
+    pub fn code(book: &Book<'s>, code: Sym) -> Cell<'s> {
+        Cell::Code(book.name(code).trim_start_matches('#'))
+    }
+
+    pub fn list(between: &'static str, parts: impl IntoIterator<Item = Cell<'s>>) -> Cell<'s> {
+        Cell::Join(between, parts.into_iter().collect())
+    }
+
+    pub fn list_or_blank(
+        between: &'static str,
+        parts: impl IntoIterator<Item = Cell<'s>>,
+    ) -> Cell<'s> {
+        let parts: Vec<Cell<'s>> = parts.into_iter().collect();
+        if parts.is_empty() {
+            Cell::Blank
+        } else {
+            Cell::Join(between, parts)
+        }
+    }
+}
+
+pub fn year_days(year: i32) -> Option<Days> {
+    let first = Day::from_ymd(year, 1, 1)?;
+    Some(calendar::Window::containing(Period::Year, first).days())
 }
 
 /// `1 time`, `2 times`.
@@ -139,12 +273,18 @@ pub fn doc_headline(book: &Book, doc: Option<Sym>) -> Option<String> {
     let mut lines = doc_lines(book.name(doc?));
     let first = lines.next()?;
     let runs_on = lines.next().is_some_and(|next| !next.trim().is_empty());
-    Some(if runs_on { format!("{first}…") } else { first.to_string() })
+    Some(if runs_on {
+        format!("{first}…")
+    } else {
+        first.to_string()
+    })
 }
 
 /// `#house`, `#check-1041`: codes as they are written.
 pub fn code_labels<'a>(book: &'a Book, codes: &'a [Sym]) -> impl Iterator<Item = String> + 'a {
-    codes.iter().map(|&code| format!("#{}", book.name(code).trim_start_matches('#')))
+    codes
+        .iter()
+        .map(|&code| format!("#{}", book.name(code).trim_start_matches('#')))
 }
 
 /// `irs by 2027-04-15`

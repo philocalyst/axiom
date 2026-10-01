@@ -27,6 +27,15 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     }
     let project = Project::find(invocation.project.unwrap_or(Path::new(".")))?;
     let sources = project.load()?;
+    if let Command::Fmt { files, check } = command {
+        return Ok(crate::fmt::execute(
+            &sources,
+            &project.root,
+            files,
+            *check,
+            terminals.out,
+        ));
+    }
     let (parsed, mut diagnostics) = sources.parse();
     let (book, built) = axiom_model::build(&parsed);
     // The syntax trees are done with; the book borrows only the source text.
@@ -36,7 +45,10 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     if let Command::Sync(files) = command {
         return sync::execute(&book, files, &project.root, terminals.out);
     }
-    let options = Options { today: invocation.today.unwrap_or_else(system_today), relaxed: invocation.relaxed };
+    let options = Options {
+        today: invocation.today.unwrap_or_else(system_today),
+        relaxed: invocation.relaxed,
+    };
     if let Command::Report(query, whose) = command {
         let context = match Context::new(&book, options, *whose) {
             Ok(context) => context,
@@ -50,7 +62,13 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
                     .filter(|diagnostic| diagnostic.is_error())
                     .collect();
                 shown.push(&problem);
-                return Ok(report_error(&shown, &sources, terminals, invocation.all, invocation.json));
+                return Ok(report_error(
+                    &shown,
+                    &sources,
+                    terminals,
+                    invocation.all,
+                    invocation.json,
+                ));
             }
         };
         let run = context.run();
@@ -100,12 +118,18 @@ fn report_error(
     if let Some(line) = tally.line() {
         text += &terminals.err.painter.paint(&[line]);
     }
-    Outcome { answer: String::new(), diagnostics: text, failed: true }
+    Outcome {
+        answer: String::new(),
+        diagnostics: text,
+        failed: true,
+    }
 }
 
 /// The current day, by the system clock, in UTC.
 fn system_today() -> Day {
-    let seconds = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_secs());
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
     Day((seconds / 86_400) as i32)
 }
 
@@ -128,28 +152,57 @@ impl Session<'_, '_> {
     fn check(&self) -> Outcome {
         let (diagnostics, tally) = self.show(&self.diagnostics);
         if self.json {
-            return Outcome { answer: diagnostics, diagnostics: String::new(), failed: tally.errors > 0 };
+            return Outcome {
+                answer: diagnostics,
+                diagnostics: String::new(),
+                failed: tally.errors > 0,
+            };
         }
         if tally.errors > 0 {
-            return Outcome { answer: String::new(), diagnostics, failed: true };
+            return Outcome {
+                answer: String::new(),
+                diagnostics,
+                failed: true,
+            };
         }
         let summary = axiom_report::summary(self.book, self.run);
-        let answer = self.terminals.out.painter.paint(&[summary_line(self.book, &summary)]);
-        Outcome { answer, diagnostics, failed: false }
+        let answer = self
+            .terminals
+            .out
+            .painter
+            .paint(&[summary_line(self.book, &summary)]);
+        Outcome {
+            answer,
+            diagnostics,
+            failed: false,
+        }
     }
 
     /// The errors, and the report. A report runs whatever the book's errors, so
     /// that a reader can investigate them; it says at its head what it rests on.
     fn report(&self, context: &Context<'_, '_>, query: &Query<'_>) -> Outcome {
         let result = context.report_with_sources(query, self.sources);
-        let mut shown: Vec<&Diagnostic> = self.diagnostics.iter().copied().filter(|found| found.is_error()).collect();
+        let mut shown: Vec<&Diagnostic> = self
+            .diagnostics
+            .iter()
+            .copied()
+            .filter(|found| found.is_error())
+            .collect();
         shown.extend(result.as_ref().err());
         let (diagnostics, tally) = self.show(&shown);
         let Ok(report) = result else {
             return if self.json {
-                Outcome { answer: diagnostics, diagnostics: String::new(), failed: true }
+                Outcome {
+                    answer: diagnostics,
+                    diagnostics: String::new(),
+                    failed: true,
+                }
             } else {
-                Outcome { answer: String::new(), diagnostics, failed: true }
+                Outcome {
+                    answer: String::new(),
+                    diagnostics,
+                    failed: true,
+                }
             };
         };
         if self.json {
@@ -159,7 +212,10 @@ impl Session<'_, '_> {
                 failed: tally.errors > 0,
             };
         }
-        let mut answer = table::TableRenderer { terminal: self.terminals.out }.render(&report, self.sources);
+        let mut answer = table::TableRenderer {
+            terminal: self.terminals.out,
+        }
+        .render(&report, self.sources);
         if tally.errors > 0 {
             let caveat = format!(
                 "rests on a book with {} (`axiom check` lists them): what they touch may be wrong",
@@ -169,15 +225,23 @@ impl Session<'_, '_> {
             line.push(&caveat, Ink::DIM);
             answer.insert_str(0, &self.terminals.out.painter.paint(&[line, Line::new()]));
         }
-        Outcome { answer, diagnostics, failed: tally.errors > 0 }
+        Outcome {
+            answer,
+            diagnostics,
+            failed: tally.errors > 0,
+        }
     }
 
     /// The diagnostics, and after them how many of each there were.
     fn show(&self, diagnostics: &[&Diagnostic]) -> (String, Tally) {
         if self.json {
-            return (crate::render::json::diagnostics(diagnostics, self.sources), Tally::of(diagnostics.iter().copied()));
+            return (
+                crate::render::json::diagnostics(diagnostics, self.sources),
+                Tally::of(diagnostics.iter().copied()),
+            );
         }
-        let (mut text, tally) = Renderer::new(self.sources, self.terminals.err).present(diagnostics, self.all);
+        let (mut text, tally) =
+            Renderer::new(self.sources, self.terminals.err).present(diagnostics, self.all);
         if let Some(line) = tally.line() {
             text += &self.terminals.err.painter.paint(&[line]);
         }
@@ -196,7 +260,10 @@ fn summary_line(book: &Book, summary: &Summary) -> Line {
     let mut line = Line::text("✓ ", Ink::GREEN.bold());
     line.push(&facts.join(" · "), Ink::PLAIN);
     if summary.unpriced > 0 {
-        line.push(&format!(" · {} unpriced", plural(summary.unpriced, "holding")), Ink::YELLOW);
+        line.push(
+            &format!(" · {} unpriced", plural(summary.unpriced, "holding")),
+            Ink::YELLOW,
+        );
     }
     line
 }

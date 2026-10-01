@@ -8,14 +8,18 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree};
-use axiom_engine::{Bound, Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State};
+use axiom_core::{
+    Arena, Day, Days, FileId, Groups, Id, Interner, Loc, Qty, Ratio, Severity, Span, Sym, Tree,
+};
+use axiom_engine::{
+    Bound, Cause, Effect, Gain, Headroom, Holding, Owed, Parcel, Posted, Run, State,
+};
 use axiom_model::Effect as Consequence;
 use axiom_model::*;
 
 use crate::lens::Whose;
 use crate::why::Found;
-use crate::{Cell, Query, Report, Row, Section, Style};
+use crate::{Cell, FlowBy, Query, Report, Row, Section, Style};
 
 fn day(y: i32, m: u32, d: u32) -> Day {
     Day::from_ymd(y, m, d).unwrap()
@@ -34,16 +38,32 @@ pub(crate) struct Household {
 impl Household {
     pub(crate) fn place(&self, path: &str) -> Id<Place> {
         let named = |(_, place): &(Id<Place>, &Place)| self.book.name(place.path) == path;
-        self.book.places.iter().find(named).map(|(id, _)| id).expect("a place in the fixture")
+        self.book
+            .places
+            .iter()
+            .find(named)
+            .map(|(id, _)| id)
+            .expect("a place in the fixture")
     }
 
     /// The entity called `name`: the book's name lookup is the model's, so it is found by hand.
     fn entity(&self, name: &str) -> Id<Entity> {
-        self.book.entities.iter().find(|(_, entity)| self.book.name(entity.path) == name).map(|(id, _)| id).unwrap()
+        self.book
+            .entities
+            .iter()
+            .find(|(_, entity)| self.book.name(entity.path) == name)
+            .map(|(id, _)| id)
+            .unwrap()
     }
 
-    fn report_for(&self, query: Query, whose: Option<&str>) -> Result<Report<'static>, axiom_core::Diagnostic> {
-        let whose = whose.map_or_else(Whose::default, |name| Whose::of(&self.book, self.entity(name)));
+    fn report_for(
+        &self,
+        query: Query,
+        whose: Option<&str>,
+    ) -> Result<Report<'static>, axiom_core::Diagnostic> {
+        let whose = whose.map_or_else(Whose::default, |name| {
+            Whose::of(&self.book, self.entity(name))
+        });
         crate::views(&self.book, &self.run, &whose, &query)
     }
 
@@ -119,7 +139,16 @@ impl Cast {
 
         // Roots take their ids in the order given: `me` and `jordan` belong to the third.
         // No place of the household is the market's.
-        let people = ["me", "jordan", "household", "landlord", "acme", "irs", "nsf", "market"];
+        let people = [
+            "me",
+            "jordan",
+            "household",
+            "landlord",
+            "acme",
+            "irs",
+            "nsf",
+            "market",
+        ];
         let entities = people.map(|name| Entity {
             path: names.intern(name),
             kind: thing,
@@ -139,21 +168,31 @@ impl Cast {
             loc: None,
         });
         let (entities, ids) = Tree::build(entities.into(), &[None; 8]).unwrap();
-        let [me, jordan, landlord, acme, irs, nsf, market] = [ids[0], ids[1], ids[3], ids[4], ids[5], ids[6], ids[7]];
+        let [me, jordan, landlord, acme, irs, nsf, market] =
+            [ids[0], ids[1], ids[3], ids[4], ids[5], ids[6], ids[7]];
         assert_eq!(ids[2], Id::new(2), "the household is the third root");
 
         let parents: Vec<Option<usize>> = PLACES
             .iter()
             .map(|(path, _)| {
-                path.rsplit_once('/').and_then(|(parent, _)| PLACES.iter().position(|(other, _)| *other == parent))
+                path.rsplit_once('/')
+                    .and_then(|(parent, _)| PLACES.iter().position(|(other, _)| *other == parent))
             })
             .collect();
         let items = PLACES.iter().map(|&(path, class)| Place {
             path: names.intern(path),
             class,
-            role: if class == Class::Outside { Role::Outside(None) } else { Role::Account { institution: None } },
+            role: if class == Class::Outside {
+                Role::Outside(None)
+            } else {
+                Role::Account { institution: None }
+            },
             kind: thing,
-            owner: if JORDAN_OWNS.contains(&path) { jordan } else { me },
+            owner: if JORDAN_OWNS.contains(&path) {
+                jordan
+            } else {
+                me
+            },
             holds: None,
             select: None,
             deferred: false,
@@ -265,27 +304,170 @@ fn journal(cast: &mut Cast) -> Journal {
     let client = Some(cast.acme);
     // (line, day, from, to, cents, payee, state)
     let rows = [
-        (1, day(2026, 1, 1), "assets/bank/checking", "expenses/insurance", 120_000, None, State::Actual),
-        (2, day(2026, 1, 15), "income/salary", "assets/bank/checking", 500_000, None, State::Actual),
-        (3, day(2026, 1, 16), "assets/bank/checking", "expenses/rent", 180_000, landlord, State::Actual),
-        (4, day(2026, 1, 18), "assets/bank/checking", "expenses/food/groceries", 8_420, None, State::Actual),
-        (5, day(2026, 2, 15), "income/salary", "assets/bank/checking", 500_000, None, State::Actual),
-        (6, day(2026, 2, 16), "assets/bank/checking", "expenses/rent", 180_000, landlord, State::Actual),
-        (7, day(2026, 2, 20), "liabilities/visa", "expenses/food/groceries", 12_000, None, State::Actual),
-        (8, day(2026, 3, 1), "assets/bank/checking", "expenses/repairs", 35_000, None, State::Pending),
-        (13, day(2026, 3, 2), "income/design", "assets/owed/clients", 480_000, client, State::Actual),
-        (16, day(2026, 3, 5), "liabilities/bills", "expenses/repairs", 120_000, None, State::Actual),
-        (14, day(2026, 3, 10), "income/jordan-pay", "assets/bank/jordan-checking", 300_000, None, State::Actual),
-        (17, day(2026, 3, 12), "assets/bank/jordan-checking", "liabilities/bills", 50_000, None, State::Actual),
-        (9, day(2026, 3, 15), "income/salary", "assets/bank/checking", 500_000, None, State::Actual),
-        (10, day(2026, 3, 20), "assets/bank/checking", "equity/unknown", 4_000, None, State::Actual),
-        (11, day(2026, 3, 25), "assets/bank/checking", "liabilities/visa", 12_000, None, State::Actual),
-        (15, day(2026, 3, 26), "assets/owed/clients", "assets/bank/jordan-checking", 180_000, client, State::Actual),
-        (12, day(2026, 3, 28), "assets/bank/checking", "assets/retirement", 100_000, None, State::Actual),
+        (
+            1,
+            day(2026, 1, 1),
+            "assets/bank/checking",
+            "expenses/insurance",
+            120_000,
+            None,
+            State::Actual,
+        ),
+        (
+            2,
+            day(2026, 1, 15),
+            "income/salary",
+            "assets/bank/checking",
+            500_000,
+            None,
+            State::Actual,
+        ),
+        (
+            3,
+            day(2026, 1, 16),
+            "assets/bank/checking",
+            "expenses/rent",
+            180_000,
+            landlord,
+            State::Actual,
+        ),
+        (
+            4,
+            day(2026, 1, 18),
+            "assets/bank/checking",
+            "expenses/food/groceries",
+            8_420,
+            None,
+            State::Actual,
+        ),
+        (
+            5,
+            day(2026, 2, 15),
+            "income/salary",
+            "assets/bank/checking",
+            500_000,
+            None,
+            State::Actual,
+        ),
+        (
+            6,
+            day(2026, 2, 16),
+            "assets/bank/checking",
+            "expenses/rent",
+            180_000,
+            landlord,
+            State::Actual,
+        ),
+        (
+            7,
+            day(2026, 2, 20),
+            "liabilities/visa",
+            "expenses/food/groceries",
+            12_000,
+            None,
+            State::Actual,
+        ),
+        (
+            8,
+            day(2026, 3, 1),
+            "assets/bank/checking",
+            "expenses/repairs",
+            35_000,
+            None,
+            State::Pending,
+        ),
+        (
+            13,
+            day(2026, 3, 2),
+            "income/design",
+            "assets/owed/clients",
+            480_000,
+            client,
+            State::Actual,
+        ),
+        (
+            16,
+            day(2026, 3, 5),
+            "liabilities/bills",
+            "expenses/repairs",
+            120_000,
+            None,
+            State::Actual,
+        ),
+        (
+            14,
+            day(2026, 3, 10),
+            "income/jordan-pay",
+            "assets/bank/jordan-checking",
+            300_000,
+            None,
+            State::Actual,
+        ),
+        (
+            17,
+            day(2026, 3, 12),
+            "assets/bank/jordan-checking",
+            "liabilities/bills",
+            50_000,
+            None,
+            State::Actual,
+        ),
+        (
+            9,
+            day(2026, 3, 15),
+            "income/salary",
+            "assets/bank/checking",
+            500_000,
+            None,
+            State::Actual,
+        ),
+        (
+            10,
+            day(2026, 3, 20),
+            "assets/bank/checking",
+            "equity/unknown",
+            4_000,
+            None,
+            State::Actual,
+        ),
+        (
+            11,
+            day(2026, 3, 25),
+            "assets/bank/checking",
+            "liabilities/visa",
+            12_000,
+            None,
+            State::Actual,
+        ),
+        (
+            15,
+            day(2026, 3, 26),
+            "assets/owed/clients",
+            "assets/bank/jordan-checking",
+            180_000,
+            client,
+            State::Actual,
+        ),
+        (
+            12,
+            day(2026, 3, 28),
+            "assets/bank/checking",
+            "assets/retirement",
+            100_000,
+            None,
+            State::Actual,
+        ),
     ];
-    let (check, invoice, bill) =
-        (cast.names.intern("#check-1041"), cast.names.intern("#inv-12"), cast.names.intern("#bill-7"));
-    let mut journal = Journal { txns: Arena::new(), flows: Arena::new(), posted: Vec::new() };
+    let (check, invoice, bill) = (
+        cast.names.intern("#check-1041"),
+        cast.names.intern("#inv-12"),
+        cast.names.intern("#bill-7"),
+    );
+    let mut journal = Journal {
+        txns: Arena::new(),
+        flows: Arena::new(),
+        posted: Vec::new(),
+    };
     for (index, &(row, when, from, to, cents, payee, state)) in rows.iter().enumerate() {
         let codes: Box<[Sym]> = match row {
             8 => Box::new([check]),
@@ -311,7 +493,10 @@ fn journal(cast: &mut Cast) -> Journal {
         });
         let amount = Amount::new(Qty(cents), cast.usd);
         let owner = [cast.id(from), cast.id(to)].map(|id| &cast.places[id]);
-        let owner = owner.into_iter().find(|place| place.class != Class::Outside).map_or(cast.me, |place| place.owner);
+        let owner = owner
+            .into_iter()
+            .find(|place| place.class != Class::Outside)
+            .map_or(cast.me, |place| place.owner);
         journal.flows.push(Flow {
             day: when,
             // The insurance is paid for the whole year.
@@ -320,7 +505,11 @@ fn journal(cast: &mut Cast) -> Journal {
             to: cast.id(to),
             out: amount,
             arrive: amount,
-            mode: if state == State::Pending { Mode::Pending } else { Mode::Actual },
+            mode: if state == State::Pending {
+                Mode::Pending
+            } else {
+                Mode::Actual
+            },
             infer: Infer::Known,
             txn,
             payee,
@@ -332,9 +521,18 @@ fn journal(cast: &mut Cast) -> Journal {
             codes,
             loc: line(row),
             waive: None,
-            detail: due.map(|due| Box::new(Detail { due: Some(due), ..Detail::default() })),
+            detail: due.map(|due| {
+                Box::new(Detail {
+                    due: Some(due),
+                    ..Detail::default()
+                })
+            }),
         });
-        journal.posted.push(Posted { out: Qty(cents), arrive: Qty(cents), state });
+        journal.posted.push(Posted {
+            out: Qty(cents),
+            arrive: Qty(cents),
+            state,
+        });
     }
     journal
 }
@@ -376,16 +574,27 @@ fn rent_plan(cast: &Cast) -> Plan {
 
 /// A law over `left op right`, both written amounts: `warn total(in, month) <= 500 USD`.
 fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn: bool) -> Law {
-    let node = |op, ty, first| Node { op, ty, loc: line(80), first: NodeId(first) };
+    let node = |op, ty, first| Node {
+        op,
+        ty,
+        loc: line(80),
+        first: NodeId(first),
+    };
     let limit = Amount::new(Qty(50_000), cast.usd);
     let nodes = vec![
-        node(Op::Call(Func::Total(Dir::In, Window::Month), Box::default()), Ty::AMOUNT, 0),
+        node(
+            Op::Call(Func::Total(Dir::In, Window::Month), Box::default()),
+            Ty::AMOUNT,
+            0,
+        ),
         node(Op::Const(Value::Amount(limit)), Ty::AMOUNT, 1),
         node(Op::Bin(op, NodeId(0), NodeId(1)), Ty::Bool, 0),
     ];
     Law {
         name: cast.names.intern(name),
-        doc: Some(cast.names.intern(Box::leak(format!("/// The {name} law says what it says.").into_boxed_str()))),
+        doc: Some(cast.names.intern(Box::leak(
+            format!("/// The {name} law says what it says.").into_boxed_str(),
+        ))),
         owner,
         system: None,
         trigger: Trigger::In,
@@ -398,7 +607,11 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
                 cond: NodeId(2),
                 otherwise: Box::default(),
                 message: None,
-                severity: if warn { Severity::Warning } else { Severity::Error },
+                severity: if warn {
+                    Severity::Warning
+                } else {
+                    Severity::Error
+                },
             },
         }]),
         nodes: nodes.into(),
@@ -408,14 +621,27 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
 
 /// `on out`, `owe amount * 10% to irs as early-withdrawal`: leaving the retirement account costs a tenth.
 fn early_withdrawal(cast: &mut Cast) -> Law {
-    let node = |op, ty, first| Node { op, ty, loc: line(85), first: NodeId(first) };
+    let node = |op, ty, first| Node {
+        op,
+        ty,
+        loc: line(85),
+        first: NodeId(first),
+    };
     let nodes = vec![
         node(Op::Var(Var::Amount), Ty::AMOUNT, 0),
-        node(Op::Const(Value::Num(Ratio::percent(10, 0).unwrap())), Ty::Num, 1),
+        node(
+            Op::Const(Value::Num(Ratio::percent(10, 0).unwrap())),
+            Ty::Num,
+            1,
+        ),
         node(Op::Bin(BinOp::Mul, NodeId(0), NodeId(1)), Ty::AMOUNT, 0),
     ];
-    let owe =
-        Consequence::Owe { amount: NodeId(2), to: cast.irs, due: None, name: cast.names.intern("early-withdrawal") };
+    let owe = Consequence::Owe {
+        amount: NodeId(2),
+        to: cast.irs,
+        due: None,
+        name: cast.names.intern("early-withdrawal"),
+    };
     Law {
         name: cast.names.intern("early-withdrawal"),
         doc: None,
@@ -425,7 +651,10 @@ fn early_withdrawal(cast: &mut Cast) -> Law {
         budget: None,
         overrides: None,
         rank: Rank(0),
-        steps: Box::new([Step { loc: line(85), kind: StepKind::Effect(owe) }]),
+        steps: Box::new([Step {
+            loc: line(85),
+            kind: StepKind::Effect(owe),
+        }]),
         nodes: nodes.into(),
         loc: line(85),
     }
@@ -456,15 +685,36 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
         nodes: Box::default(),
         loc: line(90),
     });
-    assert_eq!((budget, wages), (Id::new(0), Id::new(1)), "the rules and readings refer to laws by position");
+    assert_eq!(
+        (budget, wages),
+        (Id::new(0), Id::new(1)),
+        "the rules and readings refer to laws by position"
+    );
     let retirement = Owner::Place(cast.id("assets/retirement"));
-    laws.push(limit_law(cast, "deferral-limit", retirement, BinOp::Le, false));
-    laws.push(limit_law(cast, "overdraft", Owner::Place(cast.id("assets/bank/checking")), BinOp::Ge, true));
+    laws.push(limit_law(
+        cast,
+        "deferral-limit",
+        retirement,
+        BinOp::Le,
+        false,
+    ));
+    laws.push(limit_law(
+        cast,
+        "overdraft",
+        Owner::Place(cast.id("assets/bank/checking")),
+        BinOp::Ge,
+        true,
+    ));
     laws.push(early_withdrawal(cast));
 
     // Names are one namespace per person-year: both systems add to `agi`.
     let (me, irs, usd) = (cast.me, cast.irs, cast.usd);
-    let owed = |to| Some(Owed { to, due: day(2027, 4, 15) });
+    let owed = |to| {
+        Some(Owed {
+            to,
+            due: day(2027, 4, 15),
+        })
+    };
     let mut effect = |system, when, name: &'static str, cents, owe: Option<Owed>, cause| Effect {
         law: wages,
         subject: Subject::Entity(me),
@@ -473,17 +723,48 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
         day: when,
         name: cast.names.intern(name),
         amount: Amount::new(Qty(cents), usd),
-        consequence: owe.map_or(axiom_engine::Consequence::Count, axiom_engine::Consequence::Owe),
+        consequence: owe.map_or(
+            axiom_engine::Consequence::Count,
+            axiom_engine::Consequence::Owe,
+        ),
         cause,
     };
     let (us, ca) = (cast.us, cast.california);
     let effects = vec![
-        effect(us, day(2026, 1, 15), "wages", 500_000, None, Cause::Flow(Id::new(1))),
-        effect(us, day(2026, 2, 15), "wages", 500_000, None, Cause::Flow(Id::new(4))),
+        effect(
+            us,
+            day(2026, 1, 15),
+            "wages",
+            500_000,
+            None,
+            Cause::Flow(Id::new(1)),
+        ),
+        effect(
+            us,
+            day(2026, 2, 15),
+            "wages",
+            500_000,
+            None,
+            Cause::Flow(Id::new(4)),
+        ),
         effect(us, day(2026, 3, 31), "agi", 1_000_000, None, Cause::Time),
         effect(ca, day(2026, 3, 31), "agi", 20_000, None, Cause::Time),
-        effect(us, day(2026, 3, 31), "federal-tax", 90_000, owed(irs), Cause::Time),
-        effect(ca, day(2026, 3, 31), "ca-income-tax", 15_000, owed(irs), Cause::Time),
+        effect(
+            us,
+            day(2026, 3, 31),
+            "federal-tax",
+            90_000,
+            owed(irs),
+            Cause::Time,
+        ),
+        effect(
+            ca,
+            day(2026, 3, 31),
+            "ca-income-tax",
+            15_000,
+            owed(irs),
+            Cause::Time,
+        ),
     ];
 
     let gain = |qty: i64, basis: i64, proceeds: i64, acquired: Day, sold: Day, unit| Gain {
@@ -500,10 +781,29 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
     };
     let gains = vec![
         gain(100, 20_000, 50_000, day(2025, 6, 1), day(2026, 2, 10), usd),
-        gain(2_000, 60_000, 70_000, day(2025, 12, 1), day(2026, 2, 12), cast.vti),
-        gain(5_000, 100_000, 180_000, day(2024, 1, 5), day(2026, 3, 3), cast.vti),
+        gain(
+            2_000,
+            60_000,
+            70_000,
+            day(2025, 12, 1),
+            day(2026, 2, 12),
+            cast.vti,
+        ),
+        gain(
+            5_000,
+            100_000,
+            180_000,
+            day(2024, 1, 5),
+            day(2026, 3, 3),
+            cast.vti,
+        ),
     ];
-    Records { laws, effects, holdings: holdings(cast, journal), gains }
+    Records {
+        laws,
+        effects,
+        holdings: holdings(cast, journal),
+        gains,
+    }
 }
 
 /// The journal's final state, as the engine leaves it: plain money, except in
@@ -525,25 +825,36 @@ fn holdings(cast: &Cast, journal: &Journal) -> Vec<Holding> {
     };
     let mut lots: BTreeMap<Id<Place>, Vec<Parcel>> = BTreeMap::new();
     // 500 in checking is tied to the grant it came from.
-    lots.entry(cast.id("assets/bank/checking")).or_default().push(parcel(
-        Qty(50_000),
-        50_000,
-        day(2025, 6, 1),
-        0,
-        Some(cast.nsf),
-    ));
+    lots.entry(cast.id("assets/bank/checking"))
+        .or_default()
+        .push(parcel(
+            Qty(50_000),
+            50_000,
+            day(2025, 6, 1),
+            0,
+            Some(cast.nsf),
+        ));
     // The retirement money has no basis.
     let retired = plain[&cast.id("assets/retirement")];
-    lots.entry(cast.id("assets/retirement")).or_default().push(parcel(retired, 0, day(2026, 3, 28), 16, None));
+    lots.entry(cast.id("assets/retirement"))
+        .or_default()
+        .push(parcel(retired, 0, day(2026, 3, 28), 16, None));
     // A claim keeps the transaction that made it.
     let owed = plain[&cast.id("assets/owed/clients")];
-    lots.entry(cast.id("assets/owed/clients")).or_default().push(parcel(owed, owed.0, day(2026, 3, 2), 8, None));
+    lots.entry(cast.id("assets/owed/clients"))
+        .or_default()
+        .push(parcel(owed, owed.0, day(2026, 3, 2), 8, None));
     for (place, held) in &lots {
         *plain.get_mut(place).unwrap() -= held.iter().map(|lot| lot.qty).sum();
     }
     plain
         .into_iter()
-        .map(|(place, plain)| Holding { place, unit: cast.usd, plain, lots: lots.remove(&place).unwrap_or_default() })
+        .map(|(place, plain)| Holding {
+            place,
+            unit: cast.usd,
+            plain,
+            lots: lots.remove(&place).unwrap_or_default(),
+        })
         .filter(|holding| !holding.is_empty())
         .collect()
 }
@@ -554,20 +865,48 @@ pub(crate) fn household() -> Household {
     let records = records(&mut cast, &journal);
 
     let food = cast.id("expenses/food");
-    let budget_rule = Rule { law: Id::new(0), subject: Subject::Place(food), days: Days::ALWAYS };
+    let budget_rule = Rule {
+        law: Id::new(0),
+        subject: Subject::Place(food),
+        days: Days::ALWAYS,
+    };
     // The deferral limit governs the retirement place only until the end of 2025.
     let retirement = cast.id("assets/retirement");
     let ends_2025 = Days::new(Day::MIN, day(2025, 12, 31)).unwrap();
-    let lapsed = Rule { law: Id::new(2), subject: Subject::Place(retirement), days: ends_2025 };
-    let in_force = Rule { law: Id::new(3), subject: Subject::Place(retirement), days: Days::ALWAYS };
-    let penalty = Rule { law: Id::new(4), subject: Subject::Place(retirement), days: Days::ALWAYS };
+    let lapsed = Rule {
+        law: Id::new(2),
+        subject: Subject::Place(retirement),
+        days: ends_2025,
+    };
+    let in_force = Rule {
+        law: Id::new(3),
+        subject: Subject::Place(retirement),
+        days: Days::ALWAYS,
+    };
+    let penalty = Rule {
+        law: Id::new(4),
+        subject: Subject::Place(retirement),
+        days: Days::ALWAYS,
+    };
     let rules = Rules {
-        on_in: Groups::build(cast.places.len(), [(food, budget_rule), (retirement, lapsed), (retirement, in_force)]),
+        on_in: Groups::build(
+            cast.places.len(),
+            [
+                (food, budget_rule),
+                (retirement, lapsed),
+                (retirement, in_force),
+            ],
+        ),
         on_out: Groups::build(cast.places.len(), [(retirement, penalty)]),
         ..Rules::default()
     };
-    let touching =
-        Groups::build(cast.places.len(), journal.flows.iter().flat_map(|(id, flow)| [(flow.from, id), (flow.to, id)]));
+    let touching = Groups::build(
+        cast.places.len(),
+        journal
+            .flows
+            .iter()
+            .flat_map(|(id, flow)| [(flow.from, id), (flow.to, id)]),
+    );
     let (purposes, [income, spending, capital]) = Purpose::roots(&mut cast.names);
     let roots = Roots {
         me: cast.me,
@@ -643,35 +982,81 @@ pub(crate) fn household() -> Household {
 impl Household {
     /// The same household after the engine has recorded what each limit counted.
     fn with_headroom(mut self) -> Household {
-        let (me, jordan) = (self.book.roots.me, self.book.entities.iter().nth(1).unwrap().0);
+        let (me, jordan) = (
+            self.book.roots.me,
+            self.book.entities.iter().nth(1).unwrap().0,
+        );
         let usd = self.book.base;
         let cents = |cents| Amount::new(Qty(cents), usd);
-        let reading = |law, place: &str, from: Day, until: Day, counted, limit, owner, warn| Headroom {
-            law: Id::new(law),
-            step: 0,
-            subject: Subject::Place(self.place(place)),
-            owner,
-            days: Days::new(from, until).unwrap(),
-            counted: cents(counted),
-            limit: cents(limit),
-            day: until,
-            warn,
-            bound: Bound::Cap,
-        };
-        let (jan, feb) = ((day(2026, 1, 1), day(2026, 1, 31)), (day(2026, 2, 1), day(2026, 2, 28)));
+        let reading =
+            |law, place: &str, from: Day, until: Day, counted, limit, owner, warn| Headroom {
+                law: Id::new(law),
+                step: 0,
+                subject: Subject::Place(self.place(place)),
+                owner,
+                days: Days::new(from, until).unwrap(),
+                counted: cents(counted),
+                limit: cents(limit),
+                day: until,
+                warn,
+                bound: Bound::Cap,
+            };
+        let (jan, feb) = (
+            (day(2026, 1, 1), day(2026, 1, 31)),
+            (day(2026, 2, 1), day(2026, 2, 28)),
+        );
         let year = (day(2026, 1, 1), day(2026, 12, 31));
         let readings = vec![
             // Groceries this year, month by month, against 500 a month.
             reading(0, "expenses/food", jan.0, jan.1, 8_420, 50_000, me, true),
             reading(0, "expenses/food", feb.0, feb.1, 12_000, 50_000, me, true),
             // A cap whose limit is a parameter lookup: 2,400 of 24,000.
-            reading(2, "assets/retirement", year.0, year.1, 240_000, 2_400_000, me, false),
+            reading(
+                2,
+                "assets/retirement",
+                year.0,
+                year.1,
+                240_000,
+                2_400_000,
+                me,
+                false,
+            ),
             // The same cap for Jordan, who has used 900 of 18,000.
-            reading(2, "assets/bank/jordan-checking", year.0, year.1, 90_000, 1_800_000, jordan, false),
+            reading(
+                2,
+                "assets/bank/jordan-checking",
+                year.0,
+                year.1,
+                90_000,
+                1_800_000,
+                jordan,
+                false,
+            ),
             // A floor: the balance may not go below zero, and stands at 8,955.80.
-            Headroom { bound: Bound::Floor, ..reading(3, "assets/bank/checking", day(2026, 3, 31), day(2026, 3, 31), 0, 895_580, me, true) },
+            Headroom {
+                bound: Bound::Floor,
+                ..reading(
+                    3,
+                    "assets/bank/checking",
+                    day(2026, 3, 31),
+                    day(2026, 3, 31),
+                    0,
+                    895_580,
+                    me,
+                    true,
+                )
+            },
             // A yearly budget, over.
-            reading(0, "expenses/insurance", year.0, year.1, 120_000, 100_000, me, true),
+            reading(
+                0,
+                "expenses/insurance",
+                year.0,
+                year.1,
+                120_000,
+                100_000,
+                me,
+                true,
+            ),
         ];
         self.run.headroom = readings;
         self
@@ -683,11 +1068,24 @@ impl Household {
 fn cell(cell: &Cell) -> String {
     match cell {
         Cell::Blank => String::new(),
+        Cell::Word(word) => (*word).to_string(),
         Cell::Text(text) => text.to_string(),
+        Cell::Name(name) => (*name).to_string(),
+        Cell::Code(code) => format!("^{code}"),
+        Cell::Said(text) => text.to_string(),
         Cell::Amount { qty, scale, unit } => format!("{} {unit}", qty.show(*scale)),
         Cell::Day(day) => day.to_string(),
-        Cell::Percent(ratio) => format!("{}%", Ratio::new(ratio.num() as i128 * 100, ratio.den() as i128).unwrap()),
+        Cell::Span(span) => span.to_string(),
+        Cell::Period(days) => format!("{}..{}", days.first(), days.last()),
+        Cell::Percent(ratio) => format!(
+            "{}%",
+            Ratio::new(ratio.num() as i128 * 100, ratio.den() as i128).unwrap()
+        ),
+        Cell::Number(ratio) => ratio.to_string(),
+        Cell::Count(count, noun) => format!("{count} {noun}"),
+        Cell::Trigger(trigger) => format!("{trigger:?}"),
         Cell::Source(loc) => format!("@{}", loc.start / 100),
+        Cell::Join(separator, parts) => parts.iter().map(cell).collect::<Vec<_>>().join(separator),
     }
 }
 
@@ -703,7 +1101,14 @@ pub(crate) fn lines(section: &Section) -> Vec<String> {
         .iter()
         .map(|row| {
             let cells: Vec<String> = row.cells.iter().map(cell).collect();
-            format!("{}{}{}", mark(row), "  ".repeat(row.depth as usize), cells.join(" | ")).trim_end().to_string()
+            format!(
+                "{}{}{}",
+                mark(row),
+                "  ".repeat(row.depth as usize),
+                cells.join(" | ")
+            )
+            .trim_end()
+            .to_string()
         })
         .collect()
 }
@@ -711,9 +1116,19 @@ pub(crate) fn lines(section: &Section) -> Vec<String> {
 pub(crate) fn show(report: &Report) -> String {
     let mut out = format!("# {}\n", report.title);
     for section in &report.sections {
-        out += &format!("##{}\n", section.heading.as_ref().map_or(String::new(), |heading| format!(" {heading}")));
+        out += &format!(
+            "##{}\n",
+            section
+                .heading
+                .as_ref()
+                .map_or(String::new(), |heading| format!(" {heading}"))
+        );
         out += &lines(section).join("\n");
-        out += &section.notes.iter().map(|note| format!("\n  note: {note}")).collect::<String>();
+        out += &section
+            .notes
+            .iter()
+            .map(|note| format!("\n  note: {note}"))
+            .collect::<String>();
         out += "\n";
     }
     out
@@ -723,8 +1138,18 @@ fn table(house: &Household, query: Query) -> String {
     show(&house.report(query))
 }
 
-fn balance(globs: Vec<&'static str>, at: Option<Day>, value: bool, monthly: bool) -> Query<'static> {
-    Query::Balance { globs, at, value, monthly }
+fn balance(
+    globs: Vec<&'static str>,
+    at: Option<Day>,
+    value: bool,
+    monthly: bool,
+) -> Query<'static> {
+    Query::Balance {
+        globs,
+        at,
+        value,
+        monthly,
+    }
 }
 
 // ─── Balances, and whose they are ───────────────────────────────────────────
@@ -772,12 +1197,22 @@ Liabilities | 700.00 USD
 #[test]
 fn a_past_date_and_monthly_columns_read_the_same_flows() {
     let house = household();
-    let january = table(&house, balance(vec!["checking"], Some(day(2026, 1, 20)), false, false));
+    let january = table(
+        &house,
+        balance(vec!["checking"], Some(day(2026, 1, 20)), false, false),
+    );
     assert!(january.contains("checking | 1,915.80 USD"));
     let monthly = house.report(balance(vec!["checking"], None, true, true));
-    let titles: Vec<_> = monthly.sections[0].columns.iter().map(|column| column.title.to_string()).collect();
+    let titles: Vec<_> = monthly.sections[0]
+        .columns
+        .iter()
+        .map(|column| column.title.to_string())
+        .collect();
     assert_eq!(titles, ["Place", "2026-01-31", "2026-02-28", "2026-03-31"]);
-    assert_eq!(lines(&monthly.sections[0])[2], "    checking | 1,915.80 USD | 5,115.80 USD | 8,955.80 USD");
+    assert_eq!(
+        lines(&monthly.sections[0])[2],
+        "    checking | 1,915.80 USD | 5,115.80 USD | 8,955.80 USD"
+    );
 }
 
 #[test]
@@ -798,7 +1233,11 @@ fn the_legacy_report_keeps_the_run_its_caller_supplied() {
         None,
     )
     .unwrap();
-    assert!(lines(&report.sections[0]).iter().any(|row| row == "    checking | 8,956.80 USD"));
+    assert!(
+        lines(&report.sections[0])
+            .iter()
+            .any(|row| row == "    checking | 8,956.80 USD")
+    );
 }
 
 #[test]
@@ -808,10 +1247,13 @@ fn today_from_the_run_and_from_the_flows_agree() {
     let (everyone, today) = (Whose::default(), house.run.today);
     let lens = crate::lens::Lens::new(&house.book, &everyone, today);
     let from_holdings = crate::history::Snapshots::of(lens, &house.run, &[today], false);
-    let from_flows = crate::history::Snapshots::of(lens, &house.run, &[day(2026, 2, 1), today], false);
+    let from_flows =
+        crate::history::Snapshots::of(lens, &house.run, &[day(2026, 2, 1), today], false);
     for place in house.book.places.ids() {
-        let (held, replayed) =
-            (from_holdings.subtree(&house.book, 0, place), from_flows.subtree(&house.book, 1, place));
+        let (held, replayed) = (
+            from_holdings.subtree(&house.book, 0, place),
+            from_flows.subtree(&house.book, 1, place),
+        );
         assert_eq!(
             held.get(house.book.base),
             replayed.get(house.book.base),
@@ -831,28 +1273,39 @@ fn snapshot_storage_scales_with_occupied_owner_pairs() {
     let (all_pairs, all_cells) = all.storage_shape();
     let dense_cells = days.len() * house.book.places.len() * house.book.commodities.len();
     assert_eq!(all_cells, days.len() * all_pairs);
-    assert!(all_cells < dense_cells / 2, "{all_cells} stored cells versus {dense_cells} dense cells");
+    assert!(
+        all_cells < dense_cells / 2,
+        "{all_cells} stored cells versus {dense_cells} dense cells"
+    );
 
     let jordan = Whose::of(&house.book, house.entity("jordan"));
     let jordan_lens = crate::lens::Lens::new(&house.book, &jordan, house.run.today);
     let scoped = crate::history::Snapshots::of(jordan_lens, &house.run, &days, false);
     let (jordan_pairs, jordan_cells) = scoped.storage_shape();
     assert_eq!(jordan_cells, days.len() * jordan_pairs);
-    assert!(jordan_pairs < all_pairs, "owner scope should omit unowned pairs");
+    assert!(
+        jordan_pairs < all_pairs,
+        "owner scope should omit unowned pairs"
+    );
 }
 
 #[test]
 fn a_filtered_balance_keeps_context_but_no_net_worth() {
     let house = household();
     let report = house.report(balance(vec!["checking"], None, false, false));
-    assert_eq!(lines(&report.sections[0])[..3], ["~assets |", "~  bank |", "    checking | 8,955.80 USD"]);
+    assert_eq!(
+        lines(&report.sections[0])[..3],
+        ["~assets |", "~  bank |", "    checking | 8,955.80 USD"]
+    );
     assert_eq!(report.sections.len(), 1);
 }
 
 #[test]
 fn a_view_can_be_about_one_person_or_their_household() {
     let house = household();
-    let jordan = house.report_for(balance(vec![], None, false, false), Some("jordan")).unwrap();
+    let jordan = house
+        .report_for(balance(vec![], None, false, false), Some("jordan"))
+        .unwrap();
     assert_eq!(
         lines(&jordan.sections[0]),
         [
@@ -864,15 +1317,32 @@ fn a_view_can_be_about_one_person_or_their_household() {
         ]
     );
     // The household is its members: everything either owns.
-    let together = house.report_for(balance(vec![], None, false, false), Some("household")).unwrap();
+    let together = house
+        .report_for(balance(vec![], None, false, false), Some("household"))
+        .unwrap();
     let everyone = house.report(balance(vec![], None, false, false));
     assert_eq!(lines(&together.sections[0]), lines(&everyone.sections[0]));
     // Spending is scoped the same way.
-    let pay = house.report_for(Query::Flow { by: Period::Month, from: None, to: None }, Some("jordan")).unwrap();
+    let pay = house
+        .report_for(
+            Query::Flow {
+                by: FlowBy::Period(Period::Month),
+                from: None,
+                to: None,
+            },
+            Some("jordan"),
+        )
+        .unwrap();
     assert!(
-        lines(&pay.sections[0]).iter().any(|line| line.starts_with("  jordan-pay") && line.contains("3,000.00 USD"))
+        lines(&pay.sections[0])
+            .iter()
+            .any(|line| line.starts_with("  jordan-pay") && line.contains("3,000.00 USD"))
     );
-    assert!(!lines(&pay.sections[0]).iter().any(|line| line.contains("salary")));
+    assert!(
+        !lines(&pay.sections[0])
+            .iter()
+            .any(|line| line.contains("salary"))
+    );
 }
 
 // ─── Statements ─────────────────────────────────────────────────────────────
@@ -882,11 +1352,27 @@ fn flow_recognizes_a_spread_premium_a_little_each_day() {
     let house = household();
     // 1,200 over 365 days: January's 31 days are 101.92, February's 28 are 92.05,
     // and half-even rounding at each month boundary keeps the year exact.
-    let flow = house.report(Query::Flow { by: Period::Month, from: None, to: None });
-    let insurance = lines(&flow.sections[0]).into_iter().find(|row| row.trim_start().starts_with("insurance")).unwrap();
-    assert_eq!(insurance.trim_start(), "insurance | 101.92 USD | 92.05 USD | 101.92 USD | 295.89 USD");
-    let gains = lines(&flow.sections[0]).into_iter().find(|row| row.contains("realized gains")).unwrap();
-    assert_eq!(gains, "~  realized gains ≈ |  | 400.00 USD | 800.00 USD | 1,200.00 USD");
+    let flow = house.report(Query::Flow {
+        by: FlowBy::Period(Period::Month),
+        from: None,
+        to: None,
+    });
+    let insurance = lines(&flow.sections[0])
+        .into_iter()
+        .find(|row| row.trim_start().starts_with("insurance"))
+        .unwrap();
+    assert_eq!(
+        insurance.trim_start(),
+        "insurance | 101.92 USD | 92.05 USD | 101.92 USD | 295.89 USD"
+    );
+    let gains = lines(&flow.sections[0])
+        .into_iter()
+        .find(|row| row.contains("realized gains"))
+        .unwrap();
+    assert_eq!(
+        gains,
+        "~  realized gains ≈ |  | 400.00 USD | 800.00 USD | 1,200.00 USD"
+    );
 }
 
 #[test]
@@ -896,10 +1382,22 @@ fn register_runs_a_balance_and_mutes_the_pending_check() {
     let section = crate::register::section(&house.book, &house.run, checking, None, None);
     let rows = lines(&section);
     assert_eq!(rows.len(), 11);
-    assert_eq!(rows[6], "~2026-03-01 | expenses/repairs |  | #check-1041 · pending | -350.00 USD | 5,115.80 USD");
+    assert_eq!(
+        rows[6],
+        "~2026-03-01 | expenses/repairs |  | #check-1041 · pending | -350.00 USD | 5,115.80 USD"
+    );
     // A window opens with the balance carried in.
-    let march = crate::register::section(&house.book, &house.run, checking, Some(day(2026, 3, 1)), None);
-    assert_eq!(lines(&march)[0], "=2026-03-01 | opening balance |  |  |  | 5,115.80 USD");
+    let march = crate::register::section(
+        &house.book,
+        &house.run,
+        checking,
+        Some(day(2026, 3, 1)),
+        None,
+    );
+    assert_eq!(
+        lines(&march)[0],
+        "=2026-03-01 | opening balance |  |  |  | 5,115.80 USD"
+    );
 }
 
 #[test]
@@ -963,7 +1461,16 @@ assets/owed/clients | 3,000.00 USD | 3,000.00 USD | 2026-03-02 | 29d | 3,000.00 
 assets/retirement | 1,000.00 USD | 0.00 USD | 2026-03-28 | 3d | 1,000.00 USD | 1,000.00 USD |  |
 =Total |  | 3,500.00 USD |  |  | 4,500.00 USD | 1,000.00 USD |  |
 ";
-    assert_eq!(table(&house, Query::Lots { place: None, at: None }), expected);
+    assert_eq!(
+        table(
+            &house,
+            Query::Lots {
+                place: None,
+                at: None
+            }
+        ),
+        expected
+    );
 }
 
 #[test]
@@ -981,7 +1488,10 @@ fn gains_are_listed_as_form_8949_does_with_short_and_long_subtotals() {
 =Total |  |  |  | 3,000.00 USD | 1,800.00 USD | 1,200.00 USD |
 ";
     let text = table(&house, Query::Gains { year: Some(2026) });
-    assert!(text.ends_with(expected.split_once("##\n").unwrap().1), "{text}");
+    assert!(
+        text.ends_with(expected.split_once("##\n").unwrap().1),
+        "{text}"
+    );
     assert!(table(&house, Query::Gains { year: Some(2025) }).contains("Nothing was sold in 2025"));
 }
 
@@ -1008,7 +1518,9 @@ fn limits_rank_every_cap_by_how_much_of_it_is_used() {
 #[test]
 fn limits_are_per_owner_and_per_year() {
     let house = household().with_headroom();
-    let jordan = house.report_for(Query::Limits { year: Some(2026) }, Some("jordan")).unwrap();
+    let jordan = house
+        .report_for(Query::Limits { year: Some(2026) }, Some("jordan"))
+        .unwrap();
     assert_eq!(lines(&jordan.sections[0]).len(), 1);
     let none = house.report(Query::Limits { year: Some(2024) });
     assert!(none.sections[0].notes[0].contains("No limit was read in 2024"));
@@ -1018,14 +1530,27 @@ fn limits_are_per_owner_and_per_year() {
 fn a_budget_reads_its_window_from_headroom_and_a_year_lists_its_months() {
     let house = household().with_headroom();
     // The month: food against 500, and the year's insurance envelope that this month is part of.
-    let february = table(&house, Query::Budget { at: Some(day(2026, 2, 10)), by: Period::Month });
-    assert!(february.contains("expenses/food | budget | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%"));
-    assert!(
-        february.contains("!expenses/insurance | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%")
+    let february = table(
+        &house,
+        Query::Budget {
+            at: Some(day(2026, 2, 10)),
+            by: Period::Month,
+        },
     );
+    assert!(
+        february.contains(
+            "expenses/food | budget | 2026-02 | 120.00 USD | 500.00 USD | 380.00 USD | 24%"
+        )
+    );
+    assert!(february.contains(
+        "!expenses/insurance | budget | 2026 | 1,200.00 USD | 1,000.00 USD | -200.00 USD | 120%"
+    ));
     // The year: each envelope's year, then its months up to today (March, which
     // nothing has reached yet, is wholly unspent). Insurance is one yearly reading.
-    let year = house.report(Query::Budget { at: Some(day(2026, 2, 10)), by: Period::Year });
+    let year = house.report(Query::Budget {
+        at: Some(day(2026, 2, 10)),
+        by: Period::Year,
+    });
     assert_eq!(
         lines(&year.sections[0]),
         [
@@ -1060,7 +1585,9 @@ fn a_bill_is_netted_by_its_code_across_the_flows_that_made_and_settled_it() {
     let lens_owner = Whose::default();
     let lens = crate::lens::Lens::new(&house.book, &lens_owner, day(2026, 3, 31));
     let bills = crate::claims::owed_by_you(lens, &house.run, house.place("liabilities/bills"));
-    let [bill] = &bills[..] else { panic!("one bill is open") };
+    let [bill] = &bills[..] else {
+        panic!("one bill is open")
+    };
     assert_eq!(
         (bill.left.qty, bill.made, bill.due, bill.mine),
         (Qty(70_000), day(2026, 3, 5), Some(day(2026, 4, 4)), false)
@@ -1068,7 +1595,9 @@ fn a_bill_is_netted_by_its_code_across_the_flows_that_made_and_settled_it() {
     // Paid in full, it is no longer open.
     let paid = crate::lens::Lens::new(&house.book, &lens_owner, day(2026, 3, 5));
     assert_eq!(
-        crate::claims::owed_by_you(paid, &house.run, house.place("liabilities/bills"))[0].left.qty,
+        crate::claims::owed_by_you(paid, &house.run, house.place("liabilities/bills"))[0]
+            .left
+            .qty,
         Qty(120_000)
     );
 }
@@ -1078,11 +1607,26 @@ fn a_bill_is_netted_by_its_code_across_the_flows_that_made_and_settled_it() {
 #[test]
 fn a_code_finds_its_flows_and_a_line_explains_itself() {
     let house = household();
-    let code = table(&house, Query::Why { target: "#check-1041" });
-    assert!(code.contains("2026-03-01 | assets/bank/checking → expenses/repairs | 350.00 USD | pending | @8"));
+    let code = table(
+        &house,
+        Query::Why {
+            target: "#check-1041",
+        },
+    );
+    assert!(code.contains(
+        "2026-03-01 | assets/bank/checking → expenses/repairs | 350.00 USD | pending | @8"
+    ));
     let line = table(&house, Query::Line { loc: line(3) });
     assert!(line.contains("flow: assets/bank/checking → expenses/rent, 1,800.00 USD | @3"));
-    let stray = house.report_for(Query::Why { target: "#check-1014" }, None).err().expect("no such code");
+    let stray = house
+        .report_for(
+            Query::Why {
+                target: "#check-1014",
+            },
+            None,
+        )
+        .err()
+        .expect("no such code");
     assert_eq!(stray.help[0].text, "did you mean `check-1041`?");
 }
 
@@ -1091,8 +1635,14 @@ fn the_summary_counts_the_places_that_were_declared_or_used() {
     let house = household();
     let summary = crate::summary(&house.book, &house.run);
     // Twenty-five places, five of them class roots and two of them a vault nobody declared or touched.
-    assert_eq!((summary.flows, summary.places, summary.unpriced), (17, 18, 0));
-    assert_eq!(house.book.show(summary.net_worth).to_string(), "16,555.80 USD");
+    assert_eq!(
+        (summary.flows, summary.places, summary.unpriced),
+        (17, 18, 0)
+    );
+    assert_eq!(
+        house.book.show(summary.net_worth).to_string(),
+        "16,555.80 USD"
+    );
 }
 
 // ─── Why ────────────────────────────────────────────────────────────────────
@@ -1101,13 +1651,26 @@ fn the_summary_counts_the_places_that_were_declared_or_used() {
 fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed() {
     let house = household().with_headroom();
     let report = house.why(Found::Place(house.place("assets/retirement")));
-    let headings: Vec<_> = report.sections.iter().map(|section| section.heading.clone().unwrap_or_default()).collect();
-    assert_eq!(headings, ["Composition", "Parcels", "Limits", "Governed by", "Recent flows"]);
+    let headings: Vec<_> = report
+        .sections
+        .iter()
+        .map(|section| section.heading.clone().unwrap_or_default())
+        .collect();
+    assert_eq!(
+        headings,
+        [
+            "Composition",
+            "Parcels",
+            "Limits",
+            "Governed by",
+            "Recent flows"
+        ]
+    );
     let limits = lines(&report.sections[2]);
     assert_eq!(limits.len(), 1);
-    assert!(
-        limits[0].contains("deferral-limit on assets/retirement | 2026 | 2,400.00 USD | 24,000.00 USD | 21,600.00 USD")
-    );
+    assert!(limits[0].contains(
+        "deferral-limit on assets/retirement | 2026 | 2,400.00 USD | 24,000.00 USD | 21,600.00 USD"
+    ));
     // The rule that lapsed at the end of 2025 is not governing: the one in force is a limit, and
     // the law that prices leaving the account is a price.
     assert_eq!(
@@ -1126,14 +1689,31 @@ fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed()
 fn why_an_entity_shows_its_places_ties_and_claims() {
     let house = household();
     let grant = house.why(Found::Entity(house.entity("nsf")));
-    let ties = grant.sections.iter().find(|section| section.heading.as_deref() == Some("Held for it")).unwrap();
-    assert_eq!(lines(ties), ["assets/bank/checking | 500.00 USD | 2025-06-01 | @1", "=Remaining | 500.00 USD |  |"]);
+    let ties = grant
+        .sections
+        .iter()
+        .find(|section| section.heading.as_deref() == Some("Held for it"))
+        .unwrap();
+    assert_eq!(
+        lines(ties),
+        [
+            "assets/bank/checking | 500.00 USD | 2025-06-01 | @1",
+            "=Remaining | 500.00 USD |  |"
+        ]
+    );
     let client = house.why(Found::Entity(house.entity("acme")));
-    let claims = client.sections.iter().find(|section| section.heading.as_deref() == Some("Claims with it")).unwrap();
+    let claims = client
+        .sections
+        .iter()
+        .find(|section| section.heading.as_deref() == Some("Claims with it"))
+        .unwrap();
     assert!(lines(claims)[0].starts_with("!acme | #inv-12"));
     let jordan = house.why(Found::Entity(house.entity("jordan")));
     // What is held, not what was earned: the statement of income and spending is `flow`.
-    assert_eq!(lines(&jordan.sections[0]), ["assets/bank/jordan-checking | 4,300.00 USD"]);
+    assert_eq!(
+        lines(&jordan.sections[0]),
+        ["assets/bank/jordan-checking | 4,300.00 USD"]
+    );
 }
 
 #[test]
@@ -1141,7 +1721,10 @@ fn why_a_system_says_what_each_of_its_laws_counted() {
     let house = household();
     let us = house.book.systems.iter().next().unwrap().0;
     let report = house.why(Found::System(us));
-    assert_eq!(report.sections[0].notes, ["Nobody in this book lives here."]);
+    assert_eq!(
+        report.sections[0].notes,
+        ["Nobody in this book lives here."]
+    );
     assert_eq!(
         lines(&report.sections[1]),
         [
@@ -1168,7 +1751,10 @@ fn several_laws_with_one_name_are_listed_with_where_each_is_written() {
 // ─── Views that run the ledger ──────────────────────────────────────────────
 
 fn outlook(house: &Household, until: Day) -> Vec<Vec<String>> {
-    let report = house.report(Query::Forecast { until: Some(until), paths: 0 });
+    let report = house.report(Query::Forecast {
+        until: Some(until),
+        paths: 0,
+    });
     report.sections.iter().map(lines).collect()
 }
 
@@ -1180,18 +1766,28 @@ fn the_forecast_folds_plans_and_habits_and_reports_an_overdraft() {
     // Rent (a plan, until June) leaves on May 1 and June 1; paychecks (a rhythm
     // in the journal) arrive on the 15th, so the plan's April 1st is behind us.
     let sections = outlook(&house, day(2026, 8, 31));
-    let committed: Vec<&str> = sections[0].iter().map(|row| row.split(" | ").nth(1).unwrap()).collect();
+    let committed: Vec<&str> = sections[0]
+        .iter()
+        .map(|row| row.split(" | ").nth(1).unwrap())
+        .collect();
     assert_eq!(
         committed,
-        ["12,555.80 USD", "12,555.80 USD", "15,755.80 USD", "18,955.80 USD", "23,955.80 USD", "28,955.80 USD"]
+        [
+            "12,555.80 USD",
+            "12,555.80 USD",
+            "15,755.80 USD",
+            "18,955.80 USD",
+            "23,955.80 USD",
+            "28,955.80 USD"
+        ]
     );
     let recurring = sections[1].join("\n");
-    assert!(
-        recurring.contains("assets/bank/checking → expenses/rent (landlord) | monthly | 1,800.00 USD | 2026-05-01")
-    );
-    assert!(
-        recurring.contains("income/salary → assets/bank/checking | monthly | 5,000.00 USD | 2026-05-15 | seen 3 times")
-    );
+    assert!(recurring.contains(
+        "assets/bank/checking → expenses/rent (landlord) | monthly | 1,800.00 USD | 2026-05-01"
+    ));
+    assert!(recurring.contains(
+        "income/salary → assets/bank/checking | monthly | 5,000.00 USD | 2026-05-15 | seen 3 times"
+    ));
 
     // A 20,000 purchase planned for the 2nd of each month overdraws checking.
     let mut big = clone_plan(&house.book.plans[Id::new(0)]);
@@ -1201,7 +1797,10 @@ fn the_forecast_folds_plans_and_habits_and_reports_an_overdraft() {
     big.on = Some(On::MonthDay(2));
     house.book.plans.push(big);
     let problems = outlook(&house, day(2026, 8, 31)).pop().unwrap();
-    assert_eq!(problems, ["!2026-05-02 | assets/bank/checking is overdrawn, down to -29,644.20 USD"]);
+    assert_eq!(
+        problems,
+        ["!2026-05-02 | assets/bank/checking is overdrawn, down to -29,644.20 USD"]
+    );
 }
 
 #[test]
@@ -1210,26 +1809,46 @@ fn a_plan_that_says_the_same_as_a_habit_replaces_it_and_one_that_does_not_adds_t
     house.run.today = day(2026, 4, 15);
     // A monthly plan for the same paycheck, within tolerance: one row, not two.
     let mut same = clone_plan(&house.book.plans[Id::new(0)]);
-    (same.template[0].from, same.template[0].to) = (house.place("income/salary"), house.place("assets/bank/checking"));
+    (same.template[0].from, same.template[0].to) = (
+        house.place("income/salary"),
+        house.place("assets/bank/checking"),
+    );
     for amount in [&mut same.template[0].out, &mut same.template[0].arrive] {
         amount.qty = Qty(510_000);
     }
     same.template[0].payee = None;
     house.book.plans.push(same);
     let rows = outlook(&house, day(2026, 8, 31)).remove(1);
-    assert_eq!(rows.iter().filter(|row| row.contains("income/salary")).count(), 1);
-    assert!(rows.iter().any(|row| row.contains("income/salary") && row.ends_with("plan")));
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.contains("income/salary"))
+            .count(),
+        1
+    );
+    assert!(
+        rows.iter()
+            .any(|row| row.contains("income/salary") && row.ends_with("plan"))
+    );
     // A yearly bonus on the same pair is not the paycheck: both are projected.
     let bonus = &mut house.book.plans[Id::new(1)];
     bonus.every = Span::months(12);
     bonus.on = None;
     let rows = outlook(&house, day(2026, 8, 31)).remove(1);
-    assert_eq!(rows.iter().filter(|row| row.contains("income/salary")).count(), 2);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| row.contains("income/salary"))
+            .count(),
+        2
+    );
 }
 
 /// `12,555.80 USD` in cents.
 fn cents(amount: &str) -> i64 {
-    amount.trim_end_matches(" USD").replace([',', '.'], "").parse().unwrap()
+    amount
+        .trim_end_matches(" USD")
+        .replace([',', '.'], "")
+        .parse()
+        .unwrap()
 }
 
 #[test]
@@ -1244,8 +1863,10 @@ fn a_repayment_stops_at_what_is_owed() {
     // 10,000 a month back from the client against 3,000 still owed: one payment, cut to what is
     // left, and nothing after it. Jordan's account, which it lands in, is cash.
     let mut back = clone_plan(&house.book.plans[Id::new(0)]);
-    (back.template[0].from, back.template[0].to) =
-        (house.place("assets/owed/clients"), house.place("assets/bank/jordan-checking"));
+    (back.template[0].from, back.template[0].to) = (
+        house.place("assets/owed/clients"),
+        house.place("assets/bank/jordan-checking"),
+    );
     for amount in [&mut back.template[0].out, &mut back.template[0].arrive] {
         amount.qty = Qty(1_000_000);
     }
@@ -1287,8 +1908,13 @@ fn available_subtracts_what_is_pending_and_lists_what_is_slower() {
 #[test]
 fn available_can_be_about_one_person() {
     let house = household();
-    let report = house.report_for(Query::Available { at: None }, Some("jordan")).unwrap();
-    assert_eq!(lines(&report.sections[0]).last().unwrap(), "=Available to spend | 4,300.00 USD");
+    let report = house
+        .report_for(Query::Available { at: None }, Some("jordan"))
+        .unwrap();
+    assert_eq!(
+        lines(&report.sections[0]).last().unwrap(),
+        "=Available to spend | 4,300.00 USD"
+    );
 }
 
 fn clone_plan(plan: &Plan) -> Plan {
@@ -1306,10 +1932,21 @@ fn clone_plan(plan: &Plan) -> Plan {
 #[test]
 fn claims_and_registers_are_about_whose_money_they_are() {
     let house = household();
-    let claims = house.report_for(Query::Claims { at: None }, Some("jordan")).unwrap();
-    assert!(claims.sections[0].rows.is_empty(), "the invoice is the first person's");
+    let claims = house
+        .report_for(Query::Claims { at: None }, Some("jordan"))
+        .unwrap();
+    assert!(
+        claims.sections[0].rows.is_empty(),
+        "the invoice is the first person's"
+    );
     let me = house.entity("me");
-    let mine = crate::views(&house.book, &house.run, &Whose::of(&house.book, me), &Query::Claims { at: None }).unwrap();
+    let mine = crate::views(
+        &house.book,
+        &house.run,
+        &Whose::of(&house.book, me),
+        &Query::Claims { at: None },
+    )
+    .unwrap();
     assert_eq!(mine.sections[0].rows.len(), 2);
 }
 
@@ -1321,10 +1958,20 @@ fn tax_lines_are_kept_apart_by_person_when_several_have_them() {
     (theirs.owner, theirs.subject) = (jordan, Subject::Entity(jordan));
     house.run.effects.push(theirs);
     let text = table(&house, Query::Tax { year: None });
-    assert!(text.starts_with("# Taxes 2026\n"), "no single person to name: {text}");
-    assert!(text.contains("=me · us |  |") && text.contains("=jordan · us |  |"), "{text}");
+    assert!(
+        text.starts_with("# Taxes 2026\n"),
+        "no single person to name: {text}"
+    );
+    assert!(
+        text.contains("=me · us |  |") && text.contains("=jordan · us |  |"),
+        "{text}"
+    );
     // Asked about one person, the title says whose it is.
-    let one = show(&house.report_for(Query::Tax { year: None }, Some("jordan")).unwrap());
+    let one = show(
+        &house
+            .report_for(Query::Tax { year: None }, Some("jordan"))
+            .unwrap(),
+    );
     assert!(one.starts_with("# Taxes 2026 for jordan\n"), "{one}");
 }
 
@@ -1333,5 +1980,9 @@ fn a_window_of_all_time_is_named_and_never_panics() {
     let mut house = household().with_headroom();
     house.run.headroom[0].days = Days::ALWAYS;
     let report = house.report(Query::Limits { year: Some(2026) });
-    assert!(lines(&report.sections[0]).iter().any(|row| row.contains("| ever |")));
+    assert!(
+        lines(&report.sections[0])
+            .iter()
+            .any(|row| row.contains("| ever |"))
+    );
 }

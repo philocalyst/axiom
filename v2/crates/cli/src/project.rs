@@ -34,19 +34,38 @@ impl Project {
     /// The project around `start`: the nearest folder at or above it with an
     /// `axiom.ax`. A `.ax` file with no such folder above it is a project alone.
     pub fn find(start: &Path) -> Result<Project, Diagnostic> {
-        let start = fs::canonicalize(start)
-            .map_err(|error| failure("unreadable", format!("cannot open {}: {error}", start.display())))?;
+        let start = fs::canonicalize(start).map_err(|error| {
+            failure(
+                "unreadable",
+                format!("cannot open {}: {error}", start.display()),
+            )
+        })?;
         let alone = start.is_file();
         if alone && start.extension() != Some(OsStr::new(EXTENSION)) {
-            return Err(failure("no-project", format!("{} is not a folder or a .{EXTENSION} file", start.display())));
+            return Err(failure(
+                "no-project",
+                format!("{} is not a folder or a .{EXTENSION} file", start.display()),
+            ));
         }
-        let folder = if alone { start.parent().unwrap_or(&start) } else { &start };
+        let folder = if alone {
+            start.parent().unwrap_or(&start)
+        } else {
+            &start
+        };
         match marker_above(folder) {
             Some(root) => Ok(Project { root, only: None }),
-            None if alone => Ok(Project { root: folder.to_path_buf(), only: Some(start.clone()) }),
-            None => Err(failure("no-project", format!("no {MARKER} in {} or any folder above it", start.display()))
-                .help(format!("create an `{MARKER}` (it may be empty) in the folder that holds your ledger"))
-                .help("or point at one file on its own: `axiom -C FILE.ax check`")),
+            None if alone => Ok(Project {
+                root: folder.to_path_buf(),
+                only: Some(start.clone()),
+            }),
+            None => Err(failure(
+                "no-project",
+                format!("no {MARKER} in {} or any folder above it", start.display()),
+            )
+            .help(format!(
+                "create an `{MARKER}` (it may be empty) in the folder that holds your ledger"
+            ))
+            .help("or point at one file on its own: `axiom -C FILE.ax check`")),
         }
     }
 
@@ -60,7 +79,9 @@ impl Project {
         let texts = par::map_each(&relative, |path| self.read(path));
         let files = relative.iter().map(|path| display(path)).zip(texts);
         Sources::assemble(
-            files.map(|(path, text)| Ok((path, text?))).collect::<Result<_, _>>()?,
+            files
+                .map(|(path, text)| Ok((path, text?)))
+                .collect::<Result<_, _>>()?,
             axiom_systems::SYSTEMS,
         )
     }
@@ -73,15 +94,22 @@ impl Project {
         String::from_utf8(bytes).map_err(|error| {
             let before = &error.as_bytes()[..error.utf8_error().valid_up_to()];
             let line = 1 + memchr::memchr_iter(b'\n', before).count();
-            failure("not-utf8", format!("cannot read {shown}: line {line} is not valid UTF-8"))
-                .help("save the file as UTF-8")
+            failure(
+                "not-utf8",
+                format!("cannot read {shown}: line {line} is not valid UTF-8"),
+            )
+            .help("save the file as UTF-8")
         })
     }
 
     fn find_sources(&self) -> Result<Vec<PathBuf>, Diagnostic> {
         let mut found = Vec::new();
-        collect(&self.root, Path::new(""), &mut found)
-            .map_err(|error| failure("unreadable", format!("cannot list {}: {error}", self.root.display())))?;
+        collect(&self.root, Path::new(""), &mut found).map_err(|error| {
+            failure(
+                "unreadable",
+                format!("cannot list {}: {error}", self.root.display()),
+            )
+        })?;
         // Path order compares folder by folder, so a folder's files stay
         // together and declaration order is the same on every machine.
         found.sort();
@@ -90,7 +118,10 @@ impl Project {
 }
 
 fn marker_above(folder: &Path) -> Option<PathBuf> {
-    folder.ancestors().find(|candidate| candidate.join(MARKER).is_file()).map(Path::to_path_buf)
+    folder
+        .ancestors()
+        .find(|candidate| candidate.join(MARKER).is_file())
+        .map(Path::to_path_buf)
 }
 
 /// Adds every `.ax` file under `root/relative` to `found`, as paths relative to
@@ -119,7 +150,10 @@ fn collect(root: &Path, relative: &Path, found: &mut Vec<PathBuf>) -> io::Result
 
 /// `journal/2026/01.ax`, with `/` on every platform.
 fn display(path: &Path) -> String {
-    let parts: Vec<_> = path.components().map(|part| part.as_os_str().to_string_lossy()).collect();
+    let parts: Vec<_> = path
+        .components()
+        .map(|part| part.as_os_str().to_string_lossy())
+        .collect();
     parts.join("/")
 }
 
@@ -142,8 +176,19 @@ pub struct SourceFile {
 }
 
 impl SourceFile {
-    fn new(id: FileId, path: Cow<'static, str>, text: Cow<'static, str>, embedded: bool) -> SourceFile {
-        SourceFile { id, path, text, embedded, starts: OnceLock::new() }
+    fn new(
+        id: FileId,
+        path: Cow<'static, str>,
+        text: Cow<'static, str>,
+        embedded: bool,
+    ) -> SourceFile {
+        SourceFile {
+            id,
+            path,
+            text,
+            embedded,
+            starts: OnceLock::new(),
+        }
     }
 
     fn starts(&self) -> &[usize] {
@@ -190,7 +235,11 @@ impl SourceFile {
             .take_while(|(relative, _)| start + *relative < offset)
             .count()
             + 1;
-        Some(SourcePosition { path: &self.path, line: line + 1, column })
+        Some(SourcePosition {
+            path: &self.path,
+            line: line + 1,
+            column,
+        })
     }
 }
 
@@ -214,17 +263,29 @@ impl Sources {
         project: Vec<(String, String)>,
         systems: &'static [(&'static str, &'static str)],
     ) -> Result<Sources, Diagnostic> {
-        let inherited: Vec<_> = systems.iter().filter(|(path, _)| !overridden(&project, path)).collect();
+        let inherited: Vec<_> = systems
+            .iter()
+            .filter(|(path, _)| !overridden(&project, path))
+            .collect();
         let limit = usize::from(u16::MAX) + 1;
         if project.len() + inherited.len() > limit {
-            return Err(failure("too-many-files", format!("too many source files: at most {limit} are supported")));
+            return Err(failure(
+                "too-many-files",
+                format!("too many source files: at most {limit} are supported"),
+            ));
         }
-        let own = project.into_iter().map(|(path, text)| (Cow::Owned(path), Cow::Owned(text), false));
-        let embedded = inherited.into_iter().map(|&(path, text)| (Cow::Borrowed(path), Cow::Borrowed(text), true));
+        let own = project
+            .into_iter()
+            .map(|(path, text)| (Cow::Owned(path), Cow::Owned(text), false));
+        let embedded = inherited
+            .into_iter()
+            .map(|&(path, text)| (Cow::Borrowed(path), Cow::Borrowed(text), true));
         let files = own
             .chain(embedded)
             .enumerate()
-            .map(|(index, (path, text, embedded))| SourceFile::new(FileId(index as u16), path, text, embedded))
+            .map(|(index, (path, text, embedded))| {
+                SourceFile::new(FileId(index as u16), path, text, embedded)
+            })
             .collect();
         Ok(Sources { files })
     }
@@ -232,14 +293,30 @@ impl Sources {
     /// Texts that are not on disk, as project files in the order given, and
     /// then `systems` as the embedded ones.
     #[cfg(test)]
-    pub fn in_memory(files: &[(&str, &str)], systems: &'static [(&'static str, &'static str)]) -> Sources {
-        let texts = files.iter().map(|&(path, text)| (path.to_string(), text.to_string())).collect();
+    pub fn in_memory(
+        files: &[(&str, &str)],
+        systems: &'static [(&'static str, &'static str)],
+    ) -> Sources {
+        let texts = files
+            .iter()
+            .map(|&(path, text)| (path.to_string(), text.to_string()))
+            .collect();
         Sources::assemble(texts, systems).expect("a handful of files")
     }
 
     /// The source with this id, if there is one.
     pub fn get(&self, id: FileId) -> Option<&SourceFile> {
         self.files.get(usize::from(id.0))
+    }
+
+    /// The relative paths of project-owned `.ax` files, in parse order.
+    /// Embedded standard systems are deliberately omitted for commands such
+    /// as `fmt` and `sync` that operate on files in the project directory.
+    pub fn project_paths(&self) -> impl Iterator<Item = &str> {
+        self.files
+            .iter()
+            .filter(|file| !file.embedded)
+            .map(|file| &*file.path)
     }
 
     /// The source at `path`, as `axiom why` or a diagnostic shows it.
@@ -250,7 +327,11 @@ impl Sources {
     /// `journal/2026/01.ax:14`: what `axiom why` accepts back.
     pub fn describe(&self, loc: Loc) -> Option<String> {
         let file = self.get(loc.file)?;
-        Some(format!("{}:{}", file.path, file.line_of(loc.start as usize) + 1))
+        Some(format!(
+            "{}:{}",
+            file.path,
+            file.line_of(loc.start as usize) + 1
+        ))
     }
 
     /// The bytes of line `number` (counted from 1) of the file at `path`.
@@ -258,7 +339,11 @@ impl Sources {
         let file = self.find(path)?;
         let line = number.checked_sub(1).filter(|&line| line < file.lines())?;
         let start = file.line_start(line);
-        Some(Loc::new(file.id, start as u32, (start + file.line(line).len()) as u32))
+        Some(Loc::new(
+            file.id,
+            start as u32,
+            (start + file.line(line).len()) as u32,
+        ))
     }
 
     fn position(&self, loc: Loc) -> Option<SourcePosition<'_>> {
@@ -268,7 +353,9 @@ impl Sources {
 
     /// Parses every file, in parallel, into what the model builds from.
     pub fn parse(&self) -> (Vec<Source<'_>>, Vec<Diagnostic>) {
-        let parsed = par::map_each(&self.files, |file| axiom_syntax::parse(file.id, &file.text));
+        let parsed = par::map_each(&self.files, |file| {
+            axiom_syntax::parse(file.id, &file.text, axiom_syntax::Folder::of(&file.path))
+        });
         let mut diagnostics = Vec::new();
         let sources = self
             .files
@@ -276,7 +363,11 @@ impl Sources {
             .zip(parsed)
             .map(|(file, (ast, found))| {
                 diagnostics.extend(found);
-                Source { path: &file.path, file: ast, embedded: file.embedded }
+                Source {
+                    path: &file.path,
+                    file: ast,
+                    embedded: file.embedded,
+                }
             })
             .collect();
         (sources, diagnostics)
@@ -294,7 +385,9 @@ impl SourceProvider for Sources {
 }
 
 fn overridden(project: &[(String, String)], system: &str) -> bool {
-    project.iter().any(|(path, _)| path.strip_prefix(SYSTEMS_DIR) == Some(system))
+    project
+        .iter()
+        .any(|(path, _)| path.strip_prefix(SYSTEMS_DIR) == Some(system))
 }
 
 #[cfg(test)]
@@ -303,12 +396,21 @@ mod tests {
     use crate::testing::TempDir;
 
     fn texts(sources: &Sources) -> Vec<(&str, bool)> {
-        sources.files.iter().map(|file| (&*file.path, file.embedded)).collect()
+        sources
+            .files
+            .iter()
+            .map(|file| (&*file.path, file.embedded))
+            .collect()
     }
 
     /// The project's own files, without the embedded systems every project gets.
     fn own(sources: &Sources) -> Vec<&str> {
-        sources.files.iter().filter(|file| !file.embedded).map(|file| &*file.path).collect()
+        sources
+            .files
+            .iter()
+            .filter(|file| !file.embedded)
+            .map(|file| &*file.path)
+            .collect()
     }
 
     #[test]
@@ -325,7 +427,15 @@ mod tests {
         let project = Project::find(&dir.path().join("journal/2026")).unwrap();
         assert_eq!(project.root, fs::canonicalize(dir.path()).unwrap());
         let sources = project.load().unwrap();
-        assert_eq!(own(&sources), ["axiom.ax", "journal/2026/01.ax", "journal/2026/02.ax", "journal/2026.ax"]);
+        assert_eq!(
+            own(&sources),
+            [
+                "axiom.ax",
+                "journal/2026/01.ax",
+                "journal/2026/02.ax",
+                "journal/2026.ax"
+            ]
+        );
     }
 
     #[test]
@@ -336,12 +446,28 @@ mod tests {
         dir.write("axiom.ax", "");
         dir.write("shared/prices.ax", "");
         dir.write("shared/loop/inner.ax", "");
-        symlink(dir.path().join("shared/prices.ax"), dir.path().join("linked.ax")).unwrap();
-        symlink(dir.path().join("missing.ax"), dir.path().join("dangling.ax")).unwrap();
+        symlink(
+            dir.path().join("shared/prices.ax"),
+            dir.path().join("linked.ax"),
+        )
+        .unwrap();
+        symlink(
+            dir.path().join("missing.ax"),
+            dir.path().join("dangling.ax"),
+        )
+        .unwrap();
         symlink(dir.path(), dir.path().join("shared/loop/back")).unwrap();
 
         let sources = Project::find(dir.path()).unwrap().load().unwrap();
-        assert_eq!(own(&sources), ["axiom.ax", "linked.ax", "shared/loop/inner.ax", "shared/prices.ax"]);
+        assert_eq!(
+            own(&sources),
+            [
+                "axiom.ax",
+                "linked.ax",
+                "shared/loop/inner.ax",
+                "shared/prices.ax"
+            ]
+        );
     }
 
     #[test]
@@ -355,18 +481,30 @@ mod tests {
         let error = Project::find(dir.path()).err().unwrap();
         assert!(error.message.contains("no axiom.ax"), "{}", error.message);
         let error = Project::find(&dir.path().join("missing")).err().unwrap();
-        assert!(error.message.starts_with("cannot open"), "{}", error.message);
+        assert!(
+            error.message.starts_with("cannot open"),
+            "{}",
+            error.message
+        );
     }
 
     #[test]
     fn project_systems_override_embedded_ones_by_path() {
-        static EMBEDDED: [(&str, &str); 2] = [("us.ax", "system us"), ("us/401k.ax", "system us/401k")];
+        static EMBEDDED: [(&str, &str); 2] =
+            [("us.ax", "system us"), ("us/401k.ax", "system us/401k")];
         let project = vec![
             ("systems/us.ax".to_string(), "system us // mine".to_string()),
             ("journal.ax".to_string(), String::new()),
         ];
         let sources = Sources::assemble(project, &EMBEDDED).unwrap();
-        assert_eq!(texts(&sources), [("systems/us.ax", false), ("journal.ax", false), ("us/401k.ax", true)]);
+        assert_eq!(
+            texts(&sources),
+            [
+                ("systems/us.ax", false),
+                ("journal.ax", false),
+                ("us/401k.ax", true)
+            ]
+        );
         assert_eq!(sources.get(FileId(2)).map(|file| file.id), Some(FileId(2)));
         assert!(sources.get(FileId(3)).is_none());
     }
@@ -375,8 +513,14 @@ mod tests {
     fn lines_and_offsets() {
         let sources = Sources::in_memory(&[("a.ax", "ab\ncd\r\n\nlast")], &[]);
         let file = sources.get(FileId(0)).unwrap();
-        assert_eq!([0, 2, 3, 5, 6, 7, 8, 100].map(|at| file.line_of(at)), [0, 0, 1, 1, 1, 2, 3, 3]);
-        assert_eq!((file.line(1), file.line(2), file.line(3), file.line(9)), ("cd", "", "last", ""));
+        assert_eq!(
+            [0, 2, 3, 5, 6, 7, 8, 100].map(|at| file.line_of(at)),
+            [0, 0, 1, 1, 1, 2, 3, 3]
+        );
+        assert_eq!(
+            (file.line(1), file.line(2), file.line(3), file.line(9)),
+            ("cd", "", "last", "")
+        );
         assert_eq!(file.lines(), 4);
         // A final newline starts an empty line.
         let sources = Sources::in_memory(&[("b.ax", "a\n")], &[]);
@@ -388,8 +532,14 @@ mod tests {
         let sources = Sources::in_memory(&[("journal/2026/01.ax", "one\ntwo\n")], &[]);
         let two = sources.locate("journal/2026/01.ax", 2).unwrap();
         assert_eq!((two.start, two.end), (4, 7));
-        assert_eq!(sources.describe(two).as_deref(), Some("journal/2026/01.ax:2"));
-        assert!(sources.locate("journal/2026/01.ax", 4).is_none() && sources.locate("nowhere.ax", 1).is_none());
+        assert_eq!(
+            sources.describe(two).as_deref(),
+            Some("journal/2026/01.ax:2")
+        );
+        assert!(
+            sources.locate("journal/2026/01.ax", 4).is_none()
+                && sources.locate("nowhere.ax", 1).is_none()
+        );
     }
 
     #[test]
@@ -398,9 +548,14 @@ mod tests {
         let path = "journal/λ.ax";
         let at_letter = sources.locate(path, 1).unwrap();
         let position = SourceProvider::describe(&sources, Loc::new(at_letter.file, 2, 4)).unwrap();
-        assert_eq!((position.path, position.line, position.column), (path, 1, 3));
+        assert_eq!(
+            (position.path, position.line, position.column),
+            (path, 1, 3)
+        );
         assert!(SourceProvider::describe(&sources, Loc::new(at_letter.file, 3, 4)).is_none());
-        assert!(SourceProvider::describe(&sources, Loc::new(at_letter.file, 0, u32::MAX)).is_none());
+        assert!(
+            SourceProvider::describe(&sources, Loc::new(at_letter.file, 0, u32::MAX)).is_none()
+        );
         assert!(SourceProvider::describe(&sources, Loc::new(at_letter.file, 4, 2)).is_none());
     }
 }

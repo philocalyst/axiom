@@ -20,6 +20,7 @@ mod forecast;
 mod gains;
 mod headroom;
 mod history;
+pub mod json;
 mod lens;
 mod limits;
 mod lots;
@@ -30,7 +31,6 @@ mod synth;
 mod table;
 mod tax;
 mod why;
-pub mod json;
 
 #[cfg(test)]
 mod source_tests;
@@ -39,9 +39,9 @@ mod tests;
 
 use std::borrow::Cow;
 
-use axiom_core::{Day, Diagnostic, Id, Loc, Qty, Ratio};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Qty, Ratio, Span};
 use axiom_engine::Run;
-use axiom_model::{Amount, Book, Period, Place};
+use axiom_model::{Amount, Book, Period, Place, Trigger};
 
 use crate::history::Snapshots;
 use crate::lens::{Lens, Whose};
@@ -51,11 +51,24 @@ use crate::lens::{Lens, Whose};
 pub enum Query<'a> {
     /// Balances per place and commodity, optionally at market value, optionally
     /// with a column per month.
-    Balance { globs: Vec<&'a str>, at: Option<Day>, value: bool, monthly: bool },
+    Balance {
+        globs: Vec<&'a str>,
+        at: Option<Day>,
+        value: bool,
+        monthly: bool,
+    },
     /// A place's flows with a running balance.
-    Register { place: &'a str, from: Option<Day>, to: Option<Day> },
+    Register {
+        place: &'a str,
+        from: Option<Day>,
+        to: Option<Day>,
+    },
     /// Income and spending by period; spread flows recognized per day.
-    Flow { by: Period, from: Option<Day>, to: Option<Day> },
+    Flow {
+        by: FlowBy,
+        from: Option<Day>,
+        to: Option<Day>,
+    },
     /// What can be spent now, and what drawing on each other place would net.
     Available { at: Option<Day> },
     /// Each budget (a `warn` law over a window total): spent against limit,
@@ -72,7 +85,10 @@ pub enum Query<'a> {
     /// Every disposal in a year: acquired, sold, proceeds, basis, gain, term.
     Gains { year: Option<i32> },
     /// Parcels with basis and unrealized gain, as of a day (default: today).
-    Lots { place: Option<&'a str>, at: Option<Day> },
+    Lots {
+        place: Option<&'a str>,
+        at: Option<Day>,
+    },
     /// Plans, inferred recurrences, obligations and growth, run forward
     /// through the laws, with bands from bootstrapped spending.
     Forecast { until: Option<Day>, paths: u32 },
@@ -83,23 +99,32 @@ pub enum Query<'a> {
     Line { loc: Loc },
 }
 
+/// How flows are grouped in a statement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FlowBy {
+    Period(Period),
+    Party,
+}
+
 /// A report view with its title and ordered sections.
 pub struct Report<'s> {
-    pub title: String,
+    pub title: Cell<'s>,
     pub sections: Vec<Section<'s>>,
 }
 
 /// One headed table or note group in a report.
 pub struct Section<'s> {
-    pub heading: Option<String>,
-    pub columns: Vec<Column>,
+    pub heading: Option<Cell<'s>>,
+    pub columns: Vec<Column<'s>>,
     pub rows: Vec<Row<'s>>,
-    pub notes: Vec<String>,
+    pub notes: Vec<Cell<'s>>,
+    /// Machine-readable measures shown by this section.
+    pub facts: Vec<Fact<'s>>,
 }
 
 /// A heading and alignment for one table column.
-pub struct Column {
-    pub title: Cow<'static, str>,
+pub struct Column<'s> {
+    pub title: Cell<'s>,
     pub align: Align,
 }
 
@@ -131,9 +156,18 @@ pub enum Style {
 }
 
 /// A report value before a client chooses how to draw it.
+#[derive(Clone, Debug)]
 pub enum Cell<'s> {
     Blank,
+    /// Fixed wording supplied by a view.
+    Word(&'static str),
     Text(Cow<'s, str>),
+    /// A declared place, entity, law, asset, or contract name.
+    Name(&'s str),
+    /// A code without its written sigil.
+    Code(&'s str),
+    /// Externally supplied or diagnostic wording.
+    Said(Cow<'s, str>),
     /// Quanta, the commodity's decimal places, and its symbol.
     Amount {
         qty: Qty,
@@ -141,9 +175,41 @@ pub enum Cell<'s> {
         unit: &'s str,
     },
     Day(Day),
+    Span(Span),
+    Period(Days),
     Percent(Ratio),
+    Number(Ratio),
+    Count(usize, &'static str),
+    Trigger(Trigger),
     /// Where in the sources a line comes from, so any client can offer a trace.
     Source(Loc),
+    /// A structured sentence or list whose pieces remain individually typed.
+    Join(&'static str, Vec<Cell<'s>>),
+}
+
+/// A quantity with its commodity, recorded without display punctuation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Money<'s> {
+    pub qty: Qty,
+    pub scale: u8,
+    pub unit: &'s str,
+}
+
+/// When a fact holds.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum When {
+    Instant(Day),
+    During(Days),
+}
+
+/// A measure from a report, in a stable concept/entity/period/unit/value shape.
+#[derive(Clone, Copy, Debug)]
+pub struct Fact<'s> {
+    pub concept: &'s str,
+    pub of: Option<&'s str>,
+    pub entity: &'s str,
+    pub when: When,
+    pub value: Money<'s>,
 }
 
 pub use context::Context;
@@ -179,7 +245,12 @@ pub trait ReportRenderer {
 
 /// Builds the view `query` asks for, about the money of `whose` (`--for`: an
 /// entity, a household including its members; default everything).
-pub fn report<'s>(book: &Book<'s>, run: &Run, query: &Query, whose: Option<&str>) -> Result<Report<'s>, Diagnostic> {
+pub fn report<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    query: &Query,
+    whose: Option<&str>,
+) -> Result<Report<'s>, Diagnostic> {
     views(book, run, &Whose::resolve(book, whose)?, query)
 }
 
@@ -204,9 +275,15 @@ pub fn report_with_sources<'s>(
 /// Unknown paths remain ordinary `why` targets so existing name diagnostics
 /// keep their useful suggestions.
 pub fn resolve_source_line(query: &Query<'_>, sources: &dyn SourceProvider) -> Option<Loc> {
-    let Query::Why { target } = query else { return None };
-    let Some((path, number)) = target.rsplit_once(':') else { return None };
-    let Ok(line) = number.parse::<usize>() else { return None };
+    let Query::Why { target } = query else {
+        return None;
+    };
+    let Some((path, number)) = target.rsplit_once(':') else {
+        return None;
+    };
+    let Ok(line) = number.parse::<usize>() else {
+        return None;
+    };
     if path.is_empty() || line == 0 {
         return None;
     }
@@ -214,11 +291,30 @@ pub fn resolve_source_line(query: &Query<'_>, sources: &dyn SourceProvider) -> O
 }
 
 /// The view `query` asks for, about the money of `whose`.
-fn views<'s>(book: &Book<'s>, run: &Run, whose: &Whose, query: &Query) -> Result<Report<'s>, Diagnostic> {
+fn views<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    whose: &Whose,
+    query: &Query,
+) -> Result<Report<'s>, Diagnostic> {
     match query {
-        Query::Balance { globs, at, value, monthly } => balance::view(book, run, whose, globs, *at, *value, *monthly),
+        Query::Balance {
+            globs,
+            at,
+            value,
+            monthly,
+        } => balance::view(book, run, whose, globs, *at, *value, *monthly),
         Query::Register { place, from, to } => register::view(book, run, whose, place, *from, *to),
-        Query::Flow { by, from, to } => Ok(flow::view(book, run, whose, *by, *from, *to)),
+        Query::Flow {
+            by: FlowBy::Period(by),
+            from,
+            to,
+        } => Ok(flow::view(book, run, whose, *by, *from, *to)),
+        Query::Flow {
+            by: FlowBy::Party,
+            from,
+            to,
+        } => Ok(flow::view_by_party(book, run, whose, *from, *to)),
         Query::Available { at } => Ok(available::view(book, run, whose, *at)),
         Query::Budget { at, by } => Ok(budget::view(book, run, whose, *at, *by)),
         Query::Limits { year } => Ok(limits::view(book, run, whose, *year)),
@@ -251,14 +347,23 @@ pub fn summary(book: &Book, run: &Run) -> Summary {
     // Class roots (`assets`, `expenses`, …) group places, and the built-in
     // places exist in every book: only what was declared or used counts.
     let used = |place: Id<Place>| {
-        let held = run.holdings.partition_point(|holding| holding.place < place);
+        let held = run
+            .holdings
+            .partition_point(|holding| holding.place < place);
         book.places[place].loc.is_some()
             || !book.touching[place].is_empty()
-            || run.holdings.get(held).is_some_and(|holding| holding.place == place)
+            || run
+                .holdings
+                .get(held)
+                .is_some_and(|holding| holding.place == place)
     };
     Summary {
         flows: book.flows.len(),
-        places: book.places.ids().filter(|&place| !places::is_class_root(book, place) && used(place)).count(),
+        places: book
+            .places
+            .ids()
+            .filter(|&place| !places::is_class_root(book, place) && used(place))
+            .count(),
         laws: run.checks.iter().filter(|&&ran| ran > 0).count(),
         net_worth: Amount::new(worth.total(), book.base),
         unpriced: worth.unpriced,

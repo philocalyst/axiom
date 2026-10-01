@@ -11,9 +11,9 @@ use axiom_model::{Amount, Book, Class, Commodity, Period, Place};
 use crate::calendar::Periods;
 use crate::history::Snapshots;
 use crate::lens::{Basket, Lens, Valued, Whose};
-use crate::places::{depth, leaf, names};
+use crate::places::{depth, leaf, names, path};
 use crate::resolve;
-use crate::{Cell, Column, Report, Row, Section, Style};
+use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 /// How many month-end columns `--monthly` shows.
 const MONTHLY_COLUMNS: usize = 12;
@@ -210,10 +210,44 @@ fn push_place<'s>(
     } else {
         native_lines(book, sign, &baskets)
     };
+    for (column, basket) in baskets.iter().enumerate() {
+        let day = snapshots.days()[column];
+        if value {
+            let valued = basket.value(lens.on(day), class);
+            if valued.priced > 0 {
+                table.fact(
+                    "balance",
+                    Some(path(book, place)),
+                    lens.whose.label(book),
+                    When::Instant(day),
+                    Money::base(book, Qty(valued.total.0 * sign)),
+                );
+            }
+            for amount in valued.unpriced {
+                table.fact(
+                    "balance",
+                    Some(path(book, place)),
+                    lens.whose.label(book),
+                    When::Instant(day),
+                    Money::of(book, Amount::new(Qty(amount.qty.0 * sign), amount.unit)),
+                );
+            }
+        } else {
+            for amount in basket.amounts() {
+                table.fact(
+                    "balance",
+                    Some(path(book, place)),
+                    lens.whose.label(book),
+                    When::Instant(day),
+                    Money::of(book, Amount::new(Qty(amount.qty.0 * sign), amount.unit)),
+                );
+            }
+        }
+    }
     let unpriced = lines.iter().filter(|line| line.style == Style::Muted).count();
     let is_root = depth(book, place) == 0;
     for (index, line) in lines.into_iter().enumerate() {
-        let label = if index == 0 { Cell::text(leaf(book, place)) } else { Cell::Blank };
+        let label = if index == 0 { Cell::Name(leaf(book, place)) } else { Cell::Blank };
         let style = if is_root && line.style == Style::Normal { Style::Total } else { line.style };
         table.push(Row::new(iter::once(label).chain(line.cells)).depth(depth(book, place)).style(style));
     }
@@ -221,7 +255,7 @@ fn push_place<'s>(
 }
 
 fn context_row<'s>(book: &Book<'s>, place: Id<Place>, columns: usize) -> Row<'s> {
-    Row::new(iter::once(Cell::text(leaf(book, place))).chain((0..columns).map(|_| Cell::Blank)))
+    Row::new(iter::once(Cell::Name(leaf(book, place))).chain((0..columns).map(|_| Cell::Blank)))
         .depth(depth(book, place))
         .style(Style::Muted)
 }
@@ -288,6 +322,21 @@ fn net_worth_section<'s>(lens: Lens<'_, 's>, snapshots: &Snapshots) -> Section<'
     for (label, style, pick) in rows {
         let cells = worths.iter().map(|worth| Cell::base(book, pick(worth)));
         section.push(Row::new(iter::once(Cell::text(label)).chain(cells)).style(style));
+    }
+    for (day, worth) in snapshots.days().iter().copied().zip(&worths) {
+        for (concept, amount) in [
+            ("assets", worth.assets),
+            ("liabilities", -worth.liabilities),
+            ("net_worth", worth.total()),
+        ] {
+            section.fact(
+                concept,
+                None,
+                lens.whose.label(book),
+                When::Instant(day),
+                Money::base(book, amount),
+            );
+        }
     }
     if let Some(unpriced) = worths.iter().map(|worth| worth.unpriced).max().filter(|&n| n > 0) {
         section.note(format!("{unpriced} holdings have no price and are not counted."));
