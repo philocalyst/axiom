@@ -13,14 +13,19 @@ contracts, and dated journal statements.
 - `assets.ax` declares the house as a `rental-home`. It records $75,370 of nondepreciable
   land and a 2025-01-15 in-service date. The depreciable building basis is $301,480.
   `us/rental` treats the September roof as a separate improvement part.
-- `contracts.ax` carries the wage, lease, and mortgage terms. Journal contract
-  occurrences retain the dates and amounts that differed from the standing terms.
+- `contracts.ax` carries the wage, lease, and mortgage terms. Lease B ends for
+  Jamie on the 2025-12-29 sale date; the buyer takes the remaining lease term.
+  Journal contract occurrences retain dates and amounts that differed from the
+  standing terms.
 - `tax.ax` adds Schedule E, the documented passive-loss allowance simplification, and
   depreciation recapture. `us/rental` supplies the standard rental income, cost, and
   depreciation laws.
-- `journal/` contains the original bank balances, counterparties, purpose-tagged flows,
-  loan statements, and sale allocations. The journal no longer repeats depreciation
-  as a manually typed flow; the independent verifier derives it from the asset parts.
+- `journal/` contains the original bank balances, counterparties, purpose-tagged
+  flows, loan statements, and sale allocations. The $26,968.75 selling cost is
+  a `Less` line item on the gross $431,500 sale, so it remains associated with
+  the sale for amount-realized and gain calculations. The journal no longer
+  repeats depreciation as a manually typed flow; the independent verifier
+  derives it from the asset parts.
 - `prices/home.ax` retains the quarter-end home value observations in native price form.
 - `outputs/` are historical v3 captures. They are not evidence of v4 runtime behavior.
 

@@ -15,11 +15,11 @@
 // Previous hand-entered depreciation: 478.29 USD on 2025-12-29. v4 derives this from the house parts.
 
 /// Sold, 431,500.00 USD. The closing statement is one flow: the house goes out and the price comes in, and it is paid out
-/// in legs: the seller's costs (5% commission and 1.25% of other costs, 26_968.75 USD: a leg into an expense place during
-/// an exchange is a cost of it, so they come off the price and reduce the amount realized), the loan is paid off (what is
-/// left of the principal, settling #loan), tenant B's deposit is credited to the buyer, and the rest is Jamie's.
+/// in legs: the seller's costs (5% commission and 1.25% of other costs, 26_968.75 USD: a less-item of the sale, so it
+/// comes off the price and reduces the amount realized), the loan is paid off (what is left of the principal, settling
+/// #loan), tenant B's deposit is credited to the buyer, and the rest is Jamie's.
 2025-12-29 buyer -> rental-bank 431_500 USD #sale of house
-2025-12-29 rental-bank -> buyer 26_968.75 USD #selling-cost of house
+  - 26_968.75 USD #selling-cost of house
 2025-12-29 rental-bank -> lender 276_282.05 USD ^loan
 2025-12-29 rental-bank -> buyer 2_500 USD #deposit of house
 // Proceeds remaining after seller costs, payoff and the buyer credit are retained in rental-bank.

@@ -17,7 +17,7 @@ contract rent-b with tenant-b
   2_500 USD monthly on 1 into rental-bank #rent of house
   deposit 2_500 USD
   from 2025-10-01
-  until 2026-09-30
+  until 2025-12-29 // Jamie's landlord contract ends when the house and lease transfer to the buyer.
 
 /// Loan terms drive principal and interest; the journal still supplies each
 /// statement balance and payoff amount for independent reconciliation.

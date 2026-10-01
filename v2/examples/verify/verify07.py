@@ -54,16 +54,30 @@ def read_source():
     assets = open(os.path.join(ROOT, "assets.ax")).read()
     flows, occurrences, statements = [], [], []
     for path in sorted(glob.glob(os.path.join(ROOT, "journal", "**", "*.ax"), recursive=True)):
+        sale_header = None
         for raw in open(path):
             line = re.sub(r"\s//.*$", "", raw).strip()
             if not line or line.startswith("//") or line.startswith("opening"):
                 continue
+            item = re.match(r"^- ([\d_,.]+) (USD|%) #([\w-]+)(?: of house)?$", line)
+            if item:
+                assert sale_header is not None, f"orphaned sale line item: {line}"
+                stated = money(item.group(1))
+                item_amount = stated if item.group(2) == "USD" else cents(sale_header.amount * stated / 100)
+                flows.append(Flow(
+                    sale_header.day, None, sale_header.dst, sale_header.src,
+                    item_amount, item.group(3), None, line,
+                ))
+                sale_header = None
+                continue
             occ = re.match(r"^(\d{4}-\d\d-\d\d) (paycheck|rent-a|rent-b|home-loan|manager-fee)(?:\s+([\d_,.]+) USD)?$", line)
             if occ:
+                sale_header = None
                 occurrences.append(Occurrence(date.fromisoformat(occ.group(1)), occ.group(2), money(occ.group(3)) if occ.group(3) else None))
                 continue
             stmt = re.match(r"^(\d{4}-\d\d-\d\d) (checking|rental-bank|deposit-bank|mortgage|bills|deposits) = (empty|[\d_,.]+ USD)$", line)
             if stmt:
+                sale_header = None
                 value = D(0) if stmt.group(3) == "empty" else money(stmt.group(3).split()[0])
                 statements.append((date.fromisoformat(stmt.group(1)), stmt.group(2), value))
                 continue
@@ -72,7 +86,11 @@ def read_source():
                 day, until, src, dst, amt, tail = m.groups()
                 purpose = re.search(r"#([\w-]+)", tail)
                 code = re.search(r"\^([\w-]+)", tail)
-                flows.append(Flow(date.fromisoformat(day), date.fromisoformat(until) if until else None, src, dst, money(amt), purpose.group(1) if purpose else None, code.group(1) if code else None, line))
+                flow = Flow(date.fromisoformat(day), date.fromisoformat(until) if until else None, src, dst, money(amt), purpose.group(1) if purpose else None, code.group(1) if code else None, line)
+                flows.append(flow)
+                sale_header = flow if flow.purpose == "sale" else None
+                continue
+            sale_header = None
     return contracts, assets, flows, occurrences, statements
 
 
@@ -103,6 +121,11 @@ assert len(roof_rows) == 1, roof_rows
 ROOF = money(roof_rows[0])
 sale_line = read_num(r"(?m)^(\d{4}-\d\d-\d\d) buyer -> rental-bank ([\d_,.]+) USD #sale of house", all_journal, "sale flow")
 sale_day = date.fromisoformat(sale_line.group(1))
+lease_b_end = date.fromisoformat(read_num(
+    r"contract rent-b with tenant-b[\s\S]*?until (\d{4}-\d\d-\d\d)",
+    contracts, "lease B end",
+).group(1))
+assert lease_b_end == sale_day, ("Jamie must stop earning rent when the property and lease transfer", lease_b_end, sale_day)
 
 # ── Mortgage amortization: exact monthly interest rounds at the due date. ──
 balance = LOAN
