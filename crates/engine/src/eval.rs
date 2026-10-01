@@ -1666,17 +1666,24 @@ account temporary : temporary-account
     #[test]
     fn selected_template_groups_filter_by_purpose_and_choose_the_matching_side() {
         let text = "\
-use std
 base USD
-commodity VTI : stock
+kind currency : commodity
+kind security : commodity
+kind bank : asset
+commodity USD : currency
+  precision 2
+commodity VTI : security
+  precision 3
 purpose wages : income
-purpose retirement : spending
-account checking
-account retirement
+purpose rollover : spending
+account checking : bank
+account ira : bank
 account savings
 entity employer
-2026-01-01 employer -> checking 100 USD #wages
-2026-01-02 employer -> checking 200 USD #wages
+2026-01-01 checking 25_000 USD -> ira 7 VTI #rollover
+  10 USD #fees
+2026-01-02 checking 90_000 USD -> savings 3 VTI #wages
+  5 USD #fees
 ";
         let (file, parsed) = axiom_syntax::parse(
             axiom_core::FileId(0),
@@ -1691,17 +1698,19 @@ entity employer
         }]);
         assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
         let checking = book.place("checking").unwrap();
-        let retirement = book.place("retirement").unwrap();
+        let retirement = book.place("ira").unwrap();
         let savings = book.place("savings").unwrap();
         let owner = book.entities[book.roots.me].place.expect("me has an outside place");
         let owner = book.places[owner].owner;
         let wages = book.purpose("wages").unwrap();
-        let retirement_purpose = book.purpose("retirement").unwrap();
+        let retirement_purpose = book.purpose("rollover").unwrap();
         let usd = book.base;
         let vti = book.commodity("VTI").unwrap();
         let missing_code = book.names.intern("missing");
 
-        let mut selected = book.flows.get(Id::new(0)).unwrap().clone();
+        let first_header = book.txns.get(Id::new(0)).unwrap().flows.start();
+        let second_header = book.txns.get(Id::new(1)).unwrap().flows.start();
+        let mut selected = book.flows.get(first_header).unwrap().clone();
         selected.from = checking;
         selected.to = retirement;
         selected.out = Amount::new(Qty(25_000), usd);
@@ -1711,7 +1720,7 @@ entity employer
             of: None,
             source: axiom_model::Provenance::Written,
         });
-        let mut unrelated = book.flows.get(Id::new(1)).unwrap().clone();
+        let mut unrelated = book.flows.get(second_header).unwrap().clone();
         unrelated.from = checking;
         unrelated.to = savings;
         unrelated.out = Amount::new(Qty(90_000), usd);
@@ -1721,7 +1730,21 @@ entity employer
             of: None,
             source: axiom_model::Provenance::Written,
         });
-        let flows = [RuntimeFlow::source_at(selected, 0), RuntimeFlow::source_at(unrelated, 1)];
+        let mut mixed = book.flows.get(second_header).unwrap().clone();
+        mixed.from = checking;
+        mixed.to = retirement;
+        mixed.out = Amount::new(Qty(1_000), usd);
+        mixed.arrive = mixed.out;
+        mixed.purpose = Some(Purposed {
+            purpose: wages,
+            of: None,
+            source: axiom_model::Provenance::Written,
+        });
+        let flows = [
+            RuntimeFlow::source_at(selected, 0),
+            RuntimeFlow::source_at(unrelated, 1),
+            RuntimeFlow::source_at(mixed, 2),
+        ];
         let details = Arena::new();
         let plan = Plan::new(&book);
         let world = World::new(&book, &plan.watch);
@@ -1757,6 +1780,14 @@ entity employer
             machine.select(&[SelectKey::End(retirement), SelectKey::Code(missing_code)]),
             Value::Empty,
             "a selector with no matching group is empty, so a percentage of it is zero"
+        );
+        assert_eq!(
+            machine.select(&[SelectKey::End(retirement)]),
+            Value::Fault(Fault::UnitMismatch {
+                found: usd,
+                expected: vti,
+            }),
+            "matching both sides with incompatible units refuses to invent a sum"
         );
     }
 
