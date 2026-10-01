@@ -15,7 +15,8 @@ use crate::errors::Word;
 use crate::journal::{
     Action, Assert, Detail, EndEvent, EndTarget, Event, Filed, Flow, FlowExpressions, Gap, Infer,
     JournalEnd, JournalGroup, JournalItem, JournalProgram, JournalQuantity, Measure, Mode, Object,
-    Origin, Provenance, Purposed, Quote, Reading, Select, Split, Waive, WrittenOccurrence,
+    OccurrenceTail, Origin, Provenance, Purposed, Quote, Reading, Select, Split, Waive,
+    WrittenOccurrence,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
 use crate::scope::Home;
@@ -1098,7 +1099,14 @@ fn lower_occurrence<'a, 's>(
     let occurrence_id = world
         .book
         .written_occurrences
-        .push(WrittenOccurrence { due, schedule });
+        .push(WrittenOccurrence {
+            due,
+            schedule,
+            amount: None,
+            program: None,
+            groups: Box::default(),
+            tail: OccurrenceTail::default(),
+        });
     let input_start = world.book.input_values.len();
     for value in input_values {
         world.book.input_values.push(value);

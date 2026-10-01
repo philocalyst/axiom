@@ -632,10 +632,59 @@ pub struct Txn {
 
 /// The selected scheduled instance kept by one written contract occurrence.
 /// The owning transaction id is the index of this handle in `Book::txns`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct WrittenOccurrence {
     pub due: Day,
     pub schedule: ScheduleKind,
+    /// An amount written after the contract name replaces the terms' amount
+    /// for this occurrence only. Computed roots belong to `program` below.
+    pub amount: Option<TemplateAmount>,
+    /// Computed amount, side and basis roots for this occurrence's overrides.
+    pub program: Option<Id<JournalProgram>>,
+    /// Source-ordered partial replacements; groups absent here inherit terms.
+    pub groups: Box<[WrittenGroup]>,
+    /// Partial header metadata applied to the inherited or replaced groups.
+    pub tail: OccurrenceTail,
+}
+
+/// A partial replacement of one contract template group by a written
+/// occurrence. Side quantities are explicit options: an omitted side inherits
+/// the template, while group offsets address the source Txn's flow range.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct WrittenGroup {
+    pub template: u32,
+    pub out: Option<JournalQuantity>,
+    pub arrive: Option<JournalQuantity>,
+    pub group: JournalGroup,
+}
+
+/// Metadata written on a contract occurrence's header.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct OccurrenceTail {
+    pub codes: Run<Sym>,
+    pub purpose: Option<Purposed>,
+    pub description: Option<Text>,
+    pub payee: Option<Id<Entity>>,
+    pub recognized: Option<Days>,
+    pub detail: Detail,
+    /// Computed `basis` root, stored in `WrittenOccurrence::program`.
+    pub basis: Option<NodeId>,
+    pub waive: Option<Waive>,
+}
+
+impl Default for OccurrenceTail {
+    fn default() -> Self {
+        Self {
+            codes: Run::new(Id::new(0), 0),
+            purpose: None,
+            description: None,
+            payee: None,
+            recognized: None,
+            detail: Detail::NONE,
+            basis: None,
+            waive: None,
+        }
+    }
 }
 
 /// Expression roots and allocation groups for one written transaction.
