@@ -1,0 +1,34 @@
+// ─── Where the journal comes from ───────────────────────────────────────────
+//
+// Sam types almost nothing. Each source is declared here: where its files
+// are, and what their records look like. A script is the fallback.
+// - A record that matches what the account already saw (the same amount,
+//   within three days) is left alone.
+// - One that keeps a contract is written as the occurrence (`01 flat`).
+// - One from Halcyon that mentions INV-2026-01 settles that invoice.
+// - The rest are written as flows with the party each memo names.
+// `axiom sync --dry` shows what would be written. Nothing written is changed.
+
+/// Chase's export of the checking account, dropped into imports/.
+sync checking
+  read    "imports/chase-checking-*.csv"
+  format  csv
+    date    "Posting Date" "MM/DD/YYYY"
+    amount  "Amount"
+    memo    "Description"
+    balance "Balance"
+
+/// The card, as Chase's QFX download: OFX records, declared in std.
+sync visa
+  read    "imports/chase-visa-*.qfx"
+  format  ofx
+
+/// Quotes for everything held, by year: no bank offers these as files.
+sync prices
+  run     quotes {units} --since {since}
+  into    prices/{year}.ax
+
+/// Invoice codes, as memos spell them.
+code inv-*
+  on client
+  known-as "INV-" digit+ "-" digit+       // INV-2026-01 is ^inv-2026-01

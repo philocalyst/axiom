@@ -1,0 +1,13 @@
+// ─── What Sam means to spend ────────────────────────────────────────────────
+//
+// Budgets are about what money is for, not where it went. std ships the
+// purpose tree: food is groceries and dining, then home, transport, health
+// and fun. A budget on a purpose covers everything beneath it.
+
+budget food        900 USD monthly
+budget dining      250 USD monthly
+budget household   150 USD monthly
+budget fun         200 USD monthly
+
+/// A purpose std does not have: what the studio earns from design work.
+purpose design : business-income
