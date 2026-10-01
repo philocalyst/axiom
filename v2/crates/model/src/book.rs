@@ -765,7 +765,7 @@ pub struct TemplateItem {
     pub side: FlowSide,
     pub amount: TemplateAmount,
     pub purpose: Option<crate::journal::Purposed>,
-    pub description: Option<Sym>,
+    pub description: Option<Text>,
     pub codes: axiom_core::Run<Sym>,
     pub select: axiom_core::Run<crate::journal::Select>,
     pub detail: Option<Id<crate::journal::Detail>>,
