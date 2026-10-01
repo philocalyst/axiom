@@ -427,12 +427,86 @@ fn context_views_match_the_legacy_views_before_today_today_and_after_today() {
                 Query::Available { at: Some(at) },
                 Query::Claims { at: Some(at) },
                 Query::Lots { place: None, at: Some(at) },
+                Query::Forecast { until: Some(at), paths: 0 },
             ] {
                 let shared = context.report(&query).unwrap();
                 let old = crate::report(book, context.run(), &query, None).unwrap();
                 assert_eq!(show(&shared), show(&old), "{query:?} at {at}");
             }
         }
+    });
+}
+
+#[test]
+fn a_context_forecast_keeps_historical_and_same_day_obligations_once() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+
+entity treasury
+
+account assets/checking
+account income/reserve
+account income/salary
+account expenses/food
+
+law count-pay
+  on in
+  when from is income/salary
+  count amount as pay
+
+law historical-fee
+  on out
+  when from is assets/checking
+  require amount < 0 USD else owe 5 USD to treasury by date(2027, 2, 15) as historical-fee
+
+law pad-fee
+  on in
+  when from is income/reserve
+  owe 2 USD to treasury by date(2027, 3, 1) as pad-fee
+
+law year-end-tax
+  each year
+  owe tally(pay) * 10% to treasury by date(year + 1, 1, 15) as year-end-tax
+
+2026-01-05 income/salary -> checking 100 USD
+2026-02-01 checking -> expenses/food 10 USD
+2026-12-31 checking = 100 USD via reserve
+";
+
+    with_run(source, day(2026, 12, 31), |book, run| {
+        let context = crate::Context::new(
+            book,
+            Options {
+                today: run.today,
+                relaxed: book.relaxed,
+            },
+            None,
+        )
+        .unwrap();
+        let query = Query::Forecast {
+            until: Some(day(2027, 3, 1)),
+            paths: 0,
+        };
+        let shared = context.report(&query).unwrap();
+        let old = crate::report(book, context.run(), &query, None).unwrap();
+        assert_eq!(show(&shared), show(&old));
+
+        let owed = shared
+            .sections
+            .iter()
+            .find(|section| section.heading.as_deref() == Some("Obligations coming due"))
+            .unwrap();
+        assert_eq!(
+            lines(owed),
+            [
+                "2027-01-15 | year-end-tax | treasury | 10.00 USD",
+                "2027-02-15 | historical-fee | treasury | 5.00 USD",
+                "2027-03-01 | pad-fee | treasury | 2.00 USD",
+            ],
+            "the prefix includes the old flow and pre-close pad, while the year-end close is resumed once"
+        );
     });
 }
 

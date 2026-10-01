@@ -15,7 +15,7 @@ use axiom_model::{Book, Commodity, Entity, Flow, Func, Kind, Op, Place, Rule, Su
 use crate::bridge::{Sides, V3};
 use crate::events::{self, Events};
 use crate::facts::{self, LawFacts, Readers};
-use crate::ledger::{Ledger, fold, fold_to_view};
+use crate::ledger::{Ledger, fold, fold_to_view, fold_to_view_and_effects_prefix};
 use crate::motion::Amounts;
 use crate::scope::containing;
 use crate::state::World;
@@ -163,6 +163,14 @@ impl<'b, 's> Plan<'b, 's> {
     /// threads) instead of folding the journal again.
     pub fn run_with_view(&self, options: Options) -> (Run, Ledger<'_, 'b, 's>) {
         fold_to_view(self, options)
+    }
+
+    /// [`run_with_view`](Plan::run_with_view), and the number of effects in
+    /// the ledger before that day's closings. The returned run includes later
+    /// same-day closings and any later journal facts; this prefix length marks
+    /// exactly the effects that already existed in the view checkpoint.
+    pub fn run_with_view_and_effects_prefix(&self, options: Options) -> (Run, Ledger<'_, 'b, 's>, usize) {
+        fold_to_view_and_effects_prefix(self, options)
     }
 
     /// Whether `place` lies within `subject`: a place's subtree is a stretch of

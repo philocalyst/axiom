@@ -375,10 +375,22 @@ pub(crate) fn fold(plan: &Plan, options: Options) -> Run {
 /// day's closings, with no records: a view forks it, and does not fold the
 /// journal again to get there.
 pub(crate) fn fold_to_view<'p, 'b, 's>(plan: &'p Plan<'b, 's>, options: Options) -> (Run, Ledger<'p, 'b, 's>) {
+    let (run, view, _) = fold_to_view_and_effects_prefix(plan, options);
+    (run, view)
+}
+
+/// As `fold_to_view`, with the number of effects recorded before today's
+/// closings. The run is then concluded from the same ledger, so this length is
+/// the exact prefix in `run.effects` belonging to the paired view checkpoint.
+pub(crate) fn fold_to_view_and_effects_prefix<'p, 'b, 's>(
+    plan: &'p Plan<'b, 's>,
+    options: Options,
+) -> (Run, Ledger<'p, 'b, 's>, usize) {
     let mut ledger = plan.start(options);
     ledger.advance_to_closing(options.today);
+    let effects_prefix_len = ledger.recorded().effects.len();
     let view = ledger.fork();
-    (conclude(ledger), view)
+    (conclude(ledger), view, effects_prefix_len)
 }
 
 fn conclude(mut ledger: Ledger) -> Run {

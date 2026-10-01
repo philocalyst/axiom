@@ -20,6 +20,7 @@ pub struct Context<'b, 's> {
     plan: Plan<'b, 's>,
     run: Run,
     checkpoint: Checkpoint,
+    effects_prefix_len: usize,
     whose: Whose,
     relaxed: bool,
 }
@@ -34,7 +35,7 @@ impl<'b, 's> Context<'b, 's> {
     ) -> Result<Context<'b, 's>, Diagnostic> {
         let whose = Whose::resolve(book, whose)?;
         let plan = Plan::new(book);
-        let (run, ledger) = plan.run_with_view(options);
+        let (run, ledger, effects_prefix_len) = plan.run_with_view_and_effects_prefix(options);
         let checkpoint = ledger.checkpoint();
         drop(ledger);
         Ok(Context {
@@ -42,6 +43,7 @@ impl<'b, 's> Context<'b, 's> {
             plan,
             run,
             checkpoint,
+            effects_prefix_len,
             whose,
             relaxed: options.relaxed,
         })
@@ -135,7 +137,16 @@ impl<'b, 's> Context<'b, 's> {
                 ))
             }
             Query::Forecast { until, paths } => {
-                Ok(super::forecast::view(self.book, &self.run, &self.whose, *until, *paths))
+                Ok(super::forecast::view_from(
+                    &self.plan,
+                    &self.checkpoint,
+                    &self.run,
+                    &self.run.effects[..self.effects_prefix_len],
+                    self.lens(self.run.today),
+                    self.relaxed,
+                    *until,
+                    *paths,
+                ))
             }
             Query::Why { target } => super::why::target(self.book, &self.run, &self.whose, target),
             Query::Line { loc } => Ok(super::why::line(self.book, &self.run, *loc)),

@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Day, Days, Id, Map, Qty};
+use axiom_core::{Day, Id, Map, Qty};
 use axiom_engine::Run;
 use axiom_model::{Amount, Book, Class, End, Entity, Flow, Place, Plan, Txn};
 
@@ -212,6 +212,7 @@ fn has_ended(book: &Book, run: &Run, habit: &Expectation) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use axiom_core::Days;
     use axiom_engine::Posted;
     use axiom_engine::State;
     use axiom_model::Mode;
