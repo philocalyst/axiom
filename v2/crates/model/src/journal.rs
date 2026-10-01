@@ -707,6 +707,10 @@ pub struct Waive {
 pub struct Assert {
     pub day: Day,
     pub place: Id<Place>,
+    /// The source against which a computed amount is evaluated. Asset
+    /// assertions keep their asset subject even though reconciliation posts
+    /// through the asset's backing place.
+    pub subject: crate::law::Subject,
     /// As written, in the place's display sign (`Class::display_sign`):
     /// `visa = 1_234.56 USD` says 1,234.56 is owed, and is stored positive; an
     /// overdrawn `checking = -42.17 USD` is stored negative. The engine applies

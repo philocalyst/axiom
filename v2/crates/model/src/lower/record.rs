@@ -944,6 +944,7 @@ fn lower_value<'s>(
             world.book.asserts.push(Assert {
                 day: statement.date,
                 place,
+                subject: ModelSubject::Place(place),
                 amount,
                 computed,
                 gap,
@@ -963,6 +964,7 @@ fn lower_value<'s>(
             world.book.asserts.push(Assert {
                 day: statement.date,
                 place,
+                subject: ModelSubject::Asset(asset),
                 amount,
                 computed,
                 gap,

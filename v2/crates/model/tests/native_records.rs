@@ -122,6 +122,10 @@ account assets/checking
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     assert_eq!(book.assertion_programs.len(), 1);
     let assertion = &book.asserts[0];
+    assert!(matches!(
+        assertion.subject,
+        axiom_model::law::Subject::Place(place) if place == assertion.place
+    ));
     let Some((program, root)) = assertion.computed else {
         panic!("the computed amount should retain a program root");
     };
@@ -154,6 +158,10 @@ asset condo : property
     }]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let assertion = &book.asserts[0];
+    assert!(matches!(
+        assertion.subject,
+        axiom_model::law::Subject::Asset(_)
+    ));
     let Some((program, root)) = assertion.computed else {
         panic!("the computed amount should retain a program root");
     };
