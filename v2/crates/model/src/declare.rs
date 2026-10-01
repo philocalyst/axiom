@@ -39,6 +39,9 @@ pub(crate) struct World<'s> {
     pub scopes: Scopes,
     pub systems: SystemIndex<'s>,
     pub props: PropTable,
+    /// Property rows accumulated in source order and frozen onto their
+    /// targets once the declaration pass is complete.
+    pub prop_writes: Vec<(PropTarget, crate::book::Prop)>,
     /// The id of everything declared, in the order written.
     pub declared: Declared,
     /// Names some law counts.
@@ -48,6 +51,72 @@ pub(crate) struct World<'s> {
     /// Where the lines that say when a place is open and what it holds were
     /// written (`opened`, `closed`, `holds`), for the errors that enforce them.
     pub lines: Map<(Id<Place>, &'static str), Loc>,
+}
+
+/// A typed target for one custom property row. Kind defaults remain on the
+/// kind and are read through ancestry instead of copied into every instance.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PropTarget {
+    Kind(Id<Kind>),
+    Entity(Id<Entity>),
+    Commodity(Id<Commodity>),
+    Place(Id<Place>),
+    Asset(Id<crate::book::Asset>),
+}
+
+impl PropTarget {
+    fn key(self) -> (u8, u32) {
+        match self {
+            PropTarget::Kind(id) => (0, id.index() as u32),
+            PropTarget::Entity(id) => (1, id.index() as u32),
+            PropTarget::Commodity(id) => (2, id.index() as u32),
+            PropTarget::Place(id) => (3, id.index() as u32),
+            PropTarget::Asset(id) => (4, id.index() as u32),
+        }
+    }
+}
+
+impl World<'_> {
+    /// Stage a property row by typed identity. This allocates no per-row key
+    /// strings and leaves each target's final `Props` slice to one freeze pass.
+    pub(crate) fn set_prop(&mut self, target: PropTarget, prop: crate::book::Prop) {
+        self.prop_writes.push((target, prop));
+    }
+
+    /// Sort and freeze all staged rows into their owners once. Equal-day rows
+    /// retain source order so the property's established duplicate policy can
+    /// diagnose them with both original locations.
+    pub(crate) fn finish_props(&mut self) {
+        let names = &self.book.names;
+        self.prop_writes.sort_by(|(left_target, left), (right_target, right)| {
+            left_target
+                .key()
+                .cmp(&right_target.key())
+                .then_with(|| names.name(left.name).cmp(names.name(right.name)))
+                .then_with(|| left.since.cmp(&right.since))
+        });
+        let mut start = 0;
+        while start < self.prop_writes.len() {
+            let target = self.prop_writes[start].0;
+            let mut end = start + 1;
+            while end < self.prop_writes.len() && self.prop_writes[end].0 == target {
+                end += 1;
+            }
+            let rows: Box<[crate::book::Prop]> = self.prop_writes[start..end]
+                .iter()
+                .map(|(_, prop)| *prop)
+                .collect();
+            match target {
+                PropTarget::Kind(id) => self.book.kinds[id].props = rows,
+                PropTarget::Entity(id) => self.book.entities[id].props = rows,
+                PropTarget::Commodity(id) => self.book.commodities[id].props = rows,
+                PropTarget::Place(id) => self.book.places[id].props = rows,
+                PropTarget::Asset(id) => self.book.assets[id].props = rows,
+            }
+            start = end;
+        }
+        self.prop_writes.clear();
+    }
 }
 
 pub(crate) struct Declared {
@@ -260,6 +329,7 @@ pub(crate) fn declare<'a, 's>(
         scopes,
         systems,
         props: PropTable::default(),
+        prop_writes: Vec::new(),
         declared,
         tallies: Set::default(),
         ordinal: places.ordinal,
