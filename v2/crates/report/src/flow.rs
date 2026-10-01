@@ -574,29 +574,23 @@ pub(crate) fn movement_in_base(
 /// register balance when many small movements share one place.
 #[derive(Default)]
 pub(crate) struct MovementShares {
-    cumulative: HashMap<(Id<Place>, Id<Commodity>, bool), Qty>,
+    cumulative: HashMap<(Id<Place>, Id<Commodity>), Qty>,
 }
 
 impl MovementShares {
+    /// Allocates the change in a place's signed cumulative balance. Carrying
+    /// one signed boundary across both inflows and outflows is important when
+    /// a small shared balance crosses zero: separately rounding positive and
+    /// negative magnitudes can disagree with the scoped closing balance.
     fn split(&mut self, lens: Lens<'_, '_, '_, '_>, place: Id<Place>, amount: Amount) -> Qty {
         if lens.whose.is_everyone() || amount.qty.is_zero() {
             return amount.qty;
         }
-        let negative = amount.qty.is_negative();
-        let magnitude = if negative {
-            Qty(-amount.qty.0)
-        } else {
-            amount.qty
-        };
-        let cumulative = self
-            .cumulative
-            .entry((place, amount.unit, negative))
-            .or_default();
+        let cumulative = self.cumulative.entry((place, amount.unit)).or_default();
         let before = lens.place_qty(place, *cumulative);
-        *cumulative += magnitude;
+        *cumulative += amount.qty;
         let after = lens.place_qty(place, *cumulative);
-        let part = after - before;
-        if negative { -part } else { part }
+        after - before
     }
 }
 
@@ -610,23 +604,32 @@ pub(crate) fn movement_in_base_with(
     let from_outside = lens.book().places[flow.from].class == Class::Outside;
     let to_outside = lens.book().places[flow.to].class == Class::Outside;
     let inbound = from_outside && !to_outside;
-    let (place, amount) = if inbound {
-        (flow.to, posting.arrive())
+    let (place, amount, signed_qty) = if inbound {
+        let amount = posting.arrive();
+        (flow.to, amount, amount.qty)
     } else {
-        (flow.from, posting.out())
+        let amount = posting.out();
+        let signed = Qty(amount.qty.0.checked_neg()?);
+        (flow.from, amount, signed)
     };
     // A flow's declared owner is only the primary owner. The physical end it
     // moves through carries the effective ownership shares, so scope the
     // quantity there before pricing it. This also keeps a foreign-currency
     // movement's displayed share aligned with the unit actually posted.
-    let amount = axiom_model::Amount::new(shares.split(lens, place, amount), amount.unit);
+    let amount = axiom_model::Amount::new(
+        shares.split(
+            lens,
+            place,
+            axiom_model::Amount::new(signed_qty, amount.unit),
+        ),
+        amount.unit,
+    );
     let amount = lens.on(flow.day).value(amount)?;
-    let reverses = match root {
-        Some(PurposeRoot::Income) => !inbound,
-        Some(PurposeRoot::Spending | PurposeRoot::Capital) => inbound,
-        Some(PurposeRoot::Transfer) | None => false,
-    };
-    Some(if reverses { -amount } else { amount })
+    match root {
+        Some(PurposeRoot::Income) => Some(amount),
+        Some(PurposeRoot::Spending | PurposeRoot::Capital) => Some(Qty(amount.0.checked_neg()?)),
+        Some(PurposeRoot::Transfer) | None => Some(Qty(amount.0.checked_abs()?)),
+    }
 }
 
 /// The physical endpoint whose amount is used by income/spending reports.

@@ -312,6 +312,150 @@ opening 2026-01-01
     });
 }
 
+#[test]
+fn owner_flow_shares_conserve_signed_movement_across_zero_and_filtered_ranges() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+entity me
+entity theo
+entity payroll
+entity grocer
+account checking : asset
+  owner me 60%, theo 40%
+purpose salary : income
+purpose groceries : spending
+opening 2026-01-01
+  checking 0 USD
+2026-01-02 payroll -> checking 0.01 USD #salary
+2026-01-03 checking -> grocer 0.02 USD #groceries
+";
+
+    with_run(source, day(2026, 1, 4), |book, run| {
+        for owner in ["me", "theo"] {
+            let statement = crate::report(
+                book,
+                run,
+                &Query::Flow {
+                    by: FlowBy::Period(axiom_model::Period::Month),
+                    from: Some(day(2026, 1, 1)),
+                    to: None,
+                },
+                Some(owner),
+            )
+            .unwrap();
+            let facts = &statement.sections[0].facts;
+            let sum = |concept: &str, purpose: &str| {
+                facts
+                    .iter()
+                    .filter(|fact| fact.concept == concept && fact.of == Some(purpose))
+                    .map(|fact| fact.value.qty)
+                    .sum::<Qty>()
+            };
+            let register = crate::report(
+                book,
+                run,
+                &Query::Register {
+                    place: "checking",
+                    from: None,
+                    to: None,
+                },
+                Some(owner),
+            )
+            .unwrap();
+            let closing = register.sections[0]
+                .rows
+                .last()
+                .and_then(|row| row.cells.last())
+                .and_then(|cell| match cell {
+                    crate::Cell::Amount { qty, .. } => Some(*qty),
+                    crate::Cell::Blank => Some(Qty::ZERO),
+                    _ => None,
+                })
+                .expect("the final register balance is a typed amount");
+            assert_eq!(
+                sum("income", "salary") - sum("spending", "groceries"),
+                closing,
+                "owner {owner}"
+            );
+            let before_filter = crate::report(
+                book,
+                run,
+                &Query::Register {
+                    place: "checking",
+                    from: None,
+                    to: Some(day(2026, 1, 2)),
+                },
+                Some(owner),
+            )
+            .unwrap();
+            let opening_at_filter = before_filter.sections[0]
+                .rows
+                .last()
+                .and_then(|row| row.cells.last())
+                .and_then(|cell| match cell {
+                    crate::Cell::Amount { qty, .. } => Some(*qty),
+                    crate::Cell::Blank => Some(Qty::ZERO),
+                    _ => None,
+                })
+                .unwrap_or(Qty::ZERO);
+
+            let party = crate::report(
+                book,
+                run,
+                &Query::Flow {
+                    by: FlowBy::Party,
+                    from: Some(day(2026, 1, 1)),
+                    to: None,
+                },
+                Some(owner),
+            )
+            .unwrap();
+            let party_net = party.sections.first().map_or(Qty::ZERO, |section| {
+                section
+                    .facts
+                    .iter()
+                    .filter(|fact| fact.concept == "income")
+                    .map(|fact| fact.value.qty)
+                    .sum::<Qty>()
+                    - section
+                        .facts
+                        .iter()
+                        .filter(|fact| fact.concept == "spending")
+                        .map(|fact| fact.value.qty)
+                        .sum::<Qty>()
+            });
+            assert_eq!(party_net, closing, "party view owner {owner}");
+
+            let filtered = crate::report(
+                book,
+                run,
+                &Query::Flow {
+                    by: FlowBy::Period(axiom_model::Period::Month),
+                    from: Some(day(2026, 1, 3)),
+                    to: None,
+                },
+                Some(owner),
+            )
+            .unwrap();
+            let filtered_spending = filtered.sections.first().map_or(Qty::ZERO, |section| {
+                section
+                    .facts
+                    .iter()
+                    .filter(|fact| fact.concept == "spending" && fact.of == Some("groceries"))
+                    .map(|fact| fact.value.qty)
+                    .sum::<Qty>()
+            });
+            assert_eq!(
+                filtered_spending,
+                opening_at_filter - closing,
+                "filtered owner {owner}"
+            );
+        }
+    });
+}
+
 /// Party detail remains useful when separate counterparties offset in the
 /// spending total. The compact backing grid must retain each row independently.
 #[test]
@@ -699,6 +843,76 @@ opening 2025-12-01
 2026-01-28 checking -> repairer 3.00 USD basis 3.00 USD #depreciation
 ";
 
+pub(crate) const NATIVE_CONTRACTS: &str = "\
+base USD
+commodity USD
+  precision 2
+entity landlord-co
+entity employer-co
+entity garage
+account checking : asset
+purpose salary : income
+purpose rent : spending
+purpose repair : spending
+opening 2026-01-01
+  checking 12_000 USD
+2026-01-15 employer-co -> checking 5_000 USD #salary
+2026-02-15 employer-co -> checking 5_000 USD #salary
+2026-03-15 employer-co -> checking 5_000 USD #salary
+2026-04-15 employer-co -> checking 5_000 USD #salary
+contract monthly-rent with landlord-co
+  1_800 USD monthly on 1 from checking #rent
+  from 2026-05-01
+  until 2026-06-30
+contract payday with employer-co
+  5_000 USD monthly on 15 into checking #salary
+  from 2026-05-15
+  until 2026-06-15
+contract repair-reserve with garage
+  40_000 USD monthly on 2 from checking #repair
+  from 2026-05-02
+  until 2026-05-02
+";
+
+pub(crate) const NATIVE_LOAN: &str = "\
+base USD
+commodity USD
+  precision 2
+kind vehicle : thing
+entity bank
+asset car : vehicle
+account checking : asset
+opening 2026-01-01
+  checking 12_000 USD
+contract car-loan with bank
+  loan 3_000 USD on 2026-01-01 at 0% over 3m for car
+  monthly on 1 from checking
+";
+
+#[test]
+fn native_forecast_fixtures_build_as_contracts_not_plans() {
+    with_run(NATIVE_CONTRACTS, day(2026, 4, 15), |book, _| {
+        assert_eq!(book.contracts.len(), 3);
+        assert!(
+            book.contracts
+                .iter()
+                .all(|(_, contract)| contract.terms.is_some())
+        );
+    });
+}
+
+#[test]
+fn native_loan_fixture_builds_a_typed_loan_contract() {
+    with_run(NATIVE_LOAN, day(2026, 1, 1), |book, _| {
+        let loan = &book.contracts[book.contract("car-loan").unwrap()];
+        assert!(loan.terms.is_some());
+        assert!(
+            loan.loan.is_some(),
+            "loan terms must lower to the typed loan model"
+        );
+    });
+}
+
 #[test]
 fn a_projected_flow_keeps_its_detail_and_moves_its_recognition_period() {
     with_run(FLOW_SOURCES, day(2026, 3, 1), |book, _| {
@@ -730,54 +944,47 @@ fn a_projected_flow_keeps_its_detail_and_moves_its_recognition_period() {
             usd(depreciation),
         );
         assert!(book.flow_view(&next).detail().basis.is_some());
-        assert_eq!(
-            crate::places::route(book, &next),
-            "checking → repairer"
-        );
+        assert_eq!(crate::places::route(book, &next), "checking → repairer");
     });
 }
 
-/// A plan of depreciation, and the law that recaptures what it took.
+/// A native asset law consumes basis over time, and a yearly law recaptures
+/// the amount counted by those monthly events.
 const DEPRECIATING: &str = "\
 base USD
 commodity USD
   precision 2
-commodity HOME
-  precision 0
-
-kind property : asset
-  liquidity 90d
-
+kind property : thing
 entity treasury
-
-account assets/house : property
-account assets/checking
-account income/salary
-account expenses/depreciation
-
+entity payor
+purpose wages : income
+asset house : property
+  law depreciation
+    each month
+    let d = 300 USD
+    consume d
+    count d as depreciation
+account checking : asset
 opening 2026-01-01
-  house 1 HOME basis 120_000 USD
+  house basis 120_000 USD
   checking 5_000 USD
-
-plan depreciation every month on 28 from 2026-01-28 house.basis -> depreciation 300 USD
-
-law count-depreciation
-  on in
-  when to is expenses/depreciation
-  count amount as depreciation
-
 law recapture
   each year
   owe tally(depreciation) * 25% to treasury as recapture
-
-2026-01-05 income/salary -> checking 100 USD
+2026-01-05 payor -> checking 100 USD #wages
 ";
 
-/// The plan lowers the house's basis and recognizes the expense: the laws see
-/// ten months of depreciation, and no money leaves the house, which holds none.
+/// The native asset law lowers the house's basis and recognizes the expense:
+/// ten projected occurrences contribute 750.00 USD to the recapture, while no
+/// cash leaves checking for depreciation. Keep these financial expectations
+/// active while future time-based law projection is completed.
 #[test]
-fn the_forecast_runs_a_plan_that_changes_basis_as_one_that_moves_no_money() {
+fn native_asset_law_forecast_changes_basis_without_moving_cash() {
     with_run(DEPRECIATING, day(2026, 3, 15), |book, run| {
+        assert!(
+            run.monitor_complete,
+            "native forecast monitor is not complete"
+        );
         let forecast = Query::Forecast {
             until: Some(day(2026, 12, 31)),
             paths: 1,
