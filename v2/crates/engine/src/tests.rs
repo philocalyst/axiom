@@ -206,9 +206,23 @@ fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
     let year_limit = builder.konst(Value::Amount(f.usd(500_00)), Ty::AMOUNT);
     let year_within = builder.bin(BinOp::Le, year_total, year_limit, Ty::Bool);
     let both_within = builder.bin(BinOp::And, within, year_within, Ty::Bool);
-    let law = f.law(builder.warn(both_within));
+    let amount = builder.var(Var::Amount, Ty::AMOUNT);
+    let empty = builder.konst(Value::Empty, Ty::Empty);
+    let no_flow_amount = builder.bin(BinOp::Eq, amount, empty, Ty::Bool);
+    let one = builder.konst(Value::Amount(f.usd(1_00)), Ty::AMOUNT);
+    let zero = builder.konst(Value::Amount(f.usd(0)), Ty::AMOUNT);
+    let invalid_without_flow = builder.bin(BinOp::Div, one, zero, Ty::AMOUNT);
+    let bucket_amount = builder.if_then_else(no_flow_amount, invalid_without_flow, amount, Ty::AMOUNT);
+    let count = f.sym("recognized-flow-amount");
+    let law = f.law(builder.warn(both_within).count(bucket_amount, count));
     f.laws[law].owner = Owner::Purpose(purpose);
     let mut flow_only = LawBuilder::new(f.sym("purpose-flow-only"), Trigger::Flow);
+    // Even an orphaned PurposeTotal node is not a window requirement.
+    let _unreferenced = flow_only.call(
+        Func::PurposeTotal { purpose: Some(purpose), window: Window::Month },
+        &[],
+        Ty::AMOUNT,
+    );
     let amount = flow_only.var(Var::Amount, Ty::AMOUNT);
     let maximum = flow_only.konst(Value::Amount(f.usd(1_000_00)), Ty::AMOUNT);
     let accepted = flow_only.bin(BinOp::Le, amount, maximum, Ty::Bool);
@@ -229,6 +243,8 @@ fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
     assert_eq!(run.violations[0].cause, Cause::Time, "the limit breaks as the prepaid window opens");
     assert_eq!(run.checks[law.index()], 3, "the flow and both future months are evaluated once, despite reading two windows");
     assert_eq!(run.checks[flow_only.index()], 1, "an amount-only flow law does not run at month or year openings");
+    assert_eq!(run.effects.iter().filter(|effect| effect.law == law).count(), 1, "the count effect belongs to the real flow only");
+    assert!(run.diagnostics.iter().all(|diagnostic| diagnostic.code != "arithmetic"), "the flow-only count expression must not be evaluated at a window opening");
 }
 
 #[test]

@@ -233,19 +233,25 @@ pub(crate) fn purpose_readers(book: &Book) -> PurposeReaders {
         }
         seen.push(rule);
         let law = &book.laws[rule.law];
-        let owner = match law.owner {
+        let implicit = match law.owner {
             Owner::Purpose(purpose) => Some(purpose),
             _ => None,
         };
-        for node in &law.nodes {
-            let Op::Call(Func::PurposeTotal { purpose, window }, _) = &node.op else { continue };
-            if *window == Window::Ever {
-                continue;
-            }
-            let Some(purpose) = (*purpose).or(owner) else { continue };
-            let rules = readers.entry((purpose, *window)).or_default();
-            if !rules.contains(&rule) {
-                rules.push(rule);
+        // A read in a let, gate, unused branch, or effect does not by itself
+        // make a window obligation. Subscribe to purpose totals only when a
+        // require compares them; the evaluator filters the rest at the open.
+        for step in &law.steps {
+            let axiom_model::StepKind::Require { cond, .. } = &step.kind else { continue };
+            for at in law.range(*cond) {
+                let Op::Call(Func::PurposeTotal { purpose, window }, _) = &law.nodes[at].op else { continue };
+                if *window == Window::Ever {
+                    continue;
+                }
+                let Some(purpose) = (*purpose).or(implicit) else { continue };
+                let rules = readers.entry((purpose, *window)).or_default();
+                if !rules.contains(&rule) {
+                    rules.push(rule);
+                }
             }
         }
     }

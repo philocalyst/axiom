@@ -160,7 +160,7 @@ impl Ledger<'_, '_, '_> {
                         }
                         self.fire_as_with_done(
                             &purpose_rules,
-                            &Occasion::window(from, period),
+                            &Occasion::purpose_window(from, period, window),
                             Some(Subject::Entity(owner)),
                             &mut done,
                             true,

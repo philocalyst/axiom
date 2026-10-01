@@ -65,13 +65,29 @@ pub(crate) struct Occasion<'a> {
     /// Only limits are read: what a comparison counted is recorded, and a
     /// broken one is reported, but nothing is counted into a tally or owed.
     pub checking: bool,
+    /// A purpose window opening evaluates only matching `require` steps and
+    /// their preceding gates; flow amounts and unrelated effects are absent.
+    pub purpose_window: Option<Window>,
 }
 
 impl<'a> Occasion<'a> {
     /// Something that happened on `day`, with nothing more said about it yet.
     fn on(day: Day, over: Days, span: Days, cause: Cause, motion: Option<&'a Motion<'a>>) -> Occasion<'a> {
         let (amount, realized, skip_internal, checking) = (None, None, false, false);
-        Occasion { day, over, span, cause, motion, purpose: None, description: None, amount, realized, skip_internal, checking }
+        Occasion {
+            day,
+            over,
+            span,
+            cause,
+            motion,
+            purpose: None,
+            description: None,
+            amount,
+            realized,
+            skip_internal,
+            checking,
+            purpose_window: None,
+        }
     }
 
     pub fn flow(m: &'a Motion<'a>) -> Occasion<'a> {
@@ -91,6 +107,11 @@ impl<'a> Occasion<'a> {
     /// `day`: the laws about its total are read as no flow will make them.
     pub fn window(day: Day, period: Days) -> Occasion<'static> {
         Occasion { checking: true, ..Occasion::time(day, period) }
+    }
+
+    /// A purpose total reaches a new month or year before its flows land.
+    pub fn purpose_window(day: Day, period: Days, window: Window) -> Occasion<'static> {
+        Occasion { purpose_window: Some(window), ..Occasion::window(day, period) }
     }
 
     /// The day whose window totals are read: the day a flow moved, or the last
@@ -153,7 +174,39 @@ pub(crate) enum Outcome {
 pub(crate) fn run(env: Env, law: &Law, ctx: &Context, values: &mut Vec<Value>, out: &mut Vec<Outcome>) -> bool {
     values.resize(law.nodes.len(), Value::Empty);
     let mut machine = Machine { env, law, ctx, values, out };
-    (0..law.steps.len()).all(|index| machine.step(index))
+    if let Some(window) = ctx.purpose_window {
+        let last = law
+            .steps
+            .iter()
+            .enumerate()
+            .filter_map(|(index, step)| {
+                matches!(&step.kind, StepKind::Require { .. })
+                    .then_some(index)
+                    .filter(|&index| purpose_reader_step(law, index, window))
+            })
+            .last();
+        let Some(last) = last else { return true };
+        (0..=last)
+            .filter(|&index| purpose_reader_step(law, index, window))
+            .all(|index| machine.step(index))
+    } else {
+        (0..law.steps.len()).all(|index| machine.step(index))
+    }
+}
+
+/// Gates before the last matching requirement remain meaningful; unrelated
+/// requirements and effects are for an actual flow, not a window opening.
+fn purpose_reader_step(law: &Law, index: usize, window: Window) -> bool {
+    match &law.steps[index].kind {
+        StepKind::When(_) | StepKind::Unless(_) | StepKind::Let(_) => true,
+        StepKind::Require { cond, .. } => law.range(*cond).any(|at| {
+            matches!(
+                law.nodes[at].op,
+                Op::Call(Func::PurposeTotal { window: read, .. }, _) if read == window
+            )
+        }),
+        StepKind::Effect(_) => false,
+    }
 }
 
 /// Evaluates one expression of `law` (a `by` date, say).
