@@ -1233,6 +1233,72 @@ contract mortgage with rocket
 }
 
 #[test]
+fn contract_loan_retains_typed_index_reset_limits() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+param sofr
+  2026 5%
+entity rocket
+account assets/checking
+contract mortgage with rocket
+  loan 320_000 USD on 2024-02-20 at 5.875% over 30y
+    resets 1y from 2029-03-01 to sofr + 2.5% cap 2% life 5%
+  monthly on 1 from checking
+2024-02-20 mortgage
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let reset = book.contracts[Id::new(0)].loan.unwrap().resets.unwrap();
+    assert_eq!(reset.every, axiom_core::Span::months(12));
+    assert_eq!(reset.from, Day::from_ymd(2029, 3, 1).unwrap());
+    assert_eq!(book.name(book.params[reset.index].name), "sofr");
+    assert_eq!(reset.margin, axiom_core::Ratio::percent(25, 1).unwrap());
+    assert_eq!(reset.cap, Some(axiom_core::Ratio::percent(2, 0).unwrap()));
+    assert_eq!(reset.life, Some(axiom_core::Ratio::percent(5, 0).unwrap()));
+}
+
+#[test]
+fn invalid_loan_reset_does_not_create_a_partial_contract() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+param sofr
+  2026 5%
+entity rocket
+account assets/checking
+contract mortgage with rocket
+  loan 320_000 USD on 2024-02-20 at 5.875% over 30y
+    resets 1y from 2029-03-01 to sofr + 2.5% cap 2% cap 3%
+  monthly on 1 from checking
+2024-02-20 mortgage
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-loan-resets"),
+        "{diagnostics:?}"
+    );
+    assert!(book.contracts[Id::new(0)].loan.is_none());
+    assert!(book.flows.is_empty(), "invalid loan terms cannot lower origination flows");
+}
+
+#[test]
 fn loan_origination_rejects_a_second_amount_without_partial_flows() {
     let path = "contracts.ax";
     let text = "\

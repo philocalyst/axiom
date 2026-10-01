@@ -2,15 +2,15 @@
 //! before any template expression compiles, so a template may mention a
 //! contract declared later in the project.
 
-use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline};
+use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline};
 use axiom_syntax as ast;
-use axiom_syntax::{ClauseKind, Direction, ExprKind, ItemKind, Name};
+use axiom_syntax::{BinOp, ClauseKind, Direction, ExprKind, ItemKind, Name};
 
 use super::{JournalSurvey, compile_roots, contract_roots, inputs};
 use crate::book::{
     AlsoOn, Amount, At, Cadence, Class, Contract, Coverage, Deadline, Escalation, FlowSide, Input,
     Loan,
-    Prepay, Relative, Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent,
+    Prepay, Relative, Reset, Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent,
     TemplateLeg, TemplateProgram, TemplateQuantity, Terms, TermsState,
 };
 use crate::declare::World;
@@ -229,6 +229,7 @@ fn lower_contract<'a, 's>(
         node.props,
         party,
         owner,
+        written.site.home,
         diags,
     )?;
     let mut contract = empty_contract(
@@ -305,6 +306,7 @@ fn contract_loan<'s>(
     props: ast::Many<ast::Prop<'s>>,
     party: axiom_core::Id<crate::book::Entity>,
     owner: axiom_core::Id<crate::book::Entity>,
+    home: Home,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Option<(Loan, Ratio)>> {
     let mut written = file[props].iter().filter(|prop| prop.name.0 == "loan");
@@ -441,6 +443,7 @@ fn contract_loan<'s>(
         None
     };
 
+    let resets = loan_resets(world, home, file, prop.lines, on, diags)?;
     let mut prepay = Prepay::Shortens;
     let mut prepay_loc = None;
     for nested in &file[prop.lines] {
@@ -470,13 +473,7 @@ fn contract_loan<'s>(
                 }
                 prepay = value.unwrap();
             }
-            "resets" => {
-                diags.push(
-                    Diagnostic::error("contract-loan-resets", "loan resets are not yet lowered")
-                        .label(nested.loc, "this reset has no typed model value"),
-                );
-                return None;
-            }
+            "resets" => {}
             _ => {
                 diags.push(
                     Diagnostic::error("contract-loan-property", "this nested loan property is not supported")
@@ -494,11 +491,161 @@ fn contract_loan<'s>(
             term,
             asset,
             debt,
-            resets: None,
+            resets,
             prepay,
         },
         rate,
     )))
+}
+
+fn loan_resets<'s>(
+    world: &World<'s>,
+    home: Home,
+    file: &ast::File<'s>,
+    lines: ast::Many<ast::Nested<'s>>,
+    loan_on: Day,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<Reset>> {
+    let mut resets = file[lines].iter().filter(|nested| nested.0.name.0 == "resets");
+    let Some(first) = resets.next() else {
+        return Some(None);
+    };
+    if let Some(second) = resets.next() {
+        diags.push(
+            Diagnostic::error("duplicate-loan-resets", "a loan has one reset rule")
+                .label(second.0.loc, "a second reset cannot replace the first")
+                .context(first.0.loc, "the first reset is here"),
+        );
+        return None;
+    }
+
+    let nested = &first.0;
+    let args = &file[nested.args];
+    let mut cursor = 0;
+    let Some(&every_expr) = args.get(cursor) else {
+        return invalid_reset(diags, nested.loc, "write `resets 1y from DATE to PARAM + PERCENT`");
+    };
+    let every = match file.exprs[every_expr].kind {
+        ExprKind::Span(span) if positive_loan_term(span) => span,
+        _ => return invalid_reset(diags, file.exprs[every_expr].loc, "the reset interval must be a positive span"),
+    };
+    cursor += 1;
+
+    if !reset_keyword(file, args, cursor, "from") {
+        return invalid_reset(diags, nested.loc, "write `from DATE` after the reset interval");
+    }
+    cursor += 1;
+    let Some(&from_expr) = args.get(cursor) else {
+        return invalid_reset(diags, nested.loc, "write the first reset date after `from`");
+    };
+    let from = match file.exprs[from_expr].kind {
+        ExprKind::Date(day) if day >= loan_on => day,
+        ExprKind::Date(_) => {
+            return invalid_reset(diags, file.exprs[from_expr].loc, "the first reset cannot precede the loan");
+        }
+        _ => return invalid_reset(diags, file.exprs[from_expr].loc, "write a full date for the first reset"),
+    };
+    cursor += 1;
+
+    if !reset_keyword(file, args, cursor, "to") {
+        return invalid_reset(diags, nested.loc, "write `to PARAM + PERCENT` after the reset date");
+    }
+    cursor += 1;
+    let Some(&rate_expr) = args.get(cursor) else {
+        return invalid_reset(diags, nested.loc, "write the index and margin after `to`");
+    };
+    let (index_name, margin_expr) = match file.exprs[rate_expr].kind {
+        ExprKind::Binary(BinOp::Add, index, margin) => match file.exprs[index].kind {
+            ExprKind::Name(name) if is_percent(file, margin) => (name, margin),
+            _ => return invalid_reset(diags, file.exprs[rate_expr].loc, "write `PARAM + PERCENT`"),
+        },
+        _ => return invalid_reset(diags, file.exprs[rate_expr].loc, "write `PARAM + PERCENT`"),
+    };
+    let Some(margin) = percent_ratio(file, margin_expr) else {
+        return invalid_reset(diags, file.exprs[margin_expr].loc, "the reset margin cannot be represented");
+    };
+    if margin.is_negative() {
+        return invalid_reset(diags, file.exprs[margin_expr].loc, "the reset margin cannot be negative");
+    }
+    let word = Word {
+        text: index_name.0,
+        loc: file.loc(index_name.0),
+    };
+    let index = match world.seek_param(home, word) {
+        Ok(Some(index)) => index,
+        Ok(None) => {
+            diags.push(world.missing_param(home, word));
+            return None;
+        }
+        Err(problem) => {
+            diags.push(problem);
+            return None;
+        }
+    };
+    if world.book.params[index].unit.is_some_and(|unit| unit != Dim::Number) {
+        diags.push(
+            Diagnostic::error("contract-loan-index-unit", "a loan reset index is a rate")
+                .label(word.loc, "use a parameter with no unit or a percentage value"),
+        );
+        return None;
+    }
+    cursor += 1;
+
+    let (mut cap, mut life) = (None, None);
+    while cursor < args.len() {
+        let clause_expr = args[cursor];
+        let clause = match file.exprs[clause_expr].kind {
+            ExprKind::Name(name) if name.0 == "cap" || name.0 == "life" => name.0,
+            _ => return invalid_reset(diags, file.exprs[clause_expr].loc, "only `cap PERCENT` and `life PERCENT` follow the margin"),
+        };
+        cursor += 1;
+        let Some(&value_expr) = args.get(cursor) else {
+            return invalid_reset(diags, file.exprs[clause_expr].loc, "write a percentage after this reset limit");
+        };
+        let Some(value) = percent_ratio(file, value_expr) else {
+            return invalid_reset(diags, file.exprs[value_expr].loc, "a reset limit is a percentage");
+        };
+        if value.is_negative() {
+            return invalid_reset(diags, file.exprs[value_expr].loc, "a reset limit cannot be negative");
+        }
+        let slot = if clause == "cap" { &mut cap } else { &mut life };
+        if slot.replace(value).is_some() {
+            return invalid_reset(diags, file.exprs[clause_expr].loc, "write each reset limit once");
+        }
+        cursor += 1;
+    }
+
+    Some(Some(Reset {
+        every,
+        from,
+        index,
+        margin,
+        cap,
+        life,
+    }))
+}
+
+fn reset_keyword(file: &ast::File<'_>, args: &[ast::ExprId], at: usize, expected: &str) -> bool {
+    args.get(at).is_some_and(|&expr| matches!(file.exprs[expr].kind, ExprKind::Name(name) if name.0 == expected))
+}
+
+fn is_percent(file: &ast::File<'_>, expr: ast::ExprId) -> bool {
+    matches!(file.exprs[expr].kind, ExprKind::Pct(_))
+}
+
+fn percent_ratio(file: &ast::File<'_>, expr: ast::ExprId) -> Option<Ratio> {
+    match file.exprs[expr].kind {
+        ExprKind::Pct(percent) => Ratio::percent(percent.mantissa as i128, percent.scale),
+        _ => None,
+    }
+}
+
+fn invalid_reset<T>(diags: &mut Vec<Diagnostic>, loc: Loc, help: &str) -> Option<T> {
+    diags.push(
+        Diagnostic::error("contract-loan-resets", "a loan reset rule needs an interval, date, index and margin")
+            .label(loc, help),
+    );
+    None
 }
 
 fn positive_loan_term(span: Span) -> bool {
