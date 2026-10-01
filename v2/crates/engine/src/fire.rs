@@ -46,9 +46,25 @@ impl Ledger<'_, '_, '_> {
         if rules.is_empty() {
             return;
         }
-        let (plan, mut done) = (self.plan, std::mem::take(&mut self.scratch.done));
-        let book = plan.book;
+        let mut done = std::mem::take(&mut self.scratch.done);
         done.clear();
+        self.fire_as_with_done(rules, on, subject, &mut done, self.plan.repeats);
+        self.scratch.done = done;
+    }
+
+    fn fire_as_with_done(
+        &mut self,
+        rules: &[Rule],
+        on: &Occasion,
+        subject: Option<Subject>,
+        done: &mut Vec<(axiom_core::Id<axiom_model::Law>, Subject)>,
+        deduplicate: bool,
+    ) {
+        if rules.is_empty() {
+            return;
+        }
+        let plan = self.plan;
+        let book = plan.book;
         for written in rules {
             // Purpose rules use the flow owner at run time. It must govern
             // filtering, de-duplication, headroom and diagnostics alike.
@@ -58,7 +74,7 @@ impl Ledger<'_, '_, '_> {
             }
             // A law that two rules bring to one subject runs once.
             let subject = rule.subject;
-            if plan.repeats {
+            if deduplicate {
                 if done.contains(&(rule.law, subject)) {
                     continue;
                 }
@@ -66,7 +82,6 @@ impl Ledger<'_, '_, '_> {
             }
             self.enforce(&rule, &Context::new(subject, owner_of(book, subject), &on));
         }
-        self.scratch.done = done;
     }
 
     /// Whether the `on spend` laws of `entity` permit the flow: a dry run that
@@ -108,31 +123,56 @@ impl Ledger<'_, '_, '_> {
     #[cold]
     fn enter_months(&mut self, day: Day) {
         let plan = self.plan;
+        let mut done = std::mem::take(&mut self.scratch.done);
+        let mut purpose_rules = std::mem::take(&mut self.scratch.purpose_rules);
+        let mut opened = None;
         while let Some(reached) = self.world.totals.reached(&plan.watch, day) {
+            let from = match &reached {
+                Reached::Subject(_, from) | Reached::Purpose(_, _, from) => *from,
+            };
+            if opened != Some(from) {
+                done.clear();
+                opened = Some(from);
+            }
             match reached {
                 Reached::Subject(subject, from) => {
                     for window in [Window::Month, Window::Year] {
                         let period = window.around(from);
                         let rules = plan.readers.get(&(subject, window));
                         if let Some(rules) = rules.filter(|_| period.first() == from) {
-                            self.fire(rules, &Occasion::window(from, period));
+                            self.fire_as_with_done(rules, &Occasion::window(from, period), None, &mut done, plan.repeats);
                         }
                     }
                 }
                 Reached::Purpose(owner, purpose, from) => {
                     for window in [Window::Month, Window::Year] {
                         let period = window.around(from);
-                        if period.first() == from {
-                            self.fire_as(
-                                &plan.book.rules.purposes[purpose],
-                                &Occasion::window(from, period),
-                                Some(Subject::Entity(owner)),
-                            );
+                        if period.first() != from {
+                            continue;
                         }
+                        purpose_rules.clear();
+                        if let Some(rules) = plan.purpose_readers.get(&(purpose, window)) {
+                            for &rule in rules {
+                                if !purpose_rules.contains(&rule) {
+                                    purpose_rules.push(rule);
+                                }
+                            }
+                        }
+                        self.fire_as_with_done(
+                            &purpose_rules,
+                            &Occasion::window(from, period),
+                            Some(Subject::Entity(owner)),
+                            &mut done,
+                            true,
+                        );
                     }
                 }
             }
         }
+        done.clear();
+        self.scratch.done = done;
+        purpose_rules.clear();
+        self.scratch.purpose_rules = purpose_rules;
     }
 
     pub(crate) fn evaluate(&mut self, law: Id<Law>, ctx: &Context) -> bool {

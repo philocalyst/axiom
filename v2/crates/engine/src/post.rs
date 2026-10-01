@@ -145,18 +145,12 @@ impl Ledger<'_, '_, '_> {
             m.target.owner == m.owner && m.target.class != Class::Outside,
         );
         let root = self.plan.book.purposes[purpose].root;
-        // A capital purchase between two asset places changes the form of the
-        // owner's property but still belongs in the capital total.
-        if source_owned && target_owned && root == axiom_model::PurposeRoot::Capital {
-            return self.base_value(m, m.out).map(|amount| (Dir::Out, amount));
-        }
-        match (source_owned, target_owned) {
-            (true, false) => self.base_value(m, m.out).map(|amount| (Dir::Out, amount)),
-            (false, true) => self.base_value(m, m.arrive).map(|amount| (Dir::In, amount)),
-            // A movement wholly inside one owner's books is not an income or
-            // spending event. Capital acquisitions are the exception above.
-            (true, true) | (false, false) => None,
-        }
+        let direction = crate::purpose_direction(source_owned, target_owned, root)?;
+        let amount = match direction {
+            Dir::Out => m.out,
+            Dir::In => m.arrive,
+        };
+        self.base_value(m, amount).map(|amount| (direction, amount))
     }
 
     /// Takes `m.out` from the source, leaving the value in flight in

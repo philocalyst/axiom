@@ -6,10 +6,10 @@
 //! law alone, so the plan works them out once into [`LawFacts`] and the fold
 //! reads them: nothing walks a law's nodes again.
 
-use axiom_core::{Days, Map, Severity, Sym};
+use axiom_core::{Days, Id, Map, Severity, Sym};
 use axiom_model::{
-    BinOp, Book, Cap, Dir, Effect as LawEffect, Func, Law, NodeId, Op, Rule, StepKind, Subject, Trigger, Ty, Value,
-    Var, Window,
+    BinOp, Book, Cap, Dir, Effect as LawEffect, Func, Law, NodeId, Op, Owner, Purpose, Rule, StepKind, Subject,
+    Trigger, Ty, Value, Var, Window,
 };
 
 use crate::Bound;
@@ -212,6 +212,40 @@ pub(crate) fn readers(book: &Book, laws: &[LawFacts]) -> Readers {
             let known = readers.entry((rule.subject, window)).or_default();
             if !known.contains(&rule) {
                 known.push(rule);
+            }
+        }
+    }
+    readers
+}
+
+/// Purpose-window readers, keyed by the purpose value that advances rather
+/// than by the law table that happens to inherit the rule. One law may read
+/// several explicit purposes; each becomes a subscription. Inherited purpose
+/// tables can repeat a Rule, so each `(purpose, window, Rule)` is stored once.
+pub(crate) type PurposeReaders = Map<(Id<Purpose>, Window), Vec<Rule>>;
+
+pub(crate) fn purpose_readers(book: &Book) -> PurposeReaders {
+    let mut readers = PurposeReaders::default();
+    let mut seen = Vec::new();
+    for &rule in book.rules.purposes.values() {
+        if seen.contains(&rule) {
+            continue;
+        }
+        seen.push(rule);
+        let law = &book.laws[rule.law];
+        let owner = match law.owner {
+            Owner::Purpose(purpose) => Some(purpose),
+            _ => None,
+        };
+        for node in &law.nodes {
+            let Op::Call(Func::PurposeTotal { purpose, window }, _) = &node.op else { continue };
+            if *window == Window::Ever {
+                continue;
+            }
+            let Some(purpose) = (*purpose).or(owner) else { continue };
+            let rules = readers.entry((purpose, *window)).or_default();
+            if !rules.contains(&rule) {
+                rules.push(rule);
             }
         }
     }

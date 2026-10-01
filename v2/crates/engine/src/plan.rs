@@ -14,7 +14,7 @@ use axiom_model::{Asset, Book, Commodity, Entity, Flow, Func, Kind, Op, Place, R
 
 use crate::sides::Sides;
 use crate::events::{self, Events};
-use crate::facts::{self, LawFacts, Readers};
+use crate::facts::{self, LawFacts, PurposeReaders, Readers};
 use crate::ledger::{Ledger, fold, fold_to_view, fold_to_view_and_effects_prefix};
 use crate::motion::Amounts;
 use crate::scope::containing;
@@ -69,6 +69,9 @@ pub struct Plan<'b, 's> {
     pub(crate) repeats: bool,
     /// The laws to read as a window opens with value already recognized into it.
     pub(crate) readers: Readers,
+    /// Purpose values that enter a month or year ahead of time, and the
+    /// purpose laws that read those windows. Flow-only laws never run here.
+    pub(crate) purpose_readers: PurposeReaders,
     /// The subjects whose flow totals some law reads.
     pub(crate) watch: Watch,
     /// The asset places each entity holds: its own, its subsidiaries' and its
@@ -122,6 +125,7 @@ impl<'b, 's> Plan<'b, 's> {
             sides,
             repeats: repeats(book),
             readers: facts::readers(book, &laws),
+            purpose_readers: facts::purpose_readers(book),
             watch,
             members: Groups::build(book.entities.len(), held),
             asset_places: asset_places(book),
@@ -209,7 +213,11 @@ impl<'b, 's> Plan<'b, 's> {
 fn repeats(book: &Book) -> bool {
     let rules = &book.rules;
     let per_place = rules.per_place().into_iter().flat_map(|table| table.iter().map(|(_, list)| list));
-    let lists = per_place.chain(rules.on_spend.iter().map(|(_, list)| list)).chain([&rules.timed[..]]);
+    let lists = per_place
+        .chain(rules.on_spend.iter().map(|(_, list)| list))
+        .chain(rules.purposes.iter().map(|(_, list)| list))
+        .chain(rules.about.iter().map(|(_, list)| list))
+        .chain([&rules.timed[..]]);
     lists.into_iter().any(|list: &[Rule]| {
         let mut seen = Set::default();
         list.iter().any(|rule| !seen.insert((rule.law, rule.subject)))

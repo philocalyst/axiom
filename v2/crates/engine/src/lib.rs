@@ -64,12 +64,28 @@ mod tests;
 use std::hash::{Hash, Hasher};
 
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
-use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, FlowCodes, Law, Place, Subject, System, Txn, Waive};
+use axiom_model::{
+    Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot, Subject, System, Txn,
+    Waive,
+};
 
 pub use checkpoint::Checkpoint;
 pub use ledger::Ledger;
 pub use plan::{Known, Plan, run};
 pub use sides::Sides;
+
+/// Classifies a purpose flow by whether it crosses the owner's boundary.
+/// Internal transfers have no income/spending direction; a capital-purpose
+/// acquisition between owned places is the one internal movement counted as
+/// outgoing capital.
+pub fn purpose_direction(source_owned: bool, target_owned: bool, root: PurposeRoot) -> Option<Dir> {
+    match (source_owned, target_owned) {
+        (true, false) => Some(Dir::Out),
+        (false, true) => Some(Dir::In),
+        (true, true) if root == PurposeRoot::Capital => Some(Dir::Out),
+        (true, true) | (false, false) => None,
+    }
+}
 
 /// What each phase hands on is shared by reference between threads: the plan
 /// every fold reads, the ledgers and checkpoints forked from it, and the run.

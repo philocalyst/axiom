@@ -198,21 +198,37 @@ fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
     );
     let limit = builder.konst(Value::Amount(f.usd(100_00)), Ty::AMOUNT);
     let within = builder.bin(BinOp::Le, total, limit, Ty::Bool);
-    let law = f.law(builder.warn(within));
+    let year_total = builder.call(
+        Func::PurposeTotal { purpose: Some(purpose), window: Window::Year },
+        &[],
+        Ty::AMOUNT,
+    );
+    let year_limit = builder.konst(Value::Amount(f.usd(500_00)), Ty::AMOUNT);
+    let year_within = builder.bin(BinOp::Le, year_total, year_limit, Ty::Bool);
+    let both_within = builder.bin(BinOp::And, within, year_within, Ty::Bool);
+    let law = f.law(builder.warn(both_within));
     f.laws[law].owner = Owner::Purpose(purpose);
+    let mut flow_only = LawBuilder::new(f.sym("purpose-flow-only"), Trigger::Flow);
+    let amount = flow_only.var(Var::Amount, Ty::AMOUNT);
+    let maximum = flow_only.konst(Value::Amount(f.usd(1_000_00)), Ty::AMOUNT);
+    let accepted = flow_only.bin(BinOp::Le, amount, maximum, Ty::Bool);
+    let flow_only = f.law(flow_only.warn(accepted));
+    f.laws[flow_only].owner = Owner::Purpose(purpose);
     let mut prepaid = f.flow(date(2025, 12, 15), checking, market, 300_00);
     f.recognize(prepaid, date(2025, 12, 15), date(2026, 2, 14));
     f.flows[prepaid.index()].purpose = Some(Purposed { purpose, of: None, source: Provenance::Written });
 
     let mut book = f.book();
     let rule = Rule { law, subject: Subject::Entity(me), days: Days::ALWAYS };
-    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule)]);
+    let flow_rule = Rule { law: flow_only, ..rule };
+    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule), (purpose, flow_rule)]);
     let run = run(&book, Options { today: Day(date(2026, 2, 28)), relaxed: false });
 
     assert_eq!(run.violations.len(), 1, "only January's recognized share exceeds the monthly cap");
     assert_eq!(run.violations[0].day, Day(date(2026, 1, 1)));
     assert_eq!(run.violations[0].cause, Cause::Time, "the limit breaks as the prepaid window opens");
-    assert_eq!(run.checks[law.index()], 3, "the flow and both future months are evaluated");
+    assert_eq!(run.checks[law.index()], 3, "the flow and both future months are evaluated once, despite reading two windows");
+    assert_eq!(run.checks[flow_only.index()], 1, "an amount-only flow law does not run at month or year openings");
 }
 
 #[test]

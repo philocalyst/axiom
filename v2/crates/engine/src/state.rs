@@ -13,7 +13,7 @@ use std::hash::{Hash, Hasher};
 
 use axiom_core::hash::FxHasher;
 use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
-use axiom_model::{Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Subject, Value};
+use axiom_model::{Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, Subject, Value};
 
 use crate::eval::Outcome;
 use crate::lots::{Holdings, Relief};
@@ -167,6 +167,8 @@ pub(crate) struct Scratch {
     pub worth: Vec<(Amount, Option<Qty>)>,
     /// The rules of the list being fired that have run, when a law can reach one subject twice.
     pub done: Vec<(Id<Law>, Subject)>,
+    /// Reused union of the purpose/window reader lists for one opening.
+    pub purpose_rules: Vec<Rule>,
 }
 
 impl Clone for Scratch {
