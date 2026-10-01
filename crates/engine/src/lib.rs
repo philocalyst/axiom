@@ -75,7 +75,7 @@ use axiom_model::{
 
 pub use assets::{
     AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey,
-    Part, PartId, PartKind,
+    Part, PartId, PartKind, PendingCarry,
 };
 pub use checkpoint::Checkpoint;
 pub use ledger::{Ledger, OccurrenceOutput, TemplateError};
@@ -166,6 +166,9 @@ pub struct Run {
     pub monitor_complete: bool,
     /// Basis the laws moved: consumed (depreciation) or carried (wash sales).
     pub adjustments: Vec<Adjustment>,
+    /// Carry losses whose statutory replacement window is still open at the
+    /// run horizon. Matched and expired requests are removed from this list.
+    pub pending_carries: Vec<PendingCarry>,
     /// How many times each law ran past its `when` filters, by law id.
     pub checks: Box<[u32]>,
     pub diagnostics: Vec<Diagnostic>,
@@ -574,6 +577,7 @@ pub struct Pad {
 pub struct Recorded<'a> {
     pub gains: &'a [Gain],
     pub effects: &'a [Effect],
+    pub adjustments: &'a [Adjustment],
     pub violations: &'a [Violation],
     pub diagnostics: &'a [Diagnostic],
 }
@@ -585,6 +589,7 @@ pub struct Recorded<'a> {
 pub struct Applied {
     pub gains: std::ops::Range<usize>,
     pub effects: std::ops::Range<usize>,
+    pub adjustments: std::ops::Range<usize>,
     pub violations: std::ops::Range<usize>,
     pub diagnostics: std::ops::Range<usize>,
 }

@@ -20,7 +20,7 @@ use crate::assets::Assets;
 use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
 use crate::totals::{Tallies, Totals, Watch};
-use crate::{Applied, Effect, Gain, Headroom, Pad, Violation};
+use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Violation};
 
 #[derive(Clone)]
 pub(crate) struct World {
@@ -67,6 +67,8 @@ pub(crate) struct Record {
     pub computed_basis: Map<Id<Flow>, Qty>,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
+    /// Basis changes caused by timed asset laws and deferred-loss matching.
+    pub adjustments: Vec<Adjustment>,
     pub violations: Vec<Violation>,
     pub pads: Vec<Pad>,
     pub diagnostics: Vec<Diagnostic>,
@@ -147,6 +149,7 @@ impl Record {
         Applied {
             gains: end(self.gains.len()),
             effects: end(self.effects.len()),
+            adjustments: end(self.adjustments.len()),
             violations: end(self.violations.len()),
             diagnostics: end(self.diagnostics.len()),
         }
@@ -158,6 +161,7 @@ impl Record {
         Applied {
             gains: to(marks.gains, self.gains.len()),
             effects: to(marks.effects, self.effects.len()),
+            adjustments: to(marks.adjustments, self.adjustments.len()),
             violations: to(marks.violations, self.violations.len()),
             diagnostics: to(marks.diagnostics, self.diagnostics.len()),
         }

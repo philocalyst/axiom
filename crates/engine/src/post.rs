@@ -441,6 +441,8 @@ impl Ledger<'_, '_, '_> {
                 proceeds: slice.worth,
                 basis: slice.basis,
                 held,
+                part: slice.part,
+                codes: m.code_runs,
             };
             let on = Occasion {
                 amount: Some(Amount::new(slice.qty, m.out.unit)),
@@ -474,6 +476,20 @@ impl Ledger<'_, '_, '_> {
             m.detail().since.unwrap_or(m.day),
         );
         let acquisition = self.new_acquisition_part(m);
+        let declared_asset = book
+            .commodities
+            .get(m.arrive.unit)
+            .is_some_and(|commodity| book.asset(book.name(commodity.symbol)).is_some());
+        let fresh_part = if keeps || money || m.moves != Moves::Value {
+            None
+        } else {
+            acquisition.map(|(_, part)| part.id).or_else(|| {
+                (!declared_asset).then_some(PartId {
+                    origin: m.txn,
+                    ordinal: m.flow_ordinal,
+                })
+            })
+        };
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let mut shares = Shares::new(m.arrive.qty, whole);
         {
@@ -500,11 +516,7 @@ impl Ledger<'_, '_, '_> {
                         txn,
                         // An ordinary asset-place transfer carries the same
                         // acquisition anchor through every split slice.
-                        part: if keeps {
-                            slice.part
-                        } else {
-                            acquisition.map(|(_, part)| part.id)
-                        },
+                        part: if keeps { slice.part } else { fresh_part },
                         codes,
                         tied: hold.unwrap_or(kept),
                     },
@@ -514,20 +526,27 @@ impl Ledger<'_, '_, '_> {
             }
         }
         for slice in &self.scratch.relief.slices {
-            let part = if keeps {
-                slice.part
-            } else {
-                acquisition.map(|(_, part)| part.id)
-            };
+            let part = if keeps { slice.part } else { fresh_part };
             if let Some(part) = part {
                 self.world
                     .holdings
                     .index_part_slot(m.to, m.arrive.unit, part);
             }
         }
-        if let Some((asset, part)) = acquisition {
-            if let Err(error) = self.add_asset_part(asset, part) {
-                self.report_asset_state_error(m, error);
+        let part_ready = if let Some((asset, part)) = acquisition {
+            match self.add_asset_part(asset, part) {
+                Ok(()) => true,
+                Err(error) => {
+                    self.report_asset_state_error(m, error);
+                    false
+                }
+            }
+        } else {
+            !declared_asset
+        };
+        if !keeps && part_ready {
+            if let Some(part) = fresh_part {
+                self.match_pending_carries(part, owner, m.arrive.unit, since, m.arrive.qty, m);
             }
         }
     }
@@ -790,6 +809,7 @@ impl Ledger<'_, '_, '_> {
         let Some((asset, Dir::In)) = self.capital_asset_direction(m) else {
             return;
         };
+        self.pre_disposal(asset, m.day);
         let book = self.plan.book;
         let declaration = &book.assets[asset];
         let boundary = DisposalBoundary::After(self.event_key(m));
@@ -829,9 +849,13 @@ impl Ledger<'_, '_, '_> {
             self.report_asset_state_error(m, crate::AssetError::UnknownPart);
             return;
         }
-        let Some(proceeds) = self.realizes(m) else {
+        let Some(gross) = self.proceeds(m) else {
             return;
         };
+        let Some(stated_less) = self.asset_sale_less_items(m) else {
+            return;
+        };
+        let proceeds = gross - self.exchange_cost(m) - stated_less;
         if proceeds.is_negative() {
             self.report_asset_state_error(m, crate::AssetError::NegativeAmount);
             return;
@@ -901,6 +925,8 @@ impl Ledger<'_, '_, '_> {
                     proceeds: fetched,
                     basis: slice.basis,
                     held: m.day.since(slice.acquired),
+                    part: slice.part,
+                    codes: m.code_runs,
                 }),
                 purpose: m.purpose,
                 ..Occasion::flow(m)
@@ -909,6 +935,75 @@ impl Ledger<'_, '_, '_> {
         }
         if let Err(error) = self.dispose_asset(asset, m.txn, self.source_flow(m), boundary) {
             self.report_asset_state_error(m, error);
+        }
+    }
+
+    /// Matches future replacement acquisitions against losses already waiting
+    /// in the canonical carry queue. The parcel has been landed and indexed,
+    /// and a declared asset part (if any) has been added before this runs.
+    fn match_pending_carries(
+        &mut self,
+        part: PartId,
+        owner: Id<Entity>,
+        unit: Id<axiom_model::Commodity>,
+        acquired: axiom_core::Day,
+        quantity: Qty,
+        motion: &Motion,
+    ) {
+        let mut left = quantity;
+        let mut matched = Vec::new();
+        for index in 0..self.world.assets.pending_carries().len() {
+            let Some(request) = self.world.assets.pending_carry(index) else { continue };
+            if left.is_zero()
+                || request.owner != owner
+                || request.unit != unit
+                || request.from == part
+                || acquired < request.sold
+                || !crate::Assets::within_carry_window(request.sold, acquired, request.within)
+            {
+                continue;
+            }
+            let take = request.quantity.min(left);
+            if take.is_zero() {
+                continue;
+            }
+            let mut shares = Shares::new(request.amount, request.quantity);
+            let amount = shares.take(take);
+            matched.push((index, request, take, amount));
+            left -= take;
+        }
+        if matched.is_empty() {
+            return;
+        }
+        let Some(total) = matched.iter().try_fold(Qty::ZERO, |sum, (_, _, _, amount)| {
+            sum.0.checked_add(amount.0).map(Qty)
+        }) else {
+            self.report_asset_state_error(motion, crate::AssetError::Overflow);
+            return;
+        };
+        if let Err(error) = self.carry_basis_to_part(part, total) {
+            self.report_asset_state_error(motion, error);
+            return;
+        }
+        // `index` values refer to the pre-update queue. Removing in reverse
+        // order preserves the remaining indices; all updated amounts were
+        // precomputed while the basis guard was still untouched.
+        for (index, request, taken, amount) in matched.into_iter().rev() {
+            let quantity = request.quantity - taken;
+            let remaining = request.amount - amount;
+            if let Err(error) = self.world.assets.update_pending_carry(index, quantity, remaining) {
+                self.report_asset_state_error(motion, error);
+                return;
+            }
+            self.record.adjustments.push(crate::Adjustment {
+                day: motion.day,
+                law: request.law,
+                kind: crate::AdjustmentKind::Carried {
+                    from: request.from,
+                    to: Some(part),
+                },
+                amount,
+            });
         }
     }
 
@@ -1000,6 +1095,61 @@ impl Ledger<'_, '_, '_> {
         }
     }
 
+    /// A sale's header proceeds include explicit Less items before basis is
+    /// realized. These item values are carried by the transaction's typed
+    /// journal group, not by the header's Detail.cost field.
+    fn asset_sale_less_items(&mut self, m: &Motion) -> Option<Qty> {
+        let book = self.plan.book;
+        let Some(txn_id) = m.txn.source_txn() else { return Some(Qty::ZERO) };
+        let Some(txn) = book.txns.get(txn_id) else { return Some(Qty::ZERO) };
+        let Some(program_id) = txn.program else { return Some(Qty::ZERO) };
+        let program = &book.journal_programs[program_id];
+        let Some(group) = program
+            .groups
+            .iter()
+            .find(|group| group.header == Some(m.flow_ordinal)) else { return Some(Qty::ZERO) };
+        let mut total = Qty::ZERO;
+        for item in group.items.iter().filter(|item| {
+            item.parent == axiom_model::TemplateItemParent::Header
+                && item.sign == axiom_model::Sign::Less
+        }) {
+            let amount = match item.amount {
+                axiom_model::TemplateAmount::Literal(amount) => amount,
+                axiom_model::TemplateAmount::Computed(_) => {
+                    self.record.report(
+                        Diagnostic::error(
+                            "asset-sale-cost",
+                            "a computed Less item cannot be valued before asset gain realization",
+                        )
+                        .label(item.loc, "asset sale proceeds are incomplete"),
+                    );
+                    return None;
+                }
+            };
+            let value = if amount.unit == book.base {
+                amount.qty
+            } else {
+                let Some(value) = book.convert(amount, book.base, m.day) else {
+                    self.record.report(
+                        Diagnostic::error(
+                            "asset-sale-cost",
+                            "a sale cost has no price in the book's base currency",
+                        )
+                        .label(item.loc, "cost could not be subtracted from proceeds"),
+                    );
+                    return None;
+                };
+                value.qty
+            };
+            let Some(sum) = total.0.checked_add(value.0) else {
+                self.report_asset_state_error(m, crate::AssetError::Overflow);
+                return None;
+            };
+            total = Qty(sum);
+        }
+        Some(total)
+    }
+
     /// `amount` in the base currency at the flow's day. A missing price is
     /// reported once per commodity: the first day it is missing, which is
     /// before the first price, since a price stands until the next.
@@ -1077,6 +1227,7 @@ purpose improvement : capital
   of asset
 purpose sale : capital
   of asset
+purpose fees : spending
 account assets/checking
 entity contractor
 entity buyer
@@ -1088,6 +1239,7 @@ opening 2025-01-01
 2025-01-05 checking -> contractor 1_000 USD #purchase of condo
 2025-02-15 checking -> contractor 100 USD #improvement of condo
 2025-03-01 buyer -> checking 1_500 USD #sale of condo
+  - 60 USD #fees
 ";
         let book = book(text);
         let run = crate::run(
@@ -1127,7 +1279,7 @@ opening 2025-01-01
             state.disposed.map(|disposal| disposal.boundary),
             Some(DisposalBoundary::After(EventKey {
                 day: day(2025, 3, 1),
-                sequence: u64::from(book.flows.len() as u32 - 1),
+                sequence: u64::from(book.flows.len() as u32 - 2),
             }))
         );
 
@@ -1138,7 +1290,7 @@ opening 2025-01-01
             .expect("sale records realized gain");
         assert_eq!(
             (sale.proceeds.0, sale.basis.0, sale.gain().0),
-            (150_000, 110_000, 40_000)
+            (144_000, 110_000, 34_000)
         );
         assert!(
             !run.holdings
@@ -1153,7 +1305,7 @@ opening 2025-01-01
             .iter()
             .find(|holding| holding.place == checking && holding.unit == usd)
             .unwrap();
-        assert_eq!(cash.qty().0, 5_400_00);
+        assert_eq!(cash.qty().0, 5_340_00);
     }
 
     #[test]

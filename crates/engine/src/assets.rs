@@ -7,7 +7,9 @@
 //! table preserves the composition of its cost basis for part-aware laws.
 
 use axiom_core::{Day, Id, Qty, Span};
-use axiom_model::{Asset, Book, Commodity, Entity, Flow, RuntimeTxn};
+use axiom_model::{Asset, Book, Commodity, Entity, Flow, FlowCodes, Law, RuntimeTxn};
+
+use crate::Cause;
 
 /// Stable identity of one asset part within its originating runtime flow.
 ///
@@ -82,6 +84,23 @@ pub struct Disposal {
     pub txn: RuntimeTxn,
     pub flow: Option<Id<Flow>>,
     pub boundary: DisposalBoundary,
+}
+
+/// A loss awaiting a replacement lot inside its statutory acquisition window.
+/// This is matching metadata, not a second holdings balance; its remaining
+/// quantity and amount are resolved against canonical `Holdings` parcels.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct PendingCarry {
+    pub law: Id<Law>,
+    pub from: PartId,
+    pub cause: Cause,
+    pub owner: Id<Entity>,
+    pub unit: Id<Commodity>,
+    pub sold: Day,
+    pub within: Span,
+    pub quantity: Qty,
+    pub amount: Qty,
+    pub codes: FlowCodes,
 }
 
 /// One asset's parts and explicit disposal state.
@@ -196,6 +215,9 @@ pub struct Assets {
     /// Append-only part table keyed by stable identity. The value is an asset
     /// arena index and the part's position within that asset's append-only list.
     part_index: axiom_core::Map<PartId, (Id<Asset>, usize)>,
+    /// Unmatched statutory carry requests, in source order. They affect future
+    /// basis and therefore participate in checkpoint identity.
+    pending_carries: Vec<PendingCarry>,
 }
 
 impl std::hash::Hash for Assets {
@@ -204,6 +226,7 @@ impl std::hash::Hash for Assets {
         // those vectors in asset/ledger order is deterministic and includes
         // each part's cost, remaining basis, event boundary, and disposal.
         self.states.hash(state);
+        self.pending_carries.hash(state);
     }
 }
 
@@ -215,6 +238,7 @@ impl Assets {
                 .map(|index| AssetState::new(Id::new(index as u32)))
                 .collect(),
             part_index: axiom_core::Map::default(),
+            pending_carries: Vec::new(),
         }
     }
 
@@ -234,6 +258,89 @@ impl Assets {
 
     pub(crate) fn into_states(self) -> Vec<AssetState> {
         self.states
+    }
+
+    pub(crate) fn into_run_parts(self) -> (Vec<AssetState>, Vec<PendingCarry>) {
+        (self.states, self.pending_carries)
+    }
+
+    pub fn pending_carries(&self) -> &[PendingCarry] {
+        &self.pending_carries
+    }
+
+    pub(crate) fn expire_carries_through(&mut self, day: Day) {
+        self.pending_carries.retain(|carry| {
+            shift(carry.sold, carry.within).is_none_or(|expires| expires > day)
+        });
+    }
+
+    pub(crate) fn within_carry_window(left: Day, right: Day, within: Span) -> bool {
+        shift(left, within).is_none_or(|last| right <= last)
+            && shift(right, within).is_none_or(|last| left <= last)
+    }
+
+    pub(crate) fn enqueue_carry(&mut self, carry: PendingCarry) -> Result<(), AssetError> {
+        if carry.quantity <= Qty::ZERO || carry.amount <= Qty::ZERO {
+            return Err(AssetError::NegativeAmount);
+        }
+        if carry.within.months < 0 || carry.within.days < 0 {
+            return Err(AssetError::NegativeSpan);
+        }
+        if let Some(existing) = self.pending_carries.iter_mut().find(|existing| {
+            existing.law == carry.law
+                && existing.from == carry.from
+                && existing.cause == carry.cause
+                && existing.owner == carry.owner
+                && existing.unit == carry.unit
+                && existing.sold == carry.sold
+                && existing.within == carry.within
+        }) {
+            // Preflight both arithmetic operations before changing either
+            // field. An overflow must not leave a half-merged request behind.
+            let quantity = existing
+                .quantity
+                .0
+                .checked_add(carry.quantity.0)
+                .map(Qty)
+                .ok_or(AssetError::Overflow)?;
+            let amount = existing
+                .amount
+                .0
+                .checked_add(carry.amount.0)
+                .map(Qty)
+                .ok_or(AssetError::Overflow)?;
+            existing.quantity = quantity;
+            existing.amount = amount;
+        } else {
+            self.pending_carries.push(carry);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn pending_carry(&self, index: usize) -> Option<PendingCarry> {
+        self.pending_carries.get(index).copied()
+    }
+
+    pub(crate) fn update_pending_carry(
+        &mut self,
+        index: usize,
+        quantity: Qty,
+        amount: Qty,
+    ) -> Result<(), AssetError> {
+        if index >= self.pending_carries.len() {
+            return Err(AssetError::UnknownPart);
+        }
+        if quantity.is_negative() || amount.is_negative() {
+            return Err(AssetError::NegativeAmount);
+        }
+        if quantity.is_zero() || amount.is_zero() {
+            self.pending_carries.remove(index);
+        } else {
+            let request = &mut self.pending_carries[index];
+            request.quantity = quantity;
+            request.amount = amount;
+        }
+        Ok(())
     }
 
     /// Adds a part in event order. An asset's first part must be its original
@@ -446,6 +553,73 @@ impl Assets {
         })
     }
 
+    /// Prepares a positive basis addition to one declared asset part. The
+    /// corresponding physical parcel is adjusted by `assets_runtime` under a
+    /// second disjoint mutable guard before either store is committed.
+    pub(crate) fn prepare_basis_addition(
+        &mut self,
+        asset: Id<Asset>,
+        part_id: PartId,
+        amount: Qty,
+    ) -> Result<AssetBasisGuard<'_>, AssetError> {
+        if amount.is_negative() {
+            return Err(AssetError::NegativeAmount);
+        }
+        let state = self
+            .states
+            .get_mut(asset.index())
+            .filter(|state| state.asset == asset)
+            .ok_or(AssetError::UnknownAsset)?;
+        if state.disposed.is_some() {
+            return Err(AssetError::Disposed);
+        }
+        let (owner, index) = self.part_index.get(&part_id).copied().ok_or(AssetError::UnknownPart)?;
+        if owner != asset {
+            return Err(AssetError::UnknownPart);
+        }
+        let part = state.parts.get_mut(index).ok_or(AssetError::UnknownPart)?;
+        let basis = Qty(part
+            .basis
+            .0
+            .checked_add(amount.0)
+            .ok_or(AssetError::Overflow)?);
+        Ok(AssetBasisGuard { part, basis })
+    }
+
+    pub(crate) fn prepare_basis_additions(
+        &mut self,
+        additions: &[(Id<Asset>, PartId, Qty)],
+    ) -> Result<AssetBasisBatchGuard<'_>, AssetError> {
+        let mut changes = Vec::with_capacity(additions.len());
+        for &(asset, part_id, amount) in additions {
+            if amount.is_negative() {
+                return Err(AssetError::NegativeAmount);
+            }
+            if amount.is_zero() {
+                continue;
+            }
+            if changes.iter().any(|change: &AssetBasisChange| change.part_id == part_id) {
+                return Err(AssetError::DuplicatePart);
+            }
+            let state = self
+                .states
+                .get(asset.index())
+                .filter(|state| state.asset == asset)
+                .ok_or(AssetError::UnknownAsset)?;
+            if state.disposed.is_some() {
+                return Err(AssetError::Disposed);
+            }
+            let (owner, index) = self.part_index.get(&part_id).copied().ok_or(AssetError::UnknownPart)?;
+            if owner != asset {
+                return Err(AssetError::UnknownPart);
+            }
+            let part = state.parts.get(index).ok_or(AssetError::UnknownPart)?;
+            let basis = Qty(part.basis.0.checked_add(amount.0).ok_or(AssetError::Overflow)?);
+            changes.push(AssetBasisChange { asset: asset.index(), part_id, part: index, basis });
+        }
+        Ok(AssetBasisBatchGuard { assets: self, changes })
+    }
+
     /// The nearest acquisition of `unit` owned by `owner` within `within`,
     /// considering only parts the canonical holdings still report live. Day
     /// distance is measured in civil days; equal distances prefer the earlier
@@ -587,6 +761,37 @@ pub struct CarryUpdate {
 pub(crate) struct CarryGuard<'a> {
     result: CarryUpdate,
     target: Option<(&'a mut Part, Qty, Qty)>,
+}
+
+pub(crate) struct AssetBasisGuard<'a> {
+    part: &'a mut Part,
+    basis: Qty,
+}
+
+impl AssetBasisGuard<'_> {
+    pub fn apply(self) {
+        self.part.basis = self.basis;
+    }
+}
+
+struct AssetBasisChange {
+    asset: usize,
+    part_id: PartId,
+    part: usize,
+    basis: Qty,
+}
+
+pub(crate) struct AssetBasisBatchGuard<'a> {
+    assets: &'a mut Assets,
+    changes: Vec<AssetBasisChange>,
+}
+
+impl AssetBasisBatchGuard<'_> {
+    pub fn apply(self) {
+        for change in self.changes {
+            self.assets.states[change.asset].parts[change.part].basis = change.basis;
+        }
+    }
 }
 
 impl CarryGuard<'_> {

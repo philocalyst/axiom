@@ -192,6 +192,57 @@ impl Ledger<'_, '_, '_> {
     ) -> Result<(), AssetError> {
         self.world.assets.dispose(asset, txn, flow, boundary)
     }
+
+    /// Adds a replacement-basis amount to the canonical lot. For a declared
+    /// asset the lot is the acquisition anchor, while the asset table owns the
+    /// selected part detail; both checked guards are held before either is
+    /// applied. Ordinary security lots have only the holdings side.
+    pub(crate) fn carry_basis_to_part(
+        &mut self,
+        part: crate::PartId,
+        amount: Qty,
+    ) -> Result<(), AssetError> {
+        self.carry_basis_to_parts(&[(part, amount)])
+    }
+
+    pub(crate) fn carry_basis_to_parts(
+        &mut self,
+        additions: &[(crate::PartId, Qty)],
+    ) -> Result<(), AssetError> {
+        let world = &mut self.world;
+        let (assets, holdings) = (&mut world.assets, &mut world.holdings);
+        let mut asset_additions = Vec::new();
+        let mut checked_assets = Vec::new();
+        for &(part, amount) in additions {
+            if amount.is_negative() {
+                return Err(AssetError::NegativeAmount);
+            }
+            let Some((asset, record)) = assets.part(part) else { continue };
+            let state = assets.asset(asset).ok_or(AssetError::UnknownAsset)?;
+            let anchor = state.parts().first().ok_or(AssetError::MissingAcquisition)?.id;
+            if part != anchor {
+                return Err(AssetError::UnknownPart);
+            }
+            if !checked_assets.iter().any(|(seen, _)| *seen == asset) {
+                if holdings.part_basis(anchor)? != state.total_basis()? {
+                    return Err(AssetError::ParcelBasisMismatch);
+                }
+                checked_assets.push((asset, anchor));
+            }
+            asset_additions.push((asset, record.id, amount));
+        }
+        let parcel_additions: Vec<_> = additions
+            .iter()
+            .map(|&(part, amount)| (part, amount))
+            .collect();
+        let asset_parts = assets.prepare_basis_additions(&asset_additions)?;
+        let parcels = holdings.prepare_part_basis_additions(&parcel_additions)?;
+        // Both mutations have been completely preflighted and the guards
+        // borrow disjoint canonical stores through these infallible commits.
+        asset_parts.apply();
+        parcels.apply();
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -11,8 +11,11 @@
 //! crossed the line (or, for a window that value recognized ahead of time
 //! broke by itself, as the window opens), and its diagnostic is built only then.
 
-use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
-use axiom_model::{Amount, Cap, CapTarget, Entity, Fault, Law, Rule, Subject, Trigger, Window};
+use axiom_core::{Day, Days, Diagnostic, Id, Qty, Span, Sym};
+use axiom_model::{
+    Amount, Cap, CapTarget, Effect as LawEffect, Entity, Fault, Law, Period, Rule, StepKind,
+    Subject, Trigger, Window,
+};
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
 use crate::explain::{self, Frame};
@@ -23,7 +26,10 @@ use crate::plan::Plan;
 use crate::scope::owner_of;
 use crate::state::Missing;
 use crate::totals::{Reached, by_year};
-use crate::{Consequence, Effect, Headroom, Owed, Verdict, Violation, Waiver};
+use crate::{
+    Adjustment, AdjustmentKind, Consequence, Effect, EventKey, Headroom, Owed, PartId,
+    Verdict, Violation, Waiver,
+};
 
 /// Whether the rule is in force for some day of the occasion.
 fn applies(plan: &Plan, rule: &Rule, on: &Occasion) -> bool {
@@ -32,6 +38,16 @@ fn applies(plan: &Plan, rule: &Rule, on: &Occasion) -> bool {
             .motion
             .is_some_and(|m| plan.inside(rule.subject, m.from) && plan.inside(rule.subject, m.to));
     rule.days.overlaps(on.span) && !internal
+}
+
+fn law_consumes(book: &axiom_model::Book<'_>, law: Id<Law>) -> bool {
+    book.laws[law].steps.iter().any(|step| match &step.kind {
+        StepKind::Effect(LawEffect::Consume { .. }) => true,
+        StepKind::Require { otherwise, .. } => otherwise
+            .iter()
+            .any(|effect| matches!(effect, LawEffect::Consume { .. })),
+        _ => false,
+    })
 }
 
 impl Ledger<'_, '_, '_> {
@@ -121,8 +137,108 @@ impl Ledger<'_, '_, '_> {
     /// Fires one `by` law whose date the journal has reached, or closes a
     /// month or year for an `each` law, if its rule was in force then.
     pub(crate) fn deadline(&mut self, rule: usize, day: Day, period: Days) {
-        let rule = &self.plan.book.rules.timed[rule];
-        self.fire(std::slice::from_ref(rule), &Occasion::time(day, period));
+        let rule = self.plan.book.rules.timed[rule];
+        if let Subject::Asset(asset) = rule.subject {
+            let count = self.world.assets.asset(asset).map_or(0, |state| state.part_count());
+            let on = Occasion::time(day, period);
+            for index in 0..count {
+                let Some(part) = self
+                    .world
+                    .assets
+                    .asset(asset)
+                    .and_then(|state| state.parts().get(index))
+                    .copied()
+                else {
+                    continue;
+                };
+                if self.asset_part_held(asset, part.id, day) {
+                    self.fire_asset_part(rule, &on, part.id);
+                }
+            }
+        } else {
+            self.fire(std::slice::from_ref(&rule), &Occasion::time(day, period));
+        }
+    }
+
+    /// Runs the consuming laws due so far for each part before the asset is
+    /// disposed. A sale precedes the end-of-period deadline in the timeline,
+    /// so this closes only the partial sale period and ordinary deadlines
+    /// later that day see the disposal boundary and skip the asset.
+    pub(crate) fn pre_disposal(&mut self, asset: axiom_core::Id<axiom_model::Asset>, day: Day) {
+        let count = self.world.assets.asset(asset).map_or(0, |state| state.part_count());
+        if count == 0 {
+            return;
+        }
+        let mut rules = Vec::new();
+        for rule in self.plan.book.rules.timed.iter().copied() {
+            if rule.subject != Subject::Asset(asset)
+                || !law_consumes(self.plan.book, rule.law)
+            {
+                continue;
+            }
+            let window = match self.plan.book.laws[rule.law].trigger {
+                Trigger::Each(Period::Month, None) => Window::Month,
+                Trigger::Each(Period::Year, None) => Window::Year,
+                // A once-only `by` deadline is its own event. A sale does not
+                // advance unrelated deadlines early.
+                _ => continue,
+            };
+            let whole = window.around(day);
+            let Some(partial) = Days::new(whole.first(), day) else {
+                continue;
+            };
+            if rule.days.overlaps(partial) {
+                rules.push((rule, partial));
+            }
+        }
+        if rules.is_empty() {
+            return;
+        }
+        for index in 0..count {
+            let Some(part) = self
+                .world
+                .assets
+                .asset(asset)
+                .and_then(|state| state.parts().get(index))
+                .copied()
+            else {
+                continue;
+            };
+            if !self.asset_part_held(asset, part.id, day) {
+                continue;
+            }
+            for (rule, partial) in rules.iter().copied() {
+                let on = Occasion::partial_terminal(day, partial);
+                if applies(self.plan, &rule, &on) {
+                    self.fire_asset_part(rule, &on, part.id);
+                }
+            }
+        }
+    }
+
+    fn asset_part_held(&self, asset: axiom_core::Id<axiom_model::Asset>, part: PartId, day: Day) -> bool {
+        let Some(state) = self.world.assets.asset(asset) else {
+            return false;
+        };
+        let Some((owner, record)) = self.world.assets.part(part) else {
+            return false;
+        };
+        owner == asset
+            && record.recorded.day <= day
+            && state.held_at(EventKey {
+                day,
+                sequence: u64::MAX,
+            })
+    }
+
+    fn fire_asset_part(&mut self, rule: Rule, on: &Occasion<'_>, part: PartId) {
+        if !applies(self.plan, &rule, on) {
+            return;
+        }
+        let book = self.plan.book;
+        let context = Context::new(rule.subject, owner_of(book, rule.subject), on)
+            .for_asset_part(part);
+        self.enforce(&rule, &context);
     }
 
     /// Reads the laws about every month that begins by `day` with value
@@ -262,6 +378,183 @@ impl Ledger<'_, '_, '_> {
         holds
     }
 
+    fn consume(&mut self, rule: &Rule, ctx: &Context, step: u32, amount: Amount) {
+        let (Subject::Asset(asset), Some(part)) = (ctx.subject, ctx.asset_part) else {
+            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+            return;
+        };
+        let book = self.plan.book;
+        let Some(amount) = book.convert(amount, book.base, ctx.day) else {
+            self.fault(
+                rule,
+                ctx,
+                step as usize,
+                Fault::NoPrice {
+                    unit: amount.unit,
+                    quote: book.base,
+                },
+            );
+            return;
+        };
+        match self.consume_asset_part(asset, part, amount.qty) {
+            Ok(consumption) => {
+                if !consumption.excess.is_zero() {
+                    self.record.report(
+                        Diagnostic::error(
+                            "asset-consume-excess",
+                            "the law consumes more basis than this asset part has remaining",
+                        )
+                        .label(book.laws[rule.law].loc, "consumption is limited to remaining basis"),
+                    );
+                }
+                if !consumption.applied.is_zero() {
+                    self.record.adjustments.push(Adjustment {
+                        day: ctx.day,
+                        law: rule.law,
+                        kind: AdjustmentKind::Consumed { asset, part },
+                        amount: consumption.applied,
+                    });
+                }
+            }
+            Err(error) => {
+                self.record.report(
+                    Diagnostic::error(
+                        "asset-consume",
+                        format!("asset part basis could not be consumed: {error:?}"),
+                    )
+                    .label(book.laws[rule.law].loc, "basis update failed"),
+                );
+            }
+        }
+    }
+
+    fn carry(
+        &mut self,
+        rule: &Rule,
+        ctx: &Context,
+        step: u32,
+        amount: Amount,
+        unit: axiom_core::Id<axiom_model::Commodity>,
+        within: Span,
+    ) {
+        let Some(realized) = ctx.realized else {
+            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+            return;
+        };
+        let Some(from) = realized.part else {
+            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+            return;
+        };
+        if realized.gain >= Qty::ZERO || amount.qty <= Qty::ZERO || within.months < 0 || within.days < 0 {
+            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+            return;
+        }
+        let book = self.plan.book;
+        let Some(amount) = book.convert(amount, book.base, ctx.day) else {
+            self.fault(rule, ctx, step as usize, Fault::NoPrice { unit: amount.unit, quote: book.base });
+            return;
+        };
+        let Some(loss) = realized.gain.0.checked_neg().map(Qty) else {
+            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+            return;
+        };
+        if amount.qty > loss {
+            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+            return;
+        }
+        let Some(sold) = ctx.amount.filter(|amount| amount.unit == unit && amount.qty > Qty::ZERO) else {
+            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+            return;
+        };
+
+        // Search only this owner's asset places and the matching commodity.
+        // The held parcels are the canonical acquisition and quantity data.
+        let mut candidates: Vec<(Day, PartId, Qty)> = Vec::new();
+        let mut overflow = false;
+        for &place in self.plan.places_of(ctx.owner) {
+            let Some(slot) = self.world.holdings.get(place, unit) else { continue };
+            for parcel in &slot.holding.lots {
+                let Some(part) = parcel.part else { continue };
+                if part == from
+                    || parcel.qty <= Qty::ZERO
+                    || parcel.acquired > ctx.day
+                    || !crate::Assets::within_carry_window(parcel.acquired, ctx.day, within)
+                {
+                    continue;
+                }
+                if let Some((_, _, quantity)) = candidates.iter_mut().find(|(_, seen, _)| *seen == part) {
+                    if let Some(sum) = quantity.0.checked_add(parcel.qty.0) {
+                        quantity.0 = sum;
+                    } else {
+                        overflow = true;
+                        break;
+                    }
+                } else {
+                    candidates.push((parcel.acquired, part, parcel.qty));
+                }
+            }
+            if overflow { break; }
+        }
+        if overflow {
+            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+            return;
+        }
+        candidates.sort_by_key(|(day, _, _)| std::cmp::Reverse(*day));
+        let Some(available) = candidates.iter().try_fold(Qty::ZERO, |sum, (_, _, qty)| {
+            sum.0.checked_add(qty.0).map(Qty)
+        }) else {
+            self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+            return;
+        };
+        let matched_qty = available.min(sold.qty);
+        let mut quantity_left = matched_qty;
+        let mut shares = crate::lots::Shares::new(amount.qty, sold.qty);
+        let mut additions = Vec::new();
+        for (_, part, available) in candidates {
+            if quantity_left.is_zero() { break; }
+            let quantity = available.min(quantity_left);
+            let basis = shares.take(quantity);
+            if !basis.is_zero() { additions.push((part, basis)); }
+            quantity_left -= quantity;
+        }
+        if !additions.is_empty() {
+            if self.carry_basis_to_parts(&additions).is_err() {
+                self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+                return;
+            }
+            for &(to, basis) in &additions {
+                self.record.adjustments.push(Adjustment {
+                    day: ctx.day,
+                    law: rule.law,
+                    kind: AdjustmentKind::Carried { from, to: Some(to) },
+                    amount: basis,
+                });
+            }
+        }
+        let unmatched_qty = sold.qty - matched_qty;
+        if !unmatched_qty.is_zero() {
+            let matched_amount = additions.iter().map(|(_, basis)| *basis).fold(Qty::ZERO, |sum, amount| sum + amount);
+            let unmatched_amount = amount.qty - matched_amount;
+            if !unmatched_amount.is_zero() {
+                let carry = crate::PendingCarry {
+                    law: rule.law,
+                    from,
+                    cause: ctx.cause,
+                    owner: ctx.owner,
+                    unit,
+                    sold: ctx.day,
+                    within,
+                    quantity: unmatched_qty,
+                    amount: unmatched_amount,
+                    codes: realized.codes,
+                };
+                if self.world.assets.enqueue_carry(carry).is_err() {
+                    self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+                }
+            }
+        }
+    }
+
     /// Reads a floor of nothing (`balance >= empty`) straight off the holdings
     /// without evaluating it: the subject's holdings, when all are in the base
     /// currency, add up to no less than nothing. A subject that holds another
@@ -335,6 +628,17 @@ impl Ledger<'_, '_, '_> {
                     self.record.effects.push(effect);
                 }
                 Outcome::Count { .. } | Outcome::Owe { .. } => {}
+                Outcome::Consume { step, amount } => {
+                    self.consume(rule, ctx, step, amount);
+                }
+                Outcome::Carry {
+                    step,
+                    amount,
+                    unit,
+                    within,
+                } => {
+                    self.carry(rule, ctx, step, amount, unit, within);
+                }
                 Outcome::Priced {
                     step,
                     name,

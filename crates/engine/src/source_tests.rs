@@ -524,6 +524,125 @@ fn an_improvement_adds_basis_without_changing_the_asset_quantity() {
     });
 }
 
+const PART_DEPRECIATION: &str = "\
+base USD
+commodity USD
+  precision 2
+kind property : thing
+  has in-service date
+  law depreciation
+    each month
+    consume 10 USD
+purpose purchase : capital
+  of asset
+purpose improvement : capital
+  of asset
+purpose sale : capital
+  of asset
+account assets/checking
+entity seller
+entity buyer
+asset condo : property
+  in-service 2025-01-01
+
+opening 2025-01-01
+  checking 2_000 USD
+
+2025-01-02 checking -> seller 1_000 USD #purchase of condo
+";
+
+#[test]
+fn timed_asset_law_consumes_each_service_clock_part() {
+    let text = format!(
+        "{PART_DEPRECIATION}2025-02-15 checking -> seller 120 USD #improvement of condo\n"
+    );
+    with_run(&text, day(2025, 2, 28), |book, run| {
+        let errors: Vec<_> = run
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.is_error())
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert!(errors.is_empty(), "{errors:?}");
+        let asset = book.asset("condo").unwrap();
+        let parts = run.assets[asset.index()].parts();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(run.adjustments.len(), 3, "January purchase part, then both February parts");
+        assert_eq!(parts.iter().map(|part| part.basis.0).collect::<Vec<_>>(), [98_000, 11_000]);
+        assert_eq!(parts.iter().map(|part| part.cost.0).collect::<Vec<_>>(), [100_000, 12_000]);
+        let declaration = &book.assets[asset];
+        let holding = run
+            .holdings
+            .iter()
+            .find(|holding| holding.place == declaration.place && holding.unit == declaration.unit)
+            .unwrap();
+        assert_eq!(holding.qty().0, 1, "an improvement adds basis without another unit");
+        assert_eq!(holding.lots.iter().map(|lot| lot.basis.0).sum::<i64>(), 109_000);
+    });
+}
+
+#[test]
+fn sale_consumes_through_its_day_before_realizing_asset_gain() {
+    let text = format!(
+        "{PART_DEPRECIATION}2025-02-15 buyer -> checking 1_500 USD #sale of condo\n"
+    );
+    with_run(&text, day(2025, 2, 28), |book, run| {
+        let asset = book.asset("condo").unwrap();
+        let [gain] = run.gains[..] else { panic!("sale gain: {:?}", run.gains) };
+        assert_eq!(gain.basis.0, 98_000, "Jan close and sale-date partial February consumption happen first");
+        assert_eq!(gain.proceeds.0, 150_000);
+        assert_eq!(gain.gain().0, 52_000);
+        assert!(run.assets[asset.index()].disposed.is_some());
+        assert_eq!(run.adjustments.len(), 2);
+    });
+}
+
+#[test]
+fn mid_month_straight_line_closes_half_of_sale_month_before_gain() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind property : thing
+  has in-service date
+  law depreciation
+    each month
+    let amount = straight-line(self.cost, 12m, self.in-service, month, mid-month)
+    consume amount
+    count amount as depreciation
+purpose purchase : capital
+  of asset
+purpose sale : capital
+  of asset
+account assets/checking
+entity seller
+entity buyer
+asset condo : property
+  in-service 2025-01-01
+
+opening 2025-01-01
+  checking 2_000 USD
+
+2025-01-02 checking -> seller 1_200 USD #purchase of condo
+2025-02-15 buyer -> checking 1_500 USD #sale of condo
+";
+    with_run(text, day(2025, 2, 28), |book, run| {
+        let errors: Vec<_> = run
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.is_error())
+            .map(|diagnostic| diagnostic.message.as_str())
+            .collect();
+        assert!(errors.is_empty(), "{errors:?}");
+        let asset = book.asset("condo").unwrap();
+        let [gain] = run.gains[..] else { panic!("sale gain: {:?}", run.gains) };
+        assert_eq!(run.adjustments.len(), 2, "January's first half and the terminal sale month");
+        assert_eq!(gain.basis.0, 110_000, "the sale-month terminal half-month is consumed before gain");
+        assert_eq!(gain.gain().0, 40_000);
+        assert!(run.assets[asset.index()].disposed.is_some());
+    });
+}
+
 /// The assertion trace for the cash account includes the improvement payment:
 /// unlike a retired `.basis` endpoint, an improvement is a real cash flow.
 #[test]

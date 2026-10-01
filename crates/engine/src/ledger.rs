@@ -1156,6 +1156,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         Recorded {
             gains: &record.gains,
             effects: &record.effects,
+            adjustments: &record.adjustments,
             violations: &record.violations,
             diagnostics: &record.diagnostics,
         }
@@ -1204,10 +1205,12 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             plan,
             options,
             horizon,
-            world,
+            mut world,
             record,
             ..
         } = self;
+        world.assets.expire_carries_through(horizon);
+        let (assets, pending_carries) = world.assets.into_run_parts();
         Run {
             today: options.today,
             horizon,
@@ -1215,18 +1218,19 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             holdings: world.holdings.into_sorted(),
             gains: record.gains,
             effects: record.effects,
+            adjustments: record.adjustments,
+            pending_carries,
             violations: record.violations,
             headroom,
             pads: record.pads,
             // These collections are populated by the native state monitors.
-            assets: world.assets.into_states(),
+            assets,
             promises: Vec::new(),
             promised_flows: Box::default(),
             runtime_details: Arena::new(),
             missing_inputs: Box::default(),
             open_claims: Box::default(),
             monitor_complete: false,
-            adjustments: Vec::new(),
             checks: record.checks.into(),
             diagnostics: record.diagnostics,
         }

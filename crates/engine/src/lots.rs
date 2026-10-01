@@ -830,6 +830,43 @@ pub(crate) struct PartBasisAdjustment<'a> {
     whole: Qty,
 }
 
+struct PartBasisChange {
+    part: PartId,
+    delta: Qty,
+    whole: Qty,
+}
+
+/// A preflighted set of carried-basis changes. It borrows the one canonical
+/// holdings store until every parcel delta can be applied without failure.
+pub(crate) struct PartBasisBatchAdjustment<'a> {
+    holdings: &'a mut Holdings,
+    changes: Vec<PartBasisChange>,
+}
+
+impl PartBasisBatchAdjustment<'_> {
+    pub(crate) fn apply(self) {
+        for change in self.changes {
+            let slots = self.holdings.part_slots.get(&change.part).expect("prepared part index");
+            let mut shares = Shares::new(change.delta, change.whole);
+            for &slot_id in slots {
+                let Some(slot) = self.holdings.slots.get_mut(slot_id as usize) else { continue };
+                let mut changed = false;
+                for parcel in &mut slot.holding.lots {
+                    if parcel.part != Some(change.part) || parcel.qty <= Qty::ZERO {
+                        continue;
+                    }
+                    let share = shares.take(parcel.qty);
+                    parcel.basis += share;
+                    changed = true;
+                }
+                if changed {
+                    slot.ranked = None;
+                }
+            }
+        }
+    }
+}
+
 impl PartBasisAdjustment<'_> {
     /// Applies the prepared basis update while retaining an exclusive borrow
     /// of the indexed holdings store from validation through commit.
@@ -1039,6 +1076,51 @@ impl Holdings {
             }
         }
         Ok(PartBasisAdjustment { holdings: self, part, delta, whole: weights })
+    }
+
+    /// Preflights positive basis additions to several distinct part IDs. This
+    /// lets a single loss match several replacement lots atomically.
+    pub(crate) fn prepare_part_basis_additions(
+        &mut self,
+        additions: &[(PartId, Qty)],
+    ) -> Result<PartBasisBatchAdjustment<'_>, AssetError> {
+        let mut changes = Vec::with_capacity(additions.len());
+        for &(part, delta) in additions {
+            if delta.is_negative() {
+                return Err(AssetError::NegativeAmount);
+            }
+            if delta.is_zero() {
+                continue;
+            }
+            if changes.iter().any(|change: &PartBasisChange| change.part == part) {
+                return Err(AssetError::DuplicatePart);
+            }
+            let basis = self.part_basis(part)?;
+            basis.0.checked_add(delta.0).ok_or(AssetError::Overflow)?;
+            let slots = self.part_slots.get(&part).ok_or(AssetError::UnknownPart)?;
+            let quantity = slots
+                .iter()
+                .filter_map(|&slot| self.slots.get(slot as usize))
+                .flat_map(|slot| slot.holding.lots.iter())
+                .filter(|parcel| parcel.part == Some(part) && parcel.qty > Qty::ZERO)
+                .try_fold(Qty::ZERO, |sum, parcel| {
+                    sum.0.checked_add(parcel.qty.0).map(Qty).ok_or(AssetError::Overflow)
+                })?;
+            if quantity.is_zero() {
+                return Err(AssetError::UnknownPart);
+            }
+            let mut shares = Shares::new(delta, quantity);
+            for &slot_id in slots {
+                let Some(slot) = self.slots.get(slot_id as usize) else { continue };
+                for parcel in &slot.holding.lots {
+                    if parcel.part == Some(part) && parcel.qty > Qty::ZERO {
+                        parcel.basis.0.checked_add(shares.take(parcel.qty).0).ok_or(AssetError::Overflow)?;
+                    }
+                }
+            }
+            changes.push(PartBasisChange { part, delta, whole: quantity });
+        }
+        Ok(PartBasisBatchAdjustment { holdings: self, changes })
     }
 
     /// The slots of the places whose ids lie in `places`: a subtree.
