@@ -15,7 +15,7 @@
 //!
 //! [`fork`]: Ledger::fork
 
-use axiom_core::{par, Arena, Cadence, Day, Diagnostic, Id, Qty, Ratio, Span};
+use axiom_core::{Arena, Cadence, Day, Diagnostic, Id, Qty, Ratio, Span, par};
 use axiom_model::{
     Amount, Book, Commodity, Contract, End, Fault, Flow, FlowExpressions, FlowSide, FlowView,
     Infer, JournalGroup, JournalItem, Mode, OccurrenceTail, Origin, Place, PurposeRoot,
@@ -29,7 +29,7 @@ use crate::plan::Plan;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
 use crate::timeline::{Fact, Moment, Timeline};
-use crate::{explain, Applied, Cause, Holding, Options, Posted, Recorded, Run, State};
+use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain};
 
 /// Why one native contract occurrence could not be materialized.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -648,6 +648,27 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     }
                     ResolvedLeg::Rest
                 }
+                TemplateQuantity::Percent(rate) => {
+                    // A bare percentage on a split leg is relative to the
+                    // evaluated header quantity on that leg's side. Compute
+                    // every percentage before carving any legs, so multiple
+                    // percentage legs all refer to the same gross parent.
+                    let parent = match leg.side {
+                        FlowSide::Out => out[group_start].flow.out,
+                        FlowSide::Arrive => out[group_start].flow.arrive,
+                    };
+                    let amount = scale_template_amount(parent, rate).map_err(|fault| {
+                        TemplateError::Expression {
+                            fault,
+                            loc: leg.flow.loc,
+                        }
+                    })?;
+                    ResolvedLeg::Value(ResolvedQuantity {
+                        amount,
+                        infer: Infer::Known,
+                        mode: flow.mode,
+                    })
+                }
                 quantity => match self.template_quantity(
                     contract_id,
                     terms,
@@ -934,6 +955,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 infer: Infer::All,
                 mode: flow.mode,
             }),
+            TemplateQuantity::Percent(_) => {
+                return Err(TemplateError::InvalidTemplate { loc });
+            }
             TemplateQuantity::Rest => return Err(TemplateError::InvalidTemplate { loc }),
             TemplateQuantity::Whole => Some(ResolvedQuantity {
                 amount: Amount::new(Qty(1), source.unit),
@@ -1962,6 +1986,67 @@ contract rent with landlord
             view.to,
             book.entities[book.contracts[rent].party].place.unwrap()
         );
+    }
+
+    #[test]
+    fn percentage_split_leg_uses_the_materialized_header_amount() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+entity lumen
+account assets/checking
+account assets/retirement
+contract job with lumen
+  4_600 USD twice monthly on 15, last into checking
+  retirement 6%
+";
+        let book = source_book(source);
+        let contract = book.contract("job").expect("contract id");
+        let due = Day::from_ymd(2026, 1, 15).unwrap();
+        let plan = Plan::new(&book);
+        let mut ledger = plan.start(Options {
+            today: due,
+            relaxed: false,
+        });
+        let (mut flows, mut details, mut missing) =
+            (Vec::new(), Arena::<RuntimeDetail>::new(), Vec::new());
+        let made = ledger
+            .instantiate_occurrence(
+                contract,
+                ScheduleKind::Regular,
+                due,
+                0,
+                None,
+                &mut flows,
+                &mut details,
+                &mut missing,
+            )
+            .expect("percentage leg materializes against its header");
+        let rows = made.flows(&flows).expect("range belongs to the pool");
+        let checking = book.place("checking").unwrap();
+        let retirement = book.place("retirement").unwrap();
+        let header = rows
+            .iter()
+            .find(|flow| flow.flow.to == checking)
+            .expect("header pays checking");
+        let deferral = rows
+            .iter()
+            .find(|flow| flow.flow.to == retirement)
+            .expect("percentage leg pays retirement");
+        assert_eq!(
+            (header.flow.out.qty, header.flow.arrive.qty),
+            (Qty(432_400), Qty(432_400))
+        );
+        assert_eq!(
+            (deferral.flow.out.qty, deferral.flow.arrive.qty),
+            (Qty(27_600), Qty(27_600))
+        );
+        assert_eq!(
+            header.flow.arrive.qty + deferral.flow.arrive.qty,
+            Qty(460_000)
+        );
+        assert!(made.missing(&missing).unwrap().is_empty());
     }
 
     #[test]
