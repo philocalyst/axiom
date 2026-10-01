@@ -598,7 +598,7 @@ contract flat with greystar
     let txn = book.txns.iter().map(|(id, txn)| (id, txn)).find(|(_, txn)| txn.contract.is_some()).unwrap();
     assert_eq!(txn.1.contract, Some(contract_id));
     assert_eq!(txn.1.contract_schedule, Some(axiom_model::ScheduleKind::Regular));
-    let occurrence = book.written_occurrences[txn.1.occurrence.expect("sparse written occurrence identity")];
+    let occurrence = &book.written_occurrences[txn.1.occurrence.expect("sparse written occurrence identity")];
     assert_eq!(occurrence.due, axiom_core::Day::from_ymd(2026, 2, 1).unwrap());
     assert_eq!(occurrence.schedule, axiom_model::ScheduleKind::Regular);
     assert_eq!(txn.1.flows.len(), 0, "the occurrence marker does not invent actual flows");
@@ -661,6 +661,70 @@ contract invest with broker
         embedded: false,
     }]);
     assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "ambiguous-contract-occurrence"), "{diagnostics:?}");
+}
+
+#[test]
+fn a_written_contract_amount_keeps_its_due_identity_and_tail() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+account assets/checking
+contract rent with landlord
+  2_900 USD monthly on 1 from checking
+2026-01-01 rent 3_000 USD ^paid \"January rent\"
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let txn = &book.txns[Id::new(0)];
+    let occurrence = &book.written_occurrences[txn.occurrence.unwrap()];
+    assert_eq!(occurrence.due, Day::from_ymd(2026, 1, 1).unwrap());
+    assert_eq!(occurrence.schedule, axiom_model::ScheduleKind::Regular);
+    let usd = book.commodity("USD").unwrap();
+    assert_eq!(occurrence.amount, Some(axiom_model::TemplateAmount::Literal(axiom_model::Amount::new(axiom_core::Qty(3_000), usd))));
+    assert!(occurrence.program.is_none());
+    assert_eq!(book.name(book.codes[txn.codes.start()]), "paid");
+    assert_eq!(book.text(occurrence.tail.description.unwrap()), "January rent");
+}
+
+#[test]
+fn a_computed_buy_occurrence_keeps_a_typed_amount_root() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+  precision 2
+commodity VTI
+account assets/checking
+contract invest with broker
+  buy VTI for 500 USD monthly on 1 from checking
+2026-01-01 invest 12% of 100 VTI
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let txn = &book.txns[Id::new(0)];
+    let occurrence = &book.written_occurrences[txn.occurrence.unwrap()];
+    assert!(matches!(occurrence.amount, Some(axiom_model::TemplateAmount::Computed(_))));
+    let program = occurrence.program.unwrap();
+    let root = match occurrence.amount.unwrap() {
+        axiom_model::TemplateAmount::Computed(root) => root,
+        _ => unreachable!(),
+    };
+    assert!((root.index() as usize) < book.journal_programs[program].program.nodes.len());
 }
 
 #[test]

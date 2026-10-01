@@ -932,6 +932,7 @@ fn lower_statement<'a, 's>(
             loc,
             statement,
             *amount,
+            code_index,
             diags,
         ),
         ast::Verb::Now(_) => unsupported_statement(
@@ -949,6 +950,7 @@ fn lower_occurrence<'a, 's>(
     loc: Loc,
     statement: &ast::Statement<'s>,
     amount: Option<ast::Amount<'s>>,
+    code_index: &CodeIndex,
     diags: &mut Vec<Diagnostic>,
 ) {
     let file = &site.source.file;
@@ -983,34 +985,84 @@ fn lower_occurrence<'a, 's>(
             return;
         }
     };
-    if amount.is_some() {
-        unsupported_statement(
-            loc,
-            "a written occurrence amount is not yet retained by the native journal record",
+    let inputs = terms.inputs.clone();
+    let fallback = occurrence_amount_unit(contract, terms, world.book.base);
+
+    let code_start = world.book.codes.len();
+    let selector_start = world.book.selectors.len();
+    let detail_start = world.book.details.len();
+    let program_start = world.book.journal_programs.len();
+    let diagnostic_start = diags.len();
+    let mut expressions = Vec::new();
+    if let Some(amount) = amount {
+        push_amount_root(amount, &mut expressions);
+    }
+    push_tail_roots(file, statement.tail, &mut expressions);
+    let name = world.book.names.intern("journal");
+    let compiled = if expressions.is_empty() {
+        Some((crate::book::TemplateProgram::default(), Box::<[NodeId]>::default()))
+    } else {
+        crate::laws::compile_template(
+            world,
             diags,
-        );
+            file,
+            site.home,
+            Ty::Flow,
+            name,
+            &inputs,
+            &expressions,
+        )
+    };
+    let Some((program, root_ids)) = compiled else {
+        rollback(world, world.book.flows.len(), code_start, selector_start, detail_start, program_start);
+        return;
+    };
+    let roots: Map<_, _> = expressions.iter().zip(root_ids.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
+    let occurrence_amount = amount.and_then(|amount| {
+        resolve_amount(world, file, amount, fallback, &roots, diags).map(|(literal, root)| {
+            root.map_or(TemplateAmount::Literal(literal), TemplateAmount::Computed)
+        })
+    });
+    if amount.is_some() && occurrence_amount.is_none() {
+        rollback(world, world.book.flows.len(), code_start, selector_start, detail_start, program_start);
         return;
     }
 
-    let code_start = world.book.codes.len();
-    let diagnostic_start = diags.len();
-    let mut occurrence_codes = Vec::new();
-    for clause in &file[statement.tail] {
-        match clause.kind {
-            ClauseKind::Code(code) => occurrence_codes.push(world.book.names.intern(code.name())),
-            _ => {
-                diags.push(
-                    Diagnostic::error("contract-occurrence-tail", "this clause is not retained on a contract occurrence")
-                        .label(clause.at, "remove the clause or put it on a written flow"),
-                );
-            }
+    let (codes, header_tail) = lower_tail(
+        world,
+        site.home,
+        file,
+        statement.tail,
+        statement.date,
+        &roots,
+        code_index,
+        diags,
+    );
+    if !header_tail.valid || header_tail.price.is_some() {
+        if header_tail.price.is_some() {
+            diags.push(
+                Diagnostic::error("contract-occurrence-price", "write an occurrence price as part of its amount")
+                    .label(loc, "a detached price cannot override a contract flow"),
+            );
         }
+        rollback(world, world.book.flows.len(), code_start, selector_start, detail_start, program_start);
+        return;
     }
+    let occurrence_tail = OccurrenceTail {
+        codes,
+        purpose: header_tail.purpose,
+        description: header_tail.description,
+        payee: header_tail.payee,
+        recognized: header_tail.recognized,
+        detail: header_tail.detail,
+        basis: header_tail.basis_root,
+        waive: header_tail.waive,
+    };
 
-    let mut input_values: Vec<Option<Amount>> = vec![None; terms.inputs.len()];
-    let mut bound = vec![false; terms.inputs.len()];
+    let mut input_values: Vec<Option<Amount>> = vec![None; inputs.len()];
+    let mut bound = vec![false; inputs.len()];
     for leg in &file[statement.body.legs] {
-        let input = terms.inputs.iter().position(|input| world.book.name(input.name) == leg.end.name.0);
+        let input = inputs.iter().position(|input| world.book.name(input.name) == leg.end.name.0);
         let Some(input_at) = input else {
             diags.push(
                 Diagnostic::error("contract-occurrence-body", "written flow overrides are not yet lowered for this occurrence")
@@ -1022,7 +1074,7 @@ fn lower_occurrence<'a, 's>(
             diags.push(
                 Diagnostic::error("contract-input-duplicate", "this contract input is supplied twice")
                     .label(leg.loc, "remove the repeated binding")
-                    .context(terms.inputs[input_at].loc, "the input is declared here"),
+                    .context(inputs[input_at].loc, "the input is declared here"),
             );
             continue;
         }
@@ -1044,7 +1096,7 @@ fn lower_occurrence<'a, 's>(
                 continue;
             }
         };
-        let input_unit = terms.inputs[input_at].unit;
+        let input_unit = inputs[input_at].unit;
         let unit = match literal.unit() {
             Some(unit) => match world.commodity_of(Word {
                 text: unit.0,
@@ -1071,7 +1123,7 @@ fn lower_occurrence<'a, 's>(
             diags.push(
                 Diagnostic::error("contract-input-unit", "this input amount has the wrong commodity")
                     .label(leg.loc, "use the unit declared by this input")
-                    .context(terms.inputs[input_at].loc, "the input's expected unit is declared here"),
+                    .context(inputs[input_at].loc, "the input's expected unit is declared here"),
             );
             continue;
         }
@@ -1090,22 +1142,27 @@ fn lower_occurrence<'a, 's>(
         );
     }
     if diags.len() != diagnostic_start {
+        rollback(world, world.book.flows.len(), code_start, selector_start, detail_start, program_start);
         return;
     }
-    for code in occurrence_codes {
-        world.book.codes.push(code);
-    }
-    let code_count = world.book.codes.len() - code_start;
+
+    let program_id = (!program.nodes.is_empty()).then(|| {
+        world.book.journal_programs.push(JournalProgram {
+            program,
+            flow_roots: Box::default(),
+            groups: Box::default(),
+        })
+    });
     let occurrence_id = world
         .book
         .written_occurrences
         .push(WrittenOccurrence {
             due,
             schedule,
-            amount: None,
-            program: None,
+            amount: occurrence_amount,
+            program: program_id,
             groups: Box::default(),
-            tail: OccurrenceTail::default(),
+            tail: occurrence_tail,
         });
     let input_start = world.book.input_values.len();
     for value in input_values {
@@ -1114,10 +1171,10 @@ fn lower_occurrence<'a, 's>(
     world.book.txns.push(crate::journal::Txn {
         day: statement.date,
         flows: Run::new(Id::new(world.book.flows.len() as u32), 0),
-        inputs: Run::new(Id::new(input_start as u32), terms.inputs.len() as u32),
+        inputs: Run::new(Id::new(input_start as u32), inputs.len() as u32),
         program: None,
-        codes: Run::new(Id::new(code_start as u32), code_count as u32),
-        waive: None,
+        codes,
+        waive: header_tail.waive,
         contract: Some(contract_id),
         contract_schedule: Some(schedule),
         occurrence: Some(occurrence_id),
@@ -1696,6 +1753,24 @@ fn lower_basis<'a, 's>(
             detail_start,
             program_start,
         );
+    }
+}
+
+fn occurrence_amount_unit(
+    contract: &crate::book::Contract,
+    terms: &crate::book::Terms,
+    base: Id<crate::book::Commodity>,
+) -> Id<crate::book::Commodity> {
+    if let Some(unit) = contract.buys {
+        return unit;
+    }
+    let Some(template) = terms.template.first() else {
+        return base;
+    };
+    if template.flow.out.unit == base || template.flow.arrive.unit == base {
+        base
+    } else {
+        template.flow.arrive.unit
     }
 }
 
