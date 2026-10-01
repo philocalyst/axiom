@@ -395,7 +395,11 @@ impl Slot {
                 } else {
                     lot.basis.share(qty, lot.qty).expect("a part of a basis fits")
                 };
-                let slice = Slice { tied: lot.tied, ..Slice::new(qty, basis, Origin::Lot, (lot.acquired, lot.txn)) };
+                let slice = Slice {
+                    tied: lot.tied,
+                    codes: lot.codes,
+                    ..Slice::new(qty, basis, Origin::Lot, (lot.acquired, lot.txn))
+                };
                 lot.qty -= qty;
                 lot.basis -= basis;
                 if lot.qty.is_zero() {
@@ -1180,6 +1184,46 @@ mod tests {
         assert_eq!(held.admitted(false, &[Select::Code(header)], &pool), Qty(5));
         assert_eq!(held.admitted(false, &[Select::Code(local)], &pool), Qty(5));
         assert_eq!(held.admitted(false, &[Select::Code(other)], &pool), Qty::ZERO);
+    }
+
+    #[test]
+    fn moving_a_lot_through_a_slice_preserves_its_pooled_code_identity() {
+        let mut names = axiom_core::Interner::default();
+        let original = names.intern("original-purchase");
+        let mut pool = Arena::new();
+        let first = pool.push(original);
+        let codes = FlowCodes { header: axiom_core::Run::new(first, 1), local: empty_codes().local };
+        let mut parcel = lot(7, 700, 10);
+        parcel.codes = codes;
+        let mut source = Slot::new(Id::new(0), Id::new(0), NONE);
+        source.land_with_codes(parcel, false, &pool);
+
+        let mut relief = Relief::default();
+        let request = Request {
+            need: Qty(3),
+            money: false,
+            selectors: &[],
+            policy: Some(Policy::Fifo),
+            codes: &pool,
+            permits: &[],
+            spender: None,
+            now: (Day(20), Id::new(20)),
+            explain: &|| false,
+        };
+        source.relieve(&request, &mut relief);
+        let slice = relief.slices[0];
+        let moved = Parcel {
+            qty: slice.qty,
+            basis: slice.basis,
+            acquired: slice.acquired,
+            txn: slice.txn,
+            codes: slice.codes,
+            tied: slice.tied,
+        };
+        let mut target = Slot::new(Id::new(1), Id::new(0), NONE);
+        target.land_with_codes(moved, false, &pool);
+
+        assert_eq!(target.admitted(false, &[Select::Code(original)], &pool), Qty(3));
     }
 
     #[test]

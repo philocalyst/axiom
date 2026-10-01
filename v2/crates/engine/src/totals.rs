@@ -13,7 +13,7 @@ use std::collections::BinaryHeap;
 use std::hash::{Hash, Hasher};
 
 use axiom_core::calendar;
-use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Sym, spread};
+use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Set, Sym, spread};
 use axiom_model::{Book, Dir, Entity, Place, Purpose, Subject, Window};
 
 use crate::facts::{LawFacts, TotalsRead};

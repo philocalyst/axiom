@@ -254,7 +254,7 @@ impl Holding {
 
 /// Value at rest, remembered: a quantity with its basis, when and how it was
 /// acquired, and the restricted source it is still tied to.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Parcel {
     pub qty: Qty,
     /// Value already accounted for (cost, contributions, after-tax money), in

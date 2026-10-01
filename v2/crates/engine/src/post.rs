@@ -32,8 +32,13 @@ use crate::scope::{is_money, stays_with_owner};
 use crate::state::Missing;
 use crate::{Cause, Gain, Parcel, show};
 
-fn fresh_slice(m: &Motion, is_base: bool, now: (axiom_core::Day, axiom_core::Id<axiom_model::Txn>)) -> Slice {
-    let mut slice = Slice::fresh(m.out.qty, is_base, now);
+fn fresh_slice(
+    m: &Motion,
+    qty: Qty,
+    is_base: bool,
+    now: (axiom_core::Day, axiom_core::Id<axiom_model::Txn>),
+) -> Slice {
+    let mut slice = Slice::fresh(qty, is_base, now);
     slice.codes = m.code_runs;
     slice
 }
@@ -151,7 +156,7 @@ impl Ledger<'_, '_, '_> {
         self.scratch.relief.slices.clear();
         if source.class != Class::Asset {
             self.world.holdings.credit(m.from, unit, -m.out.qty);
-            self.scratch.relief.slices.push(fresh_slice(m, is_base, now));
+            self.scratch.relief.slices.push(fresh_slice(m, m.out.qty, is_base, now));
             return;
         }
         self.ask_ties(m);
@@ -183,8 +188,10 @@ impl Ledger<'_, '_, '_> {
         }
         // What arrives must land even when nothing left (`all` of an empty
         // holding): value never vanishes from a balanced flow.
-        if shortfall > Qty::ZERO || self.scratch.relief.slices.is_empty() {
-            self.scratch.relief.slices.push(fresh_slice(m, is_base, now));
+        if shortfall > Qty::ZERO {
+            self.scratch.relief.slices.push(fresh_slice(m, shortfall, is_base, now));
+        } else if self.scratch.relief.slices.is_empty() {
+            self.scratch.relief.slices.push(fresh_slice(m, m.out.qty, is_base, now));
         }
     }
 

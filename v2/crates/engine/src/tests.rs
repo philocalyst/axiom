@@ -1362,6 +1362,44 @@ fn lots_of(run: &Run, place: Id<Place>, unit: Id<Commodity>) -> Vec<(i64, i64)> 
 }
 
 #[test]
+fn a_partial_sale_shortfall_does_not_duplicate_the_missing_lot_slice() {
+    let mut f = Fixture::new();
+    let (equity, checking, brokerage, usd, vti) = (f.equity, f.checking, f.brokerage, f.usd, f.vti);
+    f.flow(1, equity, checking, 1_000_00);
+    f.buy(2, 700_00, 7);
+    f.sell(3, 10, 2_000_00);
+
+    let run = run(&f.book(), options());
+
+    assert_eq!(run.gains.len(), 1);
+    let gain = run.gains[0];
+    assert_eq!((gain.qty, gain.basis, gain.proceeds, gain.gain()), (Qty(7), Qty(700_00), Qty(1_400_00), Qty(700_00)));
+    assert_eq!(qty(&run, brokerage, vti), 0);
+    assert_eq!(qty(&run, checking, usd), 1_000_00 + 2_000_00 - 700_00);
+}
+
+#[test]
+fn a_transferred_lot_keeps_its_source_code_for_a_later_selector() {
+    let mut f = Fixture::new();
+    let (equity, checking, brokerage, savings, vti) = (f.equity, f.checking, f.brokerage, f.savings, f.vti);
+    f.flow(1, equity, checking, 1_000_00);
+    let purchase = f.buy(2, 700_00, 7);
+    f.mark_txn(purchase, "#original-purchase");
+    let shares = f.vti(7);
+    f.exchange(3, brokerage, shares, savings, shares);
+    let (one_share, proceeds) = (f.vti(1), f.usd(200_00));
+    let sale = f.exchange(4, savings, one_share, checking, proceeds);
+    let code = f.sym("#original-purchase");
+    f.select(sale, [Select::Code(code)]);
+
+    let run = run(&f.book(), options());
+
+    assert_eq!(run.gains.len(), 1, "the transferred lot still matches its original transaction code");
+    assert_eq!((run.gains[0].qty, run.gains[0].basis, run.gains[0].proceeds), (Qty(1), Qty(100_00), Qty(200_00)));
+    assert_eq!(lots_of(&run, savings, vti), [(6, 600_00)]);
+}
+
+#[test]
 fn a_spread_flow_counts_in_each_month_it_touches_as_the_fold_reaches_it() {
     let mut f = Fixture::new();
     let (checking, food) = (f.checking, f.food);
