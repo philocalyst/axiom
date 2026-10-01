@@ -1,0 +1,53 @@
+/// The landlord's rent, paid from checking each month.
+contract rent with landlord
+  2_850 USD monthly on 1 from checking
+
+/// The renter's policy is paid once and recognized over the year.
+contract renter-policy with insurer
+  600 USD yearly on 01-01 from checking #insurance
+  covers the year
+  until 2026-12-31
+
+/// A variable monthly bill. Each occurrence states the amount due.
+contract utility-bill with utility
+  about 120 USD monthly on 16 from checking #utilities
+
+/// The paycheck is gross. The 401(k) takes its pre-tax deferral from wages;
+/// the other legs go straight to the tax authorities.
+contract paycheck with acme
+  8_000 USD monthly on 13 into checking
+  from 2026-02-13
+  retirement 800 USD
+  irs 880 USD
+  ftb 370 USD
+  ssa 612 USD
+  checking ...
+
+/// Fall tuition, partly from checking and partly from the 529 plan.
+contract fall-tuition with state-u
+  3_600 USD yearly on 08-15 from checking #tuition
+  from 2026-08-15
+
+contract 529-tuition with state-u
+  1_200 USD yearly on 08-20 from college #tuition
+  from 2026-08-20
+
+/// The summer trip.
+contract summer-trip with travel-agent
+  2_200 USD yearly on 07-10 from checking #travel
+  from 2026-07-10
+
+/// The policy renews with a higher premium next year.
+contract next-renter-policy with insurer
+  630 USD yearly on 01-01 from checking #insurance
+  from 2027-01-01
+
+/// The year-end bonus is a separate paycheck with its own withholding.
+contract bonus with acme
+  4_000 USD yearly on 12-15 into checking
+  from 2026-12-15
+  retirement 400 USD
+  irs 880 USD
+  ftb 409 USD
+  ssa 306 USD
+  checking ...

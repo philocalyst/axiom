@@ -137,4 +137,8 @@ Capital
 The mortgage, depreciation, sales-tax, exchange-cost, payroll and wash-sale figures
 are checked independently by `../verify/verify11.py`. The report excerpts remain targets
 until the model and engine can run this project and their output is checked against those
-inputs.
+inputs. The mortgage oracle uses a monthly rate (annual rate divided by twelve), rounds
+the level payment and each due day's interest to cents, applies the remainder to principal,
+and adjusts the final payment to clear the remaining principal. Its first due date is the
+first scheduled day after origination. This is the example's monthly convention; it does
+not claim full ACTUS conformance.

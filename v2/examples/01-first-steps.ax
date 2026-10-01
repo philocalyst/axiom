@@ -1,12 +1,15 @@
-// Your first Axiom file: three lines.
-//
-// A line is a date, where the money came from, an arrow, where it went, and how
-// much. Places under the five roots (assets, liabilities, income, expenses,
-// equity) open themselves the first time they are named. The last line says what
-// the bank should show, and Axiom checks it.
+// A first ledger in three lines: who paid, what the money was for, and what
+// the bank says remains.
 
 base USD
+use std
 
-2026-01-15 income/salary -> assets/checking 3_200 USD
-2026-01-18 assets/checking -> expenses/food 84.20 USD
-2026-01-31 assets/checking = 3_115.80 USD
+entity me : person
+entity acme : employer
+entity trader-joes : grocer
+entity chase : org
+account checking : deposit at chase
+
+2026-01-15 acme -> checking 3_200 USD
+2026-01-18 checking -> trader-joes 84.20 USD
+2026-01-31 checking = 3_115.80 USD

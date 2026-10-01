@@ -1,128 +1,65 @@
-// Eight mistakes, each made on purpose. A comment before each one says what
-// Axiom should report, so the diagnostics can be read against it.
-//
-//   axiom check examples/03-violations.ax      ends with errors, exit code 1
+// V4 mistakes are conflicts between facts the book can otherwise explain.
+// Run `axiom check examples/03-violations.ax` to see each one at its source.
 
 base USD
-
 use std
 use us/401k
 use us/529
 
-/// Thirty-seven years old, so nothing that is age-gated has opened up.
 entity me : person
-  born   1988-04-12
+  born 1988-04-12
   filing single
-  lives  us
+  lives us
 
-commodity VTI : fund
-  precision 0
+entity acme : employer
+entity fidelity
+entity chase
+entity trader-joes : grocer
+entity theater
+
+account checking : deposit at chase
+account retirement : 401k at fidelity
+account brokerage : brokerage at fidelity
+account wallet : asset
+  holds BTC
 
 commodity BTC : crypto
   precision 8
-
-
-// ─── Accounts ───────────────────────────────────────────────────────────────
-
-account assets/bank/checking : bank
-account assets/bank/project  : bank
-account assets/retirement    : 401k
-account assets/brokerage     : broker
-
-/// No kind, so no lot policy: a sale that has to choose between lots has no
-/// way to.
-account assets/wallet
-
-account income/salary : wages
-account income/grants
-account equity/opening
-account expenses/groceries
-account expenses/dining
-
-entity acme : employer
-  via income/salary
+commodity VTI : fund
+  precision 3
 
 entity scholarship : grant
-  via income/grants
   purpose education
   until 2026-12-31
 
-// 1. A typo in a property name.
-//
-// expect: error: `529-plan` has no property `benificiary`
-//   help: a property with a similar name: `beneficiary`
-account assets/college : 529-plan
+// A misspelled property is refused at the declaration.
+account college : 529 at fidelity
   benificiary me
 
+opening 2025-12-31
+  checking 100_000 USD
 
-// ─── Journal ────────────────────────────────────────────────────────────────
-
-2025-12-31 opening -> checking 100_000 USD
-
-// 2. A 401(k) over-contribution.
-//
-// expect: error[deferral-limit]: 401(k) deferrals over the yearly limit
-//   The flow is `acme -> retirement 26_000 USD`, and tally(elective-deferrals)
-//   is 26_000.00 USD against limit[year] + extra = 24_500.00 USD (a 37-year-old
-//   has no catch-up). Over by 1_500.00 USD.
-//   note: the law's doc comment, from us/401k
-//   help: a deferral of 24_500.00 USD or less satisfies it
+// The 2026 deferral limit is 24,500 USD; the owner is under 50.
 2026-01-30 acme -> retirement 26_000 USD
 
-// 3. An early withdrawal.
-//
-// expect: early-withdrawal is priced, not failed: owner.age is 37y9m21d, under
-//   59y6m, so it resolves to a loss of 1_000.00 USD (10% * gain, and the whole
-//   10_000.00 USD is gain: pre-tax money has no basis), owed to irs as
-//   early-withdrawal-penalty. The 10_000.00 USD also counts as a distribution.
+// All pre-tax value in the account has no basis; this $10,000 withdrawal is
+// taxable and carries the early-withdrawal penalty for an owner aged 37.
 2026-02-02 retirement -> checking 10_000 USD
 
-// 4. A sale that has to choose between lots, with no policy to choose by.
-//
-// The wallet holds two lots of BTC bought at different prices. Selling a
-// quarter of a coin could come from either.
+// With no lot policy, a quarter of a coin could come from either purchase.
 2026-02-10 checking -> wallet 0.5 BTC @ 60_000 USD
 2026-02-20 checking -> wallet 0.5 BTC @ 90_000 USD
-
-// expect: error: ambiguous lot: `wallet` holds 2 lots that differ and no
-//   policy applies. It lists each candidate with the gain it would realize:
-//     2026-02-10  0.5 BTC, basis 30_000.00 USD  ->  gain 9_000.00 USD
-//     2026-02-20  0.5 BTC, basis 45_000.00 USD  ->  gain 1_500.00 USD
-//   help: name the lot, `wallet[2026-02-10]`, or a policy, `wallet[fifo]`, or
-//   give the account `select fifo`. The sale still moves the oldest coins, so
-//   later lines stay consistent.
 2026-03-01 wallet 0.25 BTC -> checking 24_000 USD
 
-// 5. A place that does not exist, and is nearly one that does.
-//
-// expect: error: unknown place `grocries`
-//   help: a place with a similar name: `expenses/groceries`
-2026-03-02 checking -> grocries 84.20 USD
+// Trader Joe's says groceries; the explicit purpose disagrees.
+2026-03-02 checking -> trader-joes 84.20 USD #rent
 
-// 6. A price that disagrees with the amounts written beside it.
-//
-// expect: error: the price and the amounts disagree: 4 VTI @ 285.70 USD costs
-//   1_142.80 USD, but 1_000.00 USD leaves checking, a difference of 142.80 USD
-//   help: write the difference as a leg (a fee, or the rest of the cost), or
-//   correct the price
+// Four shares at this price cost 1,142.80 USD, not 1,000 USD.
 2026-03-04 checking 1_000 USD -> brokerage 4 VTI @ 285.70 USD
 
-// 7. Grant money spent on something else.
-//
-// The project account holds nothing but the scholarship, so anything spent from
-// it is scholarship money.
-2026-04-01 scholarship -> project 1_200 USD
+// The scholarship's restricted money is used for a theater ticket, not tuition.
+2026-04-01 scholarship -> checking 1_200 USD
+2026-04-02 checking -> theater 300 USD #fun
 
-// expect: error[purpose]: grant money spent outside its purpose
-//   The flow is `project -> expenses/dining 300 USD`; `to` is `expenses/dining`,
-//   which is not of kind `education`, the scholarship's purpose.
-//   note: the law's doc comment, from std
-//   help: pay this from another account
-2026-04-02 project -> dining 300 USD
-
-// 8. The same grant, left unspent past its deadline.
-//
-// expect: error[deadline]: grant money left unspent at the deadline. The journal
-//   reaches 2026-12-31, the scholarship's `until`, and 900.00 USD of it is still
-//   tied up in `project`.
-2026-12-31 project = 900 USD
+// The scholarship ends with 900 USD of its money still tied up in checking;
+// its own deadline law reports the remainder without a balancing account.
