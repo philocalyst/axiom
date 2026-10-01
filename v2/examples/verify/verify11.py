@@ -38,6 +38,7 @@ def money(text):
 
 contracts = source("contracts.ax")
 assets = source("assets.ax")
+opening = source("journal/2026/01.ax")
 parties = source("parties.ax")
 january = source("journal/2026/01.ax")
 february = source("journal/2026/02.ax")
@@ -75,9 +76,9 @@ assert "1,892.92" in contracts
 
 # Mid-month residential depreciation is computed from the exact annual rate;
 # rounding each monthly slice before summing would introduce a cent of drift.
-property_basis = D("402000")
+property_basis = money(require(r"condo\s+basis\s+([\d_,]+)\s+USD", opening, "condo opening basis")[1])
 land = money(require(r"land\s+([\d_,]+)\s+USD", assets, "condo land value")[1])
-life_years = D("27.5")
+life_years = D(require(r"straight-line\(self\.cost - self\.land,\s*([\d.]+)y", source("std-sketch.ax"), "rental recovery life")[1])
 condo_service_months_through_2025 = D("21.5")
 base_depreciation_2024_2025 = cents(
     (property_basis - land) * condo_service_months_through_2025 / (life_years * 12)
@@ -107,7 +108,7 @@ assert laptop_tax == D("138.09")
 # received euros remain separate inputs, so the spread can be independently
 # reconciled.
 price_file = ROOT / "prices/2026.ax"
-price = require(r"2026-02-10 EUR\s+([\d.]+)\s+USD", price_file.read_text(), "Paris EUR quote")
+price = require(r"2026-02-10 EUR\s*=\s*([\d.]+)\s+USD", price_file.read_text(), "Paris EUR quote")
 eur_rate = D(price[1])
 eur_amount = money(require(r"visa\s+([\d.]+)\s+USD -> cafe-de-flore\s+([\d.]+)\s+EUR", february, "Paris card conversion")[2])
 card_amount = money(require(r"visa\s+([\d.]+)\s+USD -> cafe-de-flore", february, "Paris card charge")[1])
@@ -133,10 +134,14 @@ assert withholding == D("1269.30") and net_pay == D("3054.70")
 assert annual_gross == D("110400") and annual_deferral == D("6624.00")
 assert match == D("138.00")
 
-sale = money(require(r"fidelity\[2026-01-20\]\s+1\.620 VTI -> ([\d.]+) USD", february, "VTI lot sale")[1])
-opening_lot_cost = D("500.00")
+buy = require(r"buy VTI for\s+([\d_,.]+)\s+USD monthly on 20", contracts, "VTI standing-order amount")
+opening_lot_cost = money(buy[1])
+sale_line = require(r"fidelity\[2026-01-20\]\s+([\d.]+) VTI -> ([\d.]+) USD", february, "VTI lot sale")
+sale_quantity, sale = D(sale_line[1]), money(sale_line[2])
+purchase_line = require(r"20 vti-monthly\s+([\d.]+) VTI", january, "January VTI purchase quantity")
+assert sale_quantity == D(purchase_line[1])
 wash_loss = opening_lot_cost - sale
-replacement_cost = D("500.00")
+replacement_cost = opening_lot_cost
 replacement_basis = replacement_cost + wash_loss
 assert wash_loss == D("18.86") and replacement_basis == D("518.86")
 
