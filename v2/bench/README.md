@@ -45,10 +45,10 @@ category-budget record.
 
 ## Timing interpretation
 
-The CLI has no phase-only timing switch. These generated projects have no
-declared sync jobs, so `sync` covers project loading, parsing, and model
-construction without the engine. In these fixtures, `check - sync` is an
-approximation of the engine cost and `report - check` approximates report work.
-For other projects, `sync` can also run declared scripts and is not a general
-parse-only command. `run.sh` uses the native account names (`p1-checking`,
-`p1-brokerage`) emitted by the converter.
+`run.sh` records end-to-end CLI timings. Both `check` and `sync` load, parse,
+build, and run the project; `sync` also plans declared sync sources. Report
+commands add their query and rendering to a fresh run, so subtracting `check`
+does not isolate report or engine time. The laws-free twin has the same
+generated journal but a different model; its comparison can indicate the cost
+of laws without isolating one execution phase. `run.sh` uses native account
+names (`p1-checking`, `p1-brokerage`) emitted by the converter.

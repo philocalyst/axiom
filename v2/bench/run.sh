@@ -14,12 +14,12 @@
 #   AXIOM_BENCH_TIMEOUT  seconds before a command is killed  (default 60)
 #   AXIOM_BENCH_KEEP=1   reuse projects that are already generated
 #
-# The CLI has no phase-only timing switch. The generated projects declare no
-# sync jobs, so `sync` measures project load/parse/model build without running
-# the engine. For these fixtures only, `check - sync` approximates engine time;
-# `command - check` approximates the incremental report cost. A project with
-# declared sync jobs would also time those scripts. The laws-free twin keeps
-# the same generated journal and estimates the cost added by law evaluation.
+# These are end-to-end CLI timings. Both `check` and `sync` load, parse, build,
+# and run the project; `sync` also plans the declared sync sources. The report
+# commands add their query/render work to a fresh project run, so subtracting
+# `check` does not isolate report or engine time. The laws-free twin keeps the
+# generated journal and can indicate the extra cost of this different model,
+# but is not a phase-only control.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
