@@ -117,7 +117,8 @@ kind envelope : entity
 
 account assets/checking
 account assets/savings
-account assets/car-repair
+purpose car-maintenance : spending
+entity car-repair
 
 entity trip-fund : envelope
   via assets/savings
@@ -140,7 +141,7 @@ fn tied(book: &Book, run: &Run) -> Vec<(String, i64)> {
 
 #[test]
 fn a_payment_out_of_an_envelope_takes_that_envelopes_parcels() {
-    let text = format!("{ENVELOPES}2025-10-01 car-fund -> car-repair 150 USD\n");
+    let text = format!("{ENVELOPES}2025-10-01 car-fund -> car-repair 150 USD #car-maintenance\n");
     with_run(&text, day(2025, 12, 31), |book, run| {
         assert_eq!(tied(book, run), [("trip-fund".into(), 500_00), ("car-fund".into(), 50_00)]);
     });
@@ -148,7 +149,7 @@ fn a_payment_out_of_an_envelope_takes_that_envelopes_parcels() {
 
 #[test]
 fn an_envelope_that_runs_out_is_topped_up_from_what_is_not_tied() {
-    let text = format!("{ENVELOPES}2025-09-20 checking -> savings 300 USD\n2025-10-01 car-fund -> car-repair 250 USD\n");
+    let text = format!("{ENVELOPES}2025-09-20 checking -> savings 300 USD\n2025-10-01 car-fund -> car-repair 250 USD #car-maintenance\n");
     with_run(&text, day(2025, 12, 31), |book, run| {
         assert_eq!(tied(book, run), [("trip-fund".into(), 500_00)]);
         let savings = holding(book, run, "savings", "USD").unwrap();
@@ -158,7 +159,7 @@ fn an_envelope_that_runs_out_is_topped_up_from_what_is_not_tied() {
 
 #[test]
 fn an_overspent_envelope_leaves_the_other_envelopes_alone() {
-    let text = format!("{ENVELOPES}2025-10-01 car-fund -> car-repair 250 USD\n");
+    let text = format!("{ENVELOPES}2025-10-01 car-fund -> car-repair 250 USD #car-maintenance\n");
     with_run(&text, day(2025, 12, 31), |book, run| {
         assert_eq!(tied(book, run), [("trip-fund".into(), 500_00)]);
         assert_eq!(holding(book, run, "savings", "USD").unwrap().plain.0, -50_00, "the account owes 50 to nobody's money");
@@ -270,12 +271,12 @@ const CLOSING: &str = "\
 base USD
 commodity USD
   precision 2
-
-account assets/checking
-account assets/estimated
+purpose estimate : spending
   law paid
-    on in
+    on flow
     count value(amount, USD) as paid
+account assets/checking
+entity treasury
 
 law close
   each year closing 01-15
@@ -284,14 +285,14 @@ law close
 opening 2025-01-01
   checking 1_000 USD
 
-2025-06-01 checking -> estimated 100 USD for 2025
+2025-06-01 checking -> treasury 100 USD #estimate for 2025
 ";
 
 /// The last payment is dated on the closing day, and written after the flow of a later day.
 #[test]
 fn a_payment_dated_on_the_closing_day_counts_wherever_the_journal_writes_it() {
     let text = format!(
-        "{CLOSING}2026-03-01 checking -> estimated 10 USD\n2026-01-15 checking -> estimated 50 USD for 2025\n"
+        "{CLOSING}2026-03-01 checking -> treasury 10 USD #estimate\n2026-01-15 checking -> treasury 50 USD #estimate for 2025\n"
     );
     with_run(&text, day(2026, 3, 31), |_, run| {
         let said = run.violations.iter().map(|v| run.diagnostics[v.diagnostic as usize].message.as_str());
@@ -305,7 +306,7 @@ fn a_payment_dated_on_the_closing_day_counts_wherever_the_journal_writes_it() {
 #[test]
 fn a_february_29_closing_falls_on_the_28th_in_a_year_without_a_29th() {
     let text = CLOSING.replace("closing 01-15", "closing 02-29").replace("<= 120 USD", "<= 30 USD");
-    let text = format!("{text}2027-06-01 checking -> estimated 40 USD for 2027\n");
+    let text = format!("{text}2027-06-01 checking -> treasury 40 USD #estimate for 2027\n");
     with_run(&text, day(2028, 3, 31), |_, run| {
         let judged: Vec<_> = run.violations.iter().map(|v| v.day.to_string()).collect();
         assert_eq!(judged, ["2026-02-28", "2028-02-29"], "the 100.00 USD of 2025, then the 40.00 USD of 2027");
@@ -420,12 +421,12 @@ const YEARS: &str = "\
 base USD
 commodity USD
   precision 2
-
-account assets/checking
-account assets/estimated
+purpose estimate : spending
   law paid
-    on in
+    on flow
     count value(amount, USD) as paid
+account assets/checking
+entity treasury
 
 law look-back
   each year
@@ -435,8 +436,8 @@ law look-back
 opening 2025-01-01
   checking 1_000 USD
 
-2025-06-01 checking -> estimated 100 USD
-2026-06-01 checking -> estimated 30 USD
+2025-06-01 checking -> treasury 100 USD #estimate
+2026-06-01 checking -> treasury 30 USD #estimate
 ";
 
 #[test]
@@ -519,7 +520,8 @@ commodity EUR : {kind}
 
 account assets/checking
 account assets/wallet
-account assets/food
+purpose food : spending
+entity grocer
 
 opening 2025-01-01
   checking 5_000 USD
@@ -527,7 +529,7 @@ opening 2025-01-01
 2025-01-05 checking 1_100 USD -> wallet 1_000 EUR
 2025-02-05 checking 1_150 USD -> wallet 1_000 EUR
 2025-03-01 EUR = 1.2 USD
-2025-03-01 wallet -> food 1_500 EUR
+2025-03-01 wallet -> grocer 1_500 EUR #food
 "
     )
 }
@@ -548,10 +550,67 @@ fn anything_else_that_differs_is_still_ambiguous_without_a_policy() {
     });
 }
 
-// ─── Claims made by the legs of a split ─────────────────────────────────────
+// ─── Claims made by itemized payments and separate Owes statements ─────────
 
 #[test]
-fn each_leg_of_a_split_is_a_claim_on_its_own_debtor_and_falls_due_on_its_own_day() {
+fn an_itemized_paid_for_split_keeps_the_header_and_each_legs_due_override() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+purpose rent : spending
+account assets/checking
+entity ben
+entity cleo
+entity landlord
+opening 2025-02-01
+  checking 5_000 USD
+
+2025-03-01 checking 3_150 USD -> #rent due 2025-03-08
+  landlord 1_050 USD #rent
+  landlord 1_050 USD #rent for ben
+  landlord 1_050 USD #rent for cleo due 2025-03-15
+";
+    with_book(text, |book| {
+        let checking = book.place("checking").unwrap();
+        let landlord = book.entity("landlord").unwrap();
+        let ben = book.entity("ben").unwrap();
+        let cleo = book.entity("cleo").unwrap();
+        let (_, txn) = book.txns.iter().find(|(_, txn)| txn.day == day(2025, 3, 1)).unwrap();
+        let program = &book.journal_programs[txn.program.expect("split retains its sparse group")];
+        let [group] = program.groups.as_ref() else { panic!("one grouped split: {:?}", program.groups) };
+        assert_eq!(group.header, None, "one-sided split has no independently posted header");
+        assert_eq!(group.source.place, checking);
+        assert!(matches!(
+            group.total,
+            Some(axiom_model::JournalQuantity::Amount(amount, None))
+                if amount.qty.0 == 315_000 && amount.unit == book.base
+        ));
+        assert_eq!(group.legs.len(), 3);
+
+        let legs: Vec<_> = group
+            .legs
+            .iter()
+            .map(|offset| {
+                let flow = &book.flows[axiom_core::Id::new(txn.flows.start().index() as u32 + *offset)];
+                let detail = flow.detail.map(|id| book.details[id]);
+                (flow.to, flow.payee, detail.and_then(|detail| detail.hold), detail.and_then(|detail| detail.due))
+            })
+            .collect();
+        assert_eq!(
+            legs,
+            [
+                (book.entities[landlord].place.unwrap(), Some(landlord), None, Some(day(2025, 3, 8))),
+                (book.entities[landlord].place.unwrap(), Some(landlord), Some(ben), Some(day(2025, 3, 8))),
+                (book.entities[landlord].place.unwrap(), Some(landlord), Some(cleo), Some(day(2025, 3, 15))),
+            ],
+            "header due date inherits to legs; itemized paid-for parties and the final leg override are retained"
+        );
+    });
+}
+
+#[test]
+fn separate_owes_statements_keep_each_debtor_and_due_day() {
     let text = "\
 base USD
 commodity USD
