@@ -39,6 +39,8 @@ import random
 import sys
 import time
 
+from nativeize import nativeize_project
+
 SCALES = {  # flows, people, years
     "10k": (10_000, 1, 5),
     "100k": (100_000, 4, 8),
@@ -693,6 +695,7 @@ def main():
         f.write(f"variant={args.variant}\nseed={args.seed}\nflows={total_flows}\npeople={people}\nyears={years}\n"
                 f"first_year={START_YEAR}\nlast_year={last_year}\ntoday={last_year}-12-31\nlast_month={last_year}-12\n"
                 f"journal_lines={total_lines}\n")
+    nativeize_project(root, persons, full, years, BUDGET_FACTOR)
     print(f"{args.variant} {args.flows}: {people} people, {years} years, ~{ctx.spend_per_month} everyday txns/person-month, "
           f"{total_flows:,} flows, {total_lines:,} journal lines, {time.time() - t0:.1f}s", file=sys.stderr)
 
