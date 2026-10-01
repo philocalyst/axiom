@@ -71,6 +71,7 @@ impl<'a, 's> Elab<'a, 's> {
         self.sink.txns.push(Txn {
             day,
             flows: Run::new(Id::new(first as u32), (self.sink.flows.len() - first) as u32),
+            inputs: Run::new(Id::new(0), 0),
             codes: header.map_or_else(Box::default, |header| header.codes.iter().map(|&(code, _)| code).collect()),
             waive: header.and_then(|header| header.waive),
             plan,

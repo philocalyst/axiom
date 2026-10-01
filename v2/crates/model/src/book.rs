@@ -67,6 +67,10 @@ pub struct Book<'s> {
     pub formats: Arena<Format>,
 
     pub txns: Arena<Txn>,
+    /// Occurrence inputs in the order of the contract terms' `inputs` list.
+    /// Each transaction stores a range so the common case of no named inputs
+    /// does not allocate, and forecasts can borrow the bindings directly.
+    pub input_values: Arena<Option<Amount>>,
     /// Sorted by day; within a day, in declaration order (files in path order,
     /// then source order). Order of declaration decides ties.
     pub flows: Arena<Flow>,
@@ -1709,6 +1713,12 @@ impl<'s> Book<'s> {
     /// Borrows the flow with its pooled metadata by id.
     pub fn flow(&self, id: Id<Flow>) -> FlowView<'_> {
         self.flow_view(&self.flows[id])
+    }
+
+    /// Input bindings recorded on one transaction occurrence, aligned to the
+    /// active terms' `Terms::inputs` declaration order.
+    pub fn txn_inputs(&self, id: Id<Txn>) -> &[Option<Amount>] {
+        &self.input_values[self.txns[id].inputs]
     }
 
     /// The flow of `txn` that paid into `place`: what made a parcel there. A

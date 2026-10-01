@@ -398,6 +398,9 @@ pub struct Txn {
     pub day: Day,
     /// The flows it produced, in `Book::flows`.
     pub flows: Run<Flow>,
+    /// Occurrence input bindings, indexed by the active terms' input order.
+    /// Empty for ordinary transactions and occurrences without inputs.
+    pub inputs: Run<Option<Amount>>,
     pub codes: Run<Sym>,
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,
