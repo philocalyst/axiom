@@ -10,6 +10,7 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use axiom_core::{Day, Map, Qty, Set};
 
 use crate::Record;
+use crate::recognize::Reading;
 
 /// How far apart the bank's day and the journal's may be.
 pub const WINDOW: i32 = 3;
@@ -70,7 +71,8 @@ struct Candidate {
 
 /// For each record, the index in `existing` of the flow it is. Exact days go
 /// first, so that a record never takes the flow another one is on top of.
-pub fn reconcile<'a>(
+#[cfg(test)]
+fn reconcile<'a>(
     records: &'a [Record<'_>],
     existing: &'a [Existing<'a>],
     default: &'a str,
@@ -81,7 +83,7 @@ pub fn reconcile<'a>(
 /// Reconciles the record half of paired memo/recognition rows without
 /// materializing a second vector of records.
 pub(crate) fn reconcile_paired<'a, 't: 'a, 's>(
-    rows: &'a [(Record<'t>, crate::Reading<'s>)],
+    rows: &'a [(Record<'t>, Reading<'s>)],
     existing: &'a [Existing<'a>],
     default: &'a str,
 ) -> Vec<Option<usize>> {

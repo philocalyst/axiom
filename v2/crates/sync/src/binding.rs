@@ -7,7 +7,10 @@ use axiom_model::{Book, Commodity, Flow, Place, Role};
 
 use crate::reconcile::{Batch, Existing};
 use crate::world::{Account, World};
-use crate::{Due, Recognizer, Unit};
+use crate::promise::Due;
+use crate::recognize::Recognizer;
+use crate::write::Layout;
+use crate::Unit;
 
 /// Build the part of the sync world that is directly backed by the canonical
 /// book and run. Contract occurrences and open claims are intentionally left
@@ -77,7 +80,7 @@ pub(crate) fn world<'b, 's>(
     Ok(World {
         book,
         recognizer: Recognizer::new(book),
-        layout: crate::Layout::new(project_paths.iter().copied()),
+        layout: Layout::new(project_paths.iter().copied()),
         accounts,
         units,
         dues: Vec::<Due<'s>>::new(),

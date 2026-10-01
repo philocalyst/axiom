@@ -5,6 +5,7 @@
 use axiom_core::{Day, Map, Qty};
 
 use crate::Record;
+use crate::recognize::Reading;
 
 /// An occurrence of a contract that is due and not written, as it touches one
 /// account.
@@ -23,13 +24,14 @@ pub struct Due<'a> {
 /// For each record whose `parties` entry names one, the occurrence it keeps:
 /// the nearest first, each occurrence kept once, and only by money going the
 /// way the contract says.
-pub fn keep(records: &[Record], parties: &[Option<&str>], dues: &[Due]) -> Vec<Option<usize>> {
+#[cfg(test)]
+fn keep(records: &[Record], parties: &[Option<&str>], dues: &[Due]) -> Vec<Option<usize>> {
     keep_by(records.len(), parties, dues, |at| (records[at].day, records[at].qty))
 }
 
 /// Keeps promises directly from the shared record/recognition buffer.
 pub(crate) fn keep_paired<'t, 's>(
-    rows: &[(Record<'t>, crate::Reading<'s>)],
+    rows: &[(Record<'t>, Reading<'s>)],
     parties: &[Option<&str>],
     dues: &[Due],
 ) -> Vec<Option<usize>> {

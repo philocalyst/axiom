@@ -14,7 +14,7 @@ use crate::command::{Failed, run_all, substitute};
 use crate::paths::matching_paths;
 use crate::sink::{self, Sink};
 use crate::world::{Feed, FeedDelta, World};
-use crate::write::{Change, Update, preview, validate_text_at};
+use crate::write::{Change, Layout, Update, preview, validate_text_at};
 use crate::{Insert, Unit};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
@@ -524,7 +524,7 @@ fn sink_target_paths(
     source: &ModelSource,
     output: &str,
     file_paths: &[&str],
-    layout: &crate::Layout,
+    layout: &Layout,
 ) -> Vec<String> {
     match &source.sink {
         ModelSink::Feed { .. } => Vec::new(),

@@ -32,7 +32,7 @@
 //! | local imports and command output                     | [`SourceRegistry`]                   |
 //! | plan a selected source or all sources                | [`plan`]                             |
 //! | pending changes and source diagnostics               | [`PlanOutcome`]                      |
-//! | records and their typed export facts                 | [`Record`], [`Facts`]                |
+//! | memos from a declared local `read` source             | [`read_memos`]                       |
 
 mod amount;
 mod binding;
@@ -58,21 +58,17 @@ use std::borrow::Cow;
 
 use axiom_core::{Day, FileId, Loc, Qty};
 
-pub use axiom_model::sync::{Column, Field, Format, Rule, Shape, Spec};
-pub use command::{Failed, substitute};
 pub use format::read_memos;
-pub use peg::Patterns;
-pub use planner::{GeneratedSource, PlanOutcome, SourceFailure, SourceRegistry, SourceResult, plan};
-pub use promise::Due;
 pub use paths::matching_paths;
-pub use recognize::{KnownId, Reading, Recognized, Recognizer, Scratch, Tie, Who};
-pub use reconcile::{Batch, Existing, WINDOW};
+pub use planner::{
+    GeneratedSource, PlanOutcome, SourceFailure, SourceRegistry, SourceResult, plan,
+};
 pub use unknown::{Group, group as unrecognized};
-pub use write::{Change, Layout};
+pub use write::Change;
 
 /// One line of a statement, in the terms of the account it is for.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Record<'t> {
+pub(crate) struct Record<'t> {
     pub day: Day,
     /// Money into the account is positive.
     pub qty: Qty,
@@ -90,7 +86,7 @@ pub struct Record<'t> {
 
 /// What a format may say of a record besides its day, amount and memo.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Facts<'t> {
+pub(crate) struct Facts<'t> {
     /// A code, as the language writes one (`check-1041`, lowercase).
     pub code: Option<Cow<'t, str>>,
     /// Records that share one are one flow.
@@ -112,7 +108,7 @@ pub struct Facts<'t> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Original<'t> {
+pub(crate) struct Original<'t> {
     pub qty: Qty,
     pub unit: Cow<'t, str>,
 }
@@ -133,7 +129,8 @@ static NO_FACTS: Facts<'static> = Facts {
 
 impl<'t> Record<'t> {
     /// A record that says nothing but its day, amount and memo.
-    pub fn new(day: Day, qty: Qty, memo: impl Into<Cow<'t, str>>) -> Record<'t> {
+    #[cfg(test)]
+    pub(crate) fn new(day: Day, qty: Qty, memo: impl Into<Cow<'t, str>>) -> Record<'t> {
         Record {
             day,
             qty,
@@ -145,14 +142,14 @@ impl<'t> Record<'t> {
         }
     }
 
-    pub fn facts(&self) -> &Facts<'t> {
+    pub(crate) fn facts(&self) -> &Facts<'t> {
         self.facts.as_deref().unwrap_or(&NO_FACTS)
     }
 }
 
 /// The commodity an account is counted in.
 #[derive(Clone, Copy, Debug)]
-pub struct Unit<'a> {
+pub(crate) struct Unit<'a> {
     pub name: &'a str,
     /// Decimal places.
     pub scale: u8,
@@ -174,14 +171,14 @@ impl Span {
 
 /// A line to add to the journal, or a row to a param: where, and on which day.
 #[derive(Clone, Debug)]
-pub struct Insert {
+pub(crate) struct Insert {
     pub path: String,
     pub day: Day,
     pub form: Form,
 }
 
 #[derive(Clone, Debug)]
-pub enum Form {
+pub(crate) enum Form {
     /// What follows the date of a journal line, and any lines under it.
     Item(String),
     /// A row of a param, as it is written under `param NAME`.
