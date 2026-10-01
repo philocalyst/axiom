@@ -21,7 +21,9 @@
 //!   and acquisition day it gives.
 
 use axiom_core::{Diagnostic, Id, Qty};
-use axiom_model::{Amount, Basis, Class, Dir, Entity, Fault, Object, RuntimeTxn, Subject};
+use axiom_model::{
+    Amount, Asset, Basis, Class, Dir, Entity, Fault, Object, PurposeRoot, RuntimeTxn, Subject,
+};
 
 use crate::eval::{Occasion, Realized};
 use crate::explain;
@@ -30,7 +32,7 @@ use crate::lots::{Origin, Request, Selection, Shares, Slice};
 use crate::motion::{Motion, Moves};
 use crate::scope::{is_money, stays_with_owner};
 use crate::state::Missing;
-use crate::{Cause, Gain, Parcel, show};
+use crate::{Cause, DisposalBoundary, EventKey, Gain, Parcel, Part, PartId, PartKind, show};
 
 fn fresh_slice(m: &Motion, qty: Qty, is_base: bool, now: (axiom_core::Day, RuntimeTxn)) -> Slice {
     let mut slice = Slice::fresh(qty, is_base, now);
@@ -98,6 +100,7 @@ impl Ledger<'_, '_, '_> {
                 .holdings
                 .credit(m.to, m.arrive.unit, m.arrive.qty);
         }
+        self.record_capital_outflow(m);
         if watched {
             self.fire(
                 &book.rules.on_in[m.to],
@@ -113,6 +116,9 @@ impl Ledger<'_, '_, '_> {
             if m.to != m.from {
                 self.fire(&book.rules.always[m.to], &on);
             }
+        }
+        if self.is_asset_sale(m) {
+            self.dispose_sold_asset(m);
         }
     }
 
@@ -467,41 +473,453 @@ impl Ledger<'_, '_, '_> {
             is_money(book, m.to, m.arrive.unit),
             m.detail().since.unwrap_or(m.day),
         );
+        let acquisition = self.new_acquisition_part(m);
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let mut shares = Shares::new(m.arrive.qty, whole);
-        let slot = self.world.holdings.entry(m.to, m.arrive.unit);
-        for slice in &self.scratch.relief.slices {
-            let qty = shares.take(slice.qty);
-            let kept = if keeps || (stays && slice.origin != Origin::Fresh) {
-                slice.tied
-            } else {
-                restricted
-            };
-            // Parcels that keep their identity keep their day and purchase; the rest start over.
-            let (acquired, txn) = if keeps {
-                (slice.acquired, slice.txn)
-            } else {
-                (since, m.txn)
-            };
-            let codes = if keeps { slice.codes } else { m.code_runs };
-            slot.land_with_codes(
-                Parcel {
-                    qty,
-                    basis: slice.carried,
-                    acquired,
-                    txn,
-                    // An ordinary asset-place transfer carries the same
-                    // acquisition part through the split parcel. A flow that
-                    // restarts basis will be registered as a new part by the
-                    // ledger's acquisition hook.
-                    part: if keeps { slice.part } else { None },
-                    codes,
-                    tied: hold.unwrap_or(kept),
-                },
-                money,
-                &book.codes,
-            );
+        {
+            let slot = self.world.holdings.entry(m.to, m.arrive.unit);
+            for slice in &self.scratch.relief.slices {
+                let qty = shares.take(slice.qty);
+                let kept = if keeps || (stays && slice.origin != Origin::Fresh) {
+                    slice.tied
+                } else {
+                    restricted
+                };
+                // Parcels that keep their identity keep their day and purchase; the rest start over.
+                let (acquired, txn) = if keeps {
+                    (slice.acquired, slice.txn)
+                } else {
+                    (since, m.txn)
+                };
+                let codes = if keeps { slice.codes } else { m.code_runs };
+                slot.land_with_codes(
+                    Parcel {
+                        qty,
+                        basis: slice.carried,
+                        acquired,
+                        txn,
+                        // An ordinary asset-place transfer carries the same
+                        // acquisition anchor through every split slice.
+                        part: if keeps {
+                            slice.part
+                        } else {
+                            acquisition.map(|(_, part)| part.id)
+                        },
+                        codes,
+                        tied: hold.unwrap_or(kept),
+                    },
+                    money,
+                    &book.codes,
+                );
+            }
         }
+        for slice in &self.scratch.relief.slices {
+            let part = if keeps {
+                slice.part
+            } else {
+                acquisition.map(|(_, part)| part.id)
+            };
+            if let Some(part) = part {
+                self.world
+                    .holdings
+                    .index_part_slot(m.to, m.arrive.unit, part);
+            }
+        }
+        if let Some((asset, part)) = acquisition {
+            if let Err(error) = self.add_asset_part(asset, part) {
+                self.report_asset_state_error(m, error);
+            }
+        }
+    }
+
+    /// An asset's acquisition arrival anchors all its physical parcels to one
+    /// part id. Improvements are separate basis parts, but never another unit
+    /// of the asset commodity.
+    fn new_acquisition_part(&mut self, m: &Motion) -> Option<(Id<Asset>, Part)> {
+        let book = self.plan.book;
+        if m.target.class != Class::Asset {
+            return None;
+        }
+        let name = book.name(book.commodities.get(m.arrive.unit)?.symbol);
+        let asset = book.asset(name)?;
+        let declaration = &book.assets[asset];
+        if declaration.place != m.to || declaration.unit != m.arrive.unit {
+            return None;
+        }
+        let purchase = self.capital_asset(m) == Some(asset);
+        if !m.opening && !purchase && m.detail().basis.is_none() {
+            return None;
+        }
+        if self.world.assets.asset(asset)?.part_count() != 0 {
+            return None;
+        }
+        let ordinal = self.flow_ordinal(m);
+        let id = PartId {
+            origin: m.txn,
+            ordinal,
+        };
+        let basis = self
+            .scratch
+            .relief
+            .slices
+            .iter()
+            .try_fold(Qty::ZERO, |sum, slice| {
+                sum.0.checked_add(slice.carried.0).map(Qty)
+            });
+        let Some(basis) = basis else {
+            self.report_asset_state_error(m, crate::AssetError::Overflow);
+            return None;
+        };
+        let Some(cost) = self.capital_cost(m) else {
+            self.record.report(
+                Diagnostic::error(
+                    "asset-cost",
+                    "the acquisition cost could not be valued in the book's base currency",
+                )
+                .label(m.loc, "asset part was not recorded"),
+            );
+            return None;
+        };
+        let part = Part {
+            id,
+            flow: self.source_flow(m),
+            kind: PartKind::Acquisition,
+            recorded: self.event_key(m),
+            day: m.detail().since.unwrap_or(m.day),
+            cost,
+            basis,
+        };
+        if let Err(error) = self.validate_asset_part(asset, &part) {
+            self.report_asset_state_error(m, error);
+            return None;
+        }
+        Some((asset, part))
+    }
+
+    /// Capital-purpose outflows name the asset they acquire or improve.
+    /// The asset unit is not an endpoint of the payment flow, so its physical
+    /// parcel is materialized here from the typed purpose object.
+    fn record_capital_outflow(&mut self, m: &Motion) {
+        let Some((asset, Dir::Out)) = self.capital_asset_direction(m) else {
+            return;
+        };
+        let book = self.plan.book;
+        if m.source.class != Class::Asset || m.target.class == Class::Asset {
+            return;
+        }
+        if m.source.owner != book.assets[asset].owner {
+            return;
+        }
+        if self
+            .world
+            .assets
+            .asset(asset)
+            .is_some_and(|state| state.part_count() > 0)
+        {
+            self.add_improvement_part(m, asset);
+        } else {
+            self.add_acquisition_part(m, asset);
+        }
+    }
+
+    fn add_acquisition_part(&mut self, m: &Motion, asset: Id<Asset>) {
+        let Some(cost) = self.capital_cost(m) else {
+            self.record.report(
+                Diagnostic::error(
+                    "asset-cost",
+                    "the acquisition cost could not be valued in the book's base currency",
+                )
+                .label(m.loc, "asset acquisition was not recorded"),
+            );
+            return;
+        };
+        let part = Part {
+            id: PartId {
+                origin: m.txn,
+                ordinal: self.flow_ordinal(m),
+            },
+            flow: self.source_flow(m),
+            kind: PartKind::Acquisition,
+            recorded: self.event_key(m),
+            day: m.day,
+            cost,
+            basis: cost,
+        };
+        if let Err(error) = self.validate_asset_part(asset, &part) {
+            self.report_asset_state_error(m, error);
+            return;
+        }
+        let declaration = &self.plan.book.assets[asset];
+        self.world
+            .holdings
+            .entry(declaration.place, declaration.unit)
+            .land_with_codes(
+                Parcel {
+                    qty: Qty(1),
+                    basis: cost,
+                    acquired: m.day,
+                    txn: m.txn,
+                    part: Some(part.id),
+                    codes: m.code_runs,
+                    tied: None,
+                },
+                false,
+                &self.plan.book.codes,
+            );
+        self.world
+            .holdings
+            .index_part_slot(declaration.place, declaration.unit, part.id);
+        if let Err(error) = self.add_asset_part(asset, part) {
+            self.report_asset_state_error(m, error);
+        }
+    }
+
+    /// A capital-purpose outflow on an already held asset is an improvement;
+    /// it adds basis to the acquisition parcel without another unit.
+    fn add_improvement_part(&mut self, m: &Motion, asset: Id<Asset>) {
+        let book = self.plan.book;
+        let declaration = &book.assets[asset];
+        if m.to == declaration.place && m.arrive.unit == declaration.unit {
+            return;
+        }
+        if m.from == declaration.place && m.out.unit == declaration.unit {
+            return;
+        }
+        let Some(cost) = self.capital_cost(m) else {
+            self.record.report(
+                Diagnostic::error(
+                    "asset-cost",
+                    "the improvement cost could not be valued in the book's base currency",
+                )
+                .label(m.loc, "improvement part was not recorded"),
+            );
+            return;
+        };
+        let part = Part {
+            id: PartId {
+                origin: m.txn,
+                ordinal: self.flow_ordinal(m),
+            },
+            flow: self.source_flow(m),
+            kind: PartKind::Improvement,
+            recorded: self.event_key(m),
+            day: m.day,
+            cost,
+            basis: cost,
+        };
+        if let Err(error) = self.add_asset_part(asset, part) {
+            self.report_asset_state_error(m, error);
+        }
+    }
+
+    fn capital_asset(&self, m: &Motion) -> Option<Id<Asset>> {
+        let purpose = m.purpose?;
+        let book = self.plan.book;
+        (book.purposes[purpose.purpose].root == PurposeRoot::Capital)
+            .then_some(purpose.of)
+            .flatten()
+            .and_then(|object| match object {
+                Object::Asset(asset) => Some(asset),
+                _ => None,
+            })
+    }
+
+    fn capital_asset_direction(&self, m: &Motion) -> Option<(Id<Asset>, Dir)> {
+        let asset = self.capital_asset(m)?;
+        let root = self.plan.book.purposes[m.purpose?.purpose].root;
+        let direction = crate::purpose_direction(
+            m.source.class == Class::Asset,
+            m.target.class == Class::Asset,
+            root,
+        )?;
+        Some((asset, direction))
+    }
+
+    fn capital_cost(&mut self, m: &Motion) -> Option<Qty> {
+        if let Some(stated) = m.detail().basis
+            && (m.opening || m.out.unit == m.arrive.unit)
+        {
+            return Some(stated);
+        }
+        let cost = self.proceeds(m)?;
+        let fees = match m.detail().cost {
+            Some(fee) => self.base_value(m, fee)?,
+            None => Qty::ZERO,
+        };
+        cost.0.checked_add(fees.0).map(Qty)
+    }
+
+    fn source_flow(&self, m: &Motion) -> Option<Id<axiom_model::Flow>> {
+        match m.cause {
+            Cause::Flow(flow) => Some(flow),
+            Cause::Applied(_) | Cause::Time => None,
+        }
+    }
+
+    fn flow_ordinal(&self, m: &Motion) -> u32 {
+        m.flow_ordinal
+    }
+
+    fn event_key(&self, m: &Motion) -> EventKey {
+        let sequence = match m.cause {
+            Cause::Flow(flow) => u64::try_from(flow.index()).unwrap_or(u64::MAX),
+            Cause::Applied(ordinal) => u64::from(ordinal),
+            Cause::Time => 0,
+        };
+        EventKey {
+            day: m.day,
+            sequence,
+        }
+    }
+
+    fn is_asset_sale(&self, m: &Motion) -> bool {
+        let Some((asset, Dir::In)) = self.capital_asset_direction(m) else {
+            return false;
+        };
+        let declaration = &self.plan.book.assets[asset];
+        m.target.owner == declaration.owner
+            && self
+                .world
+                .assets
+                .asset(asset)
+                .is_some_and(|state| state.part_count() > 0 && state.disposed.is_none())
+            && is_money(self.plan.book, m.to, m.arrive.unit)
+    }
+
+    fn dispose_sold_asset(&mut self, m: &Motion) {
+        let Some((asset, Dir::In)) = self.capital_asset_direction(m) else {
+            return;
+        };
+        let book = self.plan.book;
+        let declaration = &book.assets[asset];
+        let boundary = DisposalBoundary::After(self.event_key(m));
+        let Some(state) = self.world.assets.asset(asset) else {
+            self.report_asset_state_error(m, crate::AssetError::UnknownAsset);
+            return;
+        };
+        let Some(anchor) = state.parts().first().map(|part| part.id) else {
+            self.report_asset_state_error(m, crate::AssetError::MissingAcquisition);
+            return;
+        };
+        if state.disposed.is_some() {
+            self.report_asset_state_error(m, crate::AssetError::AlreadyDisposed);
+            return;
+        }
+        if !state
+            .parts()
+            .iter()
+            .all(|part| part.recorded <= self.event_key(m))
+        {
+            self.report_asset_state_error(m, crate::AssetError::NotHeldAtBoundary);
+            return;
+        }
+        let basis = match (state.total_basis(), self.world.holdings.part_basis(anchor)) {
+            (Ok(total), Ok(held)) if total == held => total,
+            (Err(error), _) | (_, Err(error)) => {
+                self.report_asset_state_error(m, error);
+                return;
+            }
+            _ => {
+                self.report_asset_state_error(m, crate::AssetError::ParcelBasisMismatch);
+                return;
+            }
+        };
+        let quantity = self.world.holdings.qty(declaration.place, declaration.unit);
+        if quantity.is_negative() || quantity.is_zero() {
+            self.report_asset_state_error(m, crate::AssetError::UnknownPart);
+            return;
+        }
+        let Some(proceeds) = self.realizes(m) else {
+            return;
+        };
+        if proceeds.is_negative() {
+            self.report_asset_state_error(m, crate::AssetError::NegativeAmount);
+            return;
+        }
+        let request = Request {
+            need: quantity,
+            money: false,
+            selectors: &[],
+            policy: book.places[declaration.place]
+                .select
+                .or(book.commodities[declaration.unit].select),
+            codes: &book.codes,
+            permits: &[],
+            spender: None,
+            now: (m.day, m.txn),
+            explain: &|| false,
+        };
+        self.world.holdings.relieve(
+            declaration.place,
+            declaration.unit,
+            &request,
+            &mut self.scratch.relief,
+        );
+        if self.scratch.relief.shortfall > Qty::ZERO {
+            self.report_asset_state_error(m, crate::AssetError::ParcelBasisMismatch);
+            return;
+        }
+        let relieved: Qty = self
+            .scratch
+            .relief
+            .slices
+            .iter()
+            .map(|slice| slice.basis)
+            .sum();
+        if relieved != basis {
+            self.report_asset_state_error(m, crate::AssetError::ParcelBasisMismatch);
+            return;
+        }
+
+        let on_out = Occasion {
+            amount: Some(Amount::new(quantity, declaration.unit)),
+            purpose: m.purpose,
+            ..Occasion::flow(m)
+        };
+        self.fire(&book.rules.on_out[declaration.place], &on_out);
+        let mut shares = Shares::new(proceeds, quantity);
+        for at in 0..self.scratch.relief.slices.len() {
+            let slice = self.scratch.relief.slices[at];
+            let fetched = shares.take(slice.qty);
+            let gain = fetched - slice.basis;
+            self.record.gains.push(Gain {
+                cause: m.cause,
+                day: m.day,
+                from: declaration.place,
+                to: m.to,
+                unit: declaration.unit,
+                qty: slice.qty,
+                basis: slice.basis,
+                proceeds: fetched,
+                acquired: slice.acquired,
+                ambiguous: self.scratch.relief.ambiguous,
+            });
+            let on_gain = Occasion {
+                amount: Some(Amount::new(slice.qty, declaration.unit)),
+                realized: Some(Realized {
+                    gain,
+                    proceeds: fetched,
+                    basis: slice.basis,
+                    held: m.day.since(slice.acquired),
+                }),
+                purpose: m.purpose,
+                ..Occasion::flow(m)
+            };
+            self.fire(&book.rules.on_gain[declaration.place], &on_gain);
+        }
+        if let Err(error) = self.dispose_asset(asset, m.txn, self.source_flow(m), boundary) {
+            self.report_asset_state_error(m, error);
+        }
+    }
+
+    fn report_asset_state_error(&mut self, m: &Motion, error: crate::AssetError) {
+        self.record.report(
+            Diagnostic::error(
+                "asset-state",
+                format!("asset part state could not be updated: {error:?}"),
+            )
+            .label(m.loc, "asset event"),
+        );
     }
 
     /// A loss in what an asset is worth shrank its parcels and left their
@@ -616,5 +1034,231 @@ impl Ledger<'_, '_, '_> {
             self.record.report(d);
         }
         value
+    }
+}
+
+#[cfg(test)]
+mod asset_flow_tests {
+    use axiom_core::{Day, FileId};
+    use axiom_model::Source;
+    use axiom_syntax::Folder;
+
+    use crate::{DisposalBoundary, EventKey, Options, PartKind, Plan};
+
+    fn day(year: i32, month: u32, day: u32) -> Day {
+        Day::from_ymd(year, month, day).unwrap()
+    }
+
+    fn book<'s>(text: &'s str) -> axiom_model::Book<'s> {
+        let (file, parsed) = axiom_syntax::parse(FileId(0), text, Folder::default());
+        assert!(parsed.is_empty(), "source parses: {parsed:?}");
+        let (book, built) = axiom_model::build(&[Source {
+            path: "asset-test.ax",
+            file,
+            embedded: false,
+        }]);
+        assert!(
+            built.iter().all(|diagnostic| !diagnostic.is_error()),
+            "source builds: {built:?}"
+        );
+        book
+    }
+
+    #[test]
+    fn capital_outflows_acquire_or_improve_and_inflow_sells_the_asset() {
+        let text = "\
+base USD
+commodity USD
+  precision 2
+kind property : thing
+purpose purchase : capital
+  of asset
+purpose improvement : capital
+  of asset
+purpose sale : capital
+  of asset
+account assets/checking
+entity contractor
+entity buyer
+asset condo : property
+
+opening 2025-01-01
+  checking 5_000 USD
+
+2025-01-05 checking -> contractor 1_000 USD #purchase of condo
+2025-02-15 checking -> contractor 100 USD #improvement of condo
+2025-03-01 buyer -> checking 1_500 USD #sale of condo
+";
+        let book = book(text);
+        let run = crate::run(
+            &book,
+            Options {
+                today: day(2025, 3, 31),
+                relaxed: false,
+            },
+        );
+        let errors: Vec<_> = run
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.is_error())
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "native purchase/improvement/sale: {errors:?}"
+        );
+
+        let asset = book.asset("condo").unwrap();
+        let state = &run.assets[asset.index()];
+        assert_eq!(
+            state.parts().len(),
+            2,
+            "the capital payment acquires one part and the later payment adds one improvement"
+        );
+        assert_eq!(state.parts()[0].kind, PartKind::Acquisition);
+        assert_eq!(state.parts()[1].kind, PartKind::Improvement);
+        assert_eq!(
+            (
+                state.total_cost().unwrap().0,
+                state.total_basis().unwrap().0
+            ),
+            (110_000, 110_000)
+        );
+        assert_eq!(
+            state.disposed.map(|disposal| disposal.boundary),
+            Some(DisposalBoundary::After(EventKey {
+                day: day(2025, 3, 1),
+                sequence: u64::from(book.flows.len() as u32 - 1),
+            }))
+        );
+
+        let sale = run
+            .gains
+            .iter()
+            .find(|gain| gain.day == day(2025, 3, 1))
+            .expect("sale records realized gain");
+        assert_eq!(
+            (sale.proceeds.0, sale.basis.0, sale.gain().0),
+            (150_000, 110_000, 40_000)
+        );
+        assert!(
+            !run.holdings
+                .iter()
+                .any(|holding| holding.place == book.assets[asset].place),
+            "the sold asset unit is relieved"
+        );
+        let checking = book.place("assets/checking").unwrap();
+        let usd = book.commodity("USD").unwrap();
+        let cash = run
+            .holdings
+            .iter()
+            .find(|holding| holding.place == checking && holding.unit == usd)
+            .unwrap();
+        assert_eq!(cash.qty().0, 5_400_00);
+    }
+
+    #[test]
+    fn source_acquisition_improvement_consume_carry_and_disposal_share_one_asset_parcel() {
+        let text = "\
+base USD
+commodity USD
+  precision 2
+kind property : thing
+purpose improvement : capital
+  of asset
+account assets/checking
+entity contractor
+asset condo : property
+asset cabin : property
+
+opening 2025-01-01
+  checking 5_000 USD
+  condo basis 1_000 USD since 2024-01-01
+  cabin basis 500 USD since 2024-01-01
+2025-02-15 checking -> contractor 100 USD #improvement of condo
+";
+        let book = book(text);
+        let options = Options {
+            today: day(2025, 3, 31),
+            relaxed: false,
+        };
+        let plan = Plan::new(&book);
+        let (initial, mut ledger) = plan.run_with_view(options);
+        let asset = book.asset("condo").unwrap();
+        let cabin = book.asset("cabin").unwrap();
+        let condo_parts = initial.assets[asset.index()].parts();
+        let cabin_part = initial.assets[cabin.index()].parts()[0].id;
+        assert_eq!(
+            condo_parts.len(),
+            2,
+            "opening basis and improvement are separate clocks"
+        );
+        assert_eq!(condo_parts[0].kind, PartKind::Acquisition);
+        assert_eq!(condo_parts[1].kind, PartKind::Improvement);
+        assert_eq!(
+            initial.assets[asset.index()].total_cost().unwrap().0,
+            110_000
+        );
+
+        let improvement = condo_parts[1].id;
+        let consumed = ledger
+            .consume_asset_part(asset, improvement, axiom_core::Qty(2_000))
+            .unwrap();
+        assert_eq!((consumed.applied.0, consumed.excess.0), (2_000, 0));
+        let carry = ledger
+            .carry_asset_basis(cabin_part, Some((asset, improvement)), axiom_core::Qty(500))
+            .unwrap();
+        assert_eq!(carry.to, Some(improvement));
+        ledger
+            .dispose_asset(
+                asset,
+                cabin_part.origin,
+                None,
+                DisposalBoundary::After(EventKey {
+                    day: day(2025, 3, 1),
+                    sequence: 0,
+                }),
+            )
+            .unwrap();
+        let run = ledger.finish();
+
+        let state = &run.assets[asset.index()];
+        assert_eq!(state.total_cost().unwrap().0, 110_000);
+        assert_eq!(state.total_basis().unwrap().0, 108_500);
+        assert!(state.held_at(EventKey {
+            day: day(2025, 3, 1),
+            sequence: 0
+        }));
+        assert!(!state.held_at(EventKey {
+            day: day(2025, 3, 1),
+            sequence: 1
+        }));
+        let checking = book.place("assets/checking").unwrap();
+        let usd = book.commodity("USD").unwrap();
+        let cash = run
+            .holdings
+            .iter()
+            .find(|holding| holding.place == checking && holding.unit == usd)
+            .unwrap();
+        assert_eq!(
+            cash.qty().0,
+            4_900_00,
+            "only the improvement is a cash flow in this fixture"
+        );
+        let condo = run
+            .holdings
+            .iter()
+            .find(|holding| {
+                holding.place == book.assets[asset].place && holding.unit == book.assets[asset].unit
+            })
+            .unwrap();
+        assert_eq!(
+            condo.qty().0,
+            1,
+            "basis parts never duplicate the physical asset unit"
+        );
+        assert_eq!(
+            condo.lots.iter().map(|lot| lot.basis.0).sum::<i64>(),
+            108_500
+        );
     }
 }
