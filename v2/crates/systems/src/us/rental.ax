@@ -2,7 +2,9 @@
 ///
 /// Rental homes are assets with a history of purchases and improvements. The
 /// residential rental law consumes each part over its own 27.5-year life,
-/// excluding land. Income and costs attach to the home through `of`, so the
+/// excluding land. The acquisition part carries the asset's land value;
+/// improvement parts have no land value and start their own recovery period
+/// when acquired. Income and costs attach to the home through `of`, so the
 /// return can explain which property each event belongs to.
 system us/rental
 

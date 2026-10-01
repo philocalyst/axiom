@@ -84,7 +84,17 @@ base_depreciation_2024_2025 = cents(
     (property_basis - land) * condo_service_months_through_2025 / (life_years * 12)
 )
 base_depreciation_2026_q1 = cents((property_basis - land) * 3 / (life_years * 12))
-improvement = money(require(r"checking -> bay-plumbing\s+([\d_,]+)\s+USD #improvement of condo", february, "condo improvement")[1])
+improvement_line = require(
+    r"^(\d{2}) checking -> bay-plumbing\s+([\d_,]+)\s+USD #improvement of condo",
+    february,
+    "condo improvement",
+)
+improvement_day = int(improvement_line[1])
+improvement = money(improvement_line[2])
+assert improvement_day == 2
+# The improvement is its own part: its February half-month and March month use
+# its full cost. The home's $120,000 land property belongs only to the purchase
+# part and must not be subtracted from this one.
 improvement_depreciation_q1 = cents(improvement * D("1.5") / (life_years * 12))
 depreciation_2026_q1 = base_depreciation_2026_q1 + improvement_depreciation_q1
 condo_basis_2026_03_31 = property_basis + improvement - base_depreciation_2024_2025 - depreciation_2026_q1

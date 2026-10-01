@@ -37,4 +37,4 @@ entity scholarship : grant
   purpose education
 
 code check-*
-  on bank
+  on deposit
