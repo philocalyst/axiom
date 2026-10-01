@@ -3,7 +3,7 @@
 //! What a view should say depends on what the engine made of a flow, so the
 //! behaviour that turns on it is tested from `.ax` text to report.
 
-use axiom_core::{Day, FileId, Loc};
+use axiom_core::{Day, FileId, Loc, Qty};
 use axiom_engine::{Options, Run};
 use axiom_model::{Book, Source};
 
@@ -408,6 +408,22 @@ fn context_views_match_the_legacy_views_before_today_today_and_after_today() {
         .unwrap();
         for at in [day(2026, 10, 1), run.today, day(2027, 4, 20)] {
             for query in [
+                Query::Balance {
+                    globs: vec![],
+                    at: Some(at),
+                    value: false,
+                    monthly: false,
+                },
+                Query::Register {
+                    place: "checking",
+                    from: None,
+                    to: Some(at),
+                },
+                Query::Flow {
+                    by: axiom_model::Period::Month,
+                    from: None,
+                    to: Some(at),
+                },
                 Query::Available { at: Some(at) },
                 Query::Claims { at: Some(at) },
                 Query::Lots { place: None, at: Some(at) },
@@ -780,6 +796,71 @@ fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
             rows(book, run, register("market")),
             ["2025-03-31 | assets/k |  | revalued via income/market | -1,000.00 USD | -1,000.00 USD"]
         );
+    });
+}
+
+#[test]
+fn snapshots_apply_assertion_pads_through_each_requested_day() {
+    with_run(GAPS, day(2025, 12, 31), |book, run| {
+        let whose = crate::lens::Whose::default();
+        let lens = crate::lens::Lens::new(book, &whose, run.today);
+        let days = [
+            day(2025, 1, 1),
+            day(2025, 3, 31),
+            day(2025, 6, 30),
+            day(2025, 9, 30),
+        ];
+        let snapshots = crate::history::Snapshots::of(lens, run, &days, false);
+        let place = book.place("assets/k").unwrap();
+        let balances: Vec<_> = (0..days.len())
+            .map(|column| snapshots.subtree(book, column, place).get(book.base))
+            .collect();
+        assert_eq!(
+            balances,
+            [Qty(1_000_000), Qty(900_000), Qty(950_000), Qty(980_000)]
+        );
+    });
+}
+
+#[test]
+fn snapshots_preserve_stock_splits_and_returned_flow_edges() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+commodity FAST
+
+account assets/broker
+account assets/checking
+account income/pay
+
+opening 2025-01-01
+  broker 10 FAST
+
+2025-01-02 income/pay -> checking 100 USD #deposit
+2025-01-03 FAST split 2 for 1
+2025-01-04 #deposit returned
+";
+    with_run(source, day(2025, 1, 5), |book, run| {
+        let whose = crate::lens::Whose::default();
+        let lens = crate::lens::Lens::new(book, &whose, run.today);
+        let days = [
+            day(2025, 1, 1),
+            day(2025, 1, 2),
+            day(2025, 1, 3),
+            day(2025, 1, 4),
+        ];
+        let snapshots = crate::history::Snapshots::of(lens, run, &days, false);
+        let broker = book.place("assets/broker").unwrap();
+        let checking = book.place("assets/checking").unwrap();
+        let fast = book.commodity("FAST").unwrap();
+        let amount = |column, place, unit| snapshots.subtree(book, column, place).get(unit);
+        assert_eq!(amount(0, broker, fast), Qty(10));
+        assert_eq!(amount(1, broker, fast), Qty(10));
+        assert_eq!(amount(2, broker, fast), Qty(20));
+        assert_eq!(amount(1, checking, book.base), Qty(10_000));
+        assert_eq!(amount(2, checking, book.base), Qty(10_000));
+        assert_eq!(amount(3, checking, book.base), Qty::ZERO);
     });
 }
 

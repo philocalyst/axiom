@@ -822,6 +822,26 @@ fn today_from_the_run_and_from_the_flows_agree() {
 }
 
 #[test]
+fn snapshot_storage_scales_with_occupied_owner_pairs() {
+    let house = household();
+    let days = [day(2026, 1, 31), house.run.today];
+    let everyone = Whose::default();
+    let lens = crate::lens::Lens::new(&house.book, &everyone, house.run.today);
+    let all = crate::history::Snapshots::of(lens, &house.run, &days, false);
+    let (all_pairs, all_cells) = all.storage_shape();
+    let dense_cells = days.len() * house.book.places.len() * house.book.commodities.len();
+    assert_eq!(all_cells, days.len() * all_pairs);
+    assert!(all_cells < dense_cells / 2, "{all_cells} stored cells versus {dense_cells} dense cells");
+
+    let jordan = Whose::of(&house.book, house.entity("jordan"));
+    let jordan_lens = crate::lens::Lens::new(&house.book, &jordan, house.run.today);
+    let scoped = crate::history::Snapshots::of(jordan_lens, &house.run, &days, false);
+    let (jordan_pairs, jordan_cells) = scoped.storage_shape();
+    assert_eq!(jordan_cells, days.len() * jordan_pairs);
+    assert!(jordan_pairs < all_pairs, "owner scope should omit unowned pairs");
+}
+
+#[test]
 fn a_filtered_balance_keeps_context_but_no_net_worth() {
     let house = household();
     let report = house.report(balance(vec!["checking"], None, false, false));
