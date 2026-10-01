@@ -470,6 +470,64 @@ fn checked_add(day: Day, months: i64, days: i64) -> Option<Day> {
     i32::try_from(i64::from(landed.0).checked_add(days)?).ok().map(Day)
 }
 
+fn cadence_day(anchor: Day, step: Span, n: u64) -> Option<Day> {
+    let n = i64::try_from(n).ok()?;
+    checked_add(anchor, i64::from(step.months).checked_mul(n)?, i64::from(step.days).checked_mul(n)?)
+}
+
+/// The first cadence index whose base day is on or after `target`. Positive
+/// calendar steps are monotonic, so exponential search plus binary search
+/// keeps a `Day::MIN` anchor bounded by the logarithm of the elapsed span.
+fn first_cadence_at_or_after(anchor: Day, step: Span, target: Day) -> Option<u64> {
+    if anchor >= target {
+        return Some(0);
+    }
+    let (mut low, mut high) = (0u64, 1u64);
+    loop {
+        match cadence_day(anchor, step, high) {
+            Some(day) if day < target => {
+                low = high;
+                high = high.checked_mul(2)?;
+            }
+            Some(_) | None => break,
+        }
+    }
+    while high - low > 1 {
+        let middle = low + (high - low) / 2;
+        if cadence_day(anchor, step, middle).is_some_and(|day| day < target) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    cadence_day(anchor, step, high).map(|_| high)
+}
+
+struct Landings<'a> {
+    base: Day,
+    on: &'a [On],
+    previous: Option<Day>,
+    empty_pending: bool,
+}
+
+impl<'a> Iterator for Landings<'a> {
+    type Item = Day;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.on.is_empty() {
+            return std::mem::replace(&mut self.empty_pending, false).then_some(self.base);
+        }
+        let next = self
+            .on
+            .iter()
+            .filter_map(|on| on.land(self.base))
+            .filter(|&day| self.previous.is_none_or(|previous| day > previous))
+            .min()?;
+        self.previous = Some(next);
+        Some(next)
+    }
+}
+
 /// The days a schedule falls due in `within`, in order: every `every` from
 /// `anchor`, landed on `on` (the step's own day where `on` says nothing). No
 /// day before `anchor` is due. Steps are counted from the anchor, never from
@@ -493,27 +551,16 @@ pub fn due<'a>(every: Cadence, on: &'a [On], anchor: Day, within: Days) -> impl 
     };
     let forward_landing = on.iter().map(|on| landing(on, false)).max().unwrap_or(0);
     let backward_landing = on.iter().map(|on| landing(on, true)).max().unwrap_or(0);
-    let distance = (i64::from(anchor.max(within.first()).0) - i64::from(anchor.0) - forward_landing).max(0);
-    let max_step_days = (i64::from(step.months) * 31 + i64::from(step.days)).max(1);
-    let first_step = (distance / max_step_days).saturating_sub(1);
+    let target_ordinal = (i64::from(anchor.max(within.first()).0) - forward_landing)
+        .clamp(i64::from(i32::MIN), i64::from(i32::MAX));
+    let target = Day(target_ordinal as i32);
+    let first_step = first_cadence_at_or_after(anchor, step, target).unwrap_or(u64::MAX);
     let base_limit = (i64::from(within.last().0) + backward_landing).min(i64::from(i32::MAX));
-    let landed = move |base: Day| {
-        let mut days: Vec<Day> = if on.is_empty() { vec![base] } else { on.iter().filter_map(|on| on.land(base)).collect() };
-        days.sort_unstable();
-        days.dedup();
-        days
-    };
     std::iter::successors(Some(first_step), |&n| n.checked_add(1))
         .take_while(move |_| advances)
-        .map_while(move |n| {
-            checked_add(
-                anchor,
-                i64::from(step.months).checked_mul(n)?,
-                i64::from(step.days).checked_mul(n)?,
-            )
-        })
+        .map_while(move |n| cadence_day(anchor, step, n))
         .take_while(move |day| i64::from(day.0) <= base_limit)
-        .flat_map(landed)
+        .flat_map(move |base| Landings { base, on, previous: None, empty_pending: true })
         .filter(move |&day| day >= anchor && within.contains(day))
 }
 
@@ -774,6 +821,11 @@ mod tests {
     #[test]
     fn schedules_fast_forward_from_day_min_without_changing_their_phase() {
         let february = days(day(2026, 2, 1), day(2026, 2, 28));
+        let target = day(2026, 1, 2);
+        let monthly_index = first_cadence_at_or_after(Day::MIN, Span::months(1), target).unwrap();
+        assert!(monthly_index > 1_000_000);
+        assert!(cadence_day(Day::MIN, Span::months(1), monthly_index).unwrap() >= target);
+        assert!(cadence_day(Day::MIN, Span::months(1), monthly_index - 1).unwrap() < target);
         assert_eq!(
             due_days(Cadence::Every(Span::days(1)), &[], Day::MIN, february),
             (1..=28).map(|d| format!("2026-02-{d:02}")).collect::<Vec<_>>()
