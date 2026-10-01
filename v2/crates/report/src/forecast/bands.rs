@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn the_same_seed_gives_the_same_bands_and_they_are_ordered() {
-        let history = [0, 100, 200, 300, 400, 50, 50, 900];
+        let history = [0, 100, 200, 300, 400, 50, 50, 900, 75, 225];
         let categories = [0, 1];
         let run = |seed| simulate(&[10_000; 6], &[WHOLE; 6], &history, &categories, 5, 1_000, seed);
         let (a, b) = (run(42), run(42));
