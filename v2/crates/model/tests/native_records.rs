@@ -163,6 +163,46 @@ asset condo : property
     ));
 }
 
+#[test]
+fn filed_returns_keep_reported_tallies_and_events() {
+    let (system_file, system_errors) = parse(
+        FileId(1),
+        "system us\ncurrency USD\n",
+        Folder::of("systems/us.ax"),
+    );
+    assert!(system_errors.is_empty(), "{system_errors:?}");
+    let path = "journal/2026/04.ax";
+    let (file, syntax) = parse(
+        FileId(0),
+        "base USD\ncommodity USD\n2026-04-15 us filed 2025\n  wages 124_200 USD\n  tax-withheld 11_952 USD\n2026-04-16 ^check-1041 settled\n",
+        Folder::of(path),
+    );
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[
+        Source {
+            path: "systems/us.ax",
+            file: system_file,
+            embedded: false,
+        },
+        Source {
+            path,
+            file,
+            embedded: false,
+        },
+    ]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert_eq!(book.filed.len(), 1);
+    let filed = &book.filed[0];
+    assert_eq!(filed.year, 2025);
+    assert_eq!(filed.lines.len(), 2);
+    assert_eq!(book.name(filed.lines[0].0), "wages");
+    assert_eq!(filed.lines[0].1.qty.0, 124_200);
+    assert_eq!(book.events.len(), 1);
+    assert_eq!(book.name(book.events[0].code), "check-1041");
+    assert_eq!(book.events[0].state, axiom_syntax::EventState::Settled);
+}
+
 fn assert_record_indices(book: &axiom_model::book::Book<'_>) {
     for (txn_id, txn) in book.txns.iter() {
         let first = txn.flows.start().index();

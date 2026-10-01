@@ -10,9 +10,9 @@ use crate::book::{Amount, FlowSide, Sign, TemplateAmount, TemplateItemParent, Te
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{
-    Action, Assert, Detail, Event, Flow, FlowExpressions, Gap, Infer, JournalEnd, JournalGroup,
-    JournalItem, JournalProgram, JournalQuantity, Measure, Mode, Object, Origin, Provenance,
-    Purposed, Quote, Reading, Select, Split, Waive,
+    Action, Assert, Detail, Event, Filed, Flow, FlowExpressions, Gap, Infer, JournalEnd,
+    JournalGroup, JournalItem, JournalProgram, JournalQuantity, Measure, Mode, Object, Origin,
+    Provenance, Purposed, Quote, Reading, Select, Split, Waive,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
 use crate::scope::Home;
@@ -702,6 +702,7 @@ fn lower_statement<'a, 's>(
                 loc,
             });
         }
+        ast::Verb::Filed(year) => lower_filed(world, site, loc, statement, *year, diags),
         ast::Verb::Split {
             numerator,
             denominator,
@@ -752,13 +753,66 @@ fn lower_statement<'a, 's>(
         | ast::Verb::Now(_)
         | ast::Verb::Waived
         | ast::Verb::Ends
-        | ast::Verb::Basis { .. }
-        | ast::Verb::Filed(_) => unsupported_statement(
+        | ast::Verb::Basis { .. } => unsupported_statement(
             loc,
             "this statement kind does not yet have a native record lowering",
             diags,
         ),
     }
+}
+
+fn lower_filed<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    loc: Loc,
+    statement: &ast::Statement<'s>,
+    year: i32,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    let Subject::Name(system_name) = statement.subject else {
+        unsupported_statement(loc, "a return needs a system subject", diags);
+        return;
+    };
+    let system = match world.system(Word {
+        text: system_name.0,
+        loc: file.loc(system_name.0),
+    }) {
+        Ok(system) => system,
+        Err(problem) => {
+            diags.push(problem);
+            return;
+        }
+    };
+    let fallback = world.book.systems[system]
+        .currency
+        .unwrap_or(world.book.base);
+    let start = diags.len();
+    let mut lines = Vec::with_capacity(statement.body.legs.len());
+    for line in &file[statement.body.legs] {
+        let Quantity::Amount(ast::Amount::Literal(literal)) = line.amount else {
+            diags.push(
+                Diagnostic::error("filed-amount", "a filed tally needs a literal amount")
+                    .label(line.loc, "write the amount as reported"),
+            );
+            continue;
+        };
+        let Some(amount) = literal_amount(world, file, literal, Some(fallback), diags) else {
+            continue;
+        };
+        lines.push((world.book.names.intern(line.end.name.0), amount, line.loc));
+    }
+    if diags.len() != start || lines.len() != statement.body.legs.len() {
+        return;
+    }
+    world.book.filed.push(Filed {
+        day: statement.date,
+        system,
+        year,
+        owner: world.book.roots.me,
+        lines: lines.into_boxed_slice(),
+        loc,
+    });
 }
 
 #[derive(Clone, Copy)]
