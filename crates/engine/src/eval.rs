@@ -2134,10 +2134,10 @@ entity employer
     #[test]
     fn temporal_extrema_keep_intraday_values_but_days_count_the_final_daily_state() {
         let fixture = crate::fixture::Fixture::new();
+        let owner = fixture.me;
         let book = fixture.book();
         let plan = Plan::new(&book);
         let world = World::new(&book, &plan.watch);
-        let owner = fixture.me;
         let day = |d| Day::from_ymd(2026, 1, d).unwrap();
         let occasion = Occasion::time(day(4), Days::new(day(1), day(4)).unwrap());
         let context = Context::new(Subject::Entity(owner), owner, &occasion);
