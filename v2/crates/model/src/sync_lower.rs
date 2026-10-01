@@ -129,11 +129,14 @@ fn validate_pattern_calls(
     named: &[Named],
     diags: &mut Vec<Diagnostic>,
 ) {
+    const MAX_CALL_DEPTH: usize = 32;
     fn visit(
         at: Id<Pattern>,
         arena: &axiom_core::Arena<Pattern>,
         state: &mut [u8],
         reported: &mut axiom_core::Set<(usize, usize)>,
+        deep: &mut axiom_core::Set<usize>,
+        depth: usize,
         diags: &mut Vec<Diagnostic>,
     ) {
         state[at.index()] = 1;
@@ -143,7 +146,16 @@ fn validate_pattern_calls(
             _ => None,
         }) {
             match state.get(callee.index()).copied().unwrap_or(2) {
-                0 => visit(callee, arena, state, reported, diags),
+                0 if depth < MAX_CALL_DEPTH => {
+                    visit(callee, arena, state, reported, deep, depth + 1, diags)
+                }
+                0 if deep.insert(at.index()) => diags.push(
+                    Diagnostic::error(
+                        "pattern-too-deep",
+                        "named pattern calls may nest at most 32 patterns",
+                    )
+                    .label(pattern.loc, "this call exceeds the runtime nesting bound"),
+                ),
                 1 if reported.insert((at.index(), callee.index())) => {
                     let target = arena.get(callee).map_or(pattern.loc, |pattern| pattern.loc);
                     diags.push(
@@ -163,9 +175,18 @@ fn validate_pattern_calls(
 
     let mut state = vec![0u8; arena.len()];
     let mut reported = axiom_core::Set::default();
+    let mut deep = axiom_core::Set::default();
     for entry in named {
         if state[entry.id.index()] == 0 {
-            visit(entry.id, arena, &mut state, &mut reported, diags);
+            visit(
+                entry.id,
+                arena,
+                &mut state,
+                &mut reported,
+                &mut deep,
+                0,
+                diags,
+            );
         }
     }
 }
@@ -433,6 +454,16 @@ fn lower_known_as<'s>(
                                 Err(_) => {}
                             }
                         }
+                        _ if !file[decl.known_as].is_empty() => diags.push(
+                            Diagnostic::error(
+                                "unsupported-known-as",
+                                "`known-as` is supported on entities and accounts",
+                            )
+                            .label(
+                                file.loc(decl.name.0),
+                                "this declaration is not a matchable party or account",
+                            ),
+                        ),
                         _ => {}
                     }
                 }
@@ -571,6 +602,9 @@ fn lower_formats<'s>(
             let Some(entry) = by_name.get(&(site.home, sym)).copied() else {
                 continue;
             };
+            if entry.loc != file.loc(source.name.0) {
+                continue;
+            }
             let category_purposes = format_purposes(world, file, source, site.home, diags);
             let format = match lower_format(
                 file,
@@ -806,7 +840,7 @@ fn lower_format<'s>(
 fn format_purposes<'s>(
     world: &World<'s>,
     file: &ast::File<'s>,
-    _source: &ast::Format<'s>,
+    source: &ast::Format<'s>,
     home: Home,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<Option<Id<crate::book::Purpose>>> {

@@ -54,15 +54,15 @@ impl<'a> Existing<'a> {
 /// A flow's unit, amount and day, ordered for lookup by them in that order.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct Slot {
-    unit: u16,
+    unit: usize,
     qty: Qty,
     day: Day,
-    index: u32,
+    index: usize,
 }
 
 #[derive(Clone, Copy)]
 struct Candidate {
-    unit: u16,
+    unit: usize,
     qty: Qty,
 }
 
@@ -88,7 +88,7 @@ pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Ve
             1 + known.unwrap_or_else(|| {
                 units.push(name);
                 units.len() - 1
-            }) as u16
+            })
         }
     };
     let candidates: Vec<[Option<Candidate>; 2]> = records
@@ -109,7 +109,7 @@ pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Ve
         })
         .collect();
     // Only a flow of an amount some record has can be one: most of a book is not.
-    let wanted: Set<(u16, Qty)> = candidates
+    let wanted: Set<(usize, Qty)> = candidates
         .iter()
         .flatten()
         .flatten()
@@ -123,12 +123,12 @@ pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Ve
             unit: key(flow.unit),
             qty: flow.qty,
             day: flow.day,
-            index: index as u32,
+            index,
         })
         .filter(|slot| wanted.contains(&(slot.unit, slot.qty)))
         .collect();
     slots.sort_unstable();
-    let batch_of = |slot: &Slot| existing[slot.index as usize].batch;
+    let batch_of = |slot: &Slot| existing[slot.index].batch;
     // The slots of each batch: what is taken along with a flow.
     let mut batches: Map<u32, Vec<usize>> = Map::default();
     for (at, slot) in slots.iter().enumerate() {
@@ -169,12 +169,12 @@ pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Ve
                 continue;
             };
             taken[slot] = true;
-            matched[at] = Some(index as usize);
+            matched[at] = Some(index);
             // A total takes every member; a member leaves the total no longer whole.
-            let (Batch::Member(n) | Batch::Total(n)) = existing[index as usize].batch else {
+            let (Batch::Member(n) | Batch::Total(n)) = existing[index].batch else {
                 continue;
             };
-            let total = matches!(existing[index as usize].batch, Batch::Total(_));
+            let total = matches!(existing[index].batch, Batch::Total(_));
             for &other in &batches[&n] {
                 taken[other] |= total || matches!(batch_of(&slots[other]), Batch::Total(_));
             }
@@ -324,6 +324,29 @@ mod tests {
         );
         assert_eq!(reconcile(&[euros.clone()], &[flow(5, -450)], "USD"), [None]);
         assert_eq!(reconcile(&[euros], &[eur], "USD"), [Some(0)]);
+    }
+
+    #[test]
+    fn unit_indices_do_not_alias_after_u16_range() {
+        let units: Vec<String> = (0..=65_536).map(|at| format!("U{at}")).collect();
+        let records: Vec<Record<'_>> = units
+            .iter()
+            .map(|unit| Record {
+                facts: Some(Box::new(crate::Facts {
+                    currency: Some(unit.as_str().into()),
+                    ..Default::default()
+                })),
+                ..record(5, -450)
+            })
+            .collect();
+        let existing = [Existing {
+            unit: Some(units.last().unwrap()),
+            ..flow(5, -450)
+        }];
+
+        let matched = reconcile(&records, &existing, "USD");
+        assert!(matched[..matched.len() - 1].iter().all(Option::is_none));
+        assert_eq!(matched.last(), Some(&Some(0)));
     }
 
     #[test]

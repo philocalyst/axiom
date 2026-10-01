@@ -24,7 +24,7 @@ impl<'a, 's> Patterns<'a, 's> {
         let mut starts = vec![None; arena.len()];
         let mut visiting = vec![false; arena.len()];
         for (id, _) in arena.iter() {
-            starts[id.index()] = starts_of(arena, names, id, &mut visiting);
+            starts[id.index()] = starts_of(arena, names, id, &mut visiting, 0);
         }
         Patterns {
             arena,
@@ -117,7 +117,11 @@ fn starts_of(
     names: &Interner<'_>,
     id: Id<Pattern>,
     visiting: &mut [bool],
+    depth: usize,
 ) -> Option<Vec<Vec<u8>>> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
     let index = id.index();
     if *visiting.get(index)? {
         return None;
@@ -125,7 +129,7 @@ fn starts_of(
     *visiting.get_mut(index)? = true;
     let result = arena
         .get(id)
-        .and_then(|pattern| starts_in(&pattern.program, arena, names, visiting));
+        .and_then(|pattern| starts_in(&pattern.program, arena, names, visiting, depth));
     visiting[index] = false;
     result
 }
@@ -135,7 +139,11 @@ fn starts_in(
     arena: &Arena<Pattern>,
     names: &Interner<'_>,
     visiting: &mut [bool],
+    depth: usize,
 ) -> Option<Vec<Vec<u8>>> {
+    if depth > MAX_DEPTH {
+        return None;
+    }
     let mut ops = program;
     while let [Op::Class(CharClass::Start), rest @ ..] = ops {
         ops = rest;
@@ -167,23 +175,31 @@ fn starts_in(
             let (mut way, mut rest, mut all) = (usize::from(*len), rest, Vec::new());
             loop {
                 let (one, others) = rest.split_at_checked(way)?;
-                all.extend(starts_in(one, arena, names, visiting)?);
+                all.extend(starts_in(one, arena, names, visiting, depth + 1)?);
                 match others {
                     [Op::Choice { len }, next @ ..] => (way, rest) = (usize::from(*len), next),
                     last => {
-                        all.extend(starts_in(last, arena, names, visiting)?);
+                        all.extend(starts_in(last, arena, names, visiting, depth + 1)?);
                         return Some(all);
                     }
                 }
             }
         }
-        Op::Capture { len, .. } => {
-            starts_in(rest.get(..usize::from(*len))?, arena, names, visiting)
-        }
-        Op::Repeat { min, len, .. } if *min > 0 => {
-            starts_in(rest.get(..usize::from(*len))?, arena, names, visiting)
-        }
-        Op::Call(callee) => starts_of(arena, names, *callee, visiting),
+        Op::Capture { len, .. } => starts_in(
+            rest.get(..usize::from(*len))?,
+            arena,
+            names,
+            visiting,
+            depth + 1,
+        ),
+        Op::Repeat { min, len, .. } if *min > 0 => starts_in(
+            rest.get(..usize::from(*len))?,
+            arena,
+            names,
+            visiting,
+            depth + 1,
+        ),
+        Op::Call(callee) => starts_of(arena, names, *callee, visiting, depth + 1),
         Op::Class(_) | Op::Repeat { .. } => None,
     }
 }
