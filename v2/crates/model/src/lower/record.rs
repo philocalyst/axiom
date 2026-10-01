@@ -2682,48 +2682,75 @@ fn make_flow<'s>(
     let root_exprs = (out.and_then(|q| q.root), arrive.and_then(|q| q.root));
     let basis_root = tail.basis_root;
     if let Some((rate, quote, at)) = tail.price {
-        if let (Some(out), None) = (out.filter(|out| out.root.is_none()), arrive) {
-            let computed = priced(world, out.amount, quote, rate, at, diags)?;
-            tail.price = None;
-            return make_resolved_flow(
-                world,
-                day,
-                from,
-                to,
-                out.amount,
-                computed,
-                infer,
-                mode,
-                tail,
-                header_codes,
-                Run::new(Id::new(world.book.codes.len() as u32), 0),
-                txn,
-                loc,
-                diags,
+        let quoted = match (out, arrive) {
+            (Some(out), None) if out.root.is_none() => Some(priced(world, out.amount, quote, rate, at, diags)?),
+            (None, Some(arrive)) if arrive.root.is_none() => Some(priced(world, arrive.amount, quote, rate, at, diags)?),
+            (Some(out), Some(arrive)) if out.root.is_none() && arrive.root.is_none() => {
+                let expected = if out.amount.unit == quote {
+                    priced(world, arrive.amount, quote, rate, at, diags)?
+                } else if arrive.amount.unit == quote {
+                    priced(world, out.amount, quote, rate, at, diags)?
+                } else {
+                    diags.push(
+                        Diagnostic::error("price-unit", "the stated price unit must match one side of the flow")
+                            .label(at, "the quote unit appears on neither side"),
+                    );
+                    return None;
+                };
+                let actual = if out.amount.unit == quote { out.amount } else { arrive.amount };
+                if expected != actual {
+                    diags.push(
+                        Diagnostic::error("price-disagrees", "the stated price does not match the flow amounts")
+                            .label(at, "this price implies a different amount")
+                            .label(loc, "the written quantities disagree with the price"),
+                    );
+                    return None;
+                }
+                None
+            }
+            _ => {
+                diags.push(
+                    Diagnostic::error("price-shape", "a written price needs a literal quantity")
+                        .label(at, "this price cannot be applied to a computed or missing amount")
+                        .help("write one literal quantity and let the price determine the other side"),
+                );
+                return None;
+            }
+        };
+        tail.price = None;
+        let (out_amount, arrive_amount) = match (out, arrive, quoted) {
+            (Some(out), None, Some(arrive)) => (out.amount, arrive),
+            (None, Some(arrive), Some(out)) => (out, arrive.amount),
+            (Some(out), Some(arrive), None) => (out.amount, arrive.amount),
+            _ => return None,
+        };
+        return make_resolved_flow(
+            world,
+            day,
+            from,
+            to,
+            out_amount,
+            arrive_amount,
+            infer,
+            mode,
+            tail,
+            header_codes,
+            Run::new(Id::new(world.book.codes.len() as u32), 0),
+            txn,
+            loc,
+            diags,
+        )
+        .map(|flow| {
+            (
+                flow,
+                (root_exprs.0.is_some() || root_exprs.1.is_some() || basis_root.is_some()).then_some(FlowExpressions {
+                    flow: 0,
+                    out: root_exprs.0,
+                    arrive: root_exprs.1,
+                    basis: basis_root,
+                }),
             )
-            .map(|flow| {
-                (
-                    flow,
-                    (root_exprs.0.is_some() || basis_root.is_some()).then_some(FlowExpressions {
-                        flow: 0,
-                        out: root_exprs.0,
-                        arrive: None,
-                        basis: basis_root,
-                    }),
-                )
-            });
-        }
-        diags.push(
-            Diagnostic::error(
-                "price-shape",
-                "a written price needs one literal amount on the source side",
-            )
-            .label(at, "this price cannot be applied to the written quantities")
-            .help(
-                "write one literal source quantity and let the price determine the arriving amount",
-            ),
-        );
-        return None;
+        });
     }
     let local_codes = append_codes(world, &[]);
     let flow = make_resolved_flow(

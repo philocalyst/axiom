@@ -194,6 +194,65 @@ account assets/fidelity
 }
 
 #[test]
+fn quoted_unit_price_records_both_typed_flow_quantities() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind fund : commodity
+commodity VTI : fund
+account assets/checking
+account assets/brokerage
+2026-01-01 checking -> brokerage 7 VTI @ 285.70 USD
+2026-01-02 checking 1_999.90 USD -> brokerage 7 VTI @ 285.70 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let flows: Vec<_> = book.flows.iter().map(|(_, flow)| flow).collect();
+    let flow = flows[0];
+    let vti = book.commodity("VTI").unwrap();
+    let usd = book.commodity("USD").unwrap();
+    assert_eq!(flow.out, axiom_model::Amount::new(axiom_core::Qty(199_990), usd));
+    assert_eq!(flow.arrive, axiom_model::Amount::new(axiom_core::Qty(7), vti));
+    assert_eq!(flows[1].out, flow.out);
+    assert_eq!(flows[1].arrive, flow.arrive);
+}
+
+#[test]
+fn quoted_unit_price_rejects_disagreeing_explicit_amounts() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind fund : commodity
+commodity VTI : fund
+account assets/checking
+account assets/brokerage
+2026-01-01 checking 1_999.90 USD -> brokerage 7 VTI @ 285.70 USD
+2026-01-02 checking 2_000.00 USD -> brokerage 7 VTI @ 285.70 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "price-disagrees"), "{diagnostics:?}");
+    assert_eq!(book.flows.len(), 1, "the invalid priced transaction is rolled back atomically");
+}
+
+#[test]
 fn commodity_without_pays_cannot_be_used_as_a_party() {
     let path = "journal/2026/01.ax";
     let text = "\
