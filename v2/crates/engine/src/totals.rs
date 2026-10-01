@@ -14,7 +14,7 @@ use std::hash::{Hash, Hasher};
 
 use axiom_core::calendar;
 use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Sym, spread};
-use axiom_model::{Book, Dir, Entity, Place, Subject, Window};
+use axiom_model::{Book, Dir, Entity, Place, Purpose, Subject, Window};
 
 use crate::facts::{LawFacts, TotalsRead};
 use crate::scope::containing;
@@ -174,6 +174,8 @@ pub(crate) struct Watch {
     /// reads a flow total and need no rolling state.
     slots: Box<[u32]>,
     subjects: Box<[Subject]>,
+    /// The ancestors of flow purposes that some law reads.
+    purpose_through: Option<Groups<Purpose, Purpose>>,
     places: usize,
     entities: usize,
 }
@@ -235,7 +237,30 @@ impl Watch {
         within.sort_unstable_by_key(|&(place, subject)| (place, subject_key(places, entities, subject)));
         within.dedup();
         let through = Groups::build(places, within);
-        Watch { through, slots: slots.into(), subjects: subjects.into(), places, entities }
+        let mut purpose_reads = Set::default();
+        for law in book.laws.values() {
+            for node in &law.nodes {
+                let axiom_model::Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) = &node.op else {
+                    continue;
+                };
+                let purpose = (*purpose).or_else(|| match law.owner {
+                    axiom_model::Owner::Purpose(purpose) => Some(purpose),
+                    _ => None,
+                });
+                if let Some(purpose) = purpose {
+                    purpose_reads.insert(purpose);
+                }
+            }
+        }
+        let purpose_through = if purpose_reads.is_empty() {
+            None
+        } else {
+            let within = book.purposes.ids().flat_map(|actual| {
+                book.purposes.lineage(actual).filter(|ancestor| purpose_reads.contains(ancestor)).map(move |ancestor| (actual, ancestor))
+            });
+            Some(Groups::build(book.purposes.len(), within))
+        };
+        Watch { through, slots: slots.into(), subjects: subjects.into(), purpose_through, places, entities }
     }
 
     fn slot(&self, subject: Subject) -> Option<usize> {
@@ -245,6 +270,10 @@ impl Watch {
 
     pub(crate) fn subjects(&self) -> &[Subject] {
         &self.subjects
+    }
+
+    pub(crate) fn reads_purpose(&self, purpose: Id<Purpose>) -> bool {
+        self.purpose_through.as_ref().is_some_and(|through| !through[purpose].is_empty())
     }
 
     /// The watched subjects that contain `here` but not `there`: a flow from
@@ -266,12 +295,14 @@ impl Watch {
 pub(crate) struct Totals {
     windows: Vec<Windows>,
     reaching: Reaching,
+    purpose: Map<(Id<Entity>, Id<Purpose>), Windows>,
 }
 
 /// What the running totals hold: the windows, which are all the future reads.
 impl Hash for Totals {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.windows.hash(state);
+        unordered(self.purpose.iter()).hash(state);
     }
 }
 
@@ -310,6 +341,7 @@ impl Totals {
         Totals {
             windows: vec![Windows::NONE; watch.subjects().len()],
             reaching: Reaching::new(),
+            purpose: Map::default(),
         }
     }
 
@@ -337,6 +369,36 @@ impl Totals {
                 }
             }
         }
+    }
+
+    /// Counts a recognized flow for the purposes some law reads. A child
+    /// purpose contributes to each requested ancestor, while an unrelated
+    /// purpose allocates and updates no rolling state.
+    pub fn record_purpose(
+        &mut self,
+        watch: &Watch,
+        owner: Id<Entity>,
+        actual: Id<Purpose>,
+        (day, over): (Day, Days),
+        dir: Dir,
+        amount: Qty,
+    ) {
+        if amount.is_zero() {
+            return;
+        }
+        let Some(purpose_through) = watch.purpose_through.as_ref() else { return };
+        for &purpose in &purpose_through[actual] {
+            self.purpose.entry((owner, purpose)).or_insert_with(|| Windows::NONE.clone()).add(day, dir, amount, over);
+        }
+    }
+
+    /// The amount of this purpose that entered and left the owner's boundary.
+    pub fn read_purpose(&self, owner: Id<Entity>, purpose: Id<Purpose>, window: Window, day: Day) -> (Qty, Qty) {
+        self.purpose
+            .get(&(owner, purpose))
+            .map_or((Qty::ZERO, Qty::ZERO), |windows| {
+                (windows.read(Dir::In, window, day), windows.read(Dir::Out, window, day))
+            })
     }
 
     /// Whether some month begins by `day` with value recognized into it ahead of time.

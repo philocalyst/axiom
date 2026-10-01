@@ -21,7 +21,7 @@
 //!   and acquisition day it gives.
 
 use axiom_core::{Diagnostic, Id, Qty};
-use axiom_model::{Amount, Basis, Class, End, Entity, Fault, Object, Subject};
+use axiom_model::{Amount, Basis, Class, Dir, End, Entity, Fault, Object, Subject};
 
 use crate::eval::{Occasion, Realized};
 use crate::explain;
@@ -31,6 +31,12 @@ use crate::motion::{Motion, Moves};
 use crate::scope::{is_money, stays_with_owner};
 use crate::state::Missing;
 use crate::{Cause, Gain, Parcel, show};
+
+fn fresh_slice(m: &Motion, is_base: bool, now: (axiom_core::Day, axiom_core::Id<axiom_model::Txn>)) -> Slice {
+    let mut slice = Slice::fresh(m.out.qty, is_base, now);
+    slice.codes = m.code_runs;
+    slice
+}
 
 /// Whether the parcels' basis starts over at what they fetched. It does unless
 /// the value only changes place: a same-commodity transfer within one owner's
@@ -42,7 +48,7 @@ use crate::{Cause, Gain, Parcel, show};
 fn restarts_basis(m: &Motion) -> bool {
     let (from, to) = (m.source, m.target);
     // v3 bridge: a change of basis fetches nothing.
-    if matches!(m.moves, Moves::Loss | Moves::Basis(_)) {
+    if m.moves == Moves::Loss {
         return false;
     }
     if from.class != Class::Asset {
@@ -116,6 +122,24 @@ impl Ledger<'_, '_, '_> {
         let out = if leaves { self.base_value(m, m.out) } else { None };
         let arrive = if enters { self.base_value(m, m.arrive) } else { None };
         self.world.totals.record(watch, (m.from, m.to), (m.day, m.recognized), out, arrive);
+
+        if let Some(purpose) = m.purpose.map(|purpose| purpose.purpose).filter(|&purpose| watch.reads_purpose(purpose)) {
+            let (dir, amount) = if m.target.class == Class::Asset && m.source.class != Class::Asset {
+                (Dir::In, m.arrive)
+            } else {
+                (Dir::Out, m.out)
+            };
+            if let Some(amount) = self.base_value(m, amount) {
+                self.world.totals.record_purpose(
+                    watch,
+                    m.owner,
+                    purpose,
+                    (m.day, m.recognized),
+                    dir,
+                    amount,
+                );
+            }
+        }
     }
 
     /// Takes `m.out` from the source, leaving the value in flight in
@@ -125,27 +149,21 @@ impl Ledger<'_, '_, '_> {
         let (unit, source, now) = (m.out.unit, m.source, (m.day, m.txn));
         let is_base = unit == book.base;
         self.scratch.relief.slices.clear();
-        // v3 bridge: `PLACE.basis` at the source lowers its parcels' basis, and only value leaves.
-        if m.moves == Moves::Basis(End::From) {
-            self.change_basis(m, m.from, -1);
-            self.scratch.relief.slices.push(Slice::fresh(m.out.qty, is_base, now));
-            return;
-        }
         if source.class != Class::Asset {
             self.world.holdings.credit(m.from, unit, -m.out.qty);
-            self.scratch.relief.slices.push(Slice::fresh(m.out.qty, is_base, now));
+            self.scratch.relief.slices.push(fresh_slice(m, is_base, now));
             return;
         }
         self.ask_ties(m);
         let request = Request {
             need: m.out.qty,
             money: is_money(book, m.from, unit),
-            selectors: m.select,
+            selectors: m.select(),
             // A flow's selector, then the place's policy, then what the commodity says (currencies are FIFO).
             policy: source.select.or(book.commodities[unit].select),
-            txns: &book.txns,
+            codes: &book.codes,
             permits: &self.scratch.permits,
-            spender: m.detail.spender,
+            spender: m.detail().spender,
             now,
             explain: &|| !self.record.ambiguous.contains(&m.from),
         };
@@ -166,7 +184,7 @@ impl Ledger<'_, '_, '_> {
         // What arrives must land even when nothing left (`all` of an empty
         // holding): value never vanishes from a balanced flow.
         if shortfall > Qty::ZERO || self.scratch.relief.slices.is_empty() {
-            self.scratch.relief.slices.push(Slice::fresh(shortfall, is_base, now));
+            self.scratch.relief.slices.push(fresh_slice(m, is_base, now));
         }
     }
 
@@ -184,7 +202,7 @@ impl Ledger<'_, '_, '_> {
                 self.scratch.permits.push((entity, false));
             }
         }
-        if stays_with_owner(m) || m.detail.spender.is_some() {
+        if stays_with_owner(m) || m.detail().spender.is_some() {
             return;
         }
         for at in 0..self.scratch.permits.len() {
@@ -201,11 +219,11 @@ impl Ledger<'_, '_, '_> {
         // Value from outside takes the target's arrival rule; a market's growth has no basis.
         let unbased = m.target.basis == Basis::Zero || m.moves == Moves::Growth;
         // What was fetched matters to what a sale realizes, and to a basis nobody stated.
-        let priced = restarts && (m.source.class == Class::Asset || (m.detail.basis.is_none() && !unbased));
+        let priced = restarts && (m.source.class == Class::Asset || (m.detail().basis.is_none() && !unbased));
         let proceeds = if priced { self.proceeds(m) } else { None };
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let (mut worth, mut fixed) =
-            (proceeds.map(|p| Shares::new(p, whole)), m.detail.basis.map(|b| Shares::new(b, whole)));
+            (proceeds.map(|p| Shares::new(p, whole)), m.detail().basis.map(|b| Shares::new(b, whole)));
         for slice in &mut self.scratch.relief.slices {
             slice.worth = worth.as_mut().map_or(Qty::ZERO, |shares| shares.take(slice.qty));
             let stated = fixed.as_mut().map(|shares| shares.take(slice.qty));
@@ -244,7 +262,7 @@ impl Ledger<'_, '_, '_> {
             let part = shares.take(slice.qty);
             match sold {
                 true => slice.worth -= part,
-                false if m.detail.basis.is_none() => slice.carried += part,
+                false if m.detail().basis.is_none() => slice.carried += part,
                 false => {}
             }
         }
@@ -252,7 +270,7 @@ impl Ledger<'_, '_, '_> {
 
     /// What the exchange's fee legs cost it, in the base currency.
     fn exchange_cost(&mut self, m: &Motion) -> Qty {
-        m.detail.cost.and_then(|cost| self.base_value(m, cost)).unwrap_or(Qty::ZERO)
+        m.detail().cost.and_then(|cost| self.base_value(m, cost)).unwrap_or(Qty::ZERO)
     }
 
     /// What the parcels that leave realize against their basis: what they
@@ -302,10 +320,6 @@ impl Ledger<'_, '_, '_> {
     /// Lands the slices at the target.
     fn arrive(&mut self, m: &Motion, keeps: bool) {
         let book = self.plan.book;
-        // v3 bridge: `PLACE.basis` at the target changes its parcels' basis, and nothing arrives.
-        if m.moves == Moves::Basis(End::To) {
-            return self.change_basis(m, m.to, 1);
-        }
         if m.target.class != Class::Asset {
             self.world.holdings.credit(m.to, m.arrive.unit, m.arrive.qty);
             if m.moves == Moves::Loss {
@@ -317,8 +331,8 @@ impl Ledger<'_, '_, '_> {
         // `for` an entity ties what arrives to it; `for` the owner (or its household) unties it.
         let owner = m.target.owner;
         let hold =
-            m.detail.hold.map(|entity| Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e)));
-        let (money, since) = (is_money(book, m.to, m.arrive.unit), m.detail.since.unwrap_or(m.day));
+            m.detail().hold.map(|entity| Some(entity).filter(|&e| e != owner && book.entities[owner].member != Some(e)));
+        let (money, since) = (is_money(book, m.to, m.arrive.unit), m.detail().since.unwrap_or(m.day));
         let whole: Qty = self.scratch.relief.slices.iter().map(|s| s.qty).sum();
         let mut shares = Shares::new(m.arrive.qty, whole);
         let slot = self.world.holdings.entry(m.to, m.arrive.unit);
@@ -327,7 +341,12 @@ impl Ledger<'_, '_, '_> {
             let kept = if keeps || (stays && slice.origin != Origin::Fresh) { slice.tied } else { restricted };
             // Parcels that keep their identity keep their day and purchase; the rest start over.
             let (acquired, txn) = if keeps { (slice.acquired, slice.txn) } else { (since, m.txn) };
-            slot.land(Parcel { qty, basis: slice.carried, acquired, txn, tied: hold.unwrap_or(kept) }, money);
+            let codes = if keeps { slice.codes } else { m.code_runs };
+            slot.land_with_codes(
+                Parcel { qty, basis: slice.carried, acquired, txn, codes, tied: hold.unwrap_or(kept) },
+                money,
+                &book.codes,
+            );
         }
     }
 
@@ -337,7 +356,7 @@ impl Ledger<'_, '_, '_> {
     fn keep_basis(&mut self, m: &Motion) {
         let book = self.plan.book;
         let left: Qty = self.scratch.relief.slices.iter().filter(|s| s.origin != Origin::Fresh).map(|s| s.basis).sum();
-        let selection = Selection { selectors: &[], txns: &book.txns };
+        let selection = Selection { selectors: &[], codes: &book.codes };
         let slot = self.world.holdings.entry(m.from, m.out.unit);
         slot.rebase(left, &selection, is_money(book, m.from, m.out.unit), (m.day, m.txn));
     }

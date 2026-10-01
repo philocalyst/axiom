@@ -19,7 +19,6 @@ use axiom_model::{
     StepKind, Subject, System, Trigger, Value, Waive, Window,
 };
 
-use crate::bridge;
 use crate::calc::Calc;
 use crate::eval::{Context, compared};
 use crate::events::Events;
@@ -474,7 +473,7 @@ fn since(book: &Book, events: &Events, (assert, sign): (&Assert, i64), checked: 
         let flow = &book.flows[id];
         let (moved, inflow) = if flow.to == assert.place { (flow.arrive, true) } else { (flow.out, false) };
         let end = if inflow { End::To } else { End::From };
-        if moved.unit != assert.amount.unit || !bridge::moves_quantity(flow, end) {
+        if moved.unit != assert.amount.unit {
             continue;
         }
         let state = events.state(id, flow);
@@ -738,7 +737,7 @@ pub(crate) fn shortfall(book: &Book, m: &Motion, held: Qty, admitted: Qty, short
     let mut d = Diagnostic::error("insufficient-holding", format!("{place} does not hold {}", money(m.out.qty)))
         .label(m.loc, format!("{} more than {place} has", money(short)))
         .note(format!("{place} holds {}", money(held)));
-    if !m.select.is_empty() {
+    if !m.select().is_empty() {
         d = d.note(format!("the selectors match {} of it", money(admitted)));
     }
     d.help("record the purchase before this flow, or check the quantity; the missing amount is left as a negative balance so the rest of the ledger stays consistent")
@@ -775,7 +774,7 @@ pub(crate) fn overdue(
     today: Day,
 ) -> Option<Diagnostic> {
     let claim = book.paid_into(lot.txn, place)?;
-    let due = claim.detail().due.filter(|&due| due <= today)?;
+    let due = book.flow_view(claim).detail().due.filter(|&due| due <= today)?;
     let who = claim.payee.map_or_else(|| show::place(book, place), |entity| book.name(book.entities[entity].path));
     let owed = book.show(Amount::new(lot.qty, unit));
     let late = today.0 - due.0;

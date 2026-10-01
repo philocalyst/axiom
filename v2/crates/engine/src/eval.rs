@@ -489,7 +489,7 @@ impl<'a, 's> Machine<'a, 's> {
             (Value::Entity(e), Value::Glob(pattern)) => named(pattern, book.entities[e].path),
             (Value::Unit(u), Value::Glob(pattern)) => named(pattern, book.commodities[u].symbol),
             (Value::Flow, Value::Code(code)) => {
-                self.ctx.motion.is_some_and(|m| m.codes.iter().any(|&mark| named(code, mark)))
+                self.ctx.motion.is_some_and(|m| m.codes().any(|mark| named(code, mark)))
             }
             _ => false,
         }
@@ -498,12 +498,13 @@ impl<'a, 's> Machine<'a, 's> {
     fn call(&self, func: Func, args: &[NodeId]) -> Value {
         let arg = |i: usize| self.at(args[i]);
         // `total` and `tally` take their operands from the function itself.
-        let operands = !matches!(func, Func::Total(..) | Func::Tally(_));
+        let operands = !matches!(func, Func::Total(..) | Func::PurposeTotal { .. } | Func::Tally(_));
         if operands && let Some(fault) = args.iter().map(|&a| self.at(a)).find(|v| matches!(v, Value::Fault(_))) {
             return fault;
         }
         match func {
             Func::Total(dir, window) => self.total(dir, window, args),
+            Func::PurposeTotal { purpose, window } => self.purpose_total(purpose, window),
             Func::Tally(name) => self.tally(name, Func::tally_year(args).map(|year| self.at(year))),
             Func::Min => self.pick(BinOp::Le, arg(0), arg(1)),
             Func::Max => self.pick(BinOp::Ge, arg(0), arg(1)),
@@ -521,8 +522,47 @@ impl<'a, 's> Machine<'a, 's> {
                 _ => unreachable!("{TYPED}"),
             },
             Func::Date => civil_date(arg(0), arg(1), arg(2)).map_or_else(Value::Fault, Value::Day),
-            Func::StraightLine => unreachable!("{V3}"),
+            Func::StraightLine => self.straight_line(args),
         }
+    }
+
+    fn purpose_total(&self, purpose: Option<Id<axiom_model::Purpose>>, window: Window) -> Value {
+        let purpose = purpose.or_else(|| match self.law.owner {
+            axiom_model::Owner::Purpose(purpose) => Some(purpose),
+            _ => None,
+        }).expect("a purpose total without an explicit purpose belongs to a purpose law");
+        let root = self.book().purposes[purpose].root;
+        let (incoming, outgoing) = self.env.world.totals.read_purpose(
+            self.ctx.owner,
+            purpose,
+            window,
+            self.ctx.anchor(),
+        );
+        let total = match root {
+            axiom_model::PurposeRoot::Income => incoming - outgoing,
+            axiom_model::PurposeRoot::Spending | axiom_model::PurposeRoot::Capital | axiom_model::PurposeRoot::Transfer => {
+                outgoing - incoming
+            }
+        };
+        self.base(total)
+    }
+
+    fn straight_line(&self, args: &[NodeId]) -> Value {
+        let (Value::Amount(cost), Value::Span(life), Value::Day(from), Value::Name(period)) =
+            (self.at(args[0]), self.at(args[1]), self.at(args[2]), self.at(args[3]))
+        else {
+            unreachable!("{TYPED}");
+        };
+        let window = match self.book().name(period) {
+            "month" => Window::Month,
+            "year" => Window::Year,
+            _ => unreachable!("{TYPED}"),
+        };
+        let mid_month = args.get(4).is_some_and(|&node| {
+            matches!(self.at(node), Value::Name(name) if self.book().name(name) == "mid-month")
+        });
+        crate::calc::straight_line(cost.qty, life, from, self.ctx.over, window, mid_month)
+            .map_or(Value::Fault(Fault::Overflow), |qty| Value::Amount(Amount::new(qty, cost.unit)))
     }
 
     /// `min` and `max`: whichever operand `op` (`<=` or `>=`) puts first.

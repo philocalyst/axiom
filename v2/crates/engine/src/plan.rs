@@ -12,7 +12,7 @@
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Set, Sym};
 use axiom_model::{Asset, Book, Commodity, Entity, Flow, Func, Kind, Op, Place, Rule, Subject, Ty, Value};
 
-use crate::bridge::Sides;
+use crate::sides::Sides;
 use crate::events::{self, Events};
 use crate::facts::{self, LawFacts, Readers};
 use crate::ledger::{Ledger, fold, fold_to_view, fold_to_view_and_effects_prefix};

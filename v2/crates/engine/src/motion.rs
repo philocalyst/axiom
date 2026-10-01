@@ -6,9 +6,9 @@
 //! `Motion`, so exactly one code path moves value.
 
 use axiom_core::{Day, Days, Id, Loc, Qty, Sym};
-use axiom_model::{Amount, Assert, Book, Class, Detail, End, Entity, Flow, Mode, Place, Purposed, Select, Txn, Waive};
+use axiom_model::{Amount, Assert, Book, Class, Detail, End, Entity, Flow, FlowCodes, FlowView, Mode, Place, Purposed, Select, Txn, Waive};
 
-use crate::{Cause, bridge};
+use crate::Cause;
 
 /// What leaves and what arrives, once every `?`, `=` and `all` is solved.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
@@ -34,19 +34,15 @@ pub(crate) enum Moves {
     /// A market lowers it: parcels shrink and leave their basis behind, an
     /// unrealized loss. Nothing is realized, and nothing is spent.
     Loss,
-    // v3 bridge: the v4 model has no `.basis` places.
-    /// `PLACE.basis` at this end: the parcels there change basis, not quantity.
-    Basis(End),
 }
 
 impl Moves {
-    fn of(book: &Book, detail: &Detail, from: Id<Place>, to: Id<Place>) -> Moves {
+    fn of(book: &Book, from: Id<Place>, to: Id<Place>) -> Moves {
         let market = book.entities[book.roots.market].place;
-        match bridge::basis_end(detail) {
-            Some(end) => Moves::Basis(end),
-            None if book.places[to].class == Class::Asset && Some(from) == market => Moves::Growth,
-            None if book.places[from].class == Class::Asset && Some(to) == market => Moves::Loss,
-            None => Moves::Value,
+        match (book.places[from].class, book.places[to].class, Some(from) == market, Some(to) == market) {
+            (Class::Outside, Class::Asset, true, _) => Moves::Growth,
+            (Class::Asset, Class::Outside, _, true) => Moves::Loss,
+            _ => Moves::Value,
         }
     }
 
@@ -54,13 +50,16 @@ impl Moves {
         match self {
             Moves::Growth => Moves::Loss,
             Moves::Loss => Moves::Growth,
-            Moves::Basis(end) => Moves::Basis(bridge::opposite(end)),
             Moves::Value => Moves::Value,
         }
     }
 }
 
 pub(crate) struct Motion<'f> {
+    /// The immutable journal metadata, borrowed through the book's pooled view.
+    /// Keeping one view avoids copying selector, code, and rare-detail data.
+    pub view: Option<FlowView<'f>>,
+    pub code_runs: FlowCodes,
     pub cause: Cause,
     pub day: Day,
     pub recognized: Days,
@@ -76,9 +75,6 @@ pub(crate) struct Motion<'f> {
     pub payee: Option<Id<Entity>>,
     pub purpose: Option<Purposed>,
     pub description: Option<Sym>,
-    pub select: &'f [Select],
-    pub codes: &'f [Sym],
-    pub detail: &'f Detail,
     pub moves: Moves,
     /// An `opening` line: value moves, but no law sees it and no total counts it.
     pub opening: bool,
@@ -88,8 +84,15 @@ pub(crate) struct Motion<'f> {
 
 impl<'f> Motion<'f> {
     pub fn new(book: &'f Book, flow: &'f Flow, cause: Cause, day: Day, amounts: Amounts) -> Motion<'f> {
+        Motion::from_view(book, book.flow_view(flow), cause, day, amounts)
+    }
+
+    pub fn from_view(book: &'f Book, view: FlowView<'f>, cause: Cause, day: Day, amounts: Amounts) -> Motion<'f> {
+        let flow = &*view;
         let (source, target) = (&book.places[flow.from], &book.places[flow.to]);
         Motion {
+            view: Some(view),
+            code_runs: view.code_runs(),
             cause,
             day,
             recognized: flow.recognized,
@@ -104,10 +107,7 @@ impl<'f> Motion<'f> {
             payee: flow.payee,
             purpose: flow.purpose,
             description: flow.description,
-            select: &flow.select,
-            codes: &flow.codes,
-            detail: flow.detail(),
-            moves: Moves::of(book, flow.detail(), flow.from, flow.to),
+            moves: Moves::of(book, flow.from, flow.to),
             opening: flow.mode == Mode::Opening,
             waive: flow.waive,
             loc: flow.loc,
@@ -139,10 +139,12 @@ impl<'f> Motion<'f> {
             payee: None,
             purpose: None,
             description: None,
-            select: &[],
-            codes: &[],
-            detail: &Detail::NONE,
-            moves: Moves::of(book, &Detail::NONE, from, to),
+            view: None,
+            code_runs: FlowCodes {
+                header: axiom_core::Run::new(Id::new(0), 0),
+                local: axiom_core::Run::new(Id::new(0), 0),
+            },
+            moves: Moves::of(book, from, to),
             opening: false,
             waive,
             loc: assert.loc,
@@ -170,5 +172,17 @@ impl<'f> Motion<'f> {
 
     pub fn is_exchange(&self) -> bool {
         self.out.unit != self.arrive.unit
+    }
+
+    pub fn select(&self) -> &'f [Select] {
+        self.view.map_or(&[], FlowView::select)
+    }
+
+    pub fn detail(&self) -> &'f Detail {
+        self.view.map_or(&Detail::NONE, FlowView::detail)
+    }
+
+    pub fn codes(&self) -> impl Iterator<Item = Sym> + 'f {
+        self.view.into_iter().flat_map(FlowView::codes)
     }
 }

@@ -11,8 +11,8 @@
 
 use std::cmp::Ordering;
 
-use axiom_core::{Day, Id, Qty, Ratio, Span};
-use axiom_model::{Amount, BinOp, Book, Bracket, Commodity, Fault, Value};
+use axiom_core::{Day, Days, Id, Qty, Ratio, Span, day::days_in_month};
+use axiom_model::{Amount, BinOp, Book, Bracket, Commodity, Fault, Value, Window};
 
 pub(crate) struct Calc<'a, 's> {
     pub book: &'a Book<'s>,
@@ -155,6 +155,54 @@ pub(crate) fn progressive(brackets: &[Bracket], income: Qty) -> Option<Qty> {
     Some(tax)
 }
 
+/// The share of a straight-line life in one requested period. The schedule is
+/// rounded only at its actual calendar boundaries, so splitting a period into
+/// smaller windows cannot create or lose a cent. Mid-month lives have a
+/// half-month at each end and one extra calendar month to preserve the stated
+/// life.
+pub(crate) fn straight_line(cost: Qty, life: Span, from: Day, over: Days, period: Window, mid_month: bool) -> Option<Qty> {
+    if life.months <= 0 || life.days != 0 || period == Window::Ever {
+        return None;
+    }
+    let months = life.months;
+    let month_index = |day: Day| -> Option<i64> {
+        let (year, month, _) = day.ymd();
+        i64::from(year).checked_mul(12)?.checked_add(i64::from(month) - 1)
+    };
+    let first_month = month_index(from)?;
+    let first_weight = if mid_month {
+        Ratio::new(1, 2)?
+    } else {
+        let (_, month, day) = from.ymd();
+        let days = days_in_month(from.year(), month);
+        Ratio::new(i128::from(days - day + 1), i128::from(days))?
+    };
+    let months = i64::from(months);
+
+    // A boundary includes every completed month through `day`'s month. The
+    // first partial month is followed by full months and a final remainder,
+    // which makes the total exactly `life` months without moving the endpoint
+    // when the acquisition day is not the first.
+    let cumulative = |day: Day| -> Option<Qty> {
+        let offset = month_index(day)?.checked_sub(first_month)?;
+        if offset < 0 {
+            return Some(Qty::ZERO);
+        }
+        let units = if offset == 0 {
+            first_weight
+        } else if offset < months {
+            first_weight.checked_add(Ratio::int(offset))?
+        } else {
+            Ratio::int(months)
+        };
+        cost.scale(units.checked_div(Ratio::int(months))?)
+    };
+
+    let through = cumulative(over.last())?;
+    let before = cumulative(over.first().add_days(-1))?;
+    Some(through - before)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +230,49 @@ mod tests {
         assert_eq!(logic(Value::Bool(true), fault, false), fault);
         assert_eq!(logic(Value::Bool(true), Value::Bool(true), false), Value::Bool(true));
         assert_eq!(logic(Value::Bool(false), Value::Bool(false), true), Value::Bool(false));
+    }
+
+    #[test]
+    fn straight_line_splits_at_calendar_boundaries_without_changing_total() {
+        let day = |y, m, d| Day::from_ymd(y, m, d).unwrap();
+        let cost = Qty(28_200_000); // $282,000.00 at cent precision
+        let life = Span::months(330);
+        let part = |year, month| {
+            let first = day(year, month, 1);
+            let last = day(year, month, days_in_month(year, month));
+            straight_line(cost, life, day(2024, 3, 1), Days::new(first, last).unwrap(), Window::Month, true).unwrap()
+        };
+
+        let before_2026: Qty = (3..=12).map(|month| part(2024, month)).chain((1..=12).map(|month| part(2025, month))).sum();
+        let first_quarter: Qty = (1..=3).map(|month| part(2026, month)).sum();
+        assert_eq!(before_2026, Qty(1_837_273));
+        assert_eq!(first_quarter, Qty(256_363));
+        assert_eq!([part(2026, 1), part(2026, 2), part(2026, 3)], [Qty(85_454), Qty(85_455), Qty(85_454)]);
+
+        let first_day_2026 = day(2026, 1, 1);
+        let march_end = day(2026, 3, 31);
+        let whole_quarter = straight_line(
+            cost,
+            life,
+            day(2024, 3, 1),
+            Days::new(first_day_2026, march_end).unwrap(),
+            Window::Year,
+            true,
+        )
+        .unwrap();
+        assert_eq!(whole_quarter, first_quarter);
+    }
+
+    #[test]
+    fn a_mid_month_improvement_gets_its_own_half_month_start() {
+        let day = |y, m, d| Day::from_ymd(y, m, d).unwrap();
+        let cost = Qty(148_000); // $1,480.00 at cent precision
+        let life = Span::months(330);
+        let month = |m| {
+            let first = day(2026, m, 1);
+            let last = day(2026, m, days_in_month(2026, m));
+            straight_line(cost, life, day(2026, 2, 2), Days::new(first, last).unwrap(), Window::Month, true).unwrap()
+        };
+        assert_eq!(month(2) + month(3), Qty(673));
     }
 }

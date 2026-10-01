@@ -69,7 +69,7 @@ impl Ledger<'_, '_, '_> {
     pub(crate) fn change_basis(&mut self, m: &Motion, place: Id<Place>, sign: i64) {
         let book = self.plan.book;
         let amount = self.base_value(m, if sign > 0 { m.arrive } else { m.out }).unwrap_or(Qty::ZERO);
-        let selection = Selection { selectors: m.select, txns: &book.txns };
+        let selection = Selection { selectors: m.select(), codes: &book.codes };
         let held: Qty = self.world.holdings.of(place).map(|slot| slot.basis(is_money(book, place, slot.unit))).sum();
         let moved = if sign > 0 { amount } else { amount.min(held) };
         let money = |unit| is_money(book, place, unit);

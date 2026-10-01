@@ -71,6 +71,7 @@ impl StepFacts {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Reads {
     Total(Dir, Window),
+    Purpose(Window),
     Tally(Sym),
 }
 
@@ -80,14 +81,17 @@ impl Reads {
     fn of(law: &Law, cond: NodeId) -> Option<Reads> {
         let read = law.range(cond).filter_map(|at| match &law.nodes[at].op {
             Op::Call(Func::Total(dir, window), _) => Some(Reads::Total(*dir, *window)),
+            Op::Call(Func::PurposeTotal { window, .. }, _) => Some(Reads::Purpose(*window)),
             // A tally of another year is settled, not a window this flow is adding to.
             Op::Call(Func::Tally(name), args) if Func::tally_year(args).is_none() => Some(Reads::Tally(*name)),
             _ => None,
         });
         read.min_by_key(|read| match read {
             Reads::Total(_, Window::Month) => 0,
-            Reads::Total(_, Window::Year) | Reads::Tally(_) => 1,
+            Reads::Purpose(Window::Month) => 0,
+            Reads::Total(_, Window::Year) | Reads::Purpose(Window::Year) | Reads::Tally(_) => 1,
             Reads::Total(_, Window::Ever) => 2,
+            Reads::Purpose(Window::Ever) => 2,
         })
     }
 
@@ -95,6 +99,7 @@ impl Reads {
     pub fn window(self, on: &Occasion) -> Days {
         match self {
             Reads::Total(_, window) => window.around(on.anchor()),
+            Reads::Purpose(window) => window.around(on.anchor()),
             Reads::Tally(_) => Window::Year.around(on.over.first()),
         }
     }
@@ -143,6 +148,7 @@ fn is_floor_of_nothing(law: &Law) -> bool {
 fn window_read(law: &Law) -> Option<Window> {
     let windows = law.nodes.iter().filter_map(|node| match node.op {
         Op::Call(Func::Total(_, window), _) if window != Window::Ever => Some(window),
+        Op::Call(Func::PurposeTotal { window, .. }, _) if window != Window::Ever => Some(window),
         _ => None,
     });
     windows.min_by_key(|&window| window == Window::Year)
@@ -152,6 +158,7 @@ fn totals_read(law: &Law) -> TotalsRead {
     let widened = |args: &[NodeId]| args.iter().any(|arg| law.nodes[arg.index()].ty == Ty::Kind);
     let reads = law.nodes.iter().filter_map(|node| match &node.op {
         Op::Call(Func::Total(..), args) => Some(widened(args)),
+        Op::Call(Func::PurposeTotal { .. }, _) => Some(false),
         _ => None,
     });
     match reads.reduce(|a, b| a || b) {

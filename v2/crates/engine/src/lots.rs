@@ -23,8 +23,8 @@ use std::hash::{Hash, Hasher};
 use std::iter::successors;
 use std::ops::{Deref, Range};
 
-use axiom_core::{Arena, Day, Id, Qty, Ratio};
-use axiom_model::{Commodity, Entity, Place, Policy, Select, Txn};
+use axiom_core::{Arena, Day, Id, Qty, Ratio, Sym};
+use axiom_model::{Commodity, Entity, FlowCodes, Place, Policy, Select, Txn};
 
 use crate::{Holding, Parcel};
 
@@ -33,6 +33,18 @@ const NONE: u32 = u32::MAX;
 /// Sweeping a slot mid-fold costs a pass over its lots, so it waits until
 /// half of them are exhausted.
 const SWEEP_AT: usize = 32;
+
+fn empty_codes() -> FlowCodes {
+    let empty = axiom_core::Run::new(Id::new(0), 0);
+    FlowCodes { header: empty, local: empty }
+}
+
+fn same_codes(left: FlowCodes, right: FlowCodes, pool: &Arena<Sym>) -> bool {
+    let in_left = |code: &Sym| pool[left.header].contains(code) || pool[left.local].contains(code);
+    let in_right = |code: &Sym| pool[right.header].contains(code) || pool[right.local].contains(code);
+    pool[left.header].iter().chain(&pool[left.local]).all(in_right)
+        && pool[right.header].iter().chain(&pool[right.local]).all(in_left)
+}
 
 /// What makes two parcels interchangeable. Parcels merge exactly when their
 /// identities are equal, and relief between candidates with equal identities is
@@ -81,6 +93,7 @@ pub(crate) struct Slice {
     pub basis: Qty,
     pub acquired: Day,
     pub txn: Id<Txn>,
+    pub codes: FlowCodes,
     pub tied: Option<Id<Entity>>,
     pub origin: Origin,
     /// What it fetched, in base-currency quanta: what a sale realizes against.
@@ -103,7 +116,17 @@ pub(crate) enum Origin {
 
 impl Slice {
     fn new(qty: Qty, basis: Qty, origin: Origin, (acquired, txn): (Day, Id<Txn>)) -> Slice {
-        Slice { qty, basis, acquired, txn, tied: None, origin, worth: Qty::ZERO, carried: Qty::ZERO }
+        Slice {
+            qty,
+            basis,
+            acquired,
+            txn,
+            codes: empty_codes(),
+            tied: None,
+            origin,
+            worth: Qty::ZERO,
+            carried: Qty::ZERO,
+        }
     }
 
     /// Value that nothing gave up: base currency is at its face, anything else
@@ -143,7 +166,7 @@ pub(crate) struct Request<'a> {
     pub selectors: &'a [Select],
     /// The place's policy; a policy selector on the flow overrides it.
     pub policy: Option<Policy>,
-    pub txns: &'a Arena<Txn>,
+    pub codes: &'a Arena<Sym>,
     /// For each entity a parcel here is tied to: whether its `on spend` laws
     /// permit this flow.
     pub permits: &'a [(Id<Entity>, bool)],
@@ -298,6 +321,13 @@ impl Slot {
     /// (its basis adds; it keeps its own acquisition day) and otherwise taking
     /// its place among the lots, oldest first.
     pub fn land(&mut self, parcel: Parcel, money: bool) {
+        self.land_with_codes(parcel, money, &Arena::new());
+    }
+
+    /// Lands a parcel and merges only when its pooled code sets are equivalent.
+    /// Range positions are handles, so two distinct ranges can name the same
+    /// marks; compare their symbols before coalescing their selector identity.
+    pub fn land_with_codes(&mut self, parcel: Parcel, money: bool, codes: &Arena<Sym>) {
         if money && parcel.tied.is_none() && parcel.basis == parcel.qty {
             return self.credit(parcel.qty);
         }
@@ -313,7 +343,9 @@ impl Slot {
                 lots.partition_point(|lot| lot.acquired <= parcel.acquired),
             )
         };
-        let same = lots[start..end].iter().position(|lot| !lot.qty.is_zero() && identity(lot, money) == kind);
+        let same = lots[start..end].iter().position(|lot| {
+            !lot.qty.is_zero() && identity(lot, money) == kind && same_codes(lot.codes, parcel.codes, codes)
+        });
         if let Some(found) = same {
             let at = start + found;
             lots[at].qty += parcel.qty;
@@ -387,7 +419,7 @@ impl Slot {
         out.candidates.clear();
         out.ambiguous = false;
         out.shortfall = req.need;
-        let selection = Selection { selectors: req.selectors, txns: req.txns };
+        let selection = Selection { selectors: req.selectors, codes: req.codes };
         // Plain money that covers the need: the common case, and no choice to make.
         if self.holding.lots.is_empty() && self.holding.plain >= req.need && !selection.constrains() {
             self.take(Source::Plain, req.need, req, out);
@@ -421,7 +453,7 @@ impl Slot {
         let candidates = usize::from(self.holding.plain > Qty::ZERO) + self.live();
         out.ambiguous = policy.is_none() && candidates > 1 && req.need < takeable;
         if out.ambiguous && (req.explain)() {
-            self.gather(req.money, &Selection { selectors: &[], txns: req.txns }, &mut out.candidates);
+            self.gather(req.money, &Selection { selectors: &[], codes: req.codes }, &mut out.candidates);
         }
         let mut left = req.need;
         let (lifo, tied) = (policy == Some(Policy::Lifo), self.is_tied());
@@ -552,7 +584,7 @@ impl Slot {
         if plain > Qty::ZERO && !selection.constrains() {
             // Plain money has no transaction or acquisition day of its own.
             let basis = if money { plain } else { Qty::ZERO };
-            let parcel = Parcel { qty: plain, basis, acquired: Day::MIN, txn: Id::new(0), tied: None };
+            let parcel = Parcel { qty: plain, basis, acquired: Day::MIN, txn: Id::new(0), codes: empty_codes(), tied: None };
             out.push(Candidate { txn: None, ..Candidate::new(Source::Plain, &parcel, money) });
         }
         let lots = self.holding.lots.iter().enumerate();
@@ -561,8 +593,8 @@ impl Slot {
     }
 
     /// How much of the holding the selectors admit: what `all` means.
-    pub fn admitted(&self, money: bool, selectors: &[Select], txns: &Arena<Txn>) -> Qty {
-        let selection = Selection { selectors, txns };
+    pub fn admitted(&self, money: bool, selectors: &[Select], codes: &Arena<Sym>) -> Qty {
+        let selection = Selection { selectors, codes };
         if !selection.constrains() {
             return self.qty - self.holding.plain.min(Qty::ZERO);
         }
@@ -580,7 +612,7 @@ impl Slot {
         if plain > Qty::ZERO && !selection.constrains() {
             let basis = if money { plain } else { Qty::ZERO };
             self.holding.plain = Qty::ZERO;
-            self.insert(Parcel { qty: plain, basis, acquired: now.0, txn: now.1, tied: None });
+            self.insert(Parcel { qty: plain, basis, acquired: now.0, txn: now.1, codes: empty_codes(), tied: None });
         }
         let lots = &mut self.holding.lots[self.first..];
         let whole: Qty = lots.iter().filter(|lot| selection.admits(lot)).map(|lot| lot.qty).sum();
@@ -672,7 +704,7 @@ impl Shares {
 /// ranges (if any) and one of the codes (if any).
 pub(crate) struct Selection<'a> {
     pub selectors: &'a [Select],
-    pub txns: &'a Arena<Txn>,
+    pub codes: &'a Arena<Sym>,
 }
 
 impl Selection<'_> {
@@ -690,10 +722,8 @@ impl Selection<'_> {
         let codes = self.selectors.iter().filter_map(|s| if let Select::Code(c) = *s { Some(c) } else { None });
         let (mut ranges, mut codes) = (ranges.peekable(), codes.peekable());
         let in_range = ranges.peek().is_none() || ranges.any(|days| days.contains(lot.acquired));
-        let marked = codes.peek().is_none() || {
-            let marks = self.txns.get(lot.txn).map_or(&[][..], |txn| &txn.codes);
-            codes.any(|code| marks.contains(&code))
-        };
+        let marked = codes.peek().is_none()
+            || codes.any(|code| self.codes[lot.codes.header].contains(&code) || self.codes[lot.codes.local].contains(&code));
         in_range && marked
     }
 }
@@ -881,7 +911,14 @@ mod tests {
     }
 
     fn lot(qty: i64, basis: i64, acquired: i32) -> Parcel {
-        Parcel { qty: Qty(qty), basis: Qty(basis), acquired: Day(acquired), txn: Id::new(acquired as u32), tied: None }
+        Parcel {
+            qty: Qty(qty),
+            basis: Qty(basis),
+            acquired: Day(acquired),
+            txn: Id::new(acquired as u32),
+            codes: empty_codes(),
+            tied: None,
+        }
     }
 
     fn slot_of(unit: u32, plain: i64, lots: &[Parcel], money: bool) -> Slot {
@@ -903,11 +940,11 @@ mod tests {
 
     fn relieve(slot: &mut Slot, need: i64, ask: &Ask) -> Relief {
         let mut relief = Relief::default();
-        let txns = Arena::new();
+        let codes = Arena::new();
         let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
         let (spender, now) = (ask.spender, (Day(1_000), Id::new(0)));
         let request =
-            Request { need: Qty(need), money, selectors, policy, txns: &txns, permits, spender, now, explain: &|| true };
+            Request { need: Qty(need), money, selectors, policy, codes: &codes, permits, spender, now, explain: &|| true };
         slot.relieve(&request, &mut relief);
         relief
     }
@@ -1019,7 +1056,7 @@ mod tests {
         assert_eq!(taken(&relieve(&mut held, 6, &hifo)), [(5, 5_000), (1, 200)]);
         assert!(held.rebase(
             Qty(9_000),
-            &Selection { selectors: &[], txns: &Arena::new() },
+            &Selection { selectors: &[], codes: &Arena::new() },
             false,
             (Day(9), Id::new(0))
         ));
@@ -1119,12 +1156,58 @@ mod tests {
     #[test]
     fn selectors_intersect_by_kind_and_union_within_one() {
         let held = slot_of(1, 0, &[lot(1, 1, 10), lot(2, 2, 20), lot(4, 4, 30)], false);
-        let txns = Arena::new();
-        let pick = |selectors: &[Select]| held.admitted(false, selectors, &txns).0;
+        let codes = Arena::new();
+        let pick = |selectors: &[Select]| held.admitted(false, selectors, &codes).0;
         assert_eq!(pick(&[]), 7);
         assert_eq!(pick(&[Select::Range(span(10, 20))]), 3);
         assert_eq!(pick(&[Select::Range(span(10, 10)), Select::Range(span(30, 30))]), 5);
         assert_eq!(pick(&[Select::Policy(Policy::Lifo)]), 7);
+    }
+
+    #[test]
+    fn code_selectors_use_both_pooled_ranges_for_synthetic_txns() {
+        let mut names = axiom_core::Interner::default();
+        let (header, local, other) = (names.intern("statement"), names.intern("purchase"), names.intern("other"));
+        let mut pool = Arena::new();
+        let (header_at, local_at, other_at) = (pool.push(header), pool.push(local), pool.push(other));
+        let marks = FlowCodes { header: axiom_core::Run::new(header_at, 1), local: axiom_core::Run::new(local_at, 1) };
+        let mut parcel = lot(5, 5, 10);
+        parcel.txn = Id::new(999); // A runtime flow need not name a Book transaction.
+        parcel.codes = marks;
+        let mut held = Slot::new(Id::new(0), Id::new(0), NONE);
+        held.land_with_codes(parcel, false, &pool);
+
+        assert_eq!(held.admitted(false, &[Select::Code(header)], &pool), Qty(5));
+        assert_eq!(held.admitted(false, &[Select::Code(local)], &pool), Qty(5));
+        assert_eq!(held.admitted(false, &[Select::Code(other)], &pool), Qty::ZERO);
+    }
+
+    #[test]
+    fn parcel_merging_compares_code_meaning_not_range_positions() {
+        let mut names = axiom_core::Interner::default();
+        let mark = names.intern("same");
+        let different = names.intern("different");
+        let mut pool = Arena::new();
+        let first = pool.push(mark);
+        let second = pool.push(mark);
+        let other = pool.push(different);
+        let one = FlowCodes { header: axiom_core::Run::new(first, 1), local: empty_codes().local };
+        let equal = FlowCodes { header: axiom_core::Run::new(second, 1), local: empty_codes().local };
+        let distinct = FlowCodes { header: axiom_core::Run::new(other, 1), local: empty_codes().local };
+        let mut slot = Slot::new(Id::new(0), Id::new(0), NONE);
+        let mut first_parcel = lot(2, 2, 10);
+        first_parcel.codes = one;
+        let mut equivalent_parcel = lot(3, 3, 10);
+        equivalent_parcel.codes = equal;
+        let mut distinct_parcel = lot(1, 1, 10);
+        distinct_parcel.codes = distinct;
+        slot.land_with_codes(first_parcel, false, &pool);
+        slot.land_with_codes(equivalent_parcel, false, &pool);
+        slot.land_with_codes(distinct_parcel, false, &pool);
+
+        assert_eq!(slot.holding.lots.len(), 2);
+        assert_eq!(slot.holding.lots[0].qty, Qty(5));
+        assert_eq!(slot.holding.lots[1].qty, Qty(1));
     }
 
     #[test]

@@ -225,7 +225,7 @@ fn brokerage_book(policy: Option<Policy>) -> (Book<'static>, Fixture) {
     f.buy(3, 1_500_00, 10);
     let sale = f.sell(4, 5, 800_00);
     if let Some(policy) = policy {
-        f.flows[sale.index()].select = Box::new([Select::Policy(policy)]);
+        f.select(sale, [Select::Policy(policy)]);
     }
     let names = Fixture::new();
     (f.book(), names)
@@ -804,6 +804,10 @@ fn restricted_money_stays_tied_and_is_spent_first_only_where_its_laws_permit() {
         basis: Qty(amount),
         acquired: Day(2),
         txn: Id::new(txn),
+        codes: FlowCodes {
+            header: axiom_core::Run::new(Id::new(0), 0),
+            local: axiom_core::Run::new(Id::new(0), 0),
+        },
         tied: Some(nsf),
     };
     let checking_held = held(&run, checking, usd).unwrap();
@@ -1260,7 +1264,7 @@ fn value_is_conserved_over_random_journals() {
                     let sale = f.sell(day, shares, proceeds);
                     if dice.roll(3) == 0 {
                         let from = (2 + dice.roll(day as u64) as i32).min(day);
-                        f.flows[sale.index()].select = Box::new([Select::Range(span(from, day))]);
+                        f.select(sale, [Select::Range(span(from, day))]);
                     }
                     *expected.entry(vti).or_default() -= shares;
                     *expected.entry(usd).or_default() += proceeds;
@@ -1655,7 +1659,7 @@ fn claims_stay_apart_by_transaction_and_overdue_ones_are_reported_once_each() {
     f.mark_txn(first, "#inv-1");
     let code = f.sym("#inv-1");
     let partial = f.flow(10, savings, checking, 100_00);
-    f.flows[partial.index()].select = Box::new([Select::Code(code)]);
+    f.select(partial, [Select::Code(code)]);
     let book = f.book();
     let run = run(&book, Options { today: Day(45), relaxed: false });
     assert_eq!(
@@ -2035,7 +2039,7 @@ fn a_million_flows() {
                 4 if i % 100 == 4 => f.buy(day, 1_000_00, 10),
                 5 if i % 100 == 5 => {
                     let sale = f.sell(day, 10, 1_200_00);
-                    f.flows[sale.index()].select = Box::new([Select::Policy(Policy::Fifo)]);
+                    f.select(sale, [Select::Policy(Policy::Fifo)]);
                     sale
                 }
                 _ => f.flow(day, checking, food, 20_00 + i % 7),

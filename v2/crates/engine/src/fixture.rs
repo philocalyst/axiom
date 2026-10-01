@@ -20,6 +20,8 @@ pub(crate) struct Fixture {
     pub me: Id<Entity>,
     pub grant: Id<Entity>,
     pub household: Id<Entity>,
+    unknown_entity: Id<Entity>,
+    opening_entity: Id<Entity>,
     /// The market, whose place is `market`.
     pub trader: Id<Entity>,
     pub assets: Id<Place>,
@@ -42,6 +44,9 @@ pub(crate) struct Fixture {
     commodities: Arena<Commodity>,
     pub flows: Vec<Flow>,
     pub txns: Vec<Txn>,
+    codes: Arena<Sym>,
+    selectors: Arena<Select>,
+    details: Arena<Detail>,
     pub asserts: Vec<Assert>,
     pub events: Vec<Event>,
     pub splits: Vec<Split>,
@@ -61,6 +66,7 @@ impl Fixture {
         let entity = |path: Sym, restricted| Entity {
             path,
             kind,
+            purpose: None,
             place: None,
             restricted,
             lives: Box::new([]),
@@ -81,8 +87,10 @@ impl Fixture {
             entity(names.intern("nsf-grant"), true),
             entity(names.intern("household"), false),
             entity(names.intern("market"), false),
+            entity(names.intern("unknown"), false),
+            entity(names.intern("opening"), false),
         ];
-        let (mut entities, ids) = Tree::build(people, &[None; 4]).expect("no cycles");
+        let (mut entities, ids) = Tree::build(people, &[None; 6]).expect("no cycles");
         let me = ids[0];
         let place = |path: Sym, class| Place {
             path,
@@ -130,6 +138,10 @@ impl Fixture {
         places[p[5]].basis = Basis::Zero;
         places[p[16]].kind = Id::new(1);
         entities[ids[3]].place = Some(p[16]);
+        entities[ids[4]].place = Some(p[13]);
+        entities[ids[5]].place = Some(p[12]);
+        places[p[13]].owner = ids[4];
+        places[p[12]].owner = ids[5];
         let mut commodities = Arena::new();
         let usd = commodities.push(commodity(names.intern("USD"), 2));
         let vti = commodities.push(commodity(names.intern("VTI"), 0));
@@ -140,6 +152,8 @@ impl Fixture {
             me,
             grant: ids[1],
             household: ids[2],
+            unknown_entity: ids[4],
+            opening_entity: ids[5],
             trader: ids[3],
             assets: p[0],
             checking: p[1],
@@ -160,6 +174,9 @@ impl Fixture {
             commodities,
             flows: Vec::new(),
             txns: Vec::new(),
+            codes: Arena::new(),
+            selectors: Arena::new(),
+            details: Arena::new(),
             asserts: Vec::new(),
             events: Vec::new(),
             splits: Vec::new(),
@@ -250,9 +267,8 @@ impl Fixture {
         let txn = Txn {
             day,
             flows: Run::new(id, 1),
-            codes: Box::new([]),
+            codes: Run::new(Id::new(0), 0),
             waive: None,
-            plan: None,
             contract: None,
             ends: false,
             doc: None,
@@ -274,8 +290,9 @@ impl Fixture {
             purpose: None,
             description: None,
             origin: Origin::Written,
-            select: Box::new([]),
-            codes: Box::new([]),
+            select: Run::new(Id::new(0), 0),
+            header_codes: Run::new(Id::new(0), 0),
+            codes: Run::new(Id::new(0), 0),
             loc,
             waive: None,
             detail: None,
@@ -304,7 +321,18 @@ impl Fixture {
 
     /// Gives a flow detail.
     pub fn detail(&mut self, id: Id<Flow>, detail: Detail) {
-        self.flows[id.index()].detail = Some(Box::new(detail));
+        let detail = self.details.push(detail);
+        self.flows[id.index()].detail = Some(detail);
+    }
+
+    pub fn select(&mut self, id: Id<Flow>, selectors: impl IntoIterator<Item = Select>) {
+        let first = Id::new(self.selectors.len() as u32);
+        let mut len = 0;
+        for selector in selectors {
+            self.selectors.push(selector);
+            len += 1;
+        }
+        self.flows[id.index()].select = Run::new(first, len);
     }
 
     /// Makes a flow an `opening` line.
@@ -359,14 +387,17 @@ impl Fixture {
     pub fn mark_txn(&mut self, id: Id<Flow>, code: &'static str) {
         let code = self.sym(code);
         let txn = self.flows[id.index()].txn;
-        self.txns[txn.index()].codes = Box::new([code]);
-        self.flows[id.index()].codes = Box::new([code]);
+        let codes = self.codes.push(code);
+        let run = Run::new(codes, 1);
+        self.txns[txn.index()].codes = run;
+        self.flows[id.index()].header_codes = run;
     }
 
     /// Marks a flow with `code`.
     pub fn mark(&mut self, id: Id<Flow>, code: &'static str) {
         let code = self.sym(code);
-        self.flows[id.index()].codes = Box::new([code]);
+        let start = self.codes.push(code);
+        self.flows[id.index()].codes = Run::new(start, 1);
     }
 
     /// Marks a flow pending under `code`.
@@ -425,17 +456,11 @@ impl Fixture {
         let (purposes, [income, spending, capital]) = Purpose::roots(&mut self.names);
         let roots = Roots {
             me: self.me,
-            unknown: self.unknown,
-            opening: self.opening,
+            unknown: self.unknown_entity,
+            opening: self.opening_entity,
             market: self.trader,
-            asset: k,
-            debt: k,
-            thing: k,
-            commodity: k,
-            entity: k,
-            income,
-            spending,
-            capital,
+            kinds: KindRoots { asset: k, debt: k, thing: k, commodity: k, measure: k, entity: k },
+            purposes: PurposeRoots { income, spending, capital, transfer: capital },
         };
         let places = self.places.len();
         let ends = |(i, flow): (usize, &Flow)| {
@@ -479,7 +504,10 @@ impl Fixture {
             budgets: Arena::new(),
             params: Arena::new(),
             schedules: Arena::new(),
-            codes: Vec::new(),
+            code_rules: Vec::new(),
+            codes: self.codes,
+            selectors: self.selectors,
+            details: self.details,
             patterns: Arena::new(),
             formats: Arena::new(),
             txns,

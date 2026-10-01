@@ -33,7 +33,6 @@
 
 #![forbid(unsafe_code)]
 
-mod bridge;
 mod calc;
 mod checkpoint;
 mod eval;
@@ -49,6 +48,7 @@ mod plan;
 mod post;
 mod reconcile;
 mod scope;
+mod sides;
 mod show;
 mod state;
 mod timeline;
@@ -61,13 +61,15 @@ mod source_tests;
 #[cfg(test)]
 mod tests;
 
-use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
-use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn, Waive};
+use std::hash::{Hash, Hasher};
 
-pub use bridge::Sides;
+use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
+use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, FlowCodes, Law, Place, Subject, System, Txn, Waive};
+
 pub use checkpoint::Checkpoint;
 pub use ledger::Ledger;
 pub use plan::{Known, Plan, run};
+pub use sides::Sides;
 
 /// What each phase hands on is shared by reference between threads: the plan
 /// every fold reads, the ledgers and checkpoints forked from it, and the run.
@@ -260,7 +262,25 @@ pub struct Parcel {
     pub basis: Qty,
     pub acquired: Day,
     pub txn: Id<Txn>,
+    /// The originating flow's pooled codes. Selectors can match a lot after
+    /// it has moved or a forecast has copied its flow, without looking up a
+    /// synthetic transaction id or cloning code text.
+    pub codes: FlowCodes,
     pub tied: Option<Id<Entity>>,
+}
+
+impl Hash for Parcel {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.qty.hash(state);
+        self.basis.hash(state);
+        self.acquired.hash(state);
+        self.txn.hash(state);
+        self.codes.header.start().hash(state);
+        self.codes.header.len().hash(state);
+        self.codes.local.start().hash(state);
+        self.codes.local.len().hash(state);
+        self.tied.hash(state);
+    }
 }
 
 /// Which flow caused something: one in the journal, or one handed to

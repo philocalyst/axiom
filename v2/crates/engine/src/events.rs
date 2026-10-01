@@ -24,8 +24,7 @@ impl Events {
     /// A flow's state after events. An event names its flows by code, so a
     /// flow without one has its natural state and nothing is looked up.
     pub fn state(&self, id: Id<Flow>, flow: &Flow) -> State {
-        let touched = if flow.codes.is_empty() { None } else { self.states.get(&id).copied() };
-        touched.unwrap_or(match flow.mode {
+        self.states.get(&id).copied().unwrap_or(match flow.mode {
             Mode::Actual | Mode::Opening => State::Actual,
             Mode::Pending => State::Pending,
             Mode::Planned => State::Planned,
@@ -67,7 +66,7 @@ pub(crate) fn read(book: &Book) -> (Events, Vec<Diagnostic>) {
     }
     let mut by_code: Map<Sym, Vec<Id<Flow>>> = Map::default();
     for (id, flow) in book.flows.iter() {
-        for &code in flow.codes.iter() {
+        for code in book.flow_view(flow).codes() {
             by_code.entry(code).or_default().push(id);
         }
     }

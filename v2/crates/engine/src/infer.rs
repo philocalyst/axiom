@@ -17,7 +17,7 @@ use axiom_model::{Assert, Book, Commodity, End, Flow, Gap, Infer, Place};
 use crate::State;
 use crate::events::Events;
 use crate::motion::Amounts;
-use crate::bridge::{self, Sides};
+use crate::sides::Sides;
 use crate::timeline::{Fact, Moment};
 
 /// What the solve pass found.
@@ -210,10 +210,6 @@ impl Stretches<'_> {
     /// What one end of one flow does to the balance. `sign` is +1 for
     /// arriving here and -1 for leaving, negated on a reversal.
     fn step_of(&self, place: Id<Place>, flow: &Flow, id: Id<Flow>, end: End, sign: i64) -> Step {
-        // A basis end changes what parcels cost and leaves the balance alone.
-        if !bridge::moves_quantity(flow, end) {
-            return Step::Delta(Qty::ZERO);
-        }
         let known = match end {
             End::From => flow.out.qty,
             End::To => flow.arrive.qty,

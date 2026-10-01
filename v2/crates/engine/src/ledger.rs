@@ -15,8 +15,8 @@
 //!
 //! [`fork`]: Ledger::fork
 
-use axiom_core::{Day, Diagnostic, Id, Qty, par};
-use axiom_model::{Book, Commodity, End, Flow, Infer, Place};
+use axiom_core::{Arena, Day, Diagnostic, Id, Qty, par};
+use axiom_model::{Book, Commodity, End, Flow, FlowView, Infer, Place, RuntimeDetail, RuntimeFlow};
 
 use crate::motion::{Amounts, Motion};
 use crate::plan::Plan;
@@ -158,6 +158,18 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// on the ledger's day: the fold does not travel back. Its `mode` is
     /// ignored, since applying is what makes it real.
     pub fn apply(&mut self, flow: &Flow) -> Applied {
+        let view = self.plan.book.flow_view(flow);
+        self.apply_view(flow, view)
+    }
+
+    /// Applies a forecast flow whose metadata is pooled in the Book and whose
+    /// detail may be overridden in the forecast's immutable runtime arena.
+    pub fn apply_runtime(&mut self, flow: &RuntimeFlow, details: &Arena<RuntimeDetail>) -> Applied {
+        let view = self.plan.book.runtime_flow_view(flow, details);
+        self.apply_view(&flow.flow, view)
+    }
+
+    fn apply_view(&mut self, flow: &Flow, view: FlowView<'_>) -> Applied {
         let (was, before) = (self.clock.day, self.clock.phase);
         let day = flow.day.max(self.clock.day);
         self.advance_through(Moment::after_flows(day));
@@ -168,7 +180,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let number = self.clock.applied;
         self.clock.applied += 1;
         let amounts = self.amounts(flow, None);
-        self.post(&Motion::new(self.plan.book, flow, Cause::Applied(number), day, amounts));
+        self.post(&Motion::from_view(self.plan.book, view, Cause::Applied(number), day, amounts));
         self.world.holdings.tidy();
         self.record.since(marks)
     }
@@ -301,7 +313,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let slot = self.world.holdings.get(flow.from, flow.out.unit);
         let qty = if book.places[flow.from].class.holds_parcels() {
             let money = is_money(book, flow.from, flow.out.unit);
-            slot.map_or(Qty::ZERO, |slot| slot.admitted(money, &flow.select, &book.txns))
+            let view = book.flow_view(flow);
+            slot.map_or(Qty::ZERO, |slot| slot.admitted(money, view.select(), &book.codes))
         } else {
             slot.map_or(Qty::ZERO, |slot| slot.plain.max(Qty::ZERO))
         };
