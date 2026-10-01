@@ -793,17 +793,17 @@ mod tests {
     fn check_reads_local_memos_and_never_runs_declared_commands() {
         let dir = TempDir::new("check-memos");
         let marker = dir.path().join("command-ran");
-        dir.write("axiom.ax", "base USD\ncommodity USD\n  precision 2\n");
+        dir.write("axiom.ax", "base USD\n");
         dir.write(
             "sync.ax",
             &format!(
-                "sync checking\n  read \"imports/*.csv\"\n  format csv\n    memo \"Description\"\nsync prices\n  run touch {}\n  into prices.ax\n",
+                "sync checking\n  read \"imports/*.csv\"\n  format csv\n    date \"Date\" \"YYYY-MM-DD\"\n    amount \"Amount\"\n    memo \"Description\"\nsync prices\n  run touch {}\n  into prices.ax\n",
                 marker.display()
             ),
         );
         dir.write(
             "imports/card.csv",
-            "Description\nTRADER JOE'S #12\nTrader Joe's #13\n",
+            "Date,Amount,Description\n2026-01-01,12.00,TRADER JOE'S #12\n2026-01-02,13.00,Trader Joe's #13\n",
         );
 
         let project = Project::find(dir.path()).unwrap();

@@ -1014,8 +1014,8 @@ mod tests {
     #[test]
     fn operand_counts_are_checked() {
         let error = error_of(&["register"]);
-        assert_eq!(error.message, "`axiom register` needs PLACE");
-        assert_eq!(error.help[0].text, "usage: axiom register PLACE");
+        assert_eq!(error.message, "`axiom register` needs TARGET");
+        assert_eq!(error.help[0].text, "usage: axiom register TARGET");
         assert_eq!(
             error_of(&["why", "a", "b"]).message,
             "`axiom why` was given an unexpected `b`"
