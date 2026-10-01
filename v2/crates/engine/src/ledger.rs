@@ -17,8 +17,10 @@
 
 use axiom_core::{Arena, Day, Diagnostic, Id, Qty, par};
 use axiom_model::{
-    Book, Commodity, End, Fault, Flow, FlowView, Infer, Place, RuntimeDetail, RuntimeFlow,
-    RuntimeTxn, Subject, TemplateProgram, Value,
+    Amount, Book, Commodity, End, Fault, Flow, FlowExpressions, FlowView, Infer, JournalGroup,
+    JournalItem, Place,
+    PurposeRoot, RuntimeDetail, RuntimeFlow, RuntimeTxn, Sign, Subject, TemplateAmount,
+    TemplateItemParent, TemplateProgram, Value,
 };
 
 use crate::checkpoint::CheckpointPhase;
@@ -371,18 +373,40 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let txn_id = source.txn;
         let transaction = &book.txns[txn_id];
         let local = id.index().checked_sub(transaction.flows.start().index());
-        let roots = transaction.program.and_then(|program_id| {
-            let program = book.journal_programs.get(program_id)?;
-            let offset = u32::try_from(local?).ok()?;
+        let offset = local.and_then(|local| u32::try_from(local).ok());
+        let journal = transaction.program.and_then(|program_id| book.journal_programs.get(program_id));
+        let roots = journal.and_then(|journal| {
+            let offset = offset?;
             // Lowering appends these sparse roots in source-flow order.
-            let at = program.flow_roots.partition_point(|roots| roots.flow < offset);
-            program.flow_roots.get(at).filter(|roots| roots.flow == offset).copied()
+            let at = journal.flow_roots.partition_point(|roots| roots.flow < offset);
+            journal.flow_roots.get(at).filter(|roots| roots.flow == offset).copied()
         });
-        let Some(roots) = roots.filter(|roots| roots.out.is_some() || roots.arrive.is_some() || roots.basis.is_some()) else {
+        let roots = roots.filter(|roots| roots.out.is_some() || roots.arrive.is_some() || roots.basis.is_some());
+        let group = journal.and_then(|journal| {
+            journal.groups.iter().find(|group| group.header == offset)
+        });
+        let item = journal.and_then(|journal| {
+            let offset = offset?;
+            journal.groups.iter().find_map(|group| {
+                group.items.iter().find(|item| item.flow == Some(offset)).map(|item| (group, item))
+            })
+        });
+        let cost_item = item.filter(|(group, item)| is_exchange_cost(book, transaction.flows, group, item));
+        let cost_header = group.filter(|group| {
+            group.items.iter().any(|item| is_exchange_cost(book, transaction.flows, group, item))
+        });
+        let computed_cost_item = cost_item.is_some_and(|(_, item)| matches!(item.amount, TemplateAmount::Computed(_)));
+        if roots.is_none() && cost_header.is_none() && !computed_cost_item {
             let motion = self.journal_motion(id, day);
             self.post(&if reversed { motion.reversed() } else { motion });
             return;
-        };
+        }
+        let roots = roots.unwrap_or(FlowExpressions {
+            flow: offset.unwrap_or_default(),
+            out: None,
+            arrive: None,
+            basis: None,
+        });
         let program_id = transaction.program.expect("flow roots belong to a journal program");
         let program = &book.journal_programs[program_id].program;
         let mut flow = source.clone();
@@ -479,6 +503,87 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             }
         }
 
+        // A purpose-bearing `Less` item on an exchange is also the exchange's
+        // cost evidence. The item remains an ordinary posted flow for cash and
+        // purpose totals; the header carries its aggregate cost so a sale's
+        // realized proceeds shrink and a purchase's parcel basis grows.
+        if let Some(group) = cost_header {
+            let mut total = match detail.cost {
+                Some(cost) => match book.convert(cost, book.base, day) {
+                    Some(base) => base.qty.0,
+                    None => {
+                        self.record.report(Diagnostic::error(
+                            "exchange-cost-price",
+                            format!("cannot value the exchange cost {}", book.show(cost)),
+                        ).label(source.loc, "needed to value this exchange cost"));
+                        return;
+                    }
+                },
+                None => 0,
+            };
+            let mut has_cost = detail.cost.is_some();
+            for item in group.items.iter().filter(|item| is_exchange_cost(book, transaction.flows, group, item)) {
+                let Some(item_local) = item.flow else { continue };
+                let Some(start) = transaction.flows.start().index().checked_add(item_local as usize) else { continue };
+                let Ok(raw) = u32::try_from(start) else { continue };
+                let item_id = Id::new(raw);
+                let item_flow = &book.flows[item_id];
+                let amount = if let Some(cached) = self.record.resolved.get(&item_id).copied() {
+                    Amount::new(cached.out, item_flow.out.unit)
+                } else {
+                    let amount = match item.amount {
+                        TemplateAmount::Literal(amount) => amount,
+                        TemplateAmount::Computed(root) => match journal_expression(
+                            self.plan,
+                            &self.world,
+                            &mut self.scratch.values,
+                            item_id,
+                            txn_id,
+                            item_flow,
+                            program,
+                            root,
+                        ) {
+                            Value::Amount(amount) => amount,
+                            Value::Fault(fault) => {
+                                self.record.report(explain::journal_expression_fault(book, item_flow, program, root, fault, day));
+                                return;
+                            }
+                            _ => {
+                                self.record.report(explain::journal_expression_fault(
+                                    book,
+                                    item_flow,
+                                    program,
+                                    root,
+                                    Fault::InvalidProgram,
+                                    day,
+                                ));
+                                return;
+                            }
+                        },
+                    };
+                    self.record.resolved.insert(item_id, Amounts { out: amount.qty, arrive: amount.qty });
+                    amount
+                };
+                let Some(cost) = book.convert(amount, book.base, day) else {
+                    self.record.report(Diagnostic::error(
+                        "exchange-cost-price",
+                        format!("cannot value the exchange cost {}", book.show(amount)),
+                    ).label(item.loc, "needed to value this exchange cost"));
+                    return;
+                };
+                let Some(sum) = total.checked_add(cost.qty.0) else {
+                    self.record.report(Diagnostic::error("exchange-cost-overflow", "exchange costs exceed the supported amount range")
+                        .label(item.loc, "these costs do not fit in one amount"));
+                    return;
+                };
+                total = sum;
+                has_cost = true;
+            }
+            if has_cost {
+                detail.cost = Some(Amount::new(Qty(total), book.base));
+            }
+        }
+
         let amounts = self.amounts(&flow, Some(id));
         if computed_quantity {
             // `posted` and a later return use the exact amount computed on its
@@ -489,10 +594,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             self.record.computed_basis.insert(id, basis);
         }
         let txn = RuntimeTxn::journal(txn_id).expect("a journal flow cannot name the template sentinel");
-        let mut details = Arena::new();
-        let runtime_detail = if roots.basis.is_some() { Some(details.push(RuntimeDetail(detail))) } else { None };
-        let runtime = RuntimeFlow { flow, detail: runtime_detail, txn };
-        let view = book.runtime_flow_view(&runtime, &details);
+        // A computed basis is a call-local override. Borrow it directly for
+        // this motion instead of allocating a one-entry RuntimeDetail arena.
+        let view = book.flow_view_with_detail(&flow, &detail);
         let motion = Motion::from_view(book, view, txn, Cause::Flow(id), day, amounts);
         self.post(&if reversed { motion.reversed() } else { motion });
     }
@@ -582,6 +686,27 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     }
 }
 
+/// Whether this line item is a `Less` cost attached to an exchange header.
+/// The group retains the relationship; no endpoint guessing or transaction
+/// range scan is needed when the flow is posted.
+fn is_exchange_cost(book: &Book, flows: axiom_core::Run<Flow>, group: &JournalGroup, item: &JournalItem) -> bool {
+    if item.sign != Sign::Less || item.parent != TemplateItemParent::Header {
+        return false;
+    }
+    let (Some(header), Some(item)) = (group.header, item.flow) else { return false };
+    let Some(header_index) = flows.start().index().checked_add(header as usize) else { return false };
+    let Some(item_index) = flows.start().index().checked_add(item as usize) else { return false };
+    let (Ok(header_raw), Ok(item_raw)) = (u32::try_from(header_index), u32::try_from(item_index)) else {
+        return false;
+    };
+    let (header_id, item_id) = (Id::new(header_raw), Id::new(item_raw));
+    let (Some(header), Some(item)) = (book.flows.get(header_id), book.flows.get(item_id)) else { return false };
+    header.is_exchange()
+        && item
+            .purpose
+            .is_some_and(|purpose| book.purposes[purpose.purpose].root == PurposeRoot::Spending)
+}
+
 /// Evaluate one transaction-scoped expression with the current source flow as
 /// its `self`, `amount`, `from`, and `to`. This borrows the Book's program and
 /// code/detail pools; only the caller-owned node-value buffer is mutable.
@@ -596,13 +721,12 @@ fn journal_expression<'b, 's>(
     root: axiom_model::NodeId,
 ) -> Value {
     let book = plan.book;
-    let runtime = RuntimeFlow::source(flow.clone());
-    let details = Arena::new();
-    let view = book.runtime_flow_view(&runtime, &details);
+    let txn = RuntimeTxn::journal(txn_id).expect("journal expression cannot use the template transaction sentinel");
+    let view = book.flow_view(flow);
     let motion = Motion::from_view(
         book,
         view,
-        runtime.txn,
+        txn,
         Cause::Flow(flow_id),
         flow.day,
         Amounts::written(flow),
