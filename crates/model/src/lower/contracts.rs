@@ -562,10 +562,12 @@ fn lower_terms<'a, 's>(
     for leg in &file[body.legs] {
         let endpoint =
             resolve_endpoint(world, written.site.home, file, leg.end.name, leg.loc, diags)?;
-        let (leg_from, leg_to) = match side {
-            FlowSide::Arrive => (holding, endpoint),
-            FlowSide::Out => (endpoint, holding),
-        };
+        // A promised split leg names the recipient. Keep the source end of
+        // the scheduled header and send that portion to the named endpoint:
+        // an employer's paycheck leg is `lumen -> retirement`, and an owner
+        // payment leg is `checking -> escrow`.
+        let leg_from = from;
+        let leg_to = endpoint;
         let (quantity, amount) =
             template_quantity(world, file, leg.amount, &roots, header_amount.unit, diags)?;
         let mut flow = template_flow(

@@ -1134,6 +1134,7 @@ fn lower_occurrence<'a, 's>(
     let mut input_values: Vec<Option<Amount>> = vec![None; inputs.len()];
     let mut bound = vec![false; inputs.len()];
     let mut replaced_legs = Vec::new();
+    let mut added_ends: Vec<(Id<crate::book::Place>, Loc)> = Vec::new();
     let mut written_groups: Vec<Option<OccurrenceGroupDraft>> =
         (0..templates.len()).map(|_| None).collect();
     let mut flow_roots = Vec::new();
@@ -1234,10 +1235,7 @@ fn lower_occurrence<'a, 's>(
         let mut ambiguous = None;
         for (template_at, template) in templates.iter().enumerate() {
             for (leg_at, template_leg) in template.legs.iter().enumerate() {
-                let named_end = match template_leg.side {
-                    FlowSide::Out => template_leg.flow.from,
-                    FlowSide::Arrive => template_leg.flow.to,
-                };
+                let named_end = template_leg.flow.to;
                 if named_end == endpoint.place {
                     if matching.is_some() {
                         ambiguous = Some((template_at, leg_at));
@@ -1262,57 +1260,81 @@ fn lower_occurrence<'a, 's>(
             );
             continue;
         }
-        let Some((template_at, leg_at)) = matching else {
-            diags.push(
-                Diagnostic::error(
-                    "contract-occurrence-leg",
-                    "this end does not match a contract template leg",
-                )
-                .label(
-                    leg.loc,
-                    "write an end named by one of the contract's split legs",
-                ),
-            );
-            continue;
+        let (template_at, template_leg) = match matching {
+            Some((template_at, leg_at)) => {
+                if replaced_legs.contains(&(template_at, leg_at)) {
+                    diags.push(
+                        Diagnostic::error(
+                            "contract-occurrence-leg-duplicate",
+                            "this template leg is overridden twice",
+                        )
+                        .label(leg.loc, "keep one replacement for this end")
+                        .context(
+                            templates[template_at].legs[leg_at].flow.loc,
+                            "the template leg is declared here",
+                        ),
+                    );
+                    continue;
+                }
+                replaced_legs.push((template_at, leg_at));
+                (template_at, Some(&templates[template_at].legs[leg_at]))
+            }
+            None if templates.len() == 1 => {
+                // Occurrence statements may add a recipient that was not
+                // listed in the promise (for example, a one-off tax
+                // withholding on a paycheck). The engine appends this flow
+                // to the same group and subtracts it from the header's
+                // remainder.
+                if let Some((_, first_loc)) =
+                    added_ends.iter().find(|(place, _)| *place == endpoint.place)
+                {
+                    diags.push(
+                        Diagnostic::error(
+                            "contract-occurrence-leg-duplicate",
+                            "this additional end is written twice",
+                        )
+                        .label(leg.loc, "keep one replacement for this end")
+                        .context(*first_loc, "the first replacement is here"),
+                    );
+                    continue;
+                }
+                added_ends.push((endpoint.place, leg.loc));
+                (0, None)
+            }
+            None => {
+                diags.push(
+                    Diagnostic::error(
+                        "contract-occurrence-leg-group",
+                        "this additional end does not identify one contract flow group",
+                    )
+                    .label(leg.loc, "name an end covered by a template leg"),
+                );
+                continue;
+            }
         };
-        if replaced_legs.contains(&(template_at, leg_at)) {
-            diags.push(
-                Diagnostic::error(
-                    "contract-occurrence-leg-duplicate",
-                    "this template leg is overridden twice",
-                )
-                .label(leg.loc, "keep one replacement for this end")
-                .context(
-                    templates[template_at].legs[leg_at].flow.loc,
-                    "the template leg is declared here",
-                ),
-            );
-            continue;
-        }
-        replaced_legs.push((template_at, leg_at));
-
         let template = &templates[template_at];
-        let template_leg = &template.legs[leg_at];
-        if template_leg.side == FlowSide::Arrive && endpoint.select.len() != 0 {
+        let side = template_leg.map_or_else(|| template_side(world, template), |leg| leg.side);
+        let base_flow = template_leg.map_or_else(|| template.flow.clone(), |leg| leg.flow.clone());
+        if endpoint.select.len() != 0 {
             diags.push(
                 Diagnostic::error(
                     "selector-target",
                     "selectors narrow the source endpoint of a flow",
                 )
-                .label(leg.loc, "this split end only receives"),
+                .label(leg.loc, "a contract split end names the recipient"),
             );
             continue;
         }
-        let fallback = match template_leg.side {
-            FlowSide::Out => template_leg.flow.out.unit,
-            FlowSide::Arrive => template_leg.flow.arrive.unit,
+        let fallback = match side {
+            FlowSide::Out => base_flow.out.unit,
+            FlowSide::Arrive => base_flow.arrive.unit,
         };
         let Some(quantity) = resolve_quantity(
             world,
             file,
             leg.amount,
             fallback,
-            template_leg.side,
+            side,
             &roots,
             diags,
         ) else {
@@ -1343,10 +1365,9 @@ fn lower_occurrence<'a, 's>(
             continue;
         }
 
-        let base_flow = template_leg.flow.clone();
         let mut out = base_flow.out;
         let mut arrive = base_flow.arrive;
-        match template_leg.side {
+        match side {
             FlowSide::Out => out = quantity.amount,
             FlowSide::Arrive => arrive = quantity.amount,
         }
@@ -1365,7 +1386,7 @@ fn lower_occurrence<'a, 's>(
                 );
                 continue;
             }
-            let (other_unit, chosen_unit) = match template_leg.side {
+            let (other_unit, chosen_unit) = match side {
                 FlowSide::Out => (arrive.unit, out.unit),
                 FlowSide::Arrive => (out.unit, arrive.unit),
             };
@@ -1401,7 +1422,7 @@ fn lower_occurrence<'a, 's>(
                 None
             };
             let Some(other) = other else { continue };
-            match template_leg.side {
+            match side {
                 FlowSide::Out => arrive = other,
                 FlowSide::Arrive => out = other,
             }
@@ -1410,17 +1431,13 @@ fn lower_occurrence<'a, 's>(
 
         let from = ResolvedEnd {
             place: base_flow.from,
-            entity: None,
-            select: if template_leg.side == FlowSide::Out && endpoint.select.len() != 0 {
-                endpoint.select
-            } else {
-                base_flow.select
-            },
+            entity: place_entity(world, base_flow.from),
+            select: base_flow.select,
         };
         let to = ResolvedEnd {
-            place: base_flow.to,
-            entity: None,
-            select: Run::new(Id::new(0), 0),
+            place: endpoint.place,
+            entity: endpoint.entity,
+            select: endpoint.select,
         };
         let local_codes = if local_codes.is_empty() {
             base_flow.codes
@@ -1459,10 +1476,10 @@ fn lower_occurrence<'a, 's>(
         push_flow_expressions(
             &mut flow_roots,
             offset,
-            (template_leg.side == FlowSide::Out)
+            (side == FlowSide::Out)
                 .then_some(quantity.root)
                 .flatten(),
-            (template_leg.side == FlowSide::Arrive)
+            (side == FlowSide::Arrive)
                 .then_some(quantity.root)
                 .flatten(),
             tail.basis_root,
@@ -2235,6 +2252,17 @@ fn occurrence_group_draft(
         legs: Vec::new(),
         leg_quantities: Vec::new(),
         items: Box::default(),
+    }
+}
+
+fn place_entity(world: &World<'_>, place: Id<crate::book::Place>) -> Option<Id<crate::book::Entity>> {
+    match world.book.places[place].role {
+        crate::book::Role::Outside(Some(entity)) | crate::book::Role::Tab(entity) => Some(entity),
+        crate::book::Role::Holding(owner) => Some(owner),
+        crate::book::Role::Outside(None)
+        | crate::book::Role::Account { .. }
+        | crate::book::Role::Issuer(_)
+        | crate::book::Role::Asset(_) => None,
     }
 }
 

@@ -1101,12 +1101,63 @@ contract job with lumen
     let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 15).unwrap());
     assert_eq!(terms.template[0].flow.payee, Some(contract.party));
     let leg = &terms.template[0].legs[0];
+    let employer = book.entity("lumen").unwrap();
+    let retirement = book.place("assets/retirement").unwrap();
+    assert_eq!(leg.flow.from, book.entities[employer].place.unwrap());
+    assert_eq!(leg.flow.to, retirement);
     assert_eq!(leg.flow.payee, Some(contract.party));
     assert_eq!(
         leg.quantity,
         axiom_model::TemplateQuantity::Percent(axiom_core::Ratio::percent(6, 0).unwrap())
     );
     assert!(terms.program.nodes.is_empty(), "a literal percent needs no expression program");
+}
+
+#[test]
+fn a_written_occurrence_can_add_a_new_recipient_leg_to_a_split_template() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+kind employer : entity
+kind tax-authority : entity
+entity lumen : employer
+entity irs : tax-authority
+account assets/checking
+account assets/retirement
+contract job with lumen
+  4_600 USD monthly on 15 into checking
+  retirement 6%
+2026-01-15 job
+  retirement 276 USD
+  irs 498 USD
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let employer = book.entity("lumen").unwrap();
+    let retirement = book.place("assets/retirement").unwrap();
+    let irs = book.entity("irs").unwrap();
+    let irs_place = book.entities[irs].place.unwrap();
+    let txn = &book.txns[Id::new(0)];
+    let written = &book.written_occurrences[txn.occurrence.unwrap()];
+    assert_eq!(written.groups.len(), 1);
+    let group = &written.groups[0].group;
+    assert_eq!(group.legs.len(), 2);
+    assert_eq!(group.leg_quantities.len(), 2);
+    let flows: Vec<_> = txn.flows.ids().map(|id| &book.flows[id]).collect();
+    assert_eq!(flows.len(), 2);
+    assert_eq!((flows[0].from, flows[0].to), (book.entities[employer].place.unwrap(), retirement));
+    assert_eq!((flows[1].from, flows[1].to), (book.entities[employer].place.unwrap(), irs_place));
+    assert_eq!(flows[0].out.qty, axiom_core::Qty(276));
+    assert_eq!(flows[1].out.qty, axiom_core::Qty(498));
 }
 
 #[test]
