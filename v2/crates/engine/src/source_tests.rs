@@ -271,6 +271,62 @@ fn a_flow_applied_on_a_day_whose_closings_are_still_to_come_is_counted_by_them()
     });
 }
 
+/// A pre-closing checkpoint resumes at the same boundary, so a hypothetical
+/// payment on its day still reaches that day's law exactly once.
+#[test]
+fn a_view_checkpoint_preserves_closings_after_same_day_flows() {
+    with_book(CLOSING, |book| {
+        let day = day(2026, 1, 15);
+        let plan = crate::Plan::new(book);
+        let mut before_close = plan.start(Options { today: day, relaxed: false });
+        before_close.advance_to_closing(day);
+        let checkpoint = before_close.checkpoint();
+
+        let mut resumed = plan.resume(&checkpoint, Options { today: day, relaxed: false });
+        resumed.apply(&payment_on_the_closing_day(book));
+        resumed.advance(day);
+
+        assert_eq!(resumed.recorded().violations.len(), 1, "the same-day payment is judged at closing");
+        assert_eq!(resumed.finish().checks[0], 1, "resuming does not close the year twice");
+    });
+}
+
+#[test]
+fn advancing_to_an_earlier_day_keeps_the_checkpoint_boundary() {
+    with_book(CLOSING, |book| {
+        let day = day(2026, 1, 15);
+        let plan = crate::Plan::new(book);
+        let mut ledger = plan.start(Options { today: day, relaxed: false });
+        ledger.advance_to_closing(day);
+        ledger.advance(day.add_days(-1));
+        let checkpoint = ledger.checkpoint();
+
+        let mut resumed = plan.resume(&checkpoint, Options { today: day, relaxed: false });
+        resumed.apply(&payment_on_the_closing_day(book));
+        resumed.advance(day);
+        assert_eq!(resumed.finish().checks[0], 1, "an older advance must not close the checkpoint's day");
+    });
+}
+
+#[test]
+fn resuming_after_an_applied_flow_keeps_its_cause_sequence() {
+    with_book(CLOSING, |book| {
+        let day = day(2026, 1, 15);
+        let plan = crate::Plan::new(book);
+        let mut ledger = plan.start(Options { today: day, relaxed: false });
+        ledger.advance_to_closing(day);
+        ledger.apply(&payment_on_the_closing_day(book));
+        assert_eq!(ledger.clock.applied, 1);
+        let checkpoint = ledger.checkpoint();
+
+        let mut resumed = plan.resume(&checkpoint, Options { today: day, relaxed: false });
+        assert_eq!(resumed.clock.applied, 1);
+        resumed.apply(&payment_on_the_closing_day(book));
+        resumed.advance(day);
+        assert_eq!(resumed.clock.applied, 2, "the resumed ledger continues the cause sequence");
+    });
+}
+
 /// Once the day is closed a flow dated on it is late for its closings, like a
 /// journal flow written after them would be: the fold does not travel back.
 #[test]

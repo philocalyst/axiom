@@ -1,4 +1,4 @@
-//! Checkpoints: a fold's state, small enough to keep at every month's end.
+//! Checkpoints: a fold's state, small enough to keep at a report boundary or month end.
 //!
 //! What the rest of a fold depends on is the world (holdings, totals, tallies),
 //! what has already been reported, and the day: not the records, which are only
@@ -19,17 +19,31 @@ use crate::plan::Plan;
 use crate::state::{Record, World};
 use crate::timeline::Timeline;
 
-/// A fold's position at the end of a day.
+/// The last kind of moment a checkpoint has consumed on its day.
+///
+/// A view checkpoint stops before same-day closings so a hypothetical flow can
+/// still be judged by them. Ordinary incremental checkpoints stand at the end
+/// of the day.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub(crate) enum CheckpointPhase {
+    AfterFlows,
+    BeforeClosings,
+    EndOfDay,
+}
+
+/// A fold's position at a typed boundary on one day.
 #[derive(Clone)]
 pub struct Checkpoint {
     day: Day,
+    phase: CheckpointPhase,
+    applied: u32,
     world: World,
     record: Record,
     digest: u64,
 }
 
 impl Checkpoint {
-    /// The day it stands at the end of.
+    /// The day through which it has folded.
     pub fn day(&self) -> Day {
         self.day
     }
@@ -42,12 +56,18 @@ impl Checkpoint {
 }
 
 impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
-    /// The state as of the end of the last day folded.
+    /// The fold state at the current day boundary.
     pub fn checkpoint(&self) -> Checkpoint {
-        let (day, world, record) = (self.clock.day, self.world.clone(), self.record.forked());
+        let (day, phase, applied, world, record) = (
+            self.clock.day,
+            self.clock.phase,
+            self.clock.applied,
+            self.world.clone(),
+            self.record.forked(),
+        );
         let mut hasher = FxHasher::default();
-        (day, &world.holdings, &world.totals, &world.tallies, &record).hash(&mut hasher);
-        Checkpoint { day, world, record, digest: hasher.finish() }
+        (day, phase, applied, &world.holdings, &world.totals, &world.tallies, &record).hash(&mut hasher);
+        Checkpoint { day, phase, applied, world, record, digest: hasher.finish() }
     }
 
     /// Folds on through `until` a month at a time, handing `month_end` a
@@ -69,8 +89,15 @@ impl<'b, 's> Plan<'b, 's> {
     /// A ledger standing where `from` stood, folding the book this plan is for.
     /// The book may have been edited since, on any day after the checkpoint's:
     /// the state is the checkpoint's, and the facts to come are this book's.
+    /// Its typed day boundary is re-seeked in this plan, so a view checkpoint
+    /// keeps same-day closings pending without retaining stale stream indices.
     pub fn resume(&self, from: &Checkpoint, options: Options) -> Ledger<'_, 'b, 's> {
-        let clock = Clock { day: from.day, timeline: Timeline::after(self, from.day), applied: 0 };
+        let timeline = match from.phase {
+            CheckpointPhase::AfterFlows => Timeline::after_flows(self, from.day),
+            CheckpointPhase::BeforeClosings => Timeline::before_closings(self, from.day),
+            CheckpointPhase::EndOfDay => Timeline::after(self, from.day),
+        };
+        let clock = Clock { day: from.day, phase: from.phase, timeline, applied: from.applied };
         Ledger::resumed(self, options, clock, (from.world.clone(), from.record.forked()))
     }
 }

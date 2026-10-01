@@ -38,6 +38,7 @@ use axiom_core::calendar::Window;
 use axiom_core::{Day, Days, Id, Period};
 use axiom_model::{Book, Closing, Flow, Law, Mode, Rule, Subject, Trigger, Value};
 
+use crate::checkpoint::CheckpointPhase;
 use crate::State;
 use crate::eval::{self, Env, Occasion};
 use crate::events::Events;
@@ -265,13 +266,31 @@ impl Timeline {
     /// found by search: each stream's cursor is a binary search, and only the
     /// deadlines already passed are worked through.
     pub fn after(plan: &Plan, day: Day) -> Timeline {
+        Timeline::seek(plan, day, CheckpointPhase::EndOfDay)
+    }
+
+    /// As it stands after the journal's facts on `day`, before its closings.
+    /// A resumed view can still apply a hypothetical flow before those laws run.
+    pub fn before_closings(plan: &Plan, day: Day) -> Timeline {
+        Timeline::seek(plan, day, CheckpointPhase::BeforeClosings)
+    }
+
+    /// As it stands after all journal flows on `day`, before assertions and closings.
+    pub fn after_flows(plan: &Plan, day: Day) -> Timeline {
+        Timeline::seek(plan, day, CheckpointPhase::AfterFlows)
+    }
+
+    fn seek(plan: &Plan, day: Day, phase: CheckpointPhase) -> Timeline {
+        let (assertions, closings) = (phase != CheckpointPhase::AfterFlows, phase == CheckpointPhase::EndOfDay);
         let (book, changes) = (plan.book, &plan.events.changes);
         let mut timeline = Timeline::new(plan);
         timeline.done[Stream::Split as usize] = book.splits.partition_point(|split| split.day <= day);
         timeline.done[Stream::Flow as usize] = book.flows.as_slice().partition_point(|flow| flow.day <= day);
         timeline.done[Stream::Change as usize] = changes.partition_point(|&(when, _)| when <= day);
-        timeline.done[Stream::Assert as usize] = book.asserts.partition_point(|assert| assert.day <= day);
-        while timeline.due.peek().is_some_and(|&Reverse(due)| due.day <= day) {
+        timeline.done[Stream::Assert as usize] = book.asserts.partition_point(|assert| {
+            assert.day < day || (assertions && assert.day == day)
+        });
+        while timeline.due.peek().is_some_and(|&Reverse(due)| due.day < day || (closings && due.day == day)) {
             timeline.close(plan);
         }
         timeline.skip_unreal(plan);

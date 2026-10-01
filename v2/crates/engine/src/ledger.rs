@@ -23,6 +23,7 @@ use crate::plan::Plan;
 use crate::scope::is_money;
 use crate::state::{Record, Scratch, World};
 use crate::timeline::{Fact, Moment, Timeline};
+use crate::checkpoint::CheckpointPhase;
 use crate::{Applied, Cause, Holding, Options, Posted, Recorded, Run, State, explain};
 
 /// The book's state as of some day. Cheap to clone relative to a replay.
@@ -42,6 +43,7 @@ pub struct Ledger<'p, 'b, 's> {
 #[derive(Clone)]
 pub(crate) struct Clock {
     pub day: Day,
+    pub phase: CheckpointPhase,
     pub timeline: Timeline,
     /// How many flows `apply` has taken.
     pub applied: u32,
@@ -53,7 +55,12 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let timeline = Timeline::new(plan);
         let day = timeline.peek().map_or(Day::default(), |first| first.day.add_days(-1));
         let (world, record) = (World::new(plan.book), Record::new(plan.book.laws.len(), plan.problems()));
-        Ledger::resumed(plan, options, Clock { day, timeline, applied: 0 }, (world, record))
+        Ledger::resumed(
+            plan,
+            options,
+            Clock { day, phase: CheckpointPhase::EndOfDay, timeline, applied: 0 },
+            (world, record),
+        )
     }
 
     /// Stands wherever the clock, the world and the record say.
@@ -110,7 +117,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// Folds the journal's facts, and the deadlines and period ends that fall
     /// due, through the end of `day`.
     pub fn advance(&mut self, day: Day) {
-        self.fold_through(day, Moment::end_of(day));
+        self.fold_through(day, Moment::end_of(day), CheckpointPhase::EndOfDay);
     }
 
     /// Folds what the journal holds through `day`, its flows and assertions,
@@ -121,13 +128,21 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// The holdings are the same as at the end of the day, since a closing
     /// counts and owes and moves nothing.
     pub fn advance_to_closing(&mut self, day: Day) {
-        self.fold_through(day, Moment::before_closings(day));
+        self.fold_through(day, Moment::before_closings(day), CheckpointPhase::BeforeClosings);
     }
 
-    fn fold_through(&mut self, day: Day, limit: Moment) {
+    fn fold_through(&mut self, day: Day, limit: Moment, phase: CheckpointPhase) {
+        let (was, before) = (self.clock.day, self.clock.phase);
         self.advance_through(limit);
         self.clock.day = self.clock.day.max(day);
-        self.enter(day);
+        self.clock.phase = if day > was {
+            phase
+        } else if day == was {
+            before.max(phase)
+        } else {
+            before
+        };
+        self.enter(self.clock.day);
         self.world.holdings.tidy();
     }
 
@@ -143,9 +158,11 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// on the ledger's day: the fold does not travel back. Its `mode` is
     /// ignored, since applying is what makes it real.
     pub fn apply(&mut self, flow: &Flow) -> Applied {
+        let (was, before) = (self.clock.day, self.clock.phase);
         let day = flow.day.max(self.clock.day);
         self.advance_through(Moment::after_flows(day));
         self.clock.day = day;
+        self.clock.phase = if day > was { CheckpointPhase::AfterFlows } else { before.max(CheckpointPhase::AfterFlows) };
         self.enter(day);
         let marks = self.record.marks();
         let number = self.clock.applied;
