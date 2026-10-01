@@ -695,9 +695,10 @@ def main():
         f.write(f"variant={args.variant}\nseed={args.seed}\nflows={total_flows}\npeople={people}\nyears={years}\n"
                 f"first_year={START_YEAR}\nlast_year={last_year}\ntoday={last_year}-12-31\nlast_month={last_year}-12\n"
                 f"journal_lines={total_lines}\n")
-    nativeize_project(root, persons, full, years, BUDGET_FACTOR)
+    native_journal_lines = nativeize_project(root, persons, full, years, BUDGET_FACTOR)
     print(f"{args.variant} {args.flows}: {people} people, {years} years, ~{ctx.spend_per_month} everyday txns/person-month, "
-          f"{total_flows:,} flows, {total_lines:,} journal lines, {time.time() - t0:.1f}s", file=sys.stderr)
+          f"{total_flows:,} flows, {total_lines:,} simulation journal lines, {native_journal_lines:,} native journal lines, "
+          f"{time.time() - t0:.1f}s", file=sys.stderr)
 
 
 if __name__ == "__main__":

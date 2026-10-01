@@ -14,14 +14,12 @@
 #   AXIOM_BENCH_TIMEOUT  seconds before a command is killed  (default 60)
 #   AXIOM_BENCH_KEEP=1   reuse projects that are already generated
 #
-# Phases: the CLI has no timing switch. `axiom sync` on a project with no
-# `sync` declaration loads, parses and builds the model and stops (it never
-# runs the engine), so
-#     parse+model  = sync
-#     engine       = check - sync
-#     report       = command - check
-# and `check` on the laws-free twin (same journal, no kinds, systems, budgets
-# or restricted grants) isolates what evaluating laws costs.
+# The CLI has no phase-only timing switch. The generated projects declare no
+# sync jobs, so `sync` measures project load/parse/model build without running
+# the engine. For these fixtures only, `check - sync` approximates engine time;
+# `command - check` approximates the incremental report cost. A project with
+# declared sync jobs would also time those scripts. The laws-free twin keeps
+# the same generated journal and estimates the cost added by law evaluation.
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
@@ -64,14 +62,14 @@ for scale in $scales; do
     measure balance balance
     measure balance-value balance --value
     measure balance-monthly balance --monthly
-    measure register register p1/bank/checking
+    measure register register p1-checking
     measure flow flow
     measure available available
     measure budget budget "$last_month"
     measure tax tax "$last_year" --for p1
-    measure lots lots p1/invest/brokerage
+    measure lots lots p1-brokerage
     measure forecast forecast
-    measure why-place why p1/bank/checking
+    measure why-place why p1-checking
     measure why-law why deferral-limit
     measure why-code why '^chk-p1-000010'
     measure why-line why journal/2024/03.ax:100

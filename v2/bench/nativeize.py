@@ -2,7 +2,8 @@
 
 The simulation in :mod:`gen` is intentionally shared with the retained 1m
 workload: this module changes its account taxonomy and source spelling without
-changing the seed, daily events, cents, or number of journal rows.
+changing the seed, daily events, cents, or simulated flow count. Four initial
+balances become native `opening` holdings so opening value bypasses laws.
 """
 
 from __future__ import annotations
@@ -17,6 +18,15 @@ def _purpose(person: str, old_path: str) -> str:
     if parts[0] == "expenses":
         parts = parts[2:]
     return person + "-" + "-".join(parts)
+
+
+def _purpose_parent(person: str, category: str, subgroup: str) -> str:
+    # The old 529 system marked only tuition destinations as qualified
+    # education expenses. Keep that subtree under std/us `education`; other
+    # education-category purchases remain ordinary spending.
+    if category == "edu" and subgroup == "tuition":
+        return "education"
+    return f"{person}-{category}"
 
 
 def _files(persons):
@@ -47,7 +57,6 @@ def _files(persons):
         parties[n["dividends"]] = "vti-issuer"
         parties[n["growth"]] = f"{k}-market"
         parties[n["other"]] = f"{k}-other"
-        parties[n["opening"]] = f"{k}-opening"
         parties[n["grants"]] = f"{k}-grant-income"
         parties[n["fed"]] = f"{k}-federal-tax"
         parties[n["state"]] = f"{k}-state-tax"
@@ -95,7 +104,6 @@ def _native_accounts(persons, full: bool, years: int, budget_factor: float) -> s
             f"entity {k}-bank" + (" : org" if full else ""),
             f"entity {k}-custodian" + (" : org" if full else ""),
             f"entity {k}-market" + (" : org #gain" if full else " #gain"),
-            f"entity {k}-opening" + (" : org #contribution" if full else " #contribution"),
             f"entity {k}-interest-source" + (f" : org #interest-income" if full else " #interest-income"),
             f"entity {k}-other" + (f" : org #{k}-other-income" if full else f" #{k}-other-income"),
             f"purpose {k}-other-income : income",
@@ -113,8 +121,12 @@ def _native_accounts(persons, full: bool, years: int, budget_factor: float) -> s
             f"entity {p.landlord}" + (f" : landlord #{k}-housing-rent-landlord" if full else f" #{k}-housing-rent-landlord"),
         ])
 
-        # The old expense chart becomes a typed purpose tree, with the same
-        # 160 leaf destinations and category budget totals.
+        # The old expense chart becomes typed purpose trees. Tuition alone is
+        # under the `education` purpose because us/529 uses that exact lineage
+        # to recognize qualified withdrawals. A combined budget law below
+        # keeps tuition and the other edu subtree under the original $12,000
+        # monthly category allowance without making all edu spending
+        # education-qualified.
         category_budgets = {
             "housing": 9_000,
             "travel": 5_000,
@@ -130,8 +142,14 @@ def _native_accounts(persons, full: bool, years: int, budget_factor: float) -> s
                 budget = max(200, int(math.ceil(mean * budget_factor / 100.0)) * 100)
             parent = f"{k}-{category}"
             out.append(f"purpose {parent} : spending")
-            if p.full:
+            if p.full and category != "edu":
                 out.append(f"  budget {budget} USD monthly")
+            if p.full and category == "edu":
+                out.extend([
+                    f"  law {k}-edu-budget-nonqualified",
+                    f"    when owner is {k}",
+                    f"    warn value(total(#{k}-edu, month), USD) + value(total(#{k}-edu-tuition, month), USD) <= 12_000 USD \"{k} education spending exceeds its monthly allowance\"",
+                ])
             for path, _old_name, _payee, _leaf_category in p.leaves:
                 parts = path.split("/")
                 if parts[2] != category:
@@ -139,7 +157,13 @@ def _native_accounts(persons, full: bool, years: int, budget_factor: float) -> s
                 sub = parts[3]
                 parent_sub = f"{k}-{category}-{sub}"
                 if parent_sub not in seen:
-                    out.append(f"purpose {parent_sub} : {parent}")
+                    out.append(f"purpose {parent_sub} : {_purpose_parent(k, category, sub)}")
+                    if p.full and category == "edu" and sub == "tuition":
+                        out.extend([
+                            f"  law {k}-edu-budget-tuition",
+                            f"    when owner is {k}",
+                            f"    warn value(total(#{k}-edu, month), USD) + value(total(#{k}-edu-tuition, month), USD) <= 12_000 USD \"{k} education spending exceeds its monthly allowance\"",
+                        ])
                     seen.add(parent_sub)
                 out.append(f"purpose {_purpose(k, path)} : {parent_sub}")
 
@@ -468,30 +492,70 @@ def _native_plans(root, persons, places, parties, leaves, payees):
         output.write("\n".join(out) + "\n")
 
 
-def _rewrite_journals(root, places, parties, leaves, payees):
-    journal = os.path.join(root, "journal")
+_OPENING_ROW = re.compile(
+    r"^(?P<day>\d{4}-\d\d-\d\d) (?P<source>\S+/opening) -> "
+    r"(?P<target>\S+) (?P<amount>[\d_,.]+) USD$"
+)
+
+
+def _native_journal_lines(lines, places, parties, leaves, payees, opening_sources):
+    """Rewrite rows and represent seed balances as native opening holdings."""
     account_names = set(places.values())
+    output = []
+    opened = 0
+    i = 0
+    while i < len(lines):
+        match = _OPENING_ROW.fullmatch(lines[i].strip())
+        if match is None or match.group("source") not in opening_sources:
+            output.append(_native_line(lines[i], places, parties, leaves, payees, account_names))
+            i += 1
+            continue
+
+        day = match.group("day")
+        source = match.group("source")
+        rows = []
+        while i < len(lines):
+            current = _OPENING_ROW.fullmatch(lines[i].strip())
+            if current is None or current.group("day") != day or current.group("source") != source:
+                break
+            target = _endpoint(current.group("target"), places, parties, leaves, payees)
+            if target not in account_names:
+                raise ValueError(f"opening balance does not target a declared account: {lines[i]}")
+            rows.append((target, current.group("amount")))
+            i += 1
+        if not rows or len({target for target, _amount in rows}) != len(rows):
+            raise ValueError(f"invalid initial balance group for {source} on {day}")
+        output.append(f"opening {day}")
+        output.extend(f"  {target} {amount} USD" for target, amount in rows)
+        opened += len(rows)
+    return output, opened
+
+
+def _rewrite_journals(root, places, parties, leaves, payees, opening_sources):
+    journal = os.path.join(root, "journal")
+    opened = 0
     if os.path.isdir(journal):
         for base, _dirs, files in os.walk(journal):
             for name in files:
                 path = os.path.join(base, name)
                 with open(path, encoding="utf-8") as source:
                     lines = source.read().splitlines()
-                output = [
-                    _native_line(line, places, parties, leaves, payees, account_names)
-                    for line in lines
-                ]
+                output, count = _native_journal_lines(lines, places, parties, leaves, payees, opening_sources)
+                opened += count
                 with open(path, "w", encoding="utf-8") as dest:
                     dest.write("\n".join(output) + "\n")
     path = os.path.join(root, "journal.ax")
     if os.path.isfile(path):
         with open(path, encoding="utf-8") as source:
             lines = source.read().splitlines()
+        output, count = _native_journal_lines(lines, places, parties, leaves, payees, opening_sources)
+        opened += count
         with open(path, "w", encoding="utf-8") as dest:
-            dest.write("\n".join(_native_line(line, places, parties, leaves, payees, account_names) for line in lines) + "\n")
+            dest.write("\n".join(output) + "\n")
+    return opened
 
 
-def nativeize_project(root, persons, full: bool, years: int, budget_factor: float) -> None:
+def nativeize_project(root, persons, full: bool, years: int, budget_factor: float) -> int:
     """Replace chart-account output with the native purpose/party model.
 
     The journal generator is unchanged: event dates, signed cents, security
@@ -502,4 +566,26 @@ def nativeize_project(root, persons, full: bool, years: int, budget_factor: floa
         output.write(_native_accounts(persons, full, years, budget_factor))
     _native_prices(root)
     _native_plans(root, persons, places, parties, leaves, payees)
-    _rewrite_journals(root, places, parties, leaves, payees)
+    opening_sources = {p.n["opening"] for p in persons}
+    opened = _rewrite_journals(root, places, parties, leaves, payees, opening_sources)
+    expected_opening_rows = 4 * len(persons)
+    if opened != expected_opening_rows:
+        raise ValueError(f"converted {opened} opening holdings; expected {expected_opening_rows}")
+    manifest = os.path.join(root, "MANIFEST")
+    native_lines = 0
+    journal = os.path.join(root, "journal")
+    if os.path.isdir(journal):
+        for base, _dirs, files in os.walk(journal):
+            for name in files:
+                with open(os.path.join(base, name), encoding="utf-8") as source:
+                    native_lines += sum(1 for _ in source)
+    path = os.path.join(root, "journal.ax")
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as source:
+            native_lines += sum(1 for _ in source)
+    if os.path.isfile(manifest):
+        with open(manifest, encoding="utf-8") as source:
+            contents = source.read()
+        with open(manifest, "w", encoding="utf-8") as output:
+            output.write(contents + f"native_journal_lines={native_lines}\nopening_holdings={opened}\n")
+    return native_lines
