@@ -595,9 +595,10 @@ pub struct Contract {
     /// `from … until …`, cut short by `ends` or extended by a statement: the
     /// days anything is expected at all.
     pub days: Days,
-    /// What the contract says, from each day on: the declaration's terms, then
-    /// each statement's (LANGUAGE §5).
-    pub terms: Timeline<Terms>,
+    /// The regular payment schedule, then each dated change (LANGUAGE §5).
+    /// Absent for a standing-order-only contract; no schedule is represented
+    /// by invented active or waived terms.
+    pub terms: Option<Timeline<Terms>>,
     /// An optional standing `buy` order. Its cadence and changes are independent
     /// of the contract's regular payment schedule.
     pub standing: Option<Timeline<Terms>>,
@@ -901,7 +902,9 @@ impl Contract {
         if !self.days.contains(day) {
             return ContractCoverage::None;
         }
-        let regular = coverage_in_timeline(&self.terms, self.days, template, day);
+        let regular = self.terms.as_ref().map_or(ContractCoverage::None, |terms| {
+            coverage_in_timeline(terms, self.days, template, day)
+        });
         let standing = self
             .standing
             .as_ref()
@@ -920,12 +923,16 @@ impl Contract {
     pub fn occurrences(&self, within: Days) -> impl Iterator<Item = ContractOccurrence<'_>> + '_ {
         let window = within.intersect(self.days);
         let search = window.unwrap_or(within);
-        let regular = occurrences_for(&self.terms, search, window.is_some(), ScheduleKind::Regular);
-        let (standing, has_standing) = self.standing.as_ref().map_or((&self.terms, false), |terms| (terms, true));
-        let standing = occurrences_for(
-            standing,
+        let regular = occurrences_for(
+            self.terms.as_ref(),
             search,
-            window.is_some() && has_standing,
+            window.is_some(),
+            ScheduleKind::Regular,
+        );
+        let standing = occurrences_for(
+            self.standing.as_ref(),
+            search,
+            window.is_some(),
             ScheduleKind::Standing,
         );
         ContractOccurrences { regular: regular.peekable(), standing: standing.peekable() }
@@ -1123,33 +1130,35 @@ impl Contract {
     }
 
     /// The terms in force on `day`.
-    pub fn terms_on(&self, day: Day) -> &Terms {
-        self.terms.at(day)
+    pub fn terms_on(&self, day: Day) -> Option<&Terms> {
+        self.terms.as_ref().map(|terms| terms.at(day))
     }
 
     /// The terms in force on `day` for one independent schedule, if it exists.
     pub fn terms_on_schedule(&self, schedule: ScheduleKind, day: Day) -> Option<&Terms> {
         match schedule {
-            ScheduleKind::Regular => Some(self.terms.at(day)),
+            ScheduleKind::Regular => self.terms.as_ref().map(|terms| terms.at(day)),
             ScheduleKind::Standing => self.standing.as_ref().map(|terms| terms.at(day)),
         }
     }
 }
 
 fn occurrences_for<'a>(
-    timeline: &'a Timeline<Terms>,
+    timeline: Option<&'a Timeline<Terms>>,
     within: Days,
     enabled: bool,
     schedule: ScheduleKind,
 ) -> impl Iterator<Item = ContractOccurrence<'a>> + 'a {
-    timeline
-        .within(within)
-        .filter(move |(_, terms)| enabled && !terms.is_waived())
-        .flat_map(move |(stretch, terms)| {
-            let days = stretch.intersect(within).expect("timeline stretch intersects its window");
-            calendar::due(terms.every, &terms.on, terms.anchor, days)
-                .map(move |day| ContractOccurrence { day, schedule, terms })
-        })
+    timeline.into_iter().flat_map(move |timeline| {
+        timeline
+            .within(within)
+            .filter(move |(_, terms)| enabled && !terms.is_waived())
+            .flat_map(move |(stretch, terms)| {
+                let days = stretch.intersect(within).expect("timeline stretch intersects its window");
+                calendar::due(terms.every, &terms.on, terms.anchor, days)
+                    .map(move |day| ContractOccurrence { day, schedule, terms })
+            })
+    })
 }
 
 fn template_covers_flow(terms: &Terms, template: &Flow) -> bool {

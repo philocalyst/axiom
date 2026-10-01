@@ -1456,7 +1456,7 @@ fn contract(days: axiom_core::Days, terms: axiom_core::Timeline<crate::Terms>) -
         purpose: None,
         description: None,
         days,
-        terms,
+        terms: Some(terms),
         standing: None,
         buys: None,
         deposit: None,
@@ -1528,8 +1528,8 @@ fn a_contract_falls_due_by_the_terms_in_force_over_its_days() {
         let mut changing = Timeline::new(terms(monthly, &[], day(1, 1), &template));
         changing.paint(Days::new(day(3, 1), Day::MAX).unwrap(), terms(fortnightly, &[], day(3, 1), &template));
         let changing = contract(Days::ALWAYS, changing);
-        assert_eq!(changing.terms_on(day(2, 1)).every, monthly);
-        assert_eq!(changing.terms_on(day(3, 1)).every, fortnightly);
+        assert_eq!(changing.terms_on(day(2, 1)).unwrap().every, monthly);
+        assert_eq!(changing.terms_on(day(3, 1)).unwrap().every, fortnightly);
         assert_eq!(
             changing.due_days(days((1, 1), (4, 30))),
             [day(1, 1), day(2, 1), day(3, 1), day(3, 15), day(3, 29), day(4, 12), day(4, 26)]
@@ -1540,8 +1540,18 @@ fn a_contract_falls_due_by_the_terms_in_force_over_its_days() {
         waiver.state = crate::TermsState::Waived;
         waived.paint(days((2, 1), (2, 28)), waiver);
         let waived = contract(Days::ALWAYS, waived);
-        assert!(waived.terms_on(day(2, 10)).is_waived() && !waived.terms_on(day(3, 1)).is_waived());
+        assert!(waived.terms_on(day(2, 10)).unwrap().is_waived() && !waived.terms_on(day(3, 1)).unwrap().is_waived());
         assert_eq!(waived.due_days(days((1, 1), (4, 1))), [day(1, 1), day(3, 1), day(4, 1)]);
+
+        // A standing-only contract has no regular timeline or phantom days.
+        let standing_terms = terms(monthly, &[On::MonthDay(20)], day(1, 1), &template);
+        let mut standing_only = contract(Days::ALWAYS, Timeline::new(standing_terms.clone()));
+        standing_only.terms = None;
+        standing_only.standing = Some(Timeline::new(standing_terms));
+        let occurrences: Vec<_> = standing_only.occurrences(days((1, 1), (3, 1))).collect();
+        assert_eq!(occurrences.iter().map(|occurrence| occurrence.day).collect::<Vec<_>>(), [day(1, 20), day(2, 20)]);
+        assert!(occurrences.iter().all(|occurrence| occurrence.schedule == crate::ScheduleKind::Standing));
+        assert!(standing_only.terms_on_schedule(crate::ScheduleKind::Regular, day(1, 20)).is_none());
     });
 }
 

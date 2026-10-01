@@ -105,7 +105,6 @@ pub(crate) fn contracts<'a, 's>(
 }
 
 fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<crate::book::Entity>) -> Contract {
-    let terms = empty_terms(Day::MIN);
     Contract {
         name,
         party: me,
@@ -113,7 +112,7 @@ fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<crate::book::Entity>) 
         purpose: None,
         description: None,
         days: Days::ALWAYS,
-        terms: Timeline::new(terms),
+        terms: None,
         standing: None,
         buys: None,
         deposit: None,
@@ -124,29 +123,6 @@ fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<crate::book::Entity>) 
         laws: Box::default(),
         doc: None,
         loc,
-    }
-}
-
-fn empty_terms(anchor: Day) -> Terms {
-    Terms {
-        state: TermsState::Active,
-        every: Cadence::Every(Span::days(1)),
-        on: Box::default(),
-        anchor,
-        template: Box::default(),
-        program: TemplateProgram::default(),
-        inputs: Box::default(),
-        estimate: false,
-        due: None,
-        grace: Span::default(),
-        period: None,
-        covers: None,
-        prorated: false,
-        escalation: None,
-        shares: Box::default(),
-        also: Box::default(),
-        rate: None,
-        change: None,
     }
 }
 
@@ -269,7 +245,7 @@ fn lower_contract<'a, 's>(
             description,
             diags,
         )?;
-        contract.terms = Timeline::new(terms);
+        contract.terms = Some(Timeline::new(terms));
     }
     if let (Some(schedule), Some((program, ids))) = (node.standing, standing) {
         let terms = lower_terms(
