@@ -1135,6 +1135,8 @@ fn restricted_money_stays_tied_and_is_spent_first_only_where_its_laws_permit() {
         qty: Qty(amount),
         basis: Qty(amount),
         acquired: Day(2),
+        held_since: Day(2),
+        wash_matched: false,
         txn: RuntimeTxn::journal(Id::new(txn)).unwrap(),
         part: None,
         codes: FlowCodes {
@@ -1494,7 +1496,7 @@ fn a_refold_resumes_from_a_checkpoint_and_stops_where_it_meets_the_old_fold() {
 }
 
 #[test]
-fn checkpoint_digest_includes_asset_part_basis_even_when_holdings_match() {
+fn checkpoint_digest_includes_asset_basis_and_matched_replacement_state() {
     let mut f = Fixture::new();
     let (name, owner, place, unit) = (f.sym("house"), f.me, f.checking, f.usd);
     let mut book = f.book();
@@ -1510,16 +1512,17 @@ fn checkpoint_digest_includes_asset_part_basis_even_when_holdings_match() {
         loc: Loc::default(),
     });
     let plan = Plan::new(&book);
-    let digest = |basis| {
+    let digest = |basis, matched| {
         let mut ledger = plan.start(options());
         let origin = RuntimeTxn::Adjustment { place, day: Day(5) };
+        let part_id = crate::PartId { origin, ordinal: 0 };
         ledger
             .world
             .assets
             .add_part(
                 asset,
                 crate::Part {
-                    id: crate::PartId { origin, ordinal: 0 },
+                    id: part_id,
                     flow: None,
                     kind: crate::PartKind::Acquisition,
                     recorded: crate::EventKey { day: Day(5), sequence: 0 },
@@ -1529,11 +1532,24 @@ fn checkpoint_digest_includes_asset_part_basis_even_when_holdings_match() {
                 },
             )
             .expect("a first asset part");
-        assert_eq!(ledger.balance(place, unit), Qty::ZERO, "the asset-part table is separate from aggregate balances");
+        let empty = axiom_core::Run::new(Id::new(0), 0);
+        ledger.world.holdings.entry(place, unit).land(Parcel {
+            qty: Qty(1),
+            basis: Qty(1),
+            acquired: Day(5),
+            held_since: Day(5),
+            wash_matched: matched,
+            txn: origin,
+            part: Some(part_id),
+            codes: FlowCodes { header: empty, local: empty },
+            tied: None,
+        }, false);
+        assert_eq!(ledger.balance(place, unit), Qty(1), "matched metadata does not change the aggregate quantity");
         ledger.checkpoint().digest()
     };
 
-    assert_ne!(digest(450_000), digest(440_000));
+    assert_ne!(digest(450_000, false), digest(440_000, false));
+    assert_ne!(digest(450_000, false), digest(450_000, true), "matched replacement capacity affects checkpoint identity");
 }
 
 #[test]
@@ -1562,6 +1578,8 @@ fn failed_asset_carry_preflight_leaves_both_canonical_stores_unchanged() {
         qty: Qty(i64::MAX),
         basis: Qty(10),
         acquired: Day(5),
+        held_since: Day(5),
+        wash_matched: false,
         txn: origin,
         part: Some(part),
         codes: FlowCodes { header: empty, local: empty },

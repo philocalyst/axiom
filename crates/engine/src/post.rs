@@ -69,7 +69,6 @@ impl Ledger<'_, '_, '_> {
         let on = Occasion::flow(m);
         let watched = !m.opening;
         self.scratch.worth.clear();
-        self.scratch.carry_used.clear();
         // A `!` on an assertion accepts its gap: it is never unused.
         if let (Cause::Flow(_) | Cause::Applied(_), true, Some(waive)) = (m.cause, watched, m.waive)
         {
@@ -436,13 +435,13 @@ impl Ledger<'_, '_, '_> {
                 ambiguous,
             };
             self.record.gains.push(row);
-            let held = m.day.since(slice.acquired);
             let realized = Realized {
                 gain: slice.worth - slice.basis,
                 proceeds: slice.worth,
                 basis: slice.basis,
+                held: m.day.since(slice.held_since),
+                held_since: slice.held_since,
                 acquired: slice.acquired,
-                held,
                 quantity: slice.qty,
                 part: slice.part,
                 codes: m.code_runs,
@@ -516,6 +515,8 @@ impl Ledger<'_, '_, '_> {
                         qty,
                         basis: slice.carried,
                         acquired,
+                    held_since: if keeps { slice.held_since } else { since },
+                    wash_matched: keeps && slice.wash_matched,
                         txn,
                         // An ordinary asset-place transfer carries the same
                         // acquisition anchor through every split slice.
@@ -680,6 +681,8 @@ impl Ledger<'_, '_, '_> {
                     qty: Qty(1),
                     basis: cost,
                     acquired: m.day,
+                    held_since: m.day,
+                    wash_matched: false,
                     txn: m.txn,
                     part: Some(part.id),
                     codes: m.code_runs,
@@ -927,8 +930,9 @@ impl Ledger<'_, '_, '_> {
                     gain,
                     proceeds: fetched,
                     basis: slice.basis,
+                    held: m.day.since(slice.held_since),
+                    held_since: slice.held_since,
                     acquired: slice.acquired,
-                    held: m.day.since(slice.acquired),
                     quantity: slice.qty,
                     part: slice.part,
                     codes: m.code_runs,
@@ -980,13 +984,17 @@ impl Ledger<'_, '_, '_> {
         if matched.is_empty() {
             return;
         }
-        let Some(total) = matched.iter().try_fold(Qty::ZERO, |sum, (_, _, _, amount)| {
-            sum.0.checked_add(amount.0).map(Qty)
-        }) else {
-            self.report_asset_state_error(motion, crate::AssetError::Overflow);
-            return;
-        };
-        if let Err(error) = self.carry_basis_to_part(part, total) {
+        let additions: Vec<_> = matched
+            .iter()
+            .map(|(_, request, taken, amount)| crate::lots::CarryLotAddition {
+                part,
+                acquired,
+                held_since: request.held_since,
+                quantity: *taken,
+                amount: *amount,
+            })
+            .collect();
+        if let Err(error) = self.carry_basis_to_parts(&additions) {
             self.report_asset_state_error(motion, error);
             return;
         }

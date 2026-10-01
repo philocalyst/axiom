@@ -953,8 +953,178 @@ opening 2026-01-01
             [(2_500, 13_500), (2_500, 13_500)],
             "each 2.5-share replacement gets only its apportioned $10 loss"
         );
+        assert!(broker.lots.iter().all(|lot| lot.wash_matched), "both matched quantities stay ineligible for future replacement matches");
+        assert_eq!(
+            broker.lots.iter().map(|lot| (lot.acquired, lot.held_since)).collect::<Vec<_>>(),
+            [
+                (day(2026, 1, 20), day(2026, 1, 1)),
+                (day(2026, 2, 20), day(2026, 1, 1)),
+            ],
+            "matched replacement shares retain their purchase date and tack the sold lot's holding period"
+        );
         assert_eq!(run.pending_carries.len(), 1, "the unmatched second lot loss remains pending through its window");
         assert_eq!((run.pending_carries[0].quantity.0, run.pending_carries[0].amount.0), (5_000, 8_000));
+    });
+}
+
+#[test]
+fn wash_sale_replacement_capacity_is_not_reused_by_a_later_sale() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind security : commodity
+kind brokerage : asset
+  law wash-sale
+    on gain
+    when amount.unit is security
+    when gain < empty
+    carry -gain to amount.unit within 30d
+commodity VTI : security
+  precision 3
+account assets/checking
+account assets/fidelity-brokerage : brokerage
+  select fifo
+
+opening 2026-01-01
+  checking 1_000 USD
+  fidelity-brokerage 5.000 VTI basis 270 USD since 2026-01-01
+
+2026-01-15 fidelity-brokerage 2.500 VTI -> checking 125 USD
+2026-01-20 checking 250 USD -> fidelity-brokerage 2.500 VTI basis 125 USD
+2026-02-01 fidelity-brokerage 2.500 VTI -> checking 125 USD
+";
+    with_run(text, day(2026, 2, 1), |book, run| {
+        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+        let carried: Vec<_> = run
+            .adjustments
+            .iter()
+            .filter_map(|adjustment| match adjustment.kind {
+                crate::AdjustmentKind::Carried { from: _, to: Some(to) } => Some((to, adjustment.amount.0)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            carried.iter().map(|(_, amount)| *amount).collect::<Vec<_>>(),
+            [1_000],
+            "the replacement shares match the first sale only"
+        );
+        let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
+        assert_eq!(
+            broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched)).collect::<Vec<_>>(),
+            [(2_500, 13_500, day(2026, 1, 20), day(2026, 1, 1), true)],
+            "a later loss does not add basis to or retack the already-matched replacement shares"
+        );
+        let remaining: i64 = run.pending_carries.iter().map(|carry| carry.amount.0).sum();
+        assert_eq!(remaining, 1_000, "the second sale's loss remains pending");
+    });
+}
+
+#[test]
+fn wash_sale_allocates_each_loss_to_distinct_replacement_shares() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind security : commodity
+kind brokerage : asset
+  law wash-sale
+    on gain
+    when amount.unit is security
+    when gain < empty
+    carry -gain to amount.unit within 30d
+commodity VTI : security
+  precision 3
+account assets/checking
+account assets/fidelity-brokerage : brokerage
+  select fifo
+
+opening 2026-01-01
+  checking 1_000 USD
+  fidelity-brokerage 5.000 VTI basis 270 USD since 2026-01-01
+  fidelity-brokerage 5.000 VTI basis 330 USD since 2026-01-02
+
+2026-01-20 checking 500 USD -> fidelity-brokerage 10.000 VTI basis 500 USD
+2026-02-05 fidelity-brokerage 10.000 VTI -> checking 500 USD
+";
+    with_run(text, day(2026, 2, 6), |book, run| {
+        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+        let mut sales: Vec<_> = run.gains.iter().filter(|gain| gain.day == day(2026, 2, 5)).collect();
+        sales.sort_by_key(|gain| gain.acquired);
+        assert_eq!(
+            sales.iter().map(|gain| (gain.proceeds.0, gain.basis.0, gain.gain().0)).collect::<Vec<_>>(),
+            [(25_000, 27_000, -2_000), (25_000, 33_000, -8_000)],
+            "the replacement cost is allocated to the two original loss lots in FIFO order"
+        );
+        let carried: Vec<_> = run.adjustments.iter().filter_map(|adjustment| match adjustment.kind {
+            crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
+            _ => None,
+        }).collect();
+        assert_eq!(carried, [2_000, 8_000]);
+        let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
+        let mut replacement: Vec<_> = broker.lots.iter()
+            .map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since))
+            .collect();
+        replacement.sort_by_key(|lot| lot.3);
+        assert_eq!(
+            replacement,
+            [
+                (5_000, 27_000, day(2026, 1, 20), day(2026, 1, 1)),
+                (5_000, 33_000, day(2026, 1, 20), day(2026, 1, 2)),
+            ],
+            "each five-share tranche gets its own loss basis and holding-period start"
+        );
+        assert!(run.pending_carries.is_empty());
+    });
+}
+
+#[test]
+fn reselling_a_tacked_replacement_preserves_the_original_holding_period() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind security : commodity
+kind brokerage : asset
+  law wash-sale
+    on gain
+    when amount.unit is security
+    when gain < empty
+    carry -gain to amount.unit within 30d
+commodity VTI : security
+  precision 3
+account assets/checking
+account assets/fidelity-brokerage : brokerage
+  select fifo
+
+opening 2026-01-01
+  checking 1_000 USD
+  fidelity-brokerage 5.000 VTI basis 270 USD since 2026-01-01
+
+2026-01-15 fidelity-brokerage 2.500 VTI -> checking 125 USD
+2026-01-20 checking 250 USD -> fidelity-brokerage 2.500 VTI basis 125 USD
+2026-02-01 fidelity-brokerage 5.000 VTI -> checking 250 USD
+2026-02-05 checking 500 USD -> fidelity-brokerage 5.000 VTI basis 250 USD
+";
+    with_run(text, day(2026, 2, 6), |book, run| {
+        assert!(run.diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{:?}", run.diagnostics);
+        let broker = holding(book, run, "assets/fidelity-brokerage", "VTI").unwrap();
+        assert_eq!(
+            broker.lots.iter().map(|lot| (lot.qty.0, lot.basis.0, lot.acquired, lot.held_since, lot.wash_matched)).collect::<Vec<_>>(),
+            [
+                (2_500, 13_500, day(2026, 2, 5), day(2026, 1, 1), true),
+                (2_500, 13_500, day(2026, 2, 5), day(2026, 1, 1), true),
+            ],
+            "replacement shares inherit the original start, rather than the resold lot's purchase date"
+        );
+        assert_eq!(
+            run.adjustments.iter().filter_map(|adjustment| match adjustment.kind {
+                crate::AdjustmentKind::Carried { to: Some(_), .. } => Some(adjustment.amount.0),
+                _ => None,
+            }).collect::<Vec<_>>(),
+            [1_000, 1_000, 1_000]
+        );
+        assert!(run.pending_carries.is_empty());
     });
 }
 

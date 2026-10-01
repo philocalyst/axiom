@@ -97,6 +97,9 @@ pub struct PendingCarry {
     pub owner: Id<Entity>,
     pub unit: Id<Commodity>,
     pub sold: Day,
+    /// The disposed slice's tacked holding-period start, separate from its
+    /// actual acquisition day used to assess the replacement window.
+    pub held_since: Day,
     pub within: Span,
     pub quantity: Qty,
     pub amount: Qty,
@@ -293,6 +296,7 @@ impl Assets {
                 && existing.owner == carry.owner
                 && existing.unit == carry.unit
                 && existing.sold == carry.sold
+                && existing.held_since == carry.held_since
                 && existing.within == carry.within
         }) {
             // Preflight both arithmetic operations before changing either
@@ -556,36 +560,6 @@ impl Assets {
     /// Prepares a positive basis addition to one declared asset part. The
     /// corresponding physical parcel is adjusted by `assets_runtime` under a
     /// second disjoint mutable guard before either store is committed.
-    pub(crate) fn prepare_basis_addition(
-        &mut self,
-        asset: Id<Asset>,
-        part_id: PartId,
-        amount: Qty,
-    ) -> Result<AssetBasisGuard<'_>, AssetError> {
-        if amount.is_negative() {
-            return Err(AssetError::NegativeAmount);
-        }
-        let state = self
-            .states
-            .get_mut(asset.index())
-            .filter(|state| state.asset == asset)
-            .ok_or(AssetError::UnknownAsset)?;
-        if state.disposed.is_some() {
-            return Err(AssetError::Disposed);
-        }
-        let (owner, index) = self.part_index.get(&part_id).copied().ok_or(AssetError::UnknownPart)?;
-        if owner != asset {
-            return Err(AssetError::UnknownPart);
-        }
-        let part = state.parts.get_mut(index).ok_or(AssetError::UnknownPart)?;
-        let basis = Qty(part
-            .basis
-            .0
-            .checked_add(amount.0)
-            .ok_or(AssetError::Overflow)?);
-        Ok(AssetBasisGuard { part, basis })
-    }
-
     pub(crate) fn prepare_basis_additions(
         &mut self,
         additions: &[(Id<Asset>, PartId, Qty)],
@@ -761,17 +735,6 @@ pub struct CarryUpdate {
 pub(crate) struct CarryGuard<'a> {
     result: CarryUpdate,
     target: Option<(&'a mut Part, Qty, Qty)>,
-}
-
-pub(crate) struct AssetBasisGuard<'a> {
-    part: &'a mut Part,
-    basis: Qty,
-}
-
-impl AssetBasisGuard<'_> {
-    pub fn apply(self) {
-        self.part.basis = self.basis;
-    }
 }
 
 struct AssetBasisChange {

@@ -376,6 +376,13 @@ pub struct Parcel {
     /// base-currency quanta.
     pub basis: Qty,
     pub acquired: Day,
+    /// Tax holding-period start. Usually equal to `acquired`; a wash-sale
+    /// carry may tack an earlier holding date onto only the matched quantity.
+    pub held_since: Day,
+    /// This exact parcel quantity has already served as a replacement for a
+    /// disallowed loss and cannot be matched again. Partial carries split the
+    /// lot so this marker stays attached to the matched shares.
+    pub wash_matched: bool,
     pub txn: RuntimeTxn,
     /// The canonical asset part this parcel belongs to, if it came from an
     /// identified thing. Partial relief and transfers keep this identity.
@@ -392,6 +399,8 @@ impl Hash for Parcel {
         self.qty.hash(state);
         self.basis.hash(state);
         self.acquired.hash(state);
+        self.held_since.hash(state);
+        self.wash_matched.hash(state);
         self.txn.hash(state);
         self.part.hash(state);
         self.codes.header.start().hash(state);

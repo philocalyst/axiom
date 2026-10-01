@@ -484,12 +484,16 @@ impl Ledger<'_, '_, '_> {
                 let Some(part) = parcel.part else { continue };
                 if part == from
                     || parcel.qty <= Qty::ZERO
+                    || parcel.wash_matched
                     || parcel.acquired > ctx.day
                     || !crate::Assets::within_carry_window(parcel.acquired, ctx.day, within)
                 {
                     continue;
                 }
-                if let Some((_, _, quantity)) = candidates.iter_mut().find(|(_, seen, _)| *seen == part) {
+                if let Some((_, _, quantity)) = candidates
+                    .iter_mut()
+                    .find(|(seen_day, seen_part, _)| *seen_day == parcel.acquired && *seen_part == part)
+                {
                     if let Some(sum) = quantity.0.checked_add(parcel.qty.0) {
                         quantity.0 = sum;
                     } else {
@@ -507,25 +511,6 @@ impl Ledger<'_, '_, '_> {
             return;
         }
         candidates.sort_by_key(|(day, _, _)| std::cmp::Reverse(*day));
-        for (_, part, quantity) in &mut candidates {
-            let Some(reserved) = self
-                .scratch
-                .carry_used
-                .iter()
-                .filter(|(seen, _)| seen == part)
-                .try_fold(Qty::ZERO, |sum, (_, used)| {
-                    sum.0.checked_add(used.0).map(Qty)
-                })
-            else {
-                self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-                return;
-            };
-            let Some(remaining) = quantity.0.checked_sub(reserved.0) else {
-                self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
-                return;
-            };
-            quantity.0 = remaining.max(0);
-        }
         let Some(available) = candidates.iter().try_fold(Qty::ZERO, |sum, (_, _, qty)| {
             sum.0.checked_add(qty.0).map(Qty)
         }) else {
@@ -536,13 +521,25 @@ impl Ledger<'_, '_, '_> {
         let mut quantity_left = matched_qty;
         let mut shares = crate::lots::Shares::new(amount.qty, sold);
         let mut additions = Vec::new();
-        let mut used = Vec::new();
-        for (_, part, available) in candidates {
+        let mut matched_amount = Qty::ZERO;
+        for (acquired, part, available) in candidates {
             if quantity_left.is_zero() { break; }
             let quantity = available.min(quantity_left);
             let basis = shares.take(quantity);
-            if !basis.is_zero() { additions.push((part, basis)); }
-            if !quantity.is_zero() { used.push((part, quantity)); }
+            if !basis.is_zero() || !quantity.is_zero() {
+                additions.push(crate::lots::CarryLotAddition {
+                    part,
+                    acquired,
+                    held_since: realized.held_since,
+                    quantity,
+                    amount: basis,
+                });
+            }
+            let Some(sum) = matched_amount.0.checked_add(basis.0).map(Qty) else {
+                self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
+                return;
+            };
+            matched_amount = sum;
             quantity_left -= quantity;
         }
         if !additions.is_empty() {
@@ -550,19 +547,17 @@ impl Ledger<'_, '_, '_> {
                 self.fault(rule, ctx, step as usize, Fault::InvalidProgram);
                 return;
             }
-            for &(to, basis) in &additions {
+            for addition in &additions {
                 self.record.adjustments.push(Adjustment {
                     day: ctx.day,
                     law: rule.law,
-                    kind: AdjustmentKind::Carried { from, to: Some(to) },
-                    amount: basis,
+                    kind: AdjustmentKind::Carried { from, to: Some(addition.part) },
+                    amount: addition.amount,
                 });
             }
         }
-        self.scratch.carry_used.extend(used);
         let unmatched_qty = sold - matched_qty;
         if !unmatched_qty.is_zero() {
-            let matched_amount = additions.iter().map(|(_, basis)| *basis).fold(Qty::ZERO, |sum, amount| sum + amount);
             let unmatched_amount = amount.qty - matched_amount;
             if !unmatched_amount.is_zero() {
                 let carry = crate::PendingCarry {
@@ -572,6 +567,7 @@ impl Ledger<'_, '_, '_> {
                     owner: ctx.owner,
                     unit,
                     sold: ctx.day,
+                    held_since: realized.held_since,
                     within,
                     quantity: unmatched_qty,
                     amount: unmatched_amount,

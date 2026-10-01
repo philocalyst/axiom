@@ -11,7 +11,7 @@ use crate::Ledger;
 use crate::assets::{
     AssetError, Assets, CarryUpdate, Consumption, DisposalBoundary, Part, PartKind,
 };
-use crate::lots::PartBasisAdjustment;
+use crate::lots::{CarryLotAddition, PartBasisAdjustment};
 
 /// Returns one part's depreciation over a requested calendar window.
 ///
@@ -197,23 +197,16 @@ impl Ledger<'_, '_, '_> {
     /// asset the lot is the acquisition anchor, while the asset table owns the
     /// selected part detail; both checked guards are held before either is
     /// applied. Ordinary security lots have only the holdings side.
-    pub(crate) fn carry_basis_to_part(
-        &mut self,
-        part: crate::PartId,
-        amount: Qty,
-    ) -> Result<(), AssetError> {
-        self.carry_basis_to_parts(&[(part, amount)])
-    }
-
     pub(crate) fn carry_basis_to_parts(
         &mut self,
-        additions: &[(crate::PartId, Qty)],
+        additions: &[CarryLotAddition],
     ) -> Result<(), AssetError> {
         let world = &mut self.world;
         let (assets, holdings) = (&mut world.assets, &mut world.holdings);
-        let mut asset_additions = Vec::new();
+        let mut asset_additions: Vec<(Id<Asset>, crate::PartId, Qty)> = Vec::new();
         let mut checked_assets = Vec::new();
-        for &(part, amount) in additions {
+        for addition in additions {
+            let (part, amount) = (addition.part, addition.amount);
             if amount.is_negative() {
                 return Err(AssetError::NegativeAmount);
             }
@@ -229,14 +222,14 @@ impl Ledger<'_, '_, '_> {
                 }
                 checked_assets.push((asset, anchor));
             }
-            asset_additions.push((asset, record.id, amount));
+            if let Some((_, _, existing)) = asset_additions.iter_mut().find(|(_, seen, _)| *seen == part) {
+                existing.0 = existing.0.checked_add(amount.0).ok_or(AssetError::Overflow)?;
+            } else {
+                asset_additions.push((asset, record.id, amount));
+            }
         }
-        let parcel_additions: Vec<_> = additions
-            .iter()
-            .map(|&(part, amount)| (part, amount))
-            .collect();
         let asset_parts = assets.prepare_basis_additions(&asset_additions)?;
-        let parcels = holdings.prepare_part_basis_additions(&parcel_additions)?;
+        let parcels = holdings.prepare_part_carry_additions(additions)?;
         // Both mutations have been completely preflighted and the guards
         // borrow disjoint canonical stores through these infallible commits.
         asset_parts.apply();

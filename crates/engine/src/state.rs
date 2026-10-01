@@ -191,10 +191,6 @@ pub(crate) struct Scratch {
     pub done: Vec<(Id<Law>, Subject)>,
     /// Reused union of the purpose/window reader lists for one opening.
     pub purpose_rules: Vec<Rule>,
-    /// Replacement quantity already assigned to earlier loss parcels of the
-    /// same posted flow. The basis changes do not consume shares, so this
-    /// scratch reservation prevents another slice from claiming them again.
-    pub carry_used: Vec<(crate::PartId, Qty)>,
 }
 
 impl Clone for Scratch {
