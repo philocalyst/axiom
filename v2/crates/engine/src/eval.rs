@@ -1363,10 +1363,12 @@ kind flagged-account : asset
 kind inherited-account : flagged-account
 kind overridden-account : flagged-account
   marked false
+kind temporary-account : flagged-account
 account checking
 account inherited : inherited-account
 account overridden : overridden-account
-2026-01-02 overridden now marked false until 2026-01-03
+account temporary : temporary-account
+2026-01-02 temporary now marked false until 2026-01-03
 ";
         let (file, parsed) = axiom_syntax::parse(axiom_core::FileId(0), text, axiom_syntax::Folder::default());
         assert!(parsed.is_empty(), "{parsed:?}");
@@ -1391,8 +1393,9 @@ account overridden : overridden-account
         for (place, date, expected) in [
             (inherited, (2026, 1, 1), Value::Bool(true)),
             (overridden, (2026, 1, 1), Value::Bool(false)),
-            (overridden, (2026, 1, 3), Value::Bool(false)),
-            (overridden, (2026, 1, 4), Value::Bool(true)),
+            (overridden, (2026, 1, 4), Value::Bool(false)),
+            (book.place("temporary").unwrap(), (2026, 1, 2), Value::Bool(false)),
+            (book.place("temporary").unwrap(), (2026, 1, 4), Value::Bool(true)),
         ] {
             let day = Day::from_ymd(date.0, date.1, date.2).unwrap();
             let occasion = Occasion::time(day, Days::on(day));
