@@ -13,7 +13,8 @@
 use axiom_core::glob::is_pattern;
 use axiom_core::{Diagnostic, Dim, Id, Loc, Severity, Sym};
 use axiom_syntax::{
-    self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep, UnOp,
+    self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep,
+    UnOp,
 };
 
 use super::types::{binary, expected, is_test, mismatch, negate, unify};
@@ -22,21 +23,12 @@ use crate::book::{Entity, Input, Param, TemplateProgram};
 use crate::declare::World;
 use crate::errors::{Word, article, count, list, suggest};
 use crate::law::{
-    Closing, Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var,
-    Window,
+    Closing, Dir, Effect, Field, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger,
+    Ty, Value, Var, Window,
 };
 use crate::params::Shape;
 use crate::scope::Home;
 use crate::values::fits;
-
-const FUNCTIONS: [&str; 8] = ["total", "tally", "min", "max", "abs", "progressive", "value", "date"];
-
-/// The functions whose arguments are all of one type each: what they must be, and what they give.
-const FIXED: [(&str, &[Ty], Func, Ty); 3] = [
-    ("progressive", &[Ty::Schedule, Ty::AMOUNT], Func::Progressive, Ty::AMOUNT),
-    ("value", &[Ty::AMOUNT, Ty::Unit], Func::Value, Ty::AMOUNT),
-    ("date", &[Ty::Num, Ty::Num, Ty::Num], Func::Date, Ty::Day),
-];
 
 /// How the arguments of a call and a name in a pattern are read.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -48,6 +40,142 @@ enum Role {
     ParamBase,
     /// An alternative of `is`: a kind, place, entity or pattern, never a variable.
     Pattern,
+}
+
+#[derive(Clone, Copy)]
+enum Signature {
+    Total,
+    Tally,
+    Min,
+    Max,
+    Abs,
+    Progressive,
+    Value,
+    Date,
+    StraightLine,
+    Open,
+    Peak,
+    Low,
+    Days,
+}
+
+/// One source of truth for each function's arity, argument roles, and typed
+/// compiler handler. The role table is also used before name resolution, so
+/// keywords and patterns are never mistaken for variables.
+struct FunctionSpec {
+    name: &'static str,
+    min: usize,
+    max: usize,
+    roles: &'static [Role],
+    signature: Signature,
+}
+
+const FUNCTION_SPECS: &[FunctionSpec] = &[
+    FunctionSpec {
+        name: "abs",
+        min: 1,
+        max: 1,
+        roles: &[],
+        signature: Signature::Abs,
+    },
+    FunctionSpec {
+        name: "date",
+        min: 3,
+        max: 3,
+        roles: &[],
+        signature: Signature::Date,
+    },
+    FunctionSpec {
+        name: "days",
+        min: 2,
+        max: 2,
+        roles: &[Role::Normal, Role::Keyword],
+        signature: Signature::Days,
+    },
+    FunctionSpec {
+        name: "low",
+        min: 2,
+        max: 2,
+        roles: &[Role::Normal, Role::Keyword],
+        signature: Signature::Low,
+    },
+    FunctionSpec {
+        name: "max",
+        min: 2,
+        max: 2,
+        roles: &[],
+        signature: Signature::Max,
+    },
+    FunctionSpec {
+        name: "min",
+        min: 2,
+        max: 2,
+        roles: &[],
+        signature: Signature::Min,
+    },
+    FunctionSpec {
+        name: "open",
+        min: 1,
+        max: 1,
+        roles: &[Role::Pattern],
+        signature: Signature::Open,
+    },
+    FunctionSpec {
+        name: "peak",
+        min: 2,
+        max: 2,
+        roles: &[Role::Normal, Role::Keyword],
+        signature: Signature::Peak,
+    },
+    FunctionSpec {
+        name: "progressive",
+        min: 2,
+        max: 2,
+        roles: &[],
+        signature: Signature::Progressive,
+    },
+    FunctionSpec {
+        name: "straight-line",
+        min: 4,
+        max: 5,
+        roles: &[
+            Role::Normal,
+            Role::Normal,
+            Role::Normal,
+            Role::Keyword,
+            Role::Keyword,
+        ],
+        signature: Signature::StraightLine,
+    },
+    FunctionSpec {
+        name: "tally",
+        min: 1,
+        max: 2,
+        roles: &[Role::Keyword],
+        signature: Signature::Tally,
+    },
+    FunctionSpec {
+        name: "total",
+        min: 1,
+        max: 3,
+        roles: &[Role::Keyword, Role::Keyword, Role::Pattern],
+        signature: Signature::Total,
+    },
+    FunctionSpec {
+        name: "value",
+        min: 2,
+        max: 3,
+        roles: &[Role::Normal, Role::Normal, Role::Keyword],
+        signature: Signature::Value,
+    },
+];
+
+fn function_spec(name: &str) -> Option<&'static FunctionSpec> {
+    FUNCTION_SPECS.iter().find(|spec| spec.name == name)
+}
+
+fn function_names() -> Vec<&'static str> {
+    FUNCTION_SPECS.iter().map(|spec| spec.name).collect()
 }
 
 /// Why a node has no type.
@@ -87,6 +215,7 @@ pub(crate) fn compile<'s>(
         diags,
         file: site.file,
         home: site.home,
+        owner: Some(site.owner),
         subject: site.subject,
         law_name,
         first: 0,
@@ -120,6 +249,7 @@ pub(crate) fn compile_template<'s>(
         diags,
         file,
         home,
+        owner: None,
         subject,
         law_name: name,
         first: 0,
@@ -132,11 +262,19 @@ pub(crate) fn compile_template<'s>(
         when: When::Template,
         failed: false,
     };
-    let compiled: Vec<NodeId> = roots.iter().filter_map(|&(root, want)| compiler.expression(root, want)).collect();
+    let compiled: Vec<NodeId> = roots
+        .iter()
+        .filter_map(|&(root, want)| compiler.expression(root, want))
+        .collect();
     if compiler.failed || compiled.len() != roots.len() {
         return None;
     }
-    Some((TemplateProgram { nodes: std::mem::take(&mut compiler.nodes).into() }, compiled.into()))
+    Some((
+        TemplateProgram {
+            nodes: std::mem::take(&mut compiler.nodes).into(),
+        },
+        compiled.into(),
+    ))
 }
 
 struct Compiler<'w, 'a, 's> {
@@ -144,6 +282,7 @@ struct Compiler<'w, 'a, 's> {
     diags: &'w mut Vec<Diagnostic>,
     file: &'a File<'s>,
     home: Home,
+    owner: Option<Owner>,
     subject: Ty,
     law_name: Sym,
     /// The source index of the first node of the run being compiled, and the
@@ -174,11 +313,17 @@ impl<'s> Compiler<'_, '_, 's> {
             name: self.law_name,
             doc: law.doc.map(|doc| self.world.book.names.intern(doc.0)),
             owner: site.owner,
-            system: if let Home::System(system) = site.home { Some(system) } else { None },
+            system: if let Home::System(system) = site.home {
+                Some(system)
+            } else {
+                None
+            },
             trigger: trigger?,
             budget: None,
-            // v3 bridge: the v3 model has no `overrides`, and ranks nothing: it runs every law.
             overrides: None,
+            override_name: law
+                .overrides
+                .map(|name| self.world.book.names.intern(name.0)),
             rank: Rank(0),
             steps: steps.into(),
             nodes: std::mem::take(&mut self.nodes).into(),
@@ -193,8 +338,11 @@ impl<'s> Compiler<'_, '_, 's> {
             ast::Trigger::Out => Trigger::Out,
             ast::Trigger::Gain => Trigger::Gain,
             ast::Trigger::Spend => Trigger::Spend,
+            ast::Trigger::Flow => Trigger::Flow,
             ast::Trigger::Each(period) => Trigger::Each(period, None),
-            ast::Trigger::Closing { month, day } => Trigger::Each(ast::Period::Year, Some(Closing { month, day })),
+            ast::Trigger::Closing { month, day } => {
+                Trigger::Each(ast::Period::Year, Some(Closing { month, day }))
+            }
             ast::Trigger::Always => Trigger::Always,
             ast::Trigger::By(root) => Trigger::By(self.expression(root, Ty::Day)?),
         })
@@ -209,7 +357,12 @@ impl<'s> Compiler<'_, '_, 's> {
                 self.locals.push((name.0, bound));
                 StepKind::Let((!self.poisoned[bound.index()]).then_some(bound)?)
             }
-            WrittenStep::Require { cond, otherwise, message, warn } => {
+            WrittenStep::Require {
+                cond,
+                otherwise,
+                message,
+                warn,
+            } => {
                 let cond = self.condition(*cond)?;
                 // v3 bridge: a v3 `require` has one reparation at most.
                 let otherwise: Box<[Effect]> = match otherwise {
@@ -217,17 +370,34 @@ impl<'s> Compiler<'_, '_, 's> {
                     None => Box::default(),
                 };
                 let message = message.map(|text| self.world.book.names.intern(text.0));
-                let severity = if *warn { Severity::Warning } else { Severity::Error };
-                StepKind::Require { cond, otherwise, message, severity }
+                let severity = if *warn {
+                    Severity::Warning
+                } else {
+                    Severity::Error
+                };
+                StepKind::Require {
+                    cond,
+                    otherwise,
+                    message,
+                    severity,
+                }
             }
             WrittenStep::Effect(effect) => StepKind::Effect(self.effect(effect)?),
         };
-        Some(Step { loc: step.loc, kind })
+        Some(Step {
+            loc: step.loc,
+            kind,
+        })
     }
 
     fn effect(&mut self, effect: &WrittenEffect<'s>) -> Option<Effect> {
         match effect {
-            WrittenEffect::Owe { amount, to, due, name } => {
+            WrittenEffect::Owe {
+                amount,
+                to,
+                due,
+                name,
+            } => {
                 let amount = self.expression(*amount, Ty::AMOUNT)?;
                 let to = self.owed_to(to.0);
                 let due = match due {
@@ -235,17 +405,31 @@ impl<'s> Compiler<'_, '_, 's> {
                     None => None,
                 };
                 let name = name.map_or(self.law_name, |name| self.world.book.names.intern(name.0));
-                Some(Effect::Owe { amount, to: to?, due, name })
+                Some(Effect::Owe {
+                    amount,
+                    to: to?,
+                    due,
+                    name,
+                })
             }
             WrittenEffect::Count { amount, name } => {
                 let amount = self.expression(*amount, Ty::AMOUNT)?;
-                Some(Effect::Count { amount, name: self.world.book.names.intern(name.0) })
+                Some(Effect::Count {
+                    amount,
+                    name: self.world.book.names.intern(name.0),
+                })
             }
         }
     }
 
     fn owed_to(&mut self, name: &'s str) -> Option<Id<Entity>> {
-        let entity = self.world.entity(self.home, Word { text: name, loc: self.file.loc(name) });
+        let entity = self.world.entity(
+            self.home,
+            Word {
+                text: name,
+                loc: self.file.loc(name),
+            },
+        );
         entity.map_err(|diagnostic| self.report(diagnostic)).ok()
     }
 
@@ -273,29 +457,42 @@ impl<'s> Compiler<'_, '_, 's> {
     fn roles_of(&self, subtree: &[ast::Expr<'s>]) -> Vec<Role> {
         let mut roles = vec![Role::Normal; subtree.len()];
         let mut mark = |id: ExprId, role: Role| {
-            if let Some(slot) = id.index().checked_sub(self.first).and_then(|at| roles.get_mut(at)) {
+            if let Some(slot) = id
+                .index()
+                .checked_sub(self.first)
+                .and_then(|at| roles.get_mut(at))
+            {
                 *slot = role;
             }
         };
         for expr in subtree {
             match expr.kind {
-                ExprKind::Call(name, args) if name.0 == "total" => {
-                    self.file[args].iter().take(2).for_each(|&arg| mark(arg, Role::Keyword));
-                    self.file[args].iter().skip(2).for_each(|&arg| mark(arg, Role::Pattern));
-                }
-                // The name of the tally is a keyword; the year, if there is one, is a value.
-                ExprKind::Call(name, args) if name.0 == "tally" => {
-                    self.file[args].iter().take(1).for_each(|&arg| mark(arg, Role::Keyword))
-                }
-                // Arguments of a function that does not exist mean nothing; the
-                // function is the mistake worth reporting.
-                ExprKind::Call(name, args) if !FUNCTIONS.contains(&name.0) => {
-                    self.file[args].iter().for_each(|&arg| mark(arg, Role::Keyword))
+                ExprKind::Call(name, args) => {
+                    let written = &self.file[args];
+                    if name.0 == "total"
+                        && matches!(written.first(), Some(id) if matches!(self.file.exprs[*id].kind, ExprKind::Purpose(_)))
+                    {
+                        mark(written[0], Role::Pattern);
+                        written
+                            .iter()
+                            .skip(1)
+                            .for_each(|&arg| mark(arg, Role::Keyword));
+                    } else if let Some(spec) = function_spec(name.0) {
+                        for (at, &arg) in written.iter().enumerate() {
+                            if let Some(&role) = spec.roles.get(at) {
+                                mark(arg, role);
+                            }
+                        }
+                    } else {
+                        // The function name is the useful diagnostic. Do not
+                        // cascade unknown-name errors from arguments.
+                        written.iter().for_each(|&arg| mark(arg, Role::Keyword));
+                    }
                 }
                 ExprKind::Index(base, _) => mark(base, Role::ParamBase),
-                ExprKind::Is(_, alternatives) => {
-                    self.file[alternatives].iter().for_each(|&alt| mark(alt, Role::Pattern))
-                }
+                ExprKind::Is(_, alternatives) => self.file[alternatives]
+                    .iter()
+                    .for_each(|&alt| mark(alt, Role::Pattern)),
                 _ => {}
             }
         }
@@ -347,14 +544,23 @@ impl<'s> Compiler<'_, '_, 's> {
             }
             Err(Bad::Cascade) => (Op::Const(Value::Empty), Ty::Empty, false),
         };
-        self.nodes.push(Node { op, ty, loc: expr.loc, first });
+        self.nodes.push(Node {
+            op,
+            ty,
+            loc: expr.loc,
+            first,
+        });
         self.poisoned.push(!ok);
     }
 
     /// The typed child, or the reason it has none.
     fn child(&self, id: ExprId) -> Check<(NodeId, Ty)> {
         let node = self.node_id(id);
-        if self.poisoned[node.index()] { Err(Bad::Cascade) } else { Ok((node, self.nodes[node.index()].ty)) }
+        if self.poisoned[node.index()] {
+            Err(Bad::Cascade)
+        } else {
+            Ok((node, self.nodes[node.index()].ty))
+        }
     }
 
     fn children(&self, ids: &[ExprId]) -> Check<Vec<(NodeId, Ty)>> {
@@ -362,25 +568,72 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn check(&mut self, at: usize, expr: &ast::Expr<'s>) -> Check<(Op, Ty)> {
-        if let Some((value, ty)) = self.world.literal(self.file, expr)? {
+        if let Some((value, ty)) = self.world.literal(self.home, self.file, expr)? {
             return Ok((Op::Const(value), ty));
         }
         let file = self.file;
         match expr.kind {
-            ExprKind::Name(name) => self.name(at, Word { text: name.0, loc: expr.loc }),
-            ExprKind::Field(receiver, field) => self.field(receiver, Word { text: field.0, loc: file.loc(field.0) }),
+            ExprKind::Name(name) => self.name(
+                at,
+                Word {
+                    text: name.0,
+                    loc: expr.loc,
+                },
+            ),
+            ExprKind::Field(receiver, field) => self.field(
+                receiver,
+                Word {
+                    text: field.0,
+                    loc: file.loc(field.0),
+                },
+            ),
             ExprKind::Index(base, keys) => self.lookup(base, &file[keys], expr.loc),
-            ExprKind::Call(function, args) => {
-                self.call(Word { text: function.0, loc: file.loc(function.0) }, &file[args], expr.loc)
-            }
+            ExprKind::Call(function, args) => self.call(
+                Word {
+                    text: function.0,
+                    loc: file.loc(function.0),
+                },
+                &file[args],
+                expr.loc,
+            ),
             ExprKind::Unary(op, operand) => self.unary(op, operand),
             ExprKind::Binary(op, left, right) => self.binary(op, left, right),
+            ExprKind::Of(purpose, object) => self.of(purpose, object),
+            ExprKind::At(quantity, price) => self.at(quantity, price),
             ExprKind::Is(subject, alternatives) => self.is(subject, &file[alternatives]),
-            ExprKind::If(condition, then, otherwise) => self.conditional(condition, then, otherwise),
-            ExprKind::Schedule(_) => Err(Diagnostic::error("schedule-position", "a schedule belongs in a param")
-                .label(expr.loc, "write it as a row of a `param`, and look it up here")
-                .into()),
-            _ => unreachable!("literal() handles every literal kind"),
+            ExprKind::If(condition, then, otherwise) => {
+                self.conditional(condition, then, otherwise)
+            }
+            ExprKind::Schedule(_) => Err(Diagnostic::error(
+                "schedule-position",
+                "a schedule belongs in a param",
+            )
+            .label(
+                expr.loc,
+                "write it as a row of a `param`, and look it up here",
+            )
+            .into()),
+            ExprKind::Purpose(name) => {
+                let word = Word {
+                    text: name.0,
+                    loc: expr.loc,
+                };
+                let purpose = self.world.purpose(self.home, word)?;
+                Ok((Op::Const(Value::Purpose(purpose, None)), Ty::Purpose))
+            }
+            ExprKind::Month(_) | ExprKind::Fraction(..) | ExprKind::Select(_) => Err(
+                Diagnostic::error("law-expression", "this expression is not supported here")
+                    .label(
+                        expr.loc,
+                        "use a date, amount, name or supported law expression",
+                    )
+                    .into(),
+            ),
+            _ => Err(
+                Diagnostic::error("law-expression", "this expression is not supported here")
+                    .label(expr.loc, "use a supported law expression")
+                    .into(),
+            ),
         }
     }
 
@@ -394,7 +647,12 @@ impl<'s> Compiler<'_, '_, 's> {
             }
             Role::Pattern => self.constant(word),
             Role::Normal => {
-                if let Some(&(_, bound)) = self.locals.iter().rev().find(|(local, _)| *local == word.text) {
+                if let Some(&(_, bound)) = self
+                    .locals
+                    .iter()
+                    .rev()
+                    .find(|(local, _)| *local == word.text)
+                {
                     return self.local(bound);
                 }
                 if let Some((index, input)) = self
@@ -431,15 +689,17 @@ impl<'s> Compiler<'_, '_, 's> {
     fn variable(&self, var: Var, word: Word) -> Check<(Op, Ty)> {
         if var.provided_by(self.when) {
             let ty = match var {
-                Var::Input(index) => self
-                    .inputs
-                    .get(index as usize)
-                    .map_or(Ty::AMOUNT, |input| Ty::Amount(input.unit.map_or(Dim::Any, Dim::Of))),
+                Var::Input(index) => self.inputs.get(index as usize).map_or(Ty::AMOUNT, |input| {
+                    Ty::Amount(input.unit.map_or(Dim::Any, Dim::Of))
+                }),
                 _ => var.ty(self.subject),
             };
             return Ok((Op::Var(var), ty));
         }
-        let mut diagnostic = Diagnostic::error("law-variable", format!("`{}` is not available in this law", word.text));
+        let mut diagnostic = Diagnostic::error(
+            "law-variable",
+            format!("`{}` is not available in this law", word.text),
+        );
         if self.when == When::Deadline {
             diagnostic = diagnostic
                 .label(word.loc, "not known yet")
@@ -448,8 +708,15 @@ impl<'s> Compiler<'_, '_, 's> {
         } else {
             let suppliers: Vec<&str> = var.suppliers().map(When::phrase).collect();
             diagnostic = diagnostic
-                .label(word.loc, format!("this law's trigger does not provide `{}`", word.text))
-                .help(format!("`{}` is provided by {} laws", word.text, suppliers.join(" and ")));
+                .label(
+                    word.loc,
+                    format!("this law's trigger does not provide `{}`", word.text),
+                )
+                .help(format!(
+                    "`{}` is provided by {} laws",
+                    word.text,
+                    suppliers.join(" and ")
+                ));
         }
         Err(diagnostic.into())
     }
@@ -457,7 +724,10 @@ impl<'s> Compiler<'_, '_, 's> {
     /// A kind, place, entity, or pattern written where a value is expected.
     fn constant(&mut self, word: Word<'s>) -> Check<(Op, Ty)> {
         if is_pattern(word.text) {
-            return Ok((Op::Const(Value::Glob(self.world.book.names.intern(word.text))), Ty::Glob));
+            return Ok((
+                Op::Const(Value::Glob(self.world.book.names.intern(word.text))),
+                Ty::Glob,
+            ));
         }
         if let Some(kind) = self.world.seek_kind(self.home, word)? {
             return Ok((Op::Const(Value::Kind(kind)), Ty::Kind));
@@ -467,6 +737,9 @@ impl<'s> Compiler<'_, '_, 's> {
             && let Some(place) = self.world.seek_place(word)?
         {
             return Ok((Op::Const(Value::Place(place)), Ty::Place));
+        }
+        if let Some(asset) = self.world.book.asset(word.text) {
+            return Ok((Op::Const(Value::Asset(asset)), Ty::Asset));
         }
         match self.world.seek_entity(self.home, word)? {
             Some(entity) => Ok((Op::Const(Value::Entity(entity)), Ty::Entity)),
@@ -484,17 +757,41 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn unknown_name(&self, word: Word<'s>) -> Diagnostic {
-        let mut known: Vec<&str> =
-            Var::words().filter(|name| Var::parse(name).is_some_and(|var| var.provided_by(self.when))).collect();
+        let mut known: Vec<&str> = Var::words()
+            .filter(|name| Var::parse(name).is_some_and(|var| var.provided_by(self.when)))
+            .collect();
         known.extend(self.locals.iter().map(|(local, _)| *local));
-        known.extend(self.inputs.iter().map(|input| self.world.book.name(input.name)));
+        known.extend(
+            self.inputs
+                .iter()
+                .map(|input| self.world.book.name(input.name)),
+        );
         let (names, lookup) = (&self.world.book.names, &self.world.book.lookup);
         let scope = self.world.scopes.of(self.home);
         known.extend(lookup.params.names.keys(names));
         known.extend(lookup.kinds.names.keys(names).filter(|key| {
-            lookup.kinds.names.candidates(names, key).iter().any(|&id| scope.sees(lookup.kinds.home(id)))
+            lookup
+                .kinds
+                .names
+                .candidates(names, key)
+                .iter()
+                .any(|&id| scope.sees(lookup.kinds.home(id)))
         }));
         known.extend(lookup.entities.names.keys(names));
+        known.extend(
+            self.world
+                .book
+                .assets
+                .values()
+                .map(|asset| self.world.book.name(asset.name)),
+        );
+        known.extend(
+            self.world
+                .book
+                .purposes
+                .ids()
+                .map(|purpose| self.world.book.name(self.world.book.purposes[purpose].name)),
+        );
         if self.home == Home::Project {
             known.extend(lookup.places.keys(names));
         }
@@ -509,8 +806,13 @@ impl<'s> Compiler<'_, '_, 's> {
     fn field(&mut self, receiver: ExprId, field: Word<'s>) -> Check<(Op, Ty)> {
         let (node, ty) = self.child(receiver)?;
         let built_in = match (ty, field.text) {
-            (Ty::Place, "balance") => Some((Field::Balance, Ty::AMOUNT)),
-            (Ty::Place, "basis") => Some((Field::Basis, Ty::AMOUNT)),
+            (Ty::Place, "balance") => Some((Field::Balance, self.base_amount_ty())),
+            (Ty::Place, "basis") => Some((Field::Basis, self.base_amount_ty())),
+            (Ty::Asset, "cost") => Some((Field::Cost, self.base_amount_ty())),
+            (Ty::Asset, "basis") => Some((Field::Basis, self.base_amount_ty())),
+            (Ty::Asset, "in-service") => Some((Field::InService, Ty::Day)),
+            (Ty::Asset, "parts") => Some((Field::Parts, Ty::Num)),
+            (Ty::Purpose, "of") => Some((Field::Of, Ty::Asset)),
             (Ty::Amount(_) | Ty::Empty, "unit") => Some((Field::Unit, Ty::Unit)),
             (Ty::Place | Ty::Entity, "owner") => Some((Field::Owner, Ty::Entity)),
             (Ty::Place | Ty::Entity | Ty::Unit, "kind") => Some((Field::Kind, Ty::Kind)),
@@ -534,9 +836,15 @@ impl<'s> Compiler<'_, '_, 's> {
         Err(self.unknown_field(ty, field, receiver).into())
     }
 
+    fn base_amount_ty(&self) -> Ty {
+        Ty::Amount(Dim::Of(self.world.book.base))
+    }
+
     fn unknown_field(&self, ty: Ty, field: Word<'s>, receiver: ExprId) -> Diagnostic {
         let mut valid: Vec<&str> = match ty {
             Ty::Place => vec!["balance", "basis", "owner", "kind"],
+            Ty::Asset => vec!["basis", "cost", "in-service", "parts"],
+            Ty::Purpose => vec!["of"],
             Ty::Entity => vec!["owner", "kind", "age"],
             Ty::Unit => vec!["kind"],
             Ty::Amount(_) | Ty::Empty => vec!["unit"],
@@ -544,13 +852,23 @@ impl<'s> Compiler<'_, '_, 's> {
             _ => Vec::new(),
         };
         // In the order of the alphabet, not of the hash of their symbols, which every new name the book interns shuffles.
-        let mut declared: Vec<&str> = self.world.props.names(ty).map(|sym| self.world.book.name(sym)).collect();
+        let mut declared: Vec<&str> = self
+            .world
+            .props
+            .names(ty)
+            .map(|sym| self.world.book.name(sym))
+            .collect();
         declared.sort_unstable();
         valid.extend(declared);
-        let mut diagnostic =
-            Diagnostic::error("unknown-field", format!("{} has no `{}`", article(ty.word()), field.text))
-                .label(field.loc, "no such field")
-                .context(self.file.exprs[receiver].loc, format!("this is {}", article(ty.word())));
+        let mut diagnostic = Diagnostic::error(
+            "unknown-field",
+            format!("{} has no `{}`", article(ty.word()), field.text),
+        )
+        .label(field.loc, "no such field")
+        .context(
+            self.file.exprs[receiver].loc,
+            format!("this is {}", article(ty.word())),
+        );
         diagnostic = suggest(diagnostic, field.loc, field.text, valid.iter().copied());
         if valid.is_empty() {
             diagnostic.note(format!("{} has no fields", article(ty.word())))
@@ -562,31 +880,57 @@ impl<'s> Compiler<'_, '_, 's> {
     /// `limit[year]`, `ordinary[year, owner.filing]`
     fn lookup(&mut self, base: ExprId, keys: &[ExprId], loc: Loc) -> Check<(Op, Ty)> {
         let ExprKind::Name(name) = self.file.exprs[base].kind else {
-            return Err(Diagnostic::error("param-lookup", "only a param can be looked up with `[…]`")
-                .label(self.file.exprs[base].loc, "this is not a param name")
-                .into());
+            return Err(Diagnostic::error(
+                "param-lookup",
+                "only a param can be looked up with `[…]`",
+            )
+            .label(self.file.exprs[base].loc, "this is not a param name")
+            .into());
         };
-        let word = Word { text: name.0, loc: self.file.exprs[base].loc };
-        let param = self.world.seek_param(self.home, word)?.ok_or_else(|| self.world.missing_param(self.home, word))?;
+        let word = Word {
+            text: name.0,
+            loc: self.file.exprs[base].loc,
+        };
+        let param = self
+            .world
+            .seek_param(self.home, word)?
+            .ok_or_else(|| self.world.missing_param(self.home, word))?;
         let keys = self.children(keys)?;
         self.check_keys(param, word, &keys, loc)?;
-        Ok((Op::Param(param, keys.into_iter().map(|(node, _)| node).collect()), self.param_ty(param)))
+        Ok((
+            Op::Param(param, keys.into_iter().map(|(node, _)| node).collect()),
+            self.param_ty(param),
+        ))
     }
 
     /// `catch-up`: a param looked up at the day the law runs.
     fn bare_param(&mut self, param: Id<Param>, word: Word<'s>) -> Check<(Op, Ty)> {
         let shape = Shape::of(&self.world.book.params[param].rows[0]);
-        if shape != (Shape { timed: true, names: 0 }) {
-            let what = if shape.timed { "a date and names" } else { "names" };
-            return Err(Diagnostic::error("param-lookup", format!("`{}` needs keys", word.text))
-                .label(word.loc, format!("`{}` has {what} to look up", word.text))
-                .help(format!("write `{}[year]`, naming each key", word.text))
-                .into());
+        if shape
+            != (Shape {
+                timed: true,
+                names: 0,
+            })
+        {
+            let what = if shape.timed {
+                "a date and names"
+            } else {
+                "names"
+            };
+            return Err(
+                Diagnostic::error("param-lookup", format!("`{}` needs keys", word.text))
+                    .label(word.loc, format!("`{}` has {what} to look up", word.text))
+                    .help(format!("write `{}[year]`, naming each key", word.text))
+                    .into(),
+            );
         }
         if !Var::Date.provided_by(self.when) {
             return Err(Diagnostic::error(
                 "law-variable",
-                format!("`{}` is looked up at the law's date, which is not known here", word.text),
+                format!(
+                    "`{}` is looked up at the law's date, which is not known here",
+                    word.text
+                ),
             )
             .label(word.loc, "write the day to look up: `[…]`")
             .into());
@@ -596,12 +940,23 @@ impl<'s> Compiler<'_, '_, 's> {
 
     /// Every row of a param holds one type; `empty` rows adopt the amounts'.
     fn param_ty(&self, param: Id<Param>) -> Ty {
-        let rows = &self.world.book.params[param].rows;
+        let definition = &self.world.book.params[param];
+        if let Some(unit) = definition.unit {
+            return Ty::Amount(unit);
+        }
+        let rows = &definition.rows;
         let tys = rows.iter().filter_map(|row| row.value.ty());
-        tys.reduce(|a, b| unify(a, b).unwrap_or(a)).unwrap_or(Ty::Empty)
+        tys.reduce(|a, b| unify(a, b).unwrap_or(a))
+            .unwrap_or(Ty::Empty)
     }
 
-    fn check_keys(&self, param: Id<Param>, word: Word, keys: &[(NodeId, Ty)], loc: Loc) -> Check<()> {
+    fn check_keys(
+        &self,
+        param: Id<Param>,
+        word: Word,
+        keys: &[(NodeId, Ty)],
+        loc: Loc,
+    ) -> Check<()> {
         let shape = Shape::of(&self.world.book.params[param].rows[0]);
         if keys.len() != shape.keys() {
             let takes = count(shape.keys(), "key");
@@ -615,7 +970,11 @@ impl<'s> Compiler<'_, '_, 's> {
         }
         for (at, &(node, ty)) in keys.iter().enumerate() {
             let timed = shape.timed && at == 0;
-            let fine = if timed { matches!(ty, Ty::Num | Ty::Day) } else { matches!(ty, Ty::Name | Ty::Text) };
+            let fine = if timed {
+                matches!(ty, Ty::Num | Ty::Day)
+            } else {
+                matches!(ty, Ty::Name | Ty::Text)
+            };
             if !fine {
                 let wanted = if timed { "a year or a date" } else { "a name" };
                 return Err(expected(wanted, ty, self.nodes[node.index()].loc).into());
@@ -627,15 +986,26 @@ impl<'s> Compiler<'_, '_, 's> {
     // ─── Calls ──────────────────────────────────────────────────────────────
 
     fn call(&mut self, function: Word<'s>, args: &[ExprId], loc: Loc) -> Check<(Op, Ty)> {
+        let Some(spec) = function_spec(function.text) else {
+            return Err(self.unknown_function(function).into());
+        };
         let typed = self.children(args)?;
         let arity = |low: usize, high: usize| -> Check<()> {
             if (low..=high).contains(&typed.len()) {
                 return Ok(());
             }
-            let takes = if low == high { low.to_string() } else { format!("{low} or {high}") };
+            let takes = if low == high {
+                low.to_string()
+            } else {
+                format!("{low} to {high}")
+            };
             Err(Diagnostic::error(
                 "call-arity",
-                format!("`{}` takes {takes} arguments, but {} were given", function.text, typed.len()),
+                format!(
+                    "`{}` takes {takes} arguments, but {} were given",
+                    function.text,
+                    typed.len()
+                ),
             )
             .label(loc, "wrong number of arguments")
             .into())
@@ -643,41 +1013,131 @@ impl<'s> Compiler<'_, '_, 's> {
         let nodes: Box<[NodeId]> = typed.iter().map(|&(node, _)| node).collect();
         let ty_at = |at: usize| typed.get(at).map_or(Ty::Empty, |&(_, ty)| ty);
         let arg_loc = |at: usize| self.nodes[typed[at].0.index()].loc;
-        let (func, ty) = match function.text {
-            "total" => {
-                arity(2, 3)?;
-                (self.total(&typed)?, Ty::AMOUNT)
-            }
-            "tally" => {
-                arity(1, 2)?;
+        arity(spec.min, spec.max)?;
+        let base = self.base_amount_ty();
+        let (func, ty) = match spec.signature {
+            Signature::Total => (self.total(&typed)?, base),
+            Signature::Tally => {
                 if args.len() == 2 && !matches!(ty_at(1), Ty::Num | Ty::Day) {
                     return Err(expected("a year or a date", ty_at(1), arg_loc(1)).into());
                 }
-                (self.tally(args[0])?, Ty::AMOUNT)
+                (self.tally(args[0])?, base)
             }
-            "min" | "max" => {
-                arity(2, 2)?;
-                let shared = unify(ty_at(0), ty_at(1)).filter(|&shared| binary(BinOp::Lt, shared, shared).is_some());
-                let shared =
-                    shared.ok_or_else(|| mismatch(BinOp::Lt, (ty_at(0), arg_loc(0)), (ty_at(1), arg_loc(1))))?;
-                (if function.text == "min" { Func::Min } else { Func::Max }, shared)
+            Signature::Min | Signature::Max => {
+                let shared = unify(ty_at(0), ty_at(1))
+                    .filter(|&shared| binary(BinOp::Lt, shared, shared).is_some());
+                let shared = shared.ok_or_else(|| {
+                    mismatch(BinOp::Lt, (ty_at(0), arg_loc(0)), (ty_at(1), arg_loc(1)))
+                })?;
+                (
+                    if matches!(spec.signature, Signature::Min) {
+                        Func::Min
+                    } else {
+                        Func::Max
+                    },
+                    shared,
+                )
             }
-            "abs" => {
-                arity(1, 1)?;
-                let ty = negate(ty_at(0)).ok_or_else(|| expected("an amount or a number", ty_at(0), arg_loc(0)))?;
+            Signature::Abs => {
+                let ty = negate(ty_at(0))
+                    .ok_or_else(|| expected("an amount or a number", ty_at(0), arg_loc(0)))?;
                 (Func::Abs, ty)
             }
-            name => {
-                let Some(&(_, wants, func, ty)) = FIXED.iter().find(|entry| entry.0 == name) else {
-                    return Err(self.unknown_function(function).into());
-                };
-                arity(wants.len(), wants.len())?;
-                if let Some((at, &want)) = wants.iter().enumerate().find(|&(at, &want)| !fits(want, ty_at(at))) {
-                    let phrase = if want == Ty::Unit { "a commodity".into() } else { article(want.word()) };
-                    return Err(expected(&phrase, ty_at(at), arg_loc(at)).into());
+            Signature::Progressive => {
+                if ty_at(0) != Ty::Schedule {
+                    return Err(expected("a schedule", ty_at(0), arg_loc(0)).into());
                 }
-                (func, ty)
+                if !matches!(ty_at(1), Ty::Amount(_) | Ty::Empty) {
+                    return Err(expected("an amount", ty_at(1), arg_loc(1)).into());
+                }
+                (Func::Progressive, ty_at(1))
             }
+            Signature::Value => {
+                if !matches!(ty_at(0), Ty::Amount(_) | Ty::Empty) {
+                    return Err(expected("an amount", ty_at(0), arg_loc(0)).into());
+                }
+                if ty_at(1) != Ty::Unit {
+                    return Err(expected("a commodity", ty_at(1), arg_loc(1)).into());
+                }
+                if args.len() == 3 && ty_at(2) != Ty::Name {
+                    return Err(expected("a rate policy name", ty_at(2), arg_loc(2)).into());
+                }
+                (Func::Value, base)
+            }
+            Signature::Date => {
+                for at in 0..3 {
+                    if ty_at(at) != Ty::Num {
+                        return Err(expected("a number", ty_at(at), arg_loc(at)).into());
+                    }
+                }
+                (Func::Date, Ty::Day)
+            }
+            Signature::StraightLine => {
+                let wants = [Ty::Amount(Dim::Any), Ty::Span, Ty::Day, Ty::Name, Ty::Name];
+                for (at, want) in wants.iter().take(args.len()).enumerate() {
+                    if !fits(*want, ty_at(at)) {
+                        let phrase = if *want == Ty::Name {
+                            "a `mid-month` option".into()
+                        } else {
+                            article(want.word())
+                        };
+                        return Err(expected(&phrase, ty_at(at), arg_loc(at)).into());
+                    }
+                }
+                (Func::StraightLine, ty_at(0))
+            }
+            Signature::Open => {
+                let ExprKind::Code(code) = self.file.exprs[args[0]].kind else {
+                    return Err(
+                        expected("a source code such as `^rent`", ty_at(0), arg_loc(0)).into(),
+                    );
+                };
+                if ty_at(0) != Ty::Code {
+                    return Err(expected("a source code", ty_at(0), arg_loc(0)).into());
+                }
+                let symbol = self.world.book.names.intern(code.name());
+                (Func::Open(symbol), base)
+            }
+            Signature::Peak | Signature::Low => {
+                if !matches!(ty_at(0), Ty::Amount(_) | Ty::Num | Ty::Day | Ty::Span) {
+                    return Err(expected("an ordered value", ty_at(0), arg_loc(0)).into());
+                }
+                if !matches!(
+                    self.keyword(args[1]),
+                    Some(Window::Month | Window::Year | Window::Ever)
+                ) {
+                    return Err(self
+                        .keyword_error(typed[1].0, function.text, "`month`, `year` or `ever`")
+                        .into());
+                }
+                (
+                    if matches!(spec.signature, Signature::Peak) {
+                        Func::Peak
+                    } else {
+                        Func::Low
+                    },
+                    ty_at(0),
+                )
+            }
+            Signature::Days => {
+                if ty_at(0) != Ty::Bool {
+                    return Err(expected("a condition", ty_at(0), arg_loc(0)).into());
+                }
+                if !matches!(
+                    self.keyword(args[1]),
+                    Some(Window::Month | Window::Year | Window::Ever)
+                ) {
+                    return Err(self
+                        .keyword_error(typed[1].0, function.text, "`month`, `year` or `ever`")
+                        .into());
+                }
+                (Func::Days, Ty::Num)
+            }
+        };
+        let nodes = if matches!(func, Func::Open(_) | Func::PurposeTotal { .. }) {
+            Box::default()
+        } else {
+            nodes
         };
         Ok((Op::Call(func, nodes), ty))
     }
@@ -688,11 +1148,44 @@ impl<'s> Compiler<'_, '_, 's> {
             Op::Const(Value::Name(sym)) => self.world.book.name(sym),
             _ => "",
         };
+        if args.len() == 1 {
+            let window = self.window_word(word(0), args[0].0, "total")?;
+            let Some(Owner::Purpose(_)) = self.owner else {
+                return Err(self
+                    .keyword_error(
+                        args[0].0,
+                        "total",
+                        "`total(#PURPOSE, window)` outside a purpose law",
+                    )
+                    .into());
+            };
+            return Ok(Func::PurposeTotal {
+                purpose: None,
+                window,
+            });
+        }
+        if args.len() == 2 && args[0].1 == Ty::Purpose {
+            let purpose = match self.nodes[args[0].0.index()].op {
+                Op::Const(Value::Purpose(purpose, None)) => purpose,
+                _ => {
+                    return Err(self
+                        .keyword_error(args[0].0, "total", "a declared purpose")
+                        .into());
+                }
+            };
+            let window = self.window_word(word(1), args[1].0, "total")?;
+            return Ok(Func::PurposeTotal {
+                purpose: Some(purpose),
+                window,
+            });
+        }
         let dir = match word(0) {
             "in" => Dir::In,
             "out" => Dir::Out,
             _ => {
-                return Err(self.keyword_error(args[0].0, "total", "`in` or `out`").into());
+                return Err(self
+                    .keyword_error(args[0].0, "total", "`in` or `out`")
+                    .into());
             }
         };
         let window = match word(1) {
@@ -700,7 +1193,9 @@ impl<'s> Compiler<'_, '_, 's> {
             "year" => Window::Year,
             "ever" => Window::Ever,
             _ => {
-                return Err(self.keyword_error(args[1].0, "total", "`month`, `year` or `ever`").into());
+                return Err(self
+                    .keyword_error(args[1].0, "total", "`month`, `year` or `ever`")
+                    .into());
             }
         };
         if let Some(&(node, ty)) = args.get(2)
@@ -709,6 +1204,29 @@ impl<'s> Compiler<'_, '_, 's> {
             return Err(expected("a kind", ty, self.nodes[node.index()].loc).into());
         }
         Ok(Func::Total(dir, window))
+    }
+
+    fn window_word(&self, text: &str, node: NodeId, function: &str) -> Check<Window> {
+        match text {
+            "month" => Ok(Window::Month),
+            "year" => Ok(Window::Year),
+            "ever" => Ok(Window::Ever),
+            _ => Err(self
+                .keyword_error(node, function, "`month`, `year` or `ever`")
+                .into()),
+        }
+    }
+
+    fn keyword(&self, expr: ExprId) -> Option<Window> {
+        let ExprKind::Name(name) = self.file.exprs[expr].kind else {
+            return None;
+        };
+        match name.0 {
+            "month" => Some(Window::Month),
+            "year" => Some(Window::Year),
+            "ever" => Some(Window::Ever),
+            _ => None,
+        }
     }
 
     fn keyword_error(&self, node: NodeId, function: &str, wanted: &str) -> Diagnostic {
@@ -723,19 +1241,30 @@ impl<'s> Compiler<'_, '_, 's> {
             return Err(expected("the name of a tally", Ty::Num, expr.loc).into());
         };
         if !self.world.tallies.contains(name.0) {
-            let diagnostic = Diagnostic::error("unknown-tally", format!("no law counts `{}`", name.0))
-                .label(expr.loc, "nothing is tallied under this name")
-                .note("`tally(NAME)` reads what `count … as NAME` lines add up");
-            return Err(suggest(diagnostic, expr.loc, name.0, self.world.tallies.iter().copied()).into());
+            let diagnostic =
+                Diagnostic::error("unknown-tally", format!("no law counts `{}`", name.0))
+                    .label(expr.loc, "nothing is tallied under this name")
+                    .note("`tally(NAME)` reads what `count … as NAME` lines add up");
+            return Err(suggest(
+                diagnostic,
+                expr.loc,
+                name.0,
+                self.world.tallies.iter().copied(),
+            )
+            .into());
         }
         Ok(Func::Tally(self.world.book.names.intern(name.0)))
     }
 
     fn unknown_function(&self, function: Word) -> Diagnostic {
-        let diagnostic = Diagnostic::error("unknown-function", format!("there is no function `{}`", function.text))
-            .label(function.loc, "not a function")
-            .note(format!("the functions are {}", list(&FUNCTIONS)));
-        suggest(diagnostic, function.loc, function.text, FUNCTIONS)
+        let functions = function_names();
+        let diagnostic = Diagnostic::error(
+            "unknown-function",
+            format!("there is no function `{}`", function.text),
+        )
+        .label(function.loc, "not a function")
+        .note(format!("the functions are {}", list(&functions)));
+        suggest(diagnostic, function.loc, function.text, functions)
     }
 
     // ─── Operators ──────────────────────────────────────────────────────────
@@ -764,6 +1293,48 @@ impl<'s> Compiler<'_, '_, 's> {
         }
     }
 
+    /// A purpose can carry an identified object; a fraction can take a share
+    /// of an amount. The AST uses `of` for both forms, so resolve by typed
+    /// operands rather than reparsing the source text.
+    fn of(&mut self, left: ExprId, right: ExprId) -> Check<(Op, Ty)> {
+        let ((l, lt), (r, rt)) = (self.child(left)?, self.child(right)?);
+        match (lt, rt) {
+            (Ty::Purpose, Ty::Asset) => Ok((Op::Of(l, r), Ty::Purpose)),
+            (Ty::Purpose, Ty::Place | Ty::Entity) => Ok((Op::Of(l, r), Ty::Purpose)),
+            (Ty::Num, Ty::Amount(_)) | (Ty::Amount(Dim::Number), Ty::Amount(_)) => {
+                let ty =
+                    binary(BinOp::Mul, lt, rt).expect("the number dimension multiplies an amount");
+                Ok((Op::Bin(BinOp::Mul, l, r), ty))
+            }
+            _ => {
+                let locs = (self.nodes[l.index()].loc, self.nodes[r.index()].loc);
+                Err(Diagnostic::error("type-mismatch", "`of` needs a purpose and object, or a share and amount")
+                    .label(locs.1, format!("this is {}", article(rt.word())))
+                    .context(locs.0, format!("this is {}", article(lt.word())))
+                    .note("write `repair of self` for an identified purpose, or `10% of amount` for a share")
+                    .into())
+            }
+        }
+    }
+
+    /// A quantity priced in a unit per that quantity's unit.
+    fn at(&mut self, quantity: ExprId, price: ExprId) -> Check<(Op, Ty)> {
+        let ((q, qt), (p, pt)) = (self.child(quantity)?, self.child(price)?);
+        match binary(BinOp::Mul, qt, pt) {
+            Some(ty @ Ty::Amount(_)) => Ok((Op::At(q, p), ty)),
+            _ => {
+                let locs = (self.nodes[q.index()].loc, self.nodes[p.index()].loc);
+                Err(
+                    Diagnostic::error("type-mismatch", "a quantity needs a price per its unit")
+                        .label(locs.1, format!("this is {}", article(pt.word())))
+                        .context(locs.0, format!("this is {}", article(qt.word())))
+                        .note("for example, `44 MI @ 0.70 USD/MI` is an amount in USD")
+                        .into(),
+                )
+            }
+        }
+    }
+
     fn is(&mut self, subject: ExprId, alternatives: &[ExprId]) -> Check<(Op, Ty)> {
         let (node, ty) = self.child(subject)?;
         let alts = self.children(alternatives)?;
@@ -777,19 +1348,40 @@ impl<'s> Compiler<'_, '_, 's> {
                     .into());
             }
         }
-        Ok((Op::Is(node, alts.into_iter().map(|(alt, _)| alt).collect()), Ty::Bool))
+        Ok((
+            Op::Is(node, alts.into_iter().map(|(alt, _)| alt).collect()),
+            Ty::Bool,
+        ))
     }
 
-    fn conditional(&mut self, condition: ExprId, then: ExprId, otherwise: ExprId) -> Check<(Op, Ty)> {
-        let ((c, ct), (t, tt), (o, ot)) = (self.child(condition)?, self.child(then)?, self.child(otherwise)?);
+    fn conditional(
+        &mut self,
+        condition: ExprId,
+        then: ExprId,
+        otherwise: ExprId,
+    ) -> Check<(Op, Ty)> {
+        let ((c, ct), (t, tt), (o, ot)) = (
+            self.child(condition)?,
+            self.child(then)?,
+            self.child(otherwise)?,
+        );
         if ct != Ty::Bool {
             return Err(expected("a condition", ct, self.nodes[c.index()].loc).into());
         }
         let Some(ty) = unify(tt, ot) else {
-            return Err(Diagnostic::error("type-mismatch", "the two branches of `if` must be of one type")
-                .label(self.nodes[o.index()].loc, format!("this is {}", article(ot.word())))
-                .context(self.nodes[t.index()].loc, format!("this is {}", article(tt.word())))
-                .into());
+            return Err(Diagnostic::error(
+                "type-mismatch",
+                "the two branches of `if` must be of one type",
+            )
+            .label(
+                self.nodes[o.index()].loc,
+                format!("this is {}", article(ot.word())),
+            )
+            .context(
+                self.nodes[t.index()].loc,
+                format!("this is {}", article(tt.word())),
+            )
+            .into());
         };
         Ok((Op::If(c, t, o), ty))
     }

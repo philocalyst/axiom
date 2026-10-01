@@ -61,7 +61,7 @@ impl When {
     }
 }
 
-const WORDS: [(Var, &str); 16] = [
+const WORDS: [(Var, &str); 18] = [
     (Var::Amount, "amount"),
     (Var::From, "from"),
     (Var::To, "to"),
@@ -78,11 +78,16 @@ const WORDS: [(Var, &str); 16] = [
     (Var::Balance, "balance"),
     (Var::Remaining, "remaining"),
     (Var::Flow, "flow"),
+    (Var::Purpose, "purpose"),
+    (Var::Description, "description"),
 ];
 
 impl Var {
     pub(crate) fn parse(word: &str) -> Option<Var> {
-        WORDS.iter().find(|entry| entry.1 == word).map(|entry| entry.0)
+        WORDS
+            .iter()
+            .find(|entry| entry.1 == word)
+            .map(|entry| entry.0)
     }
 
     pub(crate) fn words() -> impl Iterator<Item = &'static str> {
@@ -91,7 +96,10 @@ impl Var {
 
     /// Whether an expression running at `when` may read this variable.
     pub(crate) fn provided_by(self, when: When) -> bool {
-        let flow = matches!(when, When::In | When::Out | When::Gain | When::Spend | When::Flow | When::Template);
+        let flow = matches!(
+            when,
+            When::In | When::Out | When::Gain | When::Spend | When::Flow | When::Template
+        );
         match self {
             Var::Subject | Var::Owner => true,
             Var::Date | Var::Year | Var::Month => when != When::Deadline,
@@ -107,13 +115,20 @@ impl Var {
 
     /// The triggers that supply it.
     pub(crate) fn suppliers(self) -> impl Iterator<Item = When> {
-        When::TRIGGERS.into_iter().filter(move |&when| self.provided_by(when))
+        When::TRIGGERS
+            .into_iter()
+            .filter(move |&when| self.provided_by(when))
     }
 
     /// Its type, given what `self` is in this law.
     pub(crate) fn ty(self, subject: Ty) -> Ty {
         match self {
-            Var::Amount | Var::Gain | Var::Proceeds | Var::Basis | Var::Balance | Var::Remaining => Ty::AMOUNT,
+            Var::Amount
+            | Var::Gain
+            | Var::Proceeds
+            | Var::Basis
+            | Var::Balance
+            | Var::Remaining => Ty::AMOUNT,
             Var::From | Var::To => Ty::Place,
             Var::Payee | Var::Owner => Ty::Entity,
             Var::Date => Ty::Day,

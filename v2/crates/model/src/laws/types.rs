@@ -4,7 +4,7 @@
 //! These are functions of types only; they know nothing of names or nodes.
 //! The engine implements exactly the combinations accepted here.
 
-use axiom_core::{Diagnostic, Loc};
+use axiom_core::{Diagnostic, Dim, Loc};
 use axiom_syntax::BinOp;
 
 use crate::errors::article;
@@ -34,7 +34,10 @@ pub(crate) fn binary(op: BinOp, left: Ty, right: Ty) -> Option<Ty> {
     match op {
         Or | And => (left == Ty::Bool && right == Ty::Bool).then_some(Ty::Bool),
         Eq | Ne => unify(left, right).map(|_| Ty::Bool),
-        Lt | Le | Gt | Ge => unify(left, right).filter(|&shared| is_ordered(shared)).map(|_| Ty::Bool),
+        Lt | Le | Gt | Ge => unify(left, right)
+            .filter(|&shared| is_ordered(shared))
+            .map(|_| Ty::Bool),
+        UpTo => unify(left, right).filter(|&shared| is_ordered(shared)),
         Add | Sub => match (left, right) {
             (Ty::Num, Ty::Num) => Some(Ty::Num),
             (Ty::Span, Ty::Span) => Some(Ty::Span),
@@ -44,17 +47,37 @@ pub(crate) fn binary(op: BinOp, left: Ty, right: Ty) -> Option<Ty> {
             _ => None,
         },
         Mul => match (left, right) {
-            (Ty::Num, Ty::Num) => Some(Ty::Num),
-            (amount, Ty::Num) | (Ty::Num, amount) if is_amount(amount) => Some(amount),
-            _ => None,
+            (Ty::Empty, Ty::Num | Ty::Amount(Dim::Number))
+            | (Ty::Num | Ty::Amount(Dim::Number), Ty::Empty) => Some(Ty::Empty),
+            _ => combine(left, right, Dim::mul),
         },
         Div => match (left, right) {
-            (Ty::Num, Ty::Num) => Some(Ty::Num),
-            (a, b) if is_amount(a) && is_amount(b) => Some(Ty::Num),
-            (amount, Ty::Num) if is_amount(amount) => Some(amount),
-            _ => None,
+            (Ty::Empty, Ty::Num | Ty::Amount(Dim::Number)) => Some(Ty::Empty),
+            _ => combine(left, right, Dim::div),
         },
     }
+}
+
+/// Combine numeric and dimensional amount types with the same unit algebra as
+/// literals and params. A pure number remains the dedicated `Ty::Num` type.
+fn combine(
+    left: Ty,
+    right: Ty,
+    op: fn(
+        Dim<axiom_core::Id<crate::book::Commodity>>,
+        Dim<axiom_core::Id<crate::book::Commodity>>,
+    ) -> Option<Dim<axiom_core::Id<crate::book::Commodity>>>,
+) -> Option<Ty> {
+    let dimension = |ty| match ty {
+        Ty::Num => Some(Dim::Number),
+        Ty::Amount(dim) => Some(dim),
+        _ => None,
+    };
+    let result = op(dimension(left)?, dimension(right)?)?;
+    Some(match result {
+        Dim::Number => Ty::Num,
+        dim => Ty::Amount(dim),
+    })
 }
 
 /// Whether a `-x` is allowed, and what it is.
@@ -67,10 +90,14 @@ pub(crate) fn negate(ty: Ty) -> Option<Ty> {
 pub(crate) fn is_test(left: Ty, alternative: Ty) -> bool {
     match left {
         Ty::Place | Ty::Entity | Ty::Unit => {
-            matches!(alternative, Ty::Kind | Ty::Place | Ty::Entity | Ty::Glob | Ty::Unit)
+            matches!(
+                alternative,
+                Ty::Kind | Ty::Place | Ty::Entity | Ty::Glob | Ty::Unit
+            )
         }
         Ty::Kind => alternative == Ty::Kind,
         Ty::Flow => matches!(alternative, Ty::Code | Ty::Glob),
+        Ty::Purpose => alternative == Ty::Purpose,
         _ => false,
     }
 }
@@ -84,14 +111,18 @@ fn a(ty: Ty) -> String {
 pub(crate) fn mismatch(op: BinOp, left: (Ty, Loc), right: (Ty, Loc)) -> Diagnostic {
     let (l, r) = (a(left.0), a(right.0));
     let (message, rule) = match op {
-        BinOp::Add => {
-            (format!("cannot add {r} to {l}"), "`+` adds two amounts, two numbers or two spans, or a span to a date")
-        }
+        BinOp::Add => (
+            format!("cannot add {r} to {l}"),
+            "`+` adds two amounts, two numbers or two spans, or a span to a date",
+        ),
         BinOp::Sub => (
             format!("cannot subtract {r} from {l}"),
             "`-` subtracts two amounts, two numbers or two spans, a span from a date, or a date from a date",
         ),
-        BinOp::Mul => (format!("cannot multiply {l} by {r}"), "`*` multiplies two numbers, or an amount by a number"),
+        BinOp::Mul => (
+            format!("cannot multiply {l} by {r}"),
+            "`*` multiplies two numbers, or an amount by a number",
+        ),
         BinOp::Div => (
             format!("cannot divide {l} by {r}"),
             "`/` divides an amount by a number, or by another amount to give a number",
@@ -100,9 +131,14 @@ pub(crate) fn mismatch(op: BinOp, left: (Ty, Loc), right: (Ty, Loc)) -> Diagnost
             format!("cannot compare {l} with {r}"),
             "`==` and `!=` compare two values of one type; `empty` is the zero of any amount",
         ),
-        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-            (format!("cannot compare {l} with {r}"), "`<` and its kin compare two amounts, numbers, dates or spans")
-        }
+        BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => (
+            format!("cannot compare {l} with {r}"),
+            "`<` and its kin compare two amounts, numbers, dates or spans",
+        ),
+        BinOp::UpTo => (
+            format!("cannot cap {l} with {r}"),
+            "`up to` needs two ordered values of the same unit",
+        ),
         BinOp::And | BinOp::Or => (
             format!(
                 "`{}` needs true-or-false values, but this side is {}",
@@ -120,8 +156,11 @@ pub(crate) fn mismatch(op: BinOp, left: (Ty, Loc), right: (Ty, Loc)) -> Diagnost
 
 /// `expected a condition, but this is an amount`
 pub(crate) fn expected(what: &str, found: Ty, loc: Loc) -> Diagnostic {
-    Diagnostic::error("type-mismatch", format!("expected {what}, but this is {}", a(found)))
-        .label(loc, format!("this is {}", a(found)))
+    Diagnostic::error(
+        "type-mismatch",
+        format!("expected {what}, but this is {}", a(found)),
+    )
+    .label(loc, format!("this is {}", a(found)))
 }
 
 #[cfg(test)]
@@ -138,5 +177,28 @@ mod tests {
         assert_eq!(binary(BinOp::Mul, Ty::AMOUNT, Ty::AMOUNT), None);
         assert_eq!(binary(BinOp::Lt, Ty::AMOUNT, Ty::Empty), Some(Ty::Bool));
         assert_eq!(binary(BinOp::Lt, Ty::Place, Ty::Place), None);
+    }
+
+    #[test]
+    fn arithmetic_tracks_compound_dimensions() {
+        type D = Dim<axiom_core::Id<crate::book::Commodity>>;
+        // Id is opaque, but its value is never read by the dimension algebra.
+        let usd = D::Of(axiom_core::Id::new(0));
+        let mile = D::Of(axiom_core::Id::new(1));
+        let per_mile = D::Per(axiom_core::Id::new(0), axiom_core::Id::new(1));
+        assert_eq!(
+            binary(BinOp::Mul, Ty::Amount(per_mile), Ty::Amount(mile)),
+            Some(Ty::Amount(usd))
+        );
+        assert_eq!(
+            binary(BinOp::Div, Ty::Amount(usd), Ty::Amount(per_mile)),
+            Some(Ty::Amount(mile))
+        );
+        assert_eq!(binary(BinOp::Add, Ty::Amount(usd), Ty::Amount(mile)), None);
+        assert_eq!(binary(BinOp::UpTo, Ty::Amount(usd), Ty::Amount(mile)), None);
+        assert_eq!(
+            binary(BinOp::UpTo, Ty::Amount(usd), Ty::Amount(usd)),
+            Some(Ty::Amount(usd))
+        );
     }
 }

@@ -14,7 +14,10 @@ use axiom_core::calendar;
 use axiom_core::day::days_in_month;
 use axiom_core::{Day, Days, Dim, Groups, Id, Loc, Period, Ratio, Severity, Span, Sym};
 
-use crate::book::{Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System, Text};
+use crate::book::{
+    Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule,
+    System, Text,
+};
 use crate::journal::Object;
 
 pub use axiom_syntax::BinOp;
@@ -32,6 +35,9 @@ pub struct Law {
     pub budget: Option<Id<Budget>>,
     /// `overrides NAME`: the law it replaces where both govern.
     pub overrides: Option<Id<Law>>,
+    /// The source name, retained until every law (including nested contract
+    /// laws) has been indexed and override references can resolve forward.
+    pub override_name: Option<Sym>,
     /// Specificity, for conflicts (LANGUAGE §8): thing over kind over parent
     /// kind, project over child system over parent system. Computed at build
     /// time.
@@ -56,17 +62,37 @@ impl Law {
     /// `budget 500 USD monthly` means. A total is read straight from the
     /// ledger, so a cap that holds takes no evaluating.
     pub fn cap(&self) -> Option<Cap> {
-        let [Step { kind: StepKind::Require { cond, otherwise, .. }, .. }] = &*self.steps else { return None };
+        let [
+            Step {
+                kind: StepKind::Require {
+                    cond, otherwise, ..
+                },
+                ..
+            },
+        ] = &*self.steps
+        else {
+            return None;
+        };
         if !otherwise.is_empty() {
             return None;
         }
-        let Op::Bin(cmp @ (BinOp::Le | BinOp::Lt), total, limit) = self.nodes[cond.index()].op else { return None };
+        let Op::Bin(cmp @ (BinOp::Le | BinOp::Lt), total, limit) = self.nodes[cond.index()].op
+        else {
+            return None;
+        };
         match (&self.nodes[total.index()].op, &self.nodes[limit.index()].op) {
             // A kind among the arguments widens the total to every place of that kind.
             (Op::Call(Func::Total(dir, window), args), Op::Const(Value::Amount(limit)))
-                if args.iter().all(|arg| self.nodes[arg.index()].ty != Ty::Kind) =>
+                if args
+                    .iter()
+                    .all(|arg| self.nodes[arg.index()].ty != Ty::Kind) =>
             {
-                Some(Cap { dir: *dir, window: *window, limit: *limit, strict: cmp == BinOp::Lt })
+                Some(Cap {
+                    dir: *dir,
+                    window: *window,
+                    limit: *limit,
+                    strict: cmp == BinOp::Lt,
+                })
             }
             _ => None,
         }
@@ -133,7 +159,11 @@ impl Closing {
     /// falls on the 28th in a year that has no 29th.
     pub fn day_for(self, year: i32) -> Option<Day> {
         let (next, month) = (year + 1, u32::from(self.month));
-        Day::from_ymd(next, month, u32::from(self.day).min(days_in_month(next, month)))
+        Day::from_ymd(
+            next,
+            month,
+            u32::from(self.day).min(days_in_month(next, month)),
+        )
     }
 }
 
@@ -165,7 +195,12 @@ pub enum StepKind {
 pub enum Effect {
     /// An obligation from the subject's owner to `to`, due by `due` (default:
     /// the triggering day). `name` defaults to the law's name.
-    Owe { amount: NodeId, to: Id<Entity>, due: Option<NodeId>, name: Sym },
+    Owe {
+        amount: NodeId,
+        to: Id<Entity>,
+        due: Option<NodeId>,
+        name: Sym,
+    },
     /// Adds to a tally keyed by owner, year, name and the law's system.
     Count { amount: NodeId, name: Sym },
     /// Lowers the governed asset part's basis (depreciation, depletion).
@@ -173,7 +208,11 @@ pub enum Effect {
     /// Holds a disallowed loss and adds it to the basis of the nearest
     /// acquisition of `unit` within the span `within`, before or after (a wash
     /// sale).
-    Carry { amount: NodeId, unit: NodeId, within: NodeId },
+    Carry {
+        amount: NodeId,
+        unit: NodeId,
+        within: NodeId,
+    },
 }
 
 /// Index of a node in its law's arena.
@@ -209,6 +248,10 @@ pub enum Op {
     /// bare `catch-up`, means the row in force on the day the law runs.
     Param(Id<Param>, Box<[NodeId]>),
     Call(Func, Box<[NodeId]>),
+    /// Attach an identified object to a purpose (`repair of self`).
+    Of(NodeId, NodeId),
+    /// Price a quantity (`44 MI @ 0.70 USD/MI`).
+    At(NodeId, NodeId),
     Neg(NodeId),
     Not(NodeId),
     Bin(BinOp, NodeId, NodeId),
@@ -285,8 +328,14 @@ pub enum Func {
     /// including the triggering flow, valued in the base currency. An optional
     /// argument widens it to every place of a kind the owner owns.
     Total(Dir, Window),
-    /// `total(#PURPOSE, window)`, or the purpose that owns a law when `None`.
-    PurposeTotal { purpose: Option<Id<Purpose>>, window: Window },
+    /// Total of a purpose in the current window. `None` means the purpose
+    /// whose law is running; a value names an explicit purpose.
+    PurposeTotal {
+        purpose: Option<Id<Purpose>>,
+        window: Window,
+    },
+    /// Open amount of claims carrying this stable source code.
+    Open(Sym),
     /// What laws counted under the name for the owner, in the current year or,
     /// with a second argument (a year or a date), in that one.
     Tally(Sym),
@@ -299,6 +348,9 @@ pub enum Func {
     Value,
     /// `date(y, m, d)`
     Date,
+    Peak,
+    Low,
+    Days,
     /// `straight-line(cost, life, from, period [, mid-month])`: this period's
     /// share of a cost written off evenly over a life.
     StraightLine,
@@ -457,6 +509,9 @@ pub struct Rules {
     /// `on flow` laws of each asset's place (its kind chain's and its own):
     /// flows whose purpose is `of` it.
     pub about: Groups<Place, Rule>,
+    /// Laws of a contract, indexed separately from its party so two promises
+    /// with one party keep independent scope and accounting.
+    pub contracts: Groups<Contract, Rule>,
     /// `each` and `by` laws, once per subject they govern.
     pub timed: Vec<Rule>,
 }
@@ -471,8 +526,16 @@ impl Rules {
     /// Every rule that runs while the fold does, in each list it is in: the
     /// per-place tables, `on spend`, and the timed rules.
     pub fn all(&self) -> impl Iterator<Item = &Rule> {
-        let per_place = self.per_place().into_iter().flat_map(|table| table.values());
-        per_place.chain(self.on_spend.values()).chain(&self.timed)
+        let per_place = self
+            .per_place()
+            .into_iter()
+            .flat_map(|table| table.values());
+        per_place
+            .chain(self.on_spend.values())
+            .chain(self.purposes.values())
+            .chain(self.about.values())
+            .chain(self.contracts.values())
+            .chain(&self.timed)
     }
 }
 
@@ -492,4 +555,5 @@ pub enum Subject {
     Place(Id<Place>),
     Entity(Id<Entity>),
     Asset(Id<Asset>),
+    Contract(Id<Contract>),
 }

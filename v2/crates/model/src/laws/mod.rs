@@ -13,94 +13,107 @@ mod order;
 mod types;
 mod vars;
 
-use axiom_core::{Diagnostic, Id, Set, Severity};
-use axiom_syntax::{self as ast, BinOp, DeclKind, Trigger as Written};
+use axiom_core::{Diagnostic, Id, Set};
+use axiom_syntax::{self as ast, DeclKind, ExprId, ItemKind, Trigger as Written};
 
-use self::compile::{Placement, compile};
 pub(crate) use self::compile::compile_template;
+use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
-use crate::book::{Kind, Sort, System};
-use crate::collect::Entry;
+use crate::book::{Input, Kind, Sort, System};
 use crate::declare::World;
-use crate::law::{Dir, Func, Law, Node, NodeId, Op, Owner, Step, StepKind, Trigger, Ty, Value, Window};
-use crate::names::Rank;
-use crate::props::Budget;
+use crate::errors::{Word, suggest, unknown};
+use crate::law::{Law, NodeId, Owner, Rank, Trigger, Ty};
+use crate::names::{Found, Rank as NameRank};
 use crate::scope::Home;
 use crate::sources::Site;
 
 pub(crate) fn declare<'s>(
     world: &mut World<'s>,
     sites: &[Site<'_, 's>],
-    entries: &[Entry<'_, 's>],
-    budgets: Vec<Budget>,
     diags: &mut Vec<Diagnostic>,
 ) {
     world.tallies = counted(sites);
-    let mut written: [usize; 4] = [0; 4];
-    let mut seen: Set<(DeclKind, usize)> = Set::default();
-    for entry in entries {
-        match entry {
-            Entry::Law(law) => {
-                let owner = match law.home() {
-                    Home::System(system) => Owner::System(system),
-                    Home::Project | Home::Builtin => Owner::Book,
-                };
-                let site = Placement { file: law.file(), home: law.home(), owner, subject: Ty::Entity };
-                add(world, diags, &site, law.node);
-            }
-            Entry::Decl(decl) => {
-                let (file, node) = (decl.file(), decl.node);
-                let at = &mut written[node.what as usize];
-                let position = *at;
-                *at += 1;
-                let (owner, subject, id) = match node.what {
-                    DeclKind::Commodity => {
-                        misplaced(diags, file, node.laws, "a commodity");
-                        continue;
-                    }
-                    DeclKind::Kind => {
-                        let id = world.declared.kinds[position];
-                        if world.declared.unrooted[id.index()] {
+    let mut seen: Set<(DeclKind, u32)> = Set::default();
+    for source in sites {
+        let file = &source.source.file;
+        for item in &file.items {
+            match item.kind {
+                ItemKind::Law(id) => {
+                    let law = &file[id];
+                    let owner = match source.home {
+                        Home::System(system) => Owner::System(system),
+                        Home::Project | Home::Builtin => Owner::Book,
+                    };
+                    compile_native(world, diags, file, source.home, owner, Ty::Entity, law);
+                }
+                ItemKind::Decl(id) => {
+                    let decl = &file[id];
+                    let word = Word {
+                        text: decl.name.0,
+                        loc: file.loc(decl.name.0),
+                    };
+                    let resolved = match decl.what {
+                        DeclKind::Kind => world.kind(source.home, word).map(|kind| {
+                            let subject = match world.book.kinds[kind].sort {
+                                Sort::Place(_) => Ty::Place,
+                                Sort::Entity => Ty::Entity,
+                                Sort::Thing => Ty::Asset,
+                                Sort::Commodity => Ty::Unit,
+                            };
+                            (Owner::Kind(kind), subject, kind.index() as u32)
+                        }),
+                        DeclKind::Account => world
+                            .place(word)
+                            .map(|place| (Owner::Place(place), Ty::Place, place.index() as u32)),
+                        DeclKind::Entity => world.entity(source.home, word).map(|entity| {
+                            (Owner::Entity(entity), Ty::Entity, entity.index() as u32)
+                        }),
+                        DeclKind::Asset => world
+                            .book
+                            .asset(word.text)
+                            .ok_or_else(|| unknown_named(world, "asset", word))
+                            .map(|asset| (Owner::Asset(asset), Ty::Asset, asset.index() as u32)),
+                        DeclKind::Purpose => world.purpose(source.home, word).map(|purpose| {
+                            (Owner::Purpose(purpose), Ty::Flow, purpose.index() as u32)
+                        }),
+                        DeclKind::Commodity => {
+                            misplaced(diags, file, decl.laws, "a commodity");
                             continue;
                         }
-                        let subject = match world.book.kinds[id].sort {
-                            Sort::Place(_) => Ty::Place,
-                            Sort::Entity => Ty::Entity,
-                            Sort::Commodity => {
-                                misplaced(diags, file, node.laws, "a commodity kind");
-                                continue;
-                            }
-                            // v3 bridge: the v4 model has laws of asset kinds.
-                            Sort::Thing => {
-                                misplaced(diags, file, node.laws, "an asset kind");
-                                continue;
-                            }
-                        };
-                        (Owner::Kind(id), subject, id.index())
+                    };
+                    let (owner, subject, key) = match resolved {
+                        Ok(resolved) => resolved,
+                        Err(problem) => {
+                            diags.push(problem);
+                            continue;
+                        }
+                    };
+                    if decl.what == DeclKind::Kind && subject == Ty::Unit {
+                        misplaced(diags, file, decl.laws, "a commodity kind");
+                        continue;
                     }
-                    DeclKind::Account => match world.declared.places[position] {
-                        Some(id) => (Owner::Place(id), Ty::Place, id.index()),
-                        None => continue,
-                    },
-                    DeclKind::Entity => {
-                        let id = world.declared.entities[position];
-                        (Owner::Entity(id), Ty::Entity, id.index())
+                    if seen.insert((decl.what, key)) {
+                        for law in &file[decl.laws] {
+                            compile_native(world, diags, file, source.home, owner, subject, law);
+                        }
                     }
-                };
-                // A repeated declaration is reported once, and its laws not compiled twice.
-                if seen.insert((node.what, id)) {
-                    let site = Placement { file, home: decl.home(), owner, subject };
-                    file[node.laws].iter().for_each(|law| add(world, diags, &site, law));
                 }
+                // Contract laws are compiled by the contract pass after every
+                // contract id exists, so references can point forward.
+                ItemKind::Contract(_)
+                | ItemKind::Opening(_)
+                | ItemKind::Txn(_)
+                | ItemKind::Statement(_)
+                | ItemKind::Budget(_)
+                | ItemKind::Code(_)
+                | ItemKind::Param(_)
+                | ItemKind::Sync(_)
+                | ItemKind::Pattern(_)
+                | ItemKind::Format(_)
+                | ItemKind::Setting(_) => {}
             }
-            _ => {}
         }
     }
-    for budget in budgets {
-        let law = budget_law(world, &budget);
-        push(world, law);
-    }
-    register(world);
 }
 
 /// Compiles a nested or native S5 law using the same typed compiler as
@@ -121,52 +134,197 @@ pub(crate) fn compile_native<'s>(
     if law.damaged {
         return None;
     }
-    let site = Placement { file, home, owner, subject };
+    let site = Placement {
+        file,
+        home,
+        owner,
+        subject,
+    };
     let compiled = compile(world, diags, &site, law)?;
     Some(push(world, compiled))
 }
 
 /// Rebuilds the per-kind and per-system law runs after native lowering added
 /// nested laws to the Book arena.
-pub(crate) fn register_native(world: &mut World<'_>) {
+pub(crate) fn register_native(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
     register(world);
+    resolve_overrides(world, diags);
+    set_specificity(world);
+    let order = rank(&world.book, diags);
+    crate::rules::govern(&mut world.book, &order);
+}
+
+/// Resolve `overrides` after every top-level and nested law has a stable id.
+fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
+    let pending: Vec<_> = world
+        .book
+        .laws
+        .iter()
+        .filter_map(|(id, law)| law.override_name.map(|name| (id, name, law.loc)))
+        .collect();
+    for (id, name, loc) in pending {
+        let text = world.book.name(name);
+        let names = &world.book.names;
+        match world.book.lookup.laws.find(names, text, |_| true) {
+            Found::One(target) if target != id => world.book.laws[id].overrides = Some(target),
+            Found::One(_) => diags.push(
+                Diagnostic::error("law-override", "a law cannot override itself")
+                    .label(loc, "this is the law's own name"),
+            ),
+            Found::Nothing => {
+                let word = Word { text, loc };
+                let diagnostic = unknown("unknown-law", "law", word, None);
+                let keys: Vec<_> = world.book.lookup.laws.keys(&world.book.names).collect();
+                diags.push(suggest(diagnostic, loc, text, keys));
+            }
+            Found::Several(targets) => {
+                let mut diagnostic = Diagnostic::error(
+                    "ambiguous-law",
+                    format!("law `{text}` names more than one law"),
+                )
+                .label(loc, "qualify which law this one overrides");
+                for target in targets {
+                    let law = &world.book.laws[target];
+                    diagnostic = diagnostic.context(
+                        law.loc,
+                        format!("`{}` is declared here", world.book.name(law.name)),
+                    );
+                }
+                diags.push(diagnostic);
+            }
+        }
+    }
+}
+
+/// More specific owners win when two laws govern the same occasion.
+fn set_specificity(world: &mut World<'_>) {
+    let book = &world.book;
+    let ranks: Vec<_> = book
+        .laws
+        .iter()
+        .map(|(_, law)| {
+            let raw = match law.owner {
+                Owner::Book => 500,
+                Owner::System(system) => 100 + book.systems.lineage(system).count() as u32,
+                Owner::Kind(kind) => 1_000 + book.kinds.lineage(kind).count() as u32,
+                Owner::Purpose(purpose) => 4_000 + book.purposes.lineage(purpose).count() as u32,
+                Owner::Place(_) | Owner::Entity(_) | Owner::Asset(_) => 8_000,
+                Owner::Contract(_) => 9_000,
+            };
+            Rank(raw.min(u32::from(u16::MAX)) as u16)
+        })
+        .collect();
+    for (index, rank) in ranks.into_iter().enumerate() {
+        world.book.laws[Id::new(index as u32)].rank = rank;
+    }
+}
+
+/// Compiles the expression roots of an `also` declaration into a law arena.
+/// The caller owns the returned root mapping and stores the law id in its
+/// `book::Also`; roots must be ordered as written (`when`, then amounts).
+pub(crate) fn compile_also<'s>(
+    world: &mut World<'s>,
+    diags: &mut Vec<Diagnostic>,
+    file: &ast::File<'s>,
+    home: Home,
+    owner: Owner,
+    subject: Ty,
+    name: axiom_core::Sym,
+    inputs: &[Input],
+    roots: &[(ExprId, Ty)],
+    loc: axiom_core::Loc,
+) -> Option<(Id<Law>, Box<[NodeId]>)> {
+    let (program, roots) =
+        compile_template(world, diags, file, home, subject, name, inputs, roots)?;
+    let (book, nodes) = (&mut world.book, program.nodes);
+    let law = Law {
+        name,
+        doc: None,
+        owner,
+        system: if let Home::System(system) = home {
+            Some(system)
+        } else {
+            None
+        },
+        trigger: Trigger::Flow,
+        budget: None,
+        overrides: None,
+        override_name: None,
+        rank: crate::law::Rank(0),
+        steps: Box::default(),
+        nodes,
+        loc,
+    };
+    Some((book.laws.push(law), roots))
 }
 
 /// The names some law counts into.
 fn counted<'s>(sites: &[Site<'_, 's>]) -> Set<&'s str> {
-    let steps = sites.iter().flat_map(|site| site.source.file.iter::<ast::Step>());
-    let counts = steps.filter_map(|step| match &step.kind {
-        ast::StepKind::Effect(ast::Effect::Count { name, .. })
-        | ast::StepKind::Require { otherwise: Some(ast::Effect::Count { name, .. }), .. } => Some(name.0),
-        _ => None,
-    });
-    counts.collect()
-}
-
-/// Compiles `law` and adds it to the book, if it fits where it was written.
-fn add<'s>(world: &mut World<'s>, diags: &mut Vec<Diagnostic>, site: &Placement<'_, 's>, law: &ast::Law<'s>) {
-    if let Err(problem) = fits(world, site.owner, law) {
-        diags.push(problem);
-        return;
+    let mut names = Set::default();
+    for site in sites {
+        let file = &site.source.file;
+        for step in file.iter::<ast::Step>() {
+            match &step.kind {
+                ast::StepKind::Effect(ast::Effect::Count { name, .. }) => {
+                    names.insert(name.0);
+                }
+                ast::StepKind::Require { otherwise, .. } => {
+                    for effect in &file[*otherwise] {
+                        if let ast::Effect::Count { name, .. } = effect {
+                            names.insert(name.0);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
     }
-    // The parser reported the line it left out; compiling what remains would
-    // only report that line again, as a name nothing defines.
-    if !law.damaged
-        && let Some(compiled) = compile(world, diags, site, law)
-    {
-        push(world, compiled);
-    }
+    names
 }
 
 fn push(world: &mut World, law: Law) -> Id<Law> {
     let name = world.book.name(law.name);
     let id = world.book.laws.push(law);
-    world.book.lookup.laws.insert(&mut world.book.names, name, Rank::Path, id);
+    world
+        .book
+        .lookup
+        .laws
+        .insert(&mut world.book.names, name, NameRank::Path, id);
     id
 }
 
+fn unknown_named(world: &World<'_>, noun: &str, word: Word<'_>) -> Diagnostic {
+    let (code, known): (&'static str, Vec<&str>) = match noun {
+        "asset" => (
+            "unknown-asset",
+            world
+                .book
+                .assets
+                .values()
+                .map(|asset| world.book.name(asset.name))
+                .collect(),
+        ),
+        "contract" => (
+            "unknown-contract",
+            world
+                .book
+                .contracts
+                .values()
+                .map(|contract| world.book.name(contract.name))
+                .collect(),
+        ),
+        _ => ("unknown-name", Vec::new()),
+    };
+    suggest(unknown(code, noun, word, None), word.loc, word.text, known)
+}
+
 /// Laws written inside declarations that cannot own them.
-fn misplaced(diags: &mut Vec<Diagnostic>, file: &ast::File, laws: ast::Many<ast::Law>, within: &str) {
+fn misplaced(
+    diags: &mut Vec<Diagnostic>,
+    file: &ast::File,
+    laws: ast::Many<ast::Law>,
+    within: &str,
+) {
     for law in &file[laws] {
         diags.push(
             Diagnostic::error("law-position", format!("a law cannot be written inside {within}"))
@@ -178,70 +336,78 @@ fn misplaced(diags: &mut Vec<Diagnostic>, file: &ast::File, laws: ast::Many<ast:
 
 /// Whether the trigger suits what the law governs.
 fn fits(world: &World, owner: Owner, law: &ast::Law) -> Result<(), Diagnostic> {
-    let about_entities = match owner {
-        Owner::Entity(_) => true,
-        Owner::Kind(kind) => world.book.kinds[kind].sort == Sort::Entity,
-        Owner::Place(_) | Owner::System(_) | Owner::Book | Owner::Purpose(_) | Owner::Asset(_) | Owner::Contract(_) => {
-            false
+    let thing_kind =
+        matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Thing);
+    let place_kind =
+        matches!(owner, Owner::Kind(kind) if matches!(world.book.kinds[kind].sort, Sort::Place(_)));
+    let entity_kind =
+        matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Entity);
+    let allowed = match law.trigger {
+        Written::In | Written::Out | Written::Gain => {
+            matches!(owner, Owner::Place(_) | Owner::System(_) | Owner::Book) || place_kind
+        }
+        Written::Spend => matches!(owner, Owner::Entity(_)) || entity_kind,
+        Written::Flow => {
+            matches!(
+                owner,
+                Owner::Purpose(_) | Owner::Asset(_) | Owner::Contract(_)
+            ) || thing_kind
+        }
+        Written::Each(_) | Written::Closing { .. } | Written::By(_) => {
+            !matches!(owner, Owner::Kind(kind) if world.book.kinds[kind].sort == Sort::Commodity)
+        }
+        Written::Always => {
+            matches!(
+                owner,
+                Owner::Place(_)
+                    | Owner::Entity(_)
+                    | Owner::System(_)
+                    | Owner::Book
+                    | Owner::Asset(_)
+            ) || place_kind
+                || thing_kind
+                || entity_kind
         }
     };
-    let trigger_loc = law.trigger_loc;
-    match (law.trigger, about_entities) {
-        (Written::Spend, false) => {
-            Err(Diagnostic::error("law-trigger", "`on spend` laws govern a restricted entity's money")
-                .label(trigger_loc, "this law is not attached to an entity")
-                .help("write it inside an entity kind such as `kind grant : entity`, or inside an `entity`"))
-        }
-        (Written::In | Written::Out | Written::Gain | Written::Always, true) => {
-            Err(Diagnostic::error("law-trigger", "this trigger governs places, but the law is attached to an entity")
-                .label(trigger_loc, "value moves through places, not entities")
-                .help("write it inside an account, a place kind, a system, or the project"))
-        }
-        _ => Ok(()),
+    if allowed {
+        return Ok(());
     }
-}
-
-/// `budget 500 USD monthly` is `on in`, `warn total(in, month) <= 500 USD`,
-/// every node located at the property.
-fn budget_law(world: &mut World, budget: &Budget) -> Law {
-    let names = &mut world.book.names;
-    let window_word = match budget.window {
-        Window::Month => "month",
-        Window::Year => "year",
-        Window::Ever => "ever",
+    let trigger = match law.trigger {
+        Written::In => "on in",
+        Written::Out => "on out",
+        Written::Gain => "on gain",
+        Written::Spend => "on spend",
+        Written::Flow => "on flow",
+        Written::Each(_) => "each period",
+        Written::Closing { .. } => "each year closing",
+        Written::By(_) => "by",
+        Written::Always => "always",
     };
-    let (in_word, window_word) = (names.intern("in"), names.intern(window_word));
-    let node = |op, ty, first| Node { op, ty, loc: budget.loc, first: NodeId(first) };
-    let nodes = [
-        node(Op::Const(Value::Name(in_word)), Ty::Name, 0),
-        node(Op::Const(Value::Name(window_word)), Ty::Name, 1),
-        node(Op::Call(Func::Total(Dir::In, budget.window), Box::new([NodeId(0), NodeId(1)])), Ty::AMOUNT, 0),
-        node(Op::Const(Value::Amount(budget.amount)), Ty::AMOUNT, 3),
-        node(Op::Bin(BinOp::Le, NodeId(2), NodeId(3)), Ty::Bool, 0),
-    ];
-    let step = Step {
-        loc: budget.loc,
-        kind: StepKind::Require {
-            cond: NodeId(4),
-            otherwise: Box::default(),
-            message: None,
-            severity: Severity::Warning,
-        },
+    let (message, help) = match law.trigger {
+        Written::In | Written::Out | Written::Gain => (
+            format!("`{trigger}` laws govern accounts and account kinds"),
+            "write this law inside an account, an account kind, a system, or the project",
+        ),
+        Written::Spend => (
+            "`on spend` laws govern restricted entities and their kinds".to_owned(),
+            "write this law inside an entity or a restricted entity kind",
+        ),
+        Written::Flow => (
+            "`on flow` laws govern purposes, assets, contracts, and asset kinds".to_owned(),
+            "write this law inside a purpose, asset, contract, or asset kind",
+        ),
+        Written::Always => (
+            "`always` laws govern account balances and assets".to_owned(),
+            "write this law inside an account, account kind, asset, asset kind, system, or the project",
+        ),
+        Written::Each(_) | Written::Closing { .. } | Written::By(_) => (
+            "this law's owner has no dated subject to judge".to_owned(),
+            "write a dated law inside an account, entity, purpose, asset, contract, kind, system, or the project",
+        ),
     };
-    Law {
-        name: names.intern("budget"),
-        doc: None,
-        owner: Owner::Place(budget.place),
-        system: None,
-        trigger: Trigger::In,
-        // v3 bridge: a v3 budget is a property; the law holds its limit as a constant.
-        budget: None,
-        overrides: None,
-        rank: crate::law::Rank(0),
-        steps: Box::new([step]),
-        nodes: Box::new(nodes),
-        loc: budget.loc,
-    }
+    Err(Diagnostic::error("law-trigger", message)
+        .label(law.trigger_loc, "this trigger does not fit this owner")
+        .help(help))
 }
 
 /// Tells kinds and systems which laws are theirs.
@@ -249,16 +415,19 @@ fn register(world: &mut World) {
     let book = &mut world.book;
     let mut of_kind: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.kinds.len()];
     let mut of_system: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.systems.len()];
+    let mut of_purpose: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.purposes.len()];
+    let mut of_contract: Vec<Vec<Id<Law>>> = vec![Vec::new(); book.contracts.len()];
+    let auxiliary: Set<Id<Law>> = book.also.iter().map(|also| also.law).collect();
     for (id, law) in book.laws.iter() {
+        if auxiliary.contains(&id) {
+            continue;
+        }
         match law.owner {
             Owner::Kind(kind) => of_kind[kind.index()].push(id),
             Owner::System(system) => of_system[system.index()].push(id),
-            Owner::Place(_)
-            | Owner::Entity(_)
-            | Owner::Book
-            | Owner::Purpose(_)
-            | Owner::Asset(_)
-            | Owner::Contract(_) => {}
+            Owner::Purpose(purpose) => of_purpose[purpose.index()].push(id),
+            Owner::Contract(contract) => of_contract[contract.index()].push(id),
+            Owner::Place(_) | Owner::Entity(_) | Owner::Book | Owner::Asset(_) => {}
         }
     }
     for id in book.kinds.ids().collect::<Vec<Id<Kind>>>() {
@@ -266,5 +435,19 @@ fn register(world: &mut World) {
     }
     for id in book.systems.ids().collect::<Vec<Id<System>>>() {
         book.systems[id].laws = std::mem::take(&mut of_system[id.index()]).into();
+    }
+    for id in book
+        .purposes
+        .ids()
+        .collect::<Vec<Id<crate::book::Purpose>>>()
+    {
+        book.purposes[id].laws = std::mem::take(&mut of_purpose[id.index()]).into();
+    }
+    for id in book
+        .contracts
+        .ids()
+        .collect::<Vec<Id<crate::book::Contract>>>()
+    {
+        book.contracts[id].laws = std::mem::take(&mut of_contract[id.index()]).into();
     }
 }
