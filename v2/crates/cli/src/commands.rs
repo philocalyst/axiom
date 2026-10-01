@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axiom_core::{Day, Diagnostic};
 use axiom_engine::{Options, Run};
 use axiom_model::Book;
-use axiom_report::{Query, Summary};
+use axiom_report::{Query, ReportRenderer, Summary, json::JsonRenderer};
 
 use crate::args::{Command, Invocation};
 use crate::project::{Project, Sources};
@@ -45,6 +45,7 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
         diagnostics: diagnostics.iter().chain(&run.diagnostics).collect(),
         terminals,
         all: invocation.all,
+        json: invocation.json,
     };
     Ok(if let Command::Report(query, whose) = command { session.report(query, *whose) } else { session.check() })
 }
@@ -65,12 +66,17 @@ struct Session<'a, 's> {
     terminals: Terminals,
     /// Show every diagnostic, however many.
     all: bool,
+    /// Machine-readable rendering is independent of terminal width and colour.
+    json: bool,
 }
 
 impl Session<'_, '_> {
     /// Every diagnostic; and if none is an error, the book in one line.
     fn check(&self) -> Outcome {
         let (diagnostics, tally) = self.show(&self.diagnostics);
+        if self.json {
+            return Outcome { answer: diagnostics, diagnostics: String::new(), failed: tally.errors > 0 };
+        }
         if tally.errors > 0 {
             return Outcome { answer: String::new(), diagnostics, failed: true };
         }
@@ -82,12 +88,25 @@ impl Session<'_, '_> {
     /// The errors, and the report. A report runs whatever the book's errors, so
     /// that a reader can investigate them; it says at its head what it rests on.
     fn report(&self, query: &Query, whose: Option<&str>) -> Outcome {
-        let result = axiom_report::report(self.book, self.run, &self.pinpoint(query), whose);
+        let result = axiom_report::report_with_sources(self.book, self.run, query, whose, self.sources);
         let mut shown: Vec<&Diagnostic> = self.diagnostics.iter().copied().filter(|found| found.is_error()).collect();
         shown.extend(result.as_ref().err());
         let (diagnostics, tally) = self.show(&shown);
-        let Ok(report) = result else { return Outcome { answer: String::new(), diagnostics, failed: true } };
-        let mut answer = table::render(&report, self.terminals.out, self.sources);
+        let Ok(report) = result else {
+            return if self.json {
+                Outcome { answer: diagnostics, diagnostics: String::new(), failed: true }
+            } else {
+                Outcome { answer: String::new(), diagnostics, failed: true }
+            };
+        };
+        if self.json {
+            return Outcome {
+                answer: JsonRenderer.render(&report, self.sources),
+                diagnostics,
+                failed: tally.errors > 0,
+            };
+        }
+        let mut answer = table::TableRenderer { terminal: self.terminals.out }.render(&report, self.sources);
         if tally.errors > 0 {
             let caveat = format!(
                 "rests on a book with {} (`axiom check` lists them): what they touch may be wrong",
@@ -100,16 +119,11 @@ impl Session<'_, '_> {
         Outcome { answer, diagnostics, failed: tally.errors > 0 }
     }
 
-    /// `why journal/2026/01.ax:14` asks about a line, which only the sources
-    /// can find; any other query goes to the report as it is.
-    fn pinpoint<'q>(&self, query: &Query<'q>) -> Query<'q> {
-        let Query::Why { target } = query else { return query.clone() };
-        let line = target.rsplit_once(':').and_then(|(path, number)| self.sources.locate(path, number.parse().ok()?));
-        line.map_or_else(|| query.clone(), |loc| Query::Line { loc })
-    }
-
     /// The diagnostics, and after them how many of each there were.
     fn show(&self, diagnostics: &[&Diagnostic]) -> (String, Tally) {
+        if self.json {
+            return (crate::render::json::diagnostics(diagnostics, self.sources), Tally::of(diagnostics.iter().copied()));
+        }
         let (mut text, tally) = Renderer::new(self.sources, self.terminals.err).present(diagnostics, self.all);
         if let Some(line) = tally.line() {
             text += &self.terminals.err.painter.paint(&[line]);

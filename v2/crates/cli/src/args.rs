@@ -36,6 +36,7 @@ pub enum Opt {
     By,
     Until,
     Paths,
+    Json,
 }
 
 /// An option, as parsing and the help screen see it.
@@ -76,6 +77,7 @@ pub const OPTIONS: &[OptionSpec] = &[
     option(Opt::For, "entity", Some("NAME"), "the old name of --for").everywhere(),
     option(Opt::Help, "help", None, "show this screen").short('h').everywhere(),
     option(Opt::Version, "version", None, "show the version").short('V').everywhere(),
+    option(Opt::Json, "json", None, "write machine-readable output").everywhere(),
     option(Opt::At, "at", Some("DATE"), "as of this day"),
     option(Opt::Value, "value", None, "value holdings at market prices"),
     option(Opt::Monthly, "monthly", None, "one column per month"),
@@ -190,6 +192,8 @@ pub struct Invocation<'a> {
     pub project: Option<&'a Path>,
     /// Every diagnostic is shown, however many.
     pub all: bool,
+    /// Write reports and diagnostics as JSON.
+    pub json: bool,
     pub command: Command<'a>,
 }
 
@@ -214,6 +218,7 @@ pub fn parse(args: &[String]) -> Result<Invocation<'_>, Diagnostic> {
         color: values.choice(Opt::Color, &colors)?.unwrap_or(ColorChoice::Auto),
         project: values.text(Opt::Project).map(Path::new),
         all: values.has(Opt::All),
+        json: values.has(Opt::Json),
         // Until a command is found, it is help that is asked for.
         command: Command::Help,
     };
@@ -496,6 +501,14 @@ mod tests {
         assert!(matches!(parse_words(&[]).unwrap().0, Command::Help));
         assert!(matches!(parse_words(&["balance", "--help"]).unwrap().0, Command::Help));
         assert!(matches!(parse_words(&["-V"]).unwrap().0, Command::Version));
+    }
+
+    #[test]
+    fn json_is_available_for_checks_and_every_report() {
+        for args in [["check", "--json"].as_slice(), ["flow", "--json"].as_slice()] {
+            let args = args.iter().map(|word| (*word).to_string()).collect::<Vec<_>>();
+            assert!(parse(&args).unwrap().json);
+        }
     }
 
     #[test]

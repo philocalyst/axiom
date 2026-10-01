@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use axiom_core::{Qty, Sym};
+use axiom_core::{Qty, Ratio, Sym};
 use axiom_engine::{Cause, Owed, Pad};
 use axiom_model::{Amount, Book};
 
@@ -107,6 +107,15 @@ impl<'s> Cell<'s> {
 /// `1 time`, `2 times`.
 pub fn plural(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+}
+
+/// `12%`, `3.5%`, `0.25%`: to hundredths of a percent, without trailing zeros.
+pub fn percent(ratio: Ratio) -> String {
+    let Some(hundredths) = Qty(10_000).scale(ratio) else {
+        return ratio.to_string();
+    };
+    let shown = hundredths.show(2).to_string();
+    format!("{}%", shown.trim_end_matches('0').trim_end_matches('.'))
 }
 
 /// The first line of a diagnostic's message: enough for a table cell.

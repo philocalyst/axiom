@@ -13,10 +13,8 @@
 //!   · VTI is not priced, so it is left out.
 //! ```
 
-use axiom_core::{Qty, Ratio};
-use axiom_report::{Align, Cell, Column, Report, Row, Section, Style};
+use axiom_report::{Align, Cell, Column, Report, ReportRenderer, Row, Section, SourceProvider, Style, percent};
 
-use crate::project::Sources;
 use crate::style::{Ink, Line, Terminal};
 use crate::text::wrap;
 
@@ -30,7 +28,7 @@ const DEPTH: usize = 2;
 const MIN_NOTE_WIDTH: usize = 20;
 
 /// Draws a report: its title, then each section with its table and notes.
-pub fn render(report: &Report, terminal: Terminal, sources: &Sources) -> String {
+pub fn render(report: &Report, terminal: Terminal, sources: &dyn SourceProvider) -> String {
     let mut lines = vec![Line::text(&report.title, Ink::BOLD)];
     for section in &report.sections {
         lines.push(Line::new());
@@ -39,7 +37,20 @@ pub fn render(report: &Report, terminal: Terminal, sources: &Sources) -> String 
     terminal.painter.paint(&lines)
 }
 
-fn section_lines(section: &Section, width: usize, sources: &Sources) -> Vec<Line> {
+/// The terminal table renderer, configured with its output width and painter.
+pub struct TableRenderer {
+    pub terminal: Terminal,
+}
+
+impl ReportRenderer for TableRenderer {
+    type Output = String;
+
+    fn render<'s>(&self, report: &Report<'s>, sources: &dyn SourceProvider) -> Self::Output {
+        render(report, self.terminal, sources)
+    }
+}
+
+fn section_lines(section: &Section, width: usize, sources: &dyn SourceProvider) -> Vec<Line> {
     let mut lines = Vec::new();
     if let Some(heading) = &section.heading {
         lines.push(Line::text(heading, Ink::BOLD));
@@ -62,7 +73,7 @@ fn section_lines(section: &Section, width: usize, sources: &Sources) -> Vec<Line
 }
 
 /// The column titles, a rule, and the rows, with a rule above each total.
-fn table_lines(section: &Section, sources: &Sources) -> Vec<Line> {
+fn table_lines(section: &Section, sources: &dyn SourceProvider) -> Vec<Line> {
     let units = unit_widths(section);
     let titles: Vec<Line> = section.columns.iter().map(|column| Line::text(&column.title, Ink::DIM)).collect();
     let rows: Vec<Vec<Line>> =
@@ -107,7 +118,7 @@ fn assemble(cells: Vec<Line>, widths: &[usize], columns: &[Column]) -> Line {
 
 /// One line per column: the row's cell, in the row's style, and for the first
 /// column indented to the row's depth.
-fn row_cells(row: &Row, columns: &[Column], units: &[usize], sources: &Sources) -> Vec<Line> {
+fn row_cells(row: &Row, columns: &[Column], units: &[usize], sources: &dyn SourceProvider) -> Vec<Line> {
     let ink = match row.style {
         Style::Normal => Ink::PLAIN,
         Style::Total => Ink::BOLD,
@@ -135,7 +146,7 @@ fn unit_widths(section: &Section) -> Vec<usize> {
         .collect()
 }
 
-fn cell_line(cell: &Cell, ink: Ink, unit_width: usize, sources: &Sources) -> Line {
+fn cell_line(cell: &Cell, ink: Ink, unit_width: usize, sources: &dyn SourceProvider) -> Line {
     match cell {
         Cell::Blank => Line::new(),
         Cell::Text(text) => Line::text(text, ink),
@@ -146,24 +157,17 @@ fn cell_line(cell: &Cell, ink: Ink, unit_width: usize, sources: &Sources) -> Lin
             let padding = unit_width.saturating_sub(unit.chars().count());
             Line::text(&format!("{} {unit}{}", qty.show(*scale), " ".repeat(padding)), ink)
         }
-        Cell::Source(loc) => Line::text(&sources.describe(*loc).unwrap_or_default(), Ink::DIM),
+        Cell::Source(loc) => SourceProvider::describe(sources, *loc).map_or_else(Line::new, |position| {
+            Line::text(&format!("{}:{}", position.path, position.line), Ink::DIM)
+        }),
     }
-}
-
-/// `12%`, `3.5%`, `0.25%`: to hundredths of a percent, without trailing zeros.
-fn percent(ratio: Ratio) -> String {
-    let Some(hundredths) = Qty(10_000).scale(ratio) else {
-        return ratio.to_string();
-    };
-    let shown = hundredths.show(2).to_string();
-    format!("{}%", shown.trim_end_matches('0').trim_end_matches('.'))
 }
 
 #[cfg(test)]
 mod tests {
     use std::borrow::Cow;
 
-    use axiom_core::Day;
+    use axiom_core::{Day, Qty, Ratio};
 
     use super::*;
     use crate::project::Sources;

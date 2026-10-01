@@ -58,9 +58,10 @@ pub struct Terminals {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args_os().skip(1).map(|arg| arg.to_string_lossy().into_owned()).collect();
+    let json = args.iter().any(|argument| argument == "--json" || argument.starts_with("--json="));
     let invocation = match args::parse(&args) {
         Ok(invocation) => invocation,
-        Err(usage) => return refuse(&usage, ColorChoice::Auto),
+        Err(usage) => return refuse(&usage, ColorChoice::Auto, json),
     };
     let color = invocation.color;
     let terminals =
@@ -72,12 +73,17 @@ fn main() -> ExitCode {
             let _ = io::stdout().write_all(outcome.answer.as_bytes());
             if outcome.failed { ExitCode::from(1) } else { ExitCode::SUCCESS }
         }
-        Err(problem) => refuse(&problem, invocation.color),
+        Err(problem) => refuse(&problem, invocation.color, invocation.json),
     }
 }
 
-/// Shows why nothing could be run, on standard error, and exits with 2.
-fn refuse(problem: &Diagnostic, color: ColorChoice) -> ExitCode {
+/// Shows why nothing could be run and exits with 2; JSON mode writes to stdout.
+fn refuse(problem: &Diagnostic, color: ColorChoice, json: bool) -> ExitCode {
+    if json {
+        let output = axiom_report::json::diagnostics(&[problem], &Sources::default());
+        let _ = io::stdout().write_all(output.as_bytes());
+        return ExitCode::from(2);
+    }
     let terminal = Terminal::detect(color, &io::stderr());
     let text = Renderer::new(&Sources::default(), terminal).diagnostic(problem);
     let _ = io::stderr().write_all(text.as_bytes());

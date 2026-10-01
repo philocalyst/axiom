@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 
 use axiom_core::{Diagnostic, FileId, Loc, par};
 use axiom_model::Source;
+use axiom_report::{SourcePosition, SourceProvider};
 
 /// The file that marks a project's root.
 const MARKER: &str = "axiom.ax";
@@ -172,6 +173,25 @@ impl SourceFile {
     pub fn line(&self, line: usize) -> &str {
         self.text[self.line_start(line)..self.line_start(line + 1)].trim_end_matches(['\n', '\r'])
     }
+
+    fn position(&self, loc: Loc) -> Option<SourcePosition<'_>> {
+        let (offset, end) = (loc.start as usize, loc.end as usize);
+        if offset > end
+            || end > self.text.len()
+            || !self.text.is_char_boundary(offset)
+            || !self.text.is_char_boundary(end)
+        {
+            return None;
+        }
+        let line = self.line_of(offset);
+        let start = self.line_start(line);
+        let column = self.text[start..]
+            .char_indices()
+            .take_while(|(relative, _)| start + *relative < offset)
+            .count()
+            + 1;
+        Some(SourcePosition { path: &self.path, line: line + 1, column })
+    }
 }
 
 /// Every source text of a run. The syntax tree, the book and every diagnostic
@@ -241,6 +261,11 @@ impl Sources {
         Some(Loc::new(file.id, start as u32, (start + file.line(line).len()) as u32))
     }
 
+    fn position(&self, loc: Loc) -> Option<SourcePosition<'_>> {
+        let file = self.get(loc.file)?;
+        file.position(loc)
+    }
+
     /// Parses every file, in parallel, into what the model builds from.
     pub fn parse(&self) -> (Vec<Source<'_>>, Vec<Diagnostic>) {
         let parsed = par::map_each(&self.files, |file| axiom_syntax::parse(file.id, &file.text));
@@ -255,6 +280,16 @@ impl Sources {
             })
             .collect();
         (sources, diagnostics)
+    }
+}
+
+impl SourceProvider for Sources {
+    fn locate(&self, path: &str, line: usize) -> Option<Loc> {
+        Sources::locate(self, path, line)
+    }
+
+    fn describe(&self, loc: Loc) -> Option<SourcePosition<'_>> {
+        Sources::position(self, loc)
     }
 }
 
@@ -355,5 +390,17 @@ mod tests {
         assert_eq!((two.start, two.end), (4, 7));
         assert_eq!(sources.describe(two).as_deref(), Some("journal/2026/01.ax:2"));
         assert!(sources.locate("journal/2026/01.ax", 4).is_none() && sources.locate("nowhere.ax", 1).is_none());
+    }
+
+    #[test]
+    fn borrowed_positions_count_unicode_and_reject_invalid_byte_ranges() {
+        let sources = Sources::in_memory(&[("journal/λ.ax", "a\tλ\nnext")], &[]);
+        let path = "journal/λ.ax";
+        let at_letter = sources.locate(path, 1).unwrap();
+        let position = SourceProvider::describe(&sources, Loc::new(at_letter.file, 2, 4)).unwrap();
+        assert_eq!((position.path, position.line, position.column), (path, 1, 3));
+        assert!(SourceProvider::describe(&sources, Loc::new(at_letter.file, 3, 4)).is_none());
+        assert!(SourceProvider::describe(&sources, Loc::new(at_letter.file, 0, u32::MAX)).is_none());
+        assert!(SourceProvider::describe(&sources, Loc::new(at_letter.file, 4, 2)).is_none());
     }
 }

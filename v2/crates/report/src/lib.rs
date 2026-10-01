@@ -1,5 +1,6 @@
-//! Views over a run. A report is data (typed cells in sections); the command
-//! line decides how to draw it.
+//! Views over a run. A report is data (typed cells in sections); each client
+//! supplies a renderer and source catalog, whether it is a terminal, editor, or
+//! GUI.
 //!
 //! Every view is a pure function of the book and its run. What several views
 //! need lives in one place: [`history`] answers "what happened, as posted",
@@ -28,6 +29,7 @@ mod synth;
 mod table;
 mod tax;
 mod why;
+pub mod json;
 
 #[cfg(test)]
 mod source_tests;
@@ -43,7 +45,7 @@ use axiom_model::{Amount, Book, Period, Place};
 use crate::history::Snapshots;
 use crate::lens::{Lens, Whose};
 
-/// What to show. Built by the command line from its arguments.
+/// What to show. A client builds this from its own input surface.
 #[derive(Clone, Debug)]
 pub enum Query<'a> {
     /// Balances per place and commodity, optionally at market value, optionally
@@ -73,19 +75,20 @@ pub enum Query<'a> {
     /// Plans, inferred recurrences, obligations and growth, run forward
     /// through the laws, with bands from bootstrapped spending.
     Forecast { until: Option<Day>, paths: u32 },
-    /// Explains a place, `#code`, law, or tax line.
+    /// Explains a place, `#code`, law, tax line, or a source path and line.
     Why { target: &'a str },
-    /// Explains what is written on one source line and everything it caused.
-    /// The command line turns `file:line` into the line's byte range, because
-    /// only it holds the source text.
+    /// Explains what is written at one resolved source location and everything
+    /// it caused. A client uses its [`SourceProvider`] to resolve `why FILE:LINE`.
     Line { loc: Loc },
 }
 
+/// A report view with its title and ordered sections.
 pub struct Report<'s> {
     pub title: String,
     pub sections: Vec<Section<'s>>,
 }
 
+/// One headed table or note group in a report.
 pub struct Section<'s> {
     pub heading: Option<String>,
     pub columns: Vec<Column>,
@@ -93,17 +96,20 @@ pub struct Section<'s> {
     pub notes: Vec<String>,
 }
 
+/// A heading and alignment for one table column.
 pub struct Column {
     pub title: Cow<'static, str>,
     pub align: Align,
 }
 
+/// Horizontal alignment for a table column.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Align {
     Left,
     Right,
 }
 
+/// One row of typed cells in a section.
 pub struct Row<'s> {
     /// Indentation for tree-shaped tables.
     pub depth: u8,
@@ -111,6 +117,7 @@ pub struct Row<'s> {
     pub cells: Vec<Cell<'s>>,
 }
 
+/// How a row should be emphasized by a renderer.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Style {
     Normal,
@@ -122,6 +129,7 @@ pub enum Style {
     Alert,
 }
 
+/// A report value before a client chooses how to draw it.
 pub enum Cell<'s> {
     Blank,
     Text(Cow<'s, str>),
@@ -133,15 +141,74 @@ pub enum Cell<'s> {
     },
     Day(Day),
     Percent(Ratio),
-    /// Where in the sources a line comes from. The command line prints it as
-    /// `file:line`, which `why` accepts, so every figure can be traced.
+    /// Where in the sources a line comes from, so any client can offer a trace.
     Source(Loc),
+}
+
+pub use table::percent;
+
+/// A source position as a client can display it. Lines and columns are
+/// one-based; columns count Unicode scalar values (a tab is one column). The
+/// path is borrowed from the client that owns the source text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SourcePosition<'a> {
+    pub path: &'a str,
+    pub line: usize,
+    pub column: usize,
+}
+
+/// Resolves source positions without making the report crate own file storage.
+/// A terminal, editor, or GUI can provide its own source catalog.
+pub trait SourceProvider {
+    /// The location covered by `line` of `path`, where lines are one-based.
+    fn locate(&self, path: &str, line: usize) -> Option<Loc>;
+
+    /// A borrowed display position for a source range.
+    fn describe(&self, loc: Loc) -> Option<SourcePosition<'_>>;
+}
+
+/// A client renderer for a report. Renderers receive complete report data and
+/// borrowed source positions, with no dependency on a terminal or filesystem.
+pub trait ReportRenderer {
+    type Output;
+
+    fn render<'s>(&self, report: &Report<'s>, sources: &dyn SourceProvider) -> Self::Output;
 }
 
 /// Builds the view `query` asks for, about the money of `whose` (`--for`: an
 /// entity, a household including its members; default everything).
 pub fn report<'s>(book: &Book<'s>, run: &Run, query: &Query, whose: Option<&str>) -> Result<Report<'s>, Diagnostic> {
     views(book, run, &Whose::resolve(book, whose)?, query)
+}
+
+/// Builds a report with source-aware query resolution while borrowing source
+/// names and texts from the client's provider.
+pub fn report_with_sources<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    query: &Query,
+    whose: Option<&str>,
+    sources: &dyn SourceProvider,
+) -> Result<Report<'s>, Diagnostic> {
+    if let Some(loc) = resolve_source_line(query, sources) {
+        let query = Query::Line { loc };
+        report(book, run, &query, whose)
+    } else {
+        report(book, run, query, whose)
+    }
+}
+
+/// Turns a source target into a line query when the provider recognizes it.
+/// Unknown paths remain ordinary `why` targets so existing name diagnostics
+/// keep their useful suggestions.
+pub fn resolve_source_line(query: &Query<'_>, sources: &dyn SourceProvider) -> Option<Loc> {
+    let Query::Why { target } = query else { return None };
+    let Some((path, number)) = target.rsplit_once(':') else { return None };
+    let Ok(line) = number.parse::<usize>() else { return None };
+    if path.is_empty() || line == 0 {
+        return None;
+    }
+    sources.locate(path, line)
 }
 
 /// The view `query` asks for, about the money of `whose`.

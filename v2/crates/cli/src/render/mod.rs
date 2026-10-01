@@ -12,6 +12,7 @@
 //! many diagnostics; this module gathers the rest for each one.
 
 mod findings;
+pub mod json;
 mod labels;
 mod page;
 mod snippet;

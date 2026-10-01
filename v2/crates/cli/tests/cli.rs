@@ -49,6 +49,7 @@ fn help_lists_the_commands_and_exits_cleanly() {
     ] {
         assert!(screen.contains(command), "{command} is missing from\n{screen}");
     }
+    assert!(screen.contains("--json"), "machine-readable output is documented");
     assert!(!screen.contains('\x1b'), "a pipe gets no colour");
 }
 
@@ -192,4 +193,54 @@ fn a_net_capital_loss_beyond_the_limit_is_carried_into_the_next_years_return() {
     // 5,000 USD is lost again, 3,000 deducted, and only long-term loss is left to carry.
     assert_eq!(lines("2026"), ["long-loss-carried 2,000.00 USD", "agi -3,000.00 USD"]);
     let _ = fs::remove_dir_all(folder);
+}
+
+#[test]
+fn every_view_can_write_one_json_document_from_the_report_data() {
+    let folder = empty_folder("json-report");
+    let source = "\
+base USD
+use std
+account assets/checking : bank
+account expenses/food
+opening 2026-01-01
+  checking 100 USD
+2026-01-02 checking -> food 5 USD
+";
+    fs::write(folder.join("axiom.ax"), source).expect("write project");
+    let path = folder.to_str().expect("a UTF-8 path");
+    let output = run(&["flow", "--json", "-C", path]);
+    assert_eq!(output.status.code(), Some(0), "{}", text(&output.stderr));
+    let report = text(&output.stdout);
+    assert!(report.starts_with("{\"title\":"));
+    assert!(report.contains("\"type\":\"amount\""));
+    assert!(report.ends_with("}\n"));
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn check_json_emits_diagnostics_on_stdout_one_object_per_line() {
+    let folder = project_with_a_typo("json-check");
+    let path = folder.to_str().expect("a UTF-8 path");
+    let output = run(&["check", "--json", "-C", path]);
+    assert_eq!(output.status.code(), Some(1));
+    let diagnostics = text(&output.stdout);
+    assert!(!diagnostics.is_empty());
+    assert!(diagnostics.lines().all(|line| line.starts_with('{') && line.ends_with('}')));
+    assert!(diagnostics.contains("\"headline\":"));
+    assert!(output.stderr.is_empty());
+    fs::remove_dir_all(folder).unwrap();
+}
+
+#[test]
+fn project_loading_errors_stay_machine_readable_with_json_requested() {
+    let folder = empty_folder("json-no-project");
+    let path = folder.to_str().expect("a UTF-8 path");
+    let output = run(&["check", "--json", "-C", path]);
+    assert_eq!(output.status.code(), Some(2));
+    let diagnostic = text(&output.stdout);
+    assert!(diagnostic.starts_with('{') && diagnostic.ends_with("}\n"));
+    assert!(diagnostic.contains("\"code\":\"no-project\""));
+    assert!(output.stderr.is_empty());
+    fs::remove_dir_all(folder).unwrap();
 }

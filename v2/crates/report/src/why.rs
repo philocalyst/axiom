@@ -2,8 +2,8 @@
 //!
 //! Every report line points at the source that caused it; `why` explains that
 //! source, and everything it in turn caused. A target is a place, an entity, a
-//! system, a `#code`, a law, or a tax line by name; the command line turns
-//! `file:line` into a [`Query::Line`](crate::Query::Line).
+//! system, a `#code`, a law, a tax line by name, or a source position resolved
+//! through the caller's borrowed source provider.
 
 mod code;
 mod entity;

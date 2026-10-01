@@ -3,11 +3,11 @@
 //! What a view should say depends on what the engine made of a flow, so the
 //! behaviour that turns on it is tested from `.ax` text to report.
 
-use axiom_core::{Day, FileId};
+use axiom_core::{Day, FileId, Loc};
 use axiom_engine::{Options, Run};
 use axiom_model::{Book, Source};
 
-use crate::Query;
+use crate::{Query, SourcePosition, SourceProvider};
 use crate::tests::{lines, show};
 
 fn day(y: i32, m: u32, d: u32) -> Day {
@@ -28,6 +28,70 @@ pub(crate) fn with_run<R>(text: &str, today: Day, then: impl FnOnce(&Book, &Run)
 /// The rows of the first section of the report `query` asks for.
 fn rows(book: &Book, run: &Run, query: Query) -> Vec<String> {
     lines(&crate::report(book, run, &query, None).expect("the query resolves").sections[0])
+}
+
+struct BorrowedSources<'a> {
+    path: &'a str,
+    text: &'a str,
+}
+
+impl SourceProvider for BorrowedSources<'_> {
+    fn locate(&self, path: &str, line: usize) -> Option<Loc> {
+        if path != self.path || line == 0 {
+            return None;
+        }
+        let mut start = 0;
+        for (index, part) in self.text.split_inclusive('\n').enumerate() {
+            if index + 1 == line {
+                let end = start + part.trim_end_matches(['\n', '\r']).len();
+                return Some(Loc::new(FileId(0), start as u32, end as u32));
+            }
+            start += part.len();
+        }
+        None
+    }
+
+    fn describe(&self, loc: Loc) -> Option<SourcePosition<'_>> {
+        let (start, end) = (loc.start as usize, loc.end as usize);
+        if loc.file != FileId(0)
+            || start > end
+            || end > self.text.len()
+            || !self.text.is_char_boundary(start)
+            || !self.text.is_char_boundary(end)
+        {
+            return None;
+        }
+        let line = self.text[..start].bytes().filter(|byte| *byte == b'\n').count();
+        let line_start = self.text[..start].rfind('\n').map_or(0, |at| at + 1);
+        let column = self.text[line_start..start].chars().count() + 1;
+        Some(SourcePosition { path: self.path, line: line + 1, column })
+    }
+}
+
+#[test]
+fn why_source_lines_resolve_in_the_report_layer_with_borrowed_windows_paths() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+account assets/checking
+account expenses/food
+opening 2026-01-01
+  checking 100 USD
+2026-01-02 checking -> food 5 USD
+";
+    let provider = BorrowedSources { path: r"C:\ledger\january.ax", text: source };
+    let line = source.lines().position(|text| text.starts_with("2026-01-02")).unwrap() + 1;
+    with_run(source, day(2026, 1, 3), |book, run| {
+        let target = format!(r"C:\ledger\january.ax:{line}");
+        let query = Query::Why { target: &target };
+        let report = crate::report_with_sources(book, run, &query, None, &provider).unwrap();
+        assert_eq!(report.title, "Why this line");
+        assert!(crate::tests::lines(&report.sections[0])[0].contains("flow: assets/checking → expenses/food"));
+        assert!(crate::resolve_source_line(&query, &provider).is_some());
+        let unknown = Query::Why { target: r"C:\ledger\missing.ax:1" };
+        assert_eq!(crate::resolve_source_line(&unknown, &provider), None);
+    });
 }
 
 // ─── Basis flows ────────────────────────────────────────────────────────────
