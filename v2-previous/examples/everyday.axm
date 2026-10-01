@@ -1,7 +1,0 @@
-ledger everyday
-use personal
-
-2026-09-01 spend
-  from checking
-  payee "Corner Market"
-  amount 42.75 USD
