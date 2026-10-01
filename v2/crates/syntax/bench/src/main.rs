@@ -53,7 +53,11 @@ fn fixture(records: usize) -> String {
 
 fn bench(label: &str, source: &str) {
     for _ in 0..WARMUPS {
-        let (file, diagnostics) = axiom_syntax::parse(FileId(0), black_box(source));
+        let (file, diagnostics) = axiom_syntax::parse(
+            FileId(0),
+            black_box(source),
+            axiom_syntax::Folder::default(),
+        );
         assert!(diagnostics.is_empty(), "{} diagnostics", diagnostics.len());
         black_box(file.items.len());
     }
@@ -68,7 +72,11 @@ fn bench(label: &str, source: &str) {
         REQUESTED_BYTES.store(0, Ordering::SeqCst);
 
         let start = Instant::now();
-        let (file, diagnostics) = axiom_syntax::parse(FileId(0), black_box(source));
+        let (file, diagnostics) = axiom_syntax::parse(
+            FileId(0),
+            black_box(source),
+            axiom_syntax::Folder::default(),
+        );
         parse_times.push(start.elapsed().as_nanos());
 
         assert!(diagnostics.is_empty(), "{} diagnostics", diagnostics.len());

@@ -3,7 +3,8 @@
 This standalone Rust program measures parser allocations and wall time on two
 deterministic generated inputs. Its relative path dependencies point at the
 `axiom-core` and `axiom-syntax` crates in this checkout. It has no benchmark
-framework or dependencies beyond those crates.
+framework or dependencies beyond those crates. It parses each input with
+`axiom_syntax::parse(FileId(0), source, Folder::default())`.
 
 From the repository root, run:
 

@@ -1690,6 +1690,29 @@ fn malformed_unicode_escapes_keep_utf8_boundaries() {
 }
 
 #[test]
+fn concurrent_files_keep_sources_and_diagnostic_locations_separate() {
+    let left = "2026-01-15 checking-left -> food 5 USD\n2026-01-16 checking-left -> food 0\n";
+    let right = "2026-02-15 checking-right -> food 6 USD\n2026-02-16 checking-right -> food 0\n";
+    std::thread::scope(|scope| {
+        let left_parse = scope.spawn(|| parse(FileId(17), left));
+        let right_parse = scope.spawn(|| parse(FileId(23), right));
+        let (left_file, left_diags) = left_parse.join().unwrap();
+        let (right_file, right_diags) = right_parse.join().unwrap();
+
+        assert_eq!(left_file.src, left);
+        assert_eq!(right_file.src, right);
+        assert_eq!(left_file.id, FileId(17));
+        assert_eq!(right_file.id, FileId(23));
+        assert_eq!(left_diags[0].code, "bare-zero");
+        assert_eq!(right_diags[0].code, "bare-zero");
+        assert_eq!(left_diags[0].anchor().unwrap().file, FileId(17));
+        assert_eq!(right_diags[0].anchor().unwrap().file, FileId(23));
+        assert!(left_diags[0].anchor().unwrap().start < left.len() as u32);
+        assert!(right_diags[0].anchor().unwrap().start < right.len() as u32);
+    });
+}
+
+#[test]
 fn a_piece_larger_than_its_reference_space_is_rejected() {
     let prefix = "// comment before the oversized block\n";
     let src = format!("{prefix}2026-01-15 a -> b\n  {}\n", "x".repeat(crate::refs::MAX_LOCAL_NODES + 1));

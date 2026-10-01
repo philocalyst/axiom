@@ -132,13 +132,19 @@ pub(crate) fn parse_in(file: FileId, src: &str, folder: Folder, pieces: usize) -
             job
         })
         .collect();
-    let parsed = par::map_each(&jobs, |job| parse_piece(file, src, job));
-    let (mut pieces, mut diags, mut tabs) = (Vec::new(), Vec::new(), Tabs::default());
-    for (piece, more, more_tabs) in parsed {
-        pieces.push(piece);
-        diags.extend(more);
-        tabs.merge(more_tabs);
-    }
+    // Keep only the piece tables after each ordered result has been folded in;
+    // `map_each` would also retain a full `Vec<Parsed>` until every piece ends.
+    let mut pieces = Vec::with_capacity(jobs.len());
+    let (mut diags, mut tabs) = (Vec::new(), Tabs::default());
+    par::map_each_ordered(
+        &jobs,
+        |job| parse_piece(file, src, job),
+        |(piece, more, more_tabs)| {
+            pieces.push(piece);
+            diags.extend(more);
+            tabs.merge(more_tabs);
+        },
+    );
     diags.extend(tabs.diagnostic());
     diags.sort_by_key(|diag| diag.anchor().map(|loc| loc.start));
     (File::new(file, src, pieces), diags)
