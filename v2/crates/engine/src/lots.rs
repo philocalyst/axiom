@@ -823,10 +823,48 @@ pub(crate) struct Holdings {
     untidy: bool,
 }
 
-pub(crate) struct PartBasisAdjustment {
+pub(crate) struct PartBasisAdjustment<'a> {
+    holdings: &'a mut Holdings,
     part: PartId,
     delta: Qty,
     whole: Qty,
+}
+
+impl PartBasisAdjustment<'_> {
+    /// Applies the prepared basis update while retaining an exclusive borrow
+    /// of the indexed holdings store from validation through commit.
+    pub(crate) fn apply(self) {
+        if self.delta.is_zero() {
+            return;
+        }
+        let magnitude = if self.delta.is_negative() {
+            Qty(self.delta.0.checked_neg().expect("prepared magnitude"))
+        } else {
+            self.delta
+        };
+        let slots = self.holdings.part_slots.get(&self.part).expect("prepared part index");
+        let mut shares = Shares::new(magnitude, self.whole);
+        for &slot_id in slots {
+            let Some(slot) = self.holdings.slots.get_mut(slot_id as usize) else { continue };
+            let mut changed = false;
+            for parcel in &mut slot.holding.lots {
+                if parcel.part != Some(self.part) || parcel.qty <= Qty::ZERO {
+                    continue;
+                }
+                let weight = if self.delta.is_negative() { parcel.basis } else { parcel.qty };
+                let share = shares.take(weight);
+                if self.delta.is_negative() {
+                    parcel.basis -= share;
+                } else {
+                    parcel.basis += share;
+                }
+                changed = true;
+            }
+            if changed {
+                slot.ranked = None;
+            }
+        }
+    }
 }
 
 impl Holdings {
@@ -941,21 +979,20 @@ impl Holdings {
     /// their current basis (consumption) or quantity (capital carry). Shares
     /// are rounded once across the whole part, so their sum stays exact.
     pub(crate) fn adjust_part_basis(&mut self, part: PartId, delta: Qty) -> Result<(), AssetError> {
-        let plan = self.prepare_part_basis_adjustment(part, delta)?;
-        self.apply_part_basis_adjustment(plan);
+        self.prepare_part_basis_adjustment(part, delta)?.apply();
         Ok(())
     }
 
     /// Preflights every parcel-level share before either the holdings or the
-    /// asset-part table is mutated. The returned plan has no allocation and is
-    /// safe to commit as long as this Holdings value is unchanged.
+    /// asset-part table is mutated. The returned guard keeps an exclusive
+    /// borrow of this store until its infallible `apply` consumes it.
     pub(crate) fn prepare_part_basis_adjustment(
-        &self,
+        &mut self,
         part: PartId,
         delta: Qty,
-    ) -> Result<PartBasisAdjustment, AssetError> {
+    ) -> Result<PartBasisAdjustment<'_>, AssetError> {
         if delta.is_zero() {
-            return Ok(PartBasisAdjustment { part, delta, whole: Qty::ZERO });
+            return Ok(PartBasisAdjustment { holdings: self, part, delta, whole: Qty::ZERO });
         }
         let basis = self.part_basis(part)?;
         let magnitude = if delta.is_negative() {
@@ -1001,42 +1038,7 @@ impl Holdings {
                 }
             }
         }
-        Ok(PartBasisAdjustment { part, delta, whole: weights })
-    }
-
-    /// Applies a prepared basis update. All sums and individual parcel values
-    /// were checked by `prepare_part_basis_adjustment` before mutation.
-    pub(crate) fn apply_part_basis_adjustment(&mut self, plan: PartBasisAdjustment) {
-        if plan.delta.is_zero() {
-            return;
-        }
-        let magnitude = if plan.delta.is_negative() {
-            Qty(plan.delta.0.checked_neg().expect("prepared magnitude"))
-        } else {
-            plan.delta
-        };
-        let slots = self.part_slots.get(&plan.part).expect("prepared part index");
-        let mut shares = Shares::new(magnitude, plan.whole);
-        for &slot_id in slots {
-            let Some(slot) = self.slots.get_mut(slot_id as usize) else { continue };
-            let mut changed = false;
-            for parcel in &mut slot.holding.lots {
-                if parcel.part != Some(plan.part) || parcel.qty <= Qty::ZERO {
-                    continue;
-                }
-                let weight = if plan.delta.is_negative() { parcel.basis } else { parcel.qty };
-                let share = shares.take(weight);
-                if plan.delta.is_negative() {
-                    parcel.basis -= share;
-                } else {
-                    parcel.basis += share;
-                }
-                changed = true;
-            }
-            if changed {
-                slot.ranked = None;
-            }
-        }
+        Ok(PartBasisAdjustment { holdings: self, part, delta, whole: weights })
     }
 
     /// The slots of the places whose ids lie in `places`: a subtree.
