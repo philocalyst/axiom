@@ -81,7 +81,7 @@ The journal retains the monthly 250.00 USD checking-to-529 contributions and
 2,800.00 USD checking-to-savings transfers from 2025. They remain history-derived
 rhythms rather than newly invented outside-party contracts. The independent
 verifier checks all 12 monthly rows and their dates and amounts; the native runtime
-forecast still needs an end-to-end regression after the engine fold integration.
+report forecast still needs an end-to-end regression in the integrated CLI workspace.
 
 Files under `outputs/` and the corresponding old golden snapshots were produced
 before the v4 source conversion. They are retained as historical evidence and are
