@@ -38,6 +38,7 @@
 //! | `sync NAME`, its `read` or `run`, its `format`, `into` | [`Source`], [`Feed`], [`Format`], [`Sink`] |
 
 mod amount;
+mod binding;
 mod cell;
 mod command;
 mod csv;
@@ -46,6 +47,7 @@ mod diff;
 mod format;
 mod peg;
 mod paths;
+mod planner;
 mod promise;
 mod recognize;
 mod reconcile;
@@ -64,6 +66,7 @@ pub use axiom_model::sync::{Column, Field, Format, Rule, Shape, Spec};
 pub use command::{Failed, substitute};
 pub use format::read_memos;
 pub use peg::Patterns;
+pub use planner::{GeneratedSource, PlanOutcome, SourceFailure, SourceResult, plan};
 pub use promise::Due;
 pub use paths::matching_paths;
 pub use recognize::{KnownId, Reading, Recognized, Recognizer, Scratch, Tie, Who};

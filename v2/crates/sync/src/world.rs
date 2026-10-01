@@ -19,7 +19,7 @@ use crate::write::Layout;
 use crate::{Form, Insert, Record, Unit};
 
 /// What the book says about one account.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Account<'a> {
     /// Every flow, leg, derived flow and batch total the account has.
     pub flows: Vec<Existing<'a>>,
@@ -107,11 +107,23 @@ impl<'b, 's> World<'b, 's> {
         feed: &Feed<'b, 's>,
         text: &str,
     ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
+        self.feed_at(feed, text, FileId(0))
+    }
+
+    /// As [`feed`](Self::feed), with the file identity that owns the imported
+    /// text. Local imports and captured command output use auxiliary files so
+    /// diagnostics point into the actual input, not an arbitrary source file.
+    pub fn feed_at(
+        &mut self,
+        feed: &Feed<'b, 's>,
+        text: &str,
+        file: FileId,
+    ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
         let (records, problems) = crate::format::read(
             self.book,
             feed.format,
             text,
-            FileId(0),
+            file,
             feed.unit,
             &self.units,
         );
