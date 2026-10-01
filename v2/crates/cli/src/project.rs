@@ -319,6 +319,13 @@ impl Sources {
             .map(|file| &*file.path)
     }
 
+    /// Every source path in `FileId` order, including embedded systems.
+    /// Model locations store only the numeric file id, so adapters such as
+    /// sync use this slice to resolve a declaration back to its source path.
+    pub fn all_paths(&self) -> impl Iterator<Item = &str> {
+        self.files.iter().map(|file| &*file.path)
+    }
+
     /// The source at `path`, as `axiom why` or a diagnostic shows it.
     pub fn find(&self, path: &str) -> Option<&SourceFile> {
         self.files.iter().find(|file| file.path == path)
@@ -504,6 +511,14 @@ mod tests {
                 ("journal.ax", false),
                 ("us/401k.ax", true)
             ]
+        );
+        assert_eq!(
+            sources.all_paths().collect::<Vec<_>>(),
+            ["systems/us.ax", "journal.ax", "us/401k.ax"]
+        );
+        assert_eq!(
+            sources.project_paths().collect::<Vec<_>>(),
+            ["systems/us.ax", "journal.ax"]
         );
         assert_eq!(sources.get(FileId(2)).map(|file| file.id), Some(FileId(2)));
         assert!(sources.get(FileId(3)).is_none());
