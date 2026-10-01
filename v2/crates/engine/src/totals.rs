@@ -1058,58 +1058,71 @@ mod tests {
         assert_eq!(cancel.read(Days::on(target)), Ok((Qty::ZERO, Qty(i64::MAX))));
     }
 
-    /// Manual 1M-fact scale check for the retained tree and repeated range
-    /// query path. Run with `cargo test -p axiom-engine budget_history_million -- --ignored --nocapture`.
+    /// Manual operation-level comparison against the prior exact linear scan.
+    /// Run in release mode with `cargo test -p axiom-engine budget_history_scale_check --release -- --ignored --nocapture`.
     #[test]
-    #[ignore = "manual million-record budget-history scale check"]
-    fn budget_history_million_fact_scale_check() {
-        let started = std::time::Instant::now();
-        let mut history = History::default();
-        for index in 0..1_000_000_i32 {
-            history.record(Days::on(Day(index)), Dir::Out, Qty(1));
-        }
-        let built = started.elapsed();
-
-        let facts: Vec<_> = (0..1_000_000_i32)
-            .map(|index| RecognitionFact { over: Days::on(Day(index)), dir: Dir::Out, amount: Qty(1) })
-            .collect();
-        let index_bytes = history.days.capacity() * std::mem::size_of::<DayFact>()
-            + history.blocks.capacity() * std::mem::size_of::<BlockPrefix>()
-            + history.slow.capacity() * std::mem::size_of::<RecognitionFact>();
-        let linear_bytes = facts.capacity() * std::mem::size_of::<RecognitionFact>();
-
-        let index_started = std::time::Instant::now();
-        let mut index_checksum = 0_i128;
-        for query in 0..100_i32 {
-            let first = Day((query * 7_919) % 899_900);
-            let span = days(first, Day(first.0 + 99));
-            index_checksum += i128::from(history.read(span).unwrap().1.0);
-        }
-        let index_100 = index_started.elapsed();
-        let linear_started = std::time::Instant::now();
-        let mut linear_checksum = 0_i128;
-        for query in 0..100_i32 {
-            let first = Day((query * 7_919) % 899_900);
-            let span = days(first, Day(first.0 + 99));
-            for fact in &facts {
-                if let Some(overlap) = fact.over.intersect(span) {
-                    linear_checksum += i128::from(spread(fact.amount, fact.over, overlap).0);
+    #[ignore = "manual 100k/1M budget-history operation and capacity check"]
+    fn budget_history_scale_check() {
+        for count in [100_000_usize, 1_000_000] {
+            for facts_per_day in [1_usize, 100] {
+                let day_count = count / facts_per_day;
+                let started = std::time::Instant::now();
+                let mut history = History::default();
+                for index in 0..count {
+                    let day = Day((index / facts_per_day) as i32);
+                    let dir = if index % 3 == 0 { Dir::In } else { Dir::Out };
+                    let amount = Qty(if index % 11 == 0 { -2 } else { 3 });
+                    history.record(Days::on(day), dir, amount);
                 }
+                let built = started.elapsed();
+
+                let mut facts = Vec::with_capacity(count);
+                for index in 0..count {
+                    let day = Day((index / facts_per_day) as i32);
+                    let dir = if index % 3 == 0 { Dir::In } else { Dir::Out };
+                    let amount = Qty(if index % 11 == 0 { -2 } else { 3 });
+                    facts.push(RecognitionFact { over: Days::on(day), dir, amount });
+                }
+                let index_bytes = history.days.capacity() * std::mem::size_of::<DayFact>()
+                    + history.blocks.capacity() * std::mem::size_of::<BlockPrefix>()
+                    + history.slow.capacity() * std::mem::size_of::<RecognitionFact>();
+                let linear_bytes = facts.capacity() * std::mem::size_of::<RecognitionFact>();
+                let max_start = day_count.saturating_sub(100).max(1) as i32;
+                let query_span = |query: i32| {
+                    let first = Day((query * 7_919) % max_start);
+                    days(first, Day(first.0 + 99))
+                };
+
+                let index_started = std::time::Instant::now();
+                let mut index_checksum = (0_i128, 0_i128);
+                for query in 0..100_i32 {
+                    let (incoming, outgoing) = history.read(query_span(query)).unwrap();
+                    index_checksum.0 += i128::from(incoming.0);
+                    index_checksum.1 += i128::from(outgoing.0);
+                }
+                let index_100 = index_started.elapsed();
+
+                let linear_started = std::time::Instant::now();
+                let mut linear_checksum = (0_i128, 0_i128);
+                for query in 0..100_i32 {
+                    let span = query_span(query);
+                    for fact in &facts {
+                        if let Some(overlap) = fact.over.intersect(span) {
+                            let amount = i128::from(spread(fact.amount, fact.over, overlap).0);
+                            match fact.dir {
+                                Dir::In => linear_checksum.0 += amount,
+                                Dir::Out => linear_checksum.1 += amount,
+                            }
+                        }
+                    }
+                }
+                let linear_100 = linear_started.elapsed();
+
+                assert_eq!(index_checksum, linear_checksum);
+                eprintln!(
+                    "facts={count} facts_per_day={facts_per_day} unique_days={day_count} index_retained_capacity_bytes={index_bytes} linear_fact_capacity_bytes={linear_bytes} index_build={built:?} indexed_100_queries={index_100:?} exact_linear_100_queries={linear_100:?}"
+                );
             }
         }
-        let linear_100 = linear_started.elapsed();
-
-        let query_started = std::time::Instant::now();
-        let mut checksum = 0_i128;
-        for start in (0..900_000_i32).step_by(10) {
-            let sum = history.read(days(Day(start), Day(start + 99))).unwrap().1;
-            checksum += i128::from(sum.0);
-        }
-        let queried = query_started.elapsed();
-        eprintln!(
-            "facts=1000000 index_retained_capacity_bytes={index_bytes} linear_fact_capacity_bytes={linear_bytes} build={built:?} indexed_100_queries={index_100:?} linear_100_queries={linear_100:?} indexed_90000_queries={queried:?}"
-        );
-        assert_eq!(index_checksum, linear_checksum);
-        assert_eq!(checksum, 9_000_000);
     }
 }
