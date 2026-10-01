@@ -538,6 +538,7 @@ impl Fixture {
             flows,
             touching,
             asserts: self.asserts,
+            endings: Vec::new(),
             events: self.events,
             prices: Prices::default(),
             splits: self.splits,

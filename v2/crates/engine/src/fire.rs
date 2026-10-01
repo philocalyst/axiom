@@ -210,6 +210,7 @@ impl Ledger<'_, '_, '_> {
             &self.plan.book.laws[law],
             ctx,
             &mut self.scratch.values,
+            &mut self.scratch.budget_values,
             &mut self.scratch.outcomes,
         )
     }
@@ -382,6 +383,9 @@ impl Ledger<'_, '_, '_> {
     fn read(&mut self, rule: &Rule, ctx: &Context, step: u32, counted: Amount, limit: Amount) {
         let key = (rule.law, step, rule.subject);
         let facts = self.plan.laws[rule.law.index()].steps[step as usize];
+        let window = facts
+            .reads
+            .map_or(Days::on(ctx.anchor()), |reads| reads.window(self.plan.book, ctx));
         if let Some(h) = self.record.headroom.get_mut(&key) {
             // The window of a tally is the year of what it counts, not the day a total is read.
             let day = if matches!(facts.reads, Some(Reads::Tally(_))) {
@@ -389,16 +393,14 @@ impl Ledger<'_, '_, '_> {
             } else {
                 ctx.anchor()
             };
-            if h.days.contains(day) {
+            let same_budget_segment = matches!(facts.reads, Some(Reads::Budget(_))) && h.days == window;
+            if same_budget_segment || (!matches!(facts.reads, Some(Reads::Budget(_))) && h.days.contains(day)) {
                 (h.counted, h.limit, h.day) = (counted, limit, ctx.day);
                 return;
             }
         }
         // Only a comparison of amounts in order is read, and it says which way it holds.
         let Some(bound) = facts.bound else { return };
-        let window = facts
-            .reads
-            .map_or(Days::on(ctx.anchor()), |reads| reads.window(self.plan.book, ctx));
         let headroom = Headroom {
             law: rule.law,
             step,

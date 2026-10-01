@@ -164,6 +164,9 @@ impl Record {
 pub(crate) struct Scratch {
     /// The value of every node of the law that ran last.
     pub values: Vec<Value>,
+    /// Separate reusable node values for historical budget-limit expressions.
+    /// Those roots must not overwrite the current law's locals while it runs.
+    pub budget_values: Vec<Value>,
     pub outcomes: Vec<Outcome>,
     pub relief: Relief,
     /// Entities parcels are tied to, and whether their laws permit the flow.

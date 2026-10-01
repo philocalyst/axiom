@@ -839,6 +839,111 @@ entity grocer
 }
 
 #[test]
+fn native_carry_budget_splits_periods_at_dated_cadence_changes() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+purpose food : spending
+budget food 100 USD monthly carries
+account checking
+entity grocer
+opening 2025-01-01
+  checking 2_000 USD
+2025-01-15 #food now budget 1_000 USD yearly carries
+2025-04-01 #food now budget 100 USD monthly carries
+2025-01-05 checking -> grocer 120 USD #food
+2025-01-20 checking -> grocer 200 USD #food
+2025-03-05 checking -> grocer 100 USD #food
+2025-04-05 checking -> grocer 101 USD #food
+";
+    with_run(text, day(2025, 4, 30), |book, run| {
+        let (_, budget) = book.budgets.iter().next().expect("native budget declaration");
+        let mut readings: Vec<_> = run
+            .headroom
+            .iter()
+            .filter(|reading| reading.law == budget.law)
+            .map(|reading| {
+                (
+                    reading.days.first(),
+                    reading.days.last(),
+                    reading.counted.qty.0,
+                    reading.limit.qty.0,
+                )
+            })
+            .collect();
+        readings.sort();
+        assert!(readings.contains(&(day(2025, 1, 1), day(2025, 1, 31), 12_000, 10_000)), "{readings:?}");
+        assert!(readings.contains(&(day(2025, 1, 15), day(2025, 12, 31), 42_000, 110_000)), "{readings:?}");
+        assert!(readings.contains(&(day(2025, 4, 1), day(2025, 4, 30), 52_100, 120_000)), "{readings:?}");
+        assert_eq!(run.violations.iter().filter(|violation| violation.law == budget.law).count(), 1);
+    });
+}
+
+#[test]
+fn native_carry_setting_changes_begin_a_new_carry_run() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+purpose food : spending
+budget food 100 USD monthly
+account checking
+entity grocer
+opening 2025-01-01
+  checking 1_000 USD
+2025-02-01 #food now budget 100 USD monthly carries
+2025-03-01 #food now budget 100 USD monthly
+2025-01-05 checking -> grocer 120 USD #food
+2025-02-05 checking -> grocer 80 USD #food
+2025-03-05 checking -> grocer 110 USD #food
+";
+    with_run(text, day(2025, 3, 31), |book, run| {
+        let (_, budget) = book.budgets.iter().next().expect("native budget declaration");
+        let mut readings: Vec<_> = run
+            .headroom
+            .iter()
+            .filter(|reading| reading.law == budget.law)
+            .map(|reading| (reading.days.first(), reading.counted.qty.0, reading.limit.qty.0))
+            .collect();
+        readings.sort();
+        assert_eq!(
+            readings,
+            [
+                (day(2025, 1, 1), 12_000, 10_000),
+                (day(2025, 2, 1), 8_000, 10_000),
+                (day(2025, 3, 1), 11_000, 10_000),
+            ],
+            "turning carries on starts a fresh cumulative run and turning it off restores a window cap"
+        );
+    });
+}
+
+#[test]
+fn native_carry_budget_limit_overflow_is_a_fault_not_wrapped_arithmetic() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+purpose food : spending
+budget food 1_000_000_000_000_000 USD yearly carries
+account checking
+entity grocer
+opening 2025-01-01
+  checking 10 USD
+2025-01-05 checking -> grocer 1 USD #food
+2125-01-05 checking -> grocer 1 USD #food
+";
+    with_run(text, day(2125, 1, 31), |_, run| {
+        assert!(
+            run.diagnostics.iter().any(|diagnostic| diagnostic.code == "arithmetic"),
+            "summing more than i64::MAX quanta of dated allowances must fault, not wrap: {:?}",
+            run.diagnostics
+        );
+    });
+}
+
+#[test]
 fn a_flow_recognized_for_next_year_is_in_next_years_headroom_before_anything_else_lands_there() {
     let text = format!("{INSURANCE}2025-12-12 checking -> insurance 1_140 USD for 2026\n");
     with_run(&text, day(2026, 2, 14), |book, run| {

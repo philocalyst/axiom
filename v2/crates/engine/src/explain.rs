@@ -211,11 +211,17 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
                     ),
                     Reads::Budget(id) => {
                         let Some(budget) = book.budgets.get(id) else { return Vec::new() };
-                        let read_days = if budget.terms.at(ctx.day).carries {
-                            Days::new(budget.starts, ctx.anchor()).unwrap_or(window)
+                        let start = if budget.starts == Day::MIN {
+                            self.plan.period_start.unwrap_or(budget.starts)
                         } else {
-                            window
+                            budget.starts
                         };
+                        let active_start = if budget.terms.at(ctx.day).carries {
+                            crate::budget::carry_start(budget, start, ctx.anchor()).unwrap_or(start)
+                        } else {
+                            crate::budget::segment_start(budget, start, ctx.anchor())
+                        };
+                        let read_days = Days::new(active_start, ctx.anchor()).unwrap_or(window);
                         (vec![budget.purpose], read_days)
                     }
                     _ => unreachable!(),

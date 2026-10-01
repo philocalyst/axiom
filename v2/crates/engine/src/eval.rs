@@ -21,6 +21,7 @@ use axiom_model::{
 };
 
 use crate::calc::{Calc, progressive};
+use crate::budget::{carry_start as budget_carry_start, segment_end as budget_segment_end, segment_start as budget_segment_start, window as budget_window};
 use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
 use crate::plan::Plan;
@@ -228,6 +229,7 @@ pub(crate) fn run(
     law: &Law,
     ctx: &Context,
     values: &mut Vec<Value>,
+    budget_values: &mut Vec<Value>,
     out: &mut Vec<Outcome>,
 ) -> bool {
     values.resize(law.nodes.len(), Value::Empty);
@@ -237,6 +239,7 @@ pub(crate) fn run(
         law: Some(law),
         ctx,
         values,
+        budget_values,
         out,
     };
     if let Some(window) = ctx.purpose_window {
@@ -293,6 +296,7 @@ pub(crate) fn expression(
         law: Some(law),
         ctx,
         values,
+        budget_values: &mut Vec::new(),
         out: &mut Vec::new(),
     }
     .scan(root)
@@ -314,6 +318,7 @@ pub(crate) fn program_expression(
         law: None,
         ctx,
         values,
+        budget_values: &mut Vec::new(),
         out: &mut Vec::new(),
     }
     .scan(root)
@@ -325,19 +330,13 @@ struct Machine<'a, 's> {
     law: Option<&'a Law>,
     ctx: &'a Context<'a>,
     values: &'a mut Vec<Value>,
+    budget_values: &'a mut Vec<Value>,
     /// What the steps so far found. A later step's `tally(…)` sees the `count`s
     /// among them, which the ledger will not have applied until the law is done.
     out: &'a mut Vec<Outcome>,
 }
 
 const TYPED: &str = "the model type-checks operands";
-
-fn budget_window(period: axiom_core::Period) -> Window {
-    match period {
-        axiom_core::Period::Month => Window::Month,
-        axiom_core::Period::Year => Window::Year,
-    }
-}
 
 impl<'a, 's> Machine<'a, 's> {
     fn book(&self) -> &'a Book<'s> {
@@ -564,7 +563,7 @@ impl<'a, 's> Machine<'a, 's> {
         self.base(tallies.read(ctx.owner, year, name) + counted.sum())
     }
 
-    fn node(&self, at: usize) -> Value {
+    fn node(&mut self, at: usize) -> Value {
         match &self.nodes[NodeId(at as u32)].op {
             Op::Const(value) => *value,
             Op::Var(var) => self.var(*var),
@@ -825,7 +824,7 @@ impl<'a, 's> Machine<'a, 's> {
         }
     }
 
-    fn call(&self, at: NodeId, func: Func, args: &[NodeId]) -> Value {
+    fn call(&mut self, at: NodeId, func: Func, args: &[NodeId]) -> Value {
         let arg = |i: usize| self.at(args[i]);
         // `total` and `tally` take their operands from the function itself.
         let operands = !matches!(
@@ -914,9 +913,9 @@ impl<'a, 's> Machine<'a, 's> {
         }
         let terms = budget.terms.at(anchor);
         let first = if terms.carries {
-            start
+            budget_carry_start(budget, start, anchor).unwrap_or(start)
         } else {
-            start.max(budget_window(terms.period).around(anchor).first())
+            budget_segment_start(budget, start, anchor)
         };
         let Some(span) = Days::new(first, anchor) else {
             return Value::Fault(Fault::InvalidProgram);
@@ -934,7 +933,7 @@ impl<'a, 's> Machine<'a, 's> {
     /// The allowance in force for a generated native budget law. Computed
     /// limits are roots earlier in that law's shared node arena; share limits
     /// read the declared purpose total for the budget's own period.
-    fn budget_limit(&self, id: Id<axiom_model::Budget>, at: NodeId) -> Value {
+    fn budget_limit(&mut self, id: Id<axiom_model::Budget>, at: NodeId) -> Value {
         let Some(budget) = self.book().budgets.get(id) else {
             return Value::Fault(Fault::InvalidProgram);
         };
@@ -947,35 +946,35 @@ impl<'a, 's> Machine<'a, 's> {
             return self.base(Qty::ZERO);
         }
         let terms = *budget.terms.at(day);
-        let mut historical_values = Vec::new();
         if !terms.carries {
-            let window = budget_window(terms.period).around(day);
-            let span = Days::new(start.max(window.first()), day.min(window.last()));
+            let span = Days::new(budget_segment_start(budget, start, day), day);
             let Some(span) = span else {
                 return Value::Fault(Fault::InvalidProgram);
             };
-            return self.one_budget_limit(id, terms.limit, span, at, day, &mut historical_values);
+            return self.one_budget_limit(id, terms.limit, span, at, day);
         }
 
-        let mut cursor = start;
+        let mut cursor = budget_carry_start(budget, start, day).unwrap_or(start);
         let mut total = Qty::ZERO;
         while cursor <= day {
-            let period = budget_window(budget.terms.at(cursor).period);
-            let period_days = period.around(cursor);
-            let end = period_days.last().min(day);
+            let end = budget_segment_end(budget, cursor, day);
             let Some(span) = Days::new(cursor, end) else {
                 return Value::Fault(Fault::InvalidProgram);
             };
-            // A dated restatement changes the allowance in force for the
-            // window containing it. The window contributes one allowance.
+            // A limit restatement replaces the allowance of this open segment.
             let effective = *budget.terms.at(end);
-            let value = self.one_budget_limit(id, effective.limit, span, at, end, &mut historical_values);
+            let value = self.one_budget_limit(id, effective.limit, span, at, end);
             let Value::Amount(amount) = value else {
                 return value;
             };
             let calc = Calc { book: self.book(), day: end };
             match calc.convert(amount, self.book().base) {
-                Ok(amount) => total += amount.qty,
+                Ok(amount) => {
+                    let Some(sum) = total.0.checked_add(amount.qty.0) else {
+                        return Value::Fault(Fault::Overflow);
+                    };
+                    total = Qty(sum);
+                }
                 Err(fault) => return Value::Fault(fault),
             }
             if end == Day::MAX {
@@ -987,13 +986,12 @@ impl<'a, 's> Machine<'a, 's> {
     }
 
     fn one_budget_limit(
-        &self,
+        &mut self,
         id: Id<axiom_model::Budget>,
         limit: axiom_model::Limit,
         span: Days,
         at: NodeId,
         on: Day,
-        values: &mut Vec<Value>,
     ) -> Value {
         match limit {
             axiom_model::Limit::Amount(amount) => Value::Amount(amount),
@@ -1031,7 +1029,7 @@ impl<'a, 's> Machine<'a, 's> {
                     law,
                     root,
                     &context,
-                    values,
+                    self.budget_values,
                 );
                 match value {
                     value @ (Value::Amount(_) | Value::Fault(_)) => value,

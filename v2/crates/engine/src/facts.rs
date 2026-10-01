@@ -14,6 +14,7 @@ use axiom_model::{
 
 use crate::Bound;
 use crate::eval::Occasion;
+use crate::budget;
 
 /// Everything static about one law.
 pub(crate) struct LawFacts {
@@ -102,16 +103,10 @@ impl Reads {
     pub fn window(self, book: &Book, on: &Occasion) -> Days {
         match self {
             Reads::Total(_, window) | Reads::Purpose(window) => window.around(on.anchor()),
-            Reads::Budget(budget) => book.budgets.get(budget).map_or_else(
-                || Days::on(on.anchor()),
-                |budget| {
-                    let window = match budget.terms.at(on.anchor()).period {
-                        axiom_core::Period::Month => Window::Month,
-                        axiom_core::Period::Year => Window::Year,
-                    };
-                    window.around(on.anchor())
-                },
-            ),
+            Reads::Budget(id) => book
+                .budgets
+                .get(id)
+                .map_or_else(|| Days::on(on.anchor()), |budget| budget::segment_days(budget, on.anchor())),
             Reads::Tally(_) => Window::Year.around(on.over.first()),
         }
     }

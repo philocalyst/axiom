@@ -37,6 +37,7 @@
 mod calc;
 mod checkpoint;
 mod assets;
+mod budget;
 mod eval;
 mod events;
 mod explain;
