@@ -752,7 +752,7 @@ fn read(book: &Book, run: &Run, purpose: &str) -> Vec<(String, i64)> {
 }
 
 fn broken<'r>(book: &Book, run: &'r Run) -> Vec<&'r str> {
-    let named = |v: &&crate::Violation| book.name(book.laws[v.law].name) == "budget";
+    let named = |v: &&crate::Violation| book.budgets.iter().any(|(_, budget)| budget.law == v.law);
     run.violations.iter().filter(named).map(|v| run.diagnostics[v.diagnostic as usize].message.as_str()).collect()
 }
 
