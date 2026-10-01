@@ -134,6 +134,35 @@ account assets/checking
     assert_record_indices(&book);
 }
 
+#[test]
+fn computed_asset_assertions_compile_with_asset_fields() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+kind property : thing
+asset condo : property
+2026-01-31 condo = 50% of self.cost
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let assertion = &book.asserts[0];
+    let Some((program, root)) = assertion.computed else {
+        panic!("the computed amount should retain a program root");
+    };
+    assert!(matches!(
+        book.assertion_programs[program].nodes[root].typed_ty(),
+        Some(axiom_model::law::Ty::Amount(_))
+    ));
+}
+
 fn assert_record_indices(book: &axiom_model::book::Book<'_>) {
     for (txn_id, txn) in book.txns.iter() {
         let first = txn.flows.start().index();

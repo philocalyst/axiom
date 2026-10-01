@@ -75,8 +75,21 @@ impl<'s> Parser<'s> {
         match self.tok() {
             Tok::Punct(Punct::Eq) => {
                 self.bump();
-                if self.at(Punct::Minus) {
+                if self.at(Punct::Minus)
+                    && matches!(self.lexer.peek_second().tok, Tok::Number(_))
+                {
                     self.signed_literal().map(|literal| Verb::Value(Amount::Literal(literal)))
+                } else if self.at(Punct::Minus) {
+                    let start = self.peek().loc.start as usize;
+                    self.bump();
+                    let value = self.expression()?;
+                    let first = self.expr(value).first;
+                    let root = self.node(
+                        ExprKind::Unary(UnOp::Neg, value),
+                        self.loc_from(start),
+                        first,
+                    );
+                    Ok(Verb::Value(Amount::Computed(root)))
                 } else {
                     self.amount(scope).map(Verb::Value)
                 }

@@ -877,6 +877,11 @@ fn values_may_be_negative_and_may_say_where_a_gap_goes() {
     assert!(statements(&file).iter().all(|said| matches!(said.subject, Subject::Code(_)) && matches!(said.verb, Verb::Value(_))));
     let file = parse_clean("2026-01-31 checking = 1/2 of ^income\n");
     assert!(matches!(statements(&file)[0].verb, Verb::Value(Amount::Computed(_))));
+    let file = parse_clean("2026-01-31 checking = -50% of 100 USD\n");
+    let Verb::Value(Amount::Computed(root)) = statements(&file)[0].verb else {
+        panic!("a negative computed value");
+    };
+    assert!(matches!(file.exprs[root].kind, ExprKind::Unary(UnOp::Neg, _)));
     only_error("2026-01-31 a = 5\n", "expected-commodity");
 }
 

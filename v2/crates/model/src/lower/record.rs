@@ -744,6 +744,9 @@ fn lower_statement<'a, 's>(
             // Custom properties are lowered by props::declare, which stages
             // dated values and their inclusive `until` restoration.
         }
+        ast::Verb::Now(ast::Change::Budget(_)) => {
+            // Native budgets are lowered by the declaration/law pass.
+        }
         ast::Verb::Occurrence(_)
         | ast::Verb::Owes { .. }
         | ast::Verb::Now(_)
@@ -880,7 +883,7 @@ fn lower_value<'s>(
                 return;
             };
             let Some((amount, computed)) =
-                assertion_amount(world, home, file, value, fallback, diags)
+                assertion_amount(world, home, file, value, fallback, Ty::Place, diags)
             else {
                 return;
             };
@@ -899,7 +902,7 @@ fn lower_value<'s>(
                 return;
             };
             let Some((amount, computed)) =
-                assertion_amount(world, home, file, value, world.book.base, diags)
+                assertion_amount(world, home, file, value, world.book.base, Ty::Asset, diags)
             else {
                 return;
             };
@@ -984,6 +987,7 @@ fn assertion_amount<'s>(
     file: &ast::File<'s>,
     value: ast::Amount<'s>,
     fallback: Id<crate::book::Commodity>,
+    subject: Ty,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(Amount, Option<(Id<crate::book::TemplateProgram>, NodeId)>)> {
     match value {
@@ -997,7 +1001,7 @@ fn assertion_amount<'s>(
                 diags,
                 file,
                 home,
-                Ty::Place,
+                subject,
                 name,
                 &[],
                 &[(root, Ty::AMOUNT)],
