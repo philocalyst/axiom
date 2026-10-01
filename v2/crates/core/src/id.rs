@@ -82,6 +82,11 @@ impl<T> Arena<T> {
         id
     }
 
+    /// Reserves room for `additional` items without changing any existing id.
+    pub fn reserve(&mut self, additional: usize) {
+        self.items.reserve(additional);
+    }
+
     pub fn get(&self, id: Id<T>) -> Option<&T> {
         self.items.get(id.index())
     }
