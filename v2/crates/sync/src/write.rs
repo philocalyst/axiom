@@ -332,7 +332,7 @@ fn insert_items(text: &str, path: &str, adds: &[(Day, &str)]) -> Result<String, 
     let mut additions = Additions::default();
     for &(day, body) in adds {
         let (at, ctx) = place(&dated, day, (lines.len(), last));
-        additions.add(at, day, format_item(path, ctx.shorten(day), body)?);
+        additions.add(at, day, format_item(path, day, ctx.shorten(day), body)?);
     }
     Ok(additions.splice(&lines))
 }
@@ -340,8 +340,11 @@ fn insert_items(text: &str, path: &str, adds: &[(Day, &str)]) -> Result<String, 
 /// Format just the new transaction, leaving every existing source byte alone.
 /// Running `axiom fmt` over the combined journal here would make sync rewrite
 /// unrelated transactions in that file.
-fn format_item(path: &str, date: String, body: &str) -> Result<String, Vec<Diagnostic>> {
-    let source = format!("{date} {body}\n");
+fn format_item(path: &str, day: Day, date: String, body: &str) -> Result<String, Vec<Diagnostic>> {
+    // Parse a full date so a standalone item is valid even when its short date
+    // depends on a heading already in the destination file.
+    let full_date = day.to_string();
+    let source = format!("{full_date} {body}\n");
     let (file, problems) = axiom_syntax::parse(FileId(0), &source, Folder::of(path));
     if !problems.is_empty() {
         return Err(problems
@@ -349,9 +352,21 @@ fn format_item(path: &str, date: String, body: &str) -> Result<String, Vec<Diagn
             .map(|problem| problem.note("sync refused to write invalid generated Axiom syntax"))
             .collect());
     }
-    Ok(format(&source, &file)
-        .trim_end_matches(['\r', '\n'])
-        .to_string())
+    let formatted = format(&source, &file);
+    let formatted = formatted.trim_end_matches(['\r', '\n']);
+    let Some(rest) = formatted.strip_prefix(&full_date) else {
+        return Err(vec![Diagnostic::error(
+            "sync-format",
+            "the formatter changed the generated item's full date",
+        )]);
+    };
+    if !rest.starts_with(' ') {
+        return Err(vec![Diagnostic::error(
+            "sync-format",
+            "the formatter did not leave a space after the generated item's date",
+        )]);
+    }
+    Ok(format!("{date}{rest}"))
 }
 
 /// Whether a path names a file beneath the project root. A sync declaration
@@ -615,7 +630,13 @@ mod tests {
     #[test]
     fn a_new_item_uses_the_house_formatter_and_parses_back() {
         let path = "journal/2026/03.ax";
-        let item = format_item(path, "05".into(), "checking -> store 12 USD \"memo\"").unwrap();
+        let item = format_item(
+            path,
+            day("2026-03-05"),
+            "05".into(),
+            "checking -> store 12 USD \"memo\"",
+        )
+        .unwrap();
         let source = format!("{item}\n");
         let (file, problems) = axiom_syntax::parse(FileId(0), &source, Folder::of(path));
         assert!(problems.is_empty(), "{problems:?}");
