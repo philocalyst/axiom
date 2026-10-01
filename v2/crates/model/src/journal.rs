@@ -244,13 +244,16 @@ mod runtime_txn_tests {
 
     #[test]
     fn occurrence_keys_include_schedule_and_ordinal_but_not_source_provenance() {
-        let base = RuntimeTxn::ContractOccurrence {
-            contract: Id::new(2),
-            schedule: ScheduleKind::Regular,
-            day: Day(42),
-            ordinal: 3,
-            source: None,
+        let occurrence = |schedule, ordinal| {
+            RuntimeTxn::contract_occurrence(
+                Id::new(2),
+                schedule,
+                Day(42),
+                ordinal,
+                None,
+            )
         };
+        let base = occurrence(ScheduleKind::Regular, 3);
         let kept = RuntimeTxn::contract_occurrence(
             Id::new(2),
             ScheduleKind::Regular,
@@ -258,8 +261,8 @@ mod runtime_txn_tests {
             3,
             Some(Id::new(9)),
         );
-        let standing = RuntimeTxn::ContractOccurrence { schedule: ScheduleKind::Standing, ..base };
-        let next = RuntimeTxn::ContractOccurrence { ordinal: 4, ..base };
+        let standing = occurrence(ScheduleKind::Standing, 3);
+        let next = occurrence(ScheduleKind::Regular, 4);
         assert_eq!(base, kept);
         assert_ne!(base, standing);
         assert_ne!(base, next);
@@ -391,7 +394,7 @@ mod journal_program_tests {
 
     #[test]
     fn sparse_program_handles_do_not_grow_the_common_flow_record() {
-        assert_eq!(std::mem::size_of::<Flow>(), 200);
+        assert!(std::mem::size_of::<Flow>() <= 200);
         assert!(std::mem::size_of::<Txn>() <= 96);
     }
 }

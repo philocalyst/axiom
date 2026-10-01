@@ -171,7 +171,9 @@ mod tests {
     fn arithmetic_follows_the_rules_of_amounts() {
         assert_eq!(binary(BinOp::Add, Ty::AMOUNT, Ty::Empty), Some(Ty::AMOUNT));
         assert_eq!(binary(BinOp::Mul, Ty::Num, Ty::AMOUNT), Some(Ty::AMOUNT));
-        assert_eq!(binary(BinOp::Div, Ty::AMOUNT, Ty::AMOUNT), Some(Ty::Num));
+        assert_eq!(binary(BinOp::Div, Ty::AMOUNT, Ty::AMOUNT), None);
+        let usd = Ty::Amount(Dim::Of(axiom_core::Id::new(0)));
+        assert_eq!(binary(BinOp::Div, usd, usd), Some(Ty::Num));
         assert_eq!(binary(BinOp::Sub, Ty::Day, Ty::Day), Some(Ty::Span));
         assert_eq!(binary(BinOp::Add, Ty::Day, Ty::AMOUNT), None);
         assert_eq!(binary(BinOp::Mul, Ty::AMOUNT, Ty::AMOUNT), None);

@@ -2287,7 +2287,7 @@ mod native_property_tests {
         for rate in [Ratio::new(3, 2).unwrap(), Ratio::new(-1, 2).unwrap()] {
             let diagnostic = validate_share_rate(rate, loc).unwrap_err();
             assert_eq!(diagnostic.code, "share-rate-range");
-            assert_eq!(diagnostic.anchor(), loc);
+            assert_eq!(diagnostic.anchor(), Some(loc));
         }
     }
 }

@@ -1249,23 +1249,21 @@ mod tests {
     }
 
     fn book() -> Book<'static> {
-        let system = include_str!("../../systems/src/std.ax");
-        let sources = [("std.ax", system, true), ("axiom.ax", "base USD\n", false)].map(
-            |(path, text, embedded)| {
-                let (file, diagnostics) =
-                    axiom_syntax::parse(FileId(0), text, Folder::default());
-                assert!(diagnostics.is_empty(), "{path}: {diagnostics:?}");
-                crate::Source {
-                    path,
-                    file,
-                    embedded,
-                }
-            },
+        let path = "axiom.ax";
+        let (file, diagnostics) = axiom_syntax::parse(
+            FileId(0),
+            "base USD\ncommodity USD\n",
+            Folder::default(),
         );
-        let (book, diagnostics) = crate::build(&sources);
+        assert!(diagnostics.is_empty(), "{path}: {diagnostics:?}");
+        let (book, diagnostics) = crate::build(&[crate::Source {
+            path,
+            file,
+            embedded: false,
+        }]);
         assert!(
             diagnostics.is_empty(),
-            "standard fixture failed to build: {diagnostics:?}"
+            "minimal model fixture failed to build: {diagnostics:?}"
         );
         book
     }
@@ -1329,7 +1327,7 @@ mod tests {
                     (at + 1 < count).then_some(at + 1)
                 };
                 let program = callee.map_or_else(
-                    || Box::default(),
+                    || Box::<[Op]>::default(),
                     |callee| Box::new([Op::Call(Id::new(callee as u32))]),
                 );
                 arena.push(Pattern {
