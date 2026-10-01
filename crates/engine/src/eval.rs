@@ -1676,6 +1676,7 @@ commodity VTI : security
   precision 3
 purpose wages : income
 purpose rollover : spending
+purpose fees : spending
 account checking : bank
 account ira : bank
 account savings
