@@ -68,12 +68,12 @@ for scale in $scales; do
     measure flow flow
     measure available available
     measure budget budget "$last_month"
-    measure tax tax "$last_year" --entity p1
+    measure tax tax "$last_year" --for p1
     measure lots lots p1/invest/brokerage
     measure forecast forecast
     measure why-place why p1/bank/checking
     measure why-law why deferral-limit
-    measure why-code why '#chk-p1-000010'
+    measure why-code why '^chk-p1-000010'
     measure why-line why journal/2024/03.ax:100
     # the laws-free twin: same journal, no laws
     dir=$work/$scale-nolaws
