@@ -2653,6 +2653,14 @@ fn statement_target<'s>(
             if let Some(asset) = world.book.asset(name.0) {
                 return Some(StatementTarget::Asset(asset));
             }
+            if let Some(contract) = world.book.contract(name.0)
+                && let Some(loan) = world.book.contracts[contract].loan
+            {
+                // A loan contract's name denotes its debt position in a
+                // balance assertion, not the lender entity that resolves as
+                // its ordinary flow endpoint.
+                return Some(StatementTarget::Place(loan.debt));
+            }
             let word = Word {
                 text: name.0,
                 loc: file.loc(name.0),

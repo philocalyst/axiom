@@ -1174,6 +1174,7 @@ contract mortgage with rocket
   loan 320_000 USD on 2024-02-20 at 5.875% over 30y for condo
     prepay recasts
   monthly on 1 from checking
+2026-01-31 mortgage = 300_000 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -1195,6 +1196,12 @@ contract mortgage with rocket
     assert_eq!(loan.asset, book.asset("condo"));
     assert_eq!(book.places[loan.debt].class, axiom_model::Class::Debt);
     assert_eq!(loan.prepay, axiom_model::Prepay::Recasts);
+    assert_eq!(book.asserts.len(), 1);
+    assert_eq!(book.asserts[0].place, loan.debt);
+    assert!(matches!(
+        book.asserts[0].subject,
+        axiom_model::law::Subject::Place(place) if place == loan.debt
+    ));
     let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
     assert_eq!(terms.rate, Some(axiom_core::Ratio::percent(5_875, 3).unwrap()));
     assert!(matches!(
