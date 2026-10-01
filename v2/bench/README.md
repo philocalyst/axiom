@@ -27,7 +27,6 @@ create lots with their actual dates, quantities, and exact cash amounts.
 The old 529 qualification marker applied only to the four `edu/tuition/*`
 destinations; books, supplies, and fees were not qualified. The native source
 keeps `pN-edu-tuition` under the standard `education` purpose and keeps the
-other edu leaves under `pN-edu`. A per-owner law on the spending root adds the
 other edu leaves under `pN-edu`. Two owner-filtered laws apply the same
 combined monthly cap: one under each of those purpose subtrees sums
 `total(#pN-edu, month)` and `total(#pN-edu-tuition, month)` before comparing
