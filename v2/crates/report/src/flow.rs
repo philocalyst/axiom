@@ -89,16 +89,19 @@ pub(crate) fn view_by_party_with_lens<'s>(
             flow.to
         };
         let party = flow.payee.map_or(Party::Place(other), Party::Entity);
+        let mut row_index = None;
         for period in periods.overlapping(flow.recognized.first(), flow.recognized.last()) {
             let window = periods.window(period).days();
             let Some(happened) = Days::new(window.first(), window.last().min(cutoff)) else {
                 continue;
             };
             let part = spread(amount, flow.recognized, happened);
-            let index = *values.entry((root, party)).or_insert_with(|| {
-                let index = amounts.len() / periods.len();
-                amounts.resize(index * periods.len() + periods.len(), Qty::ZERO);
-                index
+            let index = *row_index.get_or_insert_with(|| {
+                *values.entry((root, party)).or_insert_with(|| {
+                    let index = amounts.len() / periods.len();
+                    amounts.resize(index * periods.len() + periods.len(), Qty::ZERO);
+                    index
+                })
             });
             amounts[index * periods.len() + period] += part;
         }
