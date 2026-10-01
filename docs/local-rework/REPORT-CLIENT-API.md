@@ -22,11 +22,13 @@ run. Pass `whose` once to keep report scope consistent across queries. A client
 that already owns a `Run` can use the free `report(book, run, query, whose)`
 function; that compatibility path continues to use the supplied run.
 
-`Query` is the client-facing description of the currently implemented views:
+`Query` is the client-facing description of the current report views:
 balance, register, flow, available, budget, limits, claims, tax, gains, lots,
-forecast, and why. `Query::Why` can also express `why FILE:LINE`; the source
-provider resolves it to a `Loc` without requiring the report crate to read
-files or depend on CLI code.
+contracts, forecast, and why. `register` and `why` accept `entity:NAME` to
+select an entity when its name is also used by a contract; bare ambiguous
+names select the contract consistently. `Query::Why` can also express
+`why FILE:LINE`; the source provider resolves it to a `Loc` without requiring
+the report crate to read files or depend on CLI code.
 
 ## Sources and renderer boundary
 
@@ -68,11 +70,11 @@ without re-running a view. The current document has this shape:
 }
 ```
 
-Cells are tagged objects: `blank`; `text` with a string `value`; `amount` with
-a display-string `value` and a separate `unit`; `day` with an ISO date string;
-`percent` with the same percentage text used by the text renderer; and `source`
-with its location. A source location includes `file`, `line`, and `column`
-when the provider can describe it, plus the raw `file_id`, `start_byte`, and
+Cells are tagged objects, including `blank`, `word`, `text`, `name`, `code`,
+`purpose`, `sentence`, `amount`, `day`, `span`, `period`, `percent`, `number`,
+`count`, `trigger`, and `source`. Amounts carry a display-string `value` and a
+separate `unit`; a source location includes `file`, `line`, and `column` when
+the provider can describe it, plus the raw `file_id`, `start_byte`, and
 `end_byte`. Unknown display positions are `null`; raw location identity and
 byte offsets remain present.
 
@@ -93,8 +95,9 @@ end cursor, and its `replacement` text. Unresolved display positions are
 `null`, while their file IDs and byte ranges remain available to machine
 clients.
 
-The current API represents report tables and typed cells. The broader v4
-facts, sentences, and XBRL concepts described in the rework brief are not yet
-implemented, nor are future views such as contracts or measures. They should
-be added when their model and engine producers exist rather than inferred by a
-renderer from today's cell strings.
+Reports share typed table data, structured sentence cells, and explicit
+section facts. The broader v4 facts and normative XBRL concept catalog remain
+a migration gap; renderers must not infer them from today's display strings.
+Contract terms that require computed inputs are likewise shown as computed per
+occurrence until the engine's shared template evaluator is wired into forecast
+and register views.

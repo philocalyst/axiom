@@ -58,7 +58,7 @@ pub enum Query<'a> {
         value: bool,
         monthly: bool,
     },
-    /// A place's flows with a running balance.
+    /// A place, `entity:NAME`, asset or contract's register.
     Register {
         place: &'a str,
         from: Option<Day>,
@@ -95,7 +95,7 @@ pub enum Query<'a> {
     /// Plans, inferred recurrences, obligations and growth, run forward
     /// through the laws, with bands from bootstrapped spending.
     Forecast { until: Option<Day>, paths: u32 },
-    /// Explains a place, `^code`, `#purpose`, asset, contract, law or source line.
+    /// Explains a place, `entity:NAME`, `^code`, `#purpose`, asset, contract, law or source line.
     Why { target: &'a str },
     /// Explains what is written at one resolved source location and everything
     /// it caused. A client uses its [`SourceProvider`] to resolve `why FILE:LINE`.

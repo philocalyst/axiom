@@ -45,14 +45,30 @@ pub(crate) fn view_with_lens<'s>(
     to: Option<Day>,
 ) -> Result<Report<'s>, Diagnostic> {
     let book = lens.book;
-    if let Ok(entity) = book.entity(place) {
-        return Ok(entity_view(lens, run, entity, place, from, to));
+    if let Some(contract) = place.strip_prefix("contract:") {
+        let contract = resolve::contract(book, contract)?;
+        return Ok(contract_register(lens, run, contract, from, to));
+    }
+    if let Some(asset) = place.strip_prefix("asset:") {
+        let asset = resolve::asset(book, asset)?;
+        return Ok(asset_register(lens, run, asset, from, to));
+    }
+    if let Some(entity) = place.strip_prefix("entity:") {
+        let entity = book.entity(entity).map_err(|miss| resolve::entity_miss(book, entity, miss))?;
+        let target = book.name(book.entities[entity].path);
+        return Ok(entity_view(lens, run, entity, target, from, to));
+    }
+    // A contract may share its name with its party. Follow `why`'s
+    // precedence so the contract register remains addressable by its declared
+    // name; the party's own register can be selected with `entity:NAME`.
+    if let Some(contract) = book.contract(place) {
+        return Ok(contract_register(lens, run, contract, from, to));
     }
     if let Some(asset) = book.asset(place) {
         return Ok(asset_register(lens, run, asset, from, to));
     }
-    if let Some(contract) = book.contract(place) {
-        return Ok(contract_register(lens, run, contract, from, to));
+    if let Ok(entity) = book.entity(place) {
+        return Ok(entity_view(lens, run, entity, place, from, to));
     }
     let place = resolve::place(book, place)?;
     // A place is somebody's: another owner's register is not part of whose money this is.
@@ -393,7 +409,7 @@ pub fn section<'s>(
 
 /// Builds a register for a place within an owner's view.
 pub(crate) fn section_for<'s>(
-    book: &'s Book<'s>,
+    book: &Book<'s>,
     run: &Run,
     place: Id<Place>,
     from: Option<Day>,

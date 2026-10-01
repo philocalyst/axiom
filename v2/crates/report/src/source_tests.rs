@@ -243,6 +243,77 @@ commodity HR : measure
     });
 }
 
+/// A contract may share its name with its party. Bare targets select the
+/// contract, and `entity:NAME` keeps the party register addressable.
+#[test]
+fn register_resolves_a_contract_sharing_its_partys_name() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+
+entity me : person
+entity figma
+account checking : asset
+
+contract figma with figma
+  15 USD monthly on 3 from checking
+";
+
+    with_run(source, day(2026, 1, 5), |book, run| {
+        let contract = crate::report(
+            book,
+            run,
+            &Query::Register {
+                place: "figma",
+                from: None,
+                to: None,
+            },
+            None,
+        )
+        .unwrap();
+        assert!(contract.sections.iter().flat_map(|s| &s.rows).any(|row| {
+            row.cells
+                .iter()
+                .any(|cell| matches!(cell, crate::Cell::Word("terms active")))
+        }));
+
+        let party = crate::report(
+            book,
+            run,
+            &Query::Register {
+                place: "entity:figma",
+                from: None,
+                to: None,
+            },
+            None,
+        )
+        .unwrap();
+        assert!(!party.sections.iter().flat_map(|s| &s.rows).any(|row| {
+            row.cells
+                .iter()
+                .any(|cell| matches!(cell, crate::Cell::Word("terms active")))
+        }));
+
+        let why_contract = crate::report(
+            book,
+            run,
+            &Query::Why { target: "figma" },
+            None,
+        )
+        .unwrap();
+        assert_eq!(why_contract.sections[0].heading.as_deref(), Some("Terms over time"));
+        let why_party = crate::report(
+            book,
+            run,
+            &Query::Why { target: "entity:figma" },
+            None,
+        )
+        .unwrap();
+        assert_eq!(why_party.sections[0].heading.as_deref(), Some("Places"));
+    });
+}
+
 // ─── Basis flows ────────────────────────────────────────────────────────────
 
 /// An improvement to a holding: 100 USD paid into the basis of ten shares.

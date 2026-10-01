@@ -255,7 +255,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         "register",
         Operands::One("TARGET"),
         &[Opt::From, Opt::To],
-        "a place's flows, running balance",
+        "a place, `entity:NAME`, asset or contract's register",
     ),
     command(
         Verb::Flow,
@@ -332,7 +332,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         "why",
         Operands::One("TARGET"),
         &[],
-        "a place, entity, system, ^code, #purpose, asset, contract, law, tax line, file:line or description",
+        "a place, entity:NAME, system, ^code, #purpose, asset, contract, law, tax line, file:line or description",
     ),
     command(
         Verb::Sync,

@@ -1,5 +1,7 @@
 //! `why FILE:LINE`: what is written on one source line, and everything it caused.
 
+use std::collections::BTreeSet;
+
 use axiom_core::{Id, Loc};
 use axiom_engine::{Cause, Run};
 use axiom_model::{Amount, Book, Flow, Object, Provenance};
@@ -63,6 +65,7 @@ fn items(
     flows: &[Id<Flow>],
 ) -> Vec<(String, Loc)> {
     let mut items = Vec::new();
+    let visible_codes = scoped_codes(book, whose);
     for &id in flows {
         let posting = Posting::at(book, run, id);
         let flow = posting.flow;
@@ -115,7 +118,9 @@ fn items(
         .asserts
         .iter()
         .enumerate()
-        .filter(|(_, assertion)| overlaps(assertion.loc, at))
+        .filter(|(_, assertion)| {
+            overlaps(assertion.loc, at) && whose.includes(book.places[assertion.place].owner)
+        })
     {
         let gap = run
             .pads
@@ -132,7 +137,10 @@ fn items(
             assertion.loc,
         ));
     }
-    for event in book.events.iter().filter(|event| overlaps(event.loc, at)) {
+    for event in book.events.iter().filter(|event| {
+        overlaps(event.loc, at)
+            && (whose.is_everyone() || visible_codes.contains(&event.code))
+    }) {
         items.push((
             format!(
                 "event: ^{} {}",
@@ -170,6 +178,7 @@ fn items(
     items.extend(
         book.measures
             .iter()
+            .map(|(_, measure)| measure)
             .filter(|measure| overlaps(measure.loc, at) && whose.includes(measure.owner))
             .map(|measure| {
                 let action = match measure.action {
@@ -212,7 +221,10 @@ fn items(
     items.extend(
         book.readings
             .iter()
-            .filter(|reading| overlaps(reading.loc, at))
+            .filter(|reading| {
+                overlaps(reading.loc, at)
+                    && (whose.is_everyone() || visible_codes.contains(&reading.code))
+            })
             .map(|reading| {
                 (
                     format!(
@@ -226,6 +238,35 @@ fn items(
     );
     items.extend(declarations(book, at));
     items
+}
+
+/// Codes named by data visible in this owner scope. Events and readings have
+/// no owner of their own, so an owner-scoped source query only exposes them
+/// when a visible flow, measure or contract refers to their code.
+fn scoped_codes(book: &Book, whose: &Whose) -> BTreeSet<axiom_core::Sym> {
+    let mut codes = BTreeSet::new();
+    for (_, flow) in book.flows.iter().filter(|(_, flow)| whose.includes(flow.owner)) {
+        codes.extend(book.flow_view(flow).codes());
+    }
+    for (_, measure) in book
+        .measures
+        .iter()
+        .filter(|(_, measure)| whose.includes(measure.owner))
+    {
+        codes.extend(measure.codes.iter().copied());
+    }
+    for (_, contract) in book
+        .contracts
+        .iter()
+        .filter(|(_, contract)| whose.includes(contract.owner))
+    {
+        for (_, terms) in contract.terms.within(contract.days) {
+            for template in &terms.template {
+                codes.extend(book.flow_view(&template.flow).codes());
+            }
+        }
+    }
+    codes
 }
 
 /// Places, entities and commodities declared on the line.

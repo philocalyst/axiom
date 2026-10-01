@@ -120,6 +120,14 @@ pub fn target<'s>(
     whose: &Whose,
     text: &str,
 ) -> Result<Report<'s>, Diagnostic> {
+    if let Some(contract) = text.strip_prefix("contract:") {
+        let contract = resolve::contract(book, contract)?;
+        return Ok(contract::report(book, run, whose, contract));
+    }
+    if let Some(entity) = text.strip_prefix("entity:") {
+        let entity = resolve::entity(book, entity)?;
+        return Ok(entity::report(book, run, whose, entity));
+    }
     if let Some(code) = text.strip_prefix('^') {
         return code::report(book, run, whose, code);
     }

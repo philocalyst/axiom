@@ -4,7 +4,10 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Days, Id, Qty};
 use axiom_engine::Run;
-use axiom_model::{Book, Cadence, Contract, On, TemplateFlow, Terms, TermsState};
+use axiom_model::{
+    Book, Cadence, Contract, FlowSide, On, TemplateAmount, TemplateFlow, TemplateItem,
+    TemplateItemParent, TemplateQuantity, Terms, TermsState,
+};
 
 use crate::lens::Whose;
 use crate::places::route;
@@ -127,25 +130,83 @@ fn loan_balance<'s>(book: &Book<'s>, run: &Run, contract: &Contract) -> Cell<'s>
 /// evaluate at the occurrence date.
 pub(crate) fn template_flow_cell<'s>(book: &Book<'s>, template: &TemplateFlow) -> Cell<'s> {
     let flow = &template.flow;
-    let amount = if template.out.is_some() || template.arrive.is_some() {
-        Cell::Word("computed per occurrence")
-    } else if flow.is_exchange() {
+    let codes = crate::table::code_labels(book, book.flow_view(flow).codes()).collect::<Vec<_>>();
+    let header = Cell::list(
+        " ",
+        [
+            Cell::text(route(book, flow)),
+            template_quantity(book, template.out, flow.out),
+            flow.is_exchange().then(|| template_quantity(book, template.arrive, flow.arrive)).unwrap_or(Cell::Blank),
+        ]
+        .into_iter()
+        .chain(codes),
+    );
+    let legs = template.legs.iter().map(|leg| {
+        let side = match leg.side {
+            FlowSide::Out => "out",
+            FlowSide::Arrive => "arrive",
+        };
         Cell::list(
-            " for ",
+            " ",
             [
-                Cell::amount(book, flow.out),
-                Cell::amount(book, flow.arrive),
+                Cell::Word("split"),
+                Cell::text(route(book, &leg.flow)),
+                Cell::Word(side),
+                template_quantity(book, leg.quantity, match leg.side { FlowSide::Out => leg.flow.out, FlowSide::Arrive => leg.flow.arrive }),
             ],
         )
-    } else {
-        Cell::amount(book, flow.out)
+    });
+    let items = template.items.iter().map(|item| template_item_cell(book, item));
+    Cell::list("; ", std::iter::once(header).chain(legs).chain(items))
+}
+
+fn template_quantity<'s>(book: &Book<'s>, quantity: TemplateQuantity, literal: axiom_model::Amount) -> Cell<'s> {
+    match quantity {
+        TemplateQuantity::Amount(None) => Cell::amount(book, literal),
+        TemplateQuantity::Amount(Some(_)) => Cell::Word("computed per occurrence"),
+        TemplateQuantity::Pending(None) => Cell::Word("pending amount"),
+        TemplateQuantity::Pending(Some(_)) => Cell::Word("computed pending amount"),
+        TemplateQuantity::Target(None) => Cell::Word("target amount"),
+        TemplateQuantity::Target(Some(_)) => Cell::Word("computed target amount"),
+        TemplateQuantity::Unknown(unit) => Cell::list(" ", [Cell::Word("unknown"), Cell::Name(book.name(book.commodities[unit].symbol))]),
+        TemplateQuantity::All(unit) => unit.map_or(Cell::Word("all"), |unit| {
+            Cell::list(" ", [Cell::Word("all"), Cell::Name(book.name(book.commodities[unit].symbol))])
+        }),
+        TemplateQuantity::Rest => Cell::Word("rest"),
+        TemplateQuantity::Whole => Cell::Word("whole"),
+        TemplateQuantity::Derived => Cell::Word("derived by contract rule"),
+    }
+}
+
+fn template_item_cell<'s>(book: &Book<'s>, item: &TemplateItem) -> Cell<'s> {
+    let sign = match item.sign {
+        axiom_model::Sign::Carve => "carves",
+        axiom_model::Sign::Add => "adds",
+        axiom_model::Sign::Less => "takes off",
     };
-    let codes = crate::table::code_labels(book, book.flow_view(flow).codes()).collect::<Vec<_>>();
+    let parent = match item.parent {
+        TemplateItemParent::Header => Cell::Word("header"),
+        TemplateItemParent::Leg(index) => Cell::text(format!("split {}", index + 1)),
+    };
+    let side = match item.side {
+        FlowSide::Out => "out",
+        FlowSide::Arrive => "arrive",
+    };
+    let amount = match item.amount {
+        TemplateAmount::Literal(amount) => Cell::amount(book, amount),
+        TemplateAmount::Computed(_) => Cell::Word("computed per occurrence"),
+    };
+    let purpose = item.purpose.map_or(Cell::Blank, |purpose| {
+        Cell::Purpose(book.name(book.purposes[purpose.purpose].name))
+    });
+    let codes = crate::table::code_labels(book, book.codes[item.codes].iter().copied()).collect::<Vec<_>>();
     Cell::list(
         " ",
-        std::iter::once(Cell::text(route(book, flow)))
-            .chain(std::iter::once(amount))
-            .chain(codes),
+        [Cell::Word(sign), parent, Cell::Word(side), amount, purpose]
+            .into_iter()
+            .chain(item.description.map(|description| Cell::text(book.name(description))))
+            .chain(codes)
+            .chain(std::iter::once(Cell::Source(item.loc))),
     )
 }
 
