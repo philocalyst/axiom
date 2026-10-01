@@ -8,6 +8,7 @@
 
 use axiom_core::{Day, FileId};
 use axiom_model::{Book, Source};
+use axiom_syntax::Folder;
 
 use crate::{Holding, Options, Run};
 
@@ -17,7 +18,7 @@ fn day(year: i32, month: u32, day: u32) -> Day {
 
 /// Compiles `text` as a project of one file, which must have no errors.
 fn with_book<R>(text: &str, then: impl FnOnce(&Book) -> R) -> R {
-    let (file, parsed) = axiom_syntax::parse(FileId(0), text);
+    let (file, parsed) = axiom_syntax::parse(FileId(0), text, Folder::default());
     assert!(parsed.is_empty(), "the source does not parse: {parsed:?}");
     let (book, built) = axiom_model::build(&[Source { path: "axiom.ax", file, embedded: false }]);
     assert!(built.iter().all(|diagnostic| !diagnostic.is_error()), "the book has errors: {built:?}");

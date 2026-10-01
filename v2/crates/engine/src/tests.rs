@@ -72,6 +72,40 @@ fn dimensional_prices_apply_the_result_commodity_scale_once() {
 }
 
 #[test]
+fn cap_shortcut_uses_typed_conversion_when_the_limit_unit_differs() {
+    let mut f = Fixture::new();
+    let (usd, vti, checking, salary) = (f.usd, f.vti, f.checking, f.salary);
+    let mut law = LawBuilder::new(f.sym("quoted-cap"), Trigger::In);
+    let total = law.call(Func::Total(Dir::In, Window::Month), &[], Ty::AMOUNT);
+    let cap = law.konst(Value::Amount(Amount::new(Qty(100), vti)), Ty::AMOUNT);
+    let condition = law.bin(BinOp::Le, total, cap, Ty::Bool);
+    let law = f.law(law.require(condition, None));
+    let rule = f.rule(law, Subject::Place(checking));
+    f.on_in.push((checking, rule));
+    f.flow(1, salary, checking, 100);
+
+    let mut book = f.book();
+    // Use the same precision as USD so raw quanta happen to match even though
+    // the quoted values do not. The shortcut must decline to compare them.
+    book.commodities[vti].scale = 2;
+    book.prices = Prices::new(vec![Quote {
+        unit: usd,
+        quote: vti,
+        day: Day(1),
+        rate: Ratio::int(2),
+        implied: false,
+        loc: Loc::new(FileId(0), 0, 1),
+    }]);
+    assert_eq!(book.convert(Amount::new(Qty(100), usd), vti, Day(1)), Some(Amount::new(Qty(200), vti)));
+    let run = Plan::new(&book).run(options());
+
+    assert_eq!(run.violations.len(), 1, "1.00 USD is 200 VTI and exceeds the 100 VTI cap");
+    let reading = run.headroom.iter().find(|reading| reading.law == law).expect("the cap was read");
+    assert_eq!(reading.counted, Amount::new(Qty(100), usd));
+    assert_eq!(reading.limit, Amount::new(Qty(100), vti));
+}
+
+#[test]
 fn well_known_names_resolve_once_and_are_absent_where_the_book_never_says_them() {
     let book = Fixture::new().book();
     let plan = Plan::new(&book);
@@ -243,7 +277,7 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
     let owner_value = builder.konst(Value::Entity(owner), Ty::Entity);
     let about_owner = builder.bin(BinOp::Eq, actual_object, owner_value, Ty::Bool);
     let actual_description = builder.var(Var::Description, Ty::Text);
-    let description = builder.konst(Value::Text(payroll), Ty::Text);
+    let description = builder.konst(Value::Text(Text::Borrowed(payroll)), Ty::Text);
     let described = builder.bin(BinOp::Eq, actual_description, description, Ty::Bool);
     let with_object = builder.bin(BinOp::And, belongs, about_owner, Ty::Bool);
     let both = builder.bin(BinOp::And, with_object, described, Ty::Bool);
@@ -253,21 +287,28 @@ fn purpose_laws_see_the_owner_purpose_tree_and_description_of_a_flow() {
     let rule = Rule { law, subject: Subject::Entity(owner), days: Days::ALWAYS };
     f.flows[flow.index()].purpose =
         Some(Purposed { purpose, of: Some(Object::Entity(owner)), source: Provenance::Written });
-    f.flows[flow.index()].description = Some(payroll);
+    f.flows[flow.index()].description = Some(Text::Borrowed(payroll));
     let mut book = f.book();
-    let roots = [book.roots.income, book.roots.spending, book.roots.capital];
+    let roots = [
+        book.roots.purposes.income,
+        book.roots.purposes.spending,
+        book.roots.purposes.capital,
+        book.roots.purposes.transfer,
+    ];
     let names = roots.map(|root| book.purposes[root].name);
     let purposes = vec![
         Purpose { name: names[0], root: PurposeRoot::Income, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
         Purpose { name: names[1], root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
         Purpose { name: purpose_name, root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
         Purpose { name: names[2], root: PurposeRoot::Capital, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose { name: names[3], root: PurposeRoot::Transfer, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
     ];
-    let (tree, ids) = Tree::build(purposes, &[None, None, Some(1), None]).unwrap();
+    let (tree, ids) = Tree::build(purposes, &[None, None, Some(1), None, None]).unwrap();
     book.purposes = tree;
-    book.roots.income = ids[0];
-    book.roots.spending = ids[1];
-    book.roots.capital = ids[3];
+    book.roots.purposes.income = ids[0];
+    book.roots.purposes.spending = ids[1];
+    book.roots.purposes.capital = ids[3];
+    book.roots.purposes.transfer = ids[4];
     book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule)]);
 
     let run = run(&book, options());
@@ -399,19 +440,26 @@ fn a_credit_card_refund_reverses_spending_purpose_total() {
 
     let spending_name = f.sym("card-spending");
     let mut book = f.book();
-    let roots = [book.roots.income, book.roots.spending, book.roots.capital];
+    let roots = [
+        book.roots.purposes.income,
+        book.roots.purposes.spending,
+        book.roots.purposes.capital,
+        book.roots.purposes.transfer,
+    ];
     let names = roots.map(|root| book.purposes[root].name);
     let purposes = vec![
         Purpose { name: names[0], root: PurposeRoot::Income, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
         Purpose { name: names[1], root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
         Purpose { name: spending_name, root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
         Purpose { name: names[2], root: PurposeRoot::Capital, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose { name: names[3], root: PurposeRoot::Transfer, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
     ];
-    let (tree, ids) = Tree::build(purposes, &[None, None, Some(1), None]).unwrap();
+    let (tree, ids) = Tree::build(purposes, &[None, None, Some(1), None, None]).unwrap();
     book.purposes = tree;
-    book.roots.income = ids[0];
-    book.roots.spending = ids[1];
-    book.roots.capital = ids[3];
+    book.roots.purposes.income = ids[0];
+    book.roots.purposes.spending = ids[1];
+    book.roots.purposes.capital = ids[3];
+    book.roots.purposes.transfer = ids[4];
     book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, Rule {
         law,
         subject: Subject::Entity(me),
@@ -1686,7 +1734,7 @@ fn asset_law_scope_contains_each_parts_place_subtree() {
     let mut book = f.book();
     let house = book.assets.push(Asset {
         name: house_name,
-        kind: book.roots.thing,
+        kind: book.roots.kinds.thing,
         owner: me,
         place: checking,
         unit: usd,
@@ -1697,11 +1745,11 @@ fn asset_law_scope_contains_each_parts_place_subtree() {
     });
     book.assets.push(Asset {
         name: improvement_name,
-        kind: book.roots.thing,
+        kind: book.roots.kinds.thing,
         owner: me,
         place: savings,
         unit: usd,
-        part_of: Some(house),
+        part_of: Some(At { value: house, loc: Loc::default() }),
         props: Box::default(),
         doc: None,
         loc: Loc::new(FileId(0), 3, 4),
@@ -1896,36 +1944,32 @@ fn a_stated_basis_and_a_hold_override_what_the_route_says() {
 }
 
 #[test]
-fn basis_flows_change_basis_and_move_no_quantity_and_realize_nothing() {
+fn stated_basis_overrides_the_purchase_price_of_arriving_lots() {
     let mut f = Fixture::new();
-    let (equity, checking, brokerage, food, vti, usd) = (f.equity, f.checking, f.brokerage, f.food, f.vti, f.usd);
-    f.flow(1, equity, checking, 5_000_00);
-    f.buy(2, 1_000_00, 10);
-    let improvement = f.flow(3, checking, brokerage, 200_00);
-    f.detail(improvement, Detail { basis_end: Some(End::To), ..Detail::default() });
-    let depreciation = f.flow(4, brokerage, food, 50_00);
-    f.detail(depreciation, Detail { basis_end: Some(End::From), ..Detail::default() });
+    let (checking, brokerage, vti, usd) = (f.checking, f.brokerage, f.vti, f.usd);
+    f.flow(1, f.equity, checking, 5_000_00);
+    let purchase = f.buy(2, 1_000_00, 10);
+    f.detail(purchase, Detail { basis: Some(Qty(1_150_00)), ..Detail::default() });
     let book = f.book();
     let run = run(&book, options());
-    assert_eq!(
-        lots_of(&run, brokerage, vti),
-        [(10, 1_150_00)],
-        "+200 capitalized, -50 depreciated, ten shares throughout"
-    );
-    assert!(run.gains.is_empty() && run.diagnostics.is_empty(), "no realization either way: {:?}", run.diagnostics);
-    assert_eq!((qty(&run, checking, usd), qty(&run, food, usd), qty(&run, brokerage, usd)), (3_800_00, 50_00, 0));
+    assert_eq!(lots_of(&run, brokerage, vti), [(10, 1_150_00)], "the stated acquisition basis replaces the cash price");
+    assert!(run.gains.is_empty() && run.diagnostics.is_empty(), "an acquisition does not realize a gain: {:?}", run.diagnostics);
+    assert_eq!((qty(&run, checking, usd), qty(&run, brokerage, usd)), (4_000_00, 0));
 }
 
 #[test]
-fn a_basis_flow_into_a_place_that_holds_nothing_is_an_error_not_a_panic() {
+fn stated_basis_can_initialize_a_new_asset_holding() {
     let mut f = Fixture::new();
-    let (equity, checking, savings) = (f.equity, f.checking, f.savings);
-    f.flow(1, equity, checking, 100_00);
-    let improvement = f.flow(2, checking, savings, 50_00);
-    f.detail(improvement, Detail { basis_end: Some(End::To), ..Detail::default() });
+    let (checking, brokerage, vti) = (f.checking, f.brokerage, f.vti);
+    let equity = f.equity;
+    f.flow(0, equity, checking, 100_00);
+    let purchase = f.buy(1, 100_00, 1);
+    f.detail(purchase, Detail { basis: Some(Qty(250_00)), ..Detail::default() });
     let book = f.book();
     let run = run(&book, options());
-    assert_eq!(diagnostic(&run, "no-basis").message, "assets/savings holds nothing to carry a change of basis");
+    assert_eq!(lots_of(&run, brokerage, vti), [(1, 250_00)]);
+    assert_eq!(qty(&run, checking, book.base), 0);
+    assert!(run.diagnostics.is_empty());
 }
 
 #[test]

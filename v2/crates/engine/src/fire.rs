@@ -218,6 +218,13 @@ impl Ledger<'_, '_, '_> {
     /// against the limit is all the law compares. Returns whether it held; a
     /// cap that is broken is evaluated in full, which explains why.
     fn within(&mut self, rule: &Rule, ctx: &Context, cap: Cap) -> bool {
+        // Rolling totals are stored in the book's base commodity. The cap
+        // shortcut is only valid without conversion when its literal limit is
+        // also in that commodity; otherwise the full typed evaluator handles
+        // prices, scaling and missing-rate faults.
+        if cap.limit.unit != self.plan.book.base {
+            return false;
+        }
         let read = match cap.target {
             CapTarget::Total(dir) => self.world.totals.read(
                 &self.plan.watch,

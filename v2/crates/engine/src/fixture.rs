@@ -456,14 +456,14 @@ impl Fixture {
         let market = Kind { name: self.names.intern("market"), sort: Sort::Place(Class::Outside), ..kind.clone() };
         let (kinds, _) = Tree::build(vec![kind, market], &[None, None]).expect("no cycles");
         let k = Id::new(0);
-        let (purposes, [income, spending, capital]) = Purpose::roots(&mut self.names);
+        let (purposes, [income, spending, capital, transfer]) = Purpose::roots(&mut self.names);
         let roots = Roots {
             me: self.me,
             unknown: self.unknown_entity,
             opening: self.opening_entity,
             market: self.trader,
             kinds: KindRoots { asset: k, debt: k, thing: k, commodity: k, measure: k, entity: k },
-            purposes: PurposeRoots { income, spending, capital, transfer: capital },
+            purposes: PurposeRoots { income, spending, capital, transfer },
         };
         let places = self.places.len();
         let ends = |(i, flow): (usize, &Flow)| {
@@ -479,6 +479,7 @@ impl Fixture {
             on_spend: Groups::build(self.entities.len(), self.on_spend),
             purposes: Groups::default(),
             about: Groups::default(),
+            contracts: Groups::default(),
             timed: self.timed,
         };
         let (mut txns, mut flows) = (Arena::new(), Arena::new());
@@ -490,6 +491,7 @@ impl Fixture {
         });
         Book {
             names: self.names,
+            text_values: Arena::new(),
             base: self.usd,
             relaxed: false,
             roots,
@@ -514,6 +516,8 @@ impl Fixture {
             patterns: Arena::new(),
             formats: Arena::new(),
             txns,
+            journal_programs: Arena::new(),
+            input_values: Arena::new(),
             flows,
             touching,
             asserts: self.asserts,
@@ -568,7 +572,7 @@ impl LawBuilder {
     fn node(&mut self, op: Op, ty: Ty, first: Option<NodeId>) -> NodeId {
         let id = NodeId(self.nodes.len() as u32);
         let loc = Loc::new(FileId(1), id.0 * 10, id.0 * 10 + 5);
-        self.nodes.push(Node { op, ty, loc, first: first.unwrap_or(id) });
+        self.nodes.push(Node { op, ty: Some(ty), loc, first: first.unwrap_or(id) });
         id
     }
 
@@ -657,7 +661,8 @@ impl LawBuilder {
             trigger: self.trigger,
             budget: None,
             overrides: None,
-            rank: Rank(0),
+            override_name: None,
+            rank: Rank::ZERO,
             steps: self.steps.into(),
             nodes: self.nodes.into(),
             loc: Loc::new(FileId(1), 0, 1000),
