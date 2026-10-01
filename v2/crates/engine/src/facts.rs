@@ -79,7 +79,7 @@ impl Reads {
     /// The finest total or tally the condition rooted at `cond` reads: the
     /// window a comparison is about is the shortest it reads.
     fn of(law: &Law, cond: NodeId) -> Option<Reads> {
-        let read = law.range(cond).filter_map(|at| match &law.nodes[at].op {
+        let read = law.range(cond).filter_map(|at| match &law.nodes[NodeId(at as u32)].op {
             Op::Call(Func::Total(dir, window), _) => Some(Reads::Total(*dir, *window)),
             Op::Call(Func::PurposeTotal { window, .. }, _) => Some(Reads::Purpose(*window)),
             // A tally of another year is settled, not a window this flow is adding to.
@@ -137,16 +137,16 @@ fn shortcut(book: &Book, law: &Law) -> Option<Shortcut> {
 fn is_floor_of_nothing(law: &Law) -> bool {
     let [step] = &*law.steps else { return false };
     let StepKind::Require { cond, otherwise, .. } = &step.kind else { return false };
-    let Op::Bin(BinOp::Ge, balance, nothing) = law.nodes[cond.index()].op else { return false };
+    let Op::Bin(BinOp::Ge, balance, nothing) = law.nodes[*cond].op else { return false };
     law.trigger == Trigger::Always
         && otherwise.is_empty()
-        && matches!(law.nodes[balance.index()].op, Op::Var(Var::Balance))
-        && matches!(law.nodes[nothing.index()].op, Op::Const(Value::Empty))
+        && matches!(law.nodes[balance].op, Op::Var(Var::Balance))
+        && matches!(law.nodes[nothing].op, Op::Const(Value::Empty))
 }
 
 /// The finest window of flow total a law reads, month or year.
 fn window_read(law: &Law) -> Option<Window> {
-    let windows = law.nodes.iter().filter_map(|node| match node.op {
+    let windows = law.nodes.values().filter_map(|node| match node.op {
         Op::Call(Func::Total(_, window), _) if window != Window::Ever => Some(window),
         Op::Call(Func::PurposeTotal { window, .. }, _) if window != Window::Ever => Some(window),
         _ => None,
@@ -155,8 +155,8 @@ fn window_read(law: &Law) -> Option<Window> {
 }
 
 fn totals_read(law: &Law) -> TotalsRead {
-    let widened = |args: &[NodeId]| args.iter().any(|arg| law.nodes[arg.index()].ty == Ty::Kind);
-    let reads = law.nodes.iter().filter_map(|node| match &node.op {
+    let widened = |args: &[NodeId]| args.iter().any(|arg| law.nodes[*arg].typed_ty() == Some(Ty::Kind));
+    let reads = law.nodes.values().filter_map(|node| match &node.op {
         Op::Call(Func::Total(..), args) => Some(widened(args)),
         Op::Call(Func::PurposeTotal { .. }, _) => Some(false),
         _ => None,
@@ -170,7 +170,7 @@ fn totals_read(law: &Law) -> TotalsRead {
 
 fn step(law: &Law, at: usize) -> StepFacts {
     let StepKind::Require { cond, severity, .. } = law.steps[at].kind else { return StepFacts::NONE };
-    let bound = match law.nodes[cond.index()].op {
+    let bound = match law.nodes[cond].op {
         Op::Bin(BinOp::Le | BinOp::Lt, ..) => Some(Bound::Cap),
         Op::Bin(BinOp::Ge | BinOp::Gt, ..) => Some(Bound::Floor),
         _ => None,
@@ -181,15 +181,15 @@ fn step(law: &Law, at: usize) -> StepFacts {
 
 /// What the left side of the ordering `cond` is a running sum of.
 fn follows(law: &Law, step: usize, cond: NodeId) -> Option<Follows> {
-    let Op::Bin(_, lhs, _) = law.nodes[cond.index()].op else { return None };
-    match (&law.nodes[lhs.index()].op, law.trigger) {
+    let Op::Bin(_, lhs, _) = law.nodes[cond].op else { return None };
+    match (&law.nodes[lhs].op, law.trigger) {
         (Op::Var(Var::Amount), _) => Some(Follows::Flow),
         (Op::Call(Func::Total(Dir::In, window), _), Trigger::In) => Some(Follows::Total(Dir::In, *window)),
         (Op::Call(Func::Total(Dir::Out, window), _), Trigger::Out) => Some(Follows::Total(Dir::Out, *window)),
         (Op::Call(Func::Tally(name), args), _) if Func::tally_year(args).is_none() => {
             let counts_amount = |kind: &StepKind| match kind {
                 StepKind::Effect(LawEffect::Count { amount, name: counted }) => {
-                    counted == name && matches!(law.nodes[amount.index()].op, Op::Var(Var::Amount))
+                    counted == name && matches!(law.nodes[*amount].op, Op::Var(Var::Amount))
                 }
                 _ => false,
             };
@@ -243,7 +243,7 @@ pub(crate) fn purpose_readers(book: &Book) -> PurposeReaders {
         for step in &law.steps {
             let axiom_model::StepKind::Require { cond, .. } = &step.kind else { continue };
             for at in law.range(*cond) {
-                let Op::Call(Func::PurposeTotal { purpose, window }, _) = &law.nodes[at].op else { continue };
+                let Op::Call(Func::PurposeTotal { purpose, window }, _) = &law.nodes[NodeId(at as u32)].op else { continue };
                 if *window == Window::Ever {
                     continue;
                 }
