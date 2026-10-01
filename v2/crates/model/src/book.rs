@@ -715,9 +715,11 @@ impl Contract {
     /// contract's own due date. This lets an explicit contract cadence replace
     /// a learned or v3 schedule for the same movement throughout its term.
     ///
-    /// An empty waiver borrows the nearest matching active template in this
-    /// contract's timeline (preferring the prior stretch when equally near),
-    /// so suspending a promise does not revive a fallback schedule.
+    /// An empty waiver borrows the template from the nearest active terms in
+    /// this contract's timeline (preferring the prior stretch when equally
+    /// near); that template's identity is then compared with `template`.
+    /// This keeps a suspension from reviving a fallback schedule for the
+    /// promise that was active immediately before it.
     pub fn covers(&self, template: &Flow, day: Day) -> ContractCoverage {
         if !self.days.contains(day) {
             return ContractCoverage::None;
@@ -850,7 +852,10 @@ impl Contract {
 
     /// Forecast flows directly from the contract's scheduled terms. The
     /// iterator borrows the book and contract, allocating only each owned flow
-    /// that the ledger projection must apply.
+    /// that the ledger projection must apply. This consumes model-constructed
+    /// terms; source v4 contract parsing is not present. Missing values and
+    /// unsupported flow-affecting features are typed errors rather than omitted
+    /// or guessed amounts.
     pub fn forecast_flows<'a>(
         &'a self,
         book: &'a Book<'_>,
