@@ -479,9 +479,9 @@ fn journal(cast: &mut Cast) -> Journal {
         ),
     ];
     let (check, invoice, bill) = (
-        cast.names.intern("#check-1041"),
-        cast.names.intern("#inv-12"),
-        cast.names.intern("#bill-7"),
+        cast.names.intern("check-1041"),
+        cast.names.intern("inv-12"),
+        cast.names.intern("bill-7"),
     );
     let mut journal = Journal {
         txns: Arena::new(),
@@ -827,8 +827,8 @@ fn holdings(cast: &Cast, journal: &Journal) -> Vec<Holding> {
         txn: RuntimeTxn::journal(Id::new(txn)).unwrap(),
         part: None,
         codes: axiom_model::FlowCodes {
-            header: axiom_core::Run::new(Id::new(0), 0),
-            local: axiom_core::Run::new(Id::new(0), 0),
+            header: journal.flows[Id::new(txn)].header_codes,
+            local: journal.flows[Id::new(txn)].codes,
         },
         tied,
     };
@@ -1428,7 +1428,7 @@ fn register_runs_a_balance_and_mutes_the_pending_check() {
     assert_eq!(rows.len(), 11);
     assert_eq!(
         rows[6],
-        "~2026-03-01 | expenses/repairs |  | #check-1041 · pending | -350.00 USD | 5,115.80 USD"
+        "~2026-03-01 | expenses/repairs |  | ^check-1041 · pending | -350.00 USD | 5,115.80 USD"
     );
     // A window opens with the balance carried in.
     let march =
@@ -1451,8 +1451,8 @@ fn the_register_of_a_liability_reads_the_way_a_statement_does() {
     assert_eq!(
         lines(&section),
         [
-            "2026-03-05 | expenses/repairs |  | #bill-7 | 1,200.00 USD | 1,200.00 USD",
-            "2026-03-12 | assets/bank/jordan-checking |  | #bill-7 | -500.00 USD | 700.00 USD"
+            "2026-03-05 | expenses/repairs |  | ^bill-7 | 1,200.00 USD | 1,200.00 USD",
+            "2026-03-12 | assets/bank/jordan-checking |  | ^bill-7 | -500.00 USD | 700.00 USD"
         ]
     );
 }
@@ -1499,7 +1499,7 @@ fn lots_list_parcels_with_basis_gain_and_term() {
 # Lots at 2026-03-31
 ##
 assets/bank/checking | 500.00 USD | 500.00 USD | 2025-06-01 | 9m30d | 500.00 USD | 0.00 USD |  | tied to nsf
-assets/owed/clients | 3,000.00 USD | 3,000.00 USD | 2026-03-02 | 29d | 3,000.00 USD | 0.00 USD |  | #inv-12
+assets/owed/clients | 3,000.00 USD | 3,000.00 USD | 2026-03-02 | 29d | 3,000.00 USD | 0.00 USD |  | ^inv-12
 assets/retirement | 1,000.00 USD | 0.00 USD | 2026-03-28 | 3d | 1,000.00 USD | 1,000.00 USD |  |
 =Total |  | 3,500.00 USD |  |  | 4,500.00 USD | 1,000.00 USD |  |
 ";
@@ -1615,7 +1615,7 @@ fn claims_list_what_is_owed_with_its_age_and_what_is_overdue() {
     assert_eq!(
         lines(&report.sections[0]),
         [
-            "!acme | #inv-12 · The March design invoice. | 3,000.00 USD | 2026-03-02 | 29d | 2026-03-20 | overdue 11d",
+            "!acme | ^inv-12 · The March design invoice. | 3,000.00 USD | 2026-03-02 | 29d | 2026-03-20 | overdue 11d",
             "=Total |  | 3,000.00 USD |  |  |  |"
         ]
     );
@@ -1653,7 +1653,7 @@ fn a_code_finds_its_flows_and_a_line_explains_itself() {
     let code = table(
         &house,
         Query::Why {
-            target: "#check-1041",
+            target: "^check-1041",
         },
     );
     assert!(code.contains(
@@ -1664,7 +1664,7 @@ fn a_code_finds_its_flows_and_a_line_explains_itself() {
     let stray = house
         .report_for(
             Query::Why {
-                target: "#check-1014",
+                target: "^check-1014",
             },
             None,
         )
@@ -1677,10 +1677,10 @@ fn a_code_finds_its_flows_and_a_line_explains_itself() {
 fn the_summary_counts_the_places_that_were_declared_or_used() {
     let house = household();
     let summary = crate::summary(&house.book, &house.run);
-    // Twenty-five places, five of them class roots and two of them a vault nobody declared or touched.
+    // Twenty-three places are declared or touched; the two vault places are neither.
     assert_eq!(
         (summary.flows, summary.places, summary.unpriced),
-        (17, 18, 0)
+        (17, 23, 0)
     );
     assert_eq!(
         house.book.show(summary.net_worth).to_string(),
@@ -1750,7 +1750,7 @@ fn why_an_entity_shows_its_places_ties_and_claims() {
         .iter()
         .find(|section| heading(section) == Some("Claims with it"))
         .unwrap();
-    assert!(lines(claims)[0].starts_with("!acme | #inv-12"));
+    assert!(lines(claims)[0].starts_with("!acme | ^inv-12"));
     let jordan = house.why(Found::Entity(house.entity("jordan")));
     // What is held, not what was earned: the statement of income and spending is `flow`.
     assert_eq!(
