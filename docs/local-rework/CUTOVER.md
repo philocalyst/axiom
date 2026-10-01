@@ -251,3 +251,59 @@ denominator, literal `@` price forms and commodity payout endpoints. The source
 count before name-only corrections is 49,494 non-test lines. No root promotion,
 full corpus pass, whole-process performance comparison or checklist closure is
 claimed by this checkpoint.
+
+## Native consumer and sync checkpoint, 2026-10-01 12:50 UTC
+
+The integrated tree at `1e6d8ec` includes measured contract-area shares, effective
+ownership in report views, dated budget segments with checked carried sums,
+successive property finalization without lost rows, the registered-source CLI
+sync adapter, native occurrence input bindings, and bounded calendar seeking.
+The coordinator's release model/system check passed 57 model unit tests, seven
+native-law tests, seventeen native-record tests and one system parser test (82
+total). The subsequent core/model check passed 52 core tests and nineteen
+native-record tests, including occurrence grace, input ordering and ambiguous
+schedule refusal.
+
+The actual full sync package passed 94 library tests and all seven native
+end-to-end tests; five explicit timing/stress fixtures remained ignored. The
+restored world tests use a parsed Book and an engine Run. Two former behaviors
+still await the canonical monitor: invoice-code attribution and due occurrence
+variance. One settlement test still seeds a settlement code after binding;
+that adapter gap is assigned for correction and is not claimed closed. The
+paired record/reading buffer now survives sorting and reconciliation without
+unzip copies. A scale test seeds a synthetic million-entry account index on a
+native-bound world; its timing measures that runtime pipeline, not a million
+source flows parsed and folded.
+
+The report ownership integration test passed on the actual root tree and
+verifies cumulative cent conservation across a 60/40 shared account. Review
+found that several other views still used the primary `Flow.owner` instead of
+the account's effective shares; their correction and further source tests are
+in progress. The workspace check now reaches the CLI and reports four adapter
+errors. A worker has matching corrections under verification. Report fixture
+migration and the canonical future monitor remain incomplete.
+
+The full engine package executes after its fixture constructor corrections:
+134 passed, 27 failed, one ignored. Twenty-six failures are legacy source
+fixtures or their native semantic port requirements. The additional carrying
+budget test expected omitted `carries` to turn carrying off, contradicting
+LANGUAGE section 3's inheritance rule. The corrected source oracle retains
+carrying in March; no new syntax or reset-by-omission rule is introduced.
+
+Coordinator allocation instrumentation verifies identical ordinary calendar
+results over 100,000 schedules: heap calls fall from 1,300,000 to zero and
+requested bytes from 10,400,000 to zero. This first instrumented run also finds
+an ordinary-case latency regression (36.044 to 76.569 milliseconds), which is
+under correction; the allocation result does not justify accepting that
+regression. The unbounded-anchor run terminates without heap allocation. Logs
+and the before/after source probe are in `verification/cutover/` outside this
+repository. These are operation-level measurements, not whole-process RSS.
+
+One additional clean obsolete client checkout was removed without force,
+retaining its branch and commit. Two inactive dirty report worktrees were
+relocated intact under `verification/retired-worktrees/`, with separate staged
+and working patches and a manifest. Source repositories and recovery evidence
+remain unchanged. The pre-occurrence source count was 49,986 non-test lines;
+the historical size target remains unmet. Root promotion, legacy source
+deletion, full financial corpus verification and checklist completion are
+still pending.
