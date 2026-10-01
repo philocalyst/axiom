@@ -244,3 +244,22 @@ fn project_loading_errors_stay_machine_readable_with_json_requested() {
     assert!(output.stderr.is_empty());
     fs::remove_dir_all(folder).unwrap();
 }
+
+#[test]
+fn report_context_errors_keep_report_failure_channels() {
+    let folder = empty_folder("unknown-owner");
+    fs::write(folder.join("axiom.ax"), "base USD\nuse std\naccount assets/cash : cash\n")
+        .expect("write project");
+    let path = folder.to_str().expect("a UTF-8 path");
+
+    let plain = run(&["flow", "--for", "nobody", "-C", path]);
+    assert_eq!(plain.status.code(), Some(1));
+    assert!(plain.stdout.is_empty());
+    assert!(text(&plain.stderr).contains("error[unknown-entity]"));
+
+    let json = run(&["flow", "--json", "--for", "nobody", "-C", path]);
+    assert_eq!(json.status.code(), Some(1));
+    assert!(text(&json.stdout).starts_with("{\"code\":\"unknown-entity\""));
+    assert!(json.stderr.is_empty());
+    fs::remove_dir_all(folder).unwrap();
+}

@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axiom_core::{Day, Diagnostic};
 use axiom_engine::{Options, Run};
 use axiom_model::Book;
-use axiom_report::{Query, ReportRenderer, Summary, json::JsonRenderer};
+use axiom_report::{Context, Query, ReportRenderer, Summary, json::JsonRenderer};
 
 use crate::args::{Command, Invocation};
 use crate::project::{Project, Sources};
@@ -37,6 +37,37 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
         return sync::execute(&book, files, &project.root, terminals.out);
     }
     let options = Options { today: invocation.today.unwrap_or_else(system_today), relaxed: invocation.relaxed };
+    if let Command::Report(query, whose) = command {
+        let context = match Context::new(&book, options, *whose) {
+            Ok(context) => context,
+            Err(problem) => {
+                // Preserve the report command's diagnostics and exit status if
+                // owner resolution fails before Context can create its run.
+                let run = axiom_engine::run(&book, options);
+                let mut shown: Vec<&Diagnostic> = diagnostics
+                    .iter()
+                    .chain(&run.diagnostics)
+                    .filter(|diagnostic| diagnostic.is_error())
+                    .collect();
+                shown.push(&problem);
+                return Ok(report_error(&shown, &sources, terminals, invocation.all, invocation.json));
+            }
+        };
+        let run = context.run();
+        let session = Session {
+            book: &book,
+            run,
+            sources: &sources,
+            diagnostics: diagnostics.iter().chain(&run.diagnostics).collect(),
+            terminals,
+            all: invocation.all,
+            json: invocation.json,
+        };
+        return Ok(session.report(&context, query));
+    }
+
+    // `check` needs only the final run summary; constructing a report context
+    // would also retain the pre-close checkpoint that no check view uses.
     let run = axiom_engine::run(&book, options);
     let session = Session {
         book: &book,
@@ -47,7 +78,29 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
         all: invocation.all,
         json: invocation.json,
     };
-    Ok(if let Command::Report(query, whose) = command { session.report(query, *whose) } else { session.check() })
+    Ok(session.check())
+}
+
+/// Shows a query-construction error in the same channels as a report error.
+fn report_error(
+    diagnostics: &[&Diagnostic],
+    sources: &Sources,
+    terminals: Terminals,
+    all: bool,
+    json: bool,
+) -> Outcome {
+    if json {
+        return Outcome {
+            answer: axiom_report::json::diagnostics(diagnostics, sources),
+            diagnostics: String::new(),
+            failed: true,
+        };
+    }
+    let (mut text, tally) = Renderer::new(sources, terminals.err).present(diagnostics, all);
+    if let Some(line) = tally.line() {
+        text += &terminals.err.painter.paint(&[line]);
+    }
+    Outcome { answer: String::new(), diagnostics: text, failed: true }
 }
 
 /// The current day, by the system clock, in UTC.
@@ -87,8 +140,8 @@ impl Session<'_, '_> {
 
     /// The errors, and the report. A report runs whatever the book's errors, so
     /// that a reader can investigate them; it says at its head what it rests on.
-    fn report(&self, query: &Query, whose: Option<&str>) -> Outcome {
-        let result = axiom_report::report_with_sources(self.book, self.run, query, whose, self.sources);
+    fn report(&self, context: &Context<'_, '_>, query: &Query<'_>) -> Outcome {
+        let result = context.report_with_sources(query, self.sources);
         let mut shown: Vec<&Diagnostic> = self.diagnostics.iter().copied().filter(|found| found.is_error()).collect();
         shown.extend(result.as_ref().err());
         let (diagnostics, tally) = self.show(&shown);
