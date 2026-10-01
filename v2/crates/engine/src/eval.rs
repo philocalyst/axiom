@@ -732,16 +732,30 @@ impl<'a, 's> Machine<'a, 's> {
     /// A declared property: the thing's own, else its kind's default.
     fn prop(&self, base: Value, name: Sym) -> Value {
         let book = self.book();
-        let props = match base {
-            Value::Place(place) => &book.places[place].props,
-            Value::Entity(entity) => &book.entities[entity].props,
-            Value::Unit(unit) => &book.commodities[unit].props,
-            Value::Kind(kind) => &book.kinds[kind].props,
-            Value::Asset(asset) => &book.assets[asset].props,
+        let (props, kind) = match base {
+            Value::Place(place) => (book.places[place].props.as_ref(), Some(book.places[place].kind)),
+            Value::Entity(entity) => (book.entities[entity].props.as_ref(), Some(book.entities[entity].kind)),
+            Value::Unit(unit) => (book.commodities[unit].props.as_ref(), Some(book.commodities[unit].kind)),
+            Value::Kind(kind) => (&[][..], Some(kind)),
+            Value::Asset(asset) => (book.assets[asset].props.as_ref(), Some(book.assets[asset].kind)),
             _ => unreachable!("{TYPED}"),
         };
-        axiom_model::prop(props, name, self.ctx.day)
-            .map_or(Value::Fault(Fault::Unset(name)), |property| property.value)
+        if let Some(value) = axiom_model::prop(props, name, self.ctx.day).map(|property| property.value) {
+            if value != Value::Empty {
+                return value;
+            }
+        }
+        if let Some(kind) = kind {
+            for ancestor in book.kinds.lineage(kind) {
+                if let Some(value) = axiom_model::prop(&book.kinds[ancestor].props, name, self.ctx.day)
+                    .map(|property| property.value)
+                    .filter(|&value| value != Value::Empty)
+                {
+                    return value;
+                }
+            }
+        }
+        Value::Fault(Fault::Unset(name))
     }
 
     /// `limit[year]`: among rows whose name keys equal the lookup's, the latest
@@ -896,15 +910,16 @@ impl<'a, 's> Machine<'a, 's> {
             let Some(span) = Days::new(days.first(), days.last().min(self.ctx.anchor())) else {
                 return Value::Fault(Fault::InvalidProgram);
             };
-            self.env.world.totals.read_purpose_between(self.ctx.owner, purpose, span)
+            match self.env.world.totals.read_purpose_between(self.ctx.owner, purpose, span) {
+                Ok(flowed) => flowed,
+                Err(fault) => return Value::Fault(fault),
+            }
         } else {
             self.env.world.totals.read_purpose(self.ctx.owner, purpose, window, self.ctx.anchor())
         };
-        let total = match root {
-            axiom_model::PurposeRoot::Income => incoming - outgoing,
-            axiom_model::PurposeRoot::Spending
-            | axiom_model::PurposeRoot::Capital
-            | axiom_model::PurposeRoot::Transfer => outgoing - incoming,
+        let total = match purpose_net(root, incoming, outgoing) {
+            Ok(total) => total,
+            Err(fault) => return Value::Fault(fault),
         };
         self.base(total)
     }
@@ -930,12 +945,13 @@ impl<'a, 's> Machine<'a, 's> {
         let Some(span) = Days::new(first, anchor) else {
             return Value::Fault(Fault::InvalidProgram);
         };
-        let (incoming, outgoing) = self.env.world.totals.read_purpose_between(self.ctx.owner, budget.purpose, span);
-        let total = match self.book().purposes[budget.purpose].root {
-            axiom_model::PurposeRoot::Income => incoming - outgoing,
-            axiom_model::PurposeRoot::Spending
-            | axiom_model::PurposeRoot::Capital
-            | axiom_model::PurposeRoot::Transfer => outgoing - incoming,
+        let (incoming, outgoing) = match self.env.world.totals.read_purpose_between(self.ctx.owner, budget.purpose, span) {
+            Ok(flowed) => flowed,
+            Err(fault) => return Value::Fault(fault),
+        };
+        let total = match purpose_net(self.book().purposes[budget.purpose].root, incoming, outgoing) {
+            Ok(total) => total,
+            Err(fault) => return Value::Fault(fault),
         };
         self.base(total)
     }
@@ -1006,17 +1022,19 @@ impl<'a, 's> Machine<'a, 's> {
         match limit {
             axiom_model::Limit::Amount(amount) => Value::Amount(amount),
             axiom_model::Limit::Share { rate, of } => {
-                let (incoming, outgoing) = self
+                let (incoming, outgoing) = match self
                     .env
                     .world
                     .totals
-                    .read_purpose_between(self.ctx.owner, of, span);
+                    .read_purpose_between(self.ctx.owner, of, span)
+                {
+                    Ok(flowed) => flowed,
+                    Err(fault) => return Value::Fault(fault),
+                };
                 let root = self.book().purposes[of].root;
-                let total = match root {
-                    axiom_model::PurposeRoot::Income => incoming - outgoing,
-                    axiom_model::PurposeRoot::Spending
-                    | axiom_model::PurposeRoot::Capital
-                    | axiom_model::PurposeRoot::Transfer => outgoing - incoming,
+                let total = match purpose_net(root, incoming, outgoing) {
+                    Ok(total) => total,
+                    Err(fault) => return Value::Fault(fault),
                 };
                 total.scale(rate).map_or(Value::Fault(Fault::Overflow), |qty| {
                     Value::Amount(Amount::new(qty, self.book().base))
@@ -1116,13 +1134,13 @@ impl<'a, 's> Machine<'a, 's> {
     /// kind argument widens it to every place of that kind the owner has.
     fn total(&self, dir: Dir, window: Window, args: &[NodeId]) -> Value {
         let (book, ctx, totals) = (self.book(), self.ctx, &self.env.world.totals);
-        let read = |subject| {
+        let read = |subject| -> Result<Qty, Fault> {
             if ctx.budget_history {
                 let days = window.around(ctx.anchor());
                 Days::new(days.first(), days.last().min(ctx.anchor()))
-                    .map_or(Qty::ZERO, |span| totals.read_subject_between(subject, dir, span))
+                    .map_or(Ok(Qty::ZERO), |span| totals.read_subject_between(subject, dir, span))
             } else {
-                totals.read(&self.env.plan.watch, subject, dir, window, ctx.anchor())
+                Ok(totals.read(&self.env.plan.watch, subject, dir, window, ctx.anchor()))
             }
         };
         let widen = args.iter().find_map(|&a| {
@@ -1142,10 +1160,12 @@ impl<'a, 's> Machine<'a, 's> {
                 .into_iter()
                 .flat_map(|places| places.iter())
                 .filter(|&&place| book.places[place].owner == ctx.owner)
-                .map(|&place| read(Subject::Place(place)))
-                .sum(),
+                .try_fold(Qty::ZERO, |sum, &place| {
+                    let next = read(Subject::Place(place))?;
+                    sum.0.checked_add(next.0).map(Qty).ok_or(Fault::Overflow)
+                }),
         };
-        self.base(sum)
+        sum.map_or_else(Value::Fault, |sum| self.base(sum))
     }
 
     fn progressive(&self, schedule: Value, income: Value) -> Value {
@@ -1308,4 +1328,85 @@ fn civil_date(year: Value, month: Value, day: Value) -> Result<Day, Fault> {
         .unwrap_or(1)
         .min(days_in_month(year, month));
     Day::from_ymd(year, month, day).ok_or(Fault::Overflow)
+}
+
+fn purpose_net(
+    root: axiom_model::PurposeRoot,
+    incoming: Qty,
+    outgoing: Qty,
+) -> Result<Qty, Fault> {
+    let (positive, negative) = match root {
+        axiom_model::PurposeRoot::Income => (incoming, outgoing),
+        axiom_model::PurposeRoot::Spending
+        | axiom_model::PurposeRoot::Capital
+        | axiom_model::PurposeRoot::Transfer => (outgoing, incoming),
+    };
+    positive.0.checked_sub(negative.0).map(Qty).ok_or(Fault::Overflow)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn property_reads_use_the_nearest_kind_default_and_expired_overrides_fall_through() {
+        let text = "\
+base USD
+commodity USD
+kind flagged-account : asset
+  has marked bool
+  marked true
+
+  law mark
+    on in
+    require not self.marked \"the inherited kind default is active\"
+kind inherited-account : flagged-account
+kind overridden-account : flagged-account
+  marked false
+account checking
+account inherited : inherited-account
+account overridden : overridden-account
+2026-01-02 overridden now marked false until 2026-01-03
+";
+        let (file, parsed) = axiom_syntax::parse(axiom_core::FileId(0), text, axiom_syntax::Folder::default());
+        assert!(parsed.is_empty(), "{parsed:?}");
+        let (book, diagnostics) = axiom_model::build(&[axiom_model::Source {
+            path: "axiom.ax",
+            file,
+            embedded: false,
+        }]);
+        assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
+
+        let plan = Plan::new(&book);
+        let world = World::new(&book, &plan.watch);
+        let law = book.laws.values().next().expect("the source kind declares one law");
+        let nodes = &law.nodes;
+        let mut values = Vec::new();
+        let mut budget_values = Vec::new();
+        let mut outcomes = Vec::new();
+        let marked = book.names.get("marked").unwrap();
+        let inherited = book.place("inherited").unwrap();
+        let overridden = book.place("overridden").unwrap();
+
+        for (place, date, expected) in [
+            (inherited, (2026, 1, 1), Value::Bool(true)),
+            (overridden, (2026, 1, 1), Value::Bool(false)),
+            (overridden, (2026, 1, 3), Value::Bool(false)),
+            (overridden, (2026, 1, 4), Value::Bool(true)),
+        ] {
+            let day = Day::from_ymd(date.0, date.1, date.2).unwrap();
+            let occasion = Occasion::time(day, Days::on(day));
+            let context = Context::new(Subject::Place(place), book.places[place].owner, &occasion);
+            let machine = Machine {
+                env: Env { plan: &plan, world: &world },
+                nodes,
+                law: Some(law),
+                ctx: &context,
+                values: &mut values,
+                budget_values: &mut budget_values,
+                out: &mut outcomes,
+            };
+            assert_eq!(machine.prop(Value::Place(place), marked), expected, "{date:?}");
+        }
+    }
 }

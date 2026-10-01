@@ -14,7 +14,7 @@ use std::hash::{Hash, Hasher};
 
 use axiom_core::calendar;
 use axiom_core::{Day, Days, Groups, Id, Map, Period, Qty, Set, Sym, spread};
-use axiom_model::{Book, Dir, Entity, Place, Purpose, Subject, Window};
+use axiom_model::{Book, Dir, Entity, Fault, Place, Purpose, Subject, Window};
 
 use crate::facts::{LawFacts, TotalsRead};
 use crate::scope::containing;
@@ -401,21 +401,186 @@ pub(crate) struct Totals {
     purpose: Map<(Id<Entity>, Id<Purpose>), Windows>,
     /// Recognition facts needed only by budgets that carry room or overspend
     /// across calendar windows. Ordinary purpose totals remain rolling-only.
-    budget_history: Map<(Id<Entity>, Id<Purpose>), Vec<PurposeFact>>,
-    budget_total_history: Map<(Subject, Dir), Vec<TotalFact>>,
+    budget_history: Map<(Id<Entity>, Id<Purpose>), History>,
+    budget_total_history: Map<(Subject, Dir), History>,
+}
+
+/// Sparse recognition history. Ordinary single-day facts arrive in journal
+/// order and are folded into compact block-prefix summaries. Ranged and
+/// out-of-order facts stay on a retained slow path; neither requires a
+/// per-flow scratch Vec.
+const HISTORY_BLOCK: usize = 64;
+
+#[derive(Clone, Default, Hash)]
+struct History {
+    days: Vec<DayFact>,
+    blocks: Vec<BlockPrefix>,
+    slow: Vec<RecognitionFact>,
+    overflowed: bool,
 }
 
 #[derive(Clone, Copy, Hash)]
-struct PurposeFact {
+struct DayFact {
+    day: Day,
+    incoming: i64,
+    outgoing: i64,
+}
+
+#[derive(Clone, Copy, Hash)]
+struct BlockPrefix {
+    incoming: i128,
+    outgoing: i128,
+}
+
+#[derive(Clone, Copy, Hash)]
+struct RecognitionFact {
     over: Days,
     dir: Dir,
     amount: Qty,
 }
 
-#[derive(Clone, Copy, Hash)]
-struct TotalFact {
-    over: Days,
-    amount: Qty,
+impl History {
+    fn record(&mut self, over: Days, dir: Dir, amount: Qty) {
+        let Some(day) = over.single() else {
+            self.slow.push(RecognitionFact { over, dir, amount });
+            return;
+        };
+        let Some(last_index) = self.days.len().checked_sub(1) else {
+            let mut fact = DayFact { day, incoming: 0, outgoing: 0 };
+            *fact.side_mut(dir) = amount.0;
+            self.days.push(fact);
+            return;
+        };
+        let last_day = self.days[last_index].day;
+        if day < last_day {
+            self.slow.push(RecognitionFact { over, dir, amount });
+            return;
+        }
+        if day == last_day {
+            let Some(next) = self.days[last_index].value(dir).checked_add(amount.0) else {
+                self.slow.push(RecognitionFact { over, dir, amount });
+                return;
+            };
+            *self.days[last_index].side_mut(dir) = next;
+            if (last_index + 1) % HISTORY_BLOCK == 0 {
+                let Some(prefix) = self.blocks.last_mut() else {
+                    self.overflowed = true;
+                    return;
+                };
+                let Some(next) = prefix.value(dir).checked_add(i128::from(amount.0)) else {
+                    self.overflowed = true;
+                    return;
+                };
+                *prefix.side_mut(dir) = next;
+            }
+            return;
+        }
+
+        let mut fact = DayFact { day, incoming: 0, outgoing: 0 };
+        *fact.side_mut(dir) = amount.0;
+        self.days.push(fact);
+        if self.days.len() % HISTORY_BLOCK == 0 {
+            let previous = self.blocks.last().copied().unwrap_or(BlockPrefix { incoming: 0, outgoing: 0 });
+            let first = self.days.len() - HISTORY_BLOCK;
+            let mut block = BlockPrefix { incoming: 0, outgoing: 0 };
+            for fact in &self.days[first..] {
+                let Some(incoming) = block.incoming.checked_add(i128::from(fact.incoming)) else {
+                    self.overflowed = true;
+                    return;
+                };
+                let Some(outgoing) = block.outgoing.checked_add(i128::from(fact.outgoing)) else {
+                    self.overflowed = true;
+                    return;
+                };
+                block.incoming = incoming;
+                block.outgoing = outgoing;
+            }
+            let Some(incoming) = previous.incoming.checked_add(block.incoming) else {
+                self.overflowed = true;
+                return;
+            };
+            let Some(outgoing) = previous.outgoing.checked_add(block.outgoing) else {
+                self.overflowed = true;
+                return;
+            };
+            self.blocks.push(BlockPrefix { incoming, outgoing });
+        }
+    }
+
+    /// Prefix through the first `count` chronological day buckets. A fixed
+    /// block edge scan keeps retained storage near one fact per date while
+    /// range reads remain O(log n) in history length.
+    fn prefix(&self, count: usize) -> Result<(i128, i128), Fault> {
+        let complete = count / HISTORY_BLOCK;
+        let mut sums = complete
+            .checked_sub(1)
+            .and_then(|index| self.blocks.get(index))
+            .map_or((0, 0), |prefix| (prefix.incoming, prefix.outgoing));
+        let edge_start = complete * HISTORY_BLOCK;
+        for fact in &self.days[edge_start..count] {
+            sums.0 = sums.0.checked_add(i128::from(fact.incoming)).ok_or(Fault::Overflow)?;
+            sums.1 = sums.1.checked_add(i128::from(fact.outgoing)).ok_or(Fault::Overflow)?;
+        }
+        Ok(sums)
+    }
+
+    fn read(&self, span: Days) -> Result<(Qty, Qty), Fault> {
+        if self.overflowed {
+            return Err(Fault::Overflow);
+        }
+        let start = self.days.partition_point(|fact| fact.day < span.first());
+        let end = self.days.partition_point(|fact| fact.day <= span.last());
+        let upper = self.prefix(end)?;
+        let lower = self.prefix(start)?;
+        let mut incoming = upper.0.checked_sub(lower.0).ok_or(Fault::Overflow)?;
+        let mut outgoing = upper.1.checked_sub(lower.1).ok_or(Fault::Overflow)?;
+        for fact in &self.slow {
+            let Some(overlap) = fact.over.intersect(span) else { continue };
+            let amount = i128::from(spread(fact.amount, fact.over, overlap).0);
+            let total = match fact.dir {
+                Dir::In => &mut incoming,
+                Dir::Out => &mut outgoing,
+            };
+            *total = total.checked_add(amount).ok_or(Fault::Overflow)?;
+        }
+        Ok((qty(incoming)?, qty(outgoing)?))
+    }
+}
+
+fn qty(value: i128) -> Result<Qty, Fault> {
+    i64::try_from(value).map(Qty).map_err(|_| Fault::Overflow)
+}
+
+impl DayFact {
+    fn value(&self, dir: Dir) -> &i64 {
+        match dir {
+            Dir::In => &self.incoming,
+            Dir::Out => &self.outgoing,
+        }
+    }
+
+    fn side_mut(&mut self, dir: Dir) -> &mut i64 {
+        match dir {
+            Dir::In => &mut self.incoming,
+            Dir::Out => &mut self.outgoing,
+        }
+    }
+}
+
+impl BlockPrefix {
+    fn value(&self, dir: Dir) -> &i128 {
+        match dir {
+            Dir::In => &self.incoming,
+            Dir::Out => &self.outgoing,
+        }
+    }
+
+    fn side_mut(&mut self, dir: Dir) -> &mut i128 {
+        match dir {
+            Dir::In => &mut self.incoming,
+            Dir::Out => &mut self.outgoing,
+        }
+    }
 }
 
 /// What the running totals hold: the windows, which are all the future reads.
@@ -513,7 +678,7 @@ impl Totals {
                     self.budget_total_history
                         .entry((subject, dir))
                         .or_default()
-                        .push(TotalFact { over, amount: value });
+                        .record(over, dir, value);
                 }
                 let windows = &mut self.windows[at];
                 if windows.add(day, dir, value, over) && !windows.reaching {
@@ -601,7 +766,7 @@ impl Totals {
                 self.budget_history
                     .entry((owner, purpose))
                     .or_default()
-                    .push(PurposeFact { over, dir, amount });
+                    .record(over, dir, amount);
             }
         }
     }
@@ -632,27 +797,23 @@ impl Totals {
         owner: Id<Entity>,
         purpose: Id<Purpose>,
         span: Days,
-    ) -> (Qty, Qty) {
-        let mut flowed = Flowed::default();
-        if let Some(facts) = self.budget_history.get(&(owner, purpose)) {
-            for fact in facts {
-                if let Some(overlap) = fact.over.intersect(span) {
-                    *flowed.side(fact.dir) += spread(fact.amount, fact.over, overlap);
-                }
-            }
-        }
-        (flowed.incoming, flowed.outgoing)
+    ) -> Result<(Qty, Qty), Fault> {
+        self.budget_history
+            .get(&(owner, purpose))
+            .map_or(Ok((Qty::ZERO, Qty::ZERO)), |history| history.read(span))
     }
 
     /// Flow through a single watched subject over a historical span. This is
     /// retained only for a computed budget formula that reads entity totals.
-    pub fn read_subject_between(&self, subject: Subject, dir: Dir, span: Days) -> Qty {
+    pub fn read_subject_between(&self, subject: Subject, dir: Dir, span: Days) -> Result<Qty, Fault> {
         self.budget_total_history
             .get(&(subject, dir))
-            .into_iter()
-            .flatten()
-            .filter_map(|fact| fact.over.intersect(span).map(|overlap| spread(fact.amount, fact.over, overlap)))
-            .sum()
+            .map_or(Ok(Qty::ZERO), |history| history.read(span).map(|(incoming, outgoing)| {
+                match dir {
+                    Dir::In => incoming,
+                    Dir::Out => outgoing,
+                }
+            }))
     }
 
     /// Whether some month begins by `day` with value recognized into it ahead of time.
@@ -838,5 +999,117 @@ mod tests {
             windows.read(Dir::Out, Window::Ever, day(2026, 1, 15)),
             Qty(3_000_00)
         );
+    }
+
+    #[test]
+    fn indexed_budget_ranges_match_the_linear_recognition_scan() {
+        let origin = day(2025, 1, 1);
+        let mut history = History::default();
+        let mut facts = Vec::new();
+        // Deliberately add records in a permuted order. Single-day entries
+        // include refunds; ranged records exercise the slow path and exact
+        // calendar spread rounding.
+        for step in 0..2_000_i32 {
+            let offset = if step > 13 && step % 23 == 0 { step - 13 } else { step };
+            let first = Day(origin.0 + offset);
+            let is_range = step % 7 == 0;
+            let over = if is_range {
+                days(first, Day(first.0 + 1 + step % 5))
+            } else {
+                Days::on(first)
+            };
+            let dir = if step % 3 == 0 { Dir::In } else { Dir::Out };
+            let magnitude = i64::from((step % 97) + 1) * 37;
+            let amount = Qty(if step % 11 == 0 { -magnitude } else { magnitude });
+            history.record(over, dir, amount);
+            facts.push(RecognitionFact { over, dir, amount });
+        }
+
+        for offset in (0..2_000_i32).step_by(19) {
+            let first = Day(origin.0 + offset);
+            let last = Day((origin.0 + offset + 143).min(origin.0 + 2_005));
+            let span = days(first, last);
+            let mut incoming = 0_i128;
+            let mut outgoing = 0_i128;
+            for fact in &facts {
+                let Some(overlap) = fact.over.intersect(span) else { continue };
+                let amount = i128::from(spread(fact.amount, fact.over, overlap).0);
+                match fact.dir {
+                    Dir::In => incoming += amount,
+                    Dir::Out => outgoing += amount,
+                }
+            }
+            assert_eq!(history.read(span), Ok((qty(incoming).unwrap(), qty(outgoing).unwrap())), "all facts span={span:?}");
+        }
+    }
+
+    #[test]
+    fn indexed_history_checks_the_final_base_amount_range() {
+        let target = day(2025, 1, 2);
+        let mut history = History::default();
+        history.record(Days::on(target), Dir::Out, Qty(i64::MAX));
+        history.record(Days::on(target), Dir::Out, Qty(1));
+        assert_eq!(history.read(Days::on(target)), Err(Fault::Overflow));
+
+        let mut cancel = History::default();
+        cancel.record(Days::on(target), Dir::Out, Qty(i64::MAX));
+        cancel.record(Days::on(target), Dir::Out, Qty(1));
+        cancel.record(Days::on(target), Dir::Out, Qty(-1));
+        assert_eq!(cancel.read(Days::on(target)), Ok((Qty::ZERO, Qty(i64::MAX))));
+    }
+
+    /// Manual 1M-fact scale check for the retained tree and repeated range
+    /// query path. Run with `cargo test -p axiom-engine budget_history_million -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "manual million-record budget-history scale check"]
+    fn budget_history_million_fact_scale_check() {
+        let started = std::time::Instant::now();
+        let mut history = History::default();
+        for index in 0..1_000_000_i32 {
+            history.record(Days::on(Day(index)), Dir::Out, Qty(1));
+        }
+        let built = started.elapsed();
+
+        let facts: Vec<_> = (0..1_000_000_i32)
+            .map(|index| RecognitionFact { over: Days::on(Day(index)), dir: Dir::Out, amount: Qty(1) })
+            .collect();
+        let index_bytes = history.days.capacity() * std::mem::size_of::<DayFact>()
+            + history.blocks.capacity() * std::mem::size_of::<BlockPrefix>()
+            + history.slow.capacity() * std::mem::size_of::<RecognitionFact>();
+        let linear_bytes = facts.capacity() * std::mem::size_of::<RecognitionFact>();
+
+        let index_started = std::time::Instant::now();
+        let mut index_checksum = 0_i128;
+        for query in 0..100_i32 {
+            let first = Day((query * 7_919) % 899_900);
+            let span = days(first, Day(first.0 + 99));
+            index_checksum += i128::from(history.read(span).unwrap().1.0);
+        }
+        let index_100 = index_started.elapsed();
+        let linear_started = std::time::Instant::now();
+        let mut linear_checksum = 0_i128;
+        for query in 0..100_i32 {
+            let first = Day((query * 7_919) % 899_900);
+            let span = days(first, Day(first.0 + 99));
+            for fact in &facts {
+                if let Some(overlap) = fact.over.intersect(span) {
+                    linear_checksum += i128::from(spread(fact.amount, fact.over, overlap).0);
+                }
+            }
+        }
+        let linear_100 = linear_started.elapsed();
+
+        let query_started = std::time::Instant::now();
+        let mut checksum = 0_i128;
+        for start in (0..900_000_i32).step_by(10) {
+            let sum = history.read(days(Day(start), Day(start + 99))).unwrap().1;
+            checksum += i128::from(sum.0);
+        }
+        let queried = query_started.elapsed();
+        eprintln!(
+            "facts=1000000 index_retained_capacity_bytes={index_bytes} linear_fact_capacity_bytes={linear_bytes} build={built:?} indexed_100_queries={index_100:?} linear_100_queries={linear_100:?} indexed_90000_queries={queried:?}"
+        );
+        assert_eq!(index_checksum, linear_checksum);
+        assert_eq!(checksum, 9_000_000);
     }
 }

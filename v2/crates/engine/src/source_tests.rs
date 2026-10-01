@@ -148,6 +148,40 @@ fn a_payment_out_of_an_envelope_takes_that_envelopes_parcels() {
 }
 
 #[test]
+fn custom_kind_defaults_inherit_and_nearer_kind_values_override() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind flagged-account : asset
+  has marked bool
+  marked true
+
+  law mark
+    on in
+    when self.marked
+    require not self.marked \"the inherited kind default is active\"
+kind inherited-account : flagged-account
+kind overridden-account : flagged-account
+  marked false
+account checking
+account inherited : inherited-account
+account overridden : overridden-account
+opening 2026-01-01
+  checking 20 USD
+2026-01-01 checking -> inherited 1 USD
+2026-01-01 checking -> overridden 1 USD
+";
+    with_run(text, day(2026, 1, 1), |_, run| {
+        assert_eq!(
+            run.violations.iter().map(|violation| violation.day).collect::<Vec<_>>(),
+            [day(2026, 1, 1)],
+            "the child inherits true while its nearer kind's false default suppresses the law"
+        );
+    });
+}
+
+#[test]
 fn an_envelope_that_runs_out_is_topped_up_from_what_is_not_tied() {
     let text = format!("{ENVELOPES}2025-09-20 checking -> savings 300 USD\n2025-10-01 car-fund -> car-repair 250 USD #car-maintenance\n");
     with_run(&text, day(2025, 12, 31), |book, run| {
