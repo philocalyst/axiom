@@ -18,7 +18,7 @@ use axiom_syntax::{
 
 use crate::book::{
     Amount, Asset, At, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, Purpose, RatePolicy,
-    Residence, Share, Sort, Take,
+    Residence, Role, Share, Sort, Take,
 };
 use crate::declare::{MAX_SCALE, PropTarget, World};
 use crate::errors::{Word, article, list, suggest};
@@ -1293,14 +1293,7 @@ fn native_builtins<'a, 's>(
                     for assign in &own {
                         places[id].set(assign);
                     }
-                    let kind = &kinds[kind];
-                    places[id].deferred = kind.deferred;
-                    places[id].basis = kind.basis.unwrap_or(if kind.deferred {
-                        Basis::Zero
-                    } else {
-                        Basis::Cost
-                    });
-                    places[id].claim = kind.claim;
+                    inherit_place_traits(&mut places[id], &kinds[kind]);
                 }
             }
             Target::Asset => {
@@ -1330,20 +1323,25 @@ fn native_builtins<'a, 's>(
                             _ => place.set(assign),
                         }
                     }
-                    let kind = &kinds[kind];
-                    place.deferred = kind.deferred;
-                    place.basis = kind.basis.unwrap_or(if kind.deferred {
-                        Basis::Zero
-                    } else {
-                        Basis::Cost
-                    });
-                    place.claim = kind.claim;
+                    inherit_place_traits(place, &kinds[kind]);
                 }
                 diagnose_asset_cycles(&mut world.book.assets, &world.book.names, diags);
             }
             Target::Kind => unreachable!(),
         }
     }
+}
+
+fn inherit_place_traits(place: &mut Place, kind: &Kind) {
+    place.deferred = kind.deferred;
+    place.basis = kind.basis.unwrap_or(if kind.deferred {
+        Basis::Zero
+    } else {
+        Basis::Cost
+    });
+    // Claim tabs keep separate parcels even though their synthetic root kinds
+    // do not declare the `claim` trait themselves.
+    place.claim = kind.claim || matches!(place.role, Role::Tab(_));
 }
 
 fn read_builtin_lines<'s>(
@@ -2138,6 +2136,63 @@ mod native_property_tests {
 
     fn day(year: i32, month: u32, date: u32) -> Day {
         Day::from_ymd(year, month, date).unwrap()
+    }
+
+    fn place(role: Role, name: Sym) -> Place {
+        Place {
+            path: name,
+            class: crate::book::Class::Asset,
+            role,
+            kind: Id::new(0),
+            owner: Id::new(0),
+            holds: None,
+            select: None,
+            deferred: false,
+            basis: Basis::Cost,
+            claim: false,
+            liquidity: None,
+            opened: None,
+            closed: None,
+            shares: Box::default(),
+            known_as: Box::default(),
+            props: Box::default(),
+            doc: None,
+            loc: None,
+        }
+    }
+
+    #[test]
+    fn synthetic_claim_tabs_keep_their_claim_trait_without_a_kind_default() {
+        let mut names = axiom_core::Interner::default();
+        let empty = names.intern("");
+        let kind = Kind {
+            name: empty,
+            sort: Sort::Place(crate::book::Class::Asset),
+            system: None,
+            restricted: false,
+            deferred: false,
+            basis: None,
+            claim: false,
+            select: None,
+            liquidity: None,
+            purpose: None,
+            pays: None,
+            takes: Box::default(),
+            sales_tax: None,
+            shares: Box::default(),
+            has: Box::default(),
+            props: Box::default(),
+            laws: Box::default(),
+            doc: None,
+            loc: None,
+        };
+        let mut tab = place(Role::Tab(Id::new(0)), empty);
+        inherit_place_traits(&mut tab, &kind);
+        assert!(tab.claim);
+
+        let mut account = place(Role::Account { institution: None }, empty);
+        inherit_place_traits(&mut account, &kind);
+        assert!(!account.claim);
     }
 
     fn update(
