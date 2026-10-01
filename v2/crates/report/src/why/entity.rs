@@ -25,14 +25,24 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> 
     }
 
     let mut places = Section::new([Column::left("Place"), Column::right("Holds")]).headed("Places");
-    for holding in run.holdings.iter().filter(|holding| {
-        lens.owns(holding.place) && on_balance_sheet(book.places[holding.place].class)
-    }) {
+    for holding in run
+        .holdings
+        .iter()
+        .filter(|holding| on_balance_sheet(book.places[holding.place].class))
+    {
+        // `why ENTITY` is about that entity's financial holdings even when the
+        // caller's lens is the household. Allocate with the same cent
+        // boundaries used by registers so shared places neither leak the
+        // household total nor lose a cent across owners.
+        let held = lens
+            .plan()
+            .allocate(holding.place, holding.qty())
+            .find_map(|(share, qty)| (share.owner == entity).then_some(qty));
+        let Some(held) = held.filter(|qty| !qty.is_zero()) else {
+            continue;
+        };
         let sign = book.places[holding.place].class.display_sign();
-        let held = Amount::new(
-            Qty(lens.place_qty(holding.place, holding.qty()).0 * sign),
-            holding.unit,
-        );
+        let held = Amount::new(Qty(held.0 * sign), holding.unit);
         places.push(Row::new([
             Cell::text(path(book, holding.place)),
             Cell::amount(book, held),

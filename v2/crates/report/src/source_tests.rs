@@ -100,11 +100,13 @@ fn why_source_lines_resolve_in_the_report_layer_with_borrowed_windows_paths() {
 base USD
 commodity USD
   precision 2
-account assets/checking
-account expenses/food
+entity me
+entity grocer
+purpose food : spending
+account checking : asset
 opening 2026-01-01
   checking 100 USD
-2026-01-02 checking -> food 5 USD
+2026-01-02 checking -> grocer 5 USD #food
 ";
     let provider = BorrowedSources {
         path: r"C:\ledger\january.ax",
@@ -133,7 +135,7 @@ opening 2026-01-01
         assert_eq!(show(&shared), show(&report));
         assert!(
             crate::tests::lines(&report.sections[0])[0]
-                .contains("flow: assets/checking → expenses/food")
+                .contains("flow: assets/checking → grocer")
         );
         assert!(crate::resolve_source_line(&query, &provider).is_some());
         let unknown = Query::Why {
@@ -263,6 +265,13 @@ opening 2026-01-01
         )
         .unwrap();
         assert_eq!(everyone.sections[0].facts[0].value.qty, Qty(10_000));
+
+        let theo = crate::report(book, run, &Query::Why { target: "theo" }, None).unwrap();
+        assert_eq!(
+            lines(&theo.sections[0]),
+            ["checking | 160.00 USD"],
+            "why for an owner reports only that owner's 40% of the shared place"
+        );
     });
 }
 
@@ -519,7 +528,7 @@ fn decoded_flow_descriptions_stay_borrowed_in_report_cells() {
 commodity USD
   precision 2
 
-entity me : person
+entity me
 entity cafe
 account checking : asset
 
@@ -554,6 +563,8 @@ opening 2026-01-01
 fn a_measure_only_book_anchors_flow_to_its_first_measure() {
     let source = "\
 base USD
+commodity USD
+  precision 2
 entity me
 entity halcyon
 commodity HR : measure
@@ -614,7 +625,7 @@ base USD
 commodity USD
   precision 2
 
-entity me : person
+entity me
 entity figma
 account checking : asset
 
@@ -662,7 +673,7 @@ asset laptop : thing
         let why_contract = crate::report(book, run, &Query::Why { target: "figma" }, None).unwrap();
         assert_eq!(
             crate::tests::heading(&why_contract.sections[0]),
-            Some("Terms over time")
+            Some("Contract")
         );
         let why_party = crate::report(
             book,
@@ -1158,23 +1169,24 @@ base USD
 commodity USD
   precision 2
 
+entity employer
 entity treasury
+purpose salary : income
 
-account assets/checking
-account income/salary
+account checking : asset
 
 law count-pay
   on in
-  when to is assets/checking
+  when from is employer
   count amount as pay
 
 law return
   each year closing 04-15
   owe tally(pay) * 10% to treasury as income-tax
 
-2026-03-01 income/salary -> checking 1_000 USD
-2026-09-01 income/salary -> checking 1_000 USD
-2027-01-05 income/salary -> checking 500 USD
+2026-03-01 employer -> checking 1_000 USD #salary
+2026-09-01 employer -> checking 1_000 USD #salary
+2027-01-05 employer -> checking 500 USD #salary
 ";
 
 #[test]
@@ -1281,33 +1293,34 @@ commodity USD
   precision 2
 
 entity treasury
-
-account assets/checking
-account income/reserve
-account income/salary
-account expenses/food
+entity employer
+entity reserve
+entity grocer
+purpose salary : income
+purpose food : spending
+account checking : asset
 
 law count-pay
   on in
-  when from is income/salary
+  when from is employer
   count amount as pay
 
 law historical-fee
   on out
-  when from is assets/checking
-  require amount < 0 USD else owe 5 USD to treasury by date(2027, 2, 15) as historical-fee
+  when from is checking
+  require amount < empty else owe 5 USD to treasury by date(2027, 2, 15) as historical-fee
 
 law pad-fee
   on in
-  when from is income/reserve
+  when from is reserve
   owe 2 USD to treasury by date(2027, 3, 1) as pad-fee
 
 law year-end-tax
   each year
   owe tally(pay) * 10% to treasury by date(year + 1, 1, 15) as year-end-tax
 
-2026-01-05 income/salary -> checking 100 USD
-2026-02-01 checking -> expenses/food 10 USD
+2026-01-05 employer -> checking 100 USD #salary
+2026-02-01 checking -> grocer 10 USD #food
 2026-12-31 checking = 100 USD via reserve
 ";
 
@@ -1373,7 +1386,7 @@ fn a_context_checkpoint_keeps_same_day_closings_pending_for_a_withdrawal() {
             .unwrap();
         assert_eq!(
             lines(reach)[0],
-            "assets/ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD"
+                "ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD"
         );
     });
 }
@@ -1475,16 +1488,17 @@ base USD
 commodity USD
   precision 2
 
-account assets/checking
-account expenses/dining
-  budget 150 USD monthly
-account expenses/clothing
-  budget 80 USD monthly
+entity diner
+purpose dining : spending
+purpose clothing : spending
+budget dining 150 USD monthly
+budget clothing 80 USD monthly
+account checking : asset
 
 opening 2026-01-01
   checking 1_000 USD
 
-2026-01-10 checking -> dining 120 USD
+2026-01-10 checking -> diner 120 USD #dining
 ";
 
 /// The year is its months so far, each one read: a month no flow reached is
@@ -1499,10 +1513,10 @@ fn a_years_budget_reads_every_month_so_far_even_those_nothing_touched() {
         assert_eq!(
             rows(book, run, budget),
             [
-                "expenses/clothing | budget | 2026 | 0.00 USD | 160.00 USD | 160.00 USD | 0%",
+                "clothing | budget | 2026 | 0.00 USD | 160.00 USD | 160.00 USD | 0%",
                 "~   |  | 2026-01 | 0.00 USD | 80.00 USD | 80.00 USD | 0%",
                 "~   |  | 2026-02 | 0.00 USD | 80.00 USD | 80.00 USD | 0%",
-                "expenses/dining | budget | 2026 | 120.00 USD | 300.00 USD | 180.00 USD | 40%",
+                "dining | budget | 2026 | 120.00 USD | 300.00 USD | 180.00 USD | 40%",
                 "~   |  | 2026-01 | 120.00 USD | 150.00 USD | 30.00 USD | 80%",
                 "~   |  | 2026-02 | 0.00 USD | 150.00 USD | 150.00 USD | 0%",
             ]
@@ -1527,10 +1541,11 @@ kind retirement : asset
     count amount as income
 
 entity treasury
+entity employer
+purpose salary : income
 
-account assets/checking
-account assets/ira : retirement
-account income/salary
+account checking : asset
+account ira : retirement
 
 opening 2026-01-01
   checking 1_000 USD
@@ -1540,7 +1555,7 @@ law return
   each year closing 04-15
   owe tally(income) * 20% to treasury as income-tax
 
-2026-01-05 income/salary -> checking 100 USD
+2026-01-05 employer -> checking 100 USD #salary
 ";
 
 /// Drawing the account down in June makes income in 2026, and the 2026 return
@@ -1556,7 +1571,7 @@ fn available_runs_the_books_to_the_day_the_return_closes_to_price_a_withdrawal()
             .find(|s| crate::tests::heading(s) == Some("What it would take to reach the rest"));
         assert_eq!(
             lines(reach.unwrap())[0],
-            "assets/ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD"
+            "ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD"
         );
     });
 }
@@ -1575,10 +1590,11 @@ kind retirement : asset
     count amount as income
 
 entity treasury
+entity employer
+purpose salary : income
 
-account assets/checking
-account assets/ira : retirement
-account income/salary
+account checking : asset
+account ira : retirement
 
 opening 2026-01-01
   checking 1_000 USD
@@ -1588,7 +1604,7 @@ law return
   each year
   owe tally(income) * 20% to treasury as income-tax
 
-2026-01-05 income/salary -> checking 100 USD
+2026-01-05 employer -> checking 100 USD #salary
 ";
 
 /// What is drawn on the day a year ends is a fact of that day, and the law that
@@ -1606,7 +1622,7 @@ fn a_withdrawal_on_the_last_day_of_the_year_is_taxed_by_the_law_that_closes_the_
                 .unwrap();
             assert_eq!(
                 lines(reach)[0],
-                "assets/ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD",
+                "ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD",
                 "on {today}"
             );
         });
@@ -1619,23 +1635,26 @@ base USD
 commodity USD
   precision 2
 
+entity employer
 entity treasury
+purpose salary : income
 
-account assets/checking
-account income/salary
+account checking : asset
 
 law count-pay
   on in
-  when to is assets/checking
+  when from is employer
   count amount as pay
 
 law return
   each year closing 04-15
   owe tally(pay) * 10% to treasury as income-tax
 
-every month on 5 income/salary -> checking 1_000 USD
+contract salary with employer
+  1_000 USD monthly on 5 into checking #salary
+  from 2026-02-05
 
-2026-01-05 income/salary -> checking 1_000 USD
+2026-01-05 employer -> checking 1_000 USD #salary
 ";
 
 /// A year from today ends in January 2027, three months before the return of
@@ -1801,14 +1820,15 @@ commodity FAST
 
 account assets/broker
 account assets/checking
-account income/pay
+entity payer
+purpose pay : income
 
 opening 2025-01-01
   broker 10 FAST
 
-2025-01-02 income/pay -> checking 100 USD #deposit
+2025-01-02 payer -> checking 100 USD ^deposit
 2025-01-03 FAST split 2 for 1
-2025-01-04 #deposit returned
+2025-01-04 ^deposit returned
 ";
     with_run(source, day(2025, 1, 5), |book, run| {
         let whose = crate::lens::Whose::default();
