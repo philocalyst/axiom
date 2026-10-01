@@ -145,12 +145,12 @@ fn lower_contract<'a, 's>(
         Ok(party) => party,
         Err(problem) => {
             diags.push(problem);
-            world.book.roots.me
+            return None;
         }
     };
-    let days = contract_days(file, node.props, diags);
+    let days = contract_days(file, node.props, diags)?;
     let anchor = days.first();
-    let purpose = node.purpose.and_then(|purpose| {
+    let purpose = if let Some(purpose) = node.purpose {
         let purpose_word = Word {
             text: purpose.name.0,
             loc: file.loc(purpose.name.0),
@@ -168,10 +168,12 @@ fn lower_contract<'a, 's>(
             }),
             Err(problem) => {
                 diags.push(problem);
-                None
+                return None;
             }
         }
-    });
+    } else {
+        None
+    };
     let description = node
         .description
         .map(|description| world.book.quoted_text(description.0));
@@ -200,15 +202,10 @@ fn lower_contract<'a, 's>(
         ),
     );
 
-    let owner = schedule_owner(
-        world,
-        written.site.home,
-        file,
-        node.schedule.or(node.standing),
-        party,
-        diags,
-    )
-    .unwrap_or(world.book.roots.me);
+    let owner = match node.schedule.or(node.standing) {
+        Some(schedule) => schedule_owner(world, written.site.home, file, Some(schedule), party, diags)?,
+        None => world.book.roots.me,
+    };
     let mut contract = empty_contract(
         written.name,
         written.site.source.file.loc(node.name.0),
@@ -294,7 +291,13 @@ fn lower_terms<'a, 's>(
         schedule.at,
         diags,
     )?;
-    let party_place = world.book.entities[party].place?;
+    let Some(party_place) = world.book.entities[party].place else {
+        diags.push(
+            Diagnostic::error("contract-party-place", "the contract party has no usable place")
+                .label(schedule.at, "the party's flow endpoint cannot be resolved"),
+        );
+        return None;
+    };
     let (from, to, side) = match hold.direction {
         Direction::From => (holding, party_place, FlowSide::Arrive),
         Direction::Into => (party_place, holding, FlowSide::Out),
@@ -409,13 +412,20 @@ fn lower_terms<'a, 's>(
         inputs: inputs.to_vec().into_boxed_slice(),
         estimate: schedule.terms.about,
         due,
-        grace: span_property(file, written.node.props, "grace").unwrap_or(Span::default()),
-        period: relative_property(file, written.node.props),
-        covers: coverage_property(file, written.node.props),
+        grace: span_property(file, written.node.props, "grace", diags).unwrap_or(Span::default()),
+        period: relative_property(file, written.node.props, diags),
+        covers: coverage_property(file, written.node.props, diags),
         prorated: has_property(file, written.node.props, "prorated"),
         escalation: escalation_property(world, written.site.home, file, written.node.props, diags),
-        shares: shares(world, written.site.home, file, written.node.props, diags)
-            .into_boxed_slice(),
+        shares: shares(
+            world,
+            written.site.home,
+            file,
+            written.node.props,
+            purpose,
+            diags,
+        )
+        .into_boxed_slice(),
         also: Box::default(),
         rate: None,
         change: None,
@@ -723,16 +733,16 @@ fn resolve_commodity<'s>(
 
 fn resolve_endpoint<'s>(
     world: &World<'s>,
-    _home: Home,
+    home: Home,
     file: &ast::File<'s>,
     name: Name<'s>,
     loc: Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Id<crate::book::Place>> {
-    match world.find_end(name.0) {
+    match world.end(home, Word { text: name.0, loc: file.loc(name.0) }) {
         Ok(end) => Some(end.place),
-        Err(cause) => {
-            diags.push(world.explain(cause, Word { text: name.0, loc }, 1));
+        Err(problem) => {
+            diags.push(problem);
             None
         }
     }
@@ -755,41 +765,57 @@ fn contract_days(
     file: &ast::File<'_>,
     props: axiom_syntax::Many<ast::Prop<'_>>,
     diags: &mut Vec<Diagnostic>,
-) -> Days {
+) -> Option<Days> {
     let mut first = Day::MIN;
     let mut last = Day::MAX;
+    let mut valid = true;
+    let mut seen = Map::default();
     for prop in &file[props] {
         let target = match prop.name.0 {
             "from" => &mut first,
             "until" => &mut last,
             _ => continue,
         };
-        let value = file[prop.args]
-            .first()
-            .and_then(|id| match file.exprs[*id].kind {
+        if let Some(previous) = seen.insert(prop.name.0, prop.loc) {
+            diags.push(
+                Diagnostic::error("duplicate-contract-date", "a contract date is written twice")
+                    .label(prop.loc, "written again here")
+                    .context(previous, "first written here"),
+            );
+            valid = false;
+            continue;
+        }
+        let args = &file[prop.args];
+        let value = (args.len() == 1)
+            .then(|| args[0])
+            .and_then(|id| match file.exprs[id].kind {
                 ExprKind::Date(day) => Some(day),
                 _ => None,
             });
         if let Some(day) = value {
             *target = day;
         } else {
+            valid = false;
             diags.push(
                 Diagnostic::error(
                     "contract-date",
                     "a contract's `from` and `until` need a date",
                 )
-                .label(prop.loc, "write a date here"),
+                .label(prop.loc, "write exactly one date here"),
             );
         }
     }
-    Days::new(first, last).unwrap_or_else(|| {
+    if !valid {
+        return None;
+    }
+    Days::new(first, last).or_else(|| {
         diags.push(
             Diagnostic::error("contract-range", "a contract ends before it begins").label(
                 file[props].first().map_or(Loc::default(), |prop| prop.loc),
                 "these dates do not overlap",
             ),
         );
-        Days::ALWAYS
+        None
     })
 }
 
@@ -821,24 +847,30 @@ fn resolve_object<'s>(
     }
 }
 
-fn node_doc<'s>(world: &World<'s>, site: &Site<'_, 's>, loc: Loc) -> Option<Sym> {
+fn node_doc<'s>(world: &mut World<'s>, site: &Site<'_, 's>, loc: Loc) -> Option<Sym> {
     let item = site.source.file.items.iter().find(|item| item.loc == loc)?;
-    item.doc.map(|doc| world.sym(doc.0))
+    item.doc.map(|doc| world.book.names.intern(doc.0))
 }
 
 fn span_property(
     file: &ast::File<'_>,
     props: axiom_syntax::Many<ast::Prop<'_>>,
     name: &str,
+    diags: &mut Vec<Diagnostic>,
 ) -> Option<Span> {
-    file[props]
-        .iter()
-        .find(|prop| prop.name.0 == name)
-        .and_then(|prop| file[prop.args].first())
-        .and_then(|id| match file.exprs[*id].kind {
-            ExprKind::Span(span) => Some(span),
-            _ => None,
-        })
+    let prop = file[props].iter().find(|prop| prop.name.0 == name)?;
+    let args = &file[prop.args];
+    let value = (args.len() == 1).then(|| args[0]).and_then(|id| match file.exprs[id].kind {
+        ExprKind::Span(span) => Some(span),
+        _ => None,
+    });
+    if value.is_none() {
+        diags.push(
+            Diagnostic::error("contract-span", format!("`{name}` needs one time span"))
+                .label(prop.loc, format!("write `{name} 5d`")),
+        );
+    }
+    value
 }
 
 fn has_property(
@@ -852,36 +884,61 @@ fn has_property(
 fn relative_property(
     file: &ast::File<'_>,
     props: axiom_syntax::Many<ast::Prop<'_>>,
+    diags: &mut Vec<Diagnostic>,
 ) -> Option<Relative> {
     let property = file[props].iter().find(|prop| prop.name.0 == "for")?;
-    let words: Vec<_> = file[property.args]
-        .iter()
-        .filter_map(|id| match file.exprs[*id].kind {
-            ExprKind::Name(name) => Some(name.0),
-            _ => None,
-        })
-        .collect();
-    match words.as_slice() {
-        ["last", "month"] => Some(Relative::Last(axiom_core::Period::Month)),
-        ["last", "quarter"] => Some(Relative::LastQuarter),
-        ["last", "year"] => Some(Relative::Last(axiom_core::Period::Year)),
+    let args = &file[property.args];
+    let period = match args {
+        [first, second]
+            if matches!(&file.exprs[*first].kind, ExprKind::Name(Name("last"))) =>
+        {
+            match &file.exprs[*second].kind {
+                ExprKind::Name(Name("month")) => Some(Relative::Last(axiom_core::Period::Month)),
+                ExprKind::Name(Name("quarter")) => Some(Relative::LastQuarter),
+                ExprKind::Name(Name("year")) => Some(Relative::Last(axiom_core::Period::Year)),
+                _ => None,
+            }
+        }
         _ => None,
+    };
+    if period.is_none() {
+        diags.push(
+            Diagnostic::error("contract-period", "a contract recognition period must be `last month`, `last quarter` or `last year`")
+                .label(property.loc, "write one of the supported periods"),
+        );
     }
+    period
 }
 
 fn coverage_property(
     file: &ast::File<'_>,
     props: axiom_syntax::Many<ast::Prop<'_>>,
+    diags: &mut Vec<Diagnostic>,
 ) -> Option<Coverage> {
     let property = file[props].iter().find(|prop| prop.name.0 == "covers")?;
-    let arg = *file[property.args].first()?;
-    match file.exprs[arg].kind {
-        ExprKind::Span(span) => Some(Coverage::Span(span)),
-        ExprKind::Name(Name("month")) => Some(Coverage::Calendar(axiom_core::Period::Month)),
-        ExprKind::Name(Name("quarter")) => Some(Coverage::Quarter),
-        ExprKind::Name(Name("year")) => Some(Coverage::Calendar(axiom_core::Period::Year)),
+    let args = &file[property.args];
+    let coverage = match args {
+        [arg] => match &file.exprs[*arg].kind {
+            ExprKind::Span(span) => Some(Coverage::Span(*span)),
+            _ => None,
+        },
+        [the, period] if matches!(&file.exprs[*the].kind, ExprKind::Name(Name("the"))) => {
+            match &file.exprs[*period].kind {
+                ExprKind::Name(Name("month")) => Some(Coverage::Calendar(axiom_core::Period::Month)),
+                ExprKind::Name(Name("quarter")) => Some(Coverage::Quarter),
+                ExprKind::Name(Name("year")) => Some(Coverage::Calendar(axiom_core::Period::Year)),
+                _ => None,
+            }
+        }
         _ => None,
+    };
+    if coverage.is_none() {
+        diags.push(
+            Diagnostic::error("contract-covers", "`covers` needs a span, month, quarter or year")
+                .label(property.loc, "write `covers 1y` or `covers the year`"),
+        );
     }
+    coverage
 }
 
 fn escalation_property<'s>(
@@ -892,16 +949,37 @@ fn escalation_property<'s>(
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Escalation> {
     for prop in &file[props] {
-        let first = *file[prop.args].first()?;
+        if !matches!(prop.name.0, "rising" | "indexed") {
+            continue;
+        }
+        let args = &file[prop.args];
+        let Some(&first) = args.first() else {
+            diags.push(
+                Diagnostic::error("contract-escalation", "an escalation needs a rate or index")
+                    .label(prop.loc, "write `rising 3%` or `indexed to cpi`"),
+            );
+            continue;
+        };
         match prop.name.0 {
             "rising" => {
+                if args.len() != 2 || !matches!(file.exprs[args[1]].kind, ExprKind::Name(Name("yearly"))) {
+                    diags.push(
+                        Diagnostic::error("contract-rate", "a yearly rise takes one percentage")
+                            .label(prop.loc, "write `rising 3%`"),
+                    );
+                    continue;
+                }
                 let ExprKind::Pct(percent) = file.exprs[first].kind else {
+                    diags.push(
+                        Diagnostic::error("contract-rate", "a yearly rise must be a percentage")
+                            .label(file.exprs[first].loc, "write a percentage such as `3%`"),
+                    );
                     continue;
                 };
                 let rate = percent
                     .to_ratio()
                     .and_then(|rate| rate.checked_div(Ratio::new(100, 1)?));
-                if let Some(rate) = rate {
+                if let Some(rate) = rate.filter(|rate| !rate.is_negative()) {
                     return Some(Escalation::Rising(rate));
                 }
                 diags.push(
@@ -913,24 +991,37 @@ fn escalation_property<'s>(
                 );
             }
             "indexed" => {
-                let name = match file.exprs[first].kind {
-                    ExprKind::Name(name) => name,
-                    _ => continue,
+                let index = match (args.len(), &file.exprs[first].kind) {
+                    (3, ExprKind::Name(Name("to")))
+                        if matches!(&file.exprs[args[2]].kind, ExprKind::Name(Name("yearly"))) =>
+                    {
+                        match &file.exprs[args[1]].kind {
+                        ExprKind::Name(name) => Some(*name),
+                        _ => None,
+                        }
+                    }
+                    _ => None,
                 };
-                if let crate::names::Found::One(param) =
-                    world
-                        .book
-                        .lookup
-                        .params
-                        .find(&world.book.names, world.scopes.of(home), name.0)
-                {
-                    return Some(Escalation::Indexed(param));
+                if let Some(name) = index {
+                    let word = Word {
+                        text: name.0,
+                        loc: file.loc(name.0),
+                    };
+                    match world.seek_param(home, word) {
+                        Ok(Some(param)) => return Some(Escalation::Indexed(param)),
+                        Ok(None) => diags.push(world.missing_param(home, word)),
+                        Err(problem) => diags.push(problem),
+                    }
+                } else {
+                    diags.push(
+                        Diagnostic::error("contract-index", "an index escalation needs one parameter")
+                            .label(prop.loc, "write `indexed to cpi yearly`"),
+                    );
                 }
             }
             _ => {}
         }
     }
-    let _ = home;
     None
 }
 
@@ -939,64 +1030,150 @@ fn shares<'s>(
     home: Home,
     file: &ast::File<'s>,
     props: axiom_syntax::Many<ast::Prop<'s>>,
+    purpose: Option<At<Purposed>>,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<Share> {
     let mut shares = Vec::new();
+    let mut total = Ratio::ZERO;
     for prop in &file[props] {
         if prop.name.0 != "share" {
             continue;
         }
         let args = &file[prop.args];
-        let Some((&rate_expr, rest)) = args.split_first() else {
-            continue;
-        };
-        let rate = match file.exprs[rate_expr].kind {
-            ExprKind::Pct(percent) => percent
-                .to_ratio()
-                .and_then(|rate| rate.checked_div(Ratio::new(100, 1)?)),
-            ExprKind::Fraction(top, bottom) => Ratio::new(i128::from(top), i128::from(bottom)),
-            _ => None,
-        };
-        let Some(rate) = rate else {
+        if args.is_empty() {
             diags.push(
-                Diagnostic::error(
-                    "contract-share",
-                    "a contract share must be a percentage or fraction",
-                )
-                .label(file.exprs[rate_expr].loc, "write `60%` or `3/5`"),
+                Diagnostic::error("contract-share", "a contract share needs an amount")
+                    .label(prop.loc, "write `share 60% for ENTITY`"),
             );
-            continue;
-        };
-        let Some(entity_expr) = rest
-            .iter()
-            .find(|&&id| matches!(file.exprs[id].kind, ExprKind::Name(_)))
-        else {
-            diags.push(
-                Diagnostic::error("contract-share", "a contract share needs an owner")
-                    .label(prop.loc, "write `share RATE for ENTITY`"),
-            );
-            continue;
-        };
-        let ExprKind::Name(entity_name) = file.exprs[*entity_expr].kind else {
-            continue;
-        };
-        if entity_name.0 == "for" {
             continue;
         }
-        match world.entity(
-            home,
-            Word {
-                text: entity_name.0,
-                loc: file.loc(entity_name.0),
-            },
-        ) {
-            Ok(entity) => shares.push(Share {
-                rate,
-                entity,
-                measure: None,
-                loc: prop.loc,
-            }),
-            Err(problem) => diags.push(problem),
+
+        let mut at = 0;
+        while at < args.len() {
+            let written_amount = args[at];
+            at += 1;
+            let (rate, measure) = match file.exprs[written_amount].kind {
+                ExprKind::Pct(percent) => {
+                    let rate = percent
+                        .to_ratio()
+                        .and_then(|rate| rate.checked_div(Ratio::new(100, 1)?));
+                    (rate, None)
+                }
+                ExprKind::Fraction(top, bottom) => {
+                    (Ratio::new(i128::from(top), i128::from(bottom)), None)
+                }
+                ExprKind::Amount(literal) => {
+                    let unit = literal.unit().and_then(|name| world.book.commodity(name.0));
+                    let numerator = unit.and_then(|unit| {
+                        world
+                            .amount(literal.num(), unit, file.loc(literal.0))
+                            .map_err(|problem| diags.push(problem))
+                            .ok()
+                    });
+                    let denominator = purpose
+                        .and_then(|at| at.value.of)
+                        .and_then(|object| match object {
+                            crate::journal::Object::Asset(asset) => world.book.assets[asset]
+                                .props
+                                .iter()
+                                .find(|property| world.book.name(property.name) == "area")
+                                .and_then(|property| match property.value {
+                                    crate::law::Value::Amount(amount) => Some(amount),
+                                    _ => None,
+                                }),
+                            _ => None,
+                        });
+                    let ratio = match (numerator, denominator) {
+                        (Some(numerator), Some(denominator))
+                            if numerator.unit == denominator.unit && denominator.qty.0 > 0 =>
+                        {
+                            Ratio::new(i128::from(numerator.qty.0), i128::from(denominator.qty.0))
+                        }
+                        _ => {
+                            diags.push(
+                                Diagnostic::error(
+                                    "contract-share-measure",
+                                    "a measured share needs the asset's positive area in the same unit",
+                                )
+                                .label(file.exprs[written_amount].loc, "cannot resolve this measure"),
+                            );
+                            None
+                        }
+                    };
+                    (ratio, numerator.zip(denominator))
+                }
+                _ => (None, None),
+            };
+            let Some(rate) = rate.filter(|rate| !rate.is_negative()) else {
+                diags.push(
+                    Diagnostic::error(
+                        "contract-share",
+                        "a share must be a nonnegative percentage, fraction, or measure",
+                    )
+                    .label(file.exprs[written_amount].loc, "write `60%`, `3/5` or `120 SQFT`"),
+                );
+                break;
+            };
+            let Some(for_word) = args.get(at).copied() else {
+                diags.push(
+                    Diagnostic::error("contract-share", "a contract share needs an owner")
+                        .label(prop.loc, "write `share RATE for ENTITY`"),
+                );
+                break;
+            };
+            at += 1;
+            if !matches!(file.exprs[for_word].kind, ExprKind::Name(Name("for"))) {
+                diags.push(
+                    Diagnostic::error("contract-share", "a share amount must be followed by `for ENTITY`")
+                        .label(file.exprs[for_word].loc, "expected `for` here"),
+                );
+                break;
+            }
+            let Some(owner_expr) = args.get(at).copied() else {
+                diags.push(
+                    Diagnostic::error("contract-share", "a contract share needs an owner")
+                        .label(prop.loc, "write an entity after `for`"),
+                );
+                break;
+            };
+            at += 1;
+            let ExprKind::Name(owner_name) = file.exprs[owner_expr].kind else {
+                diags.push(
+                    Diagnostic::error("contract-share", "a share owner must be an entity name")
+                        .label(file.exprs[owner_expr].loc, "write the owner here"),
+                );
+                break;
+            };
+            let Some(next_total) = total.checked_add(rate) else {
+                diags.push(
+                    Diagnostic::error("contract-share-total", "contract shares exceed exact arithmetic")
+                        .label(prop.loc, "reduce the declared shares"),
+                );
+                break;
+            };
+            if next_total.checked_sub(Ratio::ONE).is_some_and(|excess| !excess.is_negative() && !excess.is_zero()) {
+                diags.push(
+                    Diagnostic::error("contract-share-total", "contract shares add up to more than 100%")
+                        .label(prop.loc, "the total shares cannot exceed 100%"),
+                );
+                break;
+            }
+            total = next_total;
+            match world.entity(
+                home,
+                Word {
+                    text: owner_name.0,
+                    loc: file.loc(owner_name.0),
+                },
+            ) {
+                Ok(entity) => shares.push(Share {
+                    rate,
+                    entity,
+                    measure,
+                    loc: prop.loc,
+                }),
+                Err(problem) => diags.push(problem),
+            }
         }
     }
     shares
