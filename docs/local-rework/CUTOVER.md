@@ -93,6 +93,10 @@ an agreed exception or as completed work.
 | `2dfe40a`, `be3a4d6` | Native declaration trees, ownership shares, surveyed claim tabs, place-first endpoints; build now reaches custom properties, parameters and contracts | Reviewed source. Workspace check still fails in legacy model adapters; native law and journal execution are not yet wired |
 | `e4bc7db`, `6932fb9` | Pooled implied-flow metadata and explicit journal versus contract-occurrence runtime identity | Reviewed source. Engine propagation and integrated model tests pending |
 | `88c5dcc`, `2b21863`, `d918dae` | One forecast-history allocation with stable category indices | Coordinator: actual integrated bands module passes all five release tests, including every sample against the previous nested-row sampling loop; full report tests still blocked by model |
+| `563a3a6`, `f98abeb` | Native declaration laws, forward override metadata, contract governance and typed S5 expressions/effects | Reviewed compiler checkpoints. Coordinator workspace check reaches 89 model migration errors; native builder wiring and execution remain pending. Dynamic amount typing is being tightened to the normative unit rules |
+| `a511cd2` | Iterative memoized effective ownership, with cycle and overflow diagnostics | Reviewed source and nested-share/cycle regression cases; integrated engine tests await the native model |
+| `dab2b66`, `01bc510`, `da1f56d` | Named sync selection, dry option and auxiliary reader sources held separately from borrowed parsed input | Reviewed API and borrow-lifetime regression case; CLI tests await model and sync adapter completion |
+| `b2f2e4b` | Validate generated sync items with a full date before emitting the destination's short date | Coordinator: actual integrated core/syntax, CSV, tagged, amount, memo-cell and writer modules pass 28 release tests; three timing tests ignored. Both heading-dependent date regressions pass |
 
 The six old completed implementation worktrees were clean before removal. Their
 branches and commits remain available; exact paths and heads are in
