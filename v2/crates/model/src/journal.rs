@@ -100,6 +100,10 @@ pub struct RuntimeDetail(pub Detail);
 pub struct RuntimeFlow {
     pub flow: Flow,
     pub detail: Option<Id<RuntimeDetail>>,
+    /// Stable source-order index among this runtime transaction's flows.
+    /// Unlike `RuntimeTxn`'s occurrence ordinal, this distinguishes grouped
+    /// headers, legs, and items within one occurrence.
+    pub ordinal: u32,
     /// Identity of the transaction in the runtime. `Flow::txn` is source
     /// metadata and is never used as a Book transaction index for a runtime
     /// flow.
@@ -109,7 +113,12 @@ pub struct RuntimeFlow {
 impl RuntimeFlow {
     pub fn source(flow: Flow) -> RuntimeFlow {
         let txn = RuntimeTxn::journal(flow.txn).expect("a source flow must not carry the template transaction sentinel");
-        RuntimeFlow { txn, flow, detail: None }
+        RuntimeFlow { txn, flow, detail: None, ordinal: 0 }
+    }
+
+    pub fn source_at(flow: Flow, ordinal: u32) -> RuntimeFlow {
+        let txn = RuntimeTxn::journal(flow.txn).expect("a source flow must not carry the template transaction sentinel");
+        RuntimeFlow { txn, flow, detail: None, ordinal }
     }
 }
 

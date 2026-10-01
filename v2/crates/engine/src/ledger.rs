@@ -180,14 +180,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let view = self.plan.book.flow_view(flow);
         let txn = axiom_model::RuntimeTxn::journal(flow.txn)
             .expect("a Book flow cannot use the template transaction sentinel");
-        self.apply_view(flow, view, txn)
+        self.apply_view(flow, view, txn, 0)
     }
 
     /// Applies a forecast flow whose metadata is pooled in the Book and whose
     /// detail may be overridden in the forecast's immutable runtime arena.
     pub fn apply_runtime(&mut self, flow: &RuntimeFlow, details: &Arena<RuntimeDetail>) -> Applied {
         let view = self.plan.book.runtime_flow_view(flow, details);
-        self.apply_view(&flow.flow, view, flow.txn)
+        self.apply_view(&flow.flow, view, flow.txn, flow.ordinal)
     }
 
     fn apply_view(
@@ -195,6 +195,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         flow: &Flow,
         view: FlowView<'_>,
         txn: axiom_model::RuntimeTxn,
+        flow_ordinal: u32,
     ) -> Applied {
         let (was, before) = (self.clock.day, self.clock.phase);
         let day = flow.day.max(self.clock.day);
@@ -210,13 +211,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let number = self.clock.applied;
         self.clock.applied += 1;
         let amounts = self.amounts(flow, None);
-        self.post(&Motion::from_view(
+        self.post(&Motion::from_view_at(
             self.plan.book,
             view,
             txn,
             Cause::Applied(number),
             day,
             amounts,
+            flow_ordinal,
         ));
         self.world.holdings.tidy();
         self.record.since(marks)
@@ -597,7 +599,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         // A computed basis is a call-local override. Borrow it directly for
         // this motion instead of allocating a one-entry RuntimeDetail arena.
         let view = book.flow_view_with_detail(&flow, &detail);
-        let motion = Motion::from_view(book, view, txn, Cause::Flow(id), day, amounts);
+        let flow_ordinal = offset.unwrap_or_default();
+        let motion = Motion::from_view_at(book, view, txn, Cause::Flow(id), day, amounts, flow_ordinal);
         self.post(&if reversed { motion.reversed() } else { motion });
     }
 
@@ -723,13 +726,18 @@ fn journal_expression<'b, 's>(
     let book = plan.book;
     let txn = RuntimeTxn::journal(txn_id).expect("journal expression cannot use the template transaction sentinel");
     let view = book.flow_view(flow);
-    let motion = Motion::from_view(
+    let flow_ordinal = plan.book.txns.get(txn_id)
+        .and_then(|txn| flow_id.index().checked_sub(txn.flows.start().index()))
+        .and_then(|at| u32::try_from(at).ok())
+        .unwrap_or(0);
+    let motion = Motion::from_view_at(
         book,
         view,
         txn,
         Cause::Flow(flow_id),
         flow.day,
         Amounts::written(flow),
+        flow_ordinal,
     );
     let mut occasion = crate::eval::Occasion::flow(&motion);
     occasion.amount = Some(if flow.out.qty == Qty::ZERO { flow.arrive } else { flow.out });

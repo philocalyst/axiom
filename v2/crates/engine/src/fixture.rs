@@ -550,6 +550,7 @@ impl Fixture {
             plans: Arena::new(),
             sources: Vec::new(),
             lookup: Default::default(),
+            issuer_places: Default::default(),
         }
     }
 }

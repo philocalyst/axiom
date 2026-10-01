@@ -82,6 +82,10 @@ pub(crate) struct Motion<'f> {
     pub out: Amount,
     pub arrive: Amount,
     pub txn: RuntimeTxn,
+    /// Source-order flow index within a journal transaction or materialized
+    /// contract occurrence. Asset-part identities use this in addition to the
+    /// transaction identity.
+    pub flow_ordinal: u32,
     pub owner: Id<Entity>,
     pub payee: Option<Id<Entity>>,
     pub purpose: Option<Purposed>,
@@ -103,7 +107,16 @@ impl<'f> Motion<'f> {
     ) -> Motion<'f> {
         let txn = RuntimeTxn::journal(flow.txn)
             .expect("journal motion cannot use the template transaction sentinel");
-        Motion::from_view(book, book.flow_view(flow), txn, cause, day, amounts)
+        let flow_ordinal = match cause {
+            Cause::Flow(id) => book
+                .txns
+                .get(flow.txn)
+                .and_then(|txn| id.index().checked_sub(txn.flows.start().index()))
+                .and_then(|at| u32::try_from(at).ok())
+                .unwrap_or(0),
+            _ => 0,
+        };
+        Motion::from_view_at(book, book.flow_view(flow), txn, cause, day, amounts, flow_ordinal)
     }
 
     pub fn from_view(
@@ -113,6 +126,18 @@ impl<'f> Motion<'f> {
         cause: Cause,
         day: Day,
         amounts: Amounts,
+    ) -> Motion<'f> {
+        Motion::from_view_at(book, view, txn, cause, day, amounts, 0)
+    }
+
+    pub fn from_view_at(
+        book: &'f Book,
+        view: FlowView<'f>,
+        txn: RuntimeTxn,
+        cause: Cause,
+        day: Day,
+        amounts: Amounts,
+        flow_ordinal: u32,
     ) -> Motion<'f> {
         let flow = &*view;
         let (source, target) = (&book.places[flow.from], &book.places[flow.to]);
@@ -129,6 +154,7 @@ impl<'f> Motion<'f> {
             out: Amount::new(amounts.out, flow.out.unit),
             arrive: Amount::new(amounts.arrive, flow.arrive.unit),
             txn,
+            flow_ordinal,
             owner: flow.owner,
             payee: flow.payee,
             purpose: flow.purpose,
@@ -180,6 +206,7 @@ impl<'f> Motion<'f> {
             out: amount,
             arrive: amount,
             txn,
+            flow_ordinal: u32::MAX,
             owner: source.owner,
             payee: None,
             purpose: None,

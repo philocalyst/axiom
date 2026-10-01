@@ -226,7 +226,7 @@ fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
     flow.out = Amount::new(Qty(7), vti);
     flow.arrive = Amount::new(Qty(7), vti);
     let txn = RuntimeTxn::contract_occurrence(contract, ScheduleKind::Regular, Day(2), 0, None);
-    let runtime = RuntimeFlow { flow, detail: None, txn };
+    let runtime = RuntimeFlow { flow, detail: None, ordinal: 0, txn };
     let plan = Plan::new(&book);
     let mut ledger = plan.start(Options { today: Day(3), relaxed: false });
     ledger.apply_runtime(&runtime, &axiom_core::Arena::<RuntimeDetail>::new());

@@ -366,6 +366,7 @@ impl<'h> Reach<'h> {
                 day: lens.day,
             },
             detail: None,
+            ordinal: 0,
             flow,
         };
 
