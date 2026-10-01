@@ -246,8 +246,8 @@ fn rounded(exact: i128) -> Option<Qty> {
         .map(Qty)
 }
 
-/// Assets and liabilities are worth what they fetch today; income, expenses
-/// and equity are past events, worth what they were on their own days.
+/// Only owned assets and debts form the balance sheet; purpose-classified
+/// outside flows are reported on the activity statement instead.
 pub fn on_balance_sheet(class: Class) -> bool {
     matches!(class, Class::Asset | Class::Debt)
 }

@@ -354,8 +354,8 @@ pub fn summary(book: &Book, run: &Run) -> Summary {
     let (everyone, today) = (Whose::default(), run.today);
     let lens = Lens::new(book, &everyone, today);
     let worth = balance::NetWorth::of(lens, &Snapshots::of(lens, run, &[today], false), 0);
-    // Class roots (`assets`, `expenses`, …) group places, and the built-in
-    // places exist in every book: only what was declared or used counts.
+    // Built-in place rows exist in every book: only declared or used places
+    // contribute to the summary.
     let used = |place: Id<Place>| {
         let held = run
             .holdings
@@ -369,11 +369,7 @@ pub fn summary(book: &Book, run: &Run) -> Summary {
     };
     Summary {
         flows: book.flows.len(),
-        places: book
-            .places
-            .ids()
-            .filter(|&place| !places::is_class_root(book, place) && used(place))
-            .count(),
+        places: book.places.ids().filter(|&place| used(place)).count(),
         laws: run.checks.iter().filter(|&&ran| ran > 0).count(),
         net_worth: Amount::new(worth.total(), book.base),
         unpriced: worth.unpriced,

@@ -1,7 +1,7 @@
 //! Questions views ask about places.
 
 use axiom_core::Id;
-use axiom_model::{Book, End, Flow, PathRoot, Place};
+use axiom_model::{Book, End, Flow, Place};
 
 
 /// A place's full path.
@@ -14,8 +14,8 @@ pub fn names<'a>(book: &'a Book<'_>) -> impl Iterator<Item = &'a str> + 'a {
     book.places.ids().flat_map(|place| [path(book, place), leaf(book, place)])
 }
 
-/// `assets/bank/checking → expenses/rent`. An end that only changes basis is
-/// written the way the journal writes it: `assets/house.basis`.
+/// A route such as `checking → landlord`. An end that only changes basis is
+/// written the way the journal writes it: `house.basis`.
 pub fn route(book: &Book, flow: &Flow) -> String {
     let end = |end: End, place: Id<Place>| {
         let path = path(book, place);
@@ -33,37 +33,4 @@ pub fn leaf<'s>(book: &'s Book<'_>, place: Id<Place>) -> &'s str {
 /// A place's indentation in a tree table.
 pub fn depth(book: &Book, place: Id<Place>) -> usize {
     book.places.depth(place) as usize
-}
-
-/// Whether the place is a path root: `assets`, `expenses`, … Roots group
-/// their places; nobody declares them.
-pub fn is_class_root(book: &Book, place: Id<Place>) -> bool {
-    book.name(book.places[place].path) == book.v3_root(place).path()
-}
-
-// v3 bridge: the report lane replaces `Side` and `v3_side` with purposes.
-/// Which side of the income statement a place is on.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Side {
-    Income,
-    Spending,
-}
-
-/// The side the path root a place sits under puts it on, if it is on one.
-pub fn v3_side(book: &Book, place: Id<Place>) -> Option<Side> {
-    match book.v3_root(place) {
-        PathRoot::Income => Some(Side::Income),
-        PathRoot::Expenses => Some(Side::Spending),
-        PathRoot::Assets | PathRoot::Liabilities | PathRoot::Equity => None,
-    }
-}
-
-/// The top-level category a place belongs to: the child of its class root
-/// (`expenses/food` for `expenses/food/groceries`).
-pub fn category(book: &Book, place: Id<Place>) -> Id<Place> {
-    let (mut top, mut below) = (place, place);
-    for ancestor in book.places.lineage(place) {
-        (below, top) = (top, ancestor);
-    }
-    if is_class_root(book, top) { below } else { top }
 }

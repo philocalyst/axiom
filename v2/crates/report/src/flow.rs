@@ -1,9 +1,9 @@
 //! `flow`: income, spending, capital and transfer, grouped by purpose or party.
 //!
-//! Income and expense places are read as the change in their balances over
-//! each period, priced in the base currency on the day each flow happened.
-//! A flow spread over a range is recognized a little each day, so a year's
-//! premium lands in every month it covers.
+//! Flows are grouped by their declared purpose and the purpose's root. Amounts
+//! are priced in the base currency on the day each flow happened. A flow spread
+//! over a range is recognized a little each day, so a year's premium lands in
+//! every month it covers.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
