@@ -325,6 +325,20 @@ pub(crate) fn progressive(brackets: &[Bracket], income: Qty) -> Option<Qty> {
 /// half-month at each end and one extra calendar month to preserve the stated
 /// life.
 pub(crate) fn straight_line(cost: Qty, life: Span, from: Day, over: Days, period: Window, mid_month: bool) -> Option<Qty> {
+    straight_line_with_terminal(cost, life, from, over, period, mid_month, false)
+}
+
+/// The share of a straight-line life in one requested period, optionally
+/// taking only half of its terminal month under a mid-month disposition rule.
+pub(crate) fn straight_line_with_terminal(
+    cost: Qty,
+    life: Span,
+    from: Day,
+    over: Days,
+    period: Window,
+    mid_month: bool,
+    terminal_half_month: bool,
+) -> Option<Qty> {
     if life.months <= 0 || life.days != 0 || period == Window::Ever {
         return None;
     }
@@ -334,6 +348,7 @@ pub(crate) fn straight_line(cost: Qty, life: Span, from: Day, over: Days, period
         i64::from(year).checked_mul(12)?.checked_add(i64::from(month) - 1)
     };
     let first_month = month_index(from)?;
+    let terminal_month = month_index(over.last())?;
     let first_weight = if mid_month {
         Ratio::new(1, 2)?
     } else {
@@ -352,13 +367,16 @@ pub(crate) fn straight_line(cost: Qty, life: Span, from: Day, over: Days, period
         if offset < 0 {
             return Some(Qty::ZERO);
         }
-        let units = if offset == 0 {
+        let mut units = if offset == 0 {
             first_weight
         } else if offset < months {
             first_weight.checked_add(Ratio::int(offset))?
         } else {
             Ratio::int(months)
         };
+        if terminal_half_month && mid_month && month_index(day)? == terminal_month && offset > 0 && offset < months {
+            units = units.checked_sub(Ratio::new(1, 2)?)?;
+        }
         cost.scale(units.checked_div(Ratio::int(months))?)
     };
 
@@ -425,6 +443,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(whole_quarter, first_quarter);
+    }
+
+    #[test]
+    fn mid_month_disposition_takes_half_of_the_terminal_month() {
+        let day = |y, m, d| Day::from_ymd(y, m, d).unwrap();
+        let cost = Qty(28_200_000);
+        let life = Span::months(330);
+        let february = Days::new(day(2026, 2, 1), day(2026, 2, 15)).unwrap();
+        let ordinary = straight_line(cost, life, day(2024, 3, 1), february, Window::Month, true).unwrap();
+        let terminal = straight_line_with_terminal(
+            cost,
+            life,
+            day(2024, 3, 1),
+            february,
+            Window::Month,
+            true,
+            true,
+        )
+        .unwrap();
+        assert_eq!(ordinary, Qty(85_455));
+        assert_eq!(terminal, Qty(42_728));
     }
 
     #[test]

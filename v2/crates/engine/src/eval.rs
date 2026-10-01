@@ -68,6 +68,9 @@ pub(crate) struct Occasion<'a> {
     /// A purpose window opening evaluates only matching `require` steps and
     /// their preceding gates; flow amounts and unrelated effects are absent.
     pub purpose_window: Option<Window>,
+    /// A sale is being evaluated before disposal. A `mid-month` depreciation
+    /// schedule takes only half of this terminal month.
+    pub partial_terminal: bool,
 }
 
 impl<'a> Occasion<'a> {
@@ -93,6 +96,7 @@ impl<'a> Occasion<'a> {
             skip_internal,
             checking,
             purpose_window: None,
+            partial_terminal: false,
         }
     }
 
@@ -123,6 +127,14 @@ impl<'a> Occasion<'a> {
         Occasion {
             purpose_window: Some(window),
             ..Occasion::window(day, period)
+        }
+    }
+
+    /// A partial final period evaluated immediately before an asset is sold.
+    pub fn partial_terminal(day: Day, period: Days) -> Occasion<'static> {
+        Occasion {
+            partial_terminal: true,
+            ..Occasion::on(day, Days::on(day), period, Cause::Time, None)
         }
     }
 
@@ -1093,7 +1105,15 @@ impl<'a, 's> Machine<'a, 's> {
         let mid_month = args.get(4).is_some_and(|&node| {
             matches!(self.at(node), Value::Name(name) if self.book().name(name) == "mid-month")
         });
-        crate::calc::straight_line(cost.qty, life, from, self.ctx.over, window, mid_month)
+        crate::calc::straight_line_with_terminal(
+            cost.qty,
+            life,
+            from,
+            self.ctx.span,
+            window,
+            mid_month,
+            self.ctx.partial_terminal,
+        )
             .map_or(Value::Fault(Fault::Overflow), |qty| {
                 Value::Amount(Amount::new(qty, cost.unit))
             })
