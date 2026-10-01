@@ -111,6 +111,7 @@ fn empty_contract(name: Sym, loc: Loc, me: axiom_core::Id<crate::book::Entity>) 
         owner: me,
         purpose: None,
         description: None,
+        area: None,
         days: Days::ALWAYS,
         terms: None,
         standing: None,
@@ -149,6 +150,10 @@ fn lower_contract<'a, 's>(
         }
     };
     let days = contract_days(file, node.props, diags)?;
+    let area = match contract_area(world, file, node.props, diags) {
+        Ok(area) => area,
+        Err(()) => return None,
+    };
     let anchor = days.first();
     let purpose = if let Some(purpose) = node.purpose {
         let purpose_word = Word {
@@ -216,6 +221,7 @@ fn lower_contract<'a, 's>(
     contract.days = days;
     contract.purpose = purpose;
     contract.description = description;
+    contract.area = area;
     contract.doc = node_doc(world, written.site, written.loc);
     contract.loc = written.loc;
     contract.buys = node
@@ -240,6 +246,7 @@ fn lower_contract<'a, 's>(
             party,
             purpose,
             description,
+            area,
             diags,
         )?;
         contract.terms = Some(Timeline::new(terms));
@@ -259,6 +266,7 @@ fn lower_contract<'a, 's>(
             party,
             purpose,
             description,
+            area,
             diags,
         )?;
         contract.standing = Some(Timeline::new(terms));
@@ -280,6 +288,7 @@ fn lower_terms<'a, 's>(
     party: axiom_core::Id<crate::book::Entity>,
     purpose: Option<At<Purposed>>,
     description: Option<crate::book::Text>,
+    contract_area: Option<Amount>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Terms> {
     let hold = schedule.terms.holding?;
@@ -423,6 +432,8 @@ fn lower_terms<'a, 's>(
             file,
             written.node.props,
             purpose,
+            contract_area,
+            anchor,
             diags,
         )
         .into_boxed_slice(),
@@ -1025,12 +1036,94 @@ fn escalation_property<'s>(
     None
 }
 
+fn contract_area<'s>(
+    world: &mut World<'s>,
+    file: &ast::File<'s>,
+    props: axiom_syntax::Many<ast::Prop<'s>>,
+    diags: &mut Vec<Diagnostic>,
+) -> Result<Option<Amount>, ()> {
+    let mut area = None;
+    let mut first_loc = None;
+    for prop in &file[props] {
+        if prop.name.0 != "area" {
+            continue;
+        }
+        if let Some(first) = first_loc {
+            diags.push(
+                Diagnostic::error("contract-area-duplicate", "a contract's area is declared twice")
+                    .label(prop.loc, "remove this repeated area")
+                    .context(first, "the first area is here"),
+            );
+            return Err(());
+        }
+        first_loc = Some(prop.loc);
+        let args = &file[prop.args];
+        if args.len() != 1 || !file[prop.lines].is_empty() {
+            diags.push(
+                Diagnostic::error("contract-area", "a contract area needs one literal measure")
+                    .label(prop.loc, "write `area 1_000 SQFT`"),
+            );
+            return Err(());
+        }
+        let expression = args[0];
+        let ExprKind::Amount(literal) = file.exprs[expression].kind else {
+            diags.push(
+                Diagnostic::error("contract-area", "a contract area needs a literal amount")
+                    .label(file.exprs[expression].loc, "write a positive measure such as `1_000 SQFT`"),
+            );
+            return Err(());
+        };
+        let Some(unit_name) = literal.unit() else {
+            diags.push(
+                Diagnostic::error("contract-area-unit", "a contract area needs a measure unit")
+                    .label(file.exprs[expression].loc, "write the unit after the area"),
+            );
+            return Err(());
+        };
+        let unit = match world.commodity_of(Word {
+            text: unit_name.0,
+            loc: file.loc(unit_name.0),
+        }) {
+            Ok(unit) => unit,
+            Err(problem) => {
+                diags.push(problem);
+                return Err(());
+            }
+        };
+        if !world.book.is_a(world.book.commodities[unit].kind, world.book.roots.kinds.measure) {
+            diags.push(
+                Diagnostic::error("contract-area-unit", "a contract area must use a measure unit")
+                    .label(file.loc(unit_name.0), "this commodity is not a measure"),
+            );
+            return Err(());
+        }
+        let amount = match world.amount(literal.num(), unit, file.exprs[expression].loc) {
+            Ok(amount) if amount.qty.0 > 0 => amount,
+            Ok(_) => {
+                diags.push(
+                    Diagnostic::error("contract-area-positive", "a contract area must be positive")
+                        .label(file.exprs[expression].loc, "write an area greater than zero"),
+                );
+                return Err(());
+            }
+            Err(problem) => {
+                diags.push(problem);
+                return Err(());
+            }
+        };
+        area = Some(amount);
+    }
+    Ok(area)
+}
+
 fn shares<'s>(
     world: &World<'s>,
     home: Home,
     file: &ast::File<'s>,
     props: axiom_syntax::Many<ast::Prop<'s>>,
     purpose: Option<At<Purposed>>,
+    contract_area: Option<Amount>,
+    anchor: Day,
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<Share> {
     let mut shares = Vec::new();
@@ -1063,26 +1156,37 @@ fn shares<'s>(
                     (Ratio::new(i128::from(top), i128::from(bottom)), None)
                 }
                 ExprKind::Amount(literal) => {
-                    let unit = literal.unit().and_then(|name| world.book.commodity(name.0));
-                    let numerator = unit.and_then(|unit| {
+                    let numerator = literal.unit().and_then(|name| {
+                        let unit = match world.commodity_of(Word {
+                            text: name.0,
+                            loc: file.loc(name.0),
+                        }) {
+                            Ok(unit) => unit,
+                            Err(problem) => {
+                                diags.push(problem);
+                                return None;
+                            }
+                        };
+                        if !world.book.is_a(world.book.commodities[unit].kind, world.book.roots.kinds.measure) {
+                            diags.push(
+                                Diagnostic::error("contract-share-unit", "a measured share must use a measure unit")
+                                    .label(file.loc(name.0), "this commodity is not a measure"),
+                            );
+                            return None;
+                        }
                         world
-                            .amount(literal.num(), unit, file.loc(literal.0))
+                            .amount(literal.num(), unit, file.exprs[written_amount].loc)
                             .map_err(|problem| diags.push(problem))
                             .ok()
                     });
-                    let denominator = purpose
-                        .and_then(|at| at.value.of)
-                        .and_then(|object| match object {
-                            crate::journal::Object::Asset(asset) => world.book.assets[asset]
-                                .props
-                                .iter()
-                                .find(|property| world.book.name(property.name) == "area")
-                                .and_then(|property| match property.value {
-                                    crate::law::Value::Amount(amount) => Some(amount),
-                                    _ => None,
-                                }),
-                            _ => None,
-                        });
+                    let denominator = contract_area.or_else(|| {
+                        purpose
+                            .and_then(|at| at.value.of)
+                            .and_then(|object| match object {
+                                crate::journal::Object::Asset(asset) => asset_area(world, asset, anchor),
+                                _ => None,
+                            })
+                    });
                     let ratio = match (numerator, denominator) {
                         (Some(numerator), Some(denominator))
                             if numerator.unit == denominator.unit && denominator.qty.0 > 0 =>
@@ -1093,7 +1197,7 @@ fn shares<'s>(
                             diags.push(
                                 Diagnostic::error(
                                     "contract-share-measure",
-                                    "a measured share needs the asset's positive area in the same unit",
+                                    "a measured share needs a positive contract or asset area in the same unit",
                                 )
                                 .label(file.exprs[written_amount].loc, "cannot resolve this measure"),
                             );
@@ -1177,4 +1281,23 @@ fn shares<'s>(
         }
     }
     shares
+}
+
+fn asset_area(world: &World<'_>, asset: Id<crate::book::Asset>, day: Day) -> Option<Amount> {
+    let area = world.book.names.get("area")?;
+    let asset = &world.book.assets[asset];
+    let own = crate::book::prop(&asset.props, area, day).and_then(|property| match property.value {
+        crate::law::Value::Amount(amount) => Some(amount),
+        _ => None,
+    });
+    own.or_else(|| {
+        world.book.kinds.lineage(asset.kind).find_map(|kind| {
+            crate::book::prop(&world.book.kinds[kind].props, area, day).and_then(|property| {
+                match property.value {
+                    crate::law::Value::Amount(amount) => Some(amount),
+                    _ => None,
+                }
+            })
+        })
+    })
 }

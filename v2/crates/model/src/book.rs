@@ -539,6 +539,8 @@ pub struct Contract {
     pub purpose: Option<At<crate::journal::Purposed>>,
     /// The promised flow's description.
     pub description: Option<Text>,
+    /// `area 1_000 SQFT`: the denominator for measured contract shares.
+    pub area: Option<Amount>,
     /// `from … until …`, cut short by `ends` or extended by a statement: the
     /// days anything is expected at all.
     pub days: Days,

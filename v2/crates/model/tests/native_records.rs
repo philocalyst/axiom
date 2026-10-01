@@ -269,6 +269,103 @@ contract c with p
 }
 
 #[test]
+fn contract_area_is_the_typed_denominator_for_measured_shares() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+commodity SQFT : measure
+kind person : entity
+entity greystar : person
+entity studio : person
+account assets/checking
+contract flat with greystar
+  2_900 USD monthly from checking
+  area 1_000 SQFT
+  share 120 SQFT for studio
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let contract = &book.contracts[Id::new(0)];
+    let area = contract.area.expect("contract retains its typed area");
+    let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
+    let share = &terms.shares[0];
+    assert_eq!(share.rate, axiom_core::Ratio::new(3, 25).unwrap());
+    assert_eq!(
+        share.measure,
+        Some((
+            axiom_model::Amount::new(axiom_core::Qty(120), book.commodity("SQFT").unwrap()),
+            area,
+        ))
+    );
+}
+
+#[test]
+fn contract_area_rejects_zero_measure_before_lowering_the_contract() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+commodity SQFT : measure
+kind person : entity
+entity greystar : person
+entity studio : person
+account assets/checking
+contract flat with greystar
+  2_900 USD monthly from checking
+  area 0 SQFT
+  share 120 SQFT for studio
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-area-positive"), "{diagnostics:?}");
+    let contract = &book.contracts[Id::new(0)];
+    assert!(contract.terms.is_none(), "an invalid area must not produce an active schedule");
+    assert!(contract.area.is_none(), "an invalid area must not be retained");
+}
+
+#[test]
+fn measured_shares_reject_missing_and_mismatched_denominators() {
+    for (extra_unit, area, share) in [
+        ("", "", "share 120 SQFT for studio"),
+        ("commodity SQM : measure\n", "  area 1_000 SQFT\n", "share 120 SQM for studio"),
+    ] {
+        let path = "contracts.ax";
+        let text = format!(
+            "base USD\ncommodity USD\ncommodity SQFT : measure\n{extra_unit}kind person : entity\nentity greystar : person\nentity studio : person\naccount assets/checking\ncontract flat with greystar\n  2_900 USD monthly from checking\n{area}  {share}\n"
+        );
+        let (file, syntax) = parse(FileId(0), &text, Folder::of(path));
+        assert!(syntax.is_empty(), "{syntax:?}");
+
+        let (book, diagnostics) = build(&[Source {
+            path,
+            file,
+            embedded: false,
+        }]);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "contract-share-measure"),
+            "{diagnostics:?}"
+        );
+        let contract = &book.contracts[Id::new(0)];
+        let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
+        assert!(terms.shares.is_empty(), "an invalid measured share must not be retained");
+    }
+}
+
+#[test]
 fn computed_balance_assertions_keep_a_sparse_typed_program() {
     let path = "journal/2026/01.ax";
     let text = "\
