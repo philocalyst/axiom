@@ -75,27 +75,44 @@ for day, plan, amount, legs in occ:
     paid_interest += interest
 assert sum(1 for o in occ if o[1] == "mortgage-payment") == 11
 
-# ── depreciation: 27.5 years straight line on 80% of the price, and on the roof ─────────────
+# ── depreciation: global cumulative rounding, including the sale-day half-month ──────────────
 building = cents(D(376850) * D("0.80"))
-house_month = cents(building / D("27.5") / 12)
-roof_month = cents(D(14200) / D("27.5") / 12)
-half = lambda x: cents(x / 2)
-expected_dep = {1: half(house_month)}
-for m in range(2, 9):
-    expected_dep[m] = house_month
-expected_dep[9] = house_month + half(roof_month)
-expected_dep[10] = expected_dep[11] = house_month + roof_month
-expected_dep[12] = half(house_month) + half(roof_month)
+life_months = D("27.5") * 12
+roof = D(14200)
+house_edges = {month: D(month) - D("0.5") for month in range(1, 12)}
+house_edges[12] = D(11)
+roof_edges = {month: D(month - 8) - D("0.5") for month in range(9, 12)}
+roof_edges[12] = D(3)
+
+
+def cumulative_recovery(cost, service_months):
+    return cents(cost * service_months / life_months)
+
+
+expected_dep = {}
+previous_house = previous_roof = D(0)
+for month in range(1, 13):
+    house_total = cumulative_recovery(building, house_edges[month])
+    roof_total = cumulative_recovery(roof, roof_edges[month]) if month in roof_edges else previous_roof
+    expected_dep[month] = house_total - previous_house + roof_total - previous_roof
+    previous_house, previous_roof = house_total, roof_total
 dep_total = D(0)
+depreciation_months = set()
 for day, plan, amount, legs in occ:
     if plan != "depreciation":
         continue
     month = int(day[5:7])
-    said = amount if amount is not None else house_month          # the plan's amount is a whole month
+    assert amount is not None, (day, "write the computed monthly amount")
+    assert month not in depreciation_months, (day, "duplicate depreciation month")
+    depreciation_months.add(month)
+    said = amount
     assert said == expected_dep[month], (day, said, expected_dep[month])
     dep_total += said
+assert depreciation_months == set(range(1, 13))
 assert dep_total == sum(expected_dep.values())
-print("depreciation: building", building, "a month", house_month, "roof a month", roof_month, "| 2025 total", dep_total)
+assert dep_total == D("10178.42")
+assert previous_house == D("10049.33") and previous_roof == D("129.09")
+print("depreciation: building", building, "and roof", roof, "| 11 building months + 3 roof months", dep_total)
 
 # ── management fees: 8% of the rent of the month before ─────────────────────────────────────
 rent_by_month = {}
@@ -153,6 +170,8 @@ expenses = {
 }
 rental_expenses = sum(expenses.values())
 rental_net = rental_income - rental_expenses
+assert rental_expenses == D("42065.18")
+assert rental_net == D("-17340.18")
 print("rental income", rental_income, "(rent", rent, "+ late fee", late, "+ kept deposit", kept, ")")
 print("rental expenses", rental_expenses, expenses)
 print("rental net", rental_net)
@@ -161,10 +180,13 @@ print("rental net", rental_net)
 price = D(431500)
 costs = cents(price * D("0.05")) + cents(price * D("0.0125"))
 amount_realized = price - costs
-adjusted_basis = D(376850) + D(14200) - dep_total
+adjusted_basis = D(376850) + roof - dep_total
 gain = amount_realized - adjusted_basis
 recaptured = min(max(gain, D(0)), dep_total)
 long_gain = gain - recaptured
+assert adjusted_basis == D("380871.58")
+assert gain == D("23659.67")
+assert recaptured == D("10178.42") and long_gain == D("13481.25")
 print("sale: costs", costs, "amount realized", amount_realized, "adjusted basis", adjusted_basis, "gain", gain,
       "| recapture (ordinary)", recaptured, "long-term", long_gain)
 # the journal's closing statement is the price, with the seller's costs as a leg and the loan payoff in another

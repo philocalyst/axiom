@@ -12,7 +12,7 @@
 2025-12-29 manager-fee 200.00 USD
 
 /// Half a month for the month of sale, booked first: the sale reads what has been taken.
-2025-12-29 depreciation 478.31 USD
+2025-12-29 depreciation 478.29 USD
 
 /// Sold, 431,500.00 USD. The closing statement is one flow: the house goes out and the price comes in, and it is paid out
 /// in legs: the seller's costs (5% commission and 1.25% of other costs, 26_968.75 USD: a leg into an expense place during

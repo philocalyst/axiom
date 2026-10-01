@@ -33,9 +33,9 @@ so it governs every rental the project will ever own.
   So there is no `equity/acc-dep-house`, no second commodity for the roof, and the
   gain the sale realizes is the gain the tax return needs.
 - **Depreciation is a plan.** 913.58 USD a month on the building (80% of the price over 27.5
-  years), half a month in the first and last months, and the roof's 43.03 USD a month from
-  mid-September. The journal writes one word a month, `2025-03-31 depreciation`, and an amount
-  in the months that differ.
+  years), half a month in January and at the December sale, and the roof from mid-September.
+  The journal records each month's amount from global cumulative recovery, rounded at each
+  month boundary; the sale-day half-month is recorded before the sale.
 - **The mortgage is a claim.** `mortgage -> rental-bank 279_000 USD #loan due 2054-12-18` is
   one payable, settled by every payment `for #loan` (principal), with the interest a separate
   leg into an expense. `axiom claims` lists it, and it is gone the day it is paid off.
@@ -74,25 +74,26 @@ so it governs every rental the project will ever own.
 
 `python3 ../verify/verify07.py` reads the journal, checks every mortgage occurrence against its
 own amortization, every depreciation and management-fee occurrence against its formula, and prints
-the figures below. All agree with Axiom to the cent.
+the figures below. The captured outputs predate cumulative-boundary depreciation; changed rows are
+marked until the native v4 engine regenerates them.
 
-| line | by hand | Axiom |
+| line | by hand | Axiom capture (pre-cutover) |
 |---|---|---|
 | mortgage payment (279,000 at 6.75%, 360 months) | 1,809.59 | 1,809.59 (every leg matches) |
 | interest paid in 2025: eleven payments 17,187.54 + payoff accrual 1,450.48 | 18,638.02 | 18,638.02 |
 | payoff principal on 2025-12-29 | 276,282.05 | 276,282.05 |
-| depreciation: 301,480.00 building, half months in January and December, the roof from September | 10,178.48 | 10,178.48 |
+| depreciation: 11 building months and 3 roof months, with half-months at service and sale | 10,178.42 | pending v4 run |
 | loan costs recognized in 2025 (3,120 x 363/377, 2024 took 115.86) | 3,004.14 | 3,004.14 |
 | rental income: rent 24,300 + late fee 75 + kept deposit 350 | 24,725.00 | 24,725.00 |
-| rental expenses (interest, depreciation, property tax 4,380.00, amortization, repairs 2,051.00, management 1,950.00, insurance 1,560.00, utilities 154.60, advertising 149.00) | 42,065.24 | 42,065.24 |
-| Schedule E net (allowed in full, under the 25,000 allowance) | -17,340.24 | -17,340.24 |
-| adjusted basis: 376,850 + 14,200 roof - 10,178.48 | 380,871.52 | 380,871.52 |
-| gain: 404,531.25 - 380,871.52 | 23,659.73 | 23,659.73 |
-| of which depreciation recaptured, taxed as ordinary income | 10,178.48 | 10,178.48 |
-| of which long-term | 13,481.25 | 13,481.25 |
+| rental expenses (interest, depreciation, property tax 4,380.00, amortization, repairs 2,051.00, management 1,950.00, insurance 1,560.00, utilities 154.60, advertising 149.00) | 42,065.18 | pending v4 run |
+| Schedule E net (allowed in full, under the 25,000 allowance) | -17,340.18 | pending v4 run |
+| adjusted basis: 376,850 + 14,200 roof - 10,178.42 | 380,871.58 | pending v4 run |
+| gain: 404,531.25 - 380,871.58 | 23,659.67 | pending v4 run |
+| of which depreciation recaptured, taxed as ordinary income | 10,178.42 | pending v4 run |
+| of which long-term | 13,481.25 | pending v4 run |
 | wages | 96,000.00 | 96,000.00 |
-| total income = wages + Schedule E | 78,659.76 | 78,659.76 |
-| AGI = total income + 10,178.48 + 13,481.25 | 102,319.49 | 102,319.49 |
+| total income = wages + Schedule E | 78,659.82 | pending v4 run |
+| AGI = total income + 10,178.42 + 13,481.25 | 102,319.49 | 102,319.49 |
 | taxable income (15,750.00 standard deduction) | 86,569.49 | 86,569.49 |
 | income tax (single brackets on 73,088.24 of ordinary income; 15% on the 13,481.25) | 13,015.59 | 13,015.59 |
 | net investment income tax (AGI is under 200,000) | 0.00 | 0.00 |
@@ -100,7 +101,12 @@ the figures below. All agree with Axiom to the cent.
 | **federal, owed (negative = refund)** | -1,564.41 | -1,564.41 |
 | net worth on 2026-04-16 (all of it in checking) | 173,866.60 | 173,866.60 |
 
-The return closes on 2026-04-15 with a **refund of 1,564.41 USD**. Run with `--today 2026-01-06`
+The hand calculation returns a **refund of 1,564.41 USD** on 2026-04-15. The captured Axiom
+outputs still reflect independently rounded monthly depreciation; regenerate them from the
+native v4 engine before treating their tax and gains lines as current. The six-cent change in
+2025 depreciation lowers the adjusted basis and sale gain by six cents, while raising the
+Schedule E result by six cents; the ordinary recapture falls by six cents, leaving total AGI
+and the tax unchanged. Run with `--today 2026-01-06`
 (`outputs/tax-2025-before-closing.txt`) the return has not closed: `axiom tax` shows the rent, the
 expenses and the recapture, and `axiom forecast` (`outputs/forecast.txt`, run that day) lists the refund among the
 obligations coming due. The 2024 figures are a stub: the ledger opens on 2024-12-18, and a 2024 return

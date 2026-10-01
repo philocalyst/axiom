@@ -15,7 +15,7 @@
 
 /// First half of the county tax.
 2025-04-30 rental-bank -> property-tax 2_190 USD / county
-2025-04-30 depreciation
+2025-04-30 depreciation 913.58 USD
 2025-04-30 mortgage = 278_275.29 USD
 2025-04-30 rental-bank = 3_319.93 USD
 2025-04-30 checking = 33_880.67 USD
