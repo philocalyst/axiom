@@ -280,7 +280,7 @@ entity own : label-4
         let inherited = value("inherited");
         let own = value("own");
         let written = |prop: &crate::Prop, text: &str| {
-            assert_eq!(prop.value, crate::Value::Text(book.names.get(text).unwrap()));
+            assert_eq!(prop.value, crate::Value::Text(crate::Text::Borrowed(book.names.get(text).unwrap())));
             let loc = prop.loc.expect("defaults preserve their source location");
             let start = source.find(&format!("nickname \"{text}\"")).unwrap();
             assert_eq!(loc.range(), start..start + format!("nickname \"{text}\"").len());

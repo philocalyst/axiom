@@ -268,6 +268,7 @@ pub(crate) fn declare<'a, 's>(
     };
     let book = Book {
         names,
+        text_values: Arena::new(),
         base: commodities.base,
         relaxed: settings.relaxed,
         roots,

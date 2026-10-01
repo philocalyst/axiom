@@ -6,9 +6,10 @@
 //! [`crate::law::Op`] and [`crate::law::Field`], and [`Source`] is not the
 //! parsed [`crate::Source`] that `build` takes. Reach them as `sync::Source`.
 
-use axiom_core::{DateLayout, Id, Interner, Loc, Sym};
+use axiom_core::{DateLayout, Id, Loc, Sym};
 
 use crate::book::{Param, Place, Purpose, System};
+pub use crate::book::Text;
 
 /// `sync NAME`: a place facts come from, and where what it recognizes goes.
 #[derive(Clone, Debug)]
@@ -25,32 +26,12 @@ pub struct Source {
 }
 
 /// How a source gets its text. (Not `Origin`, which is a flow's.)
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Fetch {
     /// `read "imports/chase-*.csv"`.
     Read(Text),
     /// `run COMMAND`, with `{since}`, `{today}`, `{units}` and `{year}` unexpanded.
     Run(Text),
-}
-
-/// Text stored in compiled sync programs. Ordinary source slices stay in the
-/// book's interner; a decoded escape owns only the changed string. This keeps
-/// all other sync text allocation-free without leaking or self-referencing.
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub enum Text {
-    Borrowed(Sym),
-    Owned(Box<str>),
-}
-
-impl Text {
-    /// Borrows this text for as long as the compiled program and interner are
-    /// both available.
-    pub fn as_str<'a, 's>(&'a self, names: &'a Interner<'s>) -> &'a str {
-        match self {
-            Text::Borrowed(sym) => names.name(*sym),
-            Text::Owned(text) => text,
-        }
-    }
 }
 
 /// Where a source's facts go.
@@ -60,7 +41,7 @@ pub enum Sink {
     /// journal.
     Feed { account: Id<Place> },
     /// `into PATH`: Axiom text, merged into that file (`{year}` splits it).
-    File(Sym),
+    File(Text),
     /// `into param NAME`: rows merged into that param.
     Param(Id<Param>),
     /// Neither: Axiom statements (invoices, bills) into the journal.
@@ -73,7 +54,7 @@ pub struct Format {
     pub name: Sym,
     pub shape: Shape,
     pub specs: Box<[Spec]>,
-    pub categories: Box<[(Sym, Id<Purpose>)]>,
+    pub categories: Box<[(Text, Id<Purpose>)]>,
     pub loc: Loc,
 }
 
@@ -98,7 +79,7 @@ pub struct Spec {
 }
 
 /// A column of an export.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Column {
     Header(Text),
     /// 1-based, as written.
@@ -108,7 +89,7 @@ pub enum Column {
 }
 
 /// How one field's value is read.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Rule {
     None,
     Flipped,
@@ -151,7 +132,7 @@ pub struct Pattern {
 }
 
 /// One step of a pattern's program.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
     /// User-written literal, kept borrowed and matched case-insensitively.
     Literal(Text),

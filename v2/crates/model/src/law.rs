@@ -14,7 +14,7 @@ use axiom_core::calendar;
 use axiom_core::day::days_in_month;
 use axiom_core::{Day, Days, Dim, Groups, Id, Loc, Period, Ratio, Severity, Span, Sym};
 
-use crate::book::{Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System};
+use crate::book::{Amount, Asset, Budget, Commodity, Contract, Entity, Kind, Param, Place, Purpose, Schedule, System, Text};
 use crate::journal::Object;
 
 pub use axiom_syntax::BinOp;
@@ -402,7 +402,7 @@ pub enum Value {
     Amount(Amount),
     Day(Day),
     Span(Span),
-    Text(Sym),
+    Text(Text),
     Name(Sym),
     Place(Id<Place>),
     Entity(Id<Entity>),

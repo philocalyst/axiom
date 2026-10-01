@@ -24,6 +24,10 @@ pub use axiom_syntax::{EventState, Policy};
 
 pub struct Book<'s> {
     pub names: Interner<'s>,
+    /// Decoded escaped strings. Unescaped source strings stay as interned
+    /// symbols; only text whose meaning differs from its source bytes enters
+    /// this compact pool.
+    pub(crate) text_values: Arena<TextString>,
     /// The currency that basis, totals and net worth are counted in.
     pub base: Id<Commodity>,
     /// `relaxed`: law violations are warnings.
@@ -97,6 +101,19 @@ pub struct Book<'s> {
     /// How names are found. [`build`](crate::build) fills it; in a book made by
     /// hand it is empty, and `Book::place` and its siblings find nothing.
     pub lookup: Lookup,
+}
+
+/// A string stored only when source escapes were decoded.
+#[derive(Debug)]
+pub struct TextString(Box<str>);
+
+/// A model string: borrowed source text or an id in the book's decoded-text
+/// pool. The handle is `Copy`, so values and journal records stay allocation
+/// free after lowering.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum Text {
+    Borrowed(Sym),
+    Owned(Id<TextString>),
 }
 
 /// Every way of finding a thing by name: each name and each of its `/`
@@ -574,7 +591,7 @@ pub struct Contract {
     /// The purpose inferred for each promised flow, when declared.
     pub purpose: Option<At<crate::journal::Purposed>>,
     /// The promised flow's description.
-    pub description: Option<Sym>,
+    pub description: Option<Text>,
     /// `from … until …`, cut short by `ends` or extended by a statement: the
     /// days anything is expected at all.
     pub days: Days,
@@ -863,7 +880,7 @@ impl Terms {
 pub struct Change {
     /// The days it holds, as written: from its day, or through its `until`.
     pub days: Days,
-    pub description: Option<Sym>,
+    pub description: Option<Text>,
     /// The code that names it, so a later statement can extend or release it.
     pub code: Option<Sym>,
     pub loc: Loc,
@@ -1483,7 +1500,7 @@ pub struct Also {
     /// steps: one expression language for laws and declarations.
     pub law: Id<Law>,
     pub purpose: Option<Purposed>,
-    pub description: Option<Sym>,
+    pub description: Option<Text>,
     pub loc: Loc,
 }
 
@@ -1790,6 +1807,35 @@ impl<'s> Book<'s> {
         self.names.name(sym)
     }
 
+    /// Adds unescaped source text without an allocation.
+    pub fn intern_text(&mut self, text: &'s str) -> Text {
+        Text::Borrowed(self.names.intern(text))
+    }
+
+    /// Decodes the four escapes accepted by the lexer. Strings without an
+    /// escape remain source-borrowed; decoded strings get one pooled allocation.
+    pub fn quoted_text(&mut self, raw: &'s str) -> Text {
+        if !raw.as_bytes().contains(&b'\\') {
+            return self.intern_text(raw);
+        }
+        let decoded = decode_quoted(raw);
+        if let Some(sym) = self.names.get(&decoded) {
+            return Text::Borrowed(sym);
+        }
+        if let Some((id, _)) = self.text_values.iter().find(|(_, text)| text.0.as_ref() == decoded) {
+            return Text::Owned(id);
+        }
+        Text::Owned(self.text_values.push(TextString(decoded.into_boxed_str())))
+    }
+
+    /// Gets text with a borrow tied to the book that owns any decoded value.
+    pub fn text(&self, text: Text) -> &str {
+        match text {
+            Text::Borrowed(sym) => self.names.name(sym),
+            Text::Owned(id) => &self.text_values[id].0,
+        }
+    }
+
     /// A place by full path or unique suffix (`checking`), or an entity's place.
     /// A place wins over an entity of the same name.
     pub fn place(&self, text: &str) -> Result<Id<Place>, Miss<Place>> {
@@ -1918,6 +1964,35 @@ impl<'s> Book<'s> {
     pub fn show(&self, amount: Amount) -> impl std::fmt::Display + '_ {
         let unit = &self.commodities[amount.unit];
         Shown { qty: amount.qty.brief(unit.scale), unit: self.name(unit.symbol) }
+    }
+}
+
+fn decode_quoted(raw: &str) -> String {
+    let mut decoded = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            decoded.push(ch);
+            continue;
+        }
+        match chars.next().expect("the lexer rejects a trailing backslash") {
+            'n' => decoded.push('\n'),
+            't' => decoded.push('\t'),
+            '"' => decoded.push('"'),
+            '\\' => decoded.push('\\'),
+            _ => unreachable!("the lexer validates string escapes"),
+        }
+    }
+    decoded
+}
+
+#[cfg(test)]
+mod text_tests {
+    use super::decode_quoted;
+
+    #[test]
+    fn decodes_only_the_escapes_accepted_by_the_lexer() {
+        assert_eq!(decode_quoted("line\\ncolumn\\tquote\\\"slash\\\\"), "line\ncolumn\tquote\"slash\\");
     }
 }
 

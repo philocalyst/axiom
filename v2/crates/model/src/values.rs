@@ -85,7 +85,7 @@ impl<'s> World<'s> {
             },
             ExprKind::Date(day) => (Value::Day(day), Ty::Day),
             ExprKind::Span(span) => (Value::Span(span), Ty::Span),
-            ExprKind::Str(text) => (Value::Text(self.book.names.intern(text)), Ty::Text),
+            ExprKind::Str(text) => (Value::Text(self.book.quoted_text(text.0)), Ty::Text),
             ExprKind::Empty => (Value::Empty, Ty::Empty),
             ExprKind::Unit(symbol) => {
                 (Value::Unit(self.commodity_of(Word { text: symbol.0, loc: expr.loc })?), Ty::Unit)
@@ -146,9 +146,30 @@ impl<'s> World<'s> {
             Some(Ty::Entity) => (Value::Entity(self.entity(home, word)?), Ty::Entity),
             Some(Ty::Place) => (Value::Place(self.place(word)?), Ty::Place),
             Some(Ty::Kind) => (Value::Kind(self.kind(home, word)?), Ty::Kind),
+            Some(Ty::Purpose) => (Value::Purpose(self.purpose(home, word)?, None), Ty::Purpose),
+            Some(Ty::Asset) => {
+                let Some(sym) = self.book.names.get(text) else {
+                    return Err(self.missing_asset(word));
+                };
+                let Some(&asset) = self.book.lookup.assets.get(&sym) else {
+                    return Err(self.missing_asset(word));
+                };
+                (Value::Asset(asset), Ty::Asset)
+            }
             Some(Ty::Bool) if text == "true" || text == "false" => (Value::Bool(text == "true"), Ty::Bool),
             _ => (Value::Name(self.book.names.intern(text)), Ty::Name),
         })
+    }
+
+    fn missing_asset(&self, word: Word<'_>) -> Diagnostic {
+        let suggestion = axiom_core::diag::closest(
+            word.text,
+            self.book
+                .assets
+                .iter()
+                .map(|(_, asset)| self.book.names.name(asset.name)),
+        );
+        crate::errors::unknown("unknown-asset", "asset", word, suggestion)
     }
 
     /// `0 USD 10% | 12_400 USD 12% | …`: marginal brackets, ascending from zero,

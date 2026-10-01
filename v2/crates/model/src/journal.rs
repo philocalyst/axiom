@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 
 use crate::book::{
     Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose, ScheduleKind,
-    System,
+    System, Text,
 };
 use crate::law::{Law, Subject};
 
@@ -37,7 +37,7 @@ pub struct Flow {
     /// What it is for, and why the book thinks so.
     pub purpose: Option<Purposed>,
     /// `"food for the routine"`.
-    pub description: Option<Sym>,
+    pub description: Option<Text>,
     /// Written, an occurrence of a contract, or derived.
     pub origin: Origin,
     /// Lot selectors applied when relieving parcels at `from`.
@@ -418,7 +418,7 @@ pub struct Txn {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Waive {
     pub loc: Loc,
-    pub reason: Option<Sym>,
+    pub reason: Option<Text>,
 }
 
 /// `2026-01-31 checking = 7_921.30 USD`, checked at the end of the day.
@@ -473,7 +473,7 @@ pub struct Measure {
     /// A party it was done for (`for halcyon`).
     pub party: Option<Id<Entity>>,
     pub purpose: Option<Purposed>,
-    pub description: Option<Sym>,
+    pub description: Option<Text>,
     pub codes: Box<[Sym]>,
     pub loc: Loc,
 }
