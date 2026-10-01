@@ -63,7 +63,7 @@ mod tests;
 
 use std::hash::{Hash, Hasher};
 
-use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Qty, Ratio, Sym};
 use axiom_model::{
     Amount, Asset, Commodity, Contract, Dir, Entity, Flow, FlowCodes, Law, Place, PurposeRoot, Subject, System, Txn,
     Waive,
@@ -73,6 +73,14 @@ pub use checkpoint::Checkpoint;
 pub use ledger::Ledger;
 pub use plan::{Known, Plan, run};
 pub use sides::Sides;
+
+/// One entity's effective financial share in a place or entity after
+/// following its declared ownership chain.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct OwnerShare {
+    pub owner: Id<Entity>,
+    pub share: Ratio,
+}
 
 /// Classifies a purpose flow by whether it crosses the owner's boundary.
 /// Internal transfers have no income/spending direction; a capital-purpose

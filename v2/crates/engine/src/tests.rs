@@ -44,6 +44,34 @@ fn well_known_names_resolve_once_and_are_absent_where_the_book_never_says_them()
 }
 
 #[test]
+fn effective_owners_compose_place_shares_through_nested_entities() {
+    let mut f = Fixture::new();
+    let (place, me, grant, household) = (f.savings, f.me, f.grant, f.household);
+    let share = |entity, rate| Share { entity, rate, measure: None, loc: Loc::default() };
+    f.entities[grant].owned_by =
+        vec![share(me, Ratio::new(1, 4).unwrap()), share(household, Ratio::new(3, 4).unwrap())].into();
+    f.places[place].shares =
+        vec![share(me, Ratio::new(3, 5).unwrap()), share(grant, Ratio::new(2, 5).unwrap())].into();
+
+    let book = f.book();
+    let plan = Plan::new(&book);
+    assert_eq!(
+        plan.owners_of(place),
+        &[
+            crate::OwnerShare { owner: me, share: Ratio::new(7, 10).unwrap() },
+            crate::OwnerShare { owner: household, share: Ratio::new(3, 10).unwrap() },
+        ]
+    );
+    assert_eq!(
+        plan.owners_of_entity(grant),
+        &[
+            crate::OwnerShare { owner: me, share: Ratio::new(1, 4).unwrap() },
+            crate::OwnerShare { owner: household, share: Ratio::new(3, 4).unwrap() },
+        ]
+    );
+}
+
+#[test]
 fn an_empty_book_folds_to_nothing() {
     let book = Fixture::new().book();
     let plan = Plan::new(&book);

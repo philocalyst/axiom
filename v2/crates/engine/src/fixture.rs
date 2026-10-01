@@ -40,7 +40,7 @@ pub(crate) struct Fixture {
     /// The market's place: revaluations come from and go to it.
     pub market: Id<Place>,
     pub places: Tree<Place>,
-    entities: Tree<Entity>,
+    pub entities: Tree<Entity>,
     commodities: Arena<Commodity>,
     pub flows: Vec<Flow>,
     pub txns: Vec<Txn>,

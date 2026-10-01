@@ -9,8 +9,8 @@
 //! [`Ledger`] borrows it, a fork copies only the world, the clock and the
 //! records, and any number of threads can fold from it at once.
 
-use axiom_core::{Day, Diagnostic, Groups, Id, Map, Set, Sym};
-use axiom_model::{Asset, Book, Commodity, Entity, Flow, Func, Kind, Op, Place, Rule, Subject, Ty, Value};
+use axiom_core::{Day, Diagnostic, Groups, Id, Map, Ratio, Set, Sym};
+use axiom_model::{Asset, Book, Commodity, Entity, Flow, Func, Kind, Op, Place, Rule, Share, Subject, Ty, Value};
 
 use crate::sides::Sides;
 use crate::events::{self, Events};
@@ -21,7 +21,7 @@ use crate::scope::containing;
 use crate::state::World;
 use crate::timeline::{self, Schedule};
 use crate::totals::Watch;
-use crate::{Options, Run, infer};
+use crate::{Options, OwnerShare, Run, infer};
 
 /// The names the fold and the views look for by spelling, resolved once: what
 /// a law reads (`born`), what marks a currency, a loan's term (`maturity`) and
@@ -79,6 +79,9 @@ pub struct Plan<'b, 's> {
     members: Groups<Entity, Id<Place>>,
     /// Places inside each identified asset, including every part's place.
     asset_places: Groups<Asset, Id<Place>>,
+    /// Effective financial owners for each declared entity and place.
+    entity_owners: Groups<Entity, OwnerShare>,
+    place_owners: Groups<Place, OwnerShare>,
     /// Places under kinds read by a widened total. Only law-referenced kinds
     /// are indexed, so books without those reads pay no grouping cost.
     pub(crate) kind_places: Map<Id<Kind>, Box<[Id<Place>]>>,
@@ -116,6 +119,8 @@ impl<'b, 's> Plan<'b, 's> {
             })
         });
         let kind_places = kind_places(book);
+        let entity_owners = entity_owners(book);
+        let place_owners = place_owners(book, &entity_owners);
         let mut plan = Plan {
             book,
             amounts: solution.amounts,
@@ -129,6 +134,8 @@ impl<'b, 's> Plan<'b, 's> {
             watch,
             members: Groups::build(book.entities.len(), held),
             asset_places: asset_places(book),
+            entity_owners,
+            place_owners,
             kind_places,
             period_start: timeline::start(book, &events),
             last_fact: timeline::last_fact(book, &events),
@@ -143,6 +150,17 @@ impl<'b, 's> Plan<'b, 's> {
 
     pub fn book(&self) -> &'b Book<'s> {
         self.book
+    }
+
+    /// Effective financial owners of `place`, including nested business
+    /// ownership. Household membership remains governance/scope only.
+    pub fn owners_of(&self, place: Id<Place>) -> &[OwnerShare] {
+        &self.place_owners[place]
+    }
+
+    /// Effective financial owners of an entity, including nested businesses.
+    pub fn owners_of_entity(&self, entity: Id<Entity>) -> &[OwnerShare] {
+        &self.entity_owners[entity]
     }
 
     /// The names looked up by spelling, resolved once.
@@ -206,6 +224,85 @@ impl<'b, 's> Plan<'b, 's> {
     pub(crate) fn problems(&self) -> Vec<Diagnostic> {
         self.problems.clone()
     }
+}
+
+fn entity_owners(book: &Book) -> Groups<Entity, OwnerShare> {
+    let pairs = book.entities.ids().flat_map(|entity| {
+        flattened_entity_owners(book, entity).into_iter().map(move |owner| (entity, owner))
+    });
+    Groups::build(book.entities.len(), pairs)
+}
+
+fn place_owners(book: &Book, entity_owners: &Groups<Entity, OwnerShare>) -> Groups<Place, OwnerShare> {
+    let mut pairs = Vec::new();
+    for place in book.places.ids() {
+        let declared = &book.places[place].shares;
+        if declared.is_empty() {
+            pairs.extend(entity_owners[book.places[place].owner].iter().copied().map(|share| (place, share)));
+        } else {
+            let mut rates = Map::default();
+            let mut path = Vec::new();
+            expand_shares(book, declared, Ratio::ONE, &mut path, &mut rates);
+            pairs.extend(sorted_shares(rates).into_iter().map(|share| (place, share)));
+        }
+    }
+    Groups::build(book.places.len(), pairs)
+}
+
+fn flattened_entity_owners(book: &Book, entity: Id<Entity>) -> Vec<OwnerShare> {
+    let mut rates = Map::default();
+    expand_entity(book, entity, Ratio::ONE, &mut Vec::new(), &mut rates);
+    sorted_shares(rates)
+}
+
+fn expand_shares(
+    book: &Book,
+    shares: &[Share],
+    factor: Ratio,
+    path: &mut Vec<Id<Entity>>,
+    rates: &mut Map<Id<Entity>, Ratio>,
+) {
+    for share in shares {
+        let Some(rate) = factor.checked_mul(share.rate) else { continue };
+        expand_entity(book, share.entity, rate, path, rates);
+    }
+}
+
+fn expand_entity(
+    book: &Book,
+    entity: Id<Entity>,
+    factor: Ratio,
+    path: &mut Vec<Id<Entity>>,
+    rates: &mut Map<Id<Entity>, Ratio>,
+) {
+    if path.contains(&entity) {
+        return;
+    }
+    path.push(entity);
+    let declaration = &book.entities[entity];
+    if !declaration.owned_by.is_empty() {
+        expand_shares(book, &declaration.owned_by, factor, path, rates);
+    } else if let Some(owner) = declaration.owner.filter(|&owner| owner != entity) {
+        expand_entity(book, owner, factor, path, rates);
+    } else {
+        match rates.get_mut(&entity) {
+            Some(previous) => {
+                if let Some(total) = previous.checked_add(factor) {
+                    *previous = total;
+                }
+            }
+            None => {
+                rates.insert(entity, factor);
+            }
+        }
+    }
+    path.pop();
+}
+
+fn sorted_shares(rates: Map<Id<Entity>, Ratio>) -> Vec<OwnerShare> {
+    let mut shares: Vec<_> = rates.into_iter().map(|(owner, share)| OwnerShare { owner, share }).collect();
+    shares.sort_unstable_by_key(|share| share.owner);
+    shares
 }
 
 /// Whether some list of rules brings one law to one subject twice, as two
