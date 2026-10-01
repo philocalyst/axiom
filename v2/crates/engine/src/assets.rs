@@ -338,35 +338,60 @@ impl Assets {
         part_id: PartId,
         requested: Qty,
     ) -> Result<Consumption, AssetError> {
+        let plan = self.prepare_consumption(asset, part_id, requested)?;
+        self.apply_consumption(plan);
+        Ok(plan.result)
+    }
+
+    /// Validates a consumption without changing canonical asset state. Ledger
+    /// callers pair this with a prepared parcel adjustment before committing
+    /// either store.
+    pub(crate) fn prepare_consumption(
+        &self,
+        asset: Id<Asset>,
+        part_id: PartId,
+        requested: Qty,
+    ) -> Result<ConsumptionPlan, AssetError> {
         if requested.is_negative() {
             return Err(AssetError::NegativeAmount);
         }
         let state = self
             .states
-            .get_mut(asset.index())
+            .get(asset.index())
             .filter(|state| state.asset == asset)
             .ok_or(AssetError::UnknownAsset)?;
         if state.disposed.is_some() {
             return Err(AssetError::Disposed);
         }
-        let part = state
-            .parts
-            .iter_mut()
-            .find(|part| part.id == part_id)
-            .ok_or(AssetError::UnknownPart)?;
+        let (owner, index) = self.part_index.get(&part_id).copied().ok_or(AssetError::UnknownPart)?;
+        if owner != asset {
+            return Err(AssetError::UnknownPart);
+        }
+        let part = state.parts.get(index).ok_or(AssetError::UnknownPart)?;
         let applied = Qty(requested.0.min(part.basis.0));
-        part.basis = Qty(part
+        let basis = Qty(part
             .basis
             .0
             .checked_sub(applied.0)
             .ok_or(AssetError::Overflow)?);
-        Ok(Consumption {
-            asset,
-            part: part_id,
-            requested,
-            applied,
-            excess: Qty(requested.0 - applied.0),
+        Ok(ConsumptionPlan {
+            result: Consumption {
+                asset,
+                part: part_id,
+                requested,
+                applied,
+                excess: Qty(requested.0 - applied.0),
+            },
+            basis,
         })
+    }
+
+    /// Commits a previously validated consumption. No fallible work remains.
+    pub(crate) fn apply_consumption(&mut self, plan: ConsumptionPlan) {
+        let (asset, index) = self.part_index[&plan.result.part];
+        debug_assert_eq!(asset, plan.result.asset);
+        let part = &mut self.states[asset.index()].parts[index];
+        part.basis = plan.basis;
     }
 
     /// Adds a carried loss to a selected acquisition part. `None` records an
@@ -378,38 +403,66 @@ impl Assets {
         to: Option<(Id<Asset>, PartId)>,
         amount: Qty,
     ) -> Result<CarryUpdate, AssetError> {
+        let plan = self.prepare_carry(from, to, amount)?;
+        self.apply_carry(plan);
+        Ok(plan.result)
+    }
+
+    /// Validates both sides of a basis carry without mutation.
+    pub(crate) fn prepare_carry(
+        &self,
+        from: PartId,
+        to: Option<(Id<Asset>, PartId)>,
+        amount: Qty,
+    ) -> Result<CarryPlan, AssetError> {
         if amount.is_negative() {
             return Err(AssetError::NegativeAmount);
         }
         if self.part(from).is_none() {
             return Err(AssetError::UnknownPart);
         }
-        if let Some((asset, part_id)) = to {
+        let basis = if let Some((asset, part_id)) = to {
             let state = self
                 .states
-                .get_mut(asset.index())
+                .get(asset.index())
                 .filter(|state| state.asset == asset)
                 .ok_or(AssetError::UnknownAsset)?;
             if state.disposed.is_some() {
                 return Err(AssetError::Disposed);
             }
-            let part = state
-                .parts
-                .iter_mut()
-                .find(|part| part.id == part_id)
-                .ok_or(AssetError::UnknownPart)?;
-            let basis = part
+            let (owner, index) = self.part_index.get(&part_id).copied().ok_or(AssetError::UnknownPart)?;
+            if owner != asset {
+                return Err(AssetError::UnknownPart);
+            }
+            let part = state.parts.get(index).ok_or(AssetError::UnknownPart)?;
+            Some(Qty(part
                 .basis
                 .0
                 .checked_add(amount.0)
-                .ok_or(AssetError::Overflow)?;
-            part.basis = Qty(basis);
-        }
-        Ok(CarryUpdate {
-            from,
-            to: to.map(|(_, part)| part),
-            amount,
+                .ok_or(AssetError::Overflow)?))
+        } else {
+            None
+        };
+        Ok(CarryPlan {
+            result: CarryUpdate {
+                from,
+                to: to.map(|(_, part)| part),
+                amount,
+            },
+            target: to,
+            basis,
         })
+    }
+
+    /// Commits a previously validated basis carry. No fallible work remains.
+    pub(crate) fn apply_carry(&mut self, plan: CarryPlan) {
+        let (Some((asset, part_id)), Some(basis)) = (plan.target, plan.basis) else {
+            return;
+        };
+        let (owner, index) = self.part_index[&part_id];
+        debug_assert_eq!(owner, asset);
+        let part = &mut self.states[asset.index()].parts[index];
+        part.basis = basis;
     }
 
     /// The nearest acquisition of `unit` owned by `owner` within `within`,
@@ -519,12 +572,25 @@ pub struct Consumption {
     pub excess: Qty,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) struct ConsumptionPlan {
+    pub result: Consumption,
+    basis: Qty,
+}
+
 /// The recorded relationship between a sale part and a receiving part.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct CarryUpdate {
     pub from: PartId,
     pub to: Option<PartId>,
     pub amount: Qty,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct CarryPlan {
+    pub result: CarryUpdate,
+    target: Option<(Id<Asset>, PartId)>,
+    basis: Option<Qty>,
 }
 
 /// Typed failures that the ledger can turn into law/source diagnostics.

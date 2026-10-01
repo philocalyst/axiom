@@ -814,13 +814,29 @@ pub(crate) struct Holdings {
     /// The first slot of each place's chain.
     heads: Vec<u32>,
     slots: Vec<Slot>,
+    /// Derived locator for asset parcels. Entries are append-only slot ids;
+    /// relief can leave a stale slot entry, which lookup verifies against the
+    /// live parcels. This avoids searching unrelated holdings for every part
+    /// basis query or adjustment.
+    part_slots: axiom_core::Map<PartId, Vec<u32>>,
     /// A lot was exhausted since the last sweep.
     untidy: bool,
 }
 
+pub(crate) struct PartBasisAdjustment {
+    part: PartId,
+    delta: Qty,
+    whole: Qty,
+}
+
 impl Holdings {
     pub fn new(places: usize) -> Holdings {
-        Holdings { heads: vec![NONE; places], slots: Vec::new(), untidy: false }
+        Holdings {
+            heads: vec![NONE; places],
+            slots: Vec::new(),
+            part_slots: axiom_core::Map::default(),
+            untidy: false,
+        }
     }
 
     fn chain(&self, head: u32) -> impl Iterator<Item = &Slot> {
@@ -850,6 +866,37 @@ impl Holdings {
         &mut self.slots[at as usize]
     }
 
+    /// Records that a live asset part can be held in this stable slot. The
+    /// slot ids never move when lot vectors are sorted, split or swept.
+    pub(crate) fn index_part_slot(
+        &mut self,
+        place: Id<Place>,
+        unit: Id<Commodity>,
+        part: PartId,
+    ) {
+        let slot = self.slot_index(place, unit).unwrap_or_else(|| {
+            self.entry(place, unit);
+            self.slot_index(place, unit).expect("entry creates the slot")
+        });
+        let slots = self.part_slots.entry(part).or_default();
+        if !slots.contains(&(slot as u32)) {
+            slots.push(slot as u32);
+        }
+    }
+
+    fn slot_index(&self, place: Id<Place>, unit: Id<Commodity>) -> Option<usize> {
+        let mut at = self.heads[place.index()];
+        while at != NONE {
+            let slot = &self.slots[at as usize];
+            match slot.unit.cmp(&unit) {
+                std::cmp::Ordering::Less => at = slot.next,
+                std::cmp::Ordering::Equal => return Some(at as usize),
+                std::cmp::Ordering::Greater => return None,
+            }
+        }
+        None
+    }
+
     /// What `place` alone holds of `unit`, in quanta.
     pub fn qty(&self, place: Id<Place>, unit: Id<Commodity>) -> Qty {
         self.get(place, unit).map_or(Qty::ZERO, |slot| slot.qty)
@@ -873,8 +920,11 @@ impl Holdings {
     /// The total basis carried by every live slice of one canonical part.
     pub(crate) fn part_basis(&self, part: PartId) -> Result<Qty, AssetError> {
         let mut found = false;
-        self.slots
-            .iter()
+        self.part_slots
+            .get(&part)
+            .into_iter()
+            .flatten()
+            .filter_map(|&slot| self.slots.get(slot as usize))
             .flat_map(|slot| slot.holding.lots.iter())
             .filter(|parcel| parcel.part == Some(part) && parcel.qty > Qty::ZERO)
             .try_fold(Qty::ZERO, |basis, parcel| {
@@ -891,8 +941,21 @@ impl Holdings {
     /// their current basis (consumption) or quantity (capital carry). Shares
     /// are rounded once across the whole part, so their sum stays exact.
     pub(crate) fn adjust_part_basis(&mut self, part: PartId, delta: Qty) -> Result<(), AssetError> {
+        let plan = self.prepare_part_basis_adjustment(part, delta)?;
+        self.apply_part_basis_adjustment(plan);
+        Ok(())
+    }
+
+    /// Preflights every parcel-level share before either the holdings or the
+    /// asset-part table is mutated. The returned plan has no allocation and is
+    /// safe to commit as long as this Holdings value is unchanged.
+    pub(crate) fn prepare_part_basis_adjustment(
+        &self,
+        part: PartId,
+        delta: Qty,
+    ) -> Result<PartBasisAdjustment, AssetError> {
         if delta.is_zero() {
-            return Ok(());
+            return Ok(PartBasisAdjustment { part, delta, whole: Qty::ZERO });
         }
         let basis = self.part_basis(part)?;
         let magnitude = if delta.is_negative() {
@@ -900,14 +963,16 @@ impl Holdings {
         } else {
             delta
         };
+        let slots = self.part_slots.get(&part).ok_or(AssetError::UnknownPart)?;
         let weights = if delta.is_negative() {
             if magnitude > basis {
                 return Err(AssetError::ParcelBasisMismatch);
             }
             basis
         } else {
-            self.slots
+            slots
                 .iter()
+                .filter_map(|&slot| self.slots.get(slot as usize))
                 .flat_map(|slot| slot.holding.lots.iter())
                 .filter(|parcel| parcel.part == Some(part) && parcel.qty > Qty::ZERO)
                 .try_fold(Qty::ZERO, |qty, parcel| {
@@ -921,15 +986,47 @@ impl Holdings {
             basis.0.checked_add(magnitude.0).ok_or(AssetError::Overflow)?;
         }
         let mut shares = Shares::new(magnitude, weights);
-        for slot in &mut self.slots {
-            let mut changed = false;
-            for parcel in &mut slot.holding.lots {
+        for &slot_id in slots {
+            let Some(slot) = self.slots.get(slot_id as usize) else { continue };
+            for parcel in &slot.holding.lots {
                 if parcel.part != Some(part) || parcel.qty <= Qty::ZERO {
                     continue;
                 }
                 let weight = if delta.is_negative() { parcel.basis } else { parcel.qty };
                 let share = shares.take(weight);
                 if delta.is_negative() {
+                    parcel.basis.0.checked_sub(share.0).ok_or(AssetError::Overflow)?;
+                } else {
+                    parcel.basis.0.checked_add(share.0).ok_or(AssetError::Overflow)?;
+                }
+            }
+        }
+        Ok(PartBasisAdjustment { part, delta, whole: weights })
+    }
+
+    /// Applies a prepared basis update. All sums and individual parcel values
+    /// were checked by `prepare_part_basis_adjustment` before mutation.
+    pub(crate) fn apply_part_basis_adjustment(&mut self, plan: PartBasisAdjustment) {
+        if plan.delta.is_zero() {
+            return;
+        }
+        let magnitude = if plan.delta.is_negative() {
+            Qty(plan.delta.0.checked_neg().expect("prepared magnitude"))
+        } else {
+            plan.delta
+        };
+        let slots = self.part_slots.get(&plan.part).expect("prepared part index");
+        let mut shares = Shares::new(magnitude, plan.whole);
+        for &slot_id in slots {
+            let Some(slot) = self.slots.get_mut(slot_id as usize) else { continue };
+            let mut changed = false;
+            for parcel in &mut slot.holding.lots {
+                if parcel.part != Some(plan.part) || parcel.qty <= Qty::ZERO {
+                    continue;
+                }
+                let weight = if plan.delta.is_negative() { parcel.basis } else { parcel.qty };
+                let share = shares.take(weight);
+                if plan.delta.is_negative() {
                     parcel.basis -= share;
                 } else {
                     parcel.basis += share;
@@ -940,7 +1037,6 @@ impl Holdings {
                 slot.ranked = None;
             }
         }
-        Ok(())
     }
 
     /// The slots of the places whose ids lie in `places`: a subtree.
@@ -1430,8 +1526,11 @@ mod tests {
         let mut independent = lot(1, 80, 10);
         independent.part = Some(other);
         holdings.entry(Id::new(0), Id::new(0)).land(first, false);
+        holdings.index_part_slot(Id::new(0), Id::new(0), part);
         holdings.entry(Id::new(1), Id::new(0)).land(second, false);
+        holdings.index_part_slot(Id::new(1), Id::new(0), part);
         holdings.entry(Id::new(1), Id::new(0)).land(independent, false);
+        holdings.index_part_slot(Id::new(1), Id::new(0), other);
 
         assert_eq!(holdings.part_basis(part), Ok(Qty(100)));
         holdings.adjust_part_basis(part, Qty(-25)).unwrap();
@@ -1440,6 +1539,32 @@ mod tests {
         holdings.adjust_part_basis(part, Qty(20)).unwrap();
         assert_eq!(holdings.part_basis(part), Ok(Qty(95)));
         assert_eq!(holdings.part_basis(other), Ok(Qty(80)));
+    }
+
+    #[test]
+    fn part_basis_preflight_rejects_overflow_without_mutating_any_slice() {
+        let origin = RuntimeTxn::Adjustment { place: Id::new(1), day: Day(10) };
+        let part = PartId { origin, ordinal: 0 };
+        let mut holdings = Holdings::new(2);
+        let mut first = lot(i64::MAX, 10, 10);
+        first.part = Some(part);
+        let mut second = lot(1, 0, 10);
+        second.part = Some(part);
+        holdings.entry(Id::new(0), Id::new(0)).land(first, false);
+        holdings.index_part_slot(Id::new(0), Id::new(0), part);
+        holdings.entry(Id::new(1), Id::new(0)).land(second, false);
+        holdings.index_part_slot(Id::new(1), Id::new(0), part);
+
+        assert_eq!(holdings.part_basis(part), Ok(Qty(10)));
+        assert_eq!(holdings.prepare_part_basis_adjustment(part, Qty(1)).err(), Some(AssetError::Overflow));
+        assert_eq!(holdings.adjust_part_basis(part, Qty(1)), Err(AssetError::Overflow));
+        let parcels: Vec<_> = holdings
+            .iter()
+            .flat_map(|slot| slot.holding.lots.iter())
+            .map(|parcel| (parcel.qty, parcel.basis))
+            .collect();
+        assert_eq!(parcels, [(Qty(i64::MAX), Qty(10)), (Qty(1), Qty::ZERO)]);
+        assert_eq!(holdings.part_basis(part), Ok(Qty(10)));
     }
 
     #[test]

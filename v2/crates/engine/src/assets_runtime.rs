@@ -52,11 +52,17 @@ impl Ledger<'_, '_, '_> {
         if self.world.holdings.part_basis(part)? != part_basis {
             return Err(AssetError::ParcelBasisMismatch);
         }
-        let consumed = self.world.assets.consume(asset, part, requested)?;
-        self.world
+        let consumption = self.world.assets.prepare_consumption(asset, part, requested)?;
+        let parcel_change = self
+            .world
             .holdings
-            .adjust_part_basis(part, -consumed.applied)?;
-        Ok(consumed)
+            .prepare_part_basis_adjustment(part, -consumption.result.applied)?;
+
+        // Both stores have been checked. These commits are infallible, so an
+        // error cannot leave asset history and live parcel basis out of sync.
+        self.world.assets.apply_consumption(consumption);
+        self.world.holdings.apply_part_basis_adjustment(parcel_change);
+        Ok(consumption.result)
     }
 
     /// Adds a deferred loss to the selected receiving part, if one was found.
@@ -68,7 +74,8 @@ impl Ledger<'_, '_, '_> {
         to: Option<(Id<Asset>, crate::PartId)>,
         amount: Qty,
     ) -> Result<CarryUpdate, AssetError> {
-        if let Some((asset, part)) = to {
+        let carry = self.world.assets.prepare_carry(from, to, amount)?;
+        let parcel_change = if let Some((asset, part)) = to {
             let basis = self
                 .world
                 .assets
@@ -78,12 +85,17 @@ impl Ledger<'_, '_, '_> {
             if self.world.holdings.part_basis(part)? != basis {
                 return Err(AssetError::ParcelBasisMismatch);
             }
+            Some(self.world.holdings.prepare_part_basis_adjustment(part, amount)?)
+        } else {
+            None
+        };
+
+        // Asset overflow/identity and every parcel share were preflighted.
+        self.world.assets.apply_carry(carry);
+        if let Some(parcel_change) = parcel_change {
+            self.world.holdings.apply_part_basis_adjustment(parcel_change);
         }
-        let update = self.world.assets.carry(from, to, amount)?;
-        if let Some((_, part)) = to {
-            self.world.holdings.adjust_part_basis(part, amount)?;
-        }
-        Ok(update)
+        Ok(carry.result)
     }
 
     /// Records an ownership boundary after a sale or closing event.

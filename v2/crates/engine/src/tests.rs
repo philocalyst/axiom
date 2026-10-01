@@ -1537,6 +1537,63 @@ fn checkpoint_digest_includes_asset_part_basis_even_when_holdings_match() {
 }
 
 #[test]
+fn failed_asset_carry_preflight_leaves_both_canonical_stores_unchanged() {
+    let mut f = Fixture::new();
+    let (place, other_place, unit, owner, asset_name) =
+        (f.checking, f.savings, f.usd, f.me, f.sym("indexed asset"));
+    let mut book = f.book();
+    let asset = book.assets.push(Asset {
+        name: asset_name,
+        kind: book.roots.kinds.thing,
+        owner,
+        place,
+        unit,
+        part_of: None,
+        props: Box::default(),
+        doc: None,
+        loc: Loc::default(),
+    });
+    let plan = Plan::new(&book);
+    let mut ledger = plan.start(options());
+    let origin = RuntimeTxn::Adjustment { place, day: Day(5) };
+    let part = crate::PartId { origin, ordinal: 0 };
+    let empty = axiom_core::Run::new(Id::new(0), 0);
+    let first = Parcel {
+        qty: Qty(i64::MAX),
+        basis: Qty(10),
+        acquired: Day(5),
+        txn: origin,
+        part: Some(part),
+        codes: FlowCodes { header: empty, local: empty },
+        tied: None,
+    };
+    let second = Parcel { qty: Qty(1), basis: Qty::ZERO, ..first };
+    ledger.world.holdings.entry(place, unit).land(first, false);
+    ledger.world.holdings.index_part_slot(place, unit, part);
+    ledger.world.holdings.entry(other_place, unit).land(second, false);
+    ledger.world.holdings.index_part_slot(other_place, unit, part);
+    ledger.world.assets.add_part(
+        asset,
+        crate::Part {
+            id: part,
+            flow: None,
+            kind: crate::PartKind::Acquisition,
+            recorded: crate::EventKey { day: Day(5), sequence: 0 },
+            day: Day(5),
+            cost: Qty(10),
+            basis: Qty(10),
+        },
+    ).unwrap();
+
+    assert_eq!(ledger.carry_asset_basis(part, Some((asset, part)), Qty(1)), Err(crate::AssetError::Overflow));
+    assert_eq!(ledger.world.assets.asset(asset).unwrap().basis(part), Ok(Qty(10)));
+    assert_eq!(ledger.world.holdings.part_basis(part), Ok(Qty(10)));
+    let held_basis: i64 = ledger.world.holdings.iter().flat_map(|slot| &slot.holding.lots)
+        .filter(|parcel| parcel.part == Some(part)).map(|parcel| parcel.basis.0).sum();
+    assert_eq!(held_basis, 10, "failed carry did not update any parcel slice");
+}
+
+#[test]
 fn deadlines_beyond_the_horizon_wait_until_the_ledger_is_asked_to_reach_them() {
     let (book, _) = timed_book(None);
     let plan = Plan::new(&book);
