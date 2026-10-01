@@ -1,23 +1,67 @@
-//! Sync end to end, on a fixture project: a checking export and a card export,
-//! the transfer between them that both show, a purchase typed from a receipt
-//! that the bank also has, a rent that keeps a contract, an invoice payment
-//! that names its invoice, and a memo nobody is known as. Sync twice: the
-//! second time writes nothing.
+//! Model-native sync end to end. Every fixture builds a real Book and Run, then
+//! plans against a registered source catalog; no legacy stand-alone World is
+//! assembled by the test.
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
 
-use axiom_core::{Day, Map, Qty};
-use axiom_sync::{
-    Account, DateFormat, Due, Env, Existing, Failure, Feed, Field, Format, Input, Kind, Known, Layout, Patterns, Place,
-    Recognizer, Rule, Shape, Sink, Source, Spec, Unit, World, sync,
-};
+use axiom_core::{Day, Diagnostic, FileId};
+use axiom_engine::{Options, Plan};
+use axiom_model::{Book, Source as ModelSource, build};
+use axiom_sync::{PlanOutcome, SourceRegistry, plan};
+use axiom_syntax::{Folder, parse};
 
-const USD: Unit = Unit { name: "USD", scale: 2 };
+const TODAY: &str = "2026-01-31";
+const CHECKING: &str = "\
+Posting Date,Description,Amount,Balance
+01/03/2026,GREYSTAR PROPERTY MGMT RENT,-2900.00,3162.55
+01/08/2026,HALCYON PAYMENT INV-2026-01,3800.00,6962.55
+01/10/2026,CHASE CREDIT CRD AUTOPAY 0110,-1240.18,5722.37
+01/12/2026,SQ *MYSTERY VENDOR 4411,-40.00,5682.37
+";
+const VISA: &str = "\
+Transaction Date,Description,Amount
+01/07/2026,TRADER JOE'S #634 SAN FRANCISCO,84.20
+01/10/2026,PAYMENT THANK YOU,-1240.18
+01/11/2026,AMAZON MKTPLACE PMTS,62.40
+";
+const AXIOM: &str = "\
+base USD
+use std
+entity me : person
+entity chase : org
+entity greystar : landlord
+entity trader-joes : grocer
+  known-as \"TRADER JOE\"
+entity amazon : store
+entity halcyon : client
+account checking : deposit at chase
+  known-as \"PAYMENT THANK YOU\"
+account visa : card at chase
+  known-as \"CHASE CREDIT CRD AUTOPAY\"
+sync checking
+  read \"feeds/checking.csv\"
+  format csv
+    date \"Posting Date\" \"MM/DD/YYYY\"
+    amount \"Amount\"
+    memo \"Description\"
+    balance \"Balance\"
+sync visa
+  read \"feeds/visa.csv\"
+  format csv
+    date \"Transaction Date\" \"MM/DD/YYYY\"
+    amount \"Amount\" flipped
+    memo \"Description\"
+";
+const JANUARY: &str = "\
+opening 2026-01-01
+  checking 6_062.55 USD
+  visa 1_240.18 USD
 
-/// The project's files, on disk and in memory.
+2026-01-06 visa -> trader-joes 84.20 USD
+";
+
 struct Project {
     root: PathBuf,
     files: BTreeMap<String, String>,
@@ -25,9 +69,13 @@ struct Project {
 
 impl Project {
     fn new(name: &str, files: &[(&str, &str)]) -> Project {
-        let root = std::env::temp_dir().join(format!("axiom-sync-e2e-{}-{name}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("axiom-sync-native-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        let mut project = Project { root, files: BTreeMap::new() };
+        let mut project = Project {
+            root,
+            files: BTreeMap::new(),
+        };
         for &(path, text) in files {
             project.write(path, text);
         }
@@ -37,14 +85,12 @@ impl Project {
     fn write(&mut self, path: &str, text: &str) {
         let file = self.root.join(path);
         fs::create_dir_all(file.parent().unwrap()).unwrap();
-        fs::write(&file, text).unwrap();
-        if path.ends_with(".ax") {
-            self.files.insert(path.to_string(), text.to_string());
-        }
+        fs::write(file, text).unwrap();
+        self.files.insert(path.to_string(), text.to_string());
     }
 
-    fn read(&self, path: &str) -> Option<String> {
-        self.files.get(path).cloned()
+    fn project_paths(&self) -> Vec<&str> {
+        self.files.keys().map(String::as_str).collect()
     }
 }
 
@@ -54,239 +100,122 @@ impl Drop for Project {
     }
 }
 
-const CHECKING: &str = "\
-Posting Date,Description,Amount,Balance
-01/03/2026,GREYSTAR PROPERTY MGMT RENT,-2900.00,3162.55
-01/08/2026,HALCYON PAYMENT INV-2026-01 THANK YOU,\"3,800.00\",6962.55
-01/10/2026,CHASE CREDIT CRD AUTOPAY 0110,-1240.18,5722.37
-01/12/2026,SQ *MYSTERY VENDOR 4411,-40.00,5682.37
-";
-
-const VISA: &str = "\
-Transaction Date,Description,Amount
-01/07/2026,TRADER JOE'S #634 SAN FRANCISCO,84.20
-01/10/2026,PAYMENT THANK YOU,-1240.18
-01/11/2026,AMAZON MKTPLACE PMTS,62.40
-";
-
-const JANUARY: &str = "\
-// January 2026. The folder says 2026 and the file says January.
-opening 01
-  checking 6_062.55 USD
-  visa     1_240.18 USD
-
-02 halcyon owes studio 3_800 USD due 30d ^inv-2026-01
-06 visa -> trader-joes 84.20 USD
-";
-
-fn column(name: &str) -> Place {
-    Place::Name(name.into())
+#[derive(Default)]
+struct Catalog {
+    root: PathBuf,
+    next: u32,
+    paths: BTreeMap<String, FileId>,
+    files: BTreeMap<FileId, (String, String)>,
 }
 
-fn rows(specs: Vec<Spec>) -> Format {
-    Format { shape: Shape::Rows, specs, categories: Vec::new() }
-}
-
-fn us_dates() -> DateFormat {
-    DateFormat::new("MM/DD/YYYY").unwrap()
-}
-
-/// `format csv` with `date "Posting Date" "MM/DD/YYYY"`, `amount "Amount"`, `memo "Description"`, `balance "Balance"`.
-fn checking_csv() -> Format {
-    rows(vec![
-        Spec::new(Field::Date, [column("Posting Date")]).layout(us_dates()),
-        Spec::new(Field::Amount, [column("Amount")]),
-        Spec::new(Field::Memo, [column("Description")]),
-        Spec::new(Field::Balance, [column("Balance")]),
-    ])
-}
-
-/// The card shows charges as positive: `amount "Amount" flipped`.
-fn visa_csv() -> Format {
-    rows(vec![
-        Spec::new(Field::Date, [column("Transaction Date")]).layout(us_dates()),
-        Spec::new(Field::Amount, [column("Amount")]).rule(Rule::Flipped),
-        Spec::new(Field::Memo, [column("Description")]),
-    ])
-}
-
-/// `format ofx`, as std declares it.
-fn ofx() -> Format {
-    let path = |text: &str| Place::Path(text.into());
-    Format {
-        shape: Shape::Tagged { records: "STMTTRN".into() },
-        specs: vec![
-            Spec::new(Field::Date, [path("DTPOSTED")]).layout(DateFormat::new("YYYYMMDD").unwrap()),
-            Spec::new(Field::Amount, [path("TRNAMT")]),
-            Spec::new(Field::Memo, [path("NAME"), path("MEMO")]),
-            Spec::new(Field::Code, [path("CHECKNUM")]),
-        ],
-        categories: Vec::new(),
-    }
-}
-
-/// `format camt053`, as std declares it.
-fn camt053() -> Format {
-    let path = |text: &str| Place::Path(text.into());
-    Format {
-        shape: Shape::Tagged { records: "Ntry".into() },
-        specs: vec![
-            Spec::new(Field::Date, [path("BookgDt/Dt")]),
-            Spec::new(Field::Amount, [path("Amt")]).rule(Rule::Sign { place: path("CdtDbtInd"), into: "CRDT".into() }),
-            Spec::new(Field::Memo, [path("AddtlNtryInf"), path("RmtInf/Ustrd")]),
-            Spec::new(Field::Pending, [path("Sts")]).rule(Rule::Is("PDNG".into())),
-            Spec::new(Field::Code, [path("NtryDtls/TxDtls/RmtInf/Strd/CdtrRefInf/Ref")]),
-            Spec::new(Field::Via, [path("NtryDtls/TxDtls/RltdPties/UltmtCdtr/Nm")]),
-        ],
-        categories: Vec::new(),
-    }
-}
-
-fn sources<'a>(order: &[&str]) -> Vec<Source<'a>> {
-    let first = Day::from_ymd(2026, 1, 1).unwrap();
-    let feed = |name: &'static str, format: Format| Source {
-        name,
-        input: Input::Run(if name == "checking" {
-            "printf '%s' {since} > since-checking.txt; cat feeds/checking.csv"
-        } else {
-            "cat feeds/visa.csv"
-        }),
-        since: first,
-        kind: Kind::Feed(Feed { account: name, unit: USD, format }),
-    };
-    order
-        .iter()
-        .map(|&name| if name == "checking" { feed("checking", checking_csv()) } else { feed("visa", visa_csv()) })
-        .collect()
-}
-
-/// What the book says, as far as this fixture needs it: read back out of the
-/// journal's own lines. `known` says who is known as what.
-fn book<'a>(files: &'a BTreeMap<String, String>, known: Vec<Known<'a>>) -> World<'a> {
-    let mut world = World {
-        recognizer: Recognizer::new(known, &["code:(\"inv-\" digit+ \"-\" digit+)"], &Patterns::default()).unwrap(),
-        layout: Layout::new(files.keys().map(String::as_str)),
-        accounts: Map::default(),
-        units: vec![USD],
-        dues: Vec::new(),
-        claims: Map::default(),
-    };
-    let (mut rent_kept, mut claims, mut paid) = (false, Vec::new(), Vec::new());
-    for text in files.values() {
-        for line in text.lines() {
-            let words: Vec<&str> = line.split_whitespace().collect();
-            let Some(of_month) =
-                words.first().and_then(|word| word.parse::<u32>().ok()).filter(|_| !line.starts_with(' '))
-            else {
-                continue;
-            };
-            let day = Day::from_ymd(2026, 1, of_month).unwrap();
-            let account = |name: &str| ["checking", "visa"].into_iter().find(|account| *account == name);
-            let mut flow = |name: &str, qty: i64| {
-                if let Some(account) = account(name) {
-                    world.accounts.entry(account).or_default().flows.push(Existing::new(day, Qty(qty)));
-                }
-            };
-            match words.as_slice() {
-                [_, "flat"] => {
-                    rent_kept = true;
-                    flow("checking", -290_000);
-                }
-                [_, name, "=", ..] => {
-                    world.accounts.entry(account(name).unwrap()).or_insert_with(Account::default).asserted.push(day)
-                }
-                [_, party, "owes", ..] => {
-                    claims.push((words.iter().find(|w| w.starts_with('^')).unwrap()[1..].to_string(), *party))
-                }
-                [_, from, "->", to, amount, ..] => {
-                    let cents = amount.replace('_', "").replace('(', "");
-                    let (whole, fraction) = cents.split_once('.').unwrap_or((&cents, "00"));
-                    let qty = whole.parse::<i64>().unwrap() * 100 + fraction.parse::<i64>().unwrap();
-                    flow(from, -qty);
-                    flow(to, qty);
-                    paid.extend(words.iter().filter(|w| w.starts_with('^')).map(|w| w[1..].to_string()));
-                }
-                _ => {}
-            }
+impl Catalog {
+    fn new(root: &Path, first_auxiliary: usize) -> Catalog {
+        Catalog {
+            root: root.to_path_buf(),
+            next: u32::try_from(first_auxiliary).unwrap(),
+            ..Catalog::default()
         }
     }
-    let open = |code: &str| !paid.iter().any(|paid| paid == code);
-    for (code, party) in &claims {
-        if open(code) {
-            let code: &str = files
-                .values()
-                .find_map(|text| text.find(&format!("^{code}")).map(|at| &text[at + 1..at + 1 + code.len()]))
-                .unwrap();
-            world.claims.insert(code, party);
+
+    fn insert(&mut self, path: &str, text: String) -> Result<FileId, Diagnostic> {
+        let id = FileId(u16::try_from(self.next).map_err(|_| {
+            Diagnostic::error("sync-file-limit", "the fixture registered too many files")
+        })?);
+        self.next += 1;
+        self.files.insert(id, (path.to_string(), text));
+        self.paths.insert(path.to_string(), id);
+        Ok(id)
+    }
+}
+
+impl SourceRegistry for Catalog {
+    fn read(&mut self, path: &str) -> Result<Option<FileId>, Diagnostic> {
+        if let Some(&id) = self.paths.get(path) {
+            return Ok(Some(id));
+        }
+        let file = self.root.join(path);
+        match fs::read_to_string(&file) {
+            Ok(text) => self.insert(path, text).map(Some),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(Diagnostic::error(
+                "sync-read-file",
+                format!("could not read `{path}`: {error}"),
+            )),
         }
     }
-    if !rent_kept {
-        let day = Day::from_ymd(2026, 1, 1).unwrap();
-        world.dues.push(Due {
-            contract: "flat",
-            party: "greystar",
-            account: "checking",
-            day,
-            qty: Qty(-290_000),
-            window: 15,
+
+    fn text(&self, file: FileId) -> Option<&str> {
+        self.files.get(&file).map(|(_, text)| text.as_str())
+    }
+
+    fn generated(&mut self, path: &str, text: String) -> Result<FileId, Diagnostic> {
+        self.insert(path, text)
+    }
+}
+
+fn build_project<'s>(project: &'s Project, axiom: &'s str) -> (Book<'s>, Vec<&'s str>) {
+    let std = include_str!("../../systems/src/std.ax");
+    let mut file_texts: Vec<(&str, &str, bool)> =
+        vec![("systems/std.ax", std, true), ("axiom.ax", axiom, false)];
+    for (path, text) in &project.files {
+        if path.ends_with(".ax") && path != "axiom.ax" {
+            file_texts.push((path, text, false));
+        }
+    }
+    let mut sources = Vec::with_capacity(file_texts.len());
+    for (index, &(path, text, embedded)) in file_texts.iter().enumerate() {
+        let (file, problems) = parse(
+            FileId(u16::try_from(index).unwrap()),
+            text,
+            Folder::of(path),
+        );
+        assert!(problems.is_empty(), "{path} should parse: {problems:?}");
+        sources.push(ModelSource {
+            path,
+            file,
+            embedded,
         });
     }
-    world
+    let (book, diagnostics) = build(&sources);
+    assert!(
+        diagnostics.is_empty(),
+        "native fixture should build: {diagnostics:?}"
+    );
+    let paths = file_texts.iter().map(|(path, _, _)| *path).collect();
+    (book, paths)
 }
 
-fn known<'a>(recognizes_visa_from_checking: bool) -> Vec<Known<'a>> {
-    let party = |name: &'a str, pattern: &'a str| Known { name, account: false, patterns: vec![pattern] };
-    let mut known = vec![
-        party("greystar", "\"GREYSTAR\""),
-        party("halcyon", "\"HALCYON\""),
-        party("trader-joes", "\"TRADER JOE\""),
-        party("amazon", "\"AMAZON\""),
-    ];
-    // Every account is known by its own name; one is also known as the bank writes it.
-    let account = |name: &'a str, pattern: Option<&'a str>| Known {
-        name,
-        account: true,
-        patterns: pattern.into_iter().collect(),
-    };
-    let (visa, checking) = match recognizes_visa_from_checking {
-        true => (Some("\"CHASE CREDIT CRD AUTOPAY\""), None),
-        false => (None, Some("\"PAYMENT THANK YOU\"")),
-    };
-    known.extend([account("visa", visa), account("checking", checking), account("stripe", None)]);
-    known
-}
-
-/// One sync of the fixture: the files it would write.
-fn run(project: &Project, order: &[&str], visa_is_known_on_checking: bool) -> Vec<(String, String)> {
-    let mut world = book(&project.files, known(visa_is_known_on_checking));
-    let sources = sources(order);
-    let env = Env {
-        root: &project.root,
-        today: Day::from_ymd(2026, 1, 31).unwrap(),
-        units: &["USD"],
-        timeout: Duration::from_secs(60),
-    };
-    let read = |path: &str| project.read(path);
-    let outcome = sync(&mut world, &sources, &env, &read);
-    for (name, result) in &outcome.sources {
-        if let Err(failure) = result {
-            let why = match failure {
-                Failure::Command(failed) => failed.summary.clone(),
-                Failure::Output { problems, .. } => {
-                    problems.iter().map(|p| p.message.clone()).collect::<Vec<_>>().join("; ")
-                }
-            };
-            panic!("{name} failed: {why}");
-        }
-    }
-    outcome.changes.into_iter().map(|change| (change.path, change.after)).collect()
+fn plan_project(project: &Project, axiom: &str, wanted: &[&str]) -> PlanOutcome {
+    let (book, file_paths) = build_project(project, axiom);
+    let today = Day::parse(TODAY.as_bytes()).unwrap();
+    let run = Plan::new(&book).run(Options {
+        today,
+        relaxed: false,
+    });
+    assert!(
+        run.diagnostics.is_empty(),
+        "native fixture run should be clean: {:?}",
+        run.diagnostics
+    );
+    let mut registry = Catalog::new(&project.root, file_paths.len());
+    plan(
+        &book,
+        &run,
+        &project.root,
+        today,
+        wanted,
+        &project.project_paths(),
+        &file_paths,
+        &mut registry,
+    )
+    .expect("the declared source names should resolve")
 }
 
 fn project(name: &str) -> Project {
     Project::new(
         name,
         &[
-            ("axiom.ax", ""),
+            ("axiom.ax", AXIOM),
             ("journal/2026/01.ax", JANUARY),
             ("feeds/checking.csv", CHECKING),
             ("feeds/visa.csv", VISA),
@@ -294,199 +223,277 @@ fn project(name: &str) -> Project {
     )
 }
 
-const SYNCED: &str = "\
-// January 2026. The folder says 2026 and the file says January.
-opening 01
-  checking 6_062.55 USD
-  visa     1_240.18 USD
-
-02 halcyon owes studio 3_800 USD due 30d ^inv-2026-01
-03 flat
-06 visa -> trader-joes 84.20 USD
-08 halcyon -> checking 3_800 USD ^inv-2026-01
-10 checking -> visa 1_240.18 USD
-11 visa -> amazon 62.40 USD
-12 checking -> ? 40 USD \"SQ *MYSTERY VENDOR 4411\"
-12 checking = 5_682.37 USD
-";
-
 #[test]
-fn a_book_is_brought_up_to_its_statements_and_a_second_sync_writes_nothing() {
+fn native_book_reconciles_two_feeds_and_the_next_plan_is_empty() {
     let mut project = project("twice");
-    let written = run(&project, &["checking", "visa"], true);
-    assert_eq!(written, [("journal/2026/01.ax".to_string(), SYNCED.to_string())]);
-    assert_eq!(
-        fs::read_to_string(project.root.join("since-checking.txt")).unwrap(),
-        "2026-01-01",
-        "{{since}} is filled in"
-    );
-
-    project.write("journal/2026/01.ax", SYNCED);
-    assert!(run(&project, &["checking", "visa"], true).is_empty(), "the second sync writes nothing");
-}
-
-#[test]
-fn a_transfer_both_accounts_show_is_written_once_whichever_side_knows_it() {
-    // The card's export is read first, and only it knows the other end: `PAYMENT THANK YOU` is the checking account.
-    let project = project("either-side");
-    let written = run(&project, &["visa", "checking"], false);
-    let journal = &written[0].1;
-    assert_eq!(journal.matches("checking -> visa 1_240.18 USD").count(), 1, "{journal}");
-    // The checking export's own record of it matched the flow the card's export made.
-    assert!(!journal.contains("? 1_240.18"), "{journal}");
-    assert!(!journal.contains("AUTOPAY"), "{journal}");
-}
-
-#[test]
-fn a_dry_run_shows_the_diff_and_what_fails_writes_nothing() {
-    let mut project = project("dry");
-    let written = run(&project, &["checking", "visa"], true);
-    let diff = axiom_sync_diff(&project, &written);
-    assert!(diff.starts_with("--- a/journal/2026/01.ax\n+++ b/journal/2026/01.ax\n@@ "), "{diff}");
+    let first = plan_project(&project, AXIOM, &[]);
     assert!(
-        diff.contains("+03 flat\n") && diff.contains("+12 checking -> ? 40 USD \"SQ *MYSTERY VENDOR 4411\"\n"),
-        "{diff}"
+        first.incomplete.is_empty(),
+        "the fixture has no claims or contracts to monitor"
     );
+    assert!(first.problems.is_empty(), "{:?}", first.problems);
+    let journal = &first.changes[0].after;
+    assert_eq!(first.changes.len(), 1);
+    assert_eq!(first.changes[0].path, "journal/2026/01.ax");
+    assert_eq!(
+        journal
+            .matches("2026-01-06 visa -> trader-joes 84.20 USD")
+            .count(),
+        1,
+        "a nearby statement duplicate is reconciled"
+    );
+    assert!(
+        journal.contains("03 checking -> greystar 2_900 USD"),
+        "{journal}"
+    );
+    assert!(
+        journal.contains("08 halcyon -> checking 3_800 USD"),
+        "{journal}"
+    );
+    assert!(
+        journal.contains("10 checking -> visa 1_240.18 USD"),
+        "{journal}"
+    );
+    assert!(journal.contains("11 visa -> amazon 62.40 USD"), "{journal}");
+    assert!(
+        journal.contains("12 checking -> ? 40 USD \"SQ *MYSTERY VENDOR 4411\""),
+        "{journal}"
+    );
+    assert!(journal.contains("12 checking = 5_682.37 USD"), "{journal}");
 
-    project.write("feeds/checking.csv", "Posting Date,Description,Amount,Balance\n13/45/2026,x,1.00,1\n");
-    let mut world = book(&project.files, known(true));
-    let env = Env {
-        root: &project.root,
-        today: Day::from_ymd(2026, 1, 31).unwrap(),
-        units: &[],
-        timeout: Duration::from_secs(60),
-    };
-    let read = |path: &str| project.read(path);
-    let outcome = sync(&mut world, &sources(&["checking", "visa"]), &env, &read);
-    let Err(Failure::Output { problems, .. }) = &outcome.sources[0].1 else { panic!("the bad row is refused") };
-    assert_eq!(problems[0].message, "row 2: `13/45/2026` is not a date written MM/DD/YYYY");
-    assert!(outcome.sources[1].1.is_ok(), "the other source is not stopped");
-    let touched: Vec<_> = outcome.changes.iter().map(|change| change.path.as_str()).collect();
-    assert_eq!(touched, ["journal/2026/01.ax"], "the visa lines are still written");
-    assert!(!outcome.changes[0].after.contains("checking ->"), "and nothing of the checking export");
+    project.write(&first.changes[0].path, journal);
+    let second = plan_project(&project, AXIOM, &[]);
+    assert!(
+        second.changes.is_empty(),
+        "a second native plan writes nothing"
+    );
 }
 
-/// The diff of every change, as `axiom sync --dry` prints it.
-fn axiom_sync_diff(project: &Project, written: &[(String, String)]) -> String {
-    written
-        .iter()
-        .map(|(path, after)| {
-            let change = axiom_sync::Change { path: path.clone(), before: project.read(path), after: after.clone() };
-            change.diff()
-        })
-        .collect()
+fn reversed_feeds() -> String {
+    let at_checking = AXIOM.find("sync checking").unwrap();
+    let at_visa = AXIOM.find("sync visa").unwrap();
+    format!(
+        "{}{}{}",
+        &AXIOM[..at_checking],
+        &AXIOM[at_visa..],
+        &AXIOM[at_checking..at_visa]
+    )
 }
-
-const QFX: &str = "OFXHEADER:100\nDATA:OFXSGML\n\n<OFX>\n<BANKMSGSRSV1><STMTTRNRS><STMTRS>\n<BANKTRANLIST>\n\
-<STMTTRN>\n<TRNTYPE>DEBIT\n<DTPOSTED>20260105120000[-5:EST]\n<TRNAMT>-84.20\n<FITID>1\n<NAME>TRADER JOE'S #634\n<MEMO>SAN FRANCISCO CA\n</STMTTRN>\n\
-<STMTTRN>\n<TRNTYPE>CHECK\n<DTPOSTED>20260106\n<TRNAMT>-350.00\n<FITID>2\n<CHECKNUM>1041\n<NAME>BAY PLUMBING &amp; HEATING\n</STMTTRN>\n\
-<STMTTRN>\n<TRNTYPE>CREDIT\n<DTPOSTED>20260108\n<TRNAMT>3800.00\n<FITID>3\n<NAME>HALCYON PAYMENT\n</STMTTRN>\n\
-</BANKTRANLIST>\n<LEDGERBAL><BALAMT>3162.55\n<DTASOF>20260112120000\n</LEDGERBAL>\n</STMTRS></STMTTRNRS></BANKMSGSRSV1>\n</OFX>\n";
 
 #[test]
-fn a_drop_folder_is_read_where_it_lies() {
-    let mut project = Project::new(
-        "drop",
+fn a_transfer_reported_by_both_accounts_is_written_once_in_either_source_order() {
+    for (name, axiom) in [
+        ("checking-first", AXIOM.to_string()),
+        ("visa-first", reversed_feeds()),
+    ] {
+        let project = project(name);
+        let outcome = plan_project(&project, &axiom, &["checking", "visa"]);
+        assert!(outcome.problems.is_empty(), "{:?}", outcome.problems);
+        let journal = &outcome.changes[0].after;
+        assert_eq!(
+            journal.matches("checking -> visa 1_240.18 USD").count(),
+            1,
+            "{journal}"
+        );
+        assert!(
+            !journal.contains("? 1_240.18"),
+            "the opposite account recognized the transfer: {journal}"
+        );
+        assert!(
+            !journal.contains("AUTOPAY"),
+            "the memo was replaced by the account identity: {journal}"
+        );
+    }
+}
+
+#[test]
+fn a_bad_feed_is_isolated_while_the_other_source_still_plans() {
+    let mut project = project("bad-feed");
+    project.write(
+        "feeds/checking.csv",
+        "Posting Date,Description,Amount,Balance\n13/45/2026,not a date,-1.00,1.00\n",
+    );
+    let outcome = plan_project(&project, AXIOM, &["checking", "visa"]);
+    let checking = outcome
+        .sources
+        .iter()
+        .find(|source| source.source == "checking")
+        .unwrap();
+    assert!(matches!(
+        checking.failure,
+        Some(axiom_sync::SourceFailure::Output(_))
+    ));
+    let visa = outcome
+        .sources
+        .iter()
+        .find(|source| source.source == "visa")
+        .unwrap();
+    assert!(
+        visa.failure.is_none(),
+        "the independent visa export succeeds"
+    );
+    assert!(outcome.problems.is_empty(), "{:?}", outcome.problems);
+    assert_eq!(outcome.changes.len(), 1);
+    assert!(!outcome.changes[0].after.contains("greystar"));
+    assert!(!outcome.changes[0].after.contains("12 checking -> ? 40 USD"));
+    assert!(
+        outcome.changes[0]
+            .after
+            .contains("11 visa -> amazon 62.40 USD")
+    );
+}
+
+#[test]
+fn a_drop_folder_is_read_in_path_order_and_an_empty_or_escaping_glob_is_safe() {
+    let axiom = format!(
+        "{}sync checking\n  read \"imports/chase/*.qfx\"\n  format ofx\n",
+        &AXIOM[..AXIOM.find("sync checking").unwrap()]
+    );
+    let project = Project::new(
+        "drop-folder",
         &[
-            ("axiom.ax", ""),
+            ("axiom.ax", &axiom),
             ("journal/2026/01.ax", JANUARY),
-            ("imports/chase/2026-01.qfx", QFX),
+            ("imports/chase/2026-01-a.qfx", QFX_A),
+            ("imports/chase/2026-01-b.qfx", QFX_B),
             ("imports/chase/notes.txt", "not a statement"),
         ],
     );
-    let source = |pattern| Source {
-        name: "checking",
-        input: Input::Read(pattern),
-        since: Day(0),
-        kind: Kind::Feed(Feed { account: "checking", unit: USD, format: ofx() }),
-    };
-    let root = project.root.clone();
-    let env =
-        Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
-    let sync_once = |project: &Project, pattern: &'static str| {
-        let mut world = book(&project.files, known(true));
-        let read = |path: &str| project.read(path);
-        let outcome = sync(&mut world, &[source(pattern)], &env, &read);
-        let labels: Vec<_> =
-            outcome.sources.iter().map(|(label, result)| (label.clone(), result.as_ref().ok().copied())).collect();
-        (labels, outcome.changes.into_iter().map(|change| (change.path, change.after)).collect::<Vec<_>>())
-    };
-
-    let (labels, written) = sync_once(&project, "imports/chase/*.qfx");
-    assert_eq!(labels, [("imports/chase/2026-01.qfx".to_string(), Some(3))]);
-    let expected = JANUARY.replace(
-        "06 visa -> trader-joes 84.20 USD\n",
-        "05 checking -> trader-joes 84.20 USD\n\
-06 visa -> trader-joes 84.20 USD\n\
-06 checking -> ? 350 USD \"BAY PLUMBING & HEATING\" ^1041\n\
-08 halcyon -> checking 3_800 USD\n",
+    let outcome = plan_project(&project, &axiom, &["checking"]);
+    assert!(outcome.problems.is_empty(), "{:?}", outcome.problems);
+    assert_eq!(outcome.sources.len(), 2);
+    assert_eq!(outcome.sources[0].path, "imports/chase/2026-01-a.qfx");
+    assert_eq!(outcome.sources[1].path, "imports/chase/2026-01-b.qfx");
+    assert!(
+        outcome
+            .sources
+            .iter()
+            .all(|source| source.failure.is_none()),
+        "{:?}",
+        outcome
+            .sources
+            .iter()
+            .map(|source| (&source.path, &source.failure))
+            .collect::<Vec<_>>()
     );
-    assert_eq!(written, [("journal/2026/01.ax".to_string(), expected.clone())]);
-
-    project.write("journal/2026/01.ax", &expected);
-    assert!(sync_once(&project, "imports/chase/*.qfx").1.is_empty(), "reading a file again writes nothing");
-    assert_eq!(
-        sync_once(&project, "imports/nobody/*.qfx").0,
-        [("checking".to_string(), Some(0))],
-        "an empty drop folder is nothing to do"
+    let journal = &outcome.changes[0].after;
+    assert!(
+        journal.contains("05 checking -> trader-joes 84.20 USD"),
+        "{journal}"
     );
-    let (labels, _) = sync_once(&project, "../secrets/*.qfx");
-    assert_eq!(labels, [("checking".to_string(), None)], "a pattern cannot leave the project");
+    assert!(
+        journal.contains("08 halcyon -> checking 3_800 USD"),
+        "{journal}"
+    );
+
+    let empty_axiom = axiom.replace("imports/chase/*.qfx", "imports/empty/*.qfx");
+    let empty = Project::new(
+        "empty-folder",
+        &[("axiom.ax", &empty_axiom), ("journal/2026/01.ax", JANUARY)],
+    );
+    let outcome = plan_project(&empty, &empty_axiom, &["checking"]);
+    assert_eq!(outcome.sources.len(), 1);
+    assert_eq!(outcome.sources[0].added, 0);
+    assert!(outcome.changes.is_empty());
+
+    let escape_axiom = axiom.replace("imports/chase/*.qfx", "../secrets/*.qfx");
+    let escape = Project::new(
+        "escape-folder",
+        &[("axiom.ax", &escape_axiom), ("journal/2026/01.ax", JANUARY)],
+    );
+    let outcome = plan_project(&escape, &escape_axiom, &["checking"]);
+    assert!(matches!(
+        outcome.sources[0].failure,
+        Some(axiom_sync::SourceFailure::Read(_))
+    ));
+    assert!(outcome.changes.is_empty());
 }
 
+const QFX_A: &str = "OFXHEADER:100\nDATA:OFXSGML\n\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>\n\
+<STMTTRN><TRNTYPE>DEBIT\n<DTPOSTED>20260105\n<TRNAMT>-84.20\n<FITID>1\n<NAME>TRADER JOE'S #634\n<MEMO>SAN FRANCISCO CA\n</STMTTRN>\n\
+</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>\n";
+const QFX_B: &str = "OFXHEADER:100\nDATA:OFXSGML\n\n<OFX><BANKMSGSRSV1><STMTTRNRS><STMTRS><BANKTRANLIST>\n\
+<STMTTRN><TRNTYPE>CREDIT\n<DTPOSTED>20260108\n<TRNAMT>3800.00\n<FITID>2\n<NAME>HALCYON PAYMENT\n</STMTTRN>\n\
+</BANKTRANLIST></STMTRS></STMTTRNRS></BANKMSGSRSV1></OFX>\n";
+
 #[test]
-fn invoices_and_prices_are_merged_by_their_sinks() {
+fn invoice_and_price_sources_merge_by_their_native_sinks_and_are_idempotent() {
+    let axiom = format!(
+        "{}commodity VTI : fund\n{}",
+        &AXIOM[..AXIOM.find("sync checking").unwrap()],
+        "sync invoices\n  run cat invoices.txt\nsync prices\n  run cat quotes.txt\n  into prices/{year}.ax\n"
+    );
+    let invoices = "2026-01-27 halcyon -> checking 900 USD ^invoice-2026-02\n";
+    let quotes = "2026-01-05 VTI = 280.14 USD\n2026-01-06 VTI = 281.02 USD\n";
     let mut project = Project::new(
         "sinks",
         &[
-            ("axiom.ax", ""),
+            ("axiom.ax", &axiom),
             ("journal/2026/01.ax", JANUARY),
-            ("prices/2026.ax", "01-05 VTI 280.14 USD\n"),
-            (
-                "invoicing.txt",
-                "2026-01-27 halcyon owes studio 900 USD due 30d ^inv-2026-02\n2026-01-02 halcyon owes studio 3_800 USD due 30d ^inv-2026-01\n",
-            ),
-            ("quotes.txt", "2026-01-05 VTI 280.14 USD\n2026-01-06 VTI 281.02 USD\n"),
+            ("prices/2026.ax", "2026-01-02 VTI = 279.50 USD\n"),
+            ("invoices.txt", invoices),
+            ("quotes.txt", quotes),
         ],
     );
-    let sources = [
-        Source {
-            name: "invoices",
-            input: Input::Run("cat invoicing.txt"),
-            since: Day(0),
-            kind: Kind::Sink(Sink::Journal),
-        },
-        Source {
-            name: "prices",
-            input: Input::Run("cat quotes.txt"),
-            since: Day(0),
-            kind: Kind::Sink(Sink::File("prices/{year}.ax")),
-        },
-    ];
-    let files = project.files.clone();
-    let mut world = book(&files, known(true));
-    let root = project.root.clone();
-    let env =
-        Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
-    let read = |path: &str| project.read(path);
-    let outcome = sync(&mut world, &sources, &env, &read);
-    let written: BTreeMap<_, _> =
-        outcome.changes.iter().map(|change| (change.path.as_str(), change.after.as_str())).collect();
-    assert_eq!(written["prices/2026.ax"], "01-05 VTI 280.14 USD\n01-06 VTI 281.02 USD\n");
+    let outcome = plan_project(&project, &axiom, &["invoices", "prices"]);
+    assert!(outcome.problems.is_empty(), "{:?}", outcome.problems);
+    let changes: BTreeMap<_, _> = outcome
+        .changes
+        .iter()
+        .map(|change| (change.path.as_str(), change.after.as_str()))
+        .collect();
+    assert!(
+        changes["journal/2026/01.ax"].contains("27 halcyon -> checking 900 USD ^invoice-2026-02")
+    );
     assert_eq!(
-        written["journal/2026/01.ax"],
-        JANUARY.to_string() + "27 halcyon owes studio 900 USD due 30d ^inv-2026-02\n"
+        changes["prices/2026.ax"],
+        "2026-01-02 VTI = 279.50 USD\n01-05 VTI = 280.14 USD\n01-06 VTI = 281.02 USD\n"
     );
     for change in &outcome.changes {
         project.write(&change.path, &change.after);
     }
-    let files = project.files.clone();
-    let mut world = book(&files, known(true));
-    let read = |path: &str| project.read(path);
-    assert!(sync(&mut world, &sources, &env, &read).changes.is_empty(), "the second sync writes nothing");
+    assert!(
+        plan_project(&project, &axiom, &["invoices", "prices"])
+            .changes
+            .is_empty()
+    );
 }
 
-/// An ISO 20022 statement: a payout through PayPal to an ultimate party, with its own reference, and a charge still pending.
+#[test]
+fn a_declared_camt053_feed_keeps_ultimate_party_reference_and_pending_charge() {
+    let axiom = format!(
+        "{}entity etsy-seller : merchant\nentity paypal : org\nentity mint : phone-company\nsync checking\n  read \"imports/bank/*.xml\"\n  format camt053\n",
+        &AXIOM[..AXIOM.find("sync checking").unwrap()]
+    );
+    let project = Project::new(
+        "camt",
+        &[
+            ("axiom.ax", &axiom),
+            ("journal/2026/01.ax", JANUARY),
+            ("imports/bank/statement.xml", CAMT),
+        ],
+    );
+    let outcome = plan_project(&project, &axiom, &["checking"]);
+    assert!(outcome.problems.is_empty(), "{:?}", outcome.problems);
+    let journal = &outcome.changes[0].after;
+    assert!(
+        journal.contains("05 etsy-seller -> checking 1_250 USD ^po-77 via paypal"),
+        "{journal}"
+    );
+    assert!(
+        journal.contains("06 checking -> mint (47.30 USD) ^pending-20260106-1"),
+        "{journal}"
+    );
+
+    let mut project = project;
+    project.write(&outcome.changes[0].path, &outcome.changes[0].after);
+    assert!(
+        plan_project(&project, &axiom, &["checking"])
+            .changes
+            .is_empty()
+    );
+}
+
 const CAMT: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
 <Document xmlns=\"urn:iso:std:iso:20022:tech:xsd:camt.053.001.02\"><BkToCstmrStmt><Stmt><Id>S1</Id>\n\
 <Ntry><Amt Ccy=\"USD\">1250.00</Amt><CdtDbtInd>CRDT</CdtDbtInd><Sts>BOOK</Sts><BookgDt><Dt>2026-01-05</Dt></BookgDt>\n\
@@ -496,81 +503,53 @@ const CAMT: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
 </Stmt></BkToCstmrStmt></Document>";
 
 #[test]
-fn an_iso_20022_statement_is_read_by_its_declared_format() {
-    let mut project =
-        Project::new("camt", &[("axiom.ax", ""), ("journal/2026/01.ax", JANUARY), ("imports/bank/2026-01.xml", CAMT)]);
-    let source = Source {
-        name: "checking",
-        input: Input::Read("imports/bank/*.xml"),
-        since: Day(0),
-        kind: Kind::Feed(Feed { account: "checking", unit: USD, format: camt053() }),
-    };
-    let root = project.root.clone();
-    let env =
-        Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
-    let sync_once = |project: &Project| {
-        let party = |name: &'static str, pattern: &'static str| Known { name, account: false, patterns: vec![pattern] };
-        let mut known = known(true);
-        known.extend([
-            party("paypal", "\"PAYPAL\""),
-            party("etsy-seller", "\"ETSY\""),
-            party("mint", "\"MINT MOBILE\""),
-        ]);
-        let mut world = book(&project.files, known);
-        let read = |path: &str| project.read(path);
-        let outcome = sync(&mut world, std::slice::from_ref(&source), &env, &read);
-        outcome.changes.into_iter().map(|change| (change.path, change.after)).collect::<Vec<_>>()
-    };
-    let written = sync_once(&project);
-    let expected = JANUARY.replace(
-        "06 visa -> trader-joes 84.20 USD\n",
-        "05 etsy-seller -> checking 1_250 USD ^po-77 via paypal\n\
-06 visa -> trader-joes 84.20 USD\n\
-06 checking -> mint (47.30 USD) ^pending-20260106-1\n",
+fn document_sinks_are_planned_before_feeds_even_when_declared_after_them() {
+    let base = &AXIOM[..AXIOM.find("sync checking").unwrap()];
+    let axiom = format!(
+        "{base}entity stripe : merchant\n  known-as \"STRIPE PAYOUT\"\npurpose fees : spending\nsync checking\n  run cat feeds/small.csv\n  format csv\n    date \"Posting Date\" \"MM/DD/YYYY\"\n    amount \"Amount\"\n    memo \"Description\"\nsync payouts\n  run cat payouts.txt\n"
     );
-    assert_eq!(written, [("journal/2026/01.ax".to_string(), expected.clone())]);
-    project.write("journal/2026/01.ax", &expected);
-    assert!(sync_once(&project).is_empty(), "the second sync writes nothing");
-}
-
-#[test]
-fn a_document_a_source_prints_is_written_once_whichever_source_comes_first() {
-    let project = Project::new(
-        "documents",
+    let mut project = Project::new(
+        "document-order",
         &[
-            ("axiom.ax", ""),
+            ("axiom.ax", &axiom),
             ("journal/2026/01.ax", JANUARY),
             (
                 "feeds/small.csv",
                 "Posting Date,Description,Amount,Balance\n01/06/2026,STRIPE PAYOUT 8841,970.00,\n01/07/2026,COFFEE,-4.00,\n",
             ),
-            ("payouts.txt", "2026-01-05 stripe -> checking 1_000 USD ^po-1\n  - 30 USD #fees via stripe\n"),
+            (
+                "payouts.txt",
+                "2026-01-05 stripe -> checking 1_000 USD ^po-1\n  - 30 USD #fees via stripe\n",
+            ),
         ],
     );
-    let bank = Source {
-        name: "checking",
-        input: Input::Run("cat feeds/small.csv"),
-        since: Day(0),
-        kind: Kind::Feed(Feed { account: "checking", unit: USD, format: checking_csv() }),
-    };
-    let payouts = Source {
-        name: "payouts",
-        input: Input::Run("cat payouts.txt"),
-        since: Day(0),
-        kind: Kind::Sink(Sink::Journal),
-    };
-    let root = project.root.clone();
-    let env =
-        Env { root: &root, today: Day::from_ymd(2026, 1, 31).unwrap(), units: &[], timeout: Duration::from_secs(60) };
-    let mut world = book(&project.files, known(true));
-    let read = |path: &str| project.read(path);
-    // The bank is declared first, but the document is read before it.
-    let outcome = sync(&mut world, &[bank, payouts], &env, &read);
-    let counts: Vec<_> =
-        outcome.sources.iter().map(|(name, result)| (name.as_str(), result.as_ref().ok().copied())).collect();
-    assert_eq!(counts, [("checking", Some(1)), ("payouts", Some(1))], "reported in the order declared");
+    let outcome = plan_project(&project, &axiom, &[]);
+    assert!(outcome.problems.is_empty(), "{:?}", outcome.problems);
+    let counts: Vec<_> = outcome
+        .sources
+        .iter()
+        .map(|source| {
+            (
+                source.source.as_str(),
+                source.added,
+                source.failure.is_none(),
+            )
+        })
+        .collect();
+    assert_eq!(counts, [("checking", 1, true), ("payouts", 1, true)]);
     let journal = &outcome.changes[0].after;
-    assert!(journal.contains("05 stripe -> checking 1_000 USD ^po-1\n  - 30 USD #fees via stripe\n"), "{journal}");
-    assert!(journal.contains("07 checking -> ? 4 USD \"COFFEE\"\n"), "{journal}");
-    assert!(!journal.contains("STRIPE PAYOUT"), "the bank's line for the same money is the document's: {journal}");
+    assert!(
+        journal.contains("stripe -> checking 1_000 USD ^po-1\n  - 30 USD #fees via stripe"),
+        "{journal}"
+    );
+    assert!(
+        journal.contains("checking -> ? 4 USD \"COFFEE\""),
+        "{journal}"
+    );
+    assert!(
+        !journal.contains("STRIPE PAYOUT"),
+        "the document's payout is reconciled first"
+    );
+    project.write(&outcome.changes[0].path, journal);
+    assert!(plan_project(&project, &axiom, &[]).changes.is_empty());
 }
