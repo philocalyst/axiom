@@ -359,7 +359,11 @@ fn format_item(path: &str, date: String, body: &str) -> Result<String, Vec<Diagn
 pub(crate) fn is_project_path(path: &str) -> bool {
     use std::path::Component;
 
-    if path.is_empty() || path.starts_with('/') || path.contains('\\') {
+    let drive_prefix = path
+        .as_bytes()
+        .get(..2)
+        .is_some_and(|[letter, colon]| letter.is_ascii_alphabetic() && *colon == b':');
+    if path.is_empty() || path.starts_with('/') || path.contains('\\') || drive_prefix {
         return false;
     }
     Path::new(path)
@@ -566,6 +570,16 @@ mod tests {
 
     fn day(text: &str) -> Day {
         Day::parse(text.as_bytes()).unwrap()
+    }
+
+    #[test]
+    fn path_validation_rejects_parent_absolute_and_windows_drive_paths_on_every_host() {
+        for path in ["", "../outside.ax", "/outside.ax", "C:/outside.ax", "d:outside.ax", "\\\\server\\share.ax"] {
+            assert!(!is_project_path(path), "{path:?}");
+        }
+        for path in ["journal.ax", "imports/checking.csv", "journal/2026/03.ax"] {
+            assert!(is_project_path(path), "{path:?}");
+        }
     }
 
     /// `text` with each `(day, body)` put in, as sync would write it into `path`.

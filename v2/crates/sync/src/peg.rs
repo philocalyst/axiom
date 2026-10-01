@@ -69,10 +69,32 @@ impl Run {
         at: usize,
         patterns: &Patterns<'_, '_>,
     ) -> Option<Found> {
+        std::str::from_utf8(hay).ok()?;
+        self.matches_at_valid(id, hay, at, patterns)
+    }
+
+    /// Execute against UTF-8 bytes already validated by the caller. This is
+    /// used while scanning every scalar boundary of a memo, so validation is
+    /// done once rather than rescanning the remaining suffix at every step.
+    pub(crate) fn matches_at_valid(
+        &mut self,
+        id: Id<Pattern>,
+        hay: &[u8],
+        at: usize,
+        patterns: &Patterns<'_, '_>,
+    ) -> Option<Found> {
+        if !boundary(hay, at) {
+            return None;
+        }
         self.literal = 0;
         self.captures.clear();
         let pattern = patterns.pattern(id)?;
         let end = body(&pattern.program, hay, at, self, patterns, 0)?;
+        if !boundary(hay, end) {
+            self.literal = 0;
+            self.captures.clear();
+            return None;
+        }
         Some(Found {
             start: at,
             end,
@@ -100,7 +122,7 @@ impl Run {
             if !prefix.is_empty() {
                 at += memmem::find(hay.get(at..)?, prefix)?;
             }
-            if let Some(found) = self.matches_at(id, hay, at, patterns) {
+            if let Some(found) = self.matches_at_valid(id, hay, at, patterns) {
                 return Some(found);
             }
             let character = text.get(at..)?.chars().next()?;
@@ -110,6 +132,13 @@ impl Run {
             }
         }
     }
+}
+
+fn boundary(hay: &[u8], at: usize) -> bool {
+    at <= hay.len()
+        && (at == 0
+            || at == hay.len()
+            || hay.get(at).is_some_and(|byte| byte & 0b1100_0000 != 0b1000_0000))
 }
 
 /// The fixed-start literals for a pattern, or `None` if it may start anywhere.
@@ -328,7 +357,7 @@ fn step(class: CharClass, hay: &[u8], at: usize) -> Option<usize> {
     match class {
         CharClass::Digit => one(u8::is_ascii_digit),
         CharClass::Letter | CharClass::Alnum => {
-            let character = std::str::from_utf8(hay.get(at..)?).ok()?.chars().next()?;
+            let character = scalar_at(hay, at)?;
             let matches = match class {
                 CharClass::Letter => character.is_alphabetic(),
                 CharClass::Alnum => character.is_alphanumeric(),
@@ -338,13 +367,28 @@ fn step(class: CharClass, hay: &[u8], at: usize) -> Option<usize> {
         }
         CharClass::Space => one(u8::is_ascii_whitespace),
         CharClass::Any => {
-            let character = std::str::from_utf8(hay.get(at..)?).ok()?.chars().next()?;
+            let character = scalar_at(hay, at)?;
             Some(at + character.len_utf8())
         }
         CharClass::Rest => Some(hay.len()),
         CharClass::Start => (at == 0).then_some(at),
         CharClass::End => (at == hay.len()).then_some(at),
     }
+}
+
+/// Decode exactly one scalar, validating at most four bytes. The matcher can
+/// apply `any*` to a long Unicode memo without validating every remaining
+/// suffix repeatedly.
+fn scalar_at(hay: &[u8], at: usize) -> Option<char> {
+    let width = match *hay.get(at)? {
+        0x00..=0x7f => 1,
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => return None,
+    };
+    let scalar = hay.get(at..at.checked_add(width)?)?;
+    std::str::from_utf8(scalar).ok()?.chars().next()
 }
 
 #[cfg(test)]

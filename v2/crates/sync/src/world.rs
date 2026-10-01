@@ -597,7 +597,7 @@ impl<'b, 's> World<'b, 's> {
             money(out.qty.abs(), unit_out),
             money(into.qty.abs(), unit_in)
         );
-        tail(self.book, &mut body, other, Some(out));
+        tail(self.book, &mut body, other, Some(out), out.facts());
         let moved = vec![
             (account, Some(unit_out.name), out.qty),
             (account, Some(unit_in.name), into.qty),
@@ -646,6 +646,7 @@ impl<'b, 's> World<'b, 's> {
             &mut body,
             other,
             Some(record).filter(|_| other.who.is_none()),
+            record.facts(),
         );
         if let Some(code) = pending {
             let _ = write!(body, " ^{code}");
@@ -723,7 +724,13 @@ enum Exchange {
 /// The tail of a written line, in the order of the language: `#purpose of
 /// THING`, `"description"`, `^codes`. A description is what the memo says, when
 /// nobody is known to say it for.
-fn tail(book: &Book<'_>, body: &mut String, other: &Other, describe: Option<&Record>) {
+fn tail(
+    book: &Book<'_>,
+    body: &mut String,
+    other: &Other,
+    describe: Option<&Record>,
+    facts: &Facts<'_>,
+) {
     if let Some((purpose, object)) = &other.purpose {
         let _ = write!(body, " #{}", book.name(*purpose));
         if let Some(object) = object {
@@ -741,8 +748,9 @@ fn tail(book: &Book<'_>, body: &mut String, other: &Other, describe: Option<&Rec
     for &code in &other.codes {
         let _ = write!(body, " ^{code}");
     }
-    if let Some(code) = describe
-        .and_then(|record| record.facts().code.as_deref())
+    if let Some(code) = facts
+        .code
+        .as_deref()
         .filter(|code| !other.codes.contains(code))
     {
         let _ = write!(body, " ^{code}");
@@ -827,6 +835,43 @@ fn closing_of(records: &[Record]) -> Option<(Day, Qty)> {
     closings.sort();
     closings.dedup();
     (closings.len() == 1).then(|| (day, closings[0]))
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+    use axiom_core::{FileId, Folder};
+    use axiom_model::Source;
+    use std::borrow::Cow;
+
+    #[test]
+    fn a_structured_code_is_written_even_when_a_party_suppresses_the_memo() {
+        let std = include_str!("../../../systems/src/std.ax");
+        let sources = [("std.ax", std, true), ("axiom.ax", "base USD\n", false)].map(
+            |(path, text, embedded)| {
+                let (file, problems) = axiom_syntax::parse(FileId(0), text, Folder::default());
+                assert!(problems.is_empty(), "{path}: {problems:?}");
+                Source { path, file, embedded }
+            },
+        );
+        let (book, problems) = axiom_model::build(&sources);
+        assert!(problems.is_empty(), "{problems:?}");
+        let other = Other {
+            who: Some(Who {
+                id: crate::recognize::KnownId::Entity(axiom_core::Id::new(0)),
+                name: "merchant",
+                account: false,
+            }),
+            ..Other::default()
+        };
+        let facts = Facts {
+            code: Some(Cow::Borrowed("statement-37")),
+            ..Facts::default()
+        };
+        let mut body = String::new();
+        tail(&book, &mut body, &other, None, &facts);
+        assert_eq!(body, " ^statement-37");
+    }
 }
 
 #[cfg(test)]

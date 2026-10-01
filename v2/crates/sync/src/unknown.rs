@@ -129,8 +129,16 @@ mod tests {
                     embedded,
                 }
             });
-            let (_, problems) = axiom_model::build(&sources);
+            let (book, problems) = axiom_model::build(&sources);
             assert!(problems.is_empty(), "{}: {problems:?}", group.known_as());
+            let recognizer = crate::recognize::Recognizer::new(&book);
+            let reading = recognizer.read(group.example, &mut crate::recognize::Scratch::default());
+            assert!(
+                reading.who.ok().and_then(|found| found.who).is_some(),
+                "{} did not recognize {}",
+                group.known_as(),
+                group.example
+            );
         }
     }
 

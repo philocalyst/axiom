@@ -27,6 +27,69 @@ pub(crate) struct Cell<'t> {
 }
 
 #[derive(Default)]
+struct MemoJoin<'t> {
+    first: Option<Cow<'t, str>>,
+    joined: Option<String>,
+    span: Option<Span>,
+}
+
+impl<'t> MemoJoin<'t> {
+    fn push(&mut self, cell: &Cell<'t>) {
+        if cell.text.is_empty() {
+            return;
+        }
+        if let Some(first) = &self.first {
+            let joined = self.joined.get_or_insert_with(|| first.to_string());
+            joined.push(' ');
+            joined.push_str(&cell.text);
+        } else {
+            self.first = Some(cell.text.clone());
+            self.span = Some(cell.span);
+        }
+    }
+
+    fn finish(self) -> Option<(Cow<'t, str>, Span)> {
+        let span = self.span.unwrap_or(ABSENT);
+        match (self.first, self.joined) {
+            (None, _) => None,
+            (Some(first), None) => Some((first, span)),
+            (Some(_), Some(joined)) => Some((Cow::Owned(joined), span)),
+        }
+    }
+}
+
+#[derive(Default)]
+struct MemoJoin<'t> {
+    first: Option<Cow<'t, str>>,
+    joined: Option<String>,
+    span: Option<Span>,
+}
+
+impl<'t> MemoJoin<'t> {
+    fn push(&mut self, cell: &Cell<'t>) {
+        if cell.text.is_empty() {
+            return;
+        }
+        if let Some(first) = &self.first {
+            let joined = self.joined.get_or_insert_with(|| first.to_string());
+            joined.push(' ');
+            joined.push_str(&cell.text);
+        } else {
+            self.first = Some(cell.text.clone());
+            self.span = Some(cell.span);
+        }
+    }
+
+    fn finish(self) -> Option<(Cow<'t, str>, Span)> {
+        match (self.first, self.joined) {
+            (None, _) => None,
+            (Some(first), None) => Some((first, self.span.unwrap_or(ABSENT))),
+            (Some(_), Some(joined)) => Some((Cow::Owned(joined), self.span.unwrap_or(ABSENT))),
+        }
+    }
+}
+
+#[derive(Default)]
 struct Harvest<'t> {
     records: Vec<Record<'t>>,
     problems: Vec<Diagnostic>,
@@ -407,11 +470,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
             },
         };
         facts.currency = currency.map(|code| {
-            if code.eq_ignore_ascii_case(unit.name) {
-                Cow::Borrowed(unit.name)
-            } else {
-                Cow::Owned(code.to_ascii_uppercase())
-            }
+            uppercase(code)
         });
 
         let Some(date) = bound(Field::Date) else {
@@ -536,25 +595,14 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
         let (memo, memo_span) = match bound(Field::Memo) {
             None => (Cow::Borrowed(""), row.whole),
             Some(memo) => {
-                let mut first = None;
-                let mut joined: Option<String> = None;
+                let mut joined = MemoJoin::default();
                 for at in 0..memo.slots.len() {
                     let cell = row.cell(memo, at)?;
-                    if !cell.text.is_empty() {
-                        if let Some(first) = first {
-                            let text = joined.get_or_insert_with(|| first.text.to_string());
-                            text.push(' ');
-                            text.push_str(&cell.text);
-                        } else {
-                            first = Some(cell);
-                        }
-                    }
+                    joined.push(cell);
                 }
-                match (first, joined) {
-                    (None, _) => (Cow::Borrowed(""), row.cell(memo, 0)?.span),
-                    (Some(first), None) => (first.text.clone(), first.span),
-                    (Some(first), Some(joined)) => (Cow::Owned(joined), first.span),
-                }
+                joined
+                    .finish()
+                    .unwrap_or((Cow::Borrowed(""), row.cell(memo, 0)?.span))
             }
         };
         let at = if memo_span == ABSENT {
@@ -756,6 +804,7 @@ fn take_row_memo<'t>(
     slots: &[usize],
     memos: &mut Vec<Cow<'t, str>>,
 ) -> Result<(), Vec<Diagnostic>> {
+    let mut joined = MemoJoin::default();
     for &slot in slots {
         let Some(cell) = row.cells.get(slot) else {
             return Err(vec![row.error(
@@ -765,10 +814,10 @@ fn take_row_memo<'t>(
                 "the row ends here",
             )]);
         };
-        if !cell.text.is_empty() {
-            memos.push(cell.text.clone());
-            return Ok(());
-        }
+        joined.push(cell);
+    }
+    if let Some((memo, _)) = joined.finish() {
+        memos.push(memo);
     }
     Ok(())
 }
@@ -812,6 +861,7 @@ fn read_tagged_memos<'t, 's>(
     let mut problems = Vec::new();
     tagged::scan(text, record_name, &paths, |found| match found {
         Ok(found) => {
+            let mut joined = MemoJoin::default();
             for &slot in &slots {
                 let Some(cell) = found.cells.get(slot) else {
                     problems.push(Diagnostic::error(
@@ -820,10 +870,10 @@ fn read_tagged_memos<'t, 's>(
                     ));
                     return false;
                 };
-                if !cell.text.is_empty() {
-                    memos.push(cell.text.clone());
-                    break;
-                }
+                joined.push(cell);
+            }
+            if let Some((memo, _)) = joined.finish() {
+                memos.push(memo);
             }
             true
         }
@@ -864,28 +914,53 @@ pub fn category(format: &Format, book: &Book<'_>, text: &str) -> Option<Id<Purpo
 /// A structured code is canonical as written, except that Axiom codes are case
 /// insensitive and are stored lowercase. Do not invent prefixes from rules.
 fn code_of<'t>(text: Cow<'t, str>) -> Option<Cow<'t, str>> {
-    let (code, borrowed) = match text {
+    let valid = |code: &str| {
+        !code.is_empty()
+            && code
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_:./-".contains(c))
+    };
+    match text {
         Cow::Borrowed(text) => {
             let trimmed = text.trim();
-            (trimmed.strip_prefix('^').unwrap_or(trimmed), true)
+            let code = trimmed.strip_prefix('^').unwrap_or(trimmed);
+            if !valid(code) {
+                None
+            } else if code.bytes().any(|byte| byte.is_ascii_uppercase()) {
+                Some(Cow::Owned(code.to_ascii_lowercase()))
+            } else {
+                Some(Cow::Borrowed(code))
+            }
         }
-        Cow::Owned(text) => {
-            let trimmed = text.trim();
-            (trimmed.strip_prefix('^').unwrap_or(trimmed), false)
+        Cow::Owned(mut code) => {
+            let leading = code.len() - code.trim_start().len();
+            code.drain(..leading);
+            let trailing = code.trim_end().len();
+            code.truncate(trailing);
+            if code.starts_with('^') {
+                code.remove(0);
+            }
+            if !valid(&code) {
+                None
+            } else {
+                code.make_ascii_lowercase();
+                Some(Cow::Owned(code))
+            }
         }
-    };
-    if code.is_empty()
-        || !code
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_:./-".contains(c))
-    {
-        return None;
     }
-    Some(if borrowed && code.bytes().all(|byte| !byte.is_ascii_uppercase()) {
-        Cow::Borrowed(code)
-    } else {
-        Cow::Owned(code.to_ascii_lowercase())
-    })
+}
+
+fn uppercase<'t>(text: Cow<'t, str>) -> Cow<'t, str> {
+    match text {
+        Cow::Borrowed(text) if text.bytes().any(|byte| byte.is_ascii_lowercase()) => {
+            Cow::Owned(text.to_ascii_uppercase())
+        }
+        Cow::Borrowed(text) => Cow::Borrowed(text),
+        Cow::Owned(mut text) => {
+            text.make_ascii_uppercase();
+            Cow::Owned(text)
+        }
+    }
 }
 
 fn whole(cells: &[Cell]) -> Span {
@@ -908,6 +983,12 @@ mod text_tests {
         let lower = code_of(Cow::Borrowed("check-1041")).unwrap();
         assert!(matches!(lower, Cow::Borrowed("check-1041")));
         assert_eq!(code_of(Cow::Borrowed("^Check-1041")).unwrap(), "check-1041");
+        assert_eq!(
+            code_of(Cow::Owned("  ^Check-1041  ".to_string())).unwrap(),
+            "check-1041"
+        );
         assert!(code_of(Cow::Borrowed("  ")).is_none());
+        assert!(matches!(uppercase(Cow::Borrowed("EUR")), Cow::Borrowed("EUR")));
+        assert_eq!(uppercase(Cow::Borrowed("eur")), "EUR");
     }
 }

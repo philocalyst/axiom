@@ -329,7 +329,9 @@ impl<'b, 's> Recognizer<'b, 's> {
             let mut try_entry = |entry_index: usize| {
                 let entry = &self.entries[entry_index];
                 let found = match (entry.pattern, entry.own.as_deref()) {
-                    (Some(pattern), _) => run.matches_at(pattern, hay, at, &self.patterns),
+                    (Some(pattern), _) => {
+                        run.matches_at_valid(pattern, hay, at, &self.patterns)
+                    }
                     (None, Some(literal)) => at
                         .checked_add(literal.len())
                         .and_then(|end| hay.get(at..end).map(|candidate| (end, candidate)))

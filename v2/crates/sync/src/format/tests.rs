@@ -90,6 +90,7 @@ fn typed_tagged_paths_read_camt_style_records() {
     let amount = Column::Path(book.intern_text("Amt"));
     let sign = Column::Path(book.intern_text("CdtDbtInd"));
     let memo = Column::Path(book.intern_text("AddtlNtryInf"));
+    let remittance = Column::Path(book.intern_text("RmtInf/Ustrd"));
     let crdt = book.intern_text("CRDT");
     let mut amount_spec = spec(Field::Amount, [amount]);
     amount_spec.rule = Rule::Sign {
@@ -102,28 +103,41 @@ fn typed_tagged_paths_read_camt_style_records() {
         specs: vec![
             spec(Field::Date, [date]),
             amount_spec,
-            spec(Field::Memo, [memo]),
+            spec(Field::Memo, [memo, remittance]),
         ]
         .into_boxed_slice(),
         categories: Box::default(),
         loc: Loc::default(),
     };
-    let source = "<Document><Ntry><BookgDt><Dt>2026-03-04</Dt></BookgDt><Amt>12.50</Amt><CdtDbtInd>CRDT</CdtDbtInd><AddtlNtryInf>Refund</AddtlNtryInf></Ntry></Document>";
+    let source = "<Document><Ntry><BookgDt><Dt>2026-03-04</Dt></BookgDt><Amt>12.50</Amt><CdtDbtInd>CRDT</CdtDbtInd><AddtlNtryInf>Refund</AddtlNtryInf><RmtInf><Ustrd>Card credit</Ustrd></RmtInf></Ntry></Document>";
     let (records, problems) = read(&book, &format, source, FileId(0), USD, &[USD]);
     assert!(problems.is_empty(), "{problems:?}");
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].qty, Qty(1250));
-    assert_eq!(records[0].memo, "Refund");
+    assert_eq!(records[0].memo, "Refund Card credit");
+    let format_id = book.formats.push(format.clone());
+    let local_source = Source {
+        name: book.names.intern("statement"),
+        fetch: Fetch::Read(book.intern_text("imports/camt.xml")),
+        format: Some(format_id),
+        sink: Sink::Journal,
+        system: None,
+        doc: None,
+        loc: Loc::default(),
+    };
+    let memos = read_memos(&book, &local_source, source, FileId(0)).unwrap();
+    assert_eq!(memos, ["Refund Card credit"]);
 }
 
 #[test]
 fn check_can_read_memos_from_local_sources_without_reconciling_rows() {
     let mut book = book();
     let memo = Column::Header(book.intern_text("Description"));
+    let extra = Column::Header(book.intern_text("Extra"));
     let format = Format {
         name: book.names.intern("bank"),
         shape: Shape::Rows,
-        specs: vec![spec(Field::Memo, [memo])].into_boxed_slice(),
+        specs: vec![spec(Field::Memo, [memo, extra])].into_boxed_slice(),
         categories: Box::default(),
         loc: Loc::default(),
     };
@@ -140,11 +154,11 @@ fn check_can_read_memos_from_local_sources_without_reconciling_rows() {
     let memos = read_memos(
         &book,
         &source,
-        "Description,Other\nTRADER JOE'S #10,ignored\nAmazon 2K4LM,ignored\n",
+        "Description,Extra\nTRADER JOE'S #10,Card\nAmazon 2K4LM,Monthly\n",
         FileId(7),
     )
     .unwrap();
-    assert_eq!(memos, ["TRADER JOE'S #10", "Amazon 2K4LM"]);
+    assert_eq!(memos, ["TRADER JOE'S #10 Card", "Amazon 2K4LM Monthly"]);
 }
 
 #[test]

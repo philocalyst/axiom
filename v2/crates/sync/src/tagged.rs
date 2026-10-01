@@ -273,7 +273,7 @@ pub(crate) fn scan<'t>(
                 continue;
             };
             for (slot, path) in wanted.iter().enumerate() {
-                if ends_with(stack, path) && cells[slot].span == ABSENT {
+                if ends_with(&stack, path) && cells[slot].span == ABSENT {
                     cells[slot] = Cell {
                         text: Cow::Borrowed(tag.value),
                         span: tag.span,
@@ -327,7 +327,7 @@ pub(crate) fn scan<'t>(
             leaf = Some(tag.name);
             stack.push(tag.name);
             for (slot, path) in wanted.iter().enumerate() {
-                if ends_with(stack, path) && cells[slot].span == ABSENT {
+                if ends_with(&stack, path) && cells[slot].span == ABSENT {
                     let text = match decode(tag.value) {
                         Ok(text) => text,
                         Err(what) => {
