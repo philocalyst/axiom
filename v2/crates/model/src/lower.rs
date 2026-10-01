@@ -639,7 +639,7 @@ mod tests {
     use axiom_core::FileId;
     use axiom_syntax::{Folder, parse};
 
-    use crate::{Source, layout::Layout, scope::Home};
+    use crate::{Source, scope::Home};
 
     #[test]
     fn survey_keeps_only_tab_relevant_syntax_and_contract_endpoints() {
@@ -668,7 +668,6 @@ opening 2026-01-01
         let site = Site {
             source: &source,
             home: Home::Project,
-            layout: Layout::of(path),
         };
         let survey = survey(&[site]);
 

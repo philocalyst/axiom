@@ -17,13 +17,10 @@ pub mod journal;
 pub mod law;
 pub mod sync;
 
-mod collect;
 mod declare;
 mod errors;
-mod flows;
 mod kinds;
 mod laws;
-mod layout;
 mod lower;
 mod names;
 mod params;
@@ -35,6 +32,7 @@ mod resolve;
 mod rules;
 mod scope;
 mod sources;
+mod sync_lower;
 #[cfg(test)]
 mod tests;
 mod values;
@@ -81,6 +79,7 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     world.book.lookup.taken = world.taken_names();
     params::declare(&mut world, &sites, &mut diags);
     props::system_rates(&mut world, &sites, &mut diags);
+    sync_lower::declare(&mut world, &sites, &mut diags);
     laws::declare(&mut world, &sites, &mut diags);
     lower::contracts(&mut world, &sites, &survey, &mut diags);
     laws::register_native(&mut world, &mut diags);

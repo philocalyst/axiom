@@ -8,7 +8,6 @@ use axiom_syntax::{ItemKind, Setting};
 use crate::Source;
 use crate::book::System;
 use crate::errors::{Word, unknown};
-use crate::layout::Layout;
 use crate::paths;
 use crate::scope::Home;
 
@@ -16,8 +15,6 @@ use crate::scope::Home;
 pub(crate) struct Site<'a, 's> {
     pub source: &'a Source<'s>,
     pub home: Home,
-    /// What the file's place among the folders says it may hold.
-    pub layout: Layout<'s>,
 }
 
 /// The path a source defines, if its first item is `system PATH`.
@@ -117,7 +114,7 @@ pub(crate) fn arrange<'a, 's>(
         .into_iter()
         .map(|source| {
             let home = defined_by(source).map_or(Home::Project, |path| Home::System(by_path[path]));
-            Site { source, home, layout: Layout::of(source.path) }
+            Site { source, home }
         })
         .collect();
     (sites, tree, SystemIndex { by_path })
