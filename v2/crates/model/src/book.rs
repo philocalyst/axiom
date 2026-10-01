@@ -1435,7 +1435,8 @@ impl Param {
         let after = first + self.rows[first..].partition_point(|row| row.names.as_ref() <= keys);
         let matching = &self.rows[first..after];
         let upto = matching.partition_point(|row| row.since.is_none_or(|since| since <= day));
-        let index = first.checked_add(upto)?.checked_sub(1)?;
+        let local_index = upto.checked_sub(1)?;
+        let index = first + local_index;
         Some((u32::try_from(index).ok()?, &self.rows[index]))
     }
 }
@@ -1477,6 +1478,8 @@ mod param_lookup_tests {
         assert_eq!(row.value, Value::Num(Ratio::int(200)));
         assert_eq!(param.row_index(day, &[self_only]).unwrap().0, 2);
         assert!(param.row_index(day, &[names.intern("individual")]).is_none());
+        assert!(param.row_index(day, &[names.intern("zzz")]).is_none());
+        assert!(param.row_index(Day::from_ymd(2024, 12, 31).unwrap(), &[self_only]).is_none());
     }
 }
 
