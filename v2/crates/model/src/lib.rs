@@ -81,6 +81,8 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     world.finish_props();
     world.book.lookup.taken = world.taken_names();
     params::declare(&mut world, &sites, &mut diags);
+    lower::contracts(&mut world, &sites, &survey, &mut diags);
+    laws::register_native(&mut world);
     // One cause is reported once, however many declarations shared the line.
     let mut seen = Set::default();
     diags.retain(|diagnostic| seen.insert((diagnostic.code.clone(), diagnostic.anchor(), diagnostic.message.clone())));
