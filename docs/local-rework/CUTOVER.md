@@ -217,7 +217,8 @@ engine errors caused by the new BudgetTerms/BudgetTotal dependency. Financial
 monitoring, shared occurrence/journal expression evaluation, part-aware assets,
 native standard systems and corpus migration still need execution evidence.
 The source count at `8dc8245` was 48,420 non-test lines; the historical 24,000-line
-target is not met. Legacy root source and `v2-previous/` remain until promotion.
+target is not met. At this checkpoint, legacy root source and `v2-previous/`
+remained; the latter was removed at the later cleanup checkpoint below.
 
 ## Dependency verification, 2026-10-01 12:20 UTC
 
@@ -371,3 +372,66 @@ At this checkpoint the native source count is 51,074 non-test lines, including
 target remains unmet. Native examples, mistakes and goldens still need their
 full source and financial migration. Root promotion and legacy removal have
 not yet occurred, and REMAINING is not marked complete.
+
+
+## Reviewed execution and cleanup checkpoint, 2026-10-01 14:31 UTC
+
+At `f30a116`, the coordinator's release engine and CLI checks passed 179 engine,
+54 CLI unit and 14 CLI integration tests. Two engine tests are explicitly ignored:
+the existing stress test and the manual history measurement. Budget recognition
+assertions retain their exact warning counts and financial readings. A fixture
+helper now identifies generated budget laws by `Book.budgets` rather than the
+old generic law name.
+
+The core/syntax/model/systems/sync check passed 53 core, 86 syntax, 57 model unit,
+seven native-law, 28 native-record, one systems-source, 94 sync unit and seven
+sync end-to-end tests. Five sync timing tests and one syntax doctest are ignored.
+The report check at `72da508` passed 65 tests and failed 31. Native forecast and
+monitor wiring, remaining source ports, budget output and several report
+behavior corrections remain active requirements. A green engine unit suite does
+not establish financial agreement for the full examples or corpus.
+
+`44a24a8` adds typed asset acquisition, improvement and sale hooks. Improvements
+add basis parts with separate service clocks while retaining one physical unit
+on the acquisition parcel. Focused purchase/improvement/sale and guarded
+consume/carry tests pass. Per-part law effects, sale-day depreciation and grouped
+capital sale costs still require integration. Review found that a Less item must
+retain its gross header and post a reversed item; subtracting both would reduce
+cash twice. The canonical occurrence materializer (`3be5072`) is integrated but
+has not yet populated the native promise and claim monitor.
+
+`30a065d` preserves landlord sale-cost evidence as a Less item and ends the
+landlord's transferred lease at disposal, based on the preserved original plan.
+The independent verifier agrees on depreciation 10,178.42 USD, net proceeds
+404,531.25 USD, gain 23,659.67 USD, tax 13,015.59 USD and final cash 173,866.60 USD.
+It reads native source and imports no Axiom implementation; engine agreement is
+still required. The benchmark converter now preserves opening holdings and
+qualified tuition separately from other education spending. Benchmark CLI runs
+are end-to-end: current Sync folds the engine even with no sync jobs. Their
+subtraction is not phase isolation.
+
+The exact history operation probe passes at 100,000 and 1,000,000 facts, checking
+both incoming and outgoing sums for every query against the retained linear
+scan. The index coalesces same-day facts and uses wide checked block prefixes.
+
+| Facts | Facts/day | Indexed capacity / old capacity | 100 indexed queries / old scans |
+|---|---:|---:|---:|
+| 100,000 | 1 | 3,211,264 / 2,400,000 bytes | 54.167 µs / 4.275375 ms |
+| 100,000 | 100 | 25,088 / 2,400,000 bytes | 10.375 µs / 5.5775 ms |
+| 1,000,000 | 1 | 25,690,112 / 24,000,000 bytes | 366.125 µs / 47.83075 ms |
+| 1,000,000 | 100 | 401,408 / 24,000,000 bytes | 17.125 µs / 50.416417 ms |
+
+Dense histories use about 60–96 times less index capacity in these cases, while
+unique-date histories use more capacity. These are capacity and query-operation
+measurements, not whole-process peak memory or ordinary CLI latency. The actual
+probe is `native-budget-history-scale.log` outside the repository. The regenerated
+native 1M fixture retains 1,000,094 simulated flows and 996,625 simulated journal
+lines; opening blocks and native spellings give 1,014,718 physical lines. A correct
+fold and financial parity are prerequisites to the whole-workload comparison.
+
+`3294182` removes all 54 tracked files of the unused `v2-previous` implementation
+(17,660 lines). Exact file hashes and the preserving commit are in
+`verification/cutover/removed-legacy-previous.json`. Legacy root source removal
+and native root promotion remain pending. Current implementation workers retain
+private working trees, and original repositories and recovery evidence remain
+unchanged. This checkpoint does not close REMAINING, the corpus or the size cap.
