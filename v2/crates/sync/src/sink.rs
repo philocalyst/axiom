@@ -27,7 +27,7 @@ pub fn merge(
     sink: Sink,
     output: &str,
     layout: &Layout,
-    read: &dyn Fn(&str) -> Option<String>,
+    read: &mut dyn FnMut(&str) -> Option<String>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     match sink {
         Sink::Journal => items(output, |day| layout.file_for(day), read),
@@ -48,7 +48,7 @@ pub fn merge(
 fn items(
     output: &str,
     path_of: impl Fn(Day) -> String,
-    read: &dyn Fn(&str) -> Option<String>,
+    read: &mut dyn FnMut(&str) -> Option<String>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     let lines: Vec<&str> = output.split_inclusive('\n').collect();
     let (found, _) = scan(&lines, Context::default());
@@ -161,7 +161,7 @@ fn rows(
     name: &str,
     path: &str,
     output: &str,
-    read: &dyn Fn(&str) -> Option<String>,
+    read: &mut dyn FnMut(&str) -> Option<String>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
     if !is_project_path(path) {
         return Err(vec![Diagnostic::error(
@@ -251,8 +251,9 @@ mod tests {
                 .find(|(name, _)| *name == path)
                 .map(|(_, text)| text.to_string())
         };
-        let inserts = merge(sink, output, &layout(), &read)?;
-        Ok(changes(&inserts, &read)
+        let mut read = read;
+        let inserts = merge(sink, output, &layout(), &mut read)?;
+        Ok(changes(&inserts, &mut read)
             .unwrap()
             .into_iter()
             .map(|change| (change.path, change.after))
@@ -270,12 +271,12 @@ mod tests {
                     "journal/2026/03.ax".to_string(),
                     format!("{march}").replace(
                         "30 me -> pge 9 USD\n",
-                        "27 halcyon owes studio 500 USD due 30d ^inv-2026-02\n30 me -> pge 9 USD\n"
+                        "27 halcyon owes studio 500 USD ^inv-2026-02 due 30d\n30 me -> pge 9 USD\n"
                     )
                 ),
                 (
                     "journal/2026/04.ax".to_string(),
-                    "02 northwind owes studio 900 USD due 30d ^inv-2026-03\n".to_string()
+                    "02 northwind owes studio 900 USD ^inv-2026-03 due 30d\n".to_string()
                 ),
             ]
         );
@@ -296,7 +297,7 @@ mod tests {
     #[test]
     fn malformed_native_output_is_refused_before_a_change_is_planned() {
         let bad_item = "2026-03-27 someone owes 3 USD";
-        let result = merge(Sink::Journal, bad_item, &layout(), &|_| None);
+        let result = merge(Sink::Journal, bad_item, &layout(), &mut |_| None);
         assert!(result.is_err(), "incomplete native item must not pass through raw");
 
         let bad_row = "2026 3_00 USD ???\n";
@@ -307,15 +308,15 @@ mod tests {
             },
             bad_row,
             &layout(),
-            &|path| (path == "settings.ax").then(|| "param rates\n".to_string()),
+            &mut |path| (path == "settings.ax").then(|| "param rates\n".to_string()),
         );
         assert!(result.is_err(), "unparseable param output must be refused");
     }
 
     #[test]
     fn sink_paths_cannot_escape_the_project_or_trigger_external_reads() {
-        let read = |_: &str| panic!("unsafe sink path must be rejected before reading");
-        let result = merge(Sink::File("../outside/{year}.ax"), "2026-03-27 a -> b 1 USD", &layout(), &read);
+        let mut read = |_: &str| panic!("unsafe sink path must be rejected before reading");
+        let result = merge(Sink::File("../outside/{year}.ax"), "2026-03-27 a -> b 1 USD", &layout(), &mut read);
         assert!(result.is_err());
         let result = merge(
             Sink::Param {
@@ -324,9 +325,30 @@ mod tests {
             },
             "2026 3 USD\n",
             &layout(),
-            &read,
+            &mut read,
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn sink_and_change_planning_accept_a_mutating_read_callback() {
+        let mut reads = Vec::new();
+        let mut read = |path: &str| {
+            reads.push(path.to_string());
+            None
+        };
+        let output = "2026-03-27 a -> b 1 USD";
+        let inserts = merge(
+            Sink::File("invoices/{year}.ax"),
+            output,
+            &layout(),
+            &mut read,
+        )
+        .unwrap();
+        let changes = changes(&inserts, &mut read).unwrap();
+        drop(read);
+        assert_eq!(changes.len(), 1);
+        assert_eq!(reads, ["invoices/2026.ax", "invoices/2026.ax"]);
     }
 
     #[test]
@@ -335,17 +357,17 @@ mod tests {
         let march = &written[0].1;
         assert_eq!(
             march,
-            "27 halcyon owes studio 3_800 USD due 30d ^inv-2026-01\n  3_000 USD #design \"brand refresh\"\n    800 USD #design \"icon set\"\n27 halcyon owes studio 500 USD due 30d ^inv-2026-02\n"
+            "27 halcyon owes studio 3_800 USD ^inv-2026-01 due 30d\n  3_000 USD #design \"brand refresh\"\n    800 USD #design \"icon set\"\n27 halcyon owes studio 500 USD ^inv-2026-02 due 30d\n"
         );
     }
 
     #[test]
     fn a_file_with_a_year_in_its_path_splits_the_output_by_year() {
-        let prices = "2026-12-30 VTI 280.14 USD\n2027-01-02 VTI 301 USD\n2026-12-30 BND 71.2 USD\n";
+        let prices = "2026-12-30 VTI = 280.14 USD\n2027-01-02 VTI = 301 USD\n2026-12-30 BND = 71.2 USD\n";
         let written = merged(
             Sink::File("prices/{year}.ax"),
             prices,
-            &[("prices/2026.ax", "12-30 VTI 280.14 USD\n")],
+            &[("prices/2026.ax", "12-30 VTI = 280.14 USD\n")],
         )
         .unwrap();
         assert_eq!(
@@ -353,11 +375,11 @@ mod tests {
             [
                 (
                     "prices/2026.ax".to_string(),
-                    "12-30 VTI 280.14 USD\n12-30 BND 71.2 USD\n".to_string()
+                    "12-30 VTI = 280.14 USD\n12-30 BND = 71.2 USD\n".to_string()
                 ),
                 (
                     "prices/2027.ax".to_string(),
-                    "01-02 VTI 301 USD\n".to_string()
+                    "01-02 VTI = 301 USD\n".to_string()
                 ),
             ]
         );
@@ -378,14 +400,14 @@ mod tests {
 
     #[test]
     fn param_rows_are_added_unless_their_key_is_there() {
-        let file = "param cpi\n  2025 315.6\n  2026 320.9\n";
+        let file = "param cpi USD\n  2025 single 315.6 USD\n  2026 single 320.9 USD\n";
         let sink = Sink::Param {
             name: "cpi",
             path: "params.ax",
         };
         let written = merged(
             sink,
-            "// the index\n2025 999\n2026-07 322.1\n\n",
+            "// the index\n2025 single 999 USD\n2026-07-01 single 322.1 USD\n\n",
             &[("params.ax", file)],
         )
         .unwrap();
@@ -393,7 +415,7 @@ mod tests {
             written,
             [(
                 "params.ax".to_string(),
-                "param cpi\n  2025 315.6\n  2026 320.9\n  2026-07 322.1\n".to_string()
+                "param cpi USD\n  2025 single 315.6 USD\n  2026 single 320.9 USD\n  2026-07-01 single 322.1 USD\n".to_string()
             )]
         );
         let problems = merged(sink, "soon 3\n", &[("params.ax", file)])

@@ -20,7 +20,9 @@ not a claim that the full cutover or v4 migration is complete.
   pending and foreign-currency rows do not determine it. Tagged statements do
   not have a statement-level balance.
 - CAMT memo text joins `AddtlNtryInf` and `RmtInf/Ustrd` in declared order,
-  matching the normal row reader's multi-column memo behavior.
+  matching the normal row reader's multi-column memo behavior. Text split by
+  XML comments or CDATA inside one element is joined too; adjacent fragments
+  concatenate, while a whitespace boundary contributes one space.
 
 ## Code and tests
 
@@ -31,12 +33,12 @@ reading is borrowing-first, with ownership only for decoded/combined values.
 never executes a `run` source. `matching_paths(root, pattern)` exposes the
 project-confined, sorted `read` glob expansion without reading file contents.
 The isolated harness at `/tmp/axiom-sync-primitives-forecast` includes the exact
-`cell.rs`, `amount.rs`, `csv.rs`, `tagged.rs`, `paths.rs`, and `write.rs` source
+`cell.rs`, `amount.rs`, `csv.rs`, `tagged.rs`, `paths.rs`, `write.rs`, and `sink.rs` source
 files and links the repository's real `axiom_core`, `axiom_syntax`, and `memchr`
 dependencies. Its log is in the sibling task evidence directory at
 `../verification/cutover/sync-primitives-forecast-tests.log`.
-It is evidence for those modules only, not a substitute for the crate or
-workspace build.
+The current run passes 40 tests, with 3 timing tests ignored. It is evidence for
+those modules only, not a substitute for the crate or workspace build.
 
 Source regression fixtures are in `v2/crates/sync/src/world/tests.rs` and
 `v2/crates/sync/src/format/tests.rs`. They cover structured party/via/code

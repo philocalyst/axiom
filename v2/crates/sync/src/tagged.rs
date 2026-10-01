@@ -32,7 +32,36 @@ fn tags(text: &str) -> impl Iterator<Item = Result<Tag<'_>, Broken>> {
     let mut from = 0;
     std::iter::from_fn(move || {
         loop {
-            let open = from + memchr(b'<', &bytes[from..])?;
+            let open = match memchr(b'<', &bytes[from..]) {
+                Some(relative) => from + relative,
+                None if from < bytes.len() => {
+                    let start = from;
+                    from = bytes.len();
+                    return Some(Ok(Tag {
+                        name: "",
+                        closing: false,
+                        empty: false,
+                        at: Span { start, end: bytes.len() },
+                        value: &text[start..],
+                        span: Span { start, end: bytes.len() },
+                        cdata: false,
+                    }));
+                }
+                None => return None,
+            };
+            if open > from {
+                let start = from;
+                from = open;
+                return Some(Ok(Tag {
+                    name: "",
+                    closing: false,
+                    empty: false,
+                    at: Span { start, end: open },
+                    value: &text[start..open],
+                    span: Span { start, end: open },
+                    cdata: false,
+                }));
+            }
             if bytes[open..].starts_with(b"<!--") {
                 let Some(end) = text[open + 4..].find("-->") else {
                     from = bytes.len();
@@ -112,9 +141,7 @@ fn tags(text: &str) -> impl Iterator<Item = Result<Tag<'_>, Broken>> {
                 }));
             };
             let close = close_rel;
-            let next =
-                close + 1 + memchr(b'<', &bytes[close + 1..]).unwrap_or(bytes.len() - close - 1);
-            from = next;
+            from = close + 1;
             let raw = text[open + 1..close].trim();
             let (closing, raw) = raw
                 .strip_prefix('/')
@@ -123,8 +150,6 @@ fn tags(text: &str) -> impl Iterator<Item = Result<Tag<'_>, Broken>> {
                 .strip_suffix('/')
                 .map_or((false, raw), |name| (true, name));
             let name = raw.split_whitespace().next().unwrap_or("");
-            let (all, value) = (&text[close + 1..next], text[close + 1..next].trim());
-            let start = close + 1 + all.len() - all.trim_start().len();
             return Some(Ok(Tag {
                 name,
                 closing,
@@ -133,11 +158,8 @@ fn tags(text: &str) -> impl Iterator<Item = Result<Tag<'_>, Broken>> {
                     start: open,
                     end: close + 1,
                 },
-                value,
-                span: Span {
-                    start,
-                    end: start + value.len(),
-                },
+                value: "",
+                span: Span { start: close + 1, end: close + 1 },
                 cdata: false,
             }));
         }
@@ -236,6 +258,65 @@ fn ends_with(open: &[&str], wanted: &[&str]) -> bool {
             .all(|(a, b)| a.eq_ignore_ascii_case(b))
 }
 
+/// Append one text node to the first value found at an element path. XML text
+/// split by comments or CDATA stays one value; a boundary that carried spaces
+/// contributes one separator while an adjacent boundary contributes none.
+fn append_text<'t>(
+    cell: &mut Cell<'t>,
+    trailing_space: &mut bool,
+    raw: &'t str,
+    span: Span,
+    cdata: bool,
+) -> Result<(), &'static str> {
+    let decoded = if cdata { Cow::Borrowed(raw) } else { decode(raw)? };
+    let value = decoded.as_ref();
+    if value.trim().is_empty() {
+        *trailing_space = cell.span != ABSENT;
+        return Ok(());
+    }
+    let leading_bytes = raw.len() - raw.trim_start().len();
+    let trailing_bytes = raw.len() - raw.trim_end().len();
+    let part_span = Span {
+        start: span.start.saturating_add(leading_bytes),
+        end: span.end.saturating_sub(trailing_bytes),
+    };
+
+    if cell.span == ABSENT {
+        let value = decoded.as_ref();
+        let ends_with_space = value.len() != value.trim_end().len();
+        cell.text = match decoded {
+            Cow::Borrowed(text) => Cow::Borrowed(text.trim()),
+            Cow::Owned(text) => Cow::Owned(text.trim().to_string()),
+        };
+        cell.span = part_span;
+        *trailing_space = ends_with_space;
+        return Ok(());
+    }
+
+    let value = decoded.as_ref();
+    let trimmed = value.trim();
+    let leading_space = value.len() != value.trim_start().len();
+    let ends_with_space = value.len() != value.trim_end().len();
+    if !trimmed.is_empty() {
+        let mut joined = match std::mem::replace(&mut cell.text, Cow::Borrowed("")) {
+            Cow::Borrowed(text) => {
+                let mut joined = String::with_capacity(text.len() + trimmed.len() + 1);
+                joined.push_str(text);
+                joined
+            }
+            Cow::Owned(text) => text,
+        };
+        if (*trailing_space || leading_space) && !joined.is_empty() {
+            joined.push(' ');
+        }
+        joined.push_str(trimmed);
+        cell.text = Cow::Owned(joined);
+        cell.span.end = span.end;
+    }
+    *trailing_space = ends_with_space;
+    Ok(())
+}
+
 /// Calls `each` with every `records` element of `text`, until it says stop.
 /// `paths` are the values wanted, as `A/B` element paths; each record has one
 /// cell for each, empty and [`ABSENT`] where the record has no such element.
@@ -254,6 +335,8 @@ pub(crate) fn scan<'t>(
             span: ABSENT,
         })
         .collect();
+    let mut capturing = vec![false; paths.len()];
+    let mut trailing_space = vec![false; paths.len()];
     let mut stack: Vec<&str> = Vec::new();
     let mut record_start = None;
     // The leaf just read, whose closing tag (XML) says nothing.
@@ -267,21 +350,34 @@ pub(crate) fn scan<'t>(
                 return;
             }
         };
-        seen = true;
-        if tag.cdata {
-            let Some(_) = record_start else {
-                continue;
-            };
-            for (slot, path) in wanted.iter().enumerate() {
-                if ends_with(&stack, path) && cells[slot].span == ABSENT {
-                    cells[slot] = Cell {
-                        text: Cow::Borrowed(tag.value),
-                        span: tag.span,
-                    };
+        if tag.name.is_empty() {
+            if record_start.is_some() {
+                for (slot, path) in wanted.iter().enumerate() {
+                    if ends_with(&stack, path)
+                        && (cells[slot].span == ABSENT || capturing[slot])
+                    {
+                        if let Err(what) = append_text(
+                            &mut cells[slot],
+                            &mut trailing_space[slot],
+                            tag.value,
+                            tag.span,
+                            tag.cdata,
+                        ) {
+                            each(Err(Broken {
+                                row: count,
+                                span: tag.span,
+                                what,
+                            }));
+                            return;
+                        }
+                        capturing[slot] = true;
+                    }
                 }
+                leaf = stack.last().copied();
             }
             continue;
         }
+        seen = true;
         let Some(begin) = record_start else {
             if !tag.closing && tag.name.eq_ignore_ascii_case(records) && !tag.empty {
                 count += 1;
@@ -292,6 +388,8 @@ pub(crate) fn scan<'t>(
                         span: ABSENT,
                     };
                 }
+                capturing.fill(false);
+                trailing_space.fill(false);
                 stack.clear();
                 stack.push(tag.name);
             }
@@ -310,42 +408,49 @@ pub(crate) fn scan<'t>(
                     return;
                 }
                 stack.clear();
-            } else if after_leaf != Some(tag.name) {
+                capturing.fill(false);
+                trailing_space.fill(false);
+            } else if after_leaf == Some(tag.name) {
+                for (slot, path) in wanted.iter().enumerate() {
+                    if ends_with(&stack, path) {
+                        capturing[slot] = false;
+                        trailing_space[slot] = false;
+                    }
+                }
+                if stack.last().is_some_and(|name| name.eq_ignore_ascii_case(tag.name)) {
+                    stack.pop();
+                }
+            } else {
                 // Also closes what an unclosed empty element (SGML) left open inside it.
                 if let Some(depth) = stack
                     .iter()
                     .rposition(|name| name.eq_ignore_ascii_case(tag.name))
                 {
+                    for (slot, path) in wanted.iter().enumerate() {
+                        if ends_with(&stack, path) {
+                            capturing[slot] = false;
+                            trailing_space[slot] = false;
+                        }
+                    }
                     stack.truncate(depth);
                 }
             }
-        } else if tag.empty {
-            continue;
-        } else if tag.value.is_empty() {
-            stack.push(tag.name);
         } else {
-            leaf = Some(tag.name);
-            stack.push(tag.name);
-            for (slot, path) in wanted.iter().enumerate() {
-                if ends_with(&stack, path) && cells[slot].span == ABSENT {
-                    let text = match decode(tag.value) {
-                        Ok(text) => text,
-                        Err(what) => {
-                            each(Err(Broken {
-                                row: count,
-                                span: tag.span,
-                                what,
-                            }));
-                            return;
-                        }
-                    };
-                    cells[slot] = Cell {
-                        text,
-                        span: tag.span,
-                    };
+            if let Some(previous) = after_leaf
+                && stack.last().is_some_and(|name| name.eq_ignore_ascii_case(previous))
+            {
+                for (slot, path) in wanted.iter().enumerate() {
+                    if ends_with(&stack, path) {
+                        capturing[slot] = false;
+                        trailing_space[slot] = false;
+                    }
                 }
+                stack.pop();
             }
-            stack.pop();
+            if tag.empty {
+                continue;
+            }
+            stack.push(tag.name);
         }
     }
     if let Some(begin) = record_start {
@@ -450,6 +555,16 @@ mod tests {
     fn cdata_and_numeric_xml_references_are_read_as_text() {
         let text = "<Ntry><Ustrd><![CDATA[a < b & c]]></Ustrd><Memo>Smile &#x1F642; &#169;</Memo></Ntry>";
         assert_eq!(read(text, "Ntry", &["Ustrd", "Memo"]), [["a < b & c", "Smile 🙂 ©"]]);
+    }
+
+    #[test]
+    fn comments_and_cdata_split_one_memo_without_losing_text_or_repeats() {
+        let text = "<Ntry><Memo>PAY<!-- separator -->\
+                    <![CDATA[PAL]]> CARD</Memo><Memo>ignored duplicate</Memo></Ntry>";
+        assert_eq!(read(text, "Ntry", &["Memo"]), [["PAYPAL CARD"]]);
+
+        let spaced = "<Ntry><Memo>PAY <!-- separator --> PAL</Memo></Ntry>";
+        assert_eq!(read(spaced, "Ntry", &["Memo"]), [["PAY PAL"]]);
     }
 
     #[test]

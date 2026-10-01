@@ -131,7 +131,8 @@ pub fn sync<'a>(
             results[at].push((label.clone(), counted));
         }
     }
-    let (changes, problems) = match changes(&inserts, read) {
+    let mut read_for_changes = |path: &str| read(path);
+    let (changes, problems) = match changes(&inserts, &mut read_for_changes) {
         Ok(changes) => (changes, Vec::new()),
         Err(problems) => (Vec::new(), problems),
     };
@@ -151,7 +152,8 @@ fn plan<'a>(
     match &source.kind {
         Kind::Feed(feed) => world.feed(feed, text),
         Kind::Sink(sink) => {
-            let added = sink::merge(*sink, text, &world.layout, read)?;
+            let mut read_for_sink = |path: &str| read(path);
+            let added = sink::merge(*sink, text, &world.layout, &mut read_for_sink)?;
             world.learn(&added);
             Ok(added)
         }

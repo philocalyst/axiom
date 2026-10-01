@@ -531,7 +531,7 @@ pub struct Change {
 /// The change each file's inserts make, files in path order.
 pub fn changes(
     inserts: &[Insert],
-    read: &dyn Fn(&str) -> Option<String>,
+    read: &mut dyn FnMut(&str) -> Option<String>,
 ) -> Result<Vec<Change>, Vec<Diagnostic>> {
     let mut by_path: BTreeMap<&str, Vec<&Insert>> = BTreeMap::new();
     for insert in inserts {
@@ -886,8 +886,14 @@ mod tests {
                 form: Form::Item("a -> b 2 USD".into()),
             },
         ];
-        let read = |path: &str| (path == "a.ax").then(|| "2026-01-01 a -> b 1 USD\n".to_string());
-        let made = changes(&inserts, &read).unwrap();
+        let mut paths = Vec::new();
+        let mut read = |path: &str| {
+            paths.push(path.to_string());
+            (path == "a.ax").then(|| "2026-01-01 a -> b 1 USD\n".to_string())
+        };
+        let made = changes(&inserts, &mut read).unwrap();
+        drop(read);
+        assert_eq!(paths, ["a.ax", "b.ax"]);
         let shown: Vec<_> = made
             .iter()
             .map(|c| (c.path.as_str(), c.before.is_some(), c.after.as_str()))
