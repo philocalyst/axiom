@@ -435,3 +435,38 @@ fold and financial parity are prerequisites to the whole-workload comparison.
 and native root promotion remain pending. Current implementation workers retain
 private working trees, and original repositories and recovery evidence remain
 unchanged. This checkpoint does not close REMAINING, the corpus or the size cap.
+
+
+## Root promotion checkpoint, 2026-10-01 15:37 UTC
+
+`86ac2b0` promotes the native crates, Cargo workspace, language specification,
+benchmarks, examples and tests to the repository root. It removes all 82 tracked
+files of the older root implementation, including its source, tests, fixtures
+and superseded design documents. The preserving commit is `07c8a8e`; exact
+hashes and sizes are recorded outside the repository in
+`verification/cutover/removed-legacy-root.json`. The 54-file `v2-previous`
+implementation was already removed at `3294182`. Original repositories and
+recovery evidence remain unchanged. The root README now describes the native
+commands, and offline Cargo metadata resolves the promoted workspace.
+
+Private implementation worktrees retain their former paths. Reviewed commits
+apply to the promoted paths through Git rename detection; `27e1251` verifies
+this with the percentage split materializer. External native probes now resolve
+`axiom-local/crates` rather than the removed `axiom-local/v2/crates` path.
+
+`4783128` adds typed percentage split legs, written body overrides, exact
+association of late payments with scheduled occurrences, party payees in both
+contract directions, and initial loan terms. Its worker native-record check
+passed 31 tests. `27e1251` materializes percentages against the gross active
+header, so 6% of a 4,600 USD payroll is 276 USD. `a59144e` corrects occurrence
+ordinals, escalation of literal amounts, Rest legs before explicit legs,
+Carve/Less distinction and same-unit split conservation. `07c8a8e` evaluates
+depreciation over the scheduled period and exposes the terminal mid-month
+calculation for disposal. Integration checks are running; grouped written
+body replacement, native loan execution and the claim monitor remain active.
+
+At `92c1c86` the release model and systems checks passed 57 model unit, seven
+native-law, 28 native-record and one systems-source tests. These checks establish
+lowering behavior, not full financial agreement for the examples. Root promotion
+is complete, while REMAINING closure is still contingent on native execution,
+reports and the financial corpus passing their required checks.

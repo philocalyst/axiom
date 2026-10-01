@@ -1,14 +1,13 @@
 # Axiom v4: what remains
 
 > Local continuation, 2026-10-01: this checklist is being completed on
-> `cutover/promote-workspace` in the isolated `axiom-local` checkout. The
-> historical branch status and benchmark figures below are preserved evidence,
-> not results from the new implementation. Current requirements, reviewed
-> checkpoints and verification are recorded in
-> [CUTOVER.md](../docs/local-rework/CUTOVER.md). Native model and journal wiring
-> is implemented. Integrated execution, corpus migration, root promotion and
-> legacy removal remain pending. Completion will be recorded only after the
-> checks pass.
+> `cutover/promote-workspace` in the isolated `axiom-local` checkout. Commit
+> `86ac2b0` promoted the native workspace to this root and removed the older
+> root implementation; `3294182` removed `v2-previous`. The historical branch
+> status and benchmark figures below describe earlier work. Current evidence
+> and verification are in [CUTOVER.md](docs/local-rework/CUTOVER.md).
+> Contract monitoring, remaining report behavior, financial corpus migration,
+> and acceptance checks remain active. This checklist is not yet complete.
 
 As of 2026-09-30. This is the brief for whoever continues the v4 rework, whether a person or a session of agents. Read it first. Then read:
 

@@ -1,5 +1,9 @@
 # Lane briefs, audits and research
 
+> These briefs were written before root promotion. In local path references,
+> read the former `v2/` prefix as the repository root. Historical audit paths
+> retain their original spelling for provenance.
+
 These are the working documents of the v4 rework, copied from the orchestrating session's scratchpad. Start from [../REMAINING.md](../REMAINING.md), which says what is done, what remains, in what order, and which of these each lane reads.
 
 Some of them still name worktree paths such as `/home/user/axiom/.claude/worktrees/lane-v4`. Those paths were one machine's checkout of the `v4` branch. The branch is now pushed as `claude/great-wozniak-pnqn7x-v4`. "The orchestrator" is whoever runs the lanes and merges them.

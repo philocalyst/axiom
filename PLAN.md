@@ -1,4 +1,11 @@
-# Axiom v2 — handoff plan
+# Axiom — handoff plan
+
+> Current checkout, 2026-10-01: the native Cargo workspace is at this repository
+> root (`86ac2b0`). Both older implementations have been removed here; their
+> history is preserved in Git and the original recovery repositories are
+> unchanged. The environment and branch descriptions below are historical.
+> [CUTOVER.md](docs/local-rework/CUTOVER.md) records current work and verification,
+> and [REMAINING.md](REMAINING.md) retains the acceptance obligations.
 
 This document lets a fresh session continue this work with no other context. Read
 it top to bottom once, then [DESIGN.md](DESIGN.md) and [LANGUAGE.md](LANGUAGE.md).
