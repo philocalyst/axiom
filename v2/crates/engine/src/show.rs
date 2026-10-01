@@ -13,9 +13,9 @@ pub(crate) fn value(book: &Book, day: Day, value: Value) -> String {
         Value::Amount(a) => book.show(a).to_string(),
         Value::Day(d) => d.to_string(),
         Value::Span(s) => s.to_string(),
-        Value::Text(t) => format!("\"{}\"", book.name(t)),
+        Value::Text(t) => format!("{:?}", book.text(t)),
         Value::Name(n) | Value::Glob(n) => book.name(n).into(),
-        Value::Code(c) => format!("#{}", book.name(c).trim_start_matches('#')),
+        Value::Code(c) => book.name(c).into(),
         Value::Place(p) => place(book, p).into(),
         Value::Entity(e) => book.name(book.entities[e].path).into(),
         Value::Kind(k) => book.name(book.kinds[k].name).into(),
@@ -37,15 +37,17 @@ pub(crate) fn subject<'a>(book: &Book<'a>, subject: Subject) -> &'a str {
         Subject::Place(p) => place(book, p),
         Subject::Entity(e) => book.name(book.entities[e].path),
         Subject::Asset(a) => book.name(book.assets[a].name),
+        Subject::Contract(c) => book.name(book.contracts[c].name),
     }
 }
 
-/// A subject as a sortable key: places, then entities, then assets, each by id.
+/// A subject as a sortable key: places, entities, assets, then contracts, each by id.
 pub(crate) fn subject_key(subject: Subject) -> (u8, usize) {
     match subject {
         Subject::Place(place) => (0, place.index()),
         Subject::Entity(entity) => (1, entity.index()),
         Subject::Asset(asset) => (2, asset.index()),
+        Subject::Contract(contract) => (3, contract.index()),
     }
 }
 
@@ -54,6 +56,14 @@ pub(crate) fn subject_key(subject: Subject) -> (u8, usize) {
 pub(crate) fn fault(book: &Book, fault: Fault, day: Day) -> (String, Option<String>) {
     let symbol = |unit: Id<Commodity>| book.name(book.commodities[unit].symbol);
     match fault {
+        Fault::InvalidProgram => (
+            "the compiled expression is invalid".into(),
+            Some("check the expression and its declared type".into()),
+        ),
+        Fault::MissingInput(index) => (
+            format!("contract input {} has no value for {day}", usize::from(index) + 1),
+            Some("supply this input on the contract occurrence".into()),
+        ),
         Fault::NoPrice { unit, quote } => {
             let (unit, quote) = (symbol(unit), symbol(quote));
             let help = format!("add a price line such as `{day} {unit} <price> {quote}`");
