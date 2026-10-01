@@ -282,6 +282,8 @@ pub enum Func {
     /// including the triggering flow, valued in the base currency. An optional
     /// argument widens it to every place of a kind the owner owns.
     Total(Dir, Window),
+    /// `total(#PURPOSE, window)`, or the purpose that owns a law when `None`.
+    PurposeTotal { purpose: Option<Id<Purpose>>, window: Window },
     /// What laws counted under the name for the owner, in the current year or,
     /// with a second argument (a year or a date), in that one.
     Tally(Sym),

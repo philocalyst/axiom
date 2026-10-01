@@ -20,7 +20,7 @@ pub mod unit;
 
 // `calendar::Window` is not re-exported: the model's law `Window` (month, year or ever) is the one
 // already in scope where a window is spoken of.
-pub use calendar::{Cadence, Days, On, Period, due, spread};
+pub use calendar::{Cadence, DateLayout, Days, On, Period, due, spread};
 pub use day::{Day, Span};
 pub use diag::{Diagnostic, Disposition, FileId, Loc, Severity};
 pub use groups::Groups;

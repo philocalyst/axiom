@@ -562,7 +562,7 @@ impl Elab<'_, '_> {
         let mut reported = Vec::new();
         for &(code, loc) in &self.coded {
             let text = book.name(code);
-            for rule in book.codes.iter().filter(|rule| glob(book.name(rule.pattern), text)) {
+            for rule in book.code_rules.iter().filter(|rule| glob(book.name(rule.pattern), text)) {
                 if flows.iter().any(|flow| touches(rule, flow.from) || touches(rule, flow.to))
                     || reported.contains(&(code, loc))
                 {

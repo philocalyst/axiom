@@ -6,7 +6,7 @@
 //! [`crate::law::Op`] and [`crate::law::Field`], and [`Source`] is not the
 //! parsed [`crate::Source`] that `build` takes. Reach them as `sync::Source`.
 
-use axiom_core::{Id, Loc, Sym};
+use axiom_core::{DateLayout, Id, Loc, Sym};
 
 use crate::book::{Param, Place, Purpose, System};
 
@@ -37,8 +37,8 @@ pub enum Fetch {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Sink {
     /// A sync named after an account: its records, reconciled into the
-    /// journal. `csv: None` means the source prints Axiom.
-    Feed { account: Id<Place>, csv: Option<Csv> },
+    /// journal.
+    Feed { account: Id<Place> },
     /// `into PATH`: Axiom text, merged into that file (`{year}` splits it).
     File(Sym),
     /// `into param NAME`: rows merged into that param.
@@ -52,31 +52,29 @@ pub enum Sink {
 pub struct Format {
     pub name: Sym,
     pub shape: Shape,
+    pub specs: Box<[Spec]>,
+    pub categories: Box<[(Sym, Id<Purpose>)]>,
     pub loc: Loc,
 }
 
 /// What a record looks like.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Shape {
-    Csv(Csv),
+    Rows,
     /// OFX, ISO 20022: named records, fields by path (`BookgDt/Dt`).
-    Tagged {
-        records: Sym,
-        fields: Box<[(Field, Box<[Sym]>)]>,
-    },
+    Tagged { records: Sym },
 }
 
-/// How the columns of an export read.
+/// One format declaration line: what the field is, where it is, and how to
+/// interpret it.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Csv {
-    /// Which column carries what: `date "Posting Date"`, `amount 4`.
-    pub columns: Box<[(Field, Column)]>,
-    /// `"MM/DD/YYYY"`; ISO when absent.
-    pub date_format: Option<Sym>,
-    /// `amount 4 flipped`: money into the account is negative in the export.
-    pub flipped: bool,
-    /// `category "Groceries" is #groceries`.
-    pub categories: Box<[(Sym, Id<Purpose>)]>,
+pub struct Spec {
+    pub field: Field,
+    /// A field may draw from several places only for `memo`.
+    pub places: Box<[Column]>,
+    pub layout: Option<DateLayout>,
+    pub rule: Rule,
+    pub loc: Loc,
 }
 
 /// A column of an export.
@@ -85,6 +83,18 @@ pub enum Column {
     Header(Sym),
     /// 1-based, as written.
     Index(u16),
+    /// A tagged field path, or a tag at any depth.
+    Path(Sym),
+}
+
+/// How one field's value is read.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Rule {
+    None,
+    Flipped,
+    /// The exact marker in `place` means money into the account.
+    Sign { place: Column, into: Sym },
+    Is(Sym),
 }
 
 /// What a column or a tagged field is of a record.
@@ -162,6 +172,9 @@ pub enum Capture {
     Payee,
     Code,
     Amount,
+    /// An amount quoted in its original commodity, preserved from the memo
+    /// for matching and explanation (for example `CHF 3,290.00`).
+    Original,
     Date,
     Named(Sym),
 }

@@ -133,7 +133,7 @@ pub(super) fn code_rules<'s>(world: &mut World<'s>, entries: &[Entry<'_, 's>], d
         if world.scopes.of(Home::Project).sees(written.home()) {
             let pattern = world.book.names.intern(rule.pattern.0.strip_prefix('#').unwrap_or(rule.pattern.0));
             // v3 bridge: no v3 code says how it appears in a memo.
-            world.book.codes.push(CodeRule {
+            world.book.code_rules.push(CodeRule {
                 pattern,
                 on: scopes.into(),
                 known_as: Box::default(),

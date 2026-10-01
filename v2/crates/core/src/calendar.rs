@@ -10,6 +10,214 @@ use std::fmt;
 use crate::day::{Day, Span, days_in_month};
 use crate::num::Qty;
 
+/// A compiled date layout such as `MM/DD/YYYY`, used by imported records.
+/// The original spelling and three token spans are enough to parse dates and
+/// suggest the same layout with day and month exchanged.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct DateLayout {
+    pattern: Box<str>,
+    fields: [DateField; 3],
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct DateField {
+    kind: DateFieldKind,
+    start: u32,
+    end: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DateFieldKind {
+    Year4,
+    Year2,
+    Month2,
+    Month,
+    Day2,
+    Day,
+}
+
+impl DateFieldKind {
+    fn index(self) -> usize {
+        match self {
+            DateFieldKind::Year4 | DateFieldKind::Year2 => 0,
+            DateFieldKind::Month2 | DateFieldKind::Month => 1,
+            DateFieldKind::Day2 | DateFieldKind::Day => 2,
+        }
+    }
+
+    fn spelling(self) -> &'static str {
+        match self {
+            DateFieldKind::Year4 => "YYYY",
+            DateFieldKind::Year2 => "YY",
+            DateFieldKind::Month2 => "MM",
+            DateFieldKind::Month => "M",
+            DateFieldKind::Day2 => "DD",
+            DateFieldKind::Day => "D",
+        }
+    }
+
+    fn widths(self) -> std::ops::RangeInclusive<usize> {
+        match self {
+            DateFieldKind::Year4 => 4..=4,
+            DateFieldKind::Year2 | DateFieldKind::Month2 | DateFieldKind::Day2 => 2..=2,
+            DateFieldKind::Month | DateFieldKind::Day => 1..=2,
+        }
+    }
+}
+
+impl DateLayout {
+    /// Compiles a layout with one `YYYY` or `YY`, one `MM` or `M`, one `DD` or
+    /// `D`, and literal separators. Single-letter month/day fields accept one
+    /// or two digits; a two-digit year is read as 2000 through 2099.
+    pub fn parse(pattern: &str) -> Option<DateLayout> {
+        let (mut fields, mut count, mut at) = ([DateField { kind: DateFieldKind::Year4, start: 0, end: 0 }; 3], 0, 0);
+        let mut found = [false; 3];
+        while at < pattern.len() {
+            let rest = &pattern[at..];
+            let token = [
+                ("YYYY", DateFieldKind::Year4),
+                ("YY", DateFieldKind::Year2),
+                ("MM", DateFieldKind::Month2),
+                ("M", DateFieldKind::Month),
+                ("DD", DateFieldKind::Day2),
+                ("D", DateFieldKind::Day),
+            ]
+            .into_iter()
+            .find(|(token, _)| rest.starts_with(token));
+            if let Some((token, kind)) = token {
+                let index = kind.index();
+                if found[index] || count == fields.len() {
+                    return None;
+                }
+                found[index] = true;
+                fields[count] = DateField {
+                    kind,
+                    start: u32::try_from(at).ok()?,
+                    end: u32::try_from(at + token.len()).ok()?,
+                };
+                count += 1;
+                at += token.len();
+            } else {
+                let ch = rest.chars().next()?;
+                if ch.is_alphanumeric() {
+                    return None;
+                }
+                at += ch.len_utf8();
+            }
+        }
+        if count != 3 || found.iter().any(|&field| !field) {
+            return None;
+        }
+        // A variable-width field next to another field needs a separator to
+        // say where its digits end.
+        if fields.windows(2).any(|pair| {
+            pair[0].end == pair[1].start
+                && (pair[0].kind.widths().start() != pair[0].kind.widths().end()
+                    || pair[1].kind.widths().start() != pair[1].kind.widths().end())
+        }) {
+            return None;
+        }
+        Some(DateLayout { pattern: pattern.into(), fields })
+    }
+
+    /// Reads a date in this layout. Invalid digits, separators and calendar
+    /// dates return `None`.
+    pub fn read(&self, text: &str) -> Option<Day> {
+        self.read_field(text, 0, 0, 0, [None; 3])
+    }
+
+    fn read_field(
+        &self,
+        text: &str,
+        field_at: usize,
+        pattern_at: usize,
+        text_at: usize,
+        values: [Option<u32>; 3],
+    ) -> Option<Day> {
+        if field_at == self.fields.len() {
+            let suffix = &self.pattern[pattern_at..];
+            let rest = text.get(text_at..)?.strip_prefix(suffix)?;
+            if !rest.is_empty() {
+                return None;
+            }
+            let mut year = values[0]?;
+            let year2 = matches!(self.fields[0].kind, DateFieldKind::Year2)
+                || matches!(self.fields[1].kind, DateFieldKind::Year2)
+                || matches!(self.fields[2].kind, DateFieldKind::Year2);
+            if year2 {
+                year += 2000;
+            }
+            return Day::from_ymd(year as i32, values[1]?, values[2]?);
+        }
+        let field = self.fields[field_at];
+        let separator = &self.pattern[pattern_at..field.start as usize];
+        text.get(text_at..)?.strip_prefix(separator)?;
+        let text_at = text_at + separator.len();
+        let widths = field.kind.widths();
+        for width in widths {
+            let digits = text.get(text_at..)?.get(..width)?;
+            if !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                continue;
+            }
+            let mut values = values;
+            values[field.kind.index()] = Some(digits.parse().ok()?);
+            if let Some(day) = self.read_field(text, field_at + 1, field.end as usize, text_at + width, values) {
+                return Some(day);
+            }
+        }
+        None
+    }
+
+    /// The same layout with `MM`/`M` and `DD`/`D` exchanged.
+    pub fn swapped(&self) -> DateLayout {
+        let mut pattern = String::with_capacity(self.pattern.len());
+        let mut at = 0;
+        for field in self.fields {
+            let start = field.start as usize;
+            let end = field.end as usize;
+            pattern.push_str(&self.pattern[at..start]);
+            let kind = match field.kind {
+                DateFieldKind::Month2 => DateFieldKind::Day2,
+                DateFieldKind::Month => DateFieldKind::Day,
+                DateFieldKind::Day2 => DateFieldKind::Month2,
+                DateFieldKind::Day => DateFieldKind::Month,
+                year => year,
+            };
+            pattern.push_str(kind.spelling());
+            at = end;
+        }
+        pattern.push_str(&self.pattern[at..]);
+        DateLayout::parse(&pattern).expect("swapping month and day preserves a valid date layout")
+    }
+}
+
+impl fmt::Display for DateLayout {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.pattern)
+    }
+}
+
+#[cfg(test)]
+mod date_layout_tests {
+    use super::*;
+
+    #[test]
+    fn reads_fixed_and_variable_width_dates_and_swaps_month_and_day() {
+        let us = DateLayout::parse("MM/DD/YYYY").unwrap();
+        let eu = us.swapped();
+        assert_eq!(us.to_string(), "MM/DD/YYYY");
+        assert_eq!(eu.to_string(), "DD/MM/YYYY");
+        assert_eq!(us.read("03/09/2026"), Day::from_ymd(2026, 3, 9));
+        assert_eq!(eu.read("09/03/2026"), Day::from_ymd(2026, 3, 9));
+
+        let short = DateLayout::parse("M/D/YY").unwrap();
+        assert_eq!(short.read("3/9/26"), Day::from_ymd(2026, 3, 9));
+        assert_eq!(short.read("13/9/26"), None);
+        assert_eq!(DateLayout::parse("MM-M-YYYY"), None);
+        assert_eq!(DateLayout::parse("YYYY.MM.DD").unwrap().read("2026.02.30"), None);
+    }
+}
+
 /// An inclusive range of days, never empty: what a flow is recognized over,
 /// what a residence or a contract lasts, and where a declaration holds.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

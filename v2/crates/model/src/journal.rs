@@ -39,18 +39,22 @@ pub struct Flow {
     /// Written, an occurrence of a contract, or derived.
     pub origin: Origin,
     /// Lot selectors applied when relieving parcels at `from`.
-    pub select: Box<[Select]>,
-    /// The transaction's codes, then the leg's own.
-    pub codes: Box<[Sym]>,
+    pub select: Run<Select>,
+    /// The transaction header's codes. This is stored on the flow so forecast
+    /// and derived flows retain metadata even when their transaction identity
+    /// is synthetic.
+    pub header_codes: Run<Sym>,
+    /// Codes written on the leg or item. Transaction codes are shared by all
+    /// its flows and are read through [`FlowView::codes`].
+    pub codes: Run<Sym>,
     /// The leg, or the header for a flow without legs.
     pub loc: Loc,
     /// The `!` that covers this flow: its leg's own, else the transaction's.
     /// Law violations it raises, priced ones included, are accepted and
     /// reported.
     pub waive: Option<Waive>,
-    /// What few flows say about the parcels they move. Boxed: most flows say
-    /// nothing, and a flow is copied into every place that reads the journal.
-    pub detail: Option<Box<Detail>>,
+    /// An id in the book's rare-detail pool; most flows say nothing here.
+    pub detail: Option<Id<Detail>>,
 }
 
 impl Flow {
@@ -58,16 +62,112 @@ impl Flow {
         self.out.unit != self.arrive.unit
     }
 
-    /// The flow's detail, or the detail of a flow that says nothing.
-    pub fn detail(&self) -> &Detail {
-        self.detail.as_deref().unwrap_or(&Detail::NONE)
+}
+
+/// A changed detail owned by an engine's runtime arena, such as a contract
+/// occurrence's shifted due day or prorated basis.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct RuntimeDetail(pub Detail);
+
+/// A forecast or derived flow and its optional runtime detail override. With
+/// no override, its `Flow::detail` handle still names the source Book detail.
+#[derive(Clone, PartialEq, Debug)]
+pub struct RuntimeFlow {
+    pub flow: Flow,
+    pub detail: Option<Id<RuntimeDetail>>,
+}
+
+impl RuntimeFlow {
+    pub fn source(flow: Flow) -> RuntimeFlow {
+        RuntimeFlow { flow, detail: None }
+    }
+}
+
+/// A borrowed view of a flow and its pooled metadata. Cloning the `Flow` is
+/// constant-size; this view gives readers the original codes, selectors and
+/// rare detail without allocating or copying them.
+#[derive(Clone, Copy)]
+pub struct FlowView<'a> {
+    flow: &'a Flow,
+    transaction_codes: &'a [Sym],
+    local_codes: &'a [Sym],
+    selectors: &'a [Select],
+    detail: &'a Detail,
+}
+
+impl<'a> FlowView<'a> {
+    pub(crate) fn new(
+        flow: &'a Flow,
+        transaction_codes: &'a [Sym],
+        local_codes: &'a [Sym],
+        selectors: &'a [Select],
+        detail: &'a Detail,
+    ) -> FlowView<'a> {
+        FlowView { flow, transaction_codes, local_codes, selectors, detail }
     }
 
-    /// Whether quantity crosses `end`. At a `PLACE.basis` end none does: the
-    /// flow changes what the place's parcels cost, and nothing arrives there or
-    /// leaves it. Everything that reads a flow as money asks this first.
-    pub fn moves_quantity(&self, end: End) -> bool {
-        self.detail().basis_end != Some(end)
+    /// Codes in source order: transaction header first, then this leg or item.
+    pub fn codes(self) -> impl Iterator<Item = Sym> + 'a {
+        self.transaction_codes.iter().chain(self.local_codes).copied()
+    }
+
+    /// The resolved selectors applied at the flow's source.
+    pub fn select(self) -> &'a [Select] {
+        self.selectors
+    }
+
+    /// The flow's rare facts, or the shared empty value.
+    pub fn detail(self) -> &'a Detail {
+        self.detail
+    }
+}
+
+impl std::ops::Deref for FlowView<'_> {
+    type Target = Flow;
+    fn deref(&self) -> &Flow {
+        self.flow
+    }
+}
+
+#[cfg(test)]
+mod flow_view_tests {
+    use super::*;
+    use crate::book::Amount;
+
+    #[test]
+    fn pooled_flow_metadata_stays_borrowed_and_codes_keep_source_order() {
+        let mut names = axiom_core::Interner::default();
+        let header = [names.intern("statement"), names.intern("tax-2026")];
+        let local = [names.intern("withheld")];
+        let amount = Amount::zero(Id::new(0));
+        let flow = Flow {
+            day: Day::MIN,
+            recognized: Days::on(Day::MIN),
+            from: Id::new(0),
+            to: Id::new(1),
+            out: amount,
+            arrive: amount,
+            mode: Mode::Actual,
+            infer: Infer::Known,
+            txn: Id::new(0),
+            payee: None,
+            owner: Id::new(0),
+            purpose: None,
+            description: None,
+            origin: Origin::Written,
+            select: Run::new(Id::new(0), 0),
+            header_codes: Run::new(Id::new(0), 0),
+            codes: Run::new(Id::new(0), 0),
+            loc: Loc::default(),
+            waive: None,
+            detail: None,
+        };
+
+        let view = FlowView::new(&flow, &header, &local, &[], &Detail::NONE);
+        assert_eq!(view.codes().collect::<Vec<_>>(), [header[0], header[1], local[0]]);
+        assert!(view.select().is_empty());
+        assert_eq!(*view.detail(), Detail::NONE);
+        assert_eq!(view.from, Id::new(0));
     }
 }
 
@@ -159,7 +259,7 @@ pub enum Sharer {
 }
 
 /// What a flow says about the parcels it moves, beyond how many.
-#[derive(Clone, Default, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 pub struct Detail {
     /// `basis 3_000 USD`: the total basis the arriving parcels take, in
     /// base-currency quanta, overriding the target kind's arrival rule.
@@ -167,13 +267,6 @@ pub struct Detail {
     /// `for ENTITY`: the arriving parcels are held for this entity, and its
     /// `on spend` laws govern them. The target's owner means "untie".
     pub hold: Option<Id<Entity>>,
-    /// v3 only: the v4 model has no `.basis` places, and this goes with the
-    /// v3 model.
-    ///
-    /// `PLACE.basis` at one end: that end moves basis, not quantity. Into it,
-    /// the place's parcels gain basis; out of it, they lose basis and the
-    /// amount is recognized at the other end.
-    pub basis_end: Option<End>,
     /// An opening line's `since`: when its parcels were acquired.
     pub since: Option<Day>,
     /// An entity written as the source (`car-fund -> car-repair 150 USD`): the
@@ -207,7 +300,6 @@ impl Detail {
     pub const NONE: Detail = Detail {
         basis: None,
         hold: None,
-        basis_end: None,
         since: None,
         spender: None,
         cost: None,
@@ -218,7 +310,7 @@ impl Detail {
 
     /// The same detail `days` later: a due day goes with the flow that carries it.
     pub fn moved(&self, days: i32) -> Detail {
-        Detail { due: self.due.map(|due| due.add_days(days)), ..self.clone() }
+        Detail { due: self.due.map(|due| due.add_days(days)), ..*self }
     }
 }
 
@@ -272,12 +364,9 @@ pub struct Txn {
     pub day: Day,
     /// The flows it produced, in `Book::flows`.
     pub flows: Run<Flow>,
-    pub codes: Box<[Sym]>,
+    pub codes: Run<Sym>,
     /// `!`: this transaction's law violations are accepted and reported.
     pub waive: Option<Waive>,
-    /// The named plan this transaction is an occurrence of (`DATE paycheck`).
-    /// v3 only: the v4 model fills `contract`.
-    pub plan: Option<Id<Plan>>,
     /// The contract this transaction is an occurrence of (`DATE phone`).
     pub contract: Option<Id<Contract>>,
     /// `DATE NAME ends`: it ends the contract, and has no flows.

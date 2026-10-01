@@ -11,7 +11,10 @@ use axiom_core::{
     Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Span, Sym, Timeline, Tree, calendar,
 };
 
-use crate::journal::{Assert, Event, Filed, Flow, Infer, Measure, Mode, Origin, Plan, Prices, Purposed, Reading, Split, Txn};
+use crate::journal::{
+    Assert, Detail, Event, Filed, Flow, FlowView, Infer, Measure, Mode, Origin, Plan, Prices, Purposed, Reading,
+    RuntimeDetail, RuntimeFlow, Select, Split, Txn,
+};
 use crate::law::{Fault, Law, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
 use crate::sync::{Format, Pattern, Source};
@@ -48,7 +51,15 @@ pub struct Book<'s> {
     pub budgets: Arena<Budget>,
     pub params: Arena<Param>,
     pub schedules: Arena<Schedule>,
-    pub codes: Vec<CodeRule>,
+    /// Code placement rules declared by the book. Flow codes live in the
+    /// separate flat `codes` arena below.
+    pub code_rules: Vec<CodeRule>,
+    /// Flow codes, shared by ranges so cloning a forecast flow copies no text.
+    pub codes: Arena<Sym>,
+    /// Resolved lot selectors used by flows, in one flat arena.
+    pub selectors: Arena<Select>,
+    /// Rare per-flow facts. Empty details are represented by `None`.
+    pub details: Arena<Detail>,
     /// Every pattern that recognizes a memo: named ones (`pattern ach = …`) and
     /// the `known-as` of things.
     pub patterns: Arena<Pattern>,
@@ -118,24 +129,37 @@ pub struct Roots {
     pub me: Id<Entity>,
     /// `?`: the unknown party. Value of unknown origin comes from it and
     /// unexplained value goes to it.
-    pub unknown: Id<Place>,
+    pub unknown: Id<Entity>,
     /// Where `opening` holdings come from: an outside place no law watches.
-    pub opening: Id<Place>,
+    pub opening: Id<Entity>,
     /// The market, a party: flows with it are revaluations. A flow between an
     /// asset place and the market's place changes quantity and keeps basis: it
     /// realizes nothing.
     pub market: Id<Entity>,
     /// Root kinds of accounts, by class.
+    pub kinds: KindRoots,
+    /// The roots of the purpose tree.
+    pub purposes: PurposeRoots,
+}
+
+/// Built-in kind roots, named so callers never rely on arena positions.
+#[derive(Clone, Copy, Debug)]
+pub struct KindRoots {
     pub asset: Id<Kind>,
     pub debt: Id<Kind>,
-    /// The root kind of assets (identified things).
     pub thing: Id<Kind>,
     pub commodity: Id<Kind>,
+    pub measure: Id<Kind>,
     pub entity: Id<Kind>,
-    /// The roots of the purpose tree.
+}
+
+/// The four disjoint roots of the purpose tree.
+#[derive(Clone, Copy, Debug)]
+pub struct PurposeRoots {
     pub income: Id<Purpose>,
     pub spending: Id<Purpose>,
     pub capital: Id<Purpose>,
+    pub transfer: Id<Purpose>,
 }
 
 /// Where a place sits: what the owners hold, what they owe, or outside them.
@@ -1321,6 +1345,61 @@ pub enum RatePolicy {
     Param(Id<Param>),
 }
 
+/// A conversion together with the exact evidence used to obtain its rate.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Conversion {
+    pub amount: Amount,
+    pub rate: Ratio,
+    pub path: ConversionPath,
+}
+
+/// One direct or inverse rate, or the two rates used through the base unit.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ConversionPath {
+    Identity,
+    Rates { first: RateUse, second: Option<RateUse> },
+}
+
+/// A rate applied from one commodity to another.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct RateUse {
+    pub from: Id<Commodity>,
+    pub to: Id<Commodity>,
+    pub rate: Ratio,
+    pub source: RateSource,
+}
+
+/// The declaration selected for one rate leg, kept typed for `why`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RateSource {
+    Spot {
+        quoted: Id<Commodity>,
+        quote: Id<Commodity>,
+        as_of: Day,
+        inverted: bool,
+        implied: bool,
+        loc: Loc,
+    },
+    Param {
+        param: Id<Param>,
+        row: u32,
+        since: Option<Day>,
+        loc: Loc,
+    },
+}
+
+/// Why a requested conversion failed.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ConversionError {
+    Missing {
+        from: Id<Commodity>,
+        to: Id<Commodity>,
+        day: Day,
+        policy: RatePolicy,
+    },
+    Overflow,
+}
+
 /// `param limit`: values by time and name keys.
 pub struct Param {
     pub name: Sym,
@@ -1339,6 +1418,66 @@ pub struct ParamRow {
     pub names: Box<[Sym]>,
     pub value: Value,
     pub loc: Loc,
+}
+
+impl Param {
+    /// The row with exactly `keys` whose date is latest at or before `day`.
+    /// Rows are grouped by their complete name-key tuple, then by date.
+    pub fn row(&self, day: Day, keys: &[Sym]) -> Option<&ParamRow> {
+        self.row_index(day, keys).map(|(_, row)| row)
+    }
+
+    /// The stable index and row with exactly `keys` whose date is latest at
+    /// or before `day`. Complete key tuples and then dates must be sorted.
+    /// Both tuple bounds and the dated row are found by binary search.
+    pub fn row_index(&self, day: Day, keys: &[Sym]) -> Option<(u32, &ParamRow)> {
+        let first = self.rows.partition_point(|row| row.names.as_ref() < keys);
+        let after = first + self.rows[first..].partition_point(|row| row.names.as_ref() <= keys);
+        let matching = &self.rows[first..after];
+        let upto = matching.partition_point(|row| row.since.is_none_or(|since| since <= day));
+        let index = first.checked_add(upto)?.checked_sub(1)?;
+        Some((u32::try_from(index).ok()?, &self.rows[index]))
+    }
+}
+
+#[cfg(test)]
+mod param_lookup_tests {
+    use super::*;
+
+    fn row(names: &[Sym], since: Option<Day>, value: i64) -> ParamRow {
+        ParamRow {
+            since,
+            names: names.into(),
+            value: Value::Num(Ratio::int(value)),
+            loc: Loc::default(),
+        }
+    }
+
+    #[test]
+    fn row_lookup_binary_searches_full_key_tuple_and_date() {
+        let mut names = Interner::default();
+        let (family, self_only) = (names.intern("family"), names.intern("self-only"));
+        let (param_name, family_key) = (names.intern("limit"), [family]);
+        let rows = vec![
+            row(&family_key, Some(Day::from_ymd(2025, 1, 1).unwrap()), 100),
+            row(&family_key, Some(Day::from_ymd(2026, 1, 1).unwrap()), 200),
+            row(&[self_only], Some(Day::from_ymd(2025, 1, 1).unwrap()), 50),
+        ];
+        let param = Param {
+            name: param_name,
+            unit: None,
+            system: None,
+            rows: rows.into(),
+            loc: Loc::default(),
+        };
+
+        let day = Day::from_ymd(2026, 6, 1).unwrap();
+        let (index, row) = param.row_index(day, &family_key).unwrap();
+        assert_eq!(index, 1);
+        assert_eq!(row.value, Value::Num(Ratio::int(200)));
+        assert_eq!(param.row_index(day, &[self_only]).unwrap().0, 2);
+        assert!(param.row_index(day, &[names.intern("individual")]).is_none());
+    }
 }
 
 /// Marginal brackets: `0 USD 10% | 12_400 USD 12% | …`.
@@ -1472,8 +1611,53 @@ impl<'s> Book<'s> {
             return Some(amount);
         }
         let rate = self.prices.rate(amount.unit, unit, day, self.base)?;
+        self.convert_at_rate(amount, unit, rate)
+    }
+
+    /// Applies an already selected exchange rate using the book's commodity
+    /// precision and the same rounding as [`Book::convert`]. Callers that
+    /// cache a typed [`RateUse`] can reuse its rate for later amounts without
+    /// repeating quote or parameter lookup.
+    pub fn convert_at_rate(&self, amount: Amount, unit: Id<Commodity>, rate: Ratio) -> Option<Amount> {
+        if amount.unit == unit {
+            return Some(amount);
+        }
         let (from, to) = (self.commodities[amount.unit].scale, self.commodities[unit].scale);
         Some(Amount::new(crate::prices::rescale(amount.qty, from, to, rate)?, unit))
+    }
+
+    /// Borrows a flow with the metadata its compact ranges name.
+    pub fn flow_view<'a>(&'a self, flow: &'a Flow) -> FlowView<'a> {
+        let detail = flow.detail.map_or(&Detail::NONE, |id| &self.details[id]);
+        self.flow_view_parts(flow, detail)
+    }
+
+    /// Borrows a forecast flow, resolving its optional transformed detail in
+    /// the runtime pool and reusing the book's code and selector pools.
+    pub fn runtime_flow_view<'a>(
+        &'a self,
+        runtime: &'a RuntimeFlow,
+        details: &'a Arena<RuntimeDetail>,
+    ) -> FlowView<'a> {
+        let flow = &runtime.flow;
+        let detail = runtime
+            .detail
+            .map(|id| &details[id].0)
+            .or_else(|| flow.detail.map(|id| &self.details[id]))
+            .unwrap_or(&Detail::NONE);
+        self.flow_view_parts(flow, detail)
+    }
+
+    fn flow_view_parts<'a>(&'a self, flow: &'a Flow, detail: &'a Detail) -> FlowView<'a> {
+        let header_codes = &self.codes[flow.header_codes];
+        let local_codes = &self.codes[flow.codes];
+        let selectors = &self.selectors[flow.select];
+        FlowView::new(flow, header_codes, local_codes, selectors, detail)
+    }
+
+    /// Borrows the flow with its pooled metadata by id.
+    pub fn flow(&self, id: Id<Flow>) -> FlowView<'_> {
+        self.flow_view(&self.flows[id])
     }
 
     /// The flow of `txn` that paid into `place`: what made a parcel there. A
