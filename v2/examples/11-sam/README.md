@@ -106,8 +106,8 @@ condo, a rental home of Sam's, bought 2024-02-20
   Cost                                  402,000.00   the purchase (land 120,000.00)
   Improvements   2026-02-02 water heater  1,480.00   journal/2026/02.ax:9
   Depreciation   2024–2025              -18,372.73   us/rental: 27.5 years, mid-month, from 2024-03-01
-                 2026 so far             -2,570.37   (6.73 of it the water heater's)
-  Basis                                 382,536.90
+                 2026 so far             -2,570.36   (6.73 of it the water heater's)
+  Basis                                 382,536.91
 
   Earns          lease with dana          2,350.00 a month   rental income 7,050.00 in 2026
   Costs          interest of condo (mortgage)   4,583.63 through March 2026
@@ -141,4 +141,8 @@ inputs. The mortgage oracle uses a monthly rate (annual rate divided by twelve),
 the level payment and each due day's interest to cents, applies the remainder to principal,
 and adjusts the final payment to clear the remaining principal. Its first due date is the
 first scheduled day after origination. This is the example's monthly convention; it does
-not claim full ACTUS conformance.
+not claim full ACTUS conformance. Depreciation rounds cumulative recovery at each period
+boundary and takes the difference between those rounded totals; this avoids a cent changing
+when a report interval is split into months. Under that rule, condo recovery through 2025 is
+18,372.73 and through March 2026 is 20,936.36, so Q1 recovery is 2,563.63 plus 6.73 for
+the water heater.

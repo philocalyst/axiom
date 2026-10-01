@@ -11,6 +11,7 @@ is the fixture's monthly convention; it is not a claim of ACTUS conformance.
 Run: python3 examples/verify/verify11.py
 """
 from decimal import Decimal as D, ROUND_HALF_EVEN
+from datetime import date
 from pathlib import Path
 import re
 
@@ -34,6 +35,15 @@ def cents(value):
 
 def money(text):
     return D(text.replace("_", ""))
+
+
+def months_through(start, end, mid_month):
+    """Count service months through an inclusive month-end observation."""
+    assert end.day >= 28, "the oracle observes depreciation at month end"
+    months = (end.year - start.year) * 12 + end.month - start.month + 1
+    if mid_month:
+        months -= D("0.5")
+    return D(months)
 
 
 contracts = source("contracts.ax")
@@ -79,11 +89,24 @@ assert "1,892.92" in contracts
 property_basis = money(require(r"condo\s+basis\s+([\d_,]+)\s+USD", opening, "condo opening basis")[1])
 land = money(require(r"land\s+([\d_,]+)\s+USD", assets, "condo land value")[1])
 life_years = D(require(r"straight-line\(self\.cost - self\.land,\s*([\d.]+)y", source("std-sketch.ax"), "rental recovery life")[1])
-condo_service_months_through_2025 = D("21.5")
-base_depreciation_2024_2025 = cents(
-    (property_basis - land) * condo_service_months_through_2025 / (life_years * 12)
+mid_month = bool(re.search(r"\bmid-month\b", source("std-sketch.ax")))
+service_day = date.fromisoformat(
+    require(r"in-service\s+(\d{4}-\d{2}-\d{2})", assets, "condo in-service date")[1]
 )
-base_depreciation_2026_q1 = cents((property_basis - land) * 3 / (life_years * 12))
+period_2025_end = date(2025, 12, 31)
+period_q1_end = date(2026, 3, 31)
+depreciable_basis = property_basis - land
+condo_service_months_through_2025 = months_through(service_day, period_2025_end, mid_month)
+condo_service_months_through_q1 = months_through(service_day, period_q1_end, mid_month)
+base_depreciation_2024_2025 = cents(
+    depreciable_basis * condo_service_months_through_2025 / (life_years * 12)
+)
+# Round cumulative recovery at each global boundary and subtract. This keeps
+# the result invariant when the same interval is split into monthly reports.
+base_depreciation_through_q1 = cents(
+    depreciable_basis * condo_service_months_through_q1 / (life_years * 12)
+)
+base_depreciation_2026_q1 = base_depreciation_through_q1 - base_depreciation_2024_2025
 improvement_line = require(
     r"^(\d{2}) checking -> bay-plumbing\s+([\d_,]+)\s+USD #improvement of condo",
     february,
@@ -91,21 +114,29 @@ improvement_line = require(
 )
 improvement_day = int(improvement_line[1])
 improvement = money(improvement_line[2])
-assert improvement_day == 2
+improvement_journal = ROOT / "journal/2026/02.ax"
+improvement_date = date(
+    int(improvement_journal.parent.name), int(improvement_journal.stem), improvement_day
+)
 # The improvement is its own part: its February half-month and March month use
 # its full cost. The home's $120,000 land property belongs only to the purchase
 # part and must not be subtracted from this one.
-improvement_depreciation_q1 = cents(improvement * D("1.5") / (life_years * 12))
+improvement_months_q1 = months_through(improvement_date, period_q1_end, mid_month)
+improvement_depreciation_q1 = cents(improvement * improvement_months_q1 / (life_years * 12))
 depreciation_2026_q1 = base_depreciation_2026_q1 + improvement_depreciation_q1
 condo_basis_2026_03_31 = property_basis + improvement - base_depreciation_2024_2025 - depreciation_2026_q1
 
 assert land == D("120000")
-assert re.search(r"in-service 2024-03-01", assets)
+assert service_day == date(2024, 3, 1)
+assert mid_month
+assert improvement_journal.exists()
+assert improvement_date == date(2026, 2, 2)
 assert base_depreciation_2024_2025 == D("18372.73")
-assert base_depreciation_2026_q1 == D("2563.64")
+assert base_depreciation_through_q1 == D("20936.36")
+assert base_depreciation_2026_q1 == D("2563.63")
 assert improvement_depreciation_q1 == D("6.73")
-assert depreciation_2026_q1 == D("2570.37")
-assert condo_basis_2026_03_31 == D("382536.90")
+assert depreciation_2026_q1 == D("2570.36")
+assert condo_basis_2026_03_31 == D("382536.91")
 
 # The purchase amount is tax-inclusive. A percentage of tax-inclusive price is
 # tax = price * rate / (1 + rate), not price * rate.
