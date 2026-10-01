@@ -998,6 +998,7 @@ pub(crate) fn household() -> Household {
         headroom: Vec::new(),
         pads: Vec::new(),
         assets: Vec::new(),
+        pending_carries: Vec::new(),
         promises: Vec::new(),
         adjustments: Vec::new(),
         checks: vec![0; law_count].into(),

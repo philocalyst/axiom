@@ -8,7 +8,7 @@
 use std::ops::{AddAssign, Range};
 
 use axiom_core::{Day, Id, Qty, Ratio, Set};
-use axiom_engine::{Holding, Pad, Posted, Run, State};
+use axiom_engine::{DisposalBoundary, Holding, Pad, Posted, Run, State};
 use axiom_model::{Amount, Book, Commodity, End, Flow, Place};
 
 use crate::lens::{Basket, Lens, on_balance_sheet};
@@ -23,7 +23,11 @@ pub struct Posting<'a> {
 
 impl<'a> Posting<'a> {
     pub fn at(book: &'a Book, run: &'a Run, id: Id<Flow>) -> Posting<'a> {
-        Posting { id, flow: &book.flows[id], posted: &run.posted[id.index()] }
+        Posting {
+            id,
+            flow: &book.flows[id],
+            posted: &run.posted[id.index()],
+        }
     }
 
     /// What left `flow.from`, as solved.
@@ -60,7 +64,11 @@ impl<'a> Posting<'a> {
 
     /// The other end of the flow, seen from `place`.
     pub fn counterparty(&self, place: Id<Place>) -> Id<Place> {
-        if self.flow.from == place { self.flow.to } else { self.flow.from }
+        if self.flow.from == place {
+            self.flow.to
+        } else {
+            self.flow.from
+        }
     }
 
     /// The place at one end of the flow.
@@ -84,7 +92,10 @@ impl<'a> Posting<'a> {
 
     /// What happened at `place`: once for each end of the flow that is there.
     pub fn changes_at(self, place: Id<Place>) -> impl Iterator<Item = Change> {
-        [End::From, End::To].into_iter().filter(move |&end| self.place(end) == place).map(move |end| self.change(end))
+        [End::From, End::To]
+            .into_iter()
+            .filter(move |&end| self.place(end) == place)
+            .map(move |end| self.change(end))
     }
 
     /// The out side priced on the day the flow happened.
@@ -114,7 +125,10 @@ pub fn pad_ends(pad: &Pad) -> [(Id<Place>, Amount); 2] {
 
 /// Every journal flow with its posting, in journal order.
 pub fn postings<'a>(book: &'a Book, run: &'a Run) -> impl Iterator<Item = Posting<'a>> {
-    book.flows.iter().zip(run.posted.iter()).map(|((id, flow), posted)| Posting { id, flow, posted })
+    book.flows
+        .iter()
+        .zip(run.posted.iter())
+        .map(|((id, flow), posted)| Posting { id, flow, posted })
 }
 
 /// Whether the journal holds nothing after `day`, so the run's final state is
@@ -163,10 +177,13 @@ impl Snapshots {
         let book = lens.book();
         // Holdings do not remember what flows were worth, so a valued balance
         // of a foreign commodity in an expense place needs the flows.
-        let foreign =
-            |holding: &Holding| holding.unit != book.base && !on_balance_sheet(book.places[holding.place].class);
+        let foreign = |holding: &Holding| {
+            holding.unit != book.base && !on_balance_sheet(book.places[holding.place].class)
+        };
         match days {
-            [day] if journal_ends_by(book, *day) && !(valued && run.holdings.iter().any(foreign)) => {
+            [day]
+                if journal_ends_by(book, *day) && !(valued && run.holdings.iter().any(foreign)) =>
+            {
                 Snapshots::final_state(lens, run, *day)
             }
             _ => Snapshots::replay(lens, run, days, valued),
@@ -184,7 +201,13 @@ impl Snapshots {
             place_offsets[place] += place_offsets[place - 1];
         }
         let cells = vec![Held::default(); days.len() * pairs.len()];
-        Snapshots { days, pairs, place_offsets, cells, unpriced: 0 }
+        Snapshots {
+            days,
+            pairs,
+            place_offsets,
+            cells,
+            unpriced: 0,
+        }
     }
 
     fn final_state(lens: Lens, run: &Run, day: Day) -> Snapshots {
@@ -195,9 +218,17 @@ impl Snapshots {
             .map(|holding| (holding.place, holding.unit))
             .collect();
         let mut snapshots = Snapshots::empty(lens.book(), vec![day], pairs);
-        for holding in run.holdings.iter().filter(|holding| lens.owns(holding.place)) {
+        for holding in run
+            .holdings
+            .iter()
+            .filter(|holding| lens.owns(holding.place))
+        {
             let qty = lens.place_qty(holding.place, holding.qty());
-            let booked = if holding.unit == lens.book().base { qty } else { Qty::ZERO };
+            let booked = if holding.unit == lens.book().base {
+                qty
+            } else {
+                Qty::ZERO
+            };
             *snapshots.cell(0, holding.place, holding.unit) = Held { qty, booked };
         }
         snapshots
@@ -211,13 +242,41 @@ impl Snapshots {
             .filter(|holding| lens.owns(holding.place))
             .map(|holding| (holding.place, holding.unit))
             .collect();
+        let mut asset_spans = Vec::new();
+        // An acquisition's cash flow names the seller, not the asset place.
+        // The engine's asset world owns the corresponding physical unit, so
+        // include its dated existence span in replay as a separate stock edge.
+        for state in &run.assets {
+            let asset = &book.assets[state.asset];
+            let Some(start) = state
+                .parts()
+                .iter()
+                .filter(|part| part.kind == axiom_engine::PartKind::Acquisition)
+                .map(|part| part.recorded.day)
+                .min()
+            else {
+                continue;
+            };
+            if lens.owns(asset.place) {
+                pairs.insert((asset.place, asset.unit));
+                let end = state
+                    .disposed
+                    .map_or(Day::MAX, |disposal| match disposal.boundary {
+                        DisposalBoundary::After(at) => at.day,
+                        DisposalBoundary::Close(day) => day,
+                    });
+                asset_spans.push((asset.place, asset.unit, start, end));
+            }
+        }
         for posting in postings(book, run) {
             if posting.standing().is_none() {
                 continue;
             }
             for end in [End::From, End::To] {
                 let place = posting.place(end);
-                if lens.owns(place) && let Change::Moved(amount) = posting.change(end) {
+                if lens.owns(place)
+                    && let Change::Moved(amount) = posting.change(end)
+                {
                     pairs.insert((place, amount.unit));
                 }
             }
@@ -236,11 +295,27 @@ impl Snapshots {
         columns.sort_unstable();
         columns.dedup();
         let mut snapshots = Snapshots::empty(book, columns, pairs.into_iter().collect());
+        for (place, unit, start, end) in asset_spans {
+            let (lo, hi) = (snapshots.column_from(start), snapshots.column_from(end));
+            if lo < hi {
+                snapshots.change(
+                    lo..hi,
+                    place,
+                    unit,
+                    Held {
+                        qty: Qty(1),
+                        booked: Qty::ZERO,
+                    },
+                );
+            }
+        }
 
         // Each flow changes every column from the one it stands on until it is
         // returned: a difference at each edge, summed across columns after.
         for posting in postings(book, run) {
-            let Some((start, past)) = posting.standing() else { continue };
+            let Some((start, past)) = posting.standing() else {
+                continue;
+            };
             let (lo, hi) = (snapshots.column_from(start), snapshots.column_from(past));
             for end in [End::From, End::To] {
                 let place = posting.place(end);
@@ -294,7 +369,10 @@ impl Snapshots {
     /// What `moved` adds to a place: its quantity, and, off the balance sheet,
     /// its worth at the prices of `lens`'s day.
     fn held(&mut self, lens: Lens, place: Id<Place>, moved: Amount, valued: bool) -> Held {
-        let mut held = Held { qty: moved.qty, booked: Qty::ZERO };
+        let mut held = Held {
+            qty: moved.qty,
+            booked: Qty::ZERO,
+        };
         if valued && !on_balance_sheet(lens.book().places[place].class) {
             match lens.value(moved) {
                 Some(worth) => held.booked = worth,
@@ -319,10 +397,19 @@ impl Snapshots {
     }
 
     /// Adds `held` to `columns`, as a difference at each edge.
-    fn change(&mut self, columns: Range<usize>, place: Id<Place>, unit: Id<axiom_model::Commodity>, held: Held) {
+    fn change(
+        &mut self,
+        columns: Range<usize>,
+        place: Id<Place>,
+        unit: Id<axiom_model::Commodity>,
+        held: Held,
+    ) {
         self.cell(columns.start, place, unit).add_assign(held);
         if columns.end < self.days.len() {
-            self.cell(columns.end, place, unit).add_assign(Held { qty: -held.qty, booked: -held.booked });
+            self.cell(columns.end, place, unit).add_assign(Held {
+                qty: -held.qty,
+                booked: -held.booked,
+            });
         }
     }
 
@@ -346,7 +433,9 @@ impl Snapshots {
                 continue;
             }
             let standing = self.cells[column * self.pairs.len() + pair].qty;
-            let more = standing.scale(ratio).map_or(Qty::ZERO, |scaled| scaled - standing);
+            let more = standing
+                .scale(ratio)
+                .map_or(Qty::ZERO, |scaled| scaled - standing);
             for later in column..self.days.len() {
                 self.cells[later * self.pairs.len() + pair].qty += more;
             }
@@ -363,10 +452,16 @@ impl Snapshots {
             .iter()
             .flat_map(|day| {
                 let column = self.column_from(*day);
-                self.cells[column * stride..(column + 1) * stride].iter().copied()
+                self.cells[column * stride..(column + 1) * stride]
+                    .iter()
+                    .copied()
             })
             .collect();
-        Snapshots { days: days.to_vec(), cells, ..self }
+        Snapshots {
+            days: days.to_vec(),
+            cells,
+            ..self
+        }
     }
 
     pub fn days(&self) -> &[Day] {
@@ -385,7 +480,10 @@ impl Snapshots {
         let first = column * self.pairs.len() + first_pair;
         let past = column * self.pairs.len() + past_pair;
         let mut basket = Basket::default();
-        for ((_, unit), held) in self.pairs[first_pair..past_pair].iter().zip(&self.cells[first..past]) {
+        for ((_, unit), held) in self.pairs[first_pair..past_pair]
+            .iter()
+            .zip(&self.cells[first..past])
+        {
             if held.qty != Qty::ZERO || held.booked != Qty::ZERO {
                 basket.add(*unit, *held);
             }

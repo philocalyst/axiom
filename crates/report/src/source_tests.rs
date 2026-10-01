@@ -1105,12 +1105,41 @@ law recapture
 ";
 
 /// The native asset law lowers the house's basis and recognizes the expense:
-/// Twelve calendar-month occurrences contribute 900.00 USD to the recapture,
-/// while no cash leaves checking for depreciation. Keep the cash and tax
-/// expectations active while checking the projected law window.
+/// Two historical month ends have already consumed 600.00 USD of basis; ten
+/// forecast month ends bring the year's 900.00 USD recapture to its full
+/// value, while no cash leaves checking for depreciation.
 #[test]
 fn native_asset_law_forecast_changes_basis_without_moving_cash() {
     with_run(DEPRECIATING, day(2026, 3, 15), |book, run| {
+        let house = book.asset("house").unwrap();
+        let house_state = run
+            .assets
+            .iter()
+            .find(|state| state.asset == house)
+            .unwrap();
+        assert_eq!(house_state.total_basis(), Ok(Qty(11_940_000)));
+        let historical_tally: Qty = run
+            .effects
+            .iter()
+            .filter_map(|effect| {
+                (book.name(effect.name) == "depreciation"
+                    && matches!(effect.consequence, axiom_engine::Consequence::Count))
+                .then_some(effect.amount.qty)
+            })
+            .sum();
+        assert_eq!(historical_tally, Qty(60_000));
+        let consumed: Qty = run
+            .adjustments
+            .iter()
+            .filter_map(|adjustment| match adjustment.kind {
+                axiom_engine::AdjustmentKind::Consumed { asset, .. } if asset == house => {
+                    Some(adjustment.amount)
+                }
+                _ => None,
+            })
+            .sum();
+        assert_eq!(consumed, Qty(60_000));
+
         let forecast = Query::Forecast {
             until: Some(day(2026, 12, 31)),
             paths: 1,
@@ -1128,7 +1157,7 @@ fn native_asset_law_forecast_changes_basis_without_moving_cash() {
         assert_eq!(
             outlook.last().unwrap(),
             "2026-12-31 | 4,200.00 USD | 5,100.00 USD",
-            "5,100 less the 900 recaptured over twelve monthly depreciation entries"
+            "5,100 less the 900 recaptured over the calendar year"
         );
         assert_eq!(
             lines(section("Obligations coming due")),
@@ -1909,14 +1938,18 @@ opening 2025-01-01
     });
 }
 
-/// Depreciation lowers a house's basis without creating an expense account or
-/// moving cash. The balance sheet contains only its native asset positions.
+/// The house is bought from checking, one dated period-end law consumes basis,
+/// and a later repair exercises replay beyond the current Run. The first
+/// balance remains $1,000 cash plus one house with $99,700 of basis.
 const DEPRECIATION: &str = "\
 base USD
 use std
+entity seller
+entity repairer
 asset house : property
   law depreciation
     each month
+    when year == 2025 and month == 2
     let d = 300 USD
     consume d
     count d as depreciation
@@ -1924,12 +1957,30 @@ account checking : bank
 
 opening 2025-01-01
   checking 101_000 USD
-  house basis 100_000 USD since 2025-01-01
+
+2025-01-01 checking -> seller 100_000 USD #purchase of house
+2026-05-01 checking -> repairer 1 USD #repair of house
 ";
 
 #[test]
-fn depreciation_does_not_book_cash_out_of_the_asset_or_checking_account() {
+fn basis_consumption_and_later_replay_preserve_the_native_purchase_economics() {
     with_std(DEPRECIATION, day(2026, 4, 16), |book, run| {
+        let asset = book.asset("house").unwrap();
+        let state = &run.assets[asset.index()];
+        assert_eq!(state.total_cost(), Ok(Qty(10_000_000)));
+        assert_eq!(state.total_basis(), Ok(Qty(9_970_000)));
+        let consumed: Qty = run
+            .adjustments
+            .iter()
+            .filter_map(|adjustment| match adjustment.kind {
+                axiom_engine::AdjustmentKind::Consumed { asset: found, .. } if found == asset => {
+                    Some(adjustment.amount)
+                }
+                _ => None,
+            })
+            .sum();
+        assert_eq!(consumed, Qty(30_000));
+
         let balance = Query::Balance {
             globs: vec![],
             at: None,
@@ -1938,7 +1989,45 @@ fn depreciation_does_not_book_cash_out_of_the_asset_or_checking_account() {
         };
         assert_eq!(
             rows(book, run, balance),
-            ["=checking | 101,000.00 USD", "=house | 1 house",]
+            ["=checking | 1,000.00 USD", "=house | 1 house",]
         );
+
+        let plan = axiom_engine::Plan::new(book);
+        let whose = crate::lens::Whose::default();
+        let lens = crate::lens::Lens::new(&plan, &whose, run.today);
+        let days = [
+            day(2025, 1, 1),
+            day(2025, 2, 28),
+            day(2026, 4, 16),
+            day(2026, 5, 1),
+        ];
+        let snapshots = crate::history::Snapshots::of(lens, run, &days, false);
+        let checking = book.place("checking").unwrap();
+        let house = book.place("house").unwrap();
+        let house_unit = book.assets[asset].unit;
+        assert_eq!(
+            snapshots.subtree(book, 0, checking).get(book.base),
+            Qty(100_000)
+        );
+        assert_eq!(
+            snapshots.subtree(book, 1, checking).get(book.base),
+            Qty(100_000)
+        );
+        assert_eq!(
+            snapshots.subtree(book, 2, checking).get(book.base),
+            Qty(100_000),
+            "the $1,000 balance stands before the May repair"
+        );
+        assert_eq!(
+            snapshots.subtree(book, 3, checking).get(book.base),
+            Qty(99_900),
+            "the May repair lowers cash by exactly $1"
+        );
+        for column in 0..days.len() {
+            assert_eq!(
+                snapshots.subtree(book, column, house).get(house_unit),
+                Qty(1)
+            );
+        }
     });
 }

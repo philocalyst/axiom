@@ -321,7 +321,7 @@ mod tests {
             inputs: Box::default(),
             estimate: false,
             due: None,
-            grace: axiom_core::Span::default(),
+            grace: Some(axiom_core::Span::default()),
             period: None,
             covers: None,
             prorated: false,

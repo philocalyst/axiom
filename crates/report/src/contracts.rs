@@ -207,6 +207,7 @@ fn template_quantity<'s>(
         TemplateQuantity::Pending(Some(_)) => Cell::Word("computed pending amount"),
         TemplateQuantity::Target(None) => Cell::Word("target amount"),
         TemplateQuantity::Target(Some(_)) => Cell::Word("computed target amount"),
+        TemplateQuantity::Percent(rate) => Cell::Percent(rate),
         TemplateQuantity::Unknown(unit) => Cell::list(
             " ",
             [
