@@ -4,9 +4,9 @@
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axiom_core::{Day, Diagnostic};
+use axiom_core::{Day, Diagnostic, FileId};
 use axiom_engine::{Options, Run};
-use axiom_model::Book;
+use axiom_model::{Book, sync::Fetch};
 use axiom_report::{Context, Query, ReportRenderer, Summary, json::JsonRenderer};
 
 use crate::args::{Command, Invocation};
@@ -26,7 +26,7 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
         _ => {}
     }
     let project = Project::find(invocation.project.unwrap_or(Path::new(".")))?;
-    let sources = project.load()?;
+    let mut sources = project.load()?;
     if let Command::Fmt { files, check } = command {
         return Ok(crate::fmt::execute(
             &sources,
@@ -87,6 +87,12 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     // `check` needs only the final run summary; constructing a report context
     // would also retain the pre-close checkpoint that no check view uses.
     let run = axiom_engine::run(&book, options);
+    let (reader_diagnostics, suggestions) = if matches!(command, Command::Check) {
+        check_memos(&book, &project, &mut sources)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    diagnostics.extend(reader_diagnostics);
     let session = Session {
         book: &book,
         run: &run,
@@ -96,7 +102,82 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
         all: invocation.all,
         json: invocation.json,
     };
-    Ok(session.check())
+    Ok(session.check(&suggestions))
+}
+
+/// Reads only declared local `read` sources for check's unknown-memo hints.
+/// Run sources are intentionally inert here: checking a book never executes
+/// an external command.
+fn check_memos(
+    book: &Book<'_>,
+    project: &Project,
+    sources: &mut Sources,
+) -> (Vec<Diagnostic>, Vec<String>) {
+    let mut diagnostics = Vec::new();
+    let mut inputs = Vec::new();
+    for (source_index, source) in book.sources.iter().enumerate() {
+        let Fetch::Read(pattern) = source.fetch else {
+            continue;
+        };
+        let pattern = book.text(pattern);
+        let paths = match axiom_sync::matching_paths(&project.root, pattern) {
+            Ok(paths) => paths,
+            Err(problem) => {
+                diagnostics.push(problem);
+                continue;
+            }
+        };
+        for path in paths {
+            let text = match project.read_local(&path) {
+                Ok(text) => text,
+                Err(problem) => {
+                    diagnostics.push(problem);
+                    continue;
+                }
+            };
+            match Sources::append_auxiliary_to(
+                &mut sources.auxiliary,
+                sources.files.len(),
+                path,
+                text,
+            ) {
+                Ok(file) => inputs.push((source_index, file)),
+                Err(problem) => diagnostics.push(problem),
+            }
+        }
+    }
+
+    // Appending is finished before any memo borrows begin. Auxiliary strings
+    // live in a disjoint vector, so the parsed Book keeps borrowing `files`.
+    let mut memos = Vec::new();
+    for (source_index, file_id) in inputs {
+        let Some(file) = sources.get(file_id) else {
+            continue;
+        };
+        match axiom_sync::read_memos(book, &book.sources[source_index], &file.text, file_id) {
+            Ok(found) => memos.extend(found),
+            Err(problems) => diagnostics.extend(problems),
+        }
+    }
+
+    let groups = axiom_sync::unrecognized(memos.iter().map(|memo| memo.as_ref()));
+    let suggestions = if groups.is_empty() {
+        Vec::new()
+    } else {
+        let mut lines = vec!["Memos nothing recognized:".to_string()];
+        lines.extend(groups.iter().flat_map(|group| {
+            [
+                format!(
+                    "  {} ({} records)",
+                    group.example.replace('\n', " ").replace('\r', " "),
+                    group.count
+                ),
+                format!("    {}", group.known_as()),
+            ]
+        }));
+        lines
+    };
+    (diagnostics, suggestions)
 }
 
 /// Shows a query-construction error in the same channels as a report error.
@@ -149,7 +230,7 @@ struct Session<'a, 's> {
 
 impl Session<'_, '_> {
     /// Every diagnostic; and if none is an error, the book in one line.
-    fn check(&self) -> Outcome {
+    fn check(&self, suggestions: &[String]) -> Outcome {
         let (diagnostics, tally) = self.show(&self.diagnostics);
         if self.json {
             return Outcome {
@@ -159,6 +240,8 @@ impl Session<'_, '_> {
             };
         }
         if tally.errors > 0 {
+            let mut diagnostics = diagnostics;
+            diagnostics.push_str(&self.suggestions(suggestions, self.terminals.err));
             return Outcome {
                 answer: String::new(),
                 diagnostics,
@@ -166,16 +249,28 @@ impl Session<'_, '_> {
             };
         }
         let summary = axiom_report::summary(self.book, self.run);
-        let answer = self
+        let mut answer = self
             .terminals
             .out
             .painter
             .paint(&[summary_line(self.book, &summary)]);
+        answer.push_str(&self.suggestions(suggestions, self.terminals.out));
         Outcome {
             answer,
             diagnostics,
             failed: false,
         }
+    }
+
+    fn suggestions(&self, suggestions: &[String], terminal: crate::style::Terminal) -> String {
+        if self.json || suggestions.is_empty() {
+            return String::new();
+        }
+        let lines = suggestions
+            .iter()
+            .map(|suggestion| Line::text(suggestion, Ink::DIM))
+            .collect::<Vec<_>>();
+        terminal.painter.paint(&lines)
     }
 
     /// The errors, and the report. A report runs whatever the book's errors, so
@@ -266,4 +361,53 @@ fn summary_line(book: &Book, summary: &Summary) -> Line {
         );
     }
     line
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::project::Project;
+    use crate::testing::TempDir;
+
+    #[test]
+    fn check_reads_local_memos_and_never_runs_declared_commands() {
+        let dir = TempDir::new("check-memos");
+        let marker = dir.path().join("command-ran");
+        dir.write("axiom.ax", "base USD\ncommodity USD\n  precision 2\n");
+        dir.write(
+            "sync.ax",
+            &format!(
+                "sync checking\n  read \"imports/*.csv\"\n  format csv\n    memo \"Description\"\nsync prices\n  run touch {}\n  into prices.ax\n",
+                marker.display()
+            ),
+        );
+        dir.write(
+            "imports/card.csv",
+            "Description\nTRADER JOE'S #12\nTrader Joe's #13\n",
+        );
+
+        let project = Project::find(dir.path()).unwrap();
+        let mut sources = project.load().unwrap();
+        let (parsed, mut diagnostics) = Sources::parse_files(&sources.files);
+        let (book, built) = axiom_model::build(&parsed);
+        drop(parsed);
+        diagnostics.extend(built);
+        assert!(
+            diagnostics.iter().all(|problem| !problem.is_error()),
+            "fixture has no model errors: {diagnostics:?}"
+        );
+
+        let (read_problems, suggestions) = check_memos(&book, &project, &mut sources);
+        assert!(read_problems.is_empty(), "{read_problems:?}");
+        assert!(suggestions.iter().any(|line| line.contains("2 records")));
+        assert!(
+            suggestions
+                .iter()
+                .any(|line| line.contains("known-as \"TRADER JOE'S\""))
+        );
+        assert!(
+            !marker.exists(),
+            "check must never execute a declared run command"
+        );
+    }
 }

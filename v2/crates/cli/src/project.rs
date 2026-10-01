@@ -102,6 +102,40 @@ impl Project {
         })
     }
 
+    /// Reads a local sync input only after resolving its final target beneath
+    /// the canonical project root. The sync glob check is repeated here so a
+    /// path changed between expansion and reading cannot escape through a
+    /// symlink.
+    pub fn read_local(&self, relative: &str) -> Result<String, Diagnostic> {
+        let path = self.root.join(relative);
+        let canonical = fs::canonicalize(&path).map_err(|error| {
+            failure(
+                "sync-read-path",
+                format!("cannot resolve `{relative}`: {error}"),
+            )
+        })?;
+        if !canonical.starts_with(&self.root) {
+            return Err(failure(
+                "sync-read-path",
+                format!("`{relative}` leaves the project through a symlink"),
+            ));
+        }
+        let bytes = fs::read(&canonical).map_err(|error| {
+            failure(
+                "sync-read-path",
+                format!("cannot read `{relative}`: {error}"),
+            )
+        })?;
+        String::from_utf8(bytes).map_err(|error| {
+            let before = &error.as_bytes()[..error.utf8_error().valid_up_to()];
+            let line = 1 + memchr::memchr_iter(b'\n', before).count();
+            failure(
+                "not-utf8",
+                format!("cannot read `{relative}`: line {line} is not valid UTF-8"),
+            )
+        })
+    }
+
     fn find_sources(&self) -> Result<Vec<PathBuf>, Diagnostic> {
         let mut found = Vec::new();
         collect(&self.root, Path::new(""), &mut found).map_err(|error| {
