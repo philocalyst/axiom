@@ -15,7 +15,7 @@ use crate::errors::Word;
 use crate::journal::{
     Action, Assert, Detail, EndEvent, EndTarget, Event, Filed, Flow, FlowExpressions, Gap, Infer,
     JournalEnd, JournalGroup, JournalItem, JournalProgram, JournalQuantity, Measure, Mode, Object,
-    Origin, Provenance, Purposed, Quote, Reading, Select, Split, Waive,
+    Origin, Provenance, Purposed, Quote, Reading, Select, Split, Waive, WrittenOccurrence,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
 use crate::scope::Home;
@@ -613,6 +613,7 @@ fn lower_txn<'a, 's>(
         waive: txn_waive,
         contract: None,
         contract_schedule: None,
+        occurrence: None,
         ends: false,
         doc: item.doc.map(|doc| world.book.names.intern(doc.0)),
         loc: item.loc,
@@ -812,6 +813,7 @@ fn lower_opening<'a, 's>(
         waive: None,
         contract: None,
         contract_schedule: None,
+        occurrence: None,
         ends: false,
         doc: item.doc.map(|doc| world.book.names.intern(doc.0)),
         loc: item.loc,
@@ -961,7 +963,7 @@ fn lower_occurrence<'a, 's>(
         return;
     };
     let contract = &world.book.contracts[contract_id];
-    let (schedule, terms) = match nearest_occurrence(contract, statement.date) {
+    let (schedule, due, terms) = match nearest_occurrence(contract, statement.date) {
         Ok(Some(found)) => found,
         Ok(None) => {
             diags.push(
@@ -1092,6 +1094,10 @@ fn lower_occurrence<'a, 's>(
         world.book.codes.push(code);
     }
     let code_count = world.book.codes.len() - code_start;
+    let occurrence_id = world
+        .book
+        .written_occurrences
+        .push(WrittenOccurrence { due, schedule });
     let input_start = world.book.input_values.len();
     for value in input_values {
         world.book.input_values.push(value);
@@ -1105,6 +1111,7 @@ fn lower_occurrence<'a, 's>(
         waive: None,
         contract: Some(contract_id),
         contract_schedule: Some(schedule),
+        occurrence: Some(occurrence_id),
         ends: false,
         doc: doc.map(|doc| world.book.names.intern(doc.0)),
         loc,
@@ -1114,7 +1121,7 @@ fn lower_occurrence<'a, 's>(
 fn nearest_occurrence<'a>(
     contract: &'a crate::book::Contract,
     day: Day,
-) -> Result<Option<(ScheduleKind, &'a crate::book::Terms)>, (Day, Day)> {
+) -> Result<Option<(ScheduleKind, Day, &'a crate::book::Terms)>, (Day, Day)> {
     if !contract.days.contains(day) {
         return Ok(None);
     }
@@ -1157,13 +1164,13 @@ fn nearest_occurrence<'a>(
             if r_distance == s_distance {
                 Err((r_day, s_day))
             } else if r_distance < s_distance {
-                Ok(Some((ScheduleKind::Regular, regular_terms)))
+                Ok(Some((ScheduleKind::Regular, r_day, regular_terms)))
             } else {
-                Ok(Some((ScheduleKind::Standing, standing_terms)))
+                Ok(Some((ScheduleKind::Standing, s_day, standing_terms)))
             }
         }
-        (Some((_, _, _, terms)), None) => Ok(Some((ScheduleKind::Regular, terms))),
-        (None, Some((_, _, _, terms))) => Ok(Some((ScheduleKind::Standing, terms))),
+        (Some((_, _, due, terms)), None) => Ok(Some((ScheduleKind::Regular, due, terms))),
+        (None, Some((_, _, due, terms))) => Ok(Some((ScheduleKind::Standing, due, terms))),
         (None, None) => Ok(None),
     }
 }
@@ -1180,6 +1187,13 @@ fn lower_owes<'a, 's>(
     diags: &mut Vec<Diagnostic>,
 ) {
     let file = &site.source.file;
+    if let Some(leg) = file[statement.body.legs].first() {
+        diags.push(
+            Diagnostic::error("claim-split", "a claim cannot contain split flow legs")
+                .label(leg.loc, "write claim line items here, not a transfer between endpoints"),
+        );
+        return;
+    }
     let Subject::Name(debtor_name) = statement.subject else {
         unsupported_statement(loc, "a claim needs a named debtor", diags);
         return;
@@ -1434,6 +1448,7 @@ fn lower_owes<'a, 's>(
         waive: header_tail.waive,
         contract: None,
         contract_schedule: None,
+        occurrence: None,
         ends: false,
         doc: None,
         loc,
@@ -1658,6 +1673,7 @@ fn lower_basis<'a, 's>(
             waive,
             contract: None,
             contract_schedule: None,
+            occurrence: None,
             ends: false,
             doc: None,
             loc,
@@ -2769,16 +2785,6 @@ fn make_resolved_flow(
     let owner = world.book.places[from.place].owner;
     let payee = tail.payee.or(to.entity).or(from.entity);
     let recognized = tail.recognized.unwrap_or(Days::on(day));
-    if !recognized.contains(day) {
-        diags.push(
-            Diagnostic::error(
-                "recognition-range",
-                "a flow day must be inside its recognition period",
-            )
-            .label(loc, "the written day is outside `for`"),
-        );
-        return None;
-    }
     Some(Flow {
         day,
         recognized,
@@ -3359,6 +3365,7 @@ fn push_empty_txn<'s>(
         waive: None,
         contract: None,
         contract_schedule: None,
+        occurrence: None,
         ends: false,
         doc: item.doc.map(|doc| world.book.names.intern(doc.0)),
         loc: item.loc,

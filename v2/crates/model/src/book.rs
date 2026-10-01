@@ -15,7 +15,7 @@ use axiom_core::{
 
 use crate::journal::{
     Assert, Detail, EndEvent, Event, Filed, Flow, FlowView, JournalProgram, Measure, Plan, Prices,
-    Purposed, Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive,
+    Purposed, Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive, WrittenOccurrence,
 };
 use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
@@ -76,6 +76,9 @@ pub struct Book<'s> {
     /// Computed journal expressions and grouped line items. Only transactions
     /// that need them have a program handle in `Txn`.
     pub journal_programs: Arena<JournalProgram>,
+    /// Exact scheduled identities for written contract occurrences. Ordinary
+    /// transactions allocate nothing in this sparse pool.
+    pub written_occurrences: Arena<WrittenOccurrence>,
     /// Occurrence inputs in the order of the contract terms' `inputs` list.
     /// Each transaction stores a range so the common case of no named inputs
     /// does not allocate, and forecasts can borrow the bindings directly.
@@ -1764,6 +1767,13 @@ impl<'s> Book<'s> {
     /// Borrows a flow with the metadata its compact ranges name.
     pub fn flow_view<'a>(&'a self, flow: &'a Flow) -> FlowView<'a> {
         let detail = flow.detail.map_or(&Detail::NONE, |id| &self.details[id]);
+        self.flow_view_parts(flow, detail)
+    }
+
+    /// Borrows a flow with a call-local detail override. The flow's codes and
+    /// selectors still resolve through the book's immutable pools; no runtime
+    /// detail allocation is needed for a single computed expression.
+    pub fn flow_view_with_detail<'a>(&'a self, flow: &'a Flow, detail: &'a Detail) -> FlowView<'a> {
         self.flow_view_parts(flow, detail)
     }
 

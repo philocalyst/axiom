@@ -612,10 +612,21 @@ pub struct Txn {
     pub contract: Option<Id<Contract>>,
     /// Which independent contract schedule this occurrence keeps.
     pub contract_schedule: Option<ScheduleKind>,
+    /// Sparse exact identity of a written occurrence. Its due day is distinct
+    /// from the day it was recorded, which matters across terms restatements.
+    pub occurrence: Option<Id<WrittenOccurrence>>,
     /// `DATE NAME ends`: it ends the contract, and has no flows.
     pub ends: bool,
     pub doc: Option<Sym>,
     pub loc: Loc,
+}
+
+/// The selected scheduled instance kept by one written contract occurrence.
+/// The owning transaction id is the index of this handle in `Book::txns`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct WrittenOccurrence {
+    pub due: Day,
+    pub schedule: ScheduleKind,
 }
 
 /// Expression roots and allocation groups for one written transaction.

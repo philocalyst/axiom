@@ -101,6 +101,22 @@ opening 2026-01-01
 }
 
 #[test]
+fn syntax_rejects_split_flow_legs_under_a_claim() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+2026-01-02 borrower owes lender 100 USD
+  checking -> seller 20 USD
+";
+    let (_file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(
+        syntax.iter().any(|diagnostic| diagnostic.code == "expected-amount"),
+        "a claim body cannot silently parse as a transfer leg: {syntax:?}"
+    );
+}
+
+#[test]
 fn asset_basis_statement_records_one_new_parcel() {
     let path = "journal/2026/01.ax";
     let text = "\
@@ -410,6 +426,9 @@ contract flat with greystar
     let txn = book.txns.iter().map(|(id, txn)| (id, txn)).find(|(_, txn)| txn.contract.is_some()).unwrap();
     assert_eq!(txn.1.contract, Some(contract_id));
     assert_eq!(txn.1.contract_schedule, Some(axiom_model::ScheduleKind::Regular));
+    let occurrence = book.written_occurrences[txn.1.occurrence.expect("sparse written occurrence identity")];
+    assert_eq!(occurrence.due, axiom_core::Day::from_ymd(2026, 2, 1).unwrap());
+    assert_eq!(occurrence.schedule, axiom_model::ScheduleKind::Regular);
     assert_eq!(txn.1.flows.len(), 0, "the occurrence marker does not invent actual flows");
     assert_eq!(
         book.txn_inputs(txn.0),
@@ -418,6 +437,32 @@ contract flat with greystar
             book.commodity("USD").unwrap(),
         ))]
     );
+}
+
+#[test]
+fn a_written_flow_can_fall_outside_its_recognition_period() {
+    let path = "journal/2025/12.ax";
+    let text = "\
+base USD
+commodity USD
+kind person : entity
+entity insurer : person
+account assets/checking
+2025-12-12 checking -> insurer 1_140 USD for 2026
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let flow = &book.flows[Id::new(0)];
+    assert_eq!(flow.day, Day::from_ymd(2025, 12, 12).unwrap());
+    assert_eq!(flow.recognized.first(), Day::from_ymd(2026, 1, 1).unwrap());
+    assert_eq!(flow.recognized.last(), Day::from_ymd(2026, 12, 31).unwrap());
 }
 
 #[test]

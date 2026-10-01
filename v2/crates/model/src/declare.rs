@@ -1541,6 +1541,7 @@ pub(crate) fn declare<'a, 's>(
         txns: Arena::new(),
         journal_programs: Arena::new(),
         assertion_programs: Arena::new(),
+        written_occurrences: Arena::new(),
         input_values: Arena::new(),
         flows: Arena::new(),
         touching: Groups::default(),
