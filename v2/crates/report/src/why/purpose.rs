@@ -231,18 +231,24 @@ fn totals<'s>(
     let mut total = Qty::ZERO;
     let mut parties: HashMap<&'s str, Qty> = HashMap::new();
     let mut unpriced = 0;
+    let mut shares = super::super::flow::MovementShares::default();
     let wanted_root = book.purposes[purpose].root;
     for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
         let flow = posting.flow;
         let Some(purpose_on_flow) = flow.purpose else {
             continue;
         };
-        if !book.purposes.covers(purpose, purpose_on_flow.purpose) || !lens.owns_entity(flow.owner)
+        if !book.purposes.covers(purpose, purpose_on_flow.purpose)
+            || !lens.owns(super::super::flow::movement_place(lens, flow))
         {
             continue;
         }
-        let Some(amount) = super::super::flow::movement_in_base(lens, posting, Some(wanted_root))
-        else {
+        let Some(amount) = super::super::flow::movement_in_base_with(
+            lens,
+            posting,
+            Some(wanted_root),
+            &mut shares,
+        ) else {
             unpriced += 1;
             continue;
         };

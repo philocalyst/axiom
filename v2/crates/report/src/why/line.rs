@@ -44,7 +44,9 @@ fn flows_on(book: &Book, at: Loc, lens: Lens<'_, '_, '_, '_>) -> Vec<Id<Flow>> {
     let direct: Vec<Id<Flow>> = book
         .flows
         .iter()
-        .filter(|(_, flow)| overlaps(flow.loc, at) && lens.owns_entity(flow.owner))
+        .filter(|(_, flow)| {
+            overlaps(flow.loc, at) && lens.owns(crate::flow::movement_place(lens, flow))
+        })
         .map(|(id, _)| id)
         .collect();
     if !direct.is_empty() {
@@ -53,7 +55,7 @@ fn flows_on(book: &Book, at: Loc, lens: Lens<'_, '_, '_, '_>) -> Vec<Id<Flow>> {
     let headers = book.txns.values().filter(|txn| overlaps(txn.loc, at));
     headers
         .flat_map(|txn| txn.flows.ids())
-        .filter(|&id| lens.owns_entity(book.flows[id].owner))
+        .filter(|&id| lens.owns(crate::flow::movement_place(lens, &book.flows[id])))
         .collect()
 }
 
@@ -71,9 +73,15 @@ fn items(
         let posting = Posting::at(book, run, id);
         let flow = posting.flow;
         let out = posting.out();
-        let out = Amount::new(lens.entity_qty(flow.owner, out.qty), out.unit);
+        let out = Amount::new(
+            crate::flow::scoped_movement_qty(lens, flow, out.qty),
+            out.unit,
+        );
         let arrive = posting.arrive();
-        let arrive = Amount::new(lens.entity_qty(flow.owner, arrive.qty), arrive.unit);
+        let arrive = Amount::new(
+            crate::flow::scoped_movement_qty(lens, flow, arrive.qty),
+            arrive.unit,
+        );
         let amounts = if flow.is_exchange() {
             format!("{} for {}", book.show(out), book.show(arrive))
         } else {
@@ -250,7 +258,7 @@ pub(super) fn scoped_codes(book: &Book, lens: Lens<'_, '_, '_, '_>) -> BTreeSet<
     for (_, flow) in book
         .flows
         .iter()
-        .filter(|(_, flow)| lens.owns_entity(flow.owner))
+        .filter(|(_, flow)| lens.owns(crate::flow::movement_place(lens, flow)))
     {
         codes.extend(book.flow_view(flow).codes());
     }

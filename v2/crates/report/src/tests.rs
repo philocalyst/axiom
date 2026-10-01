@@ -131,6 +131,8 @@ struct Cast {
     irs: Id<Entity>,
     nsf: Id<Entity>,
     market: Id<Entity>,
+    unknown: Id<Entity>,
+    opening: Id<Entity>,
     entities: Tree<Entity>,
     places: Tree<Place>,
     place_ids: Vec<Id<Place>>,
@@ -159,10 +161,13 @@ impl Cast {
             "irs",
             "nsf",
             "market",
+            "unknown",
+            "opening",
         ];
         let entities = people.map(|name| Entity {
             path: names.intern(name),
             kind: thing,
+            purpose: None,
             place: None,
             restricted: false,
             lives: Box::default(),
@@ -178,7 +183,7 @@ impl Cast {
             doc: None,
             loc: None,
         });
-        let (entities, ids) = Tree::build(entities.into(), &[None; 8]).unwrap();
+        let (entities, ids) = Tree::build(entities.into(), &[None; 10]).unwrap();
         let [me, jordan, landlord, acme, irs, nsf, market] =
             [ids[0], ids[1], ids[3], ids[4], ids[5], ids[6], ids[7]];
         assert_eq!(ids[2], Id::new(2), "the household is the third root");
@@ -256,6 +261,8 @@ impl Cast {
             irs,
             nsf,
             market,
+            unknown: ids[8],
+            opening: ids[9],
             entities,
             places,
             place_ids,
@@ -307,6 +314,8 @@ fn kind(name: Sym) -> Kind {
 struct Journal {
     txns: Arena<Txn>,
     flows: Arena<Flow>,
+    codes: Arena<Sym>,
+    details: Arena<Detail>,
     posted: Vec<Posted>,
 }
 
@@ -477,28 +486,47 @@ fn journal(cast: &mut Cast) -> Journal {
     let mut journal = Journal {
         txns: Arena::new(),
         flows: Arena::new(),
+        codes: Arena::new(),
+        details: Arena::new(),
         posted: Vec::new(),
     };
     for (index, &(row, when, from, to, cents, payee, state)) in rows.iter().enumerate() {
-        let codes: Box<[Sym]> = match row {
-            8 => Box::new([check]),
-            13 | 15 => Box::new([invoice]),
-            16 | 17 => Box::new([bill]),
-            _ => Box::default(),
+        let codes: &[Sym] = match row {
+            8 => &[check],
+            13 | 15 => &[invoice],
+            16 | 17 => &[bill],
+            _ => &[],
         };
+        let code_start = journal.codes.len();
+        for &code in codes {
+            journal.codes.push(code);
+        }
+        let header_codes = axiom_core::Run::new(
+            Id::new(code_start as u32),
+            u32::try_from(codes.len()).unwrap(),
+        );
+        let local_codes = axiom_core::Run::new(
+            Id::new((code_start + codes.len()) as u32),
+            0,
+        );
         let due = match row {
             13 => Some(day(2026, 3, 20)),
             16 => Some(day(2026, 4, 4)),
             _ => None,
         };
+        let detail = due.map(|due| {
+            journal.details.push(Detail {
+                due: Some(due),
+                ..Detail::NONE
+            })
+        });
         let txn = journal.txns.push(Txn {
             day: when,
             flows: axiom_core::Run::new(Id::new(index as u32), 1),
             inputs: axiom_core::Run::new(Id::new(0), 0),
             program: None,
-            codes: codes.clone(),
+            codes: header_codes,
             waive: None,
-            plan: None,
             contract: None,
             contract_schedule: None,
             ends: false,
@@ -531,16 +559,12 @@ fn journal(cast: &mut Cast) -> Journal {
             purpose: None,
             description: None,
             origin: Origin::Written,
-            select: Box::default(),
-            codes,
+            select: axiom_core::Run::new(Id::new(0), 0),
+            header_codes,
+            codes: local_codes,
             loc: line(row),
             waive: None,
-            detail: due.map(|due| {
-                Box::new(Detail {
-                    due: Some(due),
-                    ..Detail::default()
-                })
-            }),
+            detail,
         });
         journal.posted.push(Posted {
             out: Qty(cents),
@@ -569,8 +593,9 @@ fn rent_plan(cast: &Cast) -> Plan {
         purpose: None,
         description: None,
         origin: Origin::Written,
-        select: Box::default(),
-        codes: Box::default(),
+        select: axiom_core::Run::new(Id::new(0), 0),
+        header_codes: axiom_core::Run::new(Id::new(0), 0),
+        codes: axiom_core::Run::new(Id::new(0), 0),
         loc: line(60),
         waive: None,
         detail: None,
@@ -590,7 +615,7 @@ fn rent_plan(cast: &Cast) -> Plan {
 fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn: bool) -> Law {
     let node = |op, ty, first| Node {
         op,
-        ty,
+        ty: Some(ty),
         loc: line(80),
         first: NodeId(first),
     };
@@ -614,7 +639,8 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
         trigger: Trigger::In,
         budget: None,
         overrides: None,
-        rank: Rank(0),
+        override_name: None,
+        rank: Rank::ZERO,
         steps: Box::new([Step {
             loc: line(80),
             kind: StepKind::Require {
@@ -637,7 +663,7 @@ fn limit_law(cast: &mut Cast, name: &'static str, owner: Owner, op: BinOp, warn:
 fn early_withdrawal(cast: &mut Cast) -> Law {
     let node = |op, ty, first| Node {
         op,
-        ty,
+        ty: Some(ty),
         loc: line(85),
         first: NodeId(first),
     };
@@ -664,7 +690,8 @@ fn early_withdrawal(cast: &mut Cast) -> Law {
         trigger: Trigger::Out,
         budget: None,
         overrides: None,
-        rank: Rank(0),
+        override_name: None,
+        rank: Rank::ZERO,
         steps: Box::new([Step {
             loc: line(85),
             kind: StepKind::Effect(owe),
@@ -694,9 +721,10 @@ fn records(cast: &mut Cast, journal: &Journal) -> Records {
         trigger: Trigger::In,
         budget: None,
         overrides: None,
-        rank: Rank(0),
+        override_name: None,
+        rank: Rank::ZERO,
         steps: Box::default(),
-        nodes: Box::default(),
+        nodes: Arena::new(),
         loc: line(90),
     });
     assert_eq!(
@@ -834,7 +862,11 @@ fn holdings(cast: &Cast, journal: &Journal) -> Vec<Holding> {
         qty,
         basis: Qty(basis),
         acquired,
-        txn: Id::new(txn),
+        txn: RuntimeTxn::journal(Id::new(txn)).unwrap(),
+        codes: axiom_model::FlowCodes {
+            header: axiom_core::Run::new(Id::new(0), 0),
+            local: axiom_core::Run::new(Id::new(0), 0),
+        },
         tied,
     };
     let mut lots: BTreeMap<Id<Place>, Vec<Parcel>> = BTreeMap::new();
@@ -922,25 +954,32 @@ pub(crate) fn household() -> Household {
             .iter()
             .flat_map(|(id, flow)| [(flow.from, id), (flow.to, id)]),
     );
-    let (purposes, [income, spending, capital]) = Purpose::roots(&mut cast.names);
+    let (purposes, [income, spending, capital, transfer]) = Purpose::roots(&mut cast.names);
     let roots = Roots {
         me: cast.me,
-        unknown: cast.id("equity/unknown"),
-        opening: cast.id("equity/unknown"),
+        unknown: cast.unknown,
+        opening: cast.opening,
         market: cast.market,
-        asset: Id::new(0),
-        debt: Id::new(0),
-        thing: Id::new(0),
-        commodity: Id::new(0),
-        entity: Id::new(0),
-        income,
-        spending,
-        capital,
+        kinds: KindRoots {
+            asset: Id::new(0),
+            debt: Id::new(0),
+            thing: Id::new(0),
+            commodity: Id::new(0),
+            measure: Id::new(0),
+            entity: Id::new(0),
+        },
+        purposes: PurposeRoots {
+            income,
+            spending,
+            capital,
+            transfer,
+        },
     };
     let plans = vec![rent_plan(&cast)].into();
     let law_count = records.laws.len();
     let book = Book {
         names: cast.names,
+        text_values: Arena::new(),
         base: cast.usd,
         relaxed: false,
         roots,
@@ -958,14 +997,21 @@ pub(crate) fn household() -> Household {
         budgets: Arena::new(),
         params: Arena::new(),
         schedules: Arena::new(),
-        codes: Vec::new(),
+        code_rules: Vec::new(),
+        codes: journal.codes,
+        selectors: Arena::new(),
+        details: journal.details,
         patterns: Arena::new(),
         formats: Arena::new(),
         txns: journal.txns,
+        journal_programs: Arena::new(),
+        input_values: Arena::new(),
         flows: journal.flows,
         touching,
         asserts: Vec::new(),
+        assertion_programs: Arena::new(),
         events: Vec::new(),
+        endings: Vec::new(),
         prices: Prices::default(),
         lookup: Default::default(),
         splits: Vec::new(),
@@ -989,6 +1035,11 @@ pub(crate) fn household() -> Household {
         promises: Vec::new(),
         adjustments: Vec::new(),
         checks: vec![0; law_count].into(),
+        promised_flows: Box::default(),
+        runtime_details: Arena::new(),
+        missing_inputs: Box::default(),
+        open_claims: Box::default(),
+        monitor_complete: true,
         diagnostics: Vec::new(),
     };
     Household { book, run }
@@ -1080,8 +1131,8 @@ impl Household {
 
 // ─── Rendering, so figures can be compared as text ──────────────────────────
 
-fn cell(cell: &Cell) -> String {
-    match cell {
+pub(crate) fn cell(item: &Cell<'_>) -> String {
+    match item {
         Cell::Blank => String::new(),
         Cell::Word(word) => (*word).to_string(),
         Cell::Text(text) => text.to_string(),
@@ -1101,7 +1152,19 @@ fn cell(cell: &Cell) -> String {
         Cell::Count(count, noun) => format!("{count} {noun}"),
         Cell::Trigger(trigger) => format!("{trigger:?}"),
         Cell::Source(loc) => format!("@{}", loc.start / 100),
-        Cell::Join(separator, parts) => parts.iter().map(cell).collect::<Vec<_>>().join(separator),
+        Cell::Join(separator, parts) => parts
+            .iter()
+            .map(cell)
+            .collect::<Vec<_>>()
+            .join(separator),
+    }
+}
+
+pub(crate) fn heading<'a>(section: &'a Section<'_>) -> Option<&'a str> {
+    match section.heading.as_ref()? {
+        Cell::Word(text) | Cell::Name(text) | Cell::Purpose(text) | Cell::Code(text) => Some(text),
+        Cell::Text(text) | Cell::Said(text) => Some(text),
+        _ => None,
     }
 }
 
@@ -1130,20 +1193,20 @@ pub(crate) fn lines(section: &Section) -> Vec<String> {
 }
 
 pub(crate) fn show(report: &Report) -> String {
-    let mut out = format!("# {}\n", report.title);
+    let mut out = format!("# {}\n", cell(&report.title));
     for section in &report.sections {
         out += &format!(
             "##{}\n",
             section
                 .heading
                 .as_ref()
-                .map_or(String::new(), |heading| format!(" {heading}"))
+                .map_or(String::new(), |heading| format!(" {}", cell(heading)))
         );
         out += &lines(section).join("\n");
         out += &section
             .notes
             .iter()
-            .map(|note| format!("\n  note: {note}"))
+            .map(|note| format!("\n  note: {}", cell(note)))
             .collect::<String>();
         out += "\n";
     }
@@ -1222,7 +1285,7 @@ fn a_past_date_and_monthly_columns_read_the_same_flows() {
     let titles: Vec<_> = monthly.sections[0]
         .columns
         .iter()
-        .map(|column| column.title.to_string())
+        .map(|column| cell(&column.title))
         .collect();
     assert_eq!(titles, ["Place", "2026-01-31", "2026-02-28", "2026-03-31"]);
     assert_eq!(
@@ -1547,7 +1610,7 @@ fn limits_are_per_owner_and_per_year() {
         .unwrap();
     assert_eq!(lines(&jordan.sections[0]).len(), 1);
     let none = house.report(Query::Limits { year: Some(2024) });
-    assert!(none.sections[0].notes[0].contains("No limit was read in 2024"));
+    assert!(cell(&none.sections[0].notes[0]).contains("No limit was read in 2024"));
 }
 
 #[test]
@@ -1679,7 +1742,12 @@ fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed()
     let headings: Vec<_> = report
         .sections
         .iter()
-        .map(|section| section.heading.clone().unwrap_or_default())
+        .map(|section| {
+            section
+                .heading
+                .as_ref()
+                .map_or_else(String::new, cell)
+        })
         .collect();
     assert_eq!(
         headings,
@@ -1707,7 +1775,7 @@ fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed()
             "  early-withdrawal | on out |  | @85"
         ]
     );
-    assert!(report.sections[3].notes[0].starts_with("1 law not in force today"));
+    assert!(cell(&report.sections[3].notes[0]).starts_with("1 law not in force today"));
 }
 
 #[test]
@@ -1717,7 +1785,7 @@ fn why_an_entity_shows_its_places_ties_and_claims() {
     let ties = grant
         .sections
         .iter()
-        .find(|section| section.heading.as_deref() == Some("Held for it"))
+        .find(|section| heading(section) == Some("Held for it"))
         .unwrap();
     assert_eq!(
         lines(ties),
@@ -1730,7 +1798,7 @@ fn why_an_entity_shows_its_places_ties_and_claims() {
     let claims = client
         .sections
         .iter()
-        .find(|section| section.heading.as_deref() == Some("Claims with it"))
+        .find(|section| heading(section) == Some("Claims with it"))
         .unwrap();
     assert!(lines(claims)[0].starts_with("!acme | #inv-12"));
     let jordan = house.why(Found::Entity(house.entity("jordan")));
@@ -1747,7 +1815,7 @@ fn why_a_system_says_what_each_of_its_laws_counted() {
     let us = house.book.systems.iter().next().unwrap().0;
     let report = house.why(Found::System(us));
     assert_eq!(
-        report.sections[0].notes,
+        report.sections[0].notes.iter().map(cell).collect::<Vec<_>>(),
         ["Nobody in this book lives here."]
     );
     assert_eq!(
@@ -1762,7 +1830,7 @@ fn why_a_system_says_what_each_of_its_laws_counted() {
 fn several_laws_with_one_name_are_listed_with_where_each_is_written() {
     let house = household();
     let report = house.why(Found::Laws(Box::new([Id::new(0), Id::new(3)])));
-    assert_eq!(report.title, "`budget` is written in 2 places");
+    assert_eq!(cell(&report.title), "`budget` is written in 2 places");
     assert_eq!(
         lines(&report.sections[0]),
         [
@@ -1770,7 +1838,7 @@ fn several_laws_with_one_name_are_listed_with_where_each_is_written() {
             "overdraft | project | @80 | assets/bank/checking and everything beneath it | The overdraft law says what it says."
         ]
     );
-    assert!(report.sections[0].notes[0].contains("axiom why FILE:LINE"));
+    assert!(cell(&report.sections[0].notes[0]).contains("axiom why FILE:LINE"));
 }
 
 // ─── Views that run the ledger ──────────────────────────────────────────────

@@ -7,7 +7,11 @@ use crate::lens::Lens;
 use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: axiom_core::Id<Contract>) -> Report<'s> {
+pub fn report<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    contract_id: axiom_core::Id<Contract>,
+) -> Report<'s> {
     let book = lens.book();
     let contract = &book.contracts[contract_id];
     let name = book.name(contract.name);
@@ -25,7 +29,11 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: axiom_core
         Column::left("Statement"),
     ])
     .headed("Terms over time");
-    for (days, value) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
+    for (days, value) in contract
+        .terms
+        .iter()
+        .flat_map(|terms| terms.within(contract.days))
+    {
         let active_days = days.intersect(contract.days).unwrap_or(days);
         let templates = value
             .template
@@ -111,7 +119,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: axiom_core
     ])
     .headed("Derived flows");
     for flow in book.flows.values().filter(|flow| {
-        lens.owns_entity(flow.owner)
+        lens.owns(crate::flow::movement_place(lens, flow))
             && match flow.origin {
                 Origin::Occurrence(id) => id == contract_id,
                 Origin::Derived(

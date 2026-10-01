@@ -5,7 +5,7 @@
 
 use std::borrow::Cow;
 
-use axiom_core::{Day, FileId, Loc, Qty};
+use axiom_core::{Day, FileId, Id, Loc, Qty};
 use axiom_engine::{Options, Run};
 use axiom_model::{Book, Source};
 
@@ -129,7 +129,7 @@ opening 2026-01-01
         )
         .unwrap();
         let shared = context.report_with_sources(&query, &provider).unwrap();
-        assert_eq!(report.title, "Why this line");
+        assert_eq!(crate::tests::cell(&report.title), "Why this line");
         assert_eq!(show(&shared), show(&report));
         assert!(
             crate::tests::lines(&report.sections[0])[0]
@@ -183,7 +183,11 @@ opening 2026-01-01
         let rows = &report.sections[0].rows;
         let amount = |purpose: &str| {
             rows.iter()
-                .find(|row| row.cells.first().is_some_and(|cell| matches!(cell, crate::Cell::Name(name) if *name == purpose)))
+                .find(|row| {
+                    row.cells.first().is_some_and(
+                        |cell| matches!(cell, crate::Cell::Name(name) if *name == purpose),
+                    )
+                })
                 .and_then(|row| row.cells.get(1))
         };
         let crate::Cell::Amount { qty: groceries, .. } = amount("groceries").unwrap() else {
@@ -194,6 +198,117 @@ opening 2026-01-01
         };
         assert_eq!((*groceries, *dining), (Qty(5_000), Qty(-5_000)));
         assert!(amount("food").is_none_or(|cell| matches!(cell, crate::Cell::Blank)));
+    });
+}
+
+/// A flow's primary owner is only a convenient route label. Account shares
+/// determine the amount each owner's statement and party view carry.
+#[test]
+fn flow_reports_allocate_shared_account_movements_to_effective_owners() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+
+entity me
+entity theo
+entity grocer
+account checking : asset
+  owner me 60%, theo 40%
+
+purpose groceries : spending
+
+opening 2026-01-01
+  checking 500.00 USD
+
+2026-01-10 checking -> grocer 100.00 USD #groceries
+";
+
+    with_run(source, day(2026, 2, 1), |book, run| {
+        for by in [FlowBy::Period(axiom_model::Period::Month), FlowBy::Party] {
+            let expected_of = if by == FlowBy::Party {
+                "grocer"
+            } else {
+                "groceries"
+            };
+            let report = crate::report(
+                book,
+                run,
+                &Query::Flow {
+                    by,
+                    from: Some(day(2026, 1, 1)),
+                    to: None,
+                },
+                Some("theo"),
+            )
+            .unwrap();
+            let fact = report.sections[0]
+                .facts
+                .iter()
+                .find(|fact| fact.of == Some(expected_of))
+                .expect("the scoped owner has one purpose/party fact");
+            assert_eq!(fact.entity, "theo");
+            assert_eq!(fact.value.qty, Qty(4_000));
+        }
+
+        let everyone = crate::report(
+            book,
+            run,
+            &Query::Flow {
+                by: FlowBy::Period(axiom_model::Period::Month),
+                from: Some(day(2026, 1, 1)),
+                to: None,
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(everyone.sections[0].facts[0].value.qty, Qty(10_000));
+    });
+}
+
+#[test]
+fn owner_scoped_flow_rows_carry_rounding_across_small_postings() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+entity me
+entity theo
+entity grocer
+account checking : asset
+  owner me 60%, theo 40%
+purpose groceries : spending
+opening 2026-01-01
+  checking 1.00 USD
+2026-01-10 checking -> grocer 0.01 USD #groceries
+2026-01-11 checking -> grocer 0.01 USD #groceries
+2026-02-10 checking -> grocer 0.01 USD #groceries
+2026-02-11 checking -> grocer 0.01 USD #groceries
+2026-03-10 checking -> grocer 0.01 USD #groceries
+2026-03-11 checking -> grocer 0.01 USD #groceries
+2026-04-10 checking -> grocer 0.01 USD #groceries
+2026-04-11 checking -> grocer 0.01 USD #groceries
+";
+
+    with_run(source, day(2026, 5, 15), |book, run| {
+        let report = crate::report(
+            book,
+            run,
+            &Query::Flow {
+                by: FlowBy::Period(axiom_model::Period::Month),
+                from: Some(day(2026, 1, 1)),
+                to: None,
+            },
+            Some("theo"),
+        )
+        .unwrap();
+        let groceries: Vec<_> = report.sections[0]
+            .facts
+            .iter()
+            .filter(|fact| fact.of == Some("groceries"))
+            .map(|fact| fact.value.qty)
+            .collect();
+        assert_eq!(groceries.iter().copied().sum::<Qty>(), Qty(3));
     });
 }
 
@@ -317,7 +432,7 @@ commodity HR : measure
         let measures = report
             .sections
             .iter()
-            .find(|section| section.heading.as_deref() == Some("Measures"))
+            .find(|section| crate::tests::heading(section) == Some("Measures"))
             .expect("measure section");
         let headers: Vec<_> = measures
             .columns
@@ -327,9 +442,18 @@ commodity HR : measure
                 _ => "",
             })
             .collect();
-        let march = headers.iter().position(|&header| header == "2026-03").unwrap();
-        let april = headers.iter().position(|&header| header == "2026-04").unwrap();
-        assert!(march < april, "the earlier measure anchors the displayed range");
+        let march = headers
+            .iter()
+            .position(|&header| header == "2026-03")
+            .unwrap();
+        let april = headers
+            .iter()
+            .position(|&header| header == "2026-04")
+            .unwrap();
+        assert!(
+            march < april,
+            "the earlier measure anchors the displayed range"
+        );
         assert!(measures.rows.iter().any(|row| {
             row.cells.iter().any(|cell| matches!(cell, crate::Cell::Name("HR")))
                 && row.cells.iter().any(|cell| matches!(cell, crate::Cell::Amount { qty, unit: "HR", .. } if !qty.is_zero()))
@@ -391,32 +515,36 @@ asset laptop : thing
                 .any(|cell| matches!(cell, crate::Cell::Word("terms active")))
         }));
 
-        let why_contract = crate::report(
-            book,
-            run,
-            &Query::Why { target: "figma" },
-            None,
-        )
-        .unwrap();
-        assert_eq!(why_contract.sections[0].heading.as_deref(), Some("Terms over time"));
+        let why_contract = crate::report(book, run, &Query::Why { target: "figma" }, None).unwrap();
+        assert_eq!(
+            crate::tests::heading(&why_contract.sections[0]),
+            Some("Terms over time")
+        );
         let why_party = crate::report(
             book,
             run,
-            &Query::Why { target: "entity:figma" },
+            &Query::Why {
+                target: "entity:figma",
+            },
             None,
         )
         .unwrap();
-        assert_eq!(why_party.sections[0].heading.as_deref(), Some("Places"));
+        assert_eq!(
+            crate::tests::heading(&why_party.sections[0]),
+            Some("Places")
+        );
 
         let why_asset = crate::report(
             book,
             run,
-            &Query::Why { target: "asset:laptop" },
+            &Query::Why {
+                target: "asset:laptop",
+            },
             None,
         )
         .unwrap();
-        assert_eq!(why_asset.title, "Why laptop");
-        assert_eq!(why_asset.sections[0].heading.as_deref(), Some("Asset"));
+        assert_eq!(crate::tests::cell(&why_asset.title), "Why laptop");
+        assert_eq!(crate::tests::heading(&why_asset.sections[0]), Some("Asset"));
     });
 }
 
@@ -550,40 +678,34 @@ law audit
     });
 }
 
-// ─── Plans ──────────────────────────────────────────────────────────────────
+// ─── Reusable flow projections ────────────────────────────────────────────
 
-/// Three plans that say more than where the money goes: a premium paid each
-/// January for the year, a savings deposit held for an envelope, and a
-/// depreciation that changes basis.
-const PLANS: &str = "\
+/// Journal flows remain useful source templates for projections and
+/// hypothetical withdrawals; there is no separate v3 plan declaration.
+const FLOW_SOURCES: &str = "\
 base USD
 commodity USD
   precision 2
-commodity HOME
-
-kind envelope : entity
-  restricted
-
-entity car-fund : envelope
-
-account assets/checking
-account assets/savings
-account assets/house
-account expenses/insurance
-account expenses/depreciation
-
-plan premium every year from 2026-01-15 checking -> insurance 1_200 USD for 2026
-plan deposit every month on 1 from 2026-01-01 checking -> savings 100 USD for car-fund basis 90 USD
-plan depreciation every month on 28 from 2026-01-28 house.basis -> depreciation 300 USD
+entity insurer
+entity repairer
+account checking : asset
+account savings : asset
+purpose insurance : spending
+purpose depreciation : spending
+opening 2025-12-01
+  checking 2_000.00 USD
+2026-01-15 checking -> insurer 1_200.00 USD for 2026 #insurance
+2026-01-01 checking -> savings 100.00 USD basis 90.00 USD
+2026-01-28 checking -> repairer 3.00 USD basis 3.00 USD #depreciation
 ";
 
 #[test]
-fn a_planned_occurrence_keeps_the_terms_of_its_template_and_moves_its_period_along() {
-    with_run(PLANS, day(2026, 3, 1), |book, _| {
-        let template = |plan: usize| &book.plans.values().nth(plan).unwrap().template[0];
+fn a_projected_flow_keeps_its_detail_and_moves_its_recognition_period() {
+    with_run(FLOW_SOURCES, day(2026, 3, 1), |book, _| {
+        let template = |index| &book.flows[Id::new(index)];
         let usd = |flow: &axiom_model::Flow| flow.out;
 
-        let premium = template(0);
+        let premium = template(2);
         assert_eq!(
             (premium.recognized.first(), premium.recognized.last()),
             (day(2026, 1, 1), day(2026, 12, 31))
@@ -598,22 +720,19 @@ fn a_planned_occurrence_keeps_the_terms_of_its_template_and_moves_its_period_alo
         let deposit = template(1);
         let next = crate::synth::planned(deposit, day(2026, 5, 1), usd(deposit), usd(deposit));
         assert_eq!(next.detail, deposit.detail);
-        assert!(
-            next.detail().hold.is_some() && next.detail().basis.is_some(),
-            "held for the envelope, at 90 USD of basis"
-        );
+        assert!(book.flow_view(&next).detail().basis.is_some());
 
-        let depreciation = template(2);
+        let depreciation = template(3);
         let next = crate::synth::planned(
             depreciation,
             day(2026, 5, 28),
             usd(depreciation),
             usd(depreciation),
         );
-        assert_eq!(next.detail().basis_end, Some(axiom_model::End::From));
+        assert!(book.flow_view(&next).detail().basis.is_some());
         assert_eq!(
             crate::places::route(book, &next),
-            "assets/house.basis → expenses/depreciation"
+            "checking → repairer"
         );
     });
 }
@@ -668,7 +787,7 @@ fn the_forecast_runs_a_plan_that_changes_basis_as_one_that_moves_no_money() {
             report
                 .sections
                 .iter()
-                .find(|s| s.heading.as_deref() == Some(heading))
+                .find(|s| crate::tests::heading(s) == Some(heading))
                 .unwrap()
         };
         let outlook = lines(section("Liquid net worth"));
@@ -693,8 +812,8 @@ fn the_forecast_runs_a_plan_that_changes_basis_as_one_that_moves_no_money() {
 /// period, envelope or basis, whatever the flow it borrows its line from said.
 #[test]
 fn a_hypothetical_flow_borrows_only_the_transaction_and_the_line() {
-    with_run(PLANS, day(2026, 3, 1), |book, _| {
-        let deposit = &book.plans.values().nth(1).unwrap().template[0];
+    with_run(FLOW_SOURCES, day(2026, 3, 1), |book, _| {
+        let deposit = &book.flows[Id::new(1)];
         let flow = crate::synth::hypothetical(
             deposit,
             day(2026, 4, 2),
@@ -754,7 +873,10 @@ fn tax_says_the_return_is_not_closed_and_leaves_what_it_owes_out_instead_of_at_z
         );
         assert!(owed.rows.is_empty(), "no line of the return is figured yet");
         assert_eq!(
-            owed.notes,
+            owed.notes
+                .iter()
+                .map(crate::tests::cell)
+                .collect::<Vec<_>>(),
             [
                 "The 2026 return closes on 2027-04-15; what it owes is not figured yet; the tallies are counted so far."
             ]
@@ -775,7 +897,9 @@ fn tax_after_the_return_closes_shows_what_it_owes() {
             "  income-tax | treasury | 2027-04-15 | 200.00 USD | period end"
         );
         assert!(
-            owed.notes.iter().all(|note| !note.contains("not figured")),
+            owed.notes
+                .iter()
+                .all(|note| !crate::tests::cell(note).contains("not figured")),
             "{:?}",
             owed.notes
         );
@@ -890,7 +1014,7 @@ law year-end-tax
         let owed = shared
             .sections
             .iter()
-            .find(|section| section.heading.as_deref() == Some("Obligations coming due"))
+            .find(|section| crate::tests::heading(section) == Some("Obligations coming due"))
             .unwrap();
         assert_eq!(
             lines(owed),
@@ -926,7 +1050,7 @@ fn a_context_checkpoint_keeps_same_day_closings_pending_for_a_withdrawal() {
             .sections
             .iter()
             .find(|section| {
-                section.heading.as_deref() == Some("What it would take to reach the rest")
+                crate::tests::heading(section) == Some("What it would take to reach the rest")
             })
             .unwrap();
         assert_eq!(
@@ -992,13 +1116,8 @@ opening 2026-01-01
         )
         .unwrap();
         assert!(!show(&register).contains("200.00 USD"));
-        let explanation = crate::report(
-            book,
-            run,
-            &Query::Why { target: "jordan" },
-            Some("me"),
-        )
-        .unwrap();
+        let explanation =
+            crate::report(book, run, &Query::Why { target: "jordan" }, Some("me")).unwrap();
         assert!(!show(&explanation).contains("theirs | 200.00 USD"));
     });
 }
@@ -1023,7 +1142,7 @@ fn tax_with_one_return_closed_and_one_not_totals_what_is_owed_so_far() {
             ]
         );
         assert_eq!(
-            owed.notes[0],
+            crate::tests::cell(&owed.notes[0]),
             "The 2026 return closes on 2027-06-15; what it owes is not figured yet; the tallies are counted so far."
         );
     });
@@ -1116,7 +1235,7 @@ fn available_runs_the_books_to_the_day_the_return_closes_to_price_a_withdrawal()
         let reach = report
             .sections
             .iter()
-            .find(|s| s.heading.as_deref() == Some("What it would take to reach the rest"));
+            .find(|s| crate::tests::heading(s) == Some("What it would take to reach the rest"));
         assert_eq!(
             lines(reach.unwrap())[0],
             "assets/ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD"
@@ -1165,7 +1284,7 @@ fn a_withdrawal_on_the_last_day_of_the_year_is_taxed_by_the_law_that_closes_the_
             let reach = report
                 .sections
                 .iter()
-                .find(|s| s.heading.as_deref() == Some("What it would take to reach the rest"))
+                .find(|s| crate::tests::heading(s) == Some("What it would take to reach the rest"))
                 .unwrap();
             assert_eq!(
                 lines(reach)[0],
@@ -1208,11 +1327,11 @@ fn the_forecast_goes_on_to_the_next_closing_day_when_it_is_close_after_its_horiz
     with_run(SALARY, day(2026, 1, 10), |book, run| {
         let forecast = |until| Query::Forecast { until, paths: 1 };
         let report = crate::report(book, run, &forecast(None), None).unwrap();
-        assert_eq!(report.title, "Forecast to 2027-04-15");
+        assert_eq!(crate::tests::cell(&report.title), "Forecast to 2027-04-15");
         let owed = report
             .sections
             .iter()
-            .find(|s| s.heading.as_deref() == Some("Obligations coming due"))
+            .find(|s| crate::tests::heading(s) == Some("Obligations coming due"))
             .unwrap();
         assert_eq!(
             lines(owed),
@@ -1221,7 +1340,7 @@ fn the_forecast_goes_on_to_the_next_closing_day_when_it_is_close_after_its_horiz
 
         // What was asked for is what is shown.
         let asked = crate::report(book, run, &forecast(Some(day(2027, 1, 10))), None).unwrap();
-        assert_eq!(asked.title, "Forecast to 2027-01-10");
+        assert_eq!(crate::tests::cell(&asked.title), "Forecast to 2027-01-10");
     });
 }
 
@@ -1239,7 +1358,7 @@ fn the_forecast_stops_at_a_year_when_the_next_closing_day_is_far() {
             None,
         )
         .unwrap();
-        assert_eq!(report.title, "Forecast to 2027-05-10");
+        assert_eq!(crate::tests::cell(&report.title), "Forecast to 2027-05-10");
     });
 }
 
@@ -1336,7 +1455,8 @@ fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
 fn snapshots_apply_assertion_pads_through_each_requested_day() {
     with_run(GAPS, day(2025, 12, 31), |book, run| {
         let whose = crate::lens::Whose::default();
-        let lens = crate::lens::Lens::new(book, &whose, run.today);
+        let plan = axiom_engine::Plan::new(book);
+        let lens = crate::lens::Lens::new(&plan, &whose, run.today);
         let days = [
             day(2025, 1, 1),
             day(2025, 3, 31),
@@ -1376,7 +1496,8 @@ opening 2025-01-01
 ";
     with_run(source, day(2025, 1, 5), |book, run| {
         let whose = crate::lens::Whose::default();
-        let lens = crate::lens::Lens::new(book, &whose, run.today);
+        let plan = axiom_engine::Plan::new(book);
+        let lens = crate::lens::Lens::new(&plan, &whose, run.today);
         let days = [
             day(2025, 1, 1),
             day(2025, 1, 2),

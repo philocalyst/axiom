@@ -2,12 +2,12 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Days, Id, Qty, spread};
+use axiom_core::{Days, Id, spread};
 use axiom_engine::Run;
 use axiom_model::{Flow, Period, Purpose, PurposeRoot};
 
 use crate::calendar::Periods;
-use crate::history::{Posting, postings};
+use crate::history::postings;
 use crate::lens::Lens;
 
 /// What each top-level spending purpose cost in each full month of history,
@@ -44,7 +44,7 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
     let first = postings(book, run)
         .filter(|posting| posting.is_real_on(run.today) && !explained(posting.flow))
         .filter_map(|posting| {
-            spending_purpose(lens, &posting).map(|_| posting.flow.recognized.first())
+            spending_category(lens, posting.flow).map(|_| posting.flow.recognized.first())
         })
         .min();
     let Some(first) = first else { return none };
@@ -56,10 +56,19 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
     let months = Periods::covering(Period::Month, first, last_full_month);
     let mut categories: BTreeMap<Id<Purpose>, usize> = BTreeMap::new();
     let mut amounts = Vec::new();
+    let mut shares = crate::flow::MovementShares::default();
     for posting in postings(book, run)
         .filter(|posting| posting.is_real_on(last_full_month) && !explained(posting.flow))
     {
-        let Some((category, amount)) = spending_purpose(lens, &posting) else {
+        let Some(category) = spending_category(lens, posting.flow) else {
+            continue;
+        };
+        let Some(amount) = crate::flow::movement_in_base_with(
+            lens,
+            posting,
+            Some(PurposeRoot::Spending),
+            &mut shares,
+        ) else {
             continue;
         };
         for month in months.overlapping(
@@ -87,12 +96,11 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
     }
 }
 
-/// The first purpose beneath `spending` and this flow's signed amount, if the
-/// flow moved value and belongs to the selected owner scope.
-fn spending_purpose(lens: Lens, posting: &Posting<'_>) -> Option<(Id<Purpose>, Qty)> {
+/// The first purpose beneath `spending`, if the flow moves through an owned
+/// endpoint and belongs to the selected owner scope.
+fn spending_category(lens: Lens, flow: &Flow) -> Option<Id<Purpose>> {
     let book = lens.book();
-    let flow = posting.flow;
-    if !lens.owns_entity(flow.owner) {
+    if !lens.owns(crate::flow::movement_place(lens, flow)) {
         return None;
     }
     let purpose = flow.purpose?.purpose;
@@ -107,11 +115,7 @@ fn spending_purpose(lens: Lens, posting: &Posting<'_>) -> Option<(Id<Purpose>, Q
         }
         category = parent;
     }
-    let amount = lens.entity_qty(
-        flow.owner,
-        crate::flow::movement_in_base(lens, *posting, Some(PurposeRoot::Spending))?,
-    );
-    Some((category, amount))
+    Some(category)
 }
 
 #[cfg(test)]
@@ -149,6 +153,41 @@ opening 2026-01-01
                 Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
             assert_eq!(variable.categories, [0]);
             assert_eq!(variable.amounts, [10_000; 4]);
+            assert_eq!(variable.months, 4);
+        });
+    }
+
+    #[test]
+    fn variable_spending_uses_the_scoped_share_of_a_joint_account() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+entity me
+entity theo
+entity grocer
+account checking : asset
+  owner me 60%, theo 40%
+purpose groceries : spending
+opening 2026-01-01
+  checking 1.00 USD
+2026-01-10 checking -> grocer 0.01 USD #groceries
+2026-01-11 checking -> grocer 0.01 USD #groceries
+2026-02-10 checking -> grocer 0.01 USD #groceries
+2026-02-11 checking -> grocer 0.01 USD #groceries
+2026-03-10 checking -> grocer 0.01 USD #groceries
+2026-03-11 checking -> grocer 0.01 USD #groceries
+2026-04-10 checking -> grocer 0.01 USD #groceries
+2026-04-11 checking -> grocer 0.01 USD #groceries
+";
+        crate::source_tests::with_run(source, Day::from_ymd(2026, 5, 15).unwrap(), |book, run| {
+            let theo = book.entity("theo").unwrap();
+            let whose = Whose::of(book, theo);
+            let plan = axiom_engine::Plan::new(book);
+            let variable =
+                Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
+            assert_eq!(variable.categories, [0]);
+            assert_eq!(variable.amounts, [1, 1, 0, 1]);
             assert_eq!(variable.months, 4);
         });
     }

@@ -104,11 +104,15 @@ fn entity_view<'s>(
         let within = from.is_none_or(|from| flow.day >= from) && flow.day <= cutoff;
         let at_party = flow.payee == Some(entity)
             || [flow.from, flow.to].into_iter().any(|place| {
-                let place = &book.places[place];
-                place.owner == entity
-                    || matches!(place.role, Role::Outside(Some(party)) if party == entity)
+                let record = &book.places[place];
+                place_owned_by(lens, place, entity)
+                    || matches!(record.role, Role::Outside(Some(party)) if party == entity)
             });
-        within && lens.owns_entity(flow.owner) && (flow.owner == entity || at_party)
+        within
+            && lens.owns(crate::flow::movement_place(lens, flow))
+            && (flow.owner == entity
+                || at_party
+                || place_owned_by(lens, crate::flow::movement_place(lens, flow), entity))
     }) {
         let flow = posting.flow;
         let purpose = flow.purpose.map_or(Cell::Blank, |purpose| {
@@ -139,7 +143,7 @@ fn entity_view<'s>(
             Cell::Day(flow.day),
             purpose,
             Cell::text(crate::places::route(book, flow)),
-            Cell::amount(book, scoped_entity_amount(lens, flow.owner, posting.out())),
+            Cell::amount(book, scoped_flow_amount(lens, flow, posting.out())),
             Cell::list_or_blank(" · ", note),
             state,
             Cell::Source(flow.loc),
@@ -171,7 +175,7 @@ fn asset_register<'s>(
     let mut rows = Vec::new();
     for (id, flow) in book.flows.iter().filter(|(_, flow)| {
         in_window(flow.day, from, cutoff)
-            && lens.owns_entity(flow.owner)
+            && lens.owns(crate::flow::movement_place(lens, flow))
             && (flow.from == asset.place
                 || flow.to == asset.place
                 || flow.purpose.is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
@@ -194,7 +198,7 @@ fn asset_register<'s>(
                 Cell::Word(activity),
                 purpose,
                 Cell::text(crate::places::route(book, flow)),
-                Cell::amount(book, scoped_entity_amount(lens, flow.owner, posting.out())),
+                Cell::amount(book, scoped_flow_amount(lens, flow, posting.out())),
                 Cell::Source(flow.loc),
             ])
             .style(style),
@@ -299,7 +303,7 @@ fn contract_register<'s>(
     }
     for (id, flow) in book.flows.iter().filter(|(_, flow)| {
         in_window(flow.day, from, cutoff)
-            && lens.owns_entity(flow.owner)
+            && lens.owns(crate::flow::movement_place(lens, flow))
             && contract_flow(flow.origin, contract_id)
     }) {
         let posting = Posting::at(book, run, id);
@@ -326,7 +330,7 @@ fn contract_register<'s>(
                 Cell::list(
                     " ",
                     [
-                        Cell::amount(book, scoped_entity_amount(lens, flow.owner, posting.out())),
+                        Cell::amount(book, scoped_flow_amount(lens, flow, posting.out())),
                         Cell::Source(flow.loc),
                     ],
                 ),
@@ -366,12 +370,22 @@ fn in_window(day: Day, from: Option<Day>, cutoff: Day) -> bool {
     day <= cutoff && from.is_none_or(|from| day >= from)
 }
 
-fn scoped_entity_amount<'s>(
+fn scoped_flow_amount<'s>(
     lens: Lens<'s, '_, '_, '_>,
-    entity: axiom_core::Id<Entity>,
+    flow: &axiom_model::Flow,
     amount: Amount,
 ) -> Amount {
-    Amount::new(lens.entity_qty(entity, amount.qty), amount.unit)
+    Amount::new(
+        crate::flow::scoped_movement_qty(lens, flow, amount.qty),
+        amount.unit,
+    )
+}
+
+fn place_owned_by(lens: Lens<'_, '_, '_, '_>, place: Id<Place>, entity: Id<Entity>) -> bool {
+    lens.plan()
+        .owners_of(place)
+        .iter()
+        .any(|owner| owner.owner == entity && !owner.share.is_zero())
 }
 
 /// Builds a register for a place within an owner's view.

@@ -377,7 +377,7 @@ fn expected_section<'s>(
         let total = legs
             .iter()
             .filter(|leg| leg.out.unit == main.out.unit)
-            .map(|leg| lens.entity_qty(leg.template.owner, leg.out.qty))
+            .map(|leg| crate::flow::scoped_movement_qty(lens, leg.template, leg.out.qty))
             .sum();
         let next = legs
             .iter()
@@ -459,7 +459,7 @@ fn contract_forecasts<'s>(
                 .filter(|flow| {
                     flow.flow.day == promise.due && flow.flow.out.unit == main.flow.out.unit
                 })
-                .map(|flow| lens.entity_qty(flow.flow.owner, flow.flow.out.qty))
+                .map(|flow| crate::flow::scoped_movement_qty(lens, &flow.flow, flow.flow.out.qty))
                 .sum();
             Amount::new(qty, main.flow.out.unit)
         });
@@ -731,119 +731,95 @@ mod tests {
         );
     }
 
+    const RENT: &str = "\
+base USD
+commodity USD
+  precision 2
+entity me
+entity landlord
+account checking : asset
+opening 2026-01-01
+  checking 1_000.00 USD
+contract rent with landlord
+  100.00 USD monthly on 15 from checking
+  from 2026-01-15
+  until 2026-06-30
+";
+
     #[test]
-    fn forecast_projects_contract_occurrences_and_marks_unsupported_contracts_incomplete() {
-        use crate::tests::household;
-        use axiom_core::{Days, Timeline};
-        use axiom_model::{Cadence, Contract, On, Share, Terms, TermsState};
-
-        let mut house = household();
-        let until = day(2026, 5, 31);
-        let first = day(2026, 4, 1);
-        let mut template = house.book.plans[Id::new(0)].template[0].clone();
-        template.out.qty = Qty(100_000);
-        template.arrive.qty = Qty(100_000);
-        let baseline = view(&house.book, &house.run, &Whose::default(), Some(until), 0);
-        let baseline_cash = match &baseline.sections[0].rows.last().unwrap().cells[1] {
-            Cell::Amount { qty, .. } => *qty,
-            _ => panic!("expected committed amount"),
-        };
-
-        let terms = Terms {
-            state: TermsState::Active,
-            every: Cadence::Every(Span::months(1)),
-            on: vec![On::MonthDay(15)].into(),
-            anchor: first,
-            template: vec![template.clone()].into(),
-            inputs: Box::default(),
-            estimate: false,
-            due: None,
-            grace: Span::default(),
-            period: None,
-            covers: None,
-            prorated: false,
-            escalation: None,
-            shares: Box::default(),
-            also: Box::default(),
-            rate: None,
-            change: None,
-        };
-        let mut unsupported_template = template.clone();
-        unsupported_template.to = house.place("expenses/repairs");
-        let mut unsupported = terms.clone();
-        unsupported.template = vec![unsupported_template].into();
-        unsupported.shares = vec![Share {
-            rate: axiom_core::Ratio::ONE,
-            entity: template.owner,
-            measure: None,
-            loc: axiom_core::Loc::default(),
-        }]
-        .into();
-
-        let valid_name = house.book.names.intern("contract-rent");
-        let unsupported_name = house.book.names.intern("contract-with-shares");
-        let make_contract = |name, terms| Contract {
-            name,
-            party: template.payee.unwrap_or(template.owner),
-            owner: template.owner,
-            purpose: None,
-            description: None,
-            area: None,
-            days: Days::new(first, until).unwrap(),
-            terms: Timeline::new(terms),
-            buys: None,
-            deposit: None,
-            loan: None,
-            matching: None,
-            ended: None,
-            laws: Box::default(),
-            doc: None,
-            loc: axiom_core::Loc::default(),
-        };
-        house
-            .book
-            .contracts
-            .push(make_contract(valid_name, terms.clone()));
-        house
-            .book
-            .contracts
-            .push(make_contract(unsupported_name, unsupported));
-
-        let report = view(&house.book, &house.run, &Whose::default(), Some(until), 0);
-        let ending_cash = match &report.sections[0].rows.last().unwrap().cells[1] {
-            Cell::Amount { qty, .. } => *qty,
-            _ => panic!("expected committed amount"),
-        };
-        assert_eq!(ending_cash - baseline_cash, Qty(160_000));
-
-        let occurrences = report
-            .sections
-            .iter()
-            .find(|section| section.heading.as_deref() == Some("Contract occurrences"))
+    fn forecast_does_not_invent_contract_amounts_when_the_native_monitor_is_incomplete() {
+        crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
+            assert!(!run.monitor_complete);
+            let report = crate::report(
+                book,
+                run,
+                &crate::Query::Forecast {
+                    until: Some(day(2026, 4, 30)),
+                    paths: 0,
+                },
+                None,
+            )
             .unwrap();
-        let valid = occurrences
-            .rows
-            .iter()
-            .find(|row| matches!(&row.cells[0], Cell::Text(text) if text.contains("contract-rent")))
+            let occurrences = report
+                .sections
+                .iter()
+                .find(|section| crate::tests::heading(section) == Some("Contract occurrences"))
+                .unwrap();
+            assert!(occurrences.rows.is_empty());
+            assert!(occurrences.notes.iter().any(|note| {
+                crate::tests::cell(note).contains("did not finish the native occurrence monitor")
+            }));
+        });
+    }
+
+    /// Full native materializer integration. Keep this fixture ready so the
+    /// report assertion can be enabled as soon as the engine monitor becomes
+    /// authoritative; report code must never synthesize contract placeholders.
+    #[test]
+    #[ignore = "waiting for the engine's native occurrence monitor/materializer"]
+    fn native_contract_occurrences_change_projection_and_keep_typed_amounts() {
+        crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
+            assert!(run.monitor_complete);
+            let report = crate::report(
+                book,
+                run,
+                &crate::Query::Forecast {
+                    until: Some(day(2026, 4, 30)),
+                    paths: 0,
+                },
+                None,
+            )
             .unwrap();
-        assert!(matches!(
-            &valid.cells[2],
-            Cell::Amount {
-                qty: Qty(100_000),
-                ..
-            }
-        ));
-        assert!(
-            occurrences
-                .notes
+            let occurrences = report
+                .sections
                 .iter()
-                .any(|note| note.contains("owner shares are not forecast"))
-        );
-        assert!(
-            report.sections[0]
-                .notes
+                .find(|section| crate::tests::heading(section) == Some("Contract occurrences"))
+                .unwrap();
+            let rent: Vec<_> = occurrences
+                .rows
                 .iter()
-                .any(|note| note.contains("Projection is incomplete"))
-        );
+                .filter_map(|row| match (&row.cells[0], &row.cells[2], &row.cells[3]) {
+                    (Cell::Text(title), Cell::Amount { qty, .. }, Cell::Day(due))
+                        if title.contains("rent") =>
+                    {
+                        Some((*qty, *due))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                rent,
+                [
+                    (Qty(10_000), day(2026, 2, 15)),
+                    (Qty(10_000), day(2026, 3, 15)),
+                    (Qty(10_000), day(2026, 4, 15)),
+                ]
+            );
+            let outlook = &report.sections[0].rows;
+            let Cell::Amount { qty: ending, .. } = outlook.last().unwrap().cells[1] else {
+                panic!("forecast end is a typed amount")
+            };
+            assert_eq!(ending, Qty(70_000));
+        });
     }
 }

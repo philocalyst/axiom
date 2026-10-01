@@ -10,7 +10,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, description: &str) -> O
     let book = lens.book();
     let ids = postings(book, run)
         .filter(|posting| {
-            lens.owns_entity(posting.flow.owner)
+            lens.owns(crate::flow::movement_place(lens, posting.flow))
                 && posting
                     .flow
                     .description

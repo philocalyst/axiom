@@ -190,8 +190,9 @@ fn spendable_section<'s>(
                 && lens.liquidity(from, posting.flow.out.unit) == Some(Liquidity::Cash)
         })
         .filter_map(|posting| {
-            let amount = posting.out_in_base(lens)?;
-            let amount = lens.entity_qty(posting.flow.owner, amount);
+            let out = posting.out();
+            let amount = Amount::new(lens.place_qty(posting.flow.from, out.qty), out.unit);
+            let amount = lens.on(posting.flow.day).value(amount)?;
             Some((
                 format!("{} to {}", posting.flow.day, path(book, posting.flow.to)),
                 amount,

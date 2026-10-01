@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use axiom_core::{Day, Days, Id, Qty, spread};
 use axiom_engine::Run;
 use axiom_model::{
-    Action, Book, Class, Commodity, Entity, Object, Period, Place, Purpose, PurposeRoot,
+    Action, Amount, Book, Class, Commodity, Entity, Object, Period, Place, Purpose, PurposeRoot,
 };
 
 use crate::calendar::Periods;
@@ -41,9 +41,10 @@ pub(crate) fn view_by_party_with_lens<'s>(
     let mut values: HashMap<(PurposeRoot, Party), usize> = HashMap::new();
     let mut amounts = Vec::new();
     let mut unpriced = 0;
+    let mut shares = MovementShares::default();
     for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
         let flow = posting.flow;
-        if !lens.owns_entity(flow.owner) {
+        if !lens.owns(movement_place(lens, flow)) {
             continue;
         }
         let from_outside = book.places[flow.from].class == Class::Outside;
@@ -52,7 +53,7 @@ pub(crate) fn view_by_party_with_lens<'s>(
             continue;
         };
         let root = book.purposes[purpose.purpose].root;
-        let amount = movement_in_base(lens, posting, Some(root));
+        let amount = movement_in_base_with(lens, posting, Some(root), &mut shares);
         let Some(amount) = amount else {
             unpriced += 1;
             continue;
@@ -247,15 +248,16 @@ fn purpose_view<'s>(
     let mut unclassified = vec![Qty::ZERO; period_count];
     let mut unpriced = 0;
     let mut spread_seen = false;
+    let mut shares = MovementShares::default();
 
     for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
         let flow = posting.flow;
-        if !lens.owns_entity(flow.owner) {
+        if !lens.owns(movement_place(lens, flow)) {
             continue;
         }
         spread_seen |= flow.recognized.last() > flow.day;
         let Some(purpose) = flow.purpose else {
-            let amount = movement_in_base(lens, posting, None);
+            let amount = movement_in_base_with(lens, posting, None, &mut shares);
             let Some(amount) = amount else {
                 unpriced += 1;
                 continue;
@@ -277,7 +279,7 @@ fn purpose_view<'s>(
             continue;
         };
         let root = book.purposes[purpose.purpose].root;
-        let Some(amount) = movement_in_base(lens, posting, Some(root)) else {
+        let Some(amount) = movement_in_base_with(lens, posting, Some(root), &mut shares) else {
             unpriced += 1;
             continue;
         };
@@ -564,21 +566,91 @@ pub(crate) fn movement_in_base(
     posting: Posting<'_>,
     root: Option<PurposeRoot>,
 ) -> Option<Qty> {
+    movement_in_base_with(lens, posting, root, &mut MovementShares::default())
+}
+
+/// Carries rounding boundaries across postings at each physical endpoint.
+/// This makes statement rows conserve the same cents as the corresponding
+/// register balance when many small movements share one place.
+#[derive(Default)]
+pub(crate) struct MovementShares {
+    cumulative: HashMap<(Id<Place>, Id<Commodity>, bool), Qty>,
+}
+
+impl MovementShares {
+    fn split(&mut self, lens: Lens<'_, '_, '_, '_>, place: Id<Place>, amount: Amount) -> Qty {
+        if lens.whose.is_everyone() || amount.qty.is_zero() {
+            return amount.qty;
+        }
+        let negative = amount.qty.is_negative();
+        let magnitude = if negative {
+            Qty(-amount.qty.0)
+        } else {
+            amount.qty
+        };
+        let cumulative = self
+            .cumulative
+            .entry((place, amount.unit, negative))
+            .or_default();
+        let before = lens.place_qty(place, *cumulative);
+        *cumulative += magnitude;
+        let after = lens.place_qty(place, *cumulative);
+        let part = after - before;
+        if negative { -part } else { part }
+    }
+}
+
+pub(crate) fn movement_in_base_with(
+    lens: Lens<'_, '_, '_, '_>,
+    posting: Posting<'_>,
+    root: Option<PurposeRoot>,
+    shares: &mut MovementShares,
+) -> Option<Qty> {
     let flow = posting.flow;
     let from_outside = lens.book().places[flow.from].class == Class::Outside;
     let to_outside = lens.book().places[flow.to].class == Class::Outside;
     let inbound = from_outside && !to_outside;
-    let amount = if inbound {
-        posting.arrive_in_base(lens)
+    let (place, amount) = if inbound {
+        (flow.to, posting.arrive())
     } else {
-        posting.out_in_base(lens)
-    }?;
+        (flow.from, posting.out())
+    };
+    // A flow's declared owner is only the primary owner. The physical end it
+    // moves through carries the effective ownership shares, so scope the
+    // quantity there before pricing it. This also keeps a foreign-currency
+    // movement's displayed share aligned with the unit actually posted.
+    let amount = axiom_model::Amount::new(shares.split(lens, place, amount), amount.unit);
+    let amount = lens.on(flow.day).value(amount)?;
     let reverses = match root {
         Some(PurposeRoot::Income) => !inbound,
         Some(PurposeRoot::Spending | PurposeRoot::Capital) => inbound,
         Some(PurposeRoot::Transfer) | None => false,
     };
     Some(if reverses { -amount } else { amount })
+}
+
+/// The physical endpoint whose amount is used by income/spending reports.
+/// Incoming flows use what reached the owned end; all other flows use what
+/// left the source, matching `movement_in_base`'s direction convention.
+pub(crate) fn movement_place(lens: Lens<'_, '_, '_, '_>, flow: &axiom_model::Flow) -> Id<Place> {
+    let book = lens.book();
+    if book.places[flow.from].class == Class::Outside
+        && book.places[flow.to].class != Class::Outside
+    {
+        flow.to
+    } else {
+        flow.from
+    }
+}
+
+/// Applies the same endpoint ownership split to template amounts and other
+/// unpriced quantity views.
+pub(crate) fn scoped_movement_qty(
+    lens: Lens<'_, '_, '_, '_>,
+    flow: &axiom_model::Flow,
+    qty: Qty,
+) -> Qty {
+    lens.place_qty(movement_place(lens, flow), qty)
 }
 
 fn add_recognized(
@@ -607,7 +679,7 @@ fn first_activity(lens: Lens<'_, '_, '_, '_>, cutoff: Day) -> Day {
     let book = lens.book();
     book.flows
         .iter()
-        .filter(|(_, flow)| lens.owns_entity(flow.owner))
+        .filter(|(_, flow)| lens.owns(movement_place(lens, flow)))
         .map(|(_, flow)| flow.day)
         .chain(
             book.measures

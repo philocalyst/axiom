@@ -146,13 +146,16 @@ pub(crate) fn template_flow_cell<'s>(
         " ",
         [
             Cell::text(route(book, flow)),
-            template_quantity(lens, flow.owner, template.out, flow.out),
+            template_quantity(lens, flow, template.out, flow.out),
             flow.is_exchange()
-                .then(|| template_quantity(lens, flow.owner, template.arrive, flow.arrive))
+                .then(|| template_quantity(lens, flow, template.arrive, flow.arrive))
                 .unwrap_or(Cell::Blank),
         ]
         .into_iter()
-        .chain(crate::table::code_labels(book, book.flow_view(flow).codes())),
+        .chain(crate::table::code_labels(
+            book,
+            book.flow_view(flow).codes(),
+        )),
     );
     let legs = template.legs.iter().map(|leg| {
         let side = match leg.side {
@@ -167,7 +170,7 @@ pub(crate) fn template_flow_cell<'s>(
                 Cell::Word(side),
                 template_quantity(
                     lens,
-                    leg.flow.owner,
+                    &leg.flow,
                     leg.quantity,
                     match leg.side {
                         FlowSide::Out => leg.flow.out,
@@ -186,7 +189,7 @@ pub(crate) fn template_flow_cell<'s>(
 
 fn template_quantity<'s>(
     lens: Lens<'s, '_, '_, '_>,
-    owner: axiom_core::Id<axiom_model::Entity>,
+    flow: &axiom_model::Flow,
     quantity: TemplateQuantity,
     literal: axiom_model::Amount,
 ) -> Cell<'s> {
@@ -194,16 +197,31 @@ fn template_quantity<'s>(
     match quantity {
         TemplateQuantity::Amount(None) => Cell::amount(
             book,
-            axiom_model::Amount::new(lens.entity_qty(owner, literal.qty), literal.unit),
+            axiom_model::Amount::new(
+                crate::flow::scoped_movement_qty(lens, flow, literal.qty),
+                literal.unit,
+            ),
         ),
         TemplateQuantity::Amount(Some(_)) => Cell::Word("computed per occurrence"),
         TemplateQuantity::Pending(None) => Cell::Word("pending amount"),
         TemplateQuantity::Pending(Some(_)) => Cell::Word("computed pending amount"),
         TemplateQuantity::Target(None) => Cell::Word("target amount"),
         TemplateQuantity::Target(Some(_)) => Cell::Word("computed target amount"),
-        TemplateQuantity::Unknown(unit) => Cell::list(" ", [Cell::Word("unknown"), Cell::Name(book.name(book.commodities[unit].symbol))]),
+        TemplateQuantity::Unknown(unit) => Cell::list(
+            " ",
+            [
+                Cell::Word("unknown"),
+                Cell::Name(book.name(book.commodities[unit].symbol)),
+            ],
+        ),
         TemplateQuantity::All(unit) => unit.map_or(Cell::Word("all"), |unit| {
-            Cell::list(" ", [Cell::Word("all"), Cell::Name(book.name(book.commodities[unit].symbol))])
+            Cell::list(
+                " ",
+                [
+                    Cell::Word("all"),
+                    Cell::Name(book.name(book.commodities[unit].symbol)),
+                ],
+            )
         }),
         TemplateQuantity::Rest => Cell::Word("rest"),
         TemplateQuantity::Whole => Cell::Word("whole"),
@@ -230,17 +248,20 @@ fn template_item_cell<'s>(
         FlowSide::Out => "out",
         FlowSide::Arrive => "arrive",
     };
-    let owner = match item.parent {
-        TemplateItemParent::Header => template.flow.owner,
+    let flow = match item.parent {
+        TemplateItemParent::Header => &template.flow,
         TemplateItemParent::Leg(index) => template
             .legs
             .get(usize::from(index))
-            .map_or(template.flow.owner, |leg| leg.flow.owner),
+            .map_or(&template.flow, |leg| &leg.flow),
     };
     let amount = match item.amount {
         TemplateAmount::Literal(amount) => Cell::amount(
             book,
-            axiom_model::Amount::new(lens.entity_qty(owner, amount.qty), amount.unit),
+            axiom_model::Amount::new(
+                crate::flow::scoped_movement_qty(lens, flow, amount.qty),
+                amount.unit,
+            ),
         ),
         TemplateAmount::Computed(_) => Cell::Word("computed per occurrence"),
     };
@@ -251,8 +272,14 @@ fn template_item_cell<'s>(
         " ",
         [Cell::Word(sign), parent, Cell::Word(side), amount, purpose]
             .into_iter()
-            .chain(item.description.map(|description| Cell::text(book.text(description))))
-            .chain(crate::table::code_labels(book, book.codes[item.codes].iter().copied()))
+            .chain(
+                item.description
+                    .map(|description| Cell::text(book.text(description))),
+            )
+            .chain(crate::table::code_labels(
+                book,
+                book.codes[item.codes].iter().copied(),
+            ))
             .chain(std::iter::once(Cell::Source(item.loc))),
     )
 }

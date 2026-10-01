@@ -7,7 +7,7 @@ fn day(year: i32, month: u32, date: u32) -> Day {
     Day::from_ymd(year, month, date).unwrap()
 }
 
-fn context(owner: Option<&str>) -> Context<'static, 'static> {
+fn with_context<T>(owner: Option<&str>, then: impl FnOnce(&Context<'_, '_>) -> T) -> T {
     let source = "\
 base USD
 commodity USD
@@ -33,18 +33,16 @@ opening 2026-01-01
         diagnostics.iter().all(|diagnostic| !diagnostic.is_error()),
         "book build failed: {diagnostics:?}"
     );
-    // The returned context borrows the book; leak this tiny test fixture to
-    // give it the static lifetime required by the helper's return type.
-    let book = Box::leak(Box::new(book));
-    Context::new(
-        book,
+    let context = Context::new(
+        &book,
         Options {
             today: day(2026, 1, 4),
             relaxed: false,
         },
         owner,
     )
-    .unwrap()
+    .unwrap();
+    then(&context)
 }
 
 fn register_steps(context: &Context<'_, '_>) -> Vec<(Qty, Qty)> {
@@ -74,20 +72,14 @@ fn register_steps(context: &Context<'_, '_>) -> Vec<(Qty, Qty)> {
 
 #[test]
 fn shared_register_rounding_conserves_cents_across_postings() {
-    let me = context(Some("me"));
-    let jordan = context(Some("jordan"));
-    let everyone = context(None);
+    let me = with_context(Some("me"), register_steps);
+    let jordan = with_context(Some("jordan"), register_steps);
+    let everyone = with_context(None, register_steps);
 
     // Cumulative allocation assigns the first cent to me and the second to
     // Jordan. The balances and line amounts both reconcile to the physical
     // two-cent balance instead of rounding each posting independently.
-    assert_eq!(register_steps(&me), [(Qty(1), Qty(1)), (Qty(0), Qty(1))]);
-    assert_eq!(
-        register_steps(&jordan),
-        [(Qty(0), Qty(0)), (Qty(1), Qty(1))]
-    );
-    assert_eq!(
-        register_steps(&everyone),
-        [(Qty(1), Qty(1)), (Qty(1), Qty(2))]
-    );
+    assert_eq!(me, [(Qty(1), Qty(1)), (Qty(0), Qty(1))]);
+    assert_eq!(jordan, [(Qty(0), Qty(0)), (Qty(1), Qty(1))]);
+    assert_eq!(everyone, [(Qty(1), Qty(1)), (Qty(1), Qty(2))]);
 }

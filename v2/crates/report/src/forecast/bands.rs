@@ -21,7 +21,8 @@ pub struct Share {
 
 impl Share {
     fn apply(self, quanta: i64) -> i64 {
-        let scaled = mul_div(quanta.into(), self.days.into(), self.of.into()).expect("a month has days");
+        let scaled =
+            mul_div(quanta.into(), self.days.into(), self.of.into()).expect("a month has days");
         i64::try_from(scaled).expect("a share of an i64 fits")
     }
 }
@@ -61,9 +62,16 @@ pub fn simulate(
 ) -> Bands {
     debug_assert!(months > 0);
     debug_assert!(history.len() % months == 0);
-    debug_assert!(categories.iter().all(|&index| index < history.len() / months));
+    debug_assert!(
+        categories
+            .iter()
+            .all(|&index| index < history.len() / months)
+    );
     let groups = paths.div_ceil(LANES);
-    let mut bands = Bands { paths: groups * LANES, values: vec![0; committed.len() * groups * LANES] };
+    let mut bands = Bands {
+        paths: groups * LANES,
+        values: vec![0; committed.len() * groups * LANES],
+    };
     for group in 0..groups {
         let mut streams = Streams::seeded(seed, group as u64);
         let mut spent = [0i64; LANES];
@@ -131,7 +139,8 @@ impl Streams {
     /// division and whose bias is below 2^-32.
     fn below(&mut self, n: usize) -> [usize; LANES] {
         let bound = n as u64;
-        self.next().map(|word| (((word >> 32) * bound) >> 32) as usize)
+        self.next()
+            .map(|word| (((word >> 32) * bound) >> 32) as usize)
     }
 }
 
@@ -161,7 +170,17 @@ mod tests {
     fn the_same_seed_gives_the_same_bands_and_they_are_ordered() {
         let history = [0, 100, 200, 300, 400, 50, 50, 900, 75, 225];
         let categories = [0, 1];
-        let run = |seed| simulate(&[10_000; 6], &[WHOLE; 6], &history, &categories, 5, 1_000, seed);
+        let run = |seed| {
+            simulate(
+                &[10_000; 6],
+                &[WHOLE; 6],
+                &history,
+                &categories,
+                5,
+                1_000,
+                seed,
+            )
+        };
         let (a, b) = (run(42), run(42));
         for month in 0..6 {
             let [low, middle, high] = a.percentiles(month);

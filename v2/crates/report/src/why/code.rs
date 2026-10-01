@@ -22,7 +22,8 @@ pub fn report<'s>(
     let marked = |code: Sym| glob(pattern, book.name(code));
     let flows: Vec<_> = postings(book, run)
         .filter(|posting| {
-            lens.owns_entity(posting.flow.owner) && book.flow_view(posting.flow).codes().any(marked)
+            lens.owns(crate::flow::movement_place(lens, posting.flow))
+                && book.flow_view(posting.flow).codes().any(marked)
         })
         .map(|posting| posting.id)
         .collect();

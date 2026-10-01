@@ -70,7 +70,7 @@ fn flows_table<'s>(
             Cell::amount(
                 book,
                 Amount::new(
-                    lens.entity_qty(flow.owner, posting.out().qty),
+                    crate::flow::scoped_movement_qty(lens, flow, posting.out().qty),
                     posting.out().unit,
                 ),
             ),

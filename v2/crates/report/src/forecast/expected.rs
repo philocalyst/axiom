@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty};
 use axiom_engine::Run;
-use axiom_model::{Amount, Book, Class, End, Entity, Flow, Place};
+use axiom_model::{Amount, Book, Class, Entity, Flow, Place};
 
 use super::recurrence::{Schedule, detect, median};
 use crate::history::{Posting, postings};
@@ -294,7 +294,9 @@ mod tests {
     #[test]
     fn contract_suppression_tracks_each_projected_date_and_typed_identity() {
         use axiom_core::{Loc, Timeline};
-        use axiom_model::{Cadence, Contract, Terms, TermsState};
+        use axiom_model::{
+            Cadence, Contract, TemplateFlow, TemplateProgram, TemplateQuantity, Terms, TermsState,
+        };
 
         let mut house = household();
         let today = day(2026, 5, 1);
@@ -307,7 +309,15 @@ mod tests {
             every: Cadence::Every(axiom_core::Span::months(1)),
             on: Box::default(),
             anchor: today,
-            template: vec![template.clone()].into(),
+            template: vec![TemplateFlow {
+                flow: template.clone(),
+                out: TemplateQuantity::Amount(None),
+                arrive: TemplateQuantity::Amount(None),
+                legs: Box::default(),
+                items: Box::default(),
+            }]
+            .into(),
+            program: TemplateProgram::default(),
             inputs: Box::default(),
             estimate: false,
             due: None,
@@ -323,15 +333,19 @@ mod tests {
         };
         let contract = Contract {
             name: house.book.names.intern("rent-promise"),
+            purpose: None,
+            description: None,
             party: Id::new(0),
             owner: Id::new(0),
             purpose: None,
             description: None,
             area: None,
             days: Days::new(start, end).unwrap(),
-            terms: Timeline::new(terms),
+            terms: Some(Timeline::new(terms)),
+            standing: None,
             buys: None,
             deposit: None,
+            deposit_holding: None,
             loan: None,
             matching: None,
             ended: None,
@@ -357,12 +371,16 @@ mod tests {
         let waiver_end = start.add_days(14);
         let mut waiver = house.book.contracts[Id::new(0)]
             .terms
+            .as_ref()
+            .unwrap()
             .at(waiver_start)
             .clone();
         waiver.state = TermsState::Waived;
         waiver.template = Box::default();
         house.book.contracts[Id::new(0)]
             .terms
+            .as_mut()
+            .unwrap()
             .paint(Days::new(waiver_start, waiver_end).unwrap(), waiver);
         assert!(
             covered_on(&house.book, &template, waiver_start.add_days(1)),
@@ -401,7 +419,7 @@ opening 2026-01-01
             let plan = axiom_engine::Plan::new(book);
             let found = expected(Lens::new(&plan, &whose, run.today), run);
             assert_eq!(found.len(), 1, "the depreciation is a habit");
-            assert_eq!(found[0].template.detail().basis_end, Some(End::From));
+            assert!(book.flow_view(found[0].template).detail().basis.is_some());
         });
     }
 }

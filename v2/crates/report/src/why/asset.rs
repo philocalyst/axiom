@@ -106,14 +106,14 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) ->
     ])
     .headed("Flows about it");
     for (id, flow) in book.flows.iter().filter(|(_, flow)| {
-        lens.owns_entity(flow.owner)
+        lens.owns(crate::flow::movement_place(lens, flow))
             && flow
                 .purpose
                 .is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
     }) {
         let posting = crate::history::Posting::at(book, run, id);
         let out = posting.out();
-        let amount = lens.entity_qty(flow.owner, out.qty);
+        let amount = crate::flow::scoped_movement_qty(lens, flow, out.qty);
         if amount.is_zero() {
             continue;
         }
