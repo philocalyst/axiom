@@ -254,6 +254,8 @@ pub(crate) struct Realized {
     /// The quantity of this individual parcel, which may be only part of the
     /// flow when a sale relieves multiple lots.
     pub quantity: Qty,
+    /// Original parcel acquisition date for wash-sale holding-period tacking.
+    pub acquired: Day,
     pub held: Span,
     pub part: Option<PartId>,
     pub codes: FlowCodes,
@@ -768,6 +770,15 @@ impl<'a, 's> Machine<'a, 's> {
                         .iter()
                         .any(|&alt| self.matches(left, self.at(alt))),
                 ),
+            },
+            Op::Resides(entity, systems) => match self.at(*entity) {
+                Value::Fault(fault) => Value::Fault(fault),
+                Value::Entity(entity) => Value::Bool(
+                    self.book().entities[entity].lives.iter().any(|residence| {
+                        residence.days.contains(self.ctx.day) && systems.contains(&residence.system)
+                    }),
+                ),
+                _ => Value::Fault(Fault::InvalidProgram),
             },
             Op::If(cond, then, otherwise) => match self.at(*cond) {
                 Value::Bool(true) => self.at(*then),
