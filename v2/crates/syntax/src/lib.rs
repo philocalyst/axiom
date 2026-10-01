@@ -13,16 +13,24 @@
 //! | `lex`       | one line's tokens, with two of lookahead                   |
 //! | `parser`    | parser state and the helpers every rule shares             |
 //! | `structure` | item dispatch, one-line directives, indented blocks        |
-//! | `journal`   | dated entries, openings and plans                          |
-//! | `flow`      | flow headers, ends, legs, tails, lot selectors             |
-//! | `amount`    | amounts, and what is said about the ones that are wrong    |
-//! | `decl`, `law` | declarations, params, syncs, laws                        |
+//! | `journal`   | dated lines: flows and what statements are about, openings |
+//! | `statement` | statements: subject, verb, what each verb takes            |
+//! | `refs`      | typed indices: which piece of the file, and where in it    |
+//! | `dates`     | dates in full or short of what the folder or heading gives |
+//! | `flow`      | flow headers, ends, legs, items, tails, lot selectors      |
+//! | `contract`  | contracts: schedule, deadline, `also`, properties, template |
+//! | `amount`    | amounts and references, and the mistakes made writing them |
+//! | `decl`, `law` | declarations, params, laws                               |
+//! | `source`    | `sync`, `format`, `pattern` and `known-as`                 |
 //! | `expr`      | the expression grammar                                     |
+//! | `style`     | `axiom fmt`: the house style of a journal                  |
 //! | `malformed` | diagnostics for words that are not tokens                  |
 
-pub mod ast;
+mod ast;
 
 mod amount;
+mod contract;
+mod dates;
 mod decl;
 mod expr;
 mod flow;
@@ -32,12 +40,18 @@ mod lex;
 mod lines;
 mod malformed;
 mod parser;
+mod refs;
+mod source;
+mod statement;
 mod structure;
+mod style;
 
 #[cfg(test)]
 mod tests;
 
 pub use ast::*;
+pub use dates::MONTHS;
+pub use style::format;
 
 use std::ops::Range;
 
@@ -45,8 +59,10 @@ use axiom_core::{Diagnostic, FileId, Loc, par};
 use memchr::{memchr, memchr_iter, memrchr};
 
 use crate::ast::Piece;
+use crate::dates::heading;
 use crate::lines::{Tabs, unattached_doc};
 use crate::parser::Parser;
+use crate::refs::MAX_PIECES;
 
 /// A file smaller than this is parsed by one thread: cutting and joining would
 /// cost more than it saves.
@@ -60,15 +76,20 @@ const PIECES_PER_CORE: usize = 4;
 /// what an index can say (2^24 of a kind, and a node takes a byte of source).
 const PIECE_TARGET: usize = 1 << 23;
 
-/// Files larger than this cannot be cut into the 256 pieces an index can name.
-const FILE_MAX: usize = 256 * PIECE_TARGET;
+/// Files larger than this cannot be cut into the pieces an index can name.
+const FILE_MAX: usize = MAX_PIECES * PIECE_TARGET;
 
-/// Parses one file. Every item that parses is kept; each one that does not
-/// produces a diagnostic and is skipped. Diagnostics come in source order.
+/// Parses one file, which is in `folder`. Every item that parses is kept; each
+/// one that does not produces a diagnostic and is skipped. Diagnostics come in
+/// source order.
+///
+/// A date short of what `folder` (or a heading above it) gives is completed
+/// here. Nothing checks that a whole date agrees with either: dates are a
+/// convention of where files are kept, not a law (§10).
 ///
 /// A large file is cut at item boundaries and its pieces are parsed on every
 /// core. They keep their tables, and the file is their items in order.
-pub fn parse(file: FileId, src: &str) -> (File<'_>, Vec<Diagnostic>) {
+pub fn parse(file: FileId, src: &str, folder: Folder) -> (File<'_>, Vec<Diagnostic>) {
     if src.len() > FILE_MAX {
         let diag = Diagnostic::error("file-too-large", "source files are limited to 2 GiB")
             .label(Loc::new(file, 0, 0), "this file is larger");
@@ -77,72 +98,112 @@ pub fn parse(file: FileId, src: &str) -> (File<'_>, Vec<Diagnostic>) {
     let cores = std::thread::available_parallelism().map_or(1, |cores| cores.get());
     let pieces = match src.len() < PARALLEL_MIN {
         true => 1,
-        false => (cores * PIECES_PER_CORE).max(src.len().div_ceil(PIECE_TARGET)).min(256),
+        false => (cores * PIECES_PER_CORE).max(src.len().div_ceil(PIECE_TARGET)).min(MAX_PIECES),
     };
-    parse_in(file, src, pieces)
+    parse_in(file, src, folder, pieces)
 }
 
 /// [`parse`] with the file cut into about `pieces` pieces.
-pub(crate) fn parse_in(file: FileId, src: &str, pieces: usize) -> (File<'_>, Vec<Diagnostic>) {
+pub(crate) fn parse_in(file: FileId, src: &str, folder: Folder, pieces: usize) -> (File<'_>, Vec<Diagnostic>) {
     let ranges = cut(src, pieces);
-    let (mut parsed, mut diags, mut tabs) = (
-        Vec::with_capacity(ranges.len()),
-        Vec::new(),
-        Tabs::default(),
-    );
-    par::map_each_ordered(
-        &ranges,
-        |(number, range)| parse_piece(file, src, range.clone(), *number),
-        |(piece, more, more_tabs)| {
-            parsed.push(piece);
-            diags.extend(more);
-            tabs.merge(more_tabs);
-        },
-    );
+    // What each piece holds is read first, because what a piece's dates leave
+    // out depends on the last heading before it, in whichever piece that was.
+    let scans = par::map_each(&ranges, |range| Scan::of(&src.as_bytes()[range.clone()]));
+    let mut context = folder;
+    let jobs: Vec<Job> = ranges
+        .into_iter()
+        .zip(scans)
+        .enumerate()
+        .map(|(number, (range, scan))| {
+            let job = Job { number, range, folder: context, scan };
+            context = job.scan.heading.unwrap_or(context);
+            job
+        })
+        .collect();
+    let parsed = par::map_each(&jobs, |job| parse_piece(file, src, job));
+    let (mut pieces, mut diags, mut tabs) = (Vec::new(), Vec::new(), Tabs::default());
+    for (piece, more, more_tabs) in parsed {
+        pieces.push(piece);
+        diags.extend(more);
+        tabs.merge(more_tabs);
+    }
     diags.extend(tabs.diagnostic());
     diags.sort_by_key(|diag| diag.anchor().map(|loc| loc.start));
-    (File::new(file, src, parsed), diags)
+    (File::new(file, src, pieces), diags)
 }
 
-/// Piece number `number` of the file, `src[range]`, parsed.
-fn parse_piece(file: FileId, src: &str, range: Range<usize>, number: usize) -> (Piece<'_>, Vec<Diagnostic>, Tabs) {
-    let mut parser = Parser::new(file, src, range.clone(), number);
-    let (items, dated) = count_items(&src.as_bytes()[range]);
-    parser.items.reserve(items);
-    parser.t.txns.reserve(dated);
-    parser.items(number == 0);
+/// A parsed piece, what it found wrong, and its lines that were indented with tabs.
+type Parsed<'s> = (Piece<'s>, Vec<Diagnostic>, Tabs);
+
+/// One piece of the file to parse: which, where, what its dates start out as,
+/// and what a first look at it found.
+struct Job {
+    number: usize,
+    range: Range<usize>,
+    folder: Folder,
+    scan: Scan,
+}
+
+/// The piece `job` describes, parsed.
+fn parse_piece<'s>(file: FileId, src: &'s str, job: &Job) -> Parsed<'s> {
+    let mut parser = Parser::new(file, src, job.range.clone(), job.number, job.folder);
+    parser.items.reserve(job.scan.items);
+    parser.reserve::<Txn>(job.scan.dated);
+    parser.items(job.number == 0);
     let (piece, mut diags, lines) = parser.finish();
     diags.extend(lines.stray_doc.map(unattached_doc));
     (piece, diags, lines.tabs)
 }
 
-/// How many lines of `text` start an item, and how many of those start with a
-/// date: room for the tables, so they never grow.
-fn count_items(text: &[u8]) -> (usize, usize) {
-    let mut counts = (1, usize::from(text.first().is_some_and(u8::is_ascii_digit)));
-    for newline in memchr_iter(b'\n', text) {
-        match text.get(newline + 1) {
-            Some(b'0'..=b'9') => counts = (counts.0 + 1, counts.1 + 1),
-            Some(b' ' | b'\t' | b'\r' | b'\n') | None => {}
-            Some(_) => counts.0 += 1,
+/// What one pass over a piece's lines finds: room for the tables, so they
+/// never grow, and the last heading, which the pieces after it start from.
+struct Scan {
+    /// How many lines start an item.
+    items: usize,
+    /// How many of those start with a date (or a number).
+    dated: usize,
+    /// The context of the last heading line, if the piece has one.
+    heading: Option<Folder>,
+}
+
+impl Scan {
+    fn of(text: &[u8]) -> Scan {
+        let first_is_digit = text.first().is_some_and(u8::is_ascii_digit);
+        let mut scan = Scan { items: 1, dated: usize::from(first_is_digit), heading: None };
+        if first_is_digit {
+            scan.heading = heading(text);
         }
+        for newline in memchr_iter(b'\n', text) {
+            match text.get(newline + 1) {
+                Some(b'0'..=b'9') => {
+                    (scan.items, scan.dated) = (scan.items + 1, scan.dated + 1);
+                    // A whole date is not a heading, and is what nearly every dated line starts with.
+                    let line = &text[newline + 1..];
+                    if !(line.get(4) == Some(&b'-') && line.get(7) == Some(&b'-')) {
+                        scan.heading = heading(line).or(scan.heading);
+                    }
+                }
+                Some(b' ' | b'\t' | b'\r' | b'\n') | None => {}
+                Some(_) => scan.items += 1,
+            }
+        }
+        scan
     }
-    counts
 }
 
 /// Cuts `src` into about `pieces` ranges, each starting where an item does.
-fn cut(src: &str, pieces: usize) -> Vec<(usize, Range<usize>)> {
+fn cut(src: &str, pieces: usize) -> Vec<Range<usize>> {
     let bytes = src.as_bytes();
     let mut ranges = Vec::with_capacity(pieces);
     let mut start = 0;
     for piece in 1..pieces {
         let target = (bytes.len() / pieces * piece).max(start);
         if let Some(at) = item_boundary(bytes, target).filter(|&at| at > start) {
-            ranges.push((ranges.len(), start..at));
+            ranges.push(start..at);
             start = at;
         }
     }
-    ranges.push((ranges.len(), start..bytes.len()));
+    ranges.push(start..bytes.len());
     ranges
 }
 

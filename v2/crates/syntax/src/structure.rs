@@ -10,34 +10,94 @@ use axiom_core::diag::closest;
 use axiom_core::{Diagnostic, Loc};
 
 use crate::ast::*;
-use crate::lex::{Tok, Token};
+use crate::dates::heading;
+use crate::lex::{Punct, Tok, Token};
 use crate::lines::Line;
-use crate::parser::{Parse, Parser, Reported};
+use crate::parser::{Parse, Parser, Reported, list_words};
 
-#[rustfmt::skip]
-const KEYWORDS: [&str; 16] = [
-    "account", "entity", "commodity", "kind", "code", "param", "law", "every", "plan", "sync", "system", "use",
-    "base", "relaxed", "layout", "opening",
+/// What a column-0 line that does not start with a date can be, by its first
+/// word. The table below is the only list of them: the dispatch, the
+/// suggestion for a misspelling and the list in a message all read it.
+#[derive(Clone, Copy)]
+enum Keyword {
+    Account,
+    Entity,
+    Asset,
+    Purpose,
+    Commodity,
+    Kind,
+    Contract,
+    Budget,
+    Code,
+    Param,
+    Law,
+    Sync,
+    Opening,
+    System,
+    Use,
+    Base,
+    Relaxed,
+    Currency,
+    Rates,
+    Pattern,
+    Format,
+}
+
+const KEYWORDS: [(&str, Keyword); 21] = [
+    ("account", Keyword::Account),
+    ("entity", Keyword::Entity),
+    ("asset", Keyword::Asset),
+    ("purpose", Keyword::Purpose),
+    ("commodity", Keyword::Commodity),
+    ("kind", Keyword::Kind),
+    ("contract", Keyword::Contract),
+    ("budget", Keyword::Budget),
+    ("code", Keyword::Code),
+    ("param", Keyword::Param),
+    ("law", Keyword::Law),
+    ("sync", Keyword::Sync),
+    ("opening", Keyword::Opening),
+    ("system", Keyword::System),
+    ("use", Keyword::Use),
+    ("base", Keyword::Base),
+    ("relaxed", Keyword::Relaxed),
+    ("currency", Keyword::Currency),
+    ("rates", Keyword::Rates),
+    ("pattern", Keyword::Pattern),
+    ("format", Keyword::Format),
 ];
 
 /// Words that start a line inside a block, and what owns such a block. Written
 /// at column 0 they are a block's line whose block was forgotten.
-const BLOCK_WORDS: [(&str, &str); 9] = [
+const BLOCK_WORDS: [(&str, &str); 16] = [
     ("when", "law"),
+    ("unless", "law"),
     ("let", "law"),
     ("require", "law"),
     ("warn", "law"),
     ("owe", "law"),
     ("count", "law"),
+    ("consume", "law"),
+    ("carry", "law"),
     ("always", "law"),
     ("each", "law"),
     ("run", "sync"),
+    ("read", "sync"),
+    ("into", "sync"),
+    ("known-as", "declaration"),
+    ("also", "declaration"),
 ];
+
+/// The ways a system converts that are one word; `param NAME` is the other.
+const RATES: [(&str, Rates<'static>); 1] = [("spot", Rates::Spot)];
 
 /// The indentation a block has settled on, and the line before, for context.
 struct Block {
     indent: Option<usize>,
     previous: Loc,
+    /// Whether a line that starts with an amount may be indented further than
+    /// the rest, to line its digits up with those above it.
+    ragged: bool,
 }
 
 impl<'s> Parser<'s> {
@@ -64,6 +124,19 @@ impl<'s> Parser<'s> {
                 self.bump();
                 self.journal_entry(line, date)
             }
+            Tok::Month(_) | Tok::Number(_) | Tok::MonthDay(..) => {
+                // A line of only a year or a month says what the lines below it are in.
+                if let Some(folder) = heading(&self.src.as_bytes()[line.body..line.end]) {
+                    self.warn_ignored_doc(line);
+                    self.folder = folder;
+                    return Ok(());
+                }
+                if let Tok::Month(_) = token.tok {
+                    return Err(self.expected("expected-item", "a date, a keyword, or a heading on a line of its own"));
+                }
+                let date = self.item_date("a date or a keyword")?;
+                self.journal_entry(line, date)
+            }
             Tok::Name(word) => {
                 self.bump();
                 self.keyword_item(line, token, word, first)
@@ -73,37 +146,54 @@ impl<'s> Parser<'s> {
     }
 
     fn keyword_item(&mut self, line: &mut Line<'s>, keyword: Token<'s>, word: &str, first: bool) -> Parse<()> {
-        match word {
-            "account" => self.decl(line, DeclKind::Account),
-            "entity" => self.decl(line, DeclKind::Entity),
-            "commodity" => self.decl(line, DeclKind::Commodity),
-            "kind" => self.decl(line, DeclKind::Kind),
-            "code" => self.code_rule(line),
-            "param" => self.param(line),
-            "law" => self.law_item(line),
-            "every" => self.plan(line, None),
-            "plan" => self.named_plan(line),
-            "opening" => self.opening(line),
-            "sync" => self.sync(line),
-            "system" | "use" | "base" | "relaxed" | "layout" => self.setting(line, keyword, word, first),
-            _ => self.unknown_keyword(line, keyword, word, first),
+        let Some(&(_, kind)) = KEYWORDS.iter().find(|(known, _)| *known == word) else {
+            return self.unknown_keyword(line, keyword, word, first);
+        };
+        match kind {
+            Keyword::Account => self.decl(line, DeclKind::Account),
+            Keyword::Entity => self.decl(line, DeclKind::Entity),
+            Keyword::Asset => self.decl(line, DeclKind::Asset),
+            Keyword::Purpose => self.decl(line, DeclKind::Purpose),
+            Keyword::Commodity => self.decl(line, DeclKind::Commodity),
+            Keyword::Kind => self.decl(line, DeclKind::Kind),
+            Keyword::Budget => self.budget(line),
+            Keyword::Code => self.code_rule(line),
+            Keyword::Param => self.param(line),
+            Keyword::Law => self.law_item(line),
+            Keyword::Contract => self.contract(line),
+            Keyword::Opening => self.opening(line),
+            Keyword::Sync => self.sync(line),
+            Keyword::Pattern => self.named_pattern(line),
+            Keyword::Format => self.format(line),
+            Keyword::System if !first => self.fail(system_not_first(keyword.loc)),
+            Keyword::System | Keyword::Use => {
+                let path = self.name("expected-path", "a system path such as `us/401k`")?;
+                self.setting(line, if matches!(kind, Keyword::System) { Setting::System(path) } else { Setting::Use(path) })
+            }
+            Keyword::Base => {
+                let unit = self.unit("expected-commodity", "the base commodity, such as `USD`")?;
+                self.setting(line, Setting::Base(unit))
+            }
+            Keyword::Relaxed => self.setting(line, Setting::Relaxed),
+            Keyword::Currency => {
+                let unit = self.unit("expected-commodity", "the commodity its laws count in, such as `USD`")?;
+                self.setting(line, Setting::Currency(unit))
+            }
+            Keyword::Rates => {
+                let rates = match self.tok() {
+                    Tok::Name("param") => {
+                        self.bump();
+                        Rates::Param(self.name("expected-name", "the param that holds the rates, such as `irs-rates`")?)
+                    }
+                    _ => self.choose(&RATES, "unknown-rates", "way to convert").map(|(rates, _)| rates)?,
+                };
+                self.setting(line, Setting::Rates(rates))
+            }
         }
     }
 
-    /// One-line directives.
-    fn setting(&mut self, line: &mut Line<'s>, keyword: Token<'s>, word: &str, first: bool) -> Parse<()> {
-        let path = "a system path such as `us/401k`";
-        let setting = match word {
-            "system" if !first => return self.fail(system_not_first(keyword.loc)),
-            "system" => Setting::System(self.name("expected-path", path)?),
-            "use" => Setting::Use(self.name("expected-path", path)?),
-            "base" => Setting::Base(self.unit("expected-commodity", "the base commodity, such as `USD`")?),
-            "relaxed" => Setting::Relaxed,
-            _ => {
-                self.expect_word("free", "expected-layout", "`free`")?;
-                Setting::LayoutFree
-            }
-        };
+    /// A one-line directive, once what it names is read.
+    fn setting(&mut self, line: &mut Line<'s>, setting: Setting<'s>) -> Parse<()> {
         let header = self.end_header(line)?;
         self.emit(&header, setting, ItemKind::Setting);
         Ok(())
@@ -114,21 +204,27 @@ impl<'s> Parser<'s> {
     /// what it declares an error too; otherwise the rest of the line says what
     /// the author probably meant.
     fn unknown_keyword(&mut self, line: &mut Line<'s>, keyword: Token<'s>, word: &str, first: bool) -> Parse<()> {
+        match word {
+            "every" | "plan" => return self.fail(plan_is_a_contract(keyword.loc, word)),
+            "layout" => return self.fail(layout_is_gone(self.line_loc(line))),
+            _ => {}
+        }
         let diag = Diagnostic::error("unknown-keyword", format!("unknown keyword `{word}`"))
             .label(keyword.loc, "a line starts with a date or a keyword");
         let indent = self.point(line.start as u32);
-        let looks_like_leg = matches!(self.tok(), Tok::Number(_) | Tok::Punct("..." | "=" | "(" | "?"));
-        let near = closest(word, KEYWORDS);
+        let looks_like_leg =
+            matches!(self.tok(), Tok::Number(_) | Tok::Percent(_) | Tok::Punct(Punct::Ellipsis | Punct::Eq | Punct::LParen | Punct::Question));
+        let near = closest(word, KEYWORDS.iter().map(|(known, _)| *known));
         let diag = if let Some(near) = near {
             diag.fix(format!("did you mean `{near}`?"), keyword.loc, near)
         } else if let Some(&(_, owner)) = BLOCK_WORDS.iter().find(|(known, _)| *known == word) {
             diag.fix(format!("`{word}` is a line of a `{owner}`: indent it under one"), indent, "  ")
-        } else if self.at("->") {
+        } else if self.at(Punct::Arrow) {
             diag.help(format!("a transaction starts with its date: `2026-01-15 {word} -> …`"))
         } else if looks_like_leg {
             diag.fix("if this is a leg of the item above, indent it", indent, "  ")
         } else {
-            diag.note(format!("the keywords are `{}`", KEYWORDS.join("`, `")))
+            diag.note(format!("the keywords are {}", list_words(&KEYWORDS)))
         };
         let reported = self.report(diag);
         match near {
@@ -170,9 +266,20 @@ impl<'s> Parser<'s> {
     pub fn children(
         &mut self,
         parent: &Line<'s>,
+        each: impl FnMut(&mut Self, &mut Line<'s>) -> Parse<()>,
+    ) -> Parse<()> {
+        self.block(parent, false, each)
+    }
+
+    /// [`Parser::children`], where with `ragged` a line that starts with an
+    /// amount (an item) may be indented further than the others.
+    pub fn block(
+        &mut self,
+        parent: &Line<'s>,
+        ragged: bool,
         mut each: impl FnMut(&mut Self, &mut Line<'s>) -> Parse<()>,
     ) -> Parse<()> {
-        let mut block = Block { indent: None, previous: self.line_loc(parent) };
+        let mut block = Block { indent: None, previous: self.line_loc(parent), ragged };
         let mut intact = true;
         while let Some(mut line) = self.next_child(parent.indent) {
             if !self.is_aligned(&mut block, &line) {
@@ -210,7 +317,8 @@ impl<'s> Parser<'s> {
     /// reported once.
     fn is_aligned(&mut self, block: &mut Block, line: &Line<'s>) -> bool {
         let expected = *block.indent.get_or_insert(line.indent);
-        if line.indent == expected {
+        let amount_first = matches!(self.src.as_bytes()[line.body], b'0'..=b'9' | b'+' | b'-');
+        if line.indent == expected || (block.ragged && line.indent > expected && amount_first) {
             return true;
         }
         let there = format!("indented {} spaces, where the block uses {expected}", line.indent);
@@ -234,7 +342,7 @@ impl<'s> Parser<'s> {
 
     /// Lines that cannot be documented (properties, steps, rows) still tell the
     /// author when a `///` block above them is being ignored.
-    fn warn_ignored_doc(&mut self, line: &Line<'s>) {
+    pub fn warn_ignored_doc(&mut self, line: &Line<'s>) {
         if let Some(doc) = line.doc {
             let diag = Diagnostic::warning("misplaced-doc", "this doc comment is ignored")
                 .label(doc.loc, "nothing here takes documentation")
@@ -242,6 +350,22 @@ impl<'s> Parser<'s> {
             self.diags.push(diag);
         }
     }
+}
+
+/// v3's `every …` and `plan NAME every …`.
+fn plan_is_a_contract(loc: Loc, word: &str) -> Diagnostic {
+    Diagnostic::error("plan-is-a-contract", format!("`{word}` is gone: what repeats is a contract"))
+        .label(loc, "a promise of flows, with a name and a party")
+        .note("a contract states its schedule once, and the journal records each time it is kept")
+        .help("write `contract NAME with PARTY` and, indented, `45 USD monthly on 8 from visa`; then `08 NAME` says it")
+}
+
+/// v3's `layout free`, which turned off a rule that no longer exists.
+fn layout_is_gone(line: Loc) -> Diagnostic {
+    Diagnostic::error("layout-is-gone", "`layout` is gone: where a file is kept never limits its dates")
+        .label(line, "nothing checks a file's dates against its place")
+        .note("a short date takes its year and month from the nearest heading above it, else from the file's folder")
+        .fix("remove it", line, "")
 }
 
 fn system_not_first(loc: Loc) -> Diagnostic {

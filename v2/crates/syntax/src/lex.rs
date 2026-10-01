@@ -1,19 +1,19 @@
 //! Tokens: the words, numbers, dates and punctuation of one line.
 //!
-//! Nothing is copied: names, commodities, codes and strings are slices of the
-//! source, and dates and numbers are converted by the parsers in `axiom-core`.
+//! Nothing is copied: names, commodities, purposes, codes and strings are slices
+//! of the source, and dates and numbers are converted by the parsers in `axiom-core`.
 //! The three commonest words (a path, a plain number, a commodity) have a
 //! fast path that reads them in one pass; everything odd about a word is left
 //! to the general path, which classifies it byte by byte. A token that is not a
 //! token (`2026-02-30`, `$50`) is kept as [`Tok::Invalid`] so the parser can
 //! explain it in the context where it turned up. The lexer can look two tokens
-//! ahead, which is enough to tell `? USD` (an unknown amount) from `?` (a
-//! place), and a year from the number after it.
+//! ahead, which is enough to tell `? USD` (an unknown amount) from `?` (the
+//! unknown party), and a year from the number after it.
 
 use axiom_core::{Day, Dec, FileId, Loc, Span};
 use memchr::memchr2;
 
-use crate::ast::{Code, Name};
+use crate::ast::{BinOp, Code, Name};
 
 /// What a token means: what the parser needs, already converted.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -21,28 +21,157 @@ pub(crate) enum Tok<'s> {
     Date(Day),
     /// `YYYY-MM`, as the first day of the month.
     Month(Day),
+    /// `MM-DD` as written, unchecked: the parser says whether it is a date (in
+    /// a file whose place gives the year) or a day of every year, and whether
+    /// it exists.
+    MonthDay(u8, u8),
     /// Digits with optional `_` separators and `.fraction`. A year is a
     /// four-digit number; the parser decides where that matters.
     Number(Dec),
     /// The written number of `10%`, not yet divided by 100.
     Percent(Dec),
+    /// `1/3`: numerator and denominator as written, the latter unchecked.
+    Fraction(u32, u32),
     Span(Span),
     /// A lowercase word or `/`-separated path, possibly a glob. Keywords are
     /// names too: only the grammar knows where they count.
     Name(&'s str),
     /// A commodity: `USD`, `BRK.B`.
     Unit(&'s str),
+    /// `#groceries`, what a flow is for: the name, without its `#`.
+    Purpose(Name<'s>),
+    /// `^inv-12`, what marks flows that belong together: `^` included.
     Code(Code<'s>),
     /// A string's contents between the quotes, escapes unprocessed.
     Str(&'s str),
-    /// Punctuation, as it is spelled: `->`, `..`, `(`. What is meant for the
-    /// arrow, `=>` and `→`, is read as one, and the parser can see how it was
-    /// written.
-    Punct(&'static str),
+    /// Punctuation. What is meant for the arrow, `=>` and `→`, is read as one,
+    /// and the parser can see how it was written from the token's text.
+    Punct(Punct),
     /// The end of the line, or of its code when a comment follows.
     Eol,
     /// Not a token. The parser explains why if it ever reaches one.
     Invalid(Malformed),
+}
+
+/// The punctuation of the language, lexed by looking at the bytes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Punct {
+    Arrow,
+    Ellipsis,
+    DotDot,
+    EqEq,
+    Ne,
+    Le,
+    Ge,
+    Slash,
+    Comma,
+    Dot,
+    Eq,
+    Bang,
+    Lt,
+    Gt,
+    Plus,
+    Minus,
+    Star,
+    At,
+    LParen,
+    RParen,
+    LBracket,
+    RBracket,
+    Colon,
+    Question,
+    Pipe,
+}
+
+impl Punct {
+    /// The punctuation at the start of `rest`, and how many bytes it takes: the
+    /// longest that fits. What is meant for `->` (`=>` and `→`) is read as it.
+    pub fn lex(rest: &[u8]) -> Option<(Punct, usize)> {
+        Some(match rest {
+            [b'-', b'>', ..] | [b'=', b'>', ..] => (Punct::Arrow, 2),
+            [0xE2, 0x86, 0x92, ..] => (Punct::Arrow, 3),
+            [b'.', b'.', b'.', ..] => (Punct::Ellipsis, 3),
+            [b'.', b'.', ..] => (Punct::DotDot, 2),
+            [b'=', b'=', ..] => (Punct::EqEq, 2),
+            [b'!', b'=', ..] => (Punct::Ne, 2),
+            [b'<', b'=', ..] => (Punct::Le, 2),
+            [b'>', b'=', ..] => (Punct::Ge, 2),
+            [byte, ..] => (
+                match byte {
+                    b'/' => Punct::Slash,
+                    b',' => Punct::Comma,
+                    b'.' => Punct::Dot,
+                    b'=' => Punct::Eq,
+                    b'!' => Punct::Bang,
+                    b'<' => Punct::Lt,
+                    b'>' => Punct::Gt,
+                    b'+' => Punct::Plus,
+                    b'-' => Punct::Minus,
+                    b'*' => Punct::Star,
+                    b'@' => Punct::At,
+                    b'(' => Punct::LParen,
+                    b')' => Punct::RParen,
+                    b'[' => Punct::LBracket,
+                    b']' => Punct::RBracket,
+                    b':' => Punct::Colon,
+                    b'?' => Punct::Question,
+                    b'|' => Punct::Pipe,
+                    _ => return None,
+                },
+                1,
+            ),
+            [] => return None,
+        })
+    }
+
+    /// As spelled in a message: `->` for the arrow, however it was written.
+    pub fn spelling(self) -> &'static str {
+        match self {
+            Punct::Arrow => "->",
+            Punct::Ellipsis => "...",
+            Punct::DotDot => "..",
+            Punct::EqEq => "==",
+            Punct::Ne => "!=",
+            Punct::Le => "<=",
+            Punct::Ge => ">=",
+            Punct::Slash => "/",
+            Punct::Comma => ",",
+            Punct::Dot => ".",
+            Punct::Eq => "=",
+            Punct::Bang => "!",
+            Punct::Lt => "<",
+            Punct::Gt => ">",
+            Punct::Plus => "+",
+            Punct::Minus => "-",
+            Punct::Star => "*",
+            Punct::At => "@",
+            Punct::LParen => "(",
+            Punct::RParen => ")",
+            Punct::LBracket => "[",
+            Punct::RBracket => "]",
+            Punct::Colon => ":",
+            Punct::Question => "?",
+            Punct::Pipe => "|",
+        }
+    }
+
+    /// The infix operator this spells, if it is one. (`or`, `and` and `is` are
+    /// words.)
+    pub fn infix(self) -> Option<BinOp> {
+        Some(match self {
+            Punct::EqEq => BinOp::Eq,
+            Punct::Ne => BinOp::Ne,
+            Punct::Lt => BinOp::Lt,
+            Punct::Le => BinOp::Le,
+            Punct::Gt => BinOp::Gt,
+            Punct::Ge => BinOp::Ge,
+            Punct::Plus => BinOp::Add,
+            Punct::Minus => BinOp::Sub,
+            Punct::Star => BinOp::Mul,
+            Punct::Slash => BinOp::Div,
+            _ => return None,
+        })
+    }
 }
 
 /// What is wrong with a token that could not be classified. The lexer only
@@ -58,6 +187,8 @@ pub(crate) enum Malformed {
     SlashDate,
     /// `1__000`, or more digits than a number can hold.
     Number,
+    /// Years with a fraction that is not a whole number of months: `27.33y`.
+    Span,
     /// A commodity stuck to its number: `50USD`.
     GluedAmount,
     UnterminatedString,
@@ -65,8 +196,8 @@ pub(crate) enum Malformed {
     Escape(u32),
     /// `$50`: a currency symbol instead of a commodity.
     Currency,
-    /// `#` with nothing valid after it.
-    Code,
+    /// `#` or `^` with nothing valid after it.
+    Mark,
     /// A word that is neither a name (lowercase) nor a commodity (uppercase).
     Word,
     Character,
@@ -78,7 +209,9 @@ pub(crate) struct Token<'s> {
     pub loc: Loc,
 }
 
-/// The tokens of one line, read as they are asked for.
+/// The tokens of one line, read as they are asked for. Cloning one is how a
+/// rule looks further ahead than the two tokens it can peek at.
+#[derive(Clone)]
 pub(crate) struct Lexer<'s> {
     src: &'s str,
     /// The source cut at the end of the line, so running off it is `None`.
@@ -149,17 +282,14 @@ impl<'s> Lexer<'s> {
         self.prev_end
     }
 
-    /// The next non-blank run of characters, raw: what a file name is.
-    pub fn raw_word(&mut self) -> Option<Name<'s>> {
-        let start = self.raw_start()?;
-        let len = self.bytes[start..].iter().position(|&b| b == b' ' || b == b'\t').unwrap_or(self.bytes.len() - start);
-        Some(self.resume(start, start + len))
-    }
-
-    /// The rest of the line, raw, comments included: what a command is.
+    /// The rest of the line, raw, up to a trailing comment: what a command is.
     pub fn raw_rest(&mut self) -> Option<Name<'s>> {
         let start = self.raw_start()?;
-        Some(self.resume(start, start + self.src[start..self.bytes.len()].trim_end().len()))
+        let rest = &self.src[start..self.bytes.len()];
+        // A `//` ends the text only where it would start a comment: after a blank.
+        let comment = rest.match_indices("//").find(|&(at, _)| at > 0 && matches!(rest.as_bytes()[at - 1], b' ' | b'\t'));
+        let text = &rest[..comment.map_or(rest.len(), |(at, _)| at)];
+        Some(self.resume(start, start + text.trim_end().len()))
     }
 
     /// Where raw text starts: the next token, unless the line is over.
@@ -193,7 +323,7 @@ impl<'s> Lexer<'s> {
             b'0'..=b'9' => self.digit_word(start),
             b'a'..=b'z' => self.name(start),
             b'A'..=b'Z' => self.unit(start),
-            b'#' => self.code(start),
+            b'#' | b'^' => self.mark(start),
             b'"' => self.string(start),
             // A star touching a word is a glob (`*-trip`); alone it multiplies.
             b'*' if bytes.get(start + 1).is_some_and(|&b| CLASS[b as usize] != 0) => self.odd_name(start),
@@ -311,7 +441,12 @@ impl<'s> Lexer<'s> {
     /// follow it, so `2026..2027` is a range and `84.20` a number.
     fn number(&mut self, start: usize, word_end: usize, classes: u8) -> Tok<'s> {
         let end = word_end + fraction(&self.bytes[word_end..]);
-        if end > word_end && self.bytes.get(end).is_some_and(|&b| CLASS[b as usize] != 0) {
+        let bytes = self.bytes;
+        let ends_word = |at: usize| bytes.get(at).is_none_or(|&b| CLASS[b as usize] == 0);
+        if end > word_end && bytes.get(end) == Some(&b'y') && ends_word(end + 1) {
+            return self.fractional_years(start, end);
+        }
+        if end > word_end && !ends_word(end) {
             // `84.20USD`: a fraction leaves no word boundary, unlike `84USD`.
             self.pos = self.scan_word(end).end;
             return Tok::Invalid(if self.bytes[end].is_ascii_uppercase() {
@@ -331,6 +466,15 @@ impl<'s> Lexer<'s> {
         }
     }
 
+    /// `27.5y`: years with a fraction, as the whole months they come to.
+    fn fractional_years(&mut self, start: usize, end: usize) -> Tok<'s> {
+        self.pos = end + 1;
+        let months = Dec::parse(&self.bytes[start..end])
+            .and_then(|years| Dec { mantissa: years.mantissa.checked_mul(12)?, scale: years.scale }.to_qty(0).ok())
+            .and_then(|months| i32::try_from(months.0).ok());
+        months.map_or(Tok::Invalid(Malformed::Span), |months| Tok::Span(Span::months(months)))
+    }
+
     fn unit(&mut self, start: usize) -> Tok<'s> {
         // Capitals and then nothing that would make it a longer word: `USD`.
         let capitals = self.bytes[start..].iter().take_while(|byte| byte.is_ascii_uppercase()).count();
@@ -347,13 +491,17 @@ impl<'s> Lexer<'s> {
             (end, classes) = (part.end, classes | part.classes);
         }
         self.pos = end;
+        let text = &self.src[start..end];
         match classes & (LOWER | SYMBOL | SLASH) {
-            0 => Tok::Unit(&self.src[start..end]),
+            0 => Tok::Unit(text),
+            // `USD/MI`: a rate is two units around one slash.
+            SLASH if is_rate(text) => Tok::Unit(text),
             _ => Tok::Invalid(Malformed::Word),
         }
     }
 
-    fn code(&mut self, start: usize) -> Tok<'s> {
+    /// `#purpose` or `^code`: lowercase letters, digits and `-_:./*` behind the mark.
+    fn mark(&mut self, start: usize) -> Tok<'s> {
         let is_code_byte = |b: u8| CLASS[b as usize] != 0 || matches!(b, b':' | b'/');
         let mut end = start + 1;
         while let Some(&b) = self.bytes.get(end) {
@@ -367,8 +515,9 @@ impl<'s> Lexer<'s> {
         let text = &self.src[start..end];
         match text.bytes().nth(1) {
             _ if text.bytes().any(|b| b.is_ascii_uppercase()) => Tok::Invalid(Malformed::Word),
+            Some(b'a'..=b'z' | b'0'..=b'9') if text.starts_with('#') => Tok::Purpose(Name(&text[1..])),
             Some(b'a'..=b'z' | b'0'..=b'9') => Tok::Code(Code(text)),
-            _ => Tok::Invalid(Malformed::Code),
+            _ => Tok::Invalid(Malformed::Mark),
         }
     }
 
@@ -398,15 +547,11 @@ impl<'s> Lexer<'s> {
         }
     }
 
-    /// Punctuation: the longest that fits. What is meant for `->` (`=>` and
-    /// `→`) is read as it.
+    /// Punctuation, or a character the language does not use.
     fn punctuation(&mut self, start: usize) -> Tok<'s> {
-        let rest = &self.bytes[start..];
-        let Some(&punct) = PUNCT.iter().find(|punct| rest.starts_with(punct.as_bytes())) else {
-            return self.stray(start);
-        };
-        self.pos = start + punct.len();
-        Tok::Punct(if matches!(punct, "=>" | "→") { "->" } else { punct })
+        let Some((punct, len)) = Punct::lex(&self.bytes[start..]) else { return self.stray(start) };
+        self.pos = start + len;
+        Tok::Punct(punct)
     }
 
     /// A character the language does not use. A currency symbol takes the
@@ -434,12 +579,6 @@ fn fraction(bytes: &[u8]) -> usize {
         _ => 0,
     }
 }
-
-/// Every punctuation token, longer spellings before the ones they begin.
-const PUNCT: [&str; 27] = [
-    "->", "=>", "→", "...", "..", "==", "!=", "<=", ">=", "/", ",", ".", "=", "!", "<", ">", "+", "-", "*", "@", "(",
-    ")", "[", "]", ":", "?", "|",
-];
 
 // Byte classes for scanning words with one table lookup per byte. A word is
 // made of the bytes that have a class: `checking`, `trader-joes`, `check-????`.
@@ -502,8 +641,14 @@ fn classify_digit_word(text: &str) -> Tok<'_> {
     if is_shaped(bytes, b"dddd-dd") {
         return Day::parse(&[bytes, b"-01"].concat()).map_or(Tok::Invalid(Malformed::Date), Tok::Month);
     }
+    if is_shaped(bytes, b"dd-dd") {
+        return Tok::MonthDay((bytes[0] - b'0') * 10 + bytes[1] - b'0', (bytes[3] - b'0') * 10 + bytes[4] - b'0');
+    }
     if let Some(span) = Span::parse(bytes) {
         return Tok::Span(span);
+    }
+    if let Some((top, bottom)) = fraction_of(text) {
+        return Tok::Fraction(top, bottom);
     }
     match () {
         _ if is_unpadded_date(text) => Tok::Invalid(Malformed::LooseDate),
@@ -512,6 +657,23 @@ fn classify_digit_word(text: &str) -> Tok<'_> {
         _ if bytes.iter().any(u8::is_ascii_uppercase) => Tok::Invalid(Malformed::Word),
         _ => Tok::Name(text),
     }
+}
+
+/// `USD/MI`: two units joined by a slash.
+fn is_rate(text: &str) -> bool {
+    let is_unit = |part: &str| part.bytes().next().is_some_and(|first| first.is_ascii_uppercase());
+    text.split_once('/').is_some_and(|(per, of)| is_unit(per) && is_unit(of) && !of.contains('/'))
+}
+
+/// `1/3`: two whole numbers around one slash.
+fn fraction_of(text: &str) -> Option<(u32, u32)> {
+    let number = |part: &str| {
+        let digits = part.bytes().all(|b| matches!(b, b'0'..=b'9' | b'_'));
+        let whole = Dec::parse(part.as_bytes()).filter(|_| digits && (!part.contains('_') || underscores_between_digits(part.as_bytes())));
+        whole.and_then(|dec| u32::try_from(dec.mantissa).ok())
+    };
+    let (top, bottom) = text.split_once('/')?;
+    Some((number(top)?, number(bottom)?))
 }
 
 /// Whether every `_` in `text` sits between two digits.

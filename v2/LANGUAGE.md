@@ -976,6 +976,10 @@ merges rows into a param; otherwise Axiom statements go into the journal (invoic
 bills). Systems may declare sources: `us` brings the IRS's yearly exchange rates
 into the param its `rates` names.
 
+On raw `run` and `into` lines, `//` starts a trailing comment only when a blank
+comes before it. Thus `https://host/a//b` and `imports/a//b.ax` remain intact; a
+space followed by `//` ends the raw text.
+
 **Formats** are declarations. `csv` names columns (by header or number) for
 `date` (with its layout), `amount` (money into the account is positive; `flipped`,
 or `debit` and `credit`), `memo`, and optionally `balance`, `pending`, `code`,
