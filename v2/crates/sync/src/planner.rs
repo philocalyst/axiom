@@ -14,7 +14,7 @@ use crate::command::{Failed, run_all, substitute};
 use crate::paths::matching_paths;
 use crate::sink::{self, Sink};
 use crate::world::{Feed, FeedDelta, World};
-use crate::write::{Change, changes_borrowed, preview};
+use crate::write::{Change, Update, preview, validate_text_at};
 use crate::{Insert, Unit};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
@@ -345,7 +345,11 @@ pub fn plan<'b, 's>(
                             .map(|text| Cow::Borrowed(text.as_str()))
                             .or_else(|| cached_text(path, &base_files, registry).map(Cow::Borrowed))
                     };
-                    match preview(&inserts, &mut read_virtual) {
+                    let previewed = preview(&inserts, &mut read_virtual);
+                    drop(read_virtual);
+                    match previewed
+                        .and_then(|updates| validate_updates(updates, registry, &mut generated))
+                    {
                         Err(problems) => {
                             results[source_index].push(SourceResult {
                                 source: source_name.clone(),
@@ -380,10 +384,23 @@ pub fn plan<'b, 's>(
     }
 
     let mut read_base = |path: &str| cached_text(path, &base_files, registry).map(Cow::Borrowed);
-    let (changes, problems) = match changes_borrowed(&all_inserts, &mut read_base) {
-        Ok(changes) => (changes, Vec::new()),
-        Err(problems) => (Vec::new(), problems),
-    };
+    let previewed = preview(&all_inserts, &mut read_base);
+    drop(read_base);
+    let (changes, problems) =
+        match previewed.and_then(|updates| validate_updates(updates, registry, &mut generated)) {
+            Ok(updates) => (
+                updates
+                    .into_iter()
+                    .map(|update| Change {
+                        before: cached_text(&update.path, &base_files, registry).map(str::to_owned),
+                        path: update.path,
+                        after: update.after,
+                    })
+                    .collect(),
+                Vec::new(),
+            ),
+            Err(problems) => (Vec::new(), problems),
+        };
     let incomplete = monitor_gaps(book, run);
 
     Ok(PlanOutcome {
@@ -449,6 +466,35 @@ fn cached_text<'a>(
 ) -> Option<&'a str> {
     let file = cache.get(path)?.as_ref().ok().copied().flatten()?;
     registry.text(file)
+}
+
+fn validate_updates(
+    updates: Vec<Update>,
+    registry: &mut dyn SourceRegistry,
+    generated: &mut Vec<GeneratedSource>,
+) -> Result<Vec<Update>, Vec<Diagnostic>> {
+    let mut problems = Vec::new();
+    for update in &updates {
+        if let Err(unlocated) = validate_text_at(&update.path, &update.after, FileId(0)) {
+            let path = format!("<sync planned {}>", update.path);
+            let file = registry
+                .generated(&path, update.after.clone())
+                .map_err(|problem| vec![problem])?;
+            generated.push(GeneratedSource { file, path });
+            match validate_text_at(&update.path, &update.after, file) {
+                Ok(()) => unreachable!("the same planned text was just validated"),
+                Err(located) => {
+                    debug_assert_eq!(unlocated.len(), located.len());
+                    problems.extend(located);
+                }
+            }
+        }
+    }
+    if problems.is_empty() {
+        Ok(updates)
+    } else {
+        Err(problems)
+    }
 }
 
 fn command_units<'s>(book: &Book<'s>, run: &EngineRun) -> Vec<&'s str> {
@@ -699,7 +745,7 @@ mod tests {
             "  run printf '2026-01-03 checking -> food 20 USD\\n'\n",
             "  into second.ax\n",
             "sync bad\n",
-            "  run printf 'not a dated line\\n'\n",
+            "  run printf '2026-01-03 checking -> food 2 USD\\n2026-01-04 checking -> food 1 USD )\\n'\n",
             "  into bad.ax\n",
         );
         let (std_file, diagnostics) = axiom_syntax::parse(FileId(0), std, Folder::default());
@@ -772,18 +818,25 @@ mod tests {
         );
         assert_eq!(
             registry.text(outcome.generated[2].file),
-            Some("not a dated line\n")
+            Some("2026-01-03 checking -> food 2 USD\n2026-01-04 checking -> food 1 USD )\n")
         );
         let Some(super::SourceFailure::Output(problems)) = outcome.sources[2].failure.as_ref()
         else {
             panic!("the malformed output should retain its parser diagnostic")
         };
+        let problem = problems.first().expect("a malformed item is diagnosed");
+        let label = problem
+            .labels
+            .first()
+            .expect("syntax diagnostics identify the offending text");
+        assert_eq!(label.loc.file, outcome.generated[2].file);
+        let output = registry.text(outcome.generated[2].file).unwrap();
+        let slice = &output[label.loc.range()];
         assert!(
-            problems
-                .iter()
-                .flat_map(|problem| &problem.labels)
-                .any(|label| label.loc.file == outcome.generated[2].file)
+            label.loc.start as usize > output.find('\n').unwrap(),
+            "the label should start on the malformed second line: {label:?}"
         );
+        assert!(slice.contains(')'), "label {label:?} points to {slice:?}");
         assert_eq!(
             outcome
                 .changes

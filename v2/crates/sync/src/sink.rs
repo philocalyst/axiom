@@ -9,7 +9,7 @@ use axiom_core::{Day, Diagnostic, FileId, Loc, Map};
 
 use crate::paths::is_project_path;
 use crate::write::{
-    Context, Item, Layout, row_key, row_keys, scan, validate_item_at, validate_row_at,
+    Context, Item, Layout, row_key, row_keys, scan, validate_item_source_at, validate_row_at,
 };
 use crate::{Form, Insert};
 
@@ -103,7 +103,14 @@ fn items<'a>(
     let (found, _) = scan(&lines, Context::default());
     let (mut inserts, mut problems) = (Vec::new(), Vec::new());
     let mut present: Map<String, Map<(Day, String), usize>> = Map::default();
+    let mut offset_line = 0;
+    let mut byte_offset = 0;
     for item in &found {
+        while offset_line < item.head {
+            byte_offset += lines[offset_line].len();
+            offset_line += 1;
+        }
+        let item_offset = byte_offset;
         let dated = item
             .day
             .filter(|_| !lines[item.head].starts_with("opening"));
@@ -112,7 +119,7 @@ fn items<'a>(
             problems.push(
                 Diagnostic::error("undated-line", headline)
                     .label(
-                        line_loc(&lines, item.head, file),
+                        line_loc(lines[item.head], file, item_offset),
                         "expected a date such as 2026-03-05",
                     )
                     .help("print full dates: sync files each line by its day"),
@@ -128,7 +135,8 @@ fn items<'a>(
             continue;
         }
         let item_body = body(&lines, item);
-        if let Err(bad) = validate_item_at(&path, day, &item_body, file) {
+        let source = lines[item.head..item.end].concat();
+        if let Err(bad) = validate_item_source_at(&path, &source, file, item_offset) {
             problems.extend(bad);
             continue;
         }
@@ -152,12 +160,11 @@ fn items<'a>(
 }
 
 /// Where line `at` of what a command printed is, without its line ending.
-fn line_loc(lines: &[&str], at: usize, file: FileId) -> Loc {
-    let start: usize = lines[..at].iter().map(|line| line.len()).sum();
+fn line_loc(line: &str, file: FileId, start: usize) -> Loc {
     Loc::new(
         file,
         start as u32,
-        (start + lines[at].trim_end().len()) as u32,
+        (start + line.trim_end().len()) as u32,
     )
 }
 
@@ -236,7 +243,10 @@ fn rows<'a>(
     }
     let lines: Vec<&str> = output.split_inclusive('\n').collect();
     let (mut inserts, mut problems) = (Vec::new(), Vec::new());
+    let mut byte_offset = 0;
     for (at, line) in lines.iter().enumerate() {
+        let line_offset = byte_offset;
+        byte_offset += line.len();
         let row = line.trim();
         if row.is_empty() || row.starts_with("//") {
             continue;
@@ -246,11 +256,13 @@ fn rows<'a>(
                 "the output has a row that does not start with a year or a date".to_string();
             let label = "expected `2026`, `2026-03` or `2026-03-05` here";
             problems.push(
-                Diagnostic::error("bad-row", headline).label(line_loc(&lines, at, file), label),
+                Diagnostic::error("bad-row", headline)
+                    .label(line_loc(line, file, line_offset), label),
             );
             continue;
         };
-        if let Err(bad) = validate_row_at(path, name, row, file) {
+        let row_offset = line_offset + line.find(row).unwrap_or(0);
+        if let Err(bad) = validate_row_at(path, name, row, file, row_offset) {
             problems.extend(bad);
             continue;
         }

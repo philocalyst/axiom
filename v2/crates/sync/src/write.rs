@@ -393,9 +393,28 @@ pub(crate) fn validate_item_at(
     }
 }
 
+/// Validate the exact item slice from a command's output and locate diagnostics
+/// in that registered output rather than in a synthetic full-date wrapper.
+pub(crate) fn validate_item_source_at(
+    path: &str,
+    source: &str,
+    file: FileId,
+    offset: usize,
+) -> Result<(), Vec<Diagnostic>> {
+    let (_, problems) = axiom_syntax::parse(file, source, Folder::of(path));
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(offset_problems(problems, offset, 0)
+            .into_iter()
+            .map(|problem| problem.note("sync refused to write invalid generated Axiom syntax"))
+            .collect())
+    }
+}
+
 /// Parse a generated row in the native declaration shape that will contain it.
 pub(crate) fn validate_row(path: &str, name: &str, row: &str) -> Result<(), Vec<Diagnostic>> {
-    validate_row_at(path, name, row, FileId(0))
+    validate_row_at(path, name, row, FileId(0), 0)
 }
 
 pub(crate) fn validate_row_at(
@@ -403,17 +422,40 @@ pub(crate) fn validate_row_at(
     name: &str,
     row: &str,
     file: FileId,
+    offset: usize,
 ) -> Result<(), Vec<Diagnostic>> {
     let source = format!("param {name}\n  {row}\n");
     let (_, problems) = axiom_syntax::parse(file, &source, Folder::of(path));
     if problems.is_empty() {
         Ok(())
     } else {
-        Err(problems
+        let prefix = format!("param {name}\n  ").len();
+        Err(offset_problems(problems, offset, prefix)
             .into_iter()
             .map(|problem| problem.note("sync refused to write an invalid generated param row"))
             .collect())
     }
+}
+
+fn offset_problems(mut problems: Vec<Diagnostic>, offset: usize, source_prefix: usize) -> Vec<Diagnostic> {
+    let offset = u32::try_from(offset).unwrap_or(u32::MAX);
+    let shift = |loc: &mut axiom_core::Loc| {
+        let start = loc.start.saturating_sub(source_prefix as u32);
+        let end = loc.end.saturating_sub(source_prefix as u32);
+        loc.start = start.saturating_add(offset);
+        loc.end = end.saturating_add(offset);
+    };
+    for problem in &mut problems {
+        for label in &mut problem.labels {
+            shift(&mut label.loc);
+        }
+        for help in &mut problem.help {
+            if let Some((loc, _)) = &mut help.edit {
+                shift(loc);
+            }
+        }
+    }
+    problems
 }
 
 /// What a row of a param starts with: the day it holds from (`2026` is the
@@ -576,13 +618,6 @@ pub(crate) fn preview<'a>(
     let update = |(path, inserts): (&str, Vec<&Insert>)| -> Result<Update, Vec<Diagnostic>> {
         let before = read(path);
         let after = apply(before.as_deref().unwrap_or(""), path, &inserts)?;
-        let (_, problems) = axiom_syntax::parse(FileId(0), &after, Folder::of(path));
-        if !problems.is_empty() {
-            return Err(problems
-                .into_iter()
-                .map(|problem| problem.note("sync refused to plan a file with invalid Axiom syntax"))
-                .collect());
-        }
         Ok(Update {
             path: path.to_string(),
             after,
@@ -598,14 +633,35 @@ pub(crate) fn changes_borrowed<'a>(
     read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
 ) -> Result<Vec<Change>, Vec<Diagnostic>> {
     let updates = preview(inserts, read)?;
-    Ok(updates
-        .into_iter()
-        .map(|update| Change {
-            before: read(&update.path).map(Cow::into_owned),
-            path: update.path,
-            after: update.after,
-        })
-        .collect())
+    let mut changes = Vec::with_capacity(updates.len());
+    let mut problems = Vec::new();
+    for update in updates {
+        match validate_text_at(&update.path, &update.after, FileId(0)) {
+            Ok(()) => changes.push(Change {
+                before: read(&update.path).map(Cow::into_owned),
+                path: update.path,
+                after: update.after,
+            }),
+            Err(bad) => problems.extend(bad),
+        }
+    }
+    if problems.is_empty() {
+        Ok(changes)
+    } else {
+        Err(problems)
+    }
+}
+
+pub(crate) fn validate_text_at(path: &str, text: &str, file: FileId) -> Result<(), Vec<Diagnostic>> {
+    let (_, problems) = axiom_syntax::parse(file, text, Folder::of(path));
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems
+            .into_iter()
+            .map(|problem| problem.note("sync refused to plan a file with invalid Axiom syntax"))
+            .collect())
+    }
 }
 
 pub(crate) struct Update {
