@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Ratio};
-use axiom_engine::{Holding, Ledger, Options, Plan};
+use axiom_engine::{Checkpoint, Holding, Ledger, Options, Plan};
 use axiom_model::{Book, Class, Commodity, End, Flow, Place, Value};
 
 use crate::history::Held;
@@ -48,6 +48,43 @@ pub fn project<'p, 'b, 's>(
     let mut ledger = plan.start(Options { today: horizon, relaxed: book.relaxed });
     ledger.advance(today);
 
+    trace_from(ledger, lens, today, flows, checkpoints)
+}
+
+/// Projects from the view checkpoint paired with `plan` and `lens`.
+///
+/// The checkpoint is the journal state before its day's closings. Advancing to
+/// `today` closes that boundary before the forecast starts, matching
+/// [`project`]; expected flows are then judged against the same ledger state
+/// without folding the book a second time. `relaxed` is explicit because a
+/// client may run a relaxed view even when the serialized book's default is
+/// strict.
+pub(crate) fn project_from<'p, 'b, 's>(
+    plan: &'p Plan<'b, 's>,
+    checkpoint: &Checkpoint,
+    lens: Lens<'b, 's>,
+    today: Day,
+    relaxed: bool,
+    flows: Vec<Flow>,
+    checkpoints: &[Day],
+) -> Trace<'p, 'b, 's> {
+    debug_assert!(checkpoint.day() <= today, "projection cannot rewind its view checkpoint");
+    let horizon = checkpoints.last().copied().unwrap_or(today);
+    let options = Options { today: horizon, relaxed };
+    let mut ledger = plan.resume(checkpoint, options);
+    ledger.advance(today);
+
+    trace_from(ledger, lens, today, flows, checkpoints)
+}
+
+/// The shared forecast fold once a ledger has reached the end of `today`.
+fn trace_from<'p, 'b, 's>(
+    mut ledger: Ledger<'p, 'b, 's>,
+    lens: Lens<'b, 's>,
+    today: Day,
+    flows: Vec<Flow>,
+    checkpoints: &[Day],
+) -> Trace<'p, 'b, 's> {
     let mut overdrawn: BTreeMap<Id<Place>, Overdraft> = BTreeMap::new();
     let (mut liquid, mut worth) = (Vec::new(), Vec::new());
     let mut coming = flows.into_iter().peekable();
@@ -145,6 +182,8 @@ fn compound(book: &Book, unit: Id<Commodity>, value: Qty, months: i32) -> Qty {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axiom_core::Days;
+    use axiom_model::Amount;
     use crate::tests::household;
 
     #[test]
@@ -156,5 +195,44 @@ mod tests {
         assert_eq!(compound(&house.book, vti, Qty(10_000_000), 12), Qty(10_511_619));
         assert_eq!(compound(&house.book, usd, Qty(10_000_000), 12), Qty(10_000_000));
         assert_eq!(compound(&house.book, vti, Qty(10_000_000), 0), Qty(10_000_000));
+    }
+
+    #[test]
+    fn projection_resumes_the_supplied_checkpoint_without_refolding() {
+        let house = household();
+        let plan = Plan::new(&house.book);
+        let today = house.run.today;
+        let options = Options { today, relaxed: false };
+        let (_, mut view) = plan.run_with_view(options);
+
+        // Add a hypothetical salary to the checkpoint. A fresh fold of the
+        // book cannot contain this amount, so the resumed projection must.
+        let tomorrow = today.add_days(1);
+        let mut salary = house.book.flows[Id::new(0)].clone();
+        let checking = house.place("assets/bank/checking");
+        salary.day = tomorrow;
+        salary.recognized = Days::on(tomorrow);
+        salary.from = house.place("income/salary");
+        salary.to = checking;
+        salary.out = Amount::new(Qty(1_000), house.book.base);
+        salary.arrive = salary.out;
+        view.apply(&salary);
+        let checkpoint = view.checkpoint();
+
+        let whose = crate::lens::Whose::default();
+        let lens = Lens::with_plan(&house.book, &whose, tomorrow, plan.known(), plan.sides());
+        let resumed = project_from(
+            &plan,
+            &checkpoint,
+            lens,
+            tomorrow,
+            false,
+            Vec::new(),
+            &[tomorrow],
+        );
+        let folded = project(&plan, lens, tomorrow, Vec::new(), &[tomorrow]);
+
+        assert_eq!(resumed.liquid[0] - folded.liquid[0], Qty(1_000));
+        assert_eq!(resumed.worth[0] - folded.worth[0], Qty(1_000));
     }
 }
