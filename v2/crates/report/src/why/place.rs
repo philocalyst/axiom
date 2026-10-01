@@ -32,12 +32,13 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>) -> Re
     let held: Vec<&Holding> = run
         .holdings
         .iter()
-        .filter(|holding| {
-            book.places.covers(place, holding.place)
-                && lens.owns(holding.place)
-        })
+        .filter(|holding| book.places.covers(place, holding.place) && lens.owns(holding.place))
         .collect();
-    let recent_from = book.touching[place].iter().rev().nth(RECENT - 1).map(|&flow| book.flows[flow].day);
+    let recent_from = book.touching[place]
+        .iter()
+        .rev()
+        .nth(RECENT - 1)
+        .map(|&flow| book.flows[flow].day);
 
     // A limit is about this place when it measures it, or a place around it, or one within it.
     let all = &current(book, run, run.today, run.today);
@@ -60,31 +61,46 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>) -> Re
         ));
     }
     Report::new(format!("Why {}", path(book, place)))
-        .with(composition(book, &held))
-        .with(parcels(book, &held))
+        .with(composition(lens, &held))
+        .with(parcels(lens, &held))
         .with(limits)
         .with(laws)
-        .with(register::section_for_lens(lens, run, place, recent_from, None).headed("Recent flows"))
+        .with(
+            register::section_for_lens(lens, run, place, recent_from, None).headed("Recent flows"),
+        )
 }
 
 /// What is held, by commodity, and how much of it is plain money.
-fn composition<'s>(book: &'s Book<'_>, held: &[&Holding]) -> Section<'s> {
+fn composition<'s>(lens: Lens<'s, '_, '_, '_>, held: &[&Holding]) -> Section<'s> {
+    let book = lens.book();
     let mut units: BTreeMap<Id<Commodity>, (Qty, Qty, usize)> = BTreeMap::new();
     for holding in held {
         let (total, plain, parcels) = units.entry(holding.unit).or_default();
-        *total += holding.qty();
-        *plain += holding.plain;
+        *total += lens.place_qty(holding.place, holding.qty());
+        *plain += lens.place_qty(holding.place, holding.plain);
         *parcels += holding.lots.len();
     }
-    let columns =
-        [Column::left("Holds"), Column::right("Quantity"), Column::right("Plain money"), Column::right("Parcels")];
+    let columns = [
+        Column::left("Holds"),
+        Column::right("Quantity"),
+        Column::right("Plain money"),
+        Column::right("Parcels"),
+    ];
     let mut section = Section::new(columns).headed("Composition");
     for (unit, (total, plain, parcels)) in units {
         let cells = [
             Cell::text(book.name(book.commodities[unit].symbol)),
             Cell::amount(book, Amount::new(total, unit)),
-            if plain.is_zero() { Cell::Blank } else { Cell::amount(book, Amount::new(plain, unit)) },
-            if parcels == 0 { Cell::Blank } else { Cell::text(parcels.to_string()) },
+            if plain.is_zero() {
+                Cell::Blank
+            } else {
+                Cell::amount(book, Amount::new(plain, unit))
+            },
+            if parcels == 0 {
+                Cell::Blank
+            } else {
+                Cell::text(parcels.to_string())
+            },
         ];
         section.push(Row::new(cells));
     }
@@ -92,7 +108,8 @@ fn composition<'s>(book: &'s Book<'_>, held: &[&Holding]) -> Section<'s> {
 }
 
 /// Parcels: what is remembered about value at rest, and the line that brought it.
-fn parcels<'s>(book: &'s Book<'_>, held: &[&Holding]) -> Section<'s> {
+fn parcels<'s>(lens: Lens<'s, '_, '_, '_>, held: &[&Holding]) -> Section<'s> {
+    let book = lens.book();
     let columns = [
         Column::left("Place"),
         Column::right("Quantity"),
@@ -104,11 +121,18 @@ fn parcels<'s>(book: &'s Book<'_>, held: &[&Holding]) -> Section<'s> {
     let mut section = Section::new(columns).headed("Parcels");
     for holding in held {
         for lot in &holding.lots {
-            let tie = lot.tied.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path)));
+            let qty = lens.place_qty(holding.place, lot.qty);
+            let basis = lens.place_qty(holding.place, lot.basis);
+            if qty.is_zero() && basis.is_zero() {
+                continue;
+            }
+            let tie = lot.tied.map_or(Cell::Blank, |entity| {
+                Cell::text(book.name(book.entities[entity].path))
+            });
             let cells = [
                 Cell::text(path(book, holding.place)),
-                Cell::amount(book, Amount::new(lot.qty, holding.unit)),
-                Cell::base(book, lot.basis),
+                Cell::amount(book, Amount::new(qty, holding.unit)),
+                Cell::base(book, basis),
                 Cell::Day(lot.acquired),
                 tie,
                 lot.txn
@@ -127,11 +151,20 @@ fn parcels<'s>(book: &'s Book<'_>, held: &[&Holding]) -> Section<'s> {
 /// more are written for it that today is outside.
 fn governing(book: &Book, run: &Run, place: Id<Place>) -> (Vec<Id<Law>>, usize) {
     let rules = &book.rules;
-    let watching =
-        [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always].into_iter().flat_map(|table| table[place].iter());
-    let timed = rules.timed.iter().filter(|rule| rule.subject == Subject::Place(place));
-    let (now, later): (Vec<&Rule>, Vec<&Rule>) = watching.chain(timed).partition(|rule| rule.days.contains(run.today));
+    let watching = [&rules.on_in, &rules.on_out, &rules.on_gain, &rules.always]
+        .into_iter()
+        .flat_map(|table| table[place].iter());
+    let timed = rules
+        .timed
+        .iter()
+        .filter(|rule| rule.subject == Subject::Place(place));
+    let (now, later): (Vec<&Rule>, Vec<&Rule>) = watching
+        .chain(timed)
+        .partition(|rule| rule.days.contains(run.today));
     let laws: Vec<Id<Law>> = now.iter().map(|rule| rule.law).collect();
-    let elsewhere = later.iter().filter(|rule| !laws.contains(&rule.law)).count();
+    let elsewhere = later
+        .iter()
+        .filter(|rule| !laws.contains(&rule.law))
+        .count();
     (laws, elsewhere)
 }

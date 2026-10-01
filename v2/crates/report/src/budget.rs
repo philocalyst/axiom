@@ -12,7 +12,12 @@ use crate::headroom::window_words;
 use crate::lens::Lens;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Option<Day>, by: Period) -> Report<'s> {
+pub(crate) fn view_with_lens<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    at: Option<Day>,
+    by: Period,
+) -> Report<'s> {
     let at = at.unwrap_or(run.today);
     purpose_budgets(lens.on(at), run, at, by)
 }
@@ -24,7 +29,8 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
     let periods = Periods::covering(by, at, at);
     let window = periods.window(0).days();
     let mut table = Section::new(
-        ["Purpose", "Owner", "Window"].map(Column::left)
+        ["Purpose", "Owner", "Window"]
+            .map(Column::left)
             .into_iter()
             .chain(["Spent", "Limit", "Left", "Used"].map(Column::right)),
     );
@@ -36,7 +42,7 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
             .iter()
             .filter(|reading| {
                 reading.law == budget.law
-                    && lens.whose.includes(reading.owner)
+                    && lens.owns_entity(reading.owner)
                     && reading.days.overlaps(window)
             })
             .collect();
@@ -54,7 +60,11 @@ fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Perio
                     Cell::amount(book, left),
                     used.map_or(Cell::Blank, Cell::Percent),
                 ])
-                .style(if left.qty.is_negative() { Style::Alert } else { Style::Normal }),
+                .style(if left.qty.is_negative() {
+                    Style::Alert
+                } else {
+                    Style::Normal
+                }),
             );
         }
     }

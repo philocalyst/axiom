@@ -8,16 +8,17 @@ use axiom_model::{Amount, Book, Flow, Object, Provenance, TemplateFlow, Terms};
 
 use super::event_words;
 use crate::history::Posting;
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::places::{path, route};
 use crate::table::{creditor, gap_words};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Explains the items whose source overlaps `at`.
-pub fn line<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Loc) -> Report<'s> {
-    let flows = flows_on(book, at, whose);
+pub fn line<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Loc) -> Report<'s> {
+    let book = lens.book();
+    let flows = flows_on(book, at, lens);
     let mut written = Section::new([Column::left("On this line"), Column::left("Source")]);
-    for (text, loc) in items(book, run, whose, at, &flows) {
+    for (text, loc) in items(book, run, lens, at, &flows) {
         written.push(Row::new([Cell::text(text), Cell::Source(loc)]));
     }
     if written.rows.is_empty() {
@@ -26,7 +27,7 @@ pub fn line<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Loc) -> Report
 
     let mut caused = Section::new([Column::left("What it caused"), Column::left("Law")]);
     for id in flows {
-        consequences(book, run, id, &mut caused);
+        consequences(lens, run, id, &mut caused);
     }
     Report::new("Why this line")
         .with(written)
@@ -39,11 +40,11 @@ fn overlaps(a: Loc, b: Loc) -> bool {
 
 /// The flows written on the line. The header of a split transaction holds no
 /// flow of its own; its legs do, so it stands for all of them.
-fn flows_on(book: &Book, at: Loc, whose: &Whose) -> Vec<Id<Flow>> {
+fn flows_on(book: &Book, at: Loc, lens: Lens<'_, '_, '_, '_>) -> Vec<Id<Flow>> {
     let direct: Vec<Id<Flow>> = book
         .flows
         .iter()
-        .filter(|(_, flow)| overlaps(flow.loc, at) && whose.includes(flow.owner))
+        .filter(|(_, flow)| overlaps(flow.loc, at) && lens.owns_entity(flow.owner))
         .map(|(id, _)| id)
         .collect();
     if !direct.is_empty() {
@@ -52,7 +53,7 @@ fn flows_on(book: &Book, at: Loc, whose: &Whose) -> Vec<Id<Flow>> {
     let headers = book.txns.values().filter(|txn| overlaps(txn.loc, at));
     headers
         .flat_map(|txn| txn.flows.ids())
-        .filter(|&id| whose.includes(book.flows[id].owner))
+        .filter(|&id| lens.owns_entity(book.flows[id].owner))
         .collect()
 }
 
@@ -60,23 +61,23 @@ fn flows_on(book: &Book, at: Loc, whose: &Whose) -> Vec<Id<Flow>> {
 fn items(
     book: &Book,
     run: &Run,
-    whose: &Whose,
+    lens: Lens<'_, '_, '_, '_>,
     at: Loc,
     flows: &[Id<Flow>],
 ) -> Vec<(String, Loc)> {
     let mut items = Vec::new();
-    let visible_codes = scoped_codes(book, whose);
+    let visible_codes = scoped_codes(book, lens);
     for &id in flows {
         let posting = Posting::at(book, run, id);
         let flow = posting.flow;
+        let out = posting.out();
+        let out = Amount::new(lens.entity_qty(flow.owner, out.qty), out.unit);
+        let arrive = posting.arrive();
+        let arrive = Amount::new(lens.entity_qty(flow.owner, arrive.qty), arrive.unit);
         let amounts = if flow.is_exchange() {
-            format!(
-                "{} for {}",
-                book.show(posting.out()),
-                book.show(posting.arrive())
-            )
+            format!("{} for {}", book.show(out), book.show(arrive))
         } else {
-            book.show(posting.out()).to_string()
+            book.show(out).to_string()
         };
         let purpose = flow.purpose.map_or_else(String::new, |purposed| {
             let object = purposed.of.map_or_else(String::new, |object| match object {
@@ -118,9 +119,7 @@ fn items(
         .asserts
         .iter()
         .enumerate()
-        .filter(|(_, assertion)| {
-            overlaps(assertion.loc, at) && whose.includes(book.places[assertion.place].owner)
-        })
+        .filter(|(_, assertion)| overlaps(assertion.loc, at) && lens.owns(assertion.place))
     {
         let gap = run
             .pads
@@ -132,14 +131,16 @@ fn items(
             format!(
                 "assertion: {} = {}{gap}",
                 path(book, assertion.place),
-                book.show(assertion.amount)
+                book.show(Amount::new(
+                    lens.place_qty(assertion.place, assertion.amount.qty),
+                    assertion.amount.unit,
+                ))
             ),
             assertion.loc,
         ));
     }
     for event in book.events.iter().filter(|event| {
-        overlaps(event.loc, at)
-            && (whose.is_everyone() || visible_codes.contains(&event.code))
+        overlaps(event.loc, at) && (lens.whose.is_everyone() || visible_codes.contains(&event.code))
     }) {
         items.push((
             format!(
@@ -179,7 +180,7 @@ fn items(
         book.measures
             .iter()
             .map(|(_, measure)| measure)
-            .filter(|measure| overlaps(measure.loc, at) && whose.includes(measure.owner))
+            .filter(|measure| overlaps(measure.loc, at) && lens.owns_entity(measure.owner))
             .map(|measure| {
                 let action = match measure.action {
                     axiom_model::Action::Work => "worked",
@@ -206,7 +207,7 @@ fn items(
     items.extend(
         book.filed
             .iter()
-            .filter(|filed| overlaps(filed.loc, at) && whose.includes(filed.owner))
+            .filter(|filed| overlaps(filed.loc, at) && lens.owns_entity(filed.owner))
             .map(|filed| {
                 (
                     format!(
@@ -224,7 +225,7 @@ fn items(
             .iter()
             .filter(|reading| {
                 overlaps(reading.loc, at)
-                    && (whose.is_everyone() || visible_codes.contains(&reading.code))
+                    && (lens.whose.is_everyone() || visible_codes.contains(&reading.code))
             })
             .map(|reading| {
                 (
@@ -244,24 +245,32 @@ fn items(
 /// Codes named by data visible in this owner scope. Events and readings have
 /// no owner of their own, so an owner-scoped source query only exposes them
 /// when a visible flow, measure or contract refers to their code.
-pub(super) fn scoped_codes(book: &Book, whose: &Whose) -> BTreeSet<axiom_core::Sym> {
+pub(super) fn scoped_codes(book: &Book, lens: Lens<'_, '_, '_, '_>) -> BTreeSet<axiom_core::Sym> {
     let mut codes = BTreeSet::new();
-    for (_, flow) in book.flows.iter().filter(|(_, flow)| whose.includes(flow.owner)) {
+    for (_, flow) in book
+        .flows
+        .iter()
+        .filter(|(_, flow)| lens.owns_entity(flow.owner))
+    {
         codes.extend(book.flow_view(flow).codes());
     }
     for (_, measure) in book
         .measures
         .iter()
-        .filter(|(_, measure)| whose.includes(measure.owner))
+        .filter(|(_, measure)| lens.owns_entity(measure.owner))
     {
         codes.extend(measure.codes.iter().copied());
     }
     for (_, contract) in book
         .contracts
         .iter()
-        .filter(|(_, contract)| whose.includes(contract.owner))
+        .filter(|(_, contract)| lens.owns_entity(contract.owner))
     {
-        for (_, terms) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
+        for (_, terms) in contract
+            .terms
+            .iter()
+            .flat_map(|terms| terms.within(contract.days))
+        {
             add_terms_codes(book, terms, &mut codes);
         }
         if let Some(standing) = &contract.standing {
@@ -331,9 +340,20 @@ fn declarations(book: &Book, at: Loc) -> Vec<(String, Loc)> {
 }
 
 /// What one flow did downstream: gains, obligations, tallies, violations.
-fn consequences<'s>(book: &'s Book<'_>, run: &Run, id: Id<Flow>, section: &mut Section<'s>) {
+fn consequences<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    id: Id<Flow>,
+    section: &mut Section<'s>,
+) {
+    let book = lens.book();
     let cause = Cause::Flow(id);
-    for gain in run.gains.iter().filter(|gain| gain.cause == cause) {
+    for gain in run
+        .gains
+        .iter()
+        .filter(|gain| gain.cause == cause && lens.owns(gain.from))
+    {
+        let realized = lens.place_qty(gain.from, gain.gain());
         let ambiguity = if gain.ambiguous {
             " (no lot policy: FIFO assumed)"
         } else {
@@ -341,13 +361,17 @@ fn consequences<'s>(book: &'s Book<'_>, run: &Run, id: Id<Flow>, section: &mut S
         };
         let text = format!(
             "realized a gain of {} selling {} from {}{ambiguity}",
-            book.show(Amount::new(gain.gain(), book.base)),
+            book.show(Amount::new(realized, book.base)),
             book.show(Amount::new(gain.qty, gain.unit)),
             path(book, gain.from)
         );
         section.push(Row::new([Cell::text(text), Cell::Blank]));
     }
-    for effect in run.effects.iter().filter(|effect| effect.cause == cause) {
+    for effect in run
+        .effects
+        .iter()
+        .filter(|effect| effect.cause == cause && lens.owns_entity(effect.owner))
+    {
         let name = book.name(effect.name);
         let text = match effect.owed() {
             Some(owed) => format!(
@@ -365,7 +389,7 @@ fn consequences<'s>(book: &'s Book<'_>, run: &Run, id: Id<Flow>, section: &mut S
     for violation in run
         .violations
         .iter()
-        .filter(|violation| violation.cause == cause)
+        .filter(|violation| violation.cause == cause && lens.governs(violation.subject))
     {
         let message = run.diagnostics[violation.diagnostic as usize]
             .message

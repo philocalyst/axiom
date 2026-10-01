@@ -14,10 +14,15 @@ use crate::lens::Lens;
 use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Option<i32>) -> Report<'s> {
+pub(crate) fn view_with_lens<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    year: Option<i32>,
+) -> Report<'s> {
     let book = lens.book();
     let year = year.unwrap_or_else(|| run.today.year());
-    let window = Window::containing(Period::Year, Day::from_ymd(year, 1, 1).unwrap_or(run.today)).days();
+    let window =
+        Window::containing(Period::Year, Day::from_ymd(year, 1, 1).unwrap_or(run.today)).days();
     let today = window.last().min(run.today);
     let all = &current(book, run, today, today);
     // A floor of nothing (`balance >= empty`) is an invariant, not a limit:
@@ -25,7 +30,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Op
     let limit = |reading: &&Headroom| !(is_floor(reading) && reading.counted.qty.is_zero());
     let touching = all
         .iter()
-        .filter(|reading| lens.whose.includes(reading.owner) && reading.days.overlaps(window));
+        .filter(|reading| lens.owns_entity(reading.owner) && reading.days.overlaps(window));
     let readings = latest(touching.filter(limit));
     let floors = readings.iter().any(|reading| is_floor(reading));
     let mut table = section(book, readings);
@@ -34,7 +39,9 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Op
             "No limit was read in {year}. Laws record what they count when a `require` or `warn` compares two amounts."
         ));
     } else if floors {
-        table.note("A floor, like a minimum payment, shows what stands as counted and the room above it.");
+        table.note(
+            "A floor, like a minimum payment, shows what stands as counted and the room above it.",
+        );
     }
     Report::new(format!("Limits in {year}")).with(table)
 }
@@ -44,9 +51,17 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Op
 pub fn section<'s>(book: &'s Book<'_>, mut readings: Vec<&Headroom>) -> Section<'s> {
     let key = |reading: &Headroom| {
         let share = used(reading).filter(|_| !is_floor(reading));
-        (!is_over(reading), share.is_none(), share.map(|share| -share))
+        (
+            !is_over(reading),
+            share.is_none(),
+            share.map(|share| -share),
+        )
     };
-    readings.sort_by(|a, b| key(a).cmp(&key(b)).then_with(|| what(book, a).cmp(&what(book, b))));
+    readings.sort_by(|a, b| {
+        key(a)
+            .cmp(&key(b))
+            .then_with(|| what(book, a).cmp(&what(book, b)))
+    });
     let columns = [
         Column::left("Who"),
         Column::left("Limit"),
@@ -70,7 +85,9 @@ pub fn what(book: &Book, reading: &Headroom) -> String {
         Subject::Place(place) => format!("{law} on {}", path(book, place)),
         Subject::Entity(entity) => format!("{law} for {}", book.name(book.entities[entity].path)),
         Subject::Asset(asset) => format!("{law} on {}", book.name(book.assets[asset].name)),
-        Subject::Contract(contract) => format!("{law} on {}", book.name(book.contracts[contract].name)),
+        Subject::Contract(contract) => {
+            format!("{law} on {}", book.name(book.contracts[contract].name))
+        }
     }
 }
 
@@ -79,11 +96,16 @@ pub fn row<'s>(book: &'s Book<'_>, reading: &Headroom) -> Row<'s> {
     let floor = is_floor(reading);
     // A floor is written the other way about: what stands, and what it may not go below.
     let (counted, cap) = if floor {
-        (reading.limit, Cell::text(format!("floor {}", book.show(reading.counted))))
+        (
+            reading.limit,
+            Cell::text(format!("floor {}", book.show(reading.counted))),
+        )
     } else {
         (reading.counted, Cell::amount(book, reading.limit))
     };
-    let share = used(reading).filter(|_| !floor).map_or(Cell::Blank, Cell::Percent);
+    let share = used(reading)
+        .filter(|_| !floor)
+        .map_or(Cell::Blank, Cell::Percent);
     let cells = [
         Cell::text(book.name(book.entities[reading.owner].path)),
         Cell::text(what(book, reading)),
@@ -93,5 +115,9 @@ pub fn row<'s>(book: &'s Book<'_>, reading: &Headroom) -> Row<'s> {
         Cell::amount(book, Amount::new(room(reading), reading.limit.unit)),
         share,
     ];
-    Row::new(cells).style(if is_over(reading) { Style::Alert } else { Style::Normal })
+    Row::new(cells).style(if is_over(reading) {
+        Style::Alert
+    } else {
+        Style::Normal
+    })
 }

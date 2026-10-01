@@ -249,7 +249,7 @@ fn due_soon(lens: Lens, run: &Run, claims: &[Claim]) -> Vec<(String, Qty)> {
     let recorded = run
         .effects
         .iter()
-        .filter(|effect| effect.day <= at && lens.whose.includes(effect.owner));
+        .filter(|effect| effect.day <= at && lens.owns_entity(effect.owner));
     let owed = recorded.filter_map(|effect: &Effect| {
         let owed = effect.owed().filter(|owed| soon(owed.due))?;
         let label = format!(
@@ -278,7 +278,7 @@ type Owing = BTreeMap<(Id<Entity>, Sym, Id<Entity>, Day), Qty>;
 fn owing(lens: Lens, effects: &[Effect]) -> Owing {
     let mut owing = Owing::new();
     for effect in effects {
-        if lens.whose.includes(effect.owner) {
+        if lens.owns_entity(effect.owner) {
             if let (Some(owed), Some(qty)) = (effect.owed(), lens.value(effect.amount)) {
                 *owing
                     .entry((effect.owner, effect.name, owed.to, owed.due))

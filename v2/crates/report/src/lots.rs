@@ -1,8 +1,8 @@
 //! `lots`: parcels with their basis, and what they would fetch at the latest price.
 
-use axiom_core::{Day, Diagnostic, Qty};
-use axiom_engine::{Holding, Parcel, Run};
-use axiom_model::{Amount, Book, Place};
+use axiom_core::Qty;
+use axiom_engine::{Holding, Parcel};
+use axiom_model::{Amount, Place};
 
 use crate::gains::Term;
 use crate::lens::Lens;
@@ -37,16 +37,21 @@ pub(crate) fn view_from<'h, 's>(
     });
     for holding in held {
         for lot in &holding.lots {
-            let worth = lens.value(Amount::new(lot.qty, holding.unit));
-            basis += lot.basis;
+            let quantity = lens.place_qty(holding.place, lot.qty);
+            let lot_basis = lens.place_qty(holding.place, lot.basis);
+            if quantity.is_zero() && lot_basis.is_zero() {
+                continue;
+            }
+            let worth = lens.value(Amount::new(quantity, holding.unit));
+            basis += lot_basis;
             match worth {
                 Some(worth) => {
                     value += worth;
-                    unrealized += worth - lot.basis;
+                    unrealized += worth - lot_basis;
                 }
                 None => unpriced += 1,
             }
-            section.push(row(lens, holding, lot, worth));
+            section.push(row(lens, holding, lot, quantity, lot_basis, worth));
         }
     }
 
@@ -72,7 +77,14 @@ pub(crate) fn view_from<'h, 's>(
     Report::new(format!("Lots at {at}")).with(section)
 }
 
-fn row<'s>(lens: Lens<'s, '_, '_, '_>, holding: &Holding, lot: &Parcel, worth: Option<Qty>) -> Row<'s> {
+fn row<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    holding: &Holding,
+    lot: &Parcel,
+    quantity: Qty,
+    basis: Qty,
+    worth: Option<Qty>,
+) -> Row<'s> {
     let book = lens.book();
     let tie = lot
         .tied
@@ -84,16 +96,16 @@ fn row<'s>(lens: Lens<'s, '_, '_, '_>, holding: &Holding, lot: &Parcel, worth: O
             .chain(book.codes[lot.codes.local].iter())
             .copied(),
     )
-        .chain(tie.map(Cell::text))
-        .collect::<Vec<_>>();
+    .chain(tie.map(Cell::text))
+    .collect::<Vec<_>>();
     let cells = [
         Cell::text(path(book, holding.place)),
-        Cell::amount(book, Amount::new(lot.qty, holding.unit)),
-        Cell::base(book, lot.basis),
+        Cell::amount(book, Amount::new(quantity, holding.unit)),
+        Cell::base(book, basis),
         Cell::Day(lot.acquired),
         Cell::text(lens.day.since(lot.acquired).to_string()),
         worth.map_or(Cell::Blank, |worth| Cell::base(book, worth)),
-        worth.map_or(Cell::Blank, |worth| Cell::base(book, worth - lot.basis)),
+        worth.map_or(Cell::Blank, |worth| Cell::base(book, worth - basis)),
         Cell::text(Term::of(book, holding.unit, lot.acquired, lens.day).word()),
         Cell::list_or_blank(" · ", notes),
     ];

@@ -1,16 +1,12 @@
 //! `why "description"`: the written flows with that exact description.
 
-use axiom_engine::Run;
 use super::flows_table;
 use crate::history::postings;
 use crate::lens::Lens;
 use crate::{Cell, Column, Report, Row, Section};
+use axiom_engine::Run;
 
-pub fn report<'s>(
-    lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
-    description: &str,
-) -> Option<Report<'s>> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, description: &str) -> Option<Report<'s>> {
     let book = lens.book();
     let ids = postings(book, run)
         .filter(|posting| {
@@ -45,6 +41,6 @@ pub fn report<'s>(
     Some(
         Report::new(format!("Why \"{description}\""))
             .with(matches)
-            .with(flows_table(book, run, &ids, "Flows")),
+            .with(flows_table(lens, run, &ids, "Flows")),
     )
 }

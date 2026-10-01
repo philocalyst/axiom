@@ -9,7 +9,7 @@ use axiom_model::{Amount, Book, Limit, Period, Purpose, PurposeRoot};
 use crate::calendar::Periods;
 use crate::headroom::{current, latest, room, window_words};
 use crate::history::postings;
-use crate::lens::{Lens, Whose};
+use crate::lens::Lens;
 use crate::places::path;
 use crate::resolve;
 use crate::table::year_days;
@@ -65,7 +65,7 @@ pub fn report<'s>(
     let readings = latest(
         all_headroom
             .iter()
-            .filter(|reading| governing.contains(&reading.law) && lens.whose.includes(reading.owner)),
+            .filter(|reading| governing.contains(&reading.law) && lens.owns_entity(reading.owner)),
     );
     let mut limits = Section::new([
         Column::left("Law"),
@@ -82,7 +82,7 @@ pub fn report<'s>(
         limits.note("No headroom has been recorded for this purpose this year.");
     }
 
-    let budgets = budget_section(book, run, &lens.whose, purpose, year_window);
+    let budgets = budget_section(lens, run, purpose, year_window);
     let (total, parties, unpriced) = totals(book, run, lens, purpose, period, cutoff);
     let mut activity =
         Section::new([Column::left("This year"), Column::right("Amount")]).headed("Activity");
@@ -117,12 +117,12 @@ pub fn report<'s>(
 }
 
 fn budget_section<'s>(
-    book: &'s Book<'_>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
-    whose: &Whose,
     purpose: Id<Purpose>,
     days: Days,
 ) -> Section<'s> {
+    let book = lens.book();
     let mut section = Section::new([
         Column::left("Purpose"),
         Column::left("Window"),
@@ -138,12 +138,20 @@ fn budget_section<'s>(
         .values()
         .filter(|budget| book.purposes.covers(purpose, budget.purpose));
     for budget in budgets {
-        for (stretch, limit) in budget.limits.within(days) {
+        let Some(active_days) = Days::new(days.first().max(budget.starts), days.last()) else {
+            continue;
+        };
+        for (stretch, terms) in budget.terms.within(active_days) {
+            let visible = Days::new(
+                stretch.first().max(active_days.first()),
+                stretch.last().min(active_days.last()),
+            )
+            .expect("the timeline stretch intersects the budget window");
             section.push(Row::new([
                 Cell::Name(book.name(book.purposes[budget.purpose].name)),
-                Cell::Period(stretch),
-                budget_limit(book, *limit),
-                Cell::Word(if budget.carries {
+                Cell::Period(visible),
+                budget_limit(book, terms.limit),
+                Cell::Word(if terms.carries {
                     "carries"
                 } else {
                     "within window"
@@ -154,15 +162,19 @@ fn budget_section<'s>(
         }
         let mut matching = readings
             .iter()
-            .filter(|reading| reading.law == budget.law && whose.includes(reading.owner))
+            .filter(|reading| {
+                reading.law == budget.law
+                    && reading.day >= budget.starts
+                    && lens.owns_entity(reading.owner)
+            })
             .collect::<Vec<_>>();
         matching.sort_by_key(|reading| reading.days.first());
         for reading in matching {
             section.push(Row::new([
                 Cell::Name(book.name(book.purposes[budget.purpose].name)),
                 Cell::text(window_words(reading)),
-                budget_limit(book, *budget.limits.at(reading.day)),
-                Cell::Word(if budget.carries {
+                Cell::amount(book, reading.limit),
+                Cell::Word(if budget.terms.at(reading.day).carries {
                     "carries"
                 } else {
                     "within window"
@@ -189,6 +201,7 @@ fn budget_limit<'s>(book: &'s Book<'_>, limit: Limit) -> Cell<'s> {
                 Cell::Purpose(book.name(book.purposes[of].name)),
             ],
         ),
+        Limit::Computed(_) => Cell::Word("calculated"),
     }
 }
 
@@ -224,8 +237,7 @@ fn totals<'s>(
         let Some(purpose_on_flow) = flow.purpose else {
             continue;
         };
-        if !book.purposes.covers(purpose, purpose_on_flow.purpose)
-            || !lens.owns_entity(flow.owner)
+        if !book.purposes.covers(purpose, purpose_on_flow.purpose) || !lens.owns_entity(flow.owner)
         {
             continue;
         }

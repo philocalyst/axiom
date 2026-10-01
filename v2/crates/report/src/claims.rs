@@ -74,17 +74,24 @@ pub fn open<'h>(
         .into_iter()
         .filter(|holding| book.places[holding.place].claim && lens.owns(holding.place));
     let parcels = claimed.flat_map(|holding| {
-        holding.lots.iter().map(move |lot| {
-            let made = lot.txn.source_txn().and_then(|txn| book.paid_into(txn, holding.place));
-            Claim {
+        holding.lots.iter().filter_map(move |lot| {
+            let left = lens.place_qty(holding.place, lot.qty);
+            if left.is_zero() {
+                return None;
+            }
+            let made = lot
+                .txn
+                .source_txn()
+                .and_then(|txn| book.paid_into(txn, holding.place));
+            Some(Claim {
                 mine: true,
                 place: holding.place,
                 txn: lot.txn,
-                left: Amount::new(lot.qty, holding.unit),
+                left: Amount::new(left, holding.unit),
                 made: lot.acquired,
                 payee: made.and_then(|flow| flow.payee),
                 due: made.and_then(|flow| book.flow_view(flow).detail().due),
-            }
+            })
         })
     });
     let payable = book.kind("payable").ok();
@@ -135,6 +142,10 @@ pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim>
     }
     debts
         .into_values()
+        .map(|mut debt| {
+            debt.left.qty = lens.place_qty(place, debt.left.qty);
+            debt
+        })
         .filter(|debt| debt.left.qty > Qty::ZERO)
         .collect()
 }

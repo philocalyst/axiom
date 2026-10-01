@@ -17,13 +17,25 @@ use crate::lens::Lens;
 use crate::table::{cause_cell, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Option<i32>) -> Report<'s> {
+pub(crate) fn view_with_lens<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    year: Option<i32>,
+) -> Report<'s> {
     let book = lens.book();
     let year = year.unwrap_or_else(|| run.today.year());
     // An effect belongs to the year of the day it was recorded.
-    let effects = run.effects.iter().filter(|effect| lens.whose.includes(effect.owner) && effect.day.year() == year);
-    let (owed, tallied): (Vec<&Effect>, Vec<&Effect>) = effects.partition(|effect| effect.owed().is_some());
-    let owners: BTreeSet<Id<Entity>> = owed.iter().chain(&tallied).map(|effect| effect.owner).collect();
+    let effects = run
+        .effects
+        .iter()
+        .filter(|effect| lens.owns_entity(effect.owner) && effect.day.year() == year);
+    let (owed, tallied): (Vec<&Effect>, Vec<&Effect>) =
+        effects.partition(|effect| effect.owed().is_some());
+    let owners: BTreeSet<Id<Entity>> = owed
+        .iter()
+        .chain(&tallied)
+        .map(|effect| effect.owner)
+        .collect();
 
     let (tallied, owed) = (lines(&tallied), lines(&owed));
     // A closing law has not judged the year until its day: what it owes is
@@ -47,11 +59,19 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, year: Op
              that live under a system that declares them.",
         );
     } else {
-        let listed = if obligations.rows.is_empty() { &mut tallies } else { &mut obligations };
-        listed.note("Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.");
+        let listed = if obligations.rows.is_empty() {
+            &mut tallies
+        } else {
+            &mut obligations
+        };
+        listed.note(
+            "Trace any line with `axiom why NAME`, or `axiom why FILE:LINE` from its source.",
+        );
     }
     if owed.iter().any(|line| line.priced) {
-        obligations.note("A penalty is the price of a violated law: it is owed instead of the law failing.");
+        obligations.note(
+            "A penalty is the price of a violated law: it is owed instead of the law failing.",
+        );
     }
     let title = match owners.iter().collect::<Vec<_>>()[..] {
         [owner] => format!("Taxes {year} for {}", book.name(book.entities[*owner].path)),
@@ -103,10 +123,24 @@ struct Line {
 /// they work through them, so that order reads as the return does.
 fn lines(effects: &[&Effect]) -> Vec<Line> {
     let mut lines: Vec<Line> = Vec::new();
-    let mut at: Map<(Id<Entity>, Sym, Option<(Id<Entity>, Day)>, bool, Id<Commodity>), usize> = Map::default();
+    let mut at: Map<
+        (
+            Id<Entity>,
+            Sym,
+            Option<(Id<Entity>, Day)>,
+            bool,
+            Id<Commodity>,
+        ),
+        usize,
+    > = Map::default();
     for effect in effects {
-        let key =
-            (effect.owner, effect.name, effect.owed().map(|owed| (owed.to, owed.due)), effect.is_penalty(), effect.amount.unit);
+        let key = (
+            effect.owner,
+            effect.name,
+            effect.owed().map(|owed| (owed.to, owed.due)),
+            effect.is_penalty(),
+            effect.amount.unit,
+        );
         let index = *at.entry(key).or_insert_with(|| {
             lines.push(Line {
                 owner: effect.owner,
@@ -129,35 +163,82 @@ fn lines(effects: &[&Effect]) -> Vec<Line> {
 }
 
 fn tallies<'s>(book: &'s Book<'_>, lines: &[Line], several: bool) -> Section<'s> {
-    let mut section =
-        Section::new([Column::left("Tally"), Column::right("Amount"), Column::left("From")]).headed("Counted");
-    let cells =
-        |line: &Line| vec![Cell::text(book.name(line.name)), Cell::amount(book, line.amount), source(book, line)];
+    let mut section = Section::new([
+        Column::left("Tally"),
+        Column::right("Amount"),
+        Column::left("From"),
+    ])
+    .headed("Counted");
+    let cells = |line: &Line| {
+        vec![
+            Cell::text(book.name(line.name)),
+            Cell::amount(book, line.amount),
+            source(book, line),
+        ]
+    };
     grouped(&mut section, book, lines, several, cells, |_, _| Vec::new());
     section
 }
 
 /// Obligations, and what each jurisdiction is owed. `unfinished`: a law that
 /// owes has not judged the year yet, so the totals are what is owed so far.
-fn obligations<'s>(book: &'s Book<'_>, lines: &[Line], several: bool, unfinished: bool) -> Section<'s> {
-    let columns =
-        [Column::left("Owed"), Column::left("To"), Column::left("Due"), Column::right("Amount"), Column::left("From")];
+fn obligations<'s>(
+    book: &'s Book<'_>,
+    lines: &[Line],
+    several: bool,
+    unfinished: bool,
+) -> Section<'s> {
+    let columns = [
+        Column::left("Owed"),
+        Column::left("To"),
+        Column::left("Due"),
+        Column::right("Amount"),
+        Column::left("From"),
+    ];
     let mut section = Section::new(columns).headed("Owed");
     let cells = |line: &Line| {
         let (to, due) = line.owed.map_or((Cell::Blank, Cell::Blank), |owed| {
-            (Cell::text(book.name(book.entities[owed.to].path)), Cell::Day(owed.due))
+            (
+                Cell::text(book.name(book.entities[owed.to].path)),
+                Cell::Day(owed.due),
+            )
         });
         let name = book.name(line.name);
-        let name = if line.priced { format!("{name} (penalty)") } else { name.to_string() };
-        vec![Cell::text(name), to, due, Cell::amount(book, line.amount), source(book, line)]
+        let name = if line.priced {
+            format!("{name} (penalty)")
+        } else {
+            name.to_string()
+        };
+        vec![
+            Cell::text(name),
+            to,
+            due,
+            Cell::amount(book, line.amount),
+            source(book, line),
+        ]
     };
     // Each jurisdiction is owed its own total, when there is more than one to tell apart.
-    let several_groups = lines.chunk_by(|a, b| (a.owner, a.system) == (b.owner, b.system)).nth(1).is_some();
+    let several_groups = lines
+        .chunk_by(|a, b| (a.owner, a.system) == (b.owner, b.system))
+        .nth(1)
+        .is_some();
     let foot = |group: &[Line], jurisdiction: &str| {
-        if several_groups { totals(book, group, &format!("Total {jurisdiction}")) } else { Vec::new() }
+        if several_groups {
+            totals(book, group, &format!("Total {jurisdiction}"))
+        } else {
+            Vec::new()
+        }
     };
     grouped(&mut section, book, lines, several, cells, foot);
-    for row in totals(book, lines, if unfinished { "Total owed so far" } else { "Total owed" }) {
+    for row in totals(
+        book,
+        lines,
+        if unfinished {
+            "Total owed so far"
+        } else {
+            "Total owed"
+        },
+    ) {
         section.push(row);
     }
     section
@@ -203,8 +284,12 @@ fn grouped<'s>(
     let others = section.columns.len() - 1;
     for group in lines.chunk_by(|a, b| (a.owner, a.system) == (b.owner, b.system)) {
         let first = &group[0];
-        let depth = first.system.map_or(0, |system| book.systems.depth(system) as usize);
-        let system = first.system.map_or("project", |system| book.name(book.systems[system].path));
+        let depth = first
+            .system
+            .map_or(0, |system| book.systems.depth(system) as usize);
+        let system = first
+            .system
+            .map_or("project", |system| book.name(book.systems[system].path));
         let heading = if several {
             format!("{} · {system}", book.name(book.entities[first.owner].path))
         } else {

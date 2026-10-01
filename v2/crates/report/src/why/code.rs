@@ -26,7 +26,7 @@ pub fn report<'s>(
         })
         .map(|posting| posting.id)
         .collect();
-    let visible_codes = super::line::scoped_codes(book, &lens.whose);
+    let visible_codes = super::line::scoped_codes(book, lens);
     let event_visible = |code| lens.whose.is_everyone() || visible_codes.contains(&code);
     let mut happened = Section::new([
         Column::left("Date"),
@@ -47,7 +47,11 @@ pub fn report<'s>(
     }
 
     if flows.is_empty() && happened.rows.is_empty() {
-        let events = book.events.iter().filter(|event| event_visible(event.code)).map(|event| event.code);
+        let events = book
+            .events
+            .iter()
+            .filter(|event| event_visible(event.code))
+            .map(|event| event.code);
         let known: BTreeSet<&str> = visible_codes
             .iter()
             .copied()
@@ -57,6 +61,6 @@ pub fn report<'s>(
         return Err(resolve::nothing_named("code", pattern, known));
     }
     Ok(Report::new(format!("Why ^{pattern}"))
-        .with(flows_table(book, run, &flows, "Flows"))
+        .with(flows_table(lens, run, &flows, "Flows"))
         .with(happened))
 }

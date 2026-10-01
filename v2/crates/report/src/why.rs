@@ -24,8 +24,8 @@ use std::borrow::Cow;
 use axiom_core::{Diagnostic, Id, Sym};
 use axiom_engine::{Effect, Run, State};
 use axiom_model::{
-    Book, Closing, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place,
-    StepKind, System, Trigger,
+    Amount, Book, Closing, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period,
+    Place, StepKind, System, Trigger,
 };
 
 use crate::history::Posting;
@@ -45,7 +45,13 @@ fn recent<T>(items: &[T]) -> (&[T], usize) {
 }
 
 /// Flows, dated, with where each stands.
-fn flows_table<'s>(book: &'s Book<'_>, run: &Run, ids: &[Id<Flow>], heading: &str) -> Section<'s> {
+fn flows_table<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    ids: &[Id<Flow>],
+    heading: &str,
+) -> Section<'s> {
+    let book = lens.book();
     let columns = [
         Column::left("Date"),
         Column::left("Flow"),
@@ -61,7 +67,13 @@ fn flows_table<'s>(book: &'s Book<'_>, run: &Run, ids: &[Id<Flow>], heading: &st
         let cells = [
             Cell::Day(flow.day),
             Cell::text(route(book, flow)),
-            Cell::amount(book, posting.out()),
+            Cell::amount(
+                book,
+                Amount::new(
+                    lens.entity_qty(flow.owner, posting.out().qty),
+                    posting.out().unit,
+                ),
+            ),
             Cell::text(state_words(posting.posted.state)),
             Cell::Source(flow.loc),
         ];
@@ -187,7 +199,7 @@ pub(crate) fn line_with_lens<'s>(
     run: &Run,
     at: axiom_core::Loc,
 ) -> Report<'s> {
-    line::line(lens.book(), run, &lens.whose, at)
+    line::line(lens, run, at)
 }
 
 /// A name is a place if it can be one, else an entity, a system, a law, or

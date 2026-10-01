@@ -189,17 +189,21 @@ fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
 /// each commodity priced as a whole at today's prices and grown `months` ahead.
 fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
     let mut basket = Basket::default();
-    let on_sheet = |holding: &&Holding| {
-        matches!(
+    for holding in ledger.holdings() {
+        if !matches!(
             lens.book().places[holding.place].class,
             Class::Asset | Class::Debt
-        ) && !lens.place_qty(holding.place, pick(holding)).is_zero()
-    };
-    for holding in ledger.holdings().filter(on_sheet) {
+        ) {
+            continue;
+        }
+        let qty = lens.place_qty(holding.place, pick(holding));
+        if qty.is_zero() {
+            continue;
+        }
         basket.add(
             holding.unit,
             Held {
-                qty: lens.place_qty(holding.place, pick(holding)),
+                qty,
                 booked: Qty::ZERO,
             },
         );

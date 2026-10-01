@@ -56,7 +56,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
         let cells = [
             Cell::Name(name),
             Cell::Name(book.name(book.entities[contract.party].path)),
-            terms.map_or(Cell::Blank, |terms| terms_cell(book, contract, terms)),
+            terms.map_or(Cell::Blank, |terms| terms_cell(lens, contract, terms)),
             next.map_or(Cell::Blank, Cell::Day),
             Cell::Count(kept, "kept"),
             if late == 0 {
@@ -78,7 +78,12 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
     Report::new("Contracts").with(section)
 }
 
-pub(crate) fn terms_cell<'s>(book: &'s Book<'_>, contract: &'s Contract, terms: &'s Terms) -> Cell<'s> {
+pub(crate) fn terms_cell<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    contract: &'s Contract,
+    terms: &'s Terms,
+) -> Cell<'s> {
+    let book = lens.book();
     if terms.state == TermsState::Waived {
         return Cell::Word("waived");
     }
@@ -102,7 +107,7 @@ pub(crate) fn terms_cell<'s>(book: &'s Book<'_>, contract: &'s Contract, terms: 
         terms
             .template
             .iter()
-            .map(|flow| template_flow_cell(book, flow)),
+            .map(|flow| template_flow_cell(lens, flow)),
     );
     Cell::list(" ", parts)
 }
@@ -131,14 +136,20 @@ fn loan_balance<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract: &Contract) 
 
 /// Never render placeholder values for a term expression that the engine must
 /// evaluate at the occurrence date.
-pub(crate) fn template_flow_cell<'s>(book: &'s Book<'_>, template: &'s TemplateFlow) -> Cell<'s> {
+pub(crate) fn template_flow_cell<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    template: &'s TemplateFlow,
+) -> Cell<'s> {
+    let book = lens.book();
     let flow = &template.flow;
     let header = Cell::list(
         " ",
         [
             Cell::text(route(book, flow)),
-            template_quantity(book, template.out, flow.out),
-            flow.is_exchange().then(|| template_quantity(book, template.arrive, flow.arrive)).unwrap_or(Cell::Blank),
+            template_quantity(lens, flow.owner, template.out, flow.out),
+            flow.is_exchange()
+                .then(|| template_quantity(lens, flow.owner, template.arrive, flow.arrive))
+                .unwrap_or(Cell::Blank),
         ]
         .into_iter()
         .chain(crate::table::code_labels(book, book.flow_view(flow).codes())),
@@ -154,17 +165,37 @@ pub(crate) fn template_flow_cell<'s>(book: &'s Book<'_>, template: &'s TemplateF
                 Cell::Word("split"),
                 Cell::text(route(book, &leg.flow)),
                 Cell::Word(side),
-                template_quantity(book, leg.quantity, match leg.side { FlowSide::Out => leg.flow.out, FlowSide::Arrive => leg.flow.arrive }),
+                template_quantity(
+                    lens,
+                    leg.flow.owner,
+                    leg.quantity,
+                    match leg.side {
+                        FlowSide::Out => leg.flow.out,
+                        FlowSide::Arrive => leg.flow.arrive,
+                    },
+                ),
             ],
         )
     });
-    let items = template.items.iter().map(|item| template_item_cell(book, item));
+    let items = template
+        .items
+        .iter()
+        .map(|item| template_item_cell(lens, template, item));
     Cell::list("; ", std::iter::once(header).chain(legs).chain(items))
 }
 
-fn template_quantity<'s>(book: &'s Book<'_>, quantity: TemplateQuantity, literal: axiom_model::Amount) -> Cell<'s> {
+fn template_quantity<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    owner: axiom_core::Id<axiom_model::Entity>,
+    quantity: TemplateQuantity,
+    literal: axiom_model::Amount,
+) -> Cell<'s> {
+    let book = lens.book();
     match quantity {
-        TemplateQuantity::Amount(None) => Cell::amount(book, literal),
+        TemplateQuantity::Amount(None) => Cell::amount(
+            book,
+            axiom_model::Amount::new(lens.entity_qty(owner, literal.qty), literal.unit),
+        ),
         TemplateQuantity::Amount(Some(_)) => Cell::Word("computed per occurrence"),
         TemplateQuantity::Pending(None) => Cell::Word("pending amount"),
         TemplateQuantity::Pending(Some(_)) => Cell::Word("computed pending amount"),
@@ -180,7 +211,12 @@ fn template_quantity<'s>(book: &'s Book<'_>, quantity: TemplateQuantity, literal
     }
 }
 
-fn template_item_cell<'s>(book: &'s Book<'_>, item: &'s TemplateItem) -> Cell<'s> {
+fn template_item_cell<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    template: &'s TemplateFlow,
+    item: &'s TemplateItem,
+) -> Cell<'s> {
+    let book = lens.book();
     let sign = match item.sign {
         axiom_model::Sign::Carve => "carves",
         axiom_model::Sign::Add => "adds",
@@ -194,8 +230,18 @@ fn template_item_cell<'s>(book: &'s Book<'_>, item: &'s TemplateItem) -> Cell<'s
         FlowSide::Out => "out",
         FlowSide::Arrive => "arrive",
     };
+    let owner = match item.parent {
+        TemplateItemParent::Header => template.flow.owner,
+        TemplateItemParent::Leg(index) => template
+            .legs
+            .get(usize::from(index))
+            .map_or(template.flow.owner, |leg| leg.flow.owner),
+    };
     let amount = match item.amount {
-        TemplateAmount::Literal(amount) => Cell::amount(book, amount),
+        TemplateAmount::Literal(amount) => Cell::amount(
+            book,
+            axiom_model::Amount::new(lens.entity_qty(owner, amount.qty), amount.unit),
+        ),
         TemplateAmount::Computed(_) => Cell::Word("computed per occurrence"),
     };
     let purpose = item.purpose.map_or(Cell::Blank, |purpose| {

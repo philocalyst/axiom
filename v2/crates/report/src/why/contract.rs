@@ -30,7 +30,7 @@ pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: axiom_core
         let templates = value
             .template
             .iter()
-            .map(|flow| crate::contracts::template_flow_cell(book, flow))
+            .map(|flow| crate::contracts::template_flow_cell(lens, flow))
             .collect::<Vec<_>>();
         let state = match value.state {
             TermsState::Active => Cell::Word("active"),

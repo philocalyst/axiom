@@ -100,7 +100,7 @@ fn view_with<'p, 'b, 's>(
         .map(RuntimeFlow::source)
         .collect();
     let (contract_flows, contract_rows, contract_issues) =
-        contract_forecasts(book, run, lens.whose, today, until);
+        contract_forecasts(lens, run, today, until);
     flows.extend(contract_flows);
     flows.sort_by_key(|flow| flow.flow.day);
     let checkpoints = checkpoints(today, until);
@@ -139,7 +139,7 @@ fn view_with<'p, 'b, 's>(
 
     let mut report = Report::new(format!("Forecast to {until}"))
         .with(outlook)
-        .with(expected_section(book, &expected, today, until));
+        .with(expected_section(lens, &expected, today, until));
     if !book.contracts.is_empty() {
         report = report.with(contract_section(
             book,
@@ -343,11 +343,12 @@ fn outlook_section<'s>(
 /// One row for each thing that recurs, soonest first: a paycheck's legs are one
 /// row, shown under its biggest leg with what all of them come to.
 fn expected_section<'s>(
-    book: &'s Book<'_>,
+    lens: Lens<'s, '_, '_, '_>,
     expected: &[Expectation],
     today: Day,
     until: Day,
 ) -> Section<'s> {
+    let book = lens.book();
     let columns = [
         Column::left("Expected"),
         Column::left("Every"),
@@ -376,7 +377,7 @@ fn expected_section<'s>(
         let total = legs
             .iter()
             .filter(|leg| leg.out.unit == main.out.unit)
-            .map(|leg| leg.out.qty)
+            .map(|leg| lens.entity_qty(leg.template.owner, leg.out.qty))
             .sum();
         let next = legs
             .iter()
@@ -425,9 +426,8 @@ struct ContractRow {
 /// occurrence cannot be derived, discard that contract's partial flows and
 /// retain the typed error for the report instead of forecasting a partial leg set.
 fn contract_forecasts<'s>(
-    book: &'s Book<'_>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
-    whose: &Whose,
     today: Day,
     until: Day,
 ) -> (
@@ -435,6 +435,7 @@ fn contract_forecasts<'s>(
     Vec<ContractRow>,
     Vec<(Id<Contract>, String)>,
 ) {
+    let book = lens.book();
     let mut flows = Vec::new();
     let mut rows = Vec::new();
     let mut issues = Vec::new();
@@ -444,7 +445,7 @@ fn contract_forecasts<'s>(
         }
         let id = promise.contract;
         let contract = &book.contracts[id];
-        if !whose.includes(contract.owner) {
+        if !lens.owns_entity(contract.owner) {
             continue;
         }
         let contract_flows = run.promise_flows(promise);
@@ -458,7 +459,7 @@ fn contract_forecasts<'s>(
                 .filter(|flow| {
                     flow.flow.day == promise.due && flow.flow.out.unit == main.flow.out.unit
                 })
-                .map(|flow| flow.flow.out.qty)
+                .map(|flow| lens.entity_qty(flow.flow.owner, flow.flow.out.qty))
                 .sum();
             Amount::new(qty, main.flow.out.unit)
         });

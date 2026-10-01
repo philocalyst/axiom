@@ -37,7 +37,9 @@ pub(crate) fn view_with_lens<'s>(
         return Ok(asset_register(lens, run, asset, from, to));
     }
     if let Some(entity) = place.strip_prefix("entity:") {
-        let entity = book.entity(entity).map_err(|miss| resolve::entity_miss(book, entity, miss))?;
+        let entity = book
+            .entity(entity)
+            .map_err(|miss| resolve::entity_miss(book, entity, miss))?;
         let target = book.name(book.entities[entity].path);
         return Ok(entity_view(lens, run, entity, target, from, to));
     }
@@ -56,15 +58,8 @@ pub(crate) fn view_with_lens<'s>(
     let place = resolve::place(book, place)?;
     // A place is somebody's: another owner's register is not part of whose money this is.
     let owner = book.places[place].owner;
-    let register = match lens.whose.includes(owner) {
-        true => section_with_sign(
-            lens,
-            run,
-            place,
-            from,
-            to,
-            lens.display_sign(place),
-        ),
+    let register = match lens.owns(place) {
+        true => section_with_sign(lens, run, place, from, to, lens.display_sign(place)),
         false => Section::note_only(format!(
             "{} belongs to {}, whose money this is not.",
             path(book, place),
@@ -89,7 +84,7 @@ fn entity_view<'s>(
     let is_owner = book.entities[entity]
         .place
         .is_some_and(|place| matches!(book.places[place].role, Role::Holding(_)));
-    if is_owner && !lens.whose.includes(entity) {
+    if is_owner && !lens.owns_entity(entity) {
         return Report::new(format!("Register: {target}")).with(Section::note_only(format!(
             "{} is outside this owner's scope.",
             book.name(book.entities[entity].path)
@@ -113,7 +108,7 @@ fn entity_view<'s>(
                 place.owner == entity
                     || matches!(place.role, Role::Outside(Some(party)) if party == entity)
             });
-        within && lens.whose.includes(flow.owner) && (flow.owner == entity || at_party)
+        within && lens.owns_entity(flow.owner) && (flow.owner == entity || at_party)
     }) {
         let flow = posting.flow;
         let purpose = flow.purpose.map_or(Cell::Blank, |purpose| {
@@ -144,7 +139,7 @@ fn entity_view<'s>(
             Cell::Day(flow.day),
             purpose,
             Cell::text(crate::places::route(book, flow)),
-            Cell::amount(book, posting.out()),
+            Cell::amount(book, scoped_entity_amount(lens, flow.owner, posting.out())),
             Cell::list_or_blank(" · ", note),
             state,
             Cell::Source(flow.loc),
@@ -166,7 +161,7 @@ fn asset_register<'s>(
     let book = lens.book();
     let asset = &book.assets[asset_id];
     let name = book.name(asset.name);
-    if !lens.whose.includes(asset.owner) {
+    if !lens.owns_entity(asset.owner) {
         return Report::new(format!("Register: {name}")).with(Section::note_only(format!(
             "{name} belongs to {}, whose money this is not.",
             book.name(book.entities[asset.owner].path)
@@ -176,7 +171,7 @@ fn asset_register<'s>(
     let mut rows = Vec::new();
     for (id, flow) in book.flows.iter().filter(|(_, flow)| {
         in_window(flow.day, from, cutoff)
-            && lens.whose.includes(flow.owner)
+            && lens.owns_entity(flow.owner)
             && (flow.from == asset.place
                 || flow.to == asset.place
                 || flow.purpose.is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))
@@ -199,7 +194,7 @@ fn asset_register<'s>(
                 Cell::Word(activity),
                 purpose,
                 Cell::text(crate::places::route(book, flow)),
-                Cell::amount(book, posting.out()),
+                Cell::amount(book, scoped_entity_amount(lens, flow.owner, posting.out())),
                 Cell::Source(flow.loc),
             ])
             .style(style),
@@ -217,7 +212,7 @@ fn asset_register<'s>(
                 Cell::Word("basis consumed"),
                 Cell::Name(book.name(book.laws[adjustment.law].name)),
                 Cell::Blank,
-                Cell::base(book, adjustment.amount),
+                Cell::base(book, lens.entity_qty(asset.owner, adjustment.amount)),
                 Cell::Source(book.laws[adjustment.law].loc),
             ]),
         ));
@@ -248,7 +243,7 @@ fn contract_register<'s>(
     let book = lens.book();
     let contract = &book.contracts[contract_id];
     let name = book.name(contract.name);
-    if !lens.whose.includes(contract.owner) {
+    if !lens.owns_entity(contract.owner) {
         return Report::new(format!("Register: {name}")).with(Section::note_only(format!(
             "{name} belongs to {}, whose money this is not.",
             book.name(book.entities[contract.owner].path)
@@ -256,7 +251,11 @@ fn contract_register<'s>(
     }
     let cutoff = to.unwrap_or(run.today);
     let mut rows = Vec::new();
-    for (days, terms) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
+    for (days, terms) in contract
+        .terms
+        .iter()
+        .flat_map(|terms| terms.within(contract.days))
+    {
         let day = days.first();
         if !in_window(day, from, cutoff) {
             continue;
@@ -273,17 +272,17 @@ fn contract_register<'s>(
             Row::new([
                 Cell::Day(day),
                 activity,
-                crate::contracts::terms_cell(book, contract, terms),
+                crate::contracts::terms_cell(lens, contract, terms),
                 Cell::Blank,
                 statement,
             ]),
         ));
     }
-    for promise in run
-        .promises
-        .iter()
-        .filter(|promise| promise.contract == contract_id && in_window(promise.due, from, cutoff))
-    {
+    for promise in run.promises.iter().filter(|promise| {
+        promise.contract == contract_id
+            && lens.owns_entity(contract.owner)
+            && in_window(promise.due, from, cutoff)
+    }) {
         let kept = promise.kept.map(|(day, _)| day);
         let late = promise.late(cutoff);
         let mut row = Row::new([
@@ -300,7 +299,7 @@ fn contract_register<'s>(
     }
     for (id, flow) in book.flows.iter().filter(|(_, flow)| {
         in_window(flow.day, from, cutoff)
-            && lens.whose.includes(flow.owner)
+            && lens.owns_entity(flow.owner)
             && contract_flow(flow.origin, contract_id)
     }) {
         let posting = Posting::at(book, run, id);
@@ -326,7 +325,10 @@ fn contract_register<'s>(
                 Cell::text(crate::places::route(book, flow)),
                 Cell::list(
                     " ",
-                    [Cell::amount(book, posting.out()), Cell::Source(flow.loc)],
+                    [
+                        Cell::amount(book, scoped_entity_amount(lens, flow.owner, posting.out())),
+                        Cell::Source(flow.loc),
+                    ],
                 ),
             ]),
         ));
@@ -362,6 +364,14 @@ fn contract_flow(origin: Origin, contract: axiom_core::Id<Contract>) -> bool {
 
 fn in_window(day: Day, from: Option<Day>, cutoff: Day) -> bool {
     day <= cutoff && from.is_none_or(|from| day >= from)
+}
+
+fn scoped_entity_amount<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    entity: axiom_core::Id<Entity>,
+    amount: Amount,
+) -> Amount {
+    Amount::new(lens.entity_qty(entity, amount.qty), amount.unit)
 }
 
 /// Builds a register for a place within an owner's view.
