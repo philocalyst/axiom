@@ -1457,7 +1457,10 @@ mod param_lookup_tests {
     #[test]
     fn row_lookup_binary_searches_full_key_tuple_and_date() {
         let mut names = Interner::default();
-        let (family, self_only) = (names.intern("family"), names.intern("self-only"));
+        let family = names.intern("family");
+        let missing_middle = names.intern("individual");
+        let self_only = names.intern("self-only");
+        let missing_end = names.intern("zzz");
         let (param_name, family_key) = (names.intern("limit"), [family]);
         let rows = vec![
             row(&family_key, Some(Day::from_ymd(2025, 1, 1).unwrap()), 100),
@@ -1477,8 +1480,8 @@ mod param_lookup_tests {
         assert_eq!(index, 1);
         assert_eq!(row.value, Value::Num(Ratio::int(200)));
         assert_eq!(param.row_index(day, &[self_only]).unwrap().0, 2);
-        assert!(param.row_index(day, &[names.intern("individual")]).is_none());
-        assert!(param.row_index(day, &[names.intern("zzz")]).is_none());
+        assert!(param.row_index(day, &[missing_middle]).is_none());
+        assert!(param.row_index(day, &[missing_end]).is_none());
         assert!(param.row_index(Day::from_ymd(2024, 12, 31).unwrap(), &[self_only]).is_none());
     }
 }
