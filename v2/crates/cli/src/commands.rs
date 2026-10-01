@@ -1,6 +1,8 @@
 //! What each command does: load the project, build the book, run it, and show
 //! what was asked for.
 
+use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -10,7 +12,7 @@ use axiom_model::{Book, sync::Fetch};
 use axiom_report::{Context, Query, ReportRenderer, Summary, json::JsonRenderer};
 
 use crate::args::{Command, Invocation};
-use crate::project::{Project, Sources};
+use crate::project::{Project, SourceFile, Sources};
 use crate::render::{Renderer, Tally};
 use crate::style::{Ink, Line};
 use crate::text::plural;
@@ -88,7 +90,7 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     // would also retain the pre-close checkpoint that no check view uses.
     let run = axiom_engine::run(&book, options);
     let (reader_diagnostics, suggestions) = if matches!(command, Command::Check) {
-        check_memos(&book, &project, &mut sources)
+        check_memos(&book, &project, &sources.files, &mut sources.auxiliary)
     } else {
         (Vec::new(), Vec::new())
     };
@@ -111,10 +113,15 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
 fn check_memos(
     book: &Book<'_>,
     project: &Project,
-    sources: &mut Sources,
-) -> (Vec<Diagnostic>, Vec<String>) {
+    parsed_files: &[SourceFile],
+    auxiliary: &mut Vec<SourceFile>,
+) -> (Vec<Diagnostic>, Vec<MemoSuggestion>) {
     let mut diagnostics = Vec::new();
     let mut inputs = Vec::new();
+    let mut registered: HashMap<String, FileId> = auxiliary
+        .iter()
+        .map(|file| (file.path.to_string(), file.id))
+        .collect();
     for (source_index, source) in book.sources.iter().enumerate() {
         let Fetch::Read(pattern) = source.fetch else {
             continue;
@@ -128,6 +135,10 @@ fn check_memos(
             }
         };
         for path in paths {
+            if let Some(&file) = registered.get(&path) {
+                inputs.push((source_index, file));
+                continue;
+            }
             let text = match project.read_local(&path) {
                 Ok(text) => text,
                 Err(problem) => {
@@ -135,13 +146,11 @@ fn check_memos(
                     continue;
                 }
             };
-            match Sources::append_auxiliary_to(
-                &mut sources.auxiliary,
-                sources.files.len(),
-                path,
-                text,
-            ) {
-                Ok(file) => inputs.push((source_index, file)),
+            match Sources::append_auxiliary_to(auxiliary, parsed_files.len(), path.clone(), text) {
+                Ok(file) => {
+                    registered.insert(path, file);
+                    inputs.push((source_index, file));
+                }
                 Err(problem) => diagnostics.push(problem),
             }
         }
@@ -151,7 +160,7 @@ fn check_memos(
     // live in a disjoint vector, so the parsed Book keeps borrowing `files`.
     let mut memos = Vec::new();
     for (source_index, file_id) in inputs {
-        let Some(file) = sources.get(file_id) else {
+        let Some(file) = source_by_id(parsed_files, auxiliary, file_id) else {
             continue;
         };
         match axiom_sync::read_memos(book, &book.sources[source_index], &file.text, file_id) {
@@ -161,23 +170,92 @@ fn check_memos(
     }
 
     let groups = axiom_sync::unrecognized(memos.iter().map(|memo| memo.as_ref()));
-    let suggestions = if groups.is_empty() {
-        Vec::new()
-    } else {
-        let mut lines = vec!["Memos nothing recognized:".to_string()];
-        lines.extend(groups.iter().flat_map(|group| {
-            [
-                format!(
-                    "  {} ({} records)",
-                    group.example.replace('\n', " ").replace('\r', " "),
-                    group.count
-                ),
-                format!("    {}", group.known_as()),
-            ]
-        }));
-        lines
-    };
+    let suggestions = groups
+        .into_iter()
+        .map(|group| MemoSuggestion {
+            stem: group.stem.to_owned(),
+            count: group.count,
+            example: group.example.to_owned(),
+            pattern: group.pattern(),
+            known_as: group.known_as(),
+        })
+        .collect();
     (diagnostics, suggestions)
+}
+
+fn source_by_id(files: &[SourceFile], auxiliary: &[SourceFile], id: FileId) -> Option<&SourceFile> {
+    let index = usize::from(id.0);
+    files
+        .get(index)
+        .or_else(|| auxiliary.get(index.checked_sub(files.len())?))
+}
+
+#[derive(Clone, Debug)]
+struct MemoSuggestion {
+    stem: String,
+    count: usize,
+    example: String,
+    pattern: String,
+    known_as: String,
+}
+
+fn suggestion_lines(suggestions: &[MemoSuggestion]) -> Vec<String> {
+    if suggestions.is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec!["Memos nothing recognized:".to_string()];
+    for group in suggestions {
+        lines.push(format!(
+            "  {} ({} records)",
+            group.example.replace('\n', " ").replace('\r', " "),
+            group.count
+        ));
+        lines.push(format!("    {}", group.known_as));
+    }
+    lines
+}
+
+/// A separate NDJSON record keeps diagnostic objects unchanged while
+/// returning the memo groups as machine-readable data.
+fn json_suggestions(suggestions: &[MemoSuggestion]) -> String {
+    if suggestions.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("{\"type\":\"unrecognized_memos\",\"groups\":[");
+    for (index, group) in suggestions.iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
+        out.push_str("{\"stem\":");
+        json_string(&mut out, &group.stem);
+        let _ = write!(out, ",\"count\":{},\"example\":", group.count);
+        json_string(&mut out, &group.example);
+        out.push_str(",\"pattern\":");
+        json_string(&mut out, &group.pattern);
+        out.push_str(",\"known_as\":");
+        json_string(&mut out, &group.known_as);
+        out.push('}');
+    }
+    out.push_str("]}\n");
+    out
+}
+
+fn json_string(out: &mut String, value: &str) {
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            ch if ch <= '\u{1f}' => {
+                let _ = write!(out, "\\u{:04x}", ch as u32);
+            }
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
 }
 
 /// Shows a query-construction error in the same channels as a report error.
@@ -230,11 +308,13 @@ struct Session<'a, 's> {
 
 impl Session<'_, '_> {
     /// Every diagnostic; and if none is an error, the book in one line.
-    fn check(&self, suggestions: &[String]) -> Outcome {
+    fn check(&self, suggestions: &[MemoSuggestion]) -> Outcome {
         let (diagnostics, tally) = self.show(&self.diagnostics);
         if self.json {
+            let mut answer = diagnostics;
+            answer.push_str(&json_suggestions(suggestions));
             return Outcome {
-                answer: diagnostics,
+                answer,
                 diagnostics: String::new(),
                 failed: tally.errors > 0,
             };
@@ -262,11 +342,16 @@ impl Session<'_, '_> {
         }
     }
 
-    fn suggestions(&self, suggestions: &[String], terminal: crate::style::Terminal) -> String {
-        if self.json || suggestions.is_empty() {
+    fn suggestions(
+        &self,
+        suggestions: &[MemoSuggestion],
+        terminal: crate::style::Terminal,
+    ) -> String {
+        let lines = suggestion_lines(suggestions);
+        if lines.is_empty() {
             return String::new();
         }
-        let lines = suggestions
+        let lines = lines
             .iter()
             .map(|suggestion| Line::text(suggestion, Ink::DIM))
             .collect::<Vec<_>>();
@@ -397,13 +482,14 @@ mod tests {
             "fixture has no model errors: {diagnostics:?}"
         );
 
-        let (read_problems, suggestions) = check_memos(&book, &project, &mut sources);
+        let (read_problems, suggestions) =
+            check_memos(&book, &project, &sources.files, &mut sources.auxiliary);
         assert!(read_problems.is_empty(), "{read_problems:?}");
-        assert!(suggestions.iter().any(|line| line.contains("2 records")));
+        assert!(suggestions.iter().any(|group| group.count == 2));
         assert!(
             suggestions
                 .iter()
-                .any(|line| line.contains("known-as \"TRADER JOE'S\""))
+                .any(|group| group.known_as == "known-as \"TRADER JOE'S\"")
         );
         assert!(
             !marker.exists(),
