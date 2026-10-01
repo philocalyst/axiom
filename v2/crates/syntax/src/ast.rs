@@ -1467,6 +1467,8 @@ pub enum ExprKind<'s> {
     Date(Day),
     /// `2026-03`, as the first day of the month: a selector.
     Month(Day),
+    /// `2026` as a calendar-year selector key, distinct from `Num`.
+    Year(i32),
     /// `1/3`: numerator and denominator, the latter not zero.
     Fraction(u32, u32),
     /// `30d`, `2w`, `3m`, `1y`

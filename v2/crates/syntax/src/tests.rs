@@ -1951,6 +1951,7 @@ fn children(file: &File, kind: &ExprKind) -> Vec<ExprId> {
         | ExprKind::Amount(_)
         | ExprKind::Date(_)
         | ExprKind::Month(_)
+        | ExprKind::Year(_)
         | ExprKind::Fraction(..)
         | ExprKind::Span(_)
         | ExprKind::Str(_)
@@ -2205,6 +2206,7 @@ fn show(file: &File, id: ExprId, src: &str) -> String {
         | ExprKind::Fraction(..)
         | ExprKind::Date(_)
         | ExprKind::Month(_)
+        | ExprKind::Year(_)
         | ExprKind::Str(_)
         | ExprKind::Empty => src[exprs[id].loc.range()].to_string(),
         other => panic!("`show` does not handle {other:?}"),
@@ -2229,6 +2231,26 @@ fn operators_bind_as_documented() {
     assert_eq!(condition("owner.age >= 5 USD"), "(owner.age >= 5 USD)");
     assert_eq!(condition("x is 529"), "(x is 529)");
     only_error("law l\n  always\n  when a < b < c\n", "chained-comparison");
+}
+
+#[test]
+fn expression_selector_years_are_typed_separately_from_numbers() {
+    let source = "law l\n  always\n  when total(in, [2026]) > 0 USD\n";
+    let file = parse_clean(source);
+    let selector = file
+        .exprs
+        .iter()
+        .find_map(|expr| match expr.kind {
+            ExprKind::Select(keys) => Some(keys),
+            _ => None,
+        })
+        .expect("a selector expression");
+    let key = file[selector][0];
+    assert!(matches!(file.exprs[key].kind, ExprKind::Year(2026)));
+
+    let source = "law l\n  always\n  when amount > 2026\n";
+    let file = parse_clean(source);
+    assert!(file.exprs.iter().any(|expr| matches!(expr.kind, ExprKind::Num(_))));
 }
 
 #[test]

@@ -71,7 +71,7 @@ impl<'s> Parser<'s> {
                 }
                 Tok::Punct(Punct::LBracket) => {
                     self.bump();
-                    ExprKind::Index(expr, self.list(token.loc, Punct::RBracket)?)
+                    ExprKind::Index(expr, self.list(token.loc, Punct::RBracket, true)?)
                 }
                 _ => break,
             };
@@ -163,7 +163,7 @@ impl<'s> Parser<'s> {
             Tok::Punct(Punct::LBracket) => {
                 let first = self.next_expr();
                 self.bump();
-                let keys = self.list(token.loc, Punct::RBracket)?;
+                let keys = self.list(token.loc, Punct::RBracket, true)?;
                 Ok(self.node(ExprKind::Select(keys), self.loc_from(token.loc.start as usize), first))
             }
             Tok::MonthDay(..) => {
@@ -217,17 +217,27 @@ impl<'s> Parser<'s> {
             return Ok(self.node(ExprKind::Name(Name(text)), token.loc, first));
         }
         self.bump();
-        let args = self.list(paren.loc, Punct::RParen)?;
+        let args = self.list(paren.loc, Punct::RParen, false)?;
         Ok(self.node(ExprKind::Call(Name(text), args), self.loc_from(token.loc.start as usize), first))
     }
 
     /// Comma-separated expressions up to the `closer` of the bracket opened at
     /// `open`. A call may have none.
-    fn list(&mut self, open: Loc, closer: Punct) -> Parse<Many<ExprId>> {
+    fn list(&mut self, open: Loc, closer: Punct, year_keys: bool) -> Parse<Many<ExprId>> {
         let start = self.roots.len();
         if closer == Punct::RBracket || !self.at(Punct::RParen) {
             loop {
                 let item = self.expression()?;
+                if year_keys {
+                    let expression = self.expr(item);
+                    if matches!(expression.kind, ExprKind::Num(_)) {
+                        let text = self.text(expression.loc);
+                        if text.len() == 4 && text.bytes().all(|byte| byte.is_ascii_digit()) {
+                            let year = text.parse().expect("four ASCII digits fit in i32");
+                            self.exprs[item.local()].kind = ExprKind::Year(year);
+                        }
+                    }
+                }
                 self.roots.push(item);
                 if self.eat(Punct::Comma).is_none() {
                     break;
