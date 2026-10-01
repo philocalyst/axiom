@@ -27,20 +27,20 @@ pub enum Input<'a> {
 }
 
 /// A declared `sync`.
-pub struct Source<'a> {
-    pub name: &'a str,
-    pub input: Input<'a>,
+pub struct Source<'b, 's> {
+    pub name: &'s str,
+    pub input: Input<'s>,
     /// The day after the last record the book has from this source, or its
     /// first day.
     pub since: Day,
-    pub kind: Kind<'a>,
+    pub kind: Kind<'b, 's>,
 }
 
-pub enum Kind<'a> {
+pub enum Kind<'b, 's> {
     /// Statements for an account.
-    Feed(Feed<'a>),
+    Feed(Feed<'b, 's>),
     /// Axiom to merge.
-    Sink(Sink<'a>),
+    Sink(Sink<'s>),
 }
 
 /// What commands run against.
@@ -80,10 +80,10 @@ pub struct Outcome {
 /// after another: what an earlier source writes, a later one recognizes as
 /// written. What prints Axiom (invoices, payouts) goes first, so that the bank's
 /// line for the same money is the document's and is not written twice.
-pub fn sync<'a>(
-    world: &mut World<'a>,
-    sources: &[Source<'a>],
-    env: &Env,
+pub fn sync<'b, 's, 'e>(
+    world: &mut World<'b, 's>,
+    sources: &[Source<'b, 's>],
+    env: &Env<'e>,
     read: &dyn Fn(&str) -> Option<String>,
 ) -> Outcome {
     let commands: Vec<String> = sources
@@ -143,9 +143,9 @@ pub fn sync<'a>(
     }
 }
 
-fn plan<'a>(
-    world: &mut World<'a>,
-    source: &Source<'a>,
+fn plan<'b, 's>(
+    world: &mut World<'b, 's>,
+    source: &Source<'b, 's>,
     text: &str,
     read: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {

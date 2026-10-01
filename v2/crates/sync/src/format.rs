@@ -49,7 +49,7 @@ struct Row<'r, 't, 'n, 's> {
     book: &'n Book<'s>,
 }
 
-impl Row<'_, '_, '_, '_> {
+impl<'t> Row<'_, 't, '_, '_> {
     fn error(
         &self,
         code: &'static str,
@@ -70,11 +70,11 @@ impl Row<'_, '_, '_, '_> {
         }
     }
 
-    fn cell<'r, 't>(&'r self, bound: &Bound, place: usize) -> Result<&'r Cell<'t>, Diagnostic>
+    fn cell<'r>(&'r self, bound: &Bound, place: usize) -> Result<&'r Cell<'t>, Diagnostic>
     where
         't: 'r,
     {
-        self.cells.get(bound.slots[place]).ok_or_else(|| {
+        self.cells.get(bound.slots[place]).ok_or_else(move || {
             let end = self.cells.last().map_or(0, |cell| cell.span.end);
             let column = bound.spec.places[place];
             let headline = format!(
@@ -95,7 +95,7 @@ impl Row<'_, '_, '_, '_> {
         format!("in {}", self.shown(bound.spec.places[place]))
     }
 
-    fn first<'r, 't>(&'r self, bound: &Bound) -> Result<Option<&'r Cell<'t>>, Diagnostic>
+    fn first<'r>(&'r self, bound: &Bound) -> Result<Option<&'r Cell<'t>>, Diagnostic>
     where
         't: 'r,
     {
@@ -108,7 +108,7 @@ impl Row<'_, '_, '_, '_> {
         Ok(None)
     }
 
-    fn money<'r, 't>(&'r self, bound: &Bound, unit: Unit<'_>) -> Result<Option<Qty>, Diagnostic>
+    fn money<'r>(&'r self, bound: &Bound, unit: Unit<'_>) -> Result<Option<Qty>, Diagnostic>
     where
         't: 'r,
     {

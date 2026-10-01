@@ -5,18 +5,18 @@
 use std::fmt::Write;
 
 use axiom_core::num::POW10;
-use axiom_core::{Day, Diagnostic, FileId, Interner, Map, Qty};
-use axiom_engine::{Run as EngineRun, State};
-use axiom_model::{Book, Place, Role};
+use axiom_core::{Day, Diagnostic, FileId, Map, Qty};
+use axiom_engine::Run as EngineRun;
+use axiom_model::sync::Format;
+use axiom_model::Book;
 
 use crate::amount::amount;
 use crate::date::iso_day;
-use crate::format::Format;
 use crate::promise::{Due, keep};
 use crate::recognize::{Reading, Recognizer, Scratch, Tie, Who};
 use crate::reconcile::{Existing, reconcile};
 use crate::write::Layout;
-use crate::{Form, Insert, Record, Unit};
+use crate::{Facts, Form, Insert, Record, Unit};
 
 /// What the book says about one account.
 #[derive(Clone, Default)]
@@ -101,10 +101,10 @@ struct Other<'s> {
 }
 
 /// What the memo and the export's own `party` and `via` say of a record.
-struct Told<'t, 's> {
-    memo: Reading<'t, 's>,
-    party: Option<Reading<'t, 's>>,
-    via: Option<Reading<'t, 's>>,
+struct Told<'s> {
+    memo: Reading<'s>,
+    party: Option<Reading<'s>>,
+    via: Option<Reading<'s>>,
 }
 
 impl<'b, 's> World<'b, 's> {
@@ -312,12 +312,12 @@ impl<'b, 's> World<'b, 's> {
         // Stable, so that a day's records keep the export's order.
         let mut order: Vec<usize> = (0..records.len()).collect();
         order.sort_by_key(|&at| records[at].day);
-        let mut slots: Vec<Option<(Record<'t>, Reading<'t, 's>)>> = records
+        let mut slots: Vec<Option<(Record<'t>, Reading<'s>)>> = records
             .into_iter()
             .zip(readings.drain(..))
             .map(Some)
             .collect();
-        let (records, readings): (Vec<Record<'t>>, Vec<Reading<'t, 's>>) =
+        let (records, readings): (Vec<Record<'t>>, Vec<Reading<'s>>) =
             order.iter().filter_map(|&at| slots[at].take()).unzip();
 
         let existing = self.accounts.get(account);
@@ -412,7 +412,7 @@ impl<'b, 's> World<'b, 's> {
         &self,
         feed: &Feed<'b, 's>,
         records: &mut [Record<'t>],
-        readings: &[Reading<'t, 's>],
+        readings: &[Reading<'s>],
     ) -> Result<(), Vec<Diagnostic>> {
         let mut problems = Vec::new();
         for (record, reading) in records.iter_mut().zip(readings) {
@@ -421,7 +421,7 @@ impl<'b, 's> World<'b, 's> {
                 let headline = format!("`{text}`, which a pattern took for the {what}, is not one");
                 Diagnostic::error("bad-capture", headline).label(record.at, "in this memo")
             };
-            if let Some(text) = &reading.amount {
+            if let Some(text) = reading.amount.as_ref().and_then(|span| record.memo.get(span.clone())) {
                 match amount(&text.replace('_', ""), unit.scale) {
                     Ok(Some(qty)) if !qty.is_zero() => {
                         record.qty = if record.qty.is_negative() {
@@ -433,7 +433,7 @@ impl<'b, 's> World<'b, 's> {
                     _ => problems.push(bad("amount", text, record)),
                 }
             }
-            if let Some(text) = &reading.date {
+            if let Some(text) = reading.date.as_ref().and_then(|span| record.memo.get(span.clone())) {
                 match crate::format::date_layout(feed.format)
                     .map_or_else(|| iso_day(text), |layout| layout.read(text))
                 {
@@ -441,7 +441,7 @@ impl<'b, 's> World<'b, 's> {
                     None => problems.push(bad("day", text, record)),
                 }
             }
-            if let Some(text) = &reading.original {
+            if let Some(text) = reading.original.as_ref().and_then(|span| record.memo.get(span.clone())) {
                 match original(text, &self.units) {
                     Some(mut original) => {
                         // The memo may omit a sign because the statement's
@@ -470,9 +470,9 @@ impl<'b, 's> World<'b, 's> {
     fn told<'t>(
         &self,
         records: &[Record<'t>],
-        readings: Vec<Reading<'t, 's>>,
+        readings: Vec<Reading<'s>>,
         matched: &[Option<usize>],
-    ) -> Result<Vec<Option<Told<'t, 's>>>, Vec<Diagnostic>> {
+    ) -> Result<Vec<Option<Told<'s>>>, Vec<Diagnostic>> {
         let (mut scratch, mut problems) = (Scratch::default(), Vec::new());
         let mut told = Vec::with_capacity(records.len());
         for ((record, memo), matched) in records.iter().zip(readings).zip(matched) {
@@ -527,12 +527,12 @@ impl<'b, 's> World<'b, 's> {
         feed: &Feed<'b, 's>,
         account: &str,
         record: &Record<'t>,
-        told: &Told<'t, 's>,
+        told: &Told<'s>,
     ) -> Other<'s> {
         let recognized =
-            |reading: &Reading<'t, 's>| reading.who.as_ref().ok().copied().unwrap_or_default();
+            |reading: &Reading<'s>| reading.who.as_ref().ok().copied().unwrap_or_default();
         let memo = recognized(&told.memo);
-        let named = |reading: &Option<Reading<'t, 's>>| {
+        let named = |reading: &Option<Reading<'s>>| {
             reading.as_ref().and_then(|reading| recognized(reading).who)
         };
         let facts = record.facts();
@@ -540,10 +540,7 @@ impl<'b, 's> World<'b, 's> {
             .code
             .as_deref()
             .and_then(|code| self.claims.get(code))
-            .map(|&party| Who {
-                name: party,
-                account: false,
-            });
+            .and_then(|&party| self.recognizer.who_named(party));
         let structured = own_claim.or(named(&told.party)).or(named(&told.via));
         let mut other = Other::default();
         (other.who, other.via) = match structured {
@@ -559,16 +556,18 @@ impl<'b, 's> World<'b, 's> {
         if other.who.is_some_and(|who| who.name == account) {
             (other.who, other.via) = (None, None);
         }
-        for code in told.memo.codes.iter().copied().chain(facts.code.as_deref()) {
+        let memo_codes = told
+            .memo
+            .codes
+            .iter()
+            .filter_map(|span| record.memo.get(span.clone()));
+        for code in memo_codes.chain(facts.code.as_deref()) {
             let Some((&claim, &party)) = self.claims.get_key_value(code) else {
                 continue;
             };
             match other.who {
                 None => {
-                    other.who = Some(Who {
-                        name: party,
-                        account: false,
-                    })
+                    other.who = self.recognizer.who_named(party)
                 }
                 Some(who) if who.name != party => continue,
                 Some(_) => {}
@@ -719,9 +718,9 @@ impl<'b, 's> World<'b, 's> {
     }
 }
 
-/// Parse a typed `CUR amount` captured by an `original` pattern. Keep the
-/// currency spelling borrowed from the memo and use that unit's precision.
-fn original<'t>(text: &'t str, units: &[Unit<'_>]) -> Option<crate::Original<'t>> {
+/// Parse a typed `CUR amount` captured by an `original` pattern. Store the
+/// canonical known unit name so captured fields don't borrow an owned memo.
+fn original(text: &str, units: &[Unit<'_>]) -> Option<crate::Original<'static>> {
     let text = text.trim();
     let split = text.find(char::is_whitespace)?;
     let (unit, amount_text) = text.split_at(split);
@@ -731,7 +730,7 @@ fn original<'t>(text: &'t str, units: &[Unit<'_>]) -> Option<crate::Original<'t>
     let qty = amount(amount_text.trim(), unit_spec.scale).ok().flatten()?;
     Some(crate::Original {
         qty,
-        unit: unit.into(),
+        unit: std::borrow::Cow::Owned(unit_spec.name.to_string()),
     })
 }
 
@@ -749,7 +748,7 @@ mod original_tests {
         let parsed = original(text, &units).expect("known unit and valid amount");
         assert_eq!(parsed.qty, Qty(329_000));
         assert_eq!(parsed.unit.as_ref(), "CHF");
-        assert!(matches!(parsed.unit, std::borrow::Cow::Borrowed(_)));
+        assert!(matches!(parsed.unit, std::borrow::Cow::Owned(_)));
         assert!(original("CHF 3,290.001", &units).is_none());
         assert!(original("EUR 3,290.00", &units).is_none());
     }

@@ -355,7 +355,7 @@ fn step(class: CharClass, hay: &[u8], at: usize) -> Option<usize> {
             .map(|_| at + 1)
     };
     match class {
-        CharClass::Digit => one(u8::is_ascii_digit),
+        CharClass::Digit => one(|byte| byte.is_ascii_digit()),
         CharClass::Letter | CharClass::Alnum => {
             let character = scalar_at(hay, at)?;
             let matches = match class {
@@ -365,7 +365,7 @@ fn step(class: CharClass, hay: &[u8], at: usize) -> Option<usize> {
             };
             matches.then_some(at + character.len_utf8())
         }
-        CharClass::Space => one(u8::is_ascii_whitespace),
+        CharClass::Space => one(|byte| byte.is_ascii_whitespace()),
         CharClass::Any => {
             let character = scalar_at(hay, at)?;
             Some(at + character.len_utf8())

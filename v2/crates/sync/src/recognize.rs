@@ -3,6 +3,7 @@
 //! literal prefixes; it does not copy or recompile a pattern.
 
 use std::cmp::Reverse;
+use std::ops::Range;
 
 use axiom_core::Id;
 use axiom_core::par;
@@ -49,12 +50,14 @@ pub struct Tie<'a> {
     pub second_pattern: Option<Id<Pattern>>,
 }
 
-pub struct Reading<'t, 's> {
+pub struct Reading<'s> {
     pub who: Result<Recognized<'s>, Tie<'s>>,
-    pub codes: Vec<&'t str>,
-    pub amount: Option<&'t str>,
-    pub original: Option<&'t str>,
-    pub date: Option<&'t str>,
+    /// Byte ranges into the record memo; keeping spans avoids borrowing an
+    /// owned `Cow` while the record is reordered or updated.
+    pub codes: Vec<Range<usize>>,
+    pub amount: Option<Range<usize>>,
+    pub original: Option<Range<usize>>,
+    pub date: Option<Range<usize>>,
 }
 
 struct Known<'b, 's> {
@@ -275,7 +278,18 @@ impl<'b, 's> Recognizer<'b, 's> {
         found
     }
 
-    pub fn read_all<'t>(&self, records: &[&Record<'t>]) -> Vec<Reading<'t, 's>> {
+    pub(crate) fn who_named(&self, name: &str) -> Option<Who<'s>> {
+        self.known
+            .iter()
+            .find(|known| known.name == name)
+            .map(|known| Who {
+                id: known.id,
+                name: known.name,
+                account: known.account,
+            })
+    }
+
+    pub fn read_all<'t>(&self, records: &[&Record<'t>]) -> Vec<Reading<'s>> {
         let chunks: Vec<&[&Record]> = records.chunks(CHUNK).collect();
         let read = |chunk: &&[&Record]| {
             let mut scratch = Scratch::default();
@@ -287,7 +301,7 @@ impl<'b, 's> Recognizer<'b, 's> {
         par::map_each(&chunks, read).into_iter().flatten().collect()
     }
 
-    pub fn read<'t>(&self, memo: &'t str, scratch: &mut Scratch) -> Reading<'t, 's> {
+    pub fn read(&self, memo: &str, scratch: &mut Scratch) -> Reading<'s> {
         let Scratch { lower, run, hits } = scratch;
         lower.clear();
         lower.extend(memo.bytes().map(|byte| byte.to_ascii_lowercase()));
@@ -295,8 +309,8 @@ impl<'b, 's> Recognizer<'b, 's> {
         let mut codes = self.codes_in(memo, lower, run);
         for hit in hits.iter() {
             if let Some((start, end)) = hit.part(Capture::Code) {
-                if let Some(text) = memo.get(start..end) {
-                    codes.push(text);
+                if memo.get(start..end).is_some() {
+                    codes.push(start..end);
                 }
             }
         }
@@ -309,7 +323,7 @@ impl<'b, 's> Recognizer<'b, 's> {
                 .iter()
                 .position(|known| *known == kind)
                 .and_then(|slot| parts[slot])
-                .and_then(|(start, end)| memo.get(start..end))
+                .and_then(|(start, end)| memo.get(start..end).map(|_| start..end))
         };
         Reading {
             who,
@@ -426,7 +440,7 @@ impl<'b, 's> Recognizer<'b, 's> {
                     next = best;
                     best = Some(hit);
                 }
-                Some(_) if next.is_none_or(|current: &&Hit| {
+                Some(_) if next.is_none_or(|current: &Hit| {
                     hit.found.literal > current.found.literal
                 }) => next = Some(hit),
                 _ => {}
@@ -479,7 +493,7 @@ impl<'b, 's> Recognizer<'b, 's> {
         })
     }
 
-    fn codes_in<'t>(&self, memo: &'t str, hay: &[u8], run: &mut Run) -> Vec<&'t str> {
+    fn codes_in(&self, memo: &str, hay: &[u8], run: &mut Run) -> Vec<Range<usize>> {
         let mut codes = Vec::new();
         for &pattern in &self.codes {
             let mut from = 0;
@@ -487,8 +501,8 @@ impl<'b, 's> Recognizer<'b, 's> {
                 let (start, end) = run
                     .capture(Capture::Code)
                     .unwrap_or((found.start, found.end));
-                if let Some(code) = memo.get(start..end) {
-                    codes.push(code);
+                if memo.get(start..end).is_some() {
+                    codes.push(start..end);
                 }
                 from = found.end.max(found.start + 1);
             }

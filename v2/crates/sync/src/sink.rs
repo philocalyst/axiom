@@ -88,7 +88,7 @@ fn dated_targets(output: &str, path_of: impl Fn(Day) -> String) -> Vec<String> {
         .filter_map(|item| {
             item.day
                 .filter(|_| !lines[item.head].starts_with("opening"))
-                .map(path_of)
+                .map(|day| path_of(day))
         })
         .collect()
 }
