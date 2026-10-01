@@ -1,122 +1,17 @@
-// ─── Where the hints come from (a sketch of std and us in v4) ───────────────
-//
-// Nothing in the journal names a tax line, an expense account or a basis.
-// Every `▸` in this example follows from a declaration like these. The
-// editor shows which declaration a hint came from, so the reasoning is
-// always one click away.
-//
-// How a flow gets its purpose, first match wins:
-//   1. written on the flow or leg:   `#repair of condo`
-//   2. its contract:                 `contract flat with greystar  … #rent`
-//   3. its party's kind:             `kind grocer … purpose groceries`
-//   4. its money's kind:             `kind fund … pays dividend`
-//   5. its accounts' kinds:          `kind 401k … takes pre-tax-deferral from wages`
-// Two sources that disagree are an error naming both. When none says, the
-// flow is `unclassified`. A "description" still says why in words, and
-// `check --strict` asks for a purpose. Declarations use `:` for "is a kind
-// of", and flows use `#` for a purpose, so the two never meet.
+// Shared kinds and purpose trees come from `std` and the imported `us` systems.
+// The actual system laws stay in those imported source files; this keeps the
+// project-specific income and business-cost meanings visible at their source.
 
-// ─── Purposes: what money is for (std) ──────────────────────────────────────
-
-purpose spending
-purpose food : spending
-purpose groceries : food
-purpose dining : food
-purpose home : spending
-purpose rent : home
-purpose phone : home
-purpose household : home
-purpose fun : spending
-purpose insurance : spending
-purpose premium : insurance
-
-/// Money spent to make a thing last longer, work better or do something new.
-/// It is not spent: it joins the thing named by `of`, and leaves when the
-/// thing is sold, or bit by bit as it depreciates.
-purpose improvement : capital
-  of asset                          // a purpose may require an object, typed
-
-/// Money spent to keep a thing as it was: spent now.
-purpose repair : spending
-  of asset
-
-purpose income
-purpose wages : income
-purpose dividend : income
-purpose interest : income
-purpose tax-paid                    // what reached a tax authority
-
-// ─── Parties: what dealing with each kind means (std) ───────────────────────
-
-kind grocer : merchant
-  purpose groceries                 // what paying one is for
-kind landlord : org
-  purpose rent
-kind phone-company : merchant
-  purpose phone
-kind employer : org
-  purpose wages                     // what money from one is
-kind tax-authority : government
-  purpose tax-paid                  // for the year of the flow that pays it
-kind store : merchant
-  has sales-tax percent             // derived out of every price paid to one
-
-// ─── Money: what a kind of commodity does (std) ─────────────────────────────
-
-kind currency : commodity
-  select fifo
-kind fund : commodity
-  pays dividend                     // `VTI -> fidelity 198.12 USD` is a dividend
-
-// ─── Allocations: shares of a cost (std) ────────────────────────────────────
-//
-// `share 60% for studio`, on a contract, a party, a purpose or an asset, means
-// that 60% of each flow is a cost of `studio`. A share may be a measure of the
-// thing's area (`share 120 SQFT for studio`), and a share for a party is what
-// that party owes. It is derived, per flow, as a flow
-// of its own purpose: `studio`'s share of the phone. The whole bill stays
-// the phone. `flow` shows both, and the tax laws count the share.
-
-// ─── Tax meanings (us) ──────────────────────────────────────────────────────
-
-purpose wages
-  law count-wages
-    count amount as wages
-
-purpose tax-paid
-  law count-payments
-    when to is irs
-    count amount as payments        // for the year the paying flow is for
+purpose business-income : income
+purpose design : business-income
 
 kind sole-proprietorship : entity
-  /// A cost allocated to the business, or paid by it, is deductible on
-  /// Schedule C.
+  /// The business identity used to recognize owner allocations on spending.
+
+purpose spending
+  /// A cost allocated to a sole proprietorship, or paid by it, is deductible
+  /// on Schedule C. A bill remains one flow; only the business share is counted.
   law business-costs
-    on out                          // what leaves the business, its shares of bills included
-    count amount as schedule-c-expenses
-
-// ─── Assets that wear out (us/rental) ───────────────────────────────────────
-
-kind rental-home : property
-  has in-service date
-  has land amount
-  /// Residential rental property is depreciated straight-line over 27.5
-  /// years from the month it is placed in service (mid-month), on its cost
-  /// less the land. An improvement starts its own 27.5 years.
-  ///
-  /// To fix: set `in-service` to the day the home was first available to rent.
-  law depreciation
-    each month
-    let d = straight-line(self.cost - self.land, 27.5y, self.in-service, month, mid-month)
-    consume d                       // the part's basis goes down by this month's share
-    count d as depreciation         // runs per part: each improvement on its own 27.5 years
-
-  law rental-income
-    on flow                         // a flow whose purpose is `of` this home
-    when purpose is rent
-    count amount as rental-income
-
-  law rental-expenses
     on flow
-    when purpose is repair | insurance | interest
-    count amount as rental-expenses
+    when owner.kind is sole-proprietorship
+    count amount as schedule-c-expenses

@@ -20,6 +20,7 @@
 system us/ira
 
 use us
+use std
 
 
 /// An individual retirement account of either kind (IRC §408, §408A).
@@ -36,10 +37,11 @@ kind ira : tax-deferred
   /// deadline.
   law contribution-limit
     on in
-    when not from is income | tax-deferred
+    when not purpose is #income
+    when not from is tax-deferred
     count amount as ira-contributions
     let extra = if owner.age >= 50y then catch-up[year] else empty
-    require tally(ira-contributions) <= limit[year] + extra "IRA contributions over the yearly limit"
+    require value(tally(ira-contributions), USD) <= limit[year] + extra "IRA contributions over the yearly limit"
 
   /// Money taken out before age 59½ carries an additional 10% tax on the part
   /// that is taxable (IRC §72(t)). This withdrawal is priced at that 10%.

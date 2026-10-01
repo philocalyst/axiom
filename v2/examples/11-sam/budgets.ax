@@ -8,6 +8,3 @@ budget food        900 USD monthly
 budget dining      250 USD monthly
 budget household   150 USD monthly
 budget fun         200 USD monthly
-
-/// A purpose std does not have: what the studio earns from design work.
-purpose design : business-income

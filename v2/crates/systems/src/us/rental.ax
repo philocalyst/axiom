@@ -9,10 +9,12 @@
 system us/rental
 
 use us
+use std
 
 kind rental-home : property
   has in-service date
   has land amount
+  has area SQFT
 
   /// Residential rental property is depreciated straight-line over 27.5 years
   /// from the month it is placed in service, using the mid-month convention.
@@ -33,7 +35,7 @@ kind rental-home : property
   /// property's history.
   law rental-income
     on flow
-    when purpose is rent
+    when purpose is #rent
     count amount as rental-income
     count amount as investment-income
 
@@ -44,5 +46,5 @@ kind rental-home : property
   /// HOME` or `#interest of HOME` to identify a rental cost.
   law rental-expenses
     on flow
-    when purpose is repair | insurance | property-tax | interest
+    when purpose is #repair | #insurance | #property-tax | #interest
     count amount as rental-expenses

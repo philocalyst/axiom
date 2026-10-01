@@ -10,6 +10,8 @@ pub static SYSTEMS: &[(&str, &str)] = &[
     ("us.ax", include_str!("us.ax")),
     ("us/401k.ax", include_str!("us/401k.ax")),
     ("us/529.ax", include_str!("us/529.ax")),
+    ("us/rental.ax", include_str!("us/rental.ax")),
+    ("us/securities.ax", include_str!("us/securities.ax")),
     ("us/ca.ax", include_str!("us/ca.ax")),
     ("us/ca/san-francisco.ax", include_str!("us/ca/san-francisco.ax")),
     ("us/hsa.ax", include_str!("us/hsa.ax")),

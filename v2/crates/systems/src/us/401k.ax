@@ -17,6 +17,7 @@
 system us/401k
 
 use us
+use std
 
 
 /// An employer-sponsored retirement plan (IRC §401(k)).
@@ -36,10 +37,10 @@ kind 401k : tax-deferred
   /// excess.
   law deferral-limit
     on in
-    when from is wages
+    when purpose is #wages
     count amount as elective-deferrals
     let extra = if owner.age >= 60y and owner.age < 64y then super-catch-up[year] else if owner.age >= 50y then catch-up[year] else empty
-    require tally(elective-deferrals) <= limit[year] + extra "401(k) deferrals over the yearly limit"
+    require value(tally(elective-deferrals), USD) <= limit[year] + extra "401(k) deferrals over the yearly limit"
 
   /// Money taken out before age 59½ carries an additional 10% tax on top of
   /// the income tax (IRC §72(t)). This withdrawal is priced at that 10%.

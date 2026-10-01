@@ -15,6 +15,7 @@
 system us/ca/san-francisco
 
 use us/ca
+use std
 
 
 /// The City and County of San Francisco.
@@ -37,5 +38,6 @@ law transfer-tax
   on gain
   when from is property | home
   // verify: the three rates against the Assessor-Recorder's current table.
-  let rate = if proceeds <= 250_000 USD then 0.5% else if proceeds < 1_000_000 USD then 0.68% else 0.75%
-  owe rate * proceeds to sf as transfer-tax
+  let sale = value(proceeds, USD)
+  let rate = if sale <= 250_000 USD then 0.5% else if sale < 1_000_000 USD then 0.68% else 0.75%
+  owe rate * sale to sf as transfer-tax

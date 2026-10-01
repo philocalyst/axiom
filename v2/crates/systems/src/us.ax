@@ -58,6 +58,10 @@ use std
 
 // ─── Kinds and entities ─────────────────────────────────────────────────────
 
+purpose education : spending
+purpose medical : spending
+purpose nondeductible : spending
+
 /// An account whose growth is not taxed while it stays inside: a 401(k), an
 /// IRA, a 529 plan, an HSA. Tax falls due when value leaves for an account
 /// that is not tax-deferred, so the laws of each kind decide what it costs.
@@ -68,10 +72,8 @@ use std
 /// IRA does, says `taxed-by-kind true`.
 kind tax-deferred : asset
   deferred
-  has pays          kind
   has taxed-by-kind bool
   has deductible    bool
-  pays              tax-deferred
   taxed-by-kind     false
   deductible        false
 
@@ -88,33 +90,33 @@ kind tax-deferred : asset
     on in
     when self.deductible
     when from is asset and not from is tax-deferred
-    when not flow is #nondeductible
+    when not purpose is #nondeductible
     count amount as adjustments
 
 /// Income tax withheld from pay, or paid to the IRS directly. Every arrival
 /// counts as tax already paid for the year it is `for`.
-kind federal-tax : expense
+purpose pretax-benefit : spending
 
 /// Health premiums, commuter benefits and anything else taken from pay before
 /// tax (IRC §125). Pay counts whole, and what goes here comes back out of it.
-kind pretax-benefit : expense
+purpose mortgage-interest : spending
 
 /// Interest on a loan secured by your home (IRC §163(h)): itemized.
-kind mortgage-interest : expense
+purpose property-tax : spending
 
 /// Tax on the home, paid to the county or from escrow (IRC §164): itemized,
 /// with state income tax, up to a cap.
-kind property-tax : expense
+purpose charity : spending
 
 /// Gifts to a charity (IRC §170): itemized.
-kind charity : expense
 
 /// Your main home, held for your own use. A loss on it is not deductible, and
 /// part of a gain on it is excluded when it is sold (IRC §121).
 kind home : personal-use
 
 /// The Internal Revenue Service.
-entity irs : government
+entity irs : tax-authority
+  purpose federal-tax
 
 
 // ─── Counting income ────────────────────────────────────────────────────────
@@ -127,7 +129,7 @@ entity irs : government
 /// `wages`.
 law count-wages
   on in
-  when from is wages
+  when purpose is #wages
   count amount as wages
   count amount as total-income
 
@@ -140,8 +142,8 @@ law count-wages
 /// not from the paycheck.
 law exclude-pretax
   on in
-  when from is wages
-  when to is tax-deferred | pretax-benefit
+  when purpose is #wages
+  when to is tax-deferred or purpose is #pretax-benefit
   count amount as pretax
   count -amount as total-income
 
@@ -152,7 +154,7 @@ law exclude-pretax
 /// `interest`.
 law count-interest
   on in
-  when from is interest
+  when purpose is #interest-income
   when not to is tax-deferred
   count amount as interest
   count amount as total-income
@@ -166,7 +168,7 @@ law count-interest
 /// `dividends`.
 law count-dividends
   on in
-  when from is dividends
+  when purpose is #dividend
   when not to is tax-deferred
   count amount as dividends
   count amount as total-income
@@ -204,8 +206,9 @@ law count-long-term-gains
   when amount.unit == USD or not amount.unit is currency
   when not from is tax-deferred
   when gain > empty or not from is personal-use
-  let excluded = if from is home and held >= 2y then min(gain, home-exclusion[year, owner.filing]) else empty
-  count gain - excluded as long-term-gains
+  let taxable-gain = value(gain, USD)
+  let excluded = if from is home and held >= 2y then min(taxable-gain, home-exclusion[year, owner.filing]) else empty
+  count taxable-gain - excluded as long-term-gains
 
 /// Money in another currency is cash, not an investment: spending a euro is not
 /// a sale of a lot (dollars are the base currency and are not concerned). Converting or spending it realizes a gain against the dollars
@@ -221,7 +224,7 @@ law count-currency-gains
   when amount.unit is currency
   when amount.unit != USD
   when not from is tax-deferred
-  when gain > 200 USD
+  when value(gain, USD) > 200 USD
   count gain as short-term-gains
 
 /// What comes out of a tax-deferred account is income in the year it comes out
@@ -238,7 +241,8 @@ law count-distributions
   when from is tax-deferred
   when gain > empty
   when not from.taxed-by-kind
-  when not to is market | tax-deferred | from.pays
+  when not to is market | tax-deferred
+  when not purpose is #education | #medical
   count gain as distributions
   count gain as total-income
 
@@ -250,7 +254,7 @@ law count-distributions
 /// it is for with `for 2025`.
 law count-payments
   on in
-  when to is federal-tax
+  when purpose is #federal-tax
   count amount as payments
 
 
@@ -262,7 +266,7 @@ law count-payments
 /// `charity`, or count what a project knows into `itemized`.
 law itemize-interest-and-gifts
   on in
-  when to is mortgage-interest | charity
+  when purpose is #mortgage-interest | #charity
   count amount as itemized
 
 /// Property tax is a state and local tax. So is state income tax, which the
@@ -271,7 +275,7 @@ law itemize-interest-and-gifts
 /// To fix: book the payment under a place of kind `property-tax`.
 law count-property-tax
   on in
-  when to is property-tax
+  when purpose is #property-tax | #state-tax
   count amount as salt
 
 /// State and local taxes are deducted only up to a cap (IRC §164(b)(6)).
@@ -280,7 +284,7 @@ law count-property-tax
 /// or take the standard deduction.
 law cap-salt
   each year closing 04-15
-  count min(tally(salt), salt-cap[year, owner.filing]) as itemized
+  count min(value(tally(salt), USD), salt-cap[year, owner.filing]) as itemized
 
 
 // ─── The return ─────────────────────────────────────────────────────────────
@@ -297,8 +301,8 @@ law cap-salt
 /// lists every flow and law behind it.
 law adjusted-gross-income
   each year closing 04-15
-  let short = tally(short-term-gains) - tally(short-loss-carried, year - 1)
-  let long = tally(long-term-gains) - tally(long-loss-carried, year - 1)
+  let short = value(tally(short-term-gains), USD) - value(tally(short-loss-carried, year - 1), USD)
+  let long = value(tally(long-term-gains), USD) - value(tally(long-loss-carried, year - 1), USD)
   let short-net = max(short + min(long, empty), empty)
   let long-net = max(long + min(short, empty), empty)
   let net-loss = max(-(short + long), empty)
@@ -310,7 +314,7 @@ law adjusted-gross-income
   count long-loss - (loss - short-used) as long-loss-carried
   count long-net as net-long-term-gains
   count short-net + long-net as investment-income
-  count tally(total-income) + short-net + long-net - loss - tally(adjustments) as agi
+  count value(tally(total-income), USD) + short-net + long-net - loss - value(tally(adjustments), USD) as agi
 
 /// The deduction is the larger of the standard deduction for the filing status
 /// and what was itemized (IRC §63). A project adds another deduction, such as
@@ -320,7 +324,7 @@ law adjusted-gross-income
 /// into `itemized`.
 law standard-or-itemized
   each year closing 04-15
-  count max(standard-deduction[year, owner.filing], tally(itemized)) as deductions
+  count max(standard-deduction[year, owner.filing], value(tally(itemized), USD)) as deductions
 
 /// A credit for each qualifying child under 17 (IRC §24). Set `children` on the
 /// person or household. The phase-out above 200,000 USD of income (400,000 USD
@@ -342,8 +346,8 @@ law child-tax-credit
 /// deductions lower it, and nothing else does.
 law net-investment-income-tax
   each year closing 04-15
-  let excess = max(tally(agi) - investment-threshold[year, owner.filing], empty)
-  count 3.8% * min(tally(investment-income), excess) as other-taxes
+  let excess = max(value(tally(agi), USD) - investment-threshold[year, owner.filing], empty)
+  count 3.8% * min(value(tally(investment-income), USD), excess) as other-taxes
 
 /// Federal income tax for the year (IRC §1), figured from the tallies above.
 ///
@@ -358,19 +362,19 @@ law net-investment-income-tax
 /// on the person or household that lives here.
 law federal-income-tax
   each year closing 04-15
-  let deduction = tally(deductions)
-  let ordinary-income = tally(agi) - tally(net-long-term-gains)
-  let taxable = max(tally(agi) - deduction, empty)
+  let deduction = value(tally(deductions), USD)
+  let ordinary-income = value(tally(agi), USD) - value(tally(net-long-term-gains), USD)
+  let taxable = max(value(tally(agi), USD) - deduction, empty)
   let taxable-ordinary = min(max(ordinary-income - deduction, empty), taxable)
   let ordinary-tax = progressive(ordinary[year, owner.filing], taxable-ordinary)
   let tax-through-gains = progressive(capital-gains[year, owner.filing], taxable)
   let tax-below-gains = progressive(capital-gains[year, owner.filing], taxable-ordinary)
   let liability = ordinary-tax + tax-through-gains - tax-below-gains
-  let total = liability + tally(other-taxes) - tally(credits)
+  let total = liability + value(tally(other-taxes), USD) - value(tally(credits), USD)
   count taxable as taxable-income
   count liability as income-tax
   count total as total-tax
-  owe total - tally(payments) to irs by date(year + 1, 4, 15) as federal-income-tax
+  owe total - value(tally(payments), USD) to irs by date(year + 1, 4, 15) as federal-income-tax
 
 
 // ─── Figures ────────────────────────────────────────────────────────────────

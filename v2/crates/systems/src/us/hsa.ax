@@ -17,6 +17,7 @@
 system us/hsa
 
 use us
+use std
 
 
 /// A health savings account (IRC §223).
@@ -37,10 +38,11 @@ kind hsa : tax-deferred
   /// before the tax filing deadline.
   law contribution-limit
     on in
-    when not from is market | interest | dividends | gains | tax-deferred
+    when not from is market | tax-deferred
+    when not purpose is #interest-income | #dividend | #gain
     count amount as hsa-contributions
     let extra = if owner.age >= 55y then catch-up[year] else empty
-    require tally(hsa-contributions) <= limit[year, self.coverage] + extra "HSA contributions over the yearly limit"
+    require value(tally(hsa-contributions), USD) <= limit[year, self.coverage] + extra "HSA contributions over the yearly limit"
 
   /// A withdrawal that did not pay a qualified medical expense owes an
   /// additional 20% of what is taxable, unless the owner is 65 or older
@@ -55,7 +57,7 @@ kind hsa : tax-deferred
     on gain
     when gain > empty
     when not to is market
-    require (to is medical | tax-deferred) or owner.age >= 65y else owe 20% * gain to irs by date(year + 1, 4, 15) as nonqualified-hsa-penalty "HSA withdrawal that did not pay a medical expense"
+    require (purpose is #medical or to is tax-deferred) or owner.age >= 65y else owe 20% * gain to irs by date(year + 1, 4, 15) as nonqualified-hsa-penalty "HSA withdrawal that did not pay a medical expense"
 
 
 // The contribution limit by coverage (IRC §223(b)(2)).

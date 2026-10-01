@@ -22,14 +22,15 @@
 system us/ca
 
 use us
+use std
 
 
 /// The California Franchise Tax Board.
 entity ftb : government
+  purpose state-tax
 
 /// California income tax withheld from pay, or paid to the FTB directly.
 /// Every arrival counts as California tax already paid.
-kind ca-tax : expense
 
 
 /// Tax withheld from pay, or paid in installments, is credited against the tax
@@ -40,7 +41,7 @@ kind ca-tax : expense
 /// for with `for 2025`.
 law credit-ca-payments
   on in
-  when to is ca-tax
+  when to is ftb
   count amount as ca-withheld
   count amount as salt
 
@@ -54,11 +55,11 @@ law credit-ca-payments
 /// on the person or household that lives here.
 law state-income-tax
   each year closing 04-15
-  let taxable = max(tally(agi) - deduction[year, owner.filing], empty)
+  let taxable = max(value(tally(agi), USD) - deduction[year, owner.filing], empty)
   count taxable as ca-taxable-income
   let liability = progressive(brackets[year, owner.filing], taxable)
   count liability as ca-income-tax
-  owe liability - tally(ca-withheld) to ftb by date(year + 1, 4, 15) as ca-income-tax
+  owe liability - value(tally(ca-withheld), USD) to ftb by date(year + 1, 4, 15) as ca-income-tax
 
 // The marginal rate above each threshold (R&TC §17041), indexed every year.
 // The FTB publishes the next year's figures in the autumn; until a row for a

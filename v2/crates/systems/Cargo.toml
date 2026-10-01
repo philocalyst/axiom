@@ -4,3 +4,7 @@ description = "The standard library of economic systems, written in Axiom"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+
+[dev-dependencies]
+axiom-core = { path = "../core" }
+axiom-syntax = { path = "../syntax" }

@@ -18,6 +18,7 @@
 system us/529
 
 use us
+use std
 
 
 /// A 529 qualified tuition program (IRC §529).
@@ -41,7 +42,7 @@ kind 529-plan : tax-deferred
     on in
     when not from is market | tax-deferred
     count amount as 529-contributions
-    warn tally(529-contributions) <= gift-exclusion[year] "529 contributions over the annual gift exclusion"
+    warn value(tally(529-contributions), USD) <= gift-exclusion[year] "529 contributions over the annual gift exclusion"
 
   /// A withdrawal that did not pay a qualified education expense owes an
   /// additional 10% of its earnings (IRC §529(c)(6), §530(d)(4)). This
@@ -55,7 +56,7 @@ kind 529-plan : tax-deferred
     on gain
     when gain > empty
     when not to is market
-    require to is education | 529-plan else owe 10% * gain to irs by date(year + 1, 4, 15) as nonqualified-529-penalty "529 withdrawal that did not pay an education expense"
+    require purpose is #education or to is 529-plan else owe 10% * gain to irs by date(year + 1, 4, 15) as nonqualified-529-penalty "529 withdrawal that did not pay an education expense"
 
 
 // The annual gift-tax exclusion per recipient (IRC §2503(b)).

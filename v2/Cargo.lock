@@ -70,6 +70,10 @@ dependencies = [
 [[package]]
 name = "axiom-systems"
 version = "0.3.0"
+dependencies = [
+ "axiom-core",
+ "axiom-syntax",
+]
 
 [[package]]
 name = "memchr"

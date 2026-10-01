@@ -20,14 +20,15 @@
 system us/ny
 
 use us
+use std
 
 
 /// The New York State Department of Taxation and Finance.
 entity dtf : government
+  purpose state-tax
 
 /// New York income tax withheld from pay, or paid to the DTF directly. Every
 /// arrival counts as New York tax already paid.
-kind ny-tax : expense
 
 
 /// Tax withheld from pay, or paid in installments, is credited against the tax
@@ -38,7 +39,7 @@ kind ny-tax : expense
 /// for with `for 2025`.
 law credit-ny-payments
   on in
-  when to is ny-tax
+  when to is dtf
   count amount as ny-withheld
   count amount as salt
 
@@ -52,11 +53,11 @@ law credit-ny-payments
 /// on the person or household that lives here.
 law state-income-tax
   each year closing 04-15
-  let taxable = max(tally(agi) - deduction[year, owner.filing], empty)
+  let taxable = max(value(tally(agi), USD) - deduction[year, owner.filing], empty)
   count taxable as ny-taxable-income
   let liability = progressive(brackets[year, owner.filing], taxable)
   count liability as ny-income-tax
-  owe liability - tally(ny-withheld) to dtf by date(year + 1, 4, 15) as ny-income-tax
+  owe liability - value(tally(ny-withheld), USD) to dtf by date(year + 1, 4, 15) as ny-income-tax
 
 // The marginal rate above each threshold (Tax Law §601). A year without a row
 // uses the latest earlier one, so 2025 uses the 2024 rates. The 2026 rates

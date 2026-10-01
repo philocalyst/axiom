@@ -1,212 +1,151 @@
-/// The standard kinds and currencies that almost every ledger reaches for.
-///
-/// Place kinds say what an account is (a bank, a broker, a loan) and carry the
-/// rules that follow from it. Commodity kinds say what a unit is (a currency, a
-/// stock, a house). Entity kinds say who someone is (a person, an employer, a
-/// grant).
-///
-/// Currency precision follows ISO 4217. Like every system, this is
-/// community-maintained data: check a figure against its official source
-/// before relying on it, and send a fix when it is wrong.
+/// Standard native kinds and purposes. The v4 roots are built in: `asset`,
+/// `debt`, `thing`, `commodity`, `measure`, `entity`, and the four purpose
+/// roots. This file declares the shared vocabulary below those roots.
 system std
 
+// ─── Accounts ───────────────────────────────────────────────────────────────
 
-// ─── Places: assets ─────────────────────────────────────────────────────────
-
-/// Physical cash and money held outside any institution.
-kind cash : asset
-
-/// A checking, savings or money-market account.
-kind bank : asset
-  /// A bank balance below zero is an overdraft: the bank is lending you the
-  /// difference, usually for a fee.
-  ///
-  /// To fix: move money in before the payment clears, or look for a pending
-  /// payment or a missing deposit that explains it.
+kind deposit : asset
+kind cash : deposit
+kind bank : deposit
+  /// A bank balance below zero is an overdraft.
   law overdraft
     always
-    warn balance >= empty "balance below zero"
+    warn self.balance >= empty "bank balance below zero"
 
-/// A brokerage account. Sales relieve the oldest shares first, unless a
-/// selector or the account says otherwise.
-kind broker : asset
+kind card : debt
+kind credit-card : card
+kind brokerage : asset
   select fifo
-
-/// Land, a house or a share of one: a home, or a rental.
-kind property : asset
-
-/// Things kept for your own use rather than for profit. A gain on one is
-/// income; a loss on one is not a deduction.
-kind personal-use : asset
-
-/// A car, a boat, anything with a title.
-kind vehicle : personal-use
-
-/// Money owed to you: an invoice you sent, a loan to a friend, a deposit you
-/// paid. A flow into it that says `due` is one claim, kept apart from the
-/// others, and a flow `for` its `#code` settles it. What it holds is coming
-/// in, never money to spend.
-kind receivable : asset
-  claim
-
-/// Money a servicer holds for you to pay taxes and insurance on your home. It
-/// is yours and it is not spendable: it leaves only by paying those bills.
 kind escrow : asset
   liquidity 365d
-
-
-// ─── Places: liabilities ────────────────────────────────────────────────────
-
-/// Revolving credit. Spending goes in, payments come out of a bank account.
-kind credit-card : liability
-
-/// Money you owe on a bill: what a flow out of it (the bill) says is due, and
-/// what a flow into it (the payment) settles, `for` the bill's `#code`.
-kind payable : liability
-  claim
-
-/// Money borrowed for a term.
-kind loan : liability
-  has rate     percent
+kind loan : debt
+  has rate percent
   has maturity date
-
-  /// A loan is repaid in full by its maturity date. The journal has reached
-  /// that date with a balance still owed.
-  ///
-  /// To fix: record the missing payments, or, if the term was extended, update
-  /// `maturity` on the account.
   law payoff
     by self.maturity
     require self.balance == empty "balance still owed at maturity"
-
-/// A loan secured by a home.
 kind mortgage : loan
 
+kind receivable : asset
+  claim
+kind payable : debt
+  claim
 
-// ─── Places: income ─────────────────────────────────────────────────────────
+// ─── Identified things ──────────────────────────────────────────────────────
 
-/// Pay for work. Tax systems count what arrives from a place of this kind.
-kind wages : income
+kind thing-owned : thing
+kind property : thing
+kind personal-use : thing
+kind vehicle : personal-use
+kind good : thing
+kind equipment : thing
 
-/// Interest earned.
-kind interest : income
+// ─── Traded units ────────────────────────────────────────────────────────────
 
-/// Dividends earned.
-kind dividends : income
-
-/// Profit from selling something for more than it cost.
-kind gains : income
-
-
-// ─── Places: expenses ───────────────────────────────────────────────────────
-
-/// Tuition, books and fees. A 529 plan and a grant for education spend here.
-kind education : expense
-
-/// Doctors, prescriptions and insurance costs. An HSA spends here.
-kind medical : expense
-
-
-// ─── Commodities ────────────────────────────────────────────────────────────
-
-/// Legal tender. It is spent oldest first, wherever it is held: a euro spent on
-/// groceries is not a sale of a lot, so nothing asks which one it was.
 kind currency : commodity
   select fifo
-
-/// Anything traded on a market.
 kind security : commodity
-
-/// A share of a company.
 kind stock : security
   liquidity 1d
-
-/// A pooled fund: a mutual fund or an ETF.
 kind fund : security
   liquidity 2d
-
-/// A loan you hold, or a note that pays interest.
 kind bond : security
   liquidity 2d
-
-/// A digital asset.
 kind crypto : commodity
   liquidity 1d
-
-/// Land and buildings, counted in units you choose (one house, one acre).
 kind real-estate : commodity
   liquidity 90d
 
-/// A thing you own that is not money: a car, a painting, a bag of gold.
-kind good : commodity
-  liquidity 30d
+// ─── Common measured units ─────────────────────────────────────────────────
 
+commodity HR : measure
+commodity MI : measure
+commodity KWH : measure
+commodity SQFT : measure
 
-// ─── Entities ───────────────────────────────────────────────────────────────
+// ─── Shared purposes ────────────────────────────────────────────────────────
 
-/// Someone whose tax is figured, alone or together. `filing` says how, and
-/// `children` is how many qualifying children there are to claim.
+purpose food : spending
+purpose groceries : food
+purpose dining : food
+purpose utilities : spending
+purpose transport : spending
+purpose travel : spending
+purpose interest : spending
+purpose home : spending
+purpose rent : home
+purpose phone : home
+purpose household : home
+purpose fun : spending
+purpose insurance : spending
+purpose premium : insurance
+purpose repair : spending
+  of asset
+purpose improvement : capital
+  of asset
+purpose purchase : capital
+purpose contribution : transfer
+purpose wages : income
+purpose dividend : income
+purpose interest-income : income
+purpose gain : capital
+purpose tax-paid : spending
+purpose federal-tax : tax-paid
+purpose state-tax : tax-paid
+
+// ─── Parties ────────────────────────────────────────────────────────────────
+
+kind org : entity
+kind merchant : org
+kind grocer : merchant
+  purpose groceries
+kind landlord : org
+  purpose rent
+kind phone-company : merchant
+  purpose phone
+kind utility : org
+  purpose utilities
+kind employer : org
+  purpose wages
+kind government : org
+kind tax-authority : government
+  purpose tax-paid
+kind store : merchant
+kind contractor : merchant
+kind software : merchant
+kind streaming : merchant
+kind gym : merchant
+kind insurer : org
+kind health-insurer : insurer
+kind client : org
+kind lender : org
+kind tenant : org
+
 kind taxpayer : entity
-  has filing   name
+  has filing name
   has children number
-  children     0
-
-/// A human being. Alone, a person files as `single` unless they say otherwise.
+  children 0
 kind person : taxpayer
   has born date
   filing single
-
-/// People who share money and file one return: its members `member` it. It
-/// owns what they hold together, lives where they live, and is governed as one,
-/// so its members' pay counts into one return, and it files `joint`. What is
-/// personal stays with the person: a 401(k)'s yearly limit, the age that opens
-/// a withdrawal.
 kind household : taxpayer
   filing joint
 
-/// Anyone who is not a person: a company, a school, a landlord.
-kind org : entity
-
-/// Someone who pays you for work.
-kind employer : org
-
-/// A body that governs and taxes.
-kind government : org
-
-/// Money you set aside for something: an emergency fund, a trip, a tax
-/// vault. A flow that says `for` it ties what arrives to it. That money is not
-/// available to spend, and spending it is a flow `for` you again, or a payment
-/// straight out of the envelope.
 kind envelope : entity
   restricted
-
-/// Money given for a stated purpose, until a stated day. Money from a grant
-/// stays tied to it after it lands in your account, and may only be spent on
-/// what the grant names.
 kind grant : entity
   restricted
-  has purpose kind
-  has until  date
-
-  /// Grant money may only be spent on what the grant names. This payment went
-  /// somewhere else.
-  ///
-  /// To fix: pay it from another account, or, if the funder agreed to the
-  /// change, update `purpose` on the grant.
+  has grant-purpose purpose
+  has until date
   law purpose
     on spend
-    require to is self.purpose "grant money spent outside its purpose"
-
-  /// A grant ends on its `until` date, and unspent money is owed back.
-  ///
-  /// To fix: spend what is left on the grant's purpose before the deadline, or
-  /// ask the funder for an extension and move `until`.
+    require purpose is self.grant-purpose "grant money spent outside its purpose"
   law deadline
     by self.until
     require remaining == empty "grant money left unspent at the deadline"
 
-
-// ─── Currencies ─────────────────────────────────────────────────────────────
+// ─── Currencies and exchange-file formats ───────────────────────────────────
 
 commodity USD : currency
   name "United States dollar"

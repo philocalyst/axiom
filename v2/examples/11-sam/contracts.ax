@@ -24,7 +24,7 @@ contract job with lumen
 /// office. Greystar bills a share of the building's water each quarter.
 contract flat with greystar
   2_900 USD monthly on 1 from checking     // ▸ rent: greystar is a landlord
-  area 1_000 SQFT
+  area 1_000 SQFT                          // its whole area, used to measure the studio's share
   share 120 SQFT for studio                // ▸ 12%: 348.00 of each rent is the studio's
   input water USD                          // the building's water bill, on the months it comes
   + 12% of water #utilities
@@ -58,7 +58,8 @@ contract lease with dana
   2_350 USD monthly on 1 into checking #rent of condo
   deposit 2_350 USD                        // ▸ held for dana: not Sam's to spend, owed back at the end
   grace 3d                                 // her February payment was two days late; March's is four days late
-  from 2025-07-01 until 2026-06-30
+  from 2025-07-01
+  until 2026-06-30
 
 contract condo-insurance with state-farm
   1_140 USD yearly on 03-01 from checking #insurance of condo

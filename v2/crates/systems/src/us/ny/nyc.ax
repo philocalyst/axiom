@@ -19,14 +19,15 @@
 system us/ny/nyc
 
 use us/ny
+use std
 
 
 /// The New York City Department of Finance.
 entity nyc-dof : government
+  purpose state-tax
 
 /// New York City income tax withheld from pay, or paid to the city directly.
 /// Every arrival counts as city tax already paid.
-kind nyc-tax : expense
 
 
 /// Tax withheld from pay, or paid in installments, is credited against the city
@@ -37,7 +38,7 @@ kind nyc-tax : expense
 /// for with `for 2025`.
 law credit-nyc-payments
   on in
-  when to is nyc-tax
+  when to is nyc-dof
   count amount as nyc-withheld
   count amount as salt
 
@@ -50,10 +51,10 @@ law credit-nyc-payments
 /// on the person or household that lives here.
 law city-income-tax
   each year closing 04-15
-  let taxable = max(tally(agi) - deduction[year, owner.filing], empty)
+  let taxable = max(value(tally(agi), USD) - deduction[year, owner.filing], empty)
   let liability = progressive(brackets[year, owner.filing], taxable)
   count liability as nyc-income-tax
-  owe liability - tally(nyc-withheld) to nyc-dof by date(year + 1, 4, 15) as nyc-income-tax
+  owe liability - value(tally(nyc-withheld), USD) to nyc-dof by date(year + 1, 4, 15) as nyc-income-tax
 
 // The marginal rate above each threshold. They have not changed in years, so
 // the 2024 rows apply to every later year until a new row is written.

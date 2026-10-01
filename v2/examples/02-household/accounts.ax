@@ -11,13 +11,12 @@ account cash : cash
 account brokerage : brokerage at fidelity
 account retirement : 401k at fidelity
   employer acme
-account college : 529 at fidelity
+account college : 529-plan at fidelity
   beneficiary me
 account visa : card at chase
 
 budget food 650 USD monthly
 
-purpose education : spending
 purpose tuition : education
 
 entity chase : org

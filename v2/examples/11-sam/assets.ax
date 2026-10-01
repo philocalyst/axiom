@@ -8,6 +8,8 @@
 
 /// The condo at 41 Alma St. It was bought on 2024-02-20 and has been rented out
 /// since March 2024.
+commodity VTI : fund
+
 asset condo : rental-home
   in-service 2024-03-01        // ▸ `us/rental` depreciates it over 27.5 years, mid-month
   land       120_000 USD       // the part of its cost that is land, which is never depreciated

@@ -8,6 +8,8 @@
 base USD
 use us/ca/san-francisco
 use us/rental
+use us/401k
+use us/securities
 
 entity me : person
   born   1990-04-12
