@@ -825,7 +825,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                     loc: template.flow.loc,
                 });
             }
-            for (written_index, (&offset, &quantity)) in written_group
+            for (_written_index, (&offset, &quantity)) in written_group
                 .group
                 .legs
                 .iter()
@@ -844,10 +844,12 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 {
                     continue;
                 }
+                // Use the next effective-leg slot rather than the source
+                // written-leg offset: matched replacement legs already use
+                // their template slot and must not leave a hole or collide.
                 let flow_ordinal = ordinal_base
                     .checked_add(1)
-                    .and_then(|base| base.checked_add(u32::try_from(template.legs.len()).ok()?))
-                    .and_then(|base| base.checked_add(u32::try_from(written_index).ok()?))
+                    .and_then(|base| base.checked_add(u32::try_from(leg_flows.len()).ok()?))
                     .ok_or(TemplateError::InvalidTemplate { loc: flow.loc })?;
                 let mut flow = flow.clone();
                 flow.recognized = tail.and_then(|tail| tail.recognized).unwrap_or(recognized);
