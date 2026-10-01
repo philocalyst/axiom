@@ -42,8 +42,8 @@ pub fn run(invocation: &Invocation, terminals: Terminals) -> Result<Outcome, Dia
     drop(parsed);
     diagnostics.extend(built);
 
-    if let Command::Sync(files) = command {
-        return sync::execute(&book, files, &project.root, terminals.out);
+    if let Command::Sync { names, dry } = command {
+        return sync::execute(&book, names, &project.root, terminals.out, *dry);
     }
     let options = Options {
         today: invocation.today.unwrap_or_else(system_today),
