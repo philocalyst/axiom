@@ -231,7 +231,8 @@ impl<'b, 's> Recognizer<'b, 's> {
                     .collect::<Vec<_>>()
                     .into_boxed_slice();
                 let entry = entries.len();
-                starts.insert(&own, entry);
+                let first = own.split(|byte| *byte == b' ').next().unwrap_or(&own);
+                starts.insert(first, entry);
                 entries.push(Entry {
                     owner,
                     pattern: None,
@@ -323,7 +324,15 @@ impl<'b, 's> Recognizer<'b, 's> {
                     (None, Some(literal)) => at
                         .checked_add(literal.len())
                         .and_then(|end| hay.get(at..end).map(|candidate| (end, candidate)))
-                        .filter(|(_, candidate)| candidate.eq_ignore_ascii_case(literal))
+                        .filter(|(_, candidate)| {
+                            candidate.iter().zip(literal).all(|(&actual, &expected)| {
+                                if expected == b' ' {
+                                    matches!(actual, b' ' | b'-' | b'/')
+                                } else {
+                                    actual.eq_ignore_ascii_case(&expected)
+                                }
+                            })
+                        })
                         .map(|(end, _)| Found {
                             start: at,
                             end,

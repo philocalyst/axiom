@@ -397,6 +397,21 @@ impl<'b, 's> World<'b, 's> {
                     None => problems.push(bad("day", text, record)),
                 }
             }
+            if let Some(text) = &reading.original {
+                match original(text, &self.units) {
+                    Some(mut original) => {
+                        // The memo may omit a sign because the statement's
+                        // amount supplies the direction of the converted leg.
+                        original.qty = if record.qty.is_negative() {
+                            -original.qty.abs()
+                        } else {
+                            original.qty.abs()
+                        };
+                        record.facts.get_or_insert_with(Default::default).original = Some(original);
+                    }
+                    None => problems.push(bad("original amount and unit", text, record)),
+                }
+            }
         }
         if problems.is_empty() {
             Ok(())
@@ -646,6 +661,42 @@ impl<'b, 's> World<'b, 's> {
             body,
             moved,
         }
+    }
+}
+
+/// Parse a typed `CUR amount` captured by an `original` pattern. Keep the
+/// currency spelling borrowed from the memo and use that unit's precision.
+fn original<'t>(text: &'t str, units: &[Unit<'_>]) -> Option<crate::Original<'t>> {
+    let text = text.trim();
+    let split = text.find(char::is_whitespace)?;
+    let (unit, amount_text) = text.split_at(split);
+    let unit_spec = units
+        .iter()
+        .find(|known| known.name.eq_ignore_ascii_case(unit))?;
+    let qty = amount(amount_text.trim(), unit_spec.scale).ok().flatten()?;
+    Some(crate::Original {
+        qty,
+        unit: unit.into(),
+    })
+}
+
+#[cfg(test)]
+mod original_tests {
+    use super::*;
+
+    #[test]
+    fn original_capture_is_a_typed_currency_amount_and_keeps_its_text_borrowed() {
+        let units = [Unit {
+            name: "CHF",
+            scale: 2,
+        }];
+        let text = "CHF 3,290.00";
+        let parsed = original(text, &units).expect("known unit and valid amount");
+        assert_eq!(parsed.qty, Qty(329_000));
+        assert_eq!(parsed.unit.as_ref(), "CHF");
+        assert!(matches!(parsed.unit, std::borrow::Cow::Borrowed(_)));
+        assert!(original("CHF 3,290.001", &units).is_none());
+        assert!(original("EUR 3,290.00", &units).is_none());
     }
 }
 

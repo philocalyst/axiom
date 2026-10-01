@@ -60,6 +60,12 @@ struct Slot {
     index: u32,
 }
 
+#[derive(Clone, Copy)]
+struct Candidate {
+    unit: u16,
+    qty: Qty,
+}
+
 /// For each record, the index in `existing` of the flow it is. Exact days go
 /// first, so that a record never takes the flow another one is on top of.
 pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Vec<Option<usize>> {
@@ -85,15 +91,29 @@ pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Ve
             }) as u16
         }
     };
-    let unit_of: Vec<u16> = records
+    let candidates: Vec<[Option<Candidate>; 2]> = records
         .iter()
-        .map(|record| key(record.facts().currency.as_deref()))
+        .map(|record| {
+            let primary = Candidate {
+                unit: key(record.facts().currency.as_deref()),
+                qty: record.qty,
+            };
+            let original = record.facts().original.as_ref().map(|original| Candidate {
+                unit: key(Some(original.unit.as_ref())),
+                qty: original.qty,
+            });
+            [
+                Some(primary),
+                original.filter(|other| (other.unit, other.qty) != (primary.unit, primary.qty)),
+            ]
+        })
         .collect();
     // Only a flow of an amount some record has can be one: most of a book is not.
-    let wanted: Set<(u16, Qty)> = records
+    let wanted: Set<(u16, Qty)> = candidates
         .iter()
-        .zip(&unit_of)
-        .map(|(record, &unit)| (unit, record.qty))
+        .flatten()
+        .flatten()
+        .map(|candidate| (candidate.unit, candidate.qty))
         .collect();
     let mut slots: Vec<Slot> = existing
         .iter()
@@ -124,21 +144,27 @@ pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Ve
             if matched[at].is_some() {
                 continue;
             }
-            let (record, unit) = (&records[at], unit_of[at]);
+            let record = &records[at];
             let key = |slot: &Slot| (slot.unit, slot.qty, slot.day);
-            let from = slots.partition_point(|slot| {
-                key(slot) < (unit, record.qty, record.day.add_days(-radius))
-            });
-            let nearest = slots[from..]
-                .iter()
-                .enumerate()
-                .take_while(|(_, slot)| {
-                    (slot.unit, slot.qty) == (unit, record.qty)
-                        && slot.day <= record.day.add_days(radius)
-                })
-                .filter(|(offset, _)| !taken[from + offset])
-                .min_by_key(|(_, slot)| (slot.day.0 - record.day.0).abs())
-                .map(|(offset, slot)| (from + offset, slot.index));
+            let mut nearest = None;
+            for candidate in candidates[at].iter().flatten() {
+                let from = slots.partition_point(|slot| {
+                    key(slot) < (candidate.unit, candidate.qty, record.day.add_days(-radius))
+                });
+                nearest = slots[from..]
+                    .iter()
+                    .enumerate()
+                    .take_while(|(_, slot)| {
+                        (slot.unit, slot.qty) == (candidate.unit, candidate.qty)
+                            && slot.day <= record.day.add_days(radius)
+                    })
+                    .filter(|(offset, _)| !taken[from + offset])
+                    .min_by_key(|(_, slot)| (slot.day.0 - record.day.0).abs())
+                    .map(|(offset, slot)| (from + offset, slot.index));
+                if nearest.is_some() {
+                    break;
+                }
+            }
             let Some((slot, index)) = nearest else {
                 continue;
             };
@@ -298,6 +324,25 @@ mod tests {
         );
         assert_eq!(reconcile(&[euros.clone()], &[flow(5, -450)], "USD"), [None]);
         assert_eq!(reconcile(&[euros], &[eur], "USD"), [Some(0)]);
+    }
+
+    #[test]
+    fn original_currency_capture_reconciles_a_foreign_unit_without_making_another_flow() {
+        let record = Record {
+            facts: Some(Box::new(crate::Facts {
+                original: Some(crate::Original {
+                    qty: Qty(-4_500),
+                    unit: "CHF".into(),
+                }),
+                ..Default::default()
+            })),
+            ..record(5, -4_200)
+        };
+        let foreign = Existing {
+            unit: Some("CHF"),
+            ..flow(5, -4_500)
+        };
+        assert_eq!(reconcile(&[record], &[foreign], "EUR"), [Some(0)]);
     }
 
     #[test]
