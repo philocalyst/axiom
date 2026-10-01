@@ -29,6 +29,7 @@ use crate::motion::Motion;
 use crate::plan::Plan;
 use crate::scope::is_money;
 use crate::state::World;
+use crate::temporal::Key as TemporalKey;
 use crate::{Cause, Owed};
 
 /// What laws read: the plan (and through it the book) and the state as of now.
@@ -171,6 +172,8 @@ pub(crate) struct Context<'a> {
     pub template_flows: Option<TemplateFlows<'a>>,
     /// The asset part whose per-part law is running, if any.
     pub asset_part: Option<PartId>,
+    /// Stable law identity for temporal expression history.
+    pub law_id: Option<Id<Law>>,
     on: &'a Occasion<'a>,
 }
 
@@ -199,6 +202,7 @@ impl<'a> Context<'a> {
             inputs: None,
             template_flows: None,
             asset_part: None,
+            law_id: None,
             on,
         }
     }
@@ -215,6 +219,11 @@ impl<'a> Context<'a> {
 
     pub fn for_asset_part(mut self, part: PartId) -> Self {
         self.asset_part = Some(part);
+        self
+    }
+
+    pub fn for_law(mut self, law: Id<Law>) -> Self {
+        self.law_id = Some(law);
         self
     }
 
@@ -301,10 +310,12 @@ pub(crate) fn run(
     out: &mut Vec<Outcome>,
 ) -> bool {
     values.resize(law.nodes.len(), Value::Empty);
+    let law_id = law_identity(env.plan, law, ctx);
     let mut machine = Machine {
         env,
         nodes: &law.nodes,
         law: Some(law),
+        law_id,
         ctx,
         values,
         budget_values,
@@ -349,6 +360,35 @@ fn purpose_reader_step(book: &Book, law: &Law, index: usize, window: Window, day
     }
 }
 
+fn law_identity(plan: &Plan<'_, '_>, law: &Law, ctx: &Context<'_>) -> Option<Id<Law>> {
+    ctx.law_id.or_else(|| {
+        plan.temporal.iter().find_map(|query| {
+            (query.key.subject == ctx.subject
+                && query.key.owner == ctx.owner
+                && std::ptr::eq(&plan.book.laws[query.key.law], law))
+            .then_some(query.key.law)
+        })
+    })
+}
+
+/// Records each compiled temporal query at a state boundary. Only expression
+/// roots named by `Plan.temporal` are retained; no world snapshot is cloned.
+pub(crate) fn sample_temporal<'p, 'b, 's>(
+    plan: &'p Plan<'b, 's>,
+    world: &mut World,
+    day: Day,
+    values: &mut Vec<Value>,
+) {
+    for query in plan.temporal.iter().copied() {
+        let law = &plan.book.laws[query.key.law];
+        let occasion = Occasion::time(day, Days::on(day));
+        let context = Context::new(query.key.subject, query.key.owner, &occasion)
+            .for_law(query.key.law);
+        let value = expression(Env { plan, world: &*world }, law, query.root, &context, values);
+        world.temporal.record(query.key, day, value);
+    }
+}
+
 /// Evaluates one expression of `law` (a `by` date, say).
 pub(crate) fn expression(
     env: Env,
@@ -358,10 +398,12 @@ pub(crate) fn expression(
     values: &mut Vec<Value>,
 ) -> Value {
     values.resize(law.nodes.len(), Value::Empty);
+    let law_id = law_identity(env.plan, law, ctx);
     Machine {
         env,
         nodes: &law.nodes,
         law: Some(law),
+        law_id,
         ctx,
         values,
         budget_values: &mut Vec::new(),
@@ -384,6 +426,7 @@ pub(crate) fn program_expression(
         env,
         nodes: &program.nodes,
         law: None,
+        law_id: None,
         ctx,
         values,
         budget_values: &mut Vec::new(),
@@ -396,6 +439,7 @@ struct Machine<'a, 's> {
     env: Env<'a, 's>,
     nodes: &'a axiom_core::Arena<axiom_model::Node>,
     law: Option<&'a Law>,
+    law_id: Option<Id<Law>>,
     ctx: &'a Context<'a>,
     values: &'a mut Vec<Value>,
     budget_values: &'a mut Vec<Value>,
@@ -1122,10 +1166,164 @@ impl<'a, 's> Machine<'a, 's> {
             Func::Date => civil_date(arg(0), arg(1), arg(2)).map_or_else(Value::Fault, Value::Day),
             Func::StraightLine => self.straight_line(args),
             Func::Open(code) => self.open(code),
-            // Extrema and day counts need the occurrence-history recorder.
-            // Do not silently substitute the current sample for a historical answer.
-            Func::Peak | Func::Low | Func::Days => Value::Fault(Fault::InvalidProgram),
+            Func::Peak | Func::Low | Func::Days => self.temporal(at, func, args),
         }
+    }
+
+    fn temporal(&self, call: NodeId, func: Func, args: &[NodeId]) -> Value {
+        let Some(law) = self.law_id else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let (Some(&root), Some(&window_arg)) = (args.first(), args.get(1)) else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let mut days = match self.at(window_arg) {
+            Value::Name(name) => match self.book().name(name) {
+                "month" => Window::Month.around(self.ctx.anchor()),
+                "year" => Window::Year.around(self.ctx.anchor()),
+                "ever" => Days::ALWAYS,
+                _ => return Value::Fault(Fault::InvalidProgram),
+            },
+            _ => return Value::Fault(Fault::InvalidProgram),
+        };
+        let key = TemporalKey {
+            law,
+            subject: self.ctx.subject,
+            owner: self.ctx.owner,
+            call,
+        };
+        let samples = self.env.world.temporal.get(key);
+        if matches!(self.at(window_arg), Value::Name(name) if self.book().name(name) == "ever") {
+            days = samples
+                .first()
+                .and_then(|sample| Days::new(sample.day, days.last()))
+                .unwrap_or_else(|| Days::on(self.ctx.anchor()));
+        }
+        let current = self.at(root);
+        match func {
+            Func::Peak | Func::Low => self.extreme(func, days, samples, current),
+            Func::Days => self.day_count(days, samples, self.ctx.day, current),
+            _ => Value::Fault(Fault::InvalidProgram),
+        }
+    }
+
+    fn extreme(
+        &self,
+        func: Func,
+        days: Days,
+        samples: &[crate::temporal::Sample],
+        current: Value,
+    ) -> Value {
+        let peak = func == Func::Peak;
+        let mut best = samples
+            .iter()
+            .take_while(|sample| sample.day < days.first())
+            .last()
+            .map(|sample| sample.value)
+            .filter(|value| *value != Value::Empty);
+        if let Some(Value::Fault(fault)) = best {
+            return Value::Fault(fault);
+        }
+        for sample in samples.iter().filter(|sample| days.contains(sample.day)) {
+            if let Value::Fault(fault) = sample.value {
+                return Value::Fault(fault);
+            }
+            if sample.value == Value::Empty {
+                continue;
+            }
+            best = match best {
+                None => Some(sample.value),
+                Some(previous) => match self
+                    .calc()
+                    .binary(if peak { BinOp::Ge } else { BinOp::Le }, sample.value, previous)
+                {
+                    Value::Bool(true) => Some(sample.value),
+                    Value::Bool(false) => Some(previous),
+                    Value::Fault(fault) => return Value::Fault(fault),
+                    _ => return Value::Fault(Fault::InvalidProgram),
+                },
+            };
+        }
+        if days.contains(self.ctx.day) {
+            if let Value::Fault(fault) = current {
+                return Value::Fault(fault);
+            }
+            if current != Value::Empty {
+                best = match best {
+                    None => Some(current),
+                    Some(previous) => match self
+                        .calc()
+                        .binary(if peak { BinOp::Ge } else { BinOp::Le }, current, previous)
+                    {
+                        Value::Bool(true) => Some(current),
+                        Value::Bool(false) => Some(previous),
+                        Value::Fault(fault) => return Value::Fault(fault),
+                        _ => return Value::Fault(Fault::InvalidProgram),
+                    },
+                };
+            }
+        }
+        best.unwrap_or(Value::Empty)
+    }
+
+    fn day_count(
+        &self,
+        days: Days,
+        samples: &[crate::temporal::Sample],
+        current_day: Day,
+        current: Value,
+    ) -> Value {
+        let mut cursor = days.first();
+        let mut state = samples
+            .iter()
+            .take_while(|sample| sample.day < days.first())
+            .last()
+            .map_or(Value::Bool(false), |sample| sample.value);
+        let mut total = 0i64;
+        let mut at = samples.partition_point(|sample| sample.day < days.first());
+        while at < samples.len() && samples[at].day <= days.last() {
+            let day = samples[at].day;
+            let mut after = at + 1;
+            while after < samples.len() && samples[after].day == day {
+                after += 1;
+            }
+            if day > cursor {
+                if let Value::Fault(fault) = state {
+                    return Value::Fault(fault);
+                }
+                if state == Value::Bool(true) {
+                    total += i64::from(day.0) - i64::from(cursor.0);
+                } else if !matches!(state, Value::Bool(false) | Value::Empty) {
+                    return Value::Fault(Fault::InvalidProgram);
+                }
+            }
+            state = samples[after - 1].value;
+            cursor = day;
+            at = after;
+        }
+        if days.contains(current_day) {
+            if current_day > cursor {
+                if let Value::Fault(fault) = state {
+                    return Value::Fault(fault);
+                }
+                if state == Value::Bool(true) {
+                    total += i64::from(current_day.0) - i64::from(cursor.0);
+                } else if !matches!(state, Value::Bool(false) | Value::Empty) {
+                    return Value::Fault(Fault::InvalidProgram);
+                }
+            }
+            state = current;
+            cursor = current_day;
+        }
+        if let Value::Fault(fault) = state {
+            return Value::Fault(fault);
+        }
+        if state == Value::Bool(true) {
+            total += i64::from(days.last().0) - i64::from(cursor.0) + 1;
+        } else if !matches!(state, Value::Bool(false) | Value::Empty) {
+            return Value::Fault(Fault::InvalidProgram);
+        }
+        Value::Num(Ratio::int(total))
     }
 
     fn purpose_total(&self, purpose: Option<Id<axiom_model::Purpose>>, window: Window) -> Value {
@@ -1654,6 +1852,7 @@ account temporary : temporary-account
                 env: Env { plan: &plan, world: &world },
                 nodes,
                 law: Some(law),
+                law_id: None,
                 ctx: &context,
                 values: &mut values,
                 budget_values: &mut budget_values,
@@ -1761,6 +1960,7 @@ entity employer
             env: Env { plan: &plan, world: &world },
             nodes: &nodes,
             law: None,
+            law_id: None,
             ctx: &context,
             values: &mut values,
             budget_values: &mut budget_values,
@@ -1873,6 +2073,7 @@ entity employer
             env: Env { plan: &plan, world: &world },
             nodes: &nodes,
             law: None,
+            law_id: None,
             ctx: &context,
             values: &mut values,
             budget_values: &mut budget_values,
@@ -1892,5 +2093,49 @@ entity employer
         assert_eq!(machine.asset_basis(asset), Value::Amount(Amount::new(Qty(1_480), book.base)));
         assert_eq!(machine.prop(Value::Asset(asset), land), Value::Empty);
         assert_eq!(machine.asset_in_service(asset), Value::Day(Day::from_ymd(2026, 2, 2).unwrap()));
+    }
+
+    #[test]
+    fn temporal_extrema_keep_intraday_values_but_days_count_the_final_daily_state() {
+        let fixture = crate::fixture::Fixture::new();
+        let book = fixture.book();
+        let plan = Plan::new(&book);
+        let world = World::new(&book, &plan.watch);
+        let owner = fixture.me;
+        let day = |d| Day::from_ymd(2026, 1, d).unwrap();
+        let occasion = Occasion::time(day(4), Days::new(day(1), day(4)).unwrap());
+        let context = Context::new(Subject::Entity(owner), owner, &occasion);
+        let nodes = Arena::new();
+        let (mut values, mut budget_values, mut out) = (Vec::new(), Vec::new(), Vec::new());
+        let machine = Machine {
+            env: Env { plan: &plan, world: &world },
+            nodes: &nodes,
+            law: None,
+            law_id: None,
+            ctx: &context,
+            values: &mut values,
+            budget_values: &mut budget_values,
+            out: &mut out,
+        };
+        let amount = |qty| Value::Amount(Amount::new(Qty(qty), book.base));
+        let intraday = [
+            crate::temporal::Sample { day: day(1), value: amount(100) },
+            crate::temporal::Sample { day: day(2), value: amount(200) },
+            crate::temporal::Sample { day: day(2), value: amount(150) },
+        ];
+        let span = Days::new(day(1), day(4)).unwrap();
+        assert_eq!(machine.extreme(Func::Peak, span, &intraday, amount(150)), amount(200));
+        assert_eq!(machine.extreme(Func::Low, span, &intraday, amount(150)), amount(100));
+
+        let states = [
+            crate::temporal::Sample { day: day(1), value: Value::Bool(true) },
+            crate::temporal::Sample { day: day(2), value: Value::Bool(true) },
+            crate::temporal::Sample { day: day(2), value: Value::Bool(false) },
+            crate::temporal::Sample { day: day(3), value: Value::Bool(true) },
+        ];
+        assert_eq!(
+            machine.day_count(span, &states, day(4), Value::Bool(false)),
+            Value::Num(Ratio::int(2)),
+        );
     }
 }

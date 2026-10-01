@@ -11,7 +11,8 @@
 
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Qty, Ratio, Set, Sym};
 use axiom_model::{
-    Asset, Book, Commodity, Entity, Flow, Func, Kind, Op, Place, Rule, Subject, Ty, Value,
+    Asset, Book, Commodity, Entity, Field, Flow, Func, Kind, Op, Place, Rule, Subject, Ty, Value,
+    Var,
 };
 
 use crate::events::{self, Events};
@@ -21,6 +22,7 @@ use crate::motion::Amounts;
 use crate::scope::containing;
 use crate::sides::Sides;
 use crate::state::World;
+use crate::temporal::Query;
 use crate::timeline::{self, Schedule};
 use crate::totals::Watch;
 use crate::{Options, OwnerShare, Run, infer};
@@ -92,6 +94,10 @@ pub struct Plan<'b, 's> {
     last_fact: Option<Day>,
     /// By index in `Rules::timed`: when each falls due.
     pub(crate) timed: Box<[Schedule]>,
+    /// Expressions whose value is inspected across time by `peak`, `low` or `days`.
+    pub(crate) temporal: Box<[Query]>,
+    temporal_dates: Box<[Day]>,
+    daily_temporal: bool,
 }
 
 impl<'b, 's> Plan<'b, 's> {
@@ -133,6 +139,8 @@ impl<'b, 's> Plan<'b, 's> {
         let kind_places = kind_places(book);
         let entity_owners = entity_owners(book, &mut problems);
         let place_owners = place_owners(book, &entity_owners, &mut problems);
+        let (temporal, temporal_dates, daily_temporal) =
+            temporal_queries(book, &entity_owners, &place_owners);
         let mut plan = Plan {
             book,
             amounts: solution.amounts,
@@ -154,6 +162,9 @@ impl<'b, 's> Plan<'b, 's> {
             events,
             laws,
             timed: Box::default(),
+            temporal: temporal.into_boxed_slice(),
+            temporal_dates: temporal_dates.into_boxed_slice(),
+            daily_temporal,
         };
         let (world, mut values) = (World::new(book, &plan.watch), Vec::new());
         plan.timed = book
@@ -167,6 +178,26 @@ impl<'b, 's> Plan<'b, 's> {
 
     pub fn book(&self) -> &'b Book<'s> {
         self.book
+    }
+
+    /// Dated changes that must be sampled even when the journal has no fact that day.
+    pub(crate) fn temporal_dates(&self) -> &[Day] {
+        &self.temporal_dates
+    }
+
+    /// Whether temporal expressions depend on a value that can change each day.
+    pub(crate) fn needs_daily_temporal(&self) -> bool {
+        self.daily_temporal
+    }
+
+    /// First dated fact that can establish a temporal value. A timeless
+    /// residence is part of the initial state but should not create unbounded
+    /// history before the first dated event.
+    pub(crate) fn temporal_start(&self) -> Option<Day> {
+        self.period_start
+            .into_iter()
+            .chain(self.temporal_dates.iter().copied().filter(|&day| day != Day::MIN))
+            .min()
     }
 
     /// Effective financial owners of `place`, including nested business
@@ -297,6 +328,107 @@ fn allocate_owners(
             Some((owner, part))
         },
     )
+}
+
+fn temporal_queries(
+    book: &Book,
+    entity_owners: &Groups<Entity, OwnerShare>,
+    place_owners: &Groups<Place, OwnerShare>,
+) -> (Vec<Query>, Vec<Day>, bool) {
+    let mut queries = Vec::new();
+    let mut daily = false;
+    for rule in book.rules.all() {
+        let law = &book.laws[rule.law];
+        let owners: Vec<Id<Entity>> = match rule.subject {
+            Subject::Place(place) => place_owners[place].iter().map(|share| share.owner).collect(),
+            Subject::Entity(entity) => entity_owners[entity].iter().map(|share| share.owner).collect(),
+            Subject::Asset(asset) => place_owners[book.assets[asset].place]
+                .iter()
+                .map(|share| share.owner)
+                .collect(),
+            Subject::Contract(contract) => {
+                let entity = book.contracts[contract].owner;
+                entity_owners[entity].iter().map(|share| share.owner).collect()
+            }
+        };
+        for (id, node) in law.nodes.iter() {
+            let Op::Call(func @ (Func::Peak | Func::Low | Func::Days), args) = &node.op else {
+                continue;
+            };
+            let Some(&root) = args.first() else { continue };
+            let call = axiom_model::NodeId(id.index() as u32);
+            for &owner in &owners {
+                queries.push(Query {
+                    key: crate::temporal::Key {
+                        law: rule.law,
+                        subject: rule.subject,
+                        owner,
+                        call,
+                    },
+                    func: *func,
+                    root,
+                });
+            }
+            daily |= law
+                .nodes
+                .values()
+                .take(root.index() + 1)
+                .any(|node| match &node.op {
+                    Op::Var(Var::Date | Var::Year | Var::Month) => true,
+                    Op::Field(_, Field::Year | Field::Month | Field::Age) => true,
+                    _ => false,
+                });
+        }
+    }
+    queries.sort_by_key(|query| {
+        let subject = match query.key.subject {
+            Subject::Place(id) => (0, id.index()),
+            Subject::Entity(id) => (1, id.index()),
+            Subject::Asset(id) => (2, id.index()),
+            Subject::Contract(id) => (3, id.index()),
+        };
+        (
+            query.key.law.index(),
+            subject,
+            query.key.owner.index(),
+            query.key.call.index(),
+        )
+    });
+    queries.dedup_by_key(|query| query.key);
+
+    let mut dates = Vec::new();
+    for (_, place) in book.places.iter() {
+        add_prop_dates(&mut dates, &place.props);
+    }
+    for (_, entity) in book.entities.iter() {
+        add_prop_dates(&mut dates, &entity.props);
+        for residence in entity.lives.iter() {
+            dates.push(residence.days.first());
+            if residence.days.last() != Day::MAX {
+                dates.push(residence.days.last().add_days(1));
+            }
+        }
+    }
+    for (_, asset) in book.assets.iter() {
+        add_prop_dates(&mut dates, &asset.props);
+    }
+    for (_, commodity) in book.commodities.iter() {
+        add_prop_dates(&mut dates, &commodity.props);
+    }
+    for (_, kind) in book.kinds.iter() {
+        add_prop_dates(&mut dates, &kind.props);
+    }
+    for (_, param) in book.params.iter() {
+        dates.extend(param.rows.iter().filter_map(|row| row.since));
+    }
+    dates.extend(book.prices.quotes().iter().map(|quote| quote.day));
+    dates.sort_unstable();
+    dates.dedup();
+    (queries, dates, daily)
+}
+
+fn add_prop_dates(dates: &mut Vec<Day>, props: &[axiom_model::Prop]) {
+    dates.extend(props.iter().map(|prop| prop.since).filter(|&day| day != Day::MIN));
 }
 
 fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entity, OwnerShare> {

@@ -19,6 +19,7 @@ use crate::eval::Outcome;
 use crate::assets::Assets;
 use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
+use crate::temporal::History as TemporalHistory;
 use crate::totals::{Tallies, Totals, Watch};
 use crate::{Adjustment, Applied, Effect, Gain, Headroom, Pad, Violation};
 
@@ -28,6 +29,7 @@ pub(crate) struct World {
     pub totals: Totals,
     pub tallies: Tallies,
     pub assets: Assets,
+    pub temporal: TemporalHistory,
 }
 
 impl World {
@@ -37,6 +39,7 @@ impl World {
             totals: Totals::new(watch),
             tallies: Tallies::default(),
             assets: Assets::from_book(book),
+            temporal: TemporalHistory::default(),
         }
     }
 }

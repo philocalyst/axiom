@@ -56,6 +56,7 @@ mod show;
 mod sides;
 mod state;
 mod timeline;
+mod temporal;
 mod totals;
 
 #[cfg(test)]

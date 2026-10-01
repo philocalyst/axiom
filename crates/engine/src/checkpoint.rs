@@ -74,6 +74,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             &world.totals,
             &world.tallies,
             &world.assets,
+            &world.temporal,
             &record,
         )
             .hash(&mut hasher);
