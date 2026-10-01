@@ -6,7 +6,7 @@
 //! [`crate::law::Op`] and [`crate::law::Field`], and [`Source`] is not the
 //! parsed [`crate::Source`] that `build` takes. Reach them as `sync::Source`.
 
-use axiom_core::{DateLayout, Id, Loc, Sym};
+use axiom_core::{DateLayout, Id, Interner, Loc, Sym};
 
 use crate::book::{Param, Place, Purpose, System};
 
@@ -25,12 +25,32 @@ pub struct Source {
 }
 
 /// How a source gets its text. (Not `Origin`, which is a flow's.)
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Fetch {
     /// `read "imports/chase-*.csv"`.
-    Read(Sym),
+    Read(Text),
     /// `run COMMAND`, with `{since}`, `{today}`, `{units}` and `{year}` unexpanded.
-    Run(Sym),
+    Run(Text),
+}
+
+/// Text stored in compiled sync programs. Ordinary source slices stay in the
+/// book's interner; a decoded escape owns only the changed string. This keeps
+/// all other sync text allocation-free without leaking or self-referencing.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Text {
+    Borrowed(Sym),
+    Owned(Box<str>),
+}
+
+impl Text {
+    /// Borrows this text for as long as the compiled program and interner are
+    /// both available.
+    pub fn as_str<'a, 's>(&'a self, names: &'a Interner<'s>) -> &'a str {
+        match self {
+            Text::Borrowed(sym) => names.name(*sym),
+            Text::Owned(text) => text,
+        }
+    }
 }
 
 /// Where a source's facts go.
@@ -78,23 +98,23 @@ pub struct Spec {
 }
 
 /// A column of an export.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Column {
-    Header(Sym),
+    Header(Text),
     /// 1-based, as written.
     Index(u16),
     /// A tagged field path, or a tag at any depth.
-    Path(Sym),
+    Path(Text),
 }
 
 /// How one field's value is read.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Rule {
     None,
     Flipped,
     /// The exact marker in `place` means money into the account.
-    Sign { place: Column, into: Sym },
-    Is(Sym),
+    Sign { place: Column, into: Text },
+    Is(Text),
 }
 
 /// What a column or a tagged field is of a record.
@@ -131,10 +151,10 @@ pub struct Pattern {
 }
 
 /// One step of a pattern's program.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Op {
     /// User-written literal, kept borrowed and matched case-insensitively.
-    Literal(Sym),
+    Literal(Text),
     /// A generated entity or account name, matched case-insensitively with
     /// path separators and hyphens equivalent to spaces (`trader-joes` matches
     /// `TRADER JOES`). User-written `Literal` patterns remain exact.
