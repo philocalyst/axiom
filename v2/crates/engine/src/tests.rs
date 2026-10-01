@@ -1492,6 +1492,49 @@ fn a_refold_resumes_from_a_checkpoint_and_stops_where_it_meets_the_old_fold() {
 }
 
 #[test]
+fn checkpoint_digest_includes_asset_part_basis_even_when_holdings_match() {
+    let mut f = Fixture::new();
+    let (name, owner, place, unit) = (f.sym("house"), f.me, f.checking, f.usd);
+    let mut book = f.book();
+    let asset = book.assets.push(Asset {
+        name,
+        kind: book.roots.kinds.thing,
+        owner,
+        place,
+        unit,
+        part_of: None,
+        props: Box::default(),
+        doc: None,
+        loc: Loc::default(),
+    });
+    let plan = Plan::new(&book);
+    let digest = |basis| {
+        let mut ledger = plan.start(options());
+        let origin = RuntimeTxn::Adjustment { place, day: Day(5) };
+        ledger
+            .world
+            .assets
+            .add_part(
+                asset,
+                crate::Part {
+                    id: crate::PartId { origin, ordinal: 0 },
+                    flow: None,
+                    kind: crate::PartKind::Acquisition,
+                    recorded: crate::EventKey { day: Day(5), sequence: 0 },
+                    day: Day(5),
+                    cost: Qty(500_000),
+                    basis: Qty(basis),
+                },
+            )
+            .expect("a first asset part");
+        assert_eq!(ledger.balance(place, unit), Qty::ZERO, "the asset-part table is separate from aggregate balances");
+        ledger.checkpoint().digest()
+    };
+
+    assert_ne!(digest(450_000), digest(440_000));
+}
+
+#[test]
 fn deadlines_beyond_the_horizon_wait_until_the_ledger_is_asked_to_reach_them() {
     let (book, _) = timed_book(None);
     let plan = Plan::new(&book);

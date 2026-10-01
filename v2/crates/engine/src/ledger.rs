@@ -303,7 +303,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             headroom,
             pads: record.pads,
             // These collections are populated by the native state monitors.
-            assets: Vec::new(),
+            assets: world.assets.into_states(),
             promises: Vec::new(),
             promised_flows: Box::default(),
             runtime_details: Arena::new(),

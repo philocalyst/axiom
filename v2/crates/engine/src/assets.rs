@@ -31,7 +31,7 @@ pub struct EventKey {
 }
 
 /// Whether the unit remains owned at a specified ledger boundary.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum DisposalBoundary {
     /// Sale or other disposal takes effect just after this flow has run.
     After(EventKey),
@@ -49,7 +49,7 @@ impl DisposalBoundary {
 }
 
 /// The source's relationship to the original unit.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum PartKind {
     /// The asset unit itself: purchase, opening amount, or gifted basis.
     Acquisition,
@@ -58,7 +58,7 @@ pub enum PartKind {
 }
 
 /// Cost and remaining basis attributable to one acquisition or improvement.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Part {
     pub id: PartId,
     /// Original source flow when one exists. Runtime-only occurrences are
@@ -77,7 +77,7 @@ pub struct Part {
 }
 
 /// The source and boundary at which an asset left the owner's state.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Disposal {
     pub txn: RuntimeTxn,
     pub flow: Option<Id<Flow>>,
@@ -85,7 +85,7 @@ pub struct Disposal {
 }
 
 /// One asset's parts and explicit disposal state.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Hash)]
 pub struct AssetState {
     pub asset: Id<Asset>,
     pub parts: Vec<Part>,
@@ -198,6 +198,15 @@ pub struct Assets {
     part_index: axiom_core::Map<PartId, (Id<Asset>, usize)>,
 }
 
+impl std::hash::Hash for Assets {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        // `part_index` is derived from the append-only state vectors. Hashing
+        // those vectors in asset/ledger order is deterministic and includes
+        // each part's cost, remaining basis, event boundary, and disposal.
+        self.states.hash(state);
+    }
+}
+
 impl Assets {
     /// One empty state slot per model asset id.
     pub fn new(count: usize) -> Assets {
@@ -221,6 +230,10 @@ impl Assets {
 
     pub fn iter(&self) -> impl Iterator<Item = &AssetState> {
         self.states.iter()
+    }
+
+    pub(crate) fn into_states(self) -> Vec<AssetState> {
+        self.states
     }
 
     /// Adds a part in event order. An asset's first part must be its original

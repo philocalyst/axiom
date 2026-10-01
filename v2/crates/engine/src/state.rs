@@ -16,6 +16,7 @@ use axiom_core::{Day, Diagnostic, Id, Loc, Map, Qty, Set, Sym};
 use axiom_model::{Amount, Book, Commodity, Entity, Flow, Law, Param, Place, Rule, Subject, Value};
 
 use crate::eval::Outcome;
+use crate::assets::Assets;
 use crate::lots::{Holdings, Relief};
 use crate::motion::Amounts;
 use crate::totals::{Tallies, Totals, Watch};
@@ -26,11 +27,17 @@ pub(crate) struct World {
     pub holdings: Holdings,
     pub totals: Totals,
     pub tallies: Tallies,
+    pub assets: Assets,
 }
 
 impl World {
     pub fn new(book: &Book, watch: &Watch) -> World {
-        World { holdings: Holdings::new(book.places.len()), totals: Totals::new(watch), tallies: Tallies::default() }
+        World {
+            holdings: Holdings::new(book.places.len()),
+            totals: Totals::new(watch),
+            tallies: Tallies::default(),
+            assets: Assets::from_book(book),
+        }
     }
 }
 

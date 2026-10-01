@@ -66,7 +66,17 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             self.record.forked(),
         );
         let mut hasher = FxHasher::default();
-        (day, phase, applied, &world.holdings, &world.totals, &world.tallies, &record).hash(&mut hasher);
+        (
+            day,
+            phase,
+            applied,
+            &world.holdings,
+            &world.totals,
+            &world.tallies,
+            &world.assets,
+            &record,
+        )
+            .hash(&mut hasher);
         Checkpoint { day, phase, applied, world, record, digest: hasher.finish() }
     }
 
