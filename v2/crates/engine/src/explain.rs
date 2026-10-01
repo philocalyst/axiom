@@ -15,7 +15,7 @@
 
 use axiom_core::{Day, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
-    Amount, Assert, BinOp, Book, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param, Place,
+    Amount, Assert, BinOp, Book, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param, Place,
     RuntimeTxn, StepKind, Subject, System, Trigger, Value, Waive, Window,
 };
 
@@ -25,6 +25,7 @@ use crate::events::Events;
 use crate::facts::{Follows, LawFacts, Reads};
 use crate::lots::Candidate;
 use crate::motion::Motion;
+use crate::plan::Plan;
 use crate::show;
 use crate::{Cause, Effect, Owed, Parcel, Waiver};
 
@@ -32,8 +33,8 @@ use crate::{Cause, Effect, Owed, Parcel, Waiver};
 const SHOWN: usize = 8;
 
 /// A law's evaluation, frozen at the moment something went wrong.
-pub(crate) struct Frame<'a, 's> {
-    pub book: &'a Book<'s>,
+pub(crate) struct Frame<'a, 'b, 's> {
+    pub plan: &'a Plan<'b, 's>,
     pub law: &'a Law,
     /// What is true of the law whatever runs it: what each step reads and compares.
     pub facts: &'a LawFacts,
@@ -44,16 +45,20 @@ pub(crate) struct Frame<'a, 's> {
     pub effects: &'a [Effect],
 }
 
-impl Frame<'_, '_> {
+impl<'a, 'b, 's> Frame<'a, 'b, 's> {
+    fn book(&self) -> &'b Book<'s> {
+        self.plan.book()
+    }
+
     fn money(&self, amount: Amount) -> String {
-        self.book.show(amount).to_string()
+        self.plan.book().show(amount).to_string()
     }
 
     /// The law's own words for what it is and what to do, from its doc comment:
     /// the first paragraph, and the paragraph that starts `To fix:`.
     fn doc(&self) -> (Option<String>, Option<String>) {
         let Some(doc) = self.law.doc else { return (None, None) };
-        let lines: Vec<&str> = self.book.name(doc).lines().map(|l| l.trim().trim_start_matches("///").trim()).collect();
+        let lines: Vec<&str> = self.book().name(doc).lines().map(|l| l.trim().trim_start_matches("///").trim()).collect();
         let (mut what, mut fix) = (None, None);
         for paragraph in lines.split(|line| line.is_empty()).filter(|p| !p.is_empty()).map(|p| p.join(" ")) {
             match paragraph.strip_prefix("To fix:") {
@@ -67,7 +72,7 @@ impl Frame<'_, '_> {
     /// The primary label: the flow that fired the law, or the law itself for one
     /// fired by time.
     fn cause_label(&self) -> (Loc, String) {
-        let (book, ctx) = (self.book, self.ctx);
+        let (book, ctx) = (self.book(), self.ctx);
         let Some(motion) = ctx.motion else {
             let what = format!("checked for {} on {}", show::subject(book, ctx.subject), ctx.day);
             return (self.law.loc, what);
@@ -92,7 +97,7 @@ impl Frame<'_, '_> {
     fn comparison(&self, cond: NodeId) -> Option<Comparison> {
         let (cmp, counted, limit) = compared(self.law, self.values, cond)?;
         let upper = matches!(cmp, BinOp::Lt | BinOp::Le);
-        let counted_in_limit = Calc { book: self.book, day: self.ctx.day }.convert(counted, limit.unit).ok()?;
+        let counted_in_limit = Calc { book: self.book(), day: self.ctx.day }.convert(counted, limit.unit).ok()?;
         let off = if upper { counted_in_limit.qty - limit.qty } else { limit.qty - counted_in_limit.qty };
         Some(Comparison { counted, limit, upper, off: Amount::new(off, limit.unit) })
     }
@@ -112,7 +117,7 @@ impl Frame<'_, '_> {
         for i in at.into_iter().filter(|&i| !matches!(nodes[node_id(i)].op, Op::Const(_))) {
             let text = match (self.values[i], unit) {
                 (Value::Empty, Some(unit)) => self.money(Amount::zero(unit)),
-                (value, _) => show::value(self.book, self.ctx.day, value),
+                (value, _) => show::value(self.book(), self.ctx.day, value),
             };
             if !shown.iter().any(|(loc, _)| *loc == nodes[node_id(i)].loc) {
                 shown.push((nodes[node_id(i)].loc, text));
@@ -154,7 +159,7 @@ impl Frame<'_, '_> {
     /// Up to three flows before this one that built what a limit counted. A
     /// window read as it opened had no flow to fire it: the latest to reach it.
     fn contributors(&self, reads: Reads, cond: NodeId) -> Vec<Id<Flow>> {
-        let (book, ctx) = (self.book, self.ctx);
+        let (book, ctx) = (self.book(), self.ctx);
         let current = match ctx.cause {
             Cause::Flow(id) => Some(id),
             _ if ctx.checking => None,
@@ -199,15 +204,41 @@ impl Frame<'_, '_> {
                         _ => None,
                     }
                 }).collect();
-                let mut counted: Vec<_> = book.flows.iter().filter_map(|(id, flow)| {
-                    let actual = flow.purpose?.purpose;
-                    let in_scope = scopes.iter().any(|&wanted| book.purposes.lineage(actual).any(|parent| parent == wanted));
+                let mut counted = Vec::with_capacity(3);
+                for (id, flow) in book.flows.iter() {
                     let before = current.map_or(flow.day <= ctx.day, |current| id < current);
-                    (in_scope && flow.owner == ctx.owner && before && flow.recognized.overlaps(window) && Some(id) != current)
-                        .then_some(id)
-                }).collect();
-                counted.sort_unstable_by_key(|&id| (book.flows[id].day, id));
-                counted.into_iter().rev().take(3).collect()
+                    if !before || !flow.recognized.overlaps(window) || !self.plan.events.state(id, flow).is_real_on(ctx.day) {
+                        continue;
+                    }
+                    let Some(actual) = flow.purpose.map(|purpose| purpose.purpose) else { continue };
+                    if !scopes.iter().any(|&wanted| book.purposes.lineage(actual).any(|parent| parent == wanted)) {
+                        continue;
+                    }
+                    let owns = |place| {
+                        let details = &book.places[place];
+                        details.class != Class::Outside && self.plan.owners_of(place).iter().any(|share| {
+                            share.owner == ctx.owner && !share.share.is_zero()
+                        })
+                    };
+                    let direction = crate::purpose_direction(owns(flow.from), owns(flow.to), book.purposes[actual].root);
+                    let Some(direction) = direction else { continue };
+                    let amounts = self.plan.amounts.get(&id);
+                    let (amount, place) = match direction {
+                        Dir::Out => (Amount::new(amounts.map_or(flow.out.qty, |amounts| amounts.out), flow.out.unit), flow.from),
+                        Dir::In => (Amount::new(amounts.map_or(flow.arrive.qty, |amounts| amounts.arrive), flow.arrive.unit), flow.to),
+                    };
+                    let Ok(amount) = (Calc { book, day: flow.day }).convert(amount, book.base) else { continue };
+                    if !self.plan.allocate(place, amount.qty).any(|(owner, qty)| owner.owner == ctx.owner && !qty.is_zero()) {
+                        continue;
+                    }
+                    let key = (flow.day, id);
+                    let at = counted.binary_search_by_key(&key, |&(day, id)| (day, id)).unwrap_or_else(|at| at);
+                    counted.insert(at, key);
+                    if counted.len() > 3 {
+                        counted.remove(0);
+                    }
+                }
+                counted.into_iter().rev().map(|(_, id)| id).collect()
             }
         };
         found.reverse();
@@ -225,14 +256,14 @@ impl Frame<'_, '_> {
     /// The flows that built the count, as labels.
     fn contributions(&self, mut d: Diagnostic, reads: Option<Reads>, cond: NodeId) -> Diagnostic {
         for id in reads.map(|r| self.contributors(r, cond)).unwrap_or_default() {
-            let flow = &self.book.flows[id];
+            let flow = &self.book().flows[id];
             let moved = if matches!(reads, Some(Reads::Total(Dir::Out, _))) { flow.out } else { flow.arrive };
             let text = format!(
                 "{}: {} from {} to {}",
                 flow.day,
                 self.money(moved),
-                show::place(self.book, flow.from),
-                show::place(self.book, flow.to)
+                show::place(self.book(), flow.from),
+                show::place(self.book(), flow.to)
             );
             d = d.context(flow.loc, text);
         }
@@ -258,18 +289,18 @@ pub(crate) fn broken(f: &Frame, step: usize, warn: bool, waiver: Option<Waiver>)
     };
     let (what, fix) = f.doc();
     let (bound, reads) = (f.comparison(cond), f.facts.steps[step].reads);
-    let headline = match (message.map(|text| f.book.name(text).to_owned()), &bound) {
+    let headline = match (message.map(|text| f.plan.book().name(text).to_owned()), &bound) {
         (message, Some(bound)) => {
-            let lead = message.unwrap_or_else(|| show::subject(f.book, f.ctx.subject).to_owned());
+            let lead = message.unwrap_or_else(|| show::subject(f.plan.book(), f.ctx.subject).to_owned());
             format!("{lead}: {}", fact(f, bound, reads))
         }
         (Some(message), None) => message,
         (None, None) => what.clone().unwrap_or_else(|| {
-            format!("{} is not satisfied by {}", f.book.name(f.law.name), show::subject(f.book, f.ctx.subject))
+            format!("{} is not satisfied by {}", f.plan.book().name(f.law.name), show::subject(f.plan.book(), f.ctx.subject))
         }),
     };
     let severity = if warn { Severity::Warning } else { Severity::Error };
-    let d = f.locate(Diagnostic::new(severity, f.book.name(f.law.name).to_owned(), headline), cond, reads);
+    let d = f.locate(Diagnostic::new(severity, f.plan.book().name(f.law.name).to_owned(), headline), cond, reads);
     let d = what.filter(|_| message.is_some() || bound.is_some()).into_iter().fold(d, Diagnostic::note);
     let d = [suggestion(f, step, cond), fix].into_iter().flatten().fold(d, Diagnostic::help);
     accepted(d, f, waiver)
@@ -295,7 +326,7 @@ fn accepted(d: Diagnostic, f: &Frame, waiver: Option<Waiver>) -> Diagnostic {
         Some(Waiver::Marked(waive)) => {
             let d = d.context(waive.loc, "waived here").relaxed().disposed(Disposition::Waived);
             match waive.reason {
-                Some(reason) => d.note(format!("waived: {}", f.book.text(reason))),
+                Some(reason) => d.note(format!("waived: {}", f.plan.book().text(reason))),
                 None => d,
             }
         }
@@ -315,13 +346,13 @@ pub(crate) fn priced(
     waive: Option<Waive>,
 ) -> Diagnostic {
     let StepKind::Require { cond, .. } = f.law.steps[step].kind else { unreachable!("only a require prices") };
-    let who = f.book.name(f.book.entities[owed.to].path);
-    let (amount, name) = (f.money(amount), f.book.name(name));
+    let who = f.plan.book().name(f.plan.book().entities[owed.to].path);
+    let (amount, name) = (f.money(amount), f.plan.book().name(name));
     let headline = match waive {
         Some(_) => format!("waived: {amount} would be owed to {who} as {name}"),
         None => format!("{amount} owed to {who} as {name}, due {}", owed.due),
     };
-    let d = Diagnostic::info(f.book.name(f.law.name).to_owned(), headline).disposed(Disposition::Priced);
+    let d = Diagnostic::info(f.plan.book().name(f.law.name).to_owned(), headline).disposed(Disposition::Priced);
     let (what, fix) = f.doc();
     let d = what.into_iter().fold(f.locate(d, cond, None), Diagnostic::note);
     match waive {
@@ -337,7 +368,7 @@ pub(crate) fn priced(
 /// never set is shown where its holder is declared, since that is where the
 /// line that fixes it goes; the law's line that read it is context.
 pub(crate) fn faulted(f: &Frame, fault: Fault, origin: Option<usize>, holder: Option<Subject>) -> Diagnostic {
-    let (book, law) = (f.book, f.book.name(f.law.name));
+    let (book, law) = (f.plan.book(), f.plan.book().name(f.law.name));
     let (what, help) = show::fault(book, fault, f.ctx.day);
     let code = match fault {
         Fault::InvalidProgram => "invalid-program",
@@ -384,7 +415,7 @@ fn node_id(index: usize) -> NodeId {
 /// is older than the figures the system ships. Every law that needs a figure
 /// of that year is skipped, and this is said once.
 fn missing_figures(f: &Frame, param: Id<Param>, system: Id<System>, (cause, text): (Loc, String)) -> Diagnostic {
-    let (book, year) = (f.book, f.ctx.over.first().year());
+    let (book, year) = (f.plan.book(), f.ctx.over.first().year());
     let (param, system) = (&book.params[param], book.name(book.systems[system].path));
     let first = param.rows.iter().filter_map(|row| row.since).min().map(|day| day.year());
     let starts = first.map_or(String::new(), |first| format!(": its figures start in {first}"));
@@ -430,7 +461,7 @@ fn origin(f: &Frame, root: NodeId) -> Option<usize> {
 fn suggestion(f: &Frame, step: usize, cond: NodeId) -> Option<String> {
     let bound = f.comparison(cond)?;
     let moves = f.facts.steps[step].follows?;
-    let calc = Calc { book: f.book, day: f.ctx.day };
+    let calc = Calc { book: f.plan.book(), day: f.ctx.day };
     let flow = calc.convert(f.ctx.amount?, bound.limit.unit).ok()?.qty;
     let show = |qty: Qty| f.money(Amount::new(qty, bound.limit.unit));
     // How far the counted side is beyond the bound, or short of it.
@@ -447,7 +478,7 @@ fn suggestion(f: &Frame, step: usize, cond: NodeId) -> Option<String> {
         Follows::Total(dir, window) => {
             format!("{} {}", if dir == Dir::In { "go in" } else { "come out" }, span(window))
         }
-        Follows::Tally(name) => format!("count toward `{}` this year", f.book.name(name)),
+        Follows::Tally(name) => format!("count toward `{}` this year", f.plan.book().name(name)),
     };
     Some(match (bound.upper, flow > off) {
         (true, true) => format!("at most {} more can {of}", show(flow - off)),

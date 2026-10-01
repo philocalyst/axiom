@@ -15,7 +15,7 @@ pub(crate) fn value(book: &Book, day: Day, value: Value) -> String {
         Value::Span(s) => s.to_string(),
         Value::Text(t) => format!("{:?}", book.text(t)),
         Value::Name(n) | Value::Glob(n) => book.name(n).into(),
-        Value::Code(c) => book.name(c).into(),
+        Value::Code(c) => code(book.name(c)),
         Value::Place(p) => place(book, p).into(),
         Value::Entity(e) => book.name(book.entities[e].path).into(),
         Value::Kind(k) => book.name(book.kinds[k].name).into(),
@@ -30,6 +30,10 @@ pub(crate) fn value(book: &Book, day: Day, value: Value) -> String {
 
 pub(crate) fn place<'a>(book: &Book<'a>, place: Id<Place>) -> &'a str {
     book.name(book.places[place].path)
+}
+
+fn code(name: &str) -> String {
+    format!("^{name}")
 }
 
 pub(crate) fn subject<'a>(book: &Book<'a>, subject: Subject) -> &'a str {
@@ -89,5 +93,15 @@ pub(crate) fn fault(book: &Book, fault: Fault, day: Day) -> (String, Option<Stri
         }
         Fault::DivideByZero => ("division by zero".into(), None),
         Fault::Overflow => ("a value out of range".into(), None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::code;
+
+    #[test]
+    fn code_values_keep_the_native_caret() {
+        assert_eq!(code("check-1041"), "^check-1041");
     }
 }
