@@ -37,6 +37,7 @@ pub struct Checkpoint {
     day: Day,
     phase: CheckpointPhase,
     applied: u32,
+    temporal_through: Option<Day>,
     world: World,
     record: Record,
     digest: u64,
@@ -58,10 +59,11 @@ impl Checkpoint {
 impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// The fold state at the current day boundary.
     pub fn checkpoint(&self) -> Checkpoint {
-        let (day, phase, applied, world, record) = (
+        let (day, phase, applied, temporal_through, world, record) = (
             self.clock.day,
             self.clock.phase,
             self.clock.applied,
+            self.clock.temporal_through,
             self.world.clone(),
             self.record.forked(),
         );
@@ -70,6 +72,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             day,
             phase,
             applied,
+            temporal_through,
             &world.holdings,
             &world.totals,
             &world.tallies,
@@ -78,7 +81,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             &record,
         )
             .hash(&mut hasher);
-        Checkpoint { day, phase, applied, world, record, digest: hasher.finish() }
+        Checkpoint { day, phase, applied, temporal_through, world, record, digest: hasher.finish() }
     }
 
     /// Folds on through `until` a month at a time, handing `month_end` a
@@ -108,7 +111,13 @@ impl<'b, 's> Plan<'b, 's> {
             CheckpointPhase::BeforeClosings => Timeline::before_closings(self, from.day),
             CheckpointPhase::EndOfDay => Timeline::after(self, from.day),
         };
-        let clock = Clock { day: from.day, phase: from.phase, timeline, applied: from.applied };
+        let clock = Clock {
+            day: from.day,
+            phase: from.phase,
+            timeline,
+            applied: from.applied,
+            temporal_through: from.temporal_through,
+        };
         Ledger::resumed(self, options, clock, (from.world.clone(), from.record.forked()))
     }
 }

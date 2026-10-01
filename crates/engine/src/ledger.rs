@@ -104,6 +104,10 @@ pub(crate) struct Clock {
     pub timeline: Timeline,
     /// How many flows `apply` has taken.
     pub applied: u32,
+    /// Last day whose temporal state has been sampled. The world history
+    /// retains changes sparsely, so this cursor is needed to resume daily
+    /// date-dependent queries without replaying old days.
+    pub temporal_through: Option<Day>,
 }
 
 impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
@@ -125,6 +129,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 phase: CheckpointPhase::EndOfDay,
                 timeline,
                 applied: 0,
+                temporal_through: None,
             },
             (world, record),
         )
@@ -172,6 +177,89 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// The last day folded.
     pub fn day(&self) -> Day {
         self.clock.day
+    }
+
+    /// Records the temporal expressions against the current world after a
+    /// state mutation. Same-day samples are intentional: extrema observe each
+    /// intraday state, while `days` uses the final sample for that day.
+    pub(crate) fn sample_temporal(&mut self, day: Day) {
+        if self.plan.temporal.is_empty() {
+            return;
+        }
+        crate::eval::sample_temporal(self.plan, &mut self.world, day, &mut self.scratch.values);
+        self.clock.temporal_through = Some(
+            self.clock
+                .temporal_through
+                .map_or(day, |through| through.max(day)),
+        );
+    }
+
+    fn sample_temporal_through(&mut self, through: Day) {
+        if self.plan.temporal.is_empty() {
+            return;
+        }
+        let start = match self.clock.temporal_through {
+            Some(last) => last.0.checked_add(1).map(Day),
+            None => Some(self.temporal_start(through)),
+        };
+        let Some(start) = start.filter(|&start| start <= through) else {
+            if self.clock.temporal_through.is_none() {
+                self.clock.temporal_through = Some(through);
+            }
+            return;
+        };
+
+        if self.plan.needs_daily_temporal() {
+            let mut day = start;
+            loop {
+                self.sample_temporal(day);
+                if day >= through {
+                    break;
+                }
+                let Some(next) = day.0.checked_add(1).map(Day) else {
+                    break;
+                };
+                day = next;
+            }
+        } else {
+            if self.clock.temporal_through.is_none() {
+                self.sample_temporal(start);
+            }
+            let (first, last) = {
+                let dates = self.plan.temporal_dates();
+                (
+                    dates.partition_point(|&day| day < start),
+                    dates.partition_point(|&day| day <= through),
+                )
+            };
+            for index in first..last {
+                let day = self.plan.temporal_dates()[index];
+                if day != Day::MIN {
+                    self.sample_temporal(day);
+                }
+            }
+            self.clock.temporal_through = Some(
+                self.clock
+                    .temporal_through
+                    .map_or(through, |last| last.max(through)),
+            );
+        }
+    }
+
+    fn temporal_start(&self, through: Day) -> Day {
+        self.plan
+            .temporal_start()
+            .filter(|&day| day != Day::MIN && day <= through)
+            .or_else(|| {
+                self.plan
+                    .book
+                    .flows
+                    .iter()
+                    .map(|(_, flow)| flow.day)
+                    .filter(|&day| day != Day::MIN && day <= through)
+                    .min()
+            })
+            .unwrap_or(through)
     }
 
     /// Lets the deadlines that fall due by `day` fire, as they would had the
@@ -1517,6 +1605,7 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             amounts,
             flow_ordinal,
         ));
+        self.sample_temporal(day);
         self.world.holdings.tidy();
         self.record.since(marks)
     }
@@ -1630,13 +1719,17 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let limit = limit.min(Moment::end_of(self.horizon));
         loop {
             let Some(moment) = self.clock.timeline.peek().filter(|&moment| moment <= limit) else {
-                return;
+                break;
             };
+            self.sample_temporal_through(moment.day);
             self.clock.timeline.consume(moment, self.plan);
             self.clock.day = moment.day;
             self.enter(moment.day);
+            self.sample_temporal(moment.day);
             self.step(moment);
+            self.sample_temporal(moment.day);
         }
+        self.sample_temporal_through(limit.day);
     }
 
     fn step(&mut self, moment: Moment) {
