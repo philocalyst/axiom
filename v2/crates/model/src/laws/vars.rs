@@ -16,11 +16,21 @@ pub(crate) enum When {
     Each,
     By,
     Always,
+    Flow,
     Template,
 }
 
 impl When {
-    pub const TRIGGERS: [When; 7] = [When::In, When::Out, When::Gain, When::Spend, When::Each, When::By, When::Always];
+    pub const TRIGGERS: [When; 8] = [
+        When::In,
+        When::Out,
+        When::Gain,
+        When::Spend,
+        When::Flow,
+        When::Each,
+        When::By,
+        When::Always,
+    ];
 
     pub fn of(trigger: &Written) -> When {
         match trigger {
@@ -31,6 +41,7 @@ impl When {
             Written::Each(_) | Written::Closing { .. } => When::Each,
             Written::By(_) => When::By,
             Written::Always => When::Always,
+            Written::Flow => When::Flow,
         }
     }
 
@@ -44,6 +55,7 @@ impl When {
             When::Spend => "`on spend`",
             When::Each => "`each month` or `each year`",
             When::Always => "`always`",
+            When::Flow => "`on flow`",
             When::Template => "a contract template",
         }
     }
@@ -79,12 +91,12 @@ impl Var {
 
     /// Whether an expression running at `when` may read this variable.
     pub(crate) fn provided_by(self, when: When) -> bool {
-        let flow = matches!(when, When::In | When::Out | When::Gain | When::Spend | When::Template);
+        let flow = matches!(when, When::In | When::Out | When::Gain | When::Spend | When::Flow | When::Template);
         match self {
             Var::Subject | Var::Owner => true,
             Var::Date | Var::Year | Var::Month => when != When::Deadline,
             Var::Amount | Var::From | Var::To | Var::Flow => flow,
-            Var::Purpose | Var::Description => when == When::Template,
+            Var::Purpose | Var::Description => flow,
             Var::Payee => flow && when != When::Gain,
             Var::Gain | Var::Proceeds | Var::Basis | Var::Held => when == When::Gain,
             Var::Balance => when == When::Always,

@@ -10,7 +10,7 @@
 //! order their lines need: an amount is only exact once its commodity's
 //! precision is settled.
 
-use axiom_core::{Day, Days, Diagnostic, Dim, Id, Loc, Map, Ratio, Span, Sym, Tree};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, Span, Sym, Tree};
 use axiom_syntax::{Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line};
 
 use crate::book::{Amount, Basis, Commodity, Entity, Has, Kind, Place, Prop, Residence, Sort};
@@ -467,14 +467,6 @@ impl<'a, 's> Args<'_, 'a, 's> {
                 .label(name.loc, "choose another name")
                 .note("built-in properties keep their meaning everywhere, so a kind cannot redefine them"));
         }
-        // Asset-law depreciation commonly excludes land from building cost.
-        // This language-level property always shares the book's currency unit,
-        // even when the untyped source value omitted a unit spelling.
-        let ty = if name.text == "land" && matches!(ty, Ty::Amount(_)) {
-            Ty::Amount(Dim::Of(self.world.book.base))
-        } else {
-            ty
-        };
         Ok(Assign::Has(Has { name: self.world.book.names.intern(name.text), ty, loc: Some(name.loc) }))
     }
 
