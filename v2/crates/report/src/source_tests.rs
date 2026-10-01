@@ -197,6 +197,63 @@ opening 2026-01-01
     });
 }
 
+/// Party detail remains useful when separate counterparties offset in the
+/// spending total. The compact backing grid must retain each row independently.
+#[test]
+fn party_flow_keeps_offsetting_counterparty_rows() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+
+entity me
+entity grocer
+entity diner
+account checking : asset
+
+purpose food : spending
+purpose groceries : food
+purpose dining : food
+
+opening 2026-01-01
+  checking 500.00 USD
+
+2026-01-02 checking -> grocer 50.00 USD #groceries
+2026-01-03 diner -> checking 50.00 USD #dining
+";
+
+    with_run(source, day(2026, 1, 4), |book, run| {
+        let report = crate::report(
+            book,
+            run,
+            &Query::Flow {
+                by: FlowBy::Party,
+                from: Some(day(2026, 1, 1)),
+                to: None,
+            },
+            None,
+        )
+        .unwrap();
+        let rows = &report.sections[0].rows;
+        let amount = |party: &str| {
+            rows.iter()
+                .find(|row| {
+                    row.cells.first().is_some_and(
+                        |cell| matches!(cell, crate::Cell::Name(name) if *name == party),
+                    )
+                })
+                .and_then(|row| row.cells.get(1))
+        };
+        let crate::Cell::Amount { qty: paid, .. } = amount("grocer").unwrap() else {
+            panic!("grocer keeps its spending row")
+        };
+        let crate::Cell::Amount { qty: refund, .. } = amount("diner").unwrap() else {
+            panic!("diner keeps its offsetting income row")
+        };
+        assert_eq!((*paid, *refund), (Qty(5_000), Qty(-5_000)));
+    });
+}
+
 #[test]
 fn decoded_flow_descriptions_stay_borrowed_in_report_cells() {
     let source = r#"base USD

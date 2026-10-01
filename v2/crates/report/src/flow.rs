@@ -60,7 +60,10 @@ pub(crate) fn view_by_party_with_lens<'s>(
             Periods::covering(Period::Month, first, cutoff).last(DEFAULT_PERIODS)
         }
     };
-    let mut values: HashMap<(PurposeRoot, Party), Vec<Qty>> = HashMap::new();
+    // One flat period grid avoids a separately allocated `Vec<Qty>` for every
+    // party. `values` only stores each row's stable slot in that grid.
+    let mut values: HashMap<(PurposeRoot, Party), usize> = HashMap::new();
+    let mut amounts = Vec::new();
     let mut unpriced = 0;
     for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
         let flow = posting.flow;
@@ -92,9 +95,12 @@ pub(crate) fn view_by_party_with_lens<'s>(
                 continue;
             };
             let part = spread(amount, flow.recognized, happened);
-            values
-                .entry((root, party))
-                .or_insert_with(|| vec![Qty::ZERO; periods.len()])[period] += part;
+            let index = *values.entry((root, party)).or_insert_with(|| {
+                let index = amounts.len() / periods.len();
+                amounts.resize(index * periods.len() + periods.len(), Qty::ZERO);
+                index
+            });
+            amounts[index * periods.len() + period] += part;
         }
     }
 
@@ -111,22 +117,24 @@ pub(crate) fn view_by_party_with_lens<'s>(
         let mut parties: Vec<_> = values
             .iter()
             .filter(|((found, _), _)| *found == root)
+            .map(|(&(found, party), &index)| ((found, party), index))
             .collect();
-        parties.sort_by_key(|((_, party), amounts)| {
-            let magnitude = amounts
+        parties.sort_by_key(|((_, party), index)| {
+            let row = &amounts[index * periods.len()..][..periods.len()];
+            let magnitude = row
                 .iter()
                 .map(|qty| i128::from(qty.0).abs())
                 .sum::<i128>();
             (-magnitude, party.label(book))
         });
-        let total =
-            parties
-                .iter()
-                .fold(vec![Qty::ZERO; periods.len()], |mut total, (_, amounts)| {
-                    add_into(&mut total, amounts);
-                    total
-                });
-        if parties.iter().all(|(_, amounts)| is_zero(amounts)) {
+        let total = parties.iter().fold(vec![Qty::ZERO; periods.len()], |mut total, (_, index)| {
+            let row = &amounts[index * periods.len()..][..periods.len()];
+            add_into(&mut total, row);
+            total
+        });
+        if parties.iter().all(|(_, index)| {
+            is_zero(&amounts[index * periods.len()..][..periods.len()])
+        }) {
             continue;
         }
         let heading = match root {
@@ -136,7 +144,8 @@ pub(crate) fn view_by_party_with_lens<'s>(
             PurposeRoot::Transfer => "Transfer",
         };
         section.push(row(book, Cell::Word(heading), 0, &total, Style::Total));
-        for ((_, party), amounts) in parties {
+        for ((_, party), index) in parties {
+            let amounts = &amounts[index * periods.len()..][..periods.len()];
             let name = party.label(book);
             for (index, &amount) in amounts
                 .iter()
