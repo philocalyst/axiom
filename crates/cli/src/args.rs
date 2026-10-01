@@ -118,7 +118,6 @@ pub const OPTIONS: &[OptionSpec] = &[
         "whose money (default: everyone's; a household has its members')",
     )
     .everywhere(),
-    option(Opt::For, "entity", Some("NAME"), "the old name of --for").everywhere(),
     option(Opt::Help, "help", None, "show this screen")
         .short('h')
         .everywhere(),
@@ -925,8 +924,8 @@ mod tests {
             }
         ));
         assert_eq!(whose, Some("me"));
-        // `--entity` is the name `--for` had.
-        assert_eq!(query_of(&["tax", "--entity", "jordan"]).1, Some("jordan"));
+        let removed_alias = error_of(&["tax", "--entity", "jordan"]);
+        assert!(removed_alias.message.contains("unknown option"));
     }
 
     #[test]

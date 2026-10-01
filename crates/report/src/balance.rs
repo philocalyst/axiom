@@ -10,7 +10,7 @@ use axiom_model::{Amount, Book, Class, Commodity, Period, Place};
 
 use crate::calendar::Periods;
 use crate::history::Snapshots;
-use crate::lens::{Basket, Lens, Valued};
+use crate::lens::{Basket, Lens, Valued, on_balance_sheet};
 use crate::places::{depth, leaf, names, path};
 use crate::resolve;
 use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
@@ -30,13 +30,18 @@ pub(crate) fn view_with_lens<'s>(
     let selection = Selection::new(book, globs)?;
     let snapshots = Snapshots::of(lens, run, &column_days(book, at, monthly), value);
 
-    let mut table = Section::new(iter::once(Column::left("Place")).chain(amount_columns(book, &snapshots, value)));
+    let mut table = Section::new(
+        iter::once(Column::left("Place")).chain(amount_columns(book, &snapshots, value)),
+    );
     let mut unpriced = 0;
     for place in book.places.ids() {
         match selection.mark(place) {
             Mark::Hidden => {}
             Mark::Context => table.push(context_row(book, place, snapshots.days().len())),
-            Mark::Chosen => unpriced += push_place(&mut table, lens, place, &snapshots, value),
+            Mark::Chosen if on_balance_sheet(book.places[place].class) => {
+                unpriced += push_place(&mut table, lens, place, &snapshots, value)
+            }
+            Mark::Chosen => {}
         }
     }
     if table.rows.is_empty() {
@@ -46,11 +51,17 @@ pub(crate) fn view_with_lens<'s>(
         table.note("Holdings without a price are muted, in their own commodity, and left out of every total.");
     }
     if snapshots.unpriced > 0 {
-        table
-            .note(format!("{} flows have no price on their day and are not counted in the value.", snapshots.unpriced));
+        table.note(format!(
+            "{} flows have no price on their day and are not counted in the value.",
+            snapshots.unpriced
+        ));
     }
 
-    let title = if monthly { format!("Balances by month to {at}") } else { format!("Balances at {at}") };
+    let title = if monthly {
+        format!("Balances by month to {at}")
+    } else {
+        format!("Balances at {at}")
+    };
     let mut report = Report::new(title).with(table);
     if globs.is_empty() {
         report = report.with(net_worth_section(lens, &snapshots));
@@ -75,7 +86,11 @@ impl NetWorth {
         let book = lens.book();
         let side = |class: Class| -> Valued {
             let mut basket = Basket::default();
-            for root in book.places.roots().filter(|&root| book.places[root].class == class) {
+            for root in book
+                .places
+                .roots()
+                .filter(|&root| book.places[root].class == class)
+            {
                 basket.merge(&snapshots.subtree(book, column, root));
             }
             basket.value(lens, class)
@@ -99,16 +114,32 @@ fn column_days(book: &Book, at: Day, monthly: bool) -> Vec<Day> {
     if !monthly {
         return vec![at];
     }
-    let first = book.flows.as_slice().first().map_or(at, |flow| flow.day.min(at));
-    Periods::covering(Period::Month, first, at).last(MONTHLY_COLUMNS).ends().map(|end| end.min(at)).collect()
+    let first = book
+        .flows
+        .as_slice()
+        .first()
+        .map_or(at, |flow| flow.day.min(at));
+    Periods::covering(Period::Month, first, at)
+        .last(MONTHLY_COLUMNS)
+        .ends()
+        .map(|end| end.min(at))
+        .collect()
 }
 
 fn amount_columns<'s>(book: &'s Book<'_>, snapshots: &Snapshots, value: bool) -> Vec<Column<'s>> {
     if let [_] = snapshots.days() {
-        let title = if value { format!("Value ({})", base_symbol(book)) } else { "Balance".to_string() };
+        let title = if value {
+            format!("Value ({})", base_symbol(book))
+        } else {
+            "Balance".to_string()
+        };
         return vec![Column::right(title)];
     }
-    snapshots.days().iter().map(|day| Column::right(day.to_string())).collect()
+    snapshots
+        .days()
+        .iter()
+        .map(|day| Column::right(day.to_string()))
+        .collect()
 }
 
 fn base_symbol<'s>(book: &'s Book<'_>) -> &'s str {
@@ -133,19 +164,43 @@ struct Selection {
 
 impl Selection {
     fn new(book: &Book, globs: &[&str]) -> Result<Selection, Diagnostic> {
-        if let Some(stray) =
-            globs.iter().find(|&&pattern| !book.places.values().any(|place| matches(pattern, book.name(place.path))))
-        {
+        if let Some(stray) = globs.iter().find(|&&pattern| {
+            !book
+                .places
+                .values()
+                .any(|place| matches(pattern, book.name(place.path)))
+        }) {
             return Err(resolve::nothing_named("place matching", stray, names(book)));
         }
         if globs.is_empty() {
-            return Ok(Selection { marks: vec![Mark::Chosen; book.places.len()] });
+            let mut marks = vec![Mark::Hidden; book.places.len()];
+            for (id, place) in book.places.iter() {
+                if on_balance_sheet(place.class) {
+                    marks[id.index()] = Mark::Chosen;
+                }
+            }
+            for index in (0..marks.len()).rev() {
+                if marks[index] != Mark::Hidden
+                    && let Some(parent) = book.places.parent(Id::new(index as u32))
+                    && marks[parent.index()] == Mark::Hidden
+                {
+                    marks[parent.index()] = Mark::Context;
+                }
+            }
+            return Ok(Selection { marks });
         }
         let mut marks = vec![Mark::Hidden; book.places.len()];
         // Pre-order: a parent is marked before its children.
         for (id, place) in book.places.iter() {
-            let inherited = book.places.parent(id).is_some_and(|parent| marks[parent.index()] == Mark::Chosen);
-            if inherited || globs.iter().any(|pattern| matches(pattern, book.name(place.path))) {
+            let inherited = book
+                .places
+                .parent(id)
+                .is_some_and(|parent| marks[parent.index()] == Mark::Chosen);
+            if inherited
+                || globs
+                    .iter()
+                    .any(|pattern| matches(pattern, book.name(place.path)))
+            {
                 marks[id.index()] = Mark::Chosen;
             }
         }
@@ -169,7 +224,10 @@ impl Selection {
 /// `checking` picks `assets/bank/checking`: a pattern may match the whole
 /// path or any trailing run of its segments.
 fn matches(pattern: &str, path: &str) -> bool {
-    glob(pattern, path) || path.match_indices('/').any(|(slash, _)| glob(pattern, &path[slash + 1..]))
+    glob(pattern, path)
+        || path
+            .match_indices('/')
+            .any(|(slash, _)| glob(pattern, &path[slash + 1..]))
 }
 
 // ─── Rows ───────────────────────────────────────────────────────────────────
@@ -189,8 +247,9 @@ fn push_place<'s>(
     value: bool,
 ) -> usize {
     let book = lens.book();
-    let baskets: Vec<Basket> =
-        (0..snapshots.days().len()).map(|column| snapshots.subtree(book, column, place)).collect();
+    let baskets: Vec<Basket> = (0..snapshots.days().len())
+        .map(|column| snapshots.subtree(book, column, place))
+        .collect();
     let (class, sign) = (book.places[place].class, lens.display_sign(place));
     let lines = if value {
         market_lines(lens, class, sign, snapshots.days(), &baskets)
@@ -231,12 +290,27 @@ fn push_place<'s>(
             }
         }
     }
-    let unpriced = lines.iter().filter(|line| line.style == Style::Muted).count();
+    let unpriced = lines
+        .iter()
+        .filter(|line| line.style == Style::Muted)
+        .count();
     let is_root = depth(book, place) == 0;
     for (index, line) in lines.into_iter().enumerate() {
-        let label = if index == 0 { Cell::Name(leaf(book, place)) } else { Cell::Blank };
-        let style = if is_root && line.style == Style::Normal { Style::Total } else { line.style };
-        table.push(Row::new(iter::once(label).chain(line.cells)).depth(depth(book, place)).style(style));
+        let label = if index == 0 {
+            Cell::Name(leaf(book, place))
+        } else {
+            Cell::Blank
+        };
+        let style = if is_root && line.style == Style::Normal {
+            Style::Total
+        } else {
+            line.style
+        };
+        table.push(
+            Row::new(iter::once(label).chain(line.cells))
+                .depth(depth(book, place))
+                .style(style),
+        );
     }
     unpriced
 }
@@ -249,44 +323,74 @@ fn context_row<'s>(book: &'s Book<'_>, place: Id<Place>, columns: usize) -> Row<
 
 /// One line per commodity held anywhere in the subtree, at its own units.
 fn native_lines<'s>(book: &'s Book<'_>, sign: i64, baskets: &[Basket]) -> Vec<Line<'s>> {
-    let units: BTreeSet<Id<Commodity>> =
-        baskets.iter().flat_map(|basket| basket.amounts().map(|held| held.unit)).collect();
+    let units: BTreeSet<Id<Commodity>> = baskets
+        .iter()
+        .flat_map(|basket| basket.amounts().map(|held| held.unit))
+        .collect();
     units
         .into_iter()
         .map(|unit| Line {
             style: Style::Normal,
-            cells: baskets.iter().map(|basket| amount_cell(book, basket.get(unit), unit, sign)).collect(),
+            cells: baskets
+                .iter()
+                .map(|basket| amount_cell(book, basket.get(unit), unit, sign))
+                .collect(),
         })
         .collect()
 }
 
 /// One line valuing everything priceable in the base currency, then a muted
 /// line for each commodity that has no price.
-fn market_lines<'s>(lens: Lens<'s, '_, '_, '_>, class: Class, sign: i64, days: &[Day], baskets: &[Basket]) -> Vec<Line<'s>> {
+fn market_lines<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    class: Class,
+    sign: i64,
+    days: &[Day],
+    baskets: &[Basket],
+) -> Vec<Line<'s>> {
     let book = lens.book();
-    let valued: Vec<Valued> =
-        baskets.iter().zip(days).map(|(basket, &day)| basket.value(lens.on(day), class)).collect();
+    let valued: Vec<Valued> = baskets
+        .iter()
+        .zip(days)
+        .map(|(basket, &day)| basket.value(lens.on(day), class))
+        .collect();
     let mut lines = Vec::new();
     if valued.iter().any(|column| column.priced > 0) {
-        let cells = valued
-            .iter()
-            .map(|column| if column.priced == 0 { Cell::Blank } else { Cell::base(book, Qty(column.total.0 * sign)) });
-        lines.push(Line { style: Style::Normal, cells: cells.collect() });
+        let cells = valued.iter().map(|column| {
+            if column.priced == 0 {
+                Cell::Blank
+            } else {
+                Cell::base(book, Qty(column.total.0 * sign))
+            }
+        });
+        lines.push(Line {
+            style: Style::Normal,
+            cells: cells.collect(),
+        });
     }
-    let unpriced: BTreeSet<Id<Commodity>> =
-        valued.iter().flat_map(|column| column.unpriced.iter().map(|held| held.unit)).collect();
+    let unpriced: BTreeSet<Id<Commodity>> = valued
+        .iter()
+        .flat_map(|column| column.unpriced.iter().map(|held| held.unit))
+        .collect();
     for unit in unpriced {
         let cells = valued.iter().map(|column| {
             let held = column.unpriced.iter().find(|held| held.unit == unit);
             amount_cell(book, held.map_or(Qty::ZERO, |held| held.qty), unit, sign)
         });
-        lines.push(Line { style: Style::Muted, cells: cells.collect() });
+        lines.push(Line {
+            style: Style::Muted,
+            cells: cells.collect(),
+        });
     }
     lines
 }
 
 fn amount_cell<'s>(book: &'s Book<'_>, qty: Qty, unit: Id<Commodity>, sign: i64) -> Cell<'s> {
-    if qty.is_zero() { Cell::Blank } else { Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit)) }
+    if qty.is_zero() {
+        Cell::Blank
+    } else {
+        Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit))
+    }
 }
 
 // ─── Net worth ──────────────────────────────────────────────────────────────
@@ -325,8 +429,15 @@ fn net_worth_section<'s>(lens: Lens<'s, '_, '_, '_>, snapshots: &Snapshots) -> S
             );
         }
     }
-    if let Some(unpriced) = worths.iter().map(|worth| worth.unpriced).max().filter(|&n| n > 0) {
-        section.note(format!("{unpriced} holdings have no price and are not counted."));
+    if let Some(unpriced) = worths
+        .iter()
+        .map(|worth| worth.unpriced)
+        .max()
+        .filter(|&n| n > 0)
+    {
+        section.note(format!(
+            "{unpriced} holdings have no price and are not counted."
+        ));
     }
     section
 }

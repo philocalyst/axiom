@@ -14,9 +14,11 @@ mod variable;
 use std::iter;
 
 use axiom_core::day::days_in_month;
-use axiom_core::{Day, Id, Map, Qty, Span};
+use axiom_core::{Arena, Day, Days, Id, Map, Qty, Span};
 use axiom_engine::{Checkpoint, Effect, Plan, Run, Violation};
-use axiom_model::{Amount, Book, Contract, Flow, Law, Period, RuntimeFlow, Subject};
+use axiom_model::{
+    Amount, Book, Contract, Law, Period, RuntimeDetail, RuntimeFlow, ScheduleKind, Subject,
+};
 
 use self::bands::{Bands, Share};
 use self::expected::{Expectation, Origin, covered_by_contract, covered_on, expected};
@@ -99,8 +101,9 @@ fn view_with<'p, 'b, 's>(
         .filter(|flow| !covered_by_contract(book, flow))
         .map(RuntimeFlow::source)
         .collect();
-    let (contract_flows, contract_rows, contract_issues) =
-        contract_forecasts(lens, run, today, until);
+    flows.sort_by_key(|flow| flow.flow.day);
+    let (contract_flows, runtime_details, contract_rows, contract_issues) =
+        contract_forecasts(plan, checkpoint, lens, &flows, today, until, relaxed);
     flows.extend(contract_flows);
     flows.sort_by_key(|flow| flow.flow.day);
     let checkpoints = checkpoints(today, until);
@@ -112,10 +115,10 @@ fn view_with<'p, 'b, 's>(
             today,
             relaxed,
             flows,
-            &run.runtime_details,
+            &runtime_details,
             &checkpoints,
         ),
-        None => project_runtime(plan, lens, today, flows, &run.runtime_details, &checkpoints),
+        None => project_runtime(plan, lens, today, flows, &runtime_details, &checkpoints),
     };
 
     let due = coming_due(&trace, historical_effects, lens.whose, today);
@@ -141,13 +144,7 @@ fn view_with<'p, 'b, 's>(
         .with(outlook)
         .with(expected_section(lens, &expected, today, until));
     if !book.contracts.is_empty() {
-        report = report.with(contract_section(
-            book,
-            &contract_rows,
-            &contract_issues,
-            run,
-            until,
-        ));
+        report = report.with(contract_section(book, &contract_rows, &contract_issues));
     }
     report
         .with(owed_section(book, &due))
@@ -426,77 +423,199 @@ struct ContractRow {
 /// occurrence cannot be derived, discard that contract's partial flows and
 /// retain the typed error for the report instead of forecasting a partial leg set.
 fn contract_forecasts<'s>(
+    plan: &Plan<'_, 's>,
+    checkpoint: Option<&Checkpoint>,
     lens: Lens<'s, '_, '_, '_>,
-    run: &Run,
+    expected_flows: &[RuntimeFlow],
     today: Day,
     until: Day,
+    relaxed: bool,
 ) -> (
     Vec<RuntimeFlow>,
+    Arena<RuntimeDetail>,
     Vec<ContractRow>,
     Vec<(Id<Contract>, String)>,
 ) {
     let book = lens.book();
     let mut flows = Vec::new();
+    let mut details = Arena::new();
+    let mut missing_inputs = Vec::new();
     let mut rows = Vec::new();
     let mut issues = Vec::new();
-    for promise in &run.promises {
-        if promise.waived || promise.kept.is_some() || promise.due <= today || promise.due > until {
-            continue;
-        }
-        let id = promise.contract;
-        let contract = &book.contracts[id];
+    let Some(window) = Days::new(today.add_days(1), until) else {
+        return (flows, details, rows, issues);
+    };
+
+    // Preserve the query's source flows while deriving contract occurrences:
+    // computed roots at a later due date must see earlier forecast postings.
+    let options = axiom_engine::Options {
+        today: until,
+        relaxed,
+    };
+    let mut ledger = match checkpoint {
+        Some(checkpoint) => plan.resume(checkpoint, options),
+        None => plan.start(options),
+    };
+    ledger.advance(today);
+
+    #[derive(Clone, Copy)]
+    struct Scheduled {
+        day: Day,
+        contract: Id<Contract>,
+        schedule: axiom_model::ScheduleKind,
+        ordinal: u32,
+    }
+
+    let mut scheduled = Vec::new();
+    for (id, contract) in book.contracts.iter() {
         if !lens.owns_entity(contract.owner) {
             continue;
         }
-        let contract_flows = run.promise_flows(promise);
-        let main = contract_flows
-            .iter()
-            .filter(|flow| flow.flow.day == promise.due)
-            .max_by_key(|flow| flow.flow.out.qty.abs());
-        let amount = main.map(|main| {
-            let qty = contract_flows
-                .iter()
-                .filter(|flow| {
-                    flow.flow.day == promise.due && flow.flow.out.unit == main.flow.out.unit
-                })
-                .map(|flow| crate::flow::scoped_movement_qty(lens, &flow.flow, flow.flow.out.qty))
-                .sum();
-            Amount::new(qty, main.flow.out.unit)
-        });
-        let what = main.map_or_else(
-            || book.name(contract.name).to_string(),
-            |flow| route(book, &flow.flow),
-        );
-        let cadence = contract
-            .terms_on_schedule(promise.schedule, promise.due)
-            .map(|terms| describe_contract(terms.every))
-            .unwrap_or_else(|| "scheduled".to_string());
-        rows.push(ContractRow {
-            contract: id,
-            every: cadence,
-            what,
-            next: promise.due,
-            amount,
-        });
-        flows.extend(contract_flows.iter().cloned());
-        let missing = run.promise_missing_inputs(promise);
-        if !missing.is_empty() {
-            let names = contract
-                .terms_on_schedule(promise.schedule, promise.due)
-                .into_iter()
-                .flat_map(|terms| {
-                    missing
-                        .iter()
-                        .filter_map(|&index| terms.inputs.get(index as usize))
-                })
-                .map(|input| book.name(input.name))
-                .collect::<Vec<_>>()
-                .join(", ");
-            issues.push((id, format!("required input(s) are missing: {names}")));
+        for (ordinal, occurrence) in contract.occurrences(window).enumerate() {
+            // A written occurrence is already part of the ledger's journal
+            // fold, including when it was recorded after its due day.
+            if book.txns.iter().any(|(_, txn)| {
+                txn.contract == Some(id)
+                    && txn.contract_schedule == Some(occurrence.schedule)
+                    && txn.occurrence.is_some_and(|written| {
+                        book.written_occurrences
+                            .get(written)
+                            .is_some_and(|written| {
+                                written.due == occurrence.day
+                                    && written.schedule == occurrence.schedule
+                            })
+                    })
+            }) {
+                continue;
+            }
+            let Ok(ordinal) = u32::try_from(ordinal) else {
+                issues.push((id, "too many scheduled occurrences to identify".to_string()));
+                break;
+            };
+            scheduled.push(Scheduled {
+                day: occurrence.day,
+                contract: id,
+                schedule: occurrence.schedule,
+                ordinal,
+            });
         }
     }
+    scheduled.sort_by_key(|occurrence| {
+        (
+            occurrence.day,
+            occurrence.contract,
+            match occurrence.schedule {
+                ScheduleKind::Regular => 0,
+                ScheduleKind::Standing => 1,
+            },
+            occurrence.ordinal,
+        )
+    });
+
+    let mut source = 0;
+    let mut occurrence = 0;
+    while source < expected_flows.len() || occurrence < scheduled.len() {
+        let flow_day = expected_flows.get(source).map(|flow| flow.flow.day);
+        let due_day = scheduled.get(occurrence).map(|item| item.day);
+        let day = match (flow_day, due_day) {
+            (Some(flow), Some(due)) => flow.min(due),
+            (Some(flow), None) => flow,
+            (None, Some(due)) => due,
+            (None, None) => break,
+        };
+        ledger.advance_to_closing(day);
+
+        while expected_flows
+            .get(source)
+            .is_some_and(|flow| flow.flow.day == day)
+        {
+            let flow = &expected_flows[source];
+            ledger.apply_runtime(flow, &details);
+            source += 1;
+        }
+
+        while scheduled
+            .get(occurrence)
+            .is_some_and(|item| item.day == day)
+        {
+            let item = scheduled[occurrence];
+            occurrence += 1;
+            let contract = &book.contracts[item.contract];
+            let made = match ledger.instantiate_occurrence(
+                item.contract,
+                item.schedule,
+                item.day,
+                item.ordinal,
+                None,
+                &mut flows,
+                &mut details,
+                &mut missing_inputs,
+            ) {
+                Ok(made) => made,
+                Err(error) => {
+                    issues.push((item.contract, format!("{error:?}")));
+                    continue;
+                }
+            };
+            let contract_flows = made.flows(&flows).unwrap_or_default();
+            let missing = made.missing(&missing_inputs).unwrap_or_default();
+            let main = contract_flows
+                .iter()
+                .filter(|flow| flow.flow.day == item.day)
+                .max_by_key(|flow| flow.flow.out.qty.abs());
+            let amount = main.map(|main| {
+                let qty = contract_flows
+                    .iter()
+                    .filter(|flow| {
+                        flow.flow.day == item.day && flow.flow.out.unit == main.flow.out.unit
+                    })
+                    .map(|flow| {
+                        crate::flow::scoped_movement_qty(lens, &flow.flow, flow.flow.out.qty)
+                    })
+                    .sum();
+                Amount::new(qty, main.flow.out.unit)
+            });
+            let what = main.map_or_else(
+                || book.name(contract.name).to_string(),
+                |flow| route(book, &flow.flow),
+            );
+            let cadence = contract
+                .terms_on_schedule(item.schedule, item.day)
+                .map(|terms| describe_contract(terms.every))
+                .unwrap_or_else(|| "scheduled".to_string());
+            rows.push(ContractRow {
+                contract: item.contract,
+                every: cadence,
+                what,
+                next: item.day,
+                amount,
+            });
+            for flow in contract_flows {
+                ledger.apply_runtime(flow, &details);
+            }
+            if !missing.is_empty() {
+                let names = contract
+                    .terms_on_schedule(item.schedule, item.day)
+                    .into_iter()
+                    .flat_map(|terms| {
+                        missing
+                            .iter()
+                            .filter_map(|&index| terms.inputs.get(index as usize))
+                    })
+                    .map(|input| book.name(input.name))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                issues.push((
+                    item.contract,
+                    format!("required input(s) are missing: {names}"),
+                ));
+            }
+        }
+        ledger.advance(day);
+    }
+
     rows.sort_by_key(|row| (row.next, row.contract));
-    (flows, rows, issues)
+    (flows, details, rows, issues)
 }
 
 fn describe_contract(every: axiom_model::Cadence) -> String {
@@ -510,8 +629,6 @@ fn contract_section<'s>(
     book: &'s Book<'_>,
     contracts: &[ContractRow],
     issues: &[(Id<Contract>, String)],
-    run: &Run,
-    until: Day,
 ) -> Section<'s> {
     let mut section = Section::new([
         Column::left("Contract"),
@@ -542,12 +659,10 @@ fn contract_section<'s>(
             error
         ));
     }
-    if !run.monitor_complete {
-        section.note("Contract occurrences are incomplete because this run did not finish the native occurrence monitor.");
-    } else if until > run.horizon {
+    if !issues.is_empty() {
         section.note(format!(
-            "Occurrences after {} are not included in this run's monitor.",
-            run.horizon
+            "{} contract occurrence(s) could not be fully projected; see the notes above.",
+            issues.len()
         ));
     }
     if section.rows.is_empty() && issues.is_empty() {
@@ -747,14 +862,14 @@ contract rent with landlord
 ";
 
     #[test]
-    fn forecast_does_not_invent_contract_amounts_when_the_native_monitor_is_incomplete() {
+    fn forecast_materializes_contracts_even_when_the_run_monitor_is_incomplete() {
         crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
             assert!(!run.monitor_complete);
             let report = crate::report(
                 book,
                 run,
                 &crate::Query::Forecast {
-                    until: Some(day(2026, 4, 30)),
+                    until: Some(day(2026, 2, 28)),
                     paths: 0,
                 },
                 None,
@@ -765,9 +880,13 @@ contract rent with landlord
                 .iter()
                 .find(|section| crate::tests::heading(section) == Some("Contract occurrences"))
                 .unwrap();
-            assert!(occurrences.rows.is_empty());
-            assert!(occurrences.notes.iter().any(|note| {
-                crate::tests::cell(note).contains("did not finish the native occurrence monitor")
+            assert_eq!(occurrences.rows.len(), 1);
+            assert!(matches!(
+                (&occurrences.rows[0].cells[2], &occurrences.rows[0].cells[3]),
+                (Cell::Amount { qty: Qty(10_000), .. }, Cell::Day(due)) if *due == day(2026, 2, 15)
+            ));
+            assert!(occurrences.notes.iter().all(|note| {
+                !crate::tests::cell(note).contains("did not finish the native occurrence monitor")
             }));
         });
     }
@@ -777,7 +896,6 @@ contract rent with landlord
     #[test]
     fn native_contract_occurrences_change_projection_and_keep_typed_amounts() {
         crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
-            assert!(run.monitor_complete);
             let report = crate::report(
                 book,
                 run,

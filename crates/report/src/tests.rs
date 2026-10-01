@@ -4,7 +4,9 @@
 //! other crates), so each view can be held against figures worked out on
 //! paper. Two people, `me` and `jordan`, belong to one household. Only
 //! base-currency money is used except for two sales of VTI, which the gains
-//! view needs: pricing is the model's business.
+//! view needs: pricing is the model's business. Outside parties are not
+//! balance-sheet places; income and spending are represented by purposes in
+//! source-backed fixtures.
 
 use std::collections::BTreeMap;
 
@@ -1211,18 +1213,6 @@ fn balance_is_a_tree_with_subtotals_and_net_worth() {
   owed | 3,000.00 USD
     clients | 3,000.00 USD
   retirement | 1,000.00 USD
-=equity | 40.00 USD
-  unknown | 40.00 USD
-=expenses | 6,204.20 USD
-  food | 204.20 USD
-    groceries | 204.20 USD
-  insurance | 1,200.00 USD
-  rent | 3,600.00 USD
-  repairs | 1,200.00 USD
-=income | -22,800.00 USD
-  design | -4,800.00 USD
-  jordan-pay | -3,000.00 USD
-  salary | -15,000.00 USD
 =liabilities | 700.00 USD
   bills | 700.00 USD
 ##
@@ -1353,8 +1343,6 @@ fn a_view_can_be_about_one_person_or_their_household() {
             "=assets | 4,300.00 USD",
             "  bank | 4,300.00 USD",
             "    jordan-checking | 4,300.00 USD",
-            "=income | -3,000.00 USD",
-            "  jordan-pay | -3,000.00 USD"
         ]
     );
     // The household is its members: everything either owns.
@@ -1375,9 +1363,7 @@ fn a_view_can_be_about_one_person_or_their_household() {
         )
         .unwrap();
     assert!(pay.sections[0].facts.iter().any(|fact| {
-        fact.concept == "unclassified"
-            && fact.entity == "jordan"
-            && fact.value.qty == Qty(350_000)
+        fact.concept == "unclassified" && fact.entity == "jordan" && fact.value.qty == Qty(350_000)
     }));
     let me_pay = house
         .report_for(
