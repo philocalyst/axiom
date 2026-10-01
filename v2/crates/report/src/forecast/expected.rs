@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Day, Id, Map, Qty};
+use axiom_core::{Day, Days, Id, Map, Qty};
 use axiom_engine::Run;
 use axiom_model::{Amount, Book, Class, End, Entity, Flow, Place, Plan, Txn};
 
@@ -39,9 +39,10 @@ pub struct Expectation<'b> {
 
 impl Expectation<'_> {
     /// Its occurrences after `after`, up to `horizon`, as flows to apply.
-    pub fn flows(&self, after: Day, horizon: Day) -> Vec<Flow> {
-        let days = self.schedule.days(after, horizon);
-        days.into_iter().map(|day| planned(self.template, day, self.out, self.arrive)).collect()
+    pub fn flows(&self, after: Day, horizon: Day) -> impl Iterator<Item = Flow> + '_ {
+        self.schedule
+            .days(after, horizon)
+            .map(|day| planned(self.template, day, self.out, self.arrive))
     }
 
     /// Whether `other` says the same thing: the same pair, at the same
@@ -80,6 +81,19 @@ pub fn expected<'b>(lens: Lens<'b, '_>, run: &Run) -> Vec<Expectation<'b>> {
     }
     expected.retain(|item| lens.owns(item.template.from) || lens.owns(item.template.to));
     expected
+}
+
+/// Whether a contract covers this exact movement on its scheduled date,
+/// preserving explicit waivers so a fallback rhythm does not reappear.
+pub fn covered_by_contract(book: &Book, flow: &Flow) -> bool {
+    covered_on(book, flow, flow.day)
+}
+
+/// Whether a contract covers a template's movement on a projected date.
+pub fn covered_on(book: &Book, template: &Flow, day: Day) -> bool {
+    book.contracts
+        .iter()
+        .any(|(_, contract)| contract.covers(template, day) != axiom_model::ContractCoverage::None)
 }
 
 /// One expectation per flow of each plan. A plan the journal has instantiated
@@ -255,8 +269,78 @@ mod tests {
         assert!(!has_ended(&house.book, &house.run, &habit), "an invoice was written on it this month");
     }
 
-    /// The house holds no dollars, and depreciation never moves any through it:
-    /// its empty dollar balance does not say the rhythm is over.
+    /// Suppression follows each contract interval, including explicit waivers,
+    /// while keeping unrelated or out-of-term rhythms visible.
+    #[test]
+    fn contract_suppression_tracks_each_projected_date_and_typed_identity() {
+        use axiom_core::{Loc, Timeline};
+        use axiom_model::{Cadence, Contract, Terms, TermsState};
+
+        let mut house = household();
+        let today = day(2026, 5, 1);
+        let start = today.add_days(10);
+        let end = today.add_days(40);
+        let template_id = house.book.flows.iter().next().unwrap().0;
+        let template = house.book.flows[template_id].clone();
+        let terms = Terms {
+            state: TermsState::Active,
+            every: Cadence::Every(axiom_core::Span::months(1)),
+            on: Box::default(),
+            anchor: today,
+            template: vec![template.clone()].into(),
+            inputs: Box::default(),
+            estimate: false,
+            due: None,
+            grace: axiom_core::Span::default(),
+            period: None,
+            covers: None,
+            prorated: false,
+            escalation: None,
+            shares: Box::default(),
+            also: Box::default(),
+            rate: None,
+            change: None,
+        };
+        let contract = Contract {
+            name: house.book.names.intern("rent-promise"),
+            party: Id::new(0),
+            owner: Id::new(0),
+            days: Days::new(start, end).unwrap(),
+            terms: Timeline::new(terms),
+            buys: None,
+            deposit: None,
+            loan: None,
+            matching: None,
+            ended: None,
+            laws: Box::default(),
+            doc: None,
+            loc: Loc::default(),
+        };
+        house.book.contracts.push(contract);
+        assert!(!covered_on(&house.book, &template, today.add_days(5)), "start after today does not suppress now");
+        assert!(covered_on(&house.book, &template, start.add_days(1)), "coverage does not require the contract due day");
+        assert!(!covered_on(&house.book, &template, end.add_days(1)), "an ended contract does not suppress later dates");
+
+        let waiver_start = start.add_days(10);
+        let waiver_end = start.add_days(14);
+        let mut waiver = house.book.contracts[Id::new(0)].terms.at(waiver_start).clone();
+        waiver.state = TermsState::Waived;
+        waiver.template = Box::default();
+        house.book.contracts[Id::new(0)]
+            .terms
+            .paint(Days::new(waiver_start, waiver_end).unwrap(), waiver);
+        assert!(
+            covered_on(&house.book, &template, waiver_start.add_days(1)),
+            "an empty waiver borrows its matching active template so the fallback does not resurrect"
+        );
+        let mut other_owner = template.clone();
+        other_owner.owner = Id::new(99);
+        assert!(!covered_on(&house.book, &other_owner, start.add_days(1)));
+        let mut other_unit = template.clone();
+        other_unit.out.unit = Id::new(99);
+        assert!(!covered_on(&house.book, &other_unit, start.add_days(1)));
+    }
+
     #[test]
     fn a_monthly_depreciation_does_not_end_because_the_house_holds_no_dollars() {
         let source = "\

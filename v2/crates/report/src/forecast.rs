@@ -14,12 +14,12 @@ mod variable;
 use std::iter;
 
 use axiom_core::day::days_in_month;
-use axiom_core::{Day, Id, Map, Qty, Span};
-use axiom_engine::{Effect, Plan, Violation};
-use axiom_model::{Amount, Book, Flow, Law, Period, Subject};
+use axiom_core::{Day, Days, Id, Map, Qty, Span};
+use axiom_engine::{Checkpoint, Effect, Plan, Run, Violation};
+use axiom_model::{Amount, Book, Contract, ForecastError, Flow, ForecastFeature, Law, Period, Subject};
 
 use self::bands::{Bands, Share};
-use self::expected::{Expectation, Origin, expected};
+use self::expected::{Expectation, Origin, covered_by_contract, covered_on, expected};
 use self::projection::{Trace, project};
 use self::variable::Variable;
 use crate::calendar::Periods;
@@ -35,13 +35,33 @@ const SEED: u64 = 0x5EED_0A11_CE00_0001;
 /// Bootstrapping needs a past to draw from.
 const MIN_HISTORY_MONTHS: usize = 3;
 
+/// Context-ready adapter. The context owns a shared solved plan and checkpoint;
+/// projection will resume from them once the report's projection interface is wired.
+pub fn view_from<'p, 'b, 's>(
+    _plan: &'p Plan<'b, 's>,
+    _checkpoint: &Checkpoint,
+    run: &Run,
+    lens: Lens<'b, 's>,
+    _relaxed: bool,
+    until: Option<Day>,
+    paths: u32,
+) -> Report<'s> {
+    view(lens.book, run, lens.whose, until, paths)
+}
+
 pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: Option<Day>, paths: u32) -> Report<'s> {
     let today = run.today;
     let until = until.unwrap_or_else(|| default_horizon(book, today)).max(today);
     let lens = Lens::new(book, whose, today);
 
     let expected = expected(lens, run);
-    let mut flows: Vec<Flow> = expected.iter().flat_map(|expectation| expectation.flows(today, until)).collect();
+    let mut flows: Vec<Flow> = expected
+        .iter()
+        .flat_map(|expectation| expectation.flows(today, until))
+        .filter(|flow| !covered_by_contract(book, flow))
+        .collect();
+    let (contract_flows, contract_rows, contract_issues) = contract_forecasts(book, whose, today, until);
+    flows.extend(contract_flows);
     flows.sort_by_key(|flow| flow.day);
     let checkpoints = checkpoints(today, until);
     let plan = Plan::new(book);
@@ -49,18 +69,29 @@ pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: 
 
     let due = coming_due(&trace, whose, today);
     let committed = committed(lens, &checkpoints, &trace.liquid, &due);
-    let variable =
-        Variable::from_history(lens, run, |flow| expected.iter().any(|expectation| expectation.covers(flow)));
+    let variable = Variable::from_history(lens, run, |flow| {
+        expected.iter().any(|expectation| expectation.covers(flow)) || covered_by_contract(book, flow)
+    });
     let bands = simulate(&checkpoints, &committed, &variable, paths);
 
     let mut outlook = outlook_section(book, &checkpoints, &committed, &trace.worth, bands.as_ref());
     for note in method_notes(book, bands.as_ref(), variable.months, paths) {
         outlook.note(note);
     }
+    if !contract_issues.is_empty() {
+        outlook.note(format!(
+            "Projection is incomplete: {} contract(s) were omitted. See Contract occurrences for details.",
+            contract_issues.len()
+        ));
+    }
 
-    Report::new(format!("Forecast to {until}"))
+    let mut report = Report::new(format!("Forecast to {until}"))
         .with(outlook)
-        .with(expected_section(book, &expected, today, until))
+        .with(expected_section(book, &expected, today, until));
+    if !book.contracts.is_empty() {
+        report = report.with(contract_section(book, &contract_rows, &contract_issues));
+    }
+    report
         .with(owed_section(book, &due))
         .with(problems_section(book, &trace, today))
 }
@@ -191,7 +222,14 @@ fn expected_section<'s>(book: &Book<'s>, expected: &[Expectation], today: Day, u
         let more = (legs.len() > 1).then(|| format!(", and {}", plural(legs.len() - 1, "more leg")));
         let what = format!("{}{}{}", route(book, flow), payee.unwrap_or_default(), more.unwrap_or_default());
         let total = legs.iter().filter(|leg| leg.out.unit == main.out.unit).map(|leg| leg.out.qty).sum();
-        let next = legs.iter().filter_map(|leg| leg.schedule.days(today, until).first().copied()).min();
+        let next = legs
+            .iter()
+            .flat_map(|leg| {
+                leg.schedule
+                    .days(today, until)
+                    .filter(move |&day| !covered_on(book, leg.template, day))
+            })
+            .min();
         let source = match main.origin {
             Origin::Plan(_) => "plan".to_string(),
             Origin::Habit { occurrences } => format!("seen {occurrences} times"),
@@ -211,11 +249,181 @@ fn expected_section<'s>(book: &Book<'s>, expected: &[Expectation], today: Day, u
         section.push(row);
     }
     if section.rows.is_empty() {
-        section.note(
-            "Nothing recurs yet. Write `every month …` plans, or keep the journal going until history shows a rhythm.",
-        );
+        if book.contracts.is_empty() {
+            section.note(
+                "Nothing recurs yet. Write `every month …` plans, or keep the journal going until history shows a rhythm.",
+            );
+        } else {
+            section.note("No plan or history-based rhythm recurs in this window. Contract occurrences are listed separately.");
+        }
     }
     section
+}
+
+struct ContractRow {
+    contract: Id<Contract>,
+    every: String,
+    what: String,
+    next: Day,
+    amount: Option<Amount>,
+}
+
+/// Stream model-native contract occurrences into the shared projection. If any
+/// occurrence cannot be derived, discard that contract's partial flows and
+/// retain the typed error for the report instead of forecasting a partial leg set.
+fn contract_forecasts<'s>(
+    book: &Book<'s>,
+    whose: &Whose,
+    today: Day,
+    until: Day,
+) -> (Vec<Flow>, Vec<ContractRow>, Vec<(Id<Contract>, ForecastError)>) {
+    let Some(first) = today.0.checked_add(1).map(Day) else { return (Vec::new(), Vec::new(), Vec::new()) };
+    let Some(within) = Days::new(first, until) else { return (Vec::new(), Vec::new(), Vec::new()) };
+    let mut flows = Vec::new();
+    let mut rows = Vec::new();
+    let mut issues = Vec::new();
+    for (id, contract) in book.contracts.iter() {
+        if !whose.includes(contract.owner) {
+            continue;
+        }
+        let Some(next) = contract.occurrences(within).next() else { continue };
+        let next_day = next.day;
+        let next_template = next.terms.template.first();
+        let start = flows.len();
+        let mut issue = None;
+        for forecast in contract.forecast_flows(book, id, within) {
+            match forecast {
+                Ok(flow) => flows.push(flow),
+                Err(error) => {
+                    flows.truncate(start);
+                    issue = Some(error);
+                    break;
+                }
+            }
+        }
+        if let Some(error) = issue {
+            issues.push((id, error));
+            continue;
+        }
+        let contract_flows = &flows[start..];
+        let main = contract_flows
+            .iter()
+            .filter(|flow| flow.day == next_day)
+            .max_by_key(|flow| flow.out.qty.abs());
+        let amount = main.map(|main| {
+            let qty = contract_flows
+                .iter()
+                .filter(|flow| flow.day == next_day && flow.out.unit == main.out.unit)
+                .map(|flow| flow.out.qty)
+                .sum();
+            Amount::new(qty, main.out.unit)
+        });
+        let template = next_template.or_else(|| contract.terms_on(next_day).template.first());
+        let what = template.map_or_else(
+            || book.name(contract.name).to_string(),
+            |flow| {
+                let payee = flow.payee.map(|entity| format!(" ({})", book.name(book.entities[entity].path)));
+                format!("{}{}", route(book, flow), payee.unwrap_or_default())
+            },
+        );
+        rows.push(ContractRow {
+            contract: id,
+            every: describe_contract(next.terms.every),
+            what,
+            next: next_day,
+            amount,
+        });
+    }
+    rows.sort_by_key(|row| (row.next, row.contract));
+    (flows, rows, issues)
+}
+
+fn describe_contract(every: axiom_model::Cadence) -> String {
+    match every {
+        axiom_model::Cadence::Every(span) => recurrence::describe(span).into_owned(),
+        axiom_model::Cadence::TwiceMonthly => "twice monthly".to_string(),
+    }
+}
+
+fn contract_section<'s>(
+    book: &Book<'s>,
+    contracts: &[ContractRow],
+    issues: &[(Id<Contract>, ForecastError)],
+) -> Section<'s> {
+    let mut section = Section::new([
+        Column::left("Contract"),
+        Column::left("Every"),
+        Column::right("Amount"),
+        Column::left("Next"),
+    ])
+    .headed("Contract occurrences");
+    for row in contracts {
+        let amount = row.amount.map_or(Cell::Blank, |amount| Cell::amount(book, amount));
+        section.push(Row::new([
+            Cell::text(format!("{} · {}", book.name(book.contracts[row.contract].name), row.what)),
+            Cell::text(row.every.clone()),
+            amount,
+            Cell::Day(row.next),
+        ]));
+    }
+    for &(id, error) in issues {
+        section.note(format!(
+            "{} could not be forecast: {}",
+            book.name(book.contracts[id].name),
+            describe_forecast_error(book, error)
+        ));
+    }
+    if section.rows.is_empty() && issues.is_empty() {
+        section.note("No active contract occurrence falls within this forecast window.");
+    }
+    section
+}
+
+fn describe_forecast_error(book: &Book<'_>, error: ForecastError) -> String {
+    match error {
+        ForecastError::OutsideContract(day) => format!("{day} is outside its active days"),
+        ForecastError::Waived(day) => format!("terms are waived on {day}"),
+        ForecastError::MissingInput { input, day } => {
+            format!("input `{}` has no value on {day}", book.name(input))
+        }
+        ForecastError::MissingIndex { param, day } => format!(
+            "index `{}` has no value on {day}",
+            book.params.get(param).map_or("?", |param| book.name(param.name))
+        ),
+        ForecastError::InvalidIndex { param, day } => format!(
+            "index `{}` is not a positive number on {day}",
+            book.params.get(param).map_or("?", |param| book.name(param.name))
+        ),
+        ForecastError::IndexFault { param, day, fault } => format!(
+            "index `{}` failed on {day}: {fault:?}",
+            book.params.get(param).map_or("?", |param| book.name(param.name))
+        ),
+        ForecastError::InvalidRate => "the escalation rate is invalid".to_string(),
+        ForecastError::UnresolvedAmount(day) => format!("the amount is unresolved on {day}"),
+        ForecastError::ConflictingRecognition(day) => {
+            format!("`for` and `covers` both set recognition on {day}")
+        }
+        ForecastError::InvalidCoverage(day) => format!("the coverage span is invalid on {day}"),
+        ForecastError::UnsupportedProration(day) => {
+            format!("proration has no recognition period on {day}")
+        }
+        ForecastError::MissingTemplate(day) => format!("no flow template is available on {day}"),
+        ForecastError::UnsupportedLoan(day) => {
+            format!("loan payment derivation is not available on {day}")
+        }
+        ForecastError::UnsupportedFeature { feature, day } => {
+            let feature = match feature {
+                ForecastFeature::Deadline => "deadline effects",
+                ForecastFeature::Shares => "owner shares",
+                ForecastFeature::Also => "also flows",
+                ForecastFeature::Buy => "purchases",
+                ForecastFeature::Deposit => "deposits",
+                ForecastFeature::Matching => "matching contributions",
+            };
+            format!("{feature} are not forecast on {day}")
+        }
+        ForecastError::Overflow => "a date or amount overflowed while forecasting".to_string(),
+    }
 }
 
 fn owed_section<'s>(book: &Book<'s>, due: &[&Effect]) -> Section<'s> {

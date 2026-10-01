@@ -3,7 +3,7 @@
 
 use std::borrow::Cow;
 
-use axiom_core::{Day, Days, Qty, Span, due};
+use axiom_core::{Cadence as CalendarCadence, Day, Days, Qty, Span, due};
 use axiom_model::On;
 
 /// A rhythm needs at least this many occurrences to be believed.
@@ -108,11 +108,19 @@ pub struct Schedule {
 
 impl Schedule {
     /// The days after `after`, no later than `horizon` (or the schedule's own
-    /// end), on which the schedule falls.
-    pub fn days(&self, after: Day, horizon: Day) -> Vec<Day> {
+    /// end), on which the schedule falls. The iterator avoids an intermediate
+    /// date vector when callers only need the next day or to stream flows.
+    pub fn days(&self, after: Day, horizon: Day) -> impl Iterator<Item = Day> + '_ {
         let last = self.until.map_or(horizon, |until| until.min(horizon));
-        let Some(within) = Days::new(after.add_days(1), last) else { return Vec::new() };
-        due(axiom_core::Cadence::Every(self.every), self.on.as_slice(), self.anchor, within).collect()
+        after
+            .0
+            .checked_add(1)
+            .map(Day)
+            .into_iter()
+            .flat_map(move |first| Days::new(first, last))
+            .flat_map(|within| {
+                due(CalendarCadence::Every(self.every), self.on.as_slice(), self.anchor, within)
+            })
     }
 }
 
@@ -136,7 +144,10 @@ mod tests {
         assert_eq!((found.cadence, found.amount, found.last), (MONTHLY, Qty(1_800_00), day(2026, 5, 1)));
         assert_eq!(found.on, Some(On::MonthDay(1)));
         // Next comes June 1st, then July 1st.
-        assert_eq!(found.schedule().days(day(2026, 5, 20), day(2026, 7, 31)), [day(2026, 6, 1), day(2026, 7, 1)]);
+        assert_eq!(
+            found.schedule().days(day(2026, 5, 20), day(2026, 7, 31)).collect::<Vec<_>>(),
+            [day(2026, 6, 1), day(2026, 7, 1)]
+        );
     }
 
     #[test]
@@ -165,7 +176,7 @@ mod tests {
     fn month_days_clamp_without_drifting() {
         let schedule =
             Schedule { anchor: day(2026, 1, 31), every: Span::months(1), on: Some(On::MonthDay(31)), until: None };
-        let days = schedule.days(day(2026, 1, 31), day(2026, 4, 30));
+        let days = schedule.days(day(2026, 1, 31), day(2026, 4, 30)).collect::<Vec<_>>();
         assert_eq!(days, [day(2026, 2, 28), day(2026, 3, 31), day(2026, 4, 30)]);
     }
 
@@ -179,7 +190,7 @@ mod tests {
             until: Some(day(2026, 1, 19)),
         };
         assert_eq!(
-            mondays.days(day(2025, 12, 31), day(2026, 12, 31)),
+            mondays.days(day(2025, 12, 31), day(2026, 12, 31)).collect::<Vec<_>>(),
             [day(2026, 1, 5), day(2026, 1, 12), day(2026, 1, 19)]
         );
         let taxes = Schedule {
@@ -188,6 +199,10 @@ mod tests {
             on: Some(On::YearDay { month: 4, day: 15 }),
             until: None,
         };
-        assert_eq!(taxes.days(day(2026, 6, 1), day(2028, 12, 31)), [day(2027, 4, 15), day(2028, 4, 15)]);
+        assert_eq!(
+            taxes.days(day(2026, 6, 1), day(2028, 12, 31)).collect::<Vec<_>>(),
+            [day(2027, 4, 15), day(2028, 4, 15)]
+        );
+        assert_eq!(taxes.days(Day::MAX, Day::MAX).next(), None);
     }
 }
