@@ -5,9 +5,10 @@
 > historical branch status and benchmark figures below are preserved evidence,
 > not results from the new implementation. Current requirements, reviewed
 > checkpoints and verification are recorded in
-> [CUTOVER.md](../docs/local-rework/CUTOVER.md). Native model and journal wiring,
-> integrated execution, corpus migration, root promotion and legacy removal
-> remain pending. Completion will be recorded only after the checks pass.
+> [CUTOVER.md](../docs/local-rework/CUTOVER.md). Native model and journal wiring
+> is implemented. Integrated execution, corpus migration, root promotion and
+> legacy removal remain pending. Completion will be recorded only after the
+> checks pass.
 
 As of 2026-09-30. This is the brief for whoever continues the v4 rework, whether a person or a session of agents. Read it first. Then read:
 

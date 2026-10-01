@@ -137,3 +137,37 @@ left 472,825,856 live bytes. Planning recorded 6,862 calls; folding recorded
 These are baseline observations, not gains. A native run on the same generated
 financial workload, with correctness verified, is still required to compare
 allocation counts, retained memory and whole-process RSS/time.
+
+## Native integration checks, 2026-10-01
+
+The journal builder is now wired after native declarations, contracts and law
+registration. The obsolete Book/Contract forecast adapter has been deleted;
+forecast consumers must use the engine's canonical occurrence materializer.
+Typed law and template nodes use `Arena<Node>` with `Option<Ty>`: an invalid
+node is represented explicitly instead of by a second parallel poison vector.
+
+| Commit | Reviewed change | Actual verification |
+|---|---|---|
+| `44070b1` | Preserve nested CAMT memo text across indentation, reuse decoded memo storage and fix sync declaration lifetimes | Exact production primitive modules: 34 release tests passed, three timing tests ignored, including the independently discovered nested-memo regression |
+| `ac23af5` | Remove the obsolete Book/Contract forecast adapter | Source review; replacement engine materialization remains pending |
+| `f2f983e`, `5ecf04f`, `b2918f0` | Typed node arenas, explicit invalid types, selector-year roles and engine facts adaptation | Integrated core/syntax: 135 release tests passed; one pre-existing ignored syntax doctest |
+| `e7d533a`, `00c0a73` | Native journal lowering and builder wiring | Actual model library compiles; workspace consumers still require migration |
+| `3ddf356` | Intern native journal codes directly and share Also-tail metadata lowering | Actual native model integration tests: three passed. Household and Sam inventory no longer panics |
+| `3090f71`, `1633263` | Native diagnostics and caret codes; diagnostics borrow their Plan and bound contributor selection to three entries | Source/API review; integrated engine execution remains pending |
+| `48a770b` | Distinguish purpose caps from place-direction caps | Source review; dynamic dated budget execution and report consumption remain pending |
+
+The independent inventory builds the actual native model and shipped systems;
+it contains no substitute financial engine. After code interning was corrected,
+Sam builds 22 flows, 24 transactions, ten contracts and 22 laws, while reporting
+135 errors. Those errors include remaining unsupported statement verbs,
+contract date/share handling and older system declarations. These are real
+remaining requirements, not acceptable completion results. The logs are under
+`verification/cutover/native-model-inventory-interning-fixed.log` outside the
+repository.
+
+The integrated Flow header is 192 bytes, compared with 200 at the preserved
+baseline; Txn remains 88 bytes and syntax Item 40. This four-percent header
+reduction is a measured structural observation, not an order-of-magnitude
+whole-process memory claim. Larger candidates being implemented are staged
+sync deltas instead of copying all account history, a source registry that
+borrows cached text, canonical owner-aware views and bounded provenance scans.
