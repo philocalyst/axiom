@@ -5,10 +5,15 @@
 //! in their syntax tables and are resolved by the recording pass; this survey
 //! does not copy the journal into a second per-item plan.
 
-use axiom_core::Loc;
+use axiom_core::{Diagnostic, Loc, Map};
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, Direction, End, ExprKind, ItemKind, Name, Subject, Verb};
 
+use crate::book::Input;
+use crate::declare::World;
+use crate::errors::Word;
+use crate::law::Ty;
+use crate::scope::Home;
 use crate::sources::Site;
 
 /// The two named ends that may need a claim tab. Either end may be omitted in
@@ -86,6 +91,170 @@ pub(crate) fn survey<'s>(sites: &[Site<'_, 's>]) -> JournalSurvey<'s> {
         }
     }
     survey
+}
+
+/// Reads the ordered input bindings a contract template may use. The engine
+/// binds occurrence values by this order, while the compiler resolves each
+/// input name to its stable `Var::Input` index.
+fn inputs<'s>(
+    world: &mut World<'s>,
+    file: &ast::File<'s>,
+    props: ast::Many<ast::Prop<'s>>,
+    diags: &mut Vec<Diagnostic>,
+) -> Box<[Input]> {
+    let mut found: Vec<Input> = Vec::new();
+    let mut seen: Map<axiom_core::Sym, Loc> = Map::default();
+    for prop in &file[props] {
+        if prop.name.0 != "input" {
+            continue;
+        }
+        let args = &file[prop.args];
+        let Some(&name_id) = args.first() else {
+            diags.push(
+                Diagnostic::error("contract-input", "an input needs a name")
+                    .label(prop.loc, "write `input NAME [UNIT]`"),
+            );
+            continue;
+        };
+        let ExprKind::Name(name) = file.exprs[name_id].kind else {
+            diags.push(
+                Diagnostic::error("contract-input", "an input name must be a word")
+                    .label(file.exprs[name_id].loc, "write the input name here"),
+            );
+            continue;
+        };
+        let symbol = world.book.names.intern(name.0);
+        if let Some(first) = seen.get(&symbol) {
+            diags.push(
+                Diagnostic::error(
+                    "duplicate-input",
+                    format!("input `{}` is declared twice", name.0),
+                )
+                .label(prop.loc, "declared again here")
+                .context(*first, "first declared here")
+                .help("keep one declaration so every occurrence has one binding"),
+            );
+            continue;
+        }
+        seen.insert(symbol, prop.loc);
+
+        if found.len() > usize::from(u16::MAX) {
+            diags.push(
+                Diagnostic::error("too-many-inputs", "a contract has too many inputs")
+                    .label(prop.loc, "input index exceeds the template limit")
+                    .help("remove unused inputs; a template supports indices 0 through 65535"),
+            );
+            continue;
+        }
+
+        let unit = match args.get(1).map(|&id| &file.exprs[id]) {
+            None => None,
+            Some(expr) => {
+                let unit_name = match expr.kind {
+                    ExprKind::Unit(unit) | ExprKind::Name(unit) => unit,
+                    _ => {
+                        diags.push(
+                            Diagnostic::error(
+                                "contract-input-unit",
+                                "an input unit must name a commodity",
+                            )
+                            .label(expr.loc, "write a commodity such as `USD`"),
+                        );
+                        continue;
+                    }
+                };
+                match world.commodity_of(Word {
+                    text: unit_name.0,
+                    loc: expr.loc,
+                }) {
+                    Ok(unit) => Some(unit),
+                    Err(diagnostic) => {
+                        diags.push(diagnostic);
+                        continue;
+                    }
+                }
+            }
+        };
+
+        found.push(Input {
+            name: symbol,
+            unit,
+            loc: prop.loc,
+        });
+    }
+    found.into_boxed_slice()
+}
+
+/// Computed amounts in one initial contract template, in source order. A
+/// single typed program is compiled for these roots and the deadline's
+/// `otherwise` item; literals remain inline in their flow records.
+fn contract_roots<'s>(
+    file: &ast::File<'s>,
+    contract: &ast::Contract<'s>,
+) -> Vec<(ast::ExprId, Ty)> {
+    let mut roots = Vec::new();
+    if let Some(schedule) = contract.schedule.or(contract.standing) {
+        match schedule.terms.payment {
+            Some(ast::Payment::Fixed(amount)) => push_amount_root(amount, &mut roots),
+            Some(ast::Payment::Buy { spend, .. }) => push_amount_root(spend, &mut roots),
+            None => {}
+        }
+    }
+    for leg in &file[contract.body.legs] {
+        match leg.amount {
+            ast::Quantity::Amount(amount)
+            | ast::Quantity::Pending(amount)
+            | ast::Quantity::Target(amount) => push_amount_root(amount, &mut roots),
+            ast::Quantity::Unknown(_)
+            | ast::Quantity::All(_)
+            | ast::Quantity::Rest
+            | ast::Quantity::Whole => {}
+        }
+    }
+    for item in &file[contract.body.items] {
+        push_amount_root(item.amount, &mut roots);
+    }
+    if let Some(deadline) = &contract.deadline {
+        if let Some(item) = &deadline.otherwise {
+            push_amount_root(item.amount, &mut roots);
+        }
+    }
+    roots
+}
+
+fn push_amount_root<'s>(amount: ast::Amount<'s>, roots: &mut Vec<(ast::ExprId, Ty)>) {
+    if let ast::Amount::Computed(root) = amount {
+        roots.push((root, Ty::AMOUNT));
+    }
+}
+
+/// Compiles a term's computed roots once, retaining a direct root lookup for
+/// the template flows that refer to them. A failed expression invalidates the
+/// whole template so no caller can mistake a placeholder for a real amount.
+fn compile_roots<'s>(
+    world: &mut World<'s>,
+    file: &ast::File<'s>,
+    home: Home,
+    subject: Ty,
+    name: axiom_core::Sym,
+    inputs: &[Input],
+    roots: &[(ast::ExprId, Ty)],
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(
+    crate::book::TemplateProgram,
+    Map<ast::ExprId, crate::law::NodeId>,
+)> {
+    if roots.is_empty() {
+        return Some((crate::book::TemplateProgram::default(), Map::default()));
+    }
+    let (program, nodes) =
+        crate::laws::compile_template(world, diags, file, home, subject, name, inputs, roots)?;
+    let by_expr = roots
+        .iter()
+        .zip(nodes.iter())
+        .map(|(&(expr, _), &node)| (expr, node))
+        .collect();
+    Some((program, by_expr))
 }
 
 fn scan_contract<'s>(
@@ -429,5 +598,26 @@ opening 2026-01-01
             Mention::Ends { ends: Ends { from: Some(from), to: Some(to) }, .. }
                 if (from.0, to.0) == ("checking", "grocer")
         )));
+    }
+
+    #[test]
+    fn contract_roots_cover_input_items_and_deadline_else_once() {
+        let path = "contracts.ax";
+        let source_text = "\
+contract flat with greystar
+  2_900 USD monthly on 1 from checking
+  input water USD
+  + 12% of water #utilities
+  due 5d else + 5% #late-fee
+";
+        let (file, diagnostics) = parse(FileId(0), source_text, Folder::of(path));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let ItemKind::Contract(id) = file.items[0].kind else {
+            panic!("contract expected")
+        };
+        let roots = contract_roots(&file, &file[id]);
+        assert_eq!(roots.len(), 2);
+        assert!(matches!(file.exprs[roots[0].0].kind, ExprKind::Of(_, _)));
+        assert!(matches!(file.exprs[roots[1].0].kind, ExprKind::Pct(_)));
     }
 }
