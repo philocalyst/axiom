@@ -14,7 +14,7 @@ mod variable;
 use std::iter;
 
 use axiom_core::day::days_in_month;
-use axiom_core::{Arena, Day, Days, Id, Map, Qty, Span};
+use axiom_core::{Arena, Day, Days, Id, Map, Qty, Set, Span};
 use axiom_engine::{Checkpoint, Effect, Plan, Run, Violation};
 use axiom_model::{
     Amount, Book, Contract, Law, Period, RuntimeDetail, RuntimeFlow, ScheduleKind, Subject,
@@ -442,6 +442,16 @@ fn contract_forecasts<'s>(
     let mut missing_inputs = Vec::new();
     let mut rows = Vec::new();
     let mut issues = Vec::new();
+    let written: Set<_> = book
+        .txns
+        .iter()
+        .filter_map(|(_, txn)| {
+            let (contract, schedule, written) =
+                (txn.contract?, txn.contract_schedule?, txn.occurrence?);
+            let occurrence = book.written_occurrences.get(written)?;
+            Some((contract, schedule, occurrence.due))
+        })
+        .collect();
     let Some(window) = Days::new(today.add_days(1), until) else {
         return (flows, details, rows, issues);
     };
@@ -474,18 +484,7 @@ fn contract_forecasts<'s>(
         for (ordinal, occurrence) in contract.occurrences(window).enumerate() {
             // A written occurrence is already part of the ledger's journal
             // fold, including when it was recorded after its due day.
-            if book.txns.iter().any(|(_, txn)| {
-                txn.contract == Some(id)
-                    && txn.contract_schedule == Some(occurrence.schedule)
-                    && txn.occurrence.is_some_and(|written| {
-                        book.written_occurrences
-                            .get(written)
-                            .is_some_and(|written| {
-                                written.due == occurrence.day
-                                    && written.schedule == occurrence.schedule
-                            })
-                    })
-            }) {
+            if written.contains(&(id, occurrence.schedule, occurrence.day)) {
                 continue;
             }
             let Ok(ordinal) = u32::try_from(ordinal) else {
@@ -541,6 +540,8 @@ fn contract_forecasts<'s>(
             let item = scheduled[occurrence];
             occurrence += 1;
             let contract = &book.contracts[item.contract];
+            let (flow_start, detail_start, missing_start) =
+                (flows.len(), details.len(), missing_inputs.len());
             let made = match ledger.instantiate_occurrence(
                 item.contract,
                 item.schedule,
@@ -553,6 +554,11 @@ fn contract_forecasts<'s>(
             ) {
                 Ok(made) => made,
                 Err(error) => {
+                    // Keep prior complete occurrences, but roll back every
+                    // flow/detail/input added for this incomplete occurrence.
+                    flows.truncate(flow_start);
+                    details.truncate(detail_start);
+                    missing_inputs.truncate(missing_start);
                     issues.push((item.contract, format!("{error:?}")));
                     continue;
                 }
