@@ -581,6 +581,9 @@ pub struct Contract {
     /// What the contract says, from each day on: the declaration's terms, then
     /// each statement's (LANGUAGE §5).
     pub terms: Timeline<Terms>,
+    /// An optional standing `buy` order. Its cadence and changes are independent
+    /// of the contract's regular payment schedule.
+    pub standing: Option<Timeline<Terms>>,
     /// `buy VTI for 500 USD`: occurrences say how much was bought.
     pub buys: Option<Id<Commodity>>,
     /// `deposit 2_350 USD`: a claim the party holds, and money held for it,
@@ -610,9 +613,9 @@ pub struct Terms {
     /// Occurrences step from here: the contract's first day, or the day a
     /// statement changed the cadence.
     pub anchor: Day,
-    /// One occurrence's typed flow templates, dated `anchor`. Computed amounts
-    /// point into `program`; the engine evaluates them with this occurrence's
-    /// input bindings instead of reparsing source text.
+    /// One occurrence's typed flow groups, dated `anchor`. Each group retains
+    /// its header, split legs, and line items. Computed amounts point into
+    /// `program`; the engine evaluates them with this occurrence's inputs.
     pub template: Box<[TemplateFlow]>,
     /// Shared law IR for the computed sides of this term's flow templates.
     pub program: TemplateProgram,
@@ -669,22 +672,103 @@ pub struct TemplateProgram {
     pub nodes: Box<[Node]>,
 }
 
-/// A contract flow whose uncommon computed sides refer into its term program.
-/// Literal sides stay inline in `flow`; `Some` roots must always be evaluated.
+/// A contract's grouped flow template. Computed amounts refer into the owning
+/// `Terms.program` and are evaluated for each occurrence.
 #[derive(Clone, PartialEq, Debug)]
 pub struct TemplateFlow {
+    /// The header endpoints and metadata. The typed quantities below specify
+    /// how each side is produced.
     pub flow: Flow,
-    pub out: Option<NodeId>,
-    pub arrive: Option<NodeId>,
+    /// The header quantities on both sides; exchanges may use two units.
+    pub out: TemplateQuantity,
+    pub arrive: TemplateQuantity,
+    /// The split legs in source order. Their destinations and selectors stay
+    /// attached to their own quantities.
+    pub legs: Box<[TemplateLeg]>,
+    /// Items belong to this header group; they are not flattened into flows.
+    pub items: Box<[TemplateItem]>,
+}
+
+/// One leg of a contract template's split header.
+#[derive(Clone, PartialEq, Debug)]
+pub struct TemplateLeg {
+    pub flow: Flow,
+    /// The side supplied by this split leg.
+    pub side: FlowSide,
+    pub quantity: TemplateQuantity,
+}
+
+/// Which quantity of the parent transfer a leg or item supplies.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FlowSide {
+    Out,
+    Arrive,
+}
+
+/// A line item's typed value. A computed root is authoritative and must be
+/// evaluated for each occurrence; a literal retains its exact typed amount.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TemplateAmount {
+    Literal(Amount),
+    Computed(NodeId),
+}
+
+/// The amount form on a template header or split leg. Literal amounts already
+/// live in the corresponding side of `Flow`; a root replaces that literal.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TemplateQuantity {
+    Amount(Option<NodeId>),
+    Pending(Option<NodeId>),
+    Target(Option<NodeId>),
+    Unknown(Id<Commodity>),
+    All(Option<Id<Commodity>>),
+    Rest,
+    Whole,
+    /// The amount is supplied by another contract rule, such as a loan.
+    Derived,
+}
+
+/// The exact endpoint pair an item bridges. For a split, `Leg(i)` points to
+/// that source-ordered leg and preserves the relationship to its remainder.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TemplateItemParent {
+    Header,
+    Leg(u16),
+}
+
+/// A source-ordered item retained with its parent flow group so the engine can
+/// apply Carve/Add/Less semantics without reparsing or allocating a side plan.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct TemplateItem {
+    pub sign: crate::book::Sign,
+    pub parent: TemplateItemParent,
+    /// Which parent quantity this item's unit contributes to. This is
+    /// explicit because an exchange item may use a different unit per side.
+    pub side: FlowSide,
+    pub amount: TemplateAmount,
+    pub purpose: Option<crate::journal::Purposed>,
+    pub description: Option<Sym>,
+    pub codes: axiom_core::Run<Sym>,
+    pub select: axiom_core::Run<crate::journal::Select>,
+    pub detail: Option<Id<crate::journal::Detail>>,
+    pub waive: Option<crate::journal::Waive>,
+    pub loc: Loc,
 }
 
 /// A deadline after the due day, and what its passing adds.
 #[derive(Clone, PartialEq, Debug)]
 pub struct Deadline {
     pub after: Span,
-    /// The `else` flow, compiled into the enclosing term's shared program;
+    /// The `else` item, compiled into the enclosing term's shared program;
     /// `None` if the deadline only makes the claim late.
-    pub otherwise: Option<TemplateFlow>,
+    pub otherwise: Option<TemplateItem>,
+}
+
+/// Which of a contract's independent schedules an occurrence names.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum ScheduleKind {
+    Regular,
+    Standing,
 }
 
 /// `for last month|last quarter|last year`.
@@ -721,6 +805,8 @@ pub enum ForecastFeature {
     Buy,
     Deposit,
     Matching,
+    /// The legacy single-flow iterator cannot materialize grouped templates.
+    GroupedTemplate,
 }
 
 /// Whether a contract covers a typed flow on a particular date.
@@ -797,60 +883,32 @@ impl Contract {
         if !self.days.contains(day) {
             return ContractCoverage::None;
         }
-        let terms = self.terms_on(day);
-        if !terms.is_waived() {
-            return if terms.template.iter().any(|candidate| same_flow_kind(template, candidate)) {
-                ContractCoverage::Active
-            } else {
-                ContractCoverage::None
-            };
-        }
-        if terms.template.iter().any(|candidate| same_flow_kind(template, candidate)) {
-            return ContractCoverage::Waived;
-        }
-
-        let nearest = self
-            .terms
-            .within(self.days)
-            .filter(|(_, candidate)| !candidate.is_waived())
-            .map(|(stretch, terms)| {
-                let distance = if stretch.last() < day {
-                    i64::from(day.0) - i64::from(stretch.last().0)
-                } else if stretch.first() > day {
-                    i64::from(stretch.first().0) - i64::from(day.0)
-                } else {
-                    0
-                };
-                (distance, u8::from(stretch.first() > day), terms)
-            })
-            .min_by_key(|(distance, prefers_future, _)| (*distance, *prefers_future));
-        if nearest.is_some_and(|(_, _, terms)| {
-            terms.template.iter().any(|candidate| same_flow_kind(template, candidate))
-        }) {
-            ContractCoverage::Waived
-        } else {
-            ContractCoverage::None
+        let regular = coverage_in_timeline(&self.terms, template, day);
+        let standing = self
+            .standing
+            .as_ref()
+            .map_or(ContractCoverage::None, |terms| coverage_in_timeline(terms, template, day));
+        match (regular, standing) {
+            (ContractCoverage::Active, _) | (_, ContractCoverage::Active) => ContractCoverage::Active,
+            (ContractCoverage::Waived, _) | (_, ContractCoverage::Waived) => ContractCoverage::Waived,
+            _ => ContractCoverage::None,
         }
     }
 
     /// The scheduled occurrences in `within`, borrowing the terms that govern
     /// each one. Terms changes split the schedule; waived stretches yield none.
     pub fn occurrences(&self, within: Days) -> impl Iterator<Item = ContractOccurrence<'_>> + '_ {
-        within
-            .intersect(self.days)
-            .into_iter()
-            .flat_map(move |within| {
-                self.terms
-                    .within(within)
-                    .filter(|(_, terms)| !terms.is_waived())
-                    .flat_map(move |(stretch, terms)| {
-                        let days = stretch
-                            .intersect(within)
-                            .expect("timeline stretch intersects its window");
-                        calendar::due(terms.every, &terms.on, terms.anchor, days)
-                            .map(move |day| ContractOccurrence { day, terms })
-                    })
-            })
+        let window = within.intersect(self.days);
+        let search = window.unwrap_or(within);
+        let regular = occurrences_for(&self.terms, search, window.is_some(), ScheduleKind::Regular);
+        let (standing, has_standing) = self.standing.as_ref().map_or((&self.terms, false), |terms| (terms, true));
+        let standing = occurrences_for(
+            standing,
+            search,
+            window.is_some() && has_standing,
+            ScheduleKind::Standing,
+        );
+        ContractOccurrences { regular: regular.peekable(), standing: standing.peekable() }
     }
 
     /// The days occurrences fall due in `within`, in order. Kept as a
@@ -864,10 +922,20 @@ impl Contract {
     /// The multiplier for the terms in force on `day`, including any
     /// anniversary rise or the named index's movement since the contract began.
     pub fn amount_on(&self, book: &Book<'_>, day: Day) -> Result<Ratio, ForecastError> {
+        self.amount_on_schedule(book, ScheduleKind::Regular, day)
+    }
+
+    /// The multiplier for a specific independent schedule in force on `day`.
+    pub fn amount_on_schedule(
+        &self,
+        book: &Book<'_>,
+        schedule: ScheduleKind,
+        day: Day,
+    ) -> Result<Ratio, ForecastError> {
         if !self.days.contains(day) {
             return Err(ForecastError::OutsideContract(day));
         }
-        let terms = self.terms_on(day);
+        let terms = self.terms_on_schedule(schedule, day).ok_or(ForecastError::OutsideContract(day))?;
         if terms.is_waived() {
             return Err(ForecastError::Waived(day));
         }
@@ -894,7 +962,7 @@ impl Contract {
             return Ok(amount);
         }
         let period = self
-            .recognition_period(day)?
+            .recognition_period_for_schedule(schedule, day)?
             .ok_or(ForecastError::UnsupportedProration(day))?;
         amount
             .checked_mul(prorated_share(self.days, period)?)
@@ -904,16 +972,29 @@ impl Contract {
     /// The recognition window for one occurrence, including its relative
     /// `for` period or `covers` rule when present.
     pub fn recognition_on(&self, template: &Flow, day: Day) -> Result<Days, ForecastError> {
+        self.recognition_on_schedule(template, ScheduleKind::Regular, day)
+    }
+
+    /// The recognition window for one occurrence in its independent schedule.
+    pub fn recognition_on_schedule(
+        &self,
+        template: &Flow,
+        schedule: ScheduleKind,
+        day: Day,
+    ) -> Result<Days, ForecastError> {
         if !self.days.contains(day) {
             return Err(ForecastError::OutsideContract(day));
         }
-        if self.terms_on(day).is_waived() {
+        let Some(terms) = self.terms_on_schedule(schedule, day) else {
+            return Err(ForecastError::OutsideContract(day));
+        };
+        if terms.is_waived() {
             return Err(ForecastError::Waived(day));
         }
         // An explicit `for` or `covers` window controls recognition even when
         // only part of it overlaps the contract. Proration scales the amount
         // by that overlap; it does not move recognition outside the declared window.
-        if let Some(period) = self.recognition_period(day)? {
+        if let Some(period) = self.recognition_period_for_schedule(schedule, day)? {
             return Ok(period);
         }
         let shift = day
@@ -936,7 +1017,7 @@ impl Contract {
         within: Days,
     ) -> impl Iterator<Item = Result<Flow, ForecastError>> + 'a {
         self.occurrences(within).flat_map(move |occurrence| {
-            let amount = self.amount_on(book, occurrence.day);
+            let amount = self.amount_on_schedule(book, occurrence.schedule, occurrence.day);
             let input = occurrence.terms.inputs.first().map(|input| input.name);
             let terms = occurrence.terms;
             let template_count = if self.loan.is_some() {
@@ -957,18 +1038,27 @@ impl Contract {
                     let Some(template) = terms.template.get(index) else {
                         return Err(ForecastError::MissingTemplate(occurrence.day));
                     };
+                    if !template.legs.is_empty()
+                        || !template.items.is_empty()
+                        || !terms.program.nodes.is_empty()
+                    {
+                        return Err(ForecastError::UnsupportedFeature {
+                            feature: ForecastFeature::GroupedTemplate,
+                            day: occurrence.day,
+                        });
+                    }
                     if let Some(input) = input {
                         return Err(ForecastError::MissingInput {
                             input,
                             day: occurrence.day,
                         });
                     }
-                    if template.infer != Infer::Known {
+                    if template.flow.infer != Infer::Known {
                         return Err(ForecastError::UnresolvedAmount(occurrence.day));
                     }
-                    let recognized = self.recognition_on(template, occurrence.day)?;
+                    let recognized = self.recognition_on_schedule(&template.flow, occurrence.schedule, occurrence.day)?;
                     amount.and_then(|factor| {
-                        forecast_flow(template, occurrence.day, recognized, id, factor)
+                        forecast_flow(&template.flow, occurrence.day, recognized, id, factor)
                     })
                 })
         })
@@ -992,8 +1082,12 @@ impl Contract {
         }
     }
 
-    fn recognition_period(&self, day: Day) -> Result<Option<Days>, ForecastError> {
-        let terms = self.terms_on(day);
+    fn recognition_period_for_schedule(
+        &self,
+        schedule: ScheduleKind,
+        day: Day,
+    ) -> Result<Option<Days>, ForecastError> {
+        let terms = self.terms_on_schedule(schedule, day).ok_or(ForecastError::OutsideContract(day))?;
         if terms.period.is_some() && terms.covers.is_some() {
             return Err(ForecastError::ConflictingRecognition(day));
         }
@@ -1011,6 +1105,81 @@ impl Contract {
     /// The terms in force on `day`.
     pub fn terms_on(&self, day: Day) -> &Terms {
         self.terms.at(day)
+    }
+
+    /// The terms in force on `day` for one independent schedule, if it exists.
+    pub fn terms_on_schedule(&self, schedule: ScheduleKind, day: Day) -> Option<&Terms> {
+        match schedule {
+            ScheduleKind::Regular => Some(self.terms.at(day)),
+            ScheduleKind::Standing => self.standing.as_ref().map(|terms| terms.at(day)),
+        }
+    }
+}
+
+fn occurrences_for<'a>(
+    timeline: &'a Timeline<Terms>,
+    within: Days,
+    enabled: bool,
+    schedule: ScheduleKind,
+) -> impl Iterator<Item = ContractOccurrence<'a>> + 'a {
+    timeline
+        .within(within)
+        .filter(move |(_, terms)| enabled && !terms.is_waived())
+        .flat_map(move |(stretch, terms)| {
+            let days = stretch.intersect(within).expect("timeline stretch intersects its window");
+            calendar::due(terms.every, &terms.on, terms.anchor, days)
+                .map(move |day| ContractOccurrence { day, schedule, terms })
+        })
+}
+
+fn coverage_in_timeline(timeline: &Timeline<Terms>, template: &Flow, day: Day) -> ContractCoverage {
+    let contains = |terms: &Terms| terms.template.iter().any(|candidate| same_flow_kind(template, &candidate.flow));
+    let current = timeline.at(day);
+    if !current.is_waived() {
+        return if contains(current) { ContractCoverage::Active } else { ContractCoverage::None };
+    }
+    if contains(current) {
+        return ContractCoverage::Waived;
+    }
+    let nearest = timeline
+        .within(Days::ALWAYS)
+        .filter(|(_, candidate)| !candidate.is_waived())
+        .map(|(stretch, terms)| {
+            let distance = if stretch.last() < day {
+                i64::from(day.0) - i64::from(stretch.last().0)
+            } else if stretch.first() > day {
+                i64::from(stretch.first().0) - i64::from(day.0)
+            } else {
+                0
+            };
+            (distance, u8::from(stretch.first() > day), terms)
+        })
+        .min_by_key(|(distance, prefers_future, _)| (*distance, *prefers_future));
+    if nearest.is_some_and(|(_, _, terms)| contains(terms)) {
+        ContractCoverage::Waived
+    } else {
+        ContractCoverage::None
+    }
+}
+
+struct ContractOccurrences<I: Iterator> {
+    regular: std::iter::Peekable<I>,
+    standing: std::iter::Peekable<I>,
+}
+
+impl<'a, I> Iterator for ContractOccurrences<I>
+where
+    I: Iterator<Item = ContractOccurrence<'a>>,
+{
+    type Item = ContractOccurrence<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.regular.peek(), self.standing.peek()) {
+            (Some(regular), Some(standing)) if standing.day < regular.day => self.standing.next(),
+            (Some(_), _) => self.regular.next(),
+            (None, Some(_)) => self.standing.next(),
+            (None, None) => None,
+        }
     }
 }
 
@@ -1243,6 +1412,9 @@ fn move_days(days: Days, shift: i32) -> Result<Days, ForecastError> {
 pub struct ContractOccurrence<'a> {
     /// The day this scheduled payment falls due.
     pub day: Day,
+    /// The independent cadence this occurrence belongs to. Equal-day ties
+    /// emit Regular before Standing.
+    pub schedule: ScheduleKind,
     /// The terms that supply this occurrence's flows and escalation.
     pub terms: &'a Terms,
 }

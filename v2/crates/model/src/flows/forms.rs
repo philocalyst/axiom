@@ -76,6 +76,7 @@ impl<'a, 's> Elab<'a, 's> {
             waive: header.and_then(|header| header.waive),
             plan,
             contract: None,
+            contract_schedule: None,
             ends: false,
             doc: item.doc.map(|doc| world.sym(doc.0)),
             loc: item.loc,

@@ -1420,7 +1420,18 @@ fn terms(every: crate::Cadence, on: &[crate::On], anchor: axiom_core::Day, templ
         every,
         on: on.into(),
         anchor,
-        template: template.into(),
+        template: template
+            .iter()
+            .cloned()
+            .map(|flow| crate::TemplateFlow {
+                out: crate::TemplateQuantity::Amount(None),
+                arrive: crate::TemplateQuantity::Amount(None),
+                flow,
+                legs: Box::default(),
+                items: Box::default(),
+            })
+            .collect(),
+        program: crate::TemplateProgram::default(),
         inputs: Box::default(),
         estimate: false,
         due: None,
@@ -1446,6 +1457,7 @@ fn contract(days: axiom_core::Days, terms: axiom_core::Timeline<crate::Terms>) -
         description: None,
         days,
         terms,
+        standing: None,
         buys: None,
         deposit: None,
         deposit_holding: None,
@@ -1821,7 +1833,14 @@ fn contracts_cover_matching_fallback_flows_by_interval_and_typed_identity() {
         let mut changed_identity = terms;
         let mut other_movement = template.clone();
         other_movement.to = axiom_core::Id::new(99);
-        changed_identity.template = vec![other_movement.clone()].into();
+        changed_identity.template = vec![crate::TemplateFlow {
+            out: crate::TemplateQuantity::Amount(None),
+            arrive: crate::TemplateQuantity::Amount(None),
+            flow: other_movement.clone(),
+            legs: Box::default(),
+            items: Box::default(),
+        }]
+        .into();
         timeline.paint(Days::new(day(3, 1), day(3, 9)).unwrap(), changed_identity);
         let mut waiver = timeline.at(day(3, 1)).clone();
         waiver.state = TermsState::Waived;
@@ -1863,6 +1882,46 @@ fn contracts_cover_matching_fallback_flows_by_interval_and_typed_identity() {
         let mut other_unit = template;
         other_unit.out.unit = axiom_core::Id::new(99);
         assert_eq!(rent.covers(&other_unit, day(2, 20)), ContractCoverage::None);
+    });
+}
+
+#[test]
+fn regular_and_standing_contract_schedules_keep_identity_and_chronological_order() {
+    use crate::{Cadence, ScheduleKind};
+    use axiom_core::{Day, Days, Span, Timeline};
+    let day = |month, date| Day::from_ymd(2026, month, date).unwrap();
+    with_book("2026-01-05 checking -> food 1_000 USD\n", |_book, _| {
+        let regular = terms(
+            Cadence::Every(Span::months(1)),
+            &[crate::On::MonthDay(1)],
+            day(1, 1),
+            &[],
+        );
+        let standing = terms(
+            Cadence::Every(Span::months(1)),
+            &[crate::On::MonthDay(15)],
+            day(1, 15),
+            &[],
+        );
+        let mut rent = contract(
+            Days::new(day(1, 1), day(2, 15)).unwrap(),
+            Timeline::new(regular),
+        );
+        rent.standing = Some(Timeline::new(standing));
+
+        let occurrences: Vec<_> = rent
+            .occurrences(Days::new(day(1, 1), day(2, 15)).unwrap())
+            .map(|occurrence| (occurrence.day, occurrence.schedule))
+            .collect();
+        assert_eq!(
+            occurrences,
+            [
+                (day(1, 1), ScheduleKind::Regular),
+                (day(1, 15), ScheduleKind::Standing),
+                (day(2, 1), ScheduleKind::Regular),
+                (day(2, 15), ScheduleKind::Standing),
+            ],
+        );
     });
 }
 

@@ -5,7 +5,8 @@ use axiom_core::{Day, Days, Id, Loc, Qty, Ratio, Run, Span, Sym};
 use std::hash::{Hash, Hasher};
 
 use crate::book::{
-    Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose, System,
+    Also, Amount, Asset, Commodity, Contract, Entity, EventState, Kind, On, Place, Policy, Purpose, ScheduleKind,
+    System,
 };
 use crate::law::{Law, Subject};
 
@@ -406,6 +407,8 @@ pub struct Txn {
     pub waive: Option<Waive>,
     /// The contract this transaction is an occurrence of (`DATE phone`).
     pub contract: Option<Id<Contract>>,
+    /// Which independent contract schedule this occurrence keeps.
+    pub contract_schedule: Option<ScheduleKind>,
     /// `DATE NAME ends`: it ends the contract, and has no flows.
     pub ends: bool,
     pub doc: Option<Sym>,
