@@ -9,12 +9,17 @@ use std::hash::{Hash, Hasher};
 use axiom_core::{Day, Id, Map};
 use axiom_model::{Entity, Fault, Func, Law, NodeId, Subject, Value};
 
+use crate::assets::PartId;
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Key {
     pub law: Id<Law>,
     pub subject: Subject,
     pub owner: Id<Entity>,
     pub call: NodeId,
+    /// Asset laws run once for each acquired or improved part. Keeping this in
+    /// the history identity prevents their cost/basis readings from merging.
+    pub part: Option<PartId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -130,6 +135,7 @@ mod tests {
             subject: Subject::Entity(Id::new(0)),
             owner: Id::new(0),
             call: NodeId(4),
+            part: None,
         };
         let mut history = History::default();
         history.record(
@@ -201,5 +207,39 @@ mod tests {
             hash(&changed),
             "checkpoint state includes every retained extreme"
         );
+    }
+
+    #[test]
+    fn part_temporal_histories_do_not_merge_asset_costs() {
+        let day = Day::from_ymd(2026, 2, 5).unwrap();
+        let unit = Id::new(0);
+        let origin = axiom_model::RuntimeTxn::Adjustment {
+            place: Id::new(0),
+            day,
+        };
+        let key = Key {
+            law: Id::new(0),
+            subject: Subject::Asset(Id::new(0)),
+            owner: Id::new(0),
+            call: NodeId(4),
+            part: None,
+        };
+        let first = PartId { origin, ordinal: 0 };
+        let second = PartId { origin, ordinal: 1 };
+        let mut history = History::default();
+        history.record(
+            Key { part: Some(first), ..key },
+            day,
+            Value::Amount(Amount::new(axiom_core::Qty(100), unit)),
+        );
+        history.record(
+            Key { part: Some(second), ..key },
+            day,
+            Value::Amount(Amount::new(axiom_core::Qty(200), unit)),
+        );
+
+        assert_eq!(history.get(Key { part: Some(first), ..key }).len(), 1);
+        assert_eq!(history.get(Key { part: Some(second), ..key }).len(), 1);
+        assert_eq!(history.entries.len(), 2);
     }
 }

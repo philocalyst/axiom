@@ -364,6 +364,7 @@ fn temporal_queries(
                         subject: rule.subject,
                         owner,
                         call,
+                        part: None,
                     },
                     func: *func,
                     root,

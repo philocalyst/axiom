@@ -380,13 +380,37 @@ pub(crate) fn sample_temporal<'p, 'b, 's>(
     values: &mut Vec<Value>,
 ) {
     for query in plan.temporal.iter().copied() {
-        let law = &plan.book.laws[query.key.law];
-        let occasion = Occasion::time(day, Days::on(day));
-        let context = Context::new(query.key.subject, query.key.owner, &occasion)
-            .for_law(query.key.law);
-        let value = expression(Env { plan, world: &*world }, law, query.root, &context, values);
-        world.temporal.record(query.key, day, value);
+        if let Subject::Asset(asset) = query.key.subject {
+            let part_count = world.assets.asset(asset).map_or(0, |state| state.parts().len());
+            for index in 0..part_count {
+                let part = world.assets.asset(asset).expect("asset state was counted").parts()[index].id;
+                sample_temporal_query(plan, world, day, query, Some(part), values);
+            }
+        } else {
+            sample_temporal_query(plan, world, day, query, None, values);
+        }
     }
+}
+
+fn sample_temporal_query(
+    plan: &Plan<'_, '_>,
+    world: &mut World,
+    day: Day,
+    query: crate::temporal::Query,
+    part: Option<PartId>,
+    values: &mut Vec<Value>,
+) {
+    let law = &plan.book.laws[query.key.law];
+    let occasion = Occasion::time(day, Days::on(day));
+    let mut context = Context::new(query.key.subject, query.key.owner, &occasion)
+        .for_law(query.key.law);
+    if let Some(part) = part {
+        context = context.for_asset_part(part);
+    }
+    let value = expression(Env { plan, world: &*world }, law, query.root, &context, values);
+    let mut key = query.key;
+    key.part = part;
+    world.temporal.record(key, day, value);
 }
 
 /// Evaluates one expression of `law` (a `by` date, say).
@@ -1191,6 +1215,7 @@ impl<'a, 's> Machine<'a, 's> {
             subject: self.ctx.subject,
             owner: self.ctx.owner,
             call,
+            part: self.ctx.asset_part,
         };
         let samples = self.env.world.temporal.get(key);
         if matches!(self.at(window_arg), Value::Name(name) if self.book().name(name) == "ever") {
