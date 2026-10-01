@@ -56,11 +56,7 @@ pub(crate) fn view_by_party_with_lens<'s>(
     let periods = match from {
         Some(from) => Periods::covering(Period::Month, from, cutoff),
         None => {
-            let first = book
-                .flows
-                .as_slice()
-                .first()
-                .map_or(cutoff, |flow| flow.day.min(cutoff));
+            let first = first_activity(book, cutoff);
             Periods::covering(Period::Month, first, cutoff).last(DEFAULT_PERIODS)
         }
     };
@@ -188,7 +184,11 @@ enum Party {
 
 fn table<'s>(first: &'static str, periods: &Periods) -> Section<'s> {
     let columns = (0..periods.len()).map(|period| Column::right(periods.title(period)));
-    Section::new(std::iter::once(Column::left(first)).chain(columns))
+    Section::new(
+        std::iter::once(Column::left(first))
+            .chain(columns)
+            .chain((periods.len() > 1).then(|| Column::right("Total"))),
+    )
 }
 
 fn row<'s>(
@@ -238,11 +238,7 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
     let periods = match from {
         Some(from) => Periods::covering(by, from, cutoff),
         None => {
-            let first = book
-                .flows
-                .as_slice()
-                .first()
-                .map_or(cutoff, |flow| flow.day.min(cutoff));
+            let first = first_activity(book, cutoff);
             Periods::covering(by, first, cutoff).last(DEFAULT_PERIODS)
         }
     };
@@ -302,11 +298,16 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
     }
 
     let columns = (0..period_count).map(|period| Column::right(periods.title(period)));
-    let mut section = Section::new(std::iter::once(Column::left("Purpose")).chain(columns));
-    let roots = book.purposes.roots().collect::<Vec<_>>();
+    let mut section = Section::new(
+        std::iter::once(Column::left("Purpose"))
+            .chain(columns)
+            .chain((period_count > 1).then(|| Column::right("Total"))),
+    );
+    let roots = book.purposes.roots();
+    let mut children: Vec<(Object, &[Qty])> = Vec::new();
     for root in roots {
         let root_values = purpose_values(&totals, period_count, root);
-        if is_zero(root_values) {
+        if !has_activity(book, &totals, period_count, root) {
             continue;
         }
         let purpose = &book.purposes[root];
@@ -321,7 +322,7 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
 
         for id in book.purposes.subtree(root).skip(1) {
             let values = purpose_values(&totals, period_count, id);
-            if is_zero(values) {
+            if !has_activity(book, &totals, period_count, id) {
                 continue;
             }
             let purpose = &book.purposes[id];
@@ -335,11 +336,13 @@ fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>
             ));
             add_purpose_facts(&mut section, lens, periods, id, values);
 
-            let mut children = objects
-                .iter()
-                .filter(|((purpose_id, _), amounts)| *purpose_id == id && !is_zero(amounts))
-                .map(|((_, object), amounts)| (*object, amounts.as_slice()))
-                .collect::<Vec<_>>();
+            children.clear();
+            children.extend(
+                objects
+                    .iter()
+                    .filter(|((purpose_id, _), amounts)| *purpose_id == id && !is_zero(amounts))
+                    .map(|((_, object), amounts)| (*object, amounts.as_slice())),
+            );
             children.sort_by(|(left, _), (right, _)| {
                 object_name(book, *left).cmp(object_name(book, *right))
             });
@@ -550,6 +553,22 @@ fn add_recognized(
 
 fn purpose_values(totals: &[Qty], periods: usize, purpose: Id<Purpose>) -> &[Qty] {
     &totals[purpose.index() * periods..][..periods]
+}
+
+fn has_activity(book: &Book, totals: &[Qty], periods: usize, purpose: Id<Purpose>) -> bool {
+    book.purposes
+        .subtree(purpose)
+        .any(|id| !is_zero(purpose_values(totals, periods, id)))
+}
+
+fn first_activity(book: &Book, cutoff: Day) -> Day {
+    book.flows
+        .iter()
+        .map(|(_, flow)| flow.day)
+        .chain(book.measures.iter().map(|(_, measure)| measure.day))
+        .filter(|day| *day <= cutoff)
+        .min()
+        .unwrap_or(cutoff)
 }
 
 fn period_row<'s>(
