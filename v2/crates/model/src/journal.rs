@@ -538,10 +538,44 @@ pub struct FlowExpressions {
     pub arrive: Option<NodeId>,
 }
 
+/// A resolved endpoint retained when a split header has no postable flow of
+/// its own. `entity` records that the written endpoint named an entity whose
+/// place is used by the flow.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct JournalEnd {
+    pub place: Id<Place>,
+    pub entity: Option<Id<Entity>>,
+}
+
+/// A split header's aggregate quantity when one named side is only group
+/// metadata. Literal amounts stay inline; a computed root, when present,
+/// replaces that literal during instantiation.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum JournalQuantity {
+    Amount(Amount, Option<NodeId>),
+    Pending(Amount, Option<NodeId>),
+    Target(Amount, Option<NodeId>),
+    Unknown(Id<Commodity>),
+    All(Option<Id<Commodity>>),
+    Rest,
+    Whole,
+    Derived,
+}
+
 /// A split header and its source-ordered legs and items.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct JournalGroup {
-    pub header: u32,
+    /// An independently posted header flow, or `None` when the named source
+    /// exists only as aggregate metadata for the split legs.
+    pub header: Option<u32>,
+    /// Resolved named source for a source-only split. Still populated for
+    /// headed groups so the source relation is explicit and uniform.
+    pub source: JournalEnd,
+    /// Which side of each leg corresponds to the aggregate header quantity.
+    pub side: FlowSide,
+    /// The aggregate quantity only when `header` is absent. When a header
+    /// flow exists, its own inline amount and `FlowExpressions` are canonical.
+    pub total: Option<JournalQuantity>,
     pub legs: Box<[u32]>,
     pub items: Box<[JournalItem]>,
 }
