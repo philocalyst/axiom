@@ -7,9 +7,9 @@
 
 use std::collections::BTreeMap;
 
-use axiom_core::{Day, Id, Qty, Ratio};
+use axiom_core::{Arena, Day, Id, Qty, Ratio};
 use axiom_engine::{Checkpoint, Holding, Ledger, Options, Plan};
-use axiom_model::{Book, Class, Commodity, End, Flow, Place, Value};
+use axiom_model::{Book, Class, Commodity, Flow, Place, RuntimeDetail, RuntimeFlow, Value};
 
 use crate::history::Held;
 use crate::lens::{Basket, Lens, Liquidity};
@@ -43,12 +43,37 @@ pub fn project<'p, 'b, 's>(
     flows: Vec<Flow>,
     checkpoints: &[Day],
 ) -> Trace<'p, 'b, 's> {
+    let details = Arena::default();
+    project_runtime(
+        plan,
+        lens,
+        today,
+        flows.into_iter().map(RuntimeFlow::source).collect(),
+        &details,
+        checkpoints,
+    )
+}
+
+/// Projects typed runtime flows using the detail arena that owns their
+/// overrides. The ledger consumes the same representation as contract
+/// occurrences and never treats a runtime transaction as a Book index.
+pub(crate) fn project_runtime<'p, 'b, 's>(
+    plan: &'p Plan<'b, 's>,
+    lens: Lens<'b, 's, '_, '_>,
+    today: Day,
+    flows: Vec<RuntimeFlow>,
+    details: &Arena<RuntimeDetail>,
+    checkpoints: &[Day],
+) -> Trace<'p, 'b, 's> {
     let book = lens.book;
     let horizon = checkpoints.last().copied().unwrap_or(today);
-    let mut ledger = plan.start(Options { today: horizon, relaxed: book.relaxed });
+    let mut ledger = plan.start(Options {
+        today: horizon,
+        relaxed: book.relaxed,
+    });
     ledger.advance(today);
 
-    trace_from(ledger, lens, today, flows, checkpoints)
+    trace_from(ledger, lens, today, flows, details, checkpoints)
 }
 
 /// Projects from the view checkpoint paired with `plan` and `lens`.
@@ -68,13 +93,44 @@ pub(crate) fn project_from<'p, 'b, 's>(
     flows: Vec<Flow>,
     checkpoints: &[Day],
 ) -> Trace<'p, 'b, 's> {
-    debug_assert!(checkpoint.day() <= today, "projection cannot rewind its view checkpoint");
+    let details = Arena::default();
+    project_runtime_from(
+        plan,
+        checkpoint,
+        lens,
+        today,
+        relaxed,
+        flows.into_iter().map(RuntimeFlow::source).collect(),
+        &details,
+        checkpoints,
+    )
+}
+
+/// Resumes from a prepared checkpoint and folds engine-materialized future
+/// occurrences through the same runtime flow path used by the canonical run.
+pub(crate) fn project_runtime_from<'p, 'b, 's>(
+    plan: &'p Plan<'b, 's>,
+    checkpoint: &Checkpoint,
+    lens: Lens<'b, 's, '_, '_>,
+    today: Day,
+    relaxed: bool,
+    flows: Vec<RuntimeFlow>,
+    details: &Arena<RuntimeDetail>,
+    checkpoints: &[Day],
+) -> Trace<'p, 'b, 's> {
+    debug_assert!(
+        checkpoint.day() <= today,
+        "projection cannot rewind its view checkpoint"
+    );
     let horizon = checkpoints.last().copied().unwrap_or(today);
-    let options = Options { today: horizon, relaxed };
+    let options = Options {
+        today: horizon,
+        relaxed,
+    };
     let mut ledger = plan.resume(checkpoint, options);
     ledger.advance(today);
 
-    trace_from(ledger, lens, today, flows, checkpoints)
+    trace_from(ledger, lens, today, flows, details, checkpoints)
 }
 
 /// The shared forecast fold once a ledger has reached the end of `today`.
@@ -82,17 +138,20 @@ fn trace_from<'p, 'b, 's>(
     mut ledger: Ledger<'p, 'b, 's>,
     lens: Lens<'b, 's, '_, '_>,
     today: Day,
-    flows: Vec<Flow>,
+    flows: Vec<RuntimeFlow>,
+    details: &Arena<RuntimeDetail>,
     checkpoints: &[Day],
 ) -> Trace<'p, 'b, 's> {
     let mut overdrawn: BTreeMap<Id<Place>, Overdraft> = BTreeMap::new();
     let (mut liquid, mut worth) = (Vec::new(), Vec::new());
     let mut coming = flows.into_iter().peekable();
     for &checkpoint in checkpoints {
-        while let Some(flow) = coming.next_if(|flow| flow.day <= checkpoint) {
-            let Some(flow) = within_means(lens, &ledger, flow) else { continue };
-            ledger.apply(&flow);
-            note_overdrafts(lens, &ledger, &flow, &mut overdrawn);
+        while let Some(flow) = coming.next_if(|flow| flow.flow.day <= checkpoint) {
+            let Some(flow) = within_means(lens, &ledger, flow) else {
+                continue;
+            };
+            ledger.apply_runtime(&flow, details);
+            note_overdrafts(lens, &ledger, &flow.flow, &mut overdrawn);
         }
         ledger.advance(checkpoint);
         let months = checkpoint.since(today).months;
@@ -100,7 +159,12 @@ fn trace_from<'p, 'b, 's>(
         liquid.push(position(&|holding| in_hand_or_owed(lens, holding)));
         worth.push(position(&|holding| holding.qty()));
     }
-    Trace { ledger, liquid, worth, overdrafts: overdrawn.into_values().collect() }
+    Trace {
+        ledger,
+        liquid,
+        worth,
+        overdrafts: overdrawn.into_values().collect(),
+    }
 }
 
 /// What a holding adds to what can be spent: its free money, less what is
@@ -108,10 +172,12 @@ fn trace_from<'p, 'b, 's>(
 /// the payments the projection already makes.
 fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
     let place = &lens.book.places[holding.place];
-    let has_term = lens
-        .known
-        .maturity
-        .is_some_and(|name| place.props.iter().any(|prop| prop.name == name && matches!(prop.value, Value::Day(_))));
+    let has_term = lens.known.maturity.is_some_and(|name| {
+        place
+            .props
+            .iter()
+            .any(|prop| prop.name == name && matches!(prop.value, Value::Day(_)))
+    });
     match lens.liquidity(holding.place, holding.unit) {
         Some(Liquidity::Cash) => lens.free(holding),
         _ if place.class == Class::Debt && !has_term => holding.qty(),
@@ -124,47 +190,90 @@ fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
 fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
     let mut basket = Basket::default();
     let on_sheet = |holding: &&Holding| {
-        lens.owns(holding.place) && matches!(lens.book.places[holding.place].class, Class::Asset | Class::Debt)
+        lens.owns(holding.place)
+            && matches!(
+                lens.book.places[holding.place].class,
+                Class::Asset | Class::Debt
+            )
     };
     for holding in ledger.holdings().filter(on_sheet) {
-        basket.add(holding.unit, Held { qty: pick(holding), booked: Qty::ZERO });
+        basket.add(
+            holding.unit,
+            Held {
+                qty: pick(holding),
+                booked: Qty::ZERO,
+            },
+        );
     }
-    basket.amounts().filter_map(|amount| Some(compound(lens.book, amount.unit, lens.value(amount)?, months))).sum()
+    basket
+        .amounts()
+        .filter_map(|amount| {
+            Some(compound(
+                lens.book,
+                amount.unit,
+                lens.value(amount)?,
+                months,
+            ))
+        })
+        .sum()
 }
 
 /// A flow that cannot move more than its ends hold: what leaves an account
 /// that is not cash is limited by what it holds, and a payment into a debt by
 /// what is owed. `None` when there is nothing to move.
-fn within_means(lens: Lens, ledger: &Ledger, mut flow: Flow) -> Option<Flow> {
-    // A basis end moves no quantity, so there is none for it to run out of.
-    let leaves = flow.moves_quantity(End::From);
-    let arrives = flow.moves_quantity(End::To);
-    let held_back =
-        leaves && matches!(lens.liquidity(flow.from, flow.out.unit), Some(Liquidity::Slow(_) | Liquidity::Claim));
+fn within_means(lens: Lens, ledger: &Ledger, mut flow: RuntimeFlow) -> Option<RuntimeFlow> {
+    let movement = &flow.flow;
+    let (from, to, out_unit, arrive_unit, exchange, amount) = (
+        movement.from,
+        movement.to,
+        movement.out.unit,
+        movement.arrive.unit,
+        movement.is_exchange(),
+        movement.out.qty,
+    );
+    // Slow holdings and claims cannot move more than they currently hold.
+    let held_back = matches!(
+        lens.liquidity(from, out_unit),
+        Some(Liquidity::Slow(_) | Liquidity::Claim)
+    );
     let room = if held_back {
-        Some(ledger.balance(flow.from, flow.out.unit))
-    } else if arrives && lens.book.places[flow.to].class == Class::Debt {
-        Some(-ledger.balance(flow.to, flow.arrive.unit))
+        Some(ledger.balance(from, out_unit))
+    } else if lens.book.places[to].class == Class::Debt {
+        Some(-ledger.balance(to, arrive_unit))
     } else {
         None
     };
     match room {
-        Some(room) if !flow.is_exchange() && room < flow.out.qty => (room > Qty::ZERO).then(|| {
-            (flow.out.qty, flow.arrive.qty) = (room, room);
-            flow
-        }),
+        Some(room) if !exchange && room < amount => {
+            if room <= Qty::ZERO {
+                None
+            } else {
+                flow.flow.out.qty = room;
+                flow.flow.arrive.qty = room;
+                Some(flow)
+            }
+        }
         _ => Some(flow),
     }
 }
 
 /// Records where a flow left a cash place below zero.
-fn note_overdrafts(lens: Lens, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTreeMap<Id<Place>, Overdraft>) {
+fn note_overdrafts(
+    lens: Lens,
+    ledger: &Ledger,
+    flow: &Flow,
+    overdrawn: &mut BTreeMap<Id<Place>, Overdraft>,
+) {
     let book = lens.book;
     let cash = |&place: &Id<Place>| lens.liquidity(place, book.base) == Some(Liquidity::Cash);
     for place in [flow.from, flow.to].into_iter().filter(cash) {
         let balance = ledger.balance(place, book.base);
         if balance.is_negative() {
-            let overdraft = overdrawn.entry(place).or_insert(Overdraft { place, first: flow.day, lowest: balance });
+            let overdraft = overdrawn.entry(place).or_insert(Overdraft {
+                place,
+                first: flow.day,
+                lowest: balance,
+            });
             overdraft.lowest = overdraft.lowest.min(balance);
         }
     }
@@ -175,16 +284,19 @@ fn note_overdrafts(lens: Lens, ledger: &Ledger, flow: &Flow, overdrawn: &mut BTr
 /// the yardstick and does not grow.
 fn compound(book: &Book, unit: Id<Commodity>, value: Qty, months: i32) -> Qty {
     let yearly = book.commodities[unit].growth.filter(|_| unit != book.base);
-    let monthly = yearly.and_then(|yearly| Ratio::ONE.checked_add(yearly.checked_div(Ratio::int(12))?));
-    monthly.map_or(value, |factor| (0..months).fold(value, |worth, _| worth.scale(factor).unwrap_or(worth)))
+    let monthly =
+        yearly.and_then(|yearly| Ratio::ONE.checked_add(yearly.checked_div(Ratio::int(12))?));
+    monthly.map_or(value, |factor| {
+        (0..months).fold(value, |worth, _| worth.scale(factor).unwrap_or(worth))
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::household;
     use axiom_core::Days;
     use axiom_model::Amount;
-    use crate::tests::household;
 
     #[test]
     fn growth_compounds_monthly_and_leaves_the_yardstick_alone() {
@@ -192,9 +304,18 @@ mod tests {
         let (usd, vti) = (house.book.base, Id::new(1));
         house.book.commodities[vti].growth = Ratio::percent(5, 0);
         // 100,000.00 at 241/240 a month for a year, rounded half-even each month.
-        assert_eq!(compound(&house.book, vti, Qty(10_000_000), 12), Qty(10_511_619));
-        assert_eq!(compound(&house.book, usd, Qty(10_000_000), 12), Qty(10_000_000));
-        assert_eq!(compound(&house.book, vti, Qty(10_000_000), 0), Qty(10_000_000));
+        assert_eq!(
+            compound(&house.book, vti, Qty(10_000_000), 12),
+            Qty(10_511_619)
+        );
+        assert_eq!(
+            compound(&house.book, usd, Qty(10_000_000), 12),
+            Qty(10_000_000)
+        );
+        assert_eq!(
+            compound(&house.book, vti, Qty(10_000_000), 0),
+            Qty(10_000_000)
+        );
     }
 
     #[test]
@@ -202,7 +323,10 @@ mod tests {
         let house = household();
         let plan = Plan::new(&house.book);
         let today = house.run.today;
-        let options = Options { today, relaxed: false };
+        let options = Options {
+            today,
+            relaxed: false,
+        };
         let (_, mut view) = plan.run_with_view(options);
 
         // Add a hypothetical salary to the checkpoint. A fresh fold of the

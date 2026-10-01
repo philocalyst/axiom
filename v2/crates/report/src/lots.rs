@@ -77,7 +77,13 @@ fn row<'s>(lens: Lens<'s, '_, '_, '_>, holding: &Holding, lot: &Parcel, worth: O
     let tie = lot
         .tied
         .map(|entity| format!("tied to {}", book.name(book.entities[entity].path)));
-    let notes = code_labels(book, book.codes[book.txns[lot.txn].codes].iter().copied())
+    let notes = code_labels(
+        book,
+        book.codes[lot.codes.header]
+            .iter()
+            .chain(book.codes[lot.codes.local].iter())
+            .copied(),
+    )
         .chain(tie.map(Cell::text))
         .collect::<Vec<_>>();
     let cells = [

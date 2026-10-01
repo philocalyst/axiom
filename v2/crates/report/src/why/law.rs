@@ -2,7 +2,7 @@
 
 use axiom_core::Id;
 use axiom_engine::Run;
-use axiom_model::{Law, Owner};
+use axiom_model::{Book, Law, Owner};
 
 use crate::lens::Lens;
 use super::{effects_table, recent, trigger_words};

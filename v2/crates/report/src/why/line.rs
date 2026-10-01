@@ -189,6 +189,7 @@ fn items(
                     axiom_model::Subject::Entity(id) => book.name(book.entities[id].path),
                     axiom_model::Subject::Place(id) => book.name(book.places[id].path),
                     axiom_model::Subject::Asset(id) => book.name(book.assets[id].name),
+                    axiom_model::Subject::Contract(id) => book.name(book.contracts[id].name),
                 };
                 let purpose = measure.purpose.map_or_else(String::new, |purpose| {
                     format!(" for #{}", book.name(book.purposes[purpose.purpose].name))
@@ -260,7 +261,7 @@ pub(super) fn scoped_codes(book: &Book, whose: &Whose) -> BTreeSet<axiom_core::S
         .iter()
         .filter(|(_, contract)| whose.includes(contract.owner))
     {
-        for (_, terms) in contract.terms.within(contract.days) {
+        for (_, terms) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
             add_terms_codes(book, terms, &mut codes);
         }
         if let Some(standing) = &contract.standing {

@@ -15,36 +15,12 @@ use axiom_model::{
 
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
-use crate::lens::{Lens, Whose};
+use crate::lens::Lens;
 use crate::places::path;
 use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 /// How many periods to show when the window is not given.
 const DEFAULT_PERIODS: usize = 12;
-
-pub fn view<'s>(
-    book: &'s Book<'_>,
-    run: &Run,
-    whose: &Whose,
-    by: Period,
-    from: Option<Day>,
-    to: Option<Day>,
-) -> Report<'s> {
-    let to = to.unwrap_or(run.today);
-    view_with_lens(Lens::new(book, whose, to), run, by, from)
-}
-
-/// The same statement grouped by the other end of each flow.
-pub fn view_by_party<'s>(
-    book: &'s Book<'_>,
-    run: &Run,
-    whose: &Whose,
-    from: Option<Day>,
-    to: Option<Day>,
-) -> Report<'s> {
-    let cutoff = to.unwrap_or(run.today);
-    view_by_party_with_lens(Lens::new(book, whose, cutoff), run, from, cutoff)
-}
 
 pub(crate) fn view_by_party_with_lens<'s>(
     lens: Lens<'s, '_, '_, '_>,
@@ -56,7 +32,7 @@ pub(crate) fn view_by_party_with_lens<'s>(
     let periods = match from {
         Some(from) => Periods::covering(Period::Month, from, cutoff),
         None => {
-            let first = first_activity(book, cutoff, lens.whose);
+            let first = first_activity(lens, cutoff);
             Periods::covering(Period::Month, first, cutoff).last(DEFAULT_PERIODS)
         }
     };
@@ -67,7 +43,7 @@ pub(crate) fn view_by_party_with_lens<'s>(
     let mut unpriced = 0;
     for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
         let flow = posting.flow;
-        if !lens.whose.includes(flow.owner) || !flow.moves_quantity(axiom_model::End::From) {
+        if !lens.owns_entity(flow.owner) {
             continue;
         }
         let from_outside = book.places[flow.from].class == Class::Outside;
@@ -124,20 +100,20 @@ pub(crate) fn view_by_party_with_lens<'s>(
             .collect();
         parties.sort_by_key(|((_, party), index)| {
             let row = &amounts[index * periods.len()..][..periods.len()];
-            let magnitude = row
-                .iter()
-                .map(|qty| i128::from(qty.0).abs())
-                .sum::<i128>();
+            let magnitude = row.iter().map(|qty| i128::from(qty.0).abs()).sum::<i128>();
             (-magnitude, party.label(book))
         });
-        let total = parties.iter().fold(vec![Qty::ZERO; periods.len()], |mut total, (_, index)| {
-            let row = &amounts[index * periods.len()..][..periods.len()];
-            add_into(&mut total, row);
-            total
-        });
-        if parties.iter().all(|(_, index)| {
-            is_zero(&amounts[index * periods.len()..][..periods.len()])
-        }) {
+        let total = parties
+            .iter()
+            .fold(vec![Qty::ZERO; periods.len()], |mut total, (_, index)| {
+                let row = &amounts[index * periods.len()..][..periods.len()];
+                add_into(&mut total, row);
+                total
+            });
+        if parties
+            .iter()
+            .all(|(_, index)| is_zero(&amounts[index * periods.len()..][..periods.len()]))
+        {
             continue;
         }
         let heading = match root {
@@ -245,12 +221,17 @@ pub(crate) fn view_with_lens<'s>(
 /// Income, spending and capital, grouped by the purpose tree. The matrix is
 /// indexed by purpose and period; parent rows are accumulated once, from the
 /// leaves up, rather than rescanning every flow for each subtree.
-fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Option<Day>) -> Report<'s> {
+fn purpose_view<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    by: Period,
+    from: Option<Day>,
+) -> Report<'s> {
     let (book, cutoff) = (lens.book, lens.day);
     let periods = match from {
         Some(from) => Periods::covering(by, from, cutoff),
         None => {
-            let first = first_activity(book, cutoff, lens.whose);
+            let first = first_activity(lens, cutoff);
             Periods::covering(by, first, cutoff).last(DEFAULT_PERIODS)
         }
     };
@@ -269,7 +250,7 @@ fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Opt
 
     for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
         let flow = posting.flow;
-        if !lens.whose.includes(flow.owner) || !flow.moves_quantity(axiom_model::End::From) {
+        if !lens.owns_entity(flow.owner) {
             continue;
         }
         spread_seen |= flow.recognized.last() > flow.day;
@@ -325,12 +306,16 @@ fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Opt
 
     // Purpose ids are preordered, so reverse traversal adds every child's
     // amount into its parent exactly once.
-    for purpose in (0..purpose_count).rev().map(axiom_core::Id::new) {
+    for purpose in (0..purpose_count)
+        .rev()
+        .map(|index| axiom_core::Id::new(index as u32))
+    {
         if let Some(parent) = book.purposes.parent(purpose) {
             let child_start = purpose.index() * period_count;
             let parent_start = parent.index() * period_count;
             for period in 0..period_count {
-                totals[parent_start + period] += totals[child_start + period];
+                let child = totals[child_start + period];
+                totals[parent_start + period] += child;
             }
             purpose_activity[parent.index()] |= purpose_activity[purpose.index()];
         }
@@ -347,9 +332,9 @@ fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Opt
     object_rows.sort_by(|&left, &right| {
         let (left_purpose, left_object) = object_keys[left];
         let (right_purpose, right_object) = object_keys[right];
-        left_purpose.cmp(&right_purpose).then_with(|| {
-            object_name(book, left_object).cmp(object_name(book, right_object))
-        })
+        left_purpose
+            .cmp(&right_purpose)
+            .then_with(|| object_name(book, left_object).cmp(object_name(book, right_object)))
     });
 
     let columns = (0..period_count).map(|period| Column::right(periods.title(period)));
@@ -393,14 +378,10 @@ fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Opt
                 add_purpose_facts(&mut section, lens, periods, id, values);
             }
 
-            while next_object < object_rows.len()
-                && object_keys[object_rows[next_object]].0 < id
-            {
+            while next_object < object_rows.len() && object_keys[object_rows[next_object]].0 < id {
                 next_object += 1;
             }
-            while next_object < object_rows.len()
-                && object_keys[object_rows[next_object]].0 == id
-            {
+            while next_object < object_rows.len() && object_keys[object_rows[next_object]].0 == id {
                 let object_id = object_rows[next_object];
                 let (_, object) = object_keys[object_id];
                 let start = object_id * period_count;
@@ -482,14 +463,18 @@ struct MeasureKey {
 }
 
 /// Events have units rather than money, so they have their own rows and facts.
-fn measure_section<'s>(lens: Lens<'s, '_, '_, '_>, periods: Periods, cutoff: Day) -> Option<Section<'s>> {
+fn measure_section<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    periods: Periods,
+    cutoff: Day,
+) -> Option<Section<'s>> {
     let book = lens.book;
     // Store period rows contiguously rather than allocating a Vec for each
     // owner/purpose/unit combination.
     let mut totals: BTreeMap<MeasureKey, usize> = BTreeMap::new();
     let mut amounts = Vec::new();
     for measure in book.measures.iter().map(|(_, measure)| measure) {
-        if measure.day > cutoff || !lens.whose.includes(measure.owner) {
+        if measure.day > cutoff || !lens.owns_entity(measure.owner) {
             continue;
         }
         let Some(period) = periods.index_of(measure.day) else {
@@ -575,7 +560,7 @@ fn measure_section<'s>(lens: Lens<'s, '_, '_, '_>, periods: Periods, cutoff: Day
 }
 
 pub(crate) fn movement_in_base(
-    lens: Lens<'_, '_ , '_, '_>,
+    lens: Lens<'_, '_, '_, '_>,
     posting: Posting<'_>,
     root: Option<PurposeRoot>,
 ) -> Option<Qty> {
@@ -583,7 +568,6 @@ pub(crate) fn movement_in_base(
     let from_outside = lens.book.places[flow.from].class == Class::Outside;
     let to_outside = lens.book.places[flow.to].class == Class::Outside;
     let inbound = from_outside && !to_outside;
-    let outbound = to_outside && !from_outside;
     let amount = if inbound {
         posting.arrive_in_base(lens)
     } else {
@@ -619,15 +603,16 @@ fn purpose_values(totals: &[Qty], periods: usize, purpose: Id<Purpose>) -> &[Qty
     &totals[purpose.index() * periods..][..periods]
 }
 
-fn first_activity(book: &Book, cutoff: Day, whose: &Whose) -> Day {
+fn first_activity(lens: Lens<'_, '_, '_, '_>, cutoff: Day) -> Day {
+    let book = lens.book;
     book.flows
         .iter()
-        .filter(|(_, flow)| whose.includes(flow.owner))
+        .filter(|(_, flow)| lens.owns_entity(flow.owner))
         .map(|(_, flow)| flow.day)
         .chain(
             book.measures
                 .iter()
-                .filter(|(_, measure)| whose.includes(measure.owner))
+                .filter(|(_, measure)| lens.owns_entity(measure.owner))
                 .map(|(_, measure)| measure.day),
         )
         .filter(|day| *day <= cutoff)
@@ -676,7 +661,7 @@ fn add_facts<'s>(
     lens: Lens<'s, '_, '_, '_>,
     periods: Periods,
     concept: &'static str,
-    of: Option<&str>,
+    of: Option<&'s str>,
     values: &[Qty],
 ) {
     for (index, &amount) in values

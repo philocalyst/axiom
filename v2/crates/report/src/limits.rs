@@ -70,6 +70,7 @@ pub fn what(book: &Book, reading: &Headroom) -> String {
         Subject::Place(place) => format!("{law} on {}", path(book, place)),
         Subject::Entity(entity) => format!("{law} for {}", book.name(book.entities[entity].path)),
         Subject::Asset(asset) => format!("{law} on {}", book.name(book.assets[asset].name)),
+        Subject::Contract(contract) => format!("{law} on {}", book.name(book.contracts[contract].name)),
     }
 }
 

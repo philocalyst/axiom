@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use axiom_core::{Day, Days, Qty, Ratio, Sym, calendar};
 use axiom_engine::{Cause, Owed, Pad};
-use axiom_model::{Amount, Book};
+use axiom_model::{Amount, Book, Period};
 
 use crate::places::path;
 use crate::{Align, Cell, Column, Fact, Money, Report, Row, Section, Style, When};
@@ -296,7 +296,7 @@ pub fn creditor(book: &Book, owed: Owed) -> String {
 /// Where an accepted gap came from, in the words its assertion was written
 /// with: `!`, or `via` a place, which for a `market` place is a revaluation.
 pub fn gap_words(book: &Book, pad: &Pad) -> String {
-    if pad.counter == book.roots.unknown {
+    if book.entities[book.roots.unknown].place == Some(pad.counter) {
         "unexplained gap, accepted with !".to_string()
     } else if book.entities[book.roots.market].place == Some(pad.counter) {
         format!("revalued via {}", path(book, pad.counter))

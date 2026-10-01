@@ -111,7 +111,10 @@ fn parcels<'s>(book: &'s Book<'_>, held: &[&Holding]) -> Section<'s> {
                 Cell::base(book, lot.basis),
                 Cell::Day(lot.acquired),
                 tie,
-                Cell::Source(book.txns[lot.txn].loc),
+                lot.txn
+                    .source_txn()
+                    .and_then(|txn| book.txns.get(txn))
+                    .map_or(Cell::Blank, |txn| Cell::Source(txn.loc)),
             ];
             section.push(Row::new(cells));
         }

@@ -9,7 +9,7 @@ use axiom_model::{Amount, Book, Limit, Period, Purpose, PurposeRoot};
 use crate::calendar::Periods;
 use crate::headroom::{current, latest, room, window_words};
 use crate::history::postings;
-use crate::lens::Lens;
+use crate::lens::{Lens, Whose};
 use crate::places::path;
 use crate::resolve;
 use crate::table::year_days;
@@ -53,7 +53,7 @@ pub fn report<'s>(
     ]));
     if let Some(doc) = item.doc {
         for line in crate::table::doc_lines(book.name(doc)) {
-            about.note(line);
+            about.note(Cell::Said(std::borrow::Cow::Owned(line.to_owned())));
         }
     }
 
@@ -189,7 +189,6 @@ fn budget_limit<'s>(book: &'s Book<'_>, limit: Limit) -> Cell<'s> {
                 Cell::Purpose(book.name(book.purposes[of].name)),
             ],
         ),
-        Limit::Computed(_) => Cell::Word("calculated"),
     }
 }
 

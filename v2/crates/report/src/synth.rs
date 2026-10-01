@@ -19,8 +19,8 @@ pub fn planned(template: &Flow, day: Day, out: Amount, arrive: Amount) -> Flow {
         payee: template.payee,
         purpose: template.purpose,
         description: template.description,
-        select: template.select.clone(),
-        detail: template.detail.as_ref().map(|detail| Box::new(detail.moved(shift))),
+        select: template.select,
+        detail: template.detail,
         ..hypothetical(template, day, template.from, template.to, out, arrive)
     }
 }
@@ -45,8 +45,9 @@ pub fn hypothetical(borrowing: &Flow, day: Day, from: Id<Place>, to: Id<Place>, 
         purpose: None,
         description: None,
         origin: Origin::Written,
-        select: Box::default(),
-        codes: Box::default(),
+        select: borrowing.select,
+        header_codes: borrowing.header_codes,
+        codes: borrowing.codes,
         loc: borrowing.loc,
         waive: None,
         detail: None,

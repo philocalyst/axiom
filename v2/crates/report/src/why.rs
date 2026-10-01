@@ -53,7 +53,7 @@ fn flows_table<'s>(book: &'s Book<'_>, run: &Run, ids: &[Id<Flow>], heading: &st
         Column::left("State"),
         Column::left("From"),
     ];
-    let mut section = Section::new(columns).headed(heading);
+    let mut section = Section::new(columns).headed(Cell::Said(Cow::Owned(heading.to_owned())));
     let (shown, left_out) = recent(ids);
     for &id in shown {
         let posting = Posting::at(book, run, id);
@@ -92,7 +92,7 @@ fn effects_table<'s>(book: &'s Book<'_>, effects: &[&Effect], heading: &str) -> 
             .chain([Column::right("Amount")])
             .chain(["Owed to", "From"].map(Column::left)),
     );
-    section.heading = Some(heading.to_string());
+    section.heading = Some(Cell::Said(Cow::Owned(heading.to_owned())));
     let (shown, left_out) = recent(effects);
     for effect in shown {
         let owed = effect

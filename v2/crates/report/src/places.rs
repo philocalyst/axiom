@@ -1,7 +1,7 @@
 //! Questions views ask about places.
 
 use axiom_core::Id;
-use axiom_model::{Book, End, Flow, Place};
+use axiom_model::{Book, Flow, Place};
 
 
 /// A place's full path.
@@ -14,14 +14,9 @@ pub fn names<'a>(book: &'a Book<'_>) -> impl Iterator<Item = &'a str> + 'a {
     book.places.ids().flat_map(|place| [path(book, place), leaf(book, place)])
 }
 
-/// A route such as `checking → landlord`. An end that only changes basis is
-/// written the way the journal writes it: `house.basis`.
+/// A route such as `checking → landlord`.
 pub fn route(book: &Book, flow: &Flow) -> String {
-    let end = |end: End, place: Id<Place>| {
-        let path = path(book, place);
-        if flow.moves_quantity(end) { path.to_string() } else { format!("{path}.basis") }
-    };
-    format!("{} → {}", end(End::From, flow.from), end(End::To, flow.to))
+    format!("{} → {}", path(book, flow.from), path(book, flow.to))
 }
 
 /// The last segment of a path: a tree's indentation supplies the rest.

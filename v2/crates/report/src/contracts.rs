@@ -56,7 +56,7 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
         let cells = [
             Cell::Name(name),
             Cell::Name(book.name(book.entities[contract.party].path)),
-            terms_cell(book, contract, terms),
+            terms.map_or(Cell::Blank, |terms| terms_cell(book, contract, terms)),
             next.map_or(Cell::Blank, Cell::Day),
             Cell::Count(kept, "kept"),
             if late == 0 {
@@ -78,11 +78,11 @@ pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Repor
     Report::new("Contracts").with(section)
 }
 
-pub(crate) fn terms_cell<'s>(book: &'s Book<'_>, contract: &Contract, terms: &Terms) -> Cell<'s> {
+pub(crate) fn terms_cell<'s>(book: &'s Book<'_>, contract: &'s Contract, terms: &'s Terms) -> Cell<'s> {
     if terms.state == TermsState::Waived {
         return Cell::Word("waived");
     }
-    let mut parts = vec![cadence(terms.every)];
+    let mut parts: Vec<Cell<'s>> = vec![cadence(terms.every)];
     parts.extend(terms.on.iter().map(on_day));
     if let Some(purpose) = contract.purpose {
         parts.push(Cell::Purpose(
@@ -131,7 +131,7 @@ fn loan_balance<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract: &Contract) 
 
 /// Never render placeholder values for a term expression that the engine must
 /// evaluate at the occurrence date.
-pub(crate) fn template_flow_cell<'s>(book: &'s Book<'_>, template: &TemplateFlow) -> Cell<'s> {
+pub(crate) fn template_flow_cell<'s>(book: &'s Book<'_>, template: &'s TemplateFlow) -> Cell<'s> {
     let flow = &template.flow;
     let header = Cell::list(
         " ",
@@ -180,7 +180,7 @@ fn template_quantity<'s>(book: &'s Book<'_>, quantity: TemplateQuantity, literal
     }
 }
 
-fn template_item_cell<'s>(book: &'s Book<'_>, item: &TemplateItem) -> Cell<'s> {
+fn template_item_cell<'s>(book: &'s Book<'_>, item: &'s TemplateItem) -> Cell<'s> {
     let sign = match item.sign {
         axiom_model::Sign::Carve => "carves",
         axiom_model::Sign::Add => "adds",
@@ -211,14 +211,14 @@ fn template_item_cell<'s>(book: &'s Book<'_>, item: &TemplateItem) -> Cell<'s> {
     )
 }
 
-fn cadence(cadence: Cadence) -> Cell<'static> {
+fn cadence<'s>(cadence: Cadence) -> Cell<'s> {
     match cadence {
         Cadence::Every(span) => Cell::text(format!("every {span}")),
         Cadence::TwiceMonthly => Cell::Word("twice monthly"),
     }
 }
 
-fn on_day(on: &On) -> Cell<'static> {
+fn on_day<'s>(on: &On) -> Cell<'s> {
     match *on {
         On::MonthDay(day) => Cell::text(format!("on {day}")),
         On::Last => Cell::Word("on last"),

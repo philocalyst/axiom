@@ -36,10 +36,16 @@ impl Variable {
 /// offsets its purpose in the month it is recognized.
 fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
     let book = lens.book;
-    let none = Variable { amounts: Vec::new(), categories: Vec::new(), months: 0 };
+    let none = Variable {
+        amounts: Vec::new(),
+        categories: Vec::new(),
+        months: 0,
+    };
     let first = postings(book, run)
         .filter(|posting| posting.is_real_on(run.today) && !explained(posting.flow))
-        .filter_map(|posting| spending_purpose(lens, posting).map(|_| posting.flow.recognized.first()))
+        .filter_map(|posting| {
+            spending_purpose(lens, &posting).map(|_| posting.flow.recognized.first())
+        })
         .min();
     let Some(first) = first else { return none };
     let last_full_month = run.today.month_start().add_days(-1);
@@ -50,11 +56,19 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
     let months = Periods::covering(Period::Month, first, last_full_month);
     let mut categories: BTreeMap<Id<Purpose>, usize> = BTreeMap::new();
     let mut amounts = Vec::new();
-    for posting in postings(book, run).filter(|posting| posting.is_real_on(last_full_month) && !explained(posting.flow)) {
-        let Some((category, amount)) = spending_purpose(lens, posting) else { continue };
-        for month in months.overlapping(posting.flow.recognized.first(), posting.flow.recognized.last()) {
+    for posting in postings(book, run)
+        .filter(|posting| posting.is_real_on(last_full_month) && !explained(posting.flow))
+    {
+        let Some((category, amount)) = spending_purpose(lens, &posting) else {
+            continue;
+        };
+        for month in months.overlapping(
+            posting.flow.recognized.first(),
+            posting.flow.recognized.last(),
+        ) {
             let window = months.window(month).days();
-            let Some(happened) = Days::new(window.first(), window.last().min(last_full_month)) else {
+            let Some(happened) = Days::new(window.first(), window.last().min(last_full_month))
+            else {
                 continue;
             };
             let part = spread(amount, posting.flow.recognized, happened);
@@ -66,15 +80,19 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
             amounts[index * months.len() + month] += part.0;
         }
     }
-    Variable { amounts, categories: categories.into_values().collect(), months: months.len() }
+    Variable {
+        amounts,
+        categories: categories.into_values().collect(),
+        months: months.len(),
+    }
 }
 
 /// The first purpose beneath `spending` and this flow's signed amount, if the
 /// flow moved value and belongs to the selected owner scope.
-fn spending_purpose(lens: Lens, posting: &Posting) -> Option<(Id<Purpose>, Qty)> {
+fn spending_purpose(lens: Lens, posting: &Posting<'_>) -> Option<(Id<Purpose>, Qty)> {
     let book = lens.book;
     let flow = posting.flow;
-    if !lens.whose.includes(flow.owner) || !flow.moves_quantity(End::From) {
+    if !lens.owns_entity(flow.owner) {
         return None;
     }
     let purpose = flow.purpose?.purpose;
@@ -89,7 +107,10 @@ fn spending_purpose(lens: Lens, posting: &Posting) -> Option<(Id<Purpose>, Qty)>
         }
         category = parent;
     }
-    let amount = crate::flow::movement_in_base(lens, *posting, Some(PurposeRoot::Spending))?;
+    let amount = lens.entity_qty(
+        flow.owner,
+        crate::flow::movement_in_base(lens, *posting, Some(PurposeRoot::Spending))?,
+    );
     Some((category, amount))
 }
 
@@ -124,7 +145,8 @@ opening 2026-01-01
         with_run(source, Day::from_ymd(2026, 5, 15).unwrap(), |book, run| {
             let whose = Whose::default();
             let plan = axiom_engine::Plan::new(book);
-            let variable = Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
+            let variable =
+                Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
             assert_eq!(variable.categories, [0]);
             assert_eq!(variable.amounts, [10_000; 4]);
             assert_eq!(variable.months, 4);

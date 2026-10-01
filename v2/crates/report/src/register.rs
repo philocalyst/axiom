@@ -9,7 +9,7 @@ use axiom_core::{Day, Diagnostic, Id, Qty};
 use axiom_engine::{Pad, Run, State};
 use axiom_model::{
     Amount, Asset, Book, Commodity, Contract, Derivation, Entity, Object, Origin, Place, Role,
-    TermsState,
+    Subject, TermsState,
 };
 
 use crate::history::{Change, Posting, pad_ends, postings};
@@ -256,7 +256,7 @@ fn contract_register<'s>(
     }
     let cutoff = to.unwrap_or(run.today);
     let mut rows = Vec::new();
-    for (days, terms) in contract.terms.within(contract.days) {
+    for (days, terms) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
         let day = days.first();
         if !in_window(day, from, cutoff) {
             continue;
@@ -398,12 +398,16 @@ fn section_with_sign<'s>(
         Column::right("Balance"),
     ];
     let mut section = Section::new(columns);
-    let mut running: BTreeMap<Id<Commodity>, Qty> = BTreeMap::new();
+    let mut raw_running: BTreeMap<Id<Commodity>, Qty> = BTreeMap::new();
     for step in &steps[..split] {
         if let Change::Moved(moved) = step.change {
-            *running.entry(moved.unit).or_default() += step.counted();
+            *raw_running.entry(moved.unit).or_default() += step.counted();
         }
     }
+    let mut running = raw_running
+        .iter()
+        .map(|(&unit, &qty)| (unit, lens.place_qty(place, qty)))
+        .collect::<BTreeMap<_, _>>();
     if let Some(from) = from {
         for (&unit, &qty) in running.iter().filter(|(_, qty)| !qty.is_zero()) {
             let cells = [
@@ -420,11 +424,19 @@ fn section_with_sign<'s>(
     for step in &steps[split..] {
         let (amount, balance) = match step.change {
             Change::Moved(moved) => {
+                let raw = raw_running.entry(moved.unit).or_default();
                 let balance = running.entry(moved.unit).or_default();
-                *balance += step.counted();
-                (shown(moved.qty, moved.unit), shown(*balance, moved.unit))
+                let amount = if step.counts {
+                    let before = lens.place_qty(place, *raw);
+                    *raw += moved.qty;
+                    let after = lens.place_qty(place, *raw);
+                    *balance = after;
+                    after - before
+                } else {
+                    lens.place_qty(place, moved.qty)
+                };
+                (shown(amount, moved.unit), shown(*balance, moved.unit))
             }
-            Change::Rebased(_) => (Cell::Blank, Cell::Blank),
         };
         let payee = step.source.posting().and_then(|posting| posting.flow.payee);
         let cells = [
@@ -489,7 +501,7 @@ impl Step<'_> {
     fn counted(&self) -> Qty {
         match self.change {
             Change::Moved(moved) if self.counts => moved.qty,
-            Change::Moved(_) | Change::Rebased(_) => Qty::ZERO,
+            Change::Moved(_) => Qty::ZERO,
         }
     }
 }
@@ -505,7 +517,7 @@ fn steps<'a>(
     let book = lens.book;
     let flows = book.touching[place].iter().flat_map(|&id| {
         let posting = Posting::at(book, run, id);
-        let in_scope = lens.owns_entity(posting.flow.owner);
+        let in_scope = lens.owns(place);
         posting
             .changes_at(place)
             .filter(move |_| in_scope)
@@ -518,7 +530,7 @@ fn steps<'a>(
             })
     });
     let pads = run.pads.iter().flat_map(|pad| {
-        let in_scope = lens.governs(pad.subject);
+        let in_scope = lens.owns(place) && lens.governs(Subject::Place(pad.place));
         let with = if pad.place == place {
             pad.counter
         } else {
@@ -545,16 +557,8 @@ fn steps<'a>(
 
 /// A change of basis, codes, and settlement, as one line of small print.
 fn note<'s>(book: &'s Book<'_>, step: &Step<'_>) -> Option<Cell<'s>> {
-    let rebased = match step.change {
-        Change::Rebased(by) => Some(Cell::text(format!(
-            "basis {}{}",
-            if by.qty.is_negative() { "" } else { "+" },
-            book.show(by)
-        ))),
-        Change::Moved(_) => None,
-    };
-    let details: Vec<Cell<'s>> = match step.source {
-        Source::Gap(pad) => vec![Cell::text(gap_words(book, pad))],
+    let parts: Vec<Cell<'s>> = match step.source {
+        Source::Gap(pad) => vec![Cell::Said(gap_words(book, pad).into())],
         Source::Flow(posting) => {
             let status = match posting.posted.state {
                 State::Actual | State::Planned => None,
@@ -567,9 +571,9 @@ fn note<'s>(book: &'s Book<'_>, step: &Step<'_>) -> Option<Cell<'s>> {
                 State::Returned(on) => Some(Cell::text(format!("returned {on}"))),
             };
             let flow = book.flow_view(posting.flow);
-            code_labels(book, flow.codes()).chain(status).collect()
+            let codes = flow.codes().map(|code| Cell::Code(book.name(code)));
+            codes.chain(status).collect()
         }
     };
-    let parts = rebased.into_iter().chain(details).collect::<Vec<_>>();
     (!parts.is_empty()).then(|| Cell::list(" · ", parts))
 }

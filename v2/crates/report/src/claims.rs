@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Sym};
 use axiom_engine::{Holding, Options, Plan, Run};
-use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Select, Txn};
+use axiom_model::{Amount, Book, Class, Entity, Flow, Place, RuntimeTxn, Select};
 
 use crate::history::{Posting, journal_ends_by};
 use crate::lens::Lens;
@@ -25,7 +25,7 @@ pub struct Claim {
     pub mine: bool,
     pub place: Id<Place>,
     /// The transaction that made it: its codes, doc and source line.
-    pub txn: Id<Txn>,
+    pub txn: RuntimeTxn,
     pub left: Amount,
     pub made: Day,
     /// Who owes it, or is owed: the payee of the flow that made it.
@@ -75,7 +75,7 @@ pub fn open<'h>(
         .filter(|holding| book.places[holding.place].claim && lens.owns(holding.place));
     let parcels = claimed.flat_map(|holding| {
         holding.lots.iter().map(move |lot| {
-            let made = book.paid_into(lot.txn, holding.place);
+            let made = lot.txn.source_txn().and_then(|txn| book.paid_into(txn, holding.place));
             Claim {
                 mine: true,
                 place: holding.place,
@@ -119,7 +119,7 @@ pub(crate) fn owed_by_you(lens: Lens, run: &Run, place: Id<Place>) -> Vec<Claim>
             let debt = debts.entry(code).or_insert(Claim {
                 mine: false,
                 place,
-                txn: flow.txn,
+                txn: RuntimeTxn::journal(flow.txn).expect("journal flow has a real transaction"),
                 left: Amount::zero(flow.out.unit),
                 made: flow.day,
                 payee: flow.payee,
@@ -173,22 +173,26 @@ pub(crate) fn view_from<'h, 's>(
 
 /// Claims with what each is, when it was made and how old it is, when it is due
 /// and whether it is late, and what they come to.
-pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &str, claims: &[&Claim]) -> Section<'s> {
+pub fn section<'s>(lens: Lens<'s, '_, '_, '_>, heading: &'s str, claims: &[&Claim]) -> Section<'s> {
     let (book, at) = (lens.book, lens.day);
     let columns = ["Counterparty", "What"].map(Column::left).into_iter();
     let columns = columns
         .chain([Column::right("Left")])
         .chain(["Made", "Age", "Due", "Status"].map(Column::left));
-    let mut section = Section::new(columns).headed(heading);
+    let mut section = Section::new(columns).headed(Cell::text(heading));
     let (mut total, mut unpriced) = (Qty::ZERO, 0);
     for claim in claims {
-        let txn = &book.txns[claim.txn];
-        let what = code_labels(book, book.codes[txn.codes].iter().copied())
-            .chain(doc_headline(book, txn.doc).map(Cell::text))
-            .collect::<Vec<_>>();
+        let txn = claim.txn.source_txn().and_then(|id| book.txns.get(id));
+        let what = txn
+            .map(|txn| {
+                code_labels(book, book.codes[txn.codes].iter().copied())
+                    .chain(doc_headline(book, txn.doc).map(Cell::text))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         // What it is: its codes and doc, or where it was written when it has neither.
         let what = if what.is_empty() {
-            Cell::Source(txn.loc)
+            txn.map_or(Cell::Blank, |txn| Cell::Source(txn.loc))
         } else {
             Cell::list(" · ", what)
         };

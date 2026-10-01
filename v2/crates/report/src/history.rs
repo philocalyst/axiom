@@ -79,7 +79,7 @@ impl<'a> Posting<'a> {
             End::From => Amount::new(-self.posted.out, self.flow.out.unit),
             End::To => self.arrive(),
         };
-        if self.flow.moves_quantity(end) { Change::Moved(amount) } else { Change::Rebased(amount) }
+        Change::Moved(amount)
     }
 
     /// What happened at `place`: once for each end of the flow that is there.
@@ -103,9 +103,6 @@ impl<'a> Posting<'a> {
 pub enum Change {
     /// The place gained (positive) or lost (negative) this much.
     Moved(Amount),
-    /// The end is `PLACE.basis`: the place holds what it held, and the basis of
-    /// its parcels rose (positive) or fell (negative) by this much.
-    Rebased(Amount),
 }
 
 /// A pad, seen as the flow it stands for: from its counter place into the
@@ -199,7 +196,7 @@ impl Snapshots {
             .collect();
         let mut snapshots = Snapshots::empty(lens.book, vec![day], pairs);
         for holding in run.holdings.iter().filter(|holding| lens.owns(holding.place)) {
-            let qty = holding.qty();
+            let qty = lens.place_qty(holding.place, holding.qty());
             let booked = if holding.unit == lens.book.base { qty } else { Qty::ZERO };
             *snapshots.cell(0, holding.place, holding.unit) = Held { qty, booked };
         }

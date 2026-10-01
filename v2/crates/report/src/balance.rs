@@ -103,7 +103,7 @@ fn column_days(book: &Book, at: Day, monthly: bool) -> Vec<Day> {
     Periods::covering(Period::Month, first, at).last(MONTHLY_COLUMNS).ends().map(|end| end.min(at)).collect()
 }
 
-fn amount_columns(book: &Book, snapshots: &Snapshots, value: bool) -> Vec<Column> {
+fn amount_columns<'s>(book: &'s Book<'_>, snapshots: &Snapshots, value: bool) -> Vec<Column<'s>> {
     if let [_] = snapshots.days() {
         let title = if value { format!("Value ({})", base_symbol(book)) } else { "Balance".to_string() };
         return vec![Column::right(title)];
