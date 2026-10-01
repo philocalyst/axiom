@@ -505,10 +505,7 @@ fn journal(cast: &mut Cast) -> Journal {
             Id::new(code_start as u32),
             u32::try_from(codes.len()).unwrap(),
         );
-        let local_codes = axiom_core::Run::new(
-            Id::new((code_start + codes.len()) as u32),
-            0,
-        );
+        let local_codes = axiom_core::Run::new(Id::new((code_start + codes.len()) as u32), 0);
         let due = match row {
             13 => Some(day(2026, 3, 20)),
             16 => Some(day(2026, 4, 4)),
@@ -573,42 +570,6 @@ fn journal(cast: &mut Cast) -> Journal {
         });
     }
     journal
-}
-
-/// `every month on 1 from 2026-04-01 until 2026-06-30 checking -> landlord 1_800 USD`
-fn rent_plan(cast: &Cast) -> Plan {
-    let amount = Amount::new(Qty(180_000), cast.usd);
-    let once = Flow {
-        day: day(2026, 4, 1),
-        recognized: Days::on(day(2026, 4, 1)),
-        from: cast.id("assets/bank/checking"),
-        to: cast.id("expenses/rent"),
-        out: amount,
-        arrive: amount,
-        mode: Mode::Planned,
-        infer: Infer::Known,
-        txn: Id::new(2),
-        payee: Some(cast.landlord),
-        owner: cast.me,
-        purpose: None,
-        description: None,
-        origin: Origin::Written,
-        select: axiom_core::Run::new(Id::new(0), 0),
-        header_codes: axiom_core::Run::new(Id::new(0), 0),
-        codes: axiom_core::Run::new(Id::new(0), 0),
-        loc: line(60),
-        waive: None,
-        detail: None,
-    };
-    Plan {
-        name: None,
-        every: Span::months(1),
-        on: Some(On::MonthDay(1)),
-        from: Some(day(2026, 4, 1)),
-        until: Some(day(2026, 6, 30)),
-        template: Box::new([once]),
-        loc: line(60),
-    }
 }
 
 /// A law over `left op right`, both written amounts: `warn total(in, month) <= 500 USD`.
@@ -975,7 +936,6 @@ pub(crate) fn household() -> Household {
             transfer,
         },
     };
-    let plans = vec![rent_plan(&cast)].into();
     let law_count = records.laws.len();
     let book = Book {
         names: cast.names,
@@ -1018,7 +978,7 @@ pub(crate) fn household() -> Household {
         measures: Arena::new(),
         readings: Vec::new(),
         filed: Vec::new(),
-        plans,
+        plans: Arena::new(),
         sources: Vec::new(),
     };
     let run = Run {
@@ -1152,11 +1112,7 @@ pub(crate) fn cell(item: &Cell<'_>) -> String {
         Cell::Count(count, noun) => format!("{count} {noun}"),
         Cell::Trigger(trigger) => format!("{trigger:?}"),
         Cell::Source(loc) => format!("@{}", loc.start / 100),
-        Cell::Join(separator, parts) => parts
-            .iter()
-            .map(cell)
-            .collect::<Vec<_>>()
-            .join(separator),
+        Cell::Join(separator, parts) => parts.iter().map(cell).collect::<Vec<_>>().join(separator),
     }
 }
 
@@ -1471,13 +1427,8 @@ fn register_runs_a_balance_and_mutes_the_pending_check() {
         "~2026-03-01 | expenses/repairs |  | #check-1041 · pending | -350.00 USD | 5,115.80 USD"
     );
     // A window opens with the balance carried in.
-    let march = crate::register::section_for_lens(
-        lens,
-        &house.run,
-        checking,
-        Some(day(2026, 3, 1)),
-        None,
-    );
+    let march =
+        crate::register::section_for_lens(lens, &house.run, checking, Some(day(2026, 3, 1)), None);
     assert_eq!(
         lines(&march)[0],
         "=2026-03-01 | opening balance |  |  |  | 5,115.80 USD"
@@ -1742,12 +1693,7 @@ fn why_a_place_puts_its_limits_before_the_laws_and_leaves_out_laws_that_lapsed()
     let headings: Vec<_> = report
         .sections
         .iter()
-        .map(|section| {
-            section
-                .heading
-                .as_ref()
-                .map_or_else(String::new, cell)
-        })
+        .map(|section| section.heading.as_ref().map_or_else(String::new, cell))
         .collect();
     assert_eq!(
         headings,
@@ -1815,7 +1761,11 @@ fn why_a_system_says_what_each_of_its_laws_counted() {
     let us = house.book.systems.iter().next().unwrap().0;
     let report = house.why(Found::System(us));
     assert_eq!(
-        report.sections[0].notes.iter().map(cell).collect::<Vec<_>>(),
+        report.sections[0]
+            .notes
+            .iter()
+            .map(cell)
+            .collect::<Vec<_>>(),
         ["Nobody in this book lives here."]
     );
     assert_eq!(
@@ -1839,134 +1789,6 @@ fn several_laws_with_one_name_are_listed_with_where_each_is_written() {
         ]
     );
     assert!(cell(&report.sections[0].notes[0]).contains("axiom why FILE:LINE"));
-}
-
-// ─── Views that run the ledger ──────────────────────────────────────────────
-
-fn outlook(house: &Household, until: Day) -> Vec<Vec<String>> {
-    let report = house.report(Query::Forecast {
-        until: Some(until),
-        paths: 0,
-    });
-    report.sections.iter().map(lines).collect()
-}
-
-#[test]
-fn the_forecast_folds_plans_and_habits_and_reports_an_overdraft() {
-    let mut house = household();
-    house.run.today = day(2026, 4, 15);
-    // Money in hand: checking's 8,955.80 and Jordan's 4,300, less the 700 bill.
-    // Rent (a plan, until June) leaves on May 1 and June 1; paychecks (a rhythm
-    // in the journal) arrive on the 15th, so the plan's April 1st is behind us.
-    let sections = outlook(&house, day(2026, 8, 31));
-    let committed: Vec<&str> = sections[0]
-        .iter()
-        .map(|row| row.split(" | ").nth(1).unwrap())
-        .collect();
-    assert_eq!(
-        committed,
-        [
-            "12,555.80 USD",
-            "12,555.80 USD",
-            "15,755.80 USD",
-            "18,955.80 USD",
-            "23,955.80 USD",
-            "28,955.80 USD"
-        ]
-    );
-    let recurring = sections[1].join("\n");
-    assert!(recurring.contains(
-        "assets/bank/checking → expenses/rent (landlord) | monthly | 1,800.00 USD | 2026-05-01"
-    ));
-    assert!(recurring.contains(
-        "income/salary → assets/bank/checking | monthly | 5,000.00 USD | 2026-05-15 | seen 3 times"
-    ));
-
-    // A 20,000 purchase planned for the 2nd of each month overdraws checking.
-    let mut big = clone_plan(&house.book.plans[Id::new(0)]);
-    big.template[0].to = house.place("expenses/repairs");
-    big.template[0].out.qty = Qty(2_000_000);
-    big.template[0].arrive.qty = Qty(2_000_000);
-    big.on = Some(On::MonthDay(2));
-    house.book.plans.push(big);
-    let problems = outlook(&house, day(2026, 8, 31)).pop().unwrap();
-    assert_eq!(
-        problems,
-        ["!2026-05-02 | assets/bank/checking is overdrawn, down to -29,644.20 USD"]
-    );
-}
-
-#[test]
-fn a_plan_that_says_the_same_as_a_habit_replaces_it_and_one_that_does_not_adds_to_it() {
-    let mut house = household();
-    house.run.today = day(2026, 4, 15);
-    // A monthly plan for the same paycheck, within tolerance: one row, not two.
-    let mut same = clone_plan(&house.book.plans[Id::new(0)]);
-    (same.template[0].from, same.template[0].to) = (
-        house.place("income/salary"),
-        house.place("assets/bank/checking"),
-    );
-    for amount in [&mut same.template[0].out, &mut same.template[0].arrive] {
-        amount.qty = Qty(510_000);
-    }
-    same.template[0].payee = None;
-    house.book.plans.push(same);
-    let rows = outlook(&house, day(2026, 8, 31)).remove(1);
-    assert_eq!(
-        rows.iter()
-            .filter(|row| row.contains("income/salary"))
-            .count(),
-        1
-    );
-    assert!(
-        rows.iter()
-            .any(|row| row.contains("income/salary") && row.ends_with("plan"))
-    );
-    // A yearly bonus on the same pair is not the paycheck: both are projected.
-    let bonus = &mut house.book.plans[Id::new(1)];
-    bonus.every = Span::months(12);
-    bonus.on = None;
-    let rows = outlook(&house, day(2026, 8, 31)).remove(1);
-    assert_eq!(
-        rows.iter()
-            .filter(|row| row.contains("income/salary"))
-            .count(),
-        2
-    );
-}
-
-/// `12,555.80 USD` in cents.
-fn cents(amount: &str) -> i64 {
-    amount
-        .trim_end_matches(" USD")
-        .replace([',', '.'], "")
-        .parse()
-        .unwrap()
-}
-
-#[test]
-fn a_repayment_stops_at_what_is_owed() {
-    let mut house = household();
-    house.run.today = day(2026, 4, 15);
-    let last = |house: &Household| {
-        let committed = outlook(house, day(2026, 12, 31)).remove(0);
-        cents(committed.last().unwrap().split(" | ").nth(1).unwrap())
-    };
-    let before = last(&house);
-    // 10,000 a month back from the client against 3,000 still owed: one payment, cut to what is
-    // left, and nothing after it. Jordan's account, which it lands in, is cash.
-    let mut back = clone_plan(&house.book.plans[Id::new(0)]);
-    (back.template[0].from, back.template[0].to) = (
-        house.place("assets/owed/clients"),
-        house.place("assets/bank/jordan-checking"),
-    );
-    for amount in [&mut back.template[0].out, &mut back.template[0].arrive] {
-        amount.qty = Qty(1_000_000);
-    }
-    back.from = Some(day(2026, 5, 3));
-    back.until = None;
-    house.book.plans.push(back);
-    assert_eq!(last(&house) - before, 300_000);
 }
 
 #[test]
@@ -2008,18 +1830,6 @@ fn available_can_be_about_one_person() {
         lines(&report.sections[0]).last().unwrap(),
         "=Available to spend | 4,300.00 USD"
     );
-}
-
-fn clone_plan(plan: &Plan) -> Plan {
-    Plan {
-        name: plan.name,
-        every: plan.every,
-        on: plan.on,
-        from: plan.from,
-        until: plan.until,
-        template: plan.template.clone(),
-        loc: plan.loc,
-    }
 }
 
 #[test]

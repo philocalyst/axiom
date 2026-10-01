@@ -902,6 +902,71 @@ fn native_forecast_fixtures_build_as_contracts_not_plans() {
 }
 
 #[test]
+fn native_contract_terms_project_paychecks_once_and_preserve_overdrafts() {
+    with_run(NATIVE_CONTRACTS, day(2026, 4, 15), |book, run| {
+        assert!(
+            run.monitor_complete,
+            "native occurrence monitor is incomplete"
+        );
+        let report = crate::report(
+            book,
+            run,
+            &Query::Forecast {
+                until: Some(day(2026, 6, 30)),
+                paths: 0,
+            },
+            None,
+        )
+        .unwrap();
+        let section = |heading: &str| {
+            report
+                .sections
+                .iter()
+                .find(|section| crate::tests::heading(section) == Some(heading))
+                .unwrap()
+        };
+        let occurrences = section("Contract occurrences");
+        let mut rows: Vec<_> = occurrences
+            .rows
+            .iter()
+            .filter_map(|row| match (&row.cells[0], &row.cells[2], &row.cells[3]) {
+                (
+                    crate::Cell::Text(name),
+                    crate::Cell::Amount { qty, .. },
+                    crate::Cell::Day(day),
+                ) => Some((name.as_ref(), *qty, *day)),
+                _ => None,
+            })
+            .collect();
+        rows.sort_by_key(|row| row.2);
+        assert_eq!(
+            rows.iter()
+                .map(|(_, qty, day)| (*qty, *day))
+                .collect::<Vec<_>>(),
+            [
+                (Qty(180_000), day(2026, 5, 1)),
+                (Qty(4_000_000), day(2026, 5, 2)),
+                (Qty(500_000), day(2026, 5, 15)),
+                (Qty(180_000), day(2026, 6, 1)),
+                (Qty(500_000), day(2026, 6, 15)),
+            ],
+            "the contract replaces the matching historical paycheck and adds the rent and repair reserve"
+        );
+        let liquid = section("Liquid net worth");
+        let crate::Cell::Amount { qty: ending, .. } = liquid.rows.last().unwrap().cells[1] else {
+            panic!("forecast end is a typed amount")
+        };
+        assert_eq!(ending, Qty(-160_000));
+        assert!(
+            lines(section("Problems ahead"))
+                .iter()
+                .any(|row| row.contains("overdrawn")),
+            "the 40,000 USD repair reserve exceeds checking's available cash"
+        );
+    });
+}
+
+#[test]
 fn native_loan_fixture_builds_a_typed_loan_contract() {
     with_run(NATIVE_LOAN, day(2026, 1, 1), |book, _| {
         let loan = &book.contracts[book.contract("car-loan").unwrap()];
@@ -909,6 +974,52 @@ fn native_loan_fixture_builds_a_typed_loan_contract() {
         assert!(
             loan.loan.is_some(),
             "loan terms must lower to the typed loan model"
+        );
+    });
+}
+
+#[test]
+fn native_loan_forecast_stops_after_the_typed_principal_is_repaid() {
+    with_run(NATIVE_LOAN, day(2026, 1, 1), |book, run| {
+        assert!(
+            run.monitor_complete,
+            "native occurrence monitor is incomplete"
+        );
+        let report = crate::report(
+            book,
+            run,
+            &Query::Forecast {
+                until: Some(day(2026, 6, 30)),
+                paths: 0,
+            },
+            None,
+        )
+        .unwrap();
+        let occurrences = report
+            .sections
+            .iter()
+            .find(|section| crate::tests::heading(section) == Some("Contract occurrences"))
+            .unwrap();
+        let repayments: Vec<_> = occurrences
+            .rows
+            .iter()
+            .filter_map(|row| match (&row.cells[0], &row.cells[2], &row.cells[3]) {
+                (
+                    crate::Cell::Text(name),
+                    crate::Cell::Amount { qty, .. },
+                    crate::Cell::Day(day),
+                ) if name.contains("car-loan") => Some((*qty, *day)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            repayments,
+            [
+                (Qty(100_000), day(2026, 2, 1)),
+                (Qty(100_000), day(2026, 3, 1)),
+                (Qty(100_000), day(2026, 4, 1)),
+            ],
+            "a 3,000 USD interest-free loan over three months has three 1,000 USD payments"
         );
     });
 }

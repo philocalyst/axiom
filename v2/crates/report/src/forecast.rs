@@ -772,11 +772,9 @@ contract rent with landlord
         });
     }
 
-    /// Full native materializer integration. Keep this fixture ready so the
-    /// report assertion can be enabled as soon as the engine monitor becomes
-    /// authoritative; report code must never synthesize contract placeholders.
+    /// Full native materializer integration: the forecast includes every
+    /// monthly occurrence and projects its typed amount into the same ledger.
     #[test]
-    #[ignore = "waiting for the engine's native occurrence monitor/materializer"]
     fn native_contract_occurrences_change_projection_and_keep_typed_amounts() {
         crate::source_tests::with_run(RENT, day(2026, 2, 1), |book, run| {
             assert!(run.monitor_complete);
