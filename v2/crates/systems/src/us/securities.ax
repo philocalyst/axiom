@@ -1,0 +1,20 @@
+/// United States wash-sale adjustment for losses on stocks and funds.
+///
+/// A loss on a security is carried into the basis of a matching replacement
+/// acquired within thirty days before or after the sale (IRC §1091). The
+/// adjustment is attached to the replacement parcel; it is not a balancing
+/// flow or a separate holding.
+system us/securities
+
+use us
+
+/// A loss on a security is disallowed when a replacement is acquired within
+/// the statutory window. `carry` adds that loss to the new parcel's basis.
+///
+/// To fix: if the sale and replacement are not substantially identical
+/// securities, do not classify the commodity under `security`.
+law wash-sale
+  on gain
+  when amount.unit is security
+  when gain < empty
+  carry -gain to amount.unit within 30d

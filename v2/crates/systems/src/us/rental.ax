@@ -1,0 +1,46 @@
+/// United States residential rental property.
+///
+/// Rental homes are assets with a history of purchases and improvements. The
+/// residential rental law consumes each part over its own 27.5-year life,
+/// excluding land. Income and costs attach to the home through `of`, so the
+/// return can explain which property each event belongs to.
+system us/rental
+
+use us
+
+kind rental-home : property
+  has in-service date
+  has land amount
+
+  /// Residential rental property is depreciated straight-line over 27.5 years
+  /// from the month it is placed in service, using the mid-month convention.
+  /// Each purchase or improvement is a separate part with its own recovery
+  /// period; land is never depreciated.
+  ///
+  /// To fix: set `in-service` to the day the home was first ready and available
+  /// to rent, and enter land separately from the building.
+  law depreciation
+    each month
+    let amount = straight-line(self.cost - self.land, 27.5y, self.in-service, month, mid-month)
+    consume amount
+    count amount as rental-depreciation
+
+  /// Rent associated with this home is Schedule E income and investment income.
+  ///
+  /// To fix: write rent with `#rent of HOME` so the return can tie it to this
+  /// property's history.
+  law rental-income
+    on flow
+    when purpose is rent
+    count amount as rental-income
+    count amount as investment-income
+
+  /// Repairs, insurance, property tax and mortgage interest of this home are
+  /// rental costs. They are counted against rental income, not added to basis.
+  ///
+  /// To fix: use `#repair of HOME`, `#insurance of HOME`, `#property-tax of
+  /// HOME` or `#interest of HOME` to identify a rental cost.
+  law rental-expenses
+    on flow
+    when purpose is repair | insurance | property-tax | interest
+    count amount as rental-expenses
