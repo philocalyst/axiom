@@ -190,17 +190,16 @@ fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
 fn grown(lens: Lens, months: i32, ledger: &Ledger, pick: &dyn Fn(&Holding) -> Qty) -> Qty {
     let mut basket = Basket::default();
     let on_sheet = |holding: &&Holding| {
-        lens.owns(holding.place)
-            && matches!(
-                lens.book().places[holding.place].class,
-                Class::Asset | Class::Debt
-            )
+        matches!(
+            lens.book().places[holding.place].class,
+            Class::Asset | Class::Debt
+        ) && !lens.place_qty(holding.place, pick(holding)).is_zero()
     };
     for holding in ledger.holdings().filter(on_sheet) {
         basket.add(
             holding.unit,
             Held {
-                qty: pick(holding),
+                qty: lens.place_qty(holding.place, pick(holding)),
                 booked: Qty::ZERO,
             },
         );
@@ -358,5 +357,57 @@ mod tests {
 
         assert_eq!(resumed.liquid[0] - folded.liquid[0], Qty(1_000));
         assert_eq!(resumed.worth[0] - folded.worth[0], Qty(1_000));
+    }
+
+    #[test]
+    fn projected_worth_uses_cent_conserving_owner_shares() {
+        let source = "\
+base USD
+commodity USD
+  precision 2
+entity me
+entity jordan
+account assets/shared
+  owner me 60%, jordan 40%
+opening 2026-01-01
+  shared 100 USD
+";
+        crate::source_tests::with_run(source, Day::from_ymd(2026, 1, 2).unwrap(), |book, run| {
+            let plan = Plan::new(book);
+            let place = book
+                .places
+                .iter()
+                .find(|(_, place)| book.name(place.path) == "assets/shared")
+                .map(|(id, _)| id)
+                .unwrap();
+            let owner = |name| {
+                book.entities
+                    .iter()
+                    .find(|(_, entity)| book.name(entity.path) == name)
+                    .map(|(id, _)| id)
+                    .unwrap()
+            };
+            let forecast_for = |name| {
+                let whose = crate::lens::Whose::of(book, owner(name));
+                let lens = Lens::new(&plan, &whose, run.today);
+                project(&plan, lens, run.today, Vec::new(), &[run.today]).worth[0]
+            };
+
+            assert_eq!(forecast_for("me"), Qty(6_000));
+            assert_eq!(forecast_for("jordan"), Qty(4_000));
+
+            let everyone = crate::lens::Whose::default();
+            let lens = Lens::new(&plan, &everyone, run.today);
+            assert_eq!(
+                project(&plan, lens, run.today, Vec::new(), &[run.today]).worth[0],
+                Qty(10_000)
+            );
+            assert_eq!(
+                plan.allocate(place, Qty(10_000))
+                    .map(|(_, amount)| amount)
+                    .sum::<Qty>(),
+                Qty(10_000)
+            );
+        });
     }
 }
