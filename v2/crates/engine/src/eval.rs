@@ -520,8 +520,15 @@ impl<'a, 's> Machine<'a, 's> {
         let sum = match widen {
             None => read(ctx.subject),
             Some(kind) => {
-                let mine = book.places.iter().filter(|(_, p)| p.owner == ctx.owner && book.is_a(p.kind, kind));
-                mine.map(|(id, _)| read(Subject::Place(id))).sum()
+                self.env
+                    .plan
+                    .kind_places
+                    .get(&kind)
+                    .into_iter()
+                    .flat_map(|places| places.iter())
+                    .filter(|&&place| book.places[place].owner == ctx.owner)
+                    .map(|&place| read(Subject::Place(place)))
+                    .sum()
             }
         };
         self.base(sum)

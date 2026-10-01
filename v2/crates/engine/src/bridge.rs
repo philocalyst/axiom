@@ -26,13 +26,14 @@ pub(crate) const V3: &str = "the v3 model compiles no asset laws";
 /// `visa = 1_234.56 USD` means 1,234.56 owed. Flipping twice is the identity,
 /// so one sign converts both ways. v3 reads the sign off the path root, which
 /// costs a string comparison; it is read once here.
-pub(crate) struct Sides(Box<[i64]>);
+pub struct Sides(Box<[i64]>);
 
 impl Sides {
-    pub fn of(book: &Book) -> Sides {
+    pub(crate) fn of(book: &Book) -> Sides {
         Sides(book.places.ids().map(|place| book.v3_root(place).display_sign()).collect())
     }
 
+    /// The sign used to show the balance of `place`.
     pub fn sign(&self, place: Id<Place>) -> i64 {
         self.0[place.index()]
     }

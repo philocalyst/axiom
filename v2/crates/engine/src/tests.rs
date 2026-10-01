@@ -4,7 +4,7 @@
 //! clippy reads as inconsistent digit grouping.
 #![allow(clippy::inconsistent_digit_grouping)]
 
-use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity};
+use axiom_core::{Day, Diagnostic, Disposition, Id, Qty, Ratio, Severity, Tree};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder, span};
@@ -32,8 +32,10 @@ fn diagnostic<'a>(run: &'a Run, code: &str) -> &'a Diagnostic {
 #[test]
 fn well_known_names_resolve_once_and_are_absent_where_the_book_never_says_them() {
     let book = Fixture::new().book();
-    let known = Plan::new(&book).known();
+    let plan = Plan::new(&book);
+    let known = plan.known();
     assert!(known.born.is_none() && known.maturity.is_none() && known.budget.is_none() && known.currency.is_none());
+    assert!(plan.kind_places.is_empty(), "a book with no kind-widened totals needs no place index");
     let mut f = Fixture::new();
     let born = f.sym("born");
     let book = f.book();
@@ -73,6 +75,9 @@ fn plain_money_is_one_integer_per_place() {
     f.flow(2, checking, food, 20_00);
     f.flow(3, salary, checking, 500_00);
     let book = f.book();
+    let plan = Plan::new(&book);
+    assert_eq!(plan.sides().sign(checking), 1);
+    assert_eq!(plan.sides().display(equity, Qty(20)), Qty(-20));
     let run = run(&book, options());
     assert_eq!(qty(&run, checking, usd), 1_480_00);
     assert_eq!(qty(&run, food, usd), 20_00);
@@ -288,6 +293,158 @@ fn value_moving_inside_a_subject_does_not_count_toward_its_totals() {
     assert_eq!(run.violations[0].cause, Cause::Flow(last));
     let d = &run.diagnostics[run.violations[0].diagnostic as usize];
     assert!(d.labels.iter().any(|l| l.text == "10,500.00 USD"), "9,000 already in, 1,500 more: {d:?}");
+}
+
+#[test]
+fn kind_totals_use_descendants_and_only_the_subject_owners_places() {
+    let mut f = Fixture::new();
+    let (checking, savings, brokerage, cash, salary, grant, market_place) =
+        (f.checking, f.savings, f.brokerage, f.cash, f.salary, f.grant, f.market);
+    let bank = Id::new(1);
+    let add_limit = |f: &mut Fixture, window, name| {
+        let mut law = LawBuilder::new(f.sym(name), Trigger::In);
+        let kind = law.konst(Value::Kind(bank), Ty::Kind);
+        let total = law.call(Func::Total(Dir::In, window), &[kind], Ty::AMOUNT);
+        let limit = law.konst(Value::Amount(f.usd(100_00)), Ty::AMOUNT);
+        let condition = law.bin(BinOp::Le, total, limit, Ty::Bool);
+        let law = f.law(law.warn(condition));
+        f.on_in.push((checking, f.rule(law, Subject::Place(checking))));
+        law
+    };
+    let (month, year) = (
+        add_limit(&mut f, Window::Month, "kind-month-limit"),
+        add_limit(&mut f, Window::Year, "kind-year-limit"),
+    );
+
+    f.flow(date(2025, 1, 1), salary, checking, 40_00);
+    f.flow(date(2025, 1, 2), salary, savings, 30_00);
+    f.flow(date(2025, 1, 3), salary, brokerage, 25_00);
+    f.flow(date(2025, 1, 4), salary, cash, 200_00);
+    f.flow(date(2025, 1, 5), salary, savings, 100_00);
+    f.flow(date(2025, 1, 6), salary, checking, 20_00);
+    f.flow(date(2025, 2, 1), salary, checking, 10_00);
+
+    // Replace the fixture's two unrelated kinds with an asset-kind tree whose
+    // bank descendants and unrelated cash place make the widened set explicit.
+    let mut book = f.book();
+    let root = book.kinds[Id::new(0)].clone();
+    let market = book.kinds[Id::new(1)].clone();
+    let kind = |name, sort, parent: &Kind| Kind { name, sort, ..parent.clone() };
+    let bank_kind = kind(book.names.intern("bank"), Sort::Place(Class::Asset), &root);
+    let checking_kind = kind(book.names.intern("checking-kind"), Sort::Place(Class::Asset), &bank_kind);
+    let savings_kind = kind(book.names.intern("savings-kind"), Sort::Place(Class::Asset), &bank_kind);
+    let brokerage_kind = kind(book.names.intern("brokerage-kind"), Sort::Place(Class::Asset), &bank_kind);
+    book.kinds = Tree::build(
+        vec![root, bank_kind, checking_kind, savings_kind, brokerage_kind, market],
+        &[None, Some(0), Some(1), Some(1), Some(1), None],
+    )
+    .expect("acyclic kind fixture")
+    .0;
+    book.places[checking].kind = Id::new(2);
+    book.places[savings].kind = Id::new(3);
+    book.places[brokerage].kind = Id::new(4);
+    book.places[market_place].kind = Id::new(5);
+    book.places[savings].owner = grant;
+
+    let plan = Plan::new(&book);
+    assert_eq!(plan.kind_places.len(), 1, "repeated reads share one sparse index entry");
+    let indexed = plan.kind_places.get(&bank).expect("the total reads its kind");
+    let scanned: Vec<_> = book
+        .places
+        .iter()
+        .filter(|(_, place)| book.is_a(place.kind, bank))
+        .map(|(place, _)| place)
+        .collect();
+    assert_eq!(
+        indexed.as_ref(),
+        scanned,
+        "the kind index includes the kind and its descendants"
+    );
+    drop(plan);
+
+    let run = run(&book, options());
+    let rows = |law| {
+        run.headroom
+            .iter()
+            .filter(|reading| reading.law == law)
+            .map(|reading| (reading.days.first(), reading.counted.qty))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        rows(month),
+        [
+            (Day(date(2025, 1, 1)), Qty(85_00)),
+            (Day(date(2025, 2, 1)), Qty(10_00)),
+        ],
+        "the bank parent includes its checking, savings and brokerage descendants; \
+         cash and another owner's savings are excluded"
+    );
+    assert_eq!(
+        rows(year),
+        [(Day(date(2025, 1, 1)), Qty(95_00))],
+        "the annual window includes January and February"
+    );
+}
+
+#[test]
+fn computed_kind_totals_index_every_kind_and_use_the_selected_kind() {
+    let mut f = Fixture::new();
+    let (checking, savings, brokerage, salary, market) =
+        (f.checking, f.savings, f.brokerage, f.salary, f.market);
+    let mut law = LawBuilder::new(f.sym("computed-kind-total"), Trigger::In);
+    let yes = law.konst(Value::Bool(true), Ty::Bool);
+    let target = law.var(Var::To, Ty::Place);
+    let target_kind = law.field(target, Field::Kind, Ty::Kind);
+    let other_kind = law.konst(Value::Kind(Id::new(5)), Ty::Kind);
+    let kind = law.if_then_else(yes, target_kind, other_kind, Ty::Kind);
+    let total = law.call(Func::Total(Dir::In, Window::Year), &[kind], Ty::AMOUNT);
+    let limit = law.konst(Value::Amount(f.usd(80_00)), Ty::AMOUNT);
+    let condition = law.bin(BinOp::Le, total, limit, Ty::Bool);
+    let law = f.law(law.warn(condition));
+    f.on_in.push((checking, f.rule(law, Subject::Place(checking))));
+    f.flow(date(2025, 1, 1), salary, checking, 40_00);
+    f.flow(date(2025, 1, 2), salary, savings, 30_00);
+    f.flow(date(2025, 1, 2), salary, market, 200_00);
+    f.flow(date(2025, 1, 3), salary, checking, 20_00);
+
+    let mut book = f.book();
+    let root = book.kinds[Id::new(0)].clone();
+    let old_market = book.kinds[Id::new(1)].clone();
+    let kind = |name, sort, parent: &Kind| Kind { name, sort, ..parent.clone() };
+    let bank = kind(book.names.intern("computed-bank"), Sort::Place(Class::Asset), &root);
+    let checking_kind = kind(book.names.intern("computed-checking"), Sort::Place(Class::Asset), &bank);
+    let savings_kind = kind(book.names.intern("computed-savings"), Sort::Place(Class::Asset), &bank);
+    let brokerage_kind = kind(book.names.intern("computed-brokerage"), Sort::Place(Class::Asset), &bank);
+    book.kinds = Tree::build(
+        vec![root, bank, checking_kind, savings_kind, brokerage_kind, old_market],
+        &[None, Some(0), Some(1), Some(1), Some(1), None],
+    )
+    .expect("acyclic kind fixture")
+    .0;
+    book.places[checking].kind = Id::new(2);
+    book.places[savings].kind = Id::new(3);
+    book.places[brokerage].kind = Id::new(4);
+    book.places[market].kind = Id::new(5);
+    // The unrelated kind belongs to the same owner, so only the selected kind
+    // can keep its large flow out of this total.
+    book.places[market].owner = book.roots.me;
+    let plan = Plan::new(&book);
+    assert_eq!(plan.kind_places.len(), book.kinds.len(), "a computed kind may select every kind");
+    for (candidate, _) in book.kinds.iter() {
+        let indexed = plan.kind_places.get(&candidate).expect("the dynamic kind fallback indexes all kinds");
+        let scanned: Vec<_> = book
+            .places
+            .iter()
+            .filter(|(_, place)| book.is_a(place.kind, candidate))
+            .map(|(place, _)| place)
+            .collect();
+        assert_eq!(indexed.as_ref(), scanned, "candidate kind {candidate:?}");
+    }
+    drop(plan);
+
+    let run = run(&book, options());
+    let [reading] = run.headroom[..] else { panic!("one computed-kind reading: {:?}", run.headroom) };
+    assert_eq!((reading.law, reading.counted.qty), (law, Qty(60_00)));
 }
 
 #[test]

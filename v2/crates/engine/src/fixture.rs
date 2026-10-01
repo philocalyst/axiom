@@ -547,6 +547,11 @@ impl LawBuilder {
         self.node(Op::Bin(op, left, right), ty, Some(first))
     }
 
+    pub fn if_then_else(&mut self, condition: NodeId, yes: NodeId, no: NodeId, ty: Ty) -> NodeId {
+        let first = self.nodes[condition.index()].first;
+        self.node(Op::If(condition, yes, no), ty, Some(first))
+    }
+
     /// `left is alternatives…`
     pub fn is(&mut self, left: NodeId, alternatives: &[NodeId]) -> NodeId {
         let first = self.nodes[left.index()].first;

@@ -10,7 +10,7 @@
 //! records, and any number of threads can fold from it at once.
 
 use axiom_core::{Day, Diagnostic, Groups, Id, Map, Set, Sym};
-use axiom_model::{Book, Commodity, Entity, Flow, Kind, Place, Rule, Subject};
+use axiom_model::{Book, Commodity, Entity, Flow, Func, Kind, Op, Place, Rule, Subject, Ty, Value};
 
 use crate::bridge::{Sides, V3};
 use crate::events::{self, Events};
@@ -74,6 +74,9 @@ pub struct Plan<'b, 's> {
     /// The asset places each entity holds: its own, its subsidiaries' and its
     /// members', in place order.
     members: Groups<Entity, Id<Place>>,
+    /// Places under kinds read by a widened total. Only law-referenced kinds
+    /// are indexed, so books without those reads pay no grouping cost.
+    pub(crate) kind_places: Map<Id<Kind>, Box<[Id<Place>]>>,
     /// The day of the first fact that starts a period; before it there is nothing to close.
     pub(crate) period_start: Option<Day>,
     last_fact: Option<Day>,
@@ -106,6 +109,7 @@ impl<'b, 's> Plan<'b, 's> {
                 _ => None,
             })
         });
+        let kind_places = kind_places(book);
         let mut plan = Plan {
             book,
             amounts: solution.amounts,
@@ -117,6 +121,7 @@ impl<'b, 's> Plan<'b, 's> {
             readers: facts::readers(book, &laws),
             watch: Watch::of(book, &laws),
             members: Groups::build(book.entities.len(), held),
+            kind_places,
             period_start: timeline::start(book, &events),
             last_fact: timeline::last_fact(book, &events),
             events,
@@ -135,6 +140,11 @@ impl<'b, 's> Plan<'b, 's> {
     /// The names looked up by spelling, resolved once.
     pub fn known(&self) -> Known {
         self.known
+    }
+
+    /// The sign each place's balance is shown in.
+    pub fn sides(&self) -> &Sides {
+        &self.sides
     }
 
     /// A ledger at the day before the first fact, ready to fold.
@@ -192,6 +202,58 @@ fn repeats(book: &Book) -> bool {
         let mut seen = Set::default();
         list.iter().any(|rule| !seen.insert((rule.law, rule.subject)))
     })
+}
+
+/// Builds the static place set for every kind a `total` reads. If a typed
+/// kind argument is computed at run time, any kind can be selected, so all
+/// kinds are indexed for that book.
+fn kind_places(book: &Book) -> Map<Id<Kind>, Box<[Id<Place>]>> {
+    let mut requested = Set::default();
+    let mut dynamic = false;
+    for law in book.laws.values() {
+        for node in &law.nodes {
+            let Op::Call(Func::Total(..), args) = &node.op else { continue };
+            for &argument in args.iter().filter(|&&argument| law.nodes[argument.index()].ty == Ty::Kind) {
+                match &law.nodes[argument.index()].op {
+                    Op::Const(Value::Kind(kind)) => {
+                        requested.insert(*kind);
+                    }
+                    _ => dynamic = true,
+                }
+            }
+        }
+    }
+    if dynamic {
+        // A computed kind may select any bucket; walk each place's ancestry
+        // once instead of rescanning the place table for every book kind.
+        let mut places: Map<Id<Kind>, Vec<Id<Place>>> =
+            book.kinds.ids().map(|kind| (kind, Vec::new())).collect();
+        for (place, value) in book.places.iter() {
+            for kind in book.kinds.lineage(value.kind) {
+                places.get_mut(&kind).expect("every book kind is indexed").push(place);
+            }
+        }
+        return places
+            .into_iter()
+            .map(|(kind, matching)| (kind, matching.into_boxed_slice()))
+            .collect();
+    }
+    if requested.is_empty() {
+        return Map::default();
+    }
+    requested
+        .into_iter()
+        .map(|kind| {
+            let places = book
+                .places
+                .iter()
+                .filter(|(_, place)| book.is_a(place.kind, kind))
+                .map(|(place, _)| place)
+                .collect::<Vec<_>>()
+                .into_boxed_slice();
+            (kind, places)
+        })
+        .collect()
 }
 
 /// The journal folded through `options.today` (and every later journal fact):

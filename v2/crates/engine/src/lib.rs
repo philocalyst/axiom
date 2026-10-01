@@ -64,6 +64,7 @@ mod tests;
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
 use axiom_model::{Amount, Asset, Commodity, Contract, Entity, Flow, Law, Place, Subject, System, Txn, Waive};
 
+pub use bridge::Sides;
 pub use checkpoint::Checkpoint;
 pub use ledger::Ledger;
 pub use plan::{Known, Plan, run};
