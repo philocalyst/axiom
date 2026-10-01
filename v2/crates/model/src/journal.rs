@@ -582,6 +582,12 @@ pub enum Select {
     /// Parcels acquired by transactions marked with this code.
     Code(Sym),
     Policy(Policy),
+    /// `[#purpose]`: only parcels held for this purpose.
+    Purpose(Id<Purpose>),
+    /// `[USD]`: only parcels of this commodity.
+    Unit(Id<Commodity>),
+    /// `[retirement]`: only parcels whose fact names this destination.
+    End(Id<Place>),
 }
 
 /// Flows written together.
@@ -623,6 +629,8 @@ pub struct FlowExpressions {
     pub flow: u32,
     pub out: Option<NodeId>,
     pub arrive: Option<NodeId>,
+    /// Computed base-currency basis attached to this flow's runtime detail.
+    pub basis: Option<NodeId>,
 }
 
 /// A resolved endpoint retained when a split header has no postable flow of

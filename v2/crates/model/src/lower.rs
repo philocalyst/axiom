@@ -6,8 +6,10 @@
 //! does not copy the journal into a second per-item plan.
 
 mod contracts;
+mod record;
 
 pub(crate) use contracts::contracts;
+pub(crate) use record::record;
 
 use axiom_core::{Diagnostic, Loc, Map};
 use axiom_syntax as ast;
@@ -68,11 +70,34 @@ pub(crate) struct JournalSurvey<'s> {
 /// Where a raw endpoint occurred, so declaration preallocation can distinguish
 /// ordinary journal counterparties from contextual contract/opening names.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum EndpointContext {
+pub(crate) enum EndpointContext<'s> {
     Transaction,
     Statement,
     Opening,
-    Contract,
+    StatementSubject,
+    ClaimSubject,
+    ClaimCreditor,
+    Via,
+    ForParty,
+    PurposeObject,
+    SelectorEnd,
+    ContractParty {
+        contract: Name<'s>,
+    },
+    ContractHolding {
+        contract: Name<'s>,
+        direction: Direction,
+    },
+    ContractBody {
+        contract: Name<'s>,
+    },
+    ContractAlso {
+        contract: Name<'s>,
+    },
+    DeclarationAlso {
+        name: Name<'s>,
+        kind: ast::DeclKind,
+    },
 }
 
 /// Visits every endpoint candidate without allocating or interning it. The
@@ -80,7 +105,7 @@ pub(crate) enum EndpointContext {
 /// then preallocates only genuinely novel parties before place ids freeze.
 pub(crate) fn visit_endpoints<'s>(
     sites: &[Site<'_, 's>],
-    mut visit: impl FnMut(Home, Name<'s>, Loc, EndpointContext),
+    mut visit: impl FnMut(Home, Name<'s>, Loc, EndpointContext<'s>),
 ) {
     for site in sites {
         let file = &site.source.file;
@@ -100,6 +125,7 @@ pub(crate) fn visit_endpoints<'s>(
                     let opening = &file[id];
                     for leg in &file[opening.lines] {
                         visit(site.home, leg.end.name, leg.loc, EndpointContext::Opening);
+                        visit_tail_names(file, leg.tail, site.home, &mut visit);
                     }
                     for statement in &file[opening.claims] {
                         visit_statement_ends(file, statement, site.home, &mut visit);
@@ -113,22 +139,73 @@ pub(crate) fn visit_endpoints<'s>(
                                 site.home,
                                 holding.name,
                                 schedule.at,
-                                EndpointContext::Contract,
+                                EndpointContext::ContractHolding {
+                                    contract: contract.name,
+                                    direction: holding.direction,
+                                },
                             );
                         }
                     }
+                    if let Some(party) = contract.party {
+                        visit(
+                            site.home,
+                            party,
+                            file.loc(party.0),
+                            EndpointContext::ContractParty {
+                                contract: contract.name,
+                            },
+                        );
+                    }
                     for leg in &file[contract.body.legs] {
-                        visit(site.home, leg.end.name, leg.loc, EndpointContext::Contract);
+                        visit(
+                            site.home,
+                            leg.end.name,
+                            leg.loc,
+                            EndpointContext::ContractBody {
+                                contract: contract.name,
+                            },
+                        );
+                        visit_tail_names(file, leg.tail, site.home, &mut visit);
+                    }
+                    for line in &file[contract.body.items] {
+                        visit_tail_names(file, line.tail, site.home, &mut visit);
                     }
                     for also in &file[contract.alsos] {
-                        if let ast::AlsoLine::Flow(flow) = &also.line {
-                            visit_flow_ends(
+                        match &also.line {
+                            ast::AlsoLine::Flow(flow) => visit_flow_ends(
                                 file,
                                 flow,
                                 site.home,
-                                EndpointContext::Contract,
+                                EndpointContext::ContractAlso {
+                                    contract: contract.name,
+                                },
                                 &mut visit,
-                            );
+                            ),
+                            ast::AlsoLine::Item(item) => {
+                                visit_tail_names(file, item.tail, site.home, &mut visit)
+                            }
+                        }
+                    }
+                    if let Some(deadline) = &contract.deadline
+                        && let Some(item) = &deadline.otherwise
+                    {
+                        visit_tail_names(file, item.tail, site.home, &mut visit);
+                    }
+                }
+                ItemKind::Decl(id) => {
+                    let declaration = &file[id];
+                    for also in &file[declaration.alsos] {
+                        let context = EndpointContext::DeclarationAlso {
+                            name: declaration.name,
+                            kind: declaration.what,
+                        };
+                        match &also.line {
+                            ast::AlsoLine::Flow(flow) => {
+                                visit_flow_ends(file, flow, site.home, context, &mut visit)
+                            }
+                            ast::AlsoLine::Item(item) => {
+                                visit_tail_names(file, item.tail, site.home, &mut visit)
+                            }
                         }
                     }
                 }
@@ -142,25 +219,78 @@ fn visit_statement_ends<'s>(
     file: &ast::File<'s>,
     statement: &ast::Statement<'s>,
     home: Home,
-    visit: &mut impl FnMut(Home, Name<'s>, Loc, EndpointContext),
+    visit: &mut impl FnMut(Home, Name<'s>, Loc, EndpointContext<'s>),
 ) {
+    if let Subject::Name(name) = statement.subject {
+        let context = if matches!(&statement.verb, ast::Verb::Owes { .. }) {
+            EndpointContext::ClaimSubject
+        } else {
+            EndpointContext::StatementSubject
+        };
+        visit(home, name, file.loc(name.0), context);
+    }
+    if let ast::Verb::Owes { creditor, .. } = &statement.verb {
+        visit(
+            home,
+            *creditor,
+            file.loc(creditor.0),
+            EndpointContext::ClaimCreditor,
+        );
+    }
     for leg in &file[statement.body.legs] {
         visit(home, leg.end.name, leg.loc, EndpointContext::Statement);
+        visit_tail_names(file, leg.tail, home, visit);
     }
+    for item in &file[statement.body.items] {
+        visit_tail_names(file, item.tail, home, visit);
+    }
+    visit_tail_names(file, statement.tail, home, visit);
 }
 
 fn visit_flow_ends<'s>(
     file: &ast::File<'s>,
     flow: &ast::Flow<'s>,
     home: Home,
-    context: EndpointContext,
-    visit: &mut impl FnMut(Home, Name<'s>, Loc, EndpointContext),
+    context: EndpointContext<'s>,
+    visit: &mut impl FnMut(Home, Name<'s>, Loc, EndpointContext<'s>),
 ) {
     for end in [flow.from.end, flow.to.end].into_iter().flatten() {
         visit(home, end.name, file.loc(end.name.0), context);
+        for selector in &file[end.select] {
+            if let ast::Select::End(name) = selector {
+                visit(home, *name, file.loc(name.0), EndpointContext::SelectorEnd);
+            }
+        }
     }
+    visit_tail_names(file, flow.tail, home, visit);
     for leg in &file[flow.body.legs] {
         visit(home, leg.end.name, leg.loc, context);
+        visit_tail_names(file, leg.tail, home, visit);
+    }
+    for item in &file[flow.body.items] {
+        visit_tail_names(file, item.tail, home, visit);
+    }
+}
+
+fn visit_tail_names<'s>(
+    file: &ast::File<'s>,
+    clauses: ast::Many<ast::Clause<'s>>,
+    home: Home,
+    visit: &mut impl FnMut(Home, Name<'s>, Loc, EndpointContext<'s>),
+) {
+    for clause in &file[clauses] {
+        match clause.kind {
+            ClauseKind::Via(name) => visit(home, name, clause.at, EndpointContext::Via),
+            ClauseKind::For(ast::For::Whom(name)) => {
+                visit(home, name, clause.at, EndpointContext::ForParty)
+            }
+            ClauseKind::Purpose(purpose) => {
+                if let Some(name) = purpose.of {
+                    visit(home, name, clause.at, EndpointContext::PurposeObject);
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -212,6 +342,17 @@ fn inputs<'s>(
             continue;
         }
         let args = &file[prop.args];
+        if args.len() > 2 {
+            diags.push(
+                Diagnostic::error(
+                    "contract-input",
+                    "an input takes a name and at most one unit",
+                )
+                .label(prop.loc, "extra input arguments are not used")
+                .help("write `input NAME` or `input NAME UNIT`"),
+            );
+            continue;
+        }
         let Some(&name_id) = args.first() else {
             diags.push(
                 Diagnostic::error("contract-input", "an input needs a name")
@@ -288,41 +429,76 @@ fn inputs<'s>(
     found.into_boxed_slice()
 }
 
-/// Computed amounts in one initial contract template, in source order. A
-/// single typed program is compiled for these roots and the deadline's
-/// `otherwise` item; literals remain inline in their flow records.
-fn contract_roots<'s>(
+/// The independent computed roots owned by the regular and standing terms.
+/// Each schedule keeps its own program and chronology.
+#[derive(Default)]
+struct ContractRoots {
+    regular: Vec<(ast::ExprId, Ty)>,
+    standing: Vec<(ast::ExprId, Ty)>,
+}
+
+fn contract_roots<'s>(file: &ast::File<'s>, contract: &ast::Contract<'s>) -> ContractRoots {
+    let roots = |schedule: Option<ast::Schedule<'s>>| {
+        schedule.map_or_else(Vec::new, |schedule| {
+            changed_term_roots(
+                file,
+                schedule.terms,
+                contract.body,
+                contract.deadline.as_ref(),
+            )
+        })
+    };
+    ContractRoots {
+        regular: roots(contract.schedule),
+        standing: roots(contract.standing),
+    }
+}
+
+fn push_payment_roots<'s>(payment: Option<ast::Payment<'s>>, roots: &mut Vec<(ast::ExprId, Ty)>) {
+    match payment {
+        Some(ast::Payment::Fixed(amount)) => push_amount_root(amount, roots),
+        Some(ast::Payment::Buy { spend, .. }) => push_amount_root(spend, roots),
+        None => {}
+    }
+}
+
+/// The roots a changed `now TERMS` owns. It follows the same typed compiler
+/// route as a declaration: payment, body, and any deadline item are compiled
+/// together so expressions share nodes and input slots.
+fn changed_term_roots<'s>(
     file: &ast::File<'s>,
-    contract: &ast::Contract<'s>,
+    terms: ast::Terms<'s>,
+    body: ast::Body<'s>,
+    deadline: Option<&ast::Deadline<'s>>,
 ) -> Vec<(ast::ExprId, Ty)> {
     let mut roots = Vec::new();
-    if let Some(schedule) = contract.schedule.or(contract.standing) {
-        match schedule.terms.payment {
-            Some(ast::Payment::Fixed(amount)) => push_amount_root(amount, &mut roots),
-            Some(ast::Payment::Buy { spend, .. }) => push_amount_root(spend, &mut roots),
-            None => {}
-        }
+    push_payment_roots(terms.payment, &mut roots);
+    push_body_roots(file, body, &mut roots);
+    if let Some(item) = deadline.and_then(|deadline| deadline.otherwise.as_ref()) {
+        push_amount_root(item.amount, &mut roots);
     }
-    for leg in &file[contract.body.legs] {
+    roots
+}
+
+fn push_body_roots<'s>(
+    file: &ast::File<'s>,
+    body: ast::Body<'s>,
+    roots: &mut Vec<(ast::ExprId, Ty)>,
+) {
+    for leg in &file[body.legs] {
         match leg.amount {
             ast::Quantity::Amount(amount)
             | ast::Quantity::Pending(amount)
-            | ast::Quantity::Target(amount) => push_amount_root(amount, &mut roots),
+            | ast::Quantity::Target(amount) => push_amount_root(amount, roots),
             ast::Quantity::Unknown(_)
             | ast::Quantity::All(_)
             | ast::Quantity::Rest
             | ast::Quantity::Whole => {}
         }
     }
-    for item in &file[contract.body.items] {
-        push_amount_root(item.amount, &mut roots);
+    for item in &file[body.items] {
+        push_amount_root(item.amount, roots);
     }
-    if let Some(deadline) = &contract.deadline {
-        if let Some(item) = &deadline.otherwise {
-            push_amount_root(item.amount, &mut roots);
-        }
-    }
-    roots
 }
 
 fn push_amount_root<'s>(amount: ast::Amount<'s>, roots: &mut Vec<(ast::ExprId, Ty)>) {
@@ -703,6 +879,80 @@ opening 2026-01-01
     }
 
     #[test]
+    fn endpoint_visitor_covers_claims_declaration_also_and_flow_tails() {
+        let path = "journal/endpoints.ax";
+        let source_text = "\
+entity fund : institution
+  also issuer -> self 2 USD for holder via market
+contract lease with landlord
+  2_350 USD monthly from checking
+  also checking -> escrow 410 USD for recipient via bank
+2026-01-03 borrower owes lender 100 USD due 5d for beneficiary via clearing
+opening 2026-01-01
+  borrower owes lender 20 USD due 3d for opener
+";
+        let (file, diagnostics) = parse(FileId(0), source_text, Folder::of(path));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let source = Source {
+            path,
+            file,
+            embedded: false,
+        };
+        let site = Site {
+            source: &source,
+            home: Home::Project,
+        };
+        let mut seen = Vec::new();
+        visit_endpoints(&[site], |home, name, loc, context| {
+            assert_eq!(home, Home::Project);
+            assert!(loc.start <= loc.end);
+            assert_eq!(loc.file, FileId(0));
+            assert!(
+                source_text[loc.range()].contains(name.0),
+                "{name:?} at {loc:?}"
+            );
+            seen.push((name.0, context, loc));
+        });
+
+        assert!(seen.iter().any(|(name, context, _)| {
+            *name == "borrower" && matches!(context, EndpointContext::ClaimSubject)
+        }));
+        assert_eq!(
+            seen.iter()
+                .filter(|(name, context, _)| {
+                    *name == "borrower" && matches!(context, EndpointContext::ClaimSubject)
+                })
+                .count(),
+            2,
+            "the dated claim and opening claim are both visited"
+        );
+        assert!(seen.iter().any(|(name, context, _)| {
+            *name == "lender" && matches!(context, EndpointContext::ClaimCreditor)
+        }));
+        assert!(seen.iter().any(|(name, context, _)| {
+            *name == "holder" && matches!(context, EndpointContext::ForParty)
+        }));
+        assert!(seen.iter().any(|(name, context, _)| {
+            *name == "bank" && matches!(context, EndpointContext::Via)
+        }));
+        assert!(seen.iter().any(|(name, context, _)| {
+            *name == "issuer"
+                && matches!(context, EndpointContext::DeclarationAlso { name: decl, kind: ast::DeclKind::Entity } if decl.0 == "fund")
+        }));
+        assert!(seen.iter().any(|(name, context, _)| {
+            *name == "self"
+                && matches!(context, EndpointContext::DeclarationAlso { name: decl, kind: ast::DeclKind::Entity } if decl.0 == "fund")
+        }));
+        assert!(seen.iter().any(|(name, context, _)| {
+            *name == "escrow"
+                && matches!(context, EndpointContext::ContractAlso { contract } if contract.0 == "lease")
+        }));
+        assert!(seen.iter().any(|(name, context, _)| {
+            *name == "recipient" && matches!(context, EndpointContext::ForParty)
+        }));
+    }
+
+    #[test]
     fn contract_roots_cover_input_items_and_deadline_else_once() {
         let path = "contracts.ax";
         let source_text = "\
@@ -718,8 +968,55 @@ contract flat with greystar
             panic!("contract expected")
         };
         let roots = contract_roots(&file, &file[id]);
-        assert_eq!(roots.len(), 2);
-        assert!(matches!(file.exprs[roots[0].0].kind, ExprKind::Of(_, _)));
-        assert!(matches!(file.exprs[roots[1].0].kind, ExprKind::Pct(_)));
+        assert_eq!(roots.regular.len(), 2);
+        assert!(matches!(
+            file.exprs[roots.regular[0].0].kind,
+            ExprKind::Of(_, _)
+        ));
+        assert!(matches!(
+            file.exprs[roots.regular[1].0].kind,
+            ExprKind::Pct(_)
+        ));
+    }
+
+    #[test]
+    fn contract_and_changed_terms_collect_each_computed_root_once() {
+        let source_text = "\
+contract c with p
+  12% of ^base USD monthly from checking
+  buy VTI for 3/4 of ^base USD monthly from checking
+  + 5% of ^base
+  due 5d else + 2% of ^base
+2026-01-01 c now 10% of ^base USD monthly from checking
+  + 3% of ^base
+";
+        let (file, diagnostics) = parse(FileId(0), source_text, Folder::of("contracts.ax"));
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let ItemKind::Contract(contract_id) = file.items[0].kind else {
+            panic!("contract expected")
+        };
+        let contract = &file[contract_id];
+        assert!(contract.schedule.is_some() && contract.standing.is_some());
+        let roots = contract_roots(&file, contract);
+        assert_eq!(roots.regular.len(), 3);
+        assert_eq!(roots.standing.len(), 1);
+        assert!(matches!(
+            file.exprs[roots.regular[0].0].kind,
+            ExprKind::Of(_, _)
+        ));
+        assert!(matches!(
+            file.exprs[roots.standing[0].0].kind,
+            ExprKind::Of(_, _)
+        ));
+
+        let ItemKind::Statement(statement_id) = file.items[1].kind else {
+            panic!("statement expected")
+        };
+        let statement = &file[statement_id];
+        let Verb::Now(ast::Change::Terms(terms_id)) = statement.verb else {
+            panic!("terms change expected")
+        };
+        let changed = changed_term_roots(&file, file[terms_id], statement.body, None);
+        assert_eq!(changed.len(), 2);
     }
 }

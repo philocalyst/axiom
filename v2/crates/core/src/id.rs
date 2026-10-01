@@ -88,6 +88,15 @@ impl<T> Arena<T> {
         self.items.reserve(additional);
     }
 
+    /// Drops everything at or after `len`.
+    ///
+    /// This is intended for builders that checkpoint related arenas and roll
+    /// them back before publishing any ids. Truncating below an id stored
+    /// elsewhere invalidates that id.
+    pub fn truncate(&mut self, len: usize) {
+        self.items.truncate(len);
+    }
+
     pub fn get(&self, id: Id<T>) -> Option<&T> {
         self.items.get(id.index())
     }
