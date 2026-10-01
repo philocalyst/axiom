@@ -804,6 +804,25 @@ pub struct Event {
     pub loc: Loc,
 }
 
+/// A dated end of a promise, place or asset. The resolved target is retained
+/// with source metadata so the engine can schedule asset disposal without
+/// inventing a monetary flow, and clients can explain the written event.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct EndEvent {
+    pub day: Day,
+    pub target: EndTarget,
+    pub codes: Run<Sym>,
+    pub description: Option<Text>,
+    pub loc: Loc,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EndTarget {
+    Contract(Id<Contract>),
+    Place(Id<Place>),
+    Asset(Id<Asset>),
+}
+
 /// `every month on 1 checking -> landlord 2_400 USD until 2027-06`, or a named
 /// one, `plan paycheck every 2w …`, which the journal can also instantiate.
 pub struct Plan {

@@ -14,7 +14,7 @@ use axiom_core::{
 };
 
 use crate::journal::{
-    Assert, Detail, Event, Filed, Flow, FlowView, JournalProgram, Measure, Plan, Prices,
+    Assert, Detail, EndEvent, Event, Filed, Flow, FlowView, JournalProgram, Measure, Plan, Prices,
     Purposed, Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive,
 };
 use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
@@ -92,6 +92,9 @@ pub struct Book<'s> {
     pub assertion_programs: Arena<TemplateProgram>,
     /// Sorted by day, then declaration order.
     pub events: Vec<Event>,
+    /// Sorted by day, then source order. Includes promise/place ends and asset
+    /// disposals; assets are consumed by the engine without a synthetic flow.
+    pub endings: Vec<EndEvent>,
     pub prices: Prices,
     /// Sorted by day, then declaration order.
     pub splits: Vec<Split>,

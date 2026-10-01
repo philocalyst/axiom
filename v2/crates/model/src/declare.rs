@@ -1486,6 +1486,7 @@ pub(crate) fn declare<'a, 's>(
         touching: Groups::default(),
         asserts: Vec::new(),
         events: Vec::new(),
+        endings: Vec::new(),
         prices: Default::default(),
         splits: Vec::new(),
         measures: Arena::new(),
