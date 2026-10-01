@@ -1813,11 +1813,16 @@ fn contracts_cover_matching_fallback_flows_by_interval_and_typed_identity() {
             start,
             &[template.clone()],
         );
-        let mut timeline = Timeline::new(terms);
+        let mut timeline = Timeline::new(terms.clone());
+        let mut changed_identity = terms;
+        let mut other_movement = template.clone();
+        other_movement.to = axiom_core::Id::new(99);
+        changed_identity.template = vec![other_movement.clone()].into();
+        timeline.paint(Days::new(day(3, 1), day(3, 9)).unwrap(), changed_identity);
         let mut waiver = timeline.at(day(3, 1)).clone();
         waiver.state = TermsState::Waived;
         waiver.template = Box::default();
-        timeline.paint(Days::new(day(3, 1), day(3, 31)).unwrap(), waiver);
+        timeline.paint(Days::new(day(3, 10), day(3, 31)).unwrap(), waiver);
         let rent = contract(Days::new(start, end).unwrap(), timeline);
 
         assert_eq!(rent.covers(&template, day(2, 10)), ContractCoverage::None, "before it starts");
@@ -1828,8 +1833,13 @@ fn contracts_cover_matching_fallback_flows_by_interval_and_typed_identity() {
         );
         assert_eq!(
             rent.covers(&template, day(3, 15)),
+            ContractCoverage::None,
+            "the empty waiver does not inherit an older, no-longer-current movement"
+        );
+        assert_eq!(
+            rent.covers(&other_movement, day(3, 15)),
             ContractCoverage::Waived,
-            "an empty waiver inherits the matching prior template"
+            "an empty waiver inherits the nearest active movement"
         );
         assert_eq!(rent.covers(&template, day(5, 1)), ContractCoverage::None, "after it ends");
 

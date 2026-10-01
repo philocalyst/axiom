@@ -738,8 +738,7 @@ impl Contract {
             .terms
             .within(self.days)
             .filter(|(_, candidate)| !candidate.is_waived())
-            .filter(|(_, candidate)| candidate.template.iter().any(|flow| same_flow_kind(template, flow)))
-            .map(|(stretch, _)| {
+            .map(|(stretch, terms)| {
                 let distance = if stretch.last() < day {
                     i64::from(day.0) - i64::from(stretch.last().0)
                 } else if stretch.first() > day {
@@ -747,10 +746,12 @@ impl Contract {
                 } else {
                     0
                 };
-                (distance, u8::from(stretch.first() > day))
+                (distance, u8::from(stretch.first() > day), terms)
             })
-            .min();
-        if nearest.is_some() {
+            .min_by_key(|(distance, prefers_future, _)| (*distance, *prefers_future));
+        if nearest.is_some_and(|(_, _, terms)| {
+            terms.template.iter().any(|candidate| same_flow_kind(template, candidate))
+        }) {
             ContractCoverage::Waived
         } else {
             ContractCoverage::None
