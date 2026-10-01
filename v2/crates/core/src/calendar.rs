@@ -430,16 +430,44 @@ pub enum On {
 
 impl On {
     /// The day this asks for, in the month, year or week `base` is in.
-    fn land(self, base: Day) -> Day {
+    fn land(self, base: Day) -> Option<Day> {
         let (year, month, _) = base.ymd();
-        let clamped = |month: u32, day: u32| Day::from_ymd(year, month, day.min(days_in_month(year, month)));
+        let clamped = |month: u32, day: u32| checked_day(year, month, day.min(days_in_month(year, month)));
         match self {
-            On::MonthDay(day) => clamped(month, u32::from(day)).unwrap_or(base),
-            On::Last => base.month_end(),
-            On::YearDay { month, day } => clamped(u32::from(month).clamp(1, 12), u32::from(day)).unwrap_or(base),
-            On::Weekday(weekday) => base.add_days(((u32::from(weekday) + 7 - base.weekday()) % 7) as i32),
+            On::MonthDay(day) => clamped(month, u32::from(day)),
+            On::Last => checked_day(year, month, days_in_month(year, month)),
+            On::YearDay { month, day } => clamped(u32::from(month).clamp(1, 12), u32::from(day)),
+            On::Weekday(weekday) => i32::try_from(i64::from(base.0) + i64::from((u32::from(weekday) + 7 - base.weekday()) % 7))
+                .ok()
+                .map(Day),
         }
     }
+}
+
+/// Converts a civil date without the user-facing year bound on `Day::from_ymd`.
+fn checked_day(year: i32, month: u32, day: u32) -> Option<Day> {
+    if !(1..=12).contains(&month) || !(1..=days_in_month(year, month)).contains(&day) {
+        return None;
+    }
+    let mut year = i64::from(year);
+    let month = i64::from(month);
+    year -= i64::from(month <= 2);
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month_from_march = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_from_march + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let ordinal = era * 146_097 + day_of_era - 719_468;
+    i32::try_from(ordinal).ok().map(Day)
+}
+
+fn checked_add(day: Day, months: i64, days: i64) -> Option<Day> {
+    let (year, month, day_of_month) = day.ymd();
+    let month_index = i64::from(year).checked_mul(12)?.checked_add(i64::from(month) - 1)?.checked_add(months)?;
+    let year = i32::try_from(month_index.div_euclid(12)).ok()?;
+    let month = u32::try_from(month_index.rem_euclid(12) + 1).ok()?;
+    let landed = checked_day(year, month, day_of_month.min(days_in_month(year, month)))?;
+    i32::try_from(i64::from(landed.0).checked_add(days)?).ok().map(Day)
 }
 
 /// The days a schedule falls due in `within`, in order: every `every` from
@@ -455,20 +483,38 @@ pub fn due<'a>(every: Cadence, on: &'a [On], anchor: Day, within: Days) -> impl 
         Cadence::Every(span) => span,
         Cadence::TwiceMonthly => Span::months(1),
     };
-    // A step that goes nowhere would never end.
-    let advances = step > Span::default();
+    // Cadences are positive spans. Reject malformed direct API values too.
+    let advances = step.months >= 0 && step.days >= 0 && step > Span::default();
+    let landing = |on: &On, backward: bool| match (on, backward) {
+        (On::YearDay { .. }, _) => 365,
+        (On::MonthDay(_), _) => 30,
+        (On::Weekday(_), false) => 6,
+        (On::Weekday(_) | On::Last, true) | (On::Last, false) => 0,
+    };
+    let forward_landing = on.iter().map(|on| landing(on, false)).max().unwrap_or(0);
+    let backward_landing = on.iter().map(|on| landing(on, true)).max().unwrap_or(0);
+    let distance = (i64::from(anchor.max(within.first()).0) - i64::from(anchor.0) - forward_landing).max(0);
+    let max_step_days = (i64::from(step.months) * 31 + i64::from(step.days)).max(1);
+    let first_step = (distance / max_step_days).saturating_sub(1);
+    let base_limit = (i64::from(within.last().0) + backward_landing).min(i64::from(i32::MAX));
     let landed = move |base: Day| {
-        let mut days: Vec<Day> = if on.is_empty() { vec![base] } else { on.iter().map(|on| on.land(base)).collect() };
+        let mut days: Vec<Day> = if on.is_empty() { vec![base] } else { on.iter().filter_map(|on| on.land(base)).collect() };
         days.sort_unstable();
         days.dedup();
         days
     };
-    (0..)
+    std::iter::successors(Some(first_step), |&n| n.checked_add(1))
         .take_while(move |_| advances)
-        .map(move |n| anchor.add(Span { months: step.months * n, days: step.days * n }))
+        .map_while(move |n| {
+            checked_add(
+                anchor,
+                i64::from(step.months).checked_mul(n)?,
+                i64::from(step.days).checked_mul(n)?,
+            )
+        })
+        .take_while(move |day| i64::from(day.0) <= base_limit)
         .flat_map(landed)
-        .skip_while(move |&day| day < anchor.max(within.first()))
-        .take_while(move |&day| day <= within.last())
+        .filter(move |&day| day >= anchor && within.contains(day))
 }
 
 #[cfg(test)]
@@ -723,5 +769,42 @@ mod tests {
     fn a_schedule_that_goes_nowhere_is_never_due() {
         let always = Days::ALWAYS;
         assert_eq!(due(Cadence::Every(Span::default()), &[], day(2026, 1, 1), always).next(), None);
+    }
+
+    #[test]
+    fn schedules_fast_forward_from_day_min_without_changing_their_phase() {
+        let february = days(day(2026, 2, 1), day(2026, 2, 28));
+        assert_eq!(
+            due_days(Cadence::Every(Span::days(1)), &[], Day::MIN, february),
+            (1..=28).map(|d| format!("2026-02-{d:02}")).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            due_days(Cadence::Every(Span::months(1)), &[On::MonthDay(1)], Day::MIN, february),
+            ["2026-02-01"]
+        );
+        assert_eq!(
+            due_days(
+                Cadence::Every(Span::months(1)),
+                &[On::MonthDay(1)],
+                Day::MIN,
+                days(day(2026, 1, 31), day(2026, 2, 6))
+            ),
+            ["2026-02-01"]
+        );
+        assert_eq!(
+            due_days(Cadence::Every(Span::months(12)), &[On::YearDay { month: 2, day: 29 }], Day::MIN, february),
+            ["2026-02-28"]
+        );
+    }
+
+    #[test]
+    fn schedules_stop_at_day_max_without_overflowing_landing_dates() {
+        let first = Day(i32::MAX - 2);
+        let within = days(first, Day::MAX);
+        assert_eq!(
+            due(Cadence::Every(Span::days(1)), &[], first, within).collect::<Vec<_>>(),
+            [first, Day(i32::MAX - 1), Day::MAX]
+        );
+        assert!(due(Cadence::Every(Span::months(1)), &[On::Last], Day::MAX, within).all(|day| within.contains(day)));
     }
 }
