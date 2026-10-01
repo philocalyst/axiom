@@ -217,3 +217,37 @@ monitoring, shared occurrence/journal expression evaluation, part-aware assets,
 native standard systems and corpus migration still need execution evidence.
 The source count at `8dc8245` was 48,420 non-test lines; the historical 24,000-line
 target is not met. Legacy root source and `v2-previous/` remain until promotion.
+
+## Dependency verification, 2026-10-01 12:20 UTC
+
+`bcdf414` integrates dated carrying-budget execution, claim/opening-claim and
+asset-basis lowering, source-located ending events, the minimal surveyed tab
+lookup, native standard/US systems, the paired sync staging buffer and asset
+state in checkpoint digests. `8b35933` disambiguates example account/party and
+contract/purpose names without changing amounts.
+
+The coordinator's actual model/system run passed 56 model unit tests, seven
+native-law tests, fourteen native-record tests and the embedded-system parser
+test (78 total). The actual sync library passed 80 release tests with four
+timing tests ignored, including separate run-source output and registered
+diagnostic provenance. Package-level sync verification remains blocked by 38
+compile errors in the seven legacy end-to-end fixtures. Seventeen meaningful
+world behavior tests removed by an interim fixture migration are being ported
+back; the interim one-test replacement is not accepted as coverage closure.
+
+The workspace library check now reaches the report and finds seven consumer
+errors in asset-part and BudgetTerms rendering. The report worker has a matching
+consumer correction under verification. Engine package tests currently stop at
+one missing `Book.endings` fixture initializer; the preceding full engine run
+had 123 passing tests, 26 failures and one ignored test. Those 26 source fixtures
+still need native ports with their financial assertions retained.
+
+The independent model inventory on `bcdf414` reports fourteen errors for
+02-household and 44 for Sam. This is a real model build with the shipped systems;
+it performs no financial fold. The example name corrections reduce those counts
+on the worker's subsequent inventory to thirteen and 36. Remaining model errors
+include contract occurrence/change statements, the measured-share area
+denominator, literal `@` price forms and commodity payout endpoints. The source
+count before name-only corrections is 49,494 non-test lines. No root promotion,
+full corpus pass, whole-process performance comparison or checklist closure is
+claimed by this checkpoint.
