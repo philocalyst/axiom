@@ -170,8 +170,6 @@ pub struct SourceFile {
     pub text: Cow<'static, str>,
     /// Shipped with Axiom rather than found in the project.
     pub embedded: bool,
-    /// Added for a reader such as CSV; it is not a source of Axiom syntax.
-    auxiliary: bool,
     /// The byte at which each line starts, found when something first points
     /// into the file.
     starts: OnceLock<Vec<usize>>,
@@ -189,7 +187,6 @@ impl SourceFile {
             path,
             text,
             embedded,
-            auxiliary: false,
             starts: OnceLock::new(),
         }
     }
@@ -250,14 +247,20 @@ impl SourceFile {
 /// borrow from here, so it outlives them all.
 #[derive(Default)]
 pub struct Sources {
-    files: Vec<SourceFile>,
+    /// Axiom inputs borrowed by the syntax tree and model.
+    pub(super) files: Vec<SourceFile>,
+    /// Data read by sync/check, with IDs after all syntax sources.
+    pub(super) auxiliary: Vec<SourceFile>,
 }
 
 impl Sources {
     /// One text that is not on disk: what a `sync` command printed.
     pub fn single(path: String, text: String) -> Sources {
         let file = SourceFile::new(FileId(0), Cow::Owned(path), Cow::Owned(text), false);
-        Sources { files: vec![file] }
+        Sources {
+            files: vec![file],
+            auxiliary: Vec::new(),
+        }
     }
 
     /// The project's files first, then each embedded system the project does
@@ -290,7 +293,10 @@ impl Sources {
                 SourceFile::new(FileId(index as u16), path, text, embedded)
             })
             .collect();
-        Ok(Sources { files })
+        Ok(Sources {
+            files,
+            auxiliary: Vec::new(),
+        })
     }
 
     /// Texts that are not on disk, as project files in the order given, and
@@ -309,22 +315,35 @@ impl Sources {
 
     /// The source with this id, if there is one.
     pub fn get(&self, id: FileId) -> Option<&SourceFile> {
-        self.files.get(usize::from(id.0))
+        let index = usize::from(id.0);
+        self.files
+            .get(index)
+            .or_else(|| self.auxiliary.get(index.checked_sub(self.files.len())?))
     }
 
     /// Adds a data file so diagnostics from a declared reader can point into
     /// it. Its id follows every parsed Axiom source, and it is never parsed as
     /// Axiom or selected by commands that write project sources.
     pub fn append_auxiliary(&mut self, path: String, text: String) -> Result<FileId, Diagnostic> {
-        let Ok(index) = u16::try_from(self.files.len()) else {
+        Self::append_auxiliary_to(&mut self.auxiliary, self.files.len(), path, text)
+    }
+
+    /// Appends reader text separately from syntax files, so callers can add
+    /// it while a `Book` borrows those syntax files.
+    pub(super) fn append_auxiliary_to(
+        auxiliary: &mut Vec<SourceFile>,
+        first_id: usize,
+        path: String,
+        text: String,
+    ) -> Result<FileId, Diagnostic> {
+        let Ok(index) = u16::try_from(first_id + auxiliary.len()) else {
             return Err(failure(
                 "too-many-files",
                 "too many source files: at most 65,536 are supported".to_string(),
             ));
         };
         let mut file = SourceFile::new(FileId(index), Cow::Owned(path), Cow::Owned(text), false);
-        file.auxiliary = true;
-        self.files.push(file);
+        auxiliary.push(file);
         Ok(FileId(index))
     }
 
@@ -334,7 +353,7 @@ impl Sources {
     pub fn project_paths(&self) -> impl Iterator<Item = &str> {
         self.files
             .iter()
-            .filter(|file| !file.embedded && !file.auxiliary)
+            .filter(|file| !file.embedded)
             .map(|file| &*file.path)
     }
 
@@ -342,12 +361,18 @@ impl Sources {
     /// reader data. Model locations store only the numeric file id, so clients
     /// use this sequence to resolve a declaration or diagnostic to its path.
     pub fn all_paths(&self) -> impl Iterator<Item = &str> {
-        self.files.iter().map(|file| &*file.path)
+        self.files
+            .iter()
+            .chain(&self.auxiliary)
+            .map(|file| &*file.path)
     }
 
     /// The source at `path`, as `axiom why` or a diagnostic shows it.
     pub fn find(&self, path: &str) -> Option<&SourceFile> {
-        self.files.iter().find(|file| file.path == path)
+        self.files
+            .iter()
+            .chain(&self.auxiliary)
+            .find(|file| file.path == path)
     }
 
     /// `journal/2026/01.ax:14`: what `axiom why` accepts back.
@@ -379,12 +404,17 @@ impl Sources {
 
     /// Parses every file, in parallel, into what the model builds from.
     pub fn parse(&self) -> (Vec<Source<'_>>, Vec<Diagnostic>) {
-        let syntax_files: Vec<_> = self.files.iter().filter(|file| !file.auxiliary).collect();
-        let parsed = par::map_each(&syntax_files, |file| {
+        Self::parse_files(&self.files)
+    }
+
+    /// Parses only syntax files, so returned model borrows do not block writes
+    /// to the disjoint reader-data collection.
+    pub(super) fn parse_files(files: &[SourceFile]) -> (Vec<Source<'_>>, Vec<Diagnostic>) {
+        let parsed = par::map_each(files, |file| {
             axiom_syntax::parse(file.id, &file.text, axiom_syntax::Folder::of(&file.path))
         });
         let mut diagnostics = Vec::new();
-        let sources = syntax_files
+        let sources = files
             .iter()
             .zip(parsed)
             .map(|(file, (ast, found))| {
@@ -596,24 +626,23 @@ mod tests {
     #[test]
     fn auxiliary_data_keeps_file_ids_without_becoming_a_project_source() {
         let mut sources = Sources::in_memory(&[("axiom.ax", "")], &[]);
-        let csv = sources
-            .append_auxiliary(
-                "imports/bank.csv".to_string(),
-                "date,amount\nbad".to_string(),
-            )
-            .unwrap();
+        let (parsed, diagnostics) = Sources::parse_files(&sources.files);
+        let csv = Sources::append_auxiliary_to(
+            &mut sources.auxiliary,
+            sources.files.len(),
+            "imports/bank.csv".to_string(),
+            "date,amount\nbad".to_string(),
+        )
+        .unwrap();
 
+        assert_eq!(parsed.len(), 1);
+        assert!(diagnostics.is_empty());
         assert_eq!(csv, FileId(1));
         assert_eq!(sources.project_paths().collect::<Vec<_>>(), ["axiom.ax"]);
         assert_eq!(
             sources.all_paths().collect::<Vec<_>>(),
             ["axiom.ax", "imports/bank.csv"]
         );
-
-        // Reader text is diagnostic context, not Axiom syntax.
-        let (parsed, diagnostics) = sources.parse();
-        assert_eq!(parsed.len(), 1);
-        assert!(diagnostics.is_empty());
 
         let location = sources.locate("imports/bank.csv", 2).unwrap();
         assert_eq!(location.file, csv);
@@ -622,5 +651,11 @@ mod tests {
             (position.path, position.line, position.column),
             ("imports/bank.csv", 2, 1)
         );
+        drop(parsed);
+
+        // The ordinary parser always excludes reader data too.
+        let (parsed, diagnostics) = sources.parse();
+        assert_eq!(parsed.len(), 1);
+        assert!(diagnostics.is_empty());
     }
 }
