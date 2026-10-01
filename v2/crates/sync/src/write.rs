@@ -848,7 +848,8 @@ mod tests {
             })
             .collect();
         let started = std::time::Instant::now();
-        let out = apply(&text, "journal.ax", &inserts.iter().collect::<Vec<_>>());
+        let out = apply(&text, "journal.ax", &inserts.iter().collect::<Vec<_>>())
+            .expect("the valid benchmark additions parse as Axiom");
         eprintln!("100,000 lines into 200,000 in {:?}", started.elapsed());
         assert_eq!(out.lines().count(), 300_000);
         assert!(

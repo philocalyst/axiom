@@ -6,7 +6,7 @@ use std::borrow::Cow;
 use memchr::{memchr, memchr2};
 
 use crate::Span;
-use crate::format::Cell;
+use crate::cell::Cell;
 
 /// A row the reader lost the thread of, and where.
 pub(crate) struct Broken {

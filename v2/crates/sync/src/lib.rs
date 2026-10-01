@@ -38,6 +38,7 @@
 //! | `sync NAME`, its `read` or `run`, its `format`, `into` | [`Source`], [`Feed`], [`Format`], [`Sink`] |
 
 mod amount;
+mod cell;
 mod command;
 mod csv;
 mod date;

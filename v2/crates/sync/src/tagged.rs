@@ -9,7 +9,7 @@ use memchr::memchr;
 
 use crate::Span;
 use crate::csv::Broken;
-use crate::format::{ABSENT, Cell};
+use crate::cell::{ABSENT, Cell};
 
 /// A tag, and the text after it up to the next tag.
 struct Tag<'t> {

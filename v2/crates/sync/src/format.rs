@@ -10,60 +10,13 @@ use axiom_model::{Book, Purpose};
 use axiom_model::sync::{Column, Fetch, Field, Format, Rule, Shape, Source, Spec};
 
 use crate::amount::amount;
+use crate::cell::{ABSENT, Cell, MemoJoin};
 use crate::csv::Reader as CsvReader;
 use crate::date::iso_day;
 use crate::{Facts, Record, Span, Unit, tagged};
 
 const MAX_PROBLEMS: usize = 8;
 const FIELDS: usize = 17;
-pub(crate) const ABSENT: Span = Span {
-    start: usize::MAX,
-    end: usize::MAX,
-};
-
-pub(crate) struct Cell<'t> {
-    pub text: Cow<'t, str>,
-    pub span: Span,
-}
-
-#[derive(Default)]
-struct MemoJoin<'t> {
-    first: Option<Cow<'t, str>>,
-    joined: Option<String>,
-    span: Option<Span>,
-}
-
-impl<'t> MemoJoin<'t> {
-    fn push(&mut self, cell: &Cell<'t>) {
-        if cell.text.is_empty() {
-            return;
-        }
-        if let Some(joined) = &mut self.joined {
-            joined.push(' ');
-            joined.push_str(&cell.text);
-        } else if let Some(first) = self.first.take() {
-            let mut joined = match first {
-                Cow::Borrowed(text) => text.to_owned(),
-                Cow::Owned(text) => text,
-            };
-            joined.push(' ');
-            joined.push_str(&cell.text);
-            self.joined = Some(joined);
-        } else {
-            self.first = Some(cell.text.clone());
-            self.span = Some(cell.span);
-        }
-    }
-
-    fn finish(self) -> Option<(Cow<'t, str>, Span)> {
-        match (self.first, self.joined) {
-            (None, _) => None,
-            (Some(first), None) => Some((first, self.span.unwrap_or(ABSENT))),
-            (Some(_), Some(joined)) => Some((Cow::Owned(joined), self.span.unwrap_or(ABSENT))),
-        }
-    }
-}
-
 #[derive(Default)]
 struct Harvest<'t> {
     records: Vec<Record<'t>>,
