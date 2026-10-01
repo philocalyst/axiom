@@ -323,7 +323,8 @@ fn render_sync(
     terminals: Terminals,
     prior: &[Diagnostic],
 ) -> Outcome {
-    let write_problems = if dry {
+    let blocked_by_book_errors = prior.iter().any(Diagnostic::is_error);
+    let write_problems = if dry || blocked_by_book_errors {
         Vec::new()
     } else {
         apply_changes(root, &planned.changes)
@@ -380,6 +381,8 @@ fn render_sync(
         for change in &planned.changes {
             answer.push_str(&change_diff(change));
         }
+    } else if blocked_by_book_errors && !planned.changes.is_empty() {
+        answer.push_str("sync changes were not applied because the project has errors\n");
     } else {
         if write_problems.is_empty() {
             for change in &planned.changes {
@@ -443,6 +446,27 @@ fn apply_changes(root: &Path, changes: &[Change]) -> Vec<Diagnostic> {
             ));
             continue;
         };
+        // Check the nearest existing ancestor before creating missing folders.
+        // Otherwise `link/new-folder/file.ax` could create `new-folder` outside
+        // the project before the final-parent containment check noticed `link`.
+        let existing = match canonical_existing_ancestor(parent) {
+            Ok(existing) if existing.starts_with(&canonical_root) => existing,
+            Ok(_) => {
+                problems.push(Diagnostic::error(
+                    "sync-path-outside-project",
+                    format!("`{}` leaves the project through a symlink", change.path),
+                ));
+                continue;
+            }
+            Err(error) => {
+                problems.push(Diagnostic::error(
+                    "sync-write",
+                    format!("cannot resolve the folder for `{}`: {error}", change.path),
+                ));
+                continue;
+            }
+        };
+        let _ = existing;
         if let Err(error) = fs::create_dir_all(parent) {
             problems.push(Diagnostic::error(
                 "sync-write",
@@ -517,6 +541,20 @@ fn apply_changes(root: &Path, changes: &[Change]) -> Vec<Diagnostic> {
         }
     }
     problems
+}
+
+/// Resolves the closest existing ancestor, following any symlink in its path.
+fn canonical_existing_ancestor(path: &Path) -> std::io::Result<std::path::PathBuf> {
+    let mut ancestor = path;
+    loop {
+        match fs::symlink_metadata(ancestor) {
+            Ok(_) => return fs::canonicalize(ancestor),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                ancestor = ancestor.parent().ok_or(error)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// A compact unified hunk: the common prefix and suffix stay context, and the
@@ -847,7 +885,7 @@ mod tests {
             PlanOutcome {
                 sources: Vec::new(),
                 changes: vec![Change {
-                    path: "link/prices.ax".to_owned(),
+                    path: "link/new-folder/prices.ax".to_owned(),
                     before: None,
                     after: "new\n".to_owned(),
                 }],
@@ -866,6 +904,48 @@ mod tests {
         );
 
         assert!(outcome.failed);
-        assert!(!outside.path().join("prices.ax").exists());
+        assert!(!outside.path().join("new-folder").exists());
+    }
+
+    #[test]
+    fn sync_does_not_apply_changes_when_the_loaded_book_has_errors() {
+        let dir = TempDir::new("sync-invalid-book");
+        dir.write("axiom.ax", "base USD\n");
+        dir.write("prices.ax", "old\n");
+        let project = Project::find(dir.path()).unwrap();
+        let mut sources = project.load().unwrap();
+        let invalid_book = Diagnostic::error("invalid-book", "the project has a model error");
+        let outcome = render_sync(
+            PlanOutcome {
+                sources: Vec::new(),
+                changes: vec![Change {
+                    path: "prices.ax".to_owned(),
+                    before: Some("old\n".to_owned()),
+                    after: "new\n".to_owned(),
+                }],
+                problems: Vec::new(),
+                incomplete: Vec::new(),
+                generated: Vec::new(),
+            },
+            &mut sources,
+            &project.root,
+            false,
+            Terminals {
+                out: crate::style::Terminal::plain(80),
+                err: crate::style::Terminal::plain(80),
+            },
+            &[invalid_book],
+        );
+
+        assert!(outcome.failed);
+        assert!(
+            outcome
+                .answer
+                .contains("not applied because the project has errors")
+        );
+        assert_eq!(
+            fs::read_to_string(dir.path().join("prices.ax")).unwrap(),
+            "old\n"
+        );
     }
 }
