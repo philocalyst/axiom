@@ -1,12 +1,12 @@
-// What has not happened yet, for the forecast.
-//
-// Estimated tax for 2026 is paid from the vault ahead of the 1040-ES dates:
-// 3_000 USD is a quarter of last year's total federal tax, rounded up. The last
-// installment is planned for December, inside the year it pays for; a plan may
-// say `for 2026` as well, and each occurrence then means its own year. The
-// SEP-IRA top-ups need no plan: they have come quarterly, and the forecast
-// learns that from the journal.
+// Estimated 2026 installments continue the written safe-harbor schedule.
+contract estimate-q2 with irs
+  3_000 USD yearly on 06-14 from tax-vault #federal-tax
+  from 2026-06-14
 
-every year on 06-14 from 2026-06-14 tax-vault -> federal 3_000 USD / irs
-every year on 09-14 from 2026-09-14 tax-vault -> federal 3_000 USD / irs
-every year on 12-30 from 2026-12-30 tax-vault -> federal 3_000 USD / irs
+contract estimate-q3 with irs
+  3_000 USD yearly on 09-14 from tax-vault #federal-tax
+  from 2026-09-14
+
+contract estimate-q4 with irs
+  3_000 USD yearly on 12-30 from tax-vault #federal-tax
+  from 2026-12-30

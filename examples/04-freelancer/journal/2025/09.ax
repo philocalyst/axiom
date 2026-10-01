@@ -1,38 +1,40 @@
-2025-09-01 business-card -> software 7.20 USD / google
-2025-09-01 personal-checking -> landlord 1_750 USD
-2025-09-01 personal-checking -> bluecross 412 USD
-2025-09-02 design -> brightwave 3_200 USD #inv-2025-b09 due 30d
-2025-09-03 business-card -> software 10 USD / notion
-2025-09-03 business-checking -> personal-checking 2_950 USD // owner's draw
-2025-09-05 personal-checking -> statefarm 22 USD
-2025-09-05 personal-checking -> groceries 101.47 USD / trader-joes
-2025-09-08 business-card -> software 59.99 USD / adobe
-2025-09-08 personal-checking -> dining 42.59 USD
-2025-09-10 personal-checking -> transport 50.40 USD
-2025-09-11 odometer -> mileage 48 MI / orbit-labs
-2025-09-12 personal-checking -> comcast 80 USD
-2025-09-12 personal-checking -> groceries 114.09 USD / safeway
-2025-09-14 business-card -> software 15 USD / figma
+2025-09-01 business-card -> google 7.20 USD #business-software
+2025-09-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2025-09-01 personal-checking -> bluecross 412 USD #health-premium
+2025-09-02 brightwave owes me due 30d ^inv-2025-b09
+  3_200 USD #design
+2025-09-03 business-card -> notion 10 USD #business-software
+2025-09-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2025-09-05 personal-checking -> statefarm 22 USD #home-office-cost
+2025-09-05 personal-checking -> trader-joes 101.47 USD #groceries
+2025-09-08 business-card -> adobe 59.99 USD #business-software
+2025-09-08 personal-checking -> restaurant 42.59 USD #dining
+2025-09-10 personal-checking -> transit-agency 50.40 USD #transport
+2025-09-11 car used 48 MI #business-mile for orbit-labs
+2025-09-12 personal-checking -> comcast 80 USD #home-office-cost
+2025-09-12 personal-checking -> safeway 114.09 USD #groceries
+2025-09-14 business-card -> figma 15 USD #business-software
 
 /// Third quarter.
-2025-09-15 tax-vault -> federal 2_400 USD / irs #q3-2025
-2025-09-16 brightwave -> business-checking 3_200 USD for #inv-2025-b08
+2025-09-15 tax-vault -> irs 2_400 USD #federal-tax ^q3-2025
+2025-09-16 brightwave 3_200 USD -> business-checking #design ^inv-2025-b08
 2025-09-16 business-checking -> tax-vault 640 USD for vault
-2025-09-16 personal-checking -> pge 60.20 USD
-2025-09-18 business-card -> printing 138.40 USD
-2025-09-18 personal-checking -> tmobile 64 USD
+2025-09-16 personal-checking -> pge 60.20 USD #home-office-cost
+2025-09-18 business-card -> printing 138.40 USD #business-printing
+2025-09-18 personal-checking -> tmobile 64 USD #business-phone
 
 /// The August statement, paid in full.
 2025-09-20 business-checking -> business-card 352.18 USD
-2025-09-20 personal-checking -> groceries 121.30 USD / safeway
+2025-09-20 personal-checking -> safeway 121.30 USD #groceries
 
 /// Pitch deck.
-2025-09-22 design -> orbit-labs 4_200 USD #inv-2025-o2 due 30d
-2025-09-22 business-card -> software 21 USD / freshbooks
-2025-09-22 personal-checking -> dining 53.37 USD
+2025-09-22 orbit-labs owes me due 30d ^inv-2025-o2
+  4_200 USD #design
+2025-09-22 business-card -> freshbooks 21 USD #business-software
+2025-09-22 personal-checking -> restaurant 53.37 USD #dining
 2025-09-26 business-checking -> sep 2_000 USD
-2025-09-27 personal-checking -> groceries 120.15 USD / trader-joes
-2025-09-30 interest -> tax-vault 21.95 USD for vault
+2025-09-27 personal-checking -> trader-joes 120.15 USD #groceries
+2025-09-30 interest-source -> tax-vault 21.95 USD #interest-income for vault
 2025-09-30 sep = 24_426.60 USD via market
 2025-09-30 business-card = 251.59 USD
 2025-09-30 business-checking = 6_060.73 USD

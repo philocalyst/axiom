@@ -1,240 +1,101 @@
-// Where the money is, who it comes from, and what each kind of place means for
-// tax. The laws that add self-employment tax are in tax.ax.
+// Native v4 vocabulary for the freelance design business. Accounts describe
+// custody; purposes classify recognized income and expenses.
 
-// ─── Kinds this project needs ───────────────────────────────────────────────
-
-/// A SEP-IRA: pre-tax money that comes out taxed as income. `us` deducts what is
-/// paid in from a bank account and counts what comes out; the kind says what
-/// arrives has no basis, and adds this account's own limit.
 kind sep-ira : tax-deferred
   basis zero
   deductible true
   liquidity 3d
-
-  /// Contributions from a bank account are what the return caps and deducts.
-  /// Growth reaches the account through `market` and is not a contribution.
-  ///
-  /// To fix: money that reaches the account from anywhere else (a gift, the market) is not a contribution;
-  /// deposit from a bank account.
   law count-contributions
     on in
     when from is asset
     count amount as sep-contributions
-
-  /// A SEP-IRA takes at most 20% of net earnings after half of the
-  /// self-employment tax, and 70,000 USD (IRC §404(h), §415(c)). The limit is
-  /// known when the return closes, and a contribution made in January for the
-  /// year before, `for` that year, counts.
-  ///
-  /// To fix: take the excess back out of the account before the return's due date,
-  /// or it is taxed twice.
   law contribution-limit
     each year closing 04-15
-    let cap = min((tally(net-profit) - tally(se-deduction)) * 20%, sep-limit[year])
-    require tally(sep-contributions) <= cap "SEP-IRA contributions over the limit for the year"
+    let cap = min((value(tally(net-profit), USD) - value(tally(se-deduction), USD)) * 20%, sep-limit[year])
+    require value(tally(sep-contributions), USD) <= cap "SEP-IRA contributions over the limit for the year"
 
-// A mile is a unit like any other. The deduction is what a mile is worth on the
-// day, so the rate goes in the price file.
-commodity MI
-  name "mile"
-  precision 0
-
-/// The tax vault. Money set aside `for vault` is tied to it: it is not available
-/// to spend, and it comes out only to pay tax.
-entity vault : envelope
-
-
-// ─── Banks, card, retirement ────────────────────────────────────────────────
-
-/// Business checking. Client money lands here.
-account assets/bank/business-checking : bank
-
-/// Personal checking, funded by an owner's draw each month.
-account assets/bank/personal-checking : bank
-
-/// A fifth of every payment goes in when it arrives, `for vault`, and the
-/// estimated payments come out.
-account assets/bank/tax-vault : bank
-
-/// SEP-IRA at the custodian.
-account assets/retirement/sep : sep-ira
-
-/// The business card, paid in full every month.
-account liabilities/business-card : credit-card
-
-/// What clients owe. An invoice is a flow into this place with `due 30d`: one
-/// claim, kept apart from the others, that a payment `for` its code settles in
-/// whole or in part. Whose it is comes from the client entity written where the
-/// place would be.
-account assets/receivable : receivable
-
-  /// Cash method (IRC §446): an invoice is income when the money arrives, not
-  /// when it is sent. Everything that leaves the receivable place counts,
-  /// including what a processor kept as its fee: the fee is a deductible
-  /// expense of its own. A write-off is not a receipt.
-  ///
-  /// To fix: if money left a claim for another reason (a refund, a credit note),
-  /// send it to a place that is not the bank.
-  law count-receipts
-    on out
-    when not to is bad-debt
+purpose design : income
+  law cash-receipts
+    on flow
     count amount as gross-receipts
 
-
-// ─── Income and equity ──────────────────────────────────────────────────────
-
-/// Fees for design work, recognized when invoiced and taxed when paid.
-account income/design
-account income/interest : interest
-account income/rewards
-
-/// Miles driven for work. Only the deduction matters, so the log is a source of
-/// miles like an income place is a source of dollars.
-account equity/odometer
-
-
-// ─── Business expenses ──────────────────────────────────────────────────────
-
-/// Everything under here is an ordinary business expense (IRC §162), deducted in
-/// the year it is recognized. One law covers the subtree.
-///
-/// To fix: an expense that is not for the business belongs outside this subtree.
-account expenses/business
-  /// What arrives under this account is a business expense, counted when it is recognized.
-  ///
-  /// To fix: an expense that is not for the business belongs outside this subtree.
-  law deductible
-    on in
+purpose business-expense : spending
+  law deductible-expense
+    on flow
     count amount as business-expenses
-
-/// Subscriptions are budgeted: 113.19 USD a month is the standing total. An annual
-/// plan is spread over the year it covers, so the budget sees a twelfth of it a
-/// month.
-account expenses/business/software
+purpose business-software : business-expense
   budget 130 USD monthly
-account expenses/business/insurance
-account expenses/business/equipment
-account expenses/business/education
-account expenses/business/travel
-account expenses/business/printing
-account expenses/business/fonts
-account expenses/business/hosting
-
-/// Card annual fee, Stripe's cut, and wire fees.
-account expenses/business/fees
-
-/// An invoice that was never paid. Under the cash method its income was never
-/// counted, so there is nothing to deduct: this is outside expenses/business.
-account expenses/bad-debt
-
-/// Client meals: half deductible.
-account expenses/meals
-  /// Only half of a client meal is deductible (IRC §274(n)).
-  ///
-  /// To fix: a meal that is not with a client is not a business expense: book it under food.
-  law half-deductible
-    on in
-    count amount * 50% as business-expenses
-
-/// Business miles at the standard rate: the deduction is what the miles are
-/// worth in dollars on the day.
-account expenses/mileage
-  /// Miles are deducted at the standard rate: what they are worth in dollars on the day (IRC §162).
-  ///
-  /// To fix: the miles need a price for the day: add a `MI` price line to the price file.
+purpose business-insurance : business-expense
+purpose business-equipment : business-expense
+purpose business-education : business-expense
+purpose business-travel : business-expense
+purpose business-printing : business-expense
+purpose business-fonts : business-expense
+purpose business-hosting : business-expense
+purpose business-fees : business-expense
+purpose business-mile : spending
   law standard-mileage
-    on in
+    on flow
     count value(amount, USD) as business-expenses
-
-/// The share of the home used for work (150 of 1,000 sq ft) applies to every
-/// cost of the home.
-account expenses/home
-  /// The share of the home used for work applies to every cost of the home (IRC §280A).
-  ///
-  /// To fix: the share is the `office-share` param of the year; change it in tax.ax.
+purpose business-meal : spending
+  law half-deductible
+    on flow
+    count amount * 50% as business-expenses
+purpose home-office-cost : spending
   law home-office
-    on in
+    on flow
     count amount * office-share[year] as business-expenses
-
-account expenses/home/rent
-account expenses/home/utilities
-account expenses/home/internet
-account expenses/home/insurance
-
-/// The phone is 60% business.
-account expenses/phone
-  /// The phone is 60% for the business, so only that share is deductible.
-  ///
-  /// To fix: change the share here if the business use changes.
+purpose business-phone : spending
   law phone-share
-    on in
+    on flow
     count amount * 60% as business-expenses
-
-/// Health insurance premiums: an adjustment to income (IRC §162(l)), not a
-/// business expense.
-account expenses/health-insurance
-  /// A self-employed person deducts health insurance premiums from income, not as a business expense (IRC §162(l)).
-  ///
-  /// To fix: premiums must be paid to this account to count.
+purpose health-premium : spending
   law self-employed-health
-    on in
+    on flow
     count amount as health-premiums
     count amount as adjustments
+purpose owner-draw : transfer
+purpose tax-estimate : tax-paid
+purpose reward : income
 
-/// Groceries and eating out.
-account expenses/food
-  budget 600 USD monthly
+entity vault : envelope
 
-account expenses/food/groceries
-account expenses/food/dining
-account expenses/transport
+account business-checking : deposit at chase
+account personal-checking : deposit at chase
+  owner me
+account tax-vault : deposit at chase
+account sep : sep-ira at fidelity
+account business-card : credit-card at chase
+account receivable : receivable
 
-/// Estimated tax payments. A place of kind `federal-tax` counts what arrives as
-/// tax paid for the year it says `for`.
-account expenses/taxes/federal : federal-tax
+asset car : vehicle
+  owner me
 
+entity chase : org
+entity fidelity : org
+entity brightwave, fernhill, orbit-labs, delta-rugs, northpeak : client
+entity adobe, figma, notion, google, freshbooks, dropbox : software
+entity hiscox, bluecross, statefarm : insurer
+entity apple, trader-joes, safeway : store
+entity ixdf, config, monotype, squarespace, sf-hotel : org
+entity alaska-air, lyft, stripe, card-issuer : merchant
+entity landlord : landlord
+entity pge, comcast : utility
+entity tmobile : phone-company
+kind interest-source : org
+  pays interest-income
+kind reward-source : org
+  pays reward
+entity interest-source : interest-source
+entity rewards : reward-source
+entity restaurant : merchant
+entity transit-agency : merchant
+entity printing : merchant
+entity education-vendor : merchant
+entity travel-vendor : merchant
+entity fees : merchant
+entity bad-debt : org
 
-// ─── Clients and vendors ────────────────────────────────────────────────────
-
-/// A client. An entity written where a place is expected stands for its `via`
-/// place and is the payee: `design -> brightwave` is an invoice and
-/// `brightwave -> business-checking` is the payment.
-entity brightwave, fernhill, orbit-labs, delta-rugs, northpeak : org
-  via assets/receivable
-
-entity adobe, figma, notion, google, freshbooks, dropbox : org
-  via expenses/business/software
-entity hiscox : org
-  via expenses/business/insurance
-entity apple : org
-  via expenses/business/equipment
-entity ixdf, config : org
-  via expenses/business/education
-entity monotype : org
-  via expenses/business/fonts
-entity squarespace : org
-  via expenses/business/hosting
-entity alaska-air, sf-hotel, lyft : org
-  via expenses/business/travel
-
-entity landlord : org
-  via expenses/home/rent
-entity pge : org
-  via expenses/home/utilities
-entity comcast : org
-  via expenses/home/internet
-entity statefarm : org
-  via expenses/home/insurance
-entity tmobile : org
-  via expenses/phone
-entity bluecross : org
-  via expenses/health-insurance
-entity trader-joes, safeway : org
-  via expenses/food/groceries
-
-
-// ─── Codes ──────────────────────────────────────────────────────────────────
-
-/// An invoice number marks the invoice, and links it to every payment against it.
-code inv-*
-  on receivable
+code inv-* on receivable
+code macbook-* on business-card
+code q*-* on tax-vault

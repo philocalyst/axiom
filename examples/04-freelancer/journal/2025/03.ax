@@ -1,42 +1,44 @@
-2025-03-01 business-card -> software 7.20 USD / google
+2025-03-01 business-card -> google 7.20 USD #business-software
 
 /// Card annual fee.
-2025-03-01 business-card -> fees 375 USD
-2025-03-01 personal-checking -> landlord 1_750 USD
-2025-03-01 personal-checking -> bluecross 412 USD
-2025-03-03 design -> brightwave 3_200 USD #inv-2025-b03 due 30d
+2025-03-01 business-card -> card-issuer 375 USD #business-fees
+2025-03-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2025-03-01 personal-checking -> bluecross 412 USD #health-premium
+2025-03-03 brightwave owes me due 30d ^inv-2025-b03
+  3_200 USD #design
 
 /// Brand guidelines, billed once and paid in two halves by wire: one invoice, two payments `for` it.
-2025-03-03 design -> orbit-labs 5_500 USD #inv-2025-o1 due 30d
-2025-03-03 business-card -> software 10 USD / notion
-2025-03-03 business-checking -> personal-checking 2_950 USD // owner's draw
-2025-03-05 business-card -> equipment 2_499 USD / apple #macbook-2025
-2025-03-05 personal-checking -> statefarm 22 USD
-2025-03-05 personal-checking -> groceries 65.35 USD / trader-joes
-2025-03-08 business-card -> software 59.99 USD / adobe
-2025-03-08 personal-checking -> dining 66.06 USD
-2025-03-10 personal-checking -> transport 36.02 USD
-2025-03-12 personal-checking -> comcast 80 USD
-2025-03-12 personal-checking -> groceries 61.64 USD / safeway
-2025-03-13 business-card -> meals 54.80 USD
-2025-03-13 odometer -> mileage 22 MI / fernhill
-2025-03-14 brightwave -> business-checking 3_200 USD for #inv-2025-b02
+2025-03-03 orbit-labs owes me due 30d ^inv-2025-o1
+  5_500 USD #design
+2025-03-03 business-card -> notion 10 USD #business-software
+2025-03-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2025-03-05 business-card -> apple 2_499 USD #business-equipment ^macbook-2025
+2025-03-05 personal-checking -> statefarm 22 USD #home-office-cost
+2025-03-05 personal-checking -> trader-joes 65.35 USD #groceries
+2025-03-08 business-card -> adobe 59.99 USD #business-software
+2025-03-08 personal-checking -> restaurant 66.06 USD #dining
+2025-03-10 personal-checking -> transit-agency 36.02 USD #transport
+2025-03-12 personal-checking -> comcast 80 USD #home-office-cost
+2025-03-12 personal-checking -> safeway 61.64 USD #groceries
+2025-03-13 business-card -> meal-vendor 54.80 USD #business-meal
+2025-03-13 car used 22 MI #business-mile for fernhill
+2025-03-14 brightwave 3_200 USD -> business-checking #design ^inv-2025-b02
 2025-03-14 business-checking -> tax-vault 640 USD for vault
-2025-03-14 business-card -> software 15 USD / figma
-2025-03-16 personal-checking -> pge 71.10 USD
-2025-03-18 personal-checking -> tmobile 64 USD
+2025-03-14 business-card -> figma 15 USD #business-software
+2025-03-16 personal-checking -> pge 71.10 USD #home-office-cost
+2025-03-18 personal-checking -> tmobile 64 USD #business-phone
 
 /// The February statement, paid in full.
 2025-03-20 business-checking -> business-card 1_013.07 USD
-2025-03-20 personal-checking -> groceries 60.06 USD / safeway
-2025-03-22 business-card -> software 21 USD / freshbooks
-2025-03-22 personal-checking -> dining 34.49 USD
-2025-03-27 personal-checking -> groceries 95.76 USD / trader-joes
-2025-03-28 fernhill -> 4_500 USD for #inv-2025-f1
-  business-checking       4_369.20 USD
-  fees                    130.80 USD   // Stripe fee
+2025-03-20 personal-checking -> safeway 60.06 USD #groceries
+2025-03-22 business-card -> freshbooks 21 USD #business-software
+2025-03-22 personal-checking -> restaurant 34.49 USD #dining
+2025-03-27 personal-checking -> trader-joes 95.76 USD #groceries
+2025-03-28 fernhill -> 4_500 USD #design ^inv-2025-f1
+  business-checking 4_369.20 USD
+  stripe 130.80 USD #business-fees // Stripe fee
 2025-03-28 business-checking -> tax-vault 873.84 USD for vault
-2025-03-31 interest -> tax-vault 22.35 USD for vault
+2025-03-31 interest-source -> tax-vault 22.35 USD #interest-income for vault
 
 /// Quarterly statement: what the custodian says the account is worth. The gap from the
 /// balance is the market's doing, a revaluation `via market`, never a withdrawal.

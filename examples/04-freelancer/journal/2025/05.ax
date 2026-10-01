@@ -1,38 +1,40 @@
-2025-05-01 design -> brightwave 3_200 USD #inv-2025-b05 due 30d
-2025-05-01 business-card -> software 7.20 USD / google
-2025-05-01 personal-checking -> landlord 1_750 USD
-2025-05-01 personal-checking -> bluecross 412 USD
-2025-05-03 business-card -> software 10 USD / notion
-2025-05-03 business-checking -> personal-checking 2_950 USD // owner's draw
-2025-05-05 business-card -> education 699 USD / config #config-2025
-2025-05-05 business-card -> travel 342.18 USD / alaska-air #config-2025
-2025-05-05 personal-checking -> statefarm 22 USD
-2025-05-05 personal-checking -> groceries 84.23 USD / trader-joes
-2025-05-06 business-card -> travel 618.40 USD / sf-hotel #config-2025
-2025-05-06 business-card -> meals 96.30 USD / sf-hotel #config-2025
-2025-05-07 business-card -> travel 58.20 USD / lyft #config-2025
-2025-05-08 business-card -> software 59.99 USD / adobe
-2025-05-08 personal-checking -> dining 35.24 USD
+2025-05-01 brightwave owes me due 30d ^inv-2025-b05
+  3_200 USD #design
+2025-05-01 business-card -> google 7.20 USD #business-software
+2025-05-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2025-05-01 personal-checking -> bluecross 412 USD #health-premium
+2025-05-03 business-card -> notion 10 USD #business-software
+2025-05-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2025-05-05 business-card -> config 699 USD #business-education ^config-2025
+2025-05-05 business-card -> alaska-air 342.18 USD #business-travel ^config-2025
+2025-05-05 personal-checking -> statefarm 22 USD #home-office-cost
+2025-05-05 personal-checking -> trader-joes 84.23 USD #groceries
+2025-05-06 business-card -> sf-hotel 618.40 USD #business-travel ^config-2025
+2025-05-06 business-card -> sf-hotel 96.30 USD #business-meal ^config-2025
+2025-05-07 business-card -> lyft 58.20 USD #business-travel ^config-2025
+2025-05-08 business-card -> adobe 59.99 USD #business-software
+2025-05-08 personal-checking -> restaurant 35.24 USD #dining
 
 /// Packaging refresh; paid 52 days after the invoice.
-2025-05-09 design -> fernhill 2_800 USD #inv-2025-f2 due 30d
-2025-05-10 personal-checking -> transport 39.17 USD
-2025-05-12 personal-checking -> comcast 80 USD
-2025-05-12 personal-checking -> groceries 125.50 USD / safeway
-2025-05-13 brightwave -> business-checking 3_200 USD for #inv-2025-b04
+2025-05-09 fernhill owes me due 30d ^inv-2025-f2
+  2_800 USD #design
+2025-05-10 personal-checking -> transit-agency 39.17 USD #transport
+2025-05-12 personal-checking -> comcast 80 USD #home-office-cost
+2025-05-12 personal-checking -> safeway 125.50 USD #groceries
+2025-05-13 brightwave 3_200 USD -> business-checking #design ^inv-2025-b04
 2025-05-13 business-checking -> tax-vault 640 USD for vault
-2025-05-14 business-card -> software 15 USD / figma
-2025-05-15 odometer -> mileage 45 MI / fernhill
-2025-05-16 personal-checking -> pge 52.75 USD
-2025-05-18 personal-checking -> tmobile 64 USD
+2025-05-14 business-card -> figma 15 USD #business-software
+2025-05-15 car used 45 MI #business-mile for fernhill
+2025-05-16 personal-checking -> pge 52.75 USD #home-office-cost
+2025-05-18 personal-checking -> tmobile 64 USD #business-phone
 
 /// The April statement, paid in full.
 2025-05-20 business-checking -> business-card 424.19 USD
-2025-05-20 personal-checking -> groceries 102.08 USD / safeway
-2025-05-22 business-card -> software 21 USD / freshbooks
-2025-05-22 personal-checking -> dining 37.15 USD
-2025-05-27 personal-checking -> groceries 98.41 USD / trader-joes
-2025-05-31 interest -> tax-vault 20.49 USD for vault
+2025-05-20 personal-checking -> safeway 102.08 USD #groceries
+2025-05-22 business-card -> freshbooks 21 USD #business-software
+2025-05-22 personal-checking -> restaurant 37.15 USD #dining
+2025-05-27 personal-checking -> trader-joes 98.41 USD #groceries
+2025-05-31 interest-source -> tax-vault 20.49 USD #interest-income for vault
 2025-05-31 business-card = 1_927.27 USD
 2025-05-31 business-checking = 5_201.36 USD
 2025-05-31 personal-checking = 3_407.48 USD

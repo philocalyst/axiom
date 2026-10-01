@@ -1,38 +1,40 @@
-2026-02-01 business-card -> software 7.20 USD / google
-2026-02-01 personal-checking -> landlord 1_750 USD
-2026-02-01 personal-checking -> bluecross 425 USD
-2026-02-02 design -> brightwave 3_200 USD #inv-2026-b02 due 30d
-2026-02-03 business-card -> software 10 USD / notion
+2026-02-01 business-card -> google 7.20 USD #business-software
+2026-02-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2026-02-01 personal-checking -> bluecross 425 USD #health-premium
+2026-02-02 brightwave owes me due 30d ^inv-2026-b02
+  3_200 USD #design
+2026-02-03 business-card -> notion 10 USD #business-software
 
 /// The policy renews.
-2026-02-03..2027-02-02 business-card -> business/insurance 812 USD / hiscox
-2026-02-03 business-checking -> personal-checking 2_950 USD // owner's draw
-2026-02-05 personal-checking -> statefarm 22 USD
-2026-02-05 personal-checking -> groceries 108.87 USD / trader-joes
-2026-02-08 personal-checking -> dining 47.95 USD
-2026-02-10 personal-checking -> transport 57.01 USD
+2026-02-03..2027-02-02 business-card -> hiscox 812 USD #business-insurance
+2026-02-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2026-02-05 personal-checking -> statefarm 22 USD #home-office-cost
+2026-02-05 personal-checking -> trader-joes 108.87 USD #groceries
+2026-02-08 personal-checking -> restaurant 47.95 USD #dining
+2026-02-10 personal-checking -> transit-agency 57.01 USD #transport
 
 /// Dropbox renews.
-2026-02-12..2027-02-11 business-card -> software 119.88 USD / dropbox
-2026-02-12 personal-checking -> comcast 80 USD
-2026-02-12 personal-checking -> groceries 73.22 USD / safeway
-2026-02-13 brightwave -> business-checking 3_200 USD for #inv-2026-b01
+2026-02-12..2027-02-11 business-card -> dropbox 119.88 USD #business-software
+2026-02-12 personal-checking -> comcast 80 USD #home-office-cost
+2026-02-12 personal-checking -> safeway 73.22 USD #groceries
+2026-02-13 brightwave 3_200 USD -> business-checking #design ^inv-2026-b01
 2026-02-13 business-checking -> tax-vault 640 USD for vault
-2026-02-14 business-card -> software 15 USD / figma
-2026-02-16 personal-checking -> pge 88.45 USD
-2026-02-18 personal-checking -> tmobile 64 USD
+2026-02-14 business-card -> figma 15 USD #business-software
+2026-02-16 personal-checking -> pge 88.45 USD #home-office-cost
+2026-02-18 personal-checking -> tmobile 64 USD #business-phone
 
 /// Spring packaging.
-2026-02-20 design -> fernhill 4_800 USD #inv-2026-f1 due 30d
+2026-02-20 fernhill owes me due 30d ^inv-2026-f1
+  4_800 USD #design
 
 /// The January statement, paid in full.
 2026-02-20 business-checking -> business-card 53.20 USD
-2026-02-20 personal-checking -> groceries 73.15 USD / safeway
-2026-02-22 business-card -> software 21 USD / freshbooks
-2026-02-22 personal-checking -> dining 54.93 USD
-2026-02-24 business-card -> printing 84.20 USD
-2026-02-27 personal-checking -> groceries 68.61 USD / trader-joes
-2026-02-28 interest -> tax-vault 38.71 USD for vault
+2026-02-20 personal-checking -> safeway 73.15 USD #groceries
+2026-02-22 business-card -> freshbooks 21 USD #business-software
+2026-02-22 personal-checking -> restaurant 54.93 USD #dining
+2026-02-24 business-card -> printing 84.20 USD #business-printing
+2026-02-27 personal-checking -> trader-joes 68.61 USD #groceries
+2026-02-28 interest-source -> tax-vault 38.71 USD #interest-income for vault
 2026-02-28 business-card = 1_069.28 USD
 2026-02-28 business-checking = 13_445.34 USD
 2026-02-28 personal-checking = 4_340.31 USD

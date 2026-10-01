@@ -1,37 +1,39 @@
-2026-03-01 business-card -> software 7.20 USD / google
-2026-03-01 personal-checking -> landlord 1_750 USD
-2026-03-01 personal-checking -> bluecross 425 USD
-2026-03-02 design -> brightwave 3_200 USD #inv-2026-b03 due 30d
-2026-03-03 business-card -> software 10 USD / notion
-2026-03-03 business-checking -> personal-checking 2_950 USD // owner's draw
-2026-03-05 personal-checking -> statefarm 22 USD
-2026-03-05 personal-checking -> groceries 114.58 USD / trader-joes
-2026-03-05 odometer -> mileage 39 MI / fernhill
-2026-03-08 personal-checking -> dining 34.55 USD
+2026-03-01 business-card -> google 7.20 USD #business-software
+2026-03-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2026-03-01 personal-checking -> bluecross 425 USD #health-premium
+2026-03-02 brightwave owes me due 30d ^inv-2026-b03
+  3_200 USD #design
+2026-03-03 business-card -> notion 10 USD #business-software
+2026-03-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2026-03-05 personal-checking -> statefarm 22 USD #home-office-cost
+2026-03-05 personal-checking -> trader-joes 114.58 USD #groceries
+2026-03-05 car used 39 MI #business-mile for fernhill
+2026-03-08 personal-checking -> restaurant 34.55 USD #dining
 
 /// Annual report. Due 2026-04-09 and still open: `axiom check` says so.
-2026-03-10 design -> orbit-labs 6_000 USD #inv-2026-o1 due 30d
-2026-03-10 personal-checking -> transport 53.54 USD
-2026-03-11 business-card -> meals 47.30 USD
-2026-03-12 brightwave -> business-checking 3_200 USD for #inv-2026-b02
+2026-03-10 orbit-labs owes me due 30d ^inv-2026-o1
+  6_000 USD #design
+2026-03-10 personal-checking -> transit-agency 53.54 USD #transport
+2026-03-11 business-card -> meal-vendor 47.30 USD #business-meal
+2026-03-12 brightwave 3_200 USD -> business-checking #design ^inv-2026-b02
 2026-03-12 business-checking -> tax-vault 640 USD for vault
-2026-03-12 personal-checking -> comcast 80 USD
-2026-03-12 personal-checking -> groceries 77.13 USD / safeway
-2026-03-14 business-card -> software 15 USD / figma
-2026-03-16 personal-checking -> pge 71.10 USD
-2026-03-18 personal-checking -> tmobile 64 USD
+2026-03-12 personal-checking -> comcast 80 USD #home-office-cost
+2026-03-12 personal-checking -> safeway 77.13 USD #groceries
+2026-03-14 business-card -> figma 15 USD #business-software
+2026-03-16 personal-checking -> pge 71.10 USD #home-office-cost
+2026-03-18 personal-checking -> tmobile 64 USD #business-phone
 
 /// The February statement, paid in full.
 2026-03-20 business-checking -> business-card 1_069.28 USD
-2026-03-20 personal-checking -> groceries 58.84 USD / safeway
-2026-03-22 business-card -> software 21 USD / freshbooks
-2026-03-22 personal-checking -> dining 31.68 USD
-2026-03-27 personal-checking -> groceries 101.08 USD / trader-joes
-2026-03-30 fernhill -> 4_800 USD for #inv-2026-f1
-  business-checking       4_660.50 USD
-  fees                    139.50 USD   // Stripe fee
+2026-03-20 personal-checking -> safeway 58.84 USD #groceries
+2026-03-22 business-card -> freshbooks 21 USD #business-software
+2026-03-22 personal-checking -> restaurant 31.68 USD #dining
+2026-03-27 personal-checking -> trader-joes 101.08 USD #groceries
+2026-03-30 fernhill -> 4_800 USD #design ^inv-2026-f1
+  business-checking 4_660.50 USD
+  stripe 139.50 USD #business-fees // Stripe fee
 2026-03-30 business-checking -> tax-vault 932.10 USD for vault
-2026-03-31 interest -> tax-vault 44.35 USD for vault
+2026-03-31 interest-source -> tax-vault 44.35 USD #interest-income for vault
 2026-03-31 sep = 29_586.06 USD via market
 2026-03-31 business-card = 100.50 USD
 2026-03-31 business-checking = 15_714.46 USD

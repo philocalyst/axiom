@@ -1,39 +1,41 @@
-2025-02-01 business-card -> software 7.20 USD / google
-2025-02-01 personal-checking -> landlord 1_750 USD
-2025-02-01 personal-checking -> bluecross 412 USD
-2025-02-03 design -> brightwave 3_200 USD #inv-2025-b02 due 30d
-2025-02-03 business-card -> software 10 USD / notion
+2025-02-01 business-card -> google 7.20 USD #business-software
+2025-02-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2025-02-01 personal-checking -> bluecross 412 USD #health-premium
+2025-02-03 brightwave owes me due 30d ^inv-2025-b02
+  3_200 USD #design
+2025-02-03 business-card -> notion 10 USD #business-software
 
 /// Professional liability, a year, paid up front on the card and recognized over the policy year.
-2025-02-03..2026-02-02 business-card -> business/insurance 780 USD / hiscox
-2025-02-03 business-checking -> personal-checking 2_750 USD // owner's draw
-2025-02-05 personal-checking -> statefarm 22 USD
-2025-02-05 personal-checking -> groceries 100.16 USD / trader-joes
-2025-02-08 business-card -> software 59.99 USD / adobe
-2025-02-08 personal-checking -> dining 65.43 USD
-2025-02-10 personal-checking -> transport 59.66 USD
-2025-02-12 brightwave -> business-checking 3_200 USD for #inv-2025-b01
+2025-02-03..2026-02-02 business-card -> hiscox 780 USD #business-insurance
+2025-02-03 business-checking -> personal-checking 2_750 USD #owner-draw // owner's draw
+2025-02-05 personal-checking -> statefarm 22 USD #home-office-cost
+2025-02-05 personal-checking -> trader-joes 100.16 USD #groceries
+2025-02-08 business-card -> adobe 59.99 USD #business-software
+2025-02-08 personal-checking -> restaurant 65.43 USD #dining
+2025-02-10 personal-checking -> transit-agency 59.66 USD #transport
+2025-02-12 brightwave 3_200 USD -> business-checking #design ^inv-2025-b01
 2025-02-12 business-checking -> tax-vault 640 USD for vault
 
 /// Dropbox, annual plan: the budget sees a twelfth of it each month, not all of it in February.
-2025-02-12..2026-02-11 business-card -> software 119.88 USD / dropbox
-2025-02-12 personal-checking -> comcast 80 USD
-2025-02-12 personal-checking -> groceries 62.87 USD / safeway
+2025-02-12..2026-02-11 business-card -> dropbox 119.88 USD #business-software
+2025-02-12 personal-checking -> comcast 80 USD #home-office-cost
+2025-02-12 personal-checking -> safeway 62.87 USD #groceries
 
 /// Identity system for a bakery chain. Pays by card through Stripe, which keeps its fee.
-2025-02-14 design -> fernhill 4_500 USD #inv-2025-f1 due 30d
-2025-02-14 business-card -> software 15 USD / figma
-2025-02-16 personal-checking -> pge 88.45 USD
-2025-02-18 personal-checking -> tmobile 64 USD
+2025-02-14 fernhill owes me due 30d ^inv-2025-f1
+  4_500 USD #design
+2025-02-14 business-card -> figma 15 USD #business-software
+2025-02-16 personal-checking -> pge 88.45 USD #home-office-cost
+2025-02-18 personal-checking -> tmobile 64 USD #business-phone
 
 /// The January statement, paid in full.
 2025-02-20 business-checking -> business-card 113.19 USD
-2025-02-20 personal-checking -> groceries 87.66 USD / safeway
-2025-02-20 odometer -> mileage 41 MI / fernhill
-2025-02-22 business-card -> software 21 USD / freshbooks
-2025-02-22 personal-checking -> dining 77.03 USD
-2025-02-27 personal-checking -> groceries 61.21 USD / trader-joes
-2025-02-28 interest -> tax-vault 16.99 USD for vault
+2025-02-20 personal-checking -> safeway 87.66 USD #groceries
+2025-02-20 car used 41 MI #business-mile for fernhill
+2025-02-22 business-card -> freshbooks 21 USD #business-software
+2025-02-22 personal-checking -> restaurant 77.03 USD #dining
+2025-02-27 personal-checking -> trader-joes 61.21 USD #groceries
+2025-02-28 interest-source -> tax-vault 16.99 USD #interest-income for vault
 2025-02-28 business-card = 1_013.07 USD
 2025-02-28 business-checking = 5_167.25 USD
 2025-02-28 personal-checking = 3_306.51 USD

@@ -1,6 +1,6 @@
 // What one mile is worth as a business deduction: the IRS standard mileage
 // rate. Only prices go in this folder.
 
-2025-01-01 MI 0.70 USD
+2025-01-01 MI = 0.70 USD
 // verify: the 2026 rate against the IRS announcement.
-2026-01-01 MI 0.725 USD
+2026-01-01 MI = 0.725 USD

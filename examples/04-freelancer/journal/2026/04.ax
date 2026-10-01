@@ -1,22 +1,23 @@
 /// The April retainer, not yet due.
-2026-04-01 design -> brightwave 3_200 USD #inv-2026-b04 due 30d
-2026-04-01 business-card -> software 7.20 USD / google
-2026-04-01 personal-checking -> landlord 1_750 USD
-2026-04-01 personal-checking -> bluecross 425 USD
-2026-04-03 business-card -> software 10 USD / notion
-2026-04-03 business-checking -> personal-checking 2_950 USD // owner's draw
-2026-04-05 personal-checking -> statefarm 22 USD
-2026-04-05 personal-checking -> groceries 70.75 USD / trader-joes
-2026-04-08 personal-checking -> dining 73.02 USD
-2026-04-10 brightwave -> business-checking 3_200 USD for #inv-2026-b03
+2026-04-01 brightwave owes me due 30d ^inv-2026-b04
+  3_200 USD #design
+2026-04-01 business-card -> google 7.20 USD #business-software
+2026-04-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2026-04-01 personal-checking -> bluecross 425 USD #health-premium
+2026-04-03 business-card -> notion 10 USD #business-software
+2026-04-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2026-04-05 personal-checking -> statefarm 22 USD #home-office-cost
+2026-04-05 personal-checking -> trader-joes 70.75 USD #groceries
+2026-04-08 personal-checking -> restaurant 73.02 USD #dining
+2026-04-10 brightwave 3_200 USD -> business-checking #design ^inv-2026-b03
 2026-04-10 business-checking -> tax-vault 640 USD for vault
-2026-04-10 personal-checking -> transport 39.13 USD
+2026-04-10 personal-checking -> transit-agency 39.13 USD #transport
 
 /// Most of what the 2025 return will owe, paid before it closes.
-2026-04-10 tax-vault -> federal 1_500 USD / irs #balance-2025 for 2025
-2026-04-12 personal-checking -> comcast 80 USD
-2026-04-12 personal-checking -> groceries 108.37 USD / safeway
-2026-04-14 business-card -> software 15 USD / figma
+2026-04-10 tax-vault -> irs 1_500 USD #federal-tax ^balance-2025 for 2025
+2026-04-12 personal-checking -> comcast 80 USD #home-office-cost
+2026-04-12 personal-checking -> safeway 108.37 USD #groceries
+2026-04-14 business-card -> figma 15 USD #business-software
 
 /// Estimated tax, first quarter of 2026.
-2026-04-14 tax-vault -> federal 3_000 USD / irs #q1-2026
+2026-04-14 tax-vault -> irs 3_000 USD #federal-tax ^q1-2026

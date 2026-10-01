@@ -1,46 +1,48 @@
-2025-12-01 design -> brightwave 3_200 USD #inv-2025-b12 due 30d
+2025-12-01 brightwave owes me due 30d ^inv-2025-b12
+  3_200 USD #design
 
 /// Spring line concepts. Open since December.
-2025-12-01 design -> northpeak 2_600 USD #inv-2025-n3 due 30d
-2025-12-01 business-card -> software 7.20 USD / google
-2025-12-01 personal-checking -> landlord 1_750 USD
-2025-12-01 personal-checking -> bluecross 412 USD
-2025-12-03 business-card -> software 10 USD / notion
-2025-12-03 business-checking -> personal-checking 2_950 USD // owner's draw
-2025-12-04 odometer -> mileage 60 MI / brightwave
-2025-12-05 personal-checking -> statefarm 22 USD
-2025-12-05 personal-checking -> groceries 112.02 USD / trader-joes
-2025-12-08 personal-checking -> dining 54.85 USD
-2025-12-10 brightwave -> business-checking 3_200 USD for #inv-2025-b11
+2025-12-01 northpeak owes me due 30d ^inv-2025-n3
+  2_600 USD #design
+2025-12-01 business-card -> google 7.20 USD #business-software
+2025-12-01 personal-checking -> landlord 1_750 USD #home-office-cost
+2025-12-01 personal-checking -> bluecross 412 USD #health-premium
+2025-12-03 business-card -> notion 10 USD #business-software
+2025-12-03 business-checking -> personal-checking 2_950 USD #owner-draw // owner's draw
+2025-12-04 car used 60 MI #business-mile for brightwave
+2025-12-05 personal-checking -> statefarm 22 USD #home-office-cost
+2025-12-05 personal-checking -> trader-joes 112.02 USD #groceries
+2025-12-08 personal-checking -> restaurant 54.85 USD #dining
+2025-12-10 brightwave 3_200 USD -> business-checking #design ^inv-2025-b11
 2025-12-10 business-checking -> tax-vault 640 USD for vault
-2025-12-10 personal-checking -> transport 61.98 USD
-2025-12-12 personal-checking -> comcast 80 USD
-2025-12-12 personal-checking -> groceries 104.17 USD / safeway
-2025-12-14 business-card -> software 15 USD / figma
+2025-12-10 personal-checking -> transit-agency 61.98 USD #transport
+2025-12-12 personal-checking -> comcast 80 USD #home-office-cost
+2025-12-12 personal-checking -> safeway 104.17 USD #groceries
+2025-12-14 business-card -> figma 15 USD #business-software
 
 /// Three reminders, one "the check is in the mail", then silence. The claim is written off:
 /// no cash arrives, so under the cash method it was never income, and it is not deductible.
-2025-12-15 delta-rugs -> bad-debt 3_800 USD for #inv-2025-d1
-2025-12-16 personal-checking -> pge 101.30 USD
-2025-12-18 personal-checking -> tmobile 64 USD
+2025-12-15 ^inv-2025-d1 waived "not collected under the cash method"
+2025-12-16 personal-checking -> pge 101.30 USD #home-office-cost
+2025-12-18 personal-checking -> tmobile 64 USD #business-phone
 
 /// Adobe moves to an annual plan, bought in December and `for 2026`: it belongs to the year it covers,
 /// not the year it was paid, so 2025's books do not carry it.
-2025-12-19 business-card -> software 719.88 USD / adobe for 2026
+2025-12-19 business-card -> adobe 719.88 USD #business-software for 2026
 
 /// The November statement, paid in full.
 2025-12-20 business-checking -> business-card 271.39 USD
-2025-12-20 personal-checking -> groceries 118.05 USD / safeway
-2025-12-22 business-card -> software 21 USD / freshbooks
-2025-12-22 personal-checking -> dining 51.12 USD
+2025-12-20 personal-checking -> safeway 118.05 USD #groceries
+2025-12-22 business-card -> freshbooks 21 USD #business-software
+2025-12-22 personal-checking -> restaurant 51.12 USD #dining
 2025-12-22 business-checking -> sep 2_000 USD
-2025-12-27 rewards -> business-card 87.40 USD
-2025-12-27 personal-checking -> groceries 97.89 USD / trader-joes
-2025-12-30 fernhill -> 3_100 USD for #inv-2025-f4
-  business-checking       3_009.80 USD
-  fees                    90.20 USD   // Stripe fee
+2025-12-27 rewards -> business-card 87.40 USD #reward
+2025-12-27 personal-checking -> trader-joes 97.89 USD #groceries
+2025-12-30 fernhill -> 3_100 USD #design ^inv-2025-f4
+  business-checking 3_009.80 USD
+  stripe 90.20 USD #business-fees // Stripe fee
 2025-12-30 business-checking -> tax-vault 601.96 USD for vault
-2025-12-31 interest -> tax-vault 42.36 USD for vault
+2025-12-31 interest-source -> tax-vault 42.36 USD #interest-income for vault
 2025-12-31 sep = 27_034.41 USD via market
 2025-12-31 business-card = 685.68 USD
 2025-12-31 business-checking = 16_964.22 USD

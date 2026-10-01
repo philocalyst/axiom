@@ -16,7 +16,7 @@
 /// To fix: `axiom why net-profit` lists the receipts and the expenses behind it.
 law business-profit
   each year closing 04-15
-  let net = tally(gross-receipts) - tally(business-expenses)
+  let net = value(tally(gross-receipts), USD) - value(tally(business-expenses), USD)
   count net as net-profit
   count net as total-income
 
@@ -27,7 +27,7 @@ law business-profit
 /// To fix: the base is net profit; a loss owes nothing.
 law self-employment-tax
   each year closing 04-15
-  let earnings = max(tally(net-profit), empty) * 92.35%
+  let earnings = max(value(tally(net-profit), USD), empty) * 92.35%
   let tax = min(earnings, ss-wage-base[year]) * 12.4% + earnings * 2.9%
   count tax as se-tax
   count tax as other-taxes
@@ -43,8 +43,8 @@ law self-employment-tax
 /// deduction means less income before it.
 law qbi-deduction
   each year closing 04-15
-  let attributable = tally(net-profit) - tally(se-deduction) - tally(health-premiums) - tally(sep-contributions)
-  let before = max(tally(agi) - tally(deductions), empty)
+  let attributable = value(tally(net-profit), USD) - value(tally(se-deduction), USD) - value(tally(health-premiums), USD) - value(tally(sep-contributions), USD)
+  let before = max(value(tally(agi), USD) - value(tally(deductions), USD), empty)
   count min(max(attributable, empty), before) * 20% as deductions
 
 
@@ -63,21 +63,21 @@ law qbi-deduction
 /// To fix: pay the installment `for` the year to a place of kind `federal-tax`.
 law estimate-1-2025
   by 2025-04-15
-  warn tally(payments) >= prior-year-tax[2025] * 25% "estimated tax: first installment short"
+  warn value(tally(payments), USD) >= prior-year-tax[2025] * 25% "estimated tax: first installment short"
 
 /// Second installment. June 15 2025 fell on a Sunday, so it was due Monday the 16th.
 ///
 /// To fix: pay the installment `for` the year to a place of kind `federal-tax`.
 law estimate-2-2025
   by 2025-06-16
-  warn tally(payments) >= prior-year-tax[2025] * 50% "estimated tax: second installment short"
+  warn value(tally(payments), USD) >= prior-year-tax[2025] * 50% "estimated tax: second installment short"
 
 /// Third installment, due September 15 2025.
 ///
 /// To fix: pay the installment `for` the year to a place of kind `federal-tax`.
 law estimate-3-2025
   by 2025-09-15
-  warn tally(payments) >= prior-year-tax[2025] * 75% "estimated tax: third installment short"
+  warn value(tally(payments), USD) >= prior-year-tax[2025] * 75% "estimated tax: third installment short"
 
 /// The fourth installment of any year is due on January 15 of the next, and pays
 /// what is still short of the safe harbor. It is `for` the year that ended, so
@@ -86,7 +86,7 @@ law estimate-3-2025
 /// To fix: pay the installment `for` the year to a place of kind `federal-tax`.
 law estimate-4
   each year closing 01-15
-  warn tally(payments) >= prior-year-tax[year] * 100% "estimated tax: fourth installment short"
+  warn value(tally(payments), USD) >= prior-year-tax[year] * 100% "estimated tax: fourth installment short"
 
 
 // ─── Figures ────────────────────────────────────────────────────────────────
