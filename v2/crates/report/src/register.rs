@@ -149,6 +149,40 @@ fn entity_view<'s>(
             Cell::Source(flow.loc),
         ]));
     }
+    // An accepted assertion gap has no journal flow, but its counterparty is
+    // still part of the entity's register. In particular, this keeps market
+    // revaluations and unexplained `?` balances visible from the other end.
+    let entity_place = book.entities[entity].place;
+    for pad in &run.pads {
+        if entity_place != Some(pad.counter)
+            || !lens.owns(pad.place)
+            || !in_window(pad.day, from, cutoff)
+        {
+            continue;
+        }
+        let qty = lens.place_qty(pad.place, pad.amount.qty).0.checked_abs();
+        let Some(qty) = qty else { continue };
+        let direction = if pad.amount.qty >= Qty::ZERO {
+            format!("{} → {}", path(book, pad.counter), path(book, pad.place))
+        } else {
+            format!("{} → {}", path(book, pad.place), path(book, pad.counter))
+        };
+        let note = crate::table::gap_words(book, pad);
+        let loc = book.asserts[pad.assert as usize].loc;
+        section.push(Row::new([
+            Cell::Day(pad.day),
+            Cell::Blank,
+            Cell::text(direction),
+            Cell::amount(book, Amount::new(Qty(qty), pad.amount.unit)),
+            Cell::text(note),
+            Cell::Word("actual"),
+            Cell::Source(loc),
+        ]));
+    }
+    section.rows.sort_by_key(|row| match row.cells.first() {
+        Some(Cell::Day(day)) => *day,
+        _ => Day::MAX,
+    });
     if section.rows.is_empty() {
         section.note(format!("No flows touch {target} in this window."));
     }

@@ -1712,9 +1712,9 @@ fn a_register_says_where_each_gap_came_from() {
         assert_eq!(
             rows(book, run, register),
             [
-                "2025-01-01 | equity/opening |  |  | 10,000.00 USD | 10,000.00 USD",
-                "2025-03-31 | income/market |  | revalued via income/market | -1,000.00 USD | 9,000.00 USD",
-                "2025-06-30 | equity/unknown |  | unexplained gap, accepted with ! | 500.00 USD | 9,500.00 USD",
+                "2025-01-01 | opening |  |  | 10,000.00 USD | 10,000.00 USD",
+                "2025-03-31 | market |  | revalued via market | -1,000.00 USD | 9,000.00 USD",
+                "2025-06-30 | ? |  | unexplained gap, accepted with ! | 500.00 USD | 9,500.00 USD",
                 "2025-09-30 | assets/checking |  | gap via assets/checking | 300.00 USD | 9,800.00 USD",
             ]
         );
@@ -1733,7 +1733,7 @@ fn the_line_of_an_assertion_says_where_its_gap_came_from() {
             })
             .collect();
         assert!(
-            words[0].starts_with("assertion: assets/k = 9,000.00 USD, revalued via income/market"),
+            words[0].starts_with("assertion: assets/k = 9,000.00 USD, revalued via market"),
             "{words:?}"
         );
         assert!(
@@ -1762,9 +1762,7 @@ fn the_register_of_a_gaps_counter_place_lists_it_as_well() {
         );
         assert_eq!(
             rows(book, run, register("market")),
-            [
-                "2025-03-31 | assets/k |  | revalued via income/market | -1,000.00 USD | -1,000.00 USD"
-            ]
+            ["2025-03-31 |  | assets/k → market | 1,000.00 USD | revalued via market | actual | @1"]
         );
     });
 }
