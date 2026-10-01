@@ -259,6 +259,212 @@ struct TabDraft<'s> {
     loc: Loc,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum NameSpace {
+    Account,
+    Entity,
+    Asset,
+    Contract,
+    Purpose,
+    Commodity,
+}
+
+impl NameSpace {
+    fn article(self) -> &'static str {
+        match self {
+            NameSpace::Account => "account",
+            NameSpace::Entity => "entity",
+            NameSpace::Asset => "asset",
+            NameSpace::Contract => "contract",
+            NameSpace::Purpose => "purpose",
+            NameSpace::Commodity => "unit",
+        }
+    }
+
+    fn indefinite(self) -> &'static str {
+        match self {
+            NameSpace::Account => "an account",
+            NameSpace::Entity => "an entity",
+            NameSpace::Asset => "an asset",
+            NameSpace::Contract => "a contract",
+            NameSpace::Purpose => "a purpose",
+            NameSpace::Commodity => "a unit",
+        }
+    }
+}
+
+struct NameClaim<'s> {
+    spelling: &'s str,
+    declared: &'s str,
+    space: NameSpace,
+    home: Home,
+    loc: Loc,
+    order: usize,
+    /// Contracts may take the spelling of their party, but no other entity.
+    contract_party: Option<&'s str>,
+}
+
+fn check_cross_namespace_names(
+    sites: &[Site<'_, '_>],
+    scopes: &Scopes,
+    systems: &Tree<System>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let mut claims = Vec::new();
+    let mut order = 0;
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            match item.kind {
+                ItemKind::Decl(id) => {
+                    let decl = &file[id];
+                    if decl.what == DeclKind::Entity && matches!(decl.name.0, "opening" | "market" | "?") {
+                        diags.push(
+                            Diagnostic::error(
+                                "reserved-entity-name",
+                                format!("`{}` is reserved for a built-in entity", decl.name.0),
+                            )
+                            .label(file.loc(decl.name.0), "choose a different entity name"),
+                        );
+                    }
+                    let (space, aliases) = match decl.what {
+                        DeclKind::Account => (NameSpace::Account, true),
+                        DeclKind::Entity => (NameSpace::Entity, true),
+                        DeclKind::Asset => (NameSpace::Asset, true),
+                        DeclKind::Purpose => (NameSpace::Purpose, true),
+                        DeclKind::Commodity => (NameSpace::Commodity, false),
+                        DeclKind::Kind => {
+                            order += 1;
+                            continue;
+                        }
+                    };
+                    push_name_claims(
+                        &mut claims,
+                        decl.name.0,
+                        space,
+                        site.home,
+                        file.loc(decl.name.0),
+                        order,
+                        None,
+                        aliases,
+                    );
+                }
+                ItemKind::Contract(id) => {
+                    let contract = &file[id];
+                    push_name_claims(
+                        &mut claims,
+                        contract.name.0,
+                        NameSpace::Contract,
+                        site.home,
+                        file.loc(contract.name.0),
+                        order,
+                        Some(contract.party.unwrap_or(contract.name).0),
+                        false,
+                    );
+                }
+                _ => {}
+            }
+            order += 1;
+        }
+    }
+
+    claims.sort_unstable_by(|a, b| {
+        a.spelling
+            .cmp(b.spelling)
+            .then(a.order.cmp(&b.order))
+            .then(a.space.cmp(&b.space))
+    });
+
+    let mut start = 0;
+    while start < claims.len() {
+        let spelling = claims[start].spelling;
+        let mut end = start + 1;
+        while end < claims.len() && claims[end].spelling == spelling {
+            end += 1;
+        }
+        for index in start..end {
+            let later = &claims[index];
+            let mut earlier = Vec::new();
+            for first in &claims[start..index] {
+                if first.space == later.space
+                    || !visible_in_any_scope(scopes, systems, first.home, later.home)
+                    || contract_party_name_exception(first, later, spelling)
+                {
+                    continue;
+                }
+                earlier.push(first);
+            }
+            if earlier.is_empty() {
+                continue;
+            }
+            let mut diagnostic = Diagnostic::error(
+                "ambiguous-name",
+                format!(
+                    "`{spelling}` answers to both {} and {}",
+                    earlier[0].space.indefinite(),
+                    later.space.indefinite()
+                ),
+            )
+            .label(later.loc, format!("this {} also answers to `{spelling}`", later.space.article()));
+            for first in earlier {
+                diagnostic = diagnostic.context(
+                    first.loc,
+                    format!("{} `{}` was declared earlier", first.space.article(), first.declared),
+                );
+            }
+            diagnostic = diagnostic.help("rename one declaration or use a different account path");
+            diags.push(diagnostic);
+        }
+        start = end;
+    }
+}
+
+fn push_name_claims<'s>(
+    claims: &mut Vec<NameClaim<'s>>,
+    declared: &'s str,
+    space: NameSpace,
+    home: Home,
+    loc: Loc,
+    order: usize,
+    contract_party: Option<&'s str>,
+    aliases: bool,
+) {
+    let mut push = |spelling| {
+        claims.push(NameClaim {
+            spelling,
+            declared,
+            space,
+            home,
+            loc,
+            order,
+            contract_party,
+        });
+    };
+    push(declared);
+    if aliases {
+        for (at, _) in declared.match_indices('/') {
+            push(&declared[at + 1..]);
+        }
+    }
+}
+
+fn visible_in_any_scope(scopes: &Scopes, systems: &Tree<System>, a: Home, b: Home) -> bool {
+    let sees_both = |home| {
+        let scope = scopes.of(home);
+        scope.sees(a) && scope.sees(b)
+    };
+    sees_both(Home::Project) || systems.ids().any(|system| sees_both(Home::System(system)))
+}
+
+fn contract_party_name_exception(a: &NameClaim<'_>, b: &NameClaim<'_>, spelling: &str) -> bool {
+    let (contract, entity) = match (a.space, b.space) {
+        (NameSpace::Contract, NameSpace::Entity) => (a, b),
+        (NameSpace::Entity, NameSpace::Contract) => (b, a),
+        _ => return false,
+    };
+    contract.declared == spelling && contract.contract_party == Some(spelling) && entity.declared == spelling
+}
+
 /// Construct a native v4 Book from the syntax sites and a small survey of only
 /// claim-bearing journal relationships. No v3 chart-account collection is used.
 pub(crate) fn declare<'a, 's>(
@@ -280,6 +486,7 @@ pub(crate) fn declare<'a, 's>(
         &native_kinds.index,
         diags,
     );
+    check_cross_namespace_names(sites, &scopes, &systems_tree, diags);
 
     let mut commodities = Arena::new();
     let mut commodity_by_name: Map<&'s str, Id<Commodity>> = Map::default();

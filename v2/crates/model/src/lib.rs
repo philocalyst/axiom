@@ -35,6 +35,8 @@ mod sources;
 mod sync_lower;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod names_tests;
 mod values;
 
 pub use book::*;
