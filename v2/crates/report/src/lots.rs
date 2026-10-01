@@ -2,7 +2,7 @@
 
 use axiom_core::{Day, Diagnostic, Qty};
 use axiom_engine::{Holding, Parcel, Run};
-use axiom_model::{Amount, Book};
+use axiom_model::{Amount, Book, Place};
 
 use crate::claims::holdings_at;
 use crate::gains::Term;
@@ -22,6 +22,17 @@ pub fn view<'s>(
     let scope = place.map(|text| resolve::place(book, text)).transpose()?;
     let at = at.unwrap_or(run.today);
     let lens = Lens::new(book, whose, at);
+    let holdings = holdings_at(book, run, at);
+    Ok(view_from(lens, scope, holdings.iter()))
+}
+
+/// Builds a lots view from holdings supplied by a shared context ledger.
+pub(crate) fn view_from<'h, 's>(
+    lens: Lens<'_, 's>,
+    scope: Option<axiom_core::Id<Place>>,
+    holdings: impl IntoIterator<Item = &'h Holding>,
+) -> Report<'s> {
+    let (book, at) = (lens.book, lens.day);
 
     let mut section = Section::new([
         Column::left("Place"),
@@ -36,8 +47,7 @@ pub fn view<'s>(
     ]);
 
     let (mut basis, mut value, mut unrealized, mut unpriced) = (Qty::ZERO, Qty::ZERO, Qty::ZERO, 0);
-    let holdings = holdings_at(book, run, at);
-    let held = holdings.iter().filter(|holding| {
+    let held = holdings.into_iter().filter(|holding| {
         lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
     });
     for holding in held {
@@ -72,7 +82,7 @@ pub fn view<'s>(
     if unpriced > 0 {
         section.note(format!("{unpriced} parcels have no price; they are muted and left out of Value and Unrealized."));
     }
-    Ok(Report::new(format!("Lots at {at}")).with(section))
+    Report::new(format!("Lots at {at}")).with(section)
 }
 
 fn row<'s>(lens: Lens<'_, 's>, holding: &Holding, lot: &Parcel, worth: Option<Qty>) -> Row<'s> {

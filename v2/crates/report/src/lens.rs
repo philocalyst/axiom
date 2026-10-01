@@ -10,8 +10,8 @@ use std::iter;
 
 use axiom_core::num::{POW10, div_round, mul_div};
 use axiom_core::{Day, Diagnostic, Id, Qty, Span};
-use axiom_engine::Holding;
-use axiom_model::{Amount, Book, Class, Commodity, Entity, Kind, Place, Subject};
+use axiom_engine::{Holding, Known};
+use axiom_model::{Amount, Book, Class, Commodity, Entity, Place, Subject};
 
 use crate::history::Held;
 use crate::resolve;
@@ -31,11 +31,13 @@ impl Whose {
     /// One entity's, and its members' if it is a household.
     pub fn of(book: &Book, entity: Id<Entity>) -> Whose {
         let members = book.entities.iter().filter(|(_, other)| other.member == Some(entity)).map(|(id, _)| id);
-        Whose(Some(iter::once(entity).chain(members).collect()))
+        let mut owners: Vec<_> = iter::once(entity).chain(members).collect();
+        owners.sort_unstable();
+        Whose(Some(owners))
     }
 
     pub fn includes(&self, entity: Id<Entity>) -> bool {
-        self.0.as_ref().is_none_or(|owners| owners.contains(&entity))
+        self.0.as_ref().is_none_or(|owners| owners.binary_search(&entity).is_ok())
     }
 
     /// Whether a law's subject is one of these owners': the entity itself, or
@@ -67,11 +69,18 @@ pub struct Lens<'b, 's> {
     pub book: &'b Book<'s>,
     pub whose: &'b Whose,
     pub day: Day,
+    /// Names and kinds looked up once by the report context or this lens.
+    pub known: Known,
 }
 
 impl<'b, 's> Lens<'b, 's> {
     pub fn new(book: &'b Book<'s>, whose: &'b Whose, day: Day) -> Lens<'b, 's> {
-        Lens { book, whose, day }
+        Lens::with_known(book, whose, day, Known::of(book))
+    }
+
+    /// Uses the engine plan's pre-resolved names and kinds.
+    pub fn with_known(book: &'b Book<'s>, whose: &'b Whose, day: Day, known: Known) -> Lens<'b, 's> {
+        Lens { book, whose, day, known }
     }
 
     /// The same books at another day's prices.
@@ -105,8 +114,7 @@ impl<'b, 's> Lens<'b, 's> {
 
     fn is_currency(self, unit: Id<Commodity>) -> bool {
         let book = self.book;
-        let currency: Option<Id<Kind>> = book.kind("currency").ok();
-        unit == book.base || currency.is_some_and(|kind| book.is_a(book.commodities[unit].kind, kind))
+        unit == book.base || self.known.currency.is_some_and(|kind| book.is_a(book.commodities[unit].kind, kind))
     }
 
     /// How spendable `unit` is in `place`, from what kind of place it is and

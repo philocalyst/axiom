@@ -14,6 +14,7 @@ mod budget;
 mod calendar;
 mod claims;
 mod closings;
+mod context;
 mod flow;
 mod forecast;
 mod gains;
@@ -145,6 +146,7 @@ pub enum Cell<'s> {
     Source(Loc),
 }
 
+pub use context::Context;
 pub use table::percent;
 
 /// A source position as a client can display it. Lines and columns are

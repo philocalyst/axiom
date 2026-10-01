@@ -71,8 +71,9 @@ pub fn project<'p, 'b, 's>(
 /// the payments the projection already makes.
 fn in_hand_or_owed(lens: Lens, holding: &Holding) -> Qty {
     let place = &lens.book.places[holding.place];
-    let maturity = lens.book.names.get("maturity");
-    let has_term = maturity
+    let has_term = lens
+        .known
+        .maturity
         .is_some_and(|name| place.props.iter().any(|prop| prop.name == name && matches!(prop.value, Value::Day(_))));
     match lens.liquidity(holding.place, holding.unit) {
         Some(Liquidity::Cash) => lens.free(holding),

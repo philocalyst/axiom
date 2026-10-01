@@ -131,7 +131,17 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
     let at = at.unwrap_or(run.today);
     let lens = Lens::new(book, whose, at);
     let holdings = holdings_at(book, run, at);
-    let claims = open(lens, run, holdings.iter());
+    view_from(lens, run, holdings.iter())
+}
+
+/// Builds a claims view from holdings supplied by a shared context ledger.
+pub(crate) fn view_from<'h, 's>(
+    lens: Lens<'_, 's>,
+    run: &Run,
+    holdings: impl IntoIterator<Item = &'h Holding>,
+) -> Report<'s> {
+    let at = lens.day;
+    let claims = open(lens, run, holdings);
     let (mine, theirs): (Vec<&Claim>, Vec<&Claim>) = claims.iter().partition(|claim| claim.mine);
     let report = Report::new(format!("Claims on {at}")).with(section(lens, "Owed to you", &mine));
     let report = report.with(section(lens, "Owed by you", &theirs));

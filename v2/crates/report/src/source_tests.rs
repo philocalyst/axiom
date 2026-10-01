@@ -86,7 +86,18 @@ opening 2026-01-01
         let target = format!(r"C:\ledger\january.ax:{line}");
         let query = Query::Why { target: &target };
         let report = crate::report_with_sources(book, run, &query, None, &provider).unwrap();
+        let context = crate::Context::new(
+            book,
+            Options {
+                today: run.today,
+                relaxed: book.relaxed,
+            },
+            None,
+        )
+        .unwrap();
+        let shared = context.report_with_sources(&query, &provider).unwrap();
         assert_eq!(report.title, "Why this line");
+        assert_eq!(show(&shared), show(&report));
         assert!(crate::tests::lines(&report.sections[0])[0].contains("flow: assets/checking → expenses/food"));
         assert!(crate::resolve_source_line(&query, &provider).is_some());
         let unknown = Query::Why { target: r"C:\ledger\missing.ax:1" };
@@ -380,6 +391,108 @@ fn tax_after_the_return_closes_shows_what_it_owes() {
         let [_, owed] = &report.sections[..] else { panic!("two sections: {}", show(&report)) };
         assert_eq!(lines(owed)[1], "  income-tax | treasury | 2027-04-15 | 200.00 USD | period end");
         assert!(owed.notes.iter().all(|note| !note.contains("not figured")), "{:?}", owed.notes);
+    });
+}
+
+#[test]
+fn context_views_match_the_legacy_views_before_today_today_and_after_today() {
+    with_run(RETURN, day(2027, 3, 1), |book, run| {
+        let context = crate::Context::new(
+            book,
+            Options {
+                today: run.today,
+                relaxed: book.relaxed,
+            },
+            None,
+        )
+        .unwrap();
+        for at in [day(2026, 10, 1), run.today, day(2027, 4, 20)] {
+            for query in [
+                Query::Available { at: Some(at) },
+                Query::Claims { at: Some(at) },
+                Query::Lots { place: None, at: Some(at) },
+            ] {
+                let shared = context.report(&query).unwrap();
+                let old = crate::report(book, context.run(), &query, None).unwrap();
+                assert_eq!(show(&shared), show(&old), "{query:?} at {at}");
+            }
+        }
+    });
+}
+
+#[test]
+fn a_context_checkpoint_keeps_same_day_closings_pending_for_a_withdrawal() {
+    with_run(YEAR_END_RETURN, day(2026, 6, 1), |book, run| {
+        let context = crate::Context::new(
+            book,
+            Options {
+                today: run.today,
+                relaxed: book.relaxed,
+            },
+            None,
+        )
+        .unwrap();
+        let query = Query::Available {
+            at: Some(day(2026, 12, 31)),
+        };
+        let shared = context.report(&query).unwrap();
+        let old = crate::report(book, context.run(), &query, None).unwrap();
+        assert_eq!(show(&shared), show(&old));
+        let reach = shared
+            .sections
+            .iter()
+            .find(|section| section.heading.as_deref() == Some("What it would take to reach the rest"))
+            .unwrap();
+        assert_eq!(
+            lines(reach)[0],
+            "assets/ira | 30d | 10,000.00 USD | 2,000.00 USD | 8,000.00 USD | driven by income-tax 2,000.00 USD"
+        );
+    });
+}
+
+#[test]
+fn a_context_scopes_views_to_the_named_owner() {
+    let source = "\
+base USD
+commodity USD
+  precision 2
+
+entity me
+entity jordan
+
+account assets/mine
+  owner me
+account assets/theirs
+  owner jordan
+
+opening 2026-01-01
+  mine   100 USD
+  theirs 200 USD
+";
+    with_run(source, day(2026, 1, 2), |book, run| {
+        let make = |owner| {
+            crate::Context::new(
+                book,
+                Options {
+                    today: run.today,
+                    relaxed: book.relaxed,
+                },
+                Some(owner),
+            )
+            .unwrap()
+        };
+        let query = Query::Balance {
+            globs: vec![],
+            at: None,
+            value: false,
+            monthly: false,
+        };
+        let mine = make("me").report(&query).unwrap();
+        let jordan = make("jordan").report(&query).unwrap();
+        assert!(show(&mine).contains("mine | 100.00 USD"));
+        assert!(!show(&mine).contains("theirs | 200.00 USD"));
+        assert!(show(&jordan).contains("theirs | 200.00 USD"));
+        assert!(!show(&jordan).contains("mine | 100.00 USD"));
     });
 }
 

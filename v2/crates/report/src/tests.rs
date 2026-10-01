@@ -781,6 +781,27 @@ fn a_past_date_and_monthly_columns_read_the_same_flows() {
 }
 
 #[test]
+fn the_legacy_report_keeps_the_run_its_caller_supplied() {
+    let mut house = household();
+    let checking = house.place("assets/bank/checking");
+    house
+        .run
+        .holdings
+        .iter_mut()
+        .find(|holding| holding.place == checking)
+        .unwrap()
+        .plain += Qty(100);
+    let report = crate::report(
+        &house.book,
+        &house.run,
+        &balance(vec!["checking"], None, false, false),
+        None,
+    )
+    .unwrap();
+    assert!(lines(&report.sections[0]).iter().any(|row| row == "    checking | 8,956.80 USD"));
+}
+
+#[test]
 fn today_from_the_run_and_from_the_flows_agree() {
     // The run's holdings answer for today; two days are one pass over the flows.
     let house = household();

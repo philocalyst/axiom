@@ -38,6 +38,12 @@ pub fn view<'s>(book: &Book<'s>, run: &Run, whose: &Whose, at: Option<Day>) -> R
     let mut ledger = plan.start(Options { today: horizon.max(run.today), relaxed: book.relaxed });
     // A withdrawal is a fact of `at`, so it comes before what closes that day (a month's or a year's end).
     ledger.advance_to_closing(at);
+    from_ledger(lens, run, &ledger, horizon)
+}
+
+/// Builds the view from the shared report context's checkpoint fork.
+pub(crate) fn from_ledger<'s>(lens: Lens<'_, 's>, run: &Run, ledger: &Ledger, horizon: Day) -> Report<'s> {
+    let (book, at) = (lens.book, lens.day);
 
     let holdings: Vec<&Holding> = ledger.holdings().collect();
     let (mut cash, mut slow) = (Vec::new(), Vec::new());

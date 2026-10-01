@@ -28,7 +28,18 @@ pub fn view<'s>(
     monthly: bool,
 ) -> Result<Report<'s>, Diagnostic> {
     let at = at.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, at);
+    view_with_lens(Lens::new(book, whose, at), run, globs, value, monthly)
+}
+
+/// Builds a balance view with names resolved by a shared report context.
+pub(crate) fn view_with_lens<'s>(
+    lens: Lens<'_, 's>,
+    run: &Run,
+    globs: &[&str],
+    value: bool,
+    monthly: bool,
+) -> Result<Report<'s>, Diagnostic> {
+    let (book, at) = (lens.book, lens.day);
     let selection = Selection::new(book, globs)?;
     let snapshots = Snapshots::of(lens, run, &column_days(book, at, monthly), value);
 

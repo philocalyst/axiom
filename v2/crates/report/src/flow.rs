@@ -29,7 +29,12 @@ pub fn view<'s>(
     to: Option<Day>,
 ) -> Report<'s> {
     let to = to.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, to);
+    view_with_lens(Lens::new(book, whose, to), run, by, from)
+}
+
+/// Builds an income statement with names resolved by a shared report context.
+pub(crate) fn view_with_lens<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>) -> Report<'s> {
+    let (book, to) = (lens.book, lens.day);
     let periods = match from {
         Some(from) => Periods::covering(by, from, to),
         None => {
