@@ -48,8 +48,61 @@ opening 2026-01-30
 2026-01-31 assets/checking = 50% of 100 USD
 ";
     with_run(text, day(2026, 1, 31), |book, run| {
-        assert!(run.diagnostics.iter().all(|diagnostic| diagnostic.code != "assertion"));
+        assert!(run.diagnostics.is_empty(), "the computed assertion evaluates and matches: {:?}", run.diagnostics);
         assert_eq!(holding(book, run, "assets/checking", "USD").unwrap().qty().0, 5_000);
+    });
+}
+
+#[test]
+fn a_computed_assertion_reports_its_evaluated_value_when_it_does_not_match() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+account assets/checking
+opening 2026-01-30
+  assets/checking 40 USD
+2026-01-31 assets/checking = 50% of 100 USD
+";
+    with_run(text, day(2026, 1, 31), |_, run| {
+        let mismatch = run
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "assertion")
+            .expect("the evaluated 50 USD assertion disagrees with the 40 USD balance");
+        assert!(mismatch.message.contains("50.00 USD"), "{mismatch:?}");
+        assert!(run.diagnostics.iter().all(|diagnostic| diagnostic.code != "assertion-expression"));
+    });
+}
+
+#[test]
+fn computed_asset_assertions_evaluate_in_asset_subject_context() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+kind property : thing
+  has land amount
+asset condo : property
+  land 120 USD
+2026-01-31 condo = 100% of self.land
+";
+    with_run(text, day(2026, 1, 31), |book, run| {
+        let asset = book.asset("condo").unwrap();
+        assert!(book.assets[asset].props.iter().any(|property| {
+            property.name == book.names.get("land").unwrap()
+                && matches!(
+                    property.value,
+                    axiom_model::Value::Amount(amount)
+                        if amount.qty == axiom_core::Qty(120_00) && amount.unit == book.base
+                )
+        }));
+        assert!(run.diagnostics.iter().any(|diagnostic| diagnostic.code == "assertion"));
+        assert!(
+            run.diagnostics.iter().all(|diagnostic| diagnostic.code != "assertion-expression"),
+            "asset `self.land` must not be evaluated as a Place: {:?}",
+            run.diagnostics
+        );
     });
 }
 

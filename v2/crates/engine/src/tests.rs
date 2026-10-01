@@ -197,7 +197,26 @@ fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
     let mut f = Fixture::new();
     let (equity, brokerage, savings, vti) = (f.equity, f.brokerage, f.savings, f.vti);
     let source = f.exchange(1, equity, Amount::new(Qty(5), vti), brokerage, Amount::new(Qty(5), vti));
-    let book = f.book();
+    let mut book = f.book();
+    let contract = book.contracts.push(Contract {
+        name: book.entities[book.roots.me].path,
+        party: book.roots.me,
+        owner: book.roots.me,
+        purpose: None,
+        description: None,
+        days: Days::ALWAYS,
+        terms: None,
+        standing: None,
+        buys: None,
+        deposit: None,
+        deposit_holding: None,
+        loan: None,
+        matching: None,
+        ended: None,
+        laws: Box::default(),
+        doc: None,
+        loc: Loc::default(),
+    });
     let mut flow = book.flows[source].clone();
     flow.txn = TEMPLATE_TXN;
     flow.day = Day(2);
@@ -205,13 +224,7 @@ fn runtime_contract_flows_keep_typed_occurrence_identity_in_acquired_lots() {
     flow.to = savings;
     flow.out = Amount::new(Qty(7), vti);
     flow.arrive = Amount::new(Qty(7), vti);
-    let txn = RuntimeTxn::ContractOccurrence {
-        contract: Id::new(0),
-        schedule: ScheduleKind::Regular,
-        day: Day(2),
-        ordinal: 0,
-        source: None,
-    };
+    let txn = RuntimeTxn::contract_occurrence(contract, ScheduleKind::Regular, Day(2), 0, None);
     let runtime = RuntimeFlow { flow, detail: None, txn };
     let plan = Plan::new(&book);
     let mut ledger = plan.start(Options { today: Day(3), relaxed: false });
@@ -431,7 +444,10 @@ fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
     assert_eq!(run.violations[0].cause, Cause::Time, "the limit breaks as the prepaid window opens");
     assert_eq!(run.checks[law.index()], 3, "the flow and both future months are evaluated once, despite reading two windows");
     assert_eq!(run.checks[flow_only.index()], 1, "an amount-only flow law does not run at month or year openings");
-    assert_eq!(run.effects.iter().filter(|effect| effect.law == law).count(), 1, "the count effect belongs to the real flow only");
+    let counted: Vec<_> = run.effects.iter().filter(|effect| effect.law == law).collect();
+    assert_eq!(counted.len(), 2, "the recognized span contributes one tally entry per year");
+    assert_eq!(counted.iter().map(|effect| effect.amount.qty).sum::<Qty>(), Qty(300_00));
+    assert!(counted.iter().all(|effect| effect.cause == Cause::Flow(prepaid)));
     assert!(run.diagnostics.iter().all(|diagnostic| diagnostic.code != "arithmetic"), "the flow-only count expression must not be evaluated at a window opening");
 }
 
@@ -522,7 +538,7 @@ fn plain_money_is_one_integer_per_place() {
     let book = f.book();
     let plan = Plan::new(&book);
     assert_eq!(plan.sides().sign(checking), 1);
-    assert_eq!(plan.sides().display(equity, Qty(20)), Qty(-20));
+    assert_eq!(plan.sides().display(equity, Qty(20)), Qty(20), "all Outside places use the same class sign");
     let run = run(&book, options());
     assert_eq!(qty(&run, checking, usd), 1_480_00);
     assert_eq!(qty(&run, food, usd), 20_00);
@@ -1688,7 +1704,7 @@ fn a_partial_sale_shortfall_does_not_duplicate_the_missing_lot_slice() {
     assert_eq!(run.gains.len(), 1);
     let gain = run.gains[0];
     assert_eq!((gain.qty, gain.basis, gain.proceeds, gain.gain()), (Qty(7), Qty(700_00), Qty(1_400_00), Qty(700_00)));
-    assert_eq!(qty(&run, brokerage, vti), 0);
+    assert_eq!(qty(&run, brokerage, vti), -3, "a sale shortfall is posted as an explicit negative holding");
     assert_eq!(qty(&run, checking, usd), 1_000_00 + 2_000_00 - 700_00);
 }
 

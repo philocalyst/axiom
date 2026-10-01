@@ -160,10 +160,11 @@ impl Ledger<'_, '_, '_> {
         // all activity of its owner. Runtime future flows already carry their
         // contract identity; journal occurrences resolve through their Txn.
         let contract = match m.txn {
-            RuntimeTxn::Journal(txn) => self.plan.book.txns[txn.id()].contract,
+            RuntimeTxn::Journal(txn) => self.plan.book.txns.get(txn.id()).and_then(|txn| txn.contract),
             RuntimeTxn::ContractOccurrence { contract, .. } => Some(contract),
             RuntimeTxn::Adjustment { .. } => None,
-        };
+        }
+        .filter(|&contract| self.plan.book.contracts.get(contract).is_some());
         if let Some(contract) = contract {
             let owner = self.plan.book.contracts[contract].owner;
             let within_owner = Subject::Entity(owner);

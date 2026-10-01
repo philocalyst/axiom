@@ -15,7 +15,7 @@
 //! basis and laws see it like any other, and recorded as a [`Pad`].
 
 use axiom_core::{Days, Id, Qty};
-use axiom_model::{Amount, Assert, Fault, Gap, Place, Subject, Value, Waive};
+use axiom_model::{Amount, Assert, Fault, Gap, Place, Value, Waive};
 
 use crate::eval::{self, Context, Env, Occasion};
 use crate::ledger::Ledger;
@@ -34,6 +34,7 @@ impl Ledger<'_, '_, '_> {
         let assert = Assert {
             day: source.day,
             place: source.place,
+            subject: source.subject,
             amount,
             computed: source.computed,
             gap: source.gap,
@@ -127,7 +128,7 @@ impl Ledger<'_, '_, '_> {
         let Some((program, root)) = assertion.computed else {
             return Some(assertion.amount);
         };
-        let subject = Subject::Place(assertion.place);
+        let subject = assertion.subject;
         let owner = owner_of(book, subject);
         let on = Occasion::time(assertion.day, Days::on(assertion.day));
         let ctx = Context::new(subject, owner, &on);

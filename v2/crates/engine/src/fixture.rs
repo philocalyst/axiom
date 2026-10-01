@@ -308,7 +308,15 @@ impl Fixture {
         let amount = self.usd(cents);
         let loc =
             Loc::new(FileId(0), 50_000 + self.asserts.len() as u32 * 100, 50_050 + self.asserts.len() as u32 * 100);
-        self.asserts.push(Assert { day: Day(day), place, amount, computed: None, gap: Gap::Refused, loc });
+        self.asserts.push(Assert {
+            day: Day(day),
+            place,
+            subject: axiom_model::Subject::Place(place),
+            amount,
+            computed: None,
+            gap: Gap::Refused,
+            loc,
+        });
     }
 
     /// Marks the last assertion `!`.
@@ -354,7 +362,15 @@ impl Fixture {
         let amount = self.vti(shares);
         let loc =
             Loc::new(FileId(0), 55_000 + self.asserts.len() as u32 * 100, 55_050 + self.asserts.len() as u32 * 100);
-        self.asserts.push(Assert { day: Day(day), place, amount, computed: None, gap: Gap::Refused, loc });
+        self.asserts.push(Assert {
+            day: Day(day),
+            place,
+            subject: axiom_model::Subject::Place(place),
+            amount,
+            computed: None,
+            gap: Gap::Refused,
+            loc,
+        });
     }
 
     /// Marks the last assertion `via` a place.
