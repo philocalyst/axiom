@@ -1,6 +1,6 @@
 //! Native purpose-budget declaration and dated terms lowering.
 
-use axiom_core::{Arena, Day, Days, Diagnostic, Id, Map, Period, Ratio, Set, Severity, Timeline};
+use axiom_core::{Arena, Day, Days, Diagnostic, Id, Map, Ratio, Set, Severity, Timeline};
 use axiom_syntax::{self as ast, DeclKind, ItemKind};
 
 use super::compile;
@@ -9,7 +9,6 @@ use crate::declare::World;
 use crate::errors::Word;
 use crate::law::{
     BinOp, Func, Law, Node, NodeId, Op, Owner, Rank, Step, StepKind, Trigger, Ty, Value, Var,
-    Window,
 };
 use crate::scope::Home;
 use crate::sources::Site;
@@ -286,30 +285,10 @@ fn lower_budget<'s>(
         has_starting_terms = true;
     }
 
-    // The Plan subscribes to every `Share.of` in this terms timeline. Keep
-    // the static dependency visible as a typed node until that scan is wired.
+    // The Plan reads Share dependencies from this effective terms timeline;
+    // do not duplicate those subscriptions as dead expression nodes.
     let budget_id = Id::new(world.book.budgets.len() as u32);
     let law_id = Id::new(world.book.laws.len() as u32);
-    let mut observed = Set::default();
-    for (_, terms) in timeline.within(Days::ALWAYS) {
-        if let Limit::Share { of, .. } = terms.limit
-            && observed.insert((of, terms.period))
-        {
-            push_node(
-                &mut nodes,
-                Op::Call(
-                    Func::PurposeTotal {
-                        purpose: Some(of),
-                        window: budget_window(terms.period),
-                    },
-                    Box::default(),
-                ),
-                Ty::AMOUNT,
-                first.loc,
-                None,
-            );
-        }
-    }
 
     let mut steps = Vec::new();
     if starts != Day::MIN {
@@ -431,13 +410,6 @@ fn lower_budget_terms<'s>(
             .unwrap_or_else(|| if entry.declared { false } else { prior.carries }),
         funded,
     })
-}
-
-fn budget_window(period: Period) -> Window {
-    match period {
-        Period::Month => Window::Month,
-        Period::Year => Window::Year,
-    }
 }
 
 fn lower_budget_limit<'s>(

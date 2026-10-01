@@ -125,21 +125,16 @@ fn native_budget_and_declaration_also_are_linked() {
         Limit::Share { .. }
     ));
     assert_eq!(book.laws[share_budget.law].budget, Some(share_id));
-    let pay = book
-        .purposes
-        .iter()
-        .find(|(_, purpose)| book.name(purpose.name) == "pay")
-        .map(|(id, _)| id)
-        .expect("pay purpose");
-    assert!(book.laws[share_budget.law].nodes.iter().any(|(_, node)| {
-        matches!(
-            node.op,
-            axiom_model::Op::Call(
-                Func::PurposeTotal { purpose: Some(of), window: axiom_model::Window::Year },
-                _
-            ) if of == pay
-        )
-    }));
+    assert!(
+        book.laws[share_budget.law]
+            .nodes
+            .iter()
+            .all(|(_, node)| !matches!(
+                node.op,
+                axiom_model::Op::Call(Func::PurposeTotal { .. }, _)
+            )),
+        "Share dependencies are derived from Budget.terms by Plan, not duplicated as unused law nodes"
+    );
     let source_selected_flow = book
         .also
         .iter()
