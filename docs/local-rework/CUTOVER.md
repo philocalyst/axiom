@@ -178,3 +178,42 @@ reduction is a measured structural observation, not an order-of-magnitude
 whole-process memory claim. Larger candidates being implemented are staged
 sync deltas instead of copying all account history, a source registry that
 borrows cached text, canonical owner-aware views and bounded provenance scans.
+
+## Current integration checkpoint, 2026-10-01 11:46 UTC
+
+The Mac executor briefly disconnected, then recovered on the same host. Work
+resumed from the persisted branches. Root promotion and full verification have
+not happened. No recovery source was changed, and neither original checkout has
+uncommitted changes.
+
+| Commits | Reviewed change | Coordinator verification |
+|---|---|---|
+| `bd46f33` | Read a sync target once; preserve explicit monitor-completeness state | Exact production sync primitive harness: 42 tests passed, three timing tests ignored. Full native planner acceptance remains pending |
+| `21b7bf9`, `7e69057` | Remove obsolete model name resolution and PathRoot/v3_root adapters | Model package compiled and tested on the integrated native dependency chain |
+| `013afcb`, `5ea30b4` | Unique earlier transaction references, then chronological code index; whole-asset opening and contract waiver/end timelines | Actual native-record integration suite: ten release tests passed. Waiver/end clause review corrections and runtime asset disposal remain pending |
+| `b574f8f`, `45a530f` | Inventory legacy model behaviors and add native declaration fixtures | Package at `45a530f`: 63 release tests passed. Many behavior rows remain pending or partial; deletion of stale tests does not close those rows |
+| `8783fb3`, `95b0703`, `61effa8`, `d39ae3d` | Plan-backed report views, canonical runtime-flow APIs and owner-scoped available/forecast calculations | Lane report library compiles on its checkpoint. Native report fixture migration, future occurrence materialization and independent owner-scoped financial checks remain pending |
+| `e504307`, `e4a3d07` | Local read-only memo suggestions and grouped JSON check hints | API/source review. Integrated CLI tests await consumer and fixture migration |
+| `9f4a2cc`, `19591e7` | Typed asset-part state, checked cost/basis adjustments, indexed identity and temporal boundaries | Lane exact-source asset harness: eight tests passed. Asset table is not yet wired into the canonical ledger fold |
+| `cc872c7`, `4f80a4c`, `8dc8245` | Fully dated budget terms, inherited omitted settings, deterministic IDs and atomic refusal of malformed initial budgets/Also lines | Package before final refusal additions: 66 release tests passed. Lane final native-law suite: six passed. Runtime budget migration is the current workspace compile blocker |
+| `4c2f893`, `aee7de8` | Build stable grouped tables with two borrowed passes and no pair/order copies | Coordinator: core/syntax 136 release tests passed, one pre-existing ignored doctest; integrated benchmark verifies every bucket against the previous builder |
+
+The integrated grouped-table benchmark used 100,000 values/2,000 keys and
+1,000,000 values/20,000 keys. It reduced allocation calls from four to two.
+Requested and peak additional bytes fell from 1,608,004 to 408,004 at the smaller
+scale, and from 16,080,004 to 4,080,004 at the larger scale. Retained result bytes
+are unchanged. This run measured 369.034 to 191.965 microseconds per small build
+and 4.061597 to 2.173166 milliseconds per large build (about 1.9 times faster).
+These are operation-level measurements, not a whole-process memory or latency
+claim. Production callers borrow staging vectors; cloning an owned Vec iterator
+would reintroduce the copy and is avoided.
+
+Logs are saved outside the repository under `verification/cutover/`, including
+`groups-integrated-bench.log`, `native-core-syntax-groups-tests.log`,
+`native-model-integrated-budget-tests.log` and
+`native-workspace-consumer-check.log`. The last workspace check stops at three
+engine errors caused by the new BudgetTerms/BudgetTotal dependency. Financial
+monitoring, shared occurrence/journal expression evaluation, part-aware assets,
+native standard systems and corpus migration still need execution evidence.
+The source count at `8dc8245` was 48,420 non-test lines; the historical 24,000-line
+target is not met. Legacy root source and `v2-previous/` remain until promotion.
