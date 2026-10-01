@@ -668,6 +668,67 @@ fn broken<'r>(book: &Book, run: &'r Run) -> Vec<&'r str> {
 }
 
 #[test]
+fn native_budget_limit_is_evaluated_from_its_linked_budget() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+purpose food : spending
+budget food 100 USD monthly
+account checking
+entity landlord
+opening 2025-09-01
+  checking 500 USD
+2025-09-05 checking -> landlord 101 USD #food
+";
+    with_run(&text, day(2025, 9, 30), |book, run| {
+        assert!(run.diagnostics.iter().all(|diagnostic| diagnostic.code != "assertion-expression"));
+        let (_, budget) = book.budgets.iter().next().expect("native budget declaration");
+        let violations: Vec<_> = run.violations.iter().filter(|violation| violation.law == budget.law).collect();
+        assert_eq!(violations.len(), 1, "the native monthly budget should fire once: {violations:?}");
+        let message = &run.diagnostics[violations[0].diagnostic as usize].message;
+        assert!(
+            message.contains("101.00 USD") && message.contains("100.00 USD"),
+            "the generated law must read the linked Budget limit: {}",
+            message
+        );
+        let headroom = run.headroom.iter().find(|read| read.law == budget.law).expect("budget comparison reading");
+        assert_eq!(headroom.counted.qty.0, 101_00);
+        assert_eq!(headroom.limit.qty.0, 100_00);
+    });
+}
+
+#[test]
+fn native_share_budget_reads_the_other_purpose_total() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+purpose earnings : income
+purpose fun : spending
+budget fun 10% of #earnings monthly
+account checking
+entity employer
+entity cinema
+2025-09-01 employer -> checking 1_000 USD #earnings
+2025-09-05 checking -> cinema 120 USD #fun
+";
+    with_run(&text, day(2025, 9, 30), |book, run| {
+        let (_, budget) = book.budgets.iter().next().expect("native share budget declaration");
+        let violations: Vec<_> = run.violations.iter().filter(|violation| violation.law == budget.law).collect();
+        assert_eq!(violations.len(), 1, "the 10% allowance is exceeded: {violations:?}");
+        let message = &run.diagnostics[violations[0].diagnostic as usize].message;
+        assert!(
+            message.contains("120.00 USD") && message.contains("100.00 USD"),
+            "the generated law must scale #earnings by the linked rate: {message}"
+        );
+        let headroom = run.headroom.iter().find(|read| read.law == budget.law).expect("budget comparison reading");
+        assert_eq!(headroom.counted.qty.0, 120_00);
+        assert_eq!(headroom.limit.qty.0, 100_00);
+    });
+}
+
+#[test]
 fn a_flow_recognized_for_next_year_is_in_next_years_headroom_before_anything_else_lands_there() {
     let text = format!("{INSURANCE}2025-12-12 checking -> insurance 1_140 USD for 2026\n");
     with_run(&text, day(2026, 2, 14), |book, run| {

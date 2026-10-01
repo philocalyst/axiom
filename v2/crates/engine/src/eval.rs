@@ -544,7 +544,7 @@ impl<'a, 's> Machine<'a, 's> {
             Op::Local(bound) => self.at(*bound),
             Op::Field(base, field) => self.field(self.at(*base), *field),
             Op::Param(param, keys) => self.param(*param, keys),
-            Op::Call(func, args) => self.call(*func, args),
+            Op::Call(func, args) => self.call(NodeId(at as u32), *func, args),
             Op::Neg(x) => match self.at(*x) {
                 Value::Amount(a) => Value::Amount(Amount::new(-a.qty, a.unit)),
                 Value::Num(n) => Value::Num(-n),
@@ -798,7 +798,7 @@ impl<'a, 's> Machine<'a, 's> {
         }
     }
 
-    fn call(&self, func: Func, args: &[NodeId]) -> Value {
+    fn call(&self, at: NodeId, func: Func, args: &[NodeId]) -> Value {
         let arg = |i: usize| self.at(args[i]);
         // `total` and `tally` take their operands from the function itself.
         let operands = !matches!(
@@ -816,6 +816,7 @@ impl<'a, 's> Machine<'a, 's> {
         match func {
             Func::Total(dir, window) => self.total(dir, window, args),
             Func::PurposeTotal { purpose, window } => self.purpose_total(purpose, window),
+            Func::BudgetLimit(budget) => self.budget_limit(budget, at),
             Func::Tally(name) => self.tally(name, Func::tally_year(args).map(|year| self.at(year))),
             Func::Min => self.pick(BinOp::Le, arg(0), arg(1)),
             Func::Max => self.pick(BinOp::Ge, arg(0), arg(1)),
@@ -865,6 +866,46 @@ impl<'a, 's> Machine<'a, 's> {
             | axiom_model::PurposeRoot::Transfer => outgoing - incoming,
         };
         self.base(total)
+    }
+
+    /// The allowance in force for a generated native budget law. Computed
+    /// limits are roots earlier in that law's shared node arena; share limits
+    /// read the declared purpose total for the budget's own period.
+    fn budget_limit(&self, id: Id<axiom_model::Budget>, at: NodeId) -> Value {
+        let Some(budget) = self.book().budgets.get(id) else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let Some(law) = self.law.filter(|law| law.budget == Some(id)) else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let window = match budget.period {
+            axiom_core::Period::Month => Window::Month,
+            axiom_core::Period::Year => Window::Year,
+        };
+        match *budget.limits.at(self.ctx.day) {
+            axiom_model::Limit::Amount(amount) => Value::Amount(amount),
+            axiom_model::Limit::Share { rate, of } => {
+                let total = self.purpose_total(Some(of), window);
+                match total {
+                    Value::Amount(amount) => amount
+                        .qty
+                        .scale(rate)
+                        .map_or(Value::Fault(Fault::Overflow), |qty| {
+                            Value::Amount(Amount::new(qty, amount.unit))
+                        }),
+                    other => other,
+                }
+            }
+            axiom_model::Limit::Computed(root) => {
+                if root >= at || root.index() >= self.values.len() || law.budget != Some(id) {
+                    return Value::Fault(Fault::InvalidProgram);
+                }
+                match self.at(root) {
+                    value @ (Value::Amount(_) | Value::Fault(_)) => value,
+                    _ => Value::Fault(Fault::InvalidProgram),
+                }
+            }
+        }
     }
 
     fn straight_line(&self, args: &[NodeId]) -> Value {
