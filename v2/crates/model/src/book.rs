@@ -15,7 +15,7 @@ use crate::journal::{
     Assert, Detail, Event, Filed, Flow, FlowView, Infer, Measure, Mode, Origin, Plan, Prices, Purposed, Reading,
     RuntimeDetail, RuntimeFlow, Select, Split, Txn,
 };
-use crate::law::{Fault, Law, NodeId, Rules, Ty, Value};
+use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
 use crate::names::{Names, Scoped};
 use crate::sync::{Format, Pattern, Source};
 
@@ -480,7 +480,7 @@ pub struct Commodity {
 /// A node of the purpose tree: `groceries : food`.
 pub struct Purpose {
     pub name: Sym,
-    /// Which of the three roots it descends from.
+    /// Which of the four roots it descends from.
     pub root: PurposeRoot,
     pub system: Option<Id<System>>,
     /// `of KIND`: it takes an object of this kind (`improvement of thing`).
@@ -494,11 +494,14 @@ pub struct Purpose {
 }
 
 impl Purpose {
-    /// The purpose tree of a book that declares none: `income`, `spending` and
-    /// `capital`, in that order.
-    pub fn roots<'s>(names: &mut Interner<'s>) -> (Tree<Purpose>, [Id<Purpose>; 3]) {
-        let roots =
-            [("income", PurposeRoot::Income), ("spending", PurposeRoot::Spending), ("capital", PurposeRoot::Capital)];
+    /// The four disjoint purpose roots, in stable declaration order.
+    pub fn roots<'s>(names: &mut Interner<'s>) -> (Tree<Purpose>, [Id<Purpose>; 4]) {
+        let roots = [
+            ("income", PurposeRoot::Income),
+            ("spending", PurposeRoot::Spending),
+            ("capital", PurposeRoot::Capital),
+            ("transfer", PurposeRoot::Transfer),
+        ];
         let items = roots.map(|(name, root)| Purpose {
             name: names.intern(name),
             root,
@@ -509,8 +512,8 @@ impl Purpose {
             doc: None,
             loc: None,
         });
-        let (tree, ids) = Tree::build(items.into(), &[None; 3]).expect("roots have no parents");
-        (tree, [ids[0], ids[1], ids[2]])
+        let (tree, ids) = Tree::build(items.into(), &[None; 4]).expect("roots have no parents");
+        (tree, [ids[0], ids[1], ids[2], ids[3]])
     }
 }
 
@@ -601,11 +604,12 @@ pub struct Terms {
     /// Occurrences step from here: the contract's first day, or the day a
     /// statement changed the cadence.
     pub anchor: Day,
-    /// One occurrence's flows, dated `anchor`. An occurrence re-dates a copy,
-    /// with the journal's overrides. Input-dependent amounts need a supplied
-    /// occurrence value; forecasting returns `MissingInput` while it is absent.
-    /// Loan flows may be derived and have no explicit template.
-    pub template: Box<[Flow]>,
+    /// One occurrence's typed flow templates, dated `anchor`. Computed amounts
+    /// point into `program`; the engine evaluates them with this occurrence's
+    /// input bindings instead of reparsing source text.
+    pub template: Box<[TemplateFlow]>,
+    /// Shared law IR for the computed sides of this term's flow templates.
+    pub program: TemplateProgram,
     /// `input water USD`: names occurrences may state (`water = 155.00 USD`).
     pub inputs: Box<[Input]>,
     /// `about`: each occurrence states its own amount; the template's is the
@@ -650,6 +654,22 @@ pub struct Input {
     pub name: Sym,
     pub unit: Option<Id<Commodity>>,
     pub loc: Loc,
+}
+
+/// Typed expressions used by one stretch of contract terms. The node arena is
+/// immutable after lowering and can be evaluated with reusable engine scratch.
+#[derive(Clone, PartialEq, Debug, Default)]
+pub struct TemplateProgram {
+    pub nodes: Box<[Node]>,
+}
+
+/// A contract flow whose uncommon computed sides refer into its term program.
+/// Literal sides stay inline in `flow`; `Some` roots must always be evaluated.
+#[derive(Clone, PartialEq, Debug)]
+pub struct TemplateFlow {
+    pub flow: Flow,
+    pub out: Option<NodeId>,
+    pub arrive: Option<NodeId>,
 }
 
 /// A deadline after the due day, and what its passing adds.

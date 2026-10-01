@@ -11,14 +11,14 @@
 //! any error is dropped whole.
 
 use axiom_core::glob::is_pattern;
-use axiom_core::{Diagnostic, Id, Loc, Severity, Sym};
+use axiom_core::{Diagnostic, Dim, Id, Loc, Severity, Sym};
 use axiom_syntax::{
     self as ast, BinOp, Effect as WrittenEffect, ExprId, ExprKind, File, StepKind as WrittenStep, UnOp,
 };
 
 use super::types::{binary, expected, is_test, mismatch, negate, unify};
 use super::vars::When;
-use crate::book::{Entity, Param};
+use crate::book::{Entity, Input, Param, TemplateProgram};
 use crate::declare::World;
 use crate::errors::{Word, article, count, list, suggest};
 use crate::law::{
@@ -95,10 +95,48 @@ pub(crate) fn compile<'s>(
         poisoned: Vec::new(),
         roles: Vec::new(),
         locals: Vec::new(),
+        inputs: &[],
         when: When::of(&law.trigger),
         failed: false,
     };
     compiler.law(site, law)
+}
+
+/// Compiles the expressions used by a contract term's flow templates into one
+/// shared arena. Roots retain their declaration order and inputs resolve by
+/// their stable index in `inputs`.
+pub(crate) fn compile_template<'s>(
+    world: &mut World<'s>,
+    diags: &mut Vec<Diagnostic>,
+    file: &File<'s>,
+    home: Home,
+    subject: Ty,
+    name: Sym,
+    inputs: &[Input],
+    roots: &[(ExprId, Ty)],
+) -> Option<(TemplateProgram, Box<[NodeId]>)> {
+    let mut compiler = Compiler {
+        world,
+        diags,
+        file,
+        home,
+        subject,
+        law_name: name,
+        first: 0,
+        base: 0,
+        nodes: Vec::new(),
+        poisoned: Vec::new(),
+        roles: Vec::new(),
+        locals: Vec::new(),
+        inputs,
+        when: When::Template,
+        failed: false,
+    };
+    let compiled: Vec<NodeId> = roots.iter().filter_map(|&(root, want)| compiler.expression(root, want)).collect();
+    if compiler.failed || compiled.len() != roots.len() {
+        return None;
+    }
+    Some((TemplateProgram { nodes: std::mem::take(&mut compiler.nodes).into() }, compiled.into()))
 }
 
 struct Compiler<'w, 'a, 's> {
@@ -118,6 +156,7 @@ struct Compiler<'w, 'a, 's> {
     roles: Vec<Role>,
     /// `let` bindings in scope, and the node holding each value.
     locals: Vec<(&'s str, NodeId)>,
+    inputs: &'a [Input],
     when: When,
     failed: bool,
 }
@@ -358,6 +397,19 @@ impl<'s> Compiler<'_, '_, 's> {
                 if let Some(&(_, bound)) = self.locals.iter().rev().find(|(local, _)| *local == word.text) {
                     return self.local(bound);
                 }
+                if let Some((index, input)) = self
+                    .inputs
+                    .iter()
+                    .enumerate()
+                    .find(|(_, input)| self.world.book.name(input.name) == word.text)
+                {
+                    let index = u16::try_from(index).map_err(|_| {
+                        Diagnostic::error("too-many-inputs", "a contract has too many inputs")
+                            .label(input.loc, "input index exceeds the language limit")
+                    })?;
+                    let ty = input.unit.map_or(Dim::Any, Dim::Of);
+                    return Ok((Op::Var(Var::Input(index)), Ty::Amount(ty)));
+                }
                 if let Some(var) = Var::parse(word.text) {
                     return self.variable(var, word);
                 }
@@ -378,7 +430,14 @@ impl<'s> Compiler<'_, '_, 's> {
 
     fn variable(&self, var: Var, word: Word) -> Check<(Op, Ty)> {
         if var.provided_by(self.when) {
-            return Ok((Op::Var(var), var.ty(self.subject)));
+            let ty = match var {
+                Var::Input(index) => self
+                    .inputs
+                    .get(index as usize)
+                    .map_or(Ty::AMOUNT, |input| Ty::Amount(input.unit.map_or(Dim::Any, Dim::Of))),
+                _ => var.ty(self.subject),
+            };
+            return Ok((Op::Var(var), ty));
         }
         let mut diagnostic = Diagnostic::error("law-variable", format!("`{}` is not available in this law", word.text));
         if self.when == When::Deadline {
@@ -428,6 +487,7 @@ impl<'s> Compiler<'_, '_, 's> {
         let mut known: Vec<&str> =
             Var::words().filter(|name| Var::parse(name).is_some_and(|var| var.provided_by(self.when))).collect();
         known.extend(self.locals.iter().map(|(local, _)| *local));
+        known.extend(self.inputs.iter().map(|input| self.world.book.name(input.name)));
         let (names, lookup) = (&self.world.book.names, &self.world.book.lookup);
         let scope = self.world.scopes.of(self.home);
         known.extend(lookup.params.names.keys(names));

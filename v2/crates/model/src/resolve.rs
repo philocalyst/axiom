@@ -10,7 +10,7 @@ use axiom_core::diag::closest;
 use axiom_core::num::DecError;
 use axiom_core::{Dec, Diagnostic, Id, Loc, Map, Sym};
 
-use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, PathRoot, Place, System, Taken};
+use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, PathRoot, Place, Purpose, System, Taken};
 use crate::declare::{World, near_place};
 use crate::errors::{Candidate, Word, ambiguous, count, list, list_and, not_used, unknown};
 use crate::kinds;
@@ -158,6 +158,53 @@ impl<'s> World<'s> {
 
     pub fn entity(&self, home: Home, word: Word) -> Result<Id<Entity>, Diagnostic> {
         self.seek_entity(home, word)?.ok_or_else(|| self.missing_entity(home, word))
+    }
+
+    // ─── Purposes ───────────────────────────────────────────────────────────
+
+    /// A purpose visible from this declaration's system or the project.
+    pub fn seek_purpose(&self, home: Home, word: Word) -> Seek<Purpose> {
+        let (lookup, scope) = (&self.book.lookup.purposes, self.scopes.of(home));
+        match lookup.find(&self.book.names, scope, word.text) {
+            Found::One(purpose) => Ok(Some(purpose)),
+            Found::Nothing => Ok(None),
+            Found::Several(ids) => Err(self.ambiguous_purpose(word, &ids)),
+        }
+    }
+
+    fn ambiguous_purpose(&self, word: Word, ids: &[Id<Purpose>]) -> Diagnostic {
+        let purposes = &self.book.purposes;
+        let candidates = self.candidates(
+            &self.book.lookup.purposes.names,
+            ids,
+            |id| purposes[id].name,
+            |id| purposes[id].loc,
+        );
+        ambiguous("ambiguous-purpose", "purposes", word, &candidates)
+    }
+
+    fn missing_purpose(&self, home: Home, word: Word) -> Diagnostic {
+        let (lookup, names) = (&self.book.lookup.purposes, &self.book.names);
+        let suggestion = lookup.resolve(names, self.scopes.of(home), word.text).err().and_then(|miss| match miss {
+            Miss::Unknown { suggestion } => suggestion,
+            Miss::Ambiguous(_) => None,
+        });
+        let mut diagnostic = unknown("unknown-purpose", "purpose", word, suggestion.map(|sym| names.name(sym)));
+        for &hidden in lookup.names.candidates(names, word.text) {
+            if let Home::System(system) = lookup.home(hidden) {
+                diagnostic = not_used(
+                    diagnostic,
+                    "purpose",
+                    word.text,
+                    self.book.name(self.book.systems[system].path),
+                );
+            }
+        }
+        diagnostic
+    }
+
+    pub fn purpose(&self, home: Home, word: Word) -> Result<Id<Purpose>, Diagnostic> {
+        self.seek_purpose(home, word)?.ok_or_else(|| self.missing_purpose(home, word))
     }
 
     // ─── Places ─────────────────────────────────────────────────────────────

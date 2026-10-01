@@ -17,6 +17,7 @@ use axiom_core::{Diagnostic, Id, Set, Severity};
 use axiom_syntax::{self as ast, BinOp, DeclKind, Trigger as Written};
 
 use self::compile::{Placement, compile};
+pub(crate) use self::compile::compile_template;
 pub(crate) use self::order::rank;
 use crate::book::{Kind, Sort, System};
 use crate::collect::Entry;

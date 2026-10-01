@@ -16,6 +16,7 @@ pub(crate) enum When {
     Each,
     By,
     Always,
+    Template,
 }
 
 impl When {
@@ -43,6 +44,7 @@ impl When {
             When::Spend => "`on spend`",
             When::Each => "`each month` or `each year`",
             When::Always => "`always`",
+            When::Template => "a contract template",
         }
     }
 }
@@ -77,17 +79,17 @@ impl Var {
 
     /// Whether an expression running at `when` may read this variable.
     pub(crate) fn provided_by(self, when: When) -> bool {
-        let flow = matches!(when, When::In | When::Out | When::Gain | When::Spend);
+        let flow = matches!(when, When::In | When::Out | When::Gain | When::Spend | When::Template);
         match self {
             Var::Subject | Var::Owner => true,
             Var::Date | Var::Year | Var::Month => when != When::Deadline,
             Var::Amount | Var::From | Var::To | Var::Flow => flow,
-            // v3 bridge: no v3 trigger knows what a flow is for.
-            Var::Purpose | Var::Description => false,
+            Var::Purpose | Var::Description => when == When::Template,
             Var::Payee => flow && when != When::Gain,
             Var::Gain | Var::Proceeds | Var::Basis | Var::Held => when == When::Gain,
             Var::Balance => when == When::Always,
             Var::Remaining => matches!(when, When::Spend | When::Each | When::By),
+            Var::Input(_) => when == When::Template,
         }
     }
 
@@ -109,6 +111,7 @@ impl Var {
             Var::Flow => Ty::Flow,
             Var::Purpose => Ty::Purpose,
             Var::Description => Ty::Text,
+            Var::Input(_) => Ty::AMOUNT,
         }
     }
 }

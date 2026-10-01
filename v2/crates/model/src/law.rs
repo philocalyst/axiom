@@ -186,7 +186,7 @@ impl NodeId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Node {
     pub op: Op,
     /// Statically checked: evaluation never meets a type it did not expect.
@@ -196,7 +196,7 @@ pub struct Node {
     pub first: NodeId,
 }
 
-#[derive(Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum Op {
     /// A literal, or a name resolved at compile time. Arguments folded into a
     /// [`Func`] (`in`, `year` in `total(in, year)`) stay as constants.
@@ -250,6 +250,9 @@ pub enum Var {
     Purpose,
     /// The triggering flow's words: `"food for the routine"`.
     Description,
+    /// An input bound by one contract occurrence, indexed by its declaration
+    /// order in `Terms.inputs`.
+    Input(u16),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
