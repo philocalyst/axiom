@@ -75,7 +75,11 @@ impl<'s> Parser<'s> {
         match self.tok() {
             Tok::Punct(Punct::Eq) => {
                 self.bump();
-                self.signed_literal().map(|literal| Verb::Value(Amount::Literal(literal)))
+                if self.at(Punct::Minus) {
+                    self.signed_literal().map(|literal| Verb::Value(Amount::Literal(literal)))
+                } else {
+                    self.amount(scope).map(Verb::Value)
+                }
             }
             Tok::Name(word) => self.word_verb(scope, subject, word),
             _ => self.occurrence(subject),

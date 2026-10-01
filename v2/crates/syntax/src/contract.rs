@@ -120,7 +120,24 @@ impl<'s> Parser<'s> {
     fn at_schedule(&self) -> bool {
         match self.tok() {
             Tok::Name("about" | "buy") => true,
-            Tok::Name(_) => self.at_cadence(),
+            Tok::Name(_) => {
+                if self.at_cadence() {
+                    return true;
+                }
+                let mut ahead = self.lexer.clone();
+                ahead.bump();
+                matches!(ahead.peek().tok, Tok::Name(word) if is_cadence(word))
+            }
+            Tok::Code(_) => {
+                let mut ahead = self.lexer.clone();
+                ahead.bump();
+                matches!(ahead.peek().tok, Tok::Name(word) if is_cadence(word))
+            }
+            Tok::Percent(_) | Tok::Fraction(..) | Tok::Punct(Punct::LParen) => {
+                let mut ahead = self.lexer.clone();
+                ahead.bump();
+                !matches!(ahead.peek().tok, Tok::Eol | Tok::Str(_) | Tok::Code(_) | Tok::Purpose(_))
+            }
             Tok::Number(_) => {
                 let mut ahead = self.lexer.clone();
                 ahead.bump();
@@ -182,6 +199,10 @@ impl<'s> Parser<'s> {
                 self.keyword("for")?;
                 Some(Payment::Buy { unit, spend: self.amount(scope)? })
             }
+            Tok::Percent(_) | Tok::Fraction(..) | Tok::Code(_) | Tok::Punct(Punct::LParen) => {
+                Some(Payment::Fixed(self.amount(scope)?))
+            }
+            Tok::Name(_) if !self.at_cadence() => Some(Payment::Fixed(self.amount(scope)?)),
             _ => None,
         };
         let cadence = self.cadence()?;

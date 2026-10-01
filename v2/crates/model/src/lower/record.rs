@@ -1,7 +1,7 @@
 //! Native S5 journal records. This pass reads the source AST directly and
 //! appends resolved records to the pooled Book arenas.
 
-use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Qty, Run, Span};
+use axiom_core::{Day, Days, Diagnostic, Dim, Groups, Id, Loc, Map, Qty, Run, Span};
 use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, ItemKind, Quantity, Subject};
 
@@ -118,11 +118,6 @@ pub(crate) fn record<'a, 's>(
         .sum();
     world.book.txns.reserve(dated.len());
     world.book.flows.reserve(expected_flows);
-    world.book.codes.reserve(dated.len().saturating_mul(2));
-    world
-        .book
-        .selectors
-        .reserve(expected_flows.saturating_mul(2));
 
     for record in dated {
         let site = &sites[record.site as usize];
@@ -135,6 +130,15 @@ pub(crate) fn record<'a, 's>(
             _ => unreachable!("dated index only contains journal records"),
         }
     }
+
+    let places = world.book.places.len();
+    world.book.touching = Groups::build(
+        places,
+        world.book.flows.iter().flat_map(|(flow_id, flow)| {
+            let ends = [(flow.from, flow_id), (flow.to, flow_id)];
+            ends.into_iter().take(1 + usize::from(flow.from != flow.to))
+        }),
+    );
 }
 
 fn lower_txn<'a, 's>(
@@ -864,55 +868,55 @@ fn lower_value<'s>(
     value: ast::Amount<'s>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let ast::Amount::Literal(literal) = value else {
-        diags.push(
-            Diagnostic::error("computed-value", "a value assertion needs a literal amount").label(
-                loc,
-                "computed assertions are not yet retained by the journal",
-            ),
-        );
-        return;
-    };
     let target = statement_target(world, home, file, statement.subject, diags);
     let Some(target) = target else { return };
     match target {
         StatementTarget::Place(place) => {
             let fallback = match world.book.places[place].holds.as_deref() {
-                Some([unit]) => Some(*unit),
-                _ => Some(world.book.base),
-            };
-            let Some(amount) = literal_amount(world, file, literal, fallback, diags) else {
-                return;
+                Some([unit]) => *unit,
+                _ => world.book.base,
             };
             let Some(gap) = assertion_gap(world, home, file, statement, diags) else {
+                return;
+            };
+            let Some((amount, computed)) =
+                assertion_amount(world, home, file, value, fallback, diags)
+            else {
                 return;
             };
             world.book.asserts.push(Assert {
                 day: statement.date,
                 place,
                 amount,
+                computed,
                 gap,
                 loc,
             });
         }
         StatementTarget::Asset(asset) => {
             let place = world.book.assets[asset].place;
-            let Some(amount) = literal_amount(world, file, literal, Some(world.book.base), diags)
-            else {
+            let Some(gap) = assertion_gap(world, home, file, statement, diags) else {
                 return;
             };
-            let Some(gap) = assertion_gap(world, home, file, statement, diags) else {
+            let Some((amount, computed)) =
+                assertion_amount(world, home, file, value, world.book.base, diags)
+            else {
                 return;
             };
             world.book.asserts.push(Assert {
                 day: statement.date,
                 place,
                 amount,
+                computed,
                 gap,
                 loc,
             });
         }
         StatementTarget::Code(code) => {
+            let ast::Amount::Literal(literal) = value else {
+                unsupported_computed_value(loc, "a named measure reading", diags);
+                return;
+            };
             let Some(amount) = literal_amount(world, file, literal, Some(world.book.base), diags)
             else {
                 return;
@@ -925,6 +929,10 @@ fn lower_value<'s>(
             });
         }
         StatementTarget::Unit(unit) => {
+            let ast::Amount::Literal(literal) = value else {
+                unsupported_computed_value(loc, "a price quote", diags);
+                return;
+            };
             let Some(quote_name) = literal.unit() else {
                 diags.push(
                     Diagnostic::error("price-unit", "a price needs a quoted commodity")
@@ -968,6 +976,56 @@ fn lower_value<'s>(
             diags,
         ),
     }
+}
+
+fn assertion_amount<'s>(
+    world: &mut World<'s>,
+    home: Home,
+    file: &ast::File<'s>,
+    value: ast::Amount<'s>,
+    fallback: Id<crate::book::Commodity>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<(Amount, Option<(Id<crate::book::TemplateProgram>, NodeId)>)> {
+    match value {
+        ast::Amount::Literal(literal) => {
+            literal_amount(world, file, literal, Some(fallback), diags).map(|amount| (amount, None))
+        }
+        ast::Amount::Computed(root) => {
+            let name = world.book.names.intern("assertion");
+            let (program, roots) = crate::laws::compile_template(
+                world,
+                diags,
+                file,
+                home,
+                Ty::Place,
+                name,
+                &[],
+                &[(root, Ty::AMOUNT)],
+            )?;
+            let [root] = roots.as_ref() else {
+                return None;
+            };
+            let unit = match program.nodes[*root].typed_ty() {
+                Some(Ty::Amount(Dim::Of(unit))) => unit,
+                _ => fallback,
+            };
+            let program = world.book.assertion_programs.push(program);
+            Some((
+                Amount::zero(unit),
+                Some((program, *root)),
+            ))
+        }
+    }
+}
+
+fn unsupported_computed_value(loc: Loc, subject: &str, diags: &mut Vec<Diagnostic>) {
+    diags.push(
+        Diagnostic::error(
+            "computed-value-subject",
+            format!("computed values are not supported for {subject}"),
+        )
+        .label(loc, "write a literal amount here"),
+    );
 }
 
 fn assertion_gap<'s>(
