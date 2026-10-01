@@ -186,6 +186,20 @@ jordan_deferral = total(lambda f: f["dst"] == "jordan-401k" and tagged(f, "house
 hsa_payroll = total(lambda f: f["dst"] == "hsa" and tagged(f, "household-pre-tax"))
 dcfsa_payroll = total(lambda f: f["dst"] == "dcfsa" and tagged(f, "household-pre-tax"))
 
+# These journal rhythms were the source of the old forecast's standing monthly
+# transfers. Keep them in history rather than inventing counterparty contracts.
+monthly_529 = [f for f in flows if f["src"] == "joint-checking" and
+               f["dst"] == "riley-529" and tagged(f, "contribution")]
+monthly_savings = [f for f in flows if f["src"] == "joint-checking" and
+                   f["dst"] == "joint-savings"]
+for label, rows, expected_amount, expected_day in (
+    ("529 transfer", monthly_529, D(250), 8),
+    ("savings transfer", monthly_savings, D(2_800), 10),
+):
+    if (len(rows) != 12 or [r["day"].month for r in rows] != list(range(1, 13)) or
+            any(r["day"].day != expected_day or r["amount"] != expected_amount for r in rows)):
+        raise AssertionError(f"{label}: monthly journal rhythm changed")
+
 # Reconcile the independently recomputed values against the long-standing hand
 # oracle. These assertions intentionally make source changes fail loudly.
 expected = {
@@ -238,6 +252,8 @@ print("taxable", taxable, "income tax", income_tax, "credit", credit,
       "total tax", total_tax, "federal payments", federal, "owed", owed)
 print("California taxable", ca_taxable, "tax", ca_tax, "withheld", state - D(412),
       "owed", ca_owed)
+print("history-derived monthly transfers: 529", len(monthly_529), "× 250 USD; savings",
+      len(monthly_savings), "× 2,800 USD")
 print("limits: Alex 401(k)", alex_deferral, "of 23,500 ->", D(23_500) - alex_deferral,
       "| Jordan", jordan_deferral, "of 23,500 ->", D(23_500) - jordan_deferral,
       "| HSA", hsa_payroll + D(1_000), "of 8,550 ->", D(8_550) - hsa_payroll - D(1_000),

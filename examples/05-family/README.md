@@ -78,12 +78,10 @@ independent arithmetic oracle passes. These checks do not establish that every
 flow has been folded into the expected runtime tax, purpose, and balance reports.
 
 The journal retains the monthly 250.00 USD checking-to-529 contributions and
-2,800.00 USD checking-to-savings transfers from 2025. The current future contracts
-do not yet encode those elective owner-to-owner transfers. A combined scheduled
-`from account into account` form was rejected by the native model inventory, so
-the port does not invent a different direction or duplicate the transfer. Future
-projection of those choices remains open until the model has a source-equivalent
-form.
+2,800.00 USD checking-to-savings transfers from 2025. They remain history-derived
+rhythms rather than newly invented outside-party contracts. The independent
+verifier checks all 12 monthly rows and their dates and amounts; the native runtime
+forecast still needs an end-to-end regression after the engine fold integration.
 
 Files under `outputs/` and the corresponding old golden snapshots were produced
 before the v4 source conversion. They are retained as historical evidence and are
