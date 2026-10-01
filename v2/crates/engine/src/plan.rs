@@ -460,10 +460,10 @@ fn kind_places(book: &Book) -> Map<Id<Kind>, Box<[Id<Place>]>> {
     let mut requested = Set::default();
     let mut dynamic = false;
     for law in book.laws.values() {
-        for node in &law.nodes {
+        for node in law.nodes.values() {
             let Op::Call(Func::Total(..), args) = &node.op else { continue };
-            for &argument in args.iter().filter(|&&argument| law.nodes[argument.index()].ty == Ty::Kind) {
-                match &law.nodes[argument.index()].op {
+            for &argument in args.iter().filter(|&&argument| law.nodes[argument].typed_ty() == Some(Ty::Kind)) {
+                match &law.nodes[argument].op {
                     Op::Const(Value::Kind(kind)) => {
                         requested.insert(*kind);
                     }
