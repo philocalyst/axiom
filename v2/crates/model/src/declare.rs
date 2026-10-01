@@ -30,6 +30,9 @@ pub(crate) struct World<'s> {
     pub props: PropTable,
     pub prop_writes: Vec<(PropTarget, Prop)>,
     pub tallies: Set<&'s str>,
+    /// Claim tabs allocated from the bounded syntax survey before place IDs
+    /// freeze. A later lookup that was not surveyed is an error.
+    tabs: Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>,
     /// Loan contract names resolve to their actual debt tab, before and after
     /// contract terms have been compiled.
     pub(crate) contract_endpoints: Map<Sym, End>,
@@ -91,6 +94,20 @@ impl World<'_> {
             start = end;
         }
         self.prop_writes.clear();
+    }
+
+    pub(crate) fn tab(
+        &self,
+        party: Id<Entity>,
+        owner: Id<Entity>,
+        class: Class,
+        loc: Loc,
+    ) -> Result<Id<Place>, Diagnostic> {
+        self.tabs.get(&(party, owner, class)).copied().ok_or_else(|| {
+            Diagnostic::error("unregistered-tab", "this claim tab was not found during the declaration survey")
+                .label(loc, "a claim relationship must be visible before the place tree is frozen")
+                .help("check that the party, owner and flow direction match the claim or contract declaration")
+        })
     }
 
 }
@@ -1448,6 +1465,7 @@ pub(crate) fn declare<'a, 's>(
         props: PropTable::default(),
         prop_writes: Vec::new(),
         tallies: Set::default(),
+        tabs,
         contract_endpoints,
     }
 }
