@@ -7,7 +7,7 @@ use axiom_core::{Day, Dec, Diagnostic, Loc, Span};
 use crate::ast::*;
 use crate::lex::Tok;
 use crate::lines::Line;
-use crate::parser::{Parse, Parser};
+use crate::parser::{Parse, Parser, TailContext};
 
 const EVENT_STATES: [(&str, EventState); 3] =
     [("settled", EventState::Settled), ("void", EventState::Void), ("returned", EventState::Returned)];
@@ -114,7 +114,9 @@ impl<'s> Parser<'s> {
     /// `DATE PLAN [AMOUNT]` with override legs below.
     fn occurrence(&mut self, line: &mut Line<'s>, date: Day, plan: Name<'s>, amount: Option<Amount<'s>>) -> Parse<()> {
         let header = self.end_header(line)?;
-        let legs = self.legs(line, |parser, leg_line| parser.leg(leg_line).map(drop))?;
+        let legs = self.legs(line, |parser, leg_line| {
+            parser.leg(leg_line, TailContext::FlowLeg).map(drop)
+        })?;
         self.emit(&header, Occurrence { date, plan, amount, legs }, ItemKind::Occurrence);
         Ok(())
     }
@@ -123,15 +125,13 @@ impl<'s> Parser<'s> {
     pub fn opening(&mut self, line: &mut Line<'s>) -> Parse<()> {
         let date = self.date("the day the balances are stated, like `2024-12-31`")?;
         let header = self.end_header(line)?;
-        self.opening = true;
         let lines = self.legs(line, |parser, opening_line| {
-            let leg = parser.leg(opening_line)?;
+            let leg = parser.leg(opening_line, TailContext::OpeningLeg)?;
             match parser.get(leg).amount {
                 Quantity::Fixed(_) => Ok(()),
                 _ => parser.fail(opening_needs_amount(parser.get(leg).loc)),
             }
         });
-        self.opening = false;
         self.emit(&header, Opening { date, lines: lines? }, ItemKind::Opening);
         Ok(())
     }

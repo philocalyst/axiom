@@ -10,7 +10,7 @@ use crate::ast::*;
 use crate::journal::empty_range;
 use crate::lex::Tok;
 use crate::lines::Line;
-use crate::parser::{Parse, Parser};
+use crate::parser::{Parse, Parser, TailContext};
 
 const POLICIES: [(&str, Policy); 4] =
     [("fifo", Policy::Fifo), ("lifo", Policy::Lifo), ("hifo", Policy::Hifo), ("prorata", Policy::Prorata)];
@@ -24,13 +24,15 @@ impl<'s> Parser<'s> {
     pub fn flow_head(&mut self, from: End<'s>, clauses: usize) -> Parse<(Flow<'s>, Loc)> {
         let arrow = self.arrow(&from)?;
         let to = self.end()?;
-        let tail = self.tail(clauses)?;
+        let tail = self.tail(clauses, TailContext::Header)?;
         Ok((Flow { from, to, tail, legs: Many::EMPTY }, arrow))
     }
 
     /// Reads the legs under `line` into `flow` and checks they fit its sides.
     pub fn flow_legs(&mut self, line: &Line<'s>, flow: &mut Flow<'s>, arrow: Loc) -> Parse<()> {
-        flow.legs = self.legs(line, |parser, leg_line| parser.leg(leg_line).map(drop))?;
+        flow.legs = self.legs(line, |parser, leg_line| {
+            parser.leg(leg_line, TailContext::FlowLeg).map(drop)
+        })?;
         self.check_shape(flow, arrow)
     }
 
@@ -140,7 +142,7 @@ impl<'s> Parser<'s> {
     }
 
     /// An indented line of a split: `PLACE LEGAMOUNT TAIL`.
-    pub fn leg(&mut self, line: &mut Line<'s>) -> Parse<Id<Leg<'s>>> {
+    pub fn leg(&mut self, line: &mut Line<'s>, context: TailContext) -> Parse<Id<Leg<'s>>> {
         let doc = line.take_doc();
         let place = self.place()?;
         // What a leg may say that a header end may not: the remainder, or a
@@ -150,7 +152,7 @@ impl<'s> Parser<'s> {
             Tok::Punct("=") => Quantity::Target(self.then(Self::amount)?),
             _ => self.quantity()?,
         };
-        let tail = self.tail(self.mark::<Clause>())?;
+        let tail = self.tail(self.mark::<Clause>(), context)?;
         self.expect_eol()?;
         let loc = self.loc_from(line.body);
         Ok(self.push(Leg { doc, place, amount, tail, loc }))
@@ -159,7 +161,7 @@ impl<'s> Parser<'s> {
     /// `[/ PAYEE] CODE* [@ PRICE] [for WHAT] [due WHEN] [basis AMOUNT] [! [STRING]]`, in any
     /// order; the waiver ends it. Clauses are kept in the order written, from
     /// `mark`.
-    pub fn tail(&mut self, mark: usize) -> Parse<Tail<'s>> {
+    pub fn tail(&mut self, mark: usize, context: TailContext) -> Parse<Tail<'s>> {
         let mut payee: Option<Name<'s>> = None;
         loop {
             let token = self.peek();
@@ -178,7 +180,7 @@ impl<'s> Parser<'s> {
                 Tok::Name("for") => ClauseKind::For(self.then(Self::for_what)?),
                 Tok::Name("due") => ClauseKind::Due(self.then(Self::due)?),
                 Tok::Name("basis") => ClauseKind::Basis(self.then(Self::amount)?),
-                Tok::Name("since") if self.opening => {
+                Tok::Name("since") if matches!(context, TailContext::OpeningLeg) => {
                     ClauseKind::Since(self.then(|p| p.date("the day the parcels were acquired, like `2023-06-15`"))?)
                 }
                 _ => break,

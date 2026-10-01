@@ -971,6 +971,32 @@ fn a_file_parsed_in_pieces_is_the_file_parsed_whole() {
 }
 
 #[test]
+fn parallel_files_keep_unicode_diagnostics_and_tables_local() {
+    let repeated = "2026-01-01 a -> b 5 USD\n".repeat(80);
+    let first = format!("/// 東京 and café\n{repeated}2026-02-01 a -> b 5 USD for 2025 for 2026\n");
+    let second = format!("/// λ and résumé\n{repeated}2026-02-02 a -> b 5 USD since 2026-01-01\n");
+    let inputs = [(FileId(41), first.as_str()), (FileId(42), second.as_str())];
+
+    let parsed = axiom_core::par::map_each(&inputs, |(id, src)| parse_in(*id, src, 8));
+    for ((id, src), (file, diags)) in inputs.iter().zip(parsed) {
+        let (whole, whole_diags) = parse_in(*id, src, 1);
+        assert_eq!(file.id, *id);
+        assert_eq!(dump(&file), dump(&whole));
+        assert_eq!(format!("{diags:?}"), format!("{whole_diags:?}"));
+        assert!(!diags.is_empty(), "each file contains a syntax error");
+        for diag in &diags {
+            assert_eq!(diag.anchor().unwrap().file, *id);
+            for label in &diag.labels {
+                assert!(
+                    src.get(label.loc.range()).is_some(),
+                    "a label must cover UTF-8 boundaries: {label:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn cuts_fall_between_items_and_keep_docs_with_theirs() {
     let src = "a -> b\n  leg\n// note\n/// Doc.\n\n2026-01-01 x\n  y\nlaw z\n";
     for at in 0..src.len() {

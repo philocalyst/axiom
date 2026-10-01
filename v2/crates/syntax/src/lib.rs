@@ -84,17 +84,24 @@ pub fn parse(file: FileId, src: &str) -> (File<'_>, Vec<Diagnostic>) {
 
 /// [`parse`] with the file cut into about `pieces` pieces.
 pub(crate) fn parse_in(file: FileId, src: &str, pieces: usize) -> (File<'_>, Vec<Diagnostic>) {
-    let ranges: Vec<(usize, Range<usize>)> = cut(src, pieces).into_iter().enumerate().collect();
-    let parsed = par::map_each(&ranges, |(number, range)| parse_piece(file, src, range.clone(), *number));
-    let (mut pieces, mut diags, mut tabs) = (Vec::new(), Vec::new(), Tabs::default());
-    for (piece, more, more_tabs) in parsed {
-        pieces.push(piece);
-        diags.extend(more);
-        tabs.merge(more_tabs);
-    }
+    let ranges = cut(src, pieces);
+    let (mut parsed, mut diags, mut tabs) = (
+        Vec::with_capacity(ranges.len()),
+        Vec::new(),
+        Tabs::default(),
+    );
+    par::map_each_ordered(
+        &ranges,
+        |(number, range)| parse_piece(file, src, range.clone(), *number),
+        |(piece, more, more_tabs)| {
+            parsed.push(piece);
+            diags.extend(more);
+            tabs.merge(more_tabs);
+        },
+    );
     diags.extend(tabs.diagnostic());
     diags.sort_by_key(|diag| diag.anchor().map(|loc| loc.start));
-    (File::new(file, src, pieces), diags)
+    (File::new(file, src, parsed), diags)
 }
 
 /// Piece number `number` of the file, `src[range]`, parsed.
@@ -124,18 +131,18 @@ fn count_items(text: &[u8]) -> (usize, usize) {
 }
 
 /// Cuts `src` into about `pieces` ranges, each starting where an item does.
-fn cut(src: &str, pieces: usize) -> Vec<Range<usize>> {
+fn cut(src: &str, pieces: usize) -> Vec<(usize, Range<usize>)> {
     let bytes = src.as_bytes();
     let mut ranges = Vec::with_capacity(pieces);
     let mut start = 0;
     for piece in 1..pieces {
         let target = (bytes.len() / pieces * piece).max(start);
         if let Some(at) = item_boundary(bytes, target).filter(|&at| at > start) {
-            ranges.push(start..at);
+            ranges.push((ranges.len(), start..at));
             start = at;
         }
     }
-    ranges.push(start..bytes.len());
+    ranges.push((ranges.len(), start..bytes.len()));
     ranges
 }
 

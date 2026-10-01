@@ -27,6 +27,14 @@ pub(crate) struct Reported;
 
 pub(crate) type Parse<T> = Result<T, Reported>;
 
+/// The grammar context that controls whether a tail may say `since`.
+#[derive(Clone, Copy)]
+pub(crate) enum TailContext {
+    Header,
+    FlowLeg,
+    OpeningLeg,
+}
+
 /// A parsed header line: where the item is, and what documents it.
 pub(crate) struct Header<'s> {
     pub loc: Loc,
@@ -51,8 +59,6 @@ pub(crate) struct Parser<'s> {
     /// The expression roots of the lists being read. Lists nest (a call inside
     /// an argument), so each is collected here and moved to its table whole.
     pub roots: Vec<ExprId>,
-    /// Whether the block being read is an `opening`, whose lines may say `since`.
-    pub opening: bool,
     /// The commodities the file writes, for the amount that names none. Found
     /// when first needed.
     pub units: Option<Vec<&'s str>>,
@@ -74,7 +80,6 @@ impl<'s> Parser<'s> {
             depth: 0,
             diags: Vec::new(),
             roots: Vec::new(),
-            opening: false,
             units: None,
         }
     }
