@@ -13,13 +13,13 @@
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Id, Qty, Span, Sym, par};
-use axiom_engine::{Effect, Holding, Ledger, Options, Plan, Run, Verdict};
+use axiom_engine::{Effect, Holding, Ledger, Options, Run, Verdict};
 use axiom_model::{Amount, Book, Class, Entity, Place};
 
 use crate::claims::{self, Claim};
 use crate::closings;
 use crate::history::{Held, postings};
-use crate::lens::{Basket, Lens, Liquidity, Whose};
+use crate::lens::{Basket, Lens, Liquidity};
 use crate::places::path;
 use crate::synth::hypothetical;
 use crate::table::{headline, plural};
@@ -28,14 +28,12 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 /// Obligations falling due within this long count against what can be spent.
 const SOON: Span = Span::days(30);
 
-pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {
-    let at = at.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, at);
+pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Report<'s> {
+    let (book, at) = (lens.book, lens.day);
     // Deadlines fire up to the day the year is judged, so the laws that figure
     // its tax answer too, whether they run at its end or on a closing day.
     let horizon = closings::judged_through(book, at);
-    let plan = Plan::new(book);
-    let mut ledger = plan.start(Options { today: horizon.max(run.today), relaxed: book.relaxed });
+    let mut ledger = lens.plan().start(Options { today: horizon.max(run.today), relaxed: book.relaxed });
     // A withdrawal is a fact of `at`, so it comes before what closes that day (a month's or a year's end).
     ledger.advance_to_closing(at);
     from_ledger(lens, run, &ledger, horizon)

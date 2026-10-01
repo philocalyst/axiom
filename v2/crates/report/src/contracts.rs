@@ -9,11 +9,12 @@ use axiom_model::{
     TemplateItemParent, TemplateQuantity, Terms, TermsState,
 };
 
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose) -> Report<'s> {
+pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run) -> Report<'s> {
+    let book = lens.book;
     let mut section = Section::new([
         Column::left("Contract"),
         Column::left("Party"),
@@ -24,7 +25,7 @@ pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose) -> Report<'s> {
         Column::right("Loan balance"),
     ]);
     for (id, contract) in book.contracts.iter() {
-        if !whose.includes(contract.owner) {
+        if !lens.owns_entity(contract.owner) {
             continue;
         }
         let name = book.name(contract.name);
@@ -51,7 +52,7 @@ pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose) -> Report<'s> {
                 age + i64::from(late_days),
             )
         });
-        let loan_balance = loan_balance(book, run, contract);
+        let loan_balance = loan_balance(lens, run, contract);
         let cells = [
             Cell::Name(name),
             Cell::Name(book.name(book.entities[contract.party].path)),
@@ -106,18 +107,20 @@ pub(crate) fn terms_cell<'s>(book: &'s Book<'_>, contract: &Contract, terms: &Te
     Cell::list(" ", parts)
 }
 
-fn loan_balance<'s>(book: &'s Book<'_>, run: &Run, contract: &Contract) -> Cell<'s> {
+fn loan_balance<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract: &Contract) -> Cell<'s> {
+    let book = lens.book;
     let Some(loan) = contract.loan else {
         return Cell::Blank;
     };
-    let sign = book.places[loan.debt].class.display_sign();
+    let sign = lens.display_sign(loan.debt);
     let mut balances = BTreeMap::<Id<axiom_model::Commodity>, Qty>::new();
     for holding in run
         .holdings
         .iter()
         .filter(|holding| holding.place == loan.debt)
     {
-        *balances.entry(holding.unit).or_default() += Qty(holding.qty().0 * sign);
+        *balances.entry(holding.unit).or_default() +=
+            Qty(lens.place_qty(loan.debt, holding.qty()).0 * sign);
     }
     let cells = balances
         .into_iter()

@@ -13,28 +13,11 @@ use axiom_model::{
 };
 
 use crate::history::{Change, Posting, pad_ends, postings};
-use crate::lens::{Lens, Whose};
+use crate::lens::Lens;
 use crate::places::path;
 use crate::resolve;
 use crate::table::{code_labels, gap_words};
 use crate::{Cell, Column, Report, Row, Section, Style};
-
-pub fn view<'s>(
-    book: &'s Book<'_>,
-    run: &Run,
-    whose: &Whose,
-    place: &str,
-    from: Option<Day>,
-    to: Option<Day>,
-) -> Result<Report<'s>, Diagnostic> {
-    view_with_lens(
-        Lens::new(book, whose, to.unwrap_or(run.today)),
-        run,
-        place,
-        from,
-        to,
-    )
-}
 
 /// Builds a register using owner scope and display signs from the shared lens.
 pub(crate) fn view_with_lens<'s>(
@@ -75,13 +58,12 @@ pub(crate) fn view_with_lens<'s>(
     let owner = book.places[place].owner;
     let register = match lens.whose.includes(owner) {
         true => section_with_sign(
-            book,
+            lens,
             run,
             place,
             from,
             to,
             lens.display_sign(place),
-            Some(lens.whose),
         ),
         false => Section::note_only(format!(
             "{} belongs to {}, whose money this is not.",
@@ -382,61 +364,27 @@ fn in_window(day: Day, from: Option<Day>, cutoff: Day) -> bool {
     day <= cutoff && from.is_none_or(|from| day >= from)
 }
 
-/// The flows touching `place` from `from` to `to` (default: everything up to
-/// the run's day), each with the balance after it.
-///
-/// The running balance counts what is real at the end of the window. Pending,
-/// void and returned flows are listed, muted, and leave it alone. A flow into
-/// or out of `PLACE.basis` is listed with the change it made to the basis, and
-/// leaves the balance alone: no quantity moved.
-pub fn section<'s>(
-    book: &'s Book<'_>,
-    run: &Run,
-    place: Id<Place>,
-    from: Option<Day>,
-    to: Option<Day>,
-) -> Section<'s> {
-    section_with_sign(
-        book,
-        run,
-        place,
-        from,
-        to,
-        book.places[place].class.display_sign(),
-        None,
-    )
-}
-
 /// Builds a register for a place within an owner's view.
-pub(crate) fn section_for<'s>(
-    book: &'s Book<'_>,
+pub(crate) fn section_for_lens<'s>(
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     place: Id<Place>,
     from: Option<Day>,
     to: Option<Day>,
-    whose: &Whose,
 ) -> Section<'s> {
-    section_with_sign(
-        book,
-        run,
-        place,
-        from,
-        to,
-        book.places[place].class.display_sign(),
-        Some(whose),
-    )
+    section_with_sign(lens, run, place, from, to, lens.display_sign(place))
 }
 
 fn section_with_sign<'s>(
-    book: &'s Book<'_>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
     place: Id<Place>,
     from: Option<Day>,
     to: Option<Day>,
     sign: i64,
-    whose: Option<&Whose>,
 ) -> Section<'s> {
-    let steps = steps(book, run, place, to.unwrap_or(run.today), whose);
+    let book = lens.book;
+    let steps = steps(lens, run, place, to.unwrap_or(run.today));
     let split = from.map_or(0, |from| steps.partition_point(|step| step.day < from));
     let shown =
         |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));
@@ -549,15 +497,15 @@ impl Step<'_> {
 /// Every step touching `place` up to `cutoff`, in order. A pad, made at the
 /// end of its day, follows that day's flows.
 fn steps<'a>(
-    book: &'a Book,
+    lens: Lens<'a, '_, '_, '_>,
     run: &'a Run,
     place: Id<Place>,
     cutoff: Day,
-    whose: Option<&Whose>,
 ) -> Vec<Step<'a>> {
+    let book = lens.book;
     let flows = book.touching[place].iter().flat_map(|&id| {
         let posting = Posting::at(book, run, id);
-        let in_scope = whose.is_none_or(|whose| whose.includes(posting.flow.owner));
+        let in_scope = lens.owns_entity(posting.flow.owner);
         posting
             .changes_at(place)
             .filter(move |_| in_scope)
@@ -570,7 +518,7 @@ fn steps<'a>(
             })
     });
     let pads = run.pads.iter().flat_map(|pad| {
-        let in_scope = whose.is_none_or(|whose| whose.governs(book, pad.subject));
+        let in_scope = lens.governs(pad.subject);
         let with = if pad.place == place {
             pad.counter
         } else {

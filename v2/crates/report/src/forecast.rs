@@ -24,7 +24,7 @@ use self::projection::{Trace, project, project_from};
 use self::variable::Variable;
 use crate::calendar::Periods;
 use crate::closings;
-use crate::lens::{Lens, Whose};
+use crate::lens::Lens;
 use crate::places::{path, route};
 use crate::table::{headline, plural};
 use crate::{Cell, Column, Report, Row, Section, Style};
@@ -49,10 +49,22 @@ pub fn view_from<'p, 'b, 's>(
     view_with(plan, Some(checkpoint), Some(historical_effects), run, lens, relaxed, until, paths)
 }
 
-pub fn view<'s>(book: &'s Book<'_>, run: &axiom_engine::Run, whose: &Whose, until: Option<Day>, paths: u32) -> Report<'s> {
-    let plan = Plan::new(book);
-    let lens = Lens::new(book, whose, run.today);
-    view_with(&plan, None, None, run, lens, book.relaxed, until, paths)
+pub(crate) fn view_with_lens(
+    lens: Lens<'_, '_, '_, '_>,
+    run: &axiom_engine::Run,
+    until: Option<Day>,
+    paths: u32,
+) -> Report<'_> {
+    view_with(
+        lens.plan(),
+        None,
+        None,
+        run,
+        lens,
+        lens.book.relaxed,
+        until,
+        paths,
+    )
 }
 
 fn view_with<'p, 'b, 's>(

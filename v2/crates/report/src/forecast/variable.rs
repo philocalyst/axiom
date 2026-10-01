@@ -123,7 +123,8 @@ opening 2026-01-01
 ";
         with_run(source, Day::from_ymd(2026, 5, 15).unwrap(), |book, run| {
             let whose = Whose::default();
-            let variable = Variable::from_history(Lens::new(book, &whose, run.today), run, |_| false);
+            let plan = axiom_engine::Plan::new(book);
+            let variable = Variable::from_history(Lens::new(&plan, &whose, run.today), run, |_| false);
             assert_eq!(variable.categories, [0]);
             assert_eq!(variable.amounts, [10_000; 4]);
             assert_eq!(variable.months, 4);

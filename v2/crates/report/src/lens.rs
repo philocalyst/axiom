@@ -10,7 +10,7 @@ use std::iter;
 
 use axiom_core::num::{POW10, div_round, mul_div};
 use axiom_core::{Day, Diagnostic, Id, Qty, Span};
-use axiom_engine::{Holding, Known, Sides};
+use axiom_engine::{Holding, Known, OwnerShare, Plan};
 use axiom_model::{Amount, Book, Class, Commodity, Entity, Place, Subject};
 
 use crate::history::Held;
@@ -72,6 +72,7 @@ impl Whose {
             Subject::Place(place) => book.places[place].owner,
             Subject::Entity(entity) => entity,
             Subject::Asset(asset) => book.assets[asset].owner,
+            Subject::Contract(contract) => book.contracts[contract].owner,
         })
     }
 }
@@ -91,53 +92,29 @@ pub enum Liquidity {
 /// The books on one day, seen for one owner scope.
 #[derive(Clone, Copy)]
 pub struct Lens<'b, 's, 'w, 'p> {
-    pub book: &'b Book<'s>,
+    pub(crate) book: &'b Book<'s>,
     pub whose: &'w Whose,
     pub day: Day,
     /// Names and kinds looked up once by the report context or this lens.
     pub known: Known,
-    /// Prepared display signs from the report context's plan, when available.
-    sides: Option<&'p Sides>,
-}
-
-impl<'b, 's, 'w> Lens<'b, 's, 'w, 'b> {
-    pub fn new(book: &'b Book<'s>, whose: &'w Whose, day: Day) -> Lens<'b, 's, 'w, 'b> {
-        Lens::with_known(book, whose, day, Known::of(book))
-    }
-
-    /// Uses the engine plan's pre-resolved names and kinds.
-    pub fn with_known(
-        book: &'b Book<'s>,
-        whose: &'w Whose,
-        day: Day,
-        known: Known,
-    ) -> Lens<'b, 's, 'w, 'b> {
-        Lens {
-            book,
-            whose,
-            day,
-            known,
-            sides: None,
-        }
-    }
-
+    /// The exact plan that owns the book view, ownership map and display signs.
+    plan: &'p Plan<'b, 's>,
 }
 
 impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
-    /// Uses names, kinds and display signs prepared by one engine plan.
-    pub fn with_plan(
-        book: &'b Book<'s>,
+    /// Uses the plan's exact book, ownership graph and display signs so a
+    /// lens cannot pair unrelated arenas or fall back to raw entity owners.
+    pub fn new(
+        plan: &'p Plan<'b, 's>,
         whose: &'w Whose,
         day: Day,
-        known: Known,
-        sides: &'p Sides,
     ) -> Lens<'b, 's, 'w, 'p> {
         Lens {
-            book,
+            book: plan.book(),
             whose,
             day,
-            known,
-            sides: Some(sides),
+            known: plan.known(),
+            plan,
         }
     }
 
@@ -147,15 +124,82 @@ impl<'b, 's, 'w, 'p> Lens<'b, 's, 'w, 'p> {
     }
 
     pub fn owns(self, place: Id<Place>) -> bool {
-        self.whose.includes(self.book.places[place].owner)
+        self.owns_shares(self.plan.owners_of(place))
     }
 
-    /// The display sign for a place, using the plan's table or the legacy path lookup.
-    pub fn display_sign(self, place: Id<Place>) -> i64 {
-        self.sides.map_or_else(
-            || self.book.places[place].class.display_sign(),
-            |sides| sides.sign(place),
+    pub fn owns_entity(self, entity: Id<Entity>) -> bool {
+        self.owns_shares(self.plan.owners_of_entity(entity))
+    }
+
+    fn owns_shares(self, owners: &[OwnerShare]) -> bool {
+        self.whose.is_everyone()
+            || owners
+                .iter()
+                .any(|owner| !owner.share.is_zero() && self.whose.includes(owner.owner))
+    }
+
+    pub fn governs(self, subject: Subject) -> bool {
+        match subject {
+            Subject::Place(place) => self.owns(place),
+            Subject::Entity(entity) => self.owns_entity(entity),
+            Subject::Asset(asset) => self.owns_entity(self.book.assets[asset].owner),
+            Subject::Contract(contract) => self.owns_entity(self.book.contracts[contract].owner),
+        }
+    }
+
+    pub fn subject_qty(self, subject: Subject, qty: Qty) -> Qty {
+        match subject {
+            Subject::Place(place) => self.place_qty(place, qty),
+            Subject::Entity(entity) => self.entity_qty(entity, qty),
+            Subject::Asset(asset) => self.entity_qty(self.book.assets[asset].owner, qty),
+            Subject::Contract(contract) => {
+                self.entity_qty(self.book.contracts[contract].owner, qty)
+            }
+        }
+    }
+
+    pub fn place_qty(self, place: Id<Place>, qty: Qty) -> Qty {
+        if self.whose.is_everyone() {
+            return qty;
+        }
+        self.plan
+            .allocate(place, qty)
+            .filter(|(owner, _)| self.whose.includes(owner.owner))
+            .map(|(_, amount)| amount)
+            .sum()
+    }
+
+    pub fn entity_qty(self, entity: Id<Entity>, qty: Qty) -> Qty {
+        if self.whose.is_everyone() {
+            return qty;
+        }
+        self.plan
+            .allocate_entity(entity, qty)
+            .filter(|(owner, _)| self.whose.includes(owner.owner))
+            .map(|(_, amount)| amount)
+            .sum()
+    }
+
+    pub fn purpose_direction(
+        self,
+        from: Id<Place>,
+        to: Id<Place>,
+        root: axiom_model::PurposeRoot,
+    ) -> Option<axiom_model::Dir> {
+        axiom_engine::purpose_direction(
+            self.book.places[from].class != Class::Outside && self.owns(from),
+            self.book.places[to].class != Class::Outside && self.owns(to),
+            root,
         )
+    }
+
+    pub(crate) fn plan(self) -> &'p Plan<'b, 's> {
+        self.plan
+    }
+
+    /// The display sign for a place from the canonical plan.
+    pub fn display_sign(self, place: Id<Place>) -> i64 {
+        self.plan.sides().sign(place)
     }
 
     /// `amount` in the base currency at the lens day's prices; `None` without

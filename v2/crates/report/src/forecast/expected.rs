@@ -364,7 +364,8 @@ opening 2026-01-01
 ";
         crate::source_tests::with_run(source, day(2026, 5, 10), |book, run| {
             let whose = crate::lens::Whose::default();
-            let found = expected(Lens::new(book, &whose, run.today), run);
+            let plan = axiom_engine::Plan::new(book);
+            let found = expected(Lens::new(&plan, &whose, run.today), run);
             assert_eq!(found.len(), 1, "the depreciation is a habit");
             assert_eq!(found[0].template.detail().basis_end, Some(End::From));
         });

@@ -4,27 +4,11 @@ use axiom_core::{Day, Diagnostic, Qty};
 use axiom_engine::{Holding, Parcel, Run};
 use axiom_model::{Amount, Book, Place};
 
-use crate::claims::holdings_at;
 use crate::gains::Term;
-use crate::lens::{Lens, Whose};
+use crate::lens::Lens;
 use crate::places::path;
-use crate::resolve;
 use crate::table::code_labels;
 use crate::{Cell, Column, Report, Row, Section, Style};
-
-pub fn view<'s>(
-    book: &'s Book<'_>,
-    run: &Run,
-    whose: &Whose,
-    place: Option<&str>,
-    at: Option<Day>,
-) -> Result<Report<'s>, Diagnostic> {
-    let scope = place.map(|text| resolve::place(book, text)).transpose()?;
-    let at = at.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, at);
-    let holdings = holdings_at(book, run, at);
-    Ok(view_from(lens, scope, holdings.iter()))
-}
 
 /// Builds a lots view from holdings supplied by a shared context ledger.
 pub(crate) fn view_from<'h, 's>(

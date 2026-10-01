@@ -9,7 +9,7 @@ use axiom_model::{Amount, Book, Limit, Period, Purpose, PurposeRoot};
 use crate::calendar::Periods;
 use crate::headroom::{current, latest, room, window_words};
 use crate::history::postings;
-use crate::lens::{Lens, Whose};
+use crate::lens::Lens;
 use crate::places::path;
 use crate::resolve;
 use crate::table::year_days;
@@ -17,11 +17,11 @@ use crate::{Cell, Column, Report, Row, Section, Style};
 
 /// Resolves a purpose and gathers its rules, budgets, year total and parties.
 pub fn report<'s>(
-    book: &'s Book<'_>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
-    whose: &Whose,
     target: &str,
 ) -> Result<Report<'s>, axiom_core::Diagnostic> {
+    let book = lens.book;
     let purpose = book.purpose(target).map_err(|_| {
         resolve::nothing_named(
             "purpose",
@@ -35,7 +35,7 @@ pub fn report<'s>(
     let year_window = year_days(year).unwrap_or(Days::ALWAYS);
     let cutoff = year_window.last().min(run.today);
     let period = Periods::covering(Period::Year, year_window.first(), cutoff);
-    let lens = Lens::new(book, whose, cutoff);
+    let lens = lens.on(cutoff);
 
     let mut laws = Vec::new();
     for ancestor in book.purposes.lineage(purpose) {
@@ -65,7 +65,7 @@ pub fn report<'s>(
     let readings = latest(
         all_headroom
             .iter()
-            .filter(|reading| governing.contains(&reading.law) && whose.includes(reading.owner)),
+            .filter(|reading| governing.contains(&reading.law) && lens.whose.includes(reading.owner)),
     );
     let mut limits = Section::new([
         Column::left("Law"),
@@ -82,7 +82,7 @@ pub fn report<'s>(
         limits.note("No headroom has been recorded for this purpose this year.");
     }
 
-    let budgets = budget_section(book, run, whose, purpose, year_window);
+    let budgets = budget_section(book, run, &lens.whose, purpose, year_window);
     let (total, parties, unpriced) = totals(book, run, lens, purpose, period, cutoff);
     let mut activity =
         Section::new([Column::left("This year"), Column::right("Amount")]).headed("Activity");
@@ -93,7 +93,7 @@ pub fn report<'s>(
     activity.fact(
         root_fact(item.root),
         Some(book.name(item.name)),
-        whose.label(book),
+        lens.whose.label(book),
         crate::When::During(period.window(0).days()),
         crate::Money::base(book, total),
     );
@@ -189,6 +189,7 @@ fn budget_limit<'s>(book: &'s Book<'_>, limit: Limit) -> Cell<'s> {
                 Cell::Purpose(book.name(book.purposes[of].name)),
             ],
         ),
+        Limit::Computed(_) => Cell::Word("calculated"),
     }
 }
 
@@ -225,7 +226,7 @@ fn totals<'s>(
             continue;
         };
         if !book.purposes.covers(purpose, purpose_on_flow.purpose)
-            || !lens.whose.includes(flow.owner)
+            || !lens.owns_entity(flow.owner)
         {
             continue;
         }

@@ -16,7 +16,6 @@ use crate::{FlowBy, Query, Report, SourceProvider};
 
 /// Reusable report inputs from one plan and one run.
 pub struct Context<'b, 's> {
-    book: &'b Book<'s>,
     plan: Plan<'b, 's>,
     run: Run,
     checkpoint: Checkpoint,
@@ -39,7 +38,6 @@ impl<'b, 's> Context<'b, 's> {
         let checkpoint = ledger.checkpoint();
         drop(ledger);
         Ok(Context {
-            book,
             plan,
             run,
             checkpoint,
@@ -51,7 +49,7 @@ impl<'b, 's> Context<'b, 's> {
 
     /// The source book this context reads.
     pub fn book(&self) -> &'b Book<'s> {
-        self.book
+        self.plan.book()
     }
 
     /// The run built with this context's plan and checkpoint.
@@ -106,7 +104,7 @@ impl<'b, 's> Context<'b, 's> {
             }
             Query::Available { at } => {
                 let at = at.unwrap_or(self.run.today);
-                let horizon = closings::judged_through(self.book, at);
+                let horizon = closings::judged_through(self.plan.book(), at);
                 let ledger = self.ledger_at(at, horizon);
                 Ok(super::available::from_ledger(
                     self.lens(at),
@@ -115,17 +113,15 @@ impl<'b, 's> Context<'b, 's> {
                     horizon,
                 ))
             }
-            Query::Budget { at, by } => Ok(super::budget::view(
-                self.book,
+            Query::Budget { at, by } => Ok(super::budget::view_with_lens(
+                self.lens(at.unwrap_or(self.run.today)),
                 &self.run,
-                &self.whose,
                 *at,
                 *by,
             )),
-            Query::Limits { year } => Ok(super::limits::view(
-                self.book,
+            Query::Limits { year } => Ok(super::limits::view_with_lens(
+                self.lens(self.run.today),
                 &self.run,
-                &self.whose,
                 *year,
             )),
             Query::Claims { at } => {
@@ -137,14 +133,23 @@ impl<'b, 's> Context<'b, 's> {
                     ledger.holdings(),
                 ))
             }
-            Query::Contracts => Ok(super::contracts::view(self.book, &self.run, &self.whose)),
-            Query::Tax { year } => Ok(super::tax::view(self.book, &self.run, &self.whose, *year)),
-            Query::Gains { year } => {
-                Ok(super::gains::view(self.book, &self.run, &self.whose, *year))
-            }
+            Query::Contracts => Ok(super::contracts::view_with_lens(
+                self.lens(self.run.today),
+                &self.run,
+            )),
+            Query::Tax { year } => Ok(super::tax::view_with_lens(
+                self.lens(self.run.today),
+                &self.run,
+                *year,
+            )),
+            Query::Gains { year } => Ok(super::gains::view_with_lens(
+                self.lens(self.run.today),
+                &self.run,
+                *year,
+            )),
             Query::Lots { place, at } => {
                 let scope = place
-                    .map(|text| resolve::place(self.book, text))
+                    .map(|text| resolve::place(self.plan.book(), text))
                     .transpose()?;
                 let at = at.unwrap_or(self.run.today);
                 let ledger = self.ledger_at(at, self.run.today);
@@ -164,8 +169,16 @@ impl<'b, 's> Context<'b, 's> {
                 *until,
                 *paths,
             )),
-            Query::Why { target } => super::why::target(self.book, &self.run, &self.whose, target),
-            Query::Line { loc } => Ok(super::why::line(self.book, &self.run, &self.whose, *loc)),
+            Query::Why { target } => super::why::target_with_lens(
+                self.lens(self.run.today),
+                &self.run,
+                target,
+            ),
+            Query::Line { loc } => Ok(super::why::line_with_lens(
+                self.lens(self.run.today),
+                &self.run,
+                *loc,
+            )),
         }
     }
 
@@ -184,13 +197,7 @@ impl<'b, 's> Context<'b, 's> {
     }
 
     pub(crate) fn lens<'a>(&'a self, day: Day) -> Lens<'b, 's, 'a, 'a> {
-        Lens::with_plan(
-            self.book,
-            &self.whose,
-            day,
-            self.plan.known(),
-            self.plan.sides(),
-        )
+        Lens::new(&self.plan, &self.whose, day)
     }
 
     /// A ledger at `day` before that day's closings. Future views resume the

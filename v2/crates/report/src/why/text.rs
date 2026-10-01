@@ -1,22 +1,20 @@
 //! `why "description"`: the written flows with that exact description.
 
 use axiom_engine::Run;
-use axiom_model::Book;
-
 use super::flows_table;
 use crate::history::postings;
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::{Cell, Column, Report, Row, Section};
 
 pub fn report<'s>(
-    book: &'s Book<'_>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
-    whose: &Whose,
     description: &str,
 ) -> Option<Report<'s>> {
+    let book = lens.book;
     let ids = postings(book, run)
         .filter(|posting| {
-            whose.includes(posting.flow.owner)
+            lens.owns_entity(posting.flow.owner)
                 && posting
                     .flow
                     .description

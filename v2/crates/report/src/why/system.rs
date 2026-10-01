@@ -4,15 +4,16 @@ use std::collections::BTreeMap;
 
 use axiom_core::{Id, Qty, Sym};
 use axiom_engine::Run;
-use axiom_model::{Amount, Book, Commodity, System};
+use axiom_model::{Amount, Commodity, System};
 
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::table::doc_headline;
 use crate::{Cell, Column, Report, Row, Section};
 
 use super::trigger_words;
 
-pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, system: Id<System>) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, system: Id<System>) -> Report<'s> {
+    let book = lens.book;
     let columns =
         [Column::left("Law"), Column::left("When"), Column::left("Counted for residents"), Column::left("Written")];
     let mut laws = Section::new(columns).headed("Laws");
@@ -20,7 +21,7 @@ pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, system: Id<Syste
         book.laws.iter().filter(|(_, law)| law.system.is_some_and(|declared| book.systems.covers(system, declared)));
     for (id, law) in declared {
         let mut totals: BTreeMap<(Sym, bool, Id<Commodity>), Qty> = BTreeMap::new();
-        for effect in run.effects.iter().filter(|effect| effect.law == id && whose.includes(effect.owner)) {
+        for effect in run.effects.iter().filter(|effect| effect.law == id && lens.owns_entity(effect.owner)) {
             *totals.entry((effect.name, effect.owed().is_some(), effect.amount.unit)).or_default() += effect.amount.qty;
         }
         let did: Vec<String> = totals

@@ -29,7 +29,7 @@ use axiom_model::{
 };
 
 use crate::history::Posting;
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::places::{names, route};
 use crate::resolve;
 use crate::table::{cause_cell, creditor, doc_headline, plural};
@@ -114,44 +114,44 @@ fn effects_table<'s>(book: &'s Book<'_>, effects: &[&Effect], heading: &str) -> 
     section
 }
 
-pub fn target<'s>(
-    book: &'s Book<'_>,
+pub(crate) fn target_with_lens<'s>(
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
-    whose: &Whose,
     text: &str,
 ) -> Result<Report<'s>, Diagnostic> {
+    let book = lens.book;
     if let Some(contract) = text.strip_prefix("contract:") {
         let contract = resolve::contract(book, contract)?;
-        return Ok(contract::report(book, run, whose, contract));
+        return Ok(contract::report(lens, run, contract));
     }
     if let Some(entity) = text.strip_prefix("entity:") {
         let entity = resolve::entity(book, entity)?;
-        return Ok(entity::report(book, run, whose, entity));
+        return Ok(entity::report(lens, run, entity));
     }
     if let Some(asset) = text.strip_prefix("asset:") {
         let asset = resolve::asset(book, asset)?;
-        return Ok(asset::report(book, run, whose, asset));
+        return Ok(asset::report(lens, run, asset));
     }
     if let Some(code) = text.strip_prefix('^') {
-        return code::report(book, run, whose, code);
+        return code::report(lens, run, code);
     }
     if let Some(purpose) = text.strip_prefix('#') {
-        return purpose::report(book, run, whose, purpose);
+        return purpose::report(lens, run, purpose);
     }
     if let Some(asset) = book.asset(text) {
-        return Ok(asset::report(book, run, whose, asset));
+        return Ok(asset::report(lens, run, asset));
     }
     if let Some(contract) = book.contract(text) {
-        return Ok(contract::report(book, run, whose, contract));
+        return Ok(contract::report(lens, run, contract));
     }
     let quoted = text
         .strip_prefix('"')
         .and_then(|text| text.strip_suffix('"'))
         .unwrap_or(text);
-    if let Some(report) = self::text::report(book, run, whose, quoted) {
+    if let Some(report) = self::text::report(lens, run, quoted) {
         return Ok(report);
     }
-    Ok(explain(book, run, whose, identify(book, run, text)?))
+    Ok(explain_with_lens(lens, run, identify(book, run, text)?))
 }
 
 /// What a name means, once found.
@@ -166,15 +166,28 @@ pub(crate) enum Found<'a> {
     TaxLine(&'a str),
 }
 
-pub(crate) fn explain<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, found: Found) -> Report<'s> {
+pub(crate) fn explain_with_lens<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    found: Found,
+) -> Report<'s> {
+    let book = lens.book;
     match found {
-        Found::Place(place) => place::report(book, run, whose, place),
-        Found::Entity(entity) => entity::report(book, run, whose, entity),
-        Found::System(system) => system::report(book, run, whose, system),
-        Found::Law(law) => law::report(book, run, whose, law),
+        Found::Place(place) => place::report(lens, run, place),
+        Found::Entity(entity) => entity::report(lens, run, entity),
+        Found::System(system) => system::report(lens, run, system),
+        Found::Law(law) => law::report(lens, run, law),
         Found::Laws(candidates) => law::which(book, &candidates),
-        Found::TaxLine(name) => taxline::report(book, run, whose, name),
+        Found::TaxLine(name) => taxline::report(lens, run, name),
     }
+}
+
+pub(crate) fn line_with_lens<'s>(
+    lens: Lens<'s, '_, '_, '_>,
+    run: &Run,
+    at: axiom_core::Loc,
+) -> Report<'s> {
+    line::line(lens.book, run, &lens.whose, at)
 }
 
 /// A name is a place if it can be one, else an entity, a system, a law, or

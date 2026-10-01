@@ -1,21 +1,17 @@
 //! `why CONTRACT`: each change in terms and the occurrences it promised.
 
 use axiom_engine::Run;
-use axiom_model::{Book, Contract, Derivation, Origin, TermsState};
+use axiom_model::{Contract, Derivation, Origin, TermsState};
 
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(
-    book: &'s Book<'_>,
-    run: &Run,
-    whose: &Whose,
-    contract_id: axiom_core::Id<Contract>,
-) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, contract_id: axiom_core::Id<Contract>) -> Report<'s> {
+    let book = lens.book;
     let contract = &book.contracts[contract_id];
     let name = book.name(contract.name);
-    if !whose.includes(contract.owner) {
+    if !lens.owns_entity(contract.owner) {
         return Report::new(format!("Why {name}")).with(Section::note_only(format!(
             "{name} belongs to {}, whose money this is not.",
             book.name(book.entities[contract.owner].path)
@@ -29,7 +25,7 @@ pub fn report<'s>(
         Column::left("Statement"),
     ])
     .headed("Terms over time");
-    for (days, value) in contract.terms.within(contract.days) {
+    for (days, value) in contract.terms.iter().flat_map(|terms| terms.within(contract.days)) {
         let active_days = days.intersect(contract.days).unwrap_or(days);
         let templates = value
             .template
@@ -115,7 +111,7 @@ pub fn report<'s>(
     ])
     .headed("Derived flows");
     for flow in book.flows.values().filter(|flow| {
-        whose.includes(flow.owner)
+        lens.owns_entity(flow.owner)
             && match flow.origin {
                 Origin::Occurrence(id) => id == contract_id,
                 Origin::Derived(

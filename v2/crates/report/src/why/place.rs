@@ -9,7 +9,7 @@ use axiom_model::{Amount, Book, Commodity, Law, Place, Rule, Subject};
 
 use super::laws_table;
 use crate::headroom::{current, latest};
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::limits;
 use crate::places::path;
 use crate::register;
@@ -19,10 +19,11 @@ use crate::{Cell, Column, Report, Row, Section};
 /// How many recent flows to show.
 const RECENT: usize = 8;
 
-pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, place: Id<Place>) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, place: Id<Place>) -> Report<'s> {
+    let book = lens.book;
     let owner = book.places[place].owner;
     let name = path(book, place);
-    if !whose.includes(owner) {
+    if !lens.owns(place) {
         return Report::new(format!("Why {name}")).with(Section::note_only(format!(
             "{name} belongs to {}, whose money this is not.",
             book.name(book.entities[owner].path)
@@ -33,7 +34,7 @@ pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, place: Id<Place>
         .iter()
         .filter(|holding| {
             book.places.covers(place, holding.place)
-                && whose.includes(book.places[holding.place].owner)
+                && lens.owns(holding.place)
         })
         .collect();
     let recent_from = book.touching[place].iter().rev().nth(RECENT - 1).map(|&flow| book.flows[flow].day);
@@ -45,7 +46,7 @@ pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, place: Id<Place>
         book,
         latest(
             all.iter()
-                .filter(|reading| about(reading.subject) && whose.includes(reading.owner)),
+                .filter(|reading| about(reading.subject) && lens.governs(reading.subject)),
         ),
     )
     .headed("Limits");
@@ -63,7 +64,7 @@ pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, place: Id<Place>
         .with(parcels(book, &held))
         .with(limits)
         .with(laws)
-        .with(register::section_for(book, run, place, recent_from, None, whose).headed("Recent flows"))
+        .with(register::section_for_lens(lens, run, place, recent_from, None).headed("Recent flows"))
 }
 
 /// What is held, by commodity, and how much of it is plain money.

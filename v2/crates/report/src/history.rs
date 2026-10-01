@@ -273,6 +273,19 @@ impl Snapshots {
         for split in book.splits.iter() {
             snapshots.split(split.day, split.unit, split.ratio);
         }
+        // Attribute the accumulated place balance once per snapshot. Scaling
+        // each posting independently can round two one-cent movements into
+        // two cents for a 60% owner even though 60% of the resulting two-cent
+        // balance is one cent. The final-state and replay paths then agree.
+        let stride = snapshots.pairs.len();
+        for column in 0..snapshots.days.len() {
+            for pair in 0..stride {
+                let place = snapshots.pairs[pair].0;
+                let cell = &mut snapshots.cells[column * stride + pair];
+                cell.qty = lens.place_qty(place, cell.qty);
+                cell.booked = lens.place_qty(place, cell.booked);
+            }
+        }
         snapshots.keep(days)
     }
 

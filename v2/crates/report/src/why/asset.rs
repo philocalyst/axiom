@@ -2,16 +2,17 @@
 
 use axiom_core::{Id, Qty};
 use axiom_engine::{AdjustmentKind, Run};
-use axiom_model::{Amount, Asset, Book, Object};
+use axiom_model::{Amount, Asset, Object};
 
-use crate::lens::{Lens, Whose};
+use crate::lens::Lens;
 use crate::places::route;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, asset_id: Id<Asset>) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, asset_id: Id<Asset>) -> Report<'s> {
+    let book = lens.book;
     let asset = &book.assets[asset_id];
     let name = book.name(asset.name);
-    if !whose.includes(asset.owner) {
+    if !lens.owns_entity(asset.owner) {
         return Report::new(format!("Why {name}")).with(Section::note_only(format!(
             "{name} belongs to {}, whose money this is not.",
             book.name(book.entities[asset.owner].path)
@@ -25,10 +26,9 @@ pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, asset_id: Id<Ass
         Column::right("Basis"),
     ])
     .headed("Asset");
-    let lens = Lens::new(book, whose, run.today);
     let value = lens.value(Amount::new(Qty(1), asset.unit));
     let basis = state.map_or(Qty::ZERO, |state| {
-        state.parts.iter().map(|part| part.basis).sum()
+        lens.entity_qty(asset.owner, state.parts.iter().map(|part| part.basis).sum())
     });
     overview.push(Row::new([
         Cell::Name(book.name(book.entities[asset.owner].path)),
@@ -83,7 +83,7 @@ pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, asset_id: Id<Ass
     ])
     .headed("Flows about it");
     for (id, flow) in book.flows.iter().filter(|(_, flow)| {
-        whose.includes(flow.owner)
+        lens.owns_entity(flow.owner)
             && flow
                 .purpose
                 .is_some_and(|purpose| purpose.of == Some(Object::Asset(asset_id)))

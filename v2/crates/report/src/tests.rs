@@ -64,11 +64,22 @@ impl Household {
         let whose = whose.map_or_else(Whose::default, |name| {
             Whose::of(&self.book, self.entity(name))
         });
-        crate::views(&self.book, &self.run, &whose, &query)
+        let plan = axiom_engine::Plan::new(&self.book);
+        crate::views(
+            crate::lens::Lens::new(&plan, &whose, self.run.today),
+            &self.run,
+            &query,
+        )
     }
 
     fn why<'a>(&'a self, found: Found) -> Report<'a> {
-        crate::why::explain(&self.book, &self.run, &Whose::default(), found)
+        let whose = Whose::default();
+        let plan = axiom_engine::Plan::new(&self.book);
+        crate::why::explain_with_lens(
+            crate::lens::Lens::new(&plan, &whose, self.run.today),
+            &self.run,
+            found,
+        )
     }
 
     fn report<'a>(&'a self, query: Query) -> Report<'a> {
@@ -1249,7 +1260,8 @@ fn today_from_the_run_and_from_the_flows_agree() {
     // The run's holdings answer for today; two days are one pass over the flows.
     let house = household();
     let (everyone, today) = (Whose::default(), house.run.today);
-    let lens = crate::lens::Lens::new(&house.book, &everyone, today);
+    let plan = axiom_engine::Plan::new(&house.book);
+    let lens = crate::lens::Lens::new(&plan, &everyone, today);
     let from_holdings = crate::history::Snapshots::of(lens, &house.run, &[today], false);
     let from_flows =
         crate::history::Snapshots::of(lens, &house.run, &[day(2026, 2, 1), today], false);
@@ -1272,7 +1284,8 @@ fn snapshot_storage_scales_with_occupied_owner_pairs() {
     let house = household();
     let days = [day(2026, 1, 31), house.run.today];
     let everyone = Whose::default();
-    let lens = crate::lens::Lens::new(&house.book, &everyone, house.run.today);
+    let plan = axiom_engine::Plan::new(&house.book);
+    let lens = crate::lens::Lens::new(&plan, &everyone, house.run.today);
     let all = crate::history::Snapshots::of(lens, &house.run, &days, false);
     let (all_pairs, all_cells) = all.storage_shape();
     let dense_cells = days.len() * house.book.places.len() * house.book.commodities.len();
@@ -1283,7 +1296,7 @@ fn snapshot_storage_scales_with_occupied_owner_pairs() {
     );
 
     let jordan = Whose::of(&house.book, house.entity("jordan"));
-    let jordan_lens = crate::lens::Lens::new(&house.book, &jordan, house.run.today);
+    let jordan_lens = crate::lens::Lens::new(&plan, &jordan, house.run.today);
     let scoped = crate::history::Snapshots::of(jordan_lens, &house.run, &days, false);
     let (jordan_pairs, jordan_cells) = scoped.storage_shape();
     assert_eq!(jordan_cells, days.len() * jordan_pairs);
@@ -1383,7 +1396,10 @@ fn flow_recognizes_a_spread_premium_a_little_each_day() {
 fn register_runs_a_balance_and_mutes_the_pending_check() {
     let house = household();
     let checking = house.place("assets/bank/checking");
-    let section = crate::register::section(&house.book, &house.run, checking, None, None);
+    let plan = axiom_engine::Plan::new(&house.book);
+    let whose = Whose::default();
+    let lens = crate::lens::Lens::new(&plan, &whose, house.run.today);
+    let section = crate::register::section_for_lens(lens, &house.run, checking, None, None);
     let rows = lines(&section);
     assert_eq!(rows.len(), 11);
     assert_eq!(
@@ -1391,8 +1407,8 @@ fn register_runs_a_balance_and_mutes_the_pending_check() {
         "~2026-03-01 | expenses/repairs |  | #check-1041 · pending | -350.00 USD | 5,115.80 USD"
     );
     // A window opens with the balance carried in.
-    let march = crate::register::section(
-        &house.book,
+    let march = crate::register::section_for_lens(
+        lens,
         &house.run,
         checking,
         Some(day(2026, 3, 1)),
@@ -1408,7 +1424,10 @@ fn register_runs_a_balance_and_mutes_the_pending_check() {
 fn the_register_of_a_liability_reads_the_way_a_statement_does() {
     let house = household();
     let bills = house.place("liabilities/bills");
-    let section = crate::register::section(&house.book, &house.run, bills, None, None);
+    let plan = axiom_engine::Plan::new(&house.book);
+    let whose = Whose::default();
+    let lens = crate::lens::Lens::new(&plan, &whose, house.run.today);
+    let section = crate::register::section_for_lens(lens, &house.run, bills, None, None);
     // A bill of 1,200 is owed; 500 paid leaves 700.
     assert_eq!(
         lines(&section),
@@ -1587,7 +1606,8 @@ fn claims_list_what_is_owed_with_its_age_and_what_is_overdue() {
 fn a_bill_is_netted_by_its_code_across_the_flows_that_made_and_settled_it() {
     let house = household();
     let lens_owner = Whose::default();
-    let lens = crate::lens::Lens::new(&house.book, &lens_owner, day(2026, 3, 31));
+    let plan = axiom_engine::Plan::new(&house.book);
+    let lens = crate::lens::Lens::new(&plan, &lens_owner, day(2026, 3, 31));
     let bills = crate::claims::owed_by_you(lens, &house.run, house.place("liabilities/bills"));
     let [bill] = &bills[..] else {
         panic!("one bill is open")
@@ -1597,7 +1617,7 @@ fn a_bill_is_netted_by_its_code_across_the_flows_that_made_and_settled_it() {
         (Qty(70_000), day(2026, 3, 5), Some(day(2026, 4, 4)), false)
     );
     // Paid in full, it is no longer open.
-    let paid = crate::lens::Lens::new(&house.book, &lens_owner, day(2026, 3, 5));
+    let paid = crate::lens::Lens::new(&plan, &lens_owner, day(2026, 3, 5));
     assert_eq!(
         crate::claims::owed_by_you(paid, &house.run, house.place("liabilities/bills"))[0]
             .left
@@ -1944,10 +1964,10 @@ fn claims_and_registers_are_about_whose_money_they_are() {
         "the invoice is the first person's"
     );
     let me = house.entity("me");
+    let plan = axiom_engine::Plan::new(&house.book);
     let mine = crate::views(
-        &house.book,
+        crate::lens::Lens::new(&plan, &Whose::of(&house.book, me), house.run.today),
         &house.run,
-        &Whose::of(&house.book, me),
         &Query::Claims { at: None },
     )
     .unwrap();

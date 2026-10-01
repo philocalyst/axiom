@@ -14,7 +14,7 @@ use axiom_engine::{Holding, Options, Plan, Run};
 use axiom_model::{Amount, Book, Class, Entity, Flow, Place, Select, Txn};
 
 use crate::history::{Posting, journal_ends_by};
-use crate::lens::{Lens, Whose};
+use crate::lens::Lens;
 use crate::places::path;
 use crate::table::{code_labels, doc_headline};
 use crate::{Cell, Column, Report, Row, Section, Style};
@@ -150,13 +150,6 @@ fn settled_codes<'a>(book: &'a Book, flow: &'a Flow) -> impl Iterator<Item = Sym
         }
     });
     view.codes().chain(selected)
-}
-
-pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Option<Day>) -> Report<'s> {
-    let at = at.unwrap_or(run.today);
-    let lens = Lens::new(book, whose, at);
-    let holdings = holdings_at(book, run, at);
-    view_from(lens, run, holdings.iter())
 }
 
 /// Builds a claims view from holdings supplied by a shared context ledger.

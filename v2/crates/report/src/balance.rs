@@ -10,26 +10,13 @@ use axiom_model::{Amount, Book, Class, Commodity, Period, Place};
 
 use crate::calendar::Periods;
 use crate::history::Snapshots;
-use crate::lens::{Basket, Lens, Valued, Whose};
+use crate::lens::{Basket, Lens, Valued};
 use crate::places::{depth, leaf, names, path};
 use crate::resolve;
 use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 /// How many month-end columns `--monthly` shows.
 const MONTHLY_COLUMNS: usize = 12;
-
-pub fn view<'s>(
-    book: &'s Book<'_>,
-    run: &Run,
-    whose: &Whose,
-    globs: &[&str],
-    at: Option<Day>,
-    value: bool,
-    monthly: bool,
-) -> Result<Report<'s>, Diagnostic> {
-    let at = at.unwrap_or(run.today);
-    view_with_lens(Lens::new(book, whose, at), run, globs, value, monthly)
-}
 
 /// Builds a balance view with names resolved by a shared report context.
 pub(crate) fn view_with_lens<'s>(

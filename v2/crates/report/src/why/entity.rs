@@ -7,17 +7,17 @@
 
 use axiom_core::{Id, Qty};
 use axiom_engine::Run;
-use axiom_model::{Amount, Book, Entity, Law, Subject};
+use axiom_model::{Amount, Entity, Law, Subject};
 
 use super::laws_table;
 use crate::claims;
-use crate::lens::{Lens, Whose, on_balance_sheet};
+use crate::lens::{Lens, on_balance_sheet};
 use crate::places::path;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, entity: Id<Entity>) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, entity: Id<Entity>) -> Report<'s> {
+    let book = lens.book;
     let name = book.name(book.entities[entity].path);
-    let lens = Lens::new(book, whose, run.today);
 
     let mut places = Section::new([Column::left("Place"), Column::right("Holds")]).headed("Places");
     for holding in run
@@ -26,7 +26,7 @@ pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, entity: Id<Entit
         .filter(|holding| lens.owns(holding.place) && on_balance_sheet(book.places[holding.place].class))
     {
         let sign = book.places[holding.place].class.display_sign();
-        let held = Amount::new(Qty(holding.qty().0 * sign), holding.unit);
+        let held = Amount::new(Qty(lens.place_qty(holding.place, holding.qty()).0 * sign), holding.unit);
         places.push(Row::new([Cell::text(path(book, holding.place)), Cell::amount(book, held)]));
     }
 
@@ -50,13 +50,14 @@ pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, entity: Id<Entit
             continue;
         }
         for lot in holding.lots.iter().filter(|lot| lot.tied == Some(entity)) {
-            let held = Amount::new(lot.qty, holding.unit);
+            let held = Amount::new(lens.place_qty(holding.place, lot.qty), holding.unit);
             remaining += lens.value(held).unwrap_or_default();
+            let source = lot.txn.source_txn().and_then(|txn| book.txns.get(txn)).map(|txn| txn.loc);
             let cells = [
                 Cell::text(path(book, holding.place)),
                 Cell::amount(book, held),
                 Cell::Day(lot.acquired),
-                Cell::Source(book.txns[lot.txn].loc),
+                source.map_or(Cell::Blank, Cell::Source),
             ];
             ties.push(Row::new(cells));
         }

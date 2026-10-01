@@ -3,18 +3,19 @@
 
 use axiom_core::Id;
 use axiom_engine::{Cause, Effect, Gain, Run};
-use axiom_model::{Book, Flow};
+use axiom_model::Flow;
 
-use crate::lens::Whose;
+use crate::lens::Lens;
 use super::{effects_table, flows_table};
 use crate::Report;
 use crate::gains;
 
-pub fn report<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, name: &str) -> Report<'s> {
+pub fn report<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, name: &str) -> Report<'s> {
+    let book = lens.book;
     let effects: Vec<&Effect> = run
         .effects
         .iter()
-        .filter(|effect| book.name(effect.name) == name && whose.includes(effect.owner))
+        .filter(|effect| book.name(effect.name) == name && lens.owns_entity(effect.owner))
         .collect();
     let mut flows: Vec<Id<Flow>> = effects
         .iter()

@@ -9,17 +9,18 @@ use axiom_model::{Amount, Book, Period};
 
 use crate::calendar::Periods;
 use crate::headroom::window_words;
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::{Cell, Column, Report, Row, Section, Style};
 
-pub fn view<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Option<Day>, by: Period) -> Report<'s> {
+pub(crate) fn view_with_lens<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Option<Day>, by: Period) -> Report<'s> {
     let at = at.unwrap_or(run.today);
-    purpose_budgets(book, run, whose, at, by)
+    purpose_budgets(lens.on(at), run, at, by)
 }
 
 /// Budgets are typed declarations on purposes. Their law id ties the report to
 /// the exact headroom readings the engine produced, including the owner scope.
-fn purpose_budgets<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Day, by: Period) -> Report<'s> {
+fn purpose_budgets<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, at: Day, by: Period) -> Report<'s> {
+    let book = lens.book;
     let periods = Periods::covering(by, at, at);
     let window = periods.window(0).days();
     let mut table = Section::new(
@@ -35,7 +36,7 @@ fn purpose_budgets<'s>(book: &'s Book<'_>, run: &Run, whose: &Whose, at: Day, by
             .iter()
             .filter(|reading| {
                 reading.law == budget.law
-                    && whose.includes(reading.owner)
+                    && lens.whose.includes(reading.owner)
                     && reading.days.overlaps(window)
             })
             .collect();

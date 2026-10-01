@@ -5,30 +5,29 @@ use std::collections::BTreeSet;
 use axiom_core::glob::glob;
 use axiom_core::{Diagnostic, Sym};
 use axiom_engine::Run;
-use axiom_model::Book;
 
 use super::{event_words, flows_table};
 use crate::history::postings;
-use crate::lens::Whose;
+use crate::lens::Lens;
 use crate::resolve;
 use crate::{Cell, Column, Report, Row, Section};
 
 /// `pattern` may be a glob: `check-*`.
 pub fn report<'s>(
-    book: &'s Book<'_>,
+    lens: Lens<'s, '_, '_, '_>,
     run: &Run,
-    whose: &Whose,
     pattern: &str,
 ) -> Result<Report<'s>, Diagnostic> {
+    let book = lens.book;
     let marked = |code: Sym| glob(pattern, book.name(code));
     let flows: Vec<_> = postings(book, run)
         .filter(|posting| {
-            whose.includes(posting.flow.owner) && book.flow_view(posting.flow).codes().any(marked)
+            lens.owns_entity(posting.flow.owner) && book.flow_view(posting.flow).codes().any(marked)
         })
         .map(|posting| posting.id)
         .collect();
-    let visible_codes = super::line::scoped_codes(book, whose);
-    let event_visible = |code| whose.is_everyone() || visible_codes.contains(&code);
+    let visible_codes = super::line::scoped_codes(book, &lens.whose);
+    let event_visible = |code| lens.whose.is_everyone() || visible_codes.contains(&code);
     let mut happened = Section::new([
         Column::left("Date"),
         Column::left("Event"),
