@@ -1,0 +1,35 @@
+{
+  "kind": "exact user prompt evidence; not source patch recovery",
+  "task": "01a0f031-c1c8-7a41-8f31-8847241a38dd",
+  "source": "/Users/mileswirht/Documents/Codex/2026-09-30/task/recovery/evidence/history/recent-remote/remote-thread-ui-cache.json",
+  "source_sha256": "070f35ba350cee41df9754fa4a59ed670cfbc2b00c308f7977fda0659b5963c9",
+  "timestamp_status": "prompt arrays have no timestamps; order preserved as cached",
+  "prompts": [
+    {
+      "pointer": "/prompt-history/01a0f031-c1c8-7a41-8f31-8847241a38dd/0",
+      "text": "[https://github.com/philocalyst/axiom](https://github.com/philocalyst/axiom)\n\nclone that&#x20;"
+    },
+    {
+      "pointer": "/prompt-history/01a0f031-c1c8-7a41-8f31-8847241a38dd/1",
+      "text": "Get into this, reference the claude branch, and work from here (final claude prompt delivered). on line count, i think if you really experiment with cleaner and better typed formulations, then it'll work out fine. on parellizaiton, i mean finding true lock-free algorithims, like the ones in sled, may require some unsafe code. to avoid mutex. ideally through more trickery we can avoid arc and refcounting too. as few allocations as possible, may require more hacks. Really drive out experiments. no code golfing should end up more readable not less. And huge datastructure optimizations lay in wait through deeper refactors too, parsing could also be vastly cleaner and faster. read through carbons documentation and video on parsing and leverage its insights.\n\nPushing first: main is already up, and the unpushed work is on three branches (v4, the sync lane, the report lane).\n\nNow copying the lane briefs and research notes into the repo so they're preserved, then writing the brief itself.\n\nEverything is pushed, and the brief is in the repo as `v2/REMAINING.md`. Nothing else is running: the report and model lanes were stopped by a container restart, and I haven't restarted them since you interrupted.\n\n**Branches on the remote:**\n\n| branch                               | head      | what's there                                                                                              |\n| ------------------------------------ | --------- | --------------------------------------------------------------------------------------------------------- |\n| `claude/great-wozniak-pnqn7x` (main) | `12d5d18` | Main as merged, plus the brief. Tests, golden outputs and the mistakes corpus pass.                       |\n| `…-v4`                               | `455f819` | The new v4 syntax merged with main. Only the syntax builds, which is expected until the model is rebuilt. |\n| `…-report`                           | `9debdf9` | The report lane's work so far. Its merge of the latest main was interrupted and has to be redone.         |\n| `…-sync`                             | `75325d8` | The sync crate, not merged into main because the permission check blocked it.                             |\n\nI also copied the lane briefs, the two code audits and the research notes into `v2/briefs/`, because they lived only in this session's temporary space. `PLAN.md` now points to the brief.\n\n**What `REMAINING.md` covers:**\n\n- **Status:** every lane's state, with what's done, partial or not started, and why.\n- **Order of work:** three lines can start now (finishing the report, engine semantics, model declarations). Everything after follows in sequence, up to merging v4 into main.\n- **Each remaining lane:** its checklist, verification targets and size cap, plus the one lane that has no brief yet (connecting sync to the book).\n- **Open design questions** raised by the lanes, the findings still open, and after-v4 ideas such as the editor integration.\n- **Baselines:** the performance numbers not to regress, and a definition of done for v4.\n\n**Decisions it needs from you:**\n\n- **Sync branch:** allow the merge into main, or leave it on its branch until the model can take it?\n- **Size cap:** the 24,000-line cap won't hold. If every lane lands as briefed, the total is about 30,000 lines, or about 27,000 after the planned cuts. That is still well under half of v1's 71,000. Raise the cap, or name what to drop.\n- **Stash entry:** `e4a-wip-plan-2026` is obsolete. The engine lane wasn't allowed to drop it, so it's yours to drop.\n\nDRIVE THIS ALL THE WAY OUT! Use luna for experiments/research. you write the code yourself.&#x20;"
+    },
+    {
+      "pointer": "/prompt-history/01a0f031-c1c8-7a41-8f31-8847241a38dd/2",
+      "text": "And far too much of the code makes assumptions on the presence of a CLI, needs to be properly abstracted in many ways to truly be simple and easy to port to a GUI or other client. one good case is the report building. Better and stronger traits. Also use this as a chance to remove more intermediate allocations and leverage the borrow checker more"
+    },
+    {
+      "pointer": "/prompt-history/01a0f031-c1c8-7a41-8f31-8847241a38dd/3",
+      "text": "Yes and especially with the forecasting, I was always hoping that would just be a property of the model rather than a separate approach. seems very stringl-based in that file and that's not a good sign I believe.&#x20;"
+    },
+    {
+      "pointer": "/prompt-history/01a0f031-c1c8-7a41-8f31-8847241a38dd/4",
+      "text": "Yeah and keep working on the cleaner abstraction boundaries, also just as an excuse to streamline control flow and improve testability. work through the surfaces one systematically.&#x20;"
+    },
+    {
+      "pointer": "/prompt-history/01a0f031-c1c8-7a41-8f31-8847241a38dd/5",
+      "text": "Yeah and keep working on the cleaner abstraction boundaries, also just as an excuse to streamline control flow and improve testability. work through the surfaces one systematically. be more clever than you have been"
+    }
+  ],
+  "baseline": "12d5d1889fe9bc699a20c32a2056aa571d142d4b",
+  "new_branch": "rework/recovered-client-boundaries"
+}
