@@ -33,7 +33,8 @@ project-confined, sorted `read` glob expansion without reading file contents.
 The isolated harness at `/tmp/axiom-sync-primitives-forecast` includes the exact
 `cell.rs`, `amount.rs`, `csv.rs`, `tagged.rs`, `paths.rs`, and `write.rs` source
 files and links the repository's real `axiom_core`, `axiom_syntax`, and `memchr`
-dependencies. Its log is `verification/cutover/sync-primitives-forecast-tests.log`.
+dependencies. Its log is in the sibling task evidence directory at
+`../verification/cutover/sync-primitives-forecast-tests.log`.
 It is evidence for those modules only, not a substitute for the crate or
 workspace build.
 
