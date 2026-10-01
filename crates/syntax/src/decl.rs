@@ -203,7 +203,9 @@ impl<'s> Parser<'s> {
 
     fn param_row(&mut self, line: &Line<'s>) -> Parse<()> {
         let mark = self.mark::<Key>();
-        while let Some(key) = self.key() {
+        let mut first = true;
+        while let Some(key) = self.key(first) {
+            first = false;
             self.push(key);
         }
         let keys = self.since(mark);
@@ -222,14 +224,17 @@ impl<'s> Parser<'s> {
 
     /// The next key of a row, if the next token is one. The last token of a
     /// line is always the value, and a number followed by a commodity is a
-    /// value too, not a year.
-    fn key(&mut self) -> Option<Key<'s>> {
+    /// value except when it is the row's first (year) key.
+    fn key(&mut self, first: bool) -> Option<Key<'s>> {
         let (token, second) = (self.peek(), self.lexer.peek_second());
         let key = match token.tok {
             _ if matches!(second.tok, Tok::Eol) => return None,
             Tok::Date(day) => Key::Date(day, token.loc),
             Tok::Name(text) => Key::Name(Name(text)),
-            Tok::Number(_) if !matches!(second.tok, Tok::Unit(_)) => Key::Year(self.year(token)?, token.loc),
+            Tok::Unit(text) => Key::Name(Name(text)),
+            Tok::Number(_) if first || !matches!(second.tok, Tok::Unit(_)) => {
+                Key::Year(self.year(token)?, token.loc)
+            }
             _ => return None,
         };
         self.bump();

@@ -392,10 +392,18 @@ fn ax_files(root: &Path, dir: &Path) -> Vec<PathBuf> {
     found
 }
 
+fn sketch_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .map(|base| base.join("examples/v4-sketch"))
+        .find(|path| path.is_dir())
+        .expect("examples/v4-sketch is available beside the workspace")
+}
+
 /// Every line of the v4 sketch parses without a diagnostic.
 #[test]
 fn the_v4_sketch_parses_clean() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/v4-sketch");
+    let root = sketch_root();
     let files = ax_files(&root, &root);
     assert_eq!(files.len(), 11, "{files:?}");
     let mut items = 0;
@@ -1272,6 +1280,17 @@ fn a_system_says_what_it_counts_in_and_how_it_converts() {
     let params: Vec<&Param> = file.iter().collect();
     assert_eq!((params[0].unit.map(|unit| unit.0), params[1].unit), (Some("USD"), None));
     assert_eq!(params[0].rows.len(), 2);
+}
+
+#[test]
+fn parameter_rows_accept_currency_symbols_after_a_year_key() {
+    let file = parse_clean("param exchange-rates\n  2026 EUR USD 1.1\n");
+    let param: &Param = file.iter().next().unwrap();
+    let row = &file[param.rows][0];
+    let keys = &file[row.keys];
+    assert!(matches!(keys[0], Key::Year(2026, _)));
+    assert!(matches!(keys[1], Key::Name(Name("EUR"))));
+    assert!(matches!(keys[2], Key::Name(Name("USD"))));
 }
 
 #[test]
@@ -2180,7 +2199,7 @@ fn damaged_files_keep_the_arena_well_formed() {
 /// damaged file has the most to go wrong, and none may panic.
 #[test]
 fn damaged_sketch_files_keep_the_arena_well_formed_in_any_folder() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/v4-sketch");
+    let root = sketch_root();
     for path in ax_files(&root, &root) {
         let src = std::fs::read_to_string(root.join(&path)).unwrap();
         for folder in [Folder::default(), YEAR, MARCH, Folder::of(path.to_str().unwrap())] {
@@ -2639,7 +2658,7 @@ fn a_tail_says_its_clauses_in_one_order() {
 fn the_sketch_the_examples_and_every_verb_format_idempotently() {
     formatted(EXAMPLE, Folder::default());
     formatted(STATEMENTS, Folder::default());
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/v4-sketch");
+    let root = sketch_root();
     for path in ax_files(&root, &root) {
         let src = std::fs::read_to_string(root.join(&path)).unwrap();
         let folder = Folder::of(path.to_str().unwrap());
@@ -2658,7 +2677,7 @@ fn the_sketch_the_examples_and_every_verb_format_idempotently() {
 /// that still parses formats to what it says.
 #[test]
 fn damaged_files_format_without_panicking_and_without_changing_what_they_say() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/v4-sketch");
+    let root = sketch_root();
     let mut sources = vec![EXAMPLE.to_string(), STATEMENTS.to_string()];
     for name in ["journal/2026/01.ax", "journal/2026/03.ax"] {
         sources.push(std::fs::read_to_string(root.join(name)).unwrap());
