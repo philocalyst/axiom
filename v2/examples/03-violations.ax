@@ -34,7 +34,7 @@ entity scholarship : grant
   until 2026-12-31
 
 // A misspelled property is refused at the declaration.
-account college : 529 at fidelity
+account college : 529-plan at fidelity
   benificiary me
 // expect: unknown property `benificiary`, with `beneficiary` suggested.
 
