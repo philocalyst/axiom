@@ -38,6 +38,7 @@ pub enum Opt {
     Paths,
     Check,
     Json,
+    Dry,
 }
 
 /// An option, as parsing and the help screen see it.
@@ -130,6 +131,12 @@ pub const OPTIONS: &[OptionSpec] = &[
         "check",
         None,
         "report files that need formatting without writing them",
+    ),
+    option(
+        Opt::Dry,
+        "dry",
+        None,
+        "show proposed sync changes without writing them",
     ),
     option(Opt::At, "at", Some("DATE"), "as of this day"),
     option(Opt::Value, "value", None, "value holdings at market prices"),
@@ -337,9 +344,9 @@ pub const COMMANDS: &[CommandSpec] = &[
     command(
         Verb::Sync,
         "sync",
-        Operands::Any("FILE"),
-        &[],
-        "run the sync scripts, keep what they print",
+        Operands::Any("NAME"),
+        &[Opt::Dry],
+        "read declared sources and apply their changes",
     ),
     command(
         Verb::Fmt,
@@ -370,7 +377,10 @@ pub enum Command<'a> {
     Help,
     Version,
     Check,
-    Sync(Vec<&'a str>),
+    Sync {
+        names: Vec<&'a str>,
+        dry: bool,
+    },
     /// Format all project sources, or just the named files. With `--check`,
     /// report whether formatting would change any file without writing.
     Fmt {
@@ -449,7 +459,12 @@ fn build<'a>(
     ];
     let query = match spec.verb {
         Verb::Check => return Ok(Command::Check),
-        Verb::Sync => return Ok(Command::Sync(operands.to_vec())),
+        Verb::Sync => {
+            return Ok(Command::Sync {
+                names: operands.to_vec(),
+                dry: has(Dry),
+            });
+        }
         Verb::Fmt => {
             return Ok(Command::Fmt {
                 files: operands.to_vec(),
@@ -868,6 +883,19 @@ mod tests {
                 .message
                 .contains("has no option `--check`")
         );
+    }
+
+    #[test]
+    fn sync_selects_declared_source_names_and_accepts_dry_mode() {
+        let args = ["sync", "bank-feed", "price-import", "--dry"].map(String::from);
+        assert!(matches!(
+            parse(&args).unwrap().command,
+            Command::Sync { names, dry: true }
+                if names == ["bank-feed", "price-import"]
+        ));
+
+        let args = ["check", "--dry"].map(String::from);
+        assert!(parse(&args).is_err(), "--dry belongs to sync only");
     }
 
     #[test]
