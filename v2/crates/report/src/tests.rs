@@ -1072,6 +1072,7 @@ fn cell(cell: &Cell) -> String {
         Cell::Text(text) => text.to_string(),
         Cell::Name(name) => (*name).to_string(),
         Cell::Code(code) => format!("^{code}"),
+        Cell::Purpose(purpose) => format!("#{purpose}"),
         Cell::Said(text) => text.to_string(),
         Cell::Amount { qty, scale, unit } => format!("{} {unit}", qty.show(*scale)),
         Cell::Day(day) => day.to_string(),

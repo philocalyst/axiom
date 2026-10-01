@@ -213,7 +213,7 @@ impl<'s> Cell<'s> {
     }
 
     pub fn code(book: &Book<'s>, code: Sym) -> Cell<'s> {
-        Cell::Code(book.name(code).trim_start_matches('#'))
+        Cell::Code(book.name(code))
     }
 
     pub fn list(between: &'static str, parts: impl IntoIterator<Item = Cell<'s>>) -> Cell<'s> {
@@ -280,11 +280,12 @@ pub fn doc_headline(book: &Book, doc: Option<Sym>) -> Option<String> {
     })
 }
 
-/// `#house`, `#check-1041`: codes as they are written.
-pub fn code_labels<'a>(book: &'a Book, codes: &'a [Sym]) -> impl Iterator<Item = String> + 'a {
-    codes
-        .iter()
-        .map(|&code| format!("#{}", book.name(code).trim_start_matches('#')))
+/// Typed codes in source order. Renderers choose their native sigil (`^`).
+pub fn code_labels<'a, 's>(
+    book: &'a Book<'s>,
+    codes: impl Iterator<Item = Sym> + 'a,
+) -> impl Iterator<Item = Cell<'s>> + 'a {
+    codes.map(|code| Cell::Code(book.name(code)))
 }
 
 /// `irs by 2027-04-15`

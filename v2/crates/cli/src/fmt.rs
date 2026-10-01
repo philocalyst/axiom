@@ -188,7 +188,23 @@ mod tests {
     fn check_is_idempotent_and_only_targets_named_project_files() {
         let dir = TempDir::new("fmt");
         dir.write("axiom.ax", "base USD\n");
-        dir.write("journal/2026.ax", "2026-01-05 checking -> food 12.5 USD\n");
+        let source = "2026-01-05   checking   12.5 USD   ->   food\n";
+        let (file, diagnostics) = axiom_syntax::parse(
+            axiom_core::FileId(0),
+            source,
+            axiom_syntax::Folder::of("journal/2026.ax"),
+        );
+        assert!(
+            diagnostics.is_empty(),
+            "fixture must parse as native v4 syntax"
+        );
+        assert_ne!(
+            file.format(),
+            source,
+            "the formatter must change this input"
+        );
+        assert_eq!(file.format(), "2026-01-05 checking 12.5 USD -> food\n");
+        dir.write("journal/2026.ax", source);
         let project = Project::find(dir.path()).unwrap();
         let sources = project.load().unwrap();
         let checked = execute(
@@ -205,7 +221,7 @@ mod tests {
         );
         assert_eq!(
             fs::read_to_string(dir.path().join("journal/2026.ax")).unwrap(),
-            "2026-01-05 checking -> food 12.5 USD\n"
+            source
         );
 
         let formatted = execute(
@@ -217,6 +233,7 @@ mod tests {
         );
         assert!(!formatted.failed);
         let first = fs::read_to_string(dir.path().join("journal/2026.ax")).unwrap();
+        assert_eq!(first, "2026-01-05 checking 12.5 USD -> food\n");
         let sources = project.load().unwrap();
         let checked = execute(
             &sources,

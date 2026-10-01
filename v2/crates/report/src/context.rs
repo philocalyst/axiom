@@ -137,6 +137,7 @@ impl<'b, 's> Context<'b, 's> {
                     ledger.holdings(),
                 ))
             }
+            Query::Contracts => Ok(super::contracts::view(self.book, &self.run, &self.whose)),
             Query::Tax { year } => Ok(super::tax::view(self.book, &self.run, &self.whose, *year)),
             Query::Gains { year } => {
                 Ok(super::gains::view(self.book, &self.run, &self.whose, *year))

@@ -1,21 +1,22 @@
-//! `flow`: the income statement, by month or by year.
+//! `flow`: income, spending, capital and transfer, grouped by purpose or party.
 //!
 //! Income and expense places are read as the change in their balances over
 //! each period, priced in the base currency on the day each flow happened.
 //! A flow spread over a range is recognized a little each day, so a year's
 //! premium lands in every month it covers.
 
-use std::collections::HashMap;
-use std::iter;
+use std::collections::{BTreeMap, HashMap};
 
-use axiom_core::{Day, Days, Id, Qty, spread};
+use axiom_core::{Day, Days, Id, Qty, Sym, spread};
 use axiom_engine::Run;
-use axiom_model::{Book, Class, Entity, Period, Place, PurposeRoot};
+use axiom_model::{
+    Action, Book, Class, Commodity, Entity, Object, Period, Place, Purpose, PurposeRoot,
+};
 
 use crate::calendar::Periods;
 use crate::history::{Posting, postings};
 use crate::lens::{Lens, Whose};
-use crate::places::{Side, depth, leaf, path, v3_side};
+use crate::places::path;
 use crate::{Cell, Column, Money, Report, Row, Section, Style, When};
 
 /// How many periods to show when the window is not given.
@@ -72,36 +73,22 @@ pub(crate) fn view_by_party_with_lens<'s>(
         }
         let from_outside = book.places[flow.from].class == Class::Outside;
         let to_outside = book.places[flow.to].class == Class::Outside;
-        let inbound = from_outside && !to_outside;
-        let outbound = to_outside && !from_outside;
-        let root = flow
-            .purpose
-            .map(|purpose| book.purposes[purpose.purpose].root)
-            .or_else(|| {
-                if inbound {
-                    Some(PurposeRoot::Income)
-                } else if outbound {
-                    Some(PurposeRoot::Spending)
-                } else {
-                    None
-                }
-            });
-        let Some(root) = root else { continue };
-        let amount = if inbound {
-            posting.arrive_in_base(lens)
-        } else {
-            posting.out_in_base(lens)
+        let Some(purpose) = flow.purpose else {
+            continue;
         };
+        let root = book.purposes[purpose.purpose].root;
+        let amount = movement_in_base(lens, posting, Some(root));
         let Some(amount) = amount else {
             unpriced += 1;
             continue;
         };
-        // Income is positive when it comes in; spending and capital are
-        // positive when they leave. Transfers are shown as gross movement.
-        let reverses = (root == PurposeRoot::Income && !inbound)
-            || ((root == PurposeRoot::Spending || root == PurposeRoot::Capital) && inbound);
-        let amount = if reverses { -amount } else { amount };
-        let other = if inbound { flow.from } else { flow.to };
+        let other = if from_outside {
+            flow.from
+        } else if to_outside {
+            flow.to
+        } else {
+            flow.to
+        };
         let party = flow.payee.map_or(Party::Place(other), Party::Entity);
         for period in periods.overlapping(flow.recognized.first(), flow.recognized.last()) {
             let window = periods.window(period).days();
@@ -143,7 +130,7 @@ pub(crate) fn view_by_party_with_lens<'s>(
                     add_into(&mut total, amounts);
                     total
                 });
-        if is_zero(&total) {
+        if parties.iter().all(|(_, amounts)| is_zero(amounts)) {
             continue;
         }
         let heading = match root {
@@ -186,7 +173,7 @@ pub(crate) fn view_by_party_with_lens<'s>(
         .zip(&spending)
         .map(|(&earned, &spent)| earned - spent)
         .collect::<Vec<_>>();
-    if !is_zero(&net) {
+    if !income.iter().all(|qty| qty.is_zero()) || !spending.iter().all(|qty| qty.is_zero()) {
         section.push(net_row(book, &net));
     }
     section.unpriced(unpriced, "flow");
@@ -197,6 +184,31 @@ pub(crate) fn view_by_party_with_lens<'s>(
 enum Party {
     Entity(Id<Entity>),
     Place(Id<Place>),
+}
+
+fn table<'s>(first: &'static str, periods: &Periods) -> Section<'s> {
+    let columns = (0..periods.len()).map(|period| Column::right(periods.title(period)));
+    Section::new(std::iter::once(Column::left(first)).chain(columns))
+}
+
+fn row<'s>(
+    book: &Book<'s>,
+    label: Cell<'s>,
+    depth: usize,
+    values: &[Qty],
+    style: Style,
+) -> Row<'s> {
+    let cells = values.iter().map(|&qty| Cell::base_or_blank(book, qty));
+    let total = (values.len() > 1).then(|| Cell::base_or_blank(book, values.iter().copied().sum()));
+    Row::new(std::iter::once(label).chain(cells).chain(total))
+        .depth(depth)
+        .style(style)
+}
+
+fn net_row<'s>(book: &Book<'s>, values: &[Qty]) -> Row<'s> {
+    let cells = values.iter().map(|&qty| Cell::base(book, qty));
+    let total = (values.len() > 1).then(|| Cell::base(book, values.iter().copied().sum()));
+    Row::new(std::iter::once(Cell::Word("Net")).chain(cells).chain(total)).style(Style::Total)
 }
 
 impl Party {
@@ -215,49 +227,429 @@ pub(crate) fn view_with_lens<'s>(
     by: Period,
     from: Option<Day>,
 ) -> Report<'s> {
-    let (book, to) = (lens.book, lens.day);
+    purpose_view(lens, run, by, from)
+}
+
+/// Income, spending and capital, grouped by the purpose tree. The matrix is
+/// indexed by purpose and period; parent rows are accumulated once, from the
+/// leaves up, rather than rescanning every flow for each subtree.
+fn purpose_view<'s>(lens: Lens<'_, 's>, run: &Run, by: Period, from: Option<Day>) -> Report<'s> {
+    let (book, cutoff) = (lens.book, lens.day);
     let periods = match from {
-        Some(from) => Periods::covering(by, from, to),
+        Some(from) => Periods::covering(by, from, cutoff),
         None => {
             let first = book
                 .flows
                 .as_slice()
                 .first()
-                .map_or(to, |flow| flow.day.min(to));
-            Periods::covering(by, first, to).last(DEFAULT_PERIODS)
+                .map_or(cutoff, |flow| flow.day.min(cutoff));
+            Periods::covering(by, first, cutoff).last(DEFAULT_PERIODS)
         }
     };
-    let statement = Statement::compile(lens, run, periods, to);
-    Report::new("Income and spending").with(statement.section(lens))
-}
+    let period_count = periods.len();
+    let purpose_count = book.purposes.len();
+    let mut totals = vec![Qty::ZERO; purpose_count * period_count];
+    let mut objects: HashMap<(Id<axiom_model::Purpose>, Object), Vec<Qty>> = HashMap::new();
+    let mut descriptions: BTreeMap<Option<axiom_core::Sym>, Vec<Qty>> = BTreeMap::new();
+    let mut unclassified = vec![Qty::ZERO; period_count];
+    let mut unpriced = 0;
+    let mut spread_seen = false;
 
-/// A quantity per place per period, stored flat so that a subtree's figures
-/// are one contiguous slice.
-struct Grid {
-    columns: usize,
-    cells: Vec<Qty>,
-}
-
-impl Grid {
-    fn new(rows: usize, columns: usize) -> Grid {
-        Grid {
-            columns,
-            cells: vec![Qty::ZERO; rows * columns],
+    for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
+        let flow = posting.flow;
+        if !lens.whose.includes(flow.owner) || !flow.moves_quantity(axiom_model::End::From) {
+            continue;
+        }
+        spread_seen |= flow.recognized.last() > flow.day;
+        let Some(purpose) = flow.purpose else {
+            let amount = movement_in_base(lens, posting, None);
+            let Some(amount) = amount else {
+                unpriced += 1;
+                continue;
+            };
+            add_recognized(&mut unclassified, periods, flow.recognized, cutoff, amount);
+            let values = descriptions
+                .entry(flow.description)
+                .or_insert_with(|| vec![Qty::ZERO; period_count]);
+            add_recognized(values, periods, flow.recognized, cutoff, amount);
+            continue;
+        };
+        let root = book.purposes[purpose.purpose].root;
+        let Some(amount) = movement_in_base(lens, posting, Some(root)) else {
+            unpriced += 1;
+            continue;
+        };
+        let values = &mut totals[purpose.purpose.index() * period_count..][..period_count];
+        add_recognized(values, periods, flow.recognized, cutoff, amount);
+        if let Some(object) = purpose.of {
+            let values = objects
+                .entry((purpose.purpose, object))
+                .or_insert_with(|| vec![Qty::ZERO; period_count]);
+            add_recognized(values, periods, flow.recognized, cutoff, amount);
         }
     }
 
-    fn add(&mut self, place: Id<Place>, column: usize, qty: Qty) {
-        self.cells[place.index() * self.columns + column] += qty;
+    // Purpose ids are preordered, so reverse traversal adds every child's
+    // amount into its parent exactly once.
+    for purpose in (0..purpose_count).rev().map(axiom_core::Id::new) {
+        if let Some(parent) = book.purposes.parent(purpose) {
+            let child_start = purpose.index() * period_count;
+            let parent_start = parent.index() * period_count;
+            for period in 0..period_count {
+                totals[parent_start + period] += totals[child_start + period];
+            }
+        }
     }
 
-    /// Per-period totals for `place` and everything beneath it.
-    fn subtree(&self, book: &Book, place: Id<Place>) -> Vec<Qty> {
-        let rows = place.index() * self.columns..book.places.end(place).index() * self.columns;
-        let mut totals = vec![Qty::ZERO; self.columns];
-        for row in self.cells[rows].chunks(self.columns) {
-            add_into(&mut totals, row);
+    let columns = (0..period_count).map(|period| Column::right(periods.title(period)));
+    let mut section = Section::new(std::iter::once(Column::left("Purpose")).chain(columns));
+    let roots = book.purposes.roots().collect::<Vec<_>>();
+    for root in roots {
+        let root_values = purpose_values(&totals, period_count, root);
+        if is_zero(root_values) {
+            continue;
         }
+        let purpose = &book.purposes[root];
+        section.push(period_row(
+            book,
+            Cell::Name(book.name(purpose.name)),
+            0,
+            root_values,
+            Style::Total,
+        ));
+        add_purpose_facts(&mut section, lens, periods, root, root_values);
+
+        for id in book.purposes.subtree(root).skip(1) {
+            let values = purpose_values(&totals, period_count, id);
+            if is_zero(values) {
+                continue;
+            }
+            let purpose = &book.purposes[id];
+            let depth = book.purposes.depth(id) as usize;
+            section.push(period_row(
+                book,
+                Cell::Name(book.name(purpose.name)),
+                depth,
+                values,
+                Style::Normal,
+            ));
+            add_purpose_facts(&mut section, lens, periods, id, values);
+
+            let mut children = objects
+                .iter()
+                .filter(|((purpose_id, _), amounts)| *purpose_id == id && !is_zero(amounts))
+                .map(|((_, object), amounts)| (*object, amounts.as_slice()))
+                .collect::<Vec<_>>();
+            children.sort_by(|(left, _), (right, _)| {
+                object_name(book, *left).cmp(object_name(book, *right))
+            });
+            for (object, amounts) in children {
+                let object_name = object_name(book, object);
+                let label = Cell::list(" ", [Cell::Word("of"), Cell::Name(object_name)]);
+                section.push(period_row(book, label, depth + 1, amounts, Style::Muted));
+                add_object_facts(
+                    &mut section,
+                    lens,
+                    periods,
+                    object_name,
+                    amounts,
+                    purpose.root,
+                );
+            }
+        }
+    }
+
+    if !is_zero(&unclassified) {
+        section.push(period_row(
+            book,
+            Cell::Word("Unclassified"),
+            0,
+            &unclassified,
+            Style::Total,
+        ));
+        add_facts(
+            &mut section,
+            lens,
+            periods,
+            "unclassified",
+            None,
+            &unclassified,
+        );
+        for (description, values) in descriptions {
+            if is_zero(&values) {
+                continue;
+            }
+            let label = description.map_or(Cell::Word("unclassified"), |text| {
+                Cell::Name(book.name(text))
+            });
+            section.push(period_row(book, label, 1, &values, Style::Normal));
+            add_facts(
+                &mut section,
+                lens,
+                periods,
+                "unclassified",
+                description.map(|text| book.name(text)),
+                &values,
+            );
+        }
+    }
+    section.unpriced(unpriced, "flow");
+    if spread_seen {
+        section.note("Flows written over a date range are recognized a little each day across the periods they cover.");
+    }
+    if section.rows.is_empty() {
+        section.note("No classified flows in this window.");
+    }
+    let mut report = Report::new("Income, spending and capital").with(section);
+    if let Some(measures) = measure_section(lens, periods, cutoff) {
+        report.sections.push(measures);
+    }
+    report
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum MeasureAction {
+    Work,
+    Use,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct MeasureKey {
+    action: MeasureAction,
+    purpose: Option<Id<Purpose>>,
+    owner: Id<Entity>,
+    unit: Id<Commodity>,
+}
+
+/// Events have units rather than money, so they have their own rows and facts.
+fn measure_section<'s>(lens: Lens<'_, 's>, periods: Periods, cutoff: Day) -> Option<Section<'s>> {
+    let book = lens.book;
+    let mut totals: BTreeMap<MeasureKey, Vec<Qty>> = BTreeMap::new();
+    for measure in book.measures.iter().map(|(_, measure)| measure) {
+        if measure.day > cutoff || !lens.whose.includes(measure.owner) {
+            continue;
+        }
+        let Some(period) = periods.index_of(measure.day) else {
+            continue;
+        };
+        let action = match measure.action {
+            Action::Work => MeasureAction::Work,
+            Action::Use => MeasureAction::Use,
+        };
+        let key = MeasureKey {
+            action,
+            purpose: measure.purpose.map(|purpose| purpose.purpose),
+            owner: measure.owner,
+            unit: measure.quantity.unit,
+        };
         totals
+            .entry(key)
+            .or_insert_with(|| vec![Qty::ZERO; periods.len()])[period] += measure.quantity.qty;
+    }
+    if totals.is_empty() {
+        return None;
+    }
+
+    let period_columns = (0..periods.len()).map(|index| Column::right(periods.title(index)));
+    let mut section = Section::new(
+        [
+            Column::left("Action"),
+            Column::left("Purpose"),
+            Column::left("Owner"),
+            Column::left("Unit"),
+        ]
+        .into_iter()
+        .chain(period_columns)
+        .chain((periods.len() > 1).then(|| Column::right("Total"))),
+    )
+    .headed("Measures");
+    for (key, values) in totals {
+        let action = match key.action {
+            MeasureAction::Work => "work",
+            MeasureAction::Use => "use",
+        };
+        let purpose = key.purpose.map(|id| book.name(book.purposes[id].name));
+        let unit = &book.commodities[key.unit];
+        let cells = values
+            .iter()
+            .map(|&qty| Cell::amount(book, axiom_model::Amount::new(qty, key.unit)));
+        let total = (periods.len() > 1).then(|| {
+            Cell::amount(
+                book,
+                axiom_model::Amount::new(values.iter().copied().sum(), key.unit),
+            )
+        });
+        section.push(Row::new(
+            [
+                Cell::Word(action),
+                purpose.map_or(Cell::Word("unclassified"), Cell::Purpose),
+                Cell::Name(book.name(book.entities[key.owner].path)),
+                Cell::Name(book.name(unit.symbol)),
+            ]
+            .into_iter()
+            .chain(cells)
+            .chain(total),
+        ));
+        for (index, &qty) in values.iter().enumerate().filter(|(_, qty)| !qty.is_zero()) {
+            section.fact(
+                action,
+                purpose,
+                book.name(book.entities[key.owner].path),
+                When::During(periods.window(index).days()),
+                Money {
+                    qty,
+                    scale: unit.scale,
+                    unit: book.name(unit.symbol),
+                },
+            );
+        }
+    }
+    Some(section)
+}
+
+pub(crate) fn movement_in_base(
+    lens: Lens<'_, '_>,
+    posting: Posting<'_>,
+    root: Option<PurposeRoot>,
+) -> Option<Qty> {
+    let flow = posting.flow;
+    let from_outside = lens.book.places[flow.from].class == Class::Outside;
+    let to_outside = lens.book.places[flow.to].class == Class::Outside;
+    let inbound = from_outside && !to_outside;
+    let outbound = to_outside && !from_outside;
+    let amount = if inbound {
+        posting.arrive_in_base(lens)
+    } else {
+        posting.out_in_base(lens)
+    }?;
+    let reverses = match root {
+        Some(PurposeRoot::Income) => !inbound,
+        Some(PurposeRoot::Spending | PurposeRoot::Capital) => inbound,
+        Some(PurposeRoot::Transfer) | None => false,
+    };
+    Some(if reverses { -amount } else { amount })
+}
+
+fn add_recognized(
+    values: &mut [Qty],
+    periods: Periods,
+    recognized: axiom_core::Days,
+    cutoff: Day,
+    amount: Qty,
+) {
+    if amount.is_zero() {
+        return;
+    }
+    for index in periods.overlapping(recognized.first(), recognized.last()) {
+        let window = periods.window(index).days();
+        if let Some(happened) = axiom_core::Days::new(window.first(), window.last().min(cutoff)) {
+            values[index] += axiom_core::spread(amount, recognized, happened);
+        }
+    }
+}
+
+fn purpose_values(totals: &[Qty], periods: usize, purpose: Id<Purpose>) -> &[Qty] {
+    &totals[purpose.index() * periods..][..periods]
+}
+
+fn period_row<'s>(
+    book: &Book<'s>,
+    label: Cell<'s>,
+    depth: usize,
+    values: &[Qty],
+    style: Style,
+) -> Row<'s> {
+    let cells = values
+        .iter()
+        .map(|&amount| Cell::base_or_blank(book, amount));
+    let total = (values.len() > 1).then(|| Cell::base_or_blank(book, values.iter().copied().sum()));
+    Row::new(std::iter::once(label).chain(cells).chain(total))
+        .depth(depth)
+        .style(style)
+}
+
+fn add_purpose_facts<'s>(
+    section: &mut Section<'s>,
+    lens: Lens<'_, 's>,
+    periods: Periods,
+    purpose: Id<Purpose>,
+    values: &[Qty],
+) {
+    let book = lens.book;
+    let item = &book.purposes[purpose];
+    let name = book.name(item.name);
+    add_facts(
+        section,
+        lens,
+        periods,
+        root_concept(item.root),
+        Some(name),
+        values,
+    );
+}
+
+fn add_facts<'s>(
+    section: &mut Section<'s>,
+    lens: Lens<'_, 's>,
+    periods: Periods,
+    concept: &'static str,
+    of: Option<&str>,
+    values: &[Qty],
+) {
+    for (index, &amount) in values
+        .iter()
+        .enumerate()
+        .filter(|(_, amount)| !amount.is_zero())
+    {
+        section.fact(
+            concept,
+            of,
+            lens.whose.label(lens.book),
+            crate::When::During(periods.window(index).days()),
+            crate::Money::base(lens.book, amount),
+        );
+    }
+}
+
+fn add_object_facts<'s>(
+    section: &mut Section<'s>,
+    lens: Lens<'_, 's>,
+    periods: Periods,
+    object: &'s str,
+    values: &[Qty],
+    root: PurposeRoot,
+) {
+    let concept = root_concept(root);
+    let book = lens.book;
+    for (index, &amount) in values
+        .iter()
+        .enumerate()
+        .filter(|(_, amount)| !amount.is_zero())
+    {
+        section.fact(
+            concept,
+            Some(object),
+            lens.whose.label(book),
+            crate::When::During(periods.window(index).days()),
+            crate::Money::base(book, amount),
+        );
+    }
+}
+
+fn root_concept(root: PurposeRoot) -> &'static str {
+    match root {
+        PurposeRoot::Income => "income",
+        PurposeRoot::Spending => "spending",
+        PurposeRoot::Capital => "capital",
+        PurposeRoot::Transfer => "transfer",
+    }
+}
+
+fn object_name<'s>(book: &Book<'s>, object: Object) -> &'s str {
+    match object {
+        Object::Asset(asset) => book.name(book.assets[asset].name),
+        Object::Place(place) => path(book, place),
+        Object::Entity(entity) => book.name(book.entities[entity].path),
     }
 }
 
@@ -269,241 +661,4 @@ fn add_into(totals: &mut [Qty], values: &[Qty]) {
 
 fn is_zero(values: &[Qty]) -> bool {
     values.iter().all(|value| value.is_zero())
-}
-
-/// Income and spending per period, ready to lay out.
-struct Statement {
-    periods: Periods,
-    /// Recognition stops here: nothing after the window's end has happened.
-    cutoff: Day,
-    /// Positive for both income and spending; see [`statement_sign`].
-    grid: Grid,
-    /// Realized gains per period, derived from the run's parcels.
-    gains: Vec<Qty>,
-    spread_seen: bool,
-    unpriced: usize,
-}
-
-/// How a place's balance change reads in the statement: income and spending
-/// both come out positive. Value that fell into `?` is unexplained spending.
-fn statement_sign(book: &Book, place: Id<Place>) -> Option<i64> {
-    if place == book.roots.unknown {
-        return Some(1);
-    }
-    match v3_side(book, place) {
-        Some(Side::Income) => Some(-1),
-        Some(Side::Spending) => Some(1),
-        None => None,
-    }
-}
-
-impl Statement {
-    fn compile(lens: Lens, run: &Run, periods: Periods, cutoff: Day) -> Statement {
-        let book = lens.book;
-        let mut statement = Statement {
-            periods,
-            cutoff,
-            grid: Grid::new(book.places.len(), periods.len()),
-            gains: vec![Qty::ZERO; periods.len()],
-            spread_seen: false,
-            unpriced: 0,
-        };
-        for posting in postings(book, run).filter(|posting| posting.is_real_on(cutoff)) {
-            statement.record(lens, &posting);
-        }
-        for gain in run
-            .gains
-            .iter()
-            .filter(|gain| gain.day <= cutoff && lens.owns(gain.from))
-        {
-            for period in periods.overlapping(gain.day, gain.day) {
-                statement.gains[period] += gain.gain();
-            }
-        }
-        statement
-    }
-
-    /// The source pays on the flow's day; the arrival is recognized over its
-    /// whole range.
-    fn record(&mut self, lens: Lens, posting: &Posting) {
-        let flow = posting.flow;
-        self.spread_seen |= flow.recognized.last() > flow.day;
-        self.recognize(
-            lens,
-            flow.from,
-            posting.out_in_base(lens).map(|qty| -qty),
-            Days::on(flow.day),
-        );
-        self.recognize(lens, flow.to, posting.arrive_in_base(lens), flow.recognized);
-    }
-
-    fn recognize(&mut self, lens: Lens, place: Id<Place>, change: Option<Qty>, over: Days) {
-        let Some(sign) = statement_sign(lens.book, place).filter(|_| lens.owns(place)) else {
-            return;
-        };
-        let Some(change) = change else {
-            self.unpriced += 1;
-            return;
-        };
-        let recognized = Qty(change.0 * sign);
-        for period in self.periods.overlapping(over.first(), over.last()) {
-            let window = self.periods.window(period).days();
-            if let Some(happened) = Days::new(window.first(), window.last().min(self.cutoff)) {
-                self.grid
-                    .add(place, period, spread(recognized, over, happened));
-            }
-        }
-    }
-
-    fn section<'s>(&self, lens: Lens<'_, 's>) -> Section<'s> {
-        let book = lens.book;
-        let periods =
-            (0..self.periods.len()).map(|period| Column::right(self.periods.title(period)));
-        let total = (self.periods.len() > 1).then(|| Column::right("Total"));
-        let mut section = Section::new(
-            iter::once(Column::left("Place"))
-                .chain(periods)
-                .chain(total),
-        );
-
-        let gains = Derived {
-            label: "realized gains ≈",
-            side: "income",
-            values: &self.gains,
-            style: Style::Muted,
-        };
-        let unexplained = self.grid.subtree(book, book.roots.unknown);
-        let unexplained = Derived {
-            label: "unexplained (?)",
-            side: "spending",
-            values: &unexplained,
-            style: Style::Normal,
-        };
-        let income = self.side_rows(lens, &mut section, Side::Income, &gains);
-        let spending = self.side_rows(lens, &mut section, Side::Spending, &unexplained);
-        // Spending that vanished into `?` is still spending.
-        let net: Vec<Qty> = income
-            .iter()
-            .zip(&spending)
-            .map(|(&earned, &spent)| earned - spent)
-            .collect();
-        let cells = net
-            .iter()
-            .map(|&qty| Cell::base(book, qty))
-            .chain((self.periods.len() > 1).then(|| Cell::base(book, net.iter().copied().sum())));
-        section.push(Row::new(iter::once(Cell::Word("Net")).chain(cells)).style(Style::Total));
-        for (index, &qty) in net.iter().enumerate().filter(|(_, qty)| !qty.is_zero()) {
-            section.fact(
-                "net_income",
-                None,
-                lens.whose.label(book),
-                When::During(self.periods.window(index).days()),
-                Money::base(book, qty),
-            );
-        }
-
-        if !is_zero(&self.gains) {
-            section.note(
-                "≈ Realized gains are derived from the basis of the parcels sold; the journal does not state them.",
-            );
-        }
-        if self.spread_seen {
-            section.note(
-                "Flows written over a date range are recognized a little each day across the periods they cover.",
-            );
-        }
-        section.unpriced(self.unpriced, "flow");
-        section
-    }
-
-    /// The rows of one side's tree, then its derived line; returns the side's total.
-    fn side_rows<'s>(
-        &self,
-        lens: Lens<'_, 's>,
-        section: &mut Section<'s>,
-        side: Side,
-        derived: &Derived,
-    ) -> Vec<Qty> {
-        let book = lens.book;
-        let has_derived = !is_zero(derived.values);
-        let mut total = derived.values.to_vec();
-        for root in book
-            .places
-            .roots()
-            .filter(|&root| v3_side(book, root) == Some(side))
-        {
-            for place in book.places.subtree(root) {
-                let values = self.grid.subtree(book, place);
-                if place == root {
-                    add_into(&mut total, &values);
-                }
-                if is_zero(&values) {
-                    continue;
-                }
-                let style = if place == root && !has_derived {
-                    Style::Total
-                } else {
-                    Style::Normal
-                };
-                for (index, &qty) in values.iter().enumerate().filter(|(_, qty)| !qty.is_zero()) {
-                    section.fact(
-                        if side == Side::Income { "income" } else { "spending" },
-                        Some(path(book, place)),
-                        lens.whose.label(book),
-                        When::During(self.periods.window(index).days()),
-                        Money::base(book, qty),
-                    );
-                }
-                section.push(self.row(
-                    book,
-                    Cell::Name(leaf(book, place)),
-                    depth(book, place),
-                    &values,
-                    style,
-                ));
-            }
-        }
-        if has_derived {
-            section.push(self.row(
-                book,
-                Cell::Word(derived.label),
-                1,
-                derived.values,
-                derived.style,
-            ));
-            section.push(self.row(
-                book,
-                Cell::list(" ", [Cell::Word("Total"), Cell::Word(derived.side)]),
-                0,
-                &total,
-                Style::Total,
-            ));
-        }
-        total
-    }
-
-    fn row<'s>(
-        &self,
-        book: &Book<'s>,
-        label: Cell<'s>,
-        depth: usize,
-        values: &[Qty],
-        style: Style,
-    ) -> Row<'s> {
-        let cells = values.iter().map(|&qty| Cell::base_or_blank(book, qty));
-        let total =
-            (values.len() > 1).then(|| Cell::base_or_blank(book, values.iter().copied().sum()));
-        Row::new(iter::once(label).chain(cells).chain(total))
-            .depth(depth)
-            .style(style)
-    }
-}
-
-/// A line the journal never wrote, added to a side: gains, or unexplained value.
-struct Derived<'a> {
-    label: &'static str,
-    /// What the side is called in its total: `Total income`.
-    side: &'static str,
-    values: &'a [Qty],
-    style: Style,
 }

@@ -3,14 +3,13 @@
 //! Amounts and balances are in the place's display sign, the way a statement
 //! shows them: what a card owes is positive, and a charge adds to it.
 
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use axiom_core::{Day, Diagnostic, Id, Qty};
 use axiom_engine::{Pad, Run, State};
-use axiom_model::{Amount, Book, Commodity, Place};
+use axiom_model::{Amount, Book, Commodity, Entity, Place, Role};
 
-use crate::history::{Change, Posting, pad_ends};
+use crate::history::{Change, Posting, pad_ends, postings};
 use crate::lens::{Lens, Whose};
 use crate::places::path;
 use crate::resolve;
@@ -25,7 +24,13 @@ pub fn view<'s>(
     from: Option<Day>,
     to: Option<Day>,
 ) -> Result<Report<'s>, Diagnostic> {
-    view_with_lens(Lens::new(book, whose, to.unwrap_or(run.today)), run, place, from, to)
+    view_with_lens(
+        Lens::new(book, whose, to.unwrap_or(run.today)),
+        run,
+        place,
+        from,
+        to,
+    )
 }
 
 /// Builds a register using owner scope and display signs from the shared lens.
@@ -37,6 +42,12 @@ pub(crate) fn view_with_lens<'s>(
     to: Option<Day>,
 ) -> Result<Report<'s>, Diagnostic> {
     let book = lens.book;
+    if let Ok(entity) = book.entity(place) {
+        return Ok(entity_view(lens, run, entity, place, from, to));
+    }
+    if book.asset(place).is_some() || book.contract(place).is_some() {
+        return crate::why::target(book, run, lens.whose, place);
+    }
     let place = resolve::place(book, place)?;
     // A place is somebody's: another owner's register is not part of whose money this is.
     let owner = book.places[place].owner;
@@ -51,6 +62,79 @@ pub(crate) fn view_with_lens<'s>(
     Ok(Report::new(format!("Register: {}", path(book, place))).with(register))
 }
 
+/// A party or owner register is a history of everything it touched, including
+/// flows it owns that have no account end under its name.
+fn entity_view<'s>(
+    lens: Lens<'_, 's>,
+    run: &Run,
+    entity: axiom_core::Id<Entity>,
+    target: &str,
+    from: Option<Day>,
+    to: Option<Day>,
+) -> Report<'s> {
+    let book = lens.book;
+    let cutoff = to.unwrap_or(run.today);
+    let mut section = Section::new([
+        Column::left("Date"),
+        Column::left("Purpose"),
+        Column::left("Flow"),
+        Column::right("Amount"),
+        Column::left("Note"),
+        Column::left("State"),
+        Column::left("From"),
+    ]);
+    for posting in postings(book, run).filter(|posting| {
+        let flow = posting.flow;
+        let within = from.is_none_or(|from| flow.day >= from) && flow.day <= cutoff;
+        let at_party = flow.payee == Some(entity)
+            || [flow.from, flow.to].into_iter().any(|place| {
+                let place = &book.places[place];
+                place.owner == entity
+                    || matches!(place.role, Role::Outside(Some(party)) if party == entity)
+            });
+        within && (flow.owner == entity || at_party)
+    }) {
+        let flow = posting.flow;
+        let purpose = flow.purpose.map_or(Cell::Blank, |purpose| {
+            Cell::Purpose(book.name(book.purposes[purpose.purpose].name))
+        });
+        let mut note = book
+            .flow_view(flow)
+            .codes()
+            .map(|code| Cell::Code(book.name(code)))
+            .collect::<Vec<_>>();
+        if let Some(description) = flow.description {
+            note.push(Cell::text(book.name(description)));
+        }
+        if let Some(doc) = book.txns[flow.txn].doc {
+            if let Some(headline) = crate::table::doc_headline(book, Some(doc)) {
+                note.push(Cell::text(headline));
+            }
+        }
+        let state = match posting.posted.state {
+            State::Actual => Cell::Word("actual"),
+            State::Pending => Cell::Word("pending"),
+            State::Settled(day) => Cell::text(format!("settled {day}")),
+            State::Void => Cell::Word("void"),
+            State::Returned(day) => Cell::text(format!("returned {day}")),
+            State::Planned => Cell::Word("planned"),
+        };
+        section.push(Row::new([
+            Cell::Day(flow.day),
+            purpose,
+            Cell::text(crate::places::route(book, flow)),
+            Cell::amount(book, posting.out()),
+            Cell::list_or_blank(" · ", note),
+            state,
+            Cell::Source(flow.loc),
+        ]));
+    }
+    if section.rows.is_empty() {
+        section.note(format!("No flows touch {target} in this window."));
+    }
+    Report::new(format!("Register: {target}")).with(section)
+}
+
 /// The flows touching `place` from `from` to `to` (default: everything up to
 /// the run's day), each with the balance after it.
 ///
@@ -58,8 +142,21 @@ pub(crate) fn view_with_lens<'s>(
 /// void and returned flows are listed, muted, and leave it alone. A flow into
 /// or out of `PLACE.basis` is listed with the change it made to the basis, and
 /// leaves the balance alone: no quantity moved.
-pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Day>, to: Option<Day>) -> Section<'s> {
-    section_with_sign(book, run, place, from, to, book.v3_root(place).display_sign())
+pub fn section<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    place: Id<Place>,
+    from: Option<Day>,
+    to: Option<Day>,
+) -> Section<'s> {
+    section_with_sign(
+        book,
+        run,
+        place,
+        from,
+        to,
+        book.v3_root(place).display_sign(),
+    )
 }
 
 fn section_with_sign<'s>(
@@ -72,7 +169,8 @@ fn section_with_sign<'s>(
 ) -> Section<'s> {
     let steps = steps(book, run, place, to.unwrap_or(run.today));
     let split = from.map_or(0, |from| steps.partition_point(|step| step.day < from));
-    let shown = |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));
+    let shown =
+        |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));
 
     let columns = [
         Column::left("Date"),
@@ -115,16 +213,25 @@ fn section_with_sign<'s>(
         let cells = [
             Cell::Day(step.day),
             Cell::text(path(book, step.with)),
-            payee.map_or(Cell::Blank, |entity| Cell::text(book.name(book.entities[entity].path))),
-            note(book, step).map_or(Cell::Blank, Cell::text),
+            payee.map_or(Cell::Blank, |entity| {
+                Cell::text(book.name(book.entities[entity].path))
+            }),
+            note(book, step).unwrap_or(Cell::Blank),
             amount,
             balance,
         ];
-        section.push(Row::new(cells).style(if step.counts { Style::Normal } else { Style::Muted }));
+        section.push(Row::new(cells).style(if step.counts {
+            Style::Normal
+        } else {
+            Style::Muted
+        }));
     }
 
     if section.rows.is_empty() {
-        section.note(format!("Nothing touches {} in this window.", path(book, place)));
+        section.note(format!(
+            "Nothing touches {} in this window.",
+            path(book, place)
+        ));
     }
     if section.rows.iter().any(|row| row.style == Style::Muted) {
         section.note("Muted lines are pending, void or returned: they do not move the balance.");
@@ -184,8 +291,14 @@ fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec
         })
     });
     let pads = run.pads.iter().flat_map(|pad| {
-        let with = if pad.place == place { pad.counter } else { pad.place };
-        let here = pad_ends(pad).into_iter().filter(move |&(at, _)| at == place);
+        let with = if pad.place == place {
+            pad.counter
+        } else {
+            pad.place
+        };
+        let here = pad_ends(pad)
+            .into_iter()
+            .filter(move |&(at, _)| at == place);
         here.map(move |(_, moved)| Step {
             day: pad.day,
             change: Change::Moved(moved),
@@ -194,31 +307,41 @@ fn steps<'a>(book: &'a Book, run: &'a Run, place: Id<Place>, cutoff: Day) -> Vec
             source: Source::Gap(pad),
         })
     });
-    let mut steps: Vec<Step> = flows.chain(pads).filter(|step| step.day <= cutoff).collect();
+    let mut steps: Vec<Step> = flows
+        .chain(pads)
+        .filter(|step| step.day <= cutoff)
+        .collect();
     steps.sort_by_key(|step| step.day);
     steps
 }
 
 /// A change of basis, codes, and settlement, as one line of small print.
-fn note(book: &Book, step: &Step) -> Option<Cow<'static, str>> {
+fn note<'s>(book: &Book<'s>, step: &Step<'_>) -> Option<Cell<'s>> {
     let rebased = match step.change {
-        Change::Rebased(by) => Some(format!("basis {}{}", if by.qty.is_negative() { "" } else { "+" }, book.show(by))),
+        Change::Rebased(by) => Some(Cell::text(format!(
+            "basis {}{}",
+            if by.qty.is_negative() { "" } else { "+" },
+            book.show(by)
+        ))),
         Change::Moved(_) => None,
     };
-    let details: Vec<String> = match step.source {
-        Source::Gap(pad) => vec![gap_words(book, pad)],
+    let details: Vec<Cell<'s>> = match step.source {
+        Source::Gap(pad) => vec![Cell::text(gap_words(book, pad))],
         Source::Flow(posting) => {
             let status = match posting.posted.state {
                 State::Actual | State::Planned => None,
-                State::Pending => Some("pending".to_string()),
-                State::Void => Some("void".to_string()),
-                State::Settled(on) if !step.counts => Some(format!("pending until {on}")),
-                State::Settled(on) => Some(format!("settled {on}")),
-                State::Returned(on) => Some(format!("returned {on}")),
+                State::Pending => Some(Cell::Word("pending")),
+                State::Void => Some(Cell::Word("void")),
+                State::Settled(on) if !step.counts => {
+                    Some(Cell::text(format!("pending until {on}")))
+                }
+                State::Settled(on) => Some(Cell::text(format!("settled {on}"))),
+                State::Returned(on) => Some(Cell::text(format!("returned {on}"))),
             };
-            code_labels(book, &posting.flow.codes).chain(status).collect()
+            let flow = book.flow_view(posting.flow);
+            code_labels(book, flow.codes()).chain(status).collect()
         }
     };
-    let parts: Vec<String> = rebased.into_iter().chain(details).collect();
-    (!parts.is_empty()).then(|| parts.join(" · ").into())
+    let parts = rebased.into_iter().chain(details).collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| Cell::list(" · ", parts))
 }

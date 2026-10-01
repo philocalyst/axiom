@@ -2,16 +2,20 @@
 //!
 //! Every report line points at the source that caused it; `why` explains that
 //! source, and everything it in turn caused. A target is a place, an entity, a
-//! system, a `#code`, a law, a tax line by name, or a source position resolved
+//! system, a `^code`, `#purpose`, an asset, a contract, a law, a tax line, or a source position resolved
 //! through the caller's borrowed source provider.
 
+mod asset;
 mod code;
+mod contract;
 mod entity;
 mod law;
 mod line;
 mod place;
+mod purpose;
 mod system;
 mod taxline;
+mod text;
 
 pub use self::line::line;
 
@@ -20,8 +24,8 @@ use std::borrow::Cow;
 use axiom_core::{Diagnostic, Id, Sym};
 use axiom_engine::{Effect, Run, State};
 use axiom_model::{
-    Book, Closing, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place, StepKind, System,
-    Trigger,
+    Book, Closing, Effect as Consequence, Entity, EventState, Flow, Law, Miss, Period, Place,
+    StepKind, System, Trigger,
 };
 
 use crate::history::Posting;
@@ -83,12 +87,17 @@ fn state_words(state: State) -> Cow<'static, str> {
 /// What laws counted or owed, when, and for whom.
 fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &str) -> Section<'s> {
     let columns = ["Date", "Effect", "Owner"].map(Column::left).into_iter();
-    let mut section =
-        Section::new(columns.chain([Column::right("Amount")]).chain(["Owed to", "From"].map(Column::left)));
+    let mut section = Section::new(
+        columns
+            .chain([Column::right("Amount")])
+            .chain(["Owed to", "From"].map(Column::left)),
+    );
     section.heading = Some(heading.to_string());
     let (shown, left_out) = recent(effects);
     for effect in shown {
-        let owed = effect.owed().map_or(Cell::Blank, |owed| Cell::text(creditor(book, owed)));
+        let owed = effect
+            .owed()
+            .map_or(Cell::Blank, |owed| Cell::text(creditor(book, owed)));
         let cells = [
             Cell::Day(effect.day),
             Cell::text(book.name(effect.name)),
@@ -105,9 +114,30 @@ fn effects_table<'s>(book: &Book<'s>, effects: &[&Effect], heading: &str) -> Sec
     section
 }
 
-pub fn target<'s>(book: &Book<'s>, run: &Run, whose: &Whose, text: &str) -> Result<Report<'s>, Diagnostic> {
-    if let Some(code) = text.strip_prefix('#') {
+pub fn target<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    whose: &Whose,
+    text: &str,
+) -> Result<Report<'s>, Diagnostic> {
+    if let Some(code) = text.strip_prefix('^') {
         return code::report(book, run, code);
+    }
+    if let Some(purpose) = text.strip_prefix('#') {
+        return purpose::report(book, run, whose, purpose);
+    }
+    if let Some(asset) = book.asset(text) {
+        return Ok(asset::report(book, run, asset));
+    }
+    if let Some(contract) = book.contract(text) {
+        return Ok(contract::report(book, run, contract));
+    }
+    let quoted = text
+        .strip_prefix('"')
+        .and_then(|text| text.strip_suffix('"'))
+        .unwrap_or(text);
+    if let Some(report) = self::text::report(book, run, quoted) {
+        return Ok(report);
     }
     Ok(explain(book, run, whose, identify(book, run, text)?))
 }
@@ -156,7 +186,10 @@ fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diag
     }
     let named = |system: &System| {
         let path = book.name(system.path);
-        path == text || path.strip_suffix(text).is_some_and(|before| before.ends_with('/'))
+        path == text
+            || path
+                .strip_suffix(text)
+                .is_some_and(|before| before.ends_with('/'))
     };
     if let Some((system, _)) = book.systems.iter().find(|(_, system)| named(system)) {
         return Ok(Found::System(system));
@@ -166,16 +199,33 @@ fn identify<'a>(book: &Book, run: &Run, text: &'a str) -> Result<Found<'a>, Diag
         Err(Miss::Ambiguous(candidates)) => return Ok(Found::Laws(candidates)),
         Err(Miss::Unknown { .. }) => {}
     }
-    if run.effects.iter().any(|effect| book.name(effect.name) == text) {
+    if run
+        .effects
+        .iter()
+        .any(|effect| book.name(effect.name) == text)
+    {
         return Ok(Found::TaxLine(text));
     }
     let laws = book.laws.values().map(|law| book.name(law.name));
     let tallies = run.effects.iter().map(|effect| book.name(effect.name));
     let things = names(book).chain(book.entities.values().map(|entity| book.name(entity.path)));
     Err(resolve::nothing_named(
-        "place, entity, system, #code, law or tax line",
+        "place, entity, system, ^code, #purpose, asset, contract, law, tax line or description",
         text,
-        things.chain(laws).chain(tallies),
+        things
+            .chain(laws)
+            .chain(tallies)
+            .chain(
+                book.purposes
+                    .values()
+                    .map(|purpose| book.name(purpose.name)),
+            )
+            .chain(book.assets.values().map(|asset| book.name(asset.name)))
+            .chain(
+                book.contracts
+                    .values()
+                    .map(|contract| book.name(contract.name)),
+            ),
     ))
 }
 
@@ -212,7 +262,12 @@ fn counted(law: &Law) -> impl Iterator<Item = Sym> + '_ {
 /// The laws as one table, grouped by what they do: limits, prices, and the
 /// tallies, which are one line however many laws there are.
 fn laws_table<'s>(book: &Book<'s>, ids: &[Id<Law>]) -> Section<'s> {
-    let columns = [Column::left("Law"), Column::left("When"), Column::left("Explains"), Column::left("Written")];
+    let columns = [
+        Column::left("Law"),
+        Column::left("When"),
+        Column::left("Explains"),
+        Column::left("Written"),
+    ];
     let mut section = Section::new(columns).headed("Governed by");
     let mut unique: Vec<Id<Law>> = Vec::new();
     for &id in ids {
@@ -221,7 +276,10 @@ fn laws_table<'s>(book: &Book<'s>, ids: &[Id<Law>]) -> Section<'s> {
         }
     }
     for (wanted, heading) in [(Role::Limit, "Limits"), (Role::Price, "Prices")] {
-        let group: Vec<&Id<Law>> = unique.iter().filter(|&&id| role(&book.laws[id]) == wanted).collect();
+        let group: Vec<&Id<Law>> = unique
+            .iter()
+            .filter(|&&id| role(&book.laws[id]) == wanted)
+            .collect();
         if group.is_empty() {
             continue;
         }
@@ -238,12 +296,24 @@ fn laws_table<'s>(book: &Book<'s>, ids: &[Id<Law>]) -> Section<'s> {
             section.push(Row::new(cells).depth(1));
         }
     }
-    let tallies: Vec<&Law> = unique.iter().map(|&id| &book.laws[id]).filter(|law| role(law) == Role::Tally).collect();
+    let tallies: Vec<&Law> = unique
+        .iter()
+        .map(|&id| &book.laws[id])
+        .filter(|law| role(law) == Role::Tally)
+        .collect();
     if !tallies.is_empty() {
-        let mut names: Vec<&str> = tallies.iter().flat_map(|law| counted(law)).map(|name| book.name(name)).collect();
+        let mut names: Vec<&str> = tallies
+            .iter()
+            .flat_map(|law| counted(law))
+            .map(|name| book.name(name))
+            .collect();
         names.sort_unstable();
         names.dedup();
-        section.note(format!("{} only count, into {}.", plural(tallies.len(), "more law"), names.join(", ")));
+        section.note(format!(
+            "{} only count, into {}.",
+            plural(tallies.len(), "more law"),
+            names.join(", ")
+        ));
     }
     section
 }

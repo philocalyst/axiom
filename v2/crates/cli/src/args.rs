@@ -139,8 +139,8 @@ pub const OPTIONS: &[OptionSpec] = &[
     option(
         Opt::By,
         "by",
-        Some("month|year"),
-        "the length of a period (default: month)",
+        Some("month|year|party"),
+        "the period or counterparty to group by (default: month)",
     ),
     option(
         Opt::Until,
@@ -167,6 +167,7 @@ enum Verb {
     Budget,
     Limits,
     Claims,
+    Contracts,
     Tax,
     Gains,
     Lots,
@@ -252,7 +253,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     command(
         Verb::Register,
         "register",
-        Operands::One("PLACE"),
+        Operands::One("TARGET"),
         &[Opt::From, Opt::To],
         "a place's flows, running balance",
     ),
@@ -292,6 +293,13 @@ pub const COMMANDS: &[CommandSpec] = &[
         "what is owed to you and by you, and how old",
     ),
     command(
+        Verb::Contracts,
+        "contracts",
+        Operands::None,
+        &[],
+        "promises, current terms, and what is next due",
+    ),
+    command(
         Verb::Tax,
         "tax",
         Operands::Optional("YEAR"),
@@ -324,7 +332,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         "why",
         Operands::One("TARGET"),
         &[],
-        "a place, entity, system, #code, law, tax line, file:line",
+        "a place, entity, system, ^code, #purpose, asset, contract, law, tax line, file:line or description",
     ),
     command(
         Verb::Sync,
@@ -476,6 +484,7 @@ fn build<'a>(
         }
         Verb::Limits => Query::Limits { year: year()? },
         Verb::Claims => Query::Claims { at: day(At)? },
+        Verb::Contracts => Query::Contracts,
         Verb::Tax => Query::Tax { year: year()? },
         Verb::Gains => Query::Gains { year: year()? },
         Verb::Lots => Query::Lots {

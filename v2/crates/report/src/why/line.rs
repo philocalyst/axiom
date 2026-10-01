@@ -2,7 +2,7 @@
 
 use axiom_core::{Id, Loc};
 use axiom_engine::{Cause, Run};
-use axiom_model::{Amount, Book, Flow};
+use axiom_model::{Amount, Book, Flow, Object, Provenance};
 
 use super::event_words;
 use crate::history::Posting;
@@ -25,7 +25,9 @@ pub fn line<'s>(book: &Book<'s>, run: &Run, at: Loc) -> Report<'s> {
     for id in flows {
         consequences(book, run, id, &mut caused);
     }
-    Report::new("Why this line").with(written).with(caused.headed("Consequences"))
+    Report::new("Why this line")
+        .with(written)
+        .with(caused.headed("Consequences"))
 }
 
 fn overlaps(a: Loc, b: Loc) -> bool {
@@ -35,8 +37,12 @@ fn overlaps(a: Loc, b: Loc) -> bool {
 /// The flows written on the line. The header of a split transaction holds no
 /// flow of its own; its legs do, so it stands for all of them.
 fn flows_on(book: &Book, at: Loc) -> Vec<Id<Flow>> {
-    let direct: Vec<Id<Flow>> =
-        book.flows.iter().filter(|(_, flow)| overlaps(flow.loc, at)).map(|(id, _)| id).collect();
+    let direct: Vec<Id<Flow>> = book
+        .flows
+        .iter()
+        .filter(|(_, flow)| overlaps(flow.loc, at))
+        .map(|(id, _)| id)
+        .collect();
     if !direct.is_empty() {
         return direct;
     }
@@ -51,26 +57,91 @@ fn items(book: &Book, run: &Run, at: Loc, flows: &[Id<Flow>]) -> Vec<(String, Lo
         let posting = Posting::at(book, run, id);
         let flow = posting.flow;
         let amounts = if flow.is_exchange() {
-            format!("{} for {}", book.show(posting.out()), book.show(posting.arrive()))
+            format!(
+                "{} for {}",
+                book.show(posting.out()),
+                book.show(posting.arrive())
+            )
         } else {
             book.show(posting.out()).to_string()
         };
-        items.push((format!("flow: {}, {amounts}", route(book, flow)), flow.loc));
+        let purpose = flow.purpose.map_or_else(String::new, |purposed| {
+            let object = purposed.of.map_or_else(String::new, |object| match object {
+                Object::Asset(id) => format!(" of {}", book.name(book.assets[id].name)),
+                Object::Place(id) => format!(" of {}", book.name(book.places[id].path)),
+                Object::Entity(id) => format!(" of {}", book.name(book.entities[id].path)),
+            });
+            let source = match purposed.source {
+                Provenance::Written => "written".to_string(),
+                Provenance::Contract(id) => {
+                    format!("contract {}", book.name(book.contracts[id].name))
+                }
+                Provenance::Entity(id) => format!("party {}", book.name(book.entities[id].path)),
+                Provenance::Party(id) => format!("party kind {}", book.name(book.kinds[id].name)),
+                Provenance::Commodity(id) => {
+                    format!("commodity kind {}", book.name(book.kinds[id].name))
+                }
+                Provenance::Account(id) => {
+                    format!("account kind {}", book.name(book.kinds[id].name))
+                }
+                Provenance::Derived => "derived".to_string(),
+            };
+            format!(
+                " for #{}{object} ({source})",
+                book.name(book.purposes[purposed.purpose].name)
+            )
+        });
+        let codes = book
+            .flow_view(flow)
+            .codes()
+            .map(|code| format!(" ^{}", book.name(code)))
+            .collect::<String>();
+        items.push((
+            format!("flow: {}, {amounts}{purpose}{codes}", route(book, flow)),
+            flow.loc,
+        ));
     }
-    for (index, assertion) in book.asserts.iter().enumerate().filter(|(_, assertion)| overlaps(assertion.loc, at)) {
-        let gap = run.pads.iter().find(|pad| pad.assert as usize == index).map(|pad| gap_words(book, pad));
+    for (index, assertion) in book
+        .asserts
+        .iter()
+        .enumerate()
+        .filter(|(_, assertion)| overlaps(assertion.loc, at))
+    {
+        let gap = run
+            .pads
+            .iter()
+            .find(|pad| pad.assert as usize == index)
+            .map(|pad| gap_words(book, pad));
         let gap = gap.map_or(String::new(), |words| format!(", {words}"));
         items.push((
-            format!("assertion: {} = {}{gap}", path(book, assertion.place), book.show(assertion.amount)),
+            format!(
+                "assertion: {} = {}{gap}",
+                path(book, assertion.place),
+                book.show(assertion.amount)
+            ),
             assertion.loc,
         ));
     }
     for event in book.events.iter().filter(|event| overlaps(event.loc, at)) {
-        let code = book.name(event.code).trim_start_matches('#');
-        items.push((format!("event: #{code} {}", event_words(event.state)), event.loc));
+        items.push((
+            format!(
+                "event: ^{} {}",
+                book.name(event.code),
+                event_words(event.state)
+            ),
+            event.loc,
+        ));
     }
-    for quote in book.prices.quotes().iter().filter(|quote| overlaps(quote.loc, at)) {
-        let (unit, priced_in) = (&book.commodities[quote.unit], &book.commodities[quote.quote]);
+    for quote in book
+        .prices
+        .quotes()
+        .iter()
+        .filter(|quote| overlaps(quote.loc, at))
+    {
+        let (unit, priced_in) = (
+            &book.commodities[quote.unit],
+            &book.commodities[quote.quote],
+        );
         let text = format!(
             "price: 1 {} = {} {} on {}",
             book.name(unit.symbol),
@@ -86,20 +157,104 @@ fn items(book: &Book, run: &Run, at: Loc, flows: &[Id<Flow>]) -> Vec<(String, Lo
             .filter(|law| overlaps(law.loc, at))
             .map(|law| (format!("law {}", book.name(law.name)), law.loc)),
     );
+    items.extend(
+        book.measures
+            .iter()
+            .filter(|measure| overlaps(measure.loc, at))
+            .map(|measure| {
+                let action = match measure.action {
+                    axiom_model::Action::Work => "worked",
+                    axiom_model::Action::Use => "used",
+                };
+                let subject = match measure.subject {
+                    axiom_model::Subject::Entity(id) => book.name(book.entities[id].path),
+                    axiom_model::Subject::Place(id) => book.name(book.places[id].path),
+                    axiom_model::Subject::Asset(id) => book.name(book.assets[id].name),
+                };
+                let purpose = measure.purpose.map_or_else(String::new, |purpose| {
+                    format!(" for #{}", book.name(book.purposes[purpose.purpose].name))
+                });
+                (
+                    format!(
+                        "measure: {subject} {action} {}{purpose}",
+                        book.show(measure.quantity)
+                    ),
+                    measure.loc,
+                )
+            }),
+    );
+    items.extend(
+        book.filed
+            .iter()
+            .filter(|filed| overlaps(filed.loc, at))
+            .map(|filed| {
+                (
+                    format!(
+                        "filed: {} for {} by {}",
+                        filed.year,
+                        book.name(book.systems[filed.system].path),
+                        book.name(book.entities[filed.owner].path)
+                    ),
+                    filed.loc,
+                )
+            }),
+    );
+    items.extend(
+        book.readings
+            .iter()
+            .filter(|reading| overlaps(reading.loc, at))
+            .map(|reading| {
+                (
+                    format!(
+                        "reading: ^{} = {}",
+                        book.name(reading.code),
+                        book.show(reading.amount)
+                    ),
+                    reading.loc,
+                )
+            }),
+    );
     items.extend(declarations(book, at));
     items
 }
 
 /// Places, entities and commodities declared on the line.
 fn declarations(book: &Book, at: Loc) -> Vec<(String, Loc)> {
-    let places = book.places.values().map(|place| ("place", place.path, place.loc));
-    let entities = book.entities.values().map(|entity| ("entity", entity.path, entity.loc));
-    let commodities = book.commodities.values().map(|commodity| ("commodity", commodity.symbol, commodity.loc));
+    let places = book
+        .places
+        .values()
+        .map(|place| ("place", place.path, place.loc));
+    let entities = book
+        .entities
+        .values()
+        .map(|entity| ("entity", entity.path, entity.loc));
+    let commodities = book
+        .commodities
+        .values()
+        .map(|commodity| ("commodity", commodity.symbol, commodity.loc));
+    let purposes = book
+        .purposes
+        .values()
+        .map(|purpose| ("purpose", purpose.name, purpose.loc));
+    let contracts = book
+        .contracts
+        .values()
+        .map(|contract| ("contract", contract.name, Some(contract.loc)));
+    let assets = book
+        .assets
+        .values()
+        .map(|asset| ("asset", asset.name, Some(asset.loc)));
     places
         .chain(entities)
         .chain(commodities)
+        .chain(purposes)
+        .chain(contracts)
+        .chain(assets)
         .filter_map(|(what, name, loc)| {
-            loc.filter(|&loc| overlaps(loc, at)).map(|loc| (format!("declares {what} {}", book.name(name)), loc))
+            loc.filter(|&loc| overlaps(loc, at)).map(|loc| {
+                let sigil = if what == "purpose" { "#" } else { "" };
+                (format!("declares {what} {sigil}{}", book.name(name)), loc)
+            })
         })
         .collect()
 }
@@ -108,7 +263,11 @@ fn declarations(book: &Book, at: Loc) -> Vec<(String, Loc)> {
 fn consequences<'s>(book: &Book<'s>, run: &Run, id: Id<Flow>, section: &mut Section<'s>) {
     let cause = Cause::Flow(id);
     for gain in run.gains.iter().filter(|gain| gain.cause == cause) {
-        let ambiguity = if gain.ambiguous { " (no lot policy: FIFO assumed)" } else { "" };
+        let ambiguity = if gain.ambiguous {
+            " (no lot policy: FIFO assumed)"
+        } else {
+            ""
+        };
         let text = format!(
             "realized a gain of {} selling {} from {}{ambiguity}",
             book.show(Amount::new(gain.gain(), book.base)),
@@ -120,15 +279,37 @@ fn consequences<'s>(book: &Book<'s>, run: &Run, id: Id<Flow>, section: &mut Sect
     for effect in run.effects.iter().filter(|effect| effect.cause == cause) {
         let name = book.name(effect.name);
         let text = match effect.owed() {
-            Some(owed) => format!("owes {} to {}: {name}", book.show(effect.amount), creditor(book, owed)),
+            Some(owed) => format!(
+                "owes {} to {}: {name}",
+                book.show(effect.amount),
+                creditor(book, owed)
+            ),
             None => format!("counts {} as {name}", book.show(effect.amount)),
         };
-        section.push(Row::new([Cell::text(text), Cell::text(book.name(book.laws[effect.law].name))]));
+        section.push(Row::new([
+            Cell::text(text),
+            Cell::text(book.name(book.laws[effect.law].name)),
+        ]));
     }
-    for violation in run.violations.iter().filter(|violation| violation.cause == cause) {
-        let message = run.diagnostics[violation.diagnostic as usize].message.clone();
-        let style = if violation.verdict.is_waived() { Style::Muted } else { Style::Alert };
-        section
-            .push(Row::new([Cell::text(message), Cell::text(book.name(book.laws[violation.law].name))]).style(style));
+    for violation in run
+        .violations
+        .iter()
+        .filter(|violation| violation.cause == cause)
+    {
+        let message = run.diagnostics[violation.diagnostic as usize]
+            .message
+            .clone();
+        let style = if violation.verdict.is_waived() {
+            Style::Muted
+        } else {
+            Style::Alert
+        };
+        section.push(
+            Row::new([
+                Cell::text(message),
+                Cell::text(book.name(book.laws[violation.law].name)),
+            ])
+            .style(style),
+        );
     }
 }

@@ -25,24 +25,21 @@ impl ReportRenderer for JsonRenderer {
 pub fn render(report: &Report<'_>, sources: &dyn SourceProvider) -> String {
     let mut out = String::new();
     out.push_str("{\"title\":");
-    string(&mut out, &plain(&report.title, sources));
+    plain_string(&mut out, &report.title, sources);
     out.push_str(",\"sections\":[");
     for (section_index, section) in report.sections.iter().enumerate() {
         comma(&mut out, section_index);
         out.push_str("{\"heading\":");
-        optional_string(
-            &mut out,
-            section
-                .heading
-                .as_ref()
-                .map(|heading| plain(heading, sources))
-                .as_deref(),
-        );
+        if let Some(heading) = &section.heading {
+            plain_string(&mut out, heading, sources);
+        } else {
+            out.push_str("null");
+        }
         out.push_str(",\"columns\":[");
         for (column_index, column) in section.columns.iter().enumerate() {
             comma(&mut out, column_index);
             out.push_str("{\"title\":");
-            string(&mut out, &plain(&column.title, sources));
+            plain_string(&mut out, &column.title, sources);
             out.push_str(",\"align\":");
             string(
                 &mut out,
@@ -76,7 +73,7 @@ pub fn render(report: &Report<'_>, sources: &dyn SourceProvider) -> String {
         out.push_str("],\"notes\":[");
         for (note_index, note) in section.notes.iter().enumerate() {
             comma(&mut out, note_index);
-            string(&mut out, &plain(note, sources));
+            plain_string(&mut out, note, sources);
         }
         out.push_str("]}");
     }
@@ -169,7 +166,11 @@ pub fn diagnostics(diagnostics: &[&Diagnostic], sources: &dyn SourceProvider) ->
 fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
     match cell {
         Cell::Blank => out.push_str("{\"type\":\"blank\"}"),
-        Cell::Word(word) => string(out, word),
+        Cell::Word(word) => {
+            out.push_str("{\"type\":\"word\",\"value\":");
+            string(out, word);
+            out.push('}');
+        }
         Cell::Text(text) => {
             out.push_str("{\"type\":\"text\",\"value\":");
             string(out, text);
@@ -185,6 +186,11 @@ fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
             string(out, code);
             out.push('}');
         }
+        Cell::Purpose(purpose) => {
+            out.push_str("{\"type\":\"purpose\",\"value\":");
+            string(out, purpose);
+            out.push('}');
+        }
         Cell::Said(text) => {
             out.push_str("{\"type\":\"text\",\"value\":");
             string(out, text);
@@ -192,20 +198,25 @@ fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
         }
         Cell::Amount { qty, scale, unit } => {
             out.push_str("{\"type\":\"amount\",\"value\":");
-            let amount = format!("{} {unit}", qty.show(*scale));
-            string(out, &amount);
+            out.push('"');
+            let _ = write!(Escaped(out), "{} {unit}", qty.show(*scale));
+            out.push('"');
             out.push_str(",\"unit\":");
             string(out, unit);
             out.push('}');
         }
         Cell::Day(day) => {
             out.push_str("{\"type\":\"day\",\"value\":");
-            string(out, &day.to_string());
+            out.push('"');
+            let _ = write!(Escaped(out), "{day}");
+            out.push('"');
             out.push('}');
         }
         Cell::Span(span) => {
             out.push_str("{\"type\":\"span\",\"value\":");
-            string(out, &span.to_string());
+            out.push('"');
+            let _ = write!(Escaped(out), "{span}");
+            out.push('"');
             out.push('}');
         }
         Cell::Period(days) => {
@@ -215,12 +226,16 @@ fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
         }
         Cell::Percent(ratio) => {
             out.push_str("{\"type\":\"percent\",\"value\":");
-            string(out, &crate::percent(*ratio));
+            out.push('"');
+            let _ = write_percent(&mut Escaped(out), *ratio);
+            out.push('"');
             out.push('}');
         }
         Cell::Number(ratio) => {
             out.push_str("{\"type\":\"number\",\"value\":");
-            string(out, &ratio.to_string());
+            out.push('"');
+            let _ = write!(Escaped(out), "{ratio}");
+            out.push('"');
             out.push('}');
         }
         Cell::Count(count, noun) => {
@@ -231,7 +246,9 @@ fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
         }
         Cell::Trigger(trigger) => {
             out.push_str("{\"type\":\"trigger\",\"value\":");
-            string(out, &trigger_words(*trigger));
+            out.push('"');
+            let _ = write_trigger_words(&mut Escaped(out), *trigger);
+            out.push('"');
             out.push('}');
         }
         Cell::Source(loc) => {
@@ -252,47 +269,98 @@ fn write_cell(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
     }
 }
 
-fn plain(cell: &Cell<'_>, sources: &dyn SourceProvider) -> String {
+fn plain_string(out: &mut String, cell: &Cell<'_>, sources: &dyn SourceProvider) {
+    out.push('"');
+    let _ = write_plain(&mut Escaped(out), cell, sources);
+    out.push('"');
+}
+
+/// Writes a cell's human-readable form directly into an escaped JSON string.
+/// In particular, nested sentence parts never allocate a temporary `String`.
+fn write_plain(
+    out: &mut impl std::fmt::Write,
+    cell: &Cell<'_>,
+    sources: &dyn SourceProvider,
+) -> std::fmt::Result {
     match cell {
-        Cell::Blank => String::new(),
-        Cell::Word(word) => (*word).to_string(),
-        Cell::Text(text) | Cell::Said(text) => text.to_string(),
-        Cell::Name(name) => (*name).to_string(),
-        Cell::Code(code) => format!("#{code}"),
-        Cell::Amount { qty, scale, unit } => format!("{} {unit}", qty.show(*scale)),
-        Cell::Day(day) => day.to_string(),
-        Cell::Span(span) => span.to_string(),
-        Cell::Period(days) => period_words(*days),
-        Cell::Percent(ratio) => crate::percent(*ratio),
-        Cell::Number(ratio) => ratio.to_string(),
+        Cell::Blank => Ok(()),
+        Cell::Word(word) => out.write_str(word),
+        Cell::Text(text) | Cell::Said(text) => out.write_str(text),
+        Cell::Name(name) => out.write_str(name),
+        Cell::Code(code) => write!(out, "^{code}"),
+        Cell::Purpose(purpose) => write!(out, "#{purpose}"),
+        Cell::Amount { qty, scale, unit } => write!(out, "{} {unit}", qty.show(*scale)),
+        Cell::Day(day) => write!(out, "{day}"),
+        Cell::Span(span) => write!(out, "{span}"),
+        Cell::Period(days) => write_period_words(out, *days),
+        Cell::Percent(ratio) => write_percent(out, *ratio),
+        Cell::Number(ratio) => write!(out, "{ratio}"),
+        Cell::Count(count, noun) if noun.is_empty() => {
+            write!(out, "{}", Qty(*count as i64).show(0))
+        }
         Cell::Count(count, noun) => {
-            if noun.is_empty() {
-                Qty(*count as i64).show(0).to_string()
+            write!(out, "{count} {noun}{}", if *count == 1 { "" } else { "s" })
+        }
+        Cell::Trigger(trigger) => write_trigger_words(out, *trigger),
+        Cell::Source(loc) => {
+            if let Some(position) = SourceProvider::describe(sources, *loc) {
+                write!(out, "{}:{}", position.path, position.line)
             } else {
-                format!("{count} {noun}{}", if *count == 1 { "" } else { "s" })
+                Ok(())
             }
         }
-        Cell::Trigger(trigger) => trigger_words(*trigger),
-        Cell::Source(loc) => SourceProvider::describe(sources, *loc)
-            .map_or_else(String::new, |position| {
-                format!("{}:{}", position.path, position.line)
-            }),
         Cell::Join(separator, parts) => {
-            let mut joined = String::new();
-            for part in parts {
-                let rendered = plain(part, sources);
-                if rendered.is_empty() {
-                    continue;
+            let mut any = false;
+            for part in parts.iter().filter(|part| plain_visible(part, sources)) {
+                if any && !(*separator == " " && starts_with_punctuation(part, sources)) {
+                    out.write_str(separator)?;
                 }
-                let punctuation =
-                    *separator == " " && rendered.starts_with([',', ';', ':', '.', ')']);
-                if !joined.is_empty() && !punctuation {
-                    joined.push_str(separator);
-                }
-                joined.push_str(&rendered);
+                write_plain(out, part, sources)?;
+                any = true;
             }
-            joined
+            Ok(())
         }
+    }
+}
+
+fn plain_visible(cell: &Cell<'_>, sources: &dyn SourceProvider) -> bool {
+    match cell {
+        Cell::Blank => false,
+        Cell::Text(text) | Cell::Said(text) => !text.is_empty(),
+        Cell::Word(text) | Cell::Name(text) | Cell::Purpose(text) => !text.is_empty(),
+        Cell::Source(loc) => {
+            SourceProvider::describe(sources, *loc).is_some_and(|pos| !pos.path.is_empty())
+        }
+        Cell::Join(_, parts) => parts.iter().any(|part| plain_visible(part, sources)),
+        _ => true,
+    }
+}
+
+fn starts_with_punctuation(cell: &Cell<'_>, sources: &dyn SourceProvider) -> bool {
+    let first = match cell {
+        Cell::Text(text) | Cell::Said(text) => text.chars().next(),
+        Cell::Word(text) | Cell::Name(text) => text.chars().next(),
+        Cell::Purpose(text) => text.chars().next().or(Some('#')),
+        Cell::Join(_, parts) => {
+            return parts
+                .iter()
+                .find(|part| plain_visible(part, sources))
+                .is_some_and(|part| starts_with_punctuation(part, sources));
+        }
+        Cell::Source(loc) => {
+            SourceProvider::describe(sources, *loc).and_then(|pos| pos.path.chars().next())
+        }
+        _ => None,
+    };
+    first.is_some_and(|ch| matches!(ch, ',' | ';' | ':' | '.' | ')'))
+}
+
+struct Escaped<'a>(&'a mut String);
+
+impl std::fmt::Write for Escaped<'_> {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        escaped(self.0, text);
+        Ok(())
     }
 }
 
@@ -308,20 +376,25 @@ fn write_fact(out: &mut String, fact: &Fact<'_>) {
     match fact.when {
         When::Instant(day) => {
             out.push_str("{\"instant\":");
-            string(out, &day.to_string());
-            out.push('}');
+            out.push('"');
+            let _ = write!(Escaped(out), "{day}");
+            out.push_str("\"}");
         }
         When::During(days) => write_period(out, days),
     }
     out.push_str(",\"unit\":");
     string(out, fact.value.unit);
     out.push_str(",\"value\":");
-    string(out, &digits(fact.value.qty, fact.value.scale));
+    digits(out, fact.value.qty, fact.value.scale);
     out.push('}');
 }
 
-fn digits(qty: Qty, scale: u8) -> String {
-    qty.show(scale).to_string().replace(',', "")
+fn digits(out: &mut String, qty: Qty, scale: u8) {
+    out.push('"');
+    let mut escaped = Escaped(out);
+    let mut ungrouped = WithoutCommas(&mut escaped);
+    let _ = write!(ungrouped, "{}", qty.show(scale));
+    out.push('"');
 }
 
 fn write_period(out: &mut String, days: Days) {
@@ -334,35 +407,106 @@ fn write_period(out: &mut String, days: Days) {
     };
     out.push('{');
     out.push_str("\"from\":");
-    optional_string(out, end(days.first()).map(|day| day.to_string()).as_deref());
+    optional_day(out, end(days.first()));
     out.push_str(",\"to\":");
-    optional_string(out, end(days.last()).map(|day| day.to_string()).as_deref());
+    optional_day(out, end(days.last()));
     out.push('}');
 }
 
-fn period_words(days: Days) -> String {
-    match (Window::exactly(days), days.single()) {
-        (Some(window), _) => window.to_string(),
-        (None, Some(day)) => format!("on {day}"),
-        (None, None) if days == Days::ALWAYS => "ever".to_string(),
-        (None, None) => format!("{}..{}", days.first(), days.last()),
+fn optional_day(out: &mut String, day: Option<axiom_core::Day>) {
+    match day {
+        Some(day) => {
+            out.push('"');
+            let _ = write!(Escaped(out), "{day}");
+            out.push('"');
+        }
+        None => out.push_str("null"),
     }
 }
 
-fn trigger_words(trigger: Trigger) -> String {
+fn write_period_words(out: &mut impl std::fmt::Write, days: Days) -> std::fmt::Result {
+    match (Window::exactly(days), days.single()) {
+        (Some(window), _) => write!(out, "{window}"),
+        (None, Some(day)) => write!(out, "on {day}"),
+        (None, None) if days == Days::ALWAYS => out.write_str("ever"),
+        (None, None) => write!(out, "{}..{}", days.first(), days.last()),
+    }
+}
+
+fn write_trigger_words(out: &mut impl std::fmt::Write, trigger: Trigger) -> std::fmt::Result {
     match trigger {
-        Trigger::In => "on in".to_string(),
-        Trigger::Out => "on out".to_string(),
-        Trigger::Gain => "on gain".to_string(),
-        Trigger::Spend => "on spend".to_string(),
-        Trigger::Flow => "on flow".to_string(),
-        Trigger::Each(Period::Month, _) => "each month".to_string(),
-        Trigger::Each(Period::Year, None) => "each year".to_string(),
+        Trigger::In => out.write_str("on in"),
+        Trigger::Out => out.write_str("on out"),
+        Trigger::Gain => out.write_str("on gain"),
+        Trigger::Spend => out.write_str("on spend"),
+        Trigger::Flow => out.write_str("on flow"),
+        Trigger::Each(Period::Month, _) => out.write_str("each month"),
+        Trigger::Each(Period::Year, None) => out.write_str("each year"),
         Trigger::Each(Period::Year, Some(Closing { month, day })) => {
-            format!("each year closing {month:02}-{day:02}")
+            write!(out, "each year closing {month:02}-{day:02}")
         }
-        Trigger::By(_) => "by a date".to_string(),
-        Trigger::Always => "always".to_string(),
+        Trigger::By(_) => out.write_str("by a date"),
+        Trigger::Always => out.write_str("always"),
+    }
+}
+
+fn write_percent(out: &mut impl std::fmt::Write, ratio: axiom_core::Ratio) -> std::fmt::Result {
+    let Some(hundredths) = Qty(10_000).scale(ratio) else {
+        return write!(out, "{ratio}");
+    };
+    let mut shown = StackText::new();
+    write!(&mut shown, "{}", hundredths.show(2))?;
+    while shown.len > 0 && shown.bytes[shown.len - 1] == b'0' {
+        shown.len -= 1;
+    }
+    if shown.len > 0 && shown.bytes[shown.len - 1] == b'.' {
+        shown.len -= 1;
+    }
+    out.write_str(shown.as_str())?;
+    out.write_char('%')
+}
+
+struct StackText {
+    bytes: [u8; 64],
+    len: usize,
+}
+
+impl StackText {
+    fn new() -> StackText {
+        StackText {
+            bytes: [0; 64],
+            len: 0,
+        }
+    }
+
+    fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len]).expect("formatted quantities are UTF-8")
+    }
+}
+
+impl std::fmt::Write for StackText {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        let Some(end) = self
+            .len
+            .checked_add(text.len())
+            .filter(|&end| end <= self.bytes.len())
+        else {
+            return Err(std::fmt::Error);
+        };
+        self.bytes[self.len..end].copy_from_slice(text.as_bytes());
+        self.len = end;
+        Ok(())
+    }
+}
+
+struct WithoutCommas<W>(W);
+
+impl<W: std::fmt::Write> std::fmt::Write for WithoutCommas<W> {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        for part in text.split(',') {
+            self.0.write_str(part)?;
+        }
+        Ok(())
     }
 }
 

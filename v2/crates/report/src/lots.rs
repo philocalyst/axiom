@@ -48,7 +48,8 @@ pub(crate) fn view_from<'h, 's>(
 
     let (mut basis, mut value, mut unrealized, mut unpriced) = (Qty::ZERO, Qty::ZERO, Qty::ZERO, 0);
     let held = holdings.into_iter().filter(|holding| {
-        lens.owns(holding.place) && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
+        lens.owns(holding.place)
+            && scope.is_none_or(|scope| book.places.covers(scope, holding.place))
     });
     for holding in held {
         for lot in &holding.lots {
@@ -80,15 +81,21 @@ pub(crate) fn view_from<'h, 's>(
         section.push(Row::padded(cells, 9).style(Style::Total));
     }
     if unpriced > 0 {
-        section.note(format!("{unpriced} parcels have no price; they are muted and left out of Value and Unrealized."));
+        section.note(format!(
+            "{unpriced} parcels have no price; they are muted and left out of Value and Unrealized."
+        ));
     }
     Report::new(format!("Lots at {at}")).with(section)
 }
 
 fn row<'s>(lens: Lens<'_, 's>, holding: &Holding, lot: &Parcel, worth: Option<Qty>) -> Row<'s> {
     let book = lens.book;
-    let tie = lot.tied.map(|entity| format!("tied to {}", book.name(book.entities[entity].path)));
-    let notes: Vec<String> = code_labels(book, &book.txns[lot.txn].codes).chain(tie).collect();
+    let tie = lot
+        .tied
+        .map(|entity| format!("tied to {}", book.name(book.entities[entity].path)));
+    let notes = code_labels(book, book.codes[book.txns[lot.txn].codes].iter().copied())
+        .chain(tie.map(Cell::text))
+        .collect::<Vec<_>>();
     let cells = [
         Cell::text(path(book, holding.place)),
         Cell::amount(book, Amount::new(lot.qty, holding.unit)),
@@ -98,7 +105,11 @@ fn row<'s>(lens: Lens<'_, 's>, holding: &Holding, lot: &Parcel, worth: Option<Qt
         worth.map_or(Cell::Blank, |worth| Cell::base(book, worth)),
         worth.map_or(Cell::Blank, |worth| Cell::base(book, worth - lot.basis)),
         Cell::text(Term::of(book, holding.unit, lot.acquired, lens.day).word()),
-        if notes.is_empty() { Cell::Blank } else { Cell::text(notes.join(" · ")) },
+        Cell::list_or_blank(" · ", notes),
     ];
-    Row::new(cells).style(if worth.is_some() { Style::Normal } else { Style::Muted })
+    Row::new(cells).style(if worth.is_some() {
+        Style::Normal
+    } else {
+        Style::Muted
+    })
 }

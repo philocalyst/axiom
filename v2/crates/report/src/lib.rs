@@ -15,6 +15,7 @@ mod calendar;
 mod claims;
 mod closings;
 mod context;
+mod contracts;
 mod flow;
 mod forecast;
 mod gains;
@@ -80,6 +81,8 @@ pub enum Query<'a> {
     /// What others owe and what is owed to them: open claims with their
     /// counterparty, age and due day.
     Claims { at: Option<Day> },
+    /// Current promises, terms and the next due day.
+    Contracts,
     /// Tallies and obligations per system for a year.
     Tax { year: Option<i32> },
     /// Every disposal in a year: acquired, sold, proceeds, basis, gain, term.
@@ -92,7 +95,7 @@ pub enum Query<'a> {
     /// Plans, inferred recurrences, obligations and growth, run forward
     /// through the laws, with bands from bootstrapped spending.
     Forecast { until: Option<Day>, paths: u32 },
-    /// Explains a place, `#code`, law, tax line, or a source path and line.
+    /// Explains a place, `^code`, `#purpose`, asset, contract, law or source line.
     Why { target: &'a str },
     /// Explains what is written at one resolved source location and everything
     /// it caused. A client uses its [`SourceProvider`] to resolve `why FILE:LINE`.
@@ -166,6 +169,8 @@ pub enum Cell<'s> {
     Name(&'s str),
     /// A code without its written sigil.
     Code(&'s str),
+    /// A purpose without its written sigil.
+    Purpose(&'s str),
     /// Externally supplied or diagnostic wording.
     Said(Cow<'s, str>),
     /// Quanta, the commodity's decimal places, and its symbol.
@@ -319,6 +324,7 @@ fn views<'s>(
         Query::Budget { at, by } => Ok(budget::view(book, run, whose, *at, *by)),
         Query::Limits { year } => Ok(limits::view(book, run, whose, *year)),
         Query::Claims { at } => Ok(claims::view(book, run, whose, *at)),
+        Query::Contracts => Ok(contracts::view(book, run, whose)),
         Query::Tax { year } => Ok(tax::view(book, run, whose, *year)),
         Query::Gains { year } => Ok(gains::view(book, run, whose, *year)),
         Query::Lots { place, at } => lots::view(book, run, whose, *place, *at),

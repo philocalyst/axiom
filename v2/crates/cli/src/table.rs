@@ -322,6 +322,10 @@ fn write_cell<W: CellSink>(
             let _ = write!(out, "^{code}");
             true
         }
+        Cell::Purpose(purpose) => {
+            let _ = write!(out, "#{purpose}");
+            true
+        }
         Cell::Day(day) => {
             let _ = write!(out, "{day}");
             true
@@ -402,6 +406,7 @@ fn cell_visible(cell: &Cell<'_>, sources: &dyn SourceProvider) -> bool {
         Cell::Text(text) | Cell::Said(text) => !text.is_empty(),
         Cell::Word(text) => !text.is_empty(),
         Cell::Name(text) => !text.is_empty(),
+        Cell::Purpose(text) => !text.is_empty(),
         Cell::Source(loc) => {
             SourceProvider::describe(sources, *loc).is_some_and(|p| !p.path.is_empty())
         }
@@ -415,6 +420,7 @@ fn starts_with_punctuation(cell: &Cell<'_>, sources: &dyn SourceProvider) -> boo
         Cell::Text(text) | Cell::Said(text) => text.chars().next(),
         Cell::Word(text) => text.chars().next(),
         Cell::Name(text) => text.chars().next(),
+        Cell::Purpose(text) => text.chars().next().or(Some('#')),
         Cell::Source(loc) => {
             SourceProvider::describe(sources, *loc).and_then(|p| p.path.chars().next())
         }
