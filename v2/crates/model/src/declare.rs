@@ -80,16 +80,28 @@ impl World<'_> {
             while end < self.prop_writes.len() && self.prop_writes[end].0 == target {
                 end += 1;
             }
-            let rows: Box<[Prop]> = self.prop_writes[start..end]
-                .iter()
-                .map(|(_, prop)| *prop)
-                .collect();
+            let additions = &self.prop_writes[start..end];
             match target {
-                PropTarget::Kind(id) => self.book.kinds[id].props = rows,
-                PropTarget::Entity(id) => self.book.entities[id].props = rows,
-                PropTarget::Commodity(id) => self.book.commodities[id].props = rows,
-                PropTarget::Place(id) => self.book.places[id].props = rows,
-                PropTarget::Asset(id) => self.book.assets[id].props = rows,
+                PropTarget::Kind(id) => {
+                    let rows = merge_props(names, &self.book.kinds[id].props, additions);
+                    self.book.kinds[id].props = rows;
+                }
+                PropTarget::Entity(id) => {
+                    let rows = merge_props(names, &self.book.entities[id].props, additions);
+                    self.book.entities[id].props = rows;
+                }
+                PropTarget::Commodity(id) => {
+                    let rows = merge_props(names, &self.book.commodities[id].props, additions);
+                    self.book.commodities[id].props = rows;
+                }
+                PropTarget::Place(id) => {
+                    let rows = merge_props(names, &self.book.places[id].props, additions);
+                    self.book.places[id].props = rows;
+                }
+                PropTarget::Asset(id) => {
+                    let rows = merge_props(names, &self.book.assets[id].props, additions);
+                    self.book.assets[id].props = rows;
+                }
             }
             start = end;
         }
@@ -109,7 +121,93 @@ impl World<'_> {
                 .help("check that the party, owner and flow direction match the claim or contract declaration")
         })
     }
+}
 
+/// Merge another frozen property batch without discarding earlier rows. The
+/// stable sort preserves write order for same-name, same-day rows, so an
+/// earlier value remains the one in force as specified by [`crate::prop`].
+fn merge_props(
+    names: &Interner<'_>,
+    existing: &[Prop],
+    additions: &[(PropTarget, Prop)],
+) -> Box<[Prop]> {
+    let mut rows = Vec::with_capacity(existing.len() + additions.len());
+    rows.extend_from_slice(existing);
+    rows.extend(additions.iter().map(|(_, prop)| *prop));
+    rows.sort_by(|a, b| {
+        names
+            .name(a.name)
+            .cmp(names.name(b.name))
+            .then_with(|| a.since.cmp(&b.since))
+    });
+    rows.into_boxed_slice()
+}
+
+#[cfg(test)]
+mod property_finalization_tests {
+    use super::{PropTarget, merge_props};
+    use crate::{Prop, Value, prop};
+    use axiom_core::{Day, FileId, Id, Interner, Loc, Ratio};
+
+    #[test]
+    fn successive_property_finalization_preserves_rows_and_first_same_day_value() {
+        let mut names = Interner::default();
+        let label = names.intern("label");
+        let amount = names.intern("amount");
+        let first_day = Day::from_ymd(2026, 1, 1).unwrap();
+        let later_day = Day::from_ymd(2026, 2, 1).unwrap();
+        let first_batch = [Prop {
+            name: label,
+            value: Value::Num(Ratio::int(1)),
+            since: first_day,
+            loc: Some(Loc::new(FileId(0), 1, 2)),
+        }];
+        let first_writes = [(PropTarget::Kind(Id::new(0)), first_batch[0])];
+        let once = merge_props(&names, &[], &first_writes);
+
+        let second_batch = [
+            Prop {
+                name: label,
+                value: Value::Num(Ratio::int(2)),
+                since: first_day,
+                loc: Some(Loc::new(FileId(0), 3, 4)),
+            },
+            Prop {
+                name: label,
+                value: Value::Num(Ratio::int(3)),
+                since: later_day,
+                loc: Some(Loc::new(FileId(0), 5, 6)),
+            },
+            Prop {
+                name: amount,
+                value: Value::Num(Ratio::int(4)),
+                since: first_day,
+                loc: Some(Loc::new(FileId(0), 7, 8)),
+            },
+        ];
+        let second_writes = second_batch.map(|prop| (PropTarget::Kind(Id::new(0)), prop));
+        let twice = merge_props(&names, &once, &second_writes);
+
+        assert_eq!(twice.len(), 4);
+        assert_eq!(names.name(twice[0].name), "amount");
+        assert_eq!(
+            prop(&twice, label, first_day).unwrap().value,
+            Value::Num(Ratio::int(1))
+        );
+        assert_eq!(
+            prop(&twice, label, later_day).unwrap().value,
+            Value::Num(Ratio::int(3))
+        );
+
+        let again = merge_props(&names, &twice, &[]);
+        assert_eq!(again.len(), twice.len());
+        for (again, twice) in again.iter().zip(twice.iter()) {
+            assert_eq!(again.name, twice.name);
+            assert_eq!(again.value, twice.value);
+            assert_eq!(again.since, twice.since);
+            assert_eq!(again.loc, twice.loc);
+        }
+    }
 }
 
 pub(crate) struct Settings<'s> {
