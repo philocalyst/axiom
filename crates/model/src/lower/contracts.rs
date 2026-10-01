@@ -8,7 +8,8 @@ use axiom_syntax::{ClauseKind, Direction, ExprKind, ItemKind, Name};
 
 use super::{JournalSurvey, compile_roots, contract_roots, inputs};
 use crate::book::{
-    Amount, At, Cadence, Class, Contract, Coverage, Deadline, Escalation, FlowSide, Input, Loan,
+    AlsoOn, Amount, At, Cadence, Class, Contract, Coverage, Deadline, Escalation, FlowSide, Input,
+    Loan,
     Prepay, Relative, Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent,
     TemplateLeg, TemplateProgram, TemplateQuantity, Terms, TermsState,
 };
@@ -211,6 +212,17 @@ fn lower_contract<'a, 's>(
         Some(schedule) => schedule_owner(world, written.site.home, file, Some(schedule), party, diags)?,
         None => world.book.roots.me,
     };
+    let also = crate::laws::lower_alsos(
+        world,
+        diags,
+        file,
+        written.site.home,
+        node.alsos,
+        Owner::Contract(written.id),
+        AlsoOn::Contract(written.id),
+        &contract_inputs,
+        world.book.entities[owner].currency,
+    );
     let loan = contract_loan(
         world,
         file,
@@ -257,6 +269,7 @@ fn lower_contract<'a, 's>(
             description,
             area,
             loan.map(|(_, rate)| rate),
+            &also,
             diags,
         )?;
         contract.terms = Some(Timeline::new(terms));
@@ -278,6 +291,7 @@ fn lower_contract<'a, 's>(
             description,
             area,
             loan.map(|(_, rate)| rate),
+            &also,
             diags,
         )?;
         contract.standing = Some(Timeline::new(terms));
@@ -503,6 +517,7 @@ fn lower_terms<'a, 's>(
     description: Option<crate::book::Text>,
     contract_area: Option<Amount>,
     loan_rate: Option<Ratio>,
+    also: &[Id<crate::book::Also>],
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Terms> {
     let hold = schedule.terms.holding?;
@@ -652,7 +667,7 @@ fn lower_terms<'a, 's>(
             diags,
         )
         .into_boxed_slice(),
-        also: Box::default(),
+        also: also.to_vec().into_boxed_slice(),
         rate: loan_rate,
         change: None,
     })

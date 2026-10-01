@@ -457,6 +457,53 @@ contract c with p
 }
 
 #[test]
+fn contract_also_is_shared_by_regular_and_standing_terms() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+commodity VTI
+account assets/checking
+account assets/savings
+contract c with p
+  5 USD monthly from checking
+  buy VTI for 10 USD monthly from checking
+  also -> savings 2 * amount / 2 ^match
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let contract_id = book.contract("c").unwrap();
+    let contract = &book.contracts[contract_id];
+    let day = Day::from_ymd(2026, 1, 1).unwrap();
+    let regular = contract.terms.as_ref().unwrap().at(day);
+    let standing = contract.standing.as_ref().unwrap().at(day);
+    assert_eq!(regular.also, standing.also);
+    assert_eq!(regular.also.len(), 1);
+
+    let also = &book.also[regular.also[0]];
+    assert_eq!(also.on, axiom_model::AlsoOn::Contract(contract_id));
+    assert_eq!(book.name(book.codes[also.codes.start()]), "match");
+    let axiom_model::Implied::Flow {
+        to: Some(to),
+        amount: axiom_model::TemplateAmount::Computed(root),
+        ..
+    } = also.what
+    else {
+        panic!("contract also should retain the typed implied flow")
+    };
+    assert_eq!(to, book.place("assets/savings").unwrap());
+    assert!(!book.laws[also.law].nodes.is_empty());
+    assert!(book.laws[also.law].nodes.len() > root.index() as usize);
+}
+
+#[test]
 fn contract_area_is_the_typed_denominator_for_measured_shares() {
     let path = "contracts.ax";
     let text = "\

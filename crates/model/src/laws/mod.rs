@@ -597,7 +597,7 @@ pub(crate) fn lower_alsos<'s>(
         }
         let selector_errors = diags.len();
         let select = source_selectors.map_or(metadata.select, |selectors| {
-            lower_also_selectors(world, home, file, selectors, also.loc, diags)
+            lower_also_selectors(world, home, file, selectors, diags)
         });
         if diags.len() != selector_errors {
             continue;
@@ -657,7 +657,6 @@ fn lower_also_selectors<'s>(
     home: Home,
     file: &ast::File<'s>,
     selectors: ast::Many<ast::Select<'s>>,
-    loc: axiom_core::Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> axiom_core::Run<LotSelect> {
     let start = world.book.selectors.len();
