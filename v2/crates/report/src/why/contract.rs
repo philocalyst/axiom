@@ -114,16 +114,19 @@ pub fn report<'s>(
         Column::left("From"),
     ])
     .headed("Derived flows");
-    for flow in book.flows.values().filter(|flow| match flow.origin {
-        Origin::Occurrence(id) => id == contract_id,
-        Origin::Derived(
-            Derivation::Interest(id)
-            | Derivation::Principal(id)
-            | Derivation::Claim(id)
-            | Derivation::Otherwise(id)
-            | Derivation::Refund(id),
-        ) => id == contract_id,
-        _ => false,
+    for flow in book.flows.values().filter(|flow| {
+        whose.includes(flow.owner)
+            && match flow.origin {
+                Origin::Occurrence(id) => id == contract_id,
+                Origin::Derived(
+                    Derivation::Interest(id)
+                    | Derivation::Principal(id)
+                    | Derivation::Claim(id)
+                    | Derivation::Otherwise(id)
+                    | Derivation::Refund(id),
+                ) => id == contract_id,
+                _ => false,
+            }
     }) {
         let origin = match flow.origin {
             Origin::Occurrence(_) => "occurrence",

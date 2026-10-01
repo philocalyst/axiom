@@ -27,13 +27,19 @@ pub fn report<'s>(
         })
         .map(|posting| posting.id)
         .collect();
+    let visible_codes = super::line::scoped_codes(book, whose);
+    let event_visible = |code| whose.is_everyone() || visible_codes.contains(&code);
     let mut happened = Section::new([
         Column::left("Date"),
         Column::left("Event"),
         Column::left("From"),
     ])
     .headed("Events");
-    for event in book.events.iter().filter(|event| marked(event.code)) {
+    for event in book
+        .events
+        .iter()
+        .filter(|event| event_visible(event.code) && marked(event.code))
+    {
         happened.push(Row::new([
             Cell::Day(event.day),
             Cell::text(event_words(event.state)),
@@ -42,11 +48,10 @@ pub fn report<'s>(
     }
 
     if flows.is_empty() && happened.rows.is_empty() {
-        let events = book.events.iter().map(|event| event.code);
-        let known: BTreeSet<&str> = book
-            .flows
+        let events = book.events.iter().filter(|event| event_visible(event.code)).map(|event| event.code);
+        let known: BTreeSet<&str> = visible_codes
             .iter()
-            .flat_map(|(_, flow)| book.flow_view(flow).codes())
+            .copied()
             .chain(events)
             .map(|code| book.name(code))
             .collect();

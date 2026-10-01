@@ -202,7 +202,7 @@ fn template_item_cell<'s>(book: &'s Book<'_>, item: &TemplateItem) -> Cell<'s> {
         " ",
         [Cell::Word(sign), parent, Cell::Word(side), amount, purpose]
             .into_iter()
-            .chain(item.description.map(|description| Cell::text(book.name(description))))
+            .chain(item.description.map(|description| Cell::text(book.text(description))))
             .chain(crate::table::code_labels(book, book.codes[item.codes].iter().copied()))
             .chain(std::iter::once(Cell::Source(item.loc))),
     )

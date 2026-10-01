@@ -243,7 +243,7 @@ fn items(
 /// Codes named by data visible in this owner scope. Events and readings have
 /// no owner of their own, so an owner-scoped source query only exposes them
 /// when a visible flow, measure or contract refers to their code.
-fn scoped_codes(book: &Book, whose: &Whose) -> BTreeSet<axiom_core::Sym> {
+pub(super) fn scoped_codes(book: &Book, whose: &Whose) -> BTreeSet<axiom_core::Sym> {
     let mut codes = BTreeSet::new();
     for (_, flow) in book.flows.iter().filter(|(_, flow)| whose.includes(flow.owner)) {
         codes.extend(book.flow_view(flow).codes());

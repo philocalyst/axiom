@@ -245,7 +245,9 @@ fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Opt
     let period_count = periods.len();
     let purpose_count = book.purposes.len();
     let mut totals = vec![Qty::ZERO; purpose_count * period_count];
-    let mut objects: HashMap<(Id<Purpose>, Object), Vec<Qty>> = HashMap::new();
+    let mut object_index: HashMap<(Id<Purpose>, Object), usize> = HashMap::new();
+    let mut object_keys = Vec::new();
+    let mut object_totals = Vec::new();
     let mut purpose_activity = vec![false; purpose_count];
     let mut descriptions: BTreeMap<Option<&'s str>, Vec<Qty>> = BTreeMap::new();
     let mut description_activity = HashSet::new();
@@ -296,9 +298,15 @@ fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Opt
             purpose_activity[purpose.purpose.index()] = true;
         }
         if let Some(object) = purpose.of {
-            let values = objects
-                .entry((purpose.purpose, object))
-                .or_insert_with(|| vec![Qty::ZERO; period_count]);
+            let key = (purpose.purpose, object);
+            let index = *object_index.entry(key).or_insert_with(|| {
+                let index = object_keys.len();
+                object_keys.push(key);
+                object_totals.resize((index + 1) * period_count, Qty::ZERO);
+                index
+            });
+            let start = index * period_count;
+            let values = &mut object_totals[start..][..period_count];
             add_recognized(values, periods, flow.recognized, cutoff, amount);
         }
     }
@@ -318,17 +326,19 @@ fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Opt
 
     // Keep one sparse object group per nonzero recognized amount. Visibility
     // propagation below is linear in purposes, not a recursive tree rescan.
-    let mut object_rows: Vec<_> = objects
-        .into_iter()
-        .filter(|(_, values)| !is_zero(values))
+    let mut object_rows: Vec<_> = (0..object_keys.len())
+        .filter(|&index| {
+            let start = index * period_count;
+            !is_zero(&object_totals[start..][..period_count])
+        })
         .collect();
-    object_rows.sort_by(
-        |((left_purpose, left_object), _), ((right_purpose, right_object), _)| {
-            left_purpose
-                .cmp(right_purpose)
-                .then_with(|| object_name(book, *left_object).cmp(object_name(book, *right_object)))
-        },
-    );
+    object_rows.sort_by(|&left, &right| {
+        let (left_purpose, left_object) = object_keys[left];
+        let (right_purpose, right_object) = object_keys[right];
+        left_purpose.cmp(&right_purpose).then_with(|| {
+            object_name(book, left_object).cmp(object_name(book, right_object))
+        })
+    });
 
     let columns = (0..period_count).map(|period| Column::right(periods.title(period)));
     let mut section = Section::new(
@@ -371,12 +381,19 @@ fn purpose_view<'s>(lens: Lens<'s, '_, '_, '_>, run: &Run, by: Period, from: Opt
                 add_purpose_facts(&mut section, lens, periods, id, values);
             }
 
-            while next_object < object_rows.len() && object_rows[next_object].0.0 < id {
+            while next_object < object_rows.len()
+                && object_keys[object_rows[next_object]].0 < id
+            {
                 next_object += 1;
             }
-            while next_object < object_rows.len() && object_rows[next_object].0.0 == id {
-                let ((_, object), amounts) = &object_rows[next_object];
-                let object_name = object_name(book, *object);
+            while next_object < object_rows.len()
+                && object_keys[object_rows[next_object]].0 == id
+            {
+                let object_id = object_rows[next_object];
+                let (_, object) = object_keys[object_id];
+                let start = object_id * period_count;
+                let amounts = &object_totals[start..][..period_count];
+                let object_name = object_name(book, object);
                 let label = Cell::list(" ", [Cell::Word("of"), Cell::Name(object_name)]);
                 section.push(period_row(book, label, depth + 1, amounts, Style::Muted));
                 add_object_facts(
