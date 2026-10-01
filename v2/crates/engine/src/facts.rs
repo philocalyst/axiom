@@ -72,6 +72,7 @@ impl StepFacts {
 pub(crate) enum Reads {
     Total(Dir, Window),
     Purpose(Window),
+    Budget(Id<axiom_model::Budget>),
     Tally(Sym),
 }
 
@@ -82,6 +83,7 @@ impl Reads {
         let read = law.range(cond).filter_map(|at| match &law.nodes[NodeId(at as u32)].op {
             Op::Call(Func::Total(dir, window), _) => Some(Reads::Total(*dir, *window)),
             Op::Call(Func::PurposeTotal { window, .. }, _) => Some(Reads::Purpose(*window)),
+            Op::Call(Func::BudgetTotal(budget), _) => Some(Reads::Budget(*budget)),
             // A tally of another year is settled, not a window this flow is adding to.
             Op::Call(Func::Tally(name), args) if Func::tally_year(args).is_none() => Some(Reads::Tally(*name)),
             _ => None,
@@ -89,6 +91,7 @@ impl Reads {
         read.min_by_key(|read| match read {
             Reads::Total(_, Window::Month) => 0,
             Reads::Purpose(Window::Month) => 0,
+            Reads::Budget(_) => 0,
             Reads::Total(_, Window::Year) | Reads::Purpose(Window::Year) | Reads::Tally(_) => 1,
             Reads::Total(_, Window::Ever) => 2,
             Reads::Purpose(Window::Ever) => 2,
@@ -96,10 +99,19 @@ impl Reads {
     }
 
     /// The days the reading covers on this occasion.
-    pub fn window(self, on: &Occasion) -> Days {
+    pub fn window(self, book: &Book, on: &Occasion) -> Days {
         match self {
-            Reads::Total(_, window) => window.around(on.anchor()),
-            Reads::Purpose(window) => window.around(on.anchor()),
+            Reads::Total(_, window) | Reads::Purpose(window) => window.around(on.anchor()),
+            Reads::Budget(budget) => book.budgets.get(budget).map_or_else(
+                || Days::on(on.anchor()),
+                |budget| {
+                    let window = match budget.terms.at(on.anchor()).period {
+                        axiom_core::Period::Month => Window::Month,
+                        axiom_core::Period::Year => Window::Year,
+                    };
+                    window.around(on.anchor())
+                },
+            ),
             Reads::Tally(_) => Window::Year.around(on.over.first()),
         }
     }
@@ -121,7 +133,7 @@ impl LawFacts {
     pub fn of(book: &Book, law: &Law) -> LawFacts {
         LawFacts {
             shortcut: shortcut(book, law),
-            window: window_read(law),
+            window: window_read(book, law),
             totals: totals_read(law),
             steps: (0..law.steps.len()).map(|at| step(law, at)).collect(),
         }
@@ -145,11 +157,21 @@ fn is_floor_of_nothing(law: &Law) -> bool {
 }
 
 /// The finest window of flow total a law reads, month or year.
-fn window_read(law: &Law) -> Option<Window> {
-    let windows = law.nodes.values().filter_map(|node| match node.op {
-        Op::Call(Func::Total(_, window), _) if window != Window::Ever => Some(window),
-        Op::Call(Func::PurposeTotal { window, .. }, _) if window != Window::Ever => Some(window),
-        _ => None,
+fn window_read(book: &Book, law: &Law) -> Option<Window> {
+    let windows = law.nodes.values().flat_map(|node| match node.op {
+        Op::Call(Func::Total(_, window), _) if window != Window::Ever => vec![window],
+        Op::Call(Func::PurposeTotal { window, .. }, _) if window != Window::Ever => vec![window],
+        Op::Call(Func::BudgetTotal(id), _) => book
+            .budgets
+            .get(id)
+            .into_iter()
+            .flat_map(|budget| budget.terms.within(Days::ALWAYS).map(|(_, terms)| terms.period))
+            .map(|period| match period {
+                axiom_core::Period::Month => Window::Month,
+                axiom_core::Period::Year => Window::Year,
+            })
+            .collect(),
+        _ => Vec::new(),
     });
     windows.min_by_key(|&window| window == Window::Year)
 }
@@ -159,6 +181,7 @@ fn totals_read(law: &Law) -> TotalsRead {
     let reads = law.nodes.values().filter_map(|node| match &node.op {
         Op::Call(Func::Total(..), args) => Some(widened(args)),
         Op::Call(Func::PurposeTotal { .. }, _) => Some(false),
+        Op::Call(Func::BudgetTotal(_), _) => Some(false),
         _ => None,
     });
     match reads.reduce(|a, b| a || b) {
@@ -243,17 +266,35 @@ pub(crate) fn purpose_readers(book: &Book) -> PurposeReaders {
         for step in &law.steps {
             let axiom_model::StepKind::Require { cond, .. } = &step.kind else { continue };
             for at in law.range(*cond) {
-                let Op::Call(Func::PurposeTotal { purpose, window }, _) = &law.nodes[NodeId(at as u32)].op else { continue };
-                if *window == Window::Ever {
-                    continue;
-                }
-                let Some(purpose) = (*purpose).or(implicit) else { continue };
-                let rules = readers.entry((purpose, *window)).or_default();
-                if !rules.contains(&rule) {
-                    rules.push(rule);
+                match &law.nodes[NodeId(at as u32)].op {
+                    Op::Call(Func::PurposeTotal { purpose, window }, _) if *window != Window::Ever => {
+                        let Some(purpose) = (*purpose).or(implicit) else { continue };
+                        add_purpose_reader(&mut readers, purpose, *window, rule);
+                    }
+                    Op::Call(Func::BudgetTotal(id), _) => {
+                        let Some(budget) = book.budgets.get(*id) else { continue };
+                        for (_, terms) in budget.terms.within(Days::ALWAYS) {
+                            let window = match terms.period {
+                                axiom_core::Period::Month => Window::Month,
+                                axiom_core::Period::Year => Window::Year,
+                            };
+                            add_purpose_reader(&mut readers, budget.purpose, window, rule);
+                            if let axiom_model::Limit::Share { of, .. } = terms.limit {
+                                add_purpose_reader(&mut readers, of, window, rule);
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
     }
     readers
+}
+
+fn add_purpose_reader(readers: &mut PurposeReaders, purpose: Id<Purpose>, window: Window, rule: Rule) {
+    let rules = readers.entry((purpose, window)).or_default();
+    if !rules.contains(&rule) {
+        rules.push(rule);
+    }
 }

@@ -192,6 +192,12 @@ pub(crate) struct Watch {
     subjects: Box<[Subject]>,
     /// The ancestors of flow purposes that some law reads.
     purpose_through: Option<Groups<Purpose, Id<Purpose>>>,
+    /// The budget-relevant purpose ancestors whose recognized history is
+    /// retained for carry calculations.
+    budget_through: Option<Groups<Purpose, Id<Purpose>>>,
+    /// Slots whose history a computed budget `total(in|out, …)` may read.
+    /// Empty unless a budget formula has a non-purpose total expression.
+    budget_total_slots: Box<[bool]>,
     places: usize,
     entities: usize,
     assets: usize,
@@ -205,6 +211,12 @@ impl Watch {
             book.assets.len(),
             book.contracts.len(),
         );
+        let budget_reads_total = book.laws.values().any(|law| {
+            law.budget.is_some()
+                && law.nodes.values().any(|node| {
+                    matches!(node.op, axiom_model::Op::Call(axiom_model::Func::Total(..), _))
+                })
+        });
         let mut watched = vec![false; places + entities + assets + contracts];
         for rule in book.rules.all() {
             match laws[rule.law.index()].totals {
@@ -243,6 +255,11 @@ impl Watch {
                 subjects.push(subject_at(places, entities, assets, at));
             }
         }
+        let budget_total_slots = subjects
+            .iter()
+            .map(|subject| budget_reads_total && matches!(subject, Subject::Place(_) | Subject::Entity(_)))
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
         let mut within: Vec<_> = (0..places as u32)
             .map(Id::new)
             .flat_map(|place| containing(book, place).map(move |subject| (place, subject)))
@@ -271,6 +288,16 @@ impl Watch {
         let through = Groups::build(places, within.iter().copied());
         drop(within);
         let mut purpose_reads = Set::default();
+        let mut budget_purposes = Set::default();
+        for (_, budget) in book.budgets.iter() {
+            budget_purposes.insert(budget.purpose);
+            for (_, terms) in budget.terms.within(Days::ALWAYS) {
+                if let axiom_model::Limit::Share { of, .. } = terms.limit {
+                    budget_purposes.insert(of);
+                }
+            }
+        }
+        purpose_reads.extend(budget_purposes.iter().copied());
         for law in book.laws.values() {
             for node in law.nodes.values() {
                 let axiom_model::Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) =
@@ -284,6 +311,9 @@ impl Watch {
                 });
                 if let Some(purpose) = purpose {
                     purpose_reads.insert(purpose);
+                    if law.budget.is_some() {
+                        budget_purposes.insert(purpose);
+                    }
                 }
             }
         }
@@ -298,11 +328,24 @@ impl Watch {
             });
             Some(Groups::build(book.purposes.len(), within))
         };
+        let budget_through = if budget_purposes.is_empty() {
+            None
+        } else {
+            let within = book.purposes.ids().flat_map(|actual| {
+                book.purposes
+                    .lineage(actual)
+                    .filter(|ancestor| budget_purposes.contains(ancestor))
+                    .map(move |ancestor| (actual, ancestor))
+            });
+            Some(Groups::build(book.purposes.len(), within))
+        };
         Watch {
             through,
             slots: slots.into(),
             subjects: subjects.into(),
             purpose_through,
+            budget_through,
+            budget_total_slots,
             places,
             entities,
             assets,
@@ -318,6 +361,10 @@ impl Watch {
 
     pub(crate) fn subjects(&self) -> &[Subject] {
         &self.subjects
+    }
+
+    fn stores_budget_total(&self, at: usize) -> bool {
+        self.budget_total_slots.get(at).copied().unwrap_or(false)
     }
 
     pub(crate) fn reads_purpose(&self, purpose: Id<Purpose>) -> bool {
@@ -352,6 +399,23 @@ pub(crate) struct Totals {
     windows: Vec<Windows>,
     reaching: Reaching,
     purpose: Map<(Id<Entity>, Id<Purpose>), Windows>,
+    /// Recognition facts needed only by budgets that carry room or overspend
+    /// across calendar windows. Ordinary purpose totals remain rolling-only.
+    budget_history: Map<(Id<Entity>, Id<Purpose>), Vec<PurposeFact>>,
+    budget_total_history: Map<(Subject, Dir), Vec<TotalFact>>,
+}
+
+#[derive(Clone, Copy, Hash)]
+struct PurposeFact {
+    over: Days,
+    dir: Dir,
+    amount: Qty,
+}
+
+#[derive(Clone, Copy, Hash)]
+struct TotalFact {
+    over: Days,
+    amount: Qty,
 }
 
 /// What the running totals hold: the windows, which are all the future reads.
@@ -359,6 +423,8 @@ impl Hash for Totals {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.windows.hash(state);
         unordered(self.purpose.iter()).hash(state);
+        unordered(self.budget_history.iter()).hash(state);
+        unordered(self.budget_total_history.iter()).hash(state);
     }
 }
 
@@ -419,6 +485,8 @@ impl Totals {
             windows: vec![Windows::NONE; watch.subjects().len()],
             reaching: Reaching::new(),
             purpose: Map::default(),
+            budget_history: Map::default(),
+            budget_total_history: Map::default(),
         }
     }
 
@@ -441,6 +509,12 @@ impl Totals {
                 let Some(at) = watch.slot(subject) else {
                     continue;
                 };
+                if watch.stores_budget_total(at) && !value.is_zero() {
+                    self.budget_total_history
+                        .entry((subject, dir))
+                        .or_default()
+                        .push(TotalFact { over, amount: value });
+                }
                 let windows = &mut self.windows[at];
                 if windows.add(day, dir, value, over) && !windows.reaching {
                     windows.reaching = true;
@@ -522,6 +596,14 @@ impl Totals {
                 );
             }
         }
+        if let Some(budget_through) = watch.budget_through.as_ref() {
+            for &purpose in &budget_through[actual] {
+                self.budget_history
+                    .entry((owner, purpose))
+                    .or_default()
+                    .push(PurposeFact { over, dir, amount });
+            }
+        }
     }
 
     /// The amount of this purpose that entered and left the owner's boundary.
@@ -540,6 +622,37 @@ impl Totals {
                     windows.read(Dir::Out, window, day),
                 )
             })
+    }
+
+    /// Recognized purpose movement intersecting an arbitrary budget span.
+    /// This history is stored only for purposes named by a budget's own limit
+    /// or by a share limit, so normal books keep the rolling-only footprint.
+    pub fn read_purpose_between(
+        &self,
+        owner: Id<Entity>,
+        purpose: Id<Purpose>,
+        span: Days,
+    ) -> (Qty, Qty) {
+        let mut flowed = Flowed::default();
+        if let Some(facts) = self.budget_history.get(&(owner, purpose)) {
+            for fact in facts {
+                if let Some(overlap) = fact.over.intersect(span) {
+                    *flowed.side(fact.dir) += spread(fact.amount, fact.over, overlap);
+                }
+            }
+        }
+        (flowed.incoming, flowed.outgoing)
+    }
+
+    /// Flow through a single watched subject over a historical span. This is
+    /// retained only for a computed budget formula that reads entity totals.
+    pub fn read_subject_between(&self, subject: Subject, dir: Dir, span: Days) -> Qty {
+        self.budget_total_history
+            .get(&(subject, dir))
+            .into_iter()
+            .flatten()
+            .filter_map(|fact| fact.over.intersect(span).map(|overlap| spread(fact.amount, fact.over, overlap)))
+            .sum()
     }
 
     /// Whether some month begins by `day` with value recognized into it ahead of time.

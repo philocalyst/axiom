@@ -398,7 +398,7 @@ impl Ledger<'_, '_, '_> {
         let Some(bound) = facts.bound else { return };
         let window = facts
             .reads
-            .map_or(Days::on(ctx.anchor()), |reads| reads.window(ctx));
+            .map_or(Days::on(ctx.anchor()), |reads| reads.window(self.plan.book, ctx));
         let headroom = Headroom {
             law: rule.law,
             step,
@@ -441,7 +441,7 @@ impl Ledger<'_, '_, '_> {
                 rule.law,
                 step,
                 rule.subject,
-                reads.window(ctx).first(),
+                reads.window(self.plan.book, ctx).first(),
             )),
             _ => true,
         };

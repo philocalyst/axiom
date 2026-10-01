@@ -729,6 +729,116 @@ entity cinema
 }
 
 #[test]
+fn native_carry_budget_compares_cumulative_spending_to_cumulative_allowance() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+purpose food : spending
+budget food 100 USD monthly carries
+account checking
+entity grocer
+opening 2025-09-01
+  checking 1_000 USD
+2025-09-05 checking -> grocer 120 USD #food
+2025-10-05 checking -> grocer 120 USD #food
+";
+    with_run(&text, day(2025, 10, 31), |book, run| {
+        let (_, budget) = book.budgets.iter().next().expect("native budget declaration");
+        let violations: Vec<_> = run
+            .violations
+            .iter()
+            .filter(|violation| violation.law == budget.law)
+            .collect();
+        assert_eq!(violations.len(), 2, "the overspend is reported in each affected month: {violations:?}");
+        let messages: Vec<_> = violations
+            .iter()
+            .map(|violation| run.diagnostics[violation.diagnostic as usize].message.as_str())
+            .collect();
+        assert!(messages.iter().any(|message| message.contains("120.00 USD") && message.contains("100.00 USD")), "{messages:?}");
+        assert!(messages.iter().any(|message| message.contains("240.00 USD") && message.contains("200.00 USD")), "{messages:?}");
+
+        let mut readings: Vec<_> = run
+            .headroom
+            .iter()
+            .filter(|reading| reading.law == budget.law)
+            .map(|reading| (reading.days.first().to_string(), reading.counted.qty.0, reading.limit.qty.0))
+            .collect();
+        readings.sort();
+        assert_eq!(readings, [("2025-09-01".into(), 120_00, 100_00), ("2025-10-01".into(), 240_00, 200_00)]);
+    });
+}
+
+#[test]
+fn native_carry_budget_rechecks_computed_limits_at_each_historical_period() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+purpose fun : spending
+budget fun (10% of total(in, month)) monthly carries
+account checking
+entity employer
+entity cinema
+2025-09-01 employer -> checking 1_000 USD
+2025-09-05 checking -> cinema 120 USD #fun
+2025-10-01 employer -> checking 2_000 USD
+2025-10-05 checking -> cinema 220 USD #fun
+";
+    with_run(&text, day(2025, 10, 31), |book, run| {
+        let (_, budget) = book.budgets.iter().next().expect("native budget declaration");
+        let violations: Vec<_> = run
+            .violations
+            .iter()
+            .filter(|violation| violation.law == budget.law)
+            .collect();
+        assert_eq!(violations.len(), 2, "the allowance is evaluated once per historical month: {violations:?}");
+        let messages: Vec<_> = violations
+            .iter()
+            .map(|violation| run.diagnostics[violation.diagnostic as usize].message.as_str())
+            .collect();
+        assert!(messages.iter().any(|message| message.contains("120.00 USD") && message.contains("100.00 USD")), "{messages:?}");
+        assert!(messages.iter().any(|message| message.contains("340.00 USD") && message.contains("300.00 USD")), "{messages:?}");
+    });
+}
+
+#[test]
+fn native_carry_budget_restores_terms_after_a_temporary_change() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+purpose food : spending
+budget food 100 USD monthly carries
+account checking
+entity grocer
+2025-09-05 checking -> grocer 120 USD #food
+2025-10-01 #food now budget 200 USD monthly until 2025-10-31
+2025-10-05 checking -> grocer 210 USD #food
+2025-11-05 checking -> grocer 90 USD #food
+";
+    with_run(&text, day(2025, 11, 30), |book, run| {
+        let (_, budget) = book.budgets.iter().next().expect("native budget declaration");
+        let mut readings: Vec<_> = run
+            .headroom
+            .iter()
+            .filter(|reading| reading.law == budget.law)
+            .map(|reading| (reading.days.first().to_string(), reading.counted.qty.0, reading.limit.qty.0))
+            .collect();
+        readings.sort();
+        assert_eq!(
+            readings,
+            [
+                ("2025-09-01".into(), 120_00, 100_00),
+                ("2025-10-01".into(), 330_00, 300_00),
+                ("2025-11-01".into(), 420_00, 400_00),
+            ],
+            "the dated allowance applies through October, then the earlier terms resume"
+        );
+    });
+}
+
+#[test]
 fn a_flow_recognized_for_next_year_is_in_next_years_headroom_before_anything_else_lands_there() {
     let text = format!("{INSURANCE}2025-12-12 checking -> insurance 1_140 USD for 2026\n");
     with_run(&text, day(2026, 2, 14), |book, run| {

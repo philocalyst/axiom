@@ -13,7 +13,7 @@
 //! commodity was asserted, or a flow is missing, and puts the likeliest in a
 //! note before it offers to accept the gap.
 
-use axiom_core::{Day, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
+use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
     Amount, Assert, BinOp, Book, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param, Place,
     RuntimeTxn, StepKind, Subject, System, Trigger, Value, Waive, Window,
@@ -165,7 +165,7 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
             _ if ctx.checking => None,
             _ => return Vec::new(),
         };
-        let window = reads.window(ctx);
+        let window = reads.window(book, ctx);
         let mut found: Vec<Id<Flow>> = match reads {
             Reads::Tally(name) => {
                 let of_name = self.effects.iter().rev().filter(|e| e.owner == ctx.owner && e.name == name);
@@ -192,22 +192,38 @@ impl<'a, 'b, 's> Frame<'a, 'b, 's> {
                 });
                 moves.copied().take(3).collect()
             }
-            Reads::Purpose(_) => {
-                let scopes: Vec<_> = self.law.range(cond).filter_map(|at| {
-                    match self.law.nodes[node_id(at)].op {
-                        Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) => purpose.or_else(|| {
-                            match self.law.owner {
-                                axiom_model::Owner::Purpose(purpose) => Some(purpose),
+            Reads::Purpose(_) | Reads::Budget(_) => {
+                let (scopes, read_days): (Vec<_>, Days) = match reads {
+                    Reads::Purpose(_) => (
+                        self.law
+                            .range(cond)
+                            .filter_map(|at| match self.law.nodes[node_id(at)].op {
+                                Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) => purpose.or_else(|| {
+                                    match self.law.owner {
+                                        axiom_model::Owner::Purpose(purpose) => Some(purpose),
+                                        _ => None,
+                                    }
+                                }),
                                 _ => None,
-                            }
-                        }),
-                        _ => None,
+                            })
+                            .collect(),
+                        window,
+                    ),
+                    Reads::Budget(id) => {
+                        let Some(budget) = book.budgets.get(id) else { return Vec::new() };
+                        let read_days = if budget.terms.at(ctx.day).carries {
+                            Days::new(budget.starts, ctx.anchor()).unwrap_or(window)
+                        } else {
+                            window
+                        };
+                        (vec![budget.purpose], read_days)
                     }
-                }).collect();
+                    _ => unreachable!(),
+                };
                 let mut counted = Vec::with_capacity(3);
                 for (id, flow) in book.flows.iter() {
                     let before = current.map_or(flow.day <= ctx.day, |current| id < current);
-                    if !before || !flow.recognized.overlaps(window) || !self.plan.events.state(id, flow).is_real_on(ctx.day) {
+                    if !before || !flow.recognized.overlaps(read_days) || !self.plan.events.state(id, flow).is_real_on(ctx.day) {
                         continue;
                     }
                     let Some(actual) = flow.purpose.map(|purpose| purpose.purpose) else { continue };
@@ -312,7 +328,8 @@ fn fact(f: &Frame, bound: &Comparison, reads: Option<Reads>) -> String {
         None => String::new(),
         Some(Reads::Total(_, Window::Ever)) => " in total".to_owned(),
         Some(reads) => {
-            calendar::Window::exactly(reads.window(f.ctx)).map_or(String::new(), |window| format!(" in {window}"))
+            calendar::Window::exactly(reads.window(f.plan.book(), f.ctx))
+                .map_or(String::new(), |window| format!(" in {window}"))
         }
     };
     let (bar, past) = if bound.upper { ("limit", "over") } else { ("minimum", "short") };

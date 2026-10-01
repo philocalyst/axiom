@@ -143,6 +143,9 @@ pub(crate) struct Context<'a> {
     pub owner: Id<Entity>,
     /// Governing purpose for purpose-law or template expression evaluation.
     pub governing_purpose: Option<Id<axiom_model::Purpose>>,
+    /// A dated budget limit is re-evaluated at each prior window's end. These
+    /// reads use retained facts instead of only the current rolling window.
+    pub budget_history: bool,
     /// Declaration-order bindings for a contract occurrence.
     pub inputs: Option<&'a [Option<Amount>]>,
     on: &'a Occasion<'a>,
@@ -154,6 +157,7 @@ impl<'a> Context<'a> {
             subject,
             owner,
             governing_purpose: None,
+            budget_history: false,
             inputs: None,
             on,
         }
@@ -238,17 +242,17 @@ pub(crate) fn run(
     if let Some(window) = ctx.purpose_window {
         let last = law
             .steps
-            .iter()
-            .enumerate()
-            .filter_map(|(index, step)| {
-                matches!(&step.kind, StepKind::Require { .. })
-                    .then_some(index)
-                    .filter(|&index| purpose_reader_step(law, index, window))
-            })
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, step)| {
+                        matches!(&step.kind, StepKind::Require { .. })
+                            .then_some(index)
+                            .filter(|&index| purpose_reader_step(env.plan.book, law, index, window, ctx.day))
+                    })
             .last();
         let Some(last) = last else { return true };
         (0..=last)
-            .filter(|&index| purpose_reader_step(law, index, window))
+            .filter(|&index| purpose_reader_step(env.plan.book, law, index, window, ctx.day))
             .all(|index| machine.step(index))
     } else {
         (0..law.steps.len()).all(|index| machine.step(index))
@@ -257,14 +261,18 @@ pub(crate) fn run(
 
 /// Gates before the last matching requirement remain meaningful; unrelated
 /// requirements and effects are for an actual flow, not a window opening.
-fn purpose_reader_step(law: &Law, index: usize, window: Window) -> bool {
+fn purpose_reader_step(book: &Book, law: &Law, index: usize, window: Window, day: Day) -> bool {
     match &law.steps[index].kind {
         StepKind::When(_) | StepKind::Unless(_) | StepKind::Let(_) => true,
-        StepKind::Require { cond, .. } => law.range(*cond).any(|at| {
-            matches!(
-                law.nodes[NodeId(at as u32)].op,
-                Op::Call(Func::PurposeTotal { window: read, .. }, _) if read == window
-            )
+        StepKind::Require { cond, .. } => law.range(*cond).any(|at| match law.nodes[NodeId(at as u32)].op {
+            Op::Call(Func::PurposeTotal { window: read, .. }, _) => read == window,
+            Op::Call(Func::BudgetTotal(id), _) => book.budgets.get(id).is_some_and(|budget| {
+                if day < budget.starts {
+                    return false;
+                }
+                budget_window(budget.terms.at(day).period) == window
+            }),
+            _ => false,
         }),
         StepKind::Effect(_) => false,
     }
@@ -324,6 +332,13 @@ struct Machine<'a, 's> {
 
 const TYPED: &str = "the model type-checks operands";
 
+fn budget_window(period: axiom_core::Period) -> Window {
+    match period {
+        axiom_core::Period::Month => Window::Month,
+        axiom_core::Period::Year => Window::Year,
+    }
+}
+
 impl<'a, 's> Machine<'a, 's> {
     fn book(&self) -> &'a Book<'s> {
         self.env.plan.book
@@ -338,6 +353,18 @@ impl<'a, 's> Machine<'a, 's> {
 
     fn base(&self, qty: Qty) -> Value {
         Value::Amount(Amount::new(qty, self.book().base))
+    }
+
+    /// An undated declaration uses `Day::MIN` as a timeline sentinel. For a
+    /// carrying budget, its first meaningful window is the first window the
+    /// journal can reach, rather than millions of empty calendar windows
+    /// before the book's first fact.
+    fn budget_start(&self, budget: &axiom_model::Budget) -> Day {
+        if budget.starts != Day::MIN {
+            return budget.starts;
+        }
+        let first_fact = self.env.plan.period_start.unwrap_or_else(|| self.ctx.anchor());
+        budget_window(budget.terms.at(first_fact).period).around(first_fact).first()
     }
 
     fn at(&self, node: NodeId) -> Value {
@@ -803,7 +830,7 @@ impl<'a, 's> Machine<'a, 's> {
         // `total` and `tally` take their operands from the function itself.
         let operands = !matches!(
             func,
-            Func::Total(..) | Func::PurposeTotal { .. } | Func::Tally(_)
+            Func::Total(..) | Func::PurposeTotal { .. } | Func::BudgetTotal(_) | Func::Tally(_)
         );
         if operands
             && let Some(fault) = args
@@ -816,6 +843,7 @@ impl<'a, 's> Machine<'a, 's> {
         match func {
             Func::Total(dir, window) => self.total(dir, window, args),
             Func::PurposeTotal { purpose, window } => self.purpose_total(purpose, window),
+            Func::BudgetTotal(budget) => self.budget_total(budget),
             Func::BudgetLimit(budget) => self.budget_limit(budget, at),
             Func::Tally(name) => self.tally(name, Func::tally_year(args).map(|year| self.at(year))),
             Func::Min => self.pick(BinOp::Le, arg(0), arg(1)),
@@ -854,12 +882,47 @@ impl<'a, 's> Machine<'a, 's> {
             })
             .expect("a purpose total without an explicit purpose requires a purpose context");
         let root = self.book().purposes[purpose].root;
-        let (incoming, outgoing) =
-            self.env
-                .world
-                .totals
-                .read_purpose(self.ctx.owner, purpose, window, self.ctx.anchor());
+        let (incoming, outgoing) = if self.ctx.budget_history {
+            let days = window.around(self.ctx.anchor());
+            let Some(span) = Days::new(days.first(), days.last().min(self.ctx.anchor())) else {
+                return Value::Fault(Fault::InvalidProgram);
+            };
+            self.env.world.totals.read_purpose_between(self.ctx.owner, purpose, span)
+        } else {
+            self.env.world.totals.read_purpose(self.ctx.owner, purpose, window, self.ctx.anchor())
+        };
         let total = match root {
+            axiom_model::PurposeRoot::Income => incoming - outgoing,
+            axiom_model::PurposeRoot::Spending
+            | axiom_model::PurposeRoot::Capital
+            | axiom_model::PurposeRoot::Transfer => outgoing - incoming,
+        };
+        self.base(total)
+    }
+
+    /// The purpose movement allowed by a native budget. A carrying budget
+    /// retains only the sparse history of purposes referenced by budgets and
+    /// sums it from the declaration's effective start.
+    fn budget_total(&self, id: Id<axiom_model::Budget>) -> Value {
+        let Some(budget) = self.book().budgets.get(id) else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let anchor = self.ctx.anchor();
+        let start = self.budget_start(budget);
+        if anchor < start {
+            return self.base(Qty::ZERO);
+        }
+        let terms = budget.terms.at(anchor);
+        let first = if terms.carries {
+            start
+        } else {
+            start.max(budget_window(terms.period).around(anchor).first())
+        };
+        let Some(span) = Days::new(first, anchor) else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let (incoming, outgoing) = self.env.world.totals.read_purpose_between(self.ctx.owner, budget.purpose, span);
+        let total = match self.book().purposes[budget.purpose].root {
             axiom_model::PurposeRoot::Income => incoming - outgoing,
             axiom_model::PurposeRoot::Spending
             | axiom_model::PurposeRoot::Capital
@@ -875,32 +938,102 @@ impl<'a, 's> Machine<'a, 's> {
         let Some(budget) = self.book().budgets.get(id) else {
             return Value::Fault(Fault::InvalidProgram);
         };
-        let Some(law) = self.law.filter(|law| law.budget == Some(id)) else {
+        let Some(_law) = self.law.filter(|law| law.budget == Some(id)) else {
             return Value::Fault(Fault::InvalidProgram);
         };
-        let window = match budget.period {
-            axiom_core::Period::Month => Window::Month,
-            axiom_core::Period::Year => Window::Year,
-        };
-        match *budget.limits.at(self.ctx.day) {
+        let day = self.ctx.anchor();
+        let start = self.budget_start(budget);
+        if day < start {
+            return self.base(Qty::ZERO);
+        }
+        let terms = *budget.terms.at(day);
+        let mut historical_values = Vec::new();
+        if !terms.carries {
+            let window = budget_window(terms.period).around(day);
+            let span = Days::new(start.max(window.first()), day.min(window.last()));
+            let Some(span) = span else {
+                return Value::Fault(Fault::InvalidProgram);
+            };
+            return self.one_budget_limit(id, terms.limit, span, at, day, &mut historical_values);
+        }
+
+        let mut cursor = start;
+        let mut total = Qty::ZERO;
+        while cursor <= day {
+            let period = budget_window(budget.terms.at(cursor).period);
+            let period_days = period.around(cursor);
+            let end = period_days.last().min(day);
+            let Some(span) = Days::new(cursor, end) else {
+                return Value::Fault(Fault::InvalidProgram);
+            };
+            // A dated restatement changes the allowance in force for the
+            // window containing it. The window contributes one allowance.
+            let effective = *budget.terms.at(end);
+            let value = self.one_budget_limit(id, effective.limit, span, at, end, &mut historical_values);
+            let Value::Amount(amount) = value else {
+                return value;
+            };
+            let calc = Calc { book: self.book(), day: end };
+            match calc.convert(amount, self.book().base) {
+                Ok(amount) => total += amount.qty,
+                Err(fault) => return Value::Fault(fault),
+            }
+            if end == Day::MAX {
+                break;
+            }
+            cursor = end.add_days(1);
+        }
+        self.base(total)
+    }
+
+    fn one_budget_limit(
+        &self,
+        id: Id<axiom_model::Budget>,
+        limit: axiom_model::Limit,
+        span: Days,
+        at: NodeId,
+        on: Day,
+        values: &mut Vec<Value>,
+    ) -> Value {
+        match limit {
             axiom_model::Limit::Amount(amount) => Value::Amount(amount),
             axiom_model::Limit::Share { rate, of } => {
-                let total = self.purpose_total(Some(of), window);
-                match total {
-                    Value::Amount(amount) => amount
-                        .qty
-                        .scale(rate)
-                        .map_or(Value::Fault(Fault::Overflow), |qty| {
-                            Value::Amount(Amount::new(qty, amount.unit))
-                        }),
-                    other => other,
-                }
+                let (incoming, outgoing) = self
+                    .env
+                    .world
+                    .totals
+                    .read_purpose_between(self.ctx.owner, of, span);
+                let root = self.book().purposes[of].root;
+                let total = match root {
+                    axiom_model::PurposeRoot::Income => incoming - outgoing,
+                    axiom_model::PurposeRoot::Spending
+                    | axiom_model::PurposeRoot::Capital
+                    | axiom_model::PurposeRoot::Transfer => outgoing - incoming,
+                };
+                total.scale(rate).map_or(Value::Fault(Fault::Overflow), |qty| {
+                    Value::Amount(Amount::new(qty, self.book().base))
+                })
             }
             axiom_model::Limit::Computed(root) => {
-                if root >= at || root.index() >= self.values.len() || law.budget != Some(id) {
+                let Some(law) = self.law.filter(|law| law.budget == Some(id)) else {
+                    return Value::Fault(Fault::InvalidProgram);
+                };
+                if root >= at || root.index() >= law.nodes.len() {
                     return Value::Fault(Fault::InvalidProgram);
                 }
-                match self.at(root) {
+                let occasion = Occasion::time(on, Days::on(on));
+                let mut context = Context::new(self.ctx.subject, self.ctx.owner, &occasion);
+                context.governing_purpose = self.ctx.governing_purpose;
+                context.inputs = self.ctx.inputs;
+                context.budget_history = true;
+                let value = expression(
+                    Env { plan: self.env.plan, world: self.env.world },
+                    law,
+                    root,
+                    &context,
+                    values,
+                );
+                match value {
                     value @ (Value::Amount(_) | Value::Fault(_)) => value,
                     _ => Value::Fault(Fault::InvalidProgram),
                 }
@@ -975,6 +1108,15 @@ impl<'a, 's> Machine<'a, 's> {
     /// kind argument widens it to every place of that kind the owner has.
     fn total(&self, dir: Dir, window: Window, args: &[NodeId]) -> Value {
         let (book, ctx, totals) = (self.book(), self.ctx, &self.env.world.totals);
+        let read = |subject| {
+            if ctx.budget_history {
+                let days = window.around(ctx.anchor());
+                Days::new(days.first(), days.last().min(ctx.anchor()))
+                    .map_or(Qty::ZERO, |span| totals.read_subject_between(subject, dir, span))
+            } else {
+                totals.read(&self.env.plan.watch, subject, dir, window, ctx.anchor())
+            }
+        };
         let widen = args.iter().find_map(|&a| {
             if let Value::Kind(kind) = self.at(a) {
                 Some(kind)
@@ -982,7 +1124,6 @@ impl<'a, 's> Machine<'a, 's> {
                 None
             }
         });
-        let read = |subject| totals.read(&self.env.plan.watch, subject, dir, window, ctx.anchor());
         let sum = match widen {
             None => read(ctx.subject),
             Some(kind) => self
