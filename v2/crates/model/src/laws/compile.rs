@@ -399,7 +399,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 due,
                 name,
             } => {
-                let amount = self.expression(*amount, Ty::AMOUNT)?;
+                let amount = self.expression(*amount, self.owner_amount_ty())?;
                 let to = self.owed_to(to.0);
                 let due = match due {
                     Some(due) => Some(self.expression(*due, Ty::Day)?),
@@ -414,17 +414,17 @@ impl<'s> Compiler<'_, '_, 's> {
                 })
             }
             WrittenEffect::Count { amount, name } => {
-                let amount = self.expression(*amount, Ty::AMOUNT)?;
+                let amount = self.expression(*amount, self.owner_amount_ty())?;
                 Some(Effect::Count {
                     amount,
                     name: self.world.book.names.intern(name.0),
                 })
             }
             WrittenEffect::Consume(amount) => Some(Effect::Consume {
-                amount: self.expression(*amount, Ty::AMOUNT)?,
+                amount: self.expression(*amount, self.owner_amount_ty())?,
             }),
             WrittenEffect::Carry { amount, to, within } => {
-                let amount = self.expression(*amount, Ty::AMOUNT)?;
+                let amount = self.expression(*amount, self.owner_amount_ty())?;
                 let unit = self.expression(*to, Ty::Unit)?;
                 let node = NodeId(self.nodes.len() as u32);
                 self.nodes.push(Node {
@@ -717,7 +717,7 @@ impl<'s> Compiler<'_, '_, 's> {
                 }),
                 Var::Amount => self.flow_amount_ty(),
                 Var::Gain | Var::Proceeds | Var::Basis | Var::Balance | Var::Remaining => {
-                    self.base_amount_ty()
+                    self.owner_amount_ty()
                 }
                 _ => var.ty(self.subject),
             };
@@ -833,10 +833,10 @@ impl<'s> Compiler<'_, '_, 's> {
     fn field(&mut self, receiver: ExprId, field: Word<'s>) -> Check<(Op, Ty)> {
         let (node, ty) = self.child(receiver)?;
         let built_in = match (ty, field.text) {
-            (Ty::Place, "balance") => Some((Field::Balance, self.base_amount_ty())),
-            (Ty::Place, "basis") => Some((Field::Basis, self.base_amount_ty())),
-            (Ty::Asset, "cost") => Some((Field::Cost, self.base_amount_ty())),
-            (Ty::Asset, "basis") => Some((Field::Basis, self.base_amount_ty())),
+            (Ty::Place, "balance") => Some((Field::Balance, self.value_amount_ty(node))),
+            (Ty::Place, "basis") => Some((Field::Basis, self.value_amount_ty(node))),
+            (Ty::Asset, "cost") => Some((Field::Cost, self.value_amount_ty(node))),
+            (Ty::Asset, "basis") => Some((Field::Basis, self.value_amount_ty(node))),
             (Ty::Asset, "in-service") => Some((Field::InService, Ty::Day)),
             (Ty::Asset, "parts") => Some((Field::Parts, Ty::Num)),
             (Ty::Purpose, "of") => Some((Field::Of, Ty::Asset)),
@@ -863,8 +863,64 @@ impl<'s> Compiler<'_, '_, 's> {
         Err(self.unknown_field(ty, field, receiver).into())
     }
 
-    fn base_amount_ty(&self) -> Ty {
-        Ty::Amount(Dim::Of(self.world.book.base))
+    /// Currency used for this law's owner-scoped amounts. A kind, purpose,
+    /// project, or unconfigured system can govern many owners with different
+    /// currencies, so those contexts remain genuinely dynamic.
+    fn owner_amount_ty(&self) -> Ty {
+        let currency = match self.owner {
+            Some(Owner::Place(place)) => {
+                Some(self.world.book.entities[self.world.book.places[place].owner].currency)
+            }
+            Some(Owner::Entity(entity)) => Some(self.world.book.entities[entity].currency),
+            Some(Owner::Asset(asset)) => {
+                let owner = self.world.book.assets[asset].owner;
+                Some(self.world.book.entities[owner].currency)
+            }
+            Some(Owner::Contract(contract)) => {
+                let owner = self.world.book.contracts[contract].owner;
+                Some(self.world.book.entities[owner].currency)
+            }
+            // A system's currency is only the default for its residents;
+            // individual entities may set another one.
+            Some(Owner::System(_)) => None,
+            Some(Owner::Kind(_) | Owner::Purpose(_) | Owner::Book) | None => None,
+        };
+        currency.map_or(Ty::AMOUNT, |unit| Ty::Amount(Dim::Of(unit)))
+    }
+
+    /// Currency of an explicitly named subject, or the law owner's currency
+    /// for `self`; a generic expression stays dynamic.
+    fn value_amount_ty(&self, node: NodeId) -> Ty {
+        let currency = match self.nodes[node.index()].op {
+            Op::Const(Value::Place(place)) => {
+                let owner = self.world.book.places[place].owner;
+                Some(self.world.book.entities[owner].currency)
+            }
+            Op::Const(Value::Entity(entity)) => Some(self.world.book.entities[entity].currency),
+            Op::Const(Value::Asset(asset)) => {
+                let owner = self.world.book.assets[asset].owner;
+                Some(self.world.book.entities[owner].currency)
+            }
+            Op::Var(Var::Subject) => match self.owner {
+                Some(Owner::Place(place)) => {
+                    let owner = self.world.book.places[place].owner;
+                    Some(self.world.book.entities[owner].currency)
+                }
+                Some(Owner::Entity(entity)) => Some(self.world.book.entities[entity].currency),
+                Some(Owner::Asset(asset)) => {
+                    let owner = self.world.book.assets[asset].owner;
+                    Some(self.world.book.entities[owner].currency)
+                }
+                Some(Owner::Contract(contract)) => {
+                    let owner = self.world.book.contracts[contract].owner;
+                    Some(self.world.book.entities[owner].currency)
+                }
+                Some(Owner::System(_)) => None,
+                _ => None,
+            },
+            _ => None,
+        };
+        currency.map_or(Ty::AMOUNT, |unit| Ty::Amount(Dim::Of(unit)))
     }
 
     /// A flow amount has a static unit only when its governing place declares
@@ -1056,14 +1112,14 @@ impl<'s> Compiler<'_, '_, 's> {
         let ty_at = |at: usize| typed.get(at).map_or(Ty::Empty, |&(_, ty)| ty);
         let arg_loc = |at: usize| self.nodes[typed[at].0.index()].loc;
         arity(spec.min, spec.max)?;
-        let base = self.base_amount_ty();
+        let owner_currency = self.owner_amount_ty();
         let (func, ty) = match spec.signature {
-            Signature::Total => (self.total(&typed)?, base),
+            Signature::Total => (self.total(&typed)?, owner_currency),
             Signature::Tally => {
                 if args.len() == 2 && !matches!(ty_at(1), Ty::Num | Ty::Day) {
                     return Err(expected("a year or a date", ty_at(1), arg_loc(1)).into());
                 }
-                (self.tally(args[0])?, base)
+                (self.tally(args[0])?, owner_currency)
             }
             Signature::Min | Signature::Max => {
                 let shared = unify(ty_at(0), ty_at(1))
@@ -1098,6 +1154,19 @@ impl<'s> Compiler<'_, '_, 's> {
                     }
                     _ => None,
                 };
+                if let Some(unit) = schedule_unit
+                    && let Ty::Amount(Dim::Of(input)) = ty_at(1)
+                    && unit != input
+                {
+                    return Err(Diagnostic::error(
+                        "unit-mismatch",
+                        "the amount and tax schedule use different commodities",
+                    )
+                    .label(arg_loc(1), "convert the amount to the schedule's commodity")
+                    .context(arg_loc(0), "the schedule is declared in another commodity")
+                    .help("use `value(amount, UNIT)` to make the conversion explicit")
+                    .into());
+                }
                 (
                     Func::Progressive,
                     schedule_unit.map_or(ty_at(1), |unit| Ty::Amount(Dim::Of(unit))),
@@ -1151,7 +1220,7 @@ impl<'s> Compiler<'_, '_, 's> {
                     return Err(expected("a source code", ty_at(0), arg_loc(0)).into());
                 }
                 let symbol = self.world.book.names.intern(code.name());
-                (Func::Open(symbol), base)
+                (Func::Open(symbol), owner_currency)
             }
             Signature::Peak | Signature::Low => {
                 if !matches!(ty_at(0), Ty::Amount(_) | Ty::Num | Ty::Day | Ty::Span) {
