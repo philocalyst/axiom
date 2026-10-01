@@ -20,7 +20,7 @@ use axiom_model::{Amount, Book, Contract, ForecastError, Flow, ForecastFeature, 
 
 use self::bands::{Bands, Share};
 use self::expected::{Expectation, Origin, covered_by_contract, covered_on, expected};
-use self::projection::{Trace, project};
+use self::projection::{Trace, project, project_from};
 use self::variable::Variable;
 use crate::calendar::Periods;
 use crate::closings;
@@ -35,24 +35,39 @@ const SEED: u64 = 0x5EED_0A11_CE00_0001;
 /// Bootstrapping needs a past to draw from.
 const MIN_HISTORY_MONTHS: usize = 3;
 
-/// Context-ready adapter. The context owns a shared solved plan and checkpoint;
-/// projection will resume from them once the report's projection interface is wired.
+/// Forecasts using the plan and pre-closing checkpoint paired with this run.
 pub fn view_from<'p, 'b, 's>(
-    _plan: &'p Plan<'b, 's>,
-    _checkpoint: &Checkpoint,
+    plan: &'p Plan<'b, 's>,
+    checkpoint: &Checkpoint,
     run: &Run,
+    historical_effects: &[Effect],
     lens: Lens<'b, 's>,
-    _relaxed: bool,
+    relaxed: bool,
     until: Option<Day>,
     paths: u32,
 ) -> Report<'s> {
-    view(lens.book, run, lens.whose, until, paths)
+    view_with(plan, Some(checkpoint), Some(historical_effects), run, lens, relaxed, until, paths)
 }
 
 pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: Option<Day>, paths: u32) -> Report<'s> {
+    let plan = Plan::new(book);
+    let lens = Lens::new(book, whose, run.today);
+    view_with(&plan, None, None, run, lens, book.relaxed, until, paths)
+}
+
+fn view_with<'p, 'b, 's>(
+    plan: &'p Plan<'b, 's>,
+    checkpoint: Option<&Checkpoint>,
+    historical_effects: Option<&[Effect]>,
+    run: &Run,
+    lens: Lens<'b, 's>,
+    relaxed: bool,
+    until: Option<Day>,
+    paths: u32,
+) -> Report<'s> {
+    let book = lens.book;
     let today = run.today;
     let until = until.unwrap_or_else(|| default_horizon(book, today)).max(today);
-    let lens = Lens::new(book, whose, today);
 
     let expected = expected(lens, run);
     let mut flows: Vec<Flow> = expected
@@ -60,14 +75,16 @@ pub fn view<'s>(book: &Book<'s>, run: &axiom_engine::Run, whose: &Whose, until: 
         .flat_map(|expectation| expectation.flows(today, until))
         .filter(|flow| !covered_by_contract(book, flow))
         .collect();
-    let (contract_flows, contract_rows, contract_issues) = contract_forecasts(book, whose, today, until);
+    let (contract_flows, contract_rows, contract_issues) = contract_forecasts(book, lens.whose, today, until);
     flows.extend(contract_flows);
     flows.sort_by_key(|flow| flow.day);
     let checkpoints = checkpoints(today, until);
-    let plan = Plan::new(book);
-    let trace = project(&plan, lens, today, flows, &checkpoints);
+    let trace = match checkpoint {
+        Some(checkpoint) => project_from(plan, checkpoint, lens, today, relaxed, flows, &checkpoints),
+        None => project(plan, lens, today, flows, &checkpoints),
+    };
 
-    let due = coming_due(&trace, whose, today);
+    let due = coming_due(&trace, historical_effects, lens.whose, today);
     let committed = committed(lens, &checkpoints, &trace.liquid, &due);
     let variable = Variable::from_history(lens, run, |flow| {
         expected.iter().any(|expectation| expectation.covers(flow)) || covered_by_contract(book, flow)
@@ -118,11 +135,39 @@ fn checkpoints(today: Day, until: Day) -> Vec<Day> {
 }
 
 /// Obligations of the lens's owners falling due after `today`, soonest first.
-fn coming_due<'t>(trace: &'t Trace<'_, '_, '_>, whose: &Whose, today: Day) -> Vec<&'t Effect> {
-    let owed = |effect: &&Effect| whose.includes(effect.owner) && effect.owed().is_some_and(|owed| owed.due > today);
-    let mut due: Vec<&Effect> = trace.ledger.recorded().effects.iter().filter(owed).collect();
+/// A checkpoint deliberately forgets past records, so its paired run supplies
+/// the exact pre-close prefix while the resumed ledger supplies closings and
+/// flows from today onward. A fresh legacy projection already has its complete
+/// history in the trace.
+fn coming_due<'a>(
+    trace: &'a Trace<'_, '_, '_>,
+    historical_effects: Option<&'a [Effect]>,
+    whose: &Whose,
+    today: Day,
+) -> Vec<&'a Effect> {
+    let mut due = select_due_effects(historical_effects, trace.ledger.recorded().effects, whose, today);
     due.sort_by_key(|effect| effect.owed().map(|owed| owed.due));
     due
+}
+
+/// Select the exact historical prefix and resumed effects without guessing
+/// record membership from dates or causes. The paired prefix ends before
+/// today's closings; a fresh legacy trace has no separate prefix.
+fn select_due_effects<'a>(
+    historical: Option<&'a [Effect]>,
+    resumed: &'a [Effect],
+    whose: &Whose,
+    today: Day,
+) -> Vec<&'a Effect> {
+    let belongs = |effect: &&Effect| {
+        whose.includes(effect.owner) && effect.owed().is_some_and(|owed| owed.due > today)
+    };
+    historical
+        .into_iter()
+        .flat_map(|effects| effects.iter())
+        .chain(resumed.iter())
+        .filter(belongs)
+        .collect()
 }
 
 /// The liquid position at each checkpoint, less obligations already due.
@@ -373,6 +418,9 @@ fn contract_section<'s>(
             describe_forecast_error(book, error)
         ));
     }
+    section.note(
+        "These rows use typed model contracts; source v4 contract parsing and loan-payment derivation are not yet implemented.",
+    );
     if section.rows.is_empty() && issues.is_empty() {
         section.note("No active contract occurrence falls within this forecast window.");
     }
@@ -494,5 +542,145 @@ mod tests {
         // Standing on a month end, it is not repeated.
         assert_eq!(checkpoints(day(2026, 3, 31), day(2026, 4, 30)), [day(2026, 3, 31), day(2026, 4, 30)]);
         assert_eq!(checkpoints(day(2026, 3, 31), day(2026, 3, 31)), [day(2026, 3, 31)]);
+    }
+
+    #[test]
+    fn resumed_forecast_keeps_historical_obligations_and_closes_today_once() {
+        use axiom_engine::{Cause, Consequence, Owed};
+        use axiom_model::Subject;
+        use crate::tests::household;
+
+        let mut house = household();
+        let today = day(2026, 5, 15);
+        let base = house.book.base;
+        let name = house.book.names.intern("obligation");
+        let effect = |when: Day, cause: Cause, due: Day, qty: i64| Effect {
+            law: Id::new(0),
+            subject: Subject::Entity(Id::new(0)),
+            owner: Id::new(0),
+            system: None,
+            day: when,
+            name,
+            amount: Amount::new(Qty(qty), base),
+            consequence: Consequence::Owe(Owed { to: Id::new(0), due }),
+            cause,
+        };
+        let historical = [
+            effect(today.add_days(-10), Cause::Flow(Id::new(0)), today.add_days(5), 1),
+            effect(today, Cause::Flow(Id::new(1)), today.add_days(4), 2),
+            // A same-day assertion posting before closing also has Cause::Time.
+            effect(today, Cause::Time, today.add_days(3), 3),
+            effect(today.add_days(-1), Cause::Flow(Id::new(2)), today, 4),
+        ];
+        let resumed = [
+            // The pending closing comes from the resumed ledger, not the prefix.
+            effect(today, Cause::Time, today.add_days(3), 5),
+            effect(today, Cause::Flow(Id::new(3)), today.add_days(4), 6),
+            effect(today.add_days(1), Cause::Time, today.add_days(8), 7),
+        ];
+        let due = select_due_effects(Some(&historical), &resumed, &Whose::default(), today);
+        assert_eq!(
+            due.iter().map(|effect| effect.amount.qty.0).collect::<Vec<_>>(),
+            [1, 2, 3, 5, 6, 7],
+            "the exact prefix keeps same-day pre-close Time effects, excludes already-due items, and adds each resumed closing once"
+        );
+
+        let fresh_trace_effects = select_due_effects(None, &historical, &Whose::default(), today);
+        assert_eq!(
+            fresh_trace_effects.iter().map(|effect| effect.amount.qty.0).collect::<Vec<_>>(),
+            [1, 2, 3],
+            "a fresh projection uses only its trace and does not add a paired-run prefix"
+        );
+    }
+
+    #[test]
+    fn forecast_projects_contract_occurrences_and_marks_unsupported_contracts_incomplete() {
+        use axiom_core::{Days, Timeline};
+        use axiom_model::{Cadence, Contract, On, Share, Terms, TermsState};
+        use crate::tests::household;
+
+        let mut house = household();
+        let until = day(2026, 5, 31);
+        let first = day(2026, 4, 1);
+        let mut template = house.book.plans[Id::new(0)].template[0].clone();
+        template.out.qty = Qty(100_000);
+        template.arrive.qty = Qty(100_000);
+        let baseline = view(&house.book, &house.run, &Whose::default(), Some(until), 0);
+        let baseline_cash = match &baseline.sections[0].rows.last().unwrap().cells[1] {
+            Cell::Amount { qty, .. } => *qty,
+            _ => panic!("expected committed amount"),
+        };
+
+        let terms = Terms {
+            state: TermsState::Active,
+            every: Cadence::Every(Span::months(1)),
+            on: vec![On::MonthDay(15)].into(),
+            anchor: first,
+            template: vec![template.clone()].into(),
+            inputs: Box::default(),
+            estimate: false,
+            due: None,
+            grace: Span::default(),
+            period: None,
+            covers: None,
+            prorated: false,
+            escalation: None,
+            shares: Box::default(),
+            also: Box::default(),
+            rate: None,
+            change: None,
+        };
+        let mut unsupported_template = template.clone();
+        unsupported_template.to = house.place("expenses/repairs");
+        let mut unsupported = terms.clone();
+        unsupported.template = vec![unsupported_template].into();
+        unsupported.shares = vec![Share {
+            rate: axiom_core::Ratio::ONE,
+            entity: template.owner,
+            measure: None,
+            loc: axiom_core::Loc::default(),
+        }]
+        .into();
+
+        let valid_name = house.book.names.intern("contract-rent");
+        let unsupported_name = house.book.names.intern("contract-with-shares");
+        let make_contract = |name, terms| Contract {
+            name,
+            party: template.payee.unwrap_or(template.owner),
+            owner: template.owner,
+            days: Days::new(first, until).unwrap(),
+            terms: Timeline::new(terms),
+            buys: None,
+            deposit: None,
+            loan: None,
+            matching: None,
+            ended: None,
+            laws: Box::default(),
+            doc: None,
+            loc: axiom_core::Loc::default(),
+        };
+        house.book.contracts.push(make_contract(valid_name, terms.clone()));
+        house.book.contracts.push(make_contract(unsupported_name, unsupported));
+
+        let report = view(&house.book, &house.run, &Whose::default(), Some(until), 0);
+        let ending_cash = match &report.sections[0].rows.last().unwrap().cells[1] {
+            Cell::Amount { qty, .. } => *qty,
+            _ => panic!("expected committed amount"),
+        };
+        assert_eq!(ending_cash - baseline_cash, Qty(160_000));
+
+        let occurrences = report
+            .sections
+            .iter()
+            .find(|section| section.heading.as_deref() == Some("Contract occurrences"))
+            .unwrap();
+        let valid = occurrences
+            .rows
+            .iter()
+            .find(|row| matches!(&row.cells[0], Cell::Text(text) if text.contains("contract-rent")))
+            .unwrap();
+        assert!(matches!(&valid.cells[2], Cell::Amount { qty: Qty(100_000), .. }));
+        assert!(occurrences.notes.iter().any(|note| note.contains("owner shares are not forecast")));
+        assert!(report.sections[0].notes.iter().any(|note| note.contains("Projection is incomplete")));
     }
 }
