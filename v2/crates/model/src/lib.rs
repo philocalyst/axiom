@@ -25,6 +25,7 @@ mod flows;
 mod kinds;
 mod laws;
 mod layout;
+mod lower;
 mod names;
 mod params;
 mod paths;
