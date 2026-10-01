@@ -543,6 +543,7 @@ fn offset_op(op: &Op, by: u32) -> Op {
         Op::Is(node, alternatives) => {
             Op::Is(one(*node), alternatives.iter().copied().map(one).collect())
         }
+        Op::Resides(entity, systems) => Op::Resides(one(*entity), systems.clone()),
         Op::If(condition, yes, no) => Op::If(one(*condition), one(*yes), one(*no)),
     }
 }

@@ -106,6 +106,61 @@ asset condo : property
     });
 }
 
+#[test]
+fn temporal_peak_and_low_keep_intraday_extrema() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+account checking
+account reserve
+account incoming
+  law intraday-history
+    on out
+    warn peak(balance, year) <= 150 USD \"intraday peak exceeded\"
+    warn low(balance, year) >= 150 USD \"intraday low fell short\"
+opening 2026-01-01
+  checking 100 USD
+2026-02-01 incoming -> checking 100 USD
+2026-02-01 checking -> reserve 50 USD
+";
+
+    with_run(text, day(2026, 12, 31), |_, run| {
+        assert_eq!(
+            run.violations.iter().map(|violation| violation.cause).collect::<Vec<_>>(),
+            [crate::Cause::Flow(axiom_core::Id::new(1)), crate::Cause::Flow(axiom_core::Id::new(1))],
+            "the outgoing flow sees the earlier 200 USD peak and 100 USD low, not only its current 150 USD balance"
+        );
+        let messages: Vec<_> = run
+            .violations
+            .iter()
+            .map(|violation| run.diagnostics[violation.diagnostic as usize].message.as_str())
+            .collect();
+        assert!(messages.iter().any(|message| message.contains("intraday peak exceeded")));
+        assert!(messages.iter().any(|message| message.contains("intraday low fell short")));
+    });
+}
+
+#[test]
+fn temporal_days_count_an_inclusive_residence_before_the_first_flow() {
+    let text = "\
+system foreign
+entity me
+  lives foreign from 2026-01-01 until 2026-01-10
+  law residence-days
+    each year
+    warn days(self.lives is foreign, year) != 10 \"residence days must include both endpoints\"
+";
+
+    with_run(text, day(2026, 12, 31), |_, run| {
+        assert!(
+            run.violations.is_empty(),
+            "the ten-day residence is counted from its first day through its inclusive last day: {:?}",
+            run.violations
+        );
+    });
+}
+
 // ─── Paying out of an envelope ──────────────────────────────────────────────
 
 const ENVELOPES: &str = "\

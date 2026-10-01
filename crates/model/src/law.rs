@@ -346,6 +346,8 @@ pub enum Op {
     /// True when the left value matches any alternative: a kind, place,
     /// entity, glob or code.
     Is(NodeId, Box<[NodeId]>),
+    /// True when this entity has any listed residence on the evaluation day.
+    Resides(NodeId, Box<[Id<System>]>),
     If(NodeId, NodeId, NodeId),
 }
 

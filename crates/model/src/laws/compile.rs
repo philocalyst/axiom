@@ -1555,6 +1555,31 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn is(&mut self, subject: ExprId, alternatives: &[ExprId]) -> Check<(Op, Ty)> {
+        if let ExprKind::Field(receiver, field) = self.file.exprs[subject].kind
+            && field.0 == "lives"
+        {
+            let (entity, found) = self.child(receiver)?;
+            if found != Ty::Entity {
+                return Err(expected("an entity", found, self.nodes[entity].loc).into());
+            }
+            let mut systems = Vec::with_capacity(alternatives.len());
+            for &alternative in alternatives {
+                let expr = &self.file.exprs[alternative];
+                let ExprKind::Name(name) = expr.kind else {
+                    return Err(Diagnostic::error(
+                        "type-mismatch",
+                        "a residence can only be tested against a system",
+                    )
+                    .label(expr.loc, "name a system")
+                    .into());
+                };
+                systems.push(self.world.system(Word {
+                    text: name.0,
+                    loc: self.file.loc(name.0),
+                })?);
+            }
+            return Ok((Op::Resides(entity, systems.into()), Ty::Bool));
+        }
         let (node, ty) = self.child(subject)?;
         let alts = self.children(alternatives)?;
         for &(alt, alt_ty) in &alts {
