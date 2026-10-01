@@ -38,10 +38,17 @@ impl<'t> MemoJoin<'t> {
         if cell.text.is_empty() {
             return;
         }
-        if let Some(first) = &self.first {
-            let joined = self.joined.get_or_insert_with(|| first.to_string());
+        if let Some(joined) = &mut self.joined {
             joined.push(' ');
             joined.push_str(&cell.text);
+        } else if let Some(first) = self.first.take() {
+            let mut joined = match first {
+                Cow::Borrowed(text) => text.to_owned(),
+                Cow::Owned(text) => text,
+            };
+            joined.push(' ');
+            joined.push_str(&cell.text);
+            self.joined = Some(joined);
         } else {
             self.first = Some(cell.text.clone());
             self.span = Some(cell.span);

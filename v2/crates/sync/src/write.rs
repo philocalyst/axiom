@@ -359,10 +359,9 @@ fn format_item(path: &str, date: String, body: &str) -> Result<String, Vec<Diagn
 pub(crate) fn is_project_path(path: &str) -> bool {
     use std::path::Component;
 
-    let drive_prefix = path
-        .as_bytes()
-        .get(..2)
-        .is_some_and(|[letter, colon]| letter.is_ascii_alphabetic() && *colon == b':');
+    let drive_prefix = path.as_bytes().get(..2).is_some_and(|head| {
+        head[0].is_ascii_alphabetic() && head[1] == b':'
+    });
     if path.is_empty() || path.starts_with('/') || path.contains('\\') || drive_prefix {
         return false;
     }
