@@ -35,6 +35,61 @@ account assets/checking
 }
 
 #[test]
+fn against_resolves_a_unique_earlier_transaction_for_flows_and_measures() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+commodity HR
+account assets/checking
+2026-01-01 checking -> ? 10 USD ^invoice
+2026-01-02 checking -> ? 3 USD against ^invoice
+2026-01-03 me worked 5 HR against ^invoice
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let referenced = &book.details[book.flows[Id::new(1)].detail.unwrap()];
+    assert_eq!(referenced.against, Some(Id::new(0)));
+    assert_eq!(book.measures[Id::new(0)].against, Some(Id::new(0)));
+}
+
+#[test]
+fn against_rejects_unknown_and_ambiguous_transaction_codes() {
+    let cases = [
+        (
+            "2026-01-01 checking -> ? 3 USD against ^missing\n",
+            "unknown-against",
+        ),
+        (
+            "2026-01-01 checking -> ? 1 USD ^invoice\n2026-01-02 checking -> ? 2 USD ^invoice\n2026-01-03 checking -> ? 3 USD against ^invoice\n",
+            "ambiguous-against",
+        ),
+    ];
+    for (records, expected) in cases {
+        let path = "journal/2026/01.ax";
+        let text = format!("base USD\ncommodity USD\naccount assets/checking\n{records}");
+        let (file, syntax) = parse(FileId(0), &text, Folder::of(path));
+        assert!(syntax.is_empty(), "{syntax:?}");
+        let (_, diagnostics) = build(&[Source {
+            path,
+            file,
+            embedded: false,
+        }]);
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == expected),
+            "expected {expected}, got {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
 fn malformed_journal_text_returns_diagnostics_without_panicking() {
     let path = "journal/2026/01.ax";
     let text = "\

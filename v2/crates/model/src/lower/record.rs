@@ -1171,6 +1171,8 @@ fn lower_measure<'s>(
     let mut purpose = None;
     let mut description = None;
     let mut codes = Vec::new();
+    let mut against = None;
+    let diagnostic_start = diags.len();
     for clause in &file[statement.tail] {
         match clause.kind {
             ClauseKind::For(ast::For::Whom(name)) => match world.entity(
@@ -1209,6 +1211,9 @@ fn lower_measure<'s>(
                 description = Some(world.book.quoted_text(text.0));
             }
             ClauseKind::Code(code) => codes.push(world.book.names.intern(code.name())),
+            ClauseKind::Against(code) => {
+                against = prior_txn_for_code(world, code, clause.at, diags);
+            }
             _ => diags.push(
                 Diagnostic::error(
                     "measure-tail",
@@ -1217,6 +1222,9 @@ fn lower_measure<'s>(
                 .label(clause.at, "remove the clause or record it on a flow"),
             ),
         }
+    }
+    if diags.len() != diagnostic_start {
+        return;
     }
     world.book.measures.push(Measure {
         day: statement.date,
@@ -1228,8 +1236,50 @@ fn lower_measure<'s>(
         purpose,
         description,
         codes: codes.into_boxed_slice(),
+        against,
         loc,
     });
+}
+
+fn prior_txn_for_code<'s>(
+    world: &mut World<'s>,
+    code: ast::Code<'s>,
+    loc: Loc,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Id<crate::journal::Txn>> {
+    let symbol = world.book.names.intern(code.name());
+    let book = &world.book;
+    let mut matched = None;
+    for (txn_id, txn) in book.txns.iter() {
+        let header = txn.codes.ids().any(|id| book.codes[id] == symbol);
+        let local = txn.flows.ids().any(|flow_id| {
+            let flow = &book.flows[flow_id];
+            flow.codes.ids().any(|id| book.codes[id] == symbol)
+        });
+        if !header && !local {
+            continue;
+        }
+        if matched.is_some() {
+            diags.push(
+                Diagnostic::error("ambiguous-against", "this code names more than one earlier transaction")
+                    .label(loc, format!("`{}` is not a unique transaction reference", code.name()))
+                    .help("give the original transaction a code used nowhere else"),
+            );
+            return None;
+        }
+        matched = Some(txn_id);
+    }
+    match matched {
+        Some(txn) => Some(txn),
+        None => {
+            diags.push(
+                Diagnostic::error("unknown-against", "this code names no earlier transaction")
+                    .label(loc, format!("`{}` has not named a transaction yet", code.name()))
+                    .help("put this code on an earlier transaction or one of its flows"),
+            );
+            None
+        }
+    }
 }
 
 fn unsupported_statement(loc: Loc, message: &str, diags: &mut Vec<Diagnostic>) {
@@ -1808,15 +1858,9 @@ fn lower_tail<'s>(
                 tail.price = Some((rate, unit, clause.at));
             }
             ClauseKind::Since(day) => tail.detail.since = Some(day),
-            ClauseKind::Against(_) => {
-                diags.push(
-                    Diagnostic::error(
-                        "against-lookup",
-                        "the referenced transaction code is not resolved in this pass",
-                    )
-                    .label(clause.at, "against metadata was not retained"),
-                );
-                tail.valid = false;
+            ClauseKind::Against(code) => {
+                tail.detail.against = prior_txn_for_code(world, code, clause.at, diags);
+                tail.valid &= tail.detail.against.is_some();
             }
             ClauseKind::Until(_) => {
                 diags.push(

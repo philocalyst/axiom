@@ -765,6 +765,8 @@ pub struct Measure {
     pub purpose: Option<Purposed>,
     pub description: Option<Text>,
     pub codes: Box<[Sym]>,
+    /// The earlier transaction this work or use is about, when stated.
+    pub against: Option<Id<Txn>>,
     pub loc: Loc,
 }
 
