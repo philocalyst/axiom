@@ -22,26 +22,64 @@ fn native_budget_and_declaration_also_are_linked() {
     );
     let project = source(
         "axiom.ax",
-        "use std\nbase USD\naccount checking : bank\npurpose groceries : spending\n  budget 100 USD monthly carries\n  also + 5% of amount #fees when value(amount, USD) > 10 USD\n  also checking -> self 2 USD #fees\npurpose fees : spending\npurpose pay : income\npurpose hobbies : spending\n  budget 10% of #pay yearly carries\n",
+        "use std\nbase USD\naccount checking : bank\naccount reserve : bank\naccount envelope : bank\npurpose groceries : spending\n  budget 100 USD monthly carries funded from checking into reserve\n  also + 5% of amount #fees when value(amount, USD) > 10 USD\n  also checking[^invoice] -> self 2 USD #fees\npurpose fees : spending\npurpose pay : income\npurpose hobbies : spending\n  budget 10% of #pay yearly carries\n2026-03-01 #groceries now budget 250 USD yearly funded from checking into envelope until 04-30\npurpose late : spending\n2026-03-01 #late now budget 30 USD monthly\n",
         false,
         1,
     );
     let (book, diagnostics) = build(&[std, project]);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert_eq!(book.budgets.len(), 2);
+    assert_eq!(book.budgets.len(), 3);
+    let purpose_order: Vec<_> = book.budgets.iter().map(|(_, budget)| budget.purpose.index()).collect();
+    assert!(purpose_order.windows(2).all(|pair| pair[0] <= pair[1]));
     let (budget_id, budget) = book
         .budgets
         .iter()
-        .find(|(_, budget)| budget.period == Period::Month)
+        .find(|(_, budget)| budget.terms.at(Day::MIN).period == Period::Month)
         .expect("a monthly budget");
-    assert_eq!(budget.period, Period::Month);
-    assert!(budget.carries);
+    assert_eq!(budget.terms.at(Day::MIN).period, Period::Month);
+    assert!(budget.terms.at(Day::MIN).carries);
     assert!(
-        matches!(budget.limits.at(Day::MIN), Limit::Amount(amount) if book.show(*amount).to_string() == "100.00 USD")
+        matches!(budget.terms.at(Day::MIN).limit, Limit::Amount(amount) if book.show(amount).to_string() == "100.00 USD")
     );
     let budget_law = &book.laws[budget.law];
     assert_eq!(budget_law.budget, Some(budget_id));
     assert!(budget_law.nodes.iter().any(|(_, node)| matches!(node.op, axiom_model::Op::Call(Func::BudgetLimit(id), _) if id == budget_id)));
+    assert!(budget_law.nodes.iter().any(|(_, node)| matches!(node.op, axiom_model::Op::Call(Func::BudgetTotal(id), _) if id == budget_id)));
+    let changed = Day::parse(b"2026-03-15").unwrap();
+    let restored = Day::parse(b"2026-05-01").unwrap();
+    assert_eq!(budget.terms.at(changed).period, Period::Year);
+    assert!(
+        budget.terms.at(changed).carries,
+        "omitted carries inherits the prior setting"
+    );
+    assert!(
+        matches!(budget.terms.at(changed).limit, Limit::Amount(amount) if book.show(amount).to_string() == "250.00 USD")
+    );
+    let initial_funding = budget.terms.at(Day::MIN).funded;
+    assert_ne!(budget.terms.at(changed).funded, initial_funding);
+    assert_eq!(budget.terms.at(restored).period, Period::Month);
+    assert!(
+        budget.terms.at(restored).carries,
+        "until restores the entire prior terms row"
+    );
+    assert!(
+        matches!(budget.terms.at(restored).limit, Limit::Amount(amount) if book.show(amount).to_string() == "100.00 USD")
+    );
+    assert_eq!(budget.terms.at(restored).funded, initial_funding);
+    let late = book
+        .budgets
+        .iter()
+        .find(|(_, budget)| book.name(book.purposes[budget.purpose].name) == "late")
+        .map(|(_, budget)| budget)
+        .expect("late budget");
+    assert_eq!(late.starts, Day::parse(b"2026-03-01").unwrap());
+    assert_eq!(
+        late.terms.at(Day::MIN).limit,
+        Limit::Amount(axiom_model::Amount::zero(book.base))
+    );
+    assert!(
+        matches!(late.terms.at(late.starts).limit, Limit::Amount(amount) if book.show(amount).to_string() == "30.00 USD")
+    );
     assert_eq!(book.also.len(), 2);
     let implied = book
         .also
@@ -76,13 +114,69 @@ fn native_budget_and_declaration_also_are_linked() {
     let (share_id, share_budget) = book
         .budgets
         .iter()
-        .find(|(_, budget)| matches!(budget.limits.at(Day::MIN), Limit::Share { .. }))
+        .find(|(_, budget)| matches!(budget.terms.at(Day::MIN).limit, Limit::Share { .. }))
         .expect("the share budget");
     assert!(matches!(
-        share_budget.limits.at(Day::MIN),
+        share_budget.terms.at(Day::MIN).limit,
         Limit::Share { .. }
     ));
     assert_eq!(book.laws[share_budget.law].budget, Some(share_id));
+    let pay = book
+        .purposes
+        .iter()
+        .find(|(_, purpose)| book.name(purpose.name) == "pay")
+        .map(|(id, _)| id)
+        .expect("pay purpose");
+    assert!(book.laws[share_budget.law].nodes.iter().any(|(_, node)| {
+        matches!(
+            node.op,
+            axiom_model::Op::Call(
+                Func::PurposeTotal { purpose: Some(of), window: axiom_model::Window::Year },
+                _
+            ) if of == pay
+        )
+    }));
+    let source_selected_flow = book
+        .also
+        .iter()
+        .find(|(_, implied)| matches!(implied.what, Implied::Flow { .. }))
+        .map(|(_, implied)| implied)
+        .expect("source-selected flow");
+    let selectors = &book.selectors[source_selected_flow.select];
+    assert_eq!(selectors.len(), 1);
+    assert!(matches!(
+        selectors[0],
+        axiom_model::Select::Code(code) if book.name(code) == "invoice"
+    ));
+}
+
+#[test]
+fn invalid_declaration_also_metadata_does_not_leave_a_partial_rule() {
+    let std = source(
+        "std.ax",
+        "system std\ncommodity USD\n  precision 2\n",
+        true,
+        0,
+    );
+    let project = source(
+        "axiom.ax",
+        "use std\nbase USD\naccount checking : asset\npurpose fees : spending\npurpose wages : income\n  also checking -> self 1 USD due 3d\n",
+        false,
+        1,
+    );
+    let (book, diagnostics) = build(&[std, project]);
+    assert_eq!(
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.code.as_ref())
+            .collect::<Vec<_>>(),
+        ["also-relative-due"],
+        "unsupported tail metadata is diagnosed"
+    );
+    assert!(
+        book.also.is_empty(),
+        "an invalid Also line must not enter the runtime book"
+    );
 }
 
 #[test]

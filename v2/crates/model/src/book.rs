@@ -1365,20 +1365,30 @@ pub struct Match {
 /// purpose's total for a window passes the limit in force in it.
 pub struct Budget {
     pub purpose: Id<Purpose>,
-    pub period: Period,
-    /// The declaration's limit, then each `DATE budget …` statement's.
-    pub limits: Timeline<Limit>,
-    /// Judged on the total since it began against its limits summed through
-    /// the window: an unspent month lends to the next, an overspent one borrows.
-    pub carries: bool,
+    /// The first day this budget has an active allowance. Earlier dates have
+    /// no budget, rather than an implicit zero or unlimited allowance.
+    pub starts: Day,
+    /// The complete terms in force, with date changes restoring the preceding
+    /// terms after a bounded `until` interval.
+    pub terms: Timeline<BudgetTerms>,
     /// The law that reports it (`warn total(window) <= limit`), so violations,
     /// headroom and `why` treat a budget as every other cap. Its `Law::budget`
     /// points back here.
     pub law: Id<Law>,
+    pub loc: Loc,
+}
+
+/// The effective allowance and policy at one date.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct BudgetTerms {
+    pub limit: Limit,
+    pub period: Period,
+    /// Judged on the total since it began against its limits summed through
+    /// the window: an unspent month lends to the next, an overspent one borrows.
+    pub carries: bool,
     /// `funded from HOLDING into HOLDING`: its limit moves each window into
     /// money held for it, which what the purpose spends is drawn from first.
     pub funded: Option<(Id<Place>, Id<Place>)>,
-    pub loc: Loc,
 }
 
 /// What a budget allows in a window.
