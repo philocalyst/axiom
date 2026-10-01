@@ -103,7 +103,8 @@ mod tests {
 
     #[test]
     fn the_line_offered_parses_and_lowers_as_a_known_as_declaration() {
-        use axiom_core::{FileId, Folder};
+        use axiom_core::FileId;
+        use axiom_syntax::Folder;
         use axiom_model::Source;
 
         let memos = [
@@ -114,7 +115,7 @@ mod tests {
         ];
         for group in group(memos) {
             let text = format!("base USD\nentity someone : org\n  {}\n", group.known_as());
-            let system = include_str!("../../../systems/src/std.ax");
+            let system = include_str!("../../systems/src/std.ax");
             let sources = [
                 ("std.ax", system, true),
                 ("axiom.ax", text.as_str(), false),

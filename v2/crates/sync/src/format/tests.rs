@@ -1,5 +1,6 @@
 use super::*;
-use axiom_core::{FileId, Folder, Loc, Qty, calendar::DateLayout};
+use axiom_core::{FileId, Loc, Qty, calendar::DateLayout};
+use axiom_syntax::Folder;
 use axiom_model::sync::{Column, Fetch, Field, Format, Rule, Shape, Sink, Source, Spec};
 
 const USD: Unit<'static> = Unit {
@@ -18,7 +19,7 @@ fn spec(field: Field, places: impl Into<Box<[Column]>>) -> Spec {
 }
 
 fn book() -> axiom_model::Book<'static> {
-    let std = include_str!("../../../systems/src/std.ax");
+    let std = include_str!("../../systems/src/std.ax");
     let sources = [("std.ax", std, true), ("axiom.ax", "base USD\n", false)].map(
         |(path, text, embedded)| {
             let (file, diagnostics) =

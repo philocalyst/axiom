@@ -883,13 +883,14 @@ fn closing_of(records: &[Record]) -> Option<(Day, Qty)> {
 #[cfg(test)]
 mod output_tests {
     use super::*;
-    use axiom_core::{FileId, Folder};
+    use axiom_core::FileId;
+    use axiom_syntax::Folder;
     use axiom_model::Source;
     use std::borrow::Cow;
 
     #[test]
     fn a_structured_code_is_written_even_when_a_party_suppresses_the_memo() {
-        let std = include_str!("../../../systems/src/std.ax");
+        let std = include_str!("../../systems/src/std.ax");
         let sources = [("std.ax", std, true), ("axiom.ax", "base USD\n", false)].map(
             |(path, text, embedded)| {
                 let (file, problems) = axiom_syntax::parse(FileId(0), text, Folder::default());

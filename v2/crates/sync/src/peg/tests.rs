@@ -1,8 +1,9 @@
 use super::*;
-use axiom_core::{FileId, Folder};
+use axiom_core::FileId;
+use axiom_syntax::Folder;
 
 fn book() -> Book<'static> {
-    let std = include_str!("../../../systems/src/std.ax");
+    let std = include_str!("../../systems/src/std.ax");
     let sources = [("std.ax", std, true), ("axiom.ax", "base USD\n", false)].map(
         |(path, text, embedded)| {
             let (file, diagnostics) = axiom_syntax::parse(FileId(0), text, Folder::default());

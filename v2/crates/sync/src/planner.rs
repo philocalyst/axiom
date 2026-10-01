@@ -682,9 +682,7 @@ fn failure_for_result(failure: &SourceFailure) -> SourceFailure {
 fn monitor_gaps(book: &Book<'_>, run: &EngineRun) -> Vec<Diagnostic> {
     let has_contracts = !book.contracts.is_empty();
     let has_claim_places = book.places.iter().any(|(_, place)| place.claim);
-    if (has_contracts && run.promises.is_empty())
-        || (has_claim_places && run.open_claims.is_empty())
-    {
+    if (has_contracts || has_claim_places) && !run.monitor_complete {
         vec![Diagnostic::warning(
             "sync-monitor-incomplete",
             "this outlook does not yet use the engine's contract occurrence and open-claim results; matching may omit contract and claim records",
@@ -698,7 +696,8 @@ fn monitor_gaps(book: &Book<'_>, run: &EngineRun) -> Vec<Diagnostic> {
 mod tests {
     use std::path::Path;
 
-    use axiom_core::{Day, Diagnostic, FileId, Folder};
+    use axiom_core::{Day, Diagnostic, FileId};
+    use axiom_syntax::Folder;
     use axiom_engine::{Options, Plan};
     use axiom_model::Source;
 
@@ -735,7 +734,7 @@ mod tests {
 
     #[test]
     fn each_run_source_gets_its_own_output_and_registered_diagnostic_file() {
-        let std = include_str!("../../../systems/src/std.ax");
+        let std = include_str!("../../systems/src/std.ax");
         let axiom = concat!(
             "base USD\n",
             "sync first\n",

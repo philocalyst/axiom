@@ -38,7 +38,7 @@ impl<'a, 's> Patterns<'a, 's> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Found {
     pub start: usize,
     pub end: usize,
@@ -394,7 +394,8 @@ fn scalar_at(hay: &[u8], at: usize) -> Option<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_core::{FileId, Folder, Loc};
+    use axiom_core::{FileId, Loc};
+    use axiom_syntax::Folder;
 
     fn book() -> Book<'static> {
         let std = include_str!("../../systems/src/std.ax");

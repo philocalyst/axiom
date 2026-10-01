@@ -632,15 +632,32 @@ pub(crate) fn changes_borrowed<'a>(
     inserts: &[Insert],
     read: &mut dyn FnMut(&str) -> Option<Cow<'a, str>>,
 ) -> Result<Vec<Change>, Vec<Diagnostic>> {
-    let updates = preview(inserts, read)?;
-    let mut changes = Vec::with_capacity(updates.len());
+    let mut by_path: BTreeMap<&str, Vec<&Insert>> = BTreeMap::new();
+    for insert in inserts {
+        if !is_project_path(&insert.path) {
+            return Err(vec![Diagnostic::error(
+                "sync-path-outside-project",
+                format!("`{}` is not a project-relative file path", insert.path),
+            )]);
+        }
+        by_path.entry(&insert.path).or_default().push(insert);
+    }
+    let mut changes = Vec::with_capacity(by_path.len());
     let mut problems = Vec::new();
-    for update in updates {
-        match validate_text_at(&update.path, &update.after, FileId(0)) {
+    for (path, inserts) in by_path {
+        let before = read(path);
+        let after = match apply(before.as_deref().unwrap_or(""), path, &inserts) {
+            Ok(after) => after,
+            Err(bad) => {
+                problems.extend(bad);
+                continue;
+            }
+        };
+        match validate_text_at(path, &after, FileId(0)) {
             Ok(()) => changes.push(Change {
-                before: read(&update.path).map(Cow::into_owned),
-                path: update.path,
-                after: update.after,
+                before: before.map(Cow::into_owned),
+                path: path.to_string(),
+                after,
             }),
             Err(bad) => problems.extend(bad),
         }
