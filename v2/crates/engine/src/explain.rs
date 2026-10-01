@@ -101,7 +101,7 @@ impl Frame<'_, '_> {
     /// other condition, the facts it read (see [`Frame::atoms`]).
     fn operands(&self, cond: NodeId) -> Vec<(Loc, String)> {
         let nodes = &self.law.nodes;
-        let at = match nodes[cond.index()].op {
+        let at = match nodes[cond].op {
             Op::Bin(BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge | BinOp::Eq | BinOp::Ne, l, r) => {
                 vec![l.index(), r.index()]
             }
@@ -109,13 +109,13 @@ impl Frame<'_, '_> {
         };
         let unit = at.iter().find_map(|&i| if let Value::Amount(a) = self.values[i] { Some(a.unit) } else { None });
         let mut shown: Vec<(Loc, String)> = Vec::new();
-        for i in at.into_iter().filter(|&i| !matches!(nodes[i].op, Op::Const(_))) {
+        for i in at.into_iter().filter(|&i| !matches!(nodes[node_id(i)].op, Op::Const(_))) {
             let text = match (self.values[i], unit) {
                 (Value::Empty, Some(unit)) => self.money(Amount::zero(unit)),
                 (value, _) => show::value(self.book, self.ctx.day, value),
             };
-            if !shown.iter().any(|(loc, _)| *loc == nodes[i].loc) {
-                shown.push((nodes[i].loc, text));
+            if !shown.iter().any(|(loc, _)| *loc == nodes[node_id(i)].loc) {
+                shown.push((nodes[node_id(i)].loc, text));
             }
         }
         shown
@@ -123,7 +123,7 @@ impl Frame<'_, '_> {
 
     /// Whose property node `at` read: the entity or place a field was taken from.
     pub fn holder(&self, at: usize) -> Option<Subject> {
-        let Op::Field(receiver, _) = self.law.nodes[at].op else { return None };
+        let Op::Field(receiver, _) = self.law.nodes[node_id(at)].op else { return None };
         match self.values[receiver.index()] {
             Value::Entity(entity) => Some(Subject::Entity(entity)),
             Value::Place(place) => Some(Subject::Place(place)),
@@ -137,14 +137,14 @@ impl Frame<'_, '_> {
     /// combine facts, and the constants, say nothing the line does not.
     fn atoms(&self, cond: NodeId) -> Vec<usize> {
         let nodes = &self.law.nodes;
-        let (mut atoms, first) = (Vec::new(), nodes[cond.index()].first.index());
+        let (mut atoms, first) = (Vec::new(), nodes[cond].first.index());
         let mut at = cond.index() + 1;
         while at > first {
             at -= 1;
-            if matches!(nodes[at].op, Op::Var(_) | Op::Local(_) | Op::Field(..) | Op::Param(..) | Op::Call(..)) {
+            if matches!(nodes[node_id(at)].op, Op::Var(_) | Op::Local(_) | Op::Field(..) | Op::Param(..) | Op::Call(..)) {
                 atoms.push(at);
                 // Skip the atom's own subtree: a field's receiver, a call's arguments.
-                at = nodes[at].first.index();
+                at = nodes[node_id(at)].first.index();
             }
         }
         atoms.reverse();
@@ -153,7 +153,7 @@ impl Frame<'_, '_> {
 
     /// Up to three flows before this one that built what a limit counted. A
     /// window read as it opened had no flow to fire it: the latest to reach it.
-    fn contributors(&self, reads: Reads) -> Vec<Id<Flow>> {
+    fn contributors(&self, reads: Reads, cond: NodeId) -> Vec<Id<Flow>> {
         let (book, ctx) = (self.book, self.ctx);
         let current = match ctx.cause {
             Cause::Flow(id) => Some(id),
@@ -187,6 +187,28 @@ impl Frame<'_, '_> {
                 });
                 moves.copied().take(3).collect()
             }
+            Reads::Purpose(_) => {
+                let scopes: Vec<_> = self.law.range(cond).filter_map(|at| {
+                    match self.law.nodes[node_id(at)].op {
+                        Op::Call(axiom_model::Func::PurposeTotal { purpose, .. }, _) => purpose.or_else(|| {
+                            match self.law.owner {
+                                axiom_model::Owner::Purpose(purpose) => Some(purpose),
+                                _ => None,
+                            }
+                        }),
+                        _ => None,
+                    }
+                }).collect();
+                let mut counted: Vec<_> = book.flows.iter().filter_map(|(id, flow)| {
+                    let actual = flow.purpose?.purpose;
+                    let in_scope = scopes.iter().any(|&wanted| book.purposes.lineage(actual).any(|parent| parent == wanted));
+                    let before = current.map_or(flow.day <= ctx.day, |current| id < current);
+                    (in_scope && flow.owner == ctx.owner && before && flow.recognized.overlaps(window) && Some(id) != current)
+                        .then_some(id)
+                }).collect();
+                counted.sort_unstable_by_key(|&id| (book.flows[id].day, id));
+                counted.into_iter().rev().take(3).collect()
+            }
         };
         found.reverse();
         found
@@ -196,13 +218,13 @@ impl Frame<'_, '_> {
     /// counted (when it reads a total or tally), and the values it compared.
     fn locate(&self, d: Diagnostic, cond: NodeId, reads: Option<Reads>) -> Diagnostic {
         let (loc, text) = self.cause_label();
-        let d = self.contributions(d.label(loc, text), reads);
+        let d = self.contributions(d.label(loc, text), reads, cond);
         self.operands(cond).into_iter().fold(d, |d, (loc, value)| d.context(loc, value))
     }
 
     /// The flows that built the count, as labels.
-    fn contributions(&self, mut d: Diagnostic, reads: Option<Reads>) -> Diagnostic {
-        for id in reads.map(|r| self.contributors(r)).unwrap_or_default() {
+    fn contributions(&self, mut d: Diagnostic, reads: Option<Reads>, cond: NodeId) -> Diagnostic {
+        for id in reads.map(|r| self.contributors(r, cond)).unwrap_or_default() {
             let flow = &self.book.flows[id];
             let moved = if matches!(reads, Some(Reads::Total(Dir::Out, _))) { flow.out } else { flow.arrive };
             let text = format!(
@@ -273,7 +295,7 @@ fn accepted(d: Diagnostic, f: &Frame, waiver: Option<Waiver>) -> Diagnostic {
         Some(Waiver::Marked(waive)) => {
             let d = d.context(waive.loc, "waived here").relaxed().disposed(Disposition::Waived);
             match waive.reason {
-                Some(reason) => d.note(format!("waived: {}", f.book.name(reason))),
+                Some(reason) => d.note(format!("waived: {}", f.book.text(reason))),
                 None => d,
             }
         }
@@ -318,6 +340,8 @@ pub(crate) fn faulted(f: &Frame, fault: Fault, origin: Option<usize>, holder: Op
     let (book, law) = (f.book, f.book.name(f.law.name));
     let (what, help) = show::fault(book, fault, f.ctx.day);
     let code = match fault {
+        Fault::InvalidProgram => "invalid-program",
+        Fault::MissingInput(_) => "missing-input",
         Fault::NoPrice { .. } => "no-price",
         Fault::UnitMismatch { .. } => "unit-mismatch",
         Fault::Unset(_) => "unset-property",
@@ -325,13 +349,14 @@ pub(crate) fn faulted(f: &Frame, fault: Fault, origin: Option<usize>, holder: Op
         Fault::DivideByZero | Fault::Overflow => "arithmetic",
     };
     let (cause, text) = f.cause_label();
-    let read = origin.map(|at| (f.law.nodes[at].loc, what.clone()));
+    let read = origin.map(|at| (f.law.nodes[node_id(at)].loc, what.clone()));
     if let (Fault::Unset(name), Some(holder)) = (fault, holder) {
         let (name, thing) = (book.name(name), show::subject(book, holder));
         let declared = match holder {
             Subject::Place(place) => book.places[place].loc,
             Subject::Entity(entity) => book.entities[entity].loc,
             Subject::Asset(asset) => Some(book.assets[asset].loc),
+            Subject::Contract(contract) => Some(book.contracts[contract].loc),
         };
         let d = Diagnostic::error(code, format!("`{name}` is not set on `{thing}`, so `{law}` cannot be checked"));
         let d = match declared {
@@ -349,6 +374,10 @@ pub(crate) fn faulted(f: &Frame, fault: Fault, origin: Option<usize>, holder: Op
     let d = Diagnostic::error(code, format!("cannot check `{law}`: {what}")).label(cause, text);
     let d = read.into_iter().fold(d, |d, (loc, what)| d.context(loc, what));
     help.into_iter().fold(d, Diagnostic::help)
+}
+
+fn node_id(index: usize) -> NodeId {
+    NodeId(index as u32)
 }
 
 /// A system's table has no row for the year a law asked about: the journal
@@ -390,7 +419,7 @@ pub(crate) fn first_fault(f: &Frame, step: usize) -> Option<usize> {
 
 fn origin(f: &Frame, root: NodeId) -> Option<usize> {
     let at = f.law.range(root).find(|&at| matches!(f.values[at], Value::Fault(_)))?;
-    match f.law.nodes[at].op {
+    match f.law.nodes[node_id(at)].op {
         Op::Local(bound) => origin(f, bound).or(Some(at)),
         _ => Some(at),
     }
@@ -473,7 +502,6 @@ fn since(book: &Book, events: &Events, (assert, sign): (&Assert, i64), checked: 
     for &id in &flows[from..to] {
         let flow = &book.flows[id];
         let (moved, inflow) = if flow.to == assert.place { (flow.arrive, true) } else { (flow.out, false) };
-        let end = if inflow { End::To } else { End::From };
         if moved.unit != assert.amount.unit {
             continue;
         }
@@ -667,7 +695,7 @@ pub(crate) fn padded(book: &Book, assert: &Assert, waive: Waive, amount: Amount)
         .label(assert.loc, what)
         .disposed(Disposition::Waived);
     if let Some(reason) = waive.reason {
-        d = d.note(format!("accepted because: {}", book.name(reason)));
+        d = d.note(format!("accepted because: {}", book.text(reason)));
     }
     d
 }
