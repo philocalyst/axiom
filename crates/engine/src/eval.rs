@@ -14,14 +14,16 @@
 use std::ops::Deref;
 
 use axiom_core::glob::glob;
-use axiom_core::{Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
+use axiom_core::{Arena, Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
-    self, Amount, BinOp, Book, Dir, Effect as LawEffect, Entity, Fault, Field, Func, Law, NodeId,
-    Object, Op, Param, Prop, Purposed, StepKind, Subject, Text, Ty, Value, Var, Window,
+    self, Amount, Asset, BinOp, Book, Commodity, Dir, Effect as LawEffect, Entity, Fault, Field,
+    Func, Law, NodeId, Object, Op, Param, Prop, Purposed, RuntimeDetail, RuntimeFlow, SelectKey,
+    StepKind, Subject, Text, Ty, Value, Var, Window,
 };
 
 use crate::calc::{Calc, progressive};
 use crate::budget::{carry_start as budget_carry_start, segment_end as budget_segment_end, segment_start as budget_segment_start, window as budget_window};
+use crate::assets::PartId;
 use crate::lots::{Holdings, Slot};
 use crate::motion::Motion;
 use crate::plan::Plan;
@@ -164,7 +166,26 @@ pub(crate) struct Context<'a> {
     pub budget_history: bool,
     /// Declaration-order bindings for a contract occurrence.
     pub inputs: Option<&'a [Option<Amount>]>,
+    /// The source-order flows of the current materialized occurrence. A
+    /// contract expression's `[selector]` reads these borrowed views only.
+    pub template_flows: Option<TemplateFlows<'a>>,
+    /// The asset part whose per-part law is running, if any.
+    pub asset_part: Option<PartId>,
     on: &'a Occasion<'a>,
+}
+
+/// Borrowed occurrence members used by `Op::Select`. The materializer owns the
+/// flows and runtime detail arena for the duration of expression evaluation.
+#[derive(Clone, Copy)]
+pub(crate) struct TemplateFlows<'a> {
+    flows: &'a [RuntimeFlow],
+    details: &'a Arena<RuntimeDetail>,
+}
+
+impl<'a> TemplateFlows<'a> {
+    pub fn new(flows: &'a [RuntimeFlow], details: &'a Arena<RuntimeDetail>) -> Self {
+        Self { flows, details }
+    }
 }
 
 impl<'a> Context<'a> {
@@ -176,12 +197,24 @@ impl<'a> Context<'a> {
             flow_subject: false,
             budget_history: false,
             inputs: None,
+            template_flows: None,
+            asset_part: None,
             on,
         }
     }
 
     pub fn with_inputs(mut self, inputs: &'a [Option<Amount>]) -> Self {
         self.inputs = Some(inputs);
+        self
+    }
+
+    pub fn with_template_flows(mut self, flows: &'a [RuntimeFlow], details: &'a Arena<RuntimeDetail>) -> Self {
+        self.template_flows = Some(TemplateFlows::new(flows, details));
+        self
+    }
+
+    pub fn for_asset_part(mut self, part: PartId) -> Self {
+        self.asset_part = Some(part);
         self
     }
 
@@ -240,6 +273,15 @@ pub(crate) enum Outcome {
         step: u32,
         counted: Amount,
         limit: Amount,
+    },
+    /// A part-scoped reduction of an asset's remaining basis.
+    Consume { step: u32, amount: Amount },
+    /// A disallowed loss that the asset monitor carries to a matching part.
+    Carry {
+        step: u32,
+        amount: Amount,
+        unit: Id<Commodity>,
+        within: Span,
     },
 }
 
@@ -531,13 +573,24 @@ impl<'a, 's> Machine<'a, 's> {
                     owed: Owed { to, due },
                 });
             }
-            // These effects are applied by the native asset/claim monitor. A
-            // law cannot silently fall back to the removed v3 asset bridge.
-            LawEffect::Consume { .. } | LawEffect::Carry { .. } => {
-                self.out.push(Outcome::Faulted {
-                    step,
-                    fault: Fault::InvalidProgram,
-                });
+            LawEffect::Consume { amount } => {
+                if let Some(amount) = self.nonzero_amount(step, amount) {
+                    self.out.push(Outcome::Consume { step, amount });
+                }
+            }
+            LawEffect::Carry { amount, unit, within } => {
+                let Some(amount) = self.nonzero_amount(step, amount) else { return };
+                let unit = match self.scan(unit) {
+                    Value::Unit(unit) => unit,
+                    Value::Fault(fault) => return self.out.push(Outcome::Faulted { step, fault }),
+                    _ => return self.out.push(Outcome::Faulted { step, fault: Fault::InvalidProgram }),
+                };
+                let within = match self.scan(within) {
+                    Value::Span(within) => within,
+                    Value::Fault(fault) => return self.out.push(Outcome::Faulted { step, fault }),
+                    _ => return self.out.push(Outcome::Faulted { step, fault: Fault::InvalidProgram }),
+                };
+                self.out.push(Outcome::Carry { step, amount, unit, within });
             }
         }
     }
@@ -634,7 +687,7 @@ impl<'a, 's> Machine<'a, 's> {
                 }
                 _ => Value::Fault(Fault::InvalidProgram),
             },
-            Op::Select(_) => Value::Fault(Fault::InvalidProgram),
+            Op::Select(keys) => self.select(keys),
             Op::Is(x, alternatives) => match self.at(*x) {
                 fault @ Value::Fault(_) => fault,
                 left => Value::Bool(
@@ -708,6 +761,15 @@ impl<'a, 's> Machine<'a, 's> {
             (Field::Balance, Value::Entity(entity)) => self.balance(Subject::Entity(entity)),
             (Field::Basis, Value::Place(place)) => self.basis(Subject::Place(place)),
             (Field::Basis, Value::Entity(entity)) => self.basis(Subject::Entity(entity)),
+            (Field::Basis, Value::Asset(asset)) => self.asset_basis(asset),
+            (Field::Cost, Value::Asset(asset)) => self.asset_cost(asset),
+            (Field::InService, Value::Asset(asset)) => self.asset_in_service(asset),
+            (Field::Parts, Value::Asset(asset)) => {
+                let count = self.env.world.assets.asset(asset).map_or(0, |state| state.part_count());
+                i64::try_from(count).map_or(Value::Fault(Fault::Overflow), |count| {
+                    Value::Num(Ratio::int(count))
+                })
+            }
             (Field::Unit, Value::Amount(amount)) => Value::Unit(amount.unit),
             (Field::Unit, Value::Empty) => Value::Unit(book.base),
             (Field::Owner, Value::Place(place)) => Value::Entity(book.places[place].owner),
@@ -722,6 +784,71 @@ impl<'a, 's> Machine<'a, 's> {
             (Field::Prop(name), base) => self.prop(base, name),
             _ => unreachable!("{TYPED}"),
         }
+    }
+
+    /// Sums the selected sides of the current template occurrence without
+    /// materializing strings or cloning flow metadata. Side-specific keys
+    /// (`end`, `unit`) must agree on the same side; neutral keys select `out`.
+    fn select(&self, keys: &[SelectKey]) -> Value {
+        let Some(occurrence) = self.ctx.template_flows else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let book = self.book();
+        let mut total = None::<Amount>;
+        for runtime in occurrence.flows {
+            let view = book.runtime_flow_view(runtime, occurrence.details);
+            let mut from_matches = true;
+            let mut to_matches = true;
+            let mut has_side_key = false;
+            let mut other_matches = true;
+            for key in keys {
+                match *key {
+                    SelectKey::End(end) => {
+                        has_side_key = true;
+                        from_matches &= view.from == end;
+                        to_matches &= view.to == end;
+                    }
+                    SelectKey::Unit(unit) => {
+                        has_side_key = true;
+                        from_matches &= view.out.unit == unit;
+                        to_matches &= view.arrive.unit == unit;
+                    }
+                    SelectKey::Purpose(wanted) => {
+                        other_matches &= view.purpose.is_some_and(|actual| {
+                            book.purposes.covers(wanted, actual.purpose)
+                        });
+                    }
+                    SelectKey::Code(code) => {
+                        other_matches &= view.codes().any(|candidate| candidate == code);
+                    }
+                    SelectKey::Range(days) => {
+                        other_matches &= view.recognized.intersect(days).is_some();
+                    }
+                }
+            }
+            if !other_matches || (has_side_key && !from_matches && !to_matches) {
+                continue;
+            }
+            let amount = if has_side_key && !from_matches {
+                view.arrive
+            } else {
+                view.out
+            };
+            total = Some(match total {
+                None => amount,
+                Some(sum) if sum.unit == amount.unit => {
+                    let Some(qty) = sum.qty.0.checked_add(amount.qty.0) else {
+                        return Value::Fault(Fault::Overflow);
+                    };
+                    Amount::new(Qty(qty), sum.unit)
+                }
+                Some(sum) => return Value::Fault(Fault::UnitMismatch {
+                    found: amount.unit,
+                    expected: sum.unit,
+                }),
+            });
+        }
+        total.map_or(Value::Empty, Value::Amount)
     }
 
     /// From the entity's `born` date to the day of evaluation.
@@ -741,20 +868,107 @@ impl<'a, 's> Machine<'a, 's> {
         }
     }
 
+    fn asset_cost(&self, asset: Id<Asset>) -> Value {
+        let Some(state) = self.env.world.assets.asset(asset) else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let cost = if let Some(part) = self.ctx.asset_part {
+            let Some((owner, record)) = self.env.world.assets.part(part) else {
+                return Value::Fault(Fault::InvalidProgram);
+            };
+            if owner != asset {
+                return Value::Fault(Fault::InvalidProgram);
+            }
+            record.cost
+        } else {
+            match state.total_cost() {
+                Ok(cost) => cost,
+                Err(_) => return Value::Fault(Fault::Overflow),
+            }
+        };
+        self.base(cost)
+    }
+
+    fn asset_basis(&self, asset: Id<Asset>) -> Value {
+        let Some(state) = self.env.world.assets.asset(asset) else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let basis = if let Some(part) = self.ctx.asset_part {
+            let Some((owner, record)) = self.env.world.assets.part(part) else {
+                return Value::Fault(Fault::InvalidProgram);
+            };
+            if owner != asset {
+                return Value::Fault(Fault::InvalidProgram);
+            }
+            record.basis
+        } else {
+            match state.total_basis() {
+                Ok(basis) => basis,
+                Err(_) => return Value::Fault(Fault::Overflow),
+            }
+        };
+        self.base(basis)
+    }
+
+    fn asset_in_service(&self, asset: Id<Asset>) -> Value {
+        let Some(state) = self.env.world.assets.asset(asset) else {
+            return Value::Fault(Fault::InvalidProgram);
+        };
+        let Some(part) = self.ctx.asset_part.or_else(|| state.parts().first().map(|part| part.id)) else {
+            return Value::Empty;
+        };
+        if self.env.world.assets.part(part).is_none_or(|(owner, _)| owner != asset) {
+            return Value::Fault(Fault::InvalidProgram);
+        }
+        let property = self.book().names.get("in-service").map_or(Value::Empty, |name| {
+            self.prop(Value::Asset(asset), name)
+        });
+        let property = match property {
+            Value::Day(day) => Some(day),
+            Value::Fault(fault) => return Value::Fault(fault),
+            Value::Empty => None,
+            _ => return Value::Fault(Fault::InvalidProgram),
+        };
+        state
+            .in_service(part, property)
+            .map_or(Value::Fault(Fault::InvalidProgram), Value::Day)
+    }
+
     /// A declared property: the thing's own, else its kind's default.
     fn prop(&self, base: Value, name: Sym) -> Value {
         let book = self.book();
-        let (props, kind) = match base {
-            Value::Place(place) => (book.places[place].props.as_ref(), Some(book.places[place].kind)),
-            Value::Entity(entity) => (book.entities[entity].props.as_ref(), Some(book.entities[entity].kind)),
-            Value::Unit(unit) => (book.commodities[unit].props.as_ref(), Some(book.commodities[unit].kind)),
-            Value::Kind(kind) => (&[][..], Some(kind)),
-            Value::Asset(asset) => (book.assets[asset].props.as_ref(), Some(book.assets[asset].kind)),
+        let (props, kind, asset_property_applies) = match base {
+            Value::Place(place) => (book.places[place].props.as_ref(), Some(book.places[place].kind), true),
+            Value::Entity(entity) => (book.entities[entity].props.as_ref(), Some(book.entities[entity].kind), true),
+            Value::Unit(unit) => (book.commodities[unit].props.as_ref(), Some(book.commodities[unit].kind), true),
+            Value::Kind(kind) => (&[][..], Some(kind), true),
+            Value::Asset(asset) => {
+                let applies = if let Some(part) = self.ctx.asset_part {
+                    let Some((owner, _)) = self.env.world.assets.part(part) else {
+                        return Value::Fault(Fault::InvalidProgram);
+                    };
+                    if owner != asset {
+                        return Value::Fault(Fault::InvalidProgram);
+                    }
+                    self.env
+                        .world
+                        .assets
+                        .asset(asset)
+                        .and_then(|state| state.property_applies(part, false).ok())
+                        .unwrap_or(false)
+                } else {
+                    true
+                };
+                (book.assets[asset].props.as_ref(), Some(book.assets[asset].kind), applies)
+            }
             _ => unreachable!("{TYPED}"),
         };
-        if let Some(value) = axiom_model::prop(props, name, self.ctx.day).map(|property| property.value) {
+        let explicit = axiom_model::prop(props, name, self.ctx.day).map(|property| property.value);
+        if asset_property_applies {
+            if let Some(value) = explicit {
             if value != Value::Empty {
                 return value;
+            }
             }
         }
         if let Some(kind) = kind {
@@ -766,6 +980,9 @@ impl<'a, 's> Machine<'a, 's> {
                     return value;
                 }
             }
+        }
+        if !asset_property_applies && explicit.is_some() {
+            return Value::Empty;
         }
         Value::Fault(Fault::Unset(name))
     }
@@ -1374,6 +1591,7 @@ fn purpose_net(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::assets::{EventKey, Part, PartKind};
 
     #[test]
     fn property_reads_use_the_nearest_kind_default_and_expired_overrides_fall_through() {
@@ -1438,5 +1656,204 @@ account temporary : temporary-account
             };
             assert_eq!(machine.prop(Value::Place(place), marked), expected, "{date:?}");
         }
+    }
+
+    #[test]
+    fn selected_template_groups_filter_by_purpose_and_choose_the_matching_side() {
+        let text = "\
+use std
+base USD
+commodity VTI : stock
+purpose wages : income
+purpose retirement : spending
+account checking
+account retirement
+account savings
+entity employer
+2026-01-01 employer -> checking 100 USD #wages
+2026-01-02 employer -> checking 200 USD #wages
+";
+        let (file, parsed) = axiom_syntax::parse(
+            axiom_core::FileId(0),
+            text,
+            axiom_syntax::Folder::default(),
+        );
+        assert!(parsed.is_empty(), "{parsed:?}");
+        let (mut book, diagnostics) = axiom_model::build(&[axiom_model::Source {
+            path: "axiom.ax",
+            file,
+            embedded: false,
+        }]);
+        assert!(diagnostics.iter().all(|diagnostic| !diagnostic.is_error()), "{diagnostics:?}");
+        let checking = book.place("checking").unwrap();
+        let retirement = book.place("retirement").unwrap();
+        let savings = book.place("savings").unwrap();
+        let owner = book.entities[book.roots.me].place.expect("me has an outside place");
+        let owner = book.places[owner].owner;
+        let wages = book.purpose("wages").unwrap();
+        let retirement_purpose = book.purpose("retirement").unwrap();
+        let usd = book.base;
+        let vti = book.commodity("VTI").unwrap();
+        let missing_code = book.names.intern("missing");
+
+        let mut selected = book.flows.get(Id::new(0)).unwrap().clone();
+        selected.from = checking;
+        selected.to = retirement;
+        selected.out = Amount::new(Qty(25_000), usd);
+        selected.arrive = Amount::new(Qty(7), vti);
+        selected.purpose = Some(Purposed {
+            purpose: retirement_purpose,
+            of: None,
+            source: axiom_model::Provenance::Written,
+        });
+        let mut unrelated = book.flows.get(Id::new(1)).unwrap().clone();
+        unrelated.from = checking;
+        unrelated.to = savings;
+        unrelated.out = Amount::new(Qty(90_000), usd);
+        unrelated.arrive = unrelated.out;
+        unrelated.purpose = Some(Purposed {
+            purpose: wages,
+            of: None,
+            source: axiom_model::Provenance::Written,
+        });
+        let flows = [RuntimeFlow::source_at(selected, 0), RuntimeFlow::source_at(unrelated, 1)];
+        let details = Arena::new();
+        let plan = Plan::new(&book);
+        let world = World::new(&book, &plan.watch);
+        let day = Day::from_ymd(2026, 1, 2).unwrap();
+        let occasion = Occasion::time(day, Days::on(day));
+        let context = Context::new(Subject::Entity(owner), owner, &occasion)
+            .with_template_flows(&flows, &details);
+        let nodes = Arena::new();
+        let mut values = Vec::new();
+        let mut budget_values = Vec::new();
+        let mut out = Vec::new();
+        let machine = Machine {
+            env: Env { plan: &plan, world: &world },
+            nodes: &nodes,
+            law: None,
+            ctx: &context,
+            values: &mut values,
+            budget_values: &mut budget_values,
+            out: &mut out,
+        };
+
+        assert_eq!(
+            machine.select(&[SelectKey::Purpose(retirement_purpose)]),
+            Value::Amount(Amount::new(Qty(25_000), usd)),
+            "a purpose-only selector takes the selected flow's outgoing amount"
+        );
+        assert_eq!(
+            machine.select(&[SelectKey::End(retirement), SelectKey::Unit(vti)]),
+            Value::Amount(Amount::new(Qty(7), vti)),
+            "endpoint and unit keys identify the arrival side of an exchange"
+        );
+        assert_eq!(
+            machine.select(&[SelectKey::End(retirement), SelectKey::Code(missing_code)]),
+            Value::Empty,
+            "a selector with no matching group is empty, so a percentage of it is zero"
+        );
+    }
+
+    #[test]
+    fn asset_part_context_reads_each_basis_and_limits_asset_properties_to_acquisition() {
+        let fixture = crate::fixture::Fixture::new();
+        let me = fixture.me;
+        let checking = fixture.checking;
+        let usd = fixture.usd;
+        let mut book = fixture.book();
+        let name = book.names.intern("house");
+        let land = book.names.intern("land");
+        let in_service = book.names.intern("in-service");
+        let asset = book.assets.push(Asset {
+            name,
+            kind: book.roots.kinds.thing,
+            owner: me,
+            place: checking,
+            unit: usd,
+            part_of: None,
+            props: vec![
+                Prop {
+                    name: land,
+                    value: Value::Amount(Amount::new(Qty(12_000), usd)),
+                    since: Day::MIN,
+                    loc: None,
+                },
+                Prop {
+                    name: in_service,
+                    value: Value::Day(Day::from_ymd(2024, 3, 1).unwrap()),
+                    since: Day::MIN,
+                    loc: None,
+                },
+            ]
+            .into(),
+            doc: None,
+            loc: axiom_core::Loc::default(),
+        });
+        let plan = Plan::new(&book);
+        let mut world = World::new(&book, &plan.watch);
+        let origin = axiom_model::RuntimeTxn::journal(Id::new(0)).unwrap();
+        let acquisition = PartId { origin, ordinal: 0 };
+        let improvement = PartId { origin, ordinal: 1 };
+        world
+            .assets
+            .add_part(
+                asset,
+                Part {
+                    id: acquisition,
+                    flow: None,
+                    kind: PartKind::Acquisition,
+                    recorded: EventKey { day: Day::from_ymd(2024, 2, 20).unwrap(), sequence: 0 },
+                    day: Day::from_ymd(2024, 2, 20).unwrap(),
+                    cost: Qty(402_000),
+                    basis: Qty(382_000),
+                },
+            )
+            .unwrap();
+        world
+            .assets
+            .add_part(
+                asset,
+                Part {
+                    id: improvement,
+                    flow: None,
+                    kind: PartKind::Improvement,
+                    recorded: EventKey { day: Day::from_ymd(2026, 2, 2).unwrap(), sequence: 1 },
+                    day: Day::from_ymd(2026, 2, 2).unwrap(),
+                    cost: Qty(1_480),
+                    basis: Qty(1_480),
+                },
+            )
+            .unwrap();
+        let occasion_day = Day::from_ymd(2026, 2, 28).unwrap();
+        let occasion = Occasion::time(occasion_day, Days::on(occasion_day));
+        let context = Context::new(Subject::Asset(asset), me, &occasion).for_asset_part(acquisition);
+        let nodes = Arena::new();
+        let mut values = Vec::new();
+        let mut budget_values = Vec::new();
+        let mut out = Vec::new();
+        let machine = Machine {
+            env: Env { plan: &plan, world: &world },
+            nodes: &nodes,
+            law: None,
+            ctx: &context,
+            values: &mut values,
+            budget_values: &mut budget_values,
+            out: &mut out,
+        };
+        assert_eq!(machine.asset_cost(asset), Value::Amount(Amount::new(Qty(402_000), book.base)));
+        assert_eq!(machine.asset_basis(asset), Value::Amount(Amount::new(Qty(382_000), book.base)));
+        assert_eq!(machine.prop(Value::Asset(asset), land), Value::Amount(Amount::new(Qty(12_000), usd)));
+        assert_eq!(
+            machine.asset_in_service(asset),
+            Value::Day(Day::from_ymd(2024, 3, 1).unwrap())
+        );
+
+        let improvement_context = Context::new(Subject::Asset(asset), me, &occasion).for_asset_part(improvement);
+        let machine = Machine { ctx: &improvement_context, ..machine };
+        assert_eq!(machine.asset_cost(asset), Value::Amount(Amount::new(Qty(1_480), book.base)));
+        assert_eq!(machine.asset_basis(asset), Value::Amount(Amount::new(Qty(1_480), book.base)));
+        assert_eq!(machine.prop(Value::Asset(asset), land), Value::Empty);
+        assert_eq!(machine.asset_in_service(asset), Value::Day(Day::from_ymd(2026, 2, 2).unwrap()));
     }
 }
