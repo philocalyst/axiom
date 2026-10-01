@@ -69,9 +69,13 @@ impl<'b, 's> Context<'b, 's> {
                 let at = at.unwrap_or(self.run.today);
                 super::balance::view_with_lens(self.lens(at), &self.run, globs, *value, *monthly)
             }
-            Query::Register { place, from, to } => {
-                super::register::view(self.book, &self.run, &self.whose, place, *from, *to)
-            }
+            Query::Register { place, from, to } => super::register::view_with_lens(
+                self.lens(to.unwrap_or(self.run.today)),
+                &self.run,
+                place,
+                *from,
+                *to,
+            ),
             Query::Flow { by, from, to } => {
                 let to = to.unwrap_or(self.run.today);
                 Ok(super::flow::view_with_lens(
@@ -153,7 +157,7 @@ impl<'b, 's> Context<'b, 's> {
     }
 
     pub(crate) fn lens(&self, day: Day) -> Lens<'_, 's> {
-        Lens::with_known(self.book, &self.whose, day, self.plan.known())
+        Lens::with_plan(self.book, &self.whose, day, self.plan.known(), self.plan.sides())
     }
 
     /// A ledger at `day` before that day's closings. Future views resume the

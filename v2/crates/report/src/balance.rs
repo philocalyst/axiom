@@ -204,7 +204,7 @@ fn push_place<'s>(
     let book = lens.book;
     let baskets: Vec<Basket> =
         (0..snapshots.days().len()).map(|column| snapshots.subtree(book, column, place)).collect();
-    let (class, sign) = (book.places[place].class, book.v3_root(place).display_sign());
+    let (class, sign) = (book.places[place].class, lens.display_sign(place));
     let lines = if value {
         market_lines(lens, class, sign, snapshots.days(), &baskets)
     } else {

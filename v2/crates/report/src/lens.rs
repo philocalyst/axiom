@@ -10,7 +10,7 @@ use std::iter;
 
 use axiom_core::num::{POW10, div_round, mul_div};
 use axiom_core::{Day, Diagnostic, Id, Qty, Span};
-use axiom_engine::{Holding, Known};
+use axiom_engine::{Holding, Known, Sides};
 use axiom_model::{Amount, Book, Class, Commodity, Entity, Place, Subject};
 
 use crate::history::Held;
@@ -71,6 +71,8 @@ pub struct Lens<'b, 's> {
     pub day: Day,
     /// Names and kinds looked up once by the report context or this lens.
     pub known: Known,
+    /// Prepared display signs from the report context's plan, when available.
+    sides: Option<&'b Sides>,
 }
 
 impl<'b, 's> Lens<'b, 's> {
@@ -80,7 +82,18 @@ impl<'b, 's> Lens<'b, 's> {
 
     /// Uses the engine plan's pre-resolved names and kinds.
     pub fn with_known(book: &'b Book<'s>, whose: &'b Whose, day: Day, known: Known) -> Lens<'b, 's> {
-        Lens { book, whose, day, known }
+        Lens { book, whose, day, known, sides: None }
+    }
+
+    /// Uses names, kinds and display signs prepared by one engine plan.
+    pub fn with_plan(
+        book: &'b Book<'s>,
+        whose: &'b Whose,
+        day: Day,
+        known: Known,
+        sides: &'b Sides,
+    ) -> Lens<'b, 's> {
+        Lens { book, whose, day, known, sides: Some(sides) }
     }
 
     /// The same books at another day's prices.
@@ -90,6 +103,11 @@ impl<'b, 's> Lens<'b, 's> {
 
     pub fn owns(self, place: Id<Place>) -> bool {
         self.whose.includes(self.book.places[place].owner)
+    }
+
+    /// The display sign for a place, using the plan's table or the legacy path lookup.
+    pub fn display_sign(self, place: Id<Place>) -> i64 {
+        self.sides.map_or_else(|| self.book.v3_root(place).display_sign(), |sides| sides.sign(place))
     }
 
     /// `amount` in the base currency at the lens day's prices; `None` without

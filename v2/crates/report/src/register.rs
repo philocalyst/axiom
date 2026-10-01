@@ -11,7 +11,7 @@ use axiom_engine::{Pad, Run, State};
 use axiom_model::{Amount, Book, Commodity, Place};
 
 use crate::history::{Change, Posting, pad_ends};
-use crate::lens::Whose;
+use crate::lens::{Lens, Whose};
 use crate::places::path;
 use crate::resolve;
 use crate::table::{code_labels, gap_words};
@@ -25,11 +25,23 @@ pub fn view<'s>(
     from: Option<Day>,
     to: Option<Day>,
 ) -> Result<Report<'s>, Diagnostic> {
+    view_with_lens(Lens::new(book, whose, to.unwrap_or(run.today)), run, place, from, to)
+}
+
+/// Builds a register using owner scope and display signs from the shared lens.
+pub(crate) fn view_with_lens<'s>(
+    lens: Lens<'_, 's>,
+    run: &Run,
+    place: &str,
+    from: Option<Day>,
+    to: Option<Day>,
+) -> Result<Report<'s>, Diagnostic> {
+    let book = lens.book;
     let place = resolve::place(book, place)?;
     // A place is somebody's: another owner's register is not part of whose money this is.
     let owner = book.places[place].owner;
-    let register = match whose.includes(owner) {
-        true => section(book, run, place, from, to),
+    let register = match lens.whose.includes(owner) {
+        true => section_with_sign(book, run, place, from, to, lens.display_sign(place)),
         false => Section::note_only(format!(
             "{} belongs to {}, whose money this is not.",
             path(book, place),
@@ -47,9 +59,19 @@ pub fn view<'s>(
 /// or out of `PLACE.basis` is listed with the change it made to the basis, and
 /// leaves the balance alone: no quantity moved.
 pub fn section<'s>(book: &Book<'s>, run: &Run, place: Id<Place>, from: Option<Day>, to: Option<Day>) -> Section<'s> {
+    section_with_sign(book, run, place, from, to, book.v3_root(place).display_sign())
+}
+
+fn section_with_sign<'s>(
+    book: &Book<'s>,
+    run: &Run,
+    place: Id<Place>,
+    from: Option<Day>,
+    to: Option<Day>,
+    sign: i64,
+) -> Section<'s> {
     let steps = steps(book, run, place, to.unwrap_or(run.today));
     let split = from.map_or(0, |from| steps.partition_point(|step| step.day < from));
-    let sign = book.v3_root(place).display_sign();
     let shown = |qty: Qty, unit: Id<Commodity>| Cell::amount(book, Amount::new(Qty(qty.0 * sign), unit));
 
     let columns = [
