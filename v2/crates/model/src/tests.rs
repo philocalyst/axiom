@@ -902,7 +902,10 @@ law computed
         assert!(diags.is_empty(), "{diags:?}");
         let cap = |name: &str| book.law(name).ok().and_then(|id| book.laws[id].cap());
         let yearly = cap("yearly").expect("a cap");
-        assert_eq!((yearly.dir, yearly.window, yearly.strict), (crate::Dir::In, crate::Window::Year, true));
+        assert_eq!(
+            (yearly.target, yearly.window, yearly.strict),
+            (crate::CapTarget::Total(crate::Dir::In), crate::Window::Year, true)
+        );
         assert_eq!(book.show(yearly.limit).to_string(), "9,000 USD");
         for other in ["filtered", "priced", "computed"] {
             assert!(cap(other).is_none(), "{other} says more than a cap");
