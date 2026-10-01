@@ -254,6 +254,43 @@ account assets/bank/hy : hi-yield
 }
 
 #[test]
+fn deep_kind_defaults_keep_nearest_value_and_its_source_location() {
+    let text = "\
+kind label-0 : person
+  has nickname text
+  nickname \"root\"
+kind label-1 : label-0
+  nickname \"middle\"
+kind label-2 : label-1
+  nickname \"near\"
+kind label-3 : label-2
+kind label-4 : label-3
+entity inherited : label-4
+entity own : label-4
+  nickname \"instance\"
+";
+    let source = format!("{ACCOUNTS}\n{text}");
+    with_files(&[("axiom.ax", &source)], |book, diags| {
+        assert!(diags.is_empty(), "{diags:?}");
+        let nickname = book.names.get("nickname").unwrap();
+        let value = |entity: &str| {
+            let entity = book.entity(entity).unwrap();
+            book.entities[entity].props.iter().find(|prop| prop.name == nickname).unwrap()
+        };
+        let inherited = value("inherited");
+        let own = value("own");
+        let written = |prop: &crate::Prop, text: &str| {
+            assert_eq!(prop.value, crate::Value::Text(book.names.get(text).unwrap()));
+            let loc = prop.loc.expect("defaults preserve their source location");
+            let start = source.find(&format!("nickname \"{text}\"")).unwrap();
+            assert_eq!(loc.range(), start..start + format!("nickname \"{text}\"").len());
+        };
+        written(inherited, "near");
+        written(own, "instance");
+    });
+}
+
+#[test]
 fn a_law_is_type_checked_when_it_is_compiled() {
     let text = "
 law fine

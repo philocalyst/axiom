@@ -10,7 +10,7 @@
 //! order their lines need: an amount is only exact once its commodity's
 //! precision is settled.
 
-use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, Span, Sym};
+use axiom_core::{Day, Days, Diagnostic, Id, Loc, Map, Ratio, Span, Sym, Tree};
 use axiom_syntax::{Decl, DeclKind, Expr, ExprId, ExprKind, File, Policy, Prop as Line};
 
 use crate::book::{Amount, Basis, Commodity, Entity, Has, Kind, Place, Prop, Residence, Sort};
@@ -216,6 +216,37 @@ impl Kind {
             Assign::Liquidity(span) => self.liquidity = Some(*span),
             Assign::Prop(prop) => put(&mut self.props, *prop),
             _ => {}
+        }
+    }
+}
+
+/// Defaults written by each kind itself. Ancestors are walked when an instance
+/// is built, so a deep kind does not copy every ancestor's assignments.
+struct Defaults {
+    by_kind: Vec<Vec<Assign>>,
+}
+
+impl Defaults {
+    fn empty(kinds: usize) -> Defaults {
+        Defaults { by_kind: vec![Vec::new(); kinds] }
+    }
+
+    /// Applies defaults from the oldest ancestor through `kind`, reusing one
+    /// caller-owned path buffer across every instance of the same target.
+    fn apply(
+        &self,
+        kinds: &Tree<Kind>,
+        kind: Id<Kind>,
+        path: &mut Vec<Id<Kind>>,
+        mut apply: impl FnMut(&Assign),
+    ) {
+        path.clear();
+        path.extend(kinds.lineage(kind));
+        path.reverse();
+        for ancestor in path.iter().copied() {
+            for assign in &self.by_kind[ancestor.index()] {
+                apply(assign);
+            }
         }
     }
 }
@@ -561,7 +592,7 @@ fn kinds<'s>(
     entries: &[Entry<'_, 's>],
     target: Target,
     diags: &mut Vec<Diagnostic>,
-) -> Vec<Vec<Assign>> {
+) -> Defaults {
     let ids: Vec<Id<Kind>> =
         world.book.kinds.ids().filter(|&id| Target::of(world.book.kinds[id].sort) == target).collect();
     let written = first_of(decls(entries, DeclKind::Kind), world.declared.kinds.iter().map(|&id| Some(id)));
@@ -586,73 +617,80 @@ fn kinds<'s>(
         let unshadowed = inherited.iter().filter(|theirs| !own.iter().any(|mine| mine.name == theirs.name));
         world.book.kinds[id].has = own.iter().chain(unshadowed).copied().collect();
     }
-    let mut defaults: Vec<Vec<Assign>> = vec![Vec::new(); world.book.kinds.len()];
+    let mut defaults = Defaults::empty(world.book.kinds.len());
     for &id in &ids {
-        if let Some(parent) = world.book.kinds.parent(id) {
-            let above = world.book.kinds[parent].clone();
-            world.book.kinds[id].inherit(&above);
-            defaults[id.index()] = defaults[parent.index()].clone();
+        if world.book.kinds.parent(id).is_some() {
+            let (above, kind) = world.book.kinds.with_parent_mut(id).expect("parent was checked");
+            kind.inherit(above);
         }
         let Some(w) = written.get(&id) else { continue };
         let has = world.book.kinds[id].has.clone();
         for assign in read_lines(world, &Lines::of(w), &[Target::Kind, target], &has, id, diags) {
             world.book.kinds[id].set(&assign);
             if assign.is_default() {
-                defaults[id.index()].push(assign);
+                defaults.by_kind[id.index()].push(assign);
             }
         }
     }
     defaults
 }
 
-/// The settings of one thing: what its kind hands down, then its own lines.
-fn settings<'a, 's>(
+/// Reads only this thing's own lines. Kind defaults stay borrowed in `Defaults`
+/// and are applied directly by each target-specific setter.
+fn own_settings<'a, 's>(
     world: &mut World<'s>,
     (kind, target): (Id<Kind>, Target),
     written: Option<&Written<'a, 's, Decl<'s>>>,
-    defaults: &[Vec<Assign>],
     diags: &mut Vec<Diagnostic>,
 ) -> Vec<Assign> {
     let has = world.book.kinds[kind].has.clone();
-    let own = written.map_or_else(Vec::new, |w| read_lines(world, &Lines::of(w), &[target], &has, kind, diags));
-    defaults[kind.index()].iter().cloned().chain(own).collect()
+    written.map_or_else(Vec::new, |w| read_lines(world, &Lines::of(w), &[target], &has, kind, diags))
 }
 
 fn commodities<'s>(
     world: &mut World<'s>,
     entries: &[Entry<'_, 's>],
-    defaults: &[Vec<Assign>],
+    defaults: &Defaults,
     diags: &mut Vec<Diagnostic>,
 ) {
     let written = first_of(decls(entries, DeclKind::Commodity), world.declared.commodities.iter().map(|&id| Some(id)));
+    let mut path = Vec::new();
     for id in world.book.commodities.ids().collect::<Vec<_>>() {
         let kind = world.book.commodities[id].kind;
-        let assigns = settings(world, (kind, Target::Commodity), written.get(&id), defaults, diags);
-        assigns.iter().for_each(|assign| world.book.commodities[id].set(assign));
+        let own = own_settings(world, (kind, Target::Commodity), written.get(&id), diags);
+        let (kinds, commodities) = (&world.book.kinds, &mut world.book.commodities);
+        defaults.apply(kinds, kind, &mut path, |assign| commodities[id].set(assign));
+        for assign in &own {
+            commodities[id].set(assign);
+        }
     }
 }
 
 fn entities<'s>(
     world: &mut World<'s>,
     entries: &[Entry<'_, 's>],
-    defaults: &[Vec<Assign>],
+    defaults: &Defaults,
     diags: &mut Vec<Diagnostic>,
 ) {
     let written = first_of(decls(entries, DeclKind::Entity), world.declared.entities.iter().map(|&id| Some(id)));
+    let mut path = Vec::new();
     for id in world.book.entities.ids().collect::<Vec<_>>() {
         let kind = world.book.entities[id].kind;
-        let assigns = settings(world, (kind, Target::Entity), written.get(&id), defaults, diags);
+        let own = own_settings(world, (kind, Target::Entity), written.get(&id), diags);
         let restricted = world.book.kinds[kind].restricted;
-        let entity = &mut world.book.entities[id];
+        let (kinds, entities) = (&world.book.kinds, &mut world.book.entities);
+        let entity = &mut entities[id];
         entity.restricted = restricted;
-        for assign in &assigns {
-            match assign {
-                Assign::Member(member, loc) if *member == id => diags.push(
-                    Diagnostic::error("member-self", "an entity cannot be a member of itself")
-                        .label(*loc, "name the household this person belongs to"),
-                ),
-                _ => entity.set(assign),
-            }
+        let mut apply = |assign: &Assign| match assign {
+            Assign::Member(member, loc) if *member == id => diags.push(
+                Diagnostic::error("member-self", "an entity cannot be a member of itself")
+                    .label(*loc, "name the household this person belongs to"),
+            ),
+            _ => entity.set(assign),
+        };
+        defaults.apply(kinds, kind, &mut path, &mut apply);
+        for assign in &own {
+            apply(assign);
         }
         let mut lives = std::mem::take(&mut entity.lives).into_vec();
         lives.sort_by_key(|residence| residence.days);
@@ -663,30 +701,37 @@ fn entities<'s>(
 fn places<'s>(
     world: &mut World<'s>,
     entries: &[Entry<'_, 's>],
-    defaults: &[Vec<Assign>],
+    defaults: &Defaults,
     budgets: &mut Vec<Budget>,
     diags: &mut Vec<Diagnostic>,
 ) {
     let written = first_of(decls(entries, DeclKind::Account), world.declared.places.iter().copied());
+    let mut path = Vec::new();
     for id in world.book.places.ids().collect::<Vec<_>>() {
         let kind = world.book.places[id].kind;
-        let assigns = settings(world, (kind, Target::Place), written.get(&id), defaults, diags);
+        let own = own_settings(world, (kind, Target::Place), written.get(&id), diags);
         let facts = &world.book.kinds[kind];
         // Money in a `deferred` place is untaxed until it leaves, so unless its kind
         // says otherwise, none of it counts as already accounted for.
         let default = if facts.deferred { Basis::Zero } else { Basis::Cost };
         let (deferred, basis, claim) = (facts.deferred, facts.basis.unwrap_or(default), facts.claim);
-        let place = &mut world.book.places[id];
+        let (kinds, places) = (&world.book.kinds, &mut world.book.places);
+        let place = &mut places[id];
         (place.deferred, place.basis, place.claim) = (deferred, basis, claim);
-        for assign in &assigns {
+        let lines = &mut world.lines;
+        let mut apply = |assign: &Assign| {
             match *assign {
                 Assign::Budget(amount, window, loc) => budgets.push(Budget { place: id, amount, window, loc }),
-                Assign::Holds(_, loc) => drop(world.lines.insert((id, "holds"), loc)),
-                Assign::Opened(_, loc) => drop(world.lines.insert((id, "opened"), loc)),
-                Assign::Closed(_, loc) => drop(world.lines.insert((id, "closed"), loc)),
+                Assign::Holds(_, loc) => drop(lines.insert((id, "holds"), loc)),
+                Assign::Opened(_, loc) => drop(lines.insert((id, "opened"), loc)),
+                Assign::Closed(_, loc) => drop(lines.insert((id, "closed"), loc)),
                 _ => {}
             }
             place.set(assign);
+        };
+        defaults.apply(kinds, kind, &mut path, &mut apply);
+        for assign in &own {
+            apply(assign);
         }
         if let (Some(opened), Some(closed), Some(loc)) = (place.opened, place.closed, place.loc)
             && closed < opened
