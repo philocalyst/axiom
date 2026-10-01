@@ -15,6 +15,7 @@ use crate::errors::{Word, unknown};
 use crate::kinds::{self, NativeKinds};
 use crate::names::{Names, Scoped};
 use crate::props::PropTable;
+use crate::resolve::End;
 use crate::scope::{Home, Scopes};
 use crate::sources::{Site, SystemIndex};
 
@@ -35,6 +36,9 @@ pub(crate) struct World<'s> {
     /// Claim tabs allocated from the bounded syntax survey before Place ids
     /// freeze. A later lookup that was not surveyed is a diagnostic.
     tabs: Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>,
+    /// Loan contract names resolve to their actual debt tab, before and after
+    /// contract terms have been compiled.
+    pub(crate) contract_endpoints: Map<Sym, End>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -427,6 +431,102 @@ pub(crate) fn declare<'a, 's>(
             first_entity_paths.push(path);
         }
     }
+
+    // Endpoint names that are not declared account/asset paths, other typed
+    // names, or explicit entities are parties. Keep only one borrowed name and
+    // its first source location, even when it occurs in many journal rows.
+    let mut place_names = Set::default();
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            let ItemKind::Decl(id) = item.kind else { continue };
+            let decl = &file[id];
+            if matches!(decl.what, DeclKind::Account | DeclKind::Asset) {
+                add_path_spellings(&mut place_names, decl.name.0);
+            }
+        }
+    }
+
+    let mut entity_spellings = Set::default();
+    for &path in explicit_entities.keys() {
+        add_path_spellings(&mut entity_spellings, path);
+    }
+    for root in ["me", "?", "opening", "market"] {
+        entity_spellings.insert(root);
+    }
+
+    let mut other_spellings = Set::default();
+    for name in native_kinds.index.names.keys(&names) {
+        other_spellings.insert(name);
+    }
+    for name in native_purposes.index.names.keys(&names) {
+        other_spellings.insert(name);
+    }
+    for &name in commodity_by_name.keys() {
+        add_path_spellings(&mut other_spellings, name);
+    }
+    for (_, system) in systems_tree.iter() {
+        add_path_spellings(&mut other_spellings, names.name(system.path));
+    }
+    let mut contract_names = Set::default();
+    let mut candidates: Map<&'s str, Loc> = Map::default();
+    let mut entity_roles = Set::default();
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            match item.kind {
+                ItemKind::Decl(id) if file[id].what == DeclKind::Asset => {
+                    add_path_spellings(&mut other_spellings, file[id].name.0);
+                }
+                ItemKind::Contract(id) => {
+                    add_path_spellings(&mut contract_names, file[id].name.0);
+                }
+                _ => {}
+            }
+        }
+    }
+    crate::lower::visit_endpoints(sites, |_, name, loc, _| {
+        candidates.entry(name.0).or_insert(loc);
+    });
+    for mention in &survey.mentions {
+        match *mention {
+            crate::lower::Mention::Claim { subject, creditor, loc } => {
+                candidates.entry(subject.0).or_insert(loc);
+                candidates.entry(creditor.0).or_insert(loc);
+                entity_roles.insert(subject.0);
+                entity_roles.insert(creditor.0);
+            }
+            crate::lower::Mention::For { other, loc, .. } => {
+                candidates.entry(other.0).or_insert(loc);
+                entity_roles.insert(other.0);
+            }
+            crate::lower::Mention::Promise { party, loc, .. } => {
+                candidates.entry(party.0).or_insert(loc);
+                entity_roles.insert(party.0);
+            }
+            crate::lower::Mention::Ends { .. } | crate::lower::Mention::Due { .. } => {}
+        }
+    }
+
+    let mut implicit_party_locs: Map<&'s str, Loc> = Map::default();
+    for (&path, &loc) in &candidates {
+        if entity_spellings.contains(path) || place_names.contains(path) || other_spellings.contains(path) {
+            continue;
+        }
+        if matches!(path, "self" | "issuer") || (contract_names.contains(path) && !entity_roles.contains(path)) {
+            continue;
+        }
+        implicit_party_locs.insert(path, loc);
+    }
+    // A written suffix such as `acme` can resolve to one implicit path such as
+    // `vendors/acme`; adding a second `acme` entity would make that reference
+    // ambiguous. Preserve all full paths so genuinely ambiguous suffixes are
+    // diagnosed by the normal scoped entity resolver.
+    let implicit_paths: Vec<&'s str> = implicit_party_locs.keys().copied().collect();
+    for &path in &implicit_paths {
+        entity_spellings.insert(path);
+        add_path_spellings(&mut entity_spellings, path);
+    }
     for &path in &first_entity_paths {
         let (home, ..) = explicit_entities[&path];
         entity_drafts.push(EntityDraft { path, home });
@@ -438,6 +538,15 @@ pub(crate) fn declare<'a, 's>(
                 home: Home::Builtin,
             });
         }
+    }
+    for path in implicit_paths {
+        if explicit_entities.contains_key(path) || path_is_suffix_of_other(path, &implicit_party_locs) {
+            continue;
+        }
+        entity_drafts.push(EntityDraft {
+            path,
+            home: Home::Builtin,
+        });
     }
     let entity_paths = entity_drafts
         .iter()
@@ -479,7 +588,12 @@ pub(crate) fn declare<'a, 's>(
             });
             (kind, purpose, *doc, Some(file.loc(decl.name.0)))
         } else {
-            (native_kinds.roots.entity, None, None, None)
+            (
+                native_kinds.roots.entity,
+                None,
+                None,
+                implicit_party_locs.get(path).copied(),
+            )
         };
         Entity {
             path: names.intern(path),
@@ -1055,6 +1169,34 @@ pub(crate) fn declare<'a, 's>(
     for (tab, &old) in tab_drafts.iter().zip(&tab_node_indices) {
         tabs.insert((tab.party, tab.owner, tab.class), remap[old]);
     }
+    let mut contract_endpoints = Map::default();
+    for mention in &survey.mentions {
+        let crate::lower::Mention::Promise {
+            name,
+            party,
+            holding,
+            loan_party: Some(_),
+            ..
+        } = *mention
+        else {
+            continue;
+        };
+        let Some(&party) = entity_by_name.get(party.0) else {
+            continue;
+        };
+        let owner = holding
+            .and_then(|name| account_owner_by_path.get(name.0).copied())
+            .unwrap_or(me);
+        if let Some(&place) = tabs.get(&(party, owner, Class::Debt)) {
+            contract_endpoints.insert(
+                names.intern(name.0),
+                End {
+                    place,
+                    entity: Some(party),
+                },
+            );
+        }
+    }
     let mut ordinal = vec![u32::MAX; places.len()];
     let mut declared_places = vec![None; account_order.len()];
     for (source_at, draft_at) in account_order.into_iter().enumerate() {
@@ -1161,11 +1303,30 @@ pub(crate) fn declare<'a, 's>(
         ordinal,
         lines: Map::default(),
         tabs,
+        contract_endpoints,
     }
 }
 
 fn path_key(path: &str) -> impl Iterator<Item = u8> + '_ {
     path.bytes().map(|byte| if byte == b'/' { 0 } else { byte })
+}
+
+fn add_path_spellings<'s>(spellings: &mut Set<&'s str>, path: &'s str) {
+    for prefix in crate::paths::prefixes(path) {
+        spellings.insert(prefix);
+        for (at, _) in prefix.match_indices('/') {
+            spellings.insert(&prefix[at + 1..]);
+        }
+    }
+}
+
+fn path_is_suffix_of_other(path: &str, candidates: &Map<&str, Loc>) -> bool {
+    candidates.keys().any(|&other| {
+        other != path
+            && other
+                .strip_suffix(path)
+                .is_some_and(|prefix| prefix.ends_with('/'))
+    })
 }
 
 fn is_path_child(parent: &str, child: &str) -> bool {

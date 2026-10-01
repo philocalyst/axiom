@@ -237,10 +237,48 @@ impl<'s> World<'s> {
                 entity: None,
             });
         }
+        if let Some(sym) = self.book.names.get(word.text)
+            && let Some(&end) = self.contract_endpoints.get(&sym)
+        {
+            return Ok(end);
+        }
+        if let Some(contract) = self.book.contract(word.text) {
+            if let Some(loan) = self.book.contracts[contract].loan {
+                return Ok(End {
+                    place: loan.debt,
+                    entity: Some(self.book.contracts[contract].party),
+                });
+            }
+            if let Some(entity) = self.seek_entity(home, word)? {
+                return self.entity_end(entity, word);
+            }
+            return Err(
+                Diagnostic::error(
+                    "contract-endpoint",
+                    format!("contract `{}` is not a flow endpoint", word.text),
+                )
+                .label(word.loc, "name its party or holding account instead")
+                .help("loan contracts name their debt tab; other contracts are not places"),
+            );
+        }
         if let Some(place) = self.seek_place(word)? {
             return Ok(End { place, entity: None });
         }
+        if self.book.asset(word.text).is_some() {
+            return Err(
+                Diagnostic::error(
+                    "asset-endpoint",
+                    format!("asset `{}` is not a flow endpoint", word.text),
+                )
+                .label(word.loc, "this names the asset itself")
+                .help(format!("use `#purchase of {}` to acquire the asset", word.text)),
+            );
+        }
         let entity = self.entity(home, word)?;
+        self.entity_end(entity, word)
+    }
+
+    fn entity_end(&self, entity: Id<Entity>, word: Word) -> Result<End, Diagnostic> {
         self.book.entities[entity]
             .place
             .map(|place| End { place, entity: Some(entity) })

@@ -615,6 +615,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
             Diagnostic::error("share-rate", "a share must be a percentage or fraction")
                 .label(expr.loc, "write `60%` or `3/5`")
         })?;
+        validate_share_rate(rate, expr.loc)?;
         self.word(&["for"])?;
         let word = self.name("an entity")?;
         let entity = self.world.entity(self.home, word)?;
@@ -747,6 +748,16 @@ impl<'a, 's> Args<'_, 'a, 's> {
             loc: Some(self.line.loc),
         }))
     }
+}
+
+fn validate_share_rate(rate: Ratio, loc: Loc) -> Result<(), Diagnostic> {
+    if rate.is_negative() || rate.num() > rate.den() {
+        return Err(
+            Diagnostic::error("share-rate-range", "a share must be between 0% and 100%")
+                .label(loc, "this share is outside the allowed range"),
+        );
+    }
+    Ok(())
 }
 
 /// The lines under one declaration, and where they were written.
@@ -2265,5 +2276,18 @@ mod native_property_tests {
 
         assert_eq!(diagnostics.iter().filter(|diag| diag.code == "asset-part-cycle").count(), 1);
         assert!(assets.ids().any(|id| assets[id].part_of.is_none()));
+    }
+
+    #[test]
+    fn kind_share_rates_are_bounded_and_point_to_the_written_rate() {
+        let loc = Loc::new(axiom_core::FileId(2), 8, 11);
+        assert!(validate_share_rate(Ratio::ZERO, loc).is_ok());
+        assert!(validate_share_rate(Ratio::ONE, loc).is_ok());
+
+        for rate in [Ratio::new(3, 2).unwrap(), Ratio::new(-1, 2).unwrap()] {
+            let diagnostic = validate_share_rate(rate, loc).unwrap_err();
+            assert_eq!(diagnostic.code, "share-rate-range");
+            assert_eq!(diagnostic.anchor(), loc);
+        }
     }
 }
