@@ -27,7 +27,7 @@ pub struct Book<'s> {
     /// Decoded escaped strings. Unescaped source strings stay as interned
     /// symbols; only text whose meaning differs from its source bytes enters
     /// this compact pool.
-    pub(crate) text_values: Arena<TextString>,
+    pub text_values: Arena<TextString>,
     /// The currency that basis, totals and net worth are counted in.
     pub base: Id<Commodity>,
     /// `relaxed`: law violations are warnings.

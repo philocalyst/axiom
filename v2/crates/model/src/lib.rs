@@ -29,6 +29,7 @@ mod lower;
 mod names;
 mod params;
 mod paths;
+mod purposes;
 mod prices;
 mod props;
 mod resolve;
@@ -63,23 +64,23 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     let mut diags = Vec::new();
     let mut names = Interner::default();
     let (sites, systems_tree, systems) = sources::arrange(sources, &mut names, &mut diags);
-    let surveyed = collect::survey(&sites, &mut names);
-    diags.extend(surveyed.diags.iter().cloned());
-
-    let entries = &surveyed.entries;
-    let settings = declare::settings(entries, &mut diags);
-    let scopes = declare::scopes(entries, &systems, &systems_tree, &mut diags);
-    let mut world = declare::declare(&surveyed, &settings, names, systems_tree, systems, scopes, &mut diags);
-    let budgets = props::apply(&mut world, entries, &mut diags);
+    let settings = declare::settings(&sites, &mut diags);
+    let scopes = declare::scopes(&sites, &systems, &systems_tree, &mut diags);
+    let survey = lower::survey(&sites);
+    let mut world = declare::declare(
+        &sites,
+        &settings,
+        names,
+        systems_tree,
+        systems,
+        scopes,
+        &survey,
+        &mut diags,
+    );
+    props::declare(&mut world, &sites, &mut diags);
+    world.finish_props();
     world.book.lookup.taken = world.taken_names();
-    params::declare(&mut world, entries, &mut diags);
-    laws::declare(&mut world, &sites, entries, budgets, &mut diags);
-    let rank = laws::rank(&world.book, &mut diags);
-    rules::govern(&mut world.book, &rank);
-    flows::record(&mut world, &sites, entries, &surveyed.journal, surveyed.txns, settings.layout_free, &mut diags);
-    if !settings.layout_free {
-        layout::check(&sites, &mut diags);
-    }
+    params::declare(&mut world, &sites, &mut diags);
     // One cause is reported once, however many declarations shared the line.
     let mut seen = Set::default();
     diags.retain(|diagnostic| seen.insert((diagnostic.code.clone(), diagnostic.anchor(), diagnostic.message.clone())));

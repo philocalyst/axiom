@@ -1,67 +1,49 @@
-//! Declaration: everything that has a name is created, and nothing yet says
-//! what it holds.
+//! Native S5 declarations: create the immutable Book trees and name indexes.
 //!
-//! Kinds, commodities, entities and places exist after this, with their kinds
-//! and paths. Their properties, and the names written in laws and in the
-//! journal, are resolved against them later.
+//! This pass borrows source AST nodes directly. It creates kinds and purposes
+//! first so forward references from entities, commodities and accounts resolve
+//! against complete scoped indexes, then freezes the place tree once.
 
-use axiom_core::diag::closest;
-use axiom_core::diag::distance;
-use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Set, Sym, Tree};
-use axiom_syntax::{Change, DeclKind, ExprKind, ItemKind, Setting, Verb};
+use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Ratio, Set, Sym, Tree};
+use axiom_syntax::{Decl, DeclKind, ExprKind, ItemKind, Setting, Verb};
 
-use crate::book::{Book, Books, Class, Commodity, Entity, Kind, Lookup, PathRoot, Place, Purpose, Role, Roots, Sort};
-use crate::collect::{Entry, Seen, Surveyed, Written, decls};
-use crate::cx::Cx;
-use crate::errors::{Word, duplicate, list_and, unknown};
-use crate::kinds::{self, Kinds};
-use crate::law::Rules;
-use crate::names::{Names, Rank, Scoped};
-use crate::paths;
+use crate::book::{
+    Asset, At, Basis, Book, Books, Class, Commodity, Entity, Kind, KindRoots, Lookup, Place, Prop,
+    Purpose, Role, Roots, Share, Sort, System,
+};
+use crate::errors::{Word, unknown};
+use crate::kinds::{self, NativeKinds};
+use crate::names::{Names, Scoped};
 use crate::props::PropTable;
 use crate::scope::{Home, Scopes};
-use crate::sources::SystemIndex;
+use crate::sources::{Site, SystemIndex};
 
 /// Quanta are `i64`; eighteen decimals is as fine as one can count.
 pub(crate) const MAX_SCALE: u8 = 18;
 
-/// `?` in a flow: where value of unknown origin comes from and unexplained
-/// value goes.
-const UNKNOWN: &str = "equity/unknown";
-/// Where `opening` balances come from.
-const OPENING: &str = "equity/opening";
-/// The market's place, which `via market` on an assertion names.
-const MARKET: &str = "income/market";
-
-/// The book under construction, with what only the build needs.
+/// The book under construction, with the indexes needed by native lowerers.
 pub(crate) struct World<'s> {
     pub book: Book<'s>,
     pub scopes: Scopes,
     pub systems: SystemIndex<'s>,
     pub props: PropTable,
-    /// Property rows accumulated in source order and frozen onto their
-    /// targets once the declaration pass is complete.
-    pub prop_writes: Vec<(PropTarget, crate::book::Prop)>,
-    /// The id of everything declared, in the order written.
+    pub prop_writes: Vec<(PropTarget, Prop)>,
     pub declared: Declared,
-    /// Names some law counts.
     pub tallies: Set<&'s str>,
-    /// The order each place was declared in; places opened by use come last.
     pub ordinal: Vec<u32>,
-    /// Where the lines that say when a place is open and what it holds were
-    /// written (`opened`, `closed`, `holds`), for the errors that enforce them.
     pub lines: Map<(Id<Place>, &'static str), Loc>,
+    /// Claim tabs allocated from the bounded syntax survey before Place ids
+    /// freeze. A later lookup that was not surveyed is a diagnostic.
+    tabs: Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>,
 }
 
-/// A typed target for one custom property row. Kind defaults remain on the
-/// kind and are read through ancestry instead of copied into every instance.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum PropTarget {
     Kind(Id<Kind>),
     Entity(Id<Entity>),
     Commodity(Id<Commodity>),
     Place(Id<Place>),
-    Asset(Id<crate::book::Asset>),
+    Asset(Id<Asset>),
 }
 
 impl PropTarget {
@@ -77,23 +59,18 @@ impl PropTarget {
 }
 
 impl World<'_> {
-    /// Stage a property row by typed identity. This allocates no per-row key
-    /// strings and leaves each target's final `Props` slice to one freeze pass.
-    pub(crate) fn set_prop(&mut self, target: PropTarget, prop: crate::book::Prop) {
+    pub(crate) fn set_prop(&mut self, target: PropTarget, prop: Prop) {
         self.prop_writes.push((target, prop));
     }
 
-    /// Sort and freeze all staged rows into their owners once. Equal-day rows
-    /// retain source order so the property's established duplicate policy can
-    /// diagnose them with both original locations.
+    /// Freeze staged custom-property rows once, grouped by their typed owner.
     pub(crate) fn finish_props(&mut self) {
         let names = &self.book.names;
-        self.prop_writes.sort_by(|(left_target, left), (right_target, right)| {
-            left_target
-                .key()
-                .cmp(&right_target.key())
-                .then_with(|| names.name(left.name).cmp(names.name(right.name)))
-                .then_with(|| left.since.cmp(&right.since))
+        self.prop_writes.sort_by(|(ta, a), (tb, b)| {
+            ta.key()
+                .cmp(&tb.key())
+                .then_with(|| names.name(a.name).cmp(names.name(b.name)))
+                .then_with(|| a.since.cmp(&b.since))
         });
         let mut start = 0;
         while start < self.prop_writes.len() {
@@ -102,7 +79,7 @@ impl World<'_> {
             while end < self.prop_writes.len() && self.prop_writes[end].0 == target {
                 end += 1;
             }
-            let rows: Box<[crate::book::Prop]> = self.prop_writes[start..end]
+            let rows: Box<[Prop]> = self.prop_writes[start..end]
                 .iter()
                 .map(|(_, prop)| *prop)
                 .collect();
@@ -117,37 +94,55 @@ impl World<'_> {
         }
         self.prop_writes.clear();
     }
+
+    pub(crate) fn tab(
+        &self,
+        party: Id<Entity>,
+        owner: Id<Entity>,
+        class: Class,
+        loc: Loc,
+    ) -> Result<Id<Place>, Diagnostic> {
+        self.tabs.get(&(party, owner, class)).copied().ok_or_else(|| {
+            Diagnostic::error("unregistered-tab", "this claim tab was not found during the declaration survey")
+                .label(loc, "a claim relationship must be visible before the place tree is frozen")
+                .help("check that the party, owner and flow direction match the claim or contract declaration")
+        })
+    }
 }
 
 pub(crate) struct Declared {
     pub kinds: Vec<Id<Kind>>,
-    /// Indexed by kind: its parent chain is broken, and said so once.
     pub unrooted: Vec<bool>,
     pub commodities: Vec<Id<Commodity>>,
     pub entities: Vec<Id<Entity>>,
     pub places: Vec<Option<Id<Place>>>,
 }
 
-/// The project-wide directives.
 pub(crate) struct Settings<'s> {
     pub base: Option<Word<'s>>,
     pub relaxed: bool,
-    pub layout_free: bool,
 }
 
 pub(crate) fn settings<'a, 's>(
-    sites: &[crate::sources::Site<'a, 's>],
+    sites: &[Site<'a, 's>],
     diags: &mut Vec<Diagnostic>,
 ) -> Settings<'s> {
-    let mut settings = Settings { base: None, relaxed: false, layout_free: false };
+    let mut settings = Settings {
+        base: None,
+        relaxed: false,
+    };
     for site in sites {
         let file = &site.source.file;
         for item in &file.items {
-            let ItemKind::Setting(id) = item.kind else { continue };
-            let setting = file[id];
-            match setting {
+            let ItemKind::Setting(id) = item.kind else {
+                continue;
+            };
+            match file[id] {
                 Setting::Base(name) => {
-                    let word = Word { text: name.0, loc: file.loc(name.0) };
+                    let word = Word {
+                        text: name.0,
+                        loc: file.loc(name.0),
+                    };
                     match settings.base {
                         Some(first) if first.text != word.text => diags.push(
                             Diagnostic::error("duplicate-base", "the base currency is set twice")
@@ -160,7 +155,8 @@ pub(crate) fn settings<'a, 's>(
                     }
                 }
                 Setting::Relaxed => settings.relaxed = true,
-                Setting::System(_) | Setting::Use(_) | Setting::Currency(_) | Setting::Rates(_) => {}
+                Setting::System(_) | Setting::Use(_) | Setting::Currency(_) | Setting::Rates(_) => {
+                }
             }
         }
     }
@@ -170,12 +166,12 @@ pub(crate) fn settings<'a, 's>(
 /// What each home has brought into scope: its `use` lines, the system of every
 /// `lives` line (which implies a `use`), and `std` for everyone.
 pub(crate) fn scopes(
-    sites: &[crate::sources::Site<'_, '_>],
+    sites: &[Site<'_, '_>],
     systems: &SystemIndex,
-    tree: &Tree<crate::book::System>,
+    tree: &Tree<System>,
     diags: &mut Vec<Diagnostic>,
 ) -> Scopes {
-    let mut used: Vec<(Home, Id<crate::book::System>)> = Vec::new();
+    let mut used: Vec<(Home, Id<System>)> = Vec::new();
     for site in sites {
         let file = &site.source.file;
         for item in &file.items {
@@ -192,13 +188,15 @@ pub(crate) fn scopes(
                     }
                 }
                 ItemKind::Decl(id) if file[id].what == DeclKind::Entity => {
-                    let decl = &file[id];
-                    for prop in file[decl.props].iter().filter(|prop| prop.name.0 == "lives") {
-                        add_lives(&mut used, site.home, systems, file, prop);
+                    for prop in &file[file[id].props] {
+                        if prop.name.0 == "lives" {
+                            add_lives(&mut used, site.home, systems, file, prop);
+                        }
                     }
                 }
                 ItemKind::Statement(id) => {
-                    if let Verb::Now(Change::Property(prop)) = &file[id].verb
+                    if let Verb::Now(ax) = &file[id].verb
+                        && let axiom_syntax::Change::Property(prop) = ax
                         && prop.name.0 == "lives"
                     {
                         add_lives(&mut used, site.home, systems, file, prop);
@@ -219,77 +217,898 @@ pub(crate) fn scopes(
 }
 
 fn add_lives(
-    used: &mut Vec<(Home, Id<crate::book::System>)>,
+    used: &mut Vec<(Home, Id<System>)>,
     home: Home,
     systems: &SystemIndex<'_>,
     file: &axiom_syntax::File<'_>,
     prop: &axiom_syntax::Prop<'_>,
 ) {
     for &arg in &file[prop.args] {
-        if let ExprKind::Name(path) = file.exprs[arg].kind
-            && let Some(system) = systems.find(path.0)
-        {
-            used.push((home, system));
+        if let ExprKind::Name(path) = file.exprs[arg].kind {
+            if let Some(system) = systems.find(path.0) {
+                used.push((home, system));
+            }
         }
     }
 }
 
+struct EntityDraft<'s> {
+    path: &'s str,
+    home: Home,
+}
+
+struct AccountDraft<'s> {
+    path: &'s str,
+    class: Class,
+    kind: Id<Kind>,
+    owner: Id<Entity>,
+    shares: Box<[Share]>,
+    institution: Option<Id<Entity>>,
+    loc: Loc,
+}
+
+struct TabDraft<'s> {
+    party: Id<Entity>,
+    owner: Id<Entity>,
+    class: Class,
+    path: &'s str,
+    loc: Loc,
+}
+
+/// Construct a native v4 Book from the syntax sites and a small survey of only
+/// claim-bearing journal relationships. No v3 chart-account collection is used.
 pub(crate) fn declare<'a, 's>(
-    surveyed: &Surveyed<'a, 's>,
+    sites: &[Site<'a, 's>],
     settings: &Settings<'s>,
     mut names: Interner<'s>,
-    tree: Tree<crate::book::System>,
+    systems_tree: Tree<System>,
     systems: SystemIndex<'s>,
     scopes: Scopes,
+    survey: &crate::lower::JournalSurvey<'s>,
     diags: &mut Vec<Diagnostic>,
 ) -> World<'s> {
-    let mut cx = Cx { names: &mut names, systems: &tree, scopes: &scopes, diags };
-    let entries = &surveyed.entries;
-    let kinds = kinds::declare(entries, &mut cx);
-    let commodities = commodities(entries, &surveyed.units, settings, &kinds, &mut cx);
-    let mut entities = entities(entries, &kinds, commodities.base, &mut cx);
-    let places = places(entries, &surveyed.paths, &kinds, &entities, &mut cx);
-    entities.tree[entities.market].place = Some(places.market);
-    let (purposes, [income, spending, capital]) = Purpose::roots(cx.names);
+    let native_kinds = kinds::declare_sites(sites, &mut names, &systems_tree, &scopes, diags);
+    let native_purposes = crate::purposes::declare_sites(
+        sites,
+        &mut names,
+        &systems_tree,
+        &scopes,
+        &native_kinds.index,
+        diags,
+    );
 
+    let mut commodities = Arena::new();
+    let mut commodity_by_name: Map<&'s str, Id<Commodity>> = Map::default();
+    let mut declared_commodities = Vec::new();
+    let commodity_root = native_kinds.roots.commodity;
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            let ItemKind::Decl(id) = item.kind else {
+                continue;
+            };
+            let decl = &file[id];
+            if decl.what != DeclKind::Commodity {
+                continue;
+            }
+            let symbol = decl.name.0;
+            if let Some(&first) = commodity_by_name.get(symbol) {
+                diags.push(duplicate_decl(
+                    "commodity",
+                    symbol,
+                    file.loc(symbol),
+                    commodities[first].loc,
+                ));
+                declared_commodities.push(first);
+                continue;
+            }
+            let kind = resolve_kind(
+                decl,
+                site.home,
+                Sort::Commodity,
+                commodity_root,
+                &native_kinds,
+                &names,
+                &systems_tree,
+                &scopes,
+                file,
+                diags,
+            );
+            let id = commodities.push(Commodity {
+                symbol: names.intern(symbol),
+                kind,
+                scale: 0,
+                title: None,
+                liquidity: None,
+                select: None,
+                growth: None,
+                props: Box::default(),
+                doc: item.doc.map(|doc| names.intern(doc.0)),
+                loc: Some(file.loc(symbol)),
+            });
+            commodity_by_name.insert(symbol, id);
+            declared_commodities.push(id);
+        }
+    }
+    let mut synthetic_base = None;
+    if commodities.is_empty() {
+        let usd = names.intern("USD");
+        let id = commodities.push(Commodity {
+            symbol: usd,
+            kind: commodity_root,
+            scale: 2,
+            title: None,
+            liquidity: None,
+            select: None,
+            growth: None,
+            props: Box::default(),
+            doc: None,
+            loc: None,
+        });
+        commodity_by_name.insert("USD", id);
+        synthetic_base = Some(id);
+    }
+    let base = settings
+        .base
+        .and_then(|word| {
+            commodity_by_name.get(word.text).copied().or_else(|| {
+                let suggestion =
+                    axiom_core::diag::closest(word.text, commodity_by_name.keys().copied())
+                        .map(|near| near as &str);
+                diags.push(unknown(
+                    "unknown-commodity",
+                    "base commodity",
+                    word,
+                    suggestion,
+                ));
+                None
+            })
+        })
+        .or_else(|| commodity_by_name.get("USD").copied())
+        .or_else(|| synthetic_base)
+        .or_else(|| commodities.ids().next())
+        .expect("a book always has a base commodity");
+
+    let mut entity_drafts: Vec<EntityDraft<'s>> = Vec::new();
+    let mut explicit_entities: Map<
+        &'s str,
+        (Home, &'a axiom_syntax::File<'s>, &'a Decl<'s>, Option<Sym>),
+    > = Map::default();
+    let mut first_entity_paths = Vec::new();
+    let mut owner_names: Set<&'s str> = Set::default();
+    let mut declared_entity_names = Set::default();
+    let mut entity_declaration_paths = Vec::new();
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            let ItemKind::Decl(id) = item.kind else {
+                continue;
+            };
+            let decl = &file[id];
+            if matches!(
+                decl.what,
+                DeclKind::Account | DeclKind::Entity | DeclKind::Asset
+            ) {
+                owner_names.extend(owner_names_in(file, decl));
+            }
+            if decl.what != DeclKind::Entity {
+                continue;
+            }
+            let path = decl.name.0;
+            entity_declaration_paths.push(path);
+            if let Some((_, first_file, first, _)) = explicit_entities.get(path) {
+                diags.push(duplicate_decl(
+                    "entity",
+                    path,
+                    file.loc(path),
+                    Some(first_file.loc(first.name.0)),
+                ));
+                continue;
+            }
+            let doc = item.doc.map(|doc| names.intern(doc.0));
+            explicit_entities.insert(path, (site.home, file, decl, doc));
+            declared_entity_names.insert(path);
+            first_entity_paths.push(path);
+        }
+    }
+    for &path in &first_entity_paths {
+        let (home, ..) = explicit_entities[&path];
+        entity_drafts.push(EntityDraft { path, home });
+    }
+    for root in ["me", "?", "opening", "market"] {
+        if !declared_entity_names.contains(root) {
+            entity_drafts.push(EntityDraft {
+                path: root,
+                home: Home::Builtin,
+            });
+        }
+    }
+    let entity_paths = entity_drafts
+        .iter()
+        .map(|draft| draft.path)
+        .collect::<Vec<_>>();
+    let entity_home_by_path: Map<&str, Home> = entity_drafts
+        .iter()
+        .map(|draft| (draft.path, draft.home))
+        .collect();
+    let (mut entities, entity_ids) = crate::paths::build(entity_paths.iter().copied(), |path| {
+        let draft = explicit_entities.get(path);
+        let (kind, purpose, doc, loc) = if let Some((home, file, decl, doc)) = draft {
+            let kind = resolve_kind(
+                decl,
+                *home,
+                Sort::Entity,
+                native_kinds.roots.entity,
+                &native_kinds,
+                &names,
+                &systems_tree,
+                &scopes,
+                file,
+                diags,
+            );
+            let purpose = decl.purpose.and_then(|name| {
+                resolve_purpose(
+                    name.0,
+                    file.loc(name.0),
+                    *home,
+                    &native_purposes,
+                    &names,
+                    &scopes,
+                    diags,
+                )
+                .map(|value| At {
+                    value,
+                    loc: file.loc(name.0),
+                })
+            });
+            (kind, purpose, *doc, Some(file.loc(decl.name.0)))
+        } else {
+            (native_kinds.roots.entity, None, None, None)
+        };
+        Entity {
+            path: names.intern(path),
+            kind,
+            purpose,
+            place: None,
+            restricted: false,
+            lives: Box::default(),
+            member: None,
+            owner: None,
+            client_of: None,
+            owned_by: Box::default(),
+            currency: base,
+            citizen: Box::default(),
+            books: Books::default(),
+            known_as: Box::default(),
+            props: Box::default(),
+            doc,
+            loc,
+        }
+    });
+    let me = *entity_ids
+        .get("me")
+        .expect("the book's owner entity is created");
+    let unknown = *entity_ids.get("?").expect("the unknown entity is created");
+    let opening = *entity_ids
+        .get("opening")
+        .expect("the opening entity is created");
+    let market = *entity_ids
+        .get("market")
+        .expect("the market entity is created");
+    let mut entity_homes = vec![Home::Builtin; entities.len()];
+    for (path, &id) in &entity_ids {
+        entity_homes[id.index()] = entity_home_by_path
+            .get(path)
+            .copied()
+            .unwrap_or(Home::Builtin);
+    }
+    let entity_items: Vec<_> = entities
+        .iter()
+        .map(|(id, entity)| (id, names.name(entity.path), entity_homes[id.index()]))
+        .collect();
+    let entity_index = Scoped::build(&mut names, entity_items);
+    let entity_by_name: Map<&str, Id<Entity>> =
+        entity_ids.iter().map(|(&path, &id)| (path, id)).collect();
+
+    // Ownership belongs to entities as well as accounts. Build it after every
+    // entity id exists, preserving the declaration's source order.
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            let ItemKind::Decl(id) = item.kind else {
+                continue;
+            };
+            let decl = &file[id];
+            if decl.what != DeclKind::Entity {
+                continue;
+            }
+            let Some(&entity) = entity_ids.get(decl.name.0) else {
+                continue;
+            };
+            let owners = resolve_owner_shares(
+                file,
+                decl,
+                site.home,
+                &entity_index,
+                &names,
+                &scopes,
+                me,
+                diags,
+            );
+            if let Some(share) = owners.first() {
+                entities[entity].owner = Some(share.entity);
+                entities[entity].owned_by = owners.into_boxed_slice();
+            }
+        }
+    }
+
+    // Account drafts can refer forward to both kinds and owners because both
+    // indexes are already complete.
+    let mut account_drafts = Vec::new();
+    let mut declared_account_paths: Map<&'s str, Loc> = Map::default();
+    let mut account_order = Vec::new();
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            let ItemKind::Decl(id) = item.kind else {
+                continue;
+            };
+            let decl = &file[id];
+            if decl.what != DeclKind::Account {
+                continue;
+            }
+            let path = decl.name.0;
+            if let Some(&first) = declared_account_paths.get(path) {
+                diags.push(duplicate_decl("account", path, file.loc(path), Some(first)));
+                account_order.push(None);
+                continue;
+            }
+            declared_account_paths.insert(path, file.loc(path));
+            let kind = resolve_kind(
+                decl,
+                site.home,
+                Sort::Place(Class::Asset),
+                native_kinds.roots.asset,
+                &native_kinds,
+                &names,
+                &systems_tree,
+                &scopes,
+                file,
+                diags,
+            );
+            let class = match native_kinds.tree[kind].sort {
+                Sort::Place(class) => class,
+                found => {
+                    diags.push(
+                        Diagnostic::error("account-kind-sort", "an account needs a place kind")
+                            .label(file.loc(path), format!("this kind classifies {found:?}")),
+                    );
+                    Class::Asset
+                }
+            };
+            let shares = resolve_owner_shares(
+                file,
+                decl,
+                site.home,
+                &entity_index,
+                &names,
+                &scopes,
+                me,
+                diags,
+            );
+            let owner = shares.first().map_or_else(
+                || {
+                    first_name_prop(file, decl, "owner")
+                        .and_then(|name| entity_by_name.get(name).copied())
+                        .unwrap_or(me)
+                },
+                |share| share.entity,
+            );
+            let institution = decl.at.and_then(|name| {
+                entity_index
+                    .resolve(&names, scopes.of(site.home), name.0)
+                    .map_err(|_| {
+                        diags.push(
+                            Diagnostic::error(
+                                "unknown-institution",
+                                format!("institution `{}` is not visible", name.0),
+                            )
+                            .label(file.loc(name.0), "not a visible entity"),
+                        )
+                    })
+                    .ok()
+            });
+            let loc = file.loc(path);
+            let draft_at = account_drafts.len();
+            account_drafts.push(AccountDraft {
+                path,
+                class,
+                kind,
+                owner,
+                shares: shares.into_boxed_slice(),
+                institution,
+                loc,
+            });
+            account_order.push(Some(draft_at));
+        }
+    }
+
+    // The entities referenced as account owners are the owners' holdings;
+    // other parties keep an outside endpoint. `me` always owns a holding.
+    let mut owners = owner_names;
+    owners.insert("me");
+    let mut entity_owner = vec![false; entities.len()];
+    for (path, &id) in &entity_ids {
+        entity_owner[id.index()] = owners.contains(path);
+    }
+
+    let mut assets = Arena::new();
+    let mut asset_paths = Vec::new();
+    let mut asset_names: Map<&'s str, Id<Asset>> = Map::default();
+    let mut asset_shares: Map<Id<Asset>, Box<[Share]>> = Map::default();
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            let ItemKind::Decl(id) = item.kind else {
+                continue;
+            };
+            let decl = &file[id];
+            if decl.what != DeclKind::Asset {
+                continue;
+            }
+            let path = decl.name.0;
+            if let Some(&first) = asset_names.get(path) {
+                diags.push(duplicate_decl(
+                    "asset",
+                    path,
+                    file.loc(path),
+                    Some(assets[first].loc),
+                ));
+                continue;
+            }
+            let kind = resolve_kind(
+                decl,
+                site.home,
+                Sort::Thing,
+                native_kinds.roots.thing,
+                &native_kinds,
+                &names,
+                &systems_tree,
+                &scopes,
+                file,
+                diags,
+            );
+            let name = names.intern(path);
+            let unit = commodities.push(Commodity {
+                symbol: name,
+                kind: commodity_root,
+                scale: 0,
+                title: None,
+                liquidity: None,
+                select: None,
+                growth: None,
+                props: Box::default(),
+                doc: None,
+                loc: Some(file.loc(path)),
+            });
+            commodity_by_name.entry(path).or_insert(unit);
+            let owners = resolve_owner_shares(
+                file,
+                decl,
+                site.home,
+                &entity_index,
+                &names,
+                &scopes,
+                me,
+                diags,
+            );
+            let owner = owners.first().map_or(me, |share| share.entity);
+            let asset = assets.push(Asset {
+                name,
+                kind,
+                owner,
+                place: Id::new(0),
+                unit,
+                part_of: None,
+                props: Box::default(),
+                doc: item.doc.map(|doc| names.intern(doc.0)),
+                loc: file.loc(path),
+            });
+            if !owners.is_empty() {
+                asset_shares.insert(asset, owners.into_boxed_slice());
+            }
+            asset_names.insert(path, asset);
+            asset_paths.push((path, asset));
+        }
+    }
+
+    let mut account_owner_by_path = Map::default();
+    for account in &account_drafts {
+        account_owner_by_path.insert(account.path, account.owner);
+    }
+    let mut tab_drafts = Vec::new();
+    let mut tab_keys = Set::default();
+    let mut add_tab =
+        |party: Id<Entity>, owner: Id<Entity>, class: Class, path: &'s str, loc: Loc| {
+            if party != owner && tab_keys.insert((party, owner, class)) {
+                tab_drafts.push(TabDraft {
+                    party,
+                    owner,
+                    class,
+                    path,
+                    loc,
+                });
+            }
+        };
+    for mention in &survey.mentions {
+        match *mention {
+            crate::lower::Mention::Claim {
+                subject,
+                creditor,
+                loc,
+            } => {
+                if let (Some(&subject), Some(&creditor)) = (
+                    entity_by_name.get(subject.0),
+                    entity_by_name.get(creditor.0),
+                ) {
+                    let (party, owner, class) = if entity_owner[creditor.index()] {
+                        (subject, creditor, Class::Asset)
+                    } else if entity_owner[subject.index()] {
+                        (creditor, subject, Class::Debt)
+                    } else {
+                        (subject, creditor, Class::Asset)
+                    };
+                    add_tab(party, owner, class, names.name(entities[party].path), loc);
+                }
+            }
+            crate::lower::Mention::Promise {
+                party,
+                holding,
+                loc,
+                ..
+            } => {
+                if let Some(&party_id) = entity_by_name.get(party.0) {
+                    let owner = holding
+                        .and_then(|name| account_owner_by_path.get(name.0).copied())
+                        .unwrap_or(me);
+                    add_tab(party_id, owner, Class::Asset, party.0, loc);
+                    add_tab(party_id, owner, Class::Debt, party.0, loc);
+                }
+            }
+            crate::lower::Mention::For { other, ends, loc } => {
+                if let Some(&party) = entity_by_name.get(other.0) {
+                    let owner = ends
+                        .from
+                        .and_then(|name| account_owner_by_path.get(name.0).copied())
+                        .or_else(|| {
+                            ends.to
+                                .and_then(|name| account_owner_by_path.get(name.0).copied())
+                        })
+                        .unwrap_or(me);
+                    add_tab(party, owner, Class::Asset, other.0, loc);
+                    add_tab(party, owner, Class::Debt, other.0, loc);
+                }
+            }
+            crate::lower::Mention::Due { ends, loc }
+            | crate::lower::Mention::Ends { ends, loc } => {
+                if let (Some(from), Some(to)) = (ends.from, ends.to) {
+                    let (from_entity, to_entity) =
+                        (entity_by_name.get(from.0), entity_by_name.get(to.0));
+                    let (from_owner, to_owner) = (
+                        account_owner_by_path.get(from.0),
+                        account_owner_by_path.get(to.0),
+                    );
+                    if let (Some(&party), Some(&owner)) = (from_entity, to_owner) {
+                        add_tab(party, owner, Class::Asset, from.0, loc);
+                    }
+                    if let (Some(&party), Some(&owner)) = (to_entity, from_owner) {
+                        add_tab(party, owner, Class::Debt, to.0, loc);
+                    }
+                }
+            }
+        }
+    }
+
+    // Keep path namespaces disjoint while giving each account, entity endpoint
+    // and asset place a stable tree id. Every path and prefix is source-borrowed.
+    const ACCOUNTS: u8 = 0;
+    const ENTITY_PLACES: u8 = 1;
+    const ASSET_PLACES: u8 = 2;
+    let mut path_keys: Set<(u8, &'s str)> = Set::default();
+    for account in &account_drafts {
+        for path in crate::paths::prefixes(account.path) {
+            path_keys.insert((ACCOUNTS, path));
+        }
+    }
+    for draft in &entity_drafts {
+        for path in crate::paths::prefixes(draft.path) {
+            path_keys.insert((ENTITY_PLACES, path));
+        }
+    }
+    for &(path, _) in &asset_paths {
+        for prefix in crate::paths::prefixes(path) {
+            path_keys.insert((ASSET_PLACES, prefix));
+        }
+    }
+    let mut paths: Vec<_> = path_keys.into_iter().collect();
+    paths.sort_unstable_by(|(ns_a, a), (ns_b, b)| {
+        ns_a.cmp(ns_b).then_with(|| path_key(a).cmp(path_key(b)))
+    });
+    let path_positions: Map<(u8, &str), usize> = paths
+        .iter()
+        .enumerate()
+        .map(|(at, &key)| (key, at))
+        .collect();
+    let mut place_nodes = Vec::with_capacity(paths.len() + account_drafts.len() + tab_drafts.len());
+    let mut parents = Vec::with_capacity(place_nodes.capacity());
+    let mut place_index = Map::default();
+    let account_by_path: Map<&str, &AccountDraft<'s>> = account_drafts
+        .iter()
+        .map(|draft| (draft.path, draft))
+        .collect();
+    let asset_by_path: Map<&str, Id<Asset>> = asset_paths.iter().copied().collect();
+    let entity_by_path: Map<&str, Id<Entity>> =
+        entity_ids.iter().map(|(&path, &id)| (path, id)).collect();
+    for &(namespace, path) in &paths {
+        let explicit_account = if namespace == ACCOUNTS {
+            account_by_path.get(path).copied()
+        } else {
+            None
+        };
+        let explicit_asset = if namespace == ASSET_PLACES {
+            asset_by_path.get(path).copied()
+        } else {
+            None
+        };
+        let entity = if namespace == ENTITY_PLACES {
+            entity_by_path.get(path).copied()
+        } else {
+            None
+        };
+        let descendant_account = if namespace == ACCOUNTS {
+            account_drafts
+                .iter()
+                .find(|draft| is_path_child(path, draft.path))
+        } else {
+            None
+        };
+        let descendant_asset = if namespace == ASSET_PLACES {
+            asset_paths
+                .iter()
+                .find(|(child, _)| is_path_child(path, child))
+                .map(|(_, asset)| &assets[*asset])
+        } else {
+            None
+        };
+        let (class, role, kind, owner, loc, indexed) = if let Some(account) = explicit_account {
+            (
+                account.class,
+                Role::Account {
+                    institution: account.institution,
+                },
+                account.kind,
+                account.owner,
+                Some(account.loc),
+                true,
+            )
+        } else if let Some(asset) = explicit_asset {
+            let record = &assets[asset];
+            (
+                Class::Asset,
+                Role::Asset(asset),
+                record.kind,
+                record.owner,
+                Some(record.loc),
+                true,
+            )
+        } else if let Some(entity) = entity {
+            let held = entity_owner[entity.index()];
+            (
+                if held { Class::Asset } else { Class::Outside },
+                if held {
+                    Role::Holding(entity)
+                } else {
+                    Role::Outside(Some(entity))
+                },
+                if held {
+                    native_kinds.roots.asset
+                } else {
+                    native_kinds.roots.entity
+                },
+                if held { entity } else { me },
+                entities[entity].loc,
+                false,
+            )
+        } else if let Some(account) = descendant_account {
+            (
+                account.class,
+                Role::Account { institution: None },
+                account.kind,
+                account.owner,
+                None,
+                true,
+            )
+        } else if let Some(asset) = descendant_asset {
+            (
+                Class::Asset,
+                Role::Account { institution: None },
+                asset.kind,
+                asset.owner,
+                None,
+                true,
+            )
+        } else {
+            (
+                Class::Asset,
+                Role::Account { institution: None },
+                native_kinds.roots.asset,
+                me,
+                None,
+                false,
+            )
+        };
+        let node = Place {
+            path: names.intern(path),
+            class,
+            role,
+            kind,
+            owner,
+            holds: None,
+            select: None,
+            deferred: false,
+            basis: Basis::Cost,
+            claim: false,
+            liquidity: None,
+            opened: None,
+            closed: None,
+            shares: explicit_account.map_or_else(
+                || {
+                    explicit_asset
+                        .and_then(|asset| asset_shares.get(&asset).cloned())
+                        .unwrap_or_default()
+                },
+                |account| account.shares.clone(),
+            ),
+            known_as: Box::default(),
+            props: Box::default(),
+            doc: None,
+            loc,
+        };
+        let at = place_nodes.len();
+        place_nodes.push(node);
+        let parent = path
+            .rsplit_once('/')
+            .and_then(|(parent, _)| path_positions.get(&(namespace, parent)).copied());
+        parents.push(parent);
+        place_index.insert((namespace, path), (at, indexed));
+    }
+    // Tabs have no source path of their own; their printed label is the party
+    // name, while identity is the typed (party, owner, class) tuple.
+    let tab_node_indices: Vec<_> = tab_drafts
+        .iter()
+        .map(|tab| {
+            let at = place_nodes.len();
+            place_nodes.push(Place {
+                path: entities[tab.party].path,
+                class: tab.class,
+                role: Role::Tab(tab.party),
+                kind: if tab.class == Class::Debt {
+                    native_kinds.roots.debt
+                } else {
+                    native_kinds.roots.asset
+                },
+                owner: tab.owner,
+                holds: None,
+                select: None,
+                deferred: false,
+                basis: Basis::Cost,
+                claim: true,
+                liquidity: None,
+                opened: None,
+                closed: None,
+                shares: Box::default(),
+                known_as: Box::default(),
+                props: Box::default(),
+                doc: None,
+                loc: Some(tab.loc),
+            });
+            parents.push(None);
+            at
+        })
+        .collect();
+    let (places, remap) =
+        Tree::build(place_nodes, &parents).expect("place parents are prefixes without cycles");
+
+    let mut place_names = Names::default();
+    for (&(namespace, path), &(old, indexed)) in &place_index {
+        if indexed && (namespace == ACCOUNTS || namespace == ASSET_PLACES) {
+            place_names.insert_path(&mut names, path, remap[old]);
+        }
+    }
+    for (&path, &entity) in &entity_ids {
+        if let Some(&(old, _)) = place_index.get(&(ENTITY_PLACES, path)) {
+            entities[entity].place = Some(remap[old]);
+        }
+    }
+    for &(path, asset) in &asset_paths {
+        if let Some(&(old, _)) = place_index.get(&(ASSET_PLACES, path)) {
+            assets[asset].place = remap[old];
+        }
+    }
+    let mut tabs = Map::default();
+    for (tab, &old) in tab_drafts.iter().zip(&tab_node_indices) {
+        tabs.insert((tab.party, tab.owner, tab.class), remap[old]);
+    }
+    let mut ordinal = vec![u32::MAX; places.len()];
+    let mut declared_places = vec![None; account_order.len()];
+    for (source_at, draft_at) in account_order.into_iter().enumerate() {
+        let Some(draft_at) = draft_at else { continue };
+        let account = &account_drafts[draft_at];
+        let id = remap[place_index[&(ACCOUNTS, account.path)].0];
+        declared_places[source_at] = Some(id);
+        ordinal[id.index()] = source_at as u32;
+    }
+
+    let mut declared_entities = Vec::with_capacity(entity_declaration_paths.len());
+    for path in entity_declaration_paths {
+        if let Some(&id) = entity_ids.get(path) {
+            declared_entities.push(id);
+        }
+    }
+    let kind_index = native_kinds.index;
+    let purpose_index = native_purposes.index;
     let roots = Roots {
-        me: entities.me,
-        unknown: places.unknown,
-        opening: places.opening,
-        market: entities.market,
-        asset: kinds.roots.of_root(PathRoot::Assets),
-        debt: kinds.roots.of_root(PathRoot::Liabilities),
-        thing: kinds.roots.thing(),
-        commodity: kinds.roots.commodity(),
-        entity: kinds.roots.entity(),
-        income,
-        spending,
-        capital,
+        me,
+        unknown,
+        opening,
+        market,
+        kinds: KindRoots {
+            asset: native_kinds.roots.asset,
+            debt: native_kinds.roots.debt,
+            thing: native_kinds.roots.thing,
+            commodity: native_kinds.roots.commodity,
+            measure: native_kinds.roots.measure,
+            entity: native_kinds.roots.entity,
+        },
+        purposes: native_purposes.roots,
     };
+    let mut lookup = Lookup::default();
+    lookup.places = place_names;
+    lookup.entities = entity_index;
+    lookup.kinds = kind_index;
+    lookup.purposes = purpose_index;
+    lookup.assets = asset_names
+        .into_iter()
+        .map(|(name, id)| (names.intern(name), id))
+        .collect();
+    lookup.commodities = commodity_by_name
+        .into_iter()
+        .map(|(name, id)| (names.intern(name), id))
+        .collect();
     let book = Book {
         names,
         text_values: Arena::new(),
-        base: commodities.base,
+        base,
         relaxed: settings.relaxed,
         roots,
-        places: places.tree,
-        entities: entities.tree,
-        kinds: kinds.tree,
-        purposes,
-        systems: tree,
-        commodities: commodities.arena,
-        assets: Arena::new(),
-        // v3 bridge: the v3 model makes plans, and no contract.
+        places,
+        entities,
+        kinds: native_kinds.tree,
+        purposes: native_purposes.tree,
+        systems: systems_tree,
+        commodities,
+        assets,
         contracts: Arena::new(),
-        // v3 bridge: the v3 model has no `also`, measures, readings, returns as filed, patterns or formats.
         also: Arena::new(),
         laws: Arena::new(),
-        rules: Rules::default(),
-        // v3 bridge: a v3 budget is a property that makes a law, not an item of its own.
+        rules: Default::default(),
         budgets: Arena::new(),
         params: Arena::new(),
         schedules: Arena::new(),
-        codes: Vec::new(),
+        code_rules: Vec::new(),
+        codes: Arena::new(),
+        selectors: Arena::new(),
+        details: Arena::new(),
         patterns: Arena::new(),
         formats: Arena::new(),
         txns: Arena::new(),
@@ -305,25 +1124,14 @@ pub(crate) fn declare<'a, 's>(
         filed: Vec::new(),
         plans: Arena::new(),
         sources: Vec::new(),
-        lookup: Lookup {
-            places: places.names,
-            entities: entities.index,
-            kinds: kinds.index,
-            purposes: Scoped::default(),
-            assets: Map::default(),
-            contracts: Map::default(),
-            params: Scoped::default(),
-            laws: Names::default(),
-            commodities: commodities.by_symbol,
-            taken: Map::default(),
-        },
+        lookup,
     };
     let declared = Declared {
-        kinds: kinds.declared,
-        unrooted: kinds.unrooted,
-        commodities: commodities.declared,
-        entities: entities.declared,
-        places: places.declared,
+        kinds: native_kinds.declarations,
+        unrooted: native_kinds.unrooted,
+        commodities: declared_commodities,
+        entities: declared_entities,
+        places: declared_places,
     };
     World {
         book,
@@ -333,404 +1141,285 @@ pub(crate) fn declare<'a, 's>(
         prop_writes: Vec::new(),
         declared,
         tallies: Set::default(),
-        ordinal: places.ordinal,
+        ordinal,
         lines: Map::default(),
+        tabs,
     }
 }
 
-// ─── Commodities ────────────────────────────────────────────────────────────
-
-struct Commodities {
-    arena: Arena<Commodity>,
-    by_symbol: Map<Sym, Id<Commodity>>,
-    /// Where each was written, to say who declared it first.
-    homes: Vec<Home>,
-    declared: Vec<Id<Commodity>>,
-    base: Id<Commodity>,
+fn path_key(path: &str) -> impl Iterator<Item = u8> + '_ {
+    path.bytes().map(|byte| if byte == b'/' { 0 } else { byte })
 }
 
-impl Commodities {
-    fn find(&self, names: &Interner, symbol: &str) -> Option<Id<Commodity>> {
-        names.get(symbol).and_then(|sym| self.by_symbol.get(&sym).copied())
-    }
-
-    fn add<'s>(
-        &mut self,
-        names: &mut Interner<'s>,
-        symbol: &'s str,
-        scale: u8,
-        kind: Id<Kind>,
-        home: Home,
-    ) -> Id<Commodity> {
-        let symbol = names.intern(symbol);
-        let commodity = Commodity {
-            symbol,
-            kind,
-            scale: scale.min(MAX_SCALE),
-            title: None,
-            liquidity: None,
-            select: None,
-            growth: None,
-            props: Box::default(),
-            doc: None,
-            loc: None,
-        };
-        self.homes.push(home);
-        let id = self.arena.push(commodity);
-        self.by_symbol.insert(symbol, id);
-        id
-    }
-
-    /// The declared commodity `symbol` is a few letters away from, if any.
-    fn typo_of<'a>(&self, names: &'a Interner, symbol: &str) -> Option<&'a str> {
-        closest(symbol, self.by_symbol.keys().map(|&sym| names.name(sym)))
-    }
+fn is_path_child(parent: &str, child: &str) -> bool {
+    child.len() > parent.len()
+        && child.as_bytes().starts_with(parent.as_bytes())
+        && child.as_bytes().get(parent.len()) == Some(&b'/')
 }
 
-/// Commodities are declared, or opened on first use, unless what is written is
-/// a near miss of a declared one: that is a typo, and nothing is invented for
-/// it. A commodity's precision is what its declaration says, or else the most
-/// decimals any amount written in it uses anywhere in the sources.
-fn commodities<'s>(
-    entries: &[Entry<'_, 's>],
-    units: &[Seen<'s>],
-    settings: &Settings<'s>,
-    kinds: &Kinds,
-    cx: &mut Cx<'_, 's>,
-) -> Commodities {
-    let precision: Map<&str, u8> = units.iter().map(|unit| (unit.symbol, unit.places)).collect();
-    let scale_of = |symbol: &str| precision.get(symbol).copied().unwrap_or(0);
-    let mut table = Commodities {
-        arena: Arena::new(),
-        by_symbol: Map::default(),
-        homes: Vec::new(),
-        declared: Vec::new(),
-        base: Id::new(0),
+fn duplicate_decl(kind: &str, name: &str, again: Loc, first: Option<Loc>) -> Diagnostic {
+    let mut diagnostic = Diagnostic::error(
+        "duplicate-declaration",
+        format!("{kind} `{name}` is declared twice"),
+    )
+    .label(again, "declared again here");
+    if let Some(first) = first {
+        diagnostic = diagnostic.context(first, "first declared here");
+    }
+    diagnostic
+}
+
+fn resolve_kind<'s>(
+    decl: &Decl<'s>,
+    home: Home,
+    expected: Sort,
+    fallback: Id<Kind>,
+    kinds: &NativeKinds,
+    names: &Interner<'s>,
+    _systems: &Tree<System>,
+    scopes: &Scopes,
+    file: &axiom_syntax::File<'s>,
+    diags: &mut Vec<Diagnostic>,
+) -> Id<Kind> {
+    let Some(word) = decl.kind else {
+        return fallback;
     };
-    for written in decls(entries, DeclKind::Commodity) {
-        let (file, symbol) = (written.file(), written.node.name.0);
-        let word = Word { text: symbol, loc: file.loc(symbol) };
-        if let Some(first) = table.find(cx.names, symbol) {
-            let system = system_of(table.homes[first.index()], written.home(), cx);
-            cx.diags.push(duplicate("commodity", word, table.arena[first].loc, system));
-            table.declared.push(first);
-            continue;
+    let loc = file.loc(word.0);
+    let kind = match kinds.index.resolve(names, scopes.of(home), word.0) {
+        Ok(kind) => kind,
+        Err(crate::book::Miss::Unknown { suggestion }) => {
+            diags.push(unknown(
+                "unknown-kind",
+                "kind",
+                Word { text: word.0, loc },
+                suggestion.map(|sym| names.name(sym)),
+            ));
+            return fallback;
         }
-        let kind_word = written.node.kind.map(|kind| Word { text: kind.0, loc: file.loc(kind.0) });
-        let thing = format!("the commodity `{symbol}`");
-        let kind = kinds.declared(kind_word, written.home(), kinds.roots.commodity(), &thing, cx);
-        let id = table.add(cx.names, symbol, scale_of(symbol), kind, written.home());
-        table.arena[id].doc = written.item.doc.map(|doc| cx.names.intern(doc.0));
-        table.arena[id].loc = Some(word.loc);
-        table.declared.push(id);
-    }
-    // What the sources declare, and the currency they name as the base, are
-    // what a stray symbol may be a typo of; two undeclared symbols are equals.
-    let root = kinds.roots.commodity();
-    let named = settings.base.map(|word| word.text);
-    let known: Vec<&str> = table.by_symbol.keys().map(|&sym| cx.names.name(sym)).chain(named).collect();
-    for unit in units {
-        let declared = table.find(cx.names, unit.symbol).is_some();
-        if declared {
-            continue;
-        }
-        if named == Some(unit.symbol) || closest(unit.symbol, known.iter().copied()).is_none() {
-            table.add(cx.names, unit.symbol, unit.places, root, Home::Builtin);
-        }
-    }
-    table.base = base(&mut table, settings, units, kinds, cx);
-    table
-}
-
-/// The book's base currency: the one `base` says, or else the one currency
-/// the journal uses.
-fn base<'s>(
-    table: &mut Commodities,
-    settings: &Settings<'s>,
-    units: &[Seen<'s>],
-    kinds: &Kinds,
-    cx: &mut Cx<'_, 's>,
-) -> Id<Commodity> {
-    let root = kinds.roots.commodity();
-    if let Some(word) = settings.base {
-        if let Some(id) = table.find(cx.names, word.text) {
-            return id;
-        }
-        match table.typo_of(cx.names, word.text) {
-            None => return table.add(cx.names, word.text, 0, root, Home::Builtin),
-            Some(near) => cx.diags.push(unknown("unknown-commodity", "commodity", word, Some(near))),
-        }
-    }
-    // `currency` is a convention of the standard kinds, as `person` is.
-    let currency = cx.names.get("currency");
-    let is_currency = |id: Id<Commodity>| {
-        let mut chain = kinds.tree.lineage(table.arena[id].kind);
-        chain.any(|kind| Some(kinds.tree[kind].name) == currency)
-    };
-    let used: Vec<(&Seen, Id<Commodity>)> = units
-        .iter()
-        .filter(|unit| unit.journal)
-        .filter_map(|unit| Some((unit, table.find(cx.names, unit.symbol)?)))
-        .collect();
-    let currencies: Vec<_> = used.iter().copied().filter(|&(_, id)| is_currency(id)).collect();
-    let candidates = if currencies.is_empty() { used } else { currencies };
-    match candidates.as_slice() {
-        [] => table.find(cx.names, "USD").unwrap_or_else(|| table.add(cx.names, "USD", 0, root, Home::Builtin)),
-        [(_, only)] => *only,
-        [(first, id), (second, _), ..] => {
-            let all: Vec<&str> = candidates.iter().map(|(unit, _)| unit.symbol).collect();
-            cx.diags.push(
-                Diagnostic::error(
-                    "no-base",
-                    format!("the journal uses {}, and no `base` says which one values the others", list_and(&all)),
-                )
-                .label(second.first, format!("{} is a second currency", second.symbol))
-                .context(first.first, format!("{} is first written here", first.symbol))
-                .help(format!("declare the base currency, for example `base {}`", first.symbol)),
+        Err(crate::book::Miss::Ambiguous(ids)) => {
+            let candidates: Vec<_> = ids
+                .iter()
+                .map(|&id| names.name(kinds.tree[id].name))
+                .collect();
+            diags.push(
+                Diagnostic::error("ambiguous-kind", format!("kind `{}` is ambiguous", word.0))
+                    .label(loc, format!("could mean {}", candidates.join(" or "))),
             );
-            *id
+            return fallback;
+        }
+    };
+    let found = kinds.tree[kind].sort;
+    let valid = match expected {
+        Sort::Place(_) => matches!(found, Sort::Place(_)),
+        other => found == other,
+    };
+    if valid {
+        kind
+    } else {
+        diags.push(
+            Diagnostic::error(
+                "kind-sort",
+                format!("kind `{}` cannot classify this declaration", word.0),
+            )
+            .label(loc, format!("expected {expected:?}, found {found:?}")),
+        );
+        fallback
+    }
+}
+
+fn resolve_purpose<'s>(
+    name: &str,
+    loc: Loc,
+    home: Home,
+    purposes: &crate::purposes::NativePurposes,
+    names: &Interner<'s>,
+    scopes: &Scopes,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Id<Purpose>> {
+    match purposes.index.resolve(names, scopes.of(home), name) {
+        Ok(purpose) => Some(purpose),
+        Err(crate::book::Miss::Unknown { suggestion }) => {
+            diags.push(unknown(
+                "unknown-purpose",
+                "purpose",
+                Word { text: name, loc },
+                suggestion.map(|sym| names.name(sym)),
+            ));
+            None
+        }
+        Err(crate::book::Miss::Ambiguous(ids)) => {
+            let candidates: Vec<_> = ids
+                .iter()
+                .map(|&id| names.name(purposes.tree[id].name))
+                .collect();
+            diags.push(
+                Diagnostic::error(
+                    "ambiguous-purpose",
+                    format!("purpose `{name}` is ambiguous"),
+                )
+                .label(loc, format!("could mean {}", candidates.join(" or "))),
+            );
+            None
         }
     }
 }
 
-/// The system that declared what `first` was written in, when a project's
-/// declaration repeats it.
-fn system_of<'s>(first: Home, again: Home, cx: &Cx<'_, 's>) -> Option<&'s str> {
-    match (first, again) {
-        (Home::System(system), Home::Project) => Some(cx.names.name(cx.systems[system].path)),
-        _ => None,
-    }
+fn first_name_prop<'a, 's>(
+    file: &'a axiom_syntax::File<'s>,
+    decl: &Decl<'s>,
+    name: &str,
+) -> Option<&'s str> {
+    file[decl.props]
+        .iter()
+        .find(|prop| prop.name.0 == name)
+        .and_then(|prop| file[prop.args].first())
+        .and_then(|&arg| match file.exprs[arg].kind {
+            ExprKind::Name(name) => Some(name.0),
+            _ => None,
+        })
 }
 
-// ─── Entities ───────────────────────────────────────────────────────────────
-
-struct Entities {
-    tree: Tree<Entity>,
-    index: Scoped<Entity>,
-    me: Id<Entity>,
-    market: Id<Entity>,
-    declared: Vec<Id<Entity>>,
+fn owner_names_in<'a, 's>(file: &'a axiom_syntax::File<'s>, decl: &Decl<'s>) -> Vec<&'s str> {
+    file[decl.props]
+        .iter()
+        .filter(|prop| prop.name.0 == "owner")
+        .flat_map(|prop| file[prop.args].iter())
+        .filter_map(|&arg| match file.exprs[arg].kind {
+            ExprKind::Name(name) => Some(name.0),
+            _ => None,
+        })
+        .collect()
 }
 
-/// Entities form a path tree (`paypal/john` sits under `paypal`), with `me`
-/// and the market always present.
-fn entities<'s>(entries: &[Entry<'_, 's>], kinds: &Kinds, base: Id<Commodity>, cx: &mut Cx<'_, 's>) -> Entities {
-    let written = decls(entries, DeclKind::Entity).map(|written| written.node.name.0).chain(["me", "market"]);
-    let (mut tree, by_path) = paths::build(written, |path| Entity {
-        path: cx.names.intern(path),
-        kind: kinds.roots.entity(),
-        purpose: None,
-        place: None,
-        restricted: false,
-        lives: Box::default(),
-        member: None,
-        owner: None,
-        client_of: None,
-        // v3 bridge: no v3 entity has several owners, a citizenship, a currency of its own or accrual books,
-        // and none is known by a name on statements.
-        owned_by: Box::default(),
-        currency: base,
-        citizen: Box::default(),
-        books: Books::default(),
-        known_as: Box::default(),
-        props: Box::default(),
-        doc: None,
-        loc: None,
-    });
-    let mut homes = vec![Home::Builtin; tree.len()];
-    let mut declared = Vec::new();
-    for written in decls(entries, DeclKind::Entity) {
-        let (file, path) = (written.file(), written.node.name.0);
-        let id = by_path[path];
-        declared.push(id);
-        if let Some(first) = tree[id].loc {
-            let system = system_of(homes[id.index()], written.home(), cx);
-            cx.diags.push(duplicate("entity", Word { text: path, loc: file.loc(path) }, Some(first), system));
-            continue;
-        }
-        homes[id.index()] = written.home();
-        let kind_word = written.node.kind.map(|kind| Word { text: kind.0, loc: file.loc(kind.0) });
-        let kind = kinds.declared(kind_word, written.home(), kinds.roots.entity(), &format!("the entity `{path}`"), cx);
-        let entity = &mut tree[id];
-        entity.kind = kind;
-        entity.doc = written.item.doc.map(|doc| cx.names.intern(doc.0));
-        entity.loc = Some(file.loc(path));
-    }
-    let me = by_path["me"];
-    if tree[me].loc.is_none() {
-        tree[me].kind = person_or_root(kinds, cx);
-    }
-    // v3 bridge: the market entity is the place `income/market` under another name, and no line names it: `market`
-    // in a flow, a law or `why` has always meant the place, or the kind. Only a declaration makes it findable.
-    let market = by_path["market"];
-    let findable = |&(id, entity): &(Id<Entity>, &Entity)| id != market || entity.loc.is_some();
-    let things: Vec<_> =
-        tree.iter().filter(findable).map(|(id, entity)| (id, cx.names.name(entity.path), homes[id.index()])).collect();
-    Entities { index: Scoped::build(cx.names, things), tree, me, market, declared }
-}
-
-/// `me` is a `person` when the standard kinds are in scope.
-fn person_or_root(kinds: &Kinds, cx: &Cx) -> Id<Kind> {
-    let scope = cx.scopes.of(Home::Project);
-    match kinds::find(&kinds.index, cx.names, cx.systems, "person", |home| scope.sees(home)) {
-        Ok(person) if kinds.tree[person].sort == Sort::Entity => person,
-        _ => kinds.roots.entity(),
-    }
-}
-
-// ─── Places ─────────────────────────────────────────────────────────────────
-
-struct Places {
-    tree: Tree<Place>,
-    names: Names<Place>,
-    unknown: Id<Place>,
-    opening: Id<Place>,
-    market: Id<Place>,
-    declared: Vec<Option<Id<Place>>>,
-    ordinal: Vec<u32>,
-}
-
-/// The five class roots and the built-in places always exist. Declared
-/// accounts add to them, and so does any full path under a class root that is
-/// written anywhere: writing `expenses/food/snacks` opens it, unless it is one
-/// letter from a declared place, which is a typo and is left unopened.
-fn places<'s>(
-    entries: &[Entry<'_, 's>],
-    opened: &[&'s str],
-    kinds: &Kinds,
-    entities: &Entities,
-    cx: &mut Cx<'_, 's>,
-) -> Places {
-    let accounts: Vec<Written<_>> = decls(entries, DeclKind::Account).collect();
-    // An account outside every class root has no class, so it cannot exist.
-    let valid: Vec<bool> = accounts.iter().map(|written| root_is_valid(written, cx)).collect();
-    let declared_paths: Vec<&str> = PathRoot::ALL
-        .map(PathRoot::path)
-        .into_iter()
-        .chain([UNKNOWN, OPENING, MARKET])
-        .chain(accounts.iter().zip(&valid).filter(|&(_, &ok)| ok).map(|(written, _)| written.node.name.0))
-        .collect();
-    let declared_set: Set<&str> = declared_paths.iter().copied().collect();
-    let opens =
-        opened.iter().copied().filter(|path| declared_set.contains(path) || !typo_of_place(path, &declared_paths));
-    let (mut tree, by_path) = paths::build(declared_paths.iter().copied().chain(opens), |path| {
-        let root = PathRoot::of(path).expect("only paths under a class root are written");
-        // v3 bridge: no v3 place has an institution or names a party.
-        let role =
-            if root.class() == Class::Outside { Role::Outside(None) } else { Role::Account { institution: None } };
-        Place {
-            path: cx.names.intern(path),
-            class: root.class(),
-            role,
-            kind: kinds.roots.of_root(root),
-            owner: entities.me,
-            holds: None,
-            select: None,
-            deferred: false,
-            basis: Default::default(),
-            claim: false,
-            liquidity: None,
-            opened: None,
-            closed: None,
-            // v3 bridge: no v3 place has several owners, or is known by a name on statements.
-            shares: Box::default(),
-            known_as: Box::default(),
-            props: Box::default(),
-            doc: None,
-            loc: None,
-        }
-    });
-    tree[by_path[MARKET]].kind = kinds.roots.market();
-
-    let mut declared = vec![None; accounts.len()];
-    let mut ordinal = vec![u32::MAX; tree.len()];
-    let mut aliases: Map<&str, Id<Place>> = Map::default();
-    for (at, written) in accounts.iter().enumerate().filter(|&(at, _)| valid[at]) {
-        let (file, decl) = (written.file(), written.node);
-        let word = Word { text: decl.name.0, loc: file.loc(decl.name.0) };
-        let id = by_path[decl.name.0];
-        declared[at] = Some(id);
-        if let Some(first) = tree[id].loc {
-            cx.diags.push(duplicate("account", word, Some(first), None));
-            continue;
-        }
-        ordinal[id.index()] = at as u32;
-        let root = kinds.roots.of_root(PathRoot::of(decl.name.0).expect("a valid account starts at a root"));
-        let thing = format!("the {} account `{}`", cx.names.name(kinds.tree[root].name), decl.name.0);
-        let kind_word = decl.kind.map(|kind| Word { text: kind.0, loc: file.loc(kind.0) });
-        let kind = kinds.declared(kind_word, Home::Project, root, &thing, cx);
-        let place = &mut tree[id];
-        place.kind = kind;
-        place.doc = written.item.doc.map(|doc| cx.names.intern(doc.0));
-        place.loc = Some(word.loc);
-        if let Some(alias) = decl.alias {
-            match aliases.get(alias.0) {
-                Some(&first) => {
-                    let loc = file.loc(alias.0);
-                    let named = cx.names.name(tree[first].path);
-                    cx.diags.push(
+fn resolve_owner_shares<'a, 's>(
+    file: &'a axiom_syntax::File<'s>,
+    decl: &Decl<'s>,
+    home: Home,
+    entities: &Scoped<Entity>,
+    names: &Interner<'s>,
+    scopes: &Scopes,
+    fallback: Id<Entity>,
+    diags: &mut Vec<Diagnostic>,
+) -> Vec<Share> {
+    let Some(line) = file[decl.props].iter().find(|prop| prop.name.0 == "owner") else {
+        return Vec::new();
+    };
+    let mut resolved: Vec<(Id<Entity>, Option<Ratio>, Loc)> = Vec::new();
+    for &arg in &file[line.args] {
+        let expr = &file.exprs[arg];
+        match expr.kind {
+            ExprKind::Name(name) => match entities.resolve(names, scopes.of(home), name.0) {
+                Ok(entity) => resolved.push((entity, None, expr.loc)),
+                Err(crate::book::Miss::Unknown { suggestion }) => {
+                    let suggestion = suggestion.map(|sym| names.name(sym));
+                    diags.push(unknown(
+                        "unknown-owner",
+                        "owner",
+                        Word {
+                            text: name.0,
+                            loc: expr.loc,
+                        },
+                        suggestion,
+                    ));
+                }
+                Err(crate::book::Miss::Ambiguous(ids)) => {
+                    let candidates: Vec<_> = ids
+                        .iter()
+                        .map(|&id| format!("entity #{}", id.index()))
+                        .collect();
+                    diags.push(
                         Diagnostic::error(
-                            "duplicate-declaration",
-                            format!("`{}` is already the alias of `{named}`", alias.0),
+                            "ambiguous-owner",
+                            format!("owner `{}` is ambiguous", name.0),
                         )
-                        .label(loc, "an alias names one account")
-                        .help("choose another alias"),
+                        .label(expr.loc, format!("could mean {}", candidates.join(" or "))),
                     );
                 }
-                None => {
-                    aliases.insert(alias.0, id);
+            },
+            ExprKind::Pct(number) => {
+                if let Some((_, rate, _)) = resolved.last_mut() {
+                    if rate.is_some() {
+                        diags.push(
+                            Diagnostic::error("owner-share", "an owner has more than one share")
+                                .label(expr.loc, "write one percentage after this owner"),
+                        );
+                    } else {
+                        *rate = Ratio::percent(number.mantissa.into(), number.scale);
+                    }
+                } else {
+                    diags.push(
+                        Diagnostic::error("owner-share", "a share percentage needs an owner name")
+                            .label(expr.loc, "write `owner NAME 60%`"),
+                    );
                 }
             }
+            _ => diags.push(
+                Diagnostic::error("owner-name", "an owner must be an entity name")
+                    .label(expr.loc, "write the owner before its optional percentage"),
+            ),
         }
     }
-
-    let mut names = Names::default();
-    let paths: Vec<(Id<Place>, &str)> = tree.iter().map(|(id, place)| (id, cx.names.name(place.path))).collect();
-    for (id, path) in paths {
-        names.insert_path(cx.names, path, id);
+    if resolved.is_empty() {
+        // The diagnostic above is tied to the offending expression; keeping a
+        // deterministic default prevents an invalid declaration cascading.
+        return vec![Share {
+            rate: Ratio::ONE,
+            entity: fallback,
+            measure: None,
+            loc: line.loc,
+        }];
     }
-    for (&alias, &id) in &aliases {
-        names.insert(cx.names, alias, Rank::Alias, id);
+    let has_rate = resolved.iter().any(|(_, rate, _)| rate.is_some());
+    let all_rate = resolved.iter().all(|(_, rate, _)| rate.is_some());
+    if has_rate && !all_rate {
+        diags.push(
+            Diagnostic::error(
+                "owner-share",
+                "every owner in a shared place needs a percentage",
+            )
+            .label(line.loc, "write a percentage for each owner"),
+        );
     }
-    let (unknown, opening, market) = (by_path[UNKNOWN], by_path[OPENING], by_path[MARKET]);
-    Places { unknown, opening, market, tree, names, declared, ordinal }
+    let equal = Ratio::new(1, resolved.len() as i128).unwrap_or(Ratio::ZERO);
+    let shares: Vec<_> = resolved
+        .into_iter()
+        .map(|(entity, rate, loc)| Share {
+            rate: rate.unwrap_or(equal),
+            entity,
+            measure: None,
+            loc,
+        })
+        .collect();
+    let total = shares
+        .iter()
+        .try_fold(Ratio::ZERO, |sum, share| sum.checked_add(share.rate));
+    if shares.iter().any(|share| share.rate.is_negative()) || total != Some(Ratio::ONE) {
+        diags.push(
+            Diagnostic::error(
+                "owner-share-total",
+                "owner shares must be nonnegative and add to 100%",
+            )
+            .label(
+                line.loc,
+                "adjust the percentages so they total exactly 100%",
+            ),
+        );
+    }
+    shares
 }
 
-/// Whether a full path that no account declares is a typo of one that does.
-pub(crate) fn typo_of_place(path: &str, declared: &[&str]) -> bool {
-    near_place(path, declared).is_some()
-}
-
-/// The declared place a full path is a typo of, if any.
+/// The declared place a full path is closest to, used in migration diagnostics.
 pub(crate) fn near_place<'a>(path: &str, declared: &[&'a str]) -> Option<&'a str> {
     let limit = (path.len() / 8).clamp(1, 2);
     let root = path.split('/').next();
     declared
         .iter()
         .copied()
-        .filter(|other| other.len().abs_diff(path.len()) <= limit && other.split('/').next() == root)
-        .map(|other| (distance(path, other), other))
+        .filter(|other| {
+            other.len().abs_diff(path.len()) <= limit && other.split('/').next() == root
+        })
+        .map(|other| (axiom_core::diag::distance(path, other), other))
         .filter(|&(distance, _)| distance <= limit)
         .min()
         .map(|(_, other)| other)
-}
-
-/// Whether `decl` starts at a class root; if not, says so.
-fn root_is_valid(written: &Written<axiom_syntax::Decl>, cx: &mut Cx) -> bool {
-    let (file, path) = (written.file(), written.node.name.0);
-    if PathRoot::of(path).is_some() {
-        return true;
-    }
-    let roots = PathRoot::ALL.map(PathRoot::path);
-    let loc = file.loc(path);
-    let mut diagnostic = Diagnostic::error("account-root", format!("`{path}` does not start at a class root"))
-        .label(loc, "an account belongs to one of the five classes")
-        .note("an account's path starts with `assets`, `liabilities`, `income`, `expenses` or `equity`, and that root is its class");
-    let first = path.split('/').next().unwrap_or(path);
-    if let Some(near) = closest(first, roots) {
-        let fixed = format!("{near}{}", &path[first.len()..]);
-        diagnostic = diagnostic.fix(format!("did you mean `{fixed}`?"), loc, fixed);
-    }
-    cx.diags.push(diagnostic);
-    false
 }

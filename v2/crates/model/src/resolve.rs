@@ -227,6 +227,30 @@ impl<'s> World<'s> {
         self.seek_place(word)?.ok_or_else(|| self.explain_unknown_place(word, false))
     }
 
+    /// Resolve a journal endpoint in its source home. A place path wins over
+    /// an entity name; entities stand for their configured holding/outside
+    /// place and retain their identity as the counterparty.
+    pub(crate) fn end(&self, home: Home, word: Word) -> Result<End, Diagnostic> {
+        if word.text == "?" {
+            return Ok(End {
+                place: self.book.entities[self.book.roots.unknown].place.expect("unknown has an endpoint"),
+                entity: None,
+            });
+        }
+        if let Some(place) = self.seek_place(word)? {
+            return Ok(End { place, entity: None });
+        }
+        let entity = self.entity(home, word)?;
+        self.book.entities[entity]
+            .place
+            .map(|place| End { place, entity: Some(entity) })
+            .ok_or_else(|| {
+                Diagnostic::error("entity-no-place", format!("entity `{}` has no flow endpoint", word.text))
+                    .label(word.loc, "this entity has no holding or outside place")
+                    .help("give the entity an account or resolve its `via` location")
+            })
+    }
+
     /// The names that mean an entity in a flow although an account's path also
     /// ends with them. An entity is declared on purpose, so it takes the name,
     /// and a line that writes it names the counterparty. When the account is

@@ -453,7 +453,7 @@ impl<'a, 's> Args<'_, 'a, 's> {
     fn text(&mut self) -> Result<&'s str, Diagnostic> {
         self.arg("text in quotes", |expr| {
             if let ExprKind::Str(text) = expr.kind {
-                Some(text)
+                Some(text.0)
             } else {
                 None
             }
@@ -976,7 +976,7 @@ fn places<'s>(
 impl<'s> World<'s> {
     /// Records the properties a kind declares. Two kinds that declare one name
     /// for one sort of thing must give it the same type.
-    fn declare_props(&mut self, sort: Sort, own: &[Has], diags: &mut Vec<Diagnostic>) {
+    pub(crate) fn declare_props(&mut self, sort: Sort, own: &[Has], diags: &mut Vec<Diagnostic>) {
         let family = PropTable::family(sort);
         for &has in own {
             let earlier = *self.props.declared.entry((family, has.name)).or_insert(has);

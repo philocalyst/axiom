@@ -428,6 +428,8 @@ pub enum Fault {
     },
     /// A property the subject never set and whose kind gives no default.
     Unset(Sym),
+    /// A contract template input was not bound for this occurrence.
+    MissingInput(u16),
     /// No param row at or before the day asked for, or no row for the names.
     NoRow(Id<Param>),
     DivideByZero,

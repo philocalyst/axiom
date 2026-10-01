@@ -134,7 +134,8 @@ pub struct Pattern {
 /// One step of a pattern's program.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Op {
-    /// User-written literal, kept borrowed and matched case-insensitively.
+    /// User-written literal, borrowed when unescaped or pooled after decoding;
+    /// matched case-insensitively.
     Literal(Text),
     /// A generated entity or account name, matched case-insensitively with
     /// path separators and hyphens equivalent to spaces (`trader-joes` matches
