@@ -693,7 +693,7 @@ fn lower_statement<'a, 's>(
             };
             world.book.events.push(Event {
                 day: statement.date,
-                code: world.sym(code.name()),
+                code: world.book.names.intern(code.name()),
                 state: *state,
                 loc,
             });
@@ -765,7 +765,7 @@ enum StatementTarget {
 }
 
 fn statement_target<'s>(
-    world: &World<'s>,
+    world: &mut World<'s>,
     home: Home,
     file: &ast::File<'s>,
     subject: Subject<'s>,
@@ -797,7 +797,7 @@ fn statement_target<'s>(
                 }
             }
         }
-        Subject::Code(code) => Some(StatementTarget::Code(world.sym(code.name()))),
+        Subject::Code(code) => Some(StatementTarget::Code(world.book.names.intern(code.name()))),
         Subject::Purpose(name) => world
             .purpose(
                 home,
@@ -1090,7 +1090,7 @@ fn lower_measure<'s>(
             ClauseKind::Description(text) => {
                 description = Some(world.book.quoted_text(text.0));
             }
-            ClauseKind::Code(code) => codes.push(world.sym(code.name())),
+            ClauseKind::Code(code) => codes.push(world.book.names.intern(code.name())),
             _ => diags.push(
                 Diagnostic::error(
                     "measure-tail",
@@ -1566,7 +1566,7 @@ fn lower_tail<'s>(
                 tail.description = Some(world.book.quoted_text(text.0))
             }
             ClauseKind::Code(code) => {
-                let symbol = world.sym(code.name());
+                let symbol = world.book.names.intern(code.name());
                 world.book.codes.push(symbol);
             }
             ClauseKind::For(ast::For::Period(first, last)) => {
@@ -1749,7 +1749,7 @@ fn resolve_end<'s>(
     for selector in &file[written.select] {
         let resolved = match *selector {
             ast::Select::Range(first, last, _) => Days::new(first, last).map(Select::Range),
-            ast::Select::Code(code) => Some(Select::Code(world.sym(code.name()))),
+            ast::Select::Code(code) => Some(Select::Code(world.book.names.intern(code.name()))),
             ast::Select::Policy(policy, _) => Some(Select::Policy(policy)),
             ast::Select::Purpose(name) => match world.purpose(
                 home,
@@ -1957,7 +1957,7 @@ fn resolve_amount<'s>(
     }
 }
 
-fn resolve_object<'s>(
+pub(super) fn resolve_object<'s>(
     world: &World<'s>,
     home: Home,
     file: &ast::File<'s>,

@@ -5,6 +5,7 @@
 //! in their syntax tables and are resolved by the recording pass; this survey
 //! does not copy the journal into a second per-item plan.
 
+pub(crate) mod also;
 mod contracts;
 mod record;
 
@@ -983,12 +984,13 @@ contract flat with greystar
     fn contract_and_changed_terms_collect_each_computed_root_once() {
         let source_text = "\
 contract c with p
-  12% of ^base USD monthly from checking
-  buy VTI for 3/4 of ^base USD monthly from checking
+  12 USD monthly from checking
+  buy VTI for 3/4 of ^base monthly from checking
   + 5% of ^base
   due 5d else + 2% of ^base
-2026-01-01 c now 10% of ^base USD monthly from checking
+2026-01-01 c now 10 USD monthly from checking
   + 3% of ^base
+  + 1/4 of ^base
 ";
         let (file, diagnostics) = parse(FileId(0), source_text, Folder::of("contracts.ax"));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
@@ -998,11 +1000,11 @@ contract c with p
         let contract = &file[contract_id];
         assert!(contract.schedule.is_some() && contract.standing.is_some());
         let roots = contract_roots(&file, contract);
-        assert_eq!(roots.regular.len(), 3);
-        assert_eq!(roots.standing.len(), 1);
+        assert_eq!(roots.regular.len(), 2);
+        assert_eq!(roots.standing.len(), 3);
         assert!(matches!(
             file.exprs[roots.regular[0].0].kind,
-            ExprKind::Of(_, _)
+            ExprKind::Pct(_)
         ));
         assert!(matches!(
             file.exprs[roots.standing[0].0].kind,
