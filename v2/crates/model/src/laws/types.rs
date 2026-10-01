@@ -15,6 +15,8 @@ use crate::law::Ty;
 pub(crate) fn unify(a: Ty, b: Ty) -> Option<Ty> {
     match (a, b) {
         _ if a == b => Some(a),
+        (Ty::Amount(Dim::Any), Ty::Amount(dimension))
+        | (Ty::Amount(dimension), Ty::Amount(Dim::Any)) => Some(Ty::Amount(dimension)),
         (amount @ Ty::Amount(_), Ty::Empty) | (Ty::Empty, amount @ Ty::Amount(_)) => Some(amount),
         _ => None,
     }
@@ -177,6 +179,19 @@ mod tests {
         assert_eq!(binary(BinOp::Mul, Ty::AMOUNT, Ty::AMOUNT), None);
         assert_eq!(binary(BinOp::Lt, Ty::AMOUNT, Ty::Empty), Some(Ty::Bool));
         assert_eq!(binary(BinOp::Lt, Ty::Place, Ty::Place), None);
+    }
+
+    #[test]
+    fn a_dynamic_amount_joins_a_concrete_amount_without_erasing_its_unit() {
+        type D = Dim<axiom_core::Id<crate::book::Commodity>>;
+        let usd = Ty::Amount(D::Of(axiom_core::Id::new(0)));
+        let mile = Ty::Amount(D::Of(axiom_core::Id::new(1)));
+
+        assert_eq!(unify(Ty::AMOUNT, usd), Some(usd));
+        assert_eq!(binary(BinOp::Le, Ty::AMOUNT, usd), Some(Ty::Bool));
+        assert_eq!(binary(BinOp::UpTo, usd, Ty::AMOUNT), Some(usd));
+        assert_eq!(binary(BinOp::Add, Ty::AMOUNT, usd), Some(usd));
+        assert_eq!(binary(BinOp::Add, usd, mile), None);
     }
 
     #[test]

@@ -74,7 +74,11 @@ pub(crate) fn declare<'s>(
                             .ok_or_else(|| unknown_named(world, "asset", word))
                             .map(|asset| (Owner::Asset(asset), Ty::Asset, asset.index() as u32)),
                         DeclKind::Purpose => world.purpose(source.home, word).map(|purpose| {
-                            (Owner::Purpose(purpose), Ty::Flow, purpose.index() as u32)
+                            // Purpose laws govern purpose-bearing flows, but
+                            // `self` is the owner of the flow (LANGUAGE §8).
+                            // `total(window)` retains the purpose context in
+                            // the law owner instead of changing `self`'s type.
+                            (Owner::Purpose(purpose), Ty::Entity, purpose.index() as u32)
                         }),
                         DeclKind::Commodity => {
                             misplaced(diags, file, decl.laws, "a commodity");
