@@ -14,7 +14,7 @@ use axiom_core::{
 };
 
 use crate::journal::{
-    Assert, Detail, Event, Filed, Flow, FlowView, Infer, JournalProgram, Measure, Mode, Origin, Plan, Prices,
+    Assert, Detail, Event, Filed, Flow, FlowView, JournalProgram, Measure, Plan, Prices,
     Purposed, Reading, RuntimeDetail, RuntimeFlow, Select, Split, Txn, Waive,
 };
 use crate::law::{Fault, Law, Node, NodeId, Rules, Ty, Value};
@@ -1036,84 +1036,6 @@ impl Contract {
         move_days(template.recognized, shift)
     }
 
-    /// Forecast flows directly from the contract's scheduled terms. The
-    /// iterator borrows the book and contract, allocating only each owned flow
-    /// that the ledger projection must apply. This consumes model-constructed
-    /// terms; source v4 contract parsing is not present. Missing values and
-    /// unsupported flow-affecting features are typed errors rather than omitted
-    /// or guessed amounts.
-    pub fn forecast_flows<'a>(
-        &'a self,
-        book: &'a Book<'_>,
-        id: Id<Contract>,
-        within: Days,
-    ) -> impl Iterator<Item = Result<Flow, ForecastError>> + 'a {
-        self.occurrences(within).flat_map(move |occurrence| {
-            let amount = self.amount_on_schedule(book, occurrence.schedule, occurrence.day);
-            let input = occurrence.terms.inputs.first().map(|input| input.name);
-            let terms = occurrence.terms;
-            let template_count = if self.loan.is_some() {
-                1
-            } else {
-                terms.template.len().max(1)
-            };
-            std::iter::repeat(())
-                .take(template_count)
-                .enumerate()
-                .map(move |(index, ())| {
-                    if self.loan.is_some() {
-                        return Err(ForecastError::UnsupportedLoan(occurrence.day));
-                    }
-                    if let Some(feature) = self.unsupported_feature(terms) {
-                        return Err(ForecastError::UnsupportedFeature { feature, day: occurrence.day });
-                    }
-                    let Some(template) = terms.template.get(index) else {
-                        return Err(ForecastError::MissingTemplate(occurrence.day));
-                    };
-                    if !template.legs.is_empty()
-                        || !template.items.is_empty()
-                        || !terms.program.nodes.is_empty()
-                    {
-                        return Err(ForecastError::UnsupportedFeature {
-                            feature: ForecastFeature::GroupedTemplate,
-                            day: occurrence.day,
-                        });
-                    }
-                    if let Some(input) = input {
-                        return Err(ForecastError::MissingInput {
-                            input,
-                            day: occurrence.day,
-                        });
-                    }
-                    if template.flow.infer != Infer::Known {
-                        return Err(ForecastError::UnresolvedAmount(occurrence.day));
-                    }
-                    let recognized = self.recognition_on_schedule(&template.flow, occurrence.schedule, occurrence.day)?;
-                    amount.and_then(|factor| {
-                        forecast_flow(&template.flow, occurrence.day, recognized, id, factor)
-                    })
-                })
-        })
-    }
-
-    fn unsupported_feature(&self, terms: &Terms) -> Option<ForecastFeature> {
-        if self.buys.is_some() {
-            Some(ForecastFeature::Buy)
-        } else if self.deposit.is_some() {
-            Some(ForecastFeature::Deposit)
-        } else if self.matching.is_some() {
-            Some(ForecastFeature::Matching)
-        } else if terms.due.is_some() {
-            Some(ForecastFeature::Deadline)
-        } else if !terms.shares.is_empty() {
-            Some(ForecastFeature::Shares)
-        } else if !terms.also.is_empty() {
-            Some(ForecastFeature::Also)
-        } else {
-            None
-        }
-    }
-
     fn recognition_period_for_schedule(
         &self,
         schedule: ScheduleKind,
@@ -1375,69 +1297,6 @@ fn add_span(start: Day, span: Span) -> Result<Day, ForecastError> {
     i32::try_from(value)
         .map(Day)
         .map_err(|_| ForecastError::Overflow)
-}
-
-fn forecast_flow(
-    template: &Flow,
-    day: Day,
-    recognized: Days,
-    contract: Id<Contract>,
-    factor: Ratio,
-) -> Result<Flow, ForecastError> {
-    let shift = day
-        .0
-        .checked_sub(template.day.0)
-        .ok_or(ForecastError::Overflow)?;
-    let scale = |amount: Amount| {
-        amount
-            .qty
-            .scale(factor)
-            .map(|qty| Amount::new(qty, amount.unit))
-            .ok_or(ForecastError::Overflow)
-    };
-    let moved_detail = template
-        .detail
-        .as_deref()
-        .map(|detail| {
-            let mut moved = detail.clone();
-            moved.basis = detail
-                .basis
-                .map(|basis| basis.scale(factor).ok_or(ForecastError::Overflow))
-                .transpose()?;
-            moved.cost = detail.cost.map(scale).transpose()?;
-            moved.due = detail
-                .due
-                .map(|due| {
-                    due.0
-                        .checked_add(shift)
-                        .map(Day)
-                        .ok_or(ForecastError::Overflow)
-                })
-                .transpose()?;
-            Ok::<_, ForecastError>(Box::new(moved))
-        })
-        .transpose()?;
-    Ok(Flow {
-        day,
-        recognized,
-        from: template.from,
-        to: template.to,
-        out: scale(template.out)?,
-        arrive: scale(template.arrive)?,
-        mode: Mode::Planned,
-        infer: template.infer,
-        txn: template.txn,
-        payee: template.payee,
-        owner: template.owner,
-        purpose: template.purpose,
-        description: template.description,
-        origin: Origin::Occurrence(contract),
-        select: template.select.clone(),
-        codes: Box::default(),
-        loc: template.loc,
-        waive: template.waive,
-        detail: moved_detail,
-    })
 }
 
 fn move_days(days: Days, shift: i32) -> Result<Days, ForecastError> {
