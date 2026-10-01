@@ -78,7 +78,6 @@ pub fn build<'s>(sources: &[Source<'s>]) -> (Book<'s>, Vec<Diagnostic>) {
     );
     props::declare(&mut world, &sites, &mut diags);
     world.finish_props();
-    world.book.lookup.taken = world.taken_names();
     params::declare(&mut world, &sites, &mut diags);
     props::system_rates(&mut world, &sites, &mut diags);
     sync_lower::declare(&mut world, &sites, &mut diags);

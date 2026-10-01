@@ -137,18 +137,6 @@ pub struct Lookup {
     pub(crate) params: Scoped<Param>,
     pub(crate) laws: Names<Law>,
     pub(crate) commodities: Map<Sym, Id<Commodity>>,
-    /// The names a flow writes that mean an entity although an account's path
-    /// also ends with them: see [`World::taken`](crate::declare::World).
-    pub(crate) taken: Map<Sym, Taken>,
-}
-
-/// An entity that has a name in flows which an account's path also ends with.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Taken {
-    pub entity: Id<Entity>,
-    /// The account is not the entity's own place, so what a line that
-    /// writes the name meant is unclear.
-    pub clash: bool,
 }
 
 /// Built-in things every book has.
