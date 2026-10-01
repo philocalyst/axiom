@@ -103,6 +103,35 @@ pub(crate) fn declare<'s>(
     register(world);
 }
 
+/// Compiles a nested or native S5 law using the same typed compiler as
+/// top-level declaration laws, and adds it to the owning book.
+pub(crate) fn compile_native<'s>(
+    world: &mut World<'s>,
+    diags: &mut Vec<Diagnostic>,
+    file: &ast::File<'s>,
+    home: Home,
+    owner: Owner,
+    subject: Ty,
+    law: &ast::Law<'s>,
+) -> Option<Id<Law>> {
+    if let Err(problem) = fits(world, owner, law) {
+        diags.push(problem);
+        return None;
+    }
+    if law.damaged {
+        return None;
+    }
+    let site = Placement { file, home, owner, subject };
+    let compiled = compile(world, diags, &site, law)?;
+    Some(push(world, compiled))
+}
+
+/// Rebuilds the per-kind and per-system law runs after native lowering added
+/// nested laws to the Book arena.
+pub(crate) fn register_native(world: &mut World<'_>) {
+    register(world);
+}
+
 /// The names some law counts into.
 fn counted<'s>(sites: &[Site<'_, 's>]) -> Set<&'s str> {
     let steps = sites.iter().flat_map(|site| site.source.file.iter::<ast::Step>());
@@ -129,10 +158,11 @@ fn add<'s>(world: &mut World<'s>, diags: &mut Vec<Diagnostic>, site: &Placement<
     }
 }
 
-fn push(world: &mut World, law: Law) {
+fn push(world: &mut World, law: Law) -> Id<Law> {
     let name = world.book.name(law.name);
     let id = world.book.laws.push(law);
     world.book.lookup.laws.insert(&mut world.book.names, name, Rank::Path, id);
+    id
 }
 
 /// Laws written inside declarations that cannot own them.
