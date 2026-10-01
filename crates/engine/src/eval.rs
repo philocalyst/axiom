@@ -242,6 +242,9 @@ pub(crate) struct Realized {
     pub gain: Qty,
     pub proceeds: Qty,
     pub basis: Qty,
+    /// The quantity of this individual parcel, which may be only part of the
+    /// flow when a sale relieves multiple lots.
+    pub quantity: Qty,
     pub held: Span,
     pub part: Option<PartId>,
     pub codes: FlowCodes,
