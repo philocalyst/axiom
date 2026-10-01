@@ -100,11 +100,103 @@ pub struct RuntimeDetail(pub Detail);
 pub struct RuntimeFlow {
     pub flow: Flow,
     pub detail: Option<Id<RuntimeDetail>>,
+    /// Identity of the transaction in the runtime. `Flow::txn` is source
+    /// metadata and is never used as a Book transaction index for a runtime
+    /// flow.
+    pub txn: RuntimeTxn,
 }
 
 impl RuntimeFlow {
     pub fn source(flow: Flow) -> RuntimeFlow {
-        RuntimeFlow { flow, detail: None }
+        RuntimeFlow { txn: RuntimeTxn::journal(flow.txn), flow, detail: None }
+    }
+}
+
+/// Transaction identity for a flow applied through the runtime interface.
+///
+/// Contract occurrence identity is stable whether or not a journal
+/// transaction later keeps it. Its optional source transaction is provenance
+/// only, not part of the key used to merge lots or deduplicate occurrences.
+#[derive(Clone, Copy, Debug)]
+pub enum RuntimeTxn {
+    /// A transaction recorded in the Book.
+    Journal(Id<Txn>),
+    /// One occurrence from a contract schedule. The same key is shared by all
+    /// grouped headers, legs, and items in that occurrence.
+    ContractOccurrence {
+        contract: Id<Contract>,
+        schedule: ScheduleKind,
+        day: Day,
+        ordinal: u32,
+        source: Option<Id<Txn>>,
+    },
+}
+
+impl RuntimeTxn {
+    pub fn journal(txn: Id<Txn>) -> RuntimeTxn {
+        assert_ne!(txn, TEMPLATE_TXN, "template transaction is not a Book transaction");
+        RuntimeTxn::Journal(txn)
+    }
+
+    /// The actual Book transaction that supplies source location/codes, if
+    /// this runtime flow came from one.
+    pub fn source_txn(self) -> Option<Id<Txn>> {
+        match self {
+            RuntimeTxn::Journal(txn) => Some(txn),
+            RuntimeTxn::ContractOccurrence { source, .. } => source,
+        }
+    }
+}
+
+impl PartialEq for RuntimeTxn {
+    fn eq(&self, other: &Self) -> bool {
+        match (*self, *other) {
+            (RuntimeTxn::Journal(a), RuntimeTxn::Journal(b)) => a == b,
+            (
+                RuntimeTxn::ContractOccurrence { contract: ac, schedule: as_, day: ad, ordinal: ao, .. },
+                RuntimeTxn::ContractOccurrence { contract: bc, schedule: bs, day: bd, ordinal: bo, .. },
+            ) => (ac, as_, ad, ao) == (bc, bs, bd, bo),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for RuntimeTxn {}
+
+impl Hash for RuntimeTxn {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match *self {
+            RuntimeTxn::Journal(txn) => {
+                0u8.hash(state);
+                txn.hash(state);
+            }
+            RuntimeTxn::ContractOccurrence { contract, schedule, day, ordinal, .. } => {
+                1u8.hash(state);
+                contract.hash(state);
+                schedule.hash(state);
+                day.hash(state);
+                ordinal.hash(state);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod runtime_txn_tests {
+    use super::*;
+
+    #[test]
+    fn contract_identity_is_stable_when_a_journal_transaction_keeps_it() {
+        let key = |source| RuntimeTxn::ContractOccurrence {
+            contract: Id::new(2),
+            schedule: ScheduleKind::Standing,
+            day: Day(42),
+            ordinal: 3,
+            source,
+        };
+        assert_eq!(key(None), key(Some(Id::new(9))));
+        assert_eq!(key(None).source_txn(), None);
+        assert_eq!(key(Some(Id::new(9))).source_txn(), Some(Id::new(9)));
     }
 }
 
