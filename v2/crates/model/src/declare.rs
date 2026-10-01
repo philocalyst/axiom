@@ -29,13 +29,7 @@ pub(crate) struct World<'s> {
     pub systems: SystemIndex<'s>,
     pub props: PropTable,
     pub prop_writes: Vec<(PropTarget, Prop)>,
-    pub declared: Declared,
     pub tallies: Set<&'s str>,
-    pub ordinal: Vec<u32>,
-    pub lines: Map<(Id<Place>, &'static str), Loc>,
-    /// Claim tabs allocated from the bounded syntax survey before Place ids
-    /// freeze. A later lookup that was not surveyed is a diagnostic.
-    tabs: Map<(Id<Entity>, Id<Entity>, Class), Id<Place>>,
     /// Loan contract names resolve to their actual debt tab, before and after
     /// contract terms have been compiled.
     pub(crate) contract_endpoints: Map<Sym, End>,
@@ -99,27 +93,6 @@ impl World<'_> {
         self.prop_writes.clear();
     }
 
-    pub(crate) fn tab(
-        &self,
-        party: Id<Entity>,
-        owner: Id<Entity>,
-        class: Class,
-        loc: Loc,
-    ) -> Result<Id<Place>, Diagnostic> {
-        self.tabs.get(&(party, owner, class)).copied().ok_or_else(|| {
-            Diagnostic::error("unregistered-tab", "this claim tab was not found during the declaration survey")
-                .label(loc, "a claim relationship must be visible before the place tree is frozen")
-                .help("check that the party, owner and flow direction match the claim or contract declaration")
-        })
-    }
-}
-
-pub(crate) struct Declared {
-    pub kinds: Vec<Id<Kind>>,
-    pub unrooted: Vec<bool>,
-    pub commodities: Vec<Id<Commodity>>,
-    pub entities: Vec<Id<Entity>>,
-    pub places: Vec<Option<Id<Place>>>,
 }
 
 pub(crate) struct Settings<'s> {
@@ -251,11 +224,10 @@ struct AccountDraft<'s> {
     loc: Loc,
 }
 
-struct TabDraft<'s> {
+struct TabDraft {
     party: Id<Entity>,
     owner: Id<Entity>,
     class: Class,
-    path: &'s str,
     loc: Loc,
 }
 
@@ -490,7 +462,6 @@ pub(crate) fn declare<'a, 's>(
 
     let mut commodities = Arena::new();
     let mut commodity_by_name: Map<&'s str, Id<Commodity>> = Map::default();
-    let mut declared_commodities = Vec::new();
     let commodity_root = native_kinds.roots.commodity;
     for site in sites {
         let file = &site.source.file;
@@ -510,7 +481,6 @@ pub(crate) fn declare<'a, 's>(
                     file.loc(symbol),
                     commodities[first].loc,
                 ));
-                declared_commodities.push(first);
                 continue;
             }
             let kind = resolve_kind(
@@ -538,7 +508,6 @@ pub(crate) fn declare<'a, 's>(
                 loc: Some(file.loc(symbol)),
             });
             commodity_by_name.insert(symbol, id);
-            declared_commodities.push(id);
         }
     }
     let mut synthetic_base = None;
@@ -604,7 +573,6 @@ pub(crate) fn declare<'a, 's>(
     let mut first_entity_paths = Vec::new();
     let mut owner_names: Set<&'s str> = Set::default();
     let mut declared_entity_names = Set::default();
-    let mut entity_declaration_paths = Vec::new();
     for site in sites {
         let file = &site.source.file;
         for item in &file.items {
@@ -622,7 +590,6 @@ pub(crate) fn declare<'a, 's>(
                 continue;
             }
             let path = decl.name.0;
-            entity_declaration_paths.push(path);
             if let Some((_, first_file, first, _)) = explicit_entities.get(path) {
                 diags.push(duplicate_decl(
                     "entity",
@@ -885,7 +852,6 @@ pub(crate) fn declare<'a, 's>(
     // indexes are already complete.
     let mut account_drafts = Vec::new();
     let mut declared_account_paths: Map<&'s str, Loc> = Map::default();
-    let mut account_order = Vec::new();
     for site in sites {
         let file = &site.source.file;
         for item in &file.items {
@@ -899,7 +865,6 @@ pub(crate) fn declare<'a, 's>(
             let path = decl.name.0;
             if let Some(&first) = declared_account_paths.get(path) {
                 diags.push(duplicate_decl("account", path, file.loc(path), Some(first)));
-                account_order.push(None);
                 continue;
             }
             declared_account_paths.insert(path, file.loc(path));
@@ -958,7 +923,6 @@ pub(crate) fn declare<'a, 's>(
                     .ok()
             });
             let loc = file.loc(path);
-            let draft_at = account_drafts.len();
             account_drafts.push(AccountDraft {
                 path,
                 class,
@@ -968,7 +932,6 @@ pub(crate) fn declare<'a, 's>(
                 institution,
                 loc,
             });
-            account_order.push(Some(draft_at));
         }
     }
 
@@ -1065,20 +1028,18 @@ pub(crate) fn declare<'a, 's>(
     for account in &account_drafts {
         account_owner_by_path.insert(account.path, account.owner);
     }
-    let mut tab_drafts = Vec::new();
+    let mut tab_drafts: Vec<TabDraft> = Vec::new();
     let mut tab_keys = Set::default();
-    let mut add_tab =
-        |party: Id<Entity>, owner: Id<Entity>, class: Class, path: &'s str, loc: Loc| {
-            if party != owner && tab_keys.insert((party, owner, class)) {
-                tab_drafts.push(TabDraft {
-                    party,
-                    owner,
-                    class,
-                    path,
-                    loc,
-                });
-            }
-        };
+    let mut add_tab = |party: Id<Entity>, owner: Id<Entity>, class: Class, loc: Loc| {
+        if party != owner && tab_keys.insert((party, owner, class)) {
+            tab_drafts.push(TabDraft {
+                party,
+                owner,
+                class,
+                loc,
+            });
+        }
+    };
     for mention in &survey.mentions {
         match *mention {
             crate::lower::Mention::Claim {
@@ -1097,7 +1058,7 @@ pub(crate) fn declare<'a, 's>(
                     } else {
                         (subject, creditor, Class::Asset)
                     };
-                    add_tab(party, owner, class, names.name(entities[party].path), loc);
+                    add_tab(party, owner, class, loc);
                 }
             }
             crate::lower::Mention::Promise {
@@ -1110,8 +1071,8 @@ pub(crate) fn declare<'a, 's>(
                     let owner = holding
                         .and_then(|name| account_owner_by_path.get(name.0).copied())
                         .unwrap_or(me);
-                    add_tab(party_id, owner, Class::Asset, party.0, loc);
-                    add_tab(party_id, owner, Class::Debt, party.0, loc);
+                    add_tab(party_id, owner, Class::Asset, loc);
+                    add_tab(party_id, owner, Class::Debt, loc);
                 }
             }
             crate::lower::Mention::For { other, ends, loc } => {
@@ -1124,8 +1085,8 @@ pub(crate) fn declare<'a, 's>(
                                 .and_then(|name| account_owner_by_path.get(name.0).copied())
                         })
                         .unwrap_or(me);
-                    add_tab(party, owner, Class::Asset, other.0, loc);
-                    add_tab(party, owner, Class::Debt, other.0, loc);
+                    add_tab(party, owner, Class::Asset, loc);
+                    add_tab(party, owner, Class::Debt, loc);
                 }
             }
             crate::lower::Mention::Due { ends, loc }
@@ -1138,10 +1099,10 @@ pub(crate) fn declare<'a, 's>(
                         account_owner_by_path.get(to.0),
                     );
                     if let (Some(&party), Some(&owner)) = (from_entity, to_owner) {
-                        add_tab(party, owner, Class::Asset, from.0, loc);
+                        add_tab(party, owner, Class::Asset, loc);
                     }
                     if let (Some(&party), Some(&owner)) = (to_entity, from_owner) {
-                        add_tab(party, owner, Class::Debt, to.0, loc);
+                        add_tab(party, owner, Class::Debt, loc);
                     }
                 }
             }
@@ -1406,22 +1367,6 @@ pub(crate) fn declare<'a, 's>(
             );
         }
     }
-    let mut ordinal = vec![u32::MAX; places.len()];
-    let mut declared_places = vec![None; account_order.len()];
-    for (source_at, draft_at) in account_order.into_iter().enumerate() {
-        let Some(draft_at) = draft_at else { continue };
-        let account = &account_drafts[draft_at];
-        let id = remap[place_index[&(ACCOUNTS, account.path)].0];
-        declared_places[source_at] = Some(id);
-        ordinal[id.index()] = source_at as u32;
-    }
-
-    let mut declared_entities = Vec::with_capacity(entity_declaration_paths.len());
-    for path in entity_declaration_paths {
-        if let Some(&id) = entity_ids.get(path) {
-            declared_entities.push(id);
-        }
-    }
     let kind_index = native_kinds.index;
     let purpose_index = native_purposes.index;
     let roots = Roots {
@@ -1496,24 +1441,13 @@ pub(crate) fn declare<'a, 's>(
         sources: Vec::new(),
         lookup,
     };
-    let declared = Declared {
-        kinds: native_kinds.declarations,
-        unrooted: native_kinds.unrooted,
-        commodities: declared_commodities,
-        entities: declared_entities,
-        places: declared_places,
-    };
     World {
         book,
         scopes,
         systems,
         props: PropTable::default(),
         prop_writes: Vec::new(),
-        declared,
         tallies: Set::default(),
-        ordinal,
-        lines: Map::default(),
-        tabs,
         contract_endpoints,
     }
 }

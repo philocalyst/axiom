@@ -17,12 +17,12 @@ use axiom_syntax::{
 };
 
 use crate::book::{
-    Amount, Asset, At, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, Purpose, RatePolicy,
+    Asset, At, Basis, Books, Commodity, Entity, Has, Kind, Place, Prop, Purpose, RatePolicy,
     Residence, Role, Share, Sort, Take,
 };
 use crate::declare::{MAX_SCALE, PropTarget, World};
 use crate::errors::{Word, article, list, suggest};
-use crate::law::{Ty, Value, Window};
+use crate::law::{Ty, Value};
 use crate::scope::Home;
 use crate::values::describe;
 
@@ -203,14 +203,6 @@ const TYPES: [(&str, Ty); 14] = [
     ("purpose", Ty::Purpose),
     ("asset", Ty::Asset),
 ];
-
-/// `budget 500 USD monthly`, waiting to become a law once laws can be built.
-pub(crate) struct Budget {
-    pub place: Id<Place>,
-    pub amount: Amount,
-    pub window: Window,
-    pub loc: Loc,
-}
 
 /// Every declared property, typed once for all things of its sort: two kinds
 /// that declare `filing` for entities agree on what it is, so `owner.filing`
