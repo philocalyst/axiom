@@ -12,7 +12,7 @@
 //! broke by itself, as the window opens), and its diagnostic is built only then.
 
 use axiom_core::{Day, Days, Diagnostic, Id, Qty, Sym};
-use axiom_model::{Amount, Cap, Entity, Fault, Law, Rule, Subject, Trigger, Window};
+use axiom_model::{Amount, Cap, CapTarget, Entity, Fault, Law, Rule, Subject, Trigger, Window};
 
 use crate::eval::{self, Context, Env, Occasion, Outcome};
 use crate::explain::{self, Frame};
@@ -218,13 +218,29 @@ impl Ledger<'_, '_, '_> {
     /// against the limit is all the law compares. Returns whether it held; a
     /// cap that is broken is evaluated in full, which explains why.
     fn within(&mut self, rule: &Rule, ctx: &Context, cap: Cap) -> bool {
-        let read = self.world.totals.read(
-            &self.plan.watch,
-            rule.subject,
-            cap.dir,
-            cap.window,
-            ctx.anchor(),
-        );
+        let read = match cap.target {
+            CapTarget::Total(dir) => self.world.totals.read(
+                &self.plan.watch,
+                rule.subject,
+                dir,
+                cap.window,
+                ctx.anchor(),
+            ),
+            CapTarget::Purpose(purpose) => {
+                let (incoming, outgoing) = self.world.totals.read_purpose(
+                    ctx.owner,
+                    purpose,
+                    cap.window,
+                    ctx.anchor(),
+                );
+                match self.plan.book.purposes[purpose].root {
+                    axiom_model::PurposeRoot::Income => incoming - outgoing,
+                    axiom_model::PurposeRoot::Spending
+                    | axiom_model::PurposeRoot::Capital
+                    | axiom_model::PurposeRoot::Transfer => outgoing - incoming,
+                }
+            }
+        };
         let counted = Amount::new(read, self.plan.book.base);
         let holds = if cap.strict {
             counted.qty < cap.limit.qty
