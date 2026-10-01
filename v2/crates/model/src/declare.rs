@@ -8,7 +8,7 @@
 use axiom_core::diag::closest;
 use axiom_core::diag::distance;
 use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Set, Sym, Tree};
-use axiom_syntax::{DeclKind, ExprKind, Setting};
+use axiom_syntax::{DeclKind, ExprKind, ItemKind, Setting};
 
 use crate::book::{Book, Books, Class, Commodity, Entity, Kind, Lookup, PathRoot, Place, Purpose, Role, Roots, Sort};
 use crate::collect::{Entry, Seen, Surveyed, Written, decls};
@@ -66,29 +66,33 @@ pub(crate) struct Settings<'s> {
     pub layout_free: bool,
 }
 
-pub(crate) fn settings<'s>(entries: &[Entry<'_, 's>], diags: &mut Vec<Diagnostic>) -> Settings<'s> {
+pub(crate) fn settings<'a, 's>(
+    sites: &[crate::sources::Site<'a, 's>],
+    diags: &mut Vec<Diagnostic>,
+) -> Settings<'s> {
     let mut settings = Settings { base: None, relaxed: false, layout_free: false };
-    for entry in entries {
-        let Entry::Setting(site, setting) = entry else {
-            continue;
-        };
-        match *setting {
-            Setting::Base(name) => {
-                let word = Word { text: name.0, loc: site.source.file.loc(name.0) };
-                match settings.base {
-                    Some(first) if first.text != word.text => diags.push(
-                        Diagnostic::error("duplicate-base", "the base currency is set twice")
-                            .label(word.loc, format!("`base {}` here", word.text))
-                            .context(first.loc, "and here")
-                            .help("a book has one base currency: remove one of them"),
-                    ),
-                    Some(_) => {}
-                    None => settings.base = Some(word),
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            let ItemKind::Setting(id) = item.kind else { continue };
+            let setting = file[id];
+            match setting {
+                Setting::Base(name) => {
+                    let word = Word { text: name.0, loc: file.loc(name.0) };
+                    match settings.base {
+                        Some(first) if first.text != word.text => diags.push(
+                            Diagnostic::error("duplicate-base", "the base currency is set twice")
+                                .label(word.loc, format!("`base {}` here", word.text))
+                                .context(first.loc, "and here")
+                                .help("a book has one base currency: remove one of them"),
+                        ),
+                        Some(_) => {}
+                        None => settings.base = Some(word),
+                    }
                 }
+                Setting::Relaxed => settings.relaxed = true,
+                Setting::System(_) | Setting::Use(_) | Setting::Currency(_) | Setting::Rates(_) => {}
             }
-            Setting::Relaxed => settings.relaxed = true,
-            Setting::LayoutFree => settings.layout_free = true,
-            Setting::System(_) | Setting::Use(_) => {}
         }
     }
     settings
@@ -97,34 +101,49 @@ pub(crate) fn settings<'s>(entries: &[Entry<'_, 's>], diags: &mut Vec<Diagnostic
 /// What each home has brought into scope: its `use` lines, the system of every
 /// `lives` line (which implies a `use`), and `std` for everyone.
 pub(crate) fn scopes(
-    entries: &[Entry],
+    sites: &[crate::sources::Site<'_, '_>],
     systems: &SystemIndex,
     tree: &Tree<crate::book::System>,
     diags: &mut Vec<Diagnostic>,
 ) -> Scopes {
     let mut used: Vec<(Home, Id<crate::book::System>)> = Vec::new();
-    for entry in entries {
-        match entry {
-            Entry::Setting(site, Setting::Use(name)) => match systems.find(name.0) {
-                Some(system) => used.push((site.home, system)),
-                None => diags.push(systems.unknown(Word { text: name.0, loc: site.source.file.loc(name.0) })),
-            },
-            Entry::Decl(written) if written.node.what == DeclKind::Entity => {
-                let file = written.file();
-                for prop in file[written.node.props].iter().filter(|prop| prop.name.0 == "lives") {
-                    let named = file[prop.args].first().and_then(|&arg| match file.exprs[arg].kind {
-                        ExprKind::Name(path) => systems.find(path.0),
-                        _ => None,
-                    });
-                    used.extend(named.map(|system| (written.home(), system)));
+    for site in sites {
+        let file = &site.source.file;
+        for item in &file.items {
+            match item.kind {
+                ItemKind::Setting(id) => {
+                    if let Setting::Use(name) = file[id] {
+                        match systems.find(name.0) {
+                            Some(system) => used.push((site.home, system)),
+                            None => diags.push(systems.unknown(Word {
+                                text: name.0,
+                                loc: file.loc(name.0),
+                            })),
+                        }
+                    }
                 }
+                ItemKind::Decl(id) if file[id].what == DeclKind::Entity => {
+                    let decl = &file[id];
+                    for prop in file[decl.props].iter().filter(|prop| prop.name.0 == "lives") {
+                        let named = file[prop.args].first().and_then(|&arg| {
+                            match file.exprs[arg].kind {
+                                ExprKind::Name(path) => systems.find(path.0),
+                                _ => None,
+                            }
+                        });
+                        used.extend(named.map(|system| (site.home, system)));
+                    }
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
     let std = systems.find("std");
     Scopes::new(tree, |home| {
-        let own = used.iter().filter(|&&(user, _)| user == home).map(|&(_, system)| system);
+        let own = used
+            .iter()
+            .filter(|&&(user, _)| user == home)
+            .map(|&(_, system)| system);
         own.chain(std).collect()
     })
 }
