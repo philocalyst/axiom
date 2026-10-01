@@ -1047,3 +1047,26 @@ opening 2026-01-01
         );
     });
 }
+
+#[test]
+fn a_computed_exchange_keeps_the_explicit_other_side() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+commodity EUR
+  precision 2
+account checking
+account wallet
+opening 2026-01-01
+  checking 20 USD
+2026-01-02 checking 10 USD -> wallet 50% of 20 EUR
+";
+    with_run(text, day(2026, 1, 2), |book, run| {
+        assert!(run.diagnostics.is_empty(), "computed exchange: {:?}", run.diagnostics);
+        assert_eq!(holding(book, run, "checking", "USD").unwrap().qty().0, 1_000);
+        assert_eq!(holding(book, run, "wallet", "EUR").unwrap().qty().0, 1_000);
+        let posted = run.posted.last().expect("the computed exchange is posted");
+        assert_eq!((posted.out.0, posted.arrive.0), (1_000, 1_000));
+    });
+}

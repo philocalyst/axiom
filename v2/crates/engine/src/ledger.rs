@@ -427,9 +427,9 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             // A single written quantity supplies both ends of an ordinary
             // transfer. The model stores its root on the written side only,
             // while the literal lowering has already mirrored the placeholder.
-            if roots.out.is_some() && roots.arrive.is_none() {
+            if roots.out.is_some() && roots.arrive.is_none() && !flow.is_exchange() {
                 flow.arrive = flow.out;
-            } else if roots.arrive.is_some() && roots.out.is_none() {
+            } else if roots.arrive.is_some() && roots.out.is_none() && !flow.is_exchange() {
                 flow.out = flow.arrive;
             }
         }
