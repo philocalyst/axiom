@@ -1,38 +1,38 @@
 2025-12-01 rent-b
-2025-12-01 checking -> own-rent 1_950 USD / oak-street
-2025-12-01 mortgage-payment
-  mortgage            254.07 USD for #loan   // principal
-  interest            1_555.52 USD   // interest
+2025-12-01 checking -> oak-street 1_950 USD #rent
+2025-12-01 home-loan
+// Historical loan split, independently checked from the contract terms: mortgage            254.07 USD   // principal
+// Historical loan split, independently checked from the contract terms: interest            1_555.52 USD   // interest
 2025-12-05 manager-fee 200.00 USD
-2025-12-08 checking -> groceries 169.29 USD
-2025-12-15 checking -> groceries 188.93 USD
-2025-12-19 checking -> dining 179.28 USD
-2025-12-22 checking -> living 480.04 USD
+2025-12-08 checking -> trader-joes 169.29 USD #groceries
+2025-12-15 checking -> trader-joes 188.93 USD #groceries
+2025-12-19 checking -> cafe 179.28 USD #dining
+2025-12-22 checking -> home-supplies 480.04 USD #household
 2025-12-28 paycheck
 2025-12-29 manager-fee 200.00 USD
 
 /// Half a month for the month of sale, booked first: the sale reads what has been taken.
-2025-12-29 depreciation 478.29 USD
+// Previous hand-entered depreciation: 478.29 USD on 2025-12-29. v4 derives this from the house parts.
 
 /// Sold, 431,500.00 USD. The closing statement is one flow: the house goes out and the price comes in, and it is paid out
 /// in legs: the seller's costs (5% commission and 1.25% of other costs, 26_968.75 USD: a leg into an expense place during
 /// an exchange is a cost of it, so they come off the price and reduce the amount realized), the loan is paid off (what is
 /// left of the principal, settling #loan), tenant B's deposit is credited to the buyer, and the rest is Jamie's.
-2025-12-29 house 1 HOME -> 431_500 USD
-  selling-costs       26_968.75 USD
-  mortgage            276_282.05 USD / lender for #loan
-  deposits            2_500 USD / buyer for #dep-b
-  rental-bank         ...
+2025-12-29 buyer -> rental-bank 431_500 USD #sale of house
+2025-12-29 rental-bank -> buyer 26_968.75 USD #selling-cost of house
+2025-12-29 rental-bank -> lender 276_282.05 USD ^loan
+2025-12-29 rental-bank -> buyer 2_500 USD #deposit of house
+// Proceeds remaining after seller costs, payoff and the buyer credit are retained in rental-bank.
 
 /// The interest on the loan since the first of the month, paid out of the proceeds as well. It is Schedule E interest, not a
 /// cost of the sale, so it is a flow of its own and not a leg of the statement.
-2025-12-29 rental-bank -> interest 1_450.48 USD / lender
+2025-12-29 rental-bank -> lender 1_450.48 USD #interest of house
 
 /// Tenant B's deposit money is Jamie's again: the buyer took the claim. Released into the rental account.
-2025-12-29 deposit-bank -> rental-bank 2_500 USD for me
+2025-12-29 deposit-bank -> rental-bank 2_500 USD #transfer
 
 /// The rest of the rental account moves to checking.
-2025-12-29 rental-bank -> checking 129_981.33 USD
+2025-12-29 rental-bank -> checking 129_981.33 USD #transfer
 2025-12-31 mortgage = empty
 2025-12-31 bills = empty
 2025-12-31 rental-bank = 0.00 USD

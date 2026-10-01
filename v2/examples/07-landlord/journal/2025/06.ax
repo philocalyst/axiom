@@ -1,24 +1,23 @@
-2025-06-01 checking -> own-rent 1_950 USD / oak-street
-2025-06-01 mortgage-payment
-  mortgage            245.67 USD for #loan   // principal
-  interest            1_563.92 USD   // interest
+2025-06-01 checking -> oak-street 1_950 USD #rent
+2025-06-01 home-loan
+// Historical loan split, independently checked from the contract terms: mortgage            245.67 USD   // principal
+// Historical loan split, independently checked from the contract terms: interest            1_563.92 USD   // interest
 2025-06-05 manager-fee
-2025-06-08 checking -> groceries 257.15 USD
+2025-06-08 checking -> trader-joes 257.15 USD #groceries
 
 /// June's rent arrives on the ninth: four days past the grace period, so the lease's 75.00 USD late fee applies.
 2025-06-09 rent-a
-2025-06-09 income/late-fees -> rental-bank 75 USD #lease-a
-2025-06-15 checking -> groceries 125.59 USD
-2025-06-19 checking -> dining 235.94 USD
+2025-06-09 tenant-a -> rental-bank 75 USD #late-fees of house
+2025-06-15 checking -> trader-joes 125.59 USD #groceries
+2025-06-19 checking -> cafe 235.94 USD #dining
 
 /// Gutters and the lawn.
-2025-06-21 rental-bank -> repairs 180 USD / green-yards
-2025-06-22 checking -> living 292.67 USD
+2025-06-21 rental-bank -> green-yards 180 USD #repair of house
+2025-06-22 checking -> home-supplies 292.67 USD #household
 2025-06-28 paycheck
-2025-06-30 depreciation 913.58 USD
+// Previous hand-entered depreciation: 913.58 USD on 2025-06-30. v4 derives this from the house parts.
 2025-06-30 mortgage = 277_785.33 USD
 2025-06-30 rental-bank = 4_011.75 USD
 2025-06-30 checking = 40_451.25 USD
 2025-06-30 deposit-bank = 2_400.00 USD
-2025-06-30 house = 1 HOME
 2025-06-30 deposits = 2_400.00 USD

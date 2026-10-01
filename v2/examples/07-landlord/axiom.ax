@@ -1,21 +1,11 @@
-// A landlord: one rental house bought on 2024-12-18 and sold on 2025-12-29, with a
-// day job. Tax year 2025.
-//
-// The folders are constraints: journal/2024/12.ax holds December 2024 only.
-
+// Jamie's rental house, acquired 2024-12-18 and sold 2025-12-29.
+// The journal records the original cash facts; us/rental derives per-part
+// depreciation from the home's basis, land and in-service date.
 base USD
-
 use std
 use us
+use us/rental
 
-// The house's price is the one thing the world tells us. In a real project a
-// script fetches it; here the script only prints what the county's assessor and
-// a listing site said, so `axiom sync` would rewrite prices/home.ax to the same text.
-sync prices/home.ax
-  run sh scripts/home-prices.sh
-
-/// Jamie, 45, a nurse practitioner, single, with a rental on the side. Washington
-/// has no income tax, so `lives us` is the whole story.
 entity me : person
   born   1980-05-02
   filing single

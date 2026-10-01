@@ -1,164 +1,67 @@
-// The house, its money and its tenants. Tax rules are in tax.ax.
+// Cash and claims. The v4 journal names the other party and purpose on each flow;
+// it does not create income, expense or equity chart accounts.
+account checking     : deposit at bank
+account rental-bank : deposit at bank
+account deposit-bank : deposit at bank
+account mortgage    : mortgage at lender
+account bills       : payable at summit-roofing
+account deposits    : payable
 
-// ─── Kinds ──────────────────────────────────────────────────────────────────
-
-/// Rent, late fees and kept deposits: income of the rental, taxed when received.
-kind rent-income : income
-
-/// A rental house. What is done to it after it is bought is a flow into or out of
-/// its basis (`house.basis`): a new roof raises it, depreciation lowers it. So the
-/// gain a sale realizes is the gain the tax return needs, and the depreciation
-/// taken is the one thing the sale must still add back.
-kind rental-property : property
-  liquidity 60d
-
-  /// Selling depreciable property brings back the depreciation taken (IRC §1250):
-  /// the part of the gain that the depreciation made is taxed as ordinary income
-  /// (at most 25%; this owner's rate is lower), the rest as a long-term gain. `us`
-  /// counted all of the gain as long-term, so this moves that part across.
-  ///
-  /// To fix: the depreciation is what the flows out of `house.basis` counted. If a
-  /// year of it is missing, the sale taxes too little of the gain as ordinary income.
-  law recapture
-    on gain
-    let taken = min(max(gain, empty), tally(depreciation))
-    count taken as recaptured
-    count taken as short-term-gains
-    count empty - taken as long-term-gains
-
-/// A tenant. A security deposit is the tenant's money: it stays tied to them in
-/// whatever account it lands (`for tenant-a`), so it is never available to spend,
-/// until the lease is settled and the landlord releases what the lease lets them keep.
-kind tenant : envelope
-
-
-// ─── Banks and things ───────────────────────────────────────────────────────
-
-account assets/bank/checking : bank
-
-/// All the rental's money moves through here.
-account assets/bank/rental-bank : bank
-
-/// Tenants' deposits are kept apart, as the lease requires.
-account assets/bank/deposit-bank : bank
-
-/// The house: land and building together, one unit. It holds nothing but HOME;
-/// what is paid into its basis (a roof) or taken out of it (depreciation) is
-/// dollars that change what the house cost, and bring no dollars into it.
-account assets/rental/house : rental-property
-  holds HOME
-
-/// The mortgage is money owed to the lender: one claim, made at closing, due at
-/// maturity, and settled by every payment `for #loan`.
-account liabilities/mortgage : payable
-
-/// A contractor's invoice waiting to be paid.
-account liabilities/bills : payable
-
-/// What is owed back to each tenant, one claim per lease.
-account liabilities/deposits : payable
-
-commodity HOME : real-estate
-  name "the rental house"
-  precision 0
-
-
-// ─── Income ─────────────────────────────────────────────────────────────────
-
-account income/rent           : rent-income
-account income/late-fees      : rent-income
-account income/forfeited-deposits : rent-income
-account income/salary         : wages
-
-
-// ─── Expenses ───────────────────────────────────────────────────────────────
-
-/// Everything under here is a rental expense on Schedule E. One law covers it.
-account expenses/rental
-  /// What arrives under this account is a rental expense on Schedule E, counted when it is recognized.
-  ///
-  /// To fix: an expense that is not the rental's belongs outside this subtree.
-  law deductible
-    on in
+// Project-specific purposes not supplied by std or us/rental.
+purpose advertising : spending
+  law count-rental-advertising
+    on flow
     count amount as rental-expenses
 
-account expenses/rental/interest
-account expenses/rental/property-tax
-account expenses/rental/insurance
-account expenses/rental/management
-account expenses/rental/advertising
-account expenses/rental/utilities
+purpose management : spending
+  law count-rental-management
+    on flow
+    count amount as rental-expenses
 
-/// Repairs keep the house as it is: deducted in the year. A new roof does not:
-/// it goes into the house's basis.
-account expenses/rental/repairs
+purpose loan-cost   : spending
+purpose selling-cost : spending
+purpose deposit-return : transfer
+purpose deposit : transfer
+purpose sale : capital
+purpose rental-utilities : spending
+  law count-rental-utilities
+    on flow
+    count amount as rental-expenses
 
-/// Depreciation is a flow out of the house's basis, with no cash behind it. What
-/// arrives here is counted, because the sale needs the total.
-account expenses/rental/depreciation
-  /// Depreciation taken is counted so that the sale can add back what it brought down.
-  ///
-  /// To fix: depreciation is a flow out of `house.basis` into this account; a year missing from it is not recaptured.
-  law count-depreciation
-    on in
-    count amount as depreciation
+purpose late-fees : income
+  law count-rental-late-fees
+    on flow
+    count amount as rental-income
 
-/// The loan costs, spread over the time the loan lasted.
-account expenses/rental/amortization
+purpose forfeited-deposit : income
+  law count-rental-forfeiture
+    on flow
+    count amount as rental-income
 
-/// What it cost to sell the house: the commission and the other seller's costs. Not a rental expense:
-/// they come off the price the sale realizes.
-account expenses/selling-costs
-
-account expenses/own-rent
-account expenses/groceries
-account expenses/dining
-account expenses/living
-account expenses/taxes/federal : federal-tax
-account expenses/taxes/payroll
-
-
-// ─── People ─────────────────────────────────────────────────────────────────
-
-entity lender : org
-  via liabilities/mortgage
-
-/// The buyer of the house. Tenant B's deposit is credited to them at closing.
+entity bank : org
+entity lender : lender
 entity buyer : org
-
 entity title-co : org
-  via assets/rental/house
-
-entity summit-roofing : org
-  via liabilities/bills
-
-entity landlord-policy : org
-  via expenses/rental/insurance
-entity quick-plumbing : org
-  via expenses/rental/repairs
-entity appliance-doc : org
-  via expenses/rental/repairs
-entity green-yards : org
-  via expenses/rental/repairs
-entity fresh-paint : org
-  via expenses/rental/repairs
-entity hardware-hank : org
-  via expenses/rental/repairs
+entity summit-roofing : contractor
+entity landlord-policy : insurer
+entity quick-plumbing : contractor
+entity appliance-doc : contractor
+entity green-yards : contractor
+entity fresh-paint : contractor
+entity hardware-hank : contractor
 entity rentlist : org
-  via expenses/rental/advertising
-entity city-power : org
-  via expenses/rental/utilities
-entity city-water : org
-  via expenses/rental/utilities
-entity county : org
-  via expenses/rental/property-tax
+entity city-power : utility
+entity city-water : utility
+entity county : government
 entity hartwell-pm : org
-  via expenses/rental/management
-entity oak-street : org
-  via expenses/own-rent
-
-/// The tenants. Rent is written without a payee and marked with the lease
-/// (#lease-a): a rent payment from a tenant would be tied to them like the
-/// deposit is.
+entity oak-street : landlord
 entity tenant-a : tenant
 entity tenant-b : tenant
+entity acme : employer
+entity payroll-office : government
+entity trader-joes : grocer
+entity cafe : merchant
+entity home-supplies : store
+
+code inv-* on payable
+code loan on mortgage

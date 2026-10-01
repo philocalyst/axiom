@@ -1,24 +1,23 @@
-2025-04-01 checking -> own-rent 1_950 USD / oak-street
-2025-04-01 mortgage-payment
-  mortgage            242.93 USD for #loan   // principal
-  interest            1_566.66 USD   // interest
+2025-04-01 checking -> oak-street 1_950 USD #rent
+2025-04-01 home-loan
+// Historical loan split, independently checked from the contract terms: mortgage            242.93 USD   // principal
+// Historical loan split, independently checked from the contract terms: interest            1_566.66 USD   // interest
 2025-04-02 rent-a
 2025-04-05 manager-fee
-2025-04-08 checking -> groceries 190.94 USD
-2025-04-15 checking -> groceries 219.22 USD
+2025-04-08 checking -> trader-joes 190.94 USD #groceries
+2025-04-15 checking -> trader-joes 219.22 USD #groceries
 
 /// REPAIR: the dishwasher's pump.
-2025-04-18 rental-bank -> repairs 240 USD / appliance-doc
-2025-04-19 checking -> dining 111.05 USD
-2025-04-22 checking -> living 271.44 USD
+2025-04-18 rental-bank -> appliance-doc 240 USD #repair of house
+2025-04-19 checking -> cafe 111.05 USD #dining
+2025-04-22 checking -> home-supplies 271.44 USD #household
 2025-04-28 paycheck
 
 /// First half of the county tax.
-2025-04-30 rental-bank -> property-tax 2_190 USD / county
-2025-04-30 depreciation 913.58 USD
+2025-04-30 rental-bank -> county 2_190 USD #property-tax of house
+// Previous hand-entered depreciation: 913.58 USD on 2025-04-30. v4 derives this from the house parts.
 2025-04-30 mortgage = 278_275.29 USD
 2025-04-30 rental-bank = 3_319.93 USD
 2025-04-30 checking = 33_880.67 USD
 2025-04-30 deposit-bank = 2_400.00 USD
-2025-04-30 house = 1 HOME
 2025-04-30 deposits = 2_400.00 USD

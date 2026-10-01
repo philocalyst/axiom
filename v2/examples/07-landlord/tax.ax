@@ -1,34 +1,25 @@
-// Rental income, for the year that just ended. The shipped `us` counts wages,
-// interest, dividends and gains, and the gain on a sale; it has no Schedule E.
-// What is here counts into the lines `us` reads (total-income), and the sale's
-// depreciation recapture is the kind law of `rental-property` in accounts.ax.
-//
-// Simplifications, on purpose: cash method; the 25,000 USD passive-loss allowance
-// is applied without its phase-out above 100,000 USD of income (this year's
-// loss is used in full, because the sale of the whole interest frees it);
-// recapture is taxed as ordinary income, which is right while the bracket is
-// below 25%; no qualified business income deduction; no state tax.
+// Rental income for tax year 2025. us/rental recognizes rent, depreciation and
+// the standard repair/insurance/property-tax/interest purposes. These local
+// rules add the other documented Schedule E expenses and recapture depreciation
+// on sale. The independent verifier below works the return without Axiom.
 
-/// Schedule E: rents received less everything under expenses/rental. A loss
-/// offsets other income up to 25,000 USD (IRC §469(i)), and a loss on paper,
-/// because of depreciation and interest, is common in the first year.
-///
-/// To fix: `axiom why rental-net` lists the rents and the expenses behind it.
+law recapture
+  on gain
+  when from is rental-home
+  let taken = min(max(gain, empty), tally(rental-depreciation))
+  count taken as recaptured
+  count taken as short-term-gains
+  count empty - taken as long-term-gains
+
+/// Schedule E: rents less the expenses attached to the house. The passive loss
+/// allowance is deliberately simplified as described in README.md.
 law schedule-e
   each year closing 04-15
-  let net = tally(rental-income) - tally(rental-expenses)
+  let net = value(tally(rental-income) - tally(rental-expenses), USD)
+  let allowance = value(passive-allowance[year], USD)
   count net as rental-net
-  count max(net, empty - passive-allowance[year]) as total-income
+  count max(net, empty - allowance) as total-income
 
-/// Rents, late fees and kept deposits count when they arrive (cash method).
-///
-/// To fix: an amount that is not rent must arrive from another kind of place.
-law count-rental-income
-  on in
-  when from is rent-income
-  count amount as rental-income
-
-// The passive-loss allowance for active participation in a rental (IRC §469(i)).
 param passive-allowance
   2024 25_000 USD
   2025 25_000 USD
