@@ -10,7 +10,7 @@ use axiom_core::diag::closest;
 use axiom_core::num::DecError;
 use axiom_core::{Dec, Diagnostic, Id, Loc, Map, Sym};
 
-use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, PathRoot, Place, Purpose, System, Taken};
+use crate::book::{Amount, Commodity, Entity, Kind, Miss, Param, PathRoot, Place, Purpose, Role, System, Taken};
 use crate::declare::{World, near_place};
 use crate::errors::{Candidate, Word, ambiguous, count, list, list_and, not_used, unknown};
 use crate::kinds;
@@ -227,9 +227,10 @@ impl<'s> World<'s> {
         self.seek_place(word)?.ok_or_else(|| self.explain_unknown_place(word, false))
     }
 
-    /// Resolve a journal endpoint in its source home. A place path wins over
-    /// an entity name; entities stand for their configured holding/outside
-    /// place and retain their identity as the counterparty.
+    /// Resolve a journal endpoint in its source home. Places and entities are
+    /// considered together so a suffix in one namespace cannot hide a match
+    /// in the other. Entities stand for their configured holding/outside place
+    /// and retain their identity as the counterparty.
     pub(crate) fn end(&self, home: Home, word: Word) -> Result<End, Diagnostic> {
         if word.text == "?" {
             return Ok(End {
@@ -271,11 +272,79 @@ impl<'s> World<'s> {
                 .help(format!("use `#purchase of {}` to acquire the asset", word.text)),
             );
         }
-        if let Some(place) = self.seek_place(word)? {
+
+        let place_candidates = self.book.lookup.places.candidates(&self.book.names, word.text);
+        let entity_candidates = self.book.lookup.entities.names.candidates(&self.book.names, word.text);
+        let visible = || {
+            entity_candidates
+                .iter()
+                .copied()
+                .filter(|&entity| self.scopes.of(home).sees(self.book.lookup.entities.home(entity)))
+        };
+        let mut visible_entities = visible();
+        let entity = visible_entities.next();
+        let multiple_entities = visible_entities.next().is_some();
+
+        if place_candidates.len() > 1 && entity.is_none() {
+            return Err(self.seek_place(word).expect_err("multiple visible places must be ambiguous"));
+        }
+        if multiple_entities && place_candidates.is_empty() {
+            return Err(self.seek_entity(home, word).expect_err("multiple visible entities must be ambiguous"));
+        }
+        if (place_candidates.len() > 1 || multiple_entities || entity.is_some())
+            && !(place_candidates.len() == 1
+                && !multiple_entities
+                && entity.is_some_and(|entity| self.book.entities[entity].place == Some(place_candidates[0])))
+            && !place_candidates.is_empty()
+            && entity.is_some()
+        {
+            return Err(self.ambiguous_end(word, place_candidates, &visible().collect::<Vec<_>>()));
+        }
+        if let Some(entity) = entity {
+            return self.entity_end(entity, word);
+        }
+        if let Some(&place) = place_candidates.first() {
+            if let Role::Asset(asset) = self.book.places[place].role {
+                let name = self.book.name(self.book.assets[asset].name);
+                return Err(
+                    Diagnostic::error("asset-endpoint", format!("asset `{name}` is not a flow endpoint"))
+                        .label(word.loc, "this names the asset itself")
+                        .help(format!("use `#purchase of {name}` to acquire the asset")),
+                );
+            }
             return Ok(End { place, entity: None });
         }
         let entity = self.entity(home, word)?;
         self.entity_end(entity, word)
+    }
+
+    fn ambiguous_end(&self, word: Word, places: &[Id<Place>], entities: &[Id<Entity>]) -> Diagnostic {
+        let mut candidates = Vec::with_capacity(places.len() + entities.len());
+        for &place in places {
+            let place = &self.book.places[place];
+            let label = match place.role {
+                Role::Asset(_) => "asset place",
+                _ => "account",
+            };
+            candidates.push((place.loc, format!("{label} `{}`", self.book.name(place.path))));
+        }
+        for &entity in entities {
+            let entity = &self.book.entities[entity];
+            candidates.push((entity.loc, format!("entity `{}`", self.book.name(entity.path))));
+        }
+        candidates.sort_by_key(|(loc, _)| *loc);
+        let choices = candidates.iter().map(|(_, label)| label.as_str()).collect::<Vec<_>>().join(" or ");
+        let mut diagnostic = Diagnostic::error(
+            "ambiguous-end",
+            format!("`{}` could mean {choices}", word.text),
+        )
+        .label(word.loc, "qualify the path to make the endpoint clear");
+        for (loc, label) in candidates {
+            if let Some(loc) = loc {
+                diagnostic = diagnostic.context(loc, format!("{label} declared here"));
+            }
+        }
+        diagnostic
     }
 
     fn entity_end(&self, entity: Id<Entity>, word: Word) -> Result<End, Diagnostic> {

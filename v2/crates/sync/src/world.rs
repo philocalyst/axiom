@@ -19,12 +19,20 @@ use crate::write::Layout;
 use crate::{Form, Insert, Record, Unit};
 
 /// What the book says about one account.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Account<'a> {
     /// Every flow, leg, derived flow and batch total the account has.
     pub flows: Vec<Existing<'a>>,
     /// The days it has an assertion on.
     pub asserted: Vec<Day>,
+}
+
+/// New state a feed would add if the CLI accepts the complete target change.
+/// It contains only appends, so discarding a rejected source is constant-size
+/// with respect to the journal already bound into the world.
+pub(crate) struct FeedDelta<'s> {
+    flows: Vec<(&'s str, Existing<'s>)>,
+    asserted: Vec<(&'s str, Day)>,
 }
 
 impl Account<'_> {
@@ -107,11 +115,34 @@ impl<'b, 's> World<'b, 's> {
         feed: &Feed<'b, 's>,
         text: &str,
     ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
+        self.feed_at(feed, text, FileId(0))
+    }
+
+    /// As [`feed`](Self::feed), with the file identity that owns the imported
+    /// text. Local imports and captured command output use auxiliary files so
+    /// diagnostics point into the actual input, not an arbitrary source file.
+    pub fn feed_at(
+        &mut self,
+        feed: &Feed<'b, 's>,
+        text: &str,
+        file: FileId,
+    ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
+        let (inserts, delta) = self.plan_feed_at(feed, text, file)?;
+        self.commit_feed(delta);
+        Ok(inserts)
+    }
+
+    pub(crate) fn plan_feed_at(
+        &self,
+        feed: &Feed<'b, 's>,
+        text: &str,
+        file: FileId,
+    ) -> Result<(Vec<Insert>, FeedDelta<'s>), Vec<Diagnostic>> {
         let (records, problems) = crate::format::read(
             self.book,
             feed.format,
             text,
-            FileId(0),
+            file,
             feed.unit,
             &self.units,
         );
@@ -123,6 +154,10 @@ impl<'b, 's> World<'b, 's> {
             planned.push((account, self.plan(account, feed, records)?));
         }
         let mut inserts = Vec::new();
+        let mut delta = FeedDelta {
+            flows: Vec::new(),
+            asserted: Vec::new(),
+        };
         for (account, (lines, asserted)) in planned {
             for line in &lines {
                 for &(name, unit, qty) in &line.moved {
@@ -130,11 +165,11 @@ impl<'b, 's> World<'b, 's> {
                         unit,
                         ..Existing::new(line.day, qty)
                     };
-                    self.accounts.entry(name).or_default().flows.push(flow);
+                    delta.flows.push((name, flow));
                 }
             }
             if let Some(day) = asserted {
-                self.accounts.entry(account).or_default().asserted.push(day);
+                delta.asserted.push((account, day));
             }
             let insert = |line: Line| Insert {
                 path: self.layout.file_for(line.day),
@@ -143,7 +178,16 @@ impl<'b, 's> World<'b, 's> {
             };
             inserts.extend(lines.into_iter().map(insert));
         }
-        Ok(inserts)
+        Ok((inserts, delta))
+    }
+
+    pub(crate) fn commit_feed(&mut self, delta: FeedDelta<'s>) {
+        for (name, flow) in delta.flows {
+            self.accounts.entry(name).or_default().flows.push(flow);
+        }
+        for (account, day) in delta.asserted {
+            self.accounts.entry(account).or_default().asserted.push(day);
+        }
     }
 
     /// What lines the book's own flows say of the accounts it has: a document a

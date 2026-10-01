@@ -709,6 +709,10 @@ pub struct Assert {
     /// overdrawn `checking = -42.17 USD` is stored negative. The engine applies
     /// the sign when it compares with the balance.
     pub amount: Amount,
+    /// A computed amount, when written; the literal `amount` slot otherwise.
+    /// The sparse program pool belongs to `Book`, so ordinary assertions keep
+    /// only an empty option and no expression arena allocation.
+    pub computed: Option<(Id<TemplateProgram>, NodeId)>,
     /// What becomes of a difference between the balance and the statement.
     pub gap: Gap,
     pub loc: Loc,

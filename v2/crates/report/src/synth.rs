@@ -40,7 +40,7 @@ pub fn hypothetical(borrowing: &Flow, day: Day, from: Id<Place>, to: Id<Place>, 
         infer: Infer::Known,
         txn: borrowing.txn,
         payee: None,
-        // v3 bridge: it is whoever's the borrowed flow was, which nothing reads.
+        // Keep hypothetical effects in the borrowed flow's owner scope.
         owner: borrowing.owner,
         purpose: None,
         description: None,

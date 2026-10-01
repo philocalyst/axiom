@@ -87,6 +87,9 @@ pub struct Book<'s> {
     pub touching: Groups<Place, Id<Flow>>,
     /// Sorted by day, then declaration order.
     pub asserts: Vec<Assert>,
+    /// Sparse typed expression programs retained by computed value assertions.
+    /// Most assertions are written literals and allocate no program.
+    pub assertion_programs: Arena<TemplateProgram>,
     /// Sorted by day, then declaration order.
     pub events: Vec<Event>,
     pub prices: Prices,

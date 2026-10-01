@@ -984,7 +984,7 @@ contract flat with greystar
     fn contract_and_changed_terms_collect_each_computed_root_once() {
         let source_text = "\
 contract c with p
-  12 USD monthly from checking
+  12% of ^base monthly from checking
   buy VTI for 3/4 of ^base monthly from checking
   + 5% of ^base
   due 5d else + 2% of ^base
@@ -1000,11 +1000,11 @@ contract c with p
         let contract = &file[contract_id];
         assert!(contract.schedule.is_some() && contract.standing.is_some());
         let roots = contract_roots(&file, contract);
-        assert_eq!(roots.regular.len(), 2);
+        assert_eq!(roots.regular.len(), 3);
         assert_eq!(roots.standing.len(), 3);
         assert!(matches!(
             file.exprs[roots.regular[0].0].kind,
-            ExprKind::Pct(_)
+            ExprKind::Of(_, _)
         ));
         assert!(matches!(
             file.exprs[roots.standing[0].0].kind,
