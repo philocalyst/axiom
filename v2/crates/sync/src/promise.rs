@@ -24,6 +24,24 @@ pub struct Due<'a> {
 /// the nearest first, each occurrence kept once, and only by money going the
 /// way the contract says.
 pub fn keep(records: &[Record], parties: &[Option<&str>], dues: &[Due]) -> Vec<Option<usize>> {
+    keep_by(records.len(), parties, dues, |at| (records[at].day, records[at].qty))
+}
+
+/// Keeps promises directly from the shared record/recognition buffer.
+pub(crate) fn keep_paired<'t, 's>(
+    rows: &[(Record<'t>, crate::Reading<'s>)],
+    parties: &[Option<&str>],
+    dues: &[Due],
+) -> Vec<Option<usize>> {
+    keep_by(rows.len(), parties, dues, |at| (rows[at].0.day, rows[at].0.qty))
+}
+
+fn keep_by(
+    len: usize,
+    parties: &[Option<&str>],
+    dues: &[Due],
+    record_at: impl Fn(usize) -> (Day, Qty),
+) -> Vec<Option<usize>> {
     let mut by_party: Map<&str, Vec<usize>> = Map::default();
     for (at, due) in dues.iter().enumerate() {
         by_party.entry(due.party).or_default().push(at);
@@ -35,15 +53,16 @@ pub fn keep(records: &[Record], parties: &[Option<&str>], dues: &[Due]) -> Vec<O
             .into_iter()
             .flatten()
         {
-            let (record, due) = (&records[at], &dues[due_at]);
-            let apart = (record.day.0 - due.day.0).abs();
-            if apart <= due.window && record.qty.is_negative() == due.qty.is_negative() {
+            let (day, qty) = record_at(at);
+            let due = &dues[due_at];
+            let apart = (day.0 - due.day.0).abs();
+            if apart <= due.window && qty.is_negative() == due.qty.is_negative() {
                 pairs.push((apart, at, due_at));
             }
         }
     }
     pairs.sort_unstable();
-    let (mut kept, mut used) = (vec![None; records.len()], vec![false; dues.len()]);
+    let (mut kept, mut used) = (vec![None; len], vec![false; dues.len()]);
     for (_, at, due_at) in pairs {
         if kept[at].is_none() && !used[due_at] {
             (kept[at], used[due_at]) = (Some(due_at), true);

@@ -75,8 +75,27 @@ pub fn reconcile<'a>(
     existing: &'a [Existing<'a>],
     default: &'a str,
 ) -> Vec<Option<usize>> {
-    let mut matched = vec![None; records.len()];
-    let days = records.iter().map(|record| record.day);
+    reconcile_by(records.len(), |at| &records[at], existing, default)
+}
+
+/// Reconciles the record half of paired memo/recognition rows without
+/// materializing a second vector of records.
+pub(crate) fn reconcile_paired<'a, 't: 'a, 's>(
+    rows: &'a [(Record<'t>, crate::Reading<'s>)],
+    existing: &'a [Existing<'a>],
+    default: &'a str,
+) -> Vec<Option<usize>> {
+    reconcile_by(rows.len(), |at| &rows[at].0, existing, default)
+}
+
+fn reconcile_by<'a, 't: 'a>(
+    len: usize,
+    record_at: impl Fn(usize) -> &'a Record<'t> + Copy,
+    existing: &'a [Existing<'a>],
+    default: &'a str,
+) -> Vec<Option<usize>> {
+    let mut matched = vec![None; len];
+    let days = (0..len).map(|at| record_at(at).day);
     let (Some(first), Some(last)) = (days.clone().min(), days.max()) else {
         return matched;
     };
@@ -108,9 +127,9 @@ pub fn reconcile<'a>(
         bucket.push((name, id));
         1 + id
     };
-    let candidates: Vec<[Option<Candidate>; 2]> = records
-        .iter()
-        .map(|record| {
+    let candidates: Vec<[Option<Candidate>; 2]> = (0..len)
+        .map(|at| {
+            let record = record_at(at);
             let primary = Candidate {
                 unit: key(record.facts().currency.as_deref()),
                 qty: record.qty,
@@ -154,14 +173,14 @@ pub fn reconcile<'a>(
         }
     }
     let mut taken = vec![false; slots.len()];
-    let mut order: Vec<usize> = (0..records.len()).collect();
-    order.sort_by_key(|&at| records[at].day);
+    let mut order: Vec<usize> = (0..len).collect();
+    order.sort_by_key(|&at| record_at(at).day);
     for radius in [0, WINDOW] {
         for &at in &order {
             if matched[at].is_some() {
                 continue;
             }
-            let record = &records[at];
+            let record = record_at(at);
             let key = |slot: &Slot| (slot.unit, slot.qty, slot.day);
             let mut nearest = None;
             for candidate in candidates[at].iter().flatten() {

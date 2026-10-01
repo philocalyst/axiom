@@ -12,9 +12,9 @@ use axiom_model::Book;
 
 use crate::amount::amount;
 use crate::date::iso_day;
-use crate::promise::{Due, keep};
+use crate::promise::{Due, keep_paired};
 use crate::recognize::{Reading, Recognizer, Scratch, Tie, Who};
-use crate::reconcile::{Existing, reconcile};
+use crate::reconcile::{Existing, reconcile_paired};
 use crate::write::Layout;
 use crate::{Facts, Form, Insert, Record, Unit};
 
@@ -101,8 +101,8 @@ struct Other<'s> {
 }
 
 /// What the memo and the export's own `party` and `via` say of a record.
-struct Told<'s> {
-    memo: Reading<'s>,
+struct Told<'r, 's> {
+    memo: &'r Reading<'s>,
     party: Option<Reading<'s>>,
     via: Option<Reading<'s>>,
 }
@@ -309,32 +309,27 @@ impl<'b, 's> World<'b, 's> {
         let mut paired: Vec<_> = records.into_iter().zip(readings).collect();
         self.adopt(feed, &mut paired)?;
         // Stable, so that a day's records keep the export's order. Keep each
-        // reading beside its memo until the final consumers need record slices.
+        // reading beside its memo through reconciliation and planning.
         paired.sort_by_key(|(record, _)| record.day);
-        let mut records = Vec::with_capacity(paired.len());
-        let mut readings = Vec::with_capacity(paired.len());
-        for (record, reading) in paired {
-            records.push(record);
-            readings.push(reading);
-        }
 
         let existing = self.accounts.get(account);
         let flows = existing.map_or(&[][..], |account| &account.flows);
-        let matched = reconcile(&records, flows, feed.unit.name);
-        let told = self.told(&records, readings, &matched)?;
-        let others: Vec<Option<Other<'s>>> = (0..records.len())
+        let matched = reconcile_paired(&paired, flows, feed.unit.name);
+        let told = self.told(&paired, &matched)?;
+        let others: Vec<Option<Other<'s>>> = (0..paired.len())
             .map(|at| {
                 told[at]
                     .as_ref()
-                    .map(|told| self.other(feed, account, &records[at], told))
+                    .map(|told| self.other(feed, account, &paired[at].0, told))
             })
             .collect();
         // Only a record that is neither written nor pending can keep a promise.
-        let parties: Vec<Option<&str>> = (0..records.len())
+        let parties: Vec<Option<&str>> = (0..paired.len())
             .map(|at| {
+                let record = &paired[at].0;
                 let who = others[at]
                     .as_ref()
-                    .filter(|_| !records[at].pending)
+                    .filter(|_| !record.pending)
                     .and_then(|other| other.who);
                 who.filter(|who| !who.account).map(|who| who.name)
             })
@@ -345,12 +340,12 @@ impl<'b, 's> World<'b, 's> {
             .filter(|due| due.account == account)
             .cloned()
             .collect();
-        let kept = keep(&records, &parties, &dues);
+        let kept = keep_paired(&paired, &parties, &dues);
 
         // Pending flows carry a code of their own, for the record that posts
         // them to settle. It counts on from the flows the account has that day.
         let mut per_day: Map<Day, usize> = Map::default();
-        if records.iter().any(|record| record.pending) {
+        if paired.iter().any(|(record, _)| record.pending) {
             flows
                 .iter()
                 .for_each(|flow| *per_day.entry(flow.day).or_default() += 1);
@@ -360,12 +355,12 @@ impl<'b, 's> World<'b, 's> {
             *number += 1;
             format!("pending-{}-{number}", day.to_string().replace('-', ""))
         };
-        let exchanges = self.exchanges(&records, &others, &kept);
+        let exchanges = self.exchanges(&paired, &others, &kept);
         let mut lines = Vec::new();
-        for (at, record) in records
+        for (at, (record, _)) in paired
             .iter()
             .enumerate()
-            .filter(|(_, record)| !record.qty.is_zero())
+            .filter(|(_, (record, _))| !record.qty.is_zero())
         {
             let line = match (matched[at], kept[at], &others[at]) {
                 (Some(flow), _, _) => {
@@ -381,7 +376,7 @@ impl<'b, 's> World<'b, 's> {
                 (None, None, Some(other)) => match exchanges[at] {
                     Exchange::Second => None,
                     Exchange::First(with) => {
-                        Some(self.exchange(account, feed, record, &records[with], other))
+                        Some(self.exchange(account, feed, record, &paired[with].0, other))
                     }
                     Exchange::No => {
                         let code = record.pending.then(|| pending_code(record.day));
@@ -392,7 +387,7 @@ impl<'b, 's> World<'b, 's> {
             };
             lines.extend(line);
         }
-        let closing = closing_of(&records)
+        let closing = closing_of_paired(&paired)
             .filter(|(day, _)| existing.is_none_or(|acct| !acct.asserted.contains(day)));
         if let Some((day, balance)) = closing {
             let shown = match balance.is_negative() {
@@ -467,15 +462,14 @@ impl<'b, 's> World<'b, 's> {
     /// What the memo, and the export's own `party` and `via`, say of each record
     /// that is not yet written; ties are errors. A written record, or one that
     /// moves nothing, is not in the way of anything.
-    fn told<'t>(
+    fn told<'r, 't>(
         &self,
-        records: &[Record<'t>],
-        readings: Vec<Reading<'s>>,
+        records: &'r [(Record<'t>, Reading<'s>)],
         matched: &[Option<usize>],
-    ) -> Result<Vec<Option<Told<'s>>>, Vec<Diagnostic>> {
+    ) -> Result<Vec<Option<Told<'r, 's>>>, Vec<Diagnostic>> {
         let (mut scratch, mut problems) = (Scratch::default(), Vec::new());
         let mut told = Vec::with_capacity(records.len());
-        for ((record, memo), matched) in records.iter().zip(readings).zip(matched) {
+        for ((record, memo), matched) in records.iter().zip(matched) {
             if matched.is_some() || record.qty.is_zero() {
                 told.push(None);
                 continue;
@@ -527,11 +521,11 @@ impl<'b, 's> World<'b, 's> {
         feed: &Feed<'b, 's>,
         account: &str,
         record: &Record<'t>,
-        told: &Told<'s>,
+        told: &Told<'_, 's>,
     ) -> Other<'s> {
         let recognized =
             |reading: &Reading<'s>| reading.who.as_ref().ok().copied().unwrap_or_default();
-        let memo = recognized(&told.memo);
+        let memo = recognized(told.memo);
         let named = |reading: &Option<Reading<'s>>| {
             reading.as_ref().and_then(|reading| recognized(reading).who)
         };
@@ -589,14 +583,14 @@ impl<'b, 's> World<'b, 's> {
 
     /// Which records are the two sides of one exchange: the same `id`, one
     /// unit out and another in, both new and neither pending.
-    fn exchanges(
+    fn exchanges<'t>(
         &self,
-        records: &[Record],
+        records: &[(Record<'t>, Reading<'s>)],
         others: &[Option<Other>],
         kept: &[Option<usize>],
     ) -> Vec<Exchange> {
         let mut by_id: Map<&str, Vec<usize>> = Map::default();
-        for (at, record) in records.iter().enumerate() {
+        for (at, (record, _)) in records.iter().enumerate() {
             let free = others[at].is_some()
                 && kept[at].is_none()
                 && !record.pending
@@ -609,8 +603,8 @@ impl<'b, 's> World<'b, 's> {
         for ends in by_id.values() {
             let [a, b] = ends[..] else { continue };
             let (units, signs) = (
-                (&records[a].facts().currency, &records[b].facts().currency),
-                (records[a].qty, records[b].qty),
+                (&records[a].0.facts().currency, &records[b].0.facts().currency),
+                (records[a].0.qty, records[b].0.qty),
             );
             if units.0 != units.1 && signs.0.is_negative() != signs.1.is_negative() {
                 // The side that leaves is the first of the two, so the line says out then in.
@@ -877,17 +871,19 @@ pub fn money(qty: Qty, unit: Unit) -> String {
 /// the closing balance is the one that the day's opening balance plus
 /// everything the day moved leads to. Records in another currency are not on
 /// the account's own balance.
-fn closing_of(records: &[Record]) -> Option<(Day, Qty)> {
-    let own = |record: &&Record| !record.pending && record.facts().currency.is_none();
+fn closing_of_paired<'t, 's>(records: &[(Record<'t>, Reading<'s>)]) -> Option<(Day, Qty)> {
+    let own = |record: &&(Record<'t>, Reading<'s>)| !record.0.pending && record.0.facts().currency.is_none();
     let day = records
         .iter()
         .rev()
         .filter(own)
-        .find(|record| record.balance.is_some())?
+        .find(|record| record.0.balance.is_some())?
+        .0
         .day;
     let today: Vec<(Qty, Qty)> = records
         .iter()
         .filter(own)
+        .map(|row| &row.0)
         .filter(|record| record.day == day)
         .filter_map(|record| Some((record.qty, record.balance?)))
         .collect();
