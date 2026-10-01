@@ -123,29 +123,48 @@ impl Law {
         else {
             return None;
         };
-        match (&self.nodes[total].op, &self.nodes[limit].op) {
-            // A kind among the arguments widens the total to every place of that kind.
-            (Op::Call(Func::Total(dir, window), args), Op::Const(Value::Amount(limit)))
+        let (target, window) = match &self.nodes[total].op {
+            // A kind among the arguments widens the total, so the cap cannot
+            // be read from the subject's single watched bucket.
+            Op::Call(Func::Total(dir, window), args)
                 if args
                     .iter()
                     .all(|arg| self.nodes[*arg].typed_ty() != Some(Ty::Kind)) =>
             {
-                Some(Cap {
-                    dir: *dir,
-                    window: *window,
-                    limit: *limit,
-                    strict: cmp == BinOp::Lt,
-                })
+                (CapTarget::Total(*dir), *window)
             }
-            _ => None,
-        }
+            Op::Call(Func::PurposeTotal { purpose, window }, args) if args.is_empty() => {
+                let purpose = purpose.or_else(|| match self.owner {
+                    Owner::Purpose(purpose) => Some(purpose),
+                    _ => None,
+                })?;
+                (CapTarget::Purpose(purpose), *window)
+            }
+            _ => return None,
+        };
+        let Op::Const(Value::Amount(limit)) = self.nodes[limit].op else {
+            return None;
+        };
+        Some(Cap {
+            target,
+            window,
+            limit,
+            strict: cmp == BinOp::Lt,
+        })
     }
 }
 
-/// `total(dir, window) <= limit`, or `<` when `strict`: see [`Law::cap`].
+/// What a compiled cap counts: a direction through a place, or one purpose.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CapTarget {
+    Total(Dir),
+    Purpose(Id<Purpose>),
+}
+
+/// A cap on a place total or a purpose total: see [`Law::cap`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Cap {
-    pub dir: Dir,
+    pub target: CapTarget,
     pub window: Window,
     pub limit: Amount,
     pub strict: bool,
