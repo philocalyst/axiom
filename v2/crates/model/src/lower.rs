@@ -258,10 +258,29 @@ fn scan_statement<'s>(
         return;
     }
 
-    let ends = Ends {
-        from: subject,
-        to: None,
+    // In `NAME now TERMS`, the subject is syntactically a contract name. Keep
+    // that borrowed name as the contextual party marker; the declaration
+    // resolver substitutes the contract's actual party before registering a
+    // tab. A restated holding changes which end is explicit.
+    let ends = match (&statement.subject, &statement.verb) {
+        (Subject::Name(contract), Verb::Now(ast::Change::Terms(id))) => {
+            let terms = &file[*id];
+            terms.holding.map_or(
+                Ends {
+                    from: Some(*contract),
+                    to: None,
+                },
+                |holding| schedule_ends(*contract, Some((holding.direction, holding.name))),
+            )
+        }
+        _ => Ends {
+            from: subject,
+            to: None,
+        },
     };
+    if matches!(statement.verb, Verb::Now(ast::Change::Terms(_))) {
+        mention_ends(ends, loc, survey);
+    }
     scan_tail(file, statement.tail, ends, survey);
     match &statement.verb {
         Verb::Occurrence(_) | Verb::Now(ast::Change::Terms(_)) => {
@@ -360,6 +379,7 @@ contract lease with dana
   deposit 2_350 USD into escrow
   + 12% of water #utilities
   also -> escrow 410 USD #escrow
+2026-01-02 lease now 2_500 USD monthly into savings
 2026-01-02 checking -> dana 100 USD due 30d for dana
 2026-01-03 dana owes me 100 USD due 30d
 opening 2026-01-01
@@ -393,6 +413,11 @@ opening 2026-01-01
             mention,
             Mention::Due { ends: Ends { from: Some(from), to: Some(to) }, .. }
                 if (from.0, to.0) == ("checking", "dana")
+        )));
+        assert!(survey.mentions.iter().any(|mention| matches!(
+            mention,
+            Mention::Ends { ends: Ends { from: Some(from), to: Some(to) }, .. }
+                if (from.0, to.0) == ("lease", "savings")
         )));
         assert!(survey.mentions.iter().any(|mention| matches!(
             mention,
