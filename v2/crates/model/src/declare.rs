@@ -8,7 +8,7 @@
 use axiom_core::diag::closest;
 use axiom_core::diag::distance;
 use axiom_core::{Arena, Diagnostic, Groups, Id, Interner, Loc, Map, Set, Sym, Tree};
-use axiom_syntax::{DeclKind, ExprKind, ItemKind, Setting};
+use axiom_syntax::{Change, DeclKind, ExprKind, ItemKind, Setting, Verb};
 
 use crate::book::{Book, Books, Class, Commodity, Entity, Kind, Lookup, PathRoot, Place, Purpose, Role, Roots, Sort};
 use crate::collect::{Entry, Seen, Surveyed, Written, decls};
@@ -125,13 +125,14 @@ pub(crate) fn scopes(
                 ItemKind::Decl(id) if file[id].what == DeclKind::Entity => {
                     let decl = &file[id];
                     for prop in file[decl.props].iter().filter(|prop| prop.name.0 == "lives") {
-                        let named = file[prop.args].first().and_then(|&arg| {
-                            match file.exprs[arg].kind {
-                                ExprKind::Name(path) => systems.find(path.0),
-                                _ => None,
-                            }
-                        });
-                        used.extend(named.map(|system| (site.home, system)));
+                        add_lives(&mut used, site.home, systems, file, prop);
+                    }
+                }
+                ItemKind::Statement(id) => {
+                    if let Verb::Now(Change::Property(prop)) = &file[id].verb
+                        && prop.name.0 == "lives"
+                    {
+                        add_lives(&mut used, site.home, systems, file, prop);
                     }
                 }
                 _ => {}
@@ -146,6 +147,22 @@ pub(crate) fn scopes(
             .map(|&(_, system)| system);
         own.chain(std).collect()
     })
+}
+
+fn add_lives(
+    used: &mut Vec<(Home, Id<crate::book::System>)>,
+    home: Home,
+    systems: &SystemIndex<'_>,
+    file: &axiom_syntax::File<'_>,
+    prop: &axiom_syntax::Prop<'_>,
+) {
+    for &arg in &file[prop.args] {
+        if let ExprKind::Name(path) = file.exprs[arg].kind
+            && let Some(system) = systems.find(path.0)
+        {
+            used.push((home, system));
+        }
+    }
 }
 
 pub(crate) fn declare<'a, 's>(
