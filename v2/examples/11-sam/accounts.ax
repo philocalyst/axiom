@@ -15,7 +15,7 @@
 account checking   : deposit at chase
 account savings    : deposit at chase
 account visa       : card at chase
-account fidelity   : brokerage
+account fidelity-brokerage : brokerage
 account retirement : 401k at fidelity
   employer lumen
 account escrow     : escrow at rocket   // property tax and insurance, held by the lender

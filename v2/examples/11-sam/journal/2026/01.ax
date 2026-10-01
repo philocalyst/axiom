@@ -11,8 +11,8 @@ opening 01
   checking    6_062.55 USD
   checking    2_350.00 USD for dana                 // her deposit: held, not Sam's
   savings    15_000.00 USD for emergency            // an envelope Sam keeps
-  fidelity   210 VTI  basis 48_300 USD since 2021-06-01
-  fidelity    60 VXUS basis  3_420 USD since 2023-11-10
+  fidelity-brokerage 210 VTI  basis 48_300 USD since 2021-06-01
+  fidelity-brokerage  60 VXUS basis  3_420 USD since 2023-11-10
   retirement 56_900.00 USD
   visa        1_240.18 USD                          // owed to chase, as the statement says
   condo      basis 402_000 USD since 2024-02-20     // ▸ 18,372.73 already depreciated (2024–2025)
@@ -30,7 +30,7 @@ opening 01
 07 me -> corner-store 12.40 USD "food for the routine"
                                                     // ▸ unclassified, described · 3 flows say "food for the routine":
                                                     //   make it a purpose? (a code action)
-08 phone         // ▸ 45.00 from visa · 27.00 of it the studio's
+08 phone-bill    // ▸ 45.00 from visa · 27.00 of it the studio's
 09 visa -> amazon 62.40 USD #household "hooks for the hallway"
 
 12 checking -> jo 600 USD due 04-01 "for the car repair"

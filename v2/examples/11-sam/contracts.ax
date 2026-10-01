@@ -30,7 +30,7 @@ contract flat with greystar
   + 12% of water #utilities
   until 2026-08-31
 
-contract phone with mint
+contract phone-bill with mint
   45 USD monthly on 8 from visa            // ▸ phone: mint is a phone company
   share 60% for studio                     // ▸ 27.00 of each bill is the studio's
 

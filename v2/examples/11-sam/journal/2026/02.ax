@@ -12,13 +12,13 @@
 03 lease         // ▸ 2 days late: dana owed 2,350.00 from 02-01 to 02-03
 03 figma
 
-05 fidelity[2026-01-20] 1.620 VTI -> 481.14 USD "sold the January lot: its price fell"
+05 fidelity-brokerage[2026-01-20] 1.620 VTI -> 481.14 USD "sold the January lot: its price fell"
                                                     // ▸ proceeds stay at fidelity · loss 18.86
                                                     // ▸ wash sale: VTI is bought again on 02-20, within 30 days, so the
                                                     //   loss is disallowed and joins that lot's basis (500.00 → 518.86)
 
 07 me -> corner-store 9.80 USD "food for the routine"
-08 phone
+08 phone-bill
 
 10 visa 64.12 USD -> cafe-de-flore 58.40 EUR #dining "dinner in Paris"
                                                     // ▸ 58.40 EUR was 63.73 USD at 1.0912 · 0.39 exchange cost
@@ -58,4 +58,4 @@
   checking        ...
 
 28 checking   = 11_531.34 USD
-28 fidelity   = 481.14 USD                          // the cash side of the brokerage
+28 fidelity-brokerage = 481.14 USD                  // the cash side of the brokerage

@@ -1,6 +1,6 @@
 // March 2026.
 
-01 rent
+01 apartment-rent
 
 /// February's card statement, paid in full.
 03 checking -> visa 722.20 USD

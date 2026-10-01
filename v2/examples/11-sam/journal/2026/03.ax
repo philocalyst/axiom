@@ -11,7 +11,7 @@
 01 condo-insurance   // ▸ 1,140.00 · #insurance of condo, 95.00 a month through 2027-02
 03 figma waived "a month free: figma's apology for the outage"
                                                     // ▸ kept at nothing: not late, nothing owed
-08 phone
+08 phone-bill
 
 10 netflix ends      // cancelled: no more payments are expected, and none is missing
 
@@ -30,10 +30,10 @@
 
 // Quarterly dividends. A fund that pays is a party like any other, and what
 // it pays is a dividend.
-26 VTI -> fidelity 198.12 USD                       // ▸ #dividend, qualified (VTI : fund)
+26 VTI -> fidelity-brokerage 198.12 USD              // ▸ #dividend, qualified (VTI : fund)
 26 VXUS -> 25.09 USD                                // ▸ #dividend, 25.09 gross
   foreign-tax      2.49 USD                         // ▸ #tax-paid abroad: a credit on the return (Form 1116)
-  fidelity         ...                              // ▸ 22.60
+  fidelity-brokerage ...                            // ▸ 22.60
 
 31 job
   retirement      276.00 USD

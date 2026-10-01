@@ -1,6 +1,6 @@
 // February 2026.
 
-01 rent
+01 apartment-rent
 
 /// The scholarship's grant money lands in checking, tied to education.
 02 scholarship -> checking 1_200 USD

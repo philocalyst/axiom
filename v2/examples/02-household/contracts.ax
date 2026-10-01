@@ -1,5 +1,5 @@
 /// The landlord's rent, paid from checking each month.
-contract rent with landlord
+contract apartment-rent with landlord
   2_850 USD monthly on 1 from checking
 
 /// The renter's policy is paid once and recognized over the year.
