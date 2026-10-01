@@ -430,8 +430,7 @@ pub enum On {
 
 impl On {
     /// The day this asks for, in the month, year or week `base` is in.
-    fn land(self, base: Day) -> Option<Day> {
-        let (year, month, _) = base.ymd();
+    fn land(self, base: Day, (year, month, _): (i32, u32, u32)) -> Option<Day> {
         let clamped = |month: u32, day: u32| checked_day(year, month, day.min(days_in_month(year, month)));
         match self {
             On::MonthDay(day) => clamped(month, u32::from(day)),
@@ -448,6 +447,9 @@ impl On {
 fn checked_day(year: i32, month: u32, day: u32) -> Option<Day> {
     if !(1..=12).contains(&month) || !(1..=days_in_month(year, month)).contains(&day) {
         return None;
+    }
+    if (-999_999..=999_999).contains(&year) {
+        return Day::from_ymd(year, month, day);
     }
     let mut year = i64::from(year);
     let month = i64::from(month);
@@ -508,19 +510,83 @@ struct Landings<'a> {
     on: &'a [On],
     previous: Option<Day>,
     empty_pending: bool,
+    civil: Option<(i32, u32, u32)>,
+    small: Option<SmallLandings>,
+}
+
+struct SmallLandings {
+    days: [Day; 2],
+    len: u8,
+    next: u8,
+}
+
+impl SmallLandings {
+    fn new(mut candidates: [Option<Day>; 2]) -> SmallLandings {
+        let mut days = [Day::default(); 2];
+        let mut len = 0;
+        for candidate in candidates.iter_mut().filter_map(Option::take) {
+            days[usize::from(len)] = candidate;
+            len += 1;
+        }
+        if len == 2 && days[1] < days[0] {
+            days.swap(0, 1);
+        }
+        if len == 2 && days[0] == days[1] {
+            len = 1;
+        }
+        SmallLandings { days, len, next: 0 }
+    }
+
+    fn next(&mut self) -> Option<Day> {
+        if self.next >= self.len {
+            return None;
+        }
+        let day = self.days[usize::from(self.next)];
+        self.next += 1;
+        Some(day)
+    }
+}
+
+impl<'a> Landings<'a> {
+    fn new(base: Day, on: &'a [On]) -> Landings<'a> {
+        let small = match on {
+            [] => None,
+            [first] => {
+                let civil = base.ymd();
+                Some(SmallLandings::new([first.land(base, civil), None]))
+            }
+            [first, second] => {
+                let civil = base.ymd();
+                Some(SmallLandings::new([first.land(base, civil), second.land(base, civil)]))
+            }
+            _ => None,
+        };
+        Landings {
+            base,
+            on,
+            previous: None,
+            empty_pending: true,
+            civil: None,
+            small,
+        }
+    }
 }
 
 impl<'a> Iterator for Landings<'a> {
     type Item = Day;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if let Some(small) = &mut self.small {
+            return small.next();
+        }
         if self.on.is_empty() {
             return std::mem::replace(&mut self.empty_pending, false).then_some(self.base);
         }
+        let civil = *self.civil.get_or_insert_with(|| self.base.ymd());
         let next = self
             .on
             .iter()
-            .filter_map(|on| on.land(self.base))
+            .filter_map(|on| on.land(self.base, civil))
             .filter(|&day| self.previous.is_none_or(|previous| day > previous))
             .min()?;
         self.previous = Some(next);
@@ -560,7 +626,7 @@ pub fn due<'a>(every: Cadence, on: &'a [On], anchor: Day, within: Days) -> impl 
         .take_while(move |_| advances)
         .map_while(move |n| cadence_day(anchor, step, n))
         .take_while(move |day| i64::from(day.0) <= base_limit)
-        .flat_map(move |base| Landings { base, on, previous: None, empty_pending: true })
+        .flat_map(move |base| Landings::new(base, on))
         .filter(move |&day| day >= anchor && within.contains(day))
 }
 
@@ -858,5 +924,29 @@ mod tests {
             [first, Day(i32::MAX - 1), Day::MAX]
         );
         assert!(due(Cadence::Every(Span::months(1)), &[On::Last], Day::MAX, within).all(|day| within.contains(day)));
+    }
+
+    #[test]
+    fn optimized_civil_conversion_keeps_full_day_range_and_normal_dates() {
+        for (year, month, date) in [
+            (-999_999, 1, 1),
+            (-400, 2, 29),
+            (-1, 12, 31),
+            (0, 2, 29),
+            (1970, 1, 1),
+            (2025, 12, 12),
+            (2000, 2, 29),
+            (999_999, 12, 31),
+        ] {
+            assert_eq!(checked_day(year, month, date), Day::from_ymd(year, month, date));
+        }
+
+        for day in [Day::MIN, Day::MAX] {
+            let (year, month, date) = day.ymd();
+            assert_eq!(checked_day(year, month, date), Some(day));
+        }
+        let (year, month, date) = Day::MIN.ymd();
+        assert!(year < -999_999, "the full-range fallback must be exercised");
+        assert_eq!(checked_day(year, month, date), Some(Day::MIN));
     }
 }
