@@ -104,7 +104,7 @@ marked until the native v4 engine regenerates them.
 The hand calculation returns a **refund of 1,564.41 USD** on 2026-04-15. The captured Axiom
 outputs still reflect independently rounded monthly depreciation; regenerate them from the
 native v4 engine before treating their tax and gains lines as current. The six-cent change in
-2025 depreciation lowers the adjusted basis and sale gain by six cents, while raising the
+2025 depreciation raises the adjusted basis and lowers sale gain by six cents, while raising the
 Schedule E result by six cents; the ordinary recapture falls by six cents, leaving total AGI
 and the tax unchanged. Run with `--today 2026-01-06`
 (`outputs/tax-2025-before-closing.txt`) the return has not closed: `axiom tax` shows the rent, the
