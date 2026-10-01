@@ -656,7 +656,7 @@ fn format_args<'s>(file: &ast::File<'s>, line: &ast::FormatLine<'s>) -> Vec<Form
         .collect()
 }
 
-fn format_text(book: &mut Book<'_>, arg: FormatArg<'_>) -> Text {
+fn format_text<'a>(book: &mut Book<'a>, arg: FormatArg<'a>) -> Text {
     if arg.quoted {
         book.quoted_text(arg.text)
     } else {
@@ -1169,7 +1169,8 @@ fn resolve_format(
     let candidates: Vec<_> = formats
         .iter()
         .filter(|candidate| candidate.name == sym && scope.sees(candidate.home))
-        .map(|candidate| (scope.rank(candidate.home), candidate.id, candidate.loc));
+        .map(|candidate| (scope.rank(candidate.home), candidate.id, candidate.loc))
+        .collect();
     let Some(rank) = candidates.iter().map(|(rank, _, _)| *rank).min() else {
         let suggestion = axiom_core::diag::closest(
             name.0,

@@ -37,7 +37,7 @@ The isolated harness at `/tmp/axiom-sync-primitives-forecast` includes the exact
 files and links the repository's real `axiom_core`, `axiom_syntax`, and `memchr`
 dependencies. Its log is in the sibling task evidence directory at
 `../verification/cutover/sync-primitives-forecast-tests.log`.
-The current run passes 40 tests, with 3 timing tests ignored. It is evidence for
+The current run passes 41 tests, with 3 timing tests ignored. It is evidence for
 those modules only, not a substitute for the crate or workspace build.
 
 Source regression fixtures are in `v2/crates/sync/src/world/tests.rs` and

@@ -286,7 +286,13 @@ fn append_text<'t>(
         let ends_with_space = value.len() != value.trim_end().len();
         cell.text = match decoded {
             Cow::Borrowed(text) => Cow::Borrowed(text.trim()),
-            Cow::Owned(text) => Cow::Owned(text.trim().to_string()),
+            Cow::Owned(mut text) => {
+                let start = text.len() - text.trim_start().len();
+                let end = text.trim_end().len();
+                text.truncate(end);
+                text.drain(..start);
+                Cow::Owned(text)
+            }
         };
         cell.span = part_span;
         *trailing_space = ends_with_space;
@@ -373,7 +379,11 @@ pub(crate) fn scan<'t>(
                         capturing[slot] = true;
                     }
                 }
-                leaf = stack.last().copied();
+                if !tag.value.trim().is_empty()
+                    && wanted.iter().any(|path| ends_with(&stack, path))
+                {
+                    leaf = stack.last().copied();
+                }
             }
             continue;
         }
@@ -565,6 +575,12 @@ mod tests {
 
         let spaced = "<Ntry><Memo>PAY <!-- separator --> PAL</Memo></Ntry>";
         assert_eq!(read(spaced, "Ntry", &["Memo"]), [["PAY PAL"]]);
+    }
+
+    #[test]
+    fn whitespace_between_nested_camt_elements_does_not_close_the_record() {
+        let text = "<Document>\n  <Ntry>\n    <NtryDtls>\n      <TxDtls>\n        <RmtInf>\n          <Ustrd>PAYPAL</Ustrd>\n        </RmtInf>\n      </TxDtls>\n    </NtryDtls>\n  </Ntry>\n</Document>";
+        assert_eq!(read(text, "Ntry", &["RmtInf/Ustrd"]), [["PAYPAL"]]);
     }
 
     #[test]
