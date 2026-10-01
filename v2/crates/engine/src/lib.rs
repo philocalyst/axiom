@@ -34,11 +34,11 @@
 
 #![forbid(unsafe_code)]
 
-mod calc;
-mod checkpoint;
 mod assets;
 mod assets_runtime;
 mod budget;
+mod calc;
+mod checkpoint;
 mod eval;
 mod events;
 mod explain;
@@ -73,9 +73,12 @@ use axiom_model::{
     RuntimeDetail, RuntimeFlow, RuntimeTxn, ScheduleKind, Subject, System, Txn, Waive,
 };
 
+pub use assets::{
+    AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey,
+    Part, PartId, PartKind,
+};
 pub use checkpoint::Checkpoint;
-pub use assets::{AssetError, AssetState, Assets, CarryUpdate, Consumption, Disposal, DisposalBoundary, EventKey, Part, PartId, PartKind};
-pub use ledger::Ledger;
+pub use ledger::{Ledger, OccurrenceOutput, TemplateError};
 pub use plan::{Known, Plan, run};
 pub use sides::Sides;
 
@@ -185,6 +188,13 @@ impl RuntimeRange {
 
     pub fn is_empty(self) -> bool {
         self.len == 0
+    }
+
+    /// Returns the indexed portion of a caller-owned shared pool.
+    pub fn get<'a, T>(self, pool: &'a [T]) -> Option<&'a [T]> {
+        let start = self.start as usize;
+        let end = start.checked_add(self.len as usize)?;
+        pool.get(start..end)
     }
 }
 
