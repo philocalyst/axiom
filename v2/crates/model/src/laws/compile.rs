@@ -715,6 +715,10 @@ impl<'s> Compiler<'_, '_, 's> {
                 Var::Input(index) => self.inputs.get(index as usize).map_or(Ty::AMOUNT, |input| {
                     Ty::Amount(input.unit.map_or(Dim::Any, Dim::Of))
                 }),
+                Var::Amount => self.flow_amount_ty(),
+                Var::Gain | Var::Proceeds | Var::Basis | Var::Balance | Var::Remaining => {
+                    self.base_amount_ty()
+                }
                 _ => var.ty(self.subject),
             };
             return Ok((Op::Var(var), ty));
@@ -861,6 +865,21 @@ impl<'s> Compiler<'_, '_, 's> {
 
     fn base_amount_ty(&self) -> Ty {
         Ty::Amount(Dim::Of(self.world.book.base))
+    }
+
+    /// A flow amount has a static unit only when its governing place declares
+    /// exactly one accepted commodity. Otherwise the expression must state a
+    /// conversion with `value(amount, UNIT)` before comparing unlike units.
+    fn flow_amount_ty(&self) -> Ty {
+        let unit = match self.owner {
+            Some(Owner::Place(place)) => self.world.book.places[place]
+                .holds
+                .as_deref()
+                .and_then(|holds| (holds.len() == 1).then_some(holds[0])),
+            Some(Owner::Asset(asset)) => Some(self.world.book.assets[asset].unit),
+            _ => None,
+        };
+        unit.map_or(Ty::AMOUNT, |unit| Ty::Amount(Dim::Of(unit)))
     }
 
     fn unknown_field(&self, ty: Ty, field: Word<'s>, receiver: ExprId) -> Diagnostic {
@@ -1073,7 +1092,16 @@ impl<'s> Compiler<'_, '_, 's> {
                 if !matches!(ty_at(1), Ty::Amount(_) | Ty::Empty) {
                     return Err(expected("an amount", ty_at(1), arg_loc(1)).into());
                 }
-                (Func::Progressive, ty_at(1))
+                let schedule_unit = match self.nodes[typed[0].0.index()].op {
+                    Op::Const(Value::Schedule(schedule)) => {
+                        Some(self.world.book.schedules[schedule].unit)
+                    }
+                    _ => None,
+                };
+                (
+                    Func::Progressive,
+                    schedule_unit.map_or(ty_at(1), |unit| Ty::Amount(Dim::Of(unit))),
+                )
             }
             Signature::Value => {
                 if !matches!(ty_at(0), Ty::Amount(_) | Ty::Empty) {
@@ -1085,7 +1113,11 @@ impl<'s> Compiler<'_, '_, 's> {
                 if args.len() == 3 && ty_at(2) != Ty::Name {
                     return Err(expected("a rate policy name", ty_at(2), arg_loc(2)).into());
                 }
-                (Func::Value, base)
+                let target = match self.nodes[typed[1].0.index()].op {
+                    Op::Const(Value::Unit(unit)) => Ty::Amount(Dim::Of(unit)),
+                    _ => Ty::AMOUNT,
+                };
+                (Func::Value, target)
             }
             Signature::Date => {
                 for at in 0..3 {
