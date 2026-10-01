@@ -5,6 +5,8 @@
 //! nearest day is taken first, and a flow is taken at most once, so two
 //! identical coffees on one day are two.
 
+use std::hash::{DefaultHasher, Hash, Hasher};
+
 use axiom_core::{Day, Map, Qty, Set};
 
 use crate::Record;
@@ -68,7 +70,11 @@ struct Candidate {
 
 /// For each record, the index in `existing` of the flow it is. Exact days go
 /// first, so that a record never takes the flow another one is on top of.
-pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Vec<Option<usize>> {
+pub fn reconcile<'a>(
+    records: &'a [Record<'_>],
+    existing: &'a [Existing<'a>],
+    default: &'a str,
+) -> Vec<Option<usize>> {
     let mut matched = vec![None; records.len()];
     let days = records.iter().map(|record| record.day);
     let (Some(first), Some(last)) = (days.clone().min(), days.max()) else {
@@ -78,18 +84,29 @@ pub fn reconcile(records: &[Record], existing: &[Existing], default: &str) -> Ve
     let near = first.add_days(-WINDOW)..=last.add_days(WINDOW);
     // Units are compared as small numbers; the account's own, which a flow or a
     // record may also name outright, is 0.
-    let mut units: Vec<String> = Vec::new();
-    let mut key = |name: Option<&str>| match name.filter(|name| !name.eq_ignore_ascii_case(default))
-    {
-        None => 0,
-        Some(name) => {
-            let name = name.to_ascii_lowercase();
-            let known = units.iter().position(|known| *known == name);
-            1 + known.unwrap_or_else(|| {
-                units.push(name);
-                units.len() - 1
-            })
+    let mut unit_ids: Map<u64, Vec<(&'a str, usize)>> = Map::default();
+    let mut next_unit = 0usize;
+    let mut key = |name: Option<&'a str>| {
+        let Some(name) = name.filter(|name| !name.eq_ignore_ascii_case(default)) else {
+            return 0;
+        };
+        let mut hasher = DefaultHasher::new();
+        for byte in name.bytes() {
+            hasher.write_u8(byte.to_ascii_lowercase());
         }
+        name.len().hash(&mut hasher);
+        let hash = hasher.finish();
+        let bucket = unit_ids.entry(hash).or_default();
+        if let Some((_, id)) = bucket
+            .iter()
+            .find(|(known, _)| known.eq_ignore_ascii_case(name))
+        {
+            return 1 + *id;
+        }
+        let id = next_unit;
+        next_unit += 1;
+        bucket.push((name, id));
+        1 + id
     };
     let candidates: Vec<[Option<Candidate>; 2]> = records
         .iter()

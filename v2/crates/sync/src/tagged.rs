@@ -21,24 +21,101 @@ struct Tag<'t> {
     value: &'t str,
     /// Where the value is, without the spaces around it.
     span: Span,
+    /// A CDATA text segment, not an element boundary.
+    cdata: bool,
 }
 
 /// The tags of a text, skipping declarations, comments and processing
 /// instructions. Attributes are not read.
-fn tags(text: &str) -> impl Iterator<Item = Tag<'_>> {
+fn tags(text: &str) -> impl Iterator<Item = Result<Tag<'_>, Broken>> {
     let bytes = text.as_bytes();
     let mut from = 0;
     std::iter::from_fn(move || {
         loop {
             let open = from + memchr(b'<', &bytes[from..])?;
-            let close = open + memchr(b'>', &bytes[open..])?;
+            if bytes[open..].starts_with(b"<!--") {
+                let Some(end) = text[open + 4..].find("-->") else {
+                    from = bytes.len();
+                    return Some(Err(Broken {
+                        row: 0,
+                        span: Span { start: open, end: bytes.len() },
+                        what: "a comment is never closed",
+                    }));
+                };
+                from = open + 4 + end + 3;
+                continue;
+            }
+            if bytes[open..].starts_with(b"<![CDATA[") {
+                let body = open + 9;
+                let Some(end) = text[body..].find("]]>") else {
+                    from = bytes.len();
+                    return Some(Err(Broken {
+                        row: 0,
+                        span: Span { start: open, end: bytes.len() },
+                        what: "a CDATA section is never closed",
+                    }));
+                };
+                let stop = body + end;
+                from = stop + 3;
+                return Some(Ok(Tag {
+                    name: "",
+                    closing: false,
+                    empty: false,
+                    at: Span { start: open, end: from },
+                    value: &text[body..stop],
+                    span: Span { start: body, end: stop },
+                    cdata: true,
+                }));
+            }
+            if bytes[open..].starts_with(b"<?") {
+                let Some(end) = text[open + 2..].find("?>") else {
+                    from = bytes.len();
+                    return Some(Err(Broken {
+                        row: 0,
+                        span: Span { start: open, end: bytes.len() },
+                        what: "a processing instruction is never closed",
+                    }));
+                };
+                from = open + 2 + end + 2;
+                continue;
+            }
+            if bytes[open..].get(..9).is_some_and(|head| head.eq_ignore_ascii_case(b"<!DOCTYPE")) {
+                let Some(close) = declaration_end(bytes, open + 9) else {
+                    from = bytes.len();
+                    return Some(Err(Broken {
+                        row: 0,
+                        span: Span { start: open, end: bytes.len() },
+                        what: "a document type declaration is never closed",
+                    }));
+                };
+                from = close + 1;
+                continue;
+            }
+            if bytes[open..].starts_with(b"<!") {
+                let Some(close) = tag_end(bytes, open + 2) else {
+                    from = bytes.len();
+                    return Some(Err(Broken {
+                        row: 0,
+                        span: Span { start: open, end: bytes.len() },
+                        what: "a markup declaration is malformed or never closed",
+                    }));
+                };
+                from = close + 1;
+                continue;
+            }
+            let Some(close_rel) = tag_end(bytes, open + 1) else {
+                from = bytes.len();
+                return Some(Err(Broken {
+                    row: 0,
+                    span: Span { start: open, end: bytes.len() },
+                    what: "a tag is never closed",
+                }));
+            };
+            let close = close_rel;
             let next =
                 close + 1 + memchr(b'<', &bytes[close + 1..]).unwrap_or(bytes.len() - close - 1);
             from = next;
             let raw = text[open + 1..close].trim();
-            if raw.starts_with(['?', '!']) {
-                continue;
-            }
             let (closing, raw) = raw
                 .strip_prefix('/')
                 .map_or((false, raw), |name| (true, name));
@@ -48,7 +125,7 @@ fn tags(text: &str) -> impl Iterator<Item = Tag<'_>> {
             let name = raw.split_whitespace().next().unwrap_or("");
             let (all, value) = (&text[close + 1..next], text[close + 1..next].trim());
             let start = close + 1 + all.len() - all.trim_start().len();
-            return Some(Tag {
+            return Some(Ok(Tag {
                 name,
                 closing,
                 empty,
@@ -61,37 +138,92 @@ fn tags(text: &str) -> impl Iterator<Item = Tag<'_>> {
                     start,
                     end: start + value.len(),
                 },
-            });
+                cdata: false,
+            }));
         }
     })
 }
 
+fn tag_end(bytes: &[u8], mut at: usize) -> Option<usize> {
+    let mut quote = None;
+    while let Some(&byte) = bytes.get(at) {
+        if let Some(end) = quote {
+            if byte == end {
+                quote = None;
+            }
+        } else {
+            match byte {
+                b'\'' | b'"' => quote = Some(byte),
+                b'>' => return Some(at),
+                _ => {}
+            }
+        }
+        at += 1;
+    }
+    None
+}
+
+fn declaration_end(bytes: &[u8], mut at: usize) -> Option<usize> {
+    let (mut quote, mut subset) = (None, 0usize);
+    while let Some(&byte) = bytes.get(at) {
+        if let Some(end) = quote {
+            if byte == end {
+                quote = None;
+            }
+        } else {
+            match byte {
+                b'\'' | b'"' => quote = Some(byte),
+                b'[' => subset += 1,
+                b']' => subset = subset.saturating_sub(1),
+                b'>' if subset == 0 => return Some(at),
+                _ => {}
+            }
+        }
+        at += 1;
+    }
+    None
+}
+
 /// One record: its number, where it is, and a cell for each path asked for.
-pub(crate) struct Found<'t> {
+pub(crate) struct Found<'a, 't> {
     pub number: usize,
     pub whole: Span,
-    pub cells: Vec<Cell<'t>>,
+    pub cells: &'a [Cell<'t>],
 }
 
 /// The five escapes SGML and XML share.
-fn decode(text: &str) -> Cow<'_, str> {
+fn decode(text: &str) -> Result<Cow<'_, str>, &'static str> {
     if !text.contains('&') {
-        return Cow::Borrowed(text);
+        return Ok(Cow::Borrowed(text));
     }
-    let escapes = [
-        ("&lt;", "<"),
-        ("&gt;", ">"),
-        ("&quot;", "\""),
-        ("&apos;", "'"),
-        ("&amp;", "&"),
-    ];
-    Cow::Owned(
-        escapes
-            .iter()
-            .fold(text.to_string(), |text, (escape, plain)| {
-                text.replace(escape, plain)
-            }),
-    )
+    let mut decoded = String::with_capacity(text.len());
+    let mut from = 0;
+    while let Some(relative) = text[from..].find('&') {
+        let open = from + relative;
+        decoded.push_str(&text[from..open]);
+        let Some(end) = text[open + 1..].find(';').map(|end| open + 1 + end) else {
+            return Err("an entity reference is never closed");
+        };
+        let entity = &text[open + 1..end];
+        let value = match entity {
+            "lt" => '<', "gt" => '>', "quot" => '"', "apos" => '\'', "amp" => '&',
+            name if name.starts_with("#x") || name.starts_with("#X") => {
+                let code = u32::from_str_radix(&name[2..], 16)
+                    .map_err(|_| "a numeric XML character reference is invalid")?;
+                char::from_u32(code).ok_or("a numeric XML character reference is invalid")?
+            }
+            name if name.starts_with('#') => {
+                let code = name[1..].parse::<u32>()
+                    .map_err(|_| "a numeric XML character reference is invalid")?;
+                char::from_u32(code).ok_or("a numeric XML character reference is invalid")?
+            }
+            _ => return Err("the export uses an unknown entity reference"),
+        };
+        decoded.push(value);
+        from = end + 1;
+    }
+    decoded.push_str(&text[from..]);
+    Ok(Cow::Owned(decoded))
 }
 
 /// Whether the element path `open` (outermost first) ends with `wanted`, in
@@ -112,45 +244,72 @@ pub(crate) fn scan<'t>(
     text: &'t str,
     records: &str,
     paths: &[&str],
-    mut each: impl FnMut(Result<Found<'t>, Broken>) -> bool,
+    mut each: impl for<'a> FnMut(Result<Found<'a, 't>, Broken>) -> bool,
 ) {
     let wanted: Vec<Vec<&str>> = paths.iter().map(|path| path.split('/').collect()).collect();
     let (mut count, mut seen) = (0, false);
-    // The record being read: where it began, its cells, and the elements open in it.
-    let mut open: Option<(Span, Vec<Cell<'t>>, Vec<&str>)> = None;
+    let mut cells: Vec<Cell<'t>> = (0..paths.len())
+        .map(|_| Cell {
+            text: Cow::Borrowed(""),
+            span: ABSENT,
+        })
+        .collect();
+    let mut stack: Vec<&str> = Vec::new();
+    let mut record_start = None;
     // The leaf just read, whose closing tag (XML) says nothing.
     let mut leaf: Option<&str> = None;
     for tag in tags(text) {
+        let tag = match tag {
+            Ok(tag) => tag,
+            Err(mut broken) => {
+                broken.row = count;
+                each(Err(broken));
+                return;
+            }
+        };
         seen = true;
-        let Some((begin, cells, stack)) = open.as_mut() else {
+        if tag.cdata {
+            let Some(_) = record_start else {
+                continue;
+            };
+            for (slot, path) in wanted.iter().enumerate() {
+                if ends_with(stack, path) && cells[slot].span == ABSENT {
+                    cells[slot] = Cell {
+                        text: Cow::Borrowed(tag.value),
+                        span: tag.span,
+                    };
+                }
+            }
+            continue;
+        }
+        let Some(begin) = record_start else {
             if !tag.closing && tag.name.eq_ignore_ascii_case(records) && !tag.empty {
                 count += 1;
-                let nothing = Cell {
-                    text: Cow::Borrowed(""),
-                    span: ABSENT,
-                };
-                open = Some((tag.at, vec![nothing; paths.len()], Vec::new()));
+                record_start = Some(tag.at);
+                for cell in &mut cells {
+                    *cell = Cell {
+                        text: Cow::Borrowed(""),
+                        span: ABSENT,
+                    };
+                }
+                stack.clear();
+                stack.push(tag.name);
             }
             continue;
         };
         let after_leaf = leaf.take();
         if tag.closing {
             if tag.name.eq_ignore_ascii_case(records) {
-                let (whole, cells) = (
-                    Span {
-                        start: begin.start,
-                        end: tag.at.end,
-                    },
-                    std::mem::take(cells),
-                );
-                open = None;
+                let whole = Span { start: begin.start, end: tag.at.end };
+                record_start = None;
                 if !each(Ok(Found {
                     number: count,
                     whole,
-                    cells,
+                    cells: &cells,
                 })) {
                     return;
                 }
+                stack.clear();
             } else if after_leaf != Some(tag.name) {
                 // Also closes what an unclosed empty element (SGML) left open inside it.
                 if let Some(depth) = stack
@@ -169,8 +328,19 @@ pub(crate) fn scan<'t>(
             stack.push(tag.name);
             for (slot, path) in wanted.iter().enumerate() {
                 if ends_with(stack, path) && cells[slot].span == ABSENT {
+                    let text = match decode(tag.value) {
+                        Ok(text) => text,
+                        Err(what) => {
+                            each(Err(Broken {
+                                row: count,
+                                span: tag.span,
+                                what,
+                            }));
+                            return;
+                        }
+                    };
                     cells[slot] = Cell {
-                        text: decode(tag.value),
+                        text,
                         span: tag.span,
                     };
                 }
@@ -178,7 +348,7 @@ pub(crate) fn scan<'t>(
             stack.pop();
         }
     }
-    if let Some((begin, ..)) = open {
+    if let Some(begin) = record_start {
         each(Err(Broken {
             row: count,
             span: begin,
@@ -268,6 +438,35 @@ mod tests {
             ],
             "the first value at a path is the record's, not a deeper one's"
         );
+    }
+
+    #[test]
+    fn comments_do_not_turn_embedded_record_text_into_rows() {
+        let text = "<Document><!-- <Ntry><Amt>999</Amt></Ntry> --><Ntry><Amt>5</Amt></Ntry></Document>";
+        assert_eq!(read(text, "Ntry", &["Amt"]), [["5"]]);
+    }
+
+    #[test]
+    fn cdata_and_numeric_xml_references_are_read_as_text() {
+        let text = "<Ntry><Ustrd><![CDATA[a < b & c]]></Ustrd><Memo>Smile &#x1F642; &#169;</Memo></Ntry>";
+        assert_eq!(read(text, "Ntry", &["Ustrd", "Memo"]), [["a < b & c", "Smile 🙂 ©"]]);
+    }
+
+    #[test]
+    fn malformed_markup_and_unknown_entities_stop_the_scan() {
+        for text in ["<R><!-- no end", "<R><?xml no end", "<R><![CDATA[no end"] {
+            let found = read(text, "R", &["x"]);
+            assert_eq!(found.len(), 1, "{text}");
+            assert!(found[0][0].starts_with("broken:"), "{text}");
+        }
+        let found = read("<R><x>&unknown;</x></R>", "R", &["x"]);
+        assert!(found[0][0].starts_with("broken:"));
+    }
+
+    #[test]
+    fn a_doctype_with_an_internal_subset_is_skipped_without_finding_fake_tags() {
+        let text = "<!DOCTYPE Document [<!ENTITY fake '<Ntry>'>]><Document><Ntry><Amt>5</Amt></Ntry></Document>";
+        assert_eq!(read(text, "Ntry", &["Amt"]), [["5"]]);
     }
 
     #[test]

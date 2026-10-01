@@ -87,9 +87,9 @@ impl<'s> Line<'s> {
 struct Other<'s> {
     who: Option<Who<'s>>,
     via: Option<&'s str>,
-    codes: Vec<String>,
+    codes: Vec<&'s str>,
     /// A purpose the export's own category maps to, and the thing it is of.
-    purpose: Option<(String, Option<String>)>,
+    purpose: Option<(axiom_core::Sym, Option<String>)>,
 }
 
 /// What the memo and the export's own `party` and `via` say of a record.
@@ -108,8 +108,8 @@ impl<'b, 's> World<'b, 's> {
         text: &str,
     ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
         let (records, problems) = crate::format::read(
+            self.book,
             feed.format,
-            &self.book.names,
             text,
             FileId(0),
             feed.unit,
@@ -441,13 +441,29 @@ impl<'b, 's> World<'b, 's> {
                     .map(|text| self.recognizer.read(text, &mut scratch))
             };
             let (party, via) = (read(&record.facts().party), read(&record.facts().via));
-            let all = [Some(&memo), party.as_ref(), via.as_ref()];
-            problems.extend(
-                all.into_iter()
-                    .flatten()
-                    .filter_map(|read| read.who.as_ref().err())
-                    .map(|tie| tie_error(record, tie)),
-            );
+            for read in [party.as_ref(), via.as_ref()].into_iter().flatten() {
+                if let Err(tie) = &read.who {
+                    problems.push(tie_error(self.book, record, tie));
+                }
+            }
+            let has_structured_party = party
+                .as_ref()
+                .and_then(|read| read.who.as_ref().ok())
+                .is_some_and(|who| who.who.is_some())
+                || via
+                    .as_ref()
+                    .and_then(|read| read.who.as_ref().ok())
+                    .is_some_and(|who| who.who.is_some());
+            let has_claim_code = record
+                .facts()
+                .code
+                .as_deref()
+                .is_some_and(|code| self.claims.contains_key(code));
+            if !has_structured_party && !has_claim_code {
+                if let Err(tie) = &memo.who {
+                    problems.push(tie_error(self.book, record, tie));
+                }
+            }
             told.push(Some(Told { memo, party, via }));
         }
         if problems.is_empty() {
@@ -513,22 +529,15 @@ impl<'b, 's> World<'b, 's> {
                 Some(who) if who.name != party => continue,
                 Some(_) => {}
             }
-            other.codes.push(claim.to_string());
-        }
-        if let Some(code) = facts
-            .code
-            .as_deref()
-            .filter(|code| !other.codes.iter().any(|known| known == code))
-        {
-            other.codes.push(code.to_string());
+            other.codes.push(claim);
         }
         let purpose = facts
             .category
             .as_deref()
-            .and_then(|category| crate::format::category(feed.format, &self.book.names, category));
+            .and_then(|category| crate::format::category(feed.format, self.book, category));
         other.purpose = purpose.map(|purpose| {
             (
-                purpose.to_string(),
+                self.book.purposes[purpose].name,
                 facts.object.as_deref().map(str::to_string),
             )
         });
@@ -588,7 +597,7 @@ impl<'b, 's> World<'b, 's> {
             money(out.qty.abs(), unit_out),
             money(into.qty.abs(), unit_in)
         );
-        tail(&mut body, other, Some(out));
+        tail(self.book, &mut body, other, Some(out));
         let moved = vec![
             (account, Some(unit_out.name), out.qty),
             (account, Some(unit_in.name), into.qty),
@@ -633,6 +642,7 @@ impl<'b, 's> World<'b, 's> {
             }
         );
         tail(
+            self.book,
             &mut body,
             other,
             Some(record).filter(|_| other.who.is_none()),
@@ -713,9 +723,9 @@ enum Exchange {
 /// The tail of a written line, in the order of the language: `#purpose of
 /// THING`, `"description"`, `^codes`. A description is what the memo says, when
 /// nobody is known to say it for.
-fn tail(body: &mut String, other: &Other, describe: Option<&Record>) {
+fn tail(book: &Book<'_>, body: &mut String, other: &Other, describe: Option<&Record>) {
     if let Some((purpose, object)) = &other.purpose {
-        let _ = write!(body, " #{purpose}");
+        let _ = write!(body, " #{}", book.name(*purpose));
         if let Some(object) = object {
             let _ = write!(body, " of {object}");
         }
@@ -728,27 +738,40 @@ fn tail(body: &mut String, other: &Other, describe: Option<&Record>) {
             memo.replace('\\', "\\\\").replace('"', "\\\"")
         );
     }
-    for code in &other.codes {
+    for &code in &other.codes {
+        let _ = write!(body, " ^{code}");
+    }
+    if let Some(code) = describe
+        .and_then(|record| record.facts().code.as_deref())
+        .filter(|code| !other.codes.contains(code))
+    {
         let _ = write!(body, " ^{code}");
     }
 }
 
-fn tie_error(record: &Record, tie: &Tie) -> Diagnostic {
-    let ((first, first_pattern), (second, second_pattern)) = (&tie.first, &tie.second);
+fn tie_error(book: &Book<'_>, record: &Record, tie: &Tie) -> Diagnostic {
+    let (first, second) = (&tie.first, &tie.second);
     let headline = format!(
         "`{}` is known as both {} and {}",
         record.memo.trim(),
         first.name,
         second.name
     );
-    let note = format!(
-        "`known-as {first_pattern}` of {} and `known-as {second_pattern}` of {} match it equally well",
-        first.name, second.name
-    );
-    Diagnostic::error("ambiguous-memo", headline)
+    let mut diagnostic = Diagnostic::error("ambiguous-memo", headline)
         .label(record.at, "this memo")
-        .note(note)
-        .help("make one of the two more specific: the one that matches more of the memo wins")
+        .help("make one of the two more specific: the one that matches more of the memo wins");
+    for (id, name) in [
+        (tie.first_pattern, first.name),
+        (tie.second_pattern, second.name),
+    ] {
+        if let Some(id) = id {
+            diagnostic = diagnostic.context(
+                book.patterns[id].loc,
+                format!("this known-as pattern for `{name}` also matches"),
+            );
+        }
+    }
+    diagnostic
 }
 
 /// `01 flat`, or `08 phone 47.30 USD` when the record was for another amount.

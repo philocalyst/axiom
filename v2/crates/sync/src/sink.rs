@@ -5,7 +5,9 @@
 
 use axiom_core::{Day, Diagnostic, FileId, Loc, Map};
 
-use crate::write::{Context, Item, Layout, row_key, row_keys, scan};
+use crate::write::{
+    Context, Item, Layout, is_project_path, row_key, row_keys, scan, validate_item, validate_row,
+};
 use crate::{Form, Insert};
 
 /// Where a source's Axiom goes.
@@ -68,6 +70,18 @@ fn items(
             continue;
         };
         let path = path_of(day);
+        if !is_project_path(&path) {
+            problems.push(Diagnostic::error(
+                "sync-path-outside-project",
+                format!("`{path}` is not a project-relative file path"),
+            ));
+            continue;
+        }
+        let item_body = body(&lines, item);
+        if let Err(bad) = validate_item(&path, day, &item_body) {
+            problems.extend(bad);
+            continue;
+        }
         let there = present
             .entry(path.clone())
             .or_insert_with(|| subjects_in(read(&path).as_deref().unwrap_or(""), &path));
@@ -76,7 +90,7 @@ fn items(
             _ => inserts.push(Insert {
                 path,
                 day,
-                form: Form::Item(body(&lines, item)),
+                form: Form::Item(item_body),
             }),
         }
     }
@@ -119,7 +133,9 @@ fn subject(lines: &[&str], item: &Item) -> String {
     }
     let rest: Vec<&str> = words.collect();
     let stops = |word: &&str| {
-        word.starts_with(|c: char| c.is_ascii_digit() || matches!(c, '(' | '=' | '"' | '#'))
+        word.starts_with(|c: char| {
+            c.is_ascii_digit() || matches!(c, '(' | '=' | '"' | '#' | '^')
+        })
     };
     let name = rest.iter().take_while(|word| !stops(word));
     let codes = rest.iter().filter(|word| word.starts_with('^'));
@@ -146,6 +162,12 @@ fn rows(
     output: &str,
     read: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Vec<Insert>, Vec<Diagnostic>> {
+    if !is_project_path(path) {
+        return Err(vec![Diagnostic::error(
+            "sync-path-outside-project",
+            format!("`{path}` is not a project-relative file path"),
+        )]);
+    }
     let existing = read(path)
         .and_then(|text| row_keys(&text, name))
         .ok_or_else(|| {
@@ -176,6 +198,10 @@ fn rows(
                 .push(Diagnostic::error("bad-row", headline).label(line_loc(&lines, at), label));
             continue;
         };
+        if let Err(bad) = validate_row(path, name, row) {
+            problems.extend(bad);
+            continue;
+        }
         match present.get_mut(&key) {
             Some(count) if *count > 0 => *count -= 1,
             _ => inserts.push(Insert {
@@ -208,7 +234,7 @@ mod tests {
 2026-04-02 northwind owes studio 900 USD due 30d ^inv-2026-03
 ";
 
-    fn layout() -> Layout<'static> {
+    fn layout() -> Layout {
         Layout::new(["journal/2026/03.ax", "journal/2026/02.ax"])
     }
 
@@ -226,6 +252,7 @@ mod tests {
         };
         let inserts = merge(sink, output, &layout(), &read)?;
         Ok(changes(&inserts, &read)
+            .unwrap()
             .into_iter()
             .map(|change| (change.path, change.after))
             .collect())
@@ -263,6 +290,42 @@ mod tests {
             merged(Sink::Journal, INVOICES, &files).unwrap().is_empty(),
             "a second sync writes nothing"
         );
+    }
+
+    #[test]
+    fn malformed_native_output_is_refused_before_a_change_is_planned() {
+        let bad_item = "2026-03-27 someone owes 3 USD";
+        let result = merge(Sink::Journal, bad_item, &layout(), &|_| None);
+        assert!(result.is_err(), "incomplete native item must not pass through raw");
+
+        let bad_row = "2026 3_00 USD ???\n";
+        let result = merge(
+            Sink::Param {
+                name: "rates",
+                path: "settings.ax",
+            },
+            bad_row,
+            &layout(),
+            &|path| (path == "settings.ax").then(|| "param rates\n".to_string()),
+        );
+        assert!(result.is_err(), "unparseable param output must be refused");
+    }
+
+    #[test]
+    fn sink_paths_cannot_escape_the_project_or_trigger_external_reads() {
+        let read = |_: &str| panic!("unsafe sink path must be rejected before reading");
+        let result = merge(Sink::File("../outside/{year}.ax"), "2026-03-27 a -> b 1 USD", &layout(), &read);
+        assert!(result.is_err());
+        let result = merge(
+            Sink::Param {
+                name: "rates",
+                path: "/tmp/settings.ax",
+            },
+            "2026 3 USD\n",
+            &layout(),
+            &read,
+        );
+        assert!(result.is_err());
     }
 
     #[test]

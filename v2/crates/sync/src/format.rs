@@ -5,9 +5,9 @@
 use std::borrow::Cow;
 
 use axiom_core::diag::closest;
-use axiom_core::{Diagnostic, FileId, Id, Interner, Qty, calendar::DateLayout};
-use axiom_model::Purpose;
-use axiom_model::sync::{Column, Field, Format, Rule, Shape, Spec};
+use axiom_core::{Diagnostic, FileId, Id, Qty, calendar::DateLayout};
+use axiom_model::{Book, Purpose};
+use axiom_model::sync::{Column, Fetch, Field, Format, Rule, Shape, Source, Spec};
 
 use crate::amount::amount;
 use crate::csv::Reader as CsvReader;
@@ -55,7 +55,7 @@ struct Row<'r, 't, 'n, 's> {
     what: &'static str,
     cells: &'r [Cell<'t>],
     whole: Span,
-    names: &'n Interner<'s>,
+    book: &'n Book<'s>,
 }
 
 impl Row<'_, '_, '_, '_> {
@@ -73,9 +73,9 @@ impl Row<'_, '_, '_, '_> {
 
     fn shown(&self, column: Column) -> String {
         match column {
-            Column::Header(name) => format!("the \"{}\" column", self.names.name(name)),
+            Column::Header(name) => format!("the \"{}\" column", self.book.text(name)),
             Column::Index(index) => format!("column {index}"),
-            Column::Path(path) => self.names.name(path).to_string(),
+            Column::Path(path) => self.book.text(path).to_string(),
         }
     }
 
@@ -122,7 +122,6 @@ impl Row<'_, '_, '_, '_> {
         't: 'r,
     {
         let cell = self.cell(bound, 0)?;
-        let place = format!("{} {}", self.what, self.number);
         let span = if cell.span == ABSENT {
             self.whole
         } else {
@@ -130,7 +129,7 @@ impl Row<'_, '_, '_, '_> {
         };
         amount(&cell.text, unit.scale).map_err(|why| {
             why.diagnostic(
-                &place,
+                &format!("{} {}", self.what, self.number),
                 span.loc(self.file),
                 self.label(bound, 0),
                 &cell.text,
@@ -156,7 +155,7 @@ impl<'f> Plan<'f> {
 
 struct Reader<'f, 'n, 's> {
     format: &'f Format,
-    names: &'n Interner<'s>,
+    book: &'n Book<'s>,
 }
 
 impl<'f, 'n, 's> Reader<'f, 'n, 's> {
@@ -211,7 +210,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
             what: "row",
             cells: &cells,
             whole: whole(&cells),
-            names: self.names,
+            book: self.book,
         };
         if let Err(broken) = first {
             out.problems
@@ -225,7 +224,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
                 "columns are counted from 1",
             )),
             Column::Header(header) => {
-                let name = self.names.name(header);
+                let name = self.book.text(header);
                 header_row
                     .cells
                     .iter()
@@ -289,7 +288,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
                 what: "row",
                 cells: &cells,
                 whole: whole(&cells),
-                names: self.names,
+                book: self.book,
             };
             let record = match read {
                 Ok(()) => self.record(&plan, &row, unit, units),
@@ -312,7 +311,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
         for spec in self.format.specs.iter() {
             for place in spec.places.iter().copied() {
                 if let Column::Path(path) = place {
-                    let path = self.names.name(path);
+                    let path = self.book.text(path);
                     if !paths.contains(&path) {
                         paths.push(path);
                     }
@@ -323,7 +322,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
                 ..
             } = spec.rule
             {
-                let path = self.names.name(path);
+                let path = self.book.text(path);
                 if !paths.contains(&path) {
                     paths.push(path);
                 }
@@ -331,7 +330,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
         }
         let locate = |column: Column| match column {
             Column::Path(path) => {
-                let path = self.names.name(path);
+                let path = self.book.text(path);
                 Ok(paths.iter().position(|known| *known == path).unwrap_or(0))
             }
             _ => Err(Diagnostic::error(
@@ -353,9 +352,9 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
                         number: found.number,
                         file,
                         what: "record",
-                        cells: &found.cells,
+                        cells: found.cells,
                         whole: found.whole,
-                        names: self.names,
+                        book: self.book,
                     };
                     self.record(&plan, &row, unit, units)
                 }
@@ -407,7 +406,13 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
                 }
             },
         };
-        facts.currency = currency.map(|code| Cow::Owned(code.to_uppercase()));
+        facts.currency = currency.map(|code| {
+            if code.eq_ignore_ascii_case(unit.name) {
+                Cow::Borrowed(unit.name)
+            } else {
+                Cow::Owned(code.to_ascii_uppercase())
+            }
+        });
 
         let Some(date) = bound(Field::Date) else {
             return Err(Diagnostic::error(
@@ -467,7 +472,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
             match amount.spec.rule {
                 Rule::Flipped => -qty,
                 Rule::Sign { into, .. } => {
-                    let expected = self.names.name(into);
+                    let expected = self.book.text(into);
                     let sign = amount
                         .sign
                         .and_then(|slot| row.cells.get(slot))
@@ -520,7 +525,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
                 let says =
                     |word: &str| cell.is_some_and(|cell| cell.text.eq_ignore_ascii_case(word));
                 match pending.spec.rule {
-                    Rule::Is(value) => says(self.names.name(value)),
+                    Rule::Is(value) => says(self.book.text(value)),
                     _ => ["pending", "true", "yes", "y", "1", "p"]
                         .iter()
                         .any(|word| says(word)),
@@ -531,26 +536,24 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
         let (memo, memo_span) = match bound(Field::Memo) {
             None => (Cow::Borrowed(""), row.whole),
             Some(memo) => {
-                let mut nonempty = Vec::new();
+                let mut first = None;
+                let mut joined: Option<String> = None;
                 for at in 0..memo.slots.len() {
                     let cell = row.cell(memo, at)?;
                     if !cell.text.is_empty() {
-                        nonempty.push(cell);
+                        if let Some(first) = first {
+                            let text = joined.get_or_insert_with(|| first.text.to_string());
+                            text.push(' ');
+                            text.push_str(&cell.text);
+                        } else {
+                            first = Some(cell);
+                        }
                     }
                 }
-                match nonempty.as_slice() {
-                    [] => (Cow::Borrowed(""), row.cell(memo, 0)?.span),
-                    [only] => (only.text.clone(), only.span),
-                    [first, ..] => (
-                        Cow::Owned(
-                            nonempty
-                                .iter()
-                                .map(|cell| cell.text.as_ref())
-                                .collect::<Vec<_>>()
-                                .join(" "),
-                        ),
-                        first.span,
-                    ),
+                match (first, joined) {
+                    (None, _) => (Cow::Borrowed(""), row.cell(memo, 0)?.span),
+                    (Some(first), None) => (first.text.clone(), first.span),
+                    (Some(first), Some(joined)) => (Cow::Owned(joined), first.span),
                 }
             }
         };
@@ -560,9 +563,7 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
             memo_span
         }
         .loc(row.file);
-        facts.code = text(Field::Code)?
-            .and_then(|code| code_of(&code))
-            .map(Cow::Owned);
+        facts.code = text(Field::Code)?.and_then(code_of);
         for (field, slot) in [
             (Field::Id, &mut facts.id),
             (Field::Party, &mut facts.party),
@@ -587,22 +588,259 @@ impl<'f, 'n, 's> Reader<'f, 'n, 's> {
 }
 
 pub fn read<'t, 'n, 's>(
+    book: &'n Book<'s>,
     format: &Format,
-    names: &'n Interner<'s>,
     text: &'t str,
     file: FileId,
     unit: Unit<'_>,
     units: &[Unit<'_>],
 ) -> (Vec<Record<'t>>, Vec<Diagnostic>) {
-    let reader = Reader { format, names };
+    let reader = Reader { format, book };
     let mut out = Harvest::default();
     match &format.shape {
         Shape::Rows => reader.rows(text, file, unit, units, &mut out),
         Shape::Tagged { records } => {
-            reader.tagged(names.name(*records), text, file, unit, units, &mut out)
+            reader.tagged(book.name(*records), text, file, unit, units, &mut out)
         }
     }
     (out.records, out.problems)
+}
+
+/// Read just the memo fields from one declared, local `read` source. This is
+/// the input to `check`'s unknown-memo suggestions: it deliberately does not
+/// run commands, reconcile records, or change the book.
+pub fn read_memos<'t, 's>(
+    book: &Book<'s>,
+    source: &Source,
+    text: &'t str,
+    file: FileId,
+) -> Result<Vec<Cow<'t, str>>, Vec<Diagnostic>> {
+    if !matches!(source.fetch, Fetch::Read(_)) {
+        return Err(vec![Diagnostic::error(
+            "sync-run-memos",
+            "memos for a run source are unavailable without running it",
+        )]);
+    }
+    let Some(format_id) = source.format else {
+        return Err(vec![Diagnostic::error(
+            "sync-no-format",
+            "this source has no record format to read memos from",
+        )]);
+    };
+    let Some(format) = book.formats.get(format_id) else {
+        return Err(vec![Diagnostic::error(
+            "sync-no-format",
+            "this source refers to a format that is not in the book",
+        )]);
+    };
+    let Some(memo) = format.specs.iter().find(|spec| spec.field == Field::Memo) else {
+        return Err(vec![Diagnostic::error(
+            "sync-no-memo",
+            "this source's format has no memo field",
+        )]);
+    };
+    if memo.places.is_empty() {
+        return Err(vec![Diagnostic::error(
+            "sync-no-memo",
+            "this source's memo field has no columns or paths",
+        )]);
+    }
+    match &format.shape {
+        Shape::Rows => read_row_memos(book, format, memo, text, file),
+        Shape::Tagged { records } => {
+            read_tagged_memos(book, format, memo, book.name(*records), text, file)
+        }
+    }
+}
+
+fn read_row_memos<'t, 's>(
+    book: &Book<'s>,
+    format: &Format,
+    memo: &Spec,
+    text: &'t str,
+    file: FileId,
+) -> Result<Vec<Cow<'t, str>>, Vec<Diagnostic>> {
+    let (mut csv, mut cells) = (CsvReader::new(text), Vec::new());
+    let Some(header) = csv.next(&mut cells) else {
+        return Ok(Vec::new());
+    };
+    let span = whole(&cells);
+    if let Err(broken) = header {
+        return Err(vec![Diagnostic::error("bad-csv", broken.what)
+            .label(broken.span.loc(file), "here")]);
+    }
+    let first = Row {
+        number: csv.row,
+        file,
+        what: "row",
+        cells: &cells,
+        whole: span,
+        book,
+    };
+    let locate = |column: Column| -> Result<usize, Diagnostic> {
+        match column {
+            Column::Index(index) if index > 0 => Ok(usize::from(index) - 1),
+            Column::Index(_) => Err(Diagnostic::error(
+                "bad-format",
+                "columns are counted from 1",
+            )),
+            Column::Header(header) => first
+                .cells
+                .iter()
+                .position(|cell| cell.text.eq_ignore_ascii_case(book.text(header)))
+                .ok_or_else(|| {
+                    Diagnostic::error(
+                        "no-such-column",
+                        format!("the export has no column \"{}\"", book.text(header)),
+                    )
+                    .label(first.whole.loc(file), "the header row")
+                }),
+            Column::Path(_) => Err(Diagnostic::error(
+                "bad-format",
+                "a rows format names columns",
+            )),
+        }
+    };
+    let memo_slots = memo
+        .places
+        .iter()
+        .copied()
+        .map(locate)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|problem| vec![problem])?;
+    let date_spec = format.specs.iter().find(|spec| spec.field == Field::Date);
+    let date_slot = date_spec
+        .and_then(|spec| spec.places.first().copied())
+        .map(locate)
+        .transpose()
+        .map_err(|problem| vec![problem])?;
+    let has_headers = format
+        .specs
+        .iter()
+        .flat_map(|spec| spec.places.iter())
+        .any(|place| matches!(place, Column::Header(_)));
+    let first_is_record = !has_headers
+        && date_slot
+            .and_then(|slot| first.cells.get(slot))
+            .is_some_and(|cell| {
+                date_spec
+                    .and_then(|spec| spec.layout.as_ref())
+                    .map_or_else(|| iso_day(&cell.text).is_some(), |layout| layout.read(&cell.text).is_some())
+            });
+    let mut memos = Vec::new();
+    if first_is_record {
+        take_row_memo(&first, &memo_slots, &mut memos)?;
+    }
+    while let Some(read) = csv.next(&mut cells) {
+        let row = Row {
+            number: csv.row,
+            file,
+            what: "row",
+            cells: &cells,
+            whole: whole(&cells),
+            book,
+        };
+        match read {
+            Ok(()) => take_row_memo(&row, &memo_slots, &mut memos)?,
+            Err(broken) => {
+                return Err(vec![Diagnostic::error("bad-csv", broken.what)
+                    .label(broken.span.loc(file), "here")]);
+            }
+        }
+    }
+    Ok(memos)
+}
+
+fn take_row_memo<'t>(
+    row: &Row<'_, 't, '_, '_>,
+    slots: &[usize],
+    memos: &mut Vec<Cow<'t, str>>,
+) -> Result<(), Vec<Diagnostic>> {
+    for &slot in slots {
+        let Some(cell) = row.cells.get(slot) else {
+            return Err(vec![row.error(
+                "short-row",
+                format!("has {} columns, but the memo column is missing", row.cells.len()),
+                row.whole,
+                "the row ends here",
+            )]);
+        };
+        if !cell.text.is_empty() {
+            memos.push(cell.text.clone());
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn read_tagged_memos<'t, 's>(
+    book: &Book<'s>,
+    _format: &Format,
+    memo: &Spec,
+    record_name: &str,
+    text: &'t str,
+    file: FileId,
+) -> Result<Vec<Cow<'t, str>>, Vec<Diagnostic>> {
+    let mut paths = Vec::with_capacity(memo.places.len());
+    for place in memo.places.iter().copied() {
+        let Column::Path(path) = place else {
+            return Err(vec![Diagnostic::error(
+                "bad-format",
+                "a tagged format names paths",
+            )]);
+        };
+        let path = book.text(path);
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    let slots: Vec<usize> = memo
+        .places
+        .iter()
+        .map(|place| {
+            let Column::Path(path) = place else {
+                return Err(Diagnostic::error(
+                    "bad-format",
+                    "a tagged format names paths",
+                ));
+            };
+            Ok(paths.iter().position(|known| *known == book.text(*path)).unwrap_or(0))
+        })
+        .collect::<Result<_, _>>()
+        .map_err(|problem| vec![problem])?;
+    let mut memos = Vec::new();
+    let mut problems = Vec::new();
+    tagged::scan(text, record_name, &paths, |found| match found {
+        Ok(found) => {
+            for &slot in &slots {
+                let Some(cell) = found.cells.get(slot) else {
+                    problems.push(Diagnostic::error(
+                        "bad-tags",
+                        "the tagged record has fewer cells than the format requests",
+                    ));
+                    return false;
+                };
+                if !cell.text.is_empty() {
+                    memos.push(cell.text.clone());
+                    break;
+                }
+            }
+            true
+        }
+        Err(broken) => {
+            problems.push(Diagnostic::error(
+                "bad-tags",
+                format!("record {}: {}", broken.row, broken.what),
+            )
+            .label(broken.span.loc(file), "here"));
+            false
+        }
+    });
+    if problems.is_empty() {
+        Ok(memos)
+    } else {
+        Err(problems)
+    }
 }
 
 pub fn date_layout(format: &Format) -> Option<&DateLayout> {
@@ -614,27 +852,40 @@ pub fn date_layout(format: &Format) -> Option<&DateLayout> {
         .as_ref()
 }
 
-pub fn category(format: &Format, names: &Interner<'_>, text: &str) -> Option<Id<Purpose>> {
+pub fn category(format: &Format, book: &Book<'_>, text: &str) -> Option<Id<Purpose>> {
     let text = text.trim();
     format
         .categories
         .iter()
-        .find(|(category, _)| names.name(*category).eq_ignore_ascii_case(text))
+        .find(|(category, _)| book.text(*category).eq_ignore_ascii_case(text))
         .map(|(_, purpose)| *purpose)
 }
 
 /// A structured code is canonical as written, except that Axiom codes are case
 /// insensitive and are stored lowercase. Do not invent prefixes from rules.
-fn code_of(text: &str) -> Option<String> {
-    let text = text.trim().strip_prefix('^').unwrap_or(text.trim());
-    if text.is_empty()
-        || !text
+fn code_of<'t>(text: Cow<'t, str>) -> Option<Cow<'t, str>> {
+    let (code, borrowed) = match text {
+        Cow::Borrowed(text) => {
+            let trimmed = text.trim();
+            (trimmed.strip_prefix('^').unwrap_or(trimmed), true)
+        }
+        Cow::Owned(text) => {
+            let trimmed = text.trim();
+            (trimmed.strip_prefix('^').unwrap_or(trimmed), false)
+        }
+    };
+    if code.is_empty()
+        || !code
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || "_:./-".contains(c))
     {
         return None;
     }
-    Some(text.to_ascii_lowercase())
+    Some(if borrowed && code.bytes().all(|byte| !byte.is_ascii_uppercase()) {
+        Cow::Borrowed(code)
+    } else {
+        Cow::Owned(code.to_ascii_lowercase())
+    })
 }
 
 fn whole(cells: &[Cell]) -> Span {
@@ -647,3 +898,16 @@ fn whole(cells: &[Cell]) -> Span {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod text_tests {
+    use super::*;
+
+    #[test]
+    fn canonical_codes_stay_borrowed_and_case_is_normalized_only_when_needed() {
+        let lower = code_of(Cow::Borrowed("check-1041")).unwrap();
+        assert!(matches!(lower, Cow::Borrowed("check-1041")));
+        assert_eq!(code_of(Cow::Borrowed("^Check-1041")).unwrap(), "check-1041");
+        assert!(code_of(Cow::Borrowed("  ")).is_none());
+    }
+}

@@ -55,7 +55,7 @@ pub fn amount(cell: &str, scale: u8) -> Result<Option<Qty>, Why> {
     if cell.trim().is_empty() {
         return Ok(None);
     }
-    let (negative, number) = sign(cell);
+    let (negative, number) = sign(cell)?;
     let digits = Digits::of(number)?;
     let dec = Dec::parse(digits.as_bytes()).ok_or(Why::Range)?;
     let qty = dec.to_qty(scale).map_err(|why| match why {
@@ -67,20 +67,46 @@ pub fn amount(cell: &str, scale: u8) -> Result<Option<Qty>, Why> {
 
 /// Whether the cell says negative, and the number without its sign: a minus or
 /// parentheses make it so, and a currency sign is only decoration.
-fn sign(cell: &str) -> (bool, &str) {
+fn sign(cell: &str) -> Result<(bool, &str), Why> {
     let cell = cell.trim();
-    let (mut negative, mut rest) = match cell
+    let (parenthesized, mut rest) = match cell
         .strip_prefix('(')
         .and_then(|inner| inner.strip_suffix(')'))
     {
         Some(inner) => (true, inner),
         None => (false, cell),
     };
-    while let Some(sign) = rest.chars().next().filter(|c| "-+$€£¥ ".contains(*c)) {
-        negative |= sign == '-';
-        rest = &rest[sign.len_utf8()..];
+    if parenthesized {
+        rest = rest.trim();
+        if rest.starts_with(['+', '-', '$', '€', '£', '¥']) {
+            return Err(Why::Malformed {
+                comma_decimal: false,
+            });
+        }
+        return Ok((true, rest));
     }
-    (negative, rest)
+
+    rest = rest.trim_start();
+    let mut sign = None;
+    if let Some(ch @ ('+' | '-')) = rest.chars().next() {
+        sign = Some(ch);
+        rest = rest[ch.len_utf8()..].trim_start();
+    }
+    if let Some(ch @ ('$' | '€' | '£' | '¥')) = rest.chars().next() {
+        rest = rest[ch.len_utf8()..].trim_start();
+        if sign.is_none() {
+            if let Some(next @ ('+' | '-')) = rest.chars().next() {
+                sign = Some(next);
+                rest = rest[next.len_utf8()..].trim_start();
+            }
+        }
+    }
+    if rest.starts_with(['+', '-', '$', '€', '£', '¥']) {
+        return Err(Why::Malformed {
+            comma_decimal: false,
+        });
+    }
+    Ok((sign == Some('-'), rest))
 }
 
 /// A number's digits and its point, with the thousands separators taken out.
@@ -162,6 +188,9 @@ mod tests {
                 matches!(amount(bad, 2), Err(Why::Malformed { .. })),
                 "{bad}"
             );
+        }
+        for bad in ["+-12", "-+12", "--12", "++12", "-$-12", "(-12)"] {
+            assert!(matches!(amount(bad, 2), Err(Why::Malformed { .. })), "{bad}");
         }
         assert!(matches!(amount("0.005", 2), Err(Why::Precision)));
         assert!(matches!(

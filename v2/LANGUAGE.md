@@ -1005,6 +1005,7 @@ format camt053                                // ISO 20022 bank statements, in s
   date    BookgDt/Dt
   amount  Amt, sign CdtDbtInd CRDT
   pending Sts PDNG
+  memo    AddtlNtryInf, RmtInf/Ustrd
   code    NtryDtls/TxDtls/RmtInf/Strd/CdtrRefInf/Ref
   via     NtryDtls/TxDtls/RltdPties/UltmtCdtr/Nm
 ```

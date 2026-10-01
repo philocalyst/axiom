@@ -72,6 +72,8 @@ pub struct Outcome {
     pub sources: Vec<(String, Result<usize, Failure>)>,
     /// What every file would be.
     pub changes: Vec<Change>,
+    /// A sink path or final formatted source that could not be safely planned.
+    pub problems: Vec<Diagnostic>,
 }
 
 /// Reads the sources, the commands all at once, and plans their changes one
@@ -129,9 +131,14 @@ pub fn sync<'a>(
             results[at].push((label.clone(), counted));
         }
     }
+    let (changes, problems) = match changes(&inserts, read) {
+        Ok(changes) => (changes, Vec::new()),
+        Err(problems) => (Vec::new(), problems),
+    };
     Outcome {
         sources: results.into_iter().flatten().collect(),
-        changes: changes(&inserts, read),
+        changes,
+        problems,
     }
 }
 

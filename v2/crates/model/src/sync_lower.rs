@@ -5,12 +5,13 @@
 use axiom_core::{DateLayout, Diagnostic, Id, Interner, Loc, Map, Sym};
 use axiom_syntax as ast;
 
-use crate::book::{CodeRule, CodeScope, Role};
+use crate::book::{Book, CodeRule, CodeScope, Role};
 use crate::declare::World;
 use crate::scope::{Home, Scopes};
 use crate::sources::Site;
 use crate::sync::{
-    Capture, CharClass, Column, Fetch, Field, Format, Op, Pattern, Rule, Shape, Sink, Source, Spec,
+    Capture, CharClass, Column, Fetch, Field, Format, Op, Pattern, Rule, Shape, Sink, Source,
+    Spec, Text,
 };
 
 #[derive(Clone, Copy)]
@@ -100,7 +101,7 @@ pub(crate) fn declare<'s>(
             let program = match compile_pattern(
                 file,
                 source.pattern,
-                &mut world.book.names,
+                &mut world.book,
                 &named,
                 &world.scopes,
                 site.home,
@@ -130,63 +131,74 @@ fn validate_pattern_calls(
     diags: &mut Vec<Diagnostic>,
 ) {
     const MAX_CALL_DEPTH: usize = 32;
-    fn visit(
-        at: Id<Pattern>,
-        arena: &axiom_core::Arena<Pattern>,
-        state: &mut [u8],
-        reported: &mut axiom_core::Set<(usize, usize)>,
-        deep: &mut axiom_core::Set<usize>,
-        depth: usize,
-        diags: &mut Vec<Diagnostic>,
-    ) {
-        state[at.index()] = 1;
-        let Some(pattern) = arena.get(at) else { return };
-        for callee in pattern.program.iter().filter_map(|op| match op {
-            Op::Call(callee) => Some(*callee),
-            _ => None,
-        }) {
-            match state.get(callee.index()).copied().unwrap_or(2) {
-                0 if depth < MAX_CALL_DEPTH => {
-                    visit(callee, arena, state, reported, deep, depth + 1, diags)
+    let mut state = vec![0u8; arena.len()];
+    let mut height = vec![0usize; arena.len()];
+    let mut reported = axiom_core::Set::default();
+    let mut deep = axiom_core::Set::default();
+    for entry in named {
+        if state[entry.id.index()] != 0 {
+            continue;
+        }
+        let mut stack = vec![(entry.id, 0usize)];
+        state[entry.id.index()] = 1;
+        while let Some(&(at, next)) = stack.last() {
+            let Some(pattern) = arena.get(at) else {
+                stack.pop();
+                continue;
+            };
+            let call = pattern
+                .program
+                .iter()
+                .enumerate()
+                .skip(next)
+                .find_map(|(offset, op)| match op {
+                    Op::Call(callee) => Some((offset + 1, *callee)),
+                    _ => None,
+                });
+            if let Some((after, callee)) = call {
+                stack.last_mut().unwrap().1 = after;
+                match state.get(callee.index()).copied().unwrap_or(2) {
+                    0 => {
+                        state[callee.index()] = 1;
+                        stack.push((callee, 0));
+                    }
+                    1 if reported.insert((at.index(), callee.index())) => {
+                        let target = arena.get(callee).map_or(pattern.loc, |callee| callee.loc);
+                        diags.push(
+                            Diagnostic::error(
+                                "recursive-pattern",
+                                "named patterns may not call each other recursively",
+                            )
+                            .label(pattern.loc, "this pattern calls back into the active chain")
+                            .context(target, "the call cycle returns here"),
+                        );
+                    }
+                    _ => {}
                 }
-                0 if deep.insert(at.index()) => diags.push(
+                continue;
+            }
+
+            let longest = pattern
+                .program
+                .iter()
+                .filter_map(|op| match op {
+                    Op::Call(callee) => Some(1 + height.get(callee.index()).copied().unwrap_or(0)),
+                    _ => None,
+                })
+                .max()
+                .unwrap_or(1);
+            height[at.index()] = longest;
+            if longest > MAX_CALL_DEPTH && deep.insert(at.index()) {
+                diags.push(
                     Diagnostic::error(
                         "pattern-too-deep",
                         "named pattern calls may nest at most 32 patterns",
                     )
-                    .label(pattern.loc, "this call exceeds the runtime nesting bound"),
-                ),
-                1 if reported.insert((at.index(), callee.index())) => {
-                    let target = arena.get(callee).map_or(pattern.loc, |pattern| pattern.loc);
-                    diags.push(
-                        Diagnostic::error(
-                            "recursive-pattern",
-                            "named patterns may not call each other recursively",
-                        )
-                        .label(pattern.loc, "this pattern calls back into the active chain")
-                        .context(target, "the call cycle returns here"),
-                    );
-                }
-                _ => {}
+                    .label(pattern.loc, "this call chain exceeds the runtime nesting bound"),
+                );
             }
-        }
-        state[at.index()] = 2;
-    }
-
-    let mut state = vec![0u8; arena.len()];
-    let mut reported = axiom_core::Set::default();
-    let mut deep = axiom_core::Set::default();
-    for entry in named {
-        if state[entry.id.index()] == 0 {
-            visit(
-                entry.id,
-                arena,
-                &mut state,
-                &mut reported,
-                &mut deep,
-                0,
-                diags,
-            );
+            state[at.index()] = 2;
+            stack.pop();
         }
     }
 }
@@ -252,18 +264,18 @@ fn resolve_named(
 fn compile_pattern<'s>(
     file: &ast::File<'s>,
     pattern: ast::Pattern<'s>,
-    names: &mut Interner<'s>,
+    book: &mut Book<'s>,
     named: &[Named],
     scopes: &Scopes,
     home: Home,
 ) -> Result<Vec<Op>, Diagnostic> {
-    compile_pattern_at(file, pattern, names, named, scopes, home, 0)
+    compile_pattern_at(file, pattern, book, named, scopes, home, 0)
 }
 
 fn compile_pattern_at<'s>(
     file: &ast::File<'s>,
     pattern: ast::Pattern<'s>,
-    names: &mut Interner<'s>,
+    book: &mut Book<'s>,
     named: &[Named],
     scopes: &Scopes,
     home: Home,
@@ -280,7 +292,7 @@ fn compile_pattern_at<'s>(
         let mut sequence = Vec::new();
         for term in &file[choice.terms] {
             let mut body = match term.atom {
-                ast::PatternAtom::Literal(text) => vec![Op::Literal(names.intern(text.0))],
+                ast::PatternAtom::Literal(text) => vec![Op::Literal(book.quoted_text(text.0))],
                 ast::PatternAtom::Class(class) => vec![Op::Class(match class {
                     ast::Class::Digit => CharClass::Digit,
                     ast::Class::Letter => CharClass::Letter,
@@ -292,12 +304,12 @@ fn compile_pattern_at<'s>(
                     ast::Class::End => CharClass::End,
                 })],
                 ast::PatternAtom::Named(reference) => vec![Op::Call(resolve_named(
-                    file, names, named, scopes, home, reference,
+                    file, &book.names, named, scopes, home, reference,
                 )?)],
                 ast::PatternAtom::Group(group) => {
                     let choices = file[group.choices].len();
                     let mut program =
-                        compile_pattern_at(file, group, names, named, scopes, home, depth + 1)?;
+                        compile_pattern_at(file, group, book, named, scopes, home, depth + 1)?;
                     if choices > 1 {
                         let len = op_len(file, file.loc(file.src), program.len())?;
                         program.insert(
@@ -330,7 +342,7 @@ fn compile_pattern_at<'s>(
                     "amount" => Capture::Amount,
                     "date" => Capture::Date,
                     "original" => Capture::Original,
-                    _ => Capture::Named(names.intern(capture.0)),
+                    _ => Capture::Named(book.names.intern(capture.0)),
                 };
                 body.insert(0, Op::Capture { name: capture, len });
             }
@@ -377,9 +389,9 @@ fn lower_known_as<'s>(
                             use crate::errors::Word;
                             let mut patterns = anonymous_patterns(
                                 file,
-                                &mut world.book.names,
-                                &mut world.book.patterns,
+                                &mut world.book,
                                 &decl.known_as,
+                                item.loc,
                                 named,
                                 &world.scopes,
                                 site.home,
@@ -419,9 +431,9 @@ fn lower_known_as<'s>(
                             use crate::errors::Word;
                             let mut patterns = anonymous_patterns(
                                 file,
-                                &mut world.book.names,
-                                &mut world.book.patterns,
+                                &mut world.book,
                                 &decl.known_as,
+                                item.loc,
                                 named,
                                 &world.scopes,
                                 site.home,
@@ -472,9 +484,9 @@ fn lower_known_as<'s>(
                     let pattern = world.book.names.intern(rule.pattern.0);
                     let known_as = anonymous_patterns(
                         file,
-                        &mut world.book.names,
-                        &mut world.book.patterns,
+                        &mut world.book,
                         &rule.known_as,
+                        item.loc,
                         named,
                         &world.scopes,
                         site.home,
@@ -609,7 +621,7 @@ fn lower_formats<'s>(
             let format = match lower_format(
                 file,
                 source,
-                &mut world.book.names,
+                &mut world.book,
                 &category_purposes,
                 diags,
             ) {
@@ -644,10 +656,40 @@ fn format_args<'s>(file: &ast::File<'s>, line: &ast::FormatLine<'s>) -> Vec<Form
         .collect()
 }
 
+fn format_text(book: &mut Book<'_>, arg: FormatArg<'_>) -> Text {
+    if arg.quoted {
+        book.quoted_text(arg.text)
+    } else {
+        book.intern_text(arg.text)
+    }
+}
+
+fn decode_quoted(raw: &str) -> Result<std::borrow::Cow<'_, str>, usize> {
+    if !raw.as_bytes().contains(&b'\\') {
+        return Ok(std::borrow::Cow::Borrowed(raw));
+    }
+    let mut decoded = String::with_capacity(raw.len());
+    let mut chars = raw.char_indices();
+    while let Some((at, ch)) = chars.next() {
+        if ch != '\\' {
+            decoded.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some((_, 'n')) => decoded.push('\n'),
+            Some((_, 't')) => decoded.push('\t'),
+            Some((_, '"')) => decoded.push('"'),
+            Some((_, '\\')) => decoded.push('\\'),
+            _ => return Err(at),
+        }
+    }
+    Ok(std::borrow::Cow::Owned(decoded))
+}
+
 fn lower_format<'s>(
     file: &ast::File<'s>,
     source: &ast::Format<'s>,
-    names: &mut Interner<'s>,
+    book: &mut Book<'s>,
     category_purposes: &[Option<Id<crate::book::Purpose>>],
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Format> {
@@ -658,7 +700,7 @@ fn lower_format<'s>(
             continue;
         }
         let args = format_args(file, line);
-        if args.len() != 1 || matches!(shape, Shape::Tagged { .. }) {
+        if args.len() != 1 || args[0].quoted || matches!(shape, Shape::Tagged { .. }) {
             diags.push(
                 Diagnostic::error("bad-format", "`records` takes one tag and appears once")
                     .label(line.loc, "this format line"),
@@ -666,11 +708,11 @@ fn lower_format<'s>(
             continue;
         }
         shape = Shape::Tagged {
-            records: names.intern(args[0].text),
+            records: book.names.intern(args[0].text),
         };
     }
     let mut specs = Vec::new();
-    let mut categories = Vec::new();
+    let mut categories: Vec<(Text, Id<crate::book::Purpose>)> = Vec::new();
     let mut seen = [false; 17];
     for (line_at, line) in lines.iter().enumerate() {
         let key = line.key.0;
@@ -678,6 +720,16 @@ fn lower_format<'s>(
         let fail = |code, message: String| {
             Diagnostic::error(code, message).label(line.loc, "this format line")
         };
+        if args
+            .iter()
+            .any(|arg| arg.quoted && decode_quoted(arg.text).is_err())
+        {
+            diags.push(fail(
+                "bad-string-escape",
+                "a quoted format value has an invalid escape".into(),
+            ));
+            continue;
+        }
         if key == "records" {
             continue;
         }
@@ -692,7 +744,7 @@ fn lower_format<'s>(
             let Some(Some(purpose)) = category_purposes.get(line_at).copied() else {
                 continue;
             };
-            categories.push((names.intern(args[0].text), purpose));
+            categories.push((format_text(book, args[0]), purpose));
             continue;
         }
         let Some(field) = field(key) else {
@@ -717,18 +769,19 @@ fn lower_format<'s>(
             ));
             continue;
         }
-        let column = |arg: FormatArg<'s>, names: &mut Interner<'s>| -> Result<Column, Diagnostic> {
+        let column = |arg: FormatArg<'s>, book: &mut Book<'s>| -> Result<Column, Diagnostic> {
+            let text = format_text(book, arg);
             match shape {
-                Shape::Tagged { .. } => Ok(Column::Path(names.intern(arg.text))),
+                Shape::Tagged { .. } => Ok(Column::Path(text)),
                 Shape::Rows if !arg.quoted => match arg.text.parse::<u16>() {
                     Ok(0) => Err(fail("bad-format", "columns are counted from 1".into())),
                     Ok(index) => Ok(Column::Index(index)),
-                    Err(_) => Ok(Column::Header(names.intern(arg.text))),
+                    Err(_) => Ok(Column::Header(text)),
                 },
-                Shape::Rows => Ok(Column::Header(names.intern(arg.text))),
+                Shape::Rows => Ok(Column::Header(text)),
             }
         };
-        let place = match column(args[0], names) {
+        let place = match column(args[0], book) {
             Ok(place) => place,
             Err(problem) => {
                 diags.push(problem);
@@ -746,11 +799,12 @@ fn lower_format<'s>(
                     ));
                     continue;
                 }
-                layout = DateLayout::parse(args[1].text);
+                let text = format_text(book, args[1]);
+                layout = DateLayout::parse(book.text(text));
                 if layout.is_none() {
                     diags.push(fail(
                         "bad-date-layout",
-                        format!("`{}` is not a date layout", args[1].text),
+                        format!("`{}` is not a date layout", book.text(text)),
                     ));
                     continue;
                 }
@@ -759,14 +813,14 @@ fn lower_format<'s>(
                 None => {}
                 Some("flipped") if args.len() == 2 => rule = Rule::Flipped,
                 Some("sign") if args.len() == 4 => {
-                    let marker = match column(args[2], names) {
+                    let marker = match column(args[2], book) {
                         Ok(column) => column,
                         Err(problem) => {
                             diags.push(problem);
                             continue;
                         }
                     };
-                    let into = names.intern(args[3].text);
+                    let into = format_text(book, args[3]);
                     rule = Rule::Sign {
                         place: marker,
                         into,
@@ -780,7 +834,7 @@ fn lower_format<'s>(
                     continue;
                 }
             },
-            Field::Pending if args.len() == 2 => rule = Rule::Is(names.intern(args[1].text)),
+            Field::Pending if args.len() == 2 => rule = Rule::Is(format_text(book, args[1])),
             Field::Memo => {}
             _ if args.len() != 1 => {
                 diags.push(fail("bad-format", format!("`{key}` takes one column")));
@@ -790,7 +844,7 @@ fn lower_format<'s>(
         }
         let places = if field == Field::Memo {
             args.iter()
-                .map(|arg| column(*arg, names))
+                .map(|arg| column(*arg, book))
                 .collect::<Result<Vec<_>, _>>()
         } else {
             Ok(vec![place])
@@ -829,7 +883,7 @@ fn lower_format<'s>(
         );
     }
     Some(Format {
-        name: names.intern(source.name.0),
+        name: book.names.intern(source.name.0),
         shape,
         specs: specs.into_boxed_slice(),
         categories: categories.into_boxed_slice(),
@@ -852,15 +906,34 @@ fn format_purposes<'s>(
                 return None;
             }
             let args = format_args(file, line);
-            let Some(value) = args.get(2).filter(|arg| arg.text.starts_with('#')) else {
+            let Some(value) = args.get(2) else {
                 return None;
             };
-            let text = &value.text[1..];
+            let loc = file.loc(value.text);
+            let decoded = match value.quoted {
+                true => match decode_quoted(value.text) {
+                    Ok(text) => text,
+                    Err(_) => {
+                        diags.push(
+                            Diagnostic::error(
+                                "bad-string-escape",
+                                "a quoted category has an invalid escape",
+                            )
+                            .label(line.loc, "this format line"),
+                        );
+                        return None;
+                    }
+                },
+                false => std::borrow::Cow::Borrowed(value.text),
+            };
+            let Some(text) = decoded.strip_prefix('#') else {
+                return None;
+            };
             match world.purpose(
                 home,
                 Word {
                     text,
-                    loc: file.loc(value.text),
+                    loc,
                 },
             ) {
                 Ok(purpose) => Some(purpose),
@@ -926,8 +999,8 @@ fn lower_sources<'s>(
             declared.insert((site.home, name), file.loc(sync.name.0));
 
             let fetch = match (sync.read, sync.run) {
-                (Some(path), None) => Fetch::Read(world.book.names.intern(path.0)),
-                (None, Some(command)) => Fetch::Run(world.book.names.intern(command.0)),
+                (Some(path), None) => Fetch::Read(world.book.quoted_text(path.0)),
+                (None, Some(command)) => Fetch::Run(world.book.intern_text(command.0)),
                 _ => {
                     diags.push(
                         Diagnostic::error(
@@ -965,7 +1038,7 @@ fn lower_sources<'s>(
                         match lower_format(
                             file,
                             written,
-                            &mut world.book.names,
+                            &mut world.book,
                             &category_purposes,
                             diags,
                         ) {
@@ -1007,7 +1080,7 @@ fn lower_sources<'s>(
                             );
                             continue;
                         }
-                        _ => Sink::File(world.book.names.intern(into.0)),
+                        _ => Sink::File(world.book.intern_text(into.0)),
                     }
                 }
                 None => {
@@ -1136,9 +1209,9 @@ fn resolve_format(
 
 fn anonymous_patterns<'s>(
     file: &ast::File<'s>,
-    names: &mut Interner<'s>,
-    arena: &mut axiom_core::Arena<Pattern>,
+    book: &mut Book<'s>,
     patterns: &ast::Many<ast::Pattern<'s>>,
+    loc: Loc,
     named: &[Named],
     scopes: &Scopes,
     home: Home,
@@ -1147,11 +1220,11 @@ fn anonymous_patterns<'s>(
     file[*patterns]
         .iter()
         .filter_map(
-            |pattern| match compile_pattern(file, *pattern, names, named, scopes, home) {
-                Ok(program) => Some(arena.push(Pattern {
+            |pattern| match compile_pattern(file, *pattern, book, named, scopes, home) {
+                Ok(program) => Some(book.patterns.push(Pattern {
                     name: None,
                     program: program.into_boxed_slice(),
-                    loc: file.loc(file.src),
+                    loc,
                 })),
                 Err(problem) => {
                     diags.push(problem);
@@ -1174,6 +1247,28 @@ mod tests {
         file
     }
 
+    fn book() -> Book<'static> {
+        let system = include_str!("../../systems/src/std.ax");
+        let sources = [("std.ax", system, true), ("axiom.ax", "base USD\n", false)].map(
+            |(path, text, embedded)| {
+                let (file, diagnostics) =
+                    axiom_syntax::parse(FileId(0), text, Folder::default());
+                assert!(diagnostics.is_empty(), "{path}: {diagnostics:?}");
+                crate::Source {
+                    path,
+                    file,
+                    embedded,
+                }
+            },
+        );
+        let (book, diagnostics) = crate::build(&sources);
+        assert!(
+            diagnostics.is_empty(),
+            "standard fixture failed to build: {diagnostics:?}"
+        );
+        book
+    }
+
     #[test]
     fn group_choices_are_fenced_and_sequences_keep_their_order() {
         let file = source("pattern ach = \"ACH \" (\"DEBIT\" / \"CREDIT\") space+\n");
@@ -1182,20 +1277,20 @@ mod tests {
         };
         let tree: Tree<crate::book::System> = Tree::default();
         let scopes = Scopes::new(&tree, |_| Vec::new());
-        let mut names = Interner::default();
+        let mut book = book();
         let program = compile_pattern(
             &file,
             file[id].pattern,
-            &mut names,
+            &mut book,
             &[],
             &scopes,
             Home::Project,
         )
         .unwrap();
         let (ach, debit, credit) = (
-            names.intern("ACH "),
-            names.intern("DEBIT"),
-            names.intern("CREDIT"),
+            book.intern_text("ACH "),
+            book.intern_text("DEBIT"),
+            book.intern_text("CREDIT"),
         );
         assert_eq!(
             program,
@@ -1220,6 +1315,52 @@ mod tests {
     }
 
     #[test]
+    fn named_pattern_call_depth_is_checked_independent_of_declaration_order() {
+        fn diagnostics(reverse: bool) -> Vec<Diagnostic> {
+            let mut arena = axiom_core::Arena::new();
+            let mut names = Interner::default();
+            let name = names.intern("chain");
+            let count = 40usize;
+            for at in 0..count {
+                let callee = if reverse {
+                    at.checked_sub(1)
+                } else {
+                    (at + 1 < count).then_some(at + 1)
+                };
+                let program = callee.map_or_else(
+                    || Box::default(),
+                    |callee| Box::new([Op::Call(Id::new(callee as u32))]),
+                );
+                arena.push(Pattern {
+                    name: None,
+                    program,
+                    loc: Loc::new(FileId(0), at as u32, at as u32 + 1),
+                });
+            }
+            let named = (0..count)
+                .map(|at| Named {
+                    name,
+                    home: Home::Project,
+                    id: Id::new(at as u32),
+                    loc: Loc::new(FileId(0), at as u32, at as u32 + 1),
+                })
+                .collect::<Vec<_>>();
+            let mut diags = Vec::new();
+            validate_pattern_calls(&arena, &named, &mut diags);
+            diags
+        }
+
+        for reverse in [false, true] {
+            assert!(
+                diagnostics(reverse)
+                    .iter()
+                    .any(|problem| problem.code == "pattern-too-deep"),
+                "chain orientation reverse={reverse} must exceed the 32-call limit"
+            );
+        }
+    }
+
+    #[test]
     fn tagged_format_lines_lower_to_typed_paths_rules_and_multiple_memo_columns() {
         let file = source(
             "format camt\n  records Ntry\n  date BookgDt/Dt\n  amount Amt sign CdtDbtInd CRDT\n  memo AddtlNtryInf, RmtInf/Ustrd\n",
@@ -1227,34 +1368,34 @@ mod tests {
         let ItemKind::Format(id) = file.items[0].kind else {
             panic!("expected a format")
         };
-        let mut names = Interner::default();
-        let format = lower_format(&file, &file[id], &mut names, &[], &mut Vec::new()).unwrap();
+        let mut book = book();
+        let format = lower_format(&file, &file[id], &mut book, &[], &mut Vec::new()).unwrap();
         assert_eq!(
             format.shape,
             Shape::Tagged {
-                records: names.intern("Ntry")
+                records: book.names.intern("Ntry")
             }
         );
         assert_eq!(format.specs.len(), 3);
         assert_eq!(format.specs[0].field, Field::Date);
         assert_eq!(
             format.specs[0].places.as_ref(),
-            [Column::Path(names.intern("BookgDt/Dt"))]
+            [Column::Path(book.intern_text("BookgDt/Dt"))]
         );
         assert_eq!(format.specs[1].field, Field::Amount);
         assert_eq!(
             format.specs[1].rule,
             Rule::Sign {
-                place: Column::Path(names.intern("CdtDbtInd")),
-                into: names.intern("CRDT"),
+                place: Column::Path(book.intern_text("CdtDbtInd")),
+                into: book.intern_text("CRDT"),
             }
         );
         assert_eq!(format.specs[2].field, Field::Memo);
         assert_eq!(
             format.specs[2].places.as_ref(),
             [
-                Column::Path(names.intern("AddtlNtryInf")),
-                Column::Path(names.intern("RmtInf/Ustrd"))
+                Column::Path(book.intern_text("AddtlNtryInf")),
+                Column::Path(book.intern_text("RmtInf/Ustrd"))
             ]
         );
     }
@@ -1265,9 +1406,9 @@ mod tests {
         let ItemKind::Format(id) = file.items[0].kind else {
             panic!("expected a format")
         };
-        let mut names = Interner::default();
+        let mut book = book();
         let mut diagnostics = Vec::new();
-        let format = lower_format(&file, &file[id], &mut names, &[], &mut diagnostics).unwrap();
+        let format = lower_format(&file, &file[id], &mut book, &[], &mut diagnostics).unwrap();
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert!(format.specs.iter().any(|spec| spec.field == Field::Gross));
     }

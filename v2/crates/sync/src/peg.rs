@@ -4,8 +4,9 @@
 //! executes borrowed `model::sync::Pattern` values; it has no second pattern
 //! language or semantic representation.
 
-use axiom_core::{Arena, Id, Interner};
+use axiom_core::Id;
 use axiom_model::sync::{Capture, CharClass, Op, Pattern};
+use axiom_model::Book;
 use memchr::memmem;
 
 const MAX_DEPTH: usize = 64;
@@ -14,23 +15,18 @@ const MAX_DEPTH: usize = 64;
 /// start-literal lists are only a lookup index; the Op programs remain in the
 /// model arena and are never copied.
 pub struct Patterns<'a, 's> {
-    arena: &'a Arena<Pattern>,
-    names: &'a Interner<'s>,
+    book: &'a Book<'s>,
     starts: Vec<Option<Vec<Vec<u8>>>>,
 }
 
 impl<'a, 's> Patterns<'a, 's> {
-    pub fn new(arena: &'a Arena<Pattern>, names: &'a Interner<'s>) -> Patterns<'a, 's> {
-        let mut starts = vec![None; arena.len()];
-        let mut visiting = vec![false; arena.len()];
-        for (id, _) in arena.iter() {
-            starts[id.index()] = starts_of(arena, names, id, &mut visiting, 0);
+    pub fn new(book: &'a Book<'s>) -> Patterns<'a, 's> {
+        let mut starts = vec![None; book.patterns.len()];
+        let mut visiting = vec![false; book.patterns.len()];
+        for (id, _) in book.patterns.iter() {
+            starts[id.index()] = starts_of(book, id, &mut visiting, 0);
         }
-        Patterns {
-            arena,
-            names,
-            starts,
-        }
+        Patterns { book, starts }
     }
 
     pub fn starts(&self, id: Id<Pattern>) -> Option<&[Vec<u8>]> {
@@ -38,7 +34,7 @@ impl<'a, 's> Patterns<'a, 's> {
     }
 
     fn pattern(&self, id: Id<Pattern>) -> Option<&Pattern> {
-        self.arena.get(id)
+        self.book.patterns.get(id)
     }
 }
 
@@ -91,11 +87,15 @@ impl Run {
         from: usize,
         patterns: &Patterns<'_, '_>,
     ) -> Option<Found> {
+        let text = std::str::from_utf8(hay).ok()?;
         let prefix = match patterns.starts(id) {
             Some([only]) => only.as_slice(),
             _ => &[],
         };
-        let mut at = from;
+        let mut at = from.min(hay.len());
+        if !text.is_char_boundary(at) {
+            at = text.char_indices().find_map(|(at, _)| (at > from).then_some(at))?;
+        }
         loop {
             if !prefix.is_empty() {
                 at += memmem::find(hay.get(at..)?, prefix)?;
@@ -103,7 +103,8 @@ impl Run {
             if let Some(found) = self.matches_at(id, hay, at, patterns) {
                 return Some(found);
             }
-            at += 1;
+            let character = text.get(at..)?.chars().next()?;
+            at += character.len_utf8();
             if at > hay.len() {
                 return None;
             }
@@ -113,8 +114,7 @@ impl Run {
 
 /// The fixed-start literals for a pattern, or `None` if it may start anywhere.
 fn starts_of(
-    arena: &Arena<Pattern>,
-    names: &Interner<'_>,
+    book: &Book<'_>,
     id: Id<Pattern>,
     visiting: &mut [bool],
     depth: usize,
@@ -127,17 +127,17 @@ fn starts_of(
         return None;
     }
     *visiting.get_mut(index)? = true;
-    let result = arena
+    let result = book
+        .patterns
         .get(id)
-        .and_then(|pattern| starts_in(&pattern.program, arena, names, visiting, depth));
+        .and_then(|pattern| starts_in(&pattern.program, book, visiting, depth));
     visiting[index] = false;
     result
 }
 
 fn starts_in(
     program: &[Op],
-    arena: &Arena<Pattern>,
-    names: &Interner<'_>,
+    book: &Book<'_>,
     visiting: &mut [bool],
     depth: usize,
 ) -> Option<Vec<Vec<u8>>> {
@@ -151,8 +151,8 @@ fn starts_in(
     let (first, rest) = ops.split_first()?;
     match first {
         Op::Literal(sym) => {
-            let bytes = names
-                .name(*sym)
+            let bytes = book
+                .text(*sym)
                 .as_bytes()
                 .iter()
                 .map(u8::to_ascii_lowercase)
@@ -163,7 +163,7 @@ fn starts_in(
             // The separators may occur as spaces, hyphens or slashes in the
             // memo. Index only the first literal component; the matcher checks
             // the full generated name without allocating.
-            let name = names.name(*sym);
+            let name = book.name(*sym);
             let first = name.split(['-', '/']).next().unwrap_or(name);
             let bytes: Vec<u8> = first
                 .bytes()
@@ -175,11 +175,11 @@ fn starts_in(
             let (mut way, mut rest, mut all) = (usize::from(*len), rest, Vec::new());
             loop {
                 let (one, others) = rest.split_at_checked(way)?;
-                all.extend(starts_in(one, arena, names, visiting, depth + 1)?);
+                all.extend(starts_in(one, book, visiting, depth + 1)?);
                 match others {
                     [Op::Choice { len }, next @ ..] => (way, rest) = (usize::from(*len), next),
                     last => {
-                        all.extend(starts_in(last, arena, names, visiting, depth + 1)?);
+                        all.extend(starts_in(last, book, visiting, depth + 1)?);
                         return Some(all);
                     }
                 }
@@ -187,19 +187,17 @@ fn starts_in(
         }
         Op::Capture { len, .. } => starts_in(
             rest.get(..usize::from(*len))?,
-            arena,
-            names,
+            book,
             visiting,
             depth + 1,
         ),
         Op::Repeat { min, len, .. } if *min > 0 => starts_in(
             rest.get(..usize::from(*len))?,
-            arena,
-            names,
+            book,
             visiting,
             depth + 1,
         ),
-        Op::Call(callee) => starts_of(arena, names, *callee, visiting, depth + 1),
+        Op::Call(callee) => starts_of(book, *callee, visiting, depth + 1),
         Op::Class(_) | Op::Repeat { .. } => None,
     }
 }
@@ -238,7 +236,7 @@ fn sequence(
         at += 1;
         match op {
             Op::Literal(sym) => {
-                let literal = patterns.names.name(*sym).as_bytes();
+                let literal = patterns.book.text(*sym).as_bytes();
                 let end = pos.checked_add(literal.len())?;
                 if !hay.get(pos..end)?.eq_ignore_ascii_case(literal) {
                     return None;
@@ -247,7 +245,7 @@ fn sequence(
                 pos = end;
             }
             Op::Name(sym) => {
-                let name = patterns.names.name(*sym).as_bytes();
+                let name = patterns.book.name(*sym).as_bytes();
                 let end = match_name(name, hay, pos)?;
                 run.literal += end - pos;
                 pos = end;
@@ -329,35 +327,48 @@ fn step(class: CharClass, hay: &[u8], at: usize) -> Option<usize> {
     };
     match class {
         CharClass::Digit => one(u8::is_ascii_digit),
-        CharClass::Letter => one(|byte| byte.is_ascii_alphabetic() || byte >= 0x80),
-        CharClass::Alnum => one(|byte| byte.is_ascii_alphanumeric() || byte >= 0x80),
+        CharClass::Letter | CharClass::Alnum => {
+            let character = std::str::from_utf8(hay.get(at..)?).ok()?.chars().next()?;
+            let matches = match class {
+                CharClass::Letter => character.is_alphabetic(),
+                CharClass::Alnum => character.is_alphanumeric(),
+                _ => unreachable!(),
+            };
+            matches.then_some(at + character.len_utf8())
+        }
         CharClass::Space => one(u8::is_ascii_whitespace),
-        CharClass::Any => hay
-            .get(at)
-            .map(|&lead| at + char_width(lead))
-            .filter(|&end| end <= hay.len()),
+        CharClass::Any => {
+            let character = std::str::from_utf8(hay.get(at..)?).ok()?.chars().next()?;
+            Some(at + character.len_utf8())
+        }
         CharClass::Rest => Some(hay.len()),
         CharClass::Start => (at == 0).then_some(at),
         CharClass::End => (at == hay.len()).then_some(at),
     }
 }
 
-fn char_width(lead: u8) -> usize {
-    match lead {
-        0xF0.. => 4,
-        0xE0.. => 3,
-        0xC0.. => 2,
-        _ => 1,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axiom_core::Loc;
+    use axiom_core::{FileId, Folder, Loc};
 
-    fn add(arena: &mut Arena<Pattern>, program: Vec<Op>) -> Id<Pattern> {
-        arena.push(Pattern {
+    fn book() -> Book<'static> {
+        let std = include_str!("../../systems/src/std.ax");
+        let sources = [("std.ax", std, true), ("axiom.ax", "base USD\n", false)].map(
+            |(path, text, embedded)| {
+                let (file, diagnostics) =
+                    axiom_syntax::parse(FileId(0), text, Folder::default());
+                assert!(diagnostics.is_empty(), "{path}: {diagnostics:?}");
+                axiom_model::Source { path, file, embedded }
+            },
+        );
+        let (book, diagnostics) = axiom_model::build(&sources);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        book
+    }
+
+    fn add(book: &mut Book<'static>, program: Vec<Op>) -> Id<Pattern> {
+        book.patterns.push(Pattern {
             name: None,
             program: program.into_boxed_slice(),
             loc: Loc::default(),
@@ -366,13 +377,12 @@ mod tests {
 
     #[test]
     fn executes_borrowed_programs_with_choice_repeat_call_and_original_capture() {
-        let mut names = Interner::default();
-        let ach = names.intern("ACH ");
-        let point = names.intern(".");
-        let mut arena = Arena::new();
-        let called = add(&mut arena, vec![Op::Literal(ach)]);
+        let mut book = book();
+        let ach = book.intern_text("ACH ");
+        let point = book.intern_text(".");
+        let called = add(&mut book, vec![Op::Literal(ach)]);
         let amount = add(
-            &mut arena,
+            &mut book,
             vec![
                 Op::Call(called),
                 Op::Capture {
@@ -395,7 +405,7 @@ mod tests {
                 Op::Class(CharClass::Digit),
             ],
         );
-        let patterns = Patterns::new(&arena, &names);
+        let patterns = Patterns::new(&book);
         let mut run = Run::default();
         let hay = b"memo ach 3290.00 next";
         let found = run.find(amount, hay, 0, &patterns).unwrap();
@@ -409,18 +419,43 @@ mod tests {
 
     #[test]
     fn ordered_choice_uses_the_model_op_chain() {
-        let mut names = Interner::default();
-        let a = names.intern("A");
-        let b = names.intern("B");
-        let mut arena = Arena::new();
+        let mut book = book();
+        let a = book.intern_text("A");
+        let b = book.intern_text("B");
         let id = add(
-            &mut arena,
+            &mut book,
             vec![Op::Choice { len: 1 }, Op::Literal(a), Op::Literal(b)],
         );
-        let patterns = Patterns::new(&arena, &names);
+        let patterns = Patterns::new(&book);
         let mut run = Run::default();
         assert_eq!(run.find(id, b"B", 0, &patterns).unwrap().end, 1);
         assert_eq!(run.find(id, b"C", 0, &patterns), None);
+    }
+
+    #[test]
+    fn unicode_classes_and_captures_stay_on_utf8_boundaries() {
+        let mut book = book();
+        let id = add(
+            &mut book,
+            vec![
+                Op::Capture {
+                    name: Capture::Code,
+                    len: 1,
+                },
+                Op::Class(CharClass::Letter),
+                Op::Class(CharClass::Alnum),
+                Op::Class(CharClass::Any),
+            ],
+        );
+        let patterns = Patterns::new(&book);
+        let mut run = Run::default();
+        let memo = "é2🙂";
+        let found = run.find(id, memo.as_bytes(), 0, &patterns).unwrap();
+        assert_eq!(found.end, memo.len());
+        let (start, end) = run.capture(Capture::Code).unwrap();
+        assert_eq!(&memo[start..end], "é");
+        assert!(memo.is_char_boundary(start));
+        assert!(memo.is_char_boundary(end));
     }
 }
 

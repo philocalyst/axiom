@@ -45,6 +45,8 @@ pub struct Recognized<'a> {
 pub struct Tie<'a> {
     pub first: Who<'a>,
     pub second: Who<'a>,
+    pub first_pattern: Option<Id<Pattern>>,
+    pub second_pattern: Option<Id<Pattern>>,
 }
 
 pub struct Reading<'t, 's> {
@@ -169,7 +171,7 @@ pub struct Recognizer<'b, 's> {
 
 impl<'b, 's> Recognizer<'b, 's> {
     pub fn new(book: &'b Book<'s>) -> Recognizer<'b, 's> {
-        let patterns = Patterns::new(&book.patterns, &book.names);
+        let patterns = Patterns::new(book);
         let mut known: Vec<Known<'b, 's>> = Vec::new();
         for (id, entity) in book.entities.iter() {
             if id != book.roots.me {
@@ -257,16 +259,20 @@ impl<'b, 's> Recognizer<'b, 's> {
     }
 
     pub fn account(&self, name: &str) -> Option<&'s str> {
-        self.known
-            .iter()
-            .find(|known| {
-                known.account
-                    && known
-                        .aliases
-                        .iter()
-                        .any(|alias| alias.eq_ignore_ascii_case(name))
-            })
-            .map(|known| known.name)
+        let mut found = None;
+        for known in self.known.iter().filter(|known| {
+            known.account
+                && known
+                    .aliases
+                    .iter()
+                    .any(|alias| alias.eq_ignore_ascii_case(name))
+        }) {
+            if found.is_some_and(|previous| previous != known.name) {
+                return None;
+            }
+            found = Some(known.name);
+        }
+        found
     }
 
     pub fn read_all<'t>(&self, records: &[&Record<'t>]) -> Vec<Reading<'t, 's>> {
@@ -316,7 +322,10 @@ impl<'b, 's> Recognizer<'b, 's> {
 
     fn find_hits(&self, hay: &[u8], run: &mut Run, hits: &mut Vec<Hit>) {
         hits.clear();
-        for at in 0..hay.len() {
+        for (at, _) in std::str::from_utf8(hay)
+            .expect("memos and normalized text are valid UTF-8")
+            .char_indices()
+        {
             let mut try_entry = |entry_index: usize| {
                 let entry = &self.entries[entry_index];
                 let found = match (entry.pattern, entry.own.as_deref()) {
@@ -402,23 +411,34 @@ impl<'b, 's> Recognizer<'b, 's> {
                 })
             })
         };
-        let mut best_of_each = Vec::new();
+        let (mut best, mut next, mut previous_owner) = (None, None, None);
         for hit in hits.iter().filter(|hit| !inside_a_payee(hit)) {
-            if best_of_each
-                .last()
-                .is_none_or(|last: &&Hit| self.owner(last) != self.owner(hit))
-            {
-                best_of_each.push(hit);
+            let owner = self.owner(hit);
+            if previous_owner == Some(owner) {
+                continue;
+            }
+            previous_owner = Some(owner);
+            match best {
+                None => best = Some(hit),
+                Some(current) if hit.found.literal > current.found.literal => {
+                    next = best;
+                    best = Some(hit);
+                }
+                Some(_) if next.is_none_or(|current: &&Hit| {
+                    hit.found.literal > current.found.literal
+                }) => next = Some(hit),
+                _ => {}
             }
         }
-        best_of_each.sort_by_key(|hit| (Reverse(hit.found.literal), hit.found.start));
-        match best_of_each.as_slice() {
-            [] => Ok((Recognized::default(), [None; 5])),
-            [best, next, ..] if best.found.literal == next.found.literal => Err(Tie {
+        match (best, next) {
+            (None, _) => Ok((Recognized::default(), [None; 5])),
+            (Some(best), Some(next)) if best.found.literal == next.found.literal => Err(Tie {
                 first: self.who(self.owner(best)),
                 second: self.who(self.owner(next)),
+                first_pattern: self.entries[best.entry].pattern,
+                second_pattern: self.entries[next.entry].pattern,
             }),
-            [best, ..] => Ok((self.through(best, payee(best), hay, depth)?, best.parts)),
+            (Some(best), _) => Ok((self.through(best, payee(best), hay, depth)?, best.parts)),
         }
     }
 

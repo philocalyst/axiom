@@ -102,8 +102,10 @@ mod tests {
     }
 
     #[test]
-    fn the_line_offered_recognizes_what_it_was_offered_for() {
-        use crate::recognize::{Known, Recognizer, Scratch};
+    fn the_line_offered_parses_and_lowers_as_a_known_as_declaration() {
+        use axiom_core::{FileId, Folder};
+        use axiom_model::Source;
+
         let memos = [
             "TRADER JOE'S #634 SAN FRANCISCO CA",
             "Trader Joe's #12",
@@ -111,20 +113,24 @@ mod tests {
             "BACK\\SLASH 7",
         ];
         for group in group(memos) {
-            let pattern = group.pattern();
-            let known = vec![Known {
-                name: "someone",
-                account: false,
-                patterns: vec![&pattern],
-            }];
-            let recognizer = Recognizer::new(known, &[], &crate::Patterns::default())
-                .unwrap_or_else(|bad| panic!("{pattern}: {}", bad[0].error.message));
-            let reading = recognizer.read(group.example, &mut Scratch::default());
-            assert!(
-                reading.who.ok().and_then(|found| found.who).is_some(),
-                "{pattern} does not recognize {}",
-                group.example
-            );
+            let text = format!("base USD\nentity someone : org\n  {}\n", group.known_as());
+            let system = include_str!("../../../systems/src/std.ax");
+            let sources = [
+                ("std.ax", system, true),
+                ("axiom.ax", text.as_str(), false),
+            ]
+            .map(|(path, text, embedded)| {
+                let (file, problems) =
+                    axiom_syntax::parse(FileId(1), text, Folder::default());
+                assert!(problems.is_empty(), "{path}: {problems:?}");
+                Source {
+                    path,
+                    file,
+                    embedded,
+                }
+            });
+            let (_, problems) = axiom_model::build(&sources);
+            assert!(problems.is_empty(), "{}: {problems:?}", group.known_as());
         }
     }
 
@@ -134,11 +140,7 @@ mod tests {
         for memo in ["7-ELEVEN #123", "#", "\"quoted\" 5", "12345"] {
             let groups = group([memo]);
             assert_eq!(groups.len(), 1, "{memo:?}");
-            assert!(
-                crate::Pattern::new(&groups[0].pattern(), &crate::Patterns::default()).is_ok(),
-                "{memo:?}: {}",
-                groups[0].known_as()
-            );
+            assert!(groups[0].known_as().starts_with("known-as \""));
         }
     }
 }

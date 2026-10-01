@@ -60,6 +60,7 @@ use axiom_core::{Day, FileId, Loc, Qty};
 
 pub use axiom_model::sync::{Column, Field, Format, Rule, Shape, Spec};
 pub use command::{Failed, substitute};
+pub use format::read_memos;
 pub use peg::Patterns;
 pub use promise::Due;
 pub use recognize::{KnownId, Reading, Recognized, Recognizer, Scratch, Tie, Who};

@@ -311,3 +311,21 @@ commodity OMR : currency
 commodity JOD : currency
   name "Jordanian dinar"
   precision 3
+
+// ─── Imported statements ───────────────────────────────────────────────────
+
+format ofx
+  records STMTTRN
+  date DTPOSTED "YYYYMMDD"
+  amount TRNAMT
+  memo NAME, MEMO
+  code CHECKNUM
+
+format camt053
+  records Ntry
+  date BookgDt/Dt
+  amount Amt, sign CdtDbtInd CRDT
+  pending Sts PDNG
+  memo AddtlNtryInf, RmtInf/Ustrd
+  code NtryDtls/TxDtls/RmtInf/Strd/CdtrRefInf/Ref
+  via NtryDtls/TxDtls/RltdPties/UltmtCdtr/Nm

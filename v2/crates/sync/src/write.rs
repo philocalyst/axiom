@@ -3,8 +3,9 @@
 //! without touching anything already there.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
-use axiom_core::{Day, FileId};
+use axiom_core::{Day, Diagnostic, FileId};
 use axiom_syntax::{Folder, format};
 
 use crate::{Form, Insert};
@@ -324,30 +325,73 @@ impl Additions {
     }
 }
 
-fn insert_items(text: &str, path: &str, adds: &[(Day, &str)]) -> String {
+fn insert_items(text: &str, path: &str, adds: &[(Day, &str)]) -> Result<String, Vec<Diagnostic>> {
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     let (items, last) = scan(&lines, Context::of_path(path));
     let dated = by_day(&items);
     let mut additions = Additions::default();
     for &(day, body) in adds {
         let (at, ctx) = place(&dated, day, (lines.len(), last));
-        additions.add(at, day, format_item(path, ctx.shorten(day), body));
+        additions.add(at, day, format_item(path, ctx.shorten(day), body)?);
     }
-    additions.splice(&lines)
+    Ok(additions.splice(&lines))
 }
 
 /// Format just the new transaction, leaving every existing source byte alone.
 /// Running `axiom fmt` over the combined journal here would make sync rewrite
 /// unrelated transactions in that file.
-fn format_item(path: &str, date: String, body: &str) -> String {
+fn format_item(path: &str, date: String, body: &str) -> Result<String, Vec<Diagnostic>> {
     let source = format!("{date} {body}\n");
     let (file, problems) = axiom_syntax::parse(FileId(0), &source, Folder::of(path));
+    if !problems.is_empty() {
+        return Err(problems
+            .into_iter()
+            .map(|problem| problem.note("sync refused to write invalid generated Axiom syntax"))
+            .collect());
+    }
+    Ok(format(&source, &file)
+        .trim_end_matches(['\r', '\n'])
+        .to_string())
+}
+
+/// Whether a path names a file beneath the project root. A sync declaration
+/// cannot read or propose a change outside the project.
+pub(crate) fn is_project_path(path: &str) -> bool {
+    use std::path::Component;
+
+    if path.is_empty() || path.starts_with('/') || path.contains('\\') {
+        return false;
+    }
+    Path::new(path)
+        .components()
+        .all(|part| matches!(part, Component::Normal(_)))
+}
+
+/// Parse one generated item with a complete date before planning a file change.
+pub(crate) fn validate_item(path: &str, day: Day, body: &str) -> Result<(), Vec<Diagnostic>> {
+    let source = format!("{day} {body}\n");
+    let (_, problems) = axiom_syntax::parse(FileId(0), &source, Folder::of(path));
     if problems.is_empty() {
-        format(&source, &file)
-            .trim_end_matches(['\r', '\n'])
-            .to_string()
+        Ok(())
     } else {
-        source.trim_end_matches(['\r', '\n']).to_string()
+        Err(problems
+            .into_iter()
+            .map(|problem| problem.note("sync refused to write invalid generated Axiom syntax"))
+            .collect())
+    }
+}
+
+/// Parse a generated row in the native declaration shape that will contain it.
+pub(crate) fn validate_row(path: &str, name: &str, row: &str) -> Result<(), Vec<Diagnostic>> {
+    let source = format!("param {name}\n  {row}\n");
+    let (_, problems) = axiom_syntax::parse(FileId(0), &source, Folder::of(path));
+    if problems.is_empty() {
+        Ok(())
+    } else {
+        Err(problems
+            .into_iter()
+            .map(|problem| problem.note("sync refused to write an invalid generated param row"))
+            .collect())
     }
 }
 
@@ -446,7 +490,7 @@ fn insert_rows(text: &str, param: &str, rows: &[(Day, &str)]) -> Option<String> 
 }
 
 /// The text of `path` with the inserts in.
-fn apply(text: &str, path: &str, inserts: &[&Insert]) -> String {
+fn apply(text: &str, path: &str, inserts: &[&Insert]) -> Result<String, Vec<Diagnostic>> {
     let mut items = Vec::new();
     let mut rows: BTreeMap<&str, Vec<(Day, &str)>> = BTreeMap::new();
     for insert in inserts {
@@ -461,12 +505,17 @@ fn apply(text: &str, path: &str, inserts: &[&Insert]) -> String {
     let mut text = if items.is_empty() {
         text.to_string()
     } else {
-        insert_items(text, path, &items)
+        insert_items(text, path, &items)?
     };
     for (param, rows) in rows {
-        text = insert_rows(&text, param, &rows).unwrap_or(text);
+        text = insert_rows(&text, param, &rows).ok_or_else(|| {
+            vec![Diagnostic::error(
+                "no-such-param",
+                format!("`param {param}` is not declared in {path}"),
+            )]
+        })?;
     }
-    text
+    Ok(text)
 }
 
 /// A file as it is, and as it would be.
@@ -478,19 +527,35 @@ pub struct Change {
 }
 
 /// The change each file's inserts make, files in path order.
-pub fn changes(inserts: &[Insert], read: &dyn Fn(&str) -> Option<String>) -> Vec<Change> {
+pub fn changes(
+    inserts: &[Insert],
+    read: &dyn Fn(&str) -> Option<String>,
+) -> Result<Vec<Change>, Vec<Diagnostic>> {
     let mut by_path: BTreeMap<&str, Vec<&Insert>> = BTreeMap::new();
     for insert in inserts {
+        if !is_project_path(&insert.path) {
+            return Err(vec![Diagnostic::error(
+                "sync-path-outside-project",
+                format!("`{}` is not a project-relative file path", insert.path),
+            )]);
+        }
         by_path.entry(&insert.path).or_default().push(insert);
     }
-    let change = |(path, inserts): (&str, Vec<&Insert>)| {
+    let change = |(path, inserts): (&str, Vec<&Insert>)| -> Result<Change, Vec<Diagnostic>> {
         let before = read(path);
-        let after = apply(before.as_deref().unwrap_or(""), path, &inserts);
-        Change {
+        let after = apply(before.as_deref().unwrap_or(""), path, &inserts)?;
+        let (_, problems) = axiom_syntax::parse(FileId(0), &after, Folder::of(path));
+        if !problems.is_empty() {
+            return Err(problems
+                .into_iter()
+                .map(|problem| problem.note("sync refused to plan a file with invalid Axiom syntax"))
+                .collect());
+        }
+        Ok(Change {
             path: path.to_string(),
             before,
             after,
-        }
+        })
     };
     by_path.into_iter().map(change).collect()
 }
@@ -513,7 +578,7 @@ mod tests {
                 form: Form::Item(body.into()),
             })
             .collect();
-        apply(text, path, &inserts.iter().collect::<Vec<_>>())
+        apply(text, path, &inserts.iter().collect::<Vec<_>>()).unwrap()
     }
 
     #[test]
@@ -537,7 +602,7 @@ mod tests {
     #[test]
     fn a_new_item_uses_the_house_formatter_and_parses_back() {
         let path = "journal/2026/03.ax";
-        let item = format_item(path, "05".into(), "checking -> store 12 USD \"memo\"");
+        let item = format_item(path, "05".into(), "checking -> store 12 USD \"memo\"").unwrap();
         let source = format!("{item}\n");
         let (file, problems) = axiom_syntax::parse(FileId(0), &source, Folder::of(path));
         assert!(problems.is_empty(), "{problems:?}");
@@ -645,32 +710,33 @@ mod tests {
 
     #[test]
     fn before_everything_after_everything_and_in_a_file_that_is_not_there() {
-        let early = write("journal/2026/03.ax", "10 a\n", &[("2026-03-01", "b")]);
-        assert_eq!(early, "01 b\n10 a\n");
-        let late = write("journal/2026/03.ax", "10 a", &[("2026-03-20", "b")]);
+        let item = "a -> b 1 USD";
+        let early = write("journal/2026/03.ax", "10 a\n", &[("2026-03-01", item)]);
+        assert_eq!(early, "01 a -> b 1 USD\n10 a\n");
+        let late = write("journal/2026/03.ax", "10 a", &[("2026-03-20", item)]);
         assert_eq!(
-            late, "10 a\n20 b\n",
+            late, "10 a\n20 a -> b 1 USD\n",
             "a file without a last newline gets one"
         );
         assert_eq!(
             write(
                 "journal/2026/03.ax",
                 "",
-                &[("2026-03-20", "b"), ("2026-03-02", "a")]
+                &[("2026-03-20", item), ("2026-03-02", item)]
             ),
-            "02 a\n20 b\n"
+            "02 a -> b 1 USD\n20 a -> b 1 USD\n"
         );
         assert_eq!(
-            write("journal.ax", "entity a\n", &[("2026-03-20", "b")]),
-            "entity a\n2026-03-20 b\n"
+            write("journal.ax", "entity a\n", &[("2026-03-20", item)]),
+            "entity a\n2026-03-20 a -> b 1 USD\n"
         );
         assert_eq!(
             write(
                 "journal/2026/03.ax",
                 "10 a\r\n20 b\r\n",
-                &[("2026-03-15", "c")]
+                &[("2026-03-15", item)]
             ),
-            "10 a\r\n15 c\r\n20 b\r\n"
+            "10 a\r\n15 a -> b 1 USD\r\n20 b\r\n"
         );
     }
 
@@ -681,15 +747,15 @@ mod tests {
             "journal.ax",
             text,
             &[
-                ("2026-01-20", "x"),
-                ("2026-02-10", "y"),
-                ("2026-03-01", "z"),
-                ("2025-12-31", "w"),
+                ("2026-01-20", "a -> b 1 USD"),
+                ("2026-02-10", "a -> b 1 USD"),
+                ("2026-03-01", "a -> b 1 USD"),
+                ("2025-12-31", "a -> b 1 USD"),
             ],
         );
         assert_eq!(
             out,
-            "2025\n12-30 a\n12-31 w\n\n2026-01\n05 b\n20 x\n\n2026-02\n03 c\n10 y\n03-01 z\n"
+            "2025\n12-30 a\n12-31 a -> b 1 USD\n\n2026-01\n05 b\n20 a -> b 1 USD\n\n2026-02\n03 c\n10 a -> b 1 USD\n03-01 a -> b 1 USD\n"
         );
     }
 
@@ -698,18 +764,18 @@ mod tests {
         // After January's last line the date is `02-01`; below the February heading it is `01`.
         let text = "2026-01\n05 b\n\n2026-02\n03 c\n";
         assert_eq!(
-            write("journal.ax", text, &[("2026-02-01", "x")]),
-            "2026-01\n05 b\n\n2026-02\n01 x\n03 c\n"
+            write("journal.ax", text, &[("2026-02-01", "a -> b 1 USD")]),
+            "2026-01\n05 b\n\n2026-02\n01 a -> b 1 USD\n03 c\n"
         );
     }
 
     #[test]
     fn opening_and_ranges_start_with_their_day() {
         let text = "opening 01\n  checking 5 USD\n\n03-01..05-31 gym 10 USD\n";
-        let out = write("journal/2026/03.ax", text, &[("2026-03-02", "x")]);
+        let out = write("journal/2026/03.ax", text, &[("2026-03-02", "a -> b 1 USD")]);
         assert_eq!(
             out,
-            "opening 01\n  checking 5 USD\n\n03-01..05-31 gym 10 USD\n02 x\n"
+            "opening 01\n  checking 5 USD\n\n03-01..05-31 gym 10 USD\n02 a -> b 1 USD\n"
         );
     }
 
@@ -793,16 +859,16 @@ mod tests {
             Insert {
                 path: "b.ax".into(),
                 day: day("2026-01-02"),
-                form: Form::Item("x".into()),
+                form: Form::Item("a -> b 1 USD".into()),
             },
             Insert {
                 path: "a.ax".into(),
                 day: day("2026-01-02"),
-                form: Form::Item("y".into()),
+                form: Form::Item("a -> b 2 USD".into()),
             },
         ];
-        let read = |path: &str| (path == "a.ax").then(|| "2026-01-01 z\n".to_string());
-        let made = changes(&inserts, &read);
+        let read = |path: &str| (path == "a.ax").then(|| "2026-01-01 a -> b 1 USD\n".to_string());
+        let made = changes(&inserts, &read).unwrap();
         let shown: Vec<_> = made
             .iter()
             .map(|c| (c.path.as_str(), c.before.is_some(), c.after.as_str()))
@@ -810,8 +876,12 @@ mod tests {
         assert_eq!(
             shown,
             [
-                ("a.ax", true, "2026-01-01 z\n2026-01-02 y\n"),
-                ("b.ax", false, "2026-01-02 x\n")
+                (
+                    "a.ax",
+                    true,
+                    "2026-01-01 a -> b 1 USD\n2026-01-02 a -> b 2 USD\n"
+                ),
+                ("b.ax", false, "2026-01-02 a -> b 1 USD\n")
             ]
         );
     }
