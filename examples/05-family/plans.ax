@@ -1,25 +1,3 @@
-// What has not happened yet, for the forecast.
-//
-// The paychecks, the mortgage, the loan, the card and the monthly transfers are
-// found in the journal by cadence. Plans are for what history cannot say: the
-// two property-tax installments a year (paid from escrow), the insurance renewal,
-// the second half of the school year, and the bonus.
-
-/// The county's two installments, paid by the servicer from escrow.
-every year on 04-10 from 2026-04-10 escrow -> property-tax 3_300 USD / county
-every year on 11-10 from 2026-11-10 escrow -> property-tax 3_300 USD / county
-
-/// The homeowner's policy renews in June, up 4%.
-every year on 06-20 from 2026-06-20 escrow -> home-insurance 1_870 USD / homeguard
-
-/// The second kindergarten installment, out of the 529 plan.
-every year on 01-10 from 2026-01-10 riley-529 -> tuition 4_800 USD / st-annes-school
-
-/// Alex's bonus, withheld the same way as last year.
-every year on 03-14 from 2026-03-14 acme -> 12_000 USD
-  alex-401k       1_200 USD
-  taxes/federal   2_640 USD
-  taxes/state     1_227.60 USD
-  taxes/payroll     918 USD
-  taxes/sdi         144 USD
-  joint-checking    ...
+// Recurring commitments are native contracts in contracts.ax. This filename
+// remains as a migration note because the original project documented plans
+// separately from accounts and its one-off journal.

@@ -19,6 +19,7 @@ entity family : household
   children 1
   lives    us/ca
 
+
 /// Alex, 37, the primary taxpayer, and `me`: every place that does not say
 /// otherwise is Alex's, and belongs to the household through them.
 entity me : person

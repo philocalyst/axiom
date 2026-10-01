@@ -1,254 +1,130 @@
-// Kinds, commodities, places and people of the household. What a place means for
-// tax comes from its kind: `us` counts itemized deductions, pre-tax pay and
-// withholding by kind, so almost nothing here is a law.
+// Native v4 accounts and counterparties for the household. Places describe
+// custody and ownership; parties and purposes describe what each flow means.
 
-// ─── Kinds this project needs ───────────────────────────────────────────────
-
-/// A dependent-care FSA (IRC §129): pre-tax pay set aside for care of a child
-/// under 13, capped per household. What pays a place of kind `childcare` comes
-/// out tax-free; anything else is income. `us` takes the deferral out of pay.
 kind dependent-care-fsa : tax-deferred
   basis zero
   liquidity 5d
   pays childcare
-
-  /// Employer-provided dependent-care benefits are excluded from income up to
-  /// 5,000 USD for the household (IRC §129(a)(2)). This deferral took the year
-  /// over the cap, and the excess is wages.
-  ///
-  /// To fix: lower the election at the next open enrollment.
   law contribution-limit
     on in
-    when from is wages
+    when purpose is #household-pre-tax
     count amount as dcfsa-contributions
-    require tally(dcfsa-contributions) <= dependent-care-limit[year] "dependent-care FSA over the yearly cap"
+    require value(tally(dcfsa-contributions), USD) <= dependent-care-limit[year] "dependent-care FSA over the yearly cap"
 
-/// Care that a dependent-care FSA may pay.
-kind childcare : expense
+purpose childcare : spending
+purpose payroll-tax : spending
+purpose school-expense : spending
+purpose auto-expense : spending
+purpose shopping : spending
+purpose kids : spending
+purpose subscriptions : spending
+purpose dcfsa-contributions : spending
+purpose state-disability : tax-paid
+  law itemize-sdi
+    on flow
+    count amount as salt
+purpose household-pre-tax : pretax-benefit
+  law household-pre-tax
+    on flow
+    count amount as pretax
+    count -amount as total-income
+purpose household-deferral : pre-tax-deferral
+  law household-deferral
+    on flow
+    count amount as pretax
+    count -amount as total-income
 
 commodity HOME : real-estate
   name "the house"
   precision 0
-
-commodity CRV : good
+commodity CRV : commodity
   name "the car"
   precision 0
 
-
-// ─── Cash and everyday accounts ─────────────────────────────────────────────
-
-/// The joint checking account, and the savings beside it: the household's.
-account assets/bank/joint-checking : bank
+account joint-checking : deposit at chase
   owner family
-account assets/bank/joint-savings : bank
+account joint-savings : deposit at chase
+  owner family
+account escrow : escrow at lender
   owner family
 
-/// Money the servicer holds to pay property tax and insurance on the house. It is
-/// the family's and not spendable: `available` counts it as held.
-account assets/escrow : escrow
-  owner family
-
-
-// ─── Retirement, health and education accounts ──────────────────────────────
-
-/// Alex's 401(k): `me` owns it, so its deferral limit is Alex's own.
-account assets/retirement/alex-401k : 401k
+account alex-401k : 401k at fidelity
   employer acme
-
-/// Jordan's 401(k), and Jordan's own limit.
-account assets/retirement/jordan-401k : 401k
-  owner    jordan
+account jordan-401k : 401k at fidelity
+  owner jordan
   employer bluefin
-
-/// The family HSA, in Alex's name: 8,550 USD for 2025, employer money included.
-account assets/hsa : hsa
+account hsa : hsa at fidelity
+  owner me
   coverage family
-
-account assets/dcfsa : dependent-care-fsa
-
-/// Riley's 529 plan, held by the household. What was put in is its basis, whether
-/// it came from checking or from a grandparent; the market's growth arrives through
-/// `market` and has none.
-account assets/education/riley-529 : 529-plan
-  owner       family
+account dcfsa : dependent-care-fsa at acme
+  owner family
+account riley-529 : 529-plan at fidelity
+  owner family
   beneficiary riley
 
-
-// ─── Things owned ───────────────────────────────────────────────────────────
-
-/// The house, one unit whose value is a price in prices/home.ax. Its cost is its
-/// basis. A main home is held for the family's own use: a loss on it is not
-/// deductible, and part of a gain is excluded when it is sold.
-account assets/house : home
-  holds HOME
+asset house : home
+  owner family
+asset crv : vehicle
   owner family
 
-account assets/vehicle/crv : vehicle
-  holds CRV
+account mortgage : mortgage at lender
+  owner family
+account car-loan : loan at honda-finance
+  owner family
+account card : credit-card at chase
   owner family
 
-
-// ─── Debts ──────────────────────────────────────────────────────────────────
-
-/// 420,000 USD at 5.875% for thirty years, first payment 2023-08-01.
-account liabilities/mortgage : mortgage
-  rate     5.875%
-  maturity 2053-07-01
-  owner    family
-
-/// 32,000 USD at 4.9% for sixty months, first payment 2023-07-05.
-account liabilities/car-loan : loan
-  rate     4.9%
-  maturity 2028-06-05
-  owner    family
-
-/// One card for everyday spending, paid in full on the 25th.
-account liabilities/card : credit-card
-  owner family
-
-
-// ─── Income and equity ──────────────────────────────────────────────────────
-
-account income/alex-salary   : wages
-account income/jordan-salary : wages
-  owner jordan
-account income/interest : interest
-account income/employer-match
-account income/employer-hsa
-account income/gifts
-account income/rewards
-
-
-// ─── Expenses ───────────────────────────────────────────────────────────────
-
-/// Groceries and eating out.
-account expenses/food
-  budget 1_300 USD monthly
-
-account expenses/food/groceries
-account expenses/food/dining
-
-/// The interest on the mortgage, the property tax and gifts to charity are
-/// deducted if the family itemizes: `us` counts what arrives at a place of these
-/// kinds, and takes the larger of that and the standard deduction.
-account expenses/housing/mortgage-interest : mortgage-interest
-account expenses/housing/property-tax : property-tax
-account expenses/housing/home-insurance
-account expenses/charity : charity
-
-account expenses/utilities
-account expenses/subscriptions
-account expenses/shopping
-account expenses/kids
-account expenses/travel
-account expenses/fuel
-account expenses/auto/insurance
-account expenses/auto/loan-interest
-account expenses/auto/repairs
-
-/// Care for Riley: a place of kind `childcare`, so the FSA may pay it.
-account expenses/childcare : childcare
-
-/// School: a place of kind `education`, so the 529 plan may pay it.
-account expenses/tuition : education
-
-/// Medical costs: a place of kind `medical`, so the HSA may pay them.
-account expenses/medical : medical
-
-/// Medical, dental and vision premiums, taken from pay before tax: pay counts
-/// whole, and `us` takes what goes here back out of it.
-account expenses/health-premium : pretax-benefit
-
-/// Tax withheld from pay. A place of kind `federal-tax` or `ca-tax` counts what
-/// arrives as tax paid for the year.
-account expenses/taxes/federal : federal-tax
-account expenses/taxes/state   : ca-tax
-account expenses/taxes/payroll
-
-/// California SDI is a state tax, and deductible with the rest up to the cap. The
-/// account is the household's so that what it counts lands in the joint return.
-account expenses/taxes/sdi
-  owner family
-  /// California SDI is a state tax: it counts into the state and local taxes the return itemizes, up to the cap.
-  ///
-  /// To fix: the payment must arrive at this account, which the household owns, to reach the joint return.
-  law itemize-sdi
-    on in
-    count amount as salt
-
-/// The balance due on last year's California return, paid in April: state income
-/// tax paid in 2025, deductible in 2025 whatever year it was for.
-account expenses/taxes/state-prior
-  owner family
-  /// The balance paid in April for last year's California return is state tax paid this year, itemized this year.
-  ///
-  /// To fix: pay it to this account, not to `taxes/state`, which is the current year's withholding.
-  law itemize-state
-    on in
-    count amount as salt
-
-
-// ─── Employers and others ───────────────────────────────────────────────────
-
+entity chase : org
+entity fidelity : org
 entity acme : employer
-  via income/alex-salary
 entity bluefin : employer
-  via income/jordan-salary
-
-/// The servicer. A payment to it is split into principal, interest and escrow.
-entity lender : org
-  via liabilities/mortgage
-entity honda-finance : org
-  via liabilities/car-loan
-
-entity county : org
-  via expenses/housing/property-tax
-entity homeguard : org
-  via expenses/housing/home-insurance
-entity costco, trader-joes : org
-  via expenses/food/groceries
-entity shell : org
-  via expenses/fuel
-entity amazon : org
-  via expenses/shopping
-entity target : org
-  via expenses/kids
-entity pge, comcast, verizon : org
-  via expenses/utilities
-entity netflix, spotify : org
-  via expenses/subscriptions
-entity statefarm : org
-  via expenses/auto/insurance
-entity brake-shop : org
-  via expenses/auto/repairs
-entity st-annes-parish, food-bank : org
-  via expenses/charity
-entity little-sprouts, kids-club : org
-  via expenses/childcare
-entity st-annes-school : org
-  via expenses/tuition
-entity dr-chen, smile-dental, cvs, er-clinic : org
-  via expenses/medical
-
-/// Riley's grandmother. Money from her lands in the 529 plan.
+entity lender : lender
+entity honda-finance : lender
+entity county : government
+entity homeguard : insurer
+entity costco : grocer
+entity trader-joes : grocer
+entity shell : merchant
+entity amazon : store
+entity target : store
+entity pge : utility
+entity comcast : utility
+entity verizon : utility
+entity netflix : streaming
+entity spotify : streaming
+entity statefarm : insurer
+entity brake-shop : contractor
+entity st-annes-parish #charity
+entity food-bank #charity
+entity little-sprouts #childcare
+entity kids-club #childcare
+entity st-annes-school #education
+entity dr-chen #medical
+entity smile-dental #medical
+entity cvs #medical
+entity er-clinic #medical
 entity grandma : org
-  via income/gifts
+entity interest-source #interest-income
+entity payroll-office #payroll-tax
+entity ssa #payroll-tax
+entity edd #payroll-tax
+entity restaurant #dining
+entity household-store : store
+entity kids-market : store
+entity trip-vendor : merchant
+entity gifts #contribution
+entity rewards #contribution
+entity blue-shield : health-insurer
 
+code mortgage-* on mortgage
+code car-loan-* on car-loan
+code 529-* on riley-529
 
-// ─── Codes ──────────────────────────────────────────────────────────────────
-
-/// A payment to the servicer, tied to its statement.
-code mortgage-*
-  on mortgage
-
-code 529-*
-  on 529-plan
-
-
-// ─── Figures ────────────────────────────────────────────────────────────────
-
-// The dependent-care FSA cap (IRC §129(a)(2)). 2026 rises to 7,500 (P.L. 119-21).
 param dependent-care-limit
   2024 5_000 USD
   2025 5_000 USD
   2026 7_500 USD
+
+// Statements identify the employer and custodian; payroll destinations are
+// separate native flows so the tax systems can classify the gross pay and each
+// pretax, withholding, and net-pay leg.

@@ -1,140 +1,245 @@
-"""Independent check of examples/05-family: the household's 2025 return worked out
-from the journal text, without Axiom. Prints what the README quotes.
+"""Independent arithmetic check for the native v4 05-family project.
 
-Run: python3 examples/verify/verify05.py
+Reads the dated native flows and statements directly.  It does not import the
+model parser or inspect any Axiom output.
+
+Run from this directory with ``python3 verify05.py``.
 """
+from datetime import date
+from decimal import Decimal as D, ROUND_HALF_EVEN
+import glob
 import os
 import re
-import sys
-from decimal import Decimal as D, ROUND_HALF_EVEN
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, HERE)
-from axparse import read_journal  # noqa: E402
-
 ROOT = os.path.join(HERE, "..", "05-family")
-flows = [f for f in read_journal(ROOT) if f.day.year == 2025]
+JOURNAL = os.path.join(ROOT, "journal", "2025")
+NUMBER = r"([\d_]+(?:\.\d+)?)"
+FLOW = re.compile(
+    rf"^(2025-\d\d-\d\d)\s+(\S+)\s+->\s+(\S+)\s+{NUMBER}\s+USD(?:\s+(.*?))?\s*(?://(.*))?$"
+)
+STATEMENT = re.compile(
+    rf"^(2025-\d\d-\d\d)\s+(\S+)\s*=\s*{NUMBER}\s+USD(?:\s+via\s+(\S+))?\s*(?://.*)?$"
+)
+OPENING = re.compile(
+    rf"^\s+riley-529\s+{NUMBER}\s+USD\s+basis\s+{NUMBER}\s+USD\s+since\s+(\d{{4}}-\d\d-\d\d)"
+)
 
 
-def cents(x):
-    return x.quantize(D("0.01"), rounding=ROUND_HALF_EVEN)
+def amount(text):
+    return D(text.replace("_", ""))
 
 
-# ── a paycheck is a header (gross) and legs; wages are the gross, pre-tax is what
-#    went to a 401(k), the HSA, the FSA and the premium
-wages = pretax = D(0)
-federal = state = D(0)
-deferral = {"alex-401k": D(0), "jordan-401k": D(0)}
-hsa_payroll = dcfsa = D(0)
-for f in flows:
-    if f.src in ("acme", "bluefin") and f.legs:
-        wages += f.into
-        for place, amt, unit in f.legs:
-            if place in ("alex-401k", "jordan-401k"):
-                pretax += amt
-                deferral[place] += amt
-            elif place == "hsa":
-                pretax += amt
-                hsa_payroll += amt
-            elif place == "dcfsa":
-                pretax += amt
-                dcfsa += amt
-            elif place == "health-premium":
-                pretax += amt
-            elif place == "taxes/federal":
-                federal += amt
-            elif place == "taxes/state":
-                state += amt
+def cents(value):
+    return value.quantize(D("0.01"), rounding=ROUND_HALF_EVEN)
 
-interest = sum((f.out or f.into for f in flows if f.src == "interest"), D(0))
 
-# ── the 529: value and basis, to find the earnings in each withdrawal (pro rata)
-value, basis = D("24600"), D("19850")
-earnings = D(0)
-plan_in = D(0)
-import glob
-lines = []
-for path in sorted(glob.glob(os.path.join(ROOT, "journal", "2025", "*.ax"))):
-    lines += [(os.path.basename(path), l) for l in open(path).read().split("\n")]
+flows = []
+statements = []
+unparsed = []
+for path in sorted(glob.glob(os.path.join(JOURNAL, "*.ax"))):
+    pending_comment = ""
+    with open(path, encoding="utf-8") as source:
+        for line_no, raw in enumerate(source, 1):
+            line = raw.strip()
+            if line.startswith("//"):
+                pending_comment += " " + line.lstrip("/").strip()
+                continue
+            flow = FLOW.match(line)
+            statement = STATEMENT.match(line)
+            if flow:
+                day, src, dst, raw_amount, tail, comment = flow.groups()
+                flows.append({
+                    "day": date.fromisoformat(day), "src": src, "dst": dst,
+                    "amount": amount(raw_amount), "tail": tail or "",
+                    "comment": f"{pending_comment} {comment or ''}",
+                    "order": (path, line_no),
+                })
+                pending_comment = ""
+            elif statement:
+                day, place, raw_amount, via = statement.groups()
+                statements.append({
+                    "day": date.fromisoformat(day), "place": place,
+                    "amount": amount(raw_amount), "via": via,
+                    "order": (path, line_no),
+                })
+                pending_comment = ""
+            elif line and not line.startswith("//") and not line.startswith("opening "):
+                unparsed.append(f"{path}:{line_no}: {line}")
+
+if unparsed:
+    raise SystemExit("unrecognized dated journal rows:\n" + "\n".join(unparsed))
+
+def tagged(flow, purpose):
+    return f"#{purpose}" in flow["tail"].split()
+
+
+def total(predicate):
+    return sum((f["amount"] for f in flows if predicate(f)), D(0))
+
+
+# The displayed wages are gross flows from the two employers. The native journal
+# records deductions as separate flows, with the purpose on each flow.
+wages = total(lambda f: tagged(f, "wages"))
+pretax = total(lambda f: tagged(f, "household-pre-tax") or tagged(f, "household-deferral"))
+federal = total(lambda f: tagged(f, "federal-tax"))
+state = total(lambda f: tagged(f, "state-tax"))
+sdi = total(lambda f: tagged(f, "state-disability"))
+interest = total(lambda f: tagged(f, "interest-income"))
+mortgage_interest = total(lambda f: tagged(f, "mortgage-interest"))
+property_tax = total(lambda f: tagged(f, "property-tax"))
+charity = total(lambda f: tagged(f, "charity"))
+
+# Read the opening 529 value and basis from the opening statement, then replay
+# contributions, market revaluations, and withdrawals in source order.
+opening_line = None
+with open(os.path.join(ROOT, "journal", "2024", "12.ax"), encoding="utf-8") as source:
+    for raw in source:
+        found = OPENING.match(raw)
+        if found:
+            opening_line = found
+            break
+if opening_line is None:
+    raise SystemExit("opening statement must provide the 529 value, basis, and since date")
+initial_value, basis, opened = opening_line.groups()
+value = amount(initial_value)
+basis = amount(basis)
+if opened != "2019-01-01":
+    raise SystemExit(f"unexpected 529 opening date: {opened}")
+
 events = []
-for f in flows:
-    if f.dst == "riley-529":
-        events.append((f.day, 1, "in", f.out or f.into))
-        if f.src != "market":
-            plan_in += f.out or f.into
-    if f.src == "riley-529":
-        events.append((f.day, 1, "out", f.out or f.into, f.dst))
-for _, l in lines:
-    m = re.match(r"^(2025-\d\d-\d\d) riley-529 = ([\d_.]+) USD via market", l)
-    if m:
-        events.append((__import__("datetime").date.fromisoformat(m.group(1)), 2, "stmt", D(m.group(2).replace("_", ""))))
+contributions = D(0)
+hsa_reimbursed = D(0)
+for flow in flows:
+    if flow["dst"] == "riley-529":
+        events.append((flow["day"], flow["order"], "in", flow["amount"], None))
+        if tagged(flow, "contribution"):
+            contributions += flow["amount"]
+    if flow["src"] == "riley-529":
+        events.append((flow["day"], flow["order"], "out", flow["amount"], flow["dst"]))
+    if flow["src"] == "hsa" and "!" in flow["tail"].split():
+        hsa_reimbursed += flow["amount"]
+for statement in statements:
+    if statement["place"] == "riley-529" and statement["via"] == "market":
+        events.append((statement["day"], statement["order"], "mark", statement["amount"], None))
+
+earnings = D(0)
 withdrawals = []
-for ev in sorted(events, key=lambda e: (e[0], e[1])):
-    if ev[2] == "in":
-        value += ev[3]
-        basis += ev[3]
-    elif ev[2] == "stmt":
-        value = ev[3]
+for day, order, kind, value_or_amount, destination in sorted(events, key=lambda e: (e[0], e[1])):
+    if kind == "in":
+        value += value_or_amount
+        basis += value_or_amount
+    elif kind == "mark":
+        value = value_or_amount
     else:
-        amount = ev[3]
-        share = basis * amount / value
-        gain = amount - share
-        basis -= share
-        value -= amount
-        withdrawals.append((ev[0], ev[4], amount, cents(gain)))
-        if ev[4] != "tuition":
+        withdrawal = value_or_amount
+        released_basis = basis * withdrawal / value
+        gain = withdrawal - released_basis
+        basis -= released_basis
+        value -= withdrawal
+        withdrawals.append((day, destination, withdrawal, cents(gain)))
+        if destination != "st-annes-school":
             earnings += gain
 earnings = cents(earnings)
-hsa_reimbursed = D(620)                       # counted: a count is not a violation
 distributions = earnings + hsa_reimbursed
 
-# ── itemizing
-mortgage_interest = sum((amt for f in flows if f.dst == "lender" or f.payee == "lender" for place, amt, u in f.legs if place == "mortgage-interest"), D(0))
-property_tax = sum((f.out or f.into for f in flows if f.dst == "property-tax"), D(0))
-charity = sum((f.out or f.into for f in flows if f.dst == "charity"), D(0))
-sdi = sum((amt for f in flows if f.src in ("acme", "bluefin") for place, amt, u in f.legs if place == "taxes/sdi"), D(0))
-state_prior = sum((f.out or f.into for f in flows if f.dst == "state-prior"), D(0))
-salt = state + sdi + state_prior + property_tax
-itemized = mortgage_interest + charity + min(salt, D(40000))
-
+salt = state + sdi + property_tax
+itemized = mortgage_interest + charity + min(salt, D(40_000))
+standard = D(31_500)
+deduction = max(standard, itemized)
 total_income = wages - pretax + interest + distributions
 agi = total_income
-std = D(31500)
-deduction = max(std, itemized)
 taxable = agi - deduction
-joint = [(0, "0.10"), (23850, "0.12"), (96950, "0.22"), (206700, "0.24"), (394600, "0.32"), (501050, "0.35"), (751600, "0.37")]
 
-
-def progressive(schedule, x):
-    t = D(0)
-    for i, (lo, rate) in enumerate(schedule):
-        hi = schedule[i + 1][0] if i + 1 < len(schedule) else None
-        if x <= lo:
+def progressive(schedule, taxable_income):
+    result = D(0)
+    for i, (lower, rate) in enumerate(schedule):
+        upper = schedule[i + 1][0] if i + 1 < len(schedule) else None
+        if taxable_income <= lower:
             break
-        top = x if hi is None else min(x, D(hi))
-        t += cents((top - D(lo)) * D(rate))
-    return t
+        top = taxable_income if upper is None else min(taxable_income, D(upper))
+        result += cents((top - D(lower)) * D(rate))
+    return result
 
 
+joint = [(0, "0.10"), (23_850, "0.12"), (96_950, "0.22"),
+         (206_700, "0.24"), (394_600, "0.32"), (501_050, "0.35"),
+         (751_600, "0.37")]
 income_tax = progressive(joint, taxable)
-credit = D(2200)
+credit = D(2_200)  # 2025 child credit for the one child declared in axiom.ax.
 total_tax = income_tax - credit
-payments = federal
-owed = total_tax - payments
+owed = total_tax - federal
 
-ca_joint = [(0, "0.01"), (22158, "0.02"), (52528, "0.04"), (82904, "0.06"), (115084, "0.08"), (145448, "0.093"), (742958, "0.103")]
-ca_taxable = agi - D(11412)
-ca_tax = progressive(ca_joint, ca_taxable)
-ca_owed = ca_tax - state
+ca_schedule = [(0, "0.01"), (22_158, "0.02"), (52_528, "0.04"),
+               (82_904, "0.06"), (115_084, "0.08"), (145_448, "0.093"),
+               (742_958, "0.103")]
+ca_taxable = agi - D(11_412)
+ca_tax = progressive(ca_schedule, ca_taxable)
+state_prior_payment = total(
+    lambda f: tagged(f, "state-tax") and "2024 state balance due" in f["comment"]
+)
+state_withholding = state - state_prior_payment
+ca_owed = ca_tax - state_withholding
 
-print("wages", wages, " pretax", pretax, " interest", interest)
-print("529 withdrawals (date, to, amount, earnings):", withdrawals)
-print("distributions", distributions, "(529 earnings", earnings, "+ HSA reimbursement", hsa_reimbursed, ")  penalty 10% of earnings:", cents(earnings * D("0.1")), " HSA penalty waived:", cents(hsa_reimbursed * D("0.2")))
-print("total income / agi", total_income)
-print("itemized", itemized, "= interest", mortgage_interest, "+ salt", min(salt, D(40000)), "(state", state, "sdi", sdi, "prior", state_prior, "property", property_tax, ") + charity", charity, " vs standard", std)
-print("taxable", taxable, " income tax", income_tax, " credit", credit, " total tax", total_tax, " payments", payments, " owed", owed)
-print("CA taxable", ca_taxable, " tax", ca_tax, " withheld", state, " owed", ca_owed)
-print("limits: alex 401k", deferral["alex-401k"], "of 23,500 ->", D(23500) - deferral["alex-401k"],
-      "| jordan", deferral["jordan-401k"], "->", D(23500) - deferral["jordan-401k"],
-      "| hsa", hsa_payroll + 1000, "of 8,550 ->", D(8550) - hsa_payroll - 1000,
-      "| dcfsa", dcfsa, "| 529 contributions", plan_in, "->", D(19000) - plan_in)
+alex_deferral = total(lambda f: f["dst"] == "alex-401k" and tagged(f, "household-deferral"))
+jordan_deferral = total(lambda f: f["dst"] == "jordan-401k" and tagged(f, "household-deferral"))
+hsa_payroll = total(lambda f: f["dst"] == "hsa" and tagged(f, "household-pre-tax"))
+dcfsa_payroll = total(lambda f: f["dst"] == "dcfsa" and tagged(f, "household-pre-tax"))
+
+# Reconcile the independently recomputed values against the long-standing hand
+# oracle. These assertions intentionally make source changes fail loudly.
+expected = {
+    "wages": D("247440.07"), "pretax": D("36946.36"),
+    "interest": D("2479.02"), "distributions": D("1012.94"),
+    "total income": D("213985.67"), "mortgage interest": D("24077.32"),
+    "property tax": D("6480.00"), "charity": D("3900.00"),
+    "federal withholding": D("27594.00"), "state withholding": D("11239.60"),
+    "state prior payment": D("412.00"),
+    "state disability": D("2776.15"), "HSA reimbursement": D("620.00"),
+    "529 contributions": D("6000.00"), "Alex 401(k) deferral": D("15000.00"),
+    "Jordan 401(k) deferral": D("5846.36"), "HSA payroll": D("6000.00"),
+    "FSA payroll": D("5000.00"),
+}
+actual = {
+    "wages": wages, "pretax": pretax, "interest": interest,
+    "distributions": distributions, "total income": total_income,
+    "mortgage interest": mortgage_interest, "property tax": property_tax,
+    "charity": charity, "federal withholding": federal,
+    "state withholding": state_withholding, "state prior payment": state_prior_payment,
+    "state disability": sdi,
+    "HSA reimbursement": hsa_reimbursed, "529 contributions": contributions,
+    "Alex 401(k) deferral": alex_deferral, "Jordan 401(k) deferral": jordan_deferral,
+    "HSA payroll": hsa_payroll, "FSA payroll": dcfsa_payroll,
+}
+for name, want in expected.items():
+    got = cents(actual[name])
+    if got != want:
+        raise AssertionError(f"{name}: native source gives {got}, expected {want}")
+
+if cents(earnings) != D("392.94"):
+    raise AssertionError(f"nonqualified 529 earnings: {cents(earnings)}, expected 392.94")
+if cents(itemized) != D("48885.07") or cents(taxable) != D("165100.60"):
+    raise AssertionError(f"itemized/taxable mismatch: {cents(itemized)} / {cents(taxable)}")
+if cents(income_tax) != D("26150.13") or cents(total_tax) != D("23950.13"):
+    raise AssertionError(f"federal tax mismatch: {cents(income_tax)} / {cents(total_tax)}")
+if cents(owed) != D("-3643.87") or cents(ca_owed) != D("477.03"):
+    raise AssertionError(f"return balance mismatch: federal {cents(owed)}, California {cents(ca_owed)}")
+
+print("native 05-family arithmetic: PASS")
+print("wages", wages, "pretax", pretax, "interest", interest)
+print("529 withdrawals (date, to, amount, taxable gain):", withdrawals)
+print("distributions", distributions, "(529 taxable earnings", earnings,
+      "+ HSA reimbursement", hsa_reimbursed, ")")
+print("total income / AGI", total_income)
+print("itemized", itemized, "= mortgage interest", mortgage_interest,
+      "+ SALT", min(salt, D(40_000)), "(state", state, "SDI", sdi,
+      "property tax", property_tax, ") + charity", charity)
+print("taxable", taxable, "income tax", income_tax, "credit", credit,
+      "total tax", total_tax, "federal payments", federal, "owed", owed)
+print("California taxable", ca_taxable, "tax", ca_tax, "withheld", state - D(412),
+      "owed", ca_owed)
+print("limits: Alex 401(k)", alex_deferral, "of 23,500 ->", D(23_500) - alex_deferral,
+      "| Jordan", jordan_deferral, "of 23,500 ->", D(23_500) - jordan_deferral,
+      "| HSA", hsa_payroll + D(1_000), "of 8,550 ->", D(8_550) - hsa_payroll - D(1_000),
+      "| DCFSA", dcfsa_payroll, "| 529 contributions", contributions,
+      "of 19,000 ->", D(19_000) - contributions)
