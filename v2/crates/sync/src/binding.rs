@@ -51,7 +51,7 @@ pub(crate) fn world<'b, 's>(
                 continue;
             }
             let view = book.flow(flow_id);
-            let settle = if flow.mode == axiom_model::Mode::Pending {
+            let settle = if posted.state == State::Pending {
                 view.codes().next().map(|code| book.name(code))
             } else {
                 None

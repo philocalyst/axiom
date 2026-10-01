@@ -209,6 +209,30 @@ entity plumber : merchant\n  known-as \"PLUMBER\"\n\
         "2026-01-06,-12.50,CORNER STORE 1234,\n2026-01-06,-3.00,COFFEE,\n",
     );
     assert_eq!(posted, ["06 ^pending-20260105-1 settled"]);
+
+    let source = format!(
+        "{source}2026-01-06 ^pending-20260105-1 settled\n"
+    );
+    let mut book = native_book(&source);
+    let format = make_format(
+        &mut book,
+        &[
+            (Field::Date, 1),
+            (Field::Amount, 2),
+            (Field::Memo, 3),
+            (Field::Pending, 4),
+        ],
+    );
+    let run = engine_run(&book);
+    let mut world = native_world(&book, &run);
+    let feed = test_feed(&book, format, "assets/checking", "USD");
+    assert!(
+        world
+            .feed(&feed, "2026-01-06,-12.50,CORNER STORE 1234,\n2026-01-06,-3.00,COFFEE,\n")
+            .unwrap()
+            .is_empty(),
+        "a code whose flow is already settled should not produce a second settlement"
+    );
 }
 
 #[test]
