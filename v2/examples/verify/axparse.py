@@ -1,10 +1,11 @@
 """A tiny reader of the flows in an example's journal, independent of Axiom.
 
 It understands what the generated journals use: `DATE[..DATE] SRC -> DST AMOUNT
-UNIT [@ PRICE UNIT] [/ payee] [#codes] [for WHAT] [due WHEN] [basis AMOUNT] [!]`,
-one-side splits (indented legs, `...` remainders), `opening` blocks, prices,
-splits, assertions and doc comments. It yields plain records; tax and balance
-rules are the caller's.
+UNIT [@ PRICE UNIT] [/ payee] [#purpose] [^code] [for WHAT] [due WHEN]
+[basis AMOUNT] [!]`, one-side splits (indented legs, `...` remainders),
+`opening` blocks, prices, splits, assertions and doc comments. In a dated
+journal folder it expands a day (`5`) or month-day (`02-05`) from the path.
+It yields plain records; tax and balance rules are the caller's.
 """
 import glob
 import os
@@ -13,12 +14,24 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal as D, ROUND_HALF_EVEN
 
-DATE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
-
-
 def to_date(s):
     y, m, d = s.split("-")
     return date(int(y), int(m), int(d))
+
+
+def journal_day(token, path):
+    """Complete a journal day from its YYYY/MM path when it is abbreviated."""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", token):
+        return to_date(token)
+    match = re.search(r"[/\\]journal[/\\](\d{4})[/\\](\d{2})\.ax$", path)
+    if not match:
+        raise ValueError(f"short journal date {token!r} has no year/month in {path}")
+    year, month = map(int, match.groups())
+    if re.fullmatch(r"\d{1,2}", token):
+        day = int(token)
+    else:
+        month, day = map(int, token.split("-"))
+    return date(year, month, day)
 
 
 def money(s):
@@ -84,7 +97,7 @@ def parse_tail(rest):
     if m:
         payee = m.group(1)
         rest = rest[: m.start()] + rest[m.end():]
-    codes = re.findall(r"#[a-z0-9:./-]+", rest)
+    codes = re.findall(r"[#^][a-z0-9:./-]+", rest)
     return payee, codes, for_, due, basis, waive
 
 
@@ -109,7 +122,7 @@ def read_journal(root):
                 continue
             if not line.startswith(" "):
                 in_opening = False
-            m = re.match(r"^(\d{4}-\d{2}-\d{2})(?:\.\.(\d{4}-\d{2}-\d{2}))?\s+(.*)$", line)
+            m = re.match(r"^(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}|\d{1,2})(?:\.\.(\d{4}-\d{2}-\d{2}|\d{2}-\d{2}|\d{1,2}))?\s+(.*)$", line)
             if not m or "->" not in line:
                 continue
             day, until, body = m.group(1), m.group(2), m.group(3)
@@ -154,7 +167,7 @@ def read_journal(root):
                     tail = pm.group(3)
             payee, codes, for_, due, basis, waive = parse_tail(tail)
             pending = "(" in left[-12:] or bool(re.search(r"\(\d", right))
-            flow = Flow(to_date(day), to_date(until) if until else None, src, dst, out, out_unit, into, into_unit,
+            flow = Flow(journal_day(day, path), journal_day(until, path) if until else None, src, dst, out, out_unit, into, into_unit,
                         payee, codes, for_, due, basis, waive, pending, [], raw, path, i, price=price)
             # legs
             while i < len(lines) and lines[i].startswith("  ") and lines[i].strip() and not lines[i].strip().startswith("//"):
