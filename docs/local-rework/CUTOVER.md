@@ -83,6 +83,8 @@ an agreed exception or as completed work.
 | `67c2302` | Reject absent parameter key tuples and dates before their first row | Reviewed arithmetic correction and regression cases; model tests await native lowering |
 | `914f4aa` | Flow-owner purpose rules, dated properties, asset scopes and sparse rolling totals | Lane: 124 engine tests passed before adopting the schema dependency; native integrated engine checks pending |
 | `1a2c09f`, `e9cf758` | Sam native source fixture and independent financial oracle with source-derived inputs | Lane: all 12 Axiom files parse, 144 items, no diagnostics. Coordinator: verify11 passes. Engine agreement remains pending |
+| `c37881b`, `9e9345a`, `046c068` | Native settings/scopes, forward kind hierarchy and dimensional parameter lowering | Reviewed source checkpoints. Model tests remain blocked by old build wiring and contract API migration |
+| `ba75dde`, `86fd5d8` | Cumulative depreciation, borrowed pooled flow metadata, exact partial-lot quantities and transferred lot codes | Reviewed source and regression cases. Integrated engine tests await the native model build |
 
 The six old completed implementation worktrees were clean before removal. Their
 branches and commits remain available; exact paths and heads are in
@@ -92,3 +94,22 @@ or recovery evidence.
 
 All remaining acceptance rows are pending until verified. This document is an
 active work record, not a completion claim.
+
+## Allocation baseline
+
+The coordinator's isolated System-allocator probe records each phase separately;
+its source and logs are under `verification/cutover/` outside this repository.
+The probe counts successful allocation/reallocation calls, requested bytes,
+retained live bytes and peak live bytes. Instrumented timing is not a production
+performance measurement. Input text is loaded before each phase snapshot.
+
+At the preserved `134f2a3` baseline, the generated 1M-flow project used 64,785,844
+input bytes across 169 sources. Parsing recorded 7,147 allocation calls and
+193,195,392 requested bytes. Model building recorded 52,785 calls and
+915,523,757 requested bytes, with peak live bytes of 770,481,965. Dropping the AST
+left 472,825,856 live bytes. Planning recorded 6,862 calls; folding recorded
+1,628 calls. The baseline Flow header was 200 bytes, Txn 88 and syntax Item 40.
+
+These are baseline observations, not gains. A native run on the same generated
+financial workload, with correctness verified, is still required to compare
+allocation counts, retained memory and whole-process RSS/time.
