@@ -180,8 +180,12 @@ impl AssetState {
 
     /// Whether the asset still belongs to its owner at this exact event.
     pub fn held_at(&self, event: EventKey) -> bool {
-        self.disposed
-            .is_none_or(|disposal| disposal.boundary.includes(event))
+        self.parts
+            .first()
+            .is_some_and(|acquisition| acquisition.recorded <= event)
+            && self
+                .disposed
+                .is_none_or(|disposal| disposal.boundary.includes(event))
     }
 }
 
@@ -189,6 +193,9 @@ impl AssetState {
 #[derive(Clone, Debug)]
 pub struct Assets {
     states: Vec<AssetState>,
+    /// Append-only part table keyed by stable identity. The value is an asset
+    /// arena index and the part's position within that asset's append-only list.
+    part_index: axiom_core::Map<PartId, (Id<Asset>, usize)>,
 }
 
 impl Assets {
@@ -198,6 +205,7 @@ impl Assets {
             states: (0..count)
                 .map(|index| AssetState::new(Id::new(index as u32)))
                 .collect(),
+            part_index: axiom_core::Map::default(),
         }
     }
 
@@ -225,7 +233,7 @@ impl Assets {
         if part.basis.is_negative() {
             return Err(AssetError::NegativeBasis);
         }
-        if self.part(part.id).is_some() {
+        if self.part_index.contains_key(&part.id) {
             return Err(AssetError::DuplicatePart);
         }
         let state = self
@@ -249,7 +257,10 @@ impl Assets {
         {
             return Err(AssetError::OutOfOrder);
         }
+        let index = state.parts.len();
+        let id = part.id;
         state.parts.push(part);
+        self.part_index.insert(id, (asset, index));
         Ok(())
     }
 
@@ -273,10 +284,10 @@ impl Assets {
         if state.disposed.is_some() {
             return Err(AssetError::AlreadyDisposed);
         }
-        if !state
+        if state
             .parts
             .iter()
-            .any(|part| boundary.includes(part.recorded))
+            .any(|part| !boundary.includes(part.recorded))
         {
             return Err(AssetError::NotHeldAtBoundary);
         }
@@ -291,13 +302,9 @@ impl Assets {
     /// Finds a part by its stable origin key, returning its asset and borrowed
     /// record. The key is globally unique by construction.
     pub fn part(&self, id: PartId) -> Option<(Id<Asset>, &Part)> {
-        self.states.iter().find_map(|state| {
-            state
-                .parts
-                .iter()
-                .find(|part| part.id == id)
-                .map(|part| (state.asset, part))
-        })
+        let &(asset, index) = self.part_index.get(&id)?;
+        let part = self.states.get(asset.index())?.parts.get(index)?;
+        (part.id == id).then_some((asset, part))
     }
 
     /// Lowers one part's basis. Over-consumption is represented as `excess`
@@ -772,6 +779,10 @@ mod tests {
         let original = part(1, 0, PartKind::Acquisition, 10, 1, 100, 100);
         let original_id = original.id;
         assets.add_part(Id::new(0), original).unwrap();
+        assert!(!assets.asset(Id::new(0)).unwrap().held_at(EventKey {
+            day: Day(9),
+            sequence: u64::MAX,
+        }));
         assets
             .dispose(
                 Id::new(0),
@@ -804,5 +815,45 @@ mod tests {
             ),
             Err(AssetError::AlreadyDisposed)
         );
+    }
+
+    #[test]
+    fn disposal_cannot_precede_an_already_recorded_improvement() {
+        let asset = Id::new(0);
+        let mut assets = Assets::new(1);
+        let acquisition = part(1, 0, PartKind::Acquisition, 10, 1, 100, 100);
+        assets.add_part(asset, acquisition).unwrap();
+        let improvement = part(2, 0, PartKind::Improvement, 11, 2, 25, 25);
+        assets.add_part(asset, improvement).unwrap();
+
+        let before_improvement = DisposalBoundary::After(EventKey {
+            day: Day(10),
+            sequence: 1,
+        });
+        assert_eq!(
+            assets.dispose(asset, acquisition.id.origin, None, before_improvement),
+            Err(AssetError::NotHeldAtBoundary),
+            "a sale boundary must include every part already present in the ledger"
+        );
+        assert!(assets.asset(asset).unwrap().held_at(EventKey {
+            day: Day(11),
+            sequence: 2,
+        }));
+        assets
+            .dispose(
+                asset,
+                acquisition.id.origin,
+                None,
+                DisposalBoundary::Close(Day(11)),
+            )
+            .unwrap();
+        assert!(assets.asset(asset).unwrap().held_at(EventKey {
+            day: Day(11),
+            sequence: 2,
+        }));
+        assert!(!assets.asset(asset).unwrap().held_at(EventKey {
+            day: Day(12),
+            sequence: 0,
+        }));
     }
 }
