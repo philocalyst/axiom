@@ -129,21 +129,33 @@ impl Ledger<'_, '_, '_> {
         self.world.totals.record(watch, (m.from, m.to), (m.day, m.recognized), out, arrive);
 
         if let Some(purpose) = m.purpose.map(|purpose| purpose.purpose).filter(|&purpose| watch.reads_purpose(purpose)) {
-            let (dir, amount) = if m.target.class == Class::Asset && m.source.class != Class::Asset {
-                (Dir::In, m.arrive)
-            } else {
-                (Dir::Out, m.out)
-            };
-            if let Some(amount) = self.base_value(m, amount) {
-                self.world.totals.record_purpose(
-                    watch,
-                    m.owner,
-                    purpose,
-                    (m.day, m.recognized),
-                    dir,
-                    amount,
-                );
+            if let Some((dir, amount)) = self.purpose_flow(m, purpose) {
+                self.world.totals.record_purpose(watch, m.owner, purpose, (m.day, m.recognized), dir, amount);
             }
+        }
+    }
+
+    /// The sign of a purpose follows value crossing the owner's boundary.
+    /// The written flow direction is what matters here: paying an expense from
+    /// a card is an outflow, and a refund from that expense into the card is an
+    /// inflow. The debt balance's display sign must not reverse that meaning.
+    fn purpose_flow(&mut self, m: &Motion, purpose: axiom_core::Id<axiom_model::Purpose>) -> Option<(Dir, Qty)> {
+        let (source_owned, target_owned) = (
+            m.source.owner == m.owner && m.source.class != Class::Outside,
+            m.target.owner == m.owner && m.target.class != Class::Outside,
+        );
+        let root = self.plan.book.purposes[purpose].root;
+        // A capital purchase between two asset places changes the form of the
+        // owner's property but still belongs in the capital total.
+        if source_owned && target_owned && root == axiom_model::PurposeRoot::Capital {
+            return self.base_value(m, m.out).map(|amount| (Dir::Out, amount));
+        }
+        match (source_owned, target_owned) {
+            (true, false) => self.base_value(m, m.out).map(|amount| (Dir::Out, amount)),
+            (false, true) => self.base_value(m, m.arrive).map(|amount| (Dir::In, amount)),
+            // A movement wholly inside one owner's books is not an income or
+            // spending event. Capital acquisitions are the exception above.
+            (true, true) | (false, false) => None,
         }
     }
 

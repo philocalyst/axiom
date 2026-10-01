@@ -186,6 +186,88 @@ fn purpose_rules_use_each_flows_owner_for_scope_and_sparse_totals() {
 }
 
 #[test]
+fn a_purpose_window_rechecks_prepaid_recognition_without_later_flows() {
+    let mut f = Fixture::new();
+    let (checking, market, me) = (f.checking, f.market, f.me);
+    let purpose = Id::new(1);
+    let mut builder = LawBuilder::new(f.sym("monthly-purpose-cap"), Trigger::Flow);
+    let total = builder.call(
+        Func::PurposeTotal { purpose: Some(purpose), window: Window::Month },
+        &[],
+        Ty::AMOUNT,
+    );
+    let limit = builder.konst(Value::Amount(f.usd(100_00)), Ty::AMOUNT);
+    let within = builder.bin(BinOp::Le, total, limit, Ty::Bool);
+    let law = f.law(builder.warn(within));
+    f.laws[law].owner = Owner::Purpose(purpose);
+    let mut prepaid = f.flow(date(2025, 12, 15), checking, market, 300_00);
+    f.recognize(prepaid, date(2025, 12, 15), date(2026, 2, 14));
+    f.flows[prepaid.index()].purpose = Some(Purposed { purpose, of: None, source: Provenance::Written });
+
+    let mut book = f.book();
+    let rule = Rule { law, subject: Subject::Entity(me), days: Days::ALWAYS };
+    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, rule)]);
+    let run = run(&book, Options { today: Day(date(2026, 2, 28)), relaxed: false });
+
+    assert_eq!(run.violations.len(), 1, "only January's recognized share exceeds the monthly cap");
+    assert_eq!(run.violations[0].day, Day(date(2026, 1, 1)));
+    assert_eq!(run.violations[0].cause, Cause::Time, "the limit breaks as the prepaid window opens");
+    assert_eq!(run.checks[law.index()], 3, "the flow and both future months are evaluated");
+}
+
+#[test]
+fn a_credit_card_refund_reverses_spending_purpose_total() {
+    let mut f = Fixture::new();
+    let (card, food, me) = (f.card, f.food, f.me);
+    let purpose = Id::new(2);
+    let charge = f.flow(2, card, food, 84_00);
+    let refund = f.flow(3, food, card, 40_00);
+    for flow in [charge, refund] {
+        f.flows[flow.index()].purpose = Some(Purposed {
+            purpose,
+            of: None,
+            source: Provenance::Written,
+        });
+    }
+
+    let mut law = LawBuilder::new(f.sym("net-spending"), Trigger::Flow);
+    let total = law.call(
+        Func::PurposeTotal { purpose: Some(purpose), window: Window::Ever },
+        &[],
+        Ty::AMOUNT,
+    );
+    let expected = law.konst(Value::Amount(f.usd(44_00)), Ty::AMOUNT);
+    let matches = law.bin(BinOp::Eq, total, expected, Ty::Bool);
+    let law = f.law(law.require(matches, None));
+    f.laws[law].owner = Owner::Purpose(purpose);
+
+    let spending_name = f.sym("card-spending");
+    let mut book = f.book();
+    let roots = [book.roots.income, book.roots.spending, book.roots.capital];
+    let names = roots.map(|root| book.purposes[root].name);
+    let purposes = vec![
+        Purpose { name: names[0], root: PurposeRoot::Income, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose { name: names[1], root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose { name: spending_name, root: PurposeRoot::Spending, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+        Purpose { name: names[2], root: PurposeRoot::Capital, system: None, of: None, shares: Box::new([]), laws: Box::new([]), doc: None, loc: None },
+    ];
+    let (tree, ids) = Tree::build(purposes, &[None, None, Some(1), None]).unwrap();
+    book.purposes = tree;
+    book.roots.income = ids[0];
+    book.roots.spending = ids[1];
+    book.roots.capital = ids[3];
+    book.rules.purposes = Groups::build(book.purposes.len(), [(purpose, Rule {
+        law,
+        subject: Subject::Entity(me),
+        days: span(3, 3),
+    })]);
+
+    let run = run(&book, options());
+    assert!(run.violations.is_empty(), "84.00 charge less a 40.00 refund is 44.00");
+    assert_eq!(run.checks[law.index()], 1, "only the refund day is checked");
+}
+
+#[test]
 fn a_promise_is_late_by_the_days_until_it_is_kept_or_the_horizon_if_it_never_is() {
     let promise = |kept: Option<i32>| crate::Promise {
         contract: Id::new(0),

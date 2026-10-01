@@ -311,9 +311,20 @@ impl Hash for Totals {
 /// each month for as long as value reaches on.
 #[derive(Clone)]
 struct Reaching {
-    months: BinaryHeap<Reverse<(Day, u32)>>,
+    months: BinaryHeap<Reverse<(Day, ReachKey)>>,
     /// The earliest of them: what every moment of the fold asks about.
     soonest: Day,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ReachKey {
+    Subject(u32),
+    Purpose(u32, u32),
+}
+
+pub(crate) enum Reached {
+    Subject(Subject, Day),
+    Purpose(Id<Entity>, Id<Purpose>, Day),
 }
 
 impl Reaching {
@@ -321,14 +332,14 @@ impl Reaching {
         Reaching { months: BinaryHeap::new(), soonest: Day::MAX }
     }
 
-    /// Notes that `slot` enters the month that begins on `from`.
-    fn push(&mut self, from: Day, slot: u32) {
-        self.months.push(Reverse((from, slot)));
+    /// Notes that one sparse subject or purpose enters the month beginning on `from`.
+    fn push(&mut self, from: Day, key: ReachKey) {
+        self.months.push(Reverse((from, key)));
         self.soonest = self.soonest.min(from);
     }
 
     /// The earliest month that begins by `day`, and whose subject it is for.
-    fn pop(&mut self, day: Day) -> Option<(Day, u32)> {
+    fn pop(&mut self, day: Day) -> Option<(Day, ReachKey)> {
         let Reverse(next) = self.months.peek().copied().filter(|&Reverse((from, _))| from <= day)?;
         self.months.pop();
         self.soonest = self.months.peek().map_or(Day::MAX, |&Reverse((from, _))| from);
@@ -365,7 +376,7 @@ impl Totals {
                 let windows = &mut self.windows[at];
                 if windows.add(day, dir, value, over) && !windows.reaching {
                     windows.reaching = true;
-                    self.reaching.push(windows.month.days.last().add_days(1), at as u32);
+                    self.reaching.push(windows.month.days.last().add_days(1), ReachKey::Subject(at as u32));
                 }
             }
         }
@@ -388,7 +399,18 @@ impl Totals {
         }
         let Some(purpose_through) = watch.purpose_through.as_ref() else { return };
         for &purpose in &purpose_through[actual] {
-            self.purpose.entry((owner, purpose)).or_insert_with(|| Windows::NONE.clone()).add(day, dir, amount, over);
+            let from = {
+                let windows = self.purpose.entry((owner, purpose)).or_insert_with(|| Windows::NONE.clone());
+                if windows.add(day, dir, amount, over) && !windows.reaching {
+                    windows.reaching = true;
+                    Some(windows.month.days.last().add_days(1))
+                } else {
+                    None
+                }
+            };
+            if let Some(from) = from {
+                self.reaching.push(from, ReachKey::Purpose(owner.index() as u32, purpose.index() as u32));
+            }
         }
     }
 
@@ -410,15 +432,28 @@ impl Totals {
     /// The next month that begins by `day` with value recognized into it ahead
     /// of time, and the subject it is for. Each month is handed out once, and
     /// the subject comes back for the month after while value still reaches it.
-    pub fn reached(&mut self, watch: &Watch, day: Day) -> Option<(Subject, Day)> {
-        let (from, at) = self.reaching.pop(day)?;
+    pub fn reached(&mut self, watch: &Watch, day: Day) -> Option<Reached> {
+        let (from, key) = self.reaching.pop(day)?;
         let month = Window::Month.around(from);
-        let windows = &mut self.windows[at as usize];
-        windows.reaching = windows.ahead.iter().any(|accrual| accrual.over.last() > month.last());
-        if windows.reaching {
-            self.reaching.push(month.last().add_days(1), at);
+        match key {
+            ReachKey::Subject(at) => {
+                let windows = &mut self.windows[at as usize];
+                windows.reaching = windows.ahead.iter().any(|accrual| accrual.over.last() > month.last());
+                if windows.reaching {
+                    self.reaching.push(month.last().add_days(1), key);
+                }
+                Some(Reached::Subject(watch.subjects[at as usize], from))
+            }
+            ReachKey::Purpose(owner, purpose) => {
+                let (owner, purpose) = (Id::new(owner), Id::new(purpose));
+                let windows = self.purpose.get_mut(&(owner, purpose))?;
+                windows.reaching = windows.ahead.iter().any(|accrual| accrual.over.last() > month.last());
+                if windows.reaching {
+                    self.reaching.push(month.last().add_days(1), key);
+                }
+                Some(Reached::Purpose(owner, purpose, from))
+            }
         }
-        Some((watch.subjects[at as usize], from))
     }
 
     /// What entered or left `subject` in the window containing `day`.

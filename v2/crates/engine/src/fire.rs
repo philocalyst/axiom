@@ -22,7 +22,7 @@ use crate::motion::Motion;
 use crate::plan::Plan;
 use crate::scope::owner_of;
 use crate::state::Missing;
-use crate::totals::by_year;
+use crate::totals::{Reached, by_year};
 use crate::{Consequence, Effect, Headroom, Owed, Verdict, Violation, Waiver};
 
 /// Whether the rule is in force for some day of the occasion.
@@ -108,12 +108,28 @@ impl Ledger<'_, '_, '_> {
     #[cold]
     fn enter_months(&mut self, day: Day) {
         let plan = self.plan;
-        while let Some((subject, from)) = self.world.totals.reached(&plan.watch, day) {
-            for window in [Window::Month, Window::Year] {
-                let period = window.around(from);
-                let rules = plan.readers.get(&(subject, window));
-                if let Some(rules) = rules.filter(|_| period.first() == from) {
-                    self.fire(rules, &Occasion::window(from, period));
+        while let Some(reached) = self.world.totals.reached(&plan.watch, day) {
+            match reached {
+                Reached::Subject(subject, from) => {
+                    for window in [Window::Month, Window::Year] {
+                        let period = window.around(from);
+                        let rules = plan.readers.get(&(subject, window));
+                        if let Some(rules) = rules.filter(|_| period.first() == from) {
+                            self.fire(rules, &Occasion::window(from, period));
+                        }
+                    }
+                }
+                Reached::Purpose(owner, purpose, from) => {
+                    for window in [Window::Month, Window::Year] {
+                        let period = window.around(from);
+                        if period.first() == from {
+                            self.fire_as(
+                                &plan.book.rules.purposes[purpose],
+                                &Occasion::window(from, period),
+                                Some(Subject::Entity(owner)),
+                            );
+                        }
+                    }
                 }
             }
         }
