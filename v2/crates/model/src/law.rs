@@ -433,6 +433,9 @@ pub enum Func {
         purpose: Option<Id<Purpose>>,
         window: Window,
     },
+    /// The limit currently in force for a native purpose budget. A computed
+    /// row is an earlier root in the budget law's node arena.
+    BudgetLimit(Id<Budget>),
     /// Open amount of claims carrying this stable source code.
     Open(Sym),
     /// What laws counted under the name for the owner, in the current year or,

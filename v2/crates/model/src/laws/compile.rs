@@ -275,6 +275,47 @@ pub(crate) fn compile_template<'s>(
     ))
 }
 
+/// Compiles a dated budget limit in its purpose-owner context. Unlike a
+/// contract template, a budget is not triggered by a transaction, so amount,
+/// from and to are unavailable while its formula is read.
+pub(crate) fn compile_budget_limit<'s>(
+    world: &mut World<'s>,
+    diags: &mut Vec<Diagnostic>,
+    file: &File<'s>,
+    home: Home,
+    purpose: axiom_core::Id<crate::book::Purpose>,
+    name: Sym,
+    root: ExprId,
+) -> Option<(TemplateProgram, NodeId)> {
+    let mut compiler = Compiler {
+        world,
+        diags,
+        file,
+        home,
+        owner: Some(Owner::Purpose(purpose)),
+        subject: Ty::Entity,
+        law_name: name,
+        first: None,
+        base: 0,
+        nodes: Arena::new(),
+        roles: Vec::new(),
+        locals: Vec::new(),
+        inputs: &[],
+        when: When::Each,
+        failed: false,
+    };
+    let root = compiler.expression(root, Ty::AMOUNT)?;
+    if compiler.failed {
+        return None;
+    }
+    Some((
+        TemplateProgram {
+            nodes: std::mem::take(&mut compiler.nodes),
+        },
+        root,
+    ))
+}
+
 struct Compiler<'w, 'a, 's> {
     world: &'w mut World<'s>,
     diags: &'w mut Vec<Diagnostic>,

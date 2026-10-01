@@ -1454,6 +1454,8 @@ pub enum Limit {
         rate: Ratio,
         of: Id<Purpose>,
     },
+    /// A law expression, compiled into the node arena of `Budget::law`.
+    Computed(crate::law::NodeId),
 }
 
 /// A body of kinds, params and laws: `us`, `us/ca`, `us/401k`. Children

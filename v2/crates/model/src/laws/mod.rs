@@ -13,17 +13,22 @@ mod order;
 mod types;
 mod vars;
 
-use axiom_core::{Diagnostic, Id, Set};
+use axiom_core::{Arena, Day, Days, Diagnostic, Id, Map, Period, Ratio, Set, Severity, Timeline};
 use axiom_syntax::{self as ast, DeclKind, ExprId, ItemKind, Trigger as Written};
 
 pub(crate) use self::compile::compile_template;
 use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
-use crate::book::{Input, Kind, Sort, System};
+use crate::book::{
+    Also, AlsoOn, Amount, Budget, Implied, Input, Kind, Limit, Sign, Sort, System, TemplateAmount,
+};
 use crate::declare::World;
 use crate::errors::{Word, suggest, unknown};
-use crate::law::{Law, NodeId, Owner, Rank, RankClass, Trigger, Ty};
-use crate::names::{Found, Rank as NameRank};
+use crate::law::{
+    BinOp, Func, Law, Node, NodeId, Op, Owner, Rank, RankClass, Step, StepKind, Trigger, Ty, Value,
+    Var, Window,
+};
+use crate::names::Rank as NameRank;
 use crate::scope::Home;
 use crate::sources::Site;
 
@@ -101,6 +106,7 @@ pub(crate) fn declare<'s>(
                             compile_native(world, diags, file, source.home, owner, subject, law);
                         }
                     }
+                    declare_alsos(world, diags, file, source.home, decl, owner, decl.what);
                 }
                 // Contract laws are compiled by the contract pass after every
                 // contract id exists, so references can point forward.
@@ -118,6 +124,7 @@ pub(crate) fn declare<'s>(
             }
         }
     }
+    declare_budgets(world, sites, diags);
 }
 
 /// Compiles a nested or native S5 law using the same typed compiler as
@@ -168,26 +175,51 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
         .collect();
     for (id, name, loc) in pending {
         let text = world.book.name(name);
+        let home = law_home(&world.book.laws[id]);
+        let scope = world.scopes.of(home);
         let names = &world.book.names;
-        match world.book.lookup.laws.find(names, text, |_| true) {
-            Found::One(target) if target != id => world.book.laws[id].overrides = Some(target),
-            Found::One(_) => diags.push(
+        let table = &world.book.lookup.laws;
+        let mut candidates: Vec<_> = table
+            .candidates(names, text)
+            .iter()
+            .copied()
+            .filter(|&candidate| scope.sees(law_home(&world.book.laws[candidate])))
+            .collect();
+        if let Some(nearest) = candidates
+            .iter()
+            .map(|&candidate| scope.rank(law_home(&world.book.laws[candidate])))
+            .min()
+        {
+            candidates
+                .retain(|&candidate| scope.rank(law_home(&world.book.laws[candidate])) == nearest);
+        }
+        match candidates.as_slice() {
+            [target] if *target != id => world.book.laws[id].overrides = Some(*target),
+            [_target] => diags.push(
                 Diagnostic::error("law-override", "a law cannot override itself")
                     .label(loc, "this is the law's own name"),
             ),
-            Found::Nothing => {
+            [] => {
                 let word = Word { text, loc };
                 let diagnostic = unknown("unknown-law", "law", word, None);
-                let keys: Vec<_> = world.book.lookup.laws.keys(&world.book.names).collect();
+                let keys: Vec<_> = table
+                    .keys(names)
+                    .filter(|key| {
+                        table
+                            .candidates(names, key)
+                            .iter()
+                            .any(|&candidate| scope.sees(law_home(&world.book.laws[candidate])))
+                    })
+                    .collect();
                 diags.push(suggest(diagnostic, loc, text, keys));
             }
-            Found::Several(targets) => {
+            targets => {
                 let mut diagnostic = Diagnostic::error(
                     "ambiguous-law",
                     format!("law `{text}` names more than one law"),
                 )
                 .label(loc, "qualify which law this one overrides");
-                for target in targets {
+                for &target in targets {
                     let law = &world.book.laws[target];
                     diagnostic = diagnostic.context(
                         law.loc,
@@ -198,6 +230,10 @@ fn resolve_overrides(world: &mut World<'_>, diags: &mut Vec<Diagnostic>) {
             }
         }
     }
+}
+
+fn law_home(law: &Law) -> Home {
+    law.system.map_or(Home::Project, Home::System)
 }
 
 /// More specific owners win when two laws govern the same occasion.
@@ -267,6 +303,862 @@ pub(crate) fn compile_also<'s>(
         loc,
     };
     Some((book.laws.push(law), roots))
+}
+
+#[derive(Clone, Copy)]
+enum PendingAmount {
+    Literal(Amount),
+    Computed(usize),
+}
+
+/// Lower every declaration `also` while the complete declaration namespace is
+/// available. Its law is auxiliary: `register` deliberately leaves it out of
+/// the owner's ordinary law list, and the native group builder applies it to
+/// the matching flow.
+fn declare_alsos<'s>(
+    world: &mut World<'s>,
+    diags: &mut Vec<Diagnostic>,
+    file: &ast::File<'s>,
+    home: Home,
+    decl: &ast::Decl<'s>,
+    owner: Owner,
+    what: DeclKind,
+) {
+    if file[decl.alsos].is_empty() {
+        return;
+    }
+    let on = match owner {
+        Owner::Entity(id) => AlsoOn::Entity(id),
+        Owner::Kind(id) => AlsoOn::Kind(id),
+        Owner::Purpose(id) => AlsoOn::Purpose(id),
+        _ => {
+            for also in &file[decl.alsos] {
+                diags.push(
+                    Diagnostic::error(
+                        "also-owner",
+                        "declaration-level `also` needs an entity, kind, or purpose",
+                    )
+                    .label(
+                        also.loc,
+                        format!("`also` is not supported on this {what:?}"),
+                    ),
+                );
+            }
+            return;
+        }
+    };
+
+    for also in &file[decl.alsos] {
+        let mut roots = Vec::new();
+        let when_index = also.when.map(|when| {
+            let index = roots.len();
+            roots.push((when, Ty::Bool));
+            index
+        });
+        let (what, amount_index, metadata_clauses) = match &also.line {
+            ast::AlsoLine::Item(item) => {
+                let amount = match item.amount {
+                    ast::Amount::Literal(literal) => {
+                        let unit = match literal.unit() {
+                            Some(unit) => match world.commodity_of(Word {
+                                text: unit.0,
+                                loc: file.loc(unit.0),
+                            }) {
+                                Ok(unit) => unit,
+                                Err(problem) => {
+                                    diags.push(problem);
+                                    continue;
+                                }
+                            },
+                            None => fallback_currency(world, owner),
+                        };
+                        let Some(amount) = world
+                            .amount(literal.num(), unit, file.loc(literal.0))
+                            .map_err(|problem| diags.push(problem))
+                            .ok()
+                        else {
+                            continue;
+                        };
+                        PendingAmount::Literal(amount)
+                    }
+                    ast::Amount::Computed(root) => {
+                        let index = roots.len();
+                        roots.push((root, Ty::AMOUNT));
+                        PendingAmount::Computed(index)
+                    }
+                };
+                (
+                    Some(Implied::Item {
+                        sign: match item.sign {
+                            ast::Sign::Carve => Sign::Carve,
+                            ast::Sign::Add => Sign::Add,
+                            ast::Sign::Less => Sign::Less,
+                        },
+                        amount: TemplateAmount::Literal(Amount::zero(fallback_currency(
+                            world, owner,
+                        ))),
+                    }),
+                    Some(amount),
+                    item.tail,
+                )
+            }
+            ast::AlsoLine::Flow(flow) => {
+                if !file[flow.body.legs].is_empty() || !file[flow.body.items].is_empty() {
+                    diags.push(
+                        Diagnostic::error(
+                            "also-flow-body",
+                            "a declaration `also` flow cannot have split legs or items",
+                        )
+                        .label(also.loc, "write one implied flow here"),
+                    );
+                    continue;
+                }
+                let mut valid_ends = true;
+                let from = match flow.from.end {
+                    Some(end) if end.name.0 != "self" => match world.end(
+                        home,
+                        Word {
+                            text: end.name.0,
+                            loc: file.loc(end.name.0),
+                        },
+                    ) {
+                        Ok(end) => Some(end.place),
+                        Err(problem) => {
+                            diags.push(problem);
+                            valid_ends = false;
+                            None
+                        }
+                    },
+                    _ => None,
+                };
+                let to = match flow.to.end {
+                    Some(end) if end.name.0 != "self" => match world.end(
+                        home,
+                        Word {
+                            text: end.name.0,
+                            loc: file.loc(end.name.0),
+                        },
+                    ) {
+                        Ok(end) => Some(end.place),
+                        Err(problem) => {
+                            diags.push(problem);
+                            valid_ends = false;
+                            None
+                        }
+                    },
+                    _ => None,
+                };
+                if !valid_ends {
+                    continue;
+                }
+                let from_amount = match flow.from.amount {
+                    Some(ast::Quantity::Amount(amount)) => Some(amount),
+                    Some(other) => {
+                        diags.push(
+                            Diagnostic::error(
+                                "also-flow-amount",
+                                "an implied flow amount must be an amount expression",
+                            )
+                            .label(
+                                quantity_loc(file, other, also.loc),
+                                "this quantity cannot be implied",
+                            ),
+                        );
+                        continue;
+                    }
+                    None => None,
+                };
+                let to_amount = match flow.to.amount {
+                    Some(ast::Quantity::Amount(amount)) => Some(amount),
+                    Some(other) => {
+                        diags.push(
+                            Diagnostic::error(
+                                "also-flow-amount",
+                                "an implied flow amount must be an amount expression",
+                            )
+                            .label(
+                                quantity_loc(file, other, also.loc),
+                                "this quantity cannot be implied",
+                            ),
+                        );
+                        continue;
+                    }
+                    None => None,
+                };
+                let amount = match (from_amount, to_amount) {
+                    (Some(_), Some(_)) => {
+                        diags.push(
+                            Diagnostic::error(
+                                "also-flow-amount",
+                                "an implied flow states its amount on one side only",
+                            )
+                            .label(also.loc, "remove one of these amounts"),
+                        );
+                        continue;
+                    }
+                    (Some(amount), None) | (None, Some(amount)) => amount,
+                    (None, None) => {
+                        diags.push(
+                            Diagnostic::error(
+                                "also-flow-amount",
+                                "an implied flow needs an amount",
+                            )
+                            .label(also.loc, "write an amount on one side of the arrow"),
+                        );
+                        continue;
+                    }
+                };
+                let amount = match amount {
+                    ast::Amount::Literal(literal) => {
+                        let unit = match literal.unit() {
+                            Some(unit) => match world.commodity_of(Word {
+                                text: unit.0,
+                                loc: file.loc(unit.0),
+                            }) {
+                                Ok(unit) => unit,
+                                Err(problem) => {
+                                    diags.push(problem);
+                                    continue;
+                                }
+                            },
+                            None => fallback_currency(world, owner),
+                        };
+                        let Some(amount) = world
+                            .amount(literal.num(), unit, file.loc(literal.0))
+                            .map_err(|problem| diags.push(problem))
+                            .ok()
+                        else {
+                            continue;
+                        };
+                        PendingAmount::Literal(amount)
+                    }
+                    ast::Amount::Computed(root) => {
+                        let index = roots.len();
+                        roots.push((root, Ty::AMOUNT));
+                        PendingAmount::Computed(index)
+                    }
+                };
+                (
+                    Some(Implied::Flow {
+                        from,
+                        to,
+                        amount: TemplateAmount::Literal(Amount::zero(fallback_currency(
+                            world, owner,
+                        ))),
+                    }),
+                    Some(amount),
+                    flow.tail,
+                )
+            }
+        };
+        let (Some(mut what), Some(amount)) = (what, amount_index) else {
+            continue;
+        };
+        let metadata = crate::lower::also::tail(world, home, file, metadata_clauses, diags);
+        let name = world.book.names.intern("also");
+        let Some((law, compiled_roots)) = compile_also(
+            world,
+            diags,
+            file,
+            home,
+            owner,
+            Ty::Flow,
+            name,
+            &[],
+            &roots,
+            also.loc,
+        ) else {
+            continue;
+        };
+        let amount = match amount {
+            PendingAmount::Literal(amount) => TemplateAmount::Literal(amount),
+            PendingAmount::Computed(index) => TemplateAmount::Computed(compiled_roots[index]),
+        };
+        match &mut what {
+            Implied::Item { amount: slot, .. } | Implied::Flow { amount: slot, .. } => {
+                *slot = amount
+            }
+        }
+        let when = when_index.map(|index| compiled_roots[index]);
+        world.book.also.push(Also {
+            on,
+            what,
+            when,
+            law,
+            purpose: metadata.purpose,
+            description: metadata.description,
+            codes: metadata.codes,
+            select: metadata.select,
+            detail: metadata.detail,
+            waive: metadata.waive,
+            loc: also.loc,
+        });
+    }
+}
+
+fn fallback_currency(world: &World<'_>, owner: Owner) -> Id<crate::book::Commodity> {
+    match owner {
+        Owner::Entity(entity) => world.book.entities[entity].currency,
+        _ => world.book.base,
+    }
+}
+
+fn quantity_loc(
+    file: &ast::File<'_>,
+    quantity: ast::Quantity<'_>,
+    fallback: axiom_core::Loc,
+) -> axiom_core::Loc {
+    match quantity {
+        ast::Quantity::Amount(ast::Amount::Literal(literal)) => file.loc(literal.0),
+        ast::Quantity::Amount(ast::Amount::Computed(root))
+        | ast::Quantity::Pending(ast::Amount::Computed(root))
+        | ast::Quantity::Target(ast::Amount::Computed(root)) => file.exprs[root].loc,
+        ast::Quantity::Pending(ast::Amount::Literal(literal))
+        | ast::Quantity::Target(ast::Amount::Literal(literal)) => file.loc(literal.0),
+        _ => fallback,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct BudgetEntry<'a, 's> {
+    file: &'a ast::File<'s>,
+    home: Home,
+    allowance: ast::Allowance<'s>,
+    days: Option<Days>,
+    declared: bool,
+    loc: axiom_core::Loc,
+}
+
+#[derive(Clone, Copy)]
+enum BudgetLimit {
+    Ready(Limit),
+    Computed(NodeId),
+}
+
+/// Lowers declaration and dated budget rows after every purpose has an id.
+/// Each generated warning law reads the effective limit through one typed
+/// `BudgetLimit` call, so later rows and bounded `until` changes are not baked
+/// into a stale literal.
+fn declare_budgets<'a, 's>(
+    world: &mut World<'s>,
+    sites: &'a [Site<'a, 's>],
+    diags: &mut Vec<Diagnostic>,
+) {
+    let mut entries: Map<Id<crate::book::Purpose>, Vec<BudgetEntry<'a, 's>>> = Map::default();
+    let mut declared: Set<Id<crate::book::Purpose>> = Set::default();
+
+    for source in sites {
+        let file = &source.source.file;
+        for item in &file.items {
+            match item.kind {
+                ItemKind::Decl(reference) => {
+                    let decl = &file[reference];
+                    if let Some(allowance) = decl.budget {
+                        if decl.what != DeclKind::Purpose {
+                            diags.push(
+                                Diagnostic::error(
+                                    "budget-owner",
+                                    "a declaration budget belongs to a purpose",
+                                )
+                                .label(item.loc, "write this inside a purpose declaration"),
+                            );
+                            continue;
+                        }
+                        let word = Word {
+                            text: decl.name.0,
+                            loc: file.loc(decl.name.0),
+                        };
+                        let purpose = match world.purpose(source.home, word) {
+                            Ok(purpose) => purpose,
+                            Err(problem) => {
+                                diags.push(problem);
+                                continue;
+                            }
+                        };
+                        if !declared.insert(purpose) {
+                            diags.push(
+                                Diagnostic::error(
+                                    "duplicate-budget",
+                                    format!(
+                                        "purpose `{}` has more than one starting budget",
+                                        word.text
+                                    ),
+                                )
+                                .label(item.loc, "keep one initial budget declaration"),
+                            );
+                            continue;
+                        }
+                        entries.entry(purpose).or_default().push(BudgetEntry {
+                            file,
+                            home: source.home,
+                            allowance: file[allowance],
+                            days: None,
+                            declared: true,
+                            loc: item.loc,
+                        });
+                    }
+                }
+                ItemKind::Budget(reference) => {
+                    let budget = &file[reference];
+                    let word = Word {
+                        text: budget.purpose.0,
+                        loc: file.loc(budget.purpose.0),
+                    };
+                    let purpose = match world.purpose(source.home, word) {
+                        Ok(purpose) => purpose,
+                        Err(problem) => {
+                            diags.push(problem);
+                            continue;
+                        }
+                    };
+                    if !declared.insert(purpose) {
+                        diags.push(
+                            Diagnostic::error(
+                                "duplicate-budget",
+                                format!(
+                                    "purpose `{}` has more than one starting budget",
+                                    word.text
+                                ),
+                            )
+                            .label(item.loc, "keep one initial budget declaration"),
+                        );
+                        continue;
+                    }
+                    entries.entry(purpose).or_default().push(BudgetEntry {
+                        file,
+                        home: source.home,
+                        allowance: budget.allowance,
+                        days: None,
+                        declared: true,
+                        loc: item.loc,
+                    });
+                }
+                ItemKind::Statement(reference) => {
+                    let statement = &file[reference];
+                    let ast::Verb::Now(ast::Change::Budget(allowance)) = statement.verb else {
+                        continue;
+                    };
+                    let ast::Subject::Purpose(name) = statement.subject else {
+                        diags.push(
+                            Diagnostic::error(
+                                "budget-owner",
+                                "a dated budget change must name a purpose with `#`",
+                            )
+                            .label(item.loc, "write `#purpose now budget …`"),
+                        );
+                        continue;
+                    };
+                    let word = Word {
+                        text: name.0,
+                        loc: file.loc(name.0),
+                    };
+                    let purpose = match world.purpose(source.home, word) {
+                        Ok(purpose) => purpose,
+                        Err(problem) => {
+                            diags.push(problem);
+                            continue;
+                        }
+                    };
+                    let mut until = None;
+                    for clause in &file[statement.tail] {
+                        if let axiom_syntax::ClauseKind::Until(day) = clause.kind {
+                            if until.replace(day).is_some() {
+                                diags.push(
+                                    Diagnostic::error(
+                                        "duplicate-until",
+                                        "a budget change has one `until` date",
+                                    )
+                                    .label(clause.at, "remove this extra end date"),
+                                );
+                            }
+                        }
+                    }
+                    let last = until.unwrap_or(Day::MAX);
+                    let Some(days) = Days::new(statement.date, last) else {
+                        diags.push(
+                            Diagnostic::error(
+                                "budget-until",
+                                "a budget change ends before it begins",
+                            )
+                            .label(item.loc, "the `until` date precedes this change"),
+                        );
+                        continue;
+                    };
+                    entries.entry(purpose).or_default().push(BudgetEntry {
+                        file,
+                        home: source.home,
+                        allowance: file[allowance],
+                        days: Some(days),
+                        declared: false,
+                        loc: item.loc,
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for (purpose, mut entries) in entries {
+        entries.sort_by_key(|entry| {
+            if entry.declared {
+                Day::MIN
+            } else {
+                entry
+                    .days
+                    .expect("dated budget entries have a range")
+                    .first()
+            }
+        });
+        lower_budget(world, purpose, &entries, diags);
+    }
+}
+
+fn lower_budget<'s>(
+    world: &mut World<'s>,
+    purpose: Id<crate::book::Purpose>,
+    entries: &[BudgetEntry<'_, 's>],
+    diags: &mut Vec<Diagnostic>,
+) -> Option<()> {
+    let first = *entries.first()?;
+    let purpose_name = world.book.purposes[purpose].name;
+    let mut nodes = Arena::new();
+    let initial_limit = lower_budget_limit(world, purpose, first, purpose_name, &mut nodes, diags)?;
+    let initial_funded = funding(
+        world,
+        first.home,
+        first.file,
+        first.allowance.funded,
+        first.loc,
+        diags,
+    )?;
+    let (period, carries) = (first.allowance.per, first.allowance.carries);
+    let mut timeline = Timeline::new(match initial_limit {
+        BudgetLimit::Ready(limit) => limit,
+        BudgetLimit::Computed(root) => Limit::Computed(root),
+    });
+    let starts = first.days.map_or(Day::MIN, |days| days.first());
+    if !first.declared {
+        timeline = Timeline::new(Limit::Amount(Amount::zero(world.book.base)));
+        timeline.paint(
+            first.days.expect("late budgets have a start"),
+            match initial_limit {
+                BudgetLimit::Ready(limit) => limit,
+                BudgetLimit::Computed(root) => Limit::Computed(root),
+            },
+        );
+    }
+
+    for entry in entries.iter().copied().skip(1) {
+        if entry.allowance.per != period || entry.allowance.carries != carries {
+            diags.push(
+                Diagnostic::error(
+                    "budget-shape-change",
+                    "a dated budget change keeps its starting period and carry policy",
+                )
+                .label(
+                    entry.loc,
+                    "this change alters the budget's window or carry policy",
+                ),
+            );
+            continue;
+        }
+        let changed_funding = funding(
+            world,
+            entry.home,
+            entry.file,
+            entry.allowance.funded,
+            entry.loc,
+            diags,
+        )?;
+        if changed_funding != initial_funded {
+            diags.push(
+                Diagnostic::error(
+                    "budget-shape-change",
+                    "a dated budget change keeps its starting funding route",
+                )
+                .label(entry.loc, "this change alters the budget's funding route"),
+            );
+            continue;
+        }
+        let Some(limit) =
+            lower_budget_limit(world, purpose, entry, purpose_name, &mut nodes, diags)
+        else {
+            continue;
+        };
+        let Some(days) = entry.days else {
+            diags.push(
+                Diagnostic::error(
+                    "duplicate-budget",
+                    "a purpose has more than one starting budget",
+                )
+                .label(entry.loc, "remove the duplicate starting budget"),
+            );
+            continue;
+        };
+        timeline.paint(
+            days,
+            match limit {
+                BudgetLimit::Ready(limit) => limit,
+                BudgetLimit::Computed(root) => Limit::Computed(root),
+            },
+        );
+    }
+
+    // Every value read by a `Share` limit is a static dependency of this
+    // require. These zero-argument calls let the plan subscribe the budget law
+    // to each source purpose without allocating a second dependency table.
+    let budget_id = Id::new(world.book.budgets.len() as u32);
+    let law_id = Id::new(world.book.laws.len() as u32);
+    let window = match period {
+        Period::Month => Window::Month,
+        Period::Year => Window::Year,
+    };
+    let mut observed = Set::default();
+    for (_, limit) in timeline.within(Days::ALWAYS) {
+        if let Limit::Share { of, .. } = *limit
+            && observed.insert(of)
+        {
+            push_node(
+                &mut nodes,
+                Op::Call(
+                    Func::PurposeTotal {
+                        purpose: Some(of),
+                        window,
+                    },
+                    Box::default(),
+                ),
+                Ty::AMOUNT,
+                first.loc,
+                None,
+            );
+        }
+    }
+
+    let mut steps = Vec::new();
+    if starts != Day::MIN {
+        let date = push_node(&mut nodes, Op::Var(Var::Date), Ty::Day, first.loc, None);
+        let day = push_node(
+            &mut nodes,
+            Op::Const(Value::Day(starts)),
+            Ty::Day,
+            first.loc,
+            None,
+        );
+        let after_start = push_node(
+            &mut nodes,
+            Op::Bin(BinOp::Ge, date, day),
+            Ty::Bool,
+            first.loc,
+            Some(NodeId(0)),
+        );
+        steps.push(Step {
+            loc: first.loc,
+            kind: StepKind::When(after_start),
+        });
+    }
+    let total = push_node(
+        &mut nodes,
+        Op::Call(
+            Func::PurposeTotal {
+                purpose: None,
+                window,
+            },
+            Box::default(),
+        ),
+        Ty::AMOUNT,
+        first.loc,
+        None,
+    );
+    let cap = push_node(
+        &mut nodes,
+        Op::Call(Func::BudgetLimit(budget_id), Box::default()),
+        Ty::AMOUNT,
+        first.loc,
+        None,
+    );
+    let condition = push_node(
+        &mut nodes,
+        Op::Bin(BinOp::Le, total, cap),
+        Ty::Bool,
+        first.loc,
+        Some(NodeId(0)),
+    );
+    steps.push(Step {
+        loc: first.loc,
+        kind: StepKind::Require {
+            cond: condition,
+            otherwise: Box::default(),
+            message: None,
+            severity: Severity::Warning,
+        },
+    });
+
+    let budget = Budget {
+        purpose,
+        period,
+        limits: timeline,
+        carries,
+        law: law_id,
+        funded: initial_funded,
+        loc: first.loc,
+    };
+    let actual_budget = world.book.budgets.push(budget);
+    if actual_budget != budget_id {
+        return None;
+    }
+    world.book.laws.push(Law {
+        name: purpose_name,
+        doc: None,
+        owner: Owner::Purpose(purpose),
+        system: world.book.purposes[purpose].system,
+        trigger: Trigger::Flow,
+        budget: Some(budget_id),
+        overrides: None,
+        override_name: None,
+        rank: Rank::ZERO,
+        steps: steps.into_boxed_slice(),
+        nodes,
+        loc: first.loc,
+    });
+    if world.book.laws.len() != law_id.index() + 1 {
+        return None;
+    }
+    Some(())
+}
+
+fn lower_budget_limit<'s>(
+    world: &mut World<'s>,
+    purpose: Id<crate::book::Purpose>,
+    entry: BudgetEntry<'_, 's>,
+    name: axiom_core::Sym,
+    nodes: &mut Arena<Node>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<BudgetLimit> {
+    match entry.allowance.limit {
+        ast::Limit::Amount(ast::Amount::Literal(literal)) => {
+            let unit = match literal.unit() {
+                Some(unit) => world
+                    .commodity_of(Word {
+                        text: unit.0,
+                        loc: entry.file.loc(unit.0),
+                    })
+                    .map_err(|problem| diags.push(problem))
+                    .ok()?,
+                None => world.book.base,
+            };
+            world
+                .amount(literal.num(), unit, entry.file.loc(literal.0))
+                .map_err(|problem| diags.push(problem))
+                .ok()
+                .map(|amount| BudgetLimit::Ready(Limit::Amount(amount)))
+        }
+        ast::Limit::Amount(ast::Amount::Computed(root)) => {
+            let (program, local_root) = compile::compile_budget_limit(
+                world, diags, entry.file, entry.home, purpose, name, root,
+            )?;
+            let law_offset = nodes.len() as u32;
+            for (_, node) in program.nodes.iter() {
+                nodes.push(Node {
+                    op: offset_op(&node.op, law_offset),
+                    ty: node.ty,
+                    loc: node.loc,
+                    first: offset_node(node.first, law_offset),
+                });
+            }
+            Some(BudgetLimit::Computed(NodeId(local_root.0 + law_offset)))
+        }
+        ast::Limit::Share { percent, of } => {
+            let word = Word {
+                text: of.0,
+                loc: entry.file.loc(of.0),
+            };
+            let of = world
+                .purpose(entry.home, word)
+                .map_err(|problem| diags.push(problem))
+                .ok()?;
+            let rate = Ratio::percent(percent.mantissa as i128, percent.scale)?;
+            Some(BudgetLimit::Ready(Limit::Share { rate, of }))
+        }
+    }
+}
+
+fn funding(
+    world: &World<'_>,
+    _home: Home,
+    file: &ast::File<'_>,
+    funded: Option<ast::Funding<'_>>,
+    _loc: axiom_core::Loc,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<(Id<crate::book::Place>, Id<crate::book::Place>)>> {
+    funded
+        .map(|funding| {
+            let from = world.place(Word {
+                text: funding.from.0,
+                loc: file.loc(funding.from.0),
+            });
+            let to = world.place(Word {
+                text: funding.into.0,
+                loc: file.loc(funding.into.0),
+            });
+            match (from, to) {
+                (Ok(from), Ok(to)) => Some((from, to)),
+                (from, to) => {
+                    if let Err(problem) = from {
+                        diags.push(problem);
+                    }
+                    if let Err(problem) = to {
+                        diags.push(problem);
+                    }
+                    None
+                }
+            }
+        })
+        .map_or(Some(None), |funded| funded.map(Some))
+}
+
+fn push_node(
+    nodes: &mut Arena<Node>,
+    op: Op,
+    ty: Ty,
+    loc: axiom_core::Loc,
+    first: Option<NodeId>,
+) -> NodeId {
+    let id = NodeId(nodes.len() as u32);
+    nodes.push(Node {
+        op,
+        ty: Some(ty),
+        loc,
+        first: first.unwrap_or(id),
+    });
+    id
+}
+
+fn offset_node(node: NodeId, by: u32) -> NodeId {
+    NodeId(node.0 + by)
+}
+
+/// Moves every child reference when appending one independently compiled
+/// budget formula into its budget law's shared arena.
+fn offset_op(op: &Op, by: u32) -> Op {
+    let one = |node| offset_node(node, by);
+    match op {
+        Op::Const(value) => Op::Const(*value),
+        Op::Var(var) => Op::Var(*var),
+        Op::Local(node) => Op::Local(one(*node)),
+        Op::Field(node, field) => Op::Field(one(*node), *field),
+        Op::Param(param, keys) => Op::Param(*param, keys.iter().copied().map(one).collect()),
+        Op::Call(func, args) => Op::Call(*func, args.iter().copied().map(one).collect()),
+        Op::Of(left, right) => Op::Of(one(*left), one(*right)),
+        Op::At(left, right) => Op::At(one(*left), one(*right)),
+        Op::Select(keys) => Op::Select(keys.clone()),
+        Op::Neg(node) => Op::Neg(one(*node)),
+        Op::Not(node) => Op::Not(one(*node)),
+        Op::Bin(op, left, right) => Op::Bin(*op, one(*left), one(*right)),
+        Op::Is(node, alternatives) => {
+            Op::Is(one(*node), alternatives.iter().copied().map(one).collect())
+        }
+        Op::If(condition, yes, no) => Op::If(one(*condition), one(*yes), one(*no)),
+    }
 }
 
 /// The names some law counts into.
