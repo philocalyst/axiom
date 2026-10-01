@@ -1172,7 +1172,8 @@ fn assets_purposes_and_budgets_are_declared() {
     // A purpose's budget is its own line, and its `also` is a line of the purpose.
     let allowance = &file[groceries.budget.unwrap()];
     assert!(matches!(allowance.limit, Limit::Amount(Amount::Literal(amount)) if amount.0 == "400 USD"));
-    assert!(allowance.carries && allowance.per == Period::Month);
+    assert_eq!(allowance.carries, Some(true));
+    assert_eq!(allowance.per, Period::Month);
     assert!(matches!(&file[groceries.alsos][0].line, AlsoLine::Item(item) if item.sign == Sign::Add));
     assert!(file[groceries.alsos][0].when.is_some());
     let condo = decls.iter().find(|decl| decl.what == DeclKind::Asset).unwrap();
@@ -1181,7 +1182,7 @@ fn assets_purposes_and_budgets_are_declared() {
     let budgets: Vec<&Budget> = file.iter().collect();
     let (food, groceries) = (&budgets[0], &budgets[1]);
     assert!(matches!(food.allowance.limit, Limit::Amount(Amount::Literal(amount)) if amount.0 == "900 USD"));
-    assert_eq!((food.purpose.0, food.allowance.per, food.allowance.carries), ("food", Period::Month, false));
+    assert_eq!((food.purpose.0, food.allowance.per, food.allowance.carries), ("food", Period::Month, None));
     assert!(matches!(groceries.allowance.limit, Limit::Amount(Amount::Literal(amount)) if amount.0 == "4_000 USD"));
     assert_eq!(groceries.allowance.per, Period::Year);
     only_error("budget food 900 USD weekly\n", "unknown-period");
@@ -1191,7 +1192,8 @@ fn assets_purposes_and_budgets_are_declared() {
     let file = parse_clean("budget fun 200 USD monthly carries funded from checking into envelope\n");
     let budget: &Budget = file.iter().next().unwrap();
     let funded = budget.allowance.funded.unwrap();
-    assert!(budget.allowance.carries && (funded.from.0, funded.into.0) == ("checking", "envelope"));
+    assert_eq!(budget.allowance.carries, Some(true));
+    assert_eq!((funded.from.0, funded.into.0), ("checking", "envelope"));
     only_error("budget fun 200 USD monthly funded checking into envelope\n", "expected-keyword");
     // A purpose may state its budget once, and only a purpose has the line.
     only_error("purpose fun\n  budget 5 USD monthly\n  budget 6 USD monthly\n", "duplicate-clause");
@@ -1478,7 +1480,7 @@ fn contracts_may_leave_out_their_party_and_declarations_take_the_new_lines() {
     let file = parse_clean("budget food 900 USD monthly\nbudget fun 10% of #income monthly carries\nbudget travel 3_000 USD yearly carries\n");
     let budgets: Vec<&Budget> = file.iter().collect();
     assert!(matches!(budgets[1].allowance.limit, Limit::Share { percent, of: Name("income") } if percent.mantissa == 10));
-    assert_eq!(budgets.iter().map(|budget| budget.allowance.carries).collect::<Vec<_>>(), [false, true, true]);
+    assert_eq!(budgets.iter().map(|budget| budget.allowance.carries).collect::<Vec<_>>(), [None, Some(true), Some(true)]);
     assert_eq!(budgets[2].allowance.per, Period::Year);
     only_error("budget fun 10% monthly\n", "expected-of");
     only_error("budget fun 10% of income monthly\n", "expected-purpose");
@@ -2776,7 +2778,7 @@ fn dump_allowance(file: &File, allowance: &Allowance) -> String {
         Limit::Amount(amount) => dump_amount(file, amount),
         other => format!("{other:?}"),
     };
-    format!("{limit} {:?} {} {:?}", allowance.per, allowance.carries, allowance.funded)
+    format!("{limit} {:?} {:?} {:?}", allowance.per, allowance.carries, allowance.funded)
 }
 
 fn dump_law(file: &File, law: &Law) -> String {

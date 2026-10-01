@@ -231,7 +231,7 @@ impl<'s> Parser<'s> {
             _ => Limit::Amount(self.amount(scope)?),
         };
         let (per, _) = self.choose(&BUDGET_PERIODS, "unknown-period", "budget period")?;
-        let carries = self.eat_word("carries").is_some();
+        let carries = self.eat_word("carries").map(|_| true);
         let funded = match self.eat_word("funded") {
             Some(_) => {
                 self.keyword("from")?;

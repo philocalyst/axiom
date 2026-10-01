@@ -916,7 +916,9 @@ pub struct Allowance<'s> {
     pub per: Period,
     /// `carries`: what one window leaves unspent the next may spend, and what
     /// one overspends the next must make up.
-    pub carries: bool,
+    /// `Some(true)` means `carries` was written. `None` leaves a prior
+    /// allowance's carry setting unchanged in a dated restatement.
+    pub carries: Option<bool>,
     /// `funded from H into H`: the limit moves each window into money held for
     /// it, which the purpose's spending is drawn from first.
     pub funded: Option<Funding<'s>>,
