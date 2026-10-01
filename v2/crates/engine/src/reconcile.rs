@@ -14,18 +14,31 @@
 //! is booked to that place: either way it is posted as a flow, so parcels,
 //! basis and laws see it like any other, and recorded as a [`Pad`].
 
-use axiom_core::{Id, Qty};
-use axiom_model::{Amount, Gap, Place, Waive};
+use axiom_core::{Days, Id, Qty};
+use axiom_model::{Amount, Assert, Fault, Gap, Place, Subject, Value, Waive};
 
+use crate::eval::{self, Context, Env, Occasion};
 use crate::ledger::Ledger;
 use crate::motion::Motion;
+use crate::scope::owner_of;
 use crate::state::LastCheck;
 use crate::{Pad, explain};
 
 impl Ledger<'_, '_, '_> {
     pub(crate) fn reconcile(&mut self, index: usize) {
         let book = self.plan.book;
-        let assert = &book.asserts[index];
+        let source = &book.asserts[index];
+        let Some(amount) = self.assertion_amount(index) else {
+            return;
+        };
+        let assert = Assert {
+            day: source.day,
+            place: source.place,
+            amount,
+            computed: source.computed,
+            gap: source.gap,
+            loc: source.loc,
+        };
         let (place, unit) = (assert.place, assert.amount.unit);
         let shown = self
             .plan
@@ -54,7 +67,7 @@ impl Ledger<'_, '_, '_> {
             (Gap::Refused, false) => match blame.filter(|_| !last.unsolved_said) {
                 Some(unknown) => {
                     self.record
-                        .report(explain::unchecked(book, assert, book.flows[unknown].loc));
+                        .report(explain::unchecked(book, &assert, book.flows[unknown].loc));
                     LastCheck {
                         unsolved_said: true,
                         ..now
@@ -71,7 +84,7 @@ impl Ledger<'_, '_, '_> {
                     let report = explain::mismatch(
                         book,
                         &self.plan.events,
-                        (assert, self.plan.sides.sign(place)),
+                        (&assert, self.plan.sides.sign(place)),
                         (shown, gap - last.gap),
                         last.day,
                         &others,
@@ -83,6 +96,7 @@ impl Ledger<'_, '_, '_> {
             (Gap::Unexplained(waive), false) => {
                 self.pad(
                     index,
+                    &assert,
                     gap,
                     book.entities[book.roots.unknown]
                         .place
@@ -95,7 +109,7 @@ impl Ledger<'_, '_, '_> {
                 }
             }
             (Gap::Via { place: counter, .. }, false) => {
-                self.pad(index, gap, counter, None);
+                self.pad(index, &assert, gap, counter, None);
                 LastCheck {
                     gap: Qty::ZERO,
                     ..now
@@ -105,9 +119,41 @@ impl Ledger<'_, '_, '_> {
         self.record.checkpoints.insert((place, unit), now);
     }
 
+    /// Computes a statement amount at the statement's day. Literal assertions
+    /// take the compact direct path; computed roots share the evaluator and its
+    /// scratch buffer with laws and contract templates.
+    fn assertion_amount(&mut self, index: usize) -> Option<Amount> {
+        let (book, assertion) = (self.plan.book, &self.plan.book.asserts[index]);
+        let Some((program, root)) = assertion.computed else {
+            return Some(assertion.amount);
+        };
+        let subject = Subject::Place(assertion.place);
+        let owner = owner_of(book, subject);
+        let on = Occasion::time(assertion.day, Days::on(assertion.day));
+        let ctx = Context::new(subject, owner, &on);
+        let value = eval::program_expression(
+            Env { plan: self.plan, world: &self.world },
+            &book.assertion_programs[program],
+            root,
+            &ctx,
+            &mut self.scratch.values,
+        );
+        match value {
+            Value::Amount(amount) => Some(amount),
+            Value::Fault(fault) => {
+                self.record.report(explain::assertion_fault(book, assertion, fault));
+                None
+            }
+            _ => {
+                self.record.report(explain::assertion_fault(book, assertion, Fault::InvalidProgram));
+                None
+            }
+        }
+    }
+
     /// Posts the gap as a flow between the asserted place and `counter`.
-    fn pad(&mut self, index: usize, gap: Qty, counter: Id<Place>, waive: Option<Waive>) {
-        let (book, assert) = (self.plan.book, &self.plan.book.asserts[index]);
+    fn pad(&mut self, index: usize, assert: &Assert, gap: Qty, counter: Id<Place>, waive: Option<Waive>) {
+        let book = self.plan.book;
         // What moves into the place, in balance terms.
         let moved = self.plan.sides.display(assert.place, gap);
         self.post(&Motion::pad(book, assert, counter, moved, waive));

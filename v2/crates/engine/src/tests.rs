@@ -106,6 +106,29 @@ fn cap_shortcut_uses_typed_conversion_when_the_limit_unit_differs() {
 }
 
 #[test]
+fn a_faulted_computed_assertion_is_not_treated_as_its_zero_placeholder() {
+    let mut f = Fixture::new();
+    let (checking, usd) = (f.checking, f.usd);
+    f.assert(1, checking, 0);
+    let mut book = f.book();
+    let mut nodes = axiom_core::Arena::new();
+    nodes.push(Node {
+        op: Op::Const(Value::Amount(Amount::new(Qty::ZERO, usd))),
+        ty: None,
+        loc: Loc::new(FileId(0), 0, 1),
+        first: NodeId(0),
+    });
+    let program = book.assertion_programs.push(TemplateProgram { nodes });
+    book.asserts[0].computed = Some((program, NodeId(0)));
+
+    let run = Plan::new(&book).run(options());
+
+    assert!(run.diagnostics.iter().any(|diagnostic| diagnostic.code == "assertion-expression"));
+    assert!(run.diagnostics.iter().all(|diagnostic| diagnostic.code != "assertion"));
+    assert!(run.pads.is_empty());
+}
+
+#[test]
 fn well_known_names_resolve_once_and_are_absent_where_the_book_never_says_them() {
     let book = Fixture::new().book();
     let plan = Plan::new(&book);

@@ -411,6 +411,22 @@ fn node_id(index: usize) -> NodeId {
     NodeId(index as u32)
 }
 
+/// A computed statement value failed before reconciliation. It must not be
+/// treated as its placeholder zero amount or written into the checkpoint.
+pub(crate) fn assertion_fault(book: &Book, assertion: &Assert, fault: Fault) -> Diagnostic {
+    let (what, help) = show::fault(book, fault, assertion.day);
+    let place = show::place(book, assertion.place);
+    let mut diagnostic = Diagnostic::error(
+        "assertion-expression",
+        format!("cannot check `{place}`: {what}"),
+    )
+    .label(assertion.loc, "this computed assertion amount could not be evaluated");
+    if let Some(help) = help {
+        diagnostic = diagnostic.help(help);
+    }
+    diagnostic
+}
+
 /// A system's table has no row for the year a law asked about: the journal
 /// is older than the figures the system ships. Every law that needs a figure
 /// of that year is skipped, and this is said once.

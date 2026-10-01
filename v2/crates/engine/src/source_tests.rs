@@ -36,6 +36,23 @@ fn holding<'r>(book: &Book, run: &'r Run, place: &str, unit: &str) -> Option<&'r
     run.holdings.iter().find(|holding| holding.place == place && holding.unit == unit)
 }
 
+#[test]
+fn computed_assertion_amount_is_evaluated_during_reconciliation() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+account assets/checking
+opening 2026-01-30
+  assets/checking 50 USD
+2026-01-31 assets/checking = 50% of 100 USD
+";
+    with_run(text, day(2026, 1, 31), |book, run| {
+        assert!(run.diagnostics.iter().all(|diagnostic| diagnostic.code != "assertion"));
+        assert_eq!(holding(book, run, "assets/checking", "USD").unwrap().qty().0, 5_000);
+    });
+}
+
 // ─── Paying out of an envelope ──────────────────────────────────────────────
 
 const ENVELOPES: &str = "\

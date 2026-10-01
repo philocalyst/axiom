@@ -44,7 +44,16 @@ pub(crate) fn solve(book: &Book, events: &Events, sides: &Sides) -> Solution {
     let mut places: Vec<Id<Place>> = unknown.iter().flat_map(|&id| [book.flows[id].from, book.flows[id].to]).collect();
     places.sort_unstable();
     places.dedup();
-    let anchors = Groups::build(book.places.len(), book.asserts.iter().enumerate().map(|(i, a)| (a.place, i as u32)));
+    // A computed assertion is evaluated against the completed ledger at its
+    // day. Its placeholder `amount` is not a numeric anchor for solving `?`.
+    let anchors = Groups::build(
+        book.places.len(),
+        book.asserts
+            .iter()
+            .enumerate()
+            .filter(|(_, assertion)| assertion.computed.is_none())
+            .map(|(i, assertion)| (assertion.place, i as u32)),
+    );
 
     let world = Stretches { book, events, sides, anchors: &anchors };
     let results = par::map(&places, |&place| world.solve_place(place));
