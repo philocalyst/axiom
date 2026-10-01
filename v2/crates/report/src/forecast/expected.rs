@@ -333,8 +333,6 @@ mod tests {
         };
         let contract = Contract {
             name: house.book.names.intern("rent-promise"),
-            purpose: None,
-            description: None,
             party: Id::new(0),
             owner: Id::new(0),
             purpose: None,
