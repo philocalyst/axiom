@@ -256,6 +256,9 @@ pub(crate) struct Realized {
     pub quantity: Qty,
     /// Original parcel acquisition date for wash-sale holding-period tacking.
     pub acquired: Day,
+    /// Effective holding-period start, which may be tacked from an earlier
+    /// replacement lot even though `acquired` remains the actual buy date.
+    pub held_since: Day,
     pub held: Span,
     pub part: Option<PartId>,
     pub codes: FlowCodes,
