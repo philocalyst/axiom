@@ -115,10 +115,14 @@ kind bond-fund : fund
 commodity VTI : fund
 commodity BND : fund
 commodity QQQ : bond-fund
+entity alice : entity
+entity employer : entity
 account assets/fidelity
+  owner alice
 2026-01-01 VTI -> fidelity 10 USD
 2026-01-02 BND -> fidelity 20 USD
 2026-01-03 QQQ -> fidelity 30 USD
+2026-01-04 employer -> fidelity 40 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
     assert!(syntax.is_empty(), "{syntax:?}");
@@ -146,16 +150,47 @@ account assets/fidelity
     let flows: Vec<_> = book.flows.iter().map(|(_, flow)| flow).collect();
     let dividend_source = book.kind("fund").unwrap();
     let interest_source = book.kind("bond-fund").unwrap();
+    let alice = book.entity("alice").unwrap();
     assert_eq!(flows[0].from, vti_place);
+    assert_eq!(flows[0].owner, alice);
     assert_eq!(flows[0].purpose.unwrap().purpose, dividend);
     assert_eq!(flows[0].purpose.unwrap().source, axiom_model::Provenance::Commodity(dividend_source));
     assert_eq!(flows[1].from, bnd_place);
+    assert_eq!(flows[1].owner, alice);
     assert_eq!(flows[1].purpose.unwrap().purpose, dividend);
     assert_eq!(flows[1].purpose.unwrap().source, axiom_model::Provenance::Commodity(dividend_source));
     assert_eq!(flows[2].from, qqq_place);
+    assert_eq!(flows[2].owner, alice);
     assert_eq!(flows[2].purpose.unwrap().purpose, interest);
     assert_eq!(flows[2].purpose.unwrap().source, axiom_model::Provenance::Commodity(interest_source));
+    assert_eq!(flows[3].owner, alice, "an outside payer's owner does not override the receiving account owner");
     assert_record_indices(&book);
+}
+
+#[test]
+fn explicit_purpose_must_agree_with_a_commodity_issuer_rule() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+purpose dividend : income
+purpose interest : income
+kind fund : commodity
+  pays dividend
+commodity VTI : fund
+account assets/fidelity
+2026-01-01 VTI -> fidelity 10 USD #interest
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "purpose-disagreement"), "{diagnostics:?}");
+    assert!(book.flows.is_empty(), "a conflicting source purpose cannot be silently overridden");
 }
 
 #[test]

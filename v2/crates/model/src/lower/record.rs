@@ -47,6 +47,7 @@ struct ResolvedQuantity {
 #[derive(Clone, Default)]
 struct Tail {
     purpose: Option<Purposed>,
+    purpose_loc: Option<Loc>,
     description: Option<Text>,
     payee: Option<Id<crate::book::Entity>>,
     recognized: Option<Days>,
@@ -2768,6 +2769,33 @@ fn make_resolved_flow(
     loc: Loc,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Flow> {
+    let issuer_purpose = commodity_purpose(world, from.place);
+    if let (Some(written), Some(inferred)) = (tail.purpose, issuer_purpose)
+        && written.purpose != inferred.purpose
+    {
+        let source_loc = match inferred.source {
+            Provenance::Commodity(kind) => world.book.kinds[kind].pays.map(|pays| pays.loc),
+            _ => None,
+        };
+        let written_name = world.book.name(world.book.purposes[written.purpose].name);
+        let inferred_name = world.book.name(world.book.purposes[inferred.purpose].name);
+        let mut diagnostic = Diagnostic::error(
+            "purpose-disagreement",
+            "this flow's purpose sources disagree",
+        )
+        .label(
+            tail.purpose_loc.unwrap_or(loc),
+            format!("the written purpose is `{written_name}`"),
+        );
+        if let Some(source_loc) = source_loc {
+            diagnostic = diagnostic.label(
+                source_loc,
+                format!("the commodity kind says `{inferred_name}`"),
+            );
+        }
+        diags.push(diagnostic);
+        return None;
+    }
     let mut detail = tail.detail;
     detail.spender = from.entity;
     let detail = (detail != Detail::NONE).then(|| world.book.details.push(detail));
@@ -2782,9 +2810,17 @@ fn make_resolved_flow(
         return None;
     }
     let select = from.select;
-    let owner = world.book.places[from.place].owner;
+    let from_place = &world.book.places[from.place];
+    let to_place = &world.book.places[to.place];
+    let owner = if from_place.class != crate::book::Class::Outside {
+        from_place.owner
+    } else if to_place.class != crate::book::Class::Outside {
+        to_place.owner
+    } else {
+        from_place.owner
+    };
     let payee = tail.payee.or(to.entity).or(from.entity);
-    let purpose = tail.purpose.or_else(|| commodity_purpose(world, from.place));
+    let purpose = tail.purpose.or(issuer_purpose);
     let recognized = tail.recognized.unwrap_or(Days::on(day));
     Some(Flow {
         day,
@@ -2868,6 +2904,7 @@ fn lower_tail<'s>(
                             of,
                             source: Provenance::Written,
                         });
+                        tail.purpose_loc = Some(clause.at);
                     }
                     (Err(problem), _, _) => {
                         diags.push(problem);
@@ -3305,6 +3342,7 @@ pub(super) fn resolve_object<'s>(
 fn merge_tail(mut parent: Tail, child: Tail) -> Tail {
     if child.purpose.is_some() {
         parent.purpose = child.purpose;
+        parent.purpose_loc = child.purpose_loc;
     }
     if child.description.is_some() {
         parent.description = child.description;
