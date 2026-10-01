@@ -1882,6 +1882,27 @@ fn contracts_cover_matching_fallback_flows_by_interval_and_typed_identity() {
         let mut other_unit = template;
         other_unit.out.unit = axiom_core::Id::new(99);
         assert_eq!(rent.covers(&other_unit, day(2, 20)), ContractCoverage::None);
+
+        let mut grouped = terms(
+            Cadence::Every(Span::months(1)),
+            &[crate::On::MonthDay(15)],
+            start,
+            &[book.flows[axiom_core::Id::new(0)].clone()],
+        );
+        let mut leg_flow = book.flows[axiom_core::Id::new(0)].clone();
+        leg_flow.to = axiom_core::Id::new(99);
+        grouped.template[0].legs = vec![crate::TemplateLeg {
+            flow: leg_flow.clone(),
+            side: crate::FlowSide::Arrive,
+            quantity: crate::TemplateQuantity::Amount(None),
+        }]
+        .into();
+        let grouped = contract(Days::new(start, end).unwrap(), Timeline::new(grouped));
+        assert_eq!(
+            grouped.covers(&leg_flow, day(2, 20)),
+            ContractCoverage::Active,
+            "a named split payout belongs to the grouped contract template"
+        );
     });
 }
 

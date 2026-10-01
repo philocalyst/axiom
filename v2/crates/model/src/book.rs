@@ -883,11 +883,13 @@ impl Contract {
         if !self.days.contains(day) {
             return ContractCoverage::None;
         }
-        let regular = coverage_in_timeline(&self.terms, template, day);
+        let regular = coverage_in_timeline(&self.terms, self.days, template, day);
         let standing = self
             .standing
             .as_ref()
-            .map_or(ContractCoverage::None, |terms| coverage_in_timeline(terms, template, day));
+            .map_or(ContractCoverage::None, |terms| {
+                coverage_in_timeline(terms, self.days, template, day)
+            });
         match (regular, standing) {
             (ContractCoverage::Active, _) | (_, ContractCoverage::Active) => ContractCoverage::Active,
             (ContractCoverage::Waived, _) | (_, ContractCoverage::Waived) => ContractCoverage::Waived,
@@ -1132,8 +1134,20 @@ fn occurrences_for<'a>(
         })
 }
 
-fn coverage_in_timeline(timeline: &Timeline<Terms>, template: &Flow, day: Day) -> ContractCoverage {
-    let contains = |terms: &Terms| terms.template.iter().any(|candidate| same_flow_kind(template, &candidate.flow));
+fn template_covers_flow(terms: &Terms, template: &Flow) -> bool {
+    terms.template.iter().any(|candidate| {
+        same_flow_kind(template, &candidate.flow)
+            || candidate.legs.iter().any(|leg| same_flow_kind(template, &leg.flow))
+    })
+}
+
+fn coverage_in_timeline(
+    timeline: &Timeline<Terms>,
+    within: Days,
+    template: &Flow,
+    day: Day,
+) -> ContractCoverage {
+    let contains = |terms: &Terms| template_covers_flow(terms, template);
     let current = timeline.at(day);
     if !current.is_waived() {
         return if contains(current) { ContractCoverage::Active } else { ContractCoverage::None };
@@ -1142,9 +1156,10 @@ fn coverage_in_timeline(timeline: &Timeline<Terms>, template: &Flow, day: Day) -
         return ContractCoverage::Waived;
     }
     let nearest = timeline
-        .within(Days::ALWAYS)
+        .within(within)
         .filter(|(_, candidate)| !candidate.is_waived())
         .map(|(stretch, terms)| {
+            let stretch = stretch.intersect(within).expect("timeline stretch intersects the contract");
             let distance = if stretch.last() < day {
                 i64::from(day.0) - i64::from(stretch.last().0)
             } else if stretch.first() > day {
