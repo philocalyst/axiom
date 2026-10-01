@@ -195,7 +195,15 @@ fn simulate(checkpoints: &[Day], committed: &[Qty], variable: &Variable, paths: 
             Share { days: i64::from(pair[1].0 - pair[0].0), of: i64::from(days_in_month(year, month)) }
         })
         .collect();
-    Some(bands::simulate(&standing, &shares, &variable.categories, paths as usize, SEED))
+    Some(bands::simulate(
+        &standing,
+        &shares,
+        &variable.amounts,
+        &variable.categories,
+        variable.months,
+        paths as usize,
+        SEED,
+    ))
 }
 
 // ─── Sections ───────────────────────────────────────────────────────────────

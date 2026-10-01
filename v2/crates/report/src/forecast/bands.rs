@@ -50,14 +50,25 @@ impl Bands {
 /// is where the forecast stands at the end of month `m`, `shares[m]` how much
 /// of a month it is, and `history` holds each category's spending in past
 /// months.
-pub fn simulate(committed: &[i64], shares: &[Share], history: &[Vec<i64>], paths: usize, seed: u64) -> Bands {
+pub fn simulate(
+    committed: &[i64],
+    shares: &[Share],
+    history: &[i64],
+    categories: &[usize],
+    months: usize,
+    paths: usize,
+    seed: u64,
+) -> Bands {
+    debug_assert!(months > 0);
+    debug_assert!(history.len() % months == 0);
+    debug_assert!(categories.iter().all(|&index| index < history.len() / months));
     let groups = paths.div_ceil(LANES);
     let mut bands = Bands { paths: groups * LANES, values: vec![0; committed.len() * groups * LANES] };
     for group in 0..groups {
         let mut streams = Streams::seeded(seed, group as u64);
         let mut spent = [0i64; LANES];
         for (month, (&standing, &share)) in committed.iter().zip(shares).enumerate() {
-            let drawn = draw_month(&mut streams, history);
+            let drawn = draw_month(&mut streams, history, categories, months);
             for lane in 0..LANES {
                 spent[lane] += share.apply(drawn[lane]);
                 bands.values[month * bands.paths + group * LANES + lane] = standing - spent[lane];
@@ -68,9 +79,15 @@ pub fn simulate(committed: &[i64], shares: &[Share], history: &[Vec<i64>], paths
 }
 
 /// One month of spending per lane: a random past month for every category.
-fn draw_month(streams: &mut Streams, history: &[Vec<i64>]) -> [i64; LANES] {
+fn draw_month(
+    streams: &mut Streams,
+    history: &[i64],
+    categories: &[usize],
+    months: usize,
+) -> [i64; LANES] {
     let mut drawn = [0i64; LANES];
-    for category in history.iter().filter(|category| !category.is_empty()) {
+    for &index in categories {
+        let category = &history[index * months..][..months];
         let picks = streams.below(category.len());
         for lane in 0..LANES {
             drawn[lane] += category[picks[lane]];
@@ -134,7 +151,7 @@ mod tests {
     #[test]
     fn without_variation_every_path_agrees() {
         // One category that always cost 100: after k months every path is 100·k short.
-        let bands = simulate(&[1_000, 1_000, 1_000], &[WHOLE; 3], &[vec![100]], 16, 7);
+        let bands = simulate(&[1_000, 1_000, 1_000], &[WHOLE; 3], &[100], &[0], 1, 16, 7);
         assert_eq!(bands.paths(), 16);
         assert_eq!(bands.percentiles(0), [900; 3]);
         assert_eq!(bands.percentiles(2), [700; 3]);
@@ -142,8 +159,9 @@ mod tests {
 
     #[test]
     fn the_same_seed_gives_the_same_bands_and_they_are_ordered() {
-        let history = vec![vec![0, 100, 200, 300, 400], vec![50, 50, 900]];
-        let run = |seed| simulate(&[10_000; 6], &[WHOLE; 6], &history, 1_000, seed);
+        let history = [0, 100, 200, 300, 400, 50, 50, 900];
+        let categories = [0, 1];
+        let run = |seed| simulate(&[10_000; 6], &[WHOLE; 6], &history, &categories, 5, 1_000, seed);
         let (a, b) = (run(42), run(42));
         for month in 0..6 {
             let [low, middle, high] = a.percentiles(month);
@@ -158,8 +176,21 @@ mod tests {
     #[test]
     fn a_partial_month_draws_a_partial_share() {
         let half = Share { days: 15, of: 30 };
-        let bands = simulate(&[0], &[half], &[vec![1_001]], 8, 1);
+        let bands = simulate(&[0], &[half], &[1_001], &[0], 1, 8, 1);
         // Half of 1,001 is 500.5, which rounds half to even: 500.
         assert_eq!(bands.percentiles(0), [-500; 3]);
+    }
+
+    #[test]
+    fn category_indices_preserve_sorted_sampling_order_without_repacking_rows() {
+        let committed = [5_000; 4];
+        let shares = [WHOLE; 4];
+        let sorted = [10, 20, 30, 40, 100, 150, 200, 250];
+        let permuted = [100, 150, 200, 250, 10, 20, 30, 40];
+        let a = simulate(&committed, &shares, &sorted, &[0, 1], 4, 256, 19);
+        let b = simulate(&committed, &shares, &permuted, &[1, 0], 4, 256, 19);
+        for month in 0..committed.len() {
+            assert_eq!(a.percentiles(month), b.percentiles(month));
+        }
     }
 }

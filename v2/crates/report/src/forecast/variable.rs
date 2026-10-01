@@ -15,8 +15,10 @@ use crate::places::{Side, category, v3_side};
 /// leaving out the flows that plans and habits already project. This is the
 /// variable part of spending, the part the bands bootstrap.
 pub struct Variable {
-    /// One series per category, one figure per month, oldest first, in base quanta.
-    pub categories: Vec<Vec<i64>>,
+    /// Month-major rows in one allocation, in base quanta.
+    pub amounts: Vec<i64>,
+    /// Category row indices, sorted by the category id for reproducibility.
+    pub categories: Vec<usize>,
     pub months: usize,
 }
 
@@ -39,7 +41,7 @@ impl Variable {
 
 fn place_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
         let book = lens.book;
-        let none = Variable { categories: Vec::new(), months: 0 };
+        let none = Variable { amounts: Vec::new(), categories: Vec::new(), months: 0 };
         let first_spent = postings(book, run).find(|posting| spending(lens, posting).next().is_some());
         let Some(first) = first_spent.map(|posting| posting.flow.day) else { return none };
         let last_full_month = run.today.month_start().add_days(-1);
@@ -48,16 +50,22 @@ fn place_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Va
         }
 
         let months = Periods::covering(Period::Month, first, last_full_month);
-        let mut categories: BTreeMap<Id<Place>, Vec<i64>> = BTreeMap::new();
+        let mut categories: BTreeMap<Id<Place>, usize> = BTreeMap::new();
+        let mut amounts = Vec::new();
         let real =
             postings(book, run).filter(|posting| posting.is_real_on(last_full_month) && !explained(posting.flow));
         for posting in real {
             let Some(month) = months.index_of(posting.flow.day) else { continue };
             for (place, qty) in spending(lens, &posting) {
-                categories.entry(category(book, place)).or_insert_with(|| vec![0; months.len()])[month] += qty.0;
+                let index = *categories.entry(category(book, place)).or_insert_with(|| {
+                    let index = amounts.len() / months.len();
+                    amounts.resize((index + 1) * months.len(), 0);
+                    index
+                });
+                amounts[index * months.len() + month] += qty.0;
             }
         }
-        Variable { categories: categories.into_values().collect(), months: months.len() }
+        Variable { amounts, categories: categories.into_values().collect(), months: months.len() }
 }
 
 /// Spending history grouped under the first child of the spending root. A
@@ -65,7 +73,7 @@ fn place_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Va
 /// offsets its purpose in the month it is recognized.
 fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> Variable {
     let book = lens.book;
-    let none = Variable { categories: Vec::new(), months: 0 };
+    let none = Variable { amounts: Vec::new(), categories: Vec::new(), months: 0 };
     let first = postings(book, run)
         .filter(|posting| posting.is_real_on(run.today) && !explained(posting.flow))
         .filter_map(|posting| spending_purpose(lens, posting).map(|_| posting.flow.recognized.first()))
@@ -77,7 +85,8 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
     }
 
     let months = Periods::covering(Period::Month, first, last_full_month);
-    let mut categories: BTreeMap<Id<Purpose>, Vec<i64>> = BTreeMap::new();
+    let mut categories: BTreeMap<Id<Purpose>, usize> = BTreeMap::new();
+    let mut amounts = Vec::new();
     for posting in postings(book, run).filter(|posting| posting.is_real_on(last_full_month) && !explained(posting.flow)) {
         let Some((category, amount)) = spending_purpose(lens, posting) else { continue };
         for month in months.overlapping(posting.flow.recognized.first(), posting.flow.recognized.last()) {
@@ -86,10 +95,15 @@ fn purpose_history(lens: Lens, run: &Run, explained: impl Fn(&Flow) -> bool) -> 
                 continue;
             };
             let part = spread(amount, posting.flow.recognized, happened);
-            categories.entry(category).or_insert_with(|| vec![0; months.len()])[month] += part.0;
+            let index = *categories.entry(category).or_insert_with(|| {
+                let index = amounts.len() / months.len();
+                amounts.resize((index + 1) * months.len(), 0);
+                index
+            });
+            amounts[index * months.len() + month] += part.0;
         }
     }
-    Variable { categories: categories.into_values().collect(), months: months.len() }
+    Variable { amounts, categories: categories.into_values().collect(), months: months.len() }
 }
 
 /// The first purpose beneath `spending` and this flow's signed amount, if the
@@ -168,7 +182,9 @@ opening 2026-01-01
         with_run(source, Day::from_ymd(2026, 5, 15).unwrap(), |book, run| {
             let whose = Whose::default();
             let variable = Variable::from_history(Lens::new(book, &whose, run.today), run, |_| false);
-            assert_eq!(variable.categories, [vec![10_000; 4]], "four months of groceries, and no depreciation");
+            assert_eq!(variable.categories, [0]);
+            assert_eq!(variable.amounts, [10_000; 4], "four months of groceries, and no depreciation");
+            assert_eq!(variable.months, 4);
         });
     }
 
@@ -195,7 +211,8 @@ opening 2026-01-01
         with_run(source, Day::from_ymd(2026, 5, 15).unwrap(), |book, run| {
             let whose = Whose::default();
             let variable = Variable::from_history(Lens::new(book, &whose, run.today), run, |_| false);
-            assert_eq!(variable.categories, [vec![10_000; 4]]);
+            assert_eq!(variable.categories, [0]);
+            assert_eq!(variable.amounts, [10_000; 4]);
             assert_eq!(variable.months, 4);
         });
     }
