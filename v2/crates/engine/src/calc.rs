@@ -11,8 +11,8 @@
 
 use std::cmp::Ordering;
 
-use axiom_core::{Day, Days, Id, Qty, Ratio, Span, day::days_in_month};
-use axiom_model::{Amount, BinOp, Book, Bracket, Commodity, Fault, Value, Window};
+use axiom_core::{Day, Days, Dim, Id, Qty, Ratio, Span, day::days_in_month};
+use axiom_model::{Amount, BinOp, Book, Bracket, Commodity, Fault, Ty, Value, Window};
 
 pub(crate) struct Calc<'a, 's> {
     pub book: &'a Book<'s>,
@@ -21,6 +21,13 @@ pub(crate) struct Calc<'a, 's> {
 }
 
 const TYPED: &str = "the model type-checks operands";
+
+fn dimension(ty: Ty) -> Option<Dim<Id<Commodity>>> {
+    match ty {
+        Ty::Amount(dim) => Some(dim),
+        _ => None,
+    }
+}
 
 impl Calc<'_, '_> {
     pub fn convert(&self, amount: Amount, unit: Id<Commodity>) -> Result<Amount, Fault> {
@@ -49,6 +56,163 @@ impl Calc<'_, '_> {
             _ => self.compare(op, left, right).map(Value::Bool),
         };
         result.unwrap_or_else(Value::Fault)
+    }
+
+    /// Evaluates an operation with the dimensions the compiler assigned to
+    /// each operand. Param rates remain natural ratios in `Value::Num`; when a
+    /// rate is applied to a quantity, the result is rescaled once from the
+    /// source commodity's quantum to the result commodity's quantum.
+    pub fn binary_typed(&self, op: BinOp, left: Value, right: Value, lty: Ty, rty: Ty, out: Ty) -> Value {
+        let left = self.typed_value(left, lty);
+        let right = self.typed_value(right, rty);
+        if matches!(left, Value::Fault(_)) {
+            return left;
+        }
+        if matches!(right, Value::Fault(_)) {
+            return right;
+        }
+        if matches!(op, BinOp::Mul) {
+            return self
+                .product_typed(left, right, dimension(lty), dimension(rty), dimension(out))
+                .unwrap_or_else(Value::Fault);
+        }
+        if matches!(op, BinOp::Div) {
+            return self
+                .quotient_typed(left, right, dimension(lty), dimension(rty), dimension(out))
+                .unwrap_or_else(Value::Fault);
+        }
+        self.binary(op, left, right)
+    }
+
+    /// Rejects a runtime amount whose unit disagrees with a statically known
+    /// commodity. `Any` remains dynamic and is handled by the ordinary price
+    /// conversion rules.
+    pub fn typed_value(&self, value: Value, ty: Ty) -> Value {
+        match (value, ty) {
+            (Value::Amount(amount), Ty::Amount(Dim::Of(expected))) if amount.unit != expected => {
+                Value::Fault(Fault::UnitMismatch { found: amount.unit, expected })
+            }
+            // A typed parameter row stores its written number naturally; its
+            // declaration supplies the amount unit. Compound dimensions such
+            // as USD/MI deliberately remain a natural ratio for `@`/`*`.
+            (Value::Num(value), Ty::Amount(Dim::Of(unit))) => {
+                let scale = self.book.commodities[unit].scale;
+                let quantum = (0..scale).try_fold(1i128, |value, _| value.checked_mul(10));
+                let amount = quantum
+                    .and_then(|quantum| Ratio::new(quantum, 1))
+                    .and_then(|quantum| value.checked_mul(quantum))
+                    .and_then(|value| i64::try_from(value.round()).ok());
+                amount.map_or(Value::Fault(Fault::Overflow), |qty| Value::Amount(Amount::new(Qty(qty), unit)))
+            }
+            (other, _) => other,
+        }
+    }
+
+    fn product_typed(
+        &self,
+        left: Value,
+        right: Value,
+        ldim: Option<Dim<Id<Commodity>>>,
+        rdim: Option<Dim<Id<Commodity>>>,
+        output: Option<Dim<Id<Commodity>>>,
+    ) -> Result<Value, Fault> {
+        match (left, right, ldim, rdim, output) {
+            (Value::Amount(amount), Value::Num(rate), Some(Dim::Of(unit)), Some(Dim::Number), Some(Dim::Of(out)))
+            | (Value::Num(rate), Value::Amount(amount), Some(Dim::Number), Some(Dim::Of(unit)), Some(Dim::Of(out)))
+                if unit == out =>
+            {
+                self.checked_amount_unit(amount, unit)?;
+                Ok(Value::Amount(Amount::new(amount.qty.scale(rate).ok_or(Fault::Overflow)?, out)))
+            }
+            (
+                Value::Amount(amount),
+                Value::Num(rate),
+                Some(Dim::Of(unit)),
+                Some(Dim::Per(out, per)),
+                Some(Dim::Of(result)),
+            )
+            | (
+                Value::Num(rate),
+                Value::Amount(amount),
+                Some(Dim::Per(out, per)),
+                Some(Dim::Of(unit)),
+                Some(Dim::Of(result)),
+            ) if unit == per && out == result => {
+                self.checked_amount_unit(amount, unit)?;
+                let scaled = self.scale_between(amount.qty, rate, unit, out)?;
+                Ok(Value::Amount(Amount::new(scaled, out)))
+            }
+            (Value::Empty, Value::Num(_), ..) | (Value::Num(_), Value::Empty, ..) => Ok(Value::Empty),
+            (Value::Num(a), Value::Num(b), ..) => Ok(Value::Num(a.checked_mul(b).ok_or(Fault::Overflow)?)),
+            _ => self.product(left, right),
+        }
+    }
+
+    fn quotient_typed(
+        &self,
+        left: Value,
+        right: Value,
+        ldim: Option<Dim<Id<Commodity>>>,
+        rdim: Option<Dim<Id<Commodity>>>,
+        output: Option<Dim<Id<Commodity>>>,
+    ) -> Result<Value, Fault> {
+        match (left, right, ldim, rdim, output) {
+            (
+                Value::Amount(a),
+                Value::Amount(b),
+                Some(Dim::Of(from)),
+                Some(Dim::Of(by)),
+                Some(Dim::Per(out, over)),
+            ) if out == from && over == by => {
+                self.checked_amount_unit(a, from)?;
+                self.checked_amount_unit(b, by)?;
+                let ratio = Ratio::new(a.qty.0 as i128, b.qty.0 as i128)
+                    .ok_or(if b.qty.is_zero() { Fault::DivideByZero } else { Fault::Overflow })?;
+                Ok(Value::Num(ratio.checked_mul(self.unit_factor(from, by)?).ok_or(Fault::Overflow)?))
+            }
+            (Value::Amount(a), Value::Num(n), Some(Dim::Of(unit)), Some(Dim::Number), Some(Dim::Of(out)))
+                if unit == out =>
+            {
+                self.checked_amount_unit(a, unit)?;
+                let by = n.recip().ok_or(Fault::DivideByZero)?;
+                Ok(Value::Amount(Amount::new(a.qty.scale(by).ok_or(Fault::Overflow)?, out)))
+            }
+            (
+                Value::Amount(a),
+                Value::Num(rate),
+                Some(Dim::Of(from)),
+                Some(Dim::Per(per, to)),
+                Some(Dim::Of(out)),
+            ) if from == per && to == out => {
+                self.checked_amount_unit(a, from)?;
+                let inverse = rate.recip().ok_or(Fault::DivideByZero)?;
+                Ok(Value::Amount(Amount::new(self.scale_between(a.qty, inverse, from, to)?, to)))
+            }
+            (Value::Empty, Value::Num(_), ..) => Ok(Value::Empty),
+            (Value::Num(a), Value::Num(b), ..) => Ok(Value::Num(a.checked_div(b).ok_or(Fault::DivideByZero)?)),
+            _ => self.quotient(left, right),
+        }
+    }
+
+    fn checked_amount_unit(&self, amount: Amount, expected: Id<Commodity>) -> Result<(), Fault> {
+        if amount.unit == expected {
+            Ok(())
+        } else {
+            Err(Fault::UnitMismatch { found: amount.unit, expected })
+        }
+    }
+
+    fn scale_between(&self, qty: Qty, factor: Ratio, from: Id<Commodity>, to: Id<Commodity>) -> Result<Qty, Fault> {
+        let multiplier = factor.checked_mul(self.unit_factor(from, to)?).ok_or(Fault::Overflow)?;
+        qty.scale(multiplier).ok_or(Fault::Overflow)
+    }
+
+    /// The ratio between the quanta of two commodities: 10^to / 10^from.
+    fn unit_factor(&self, from: Id<Commodity>, to: Id<Commodity>) -> Result<Ratio, Fault> {
+        let power = |scale: u8| (0..scale).try_fold(1i128, |value, _| value.checked_mul(10));
+        let numerator = power(self.book.commodities[to].scale).ok_or(Fault::Overflow)?;
+        let denominator = power(self.book.commodities[from].scale).ok_or(Fault::Overflow)?;
+        Ratio::new(numerator, denominator).ok_or(Fault::Overflow)
     }
 
     fn sum(&self, minus: bool, left: Value, right: Value) -> Result<Value, Fault> {

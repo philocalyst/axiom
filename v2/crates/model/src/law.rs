@@ -534,6 +534,8 @@ pub enum Fault {
         unit: Id<Commodity>,
         quote: Id<Commodity>,
     },
+    /// A runtime amount disagrees with the commodity the expression declared.
+    UnitMismatch { found: Id<Commodity>, expected: Id<Commodity> },
     /// A property the subject never set and whose kind gives no default.
     Unset(Sym),
     /// A contract template input was not bound for this occurrence.

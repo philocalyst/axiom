@@ -6,6 +6,8 @@
 //! place under that one", "is this kind a 401k", and "does this jurisdiction
 //! include that one" are all interval tests.
 
+use std::cmp::Ordering;
+
 use axiom_core::day::days_in_month;
 use axiom_core::{
     Arena, Day, Days, Dim, Groups, Id, Interner, Loc, Map, Qty, Ratio, Run, Span, Sym, Timeline, Tree, calendar,
@@ -1702,8 +1704,22 @@ impl Param {
     /// or before `day`. Complete key tuples and then dates must be sorted.
     /// Both tuple bounds and the dated row are found by binary search.
     pub fn row_index(&self, day: Day, keys: &[Sym]) -> Option<(u32, &ParamRow)> {
-        let first = self.rows.partition_point(|row| row.names.as_ref() < keys);
-        let after = first + self.rows[first..].partition_point(|row| row.names.as_ref() <= keys);
+        self.row_index_by(day, |row_keys| row_keys.cmp(keys))
+    }
+
+    /// The stable index and row using an allocation-free comparison against a
+    /// caller's typed key source. The comparator orders a row's full name
+    /// tuple against the requested tuple.
+    pub fn row_index_by(
+        &self,
+        day: Day,
+        mut compare_keys: impl FnMut(&[Sym]) -> Ordering,
+    ) -> Option<(u32, &ParamRow)> {
+        let first = self.rows.partition_point(|row| compare_keys(&row.names) == Ordering::Less);
+        if first == self.rows.len() || compare_keys(&self.rows[first].names) != Ordering::Equal {
+            return None;
+        }
+        let after = first + self.rows[first..].partition_point(|row| compare_keys(&row.names) != Ordering::Greater);
         let matching = &self.rows[first..after];
         let upto = matching.partition_point(|row| row.since.is_none_or(|since| since <= day));
         let local_index = upto.checked_sub(1)?;
@@ -1750,6 +1766,11 @@ mod param_lookup_tests {
         let (index, row) = param.row_index(day, &family_key).unwrap();
         assert_eq!(index, 1);
         assert_eq!(row.value, Value::Num(Ratio::int(200)));
+        assert_eq!(
+            param.row_index_by(day, |row_keys| row_keys.cmp(&family_key)).unwrap().0,
+            index,
+            "the borrowed comparator selects the same full tuple without a key vector"
+        );
         assert_eq!(param.row_index(day, &[self_only]).unwrap().0, 2);
         assert!(param.row_index(day, &[missing_middle]).is_none());
         assert!(param.row_index(day, &[missing_end]).is_none());

@@ -9,7 +9,7 @@
 //! [`Ledger`] borrows it, a fork copies only the world, the clock and the
 //! records, and any number of threads can fold from it at once.
 
-use axiom_core::{Day, Diagnostic, Groups, Id, Map, Ratio, Set, Sym};
+use axiom_core::{Day, Diagnostic, Groups, Id, Map, Qty, Ratio, Set, Sym};
 use axiom_model::{Asset, Book, Commodity, Entity, Flow, Func, Kind, Op, Place, Rule, Share, Subject, Ty, Value};
 
 use crate::sides::Sides;
@@ -163,6 +163,18 @@ impl<'b, 's> Plan<'b, 's> {
         &self.entity_owners[entity]
     }
 
+    /// Splits a signed quantity among a place's effective owners. Cumulative
+    /// boundaries are rounded once and the final owner receives the remainder,
+    /// so positive and negative amounts both conserve every quantum.
+    pub fn allocate(&self, place: Id<Place>, amount: Qty) -> impl Iterator<Item = (OwnerShare, Qty)> + '_ {
+        allocate_owners(self.owners_of(place), amount)
+    }
+
+    /// Splits a signed quantity among an entity's effective owners.
+    pub fn allocate_entity(&self, entity: Id<Entity>, amount: Qty) -> impl Iterator<Item = (OwnerShare, Qty)> + '_ {
+        allocate_owners(self.owners_of_entity(entity), amount)
+    }
+
     /// The names looked up by spelling, resolved once.
     pub fn known(&self) -> Known {
         self.known
@@ -224,6 +236,26 @@ impl<'b, 's> Plan<'b, 's> {
     pub(crate) fn problems(&self) -> Vec<Diagnostic> {
         self.problems.clone()
     }
+}
+
+fn allocate_owners(owners: &[OwnerShare], amount: Qty) -> impl Iterator<Item = (OwnerShare, Qty)> + '_ {
+    let last = owners.len().saturating_sub(1);
+    owners.iter().copied().enumerate().scan(
+        (Ratio::ZERO, Qty::ZERO),
+        move |(cumulative_share, allocated), (index, owner)| {
+            *cumulative_share = cumulative_share
+                .checked_add(owner.share)
+                .expect("effective owner shares fit the plan's checked ratios");
+            let boundary = if index == last {
+                amount
+            } else {
+                amount.scale(*cumulative_share).expect("an owner's quantity fits the source quantity")
+            };
+            let part = boundary - *allocated;
+            *allocated = boundary;
+            Some((owner, part))
+        },
+    )
 }
 
 fn entity_owners(book: &Book, diagnostics: &mut Vec<Diagnostic>) -> Groups<Entity, OwnerShare> {

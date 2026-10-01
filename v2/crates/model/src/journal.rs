@@ -108,7 +108,8 @@ pub struct RuntimeFlow {
 
 impl RuntimeFlow {
     pub fn source(flow: Flow) -> RuntimeFlow {
-        RuntimeFlow { txn: RuntimeTxn::journal(flow.txn), flow, detail: None }
+        let txn = RuntimeTxn::journal(flow.txn).expect("a source flow must not carry the template transaction sentinel");
+        RuntimeFlow { txn, flow, detail: None }
     }
 }
 
@@ -117,10 +118,25 @@ impl RuntimeFlow {
 /// Contract occurrence identity is stable whether or not a journal
 /// transaction later keeps it. Its optional source transaction is provenance
 /// only, not part of the key used to merge lots or deduplicate occurrences.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub struct JournalTxn(Id<Txn>);
+
+impl JournalTxn {
+    /// A source transaction may be wrapped only when it is a real journal
+    /// transaction, never the template sentinel. This does not check Book bounds.
+    pub fn new(txn: Id<Txn>) -> Option<JournalTxn> {
+        (txn != TEMPLATE_TXN).then_some(JournalTxn(txn))
+    }
+
+    pub fn id(self) -> Id<Txn> {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum RuntimeTxn {
     /// A transaction recorded in the Book.
-    Journal(Id<Txn>),
+    Journal(JournalTxn),
     /// One occurrence from a contract schedule. The same key is shared by all
     /// grouped headers, legs, and items in that occurrence.
     ContractOccurrence {
@@ -128,7 +144,7 @@ pub enum RuntimeTxn {
         schedule: ScheduleKind,
         day: Day,
         ordinal: u32,
-        source: Option<Id<Txn>>,
+        source: Option<JournalTxn>,
     },
     /// A balance-closing or other runtime adjustment with no journal source.
     /// It is local to a place and day, so it cannot masquerade as a Book ID.
@@ -136,17 +152,32 @@ pub enum RuntimeTxn {
 }
 
 impl RuntimeTxn {
-    pub fn journal(txn: Id<Txn>) -> RuntimeTxn {
-        assert_ne!(txn, TEMPLATE_TXN, "template transaction is not a Book transaction");
-        RuntimeTxn::Journal(txn)
+    pub fn journal(txn: Id<Txn>) -> Option<RuntimeTxn> {
+        JournalTxn::new(txn).map(RuntimeTxn::Journal)
+    }
+
+    pub fn contract_occurrence(
+        contract: Id<Contract>,
+        schedule: ScheduleKind,
+        day: Day,
+        ordinal: u32,
+        source: Option<Id<Txn>>,
+    ) -> RuntimeTxn {
+        RuntimeTxn::ContractOccurrence {
+            contract,
+            schedule,
+            day,
+            ordinal,
+            source: source.and_then(JournalTxn::new),
+        }
     }
 
     /// The actual Book transaction that supplies source location/codes, if
     /// this runtime flow came from one.
     pub fn source_txn(self) -> Option<Id<Txn>> {
         match self {
-            RuntimeTxn::Journal(txn) => (txn != TEMPLATE_TXN).then_some(txn),
-            RuntimeTxn::ContractOccurrence { source, .. } => source.filter(|&txn| txn != TEMPLATE_TXN),
+            RuntimeTxn::Journal(txn) => Some(txn.id()),
+            RuntimeTxn::ContractOccurrence { source, .. } => source.map(JournalTxn::id),
             RuntimeTxn::Adjustment { .. } => None,
         }
     }
@@ -199,13 +230,13 @@ mod runtime_txn_tests {
 
     #[test]
     fn contract_identity_is_stable_when_a_journal_transaction_keeps_it() {
-        let key = |source| RuntimeTxn::ContractOccurrence {
-            contract: Id::new(2),
-            schedule: ScheduleKind::Standing,
-            day: Day(42),
-            ordinal: 3,
+        let key = |source| RuntimeTxn::contract_occurrence(
+            Id::new(2),
+            ScheduleKind::Standing,
+            Day(42),
+            3,
             source,
-        };
+        );
         assert_eq!(key(None), key(Some(Id::new(9))));
         assert_eq!(key(None).source_txn(), None);
         assert_eq!(key(Some(Id::new(9))).source_txn(), Some(Id::new(9)));
@@ -220,7 +251,13 @@ mod runtime_txn_tests {
             ordinal: 3,
             source: None,
         };
-        let kept = RuntimeTxn::ContractOccurrence { source: Some(Id::new(9)), ..base };
+        let kept = RuntimeTxn::contract_occurrence(
+            Id::new(2),
+            ScheduleKind::Regular,
+            Day(42),
+            3,
+            Some(Id::new(9)),
+        );
         let standing = RuntimeTxn::ContractOccurrence { schedule: ScheduleKind::Standing, ..base };
         let next = RuntimeTxn::ContractOccurrence { ordinal: 4, ..base };
         assert_eq!(base, kept);
@@ -235,9 +272,16 @@ mod runtime_txn_tests {
         assert_ne!(hash(base), hash(standing));
         assert_eq!(base.source_txn(), None);
         assert_eq!(RuntimeTxn::Adjustment { place: Id::new(4), day: Day(42) }.source_txn(), None);
-        assert_eq!(RuntimeTxn::Journal(TEMPLATE_TXN).source_txn(), None);
+        assert!(JournalTxn::new(TEMPLATE_TXN).is_none());
         assert_eq!(
-            RuntimeTxn::ContractOccurrence { source: Some(TEMPLATE_TXN), ..base }.source_txn(),
+            RuntimeTxn::contract_occurrence(
+                Id::new(2),
+                ScheduleKind::Regular,
+                Day(42),
+                3,
+                Some(TEMPLATE_TXN),
+            )
+            .source_txn(),
             None
         );
     }

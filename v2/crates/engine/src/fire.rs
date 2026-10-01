@@ -388,6 +388,7 @@ impl Ledger<'_, '_, '_> {
             Fault::Unset(name) => Missing::Property(holder, name),
             Fault::NoRow(param) if book.params[param].system.is_some() => Missing::Figures(ctx.over.first().year()),
             Fault::NoRow(param) => Missing::Row(param),
+            Fault::UnitMismatch { .. } => Missing::Arithmetic(rule.law, step as u32),
             Fault::DivideByZero | Fault::Overflow => Missing::Arithmetic(rule.law, step as u32),
         };
         if self.record.missing.insert(missing) {

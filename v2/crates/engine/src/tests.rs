@@ -4,7 +4,7 @@
 //! clippy reads as inconsistent digit grouping.
 #![allow(clippy::inconsistent_digit_grouping)]
 
-use axiom_core::{Day, Diagnostic, Disposition, Days, FileId, Groups, Id, Loc, Qty, Ratio, Severity, Tree};
+use axiom_core::{Day, Diagnostic, Disposition, Dim, Days, FileId, Groups, Id, Loc, Qty, Ratio, Severity, Tree};
 use axiom_model::*;
 
 use crate::fixture::{Fixture, LawBuilder, span};
@@ -27,6 +27,48 @@ fn diagnostic<'a>(run: &'a Run, code: &str) -> &'a Diagnostic {
         .iter()
         .find(|d| d.code == code)
         .unwrap_or_else(|| panic!("no `{code}` diagnostic in {:?}", run.diagnostics))
+}
+
+#[test]
+fn dimensional_prices_apply_the_result_commodity_scale_once() {
+    let fixture = Fixture::new();
+    let (usd, mile) = (fixture.usd, fixture.vti);
+    let book = fixture.book();
+    let calc = crate::calc::Calc { book: &book, day: Day(1000) };
+    let price = Value::Num(Ratio::new(7, 10).unwrap());
+    let rate_ty = Ty::Amount(Dim::Per(usd, mile));
+    let distance_ty = Ty::Amount(Dim::Of(mile));
+    let money_ty = Ty::Amount(Dim::Of(usd));
+
+    let money = calc.binary_typed(
+        BinOp::Mul,
+        Value::Amount(Amount::new(Qty(44), mile)),
+        price,
+        distance_ty,
+        rate_ty,
+        money_ty,
+    );
+    assert_eq!(money, Value::Amount(Amount::new(Qty(3_080), usd)));
+
+    let distance = calc.binary_typed(
+        BinOp::Div,
+        money,
+        price,
+        money_ty,
+        rate_ty,
+        distance_ty,
+    );
+    assert_eq!(distance, Value::Amount(Amount::new(Qty(44), mile)));
+
+    assert_eq!(
+        calc.typed_value(Value::Num(Ratio::new(5_840, 100).unwrap()), money_ty),
+        Value::Amount(Amount::new(Qty(5_840), usd)),
+        "a unit-bearing parameter number becomes quanta in its declared unit"
+    );
+    assert_eq!(
+        calc.typed_value(Value::Amount(Amount::new(Qty(44), mile)), money_ty),
+        Value::Fault(Fault::UnitMismatch { found: mile, expected: usd })
+    );
 }
 
 #[test]
@@ -69,6 +111,12 @@ fn effective_owners_compose_place_shares_through_nested_entities() {
             crate::OwnerShare { owner: household, share: Ratio::new(3, 4).unwrap() },
         ]
     );
+    let positive: Vec<_> = plan.allocate(place, Qty(101)).collect();
+    let negative: Vec<_> = plan.allocate(place, Qty(-101)).collect();
+    assert_eq!(positive.iter().map(|(_, qty)| *qty).sum::<Qty>(), Qty(101));
+    assert_eq!(negative.iter().map(|(_, qty)| *qty).sum::<Qty>(), Qty(-101));
+    assert_eq!(positive[0].1, Qty(71), "cumulative owner boundary rounds once");
+    assert_eq!(negative[0].1, Qty(-71), "signed allocations use the same boundary");
 }
 
 #[test]
@@ -993,7 +1041,7 @@ fn restricted_money_stays_tied_and_is_spent_first_only_where_its_laws_permit() {
         qty: Qty(amount),
         basis: Qty(amount),
         acquired: Day(2),
-        txn: RuntimeTxn::journal(Id::new(txn)),
+        txn: RuntimeTxn::journal(Id::new(txn)).unwrap(),
         codes: FlowCodes {
             header: axiom_core::Run::new(Id::new(0), 0),
             local: axiom_core::Run::new(Id::new(0), 0),

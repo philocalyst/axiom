@@ -59,6 +59,13 @@ pub(crate) fn fault(book: &Book, fault: Fault, day: Day) -> (String, Option<Stri
             let help = format!("add a price line such as `{day} {unit} <price> {quote}`");
             (format!("no price for {unit} in {quote} on {day}"), Some(help))
         }
+        Fault::UnitMismatch { found, expected } => {
+            let (found, expected) = (symbol(found), symbol(expected));
+            (
+                format!("runtime amount is in {found}, but this expression requires {expected}"),
+                Some(format!("convert it with `value(amount, {expected})` or correct the declared unit")),
+            )
+        }
         Fault::Unset(name) => {
             let name = book.name(name);
             (format!("`{name}` is not set"), Some(format!("give it a value where the thing is declared: `{name} …`")))

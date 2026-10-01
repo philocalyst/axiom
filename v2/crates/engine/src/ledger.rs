@@ -159,7 +159,8 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     /// ignored, since applying is what makes it real.
     pub fn apply(&mut self, flow: &Flow) -> Applied {
         let view = self.plan.book.flow_view(flow);
-        self.apply_view(flow, view, axiom_model::RuntimeTxn::journal(flow.txn))
+        let txn = axiom_model::RuntimeTxn::journal(flow.txn).expect("a Book flow cannot use the template transaction sentinel");
+        self.apply_view(flow, view, txn)
     }
 
     /// Applies a forecast flow whose metadata is pooled in the Book and whose

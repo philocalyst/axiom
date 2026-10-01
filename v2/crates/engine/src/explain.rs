@@ -319,6 +319,7 @@ pub(crate) fn faulted(f: &Frame, fault: Fault, origin: Option<usize>, holder: Op
     let (what, help) = show::fault(book, fault, f.ctx.day);
     let code = match fault {
         Fault::NoPrice { .. } => "no-price",
+        Fault::UnitMismatch { .. } => "unit-mismatch",
         Fault::Unset(_) => "unset-property",
         Fault::NoRow(_) => "no-param-row",
         Fault::DivideByZero | Fault::Overflow => "arithmetic",

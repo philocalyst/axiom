@@ -66,6 +66,7 @@ pub(crate) enum Identity {
 impl PartialEq for Identity {
     fn eq(&self, other: &Identity) -> bool {
         match (*self, *other) {
+            (Identity::Plain { basis: ab, qty: aq }, Identity::Plain { basis: bb, qty: bq }) => (ab, aq) == (bb, bq),
             (Identity::Money { tied: a, basis: ab, qty: aq }, Identity::Money { tied: b, basis: bb, qty: bq }) => {
                 // Basis per unit, compared exactly: ab/aq == bb/bq.
                 a == b && ab.0 as i128 * bq.0 as i128 == bb.0 as i128 * aq.0 as i128
@@ -927,7 +928,7 @@ mod tests {
     }
 
     fn journal(txn: u32) -> RuntimeTxn {
-        RuntimeTxn::journal(Id::new(txn))
+        RuntimeTxn::journal(Id::new(txn)).unwrap()
     }
 
     fn lot(qty: i64, basis: i64, acquired: i32) -> Parcel {
@@ -935,7 +936,7 @@ mod tests {
             qty: Qty(qty),
             basis: Qty(basis),
             acquired: Day(acquired),
-            txn: RuntimeTxn::journal(Id::new(acquired as u32)),
+            txn: journal(acquired as u32),
             codes: empty_codes(),
             tied: None,
         }
@@ -962,7 +963,7 @@ mod tests {
         let mut relief = Relief::default();
         let codes = Arena::new();
         let (money, policy, selectors, permits) = (ask.money, ask.policy, ask.selectors, ask.permits);
-        let (spender, now) = (ask.spender, (Day(1_000), RuntimeTxn::journal(Id::new(0))));
+        let (spender, now) = (ask.spender, (Day(1_000), journal(0)));
         let request =
             Request { need: Qty(need), money, selectors, policy, codes: &codes, permits, spender, now, explain: &|| true };
         slot.relieve(&request, &mut relief);
@@ -1107,7 +1108,7 @@ mod tests {
     fn only_lots_that_differ_are_ambiguous_without_a_policy() {
         let mut same = slot_of(1, 0, &[lot(10, 1_000, 5)], false);
         assert!(!relieve(&mut same, 6, &PLAIN).ambiguous);
-        let purchase = |txn| Parcel { txn: RuntimeTxn::journal(Id::new(txn)), ..lot(10, 1_500, 5) };
+        let purchase = |txn| Parcel { txn: journal(txn), ..lot(10, 1_500, 5) };
         let differ = slot_of(1, 0, &[lot(10, 1_000, 5), purchase(99)], false);
         let relief = relieve(&mut differ.clone(), 6, &PLAIN);
         assert!(relief.ambiguous);
@@ -1182,6 +1183,20 @@ mod tests {
         assert_eq!(pick(&[Select::Range(span(10, 20))]), 3);
         assert_eq!(pick(&[Select::Range(span(10, 10)), Select::Range(span(30, 30))]), 5);
         assert_eq!(pick(&[Select::Policy(Policy::Lifo)]), 7);
+    }
+
+    #[test]
+    fn plain_identity_is_reflexive_without_a_fabricated_transaction_key() {
+        let mut slot = slot_of(1, 0, &[], false);
+        slot.credit(Qty(5));
+        let candidates = {
+            let mut out = Vec::new();
+            slot.gather(false, &Selection { selectors: &[], codes: &Arena::new() }, &mut out);
+            out
+        };
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].txn, None);
+        assert_eq!(candidates[0].identity, candidates[0].identity);
     }
 
     #[test]

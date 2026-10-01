@@ -84,7 +84,8 @@ pub(crate) struct Motion<'f> {
 
 impl<'f> Motion<'f> {
     pub fn new(book: &'f Book, flow: &'f Flow, cause: Cause, day: Day, amounts: Amounts) -> Motion<'f> {
-        Motion::from_view(book, book.flow_view(flow), RuntimeTxn::journal(flow.txn), cause, day, amounts)
+        let txn = RuntimeTxn::journal(flow.txn).expect("journal motion cannot use the template transaction sentinel");
+        Motion::from_view(book, book.flow_view(flow), txn, cause, day, amounts)
     }
 
     pub fn from_view(
@@ -132,6 +133,7 @@ impl<'f> Motion<'f> {
         let last = touching.partition_point(|&id| book.flows[id].day <= assert.day);
         let txn = last.checked_sub(1).map_or(RuntimeTxn::Adjustment { place: assert.place, day: assert.day }, |at| {
             RuntimeTxn::journal(book.flows[touching[at]].txn)
+                .expect("a Book flow cannot use the template transaction sentinel")
         });
         Motion {
             cause: Cause::Time,

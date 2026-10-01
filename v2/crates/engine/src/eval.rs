@@ -17,7 +17,7 @@ use axiom_core::glob::glob;
 use axiom_core::{Day, Days, Id, Qty, Ratio, Severity, Span, Sym, day::days_in_month, spread};
 use axiom_model::{
     self, Amount, BinOp, Book, Dir, Effect as LawEffect, Entity, Fault, Field, Func, Law, NodeId, Object, Op, Param,
-    Prop, Purposed, StepKind, Subject, Value, Var, Window,
+    Prop, Purposed, StepKind, Subject, Text, Value, Var, Window,
 };
 
 use crate::bridge::V3;
@@ -248,7 +248,7 @@ impl<'a, 's> Machine<'a, 's> {
     fn scan(&mut self, root: NodeId) -> Value {
         for at in self.law.range(root) {
             let value = self.node(at);
-            self.values[at] = value;
+            self.values[at] = self.calc().typed_value(value, self.law.nodes[at].ty);
         }
         self.at(root)
     }
@@ -392,7 +392,22 @@ impl<'a, 's> Machine<'a, 's> {
                 Value::Bool(b) => Value::Bool(!b),
                 other => other,
             },
-            Op::Bin(op, l, r) => self.calc().binary(*op, self.at(*l), self.at(*r)),
+            Op::Bin(op, l, r) => self.calc().binary_typed(
+                *op,
+                self.at(*l),
+                self.at(*r),
+                self.law.nodes[l.index()].ty,
+                self.law.nodes[r.index()].ty,
+                self.law.nodes[at].ty,
+            ),
+            Op::At(quantity, price) => self.calc().binary_typed(
+                BinOp::Mul,
+                self.at(*quantity),
+                self.at(*price),
+                self.law.nodes[quantity.index()].ty,
+                self.law.nodes[price.index()].ty,
+                self.law.nodes[at].ty,
+            ),
             Op::Is(x, alternatives) => match self.at(*x) {
                 fault @ Value::Fault(_) => fault,
                 left => Value::Bool(alternatives.iter().any(|&alt| self.matches(left, self.at(alt)))),
@@ -493,28 +508,47 @@ impl<'a, 's> Machine<'a, 's> {
     /// of that year, a date key for that day; with neither, the context day.
     fn param(&self, param: Id<Param>, keys: &[NodeId]) -> Value {
         let mut when = self.ctx.anchor();
-        for &key in keys {
+        let mut name_count = 0usize;
+        for (index, &key) in keys.iter().enumerate() {
             match self.at(key) {
                 Value::Fault(fault) => return Value::Fault(fault),
-                Value::Num(year) => match Day::from_ymd(year.round() as i32, 1, 1) {
+                Value::Num(year) if index == 0 => match Day::from_ymd(year.round() as i32, 1, 1) {
                     Some(start) => when = start,
                     None => return Value::Fault(Fault::Overflow),
                 },
-                Value::Day(day) => when = day,
-                _ => {}
+                Value::Day(day) if index == 0 => when = day,
+                value if self.key_name(value).is_some() => name_count += 1,
+                _ => return Value::Fault(Fault::NoRow(param)),
             }
         }
-        let wanted = keys.iter().filter_map(|&key| self.key_name(self.at(key)));
-        let rows = self.book().params[param].rows.iter();
-        let best = rows
-            .filter(|row| row.since.is_none_or(|since| since <= when) && row.names.iter().copied().eq(wanted.clone()));
-        best.max_by_key(|row| row.since).map_or(Value::Fault(Fault::NoRow(param)), |row| row.value)
+        self.book().params[param]
+            .row_index_by(when, |row_names| {
+                if row_names.len() != name_count {
+                    return row_names.len().cmp(&name_count);
+                }
+                let mut names = keys.iter().enumerate().filter_map(|(index, &key)| {
+                    if index == 0 && matches!(self.at(key), Value::Num(_) | Value::Day(_)) {
+                        None
+                    } else {
+                        self.key_name(self.at(key))
+                    }
+                });
+                for (row_name, requested) in row_names.iter().zip(&mut names) {
+                    match row_name.cmp(requested) {
+                        std::cmp::Ordering::Equal => {}
+                        different => return different,
+                    }
+                }
+                std::cmp::Ordering::Equal
+            })
+            .map_or(Value::Fault(Fault::NoRow(param)), |(_, row)| row.value)
     }
 
     fn key_name(&self, key: Value) -> Option<Sym> {
         let book = self.book();
         match key {
-            Value::Name(sym) | Value::Text(sym) | Value::Code(sym) => Some(sym),
+            Value::Name(sym) | Value::Code(sym) => Some(sym),
+            Value::Text(Text::Borrowed(sym)) => Some(sym),
             Value::Unit(unit) => Some(book.commodities[unit].symbol),
             Value::Kind(kind) => Some(book.kinds[kind].name),
             _ => None,
