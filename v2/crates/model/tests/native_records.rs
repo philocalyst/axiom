@@ -35,6 +35,37 @@ account assets/checking
 }
 
 #[test]
+fn opening_records_a_whole_asset_with_basis_and_acquisition_day() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+kind property : thing
+asset condo : property
+opening 2026-01-01
+  condo basis 402_000 USD since 2024-02-20
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let asset = book.asset("condo").unwrap();
+    let (_, flow) = book.flows.iter().next().unwrap();
+    assert_eq!(flow.to, book.assets[asset].place);
+    assert_eq!(flow.arrive, axiom_model::Amount::new(axiom_core::Qty(1), book.assets[asset].unit));
+    assert_eq!(flow.mode, axiom_model::Mode::Opening);
+    let detail = &book.details[flow.detail.unwrap()];
+    assert_eq!(detail.basis, Some(axiom_core::Qty(402_000)));
+    assert_eq!(detail.since, Some(Day::from_ymd(2024, 2, 20).unwrap()));
+    assert_record_indices(&book);
+}
+
+#[test]
 fn against_resolves_a_unique_earlier_transaction_for_flows_and_measures() {
     let path = "journal/2026/01.ax";
     let text = "\
@@ -86,6 +117,15 @@ fn against_rejects_unknown_and_ambiguous_transaction_codes() {
             diagnostics.iter().any(|diagnostic| diagnostic.code == expected),
             "expected {expected}, got {diagnostics:?}"
         );
+        if expected == "ambiguous-against" {
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == expected)
+                .unwrap();
+            assert_eq!(diagnostic.labels.len(), 3, "{diagnostic:?}");
+            assert!(diagnostic.labels[1].text.contains("matching transaction"));
+            assert!(diagnostic.labels[2].text.contains("matching transaction"));
+        }
     }
 }
 
@@ -264,6 +304,38 @@ fn filed_returns_keep_reported_tallies_and_events() {
     assert_eq!(book.events.len(), 1);
     assert_eq!(book.name(book.events[0].code), "check-1041");
     assert_eq!(book.events[0].state, axiom_syntax::EventState::Settled);
+}
+
+#[test]
+fn contract_waivers_and_endings_paint_timeline_and_bound_occurrences() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+account assets/checking
+contract phone with carrier
+  100 USD monthly on 1 from checking
+2026-01-15 phone waived until 2026-02-15 ^pause \"pause\"
+2026-02-20 phone ends
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let contract = &book.contracts[Id::new(0)];
+    let regular = contract.terms.as_ref().unwrap();
+    let waived = Day::from_ymd(2026, 1, 20).unwrap();
+    let restored = Day::from_ymd(2026, 2, 16).unwrap();
+    assert_eq!(regular.at(waived).state, axiom_model::book::TermsState::Waived);
+    assert_eq!(regular.at(restored).state, axiom_model::book::TermsState::Active);
+    assert_eq!(contract.days.last(), Day::from_ymd(2026, 2, 20).unwrap());
+    assert!(contract.ended.is_some());
+    assert_eq!(book.name(regular.at(waived).change.unwrap().code.unwrap()), "pause");
 }
 
 fn assert_record_indices(book: &axiom_model::book::Book<'_>) {

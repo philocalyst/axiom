@@ -6,7 +6,7 @@ use axiom_syntax as ast;
 use axiom_syntax::{ClauseKind, ItemKind, Quantity, Subject};
 
 use super::push_amount_root;
-use crate::book::{Amount, FlowSide, Sign, TemplateAmount, TemplateItemParent, Text};
+use crate::book::{Amount, Change as BookChange, FlowSide, Sign, TemplateAmount, TemplateItemParent, TermsState, Text};
 use crate::declare::World;
 use crate::errors::Word;
 use crate::journal::{
@@ -52,6 +52,93 @@ struct Tail {
     basis_root: Option<NodeId>,
     price: Option<(axiom_core::Ratio, Id<crate::book::Commodity>, Loc)>,
     valid: bool,
+}
+
+#[derive(Clone, Copy)]
+enum CodeTarget {
+    Unique { txn: Id<crate::journal::Txn>, loc: Loc },
+    Ambiguous { first: Loc, second: Loc },
+}
+
+/// A chronological index of transaction codes. Each transaction is visited
+/// once after its lowering succeeds; repeated code storage on its header and
+/// flows is deduplicated by the transaction ID.
+#[derive(Default)]
+struct CodeIndex {
+    by_code: Map<axiom_core::Sym, CodeTarget>,
+}
+
+impl CodeIndex {
+    fn add(&mut self, world: &World<'_>, txn_id: Id<crate::journal::Txn>) {
+        let source = &world.book.txns[txn_id];
+        let mut add_code = |code| match self.by_code.get(&code).copied() {
+            None => {
+                self.by_code.insert(
+                    code,
+                    CodeTarget::Unique {
+                        txn: txn_id,
+                        loc: source.loc,
+                    },
+                );
+            }
+            Some(CodeTarget::Unique { txn, loc }) if txn != txn_id => {
+                self.by_code.insert(
+                    code,
+                    CodeTarget::Ambiguous {
+                        first: loc,
+                        second: source.loc,
+                    },
+                );
+            }
+            Some(CodeTarget::Unique { .. } | CodeTarget::Ambiguous { .. }) => {}
+        };
+        for code in source.codes.ids().map(|id| world.book.codes[id]) {
+            add_code(code);
+        }
+        for flow_id in source.flows.ids() {
+            for code in world.book.flows[flow_id]
+                .codes
+                .ids()
+                .map(|id| world.book.codes[id])
+            {
+                add_code(code);
+            }
+        }
+    }
+
+    fn resolve<'s>(
+        &self,
+        world: &mut World<'s>,
+        code: ast::Code<'s>,
+        loc: Loc,
+        diags: &mut Vec<Diagnostic>,
+    ) -> Option<Id<crate::journal::Txn>> {
+        let symbol = world.book.names.intern(code.name());
+        match self.by_code.get(&symbol).copied() {
+            Some(CodeTarget::Unique { txn, .. }) => Some(txn),
+            Some(CodeTarget::Ambiguous { first, second }) => {
+                diags.push(
+                    Diagnostic::error(
+                        "ambiguous-against",
+                        "this code names more than one earlier transaction",
+                    )
+                    .label(loc, format!("`{}` is not a unique transaction reference", code.name()))
+                    .label(first, "one matching transaction is here")
+                    .label(second, "another matching transaction is here")
+                    .help("give the original transaction a code used nowhere else"),
+                );
+                None
+            }
+            None => {
+                diags.push(
+                    Diagnostic::error("unknown-against", "this code names no earlier transaction")
+                        .label(loc, format!("`{}` has not named a transaction yet", code.name()))
+                        .help("put this code on an earlier transaction or one of its flows"),
+                );
+                None
+            }
+        }
+    }
 }
 
 /// Lowers dated native transactions, statements and openings in stable
@@ -119,15 +206,29 @@ pub(crate) fn record<'a, 's>(
     world.book.txns.reserve(dated.len());
     world.book.flows.reserve(expected_flows);
 
+    let mut code_index = CodeIndex::default();
     for record in dated {
         let site = &sites[record.site as usize];
         let file = &site.source.file;
         let item = &file.items[record.item as usize];
+        let txn_start = world.book.txns.len();
+        let diagnostic_start = diags.len();
         match item.kind {
-            ItemKind::Txn(id) => lower_txn(world, site, item, &file[id], diags),
-            ItemKind::Opening(id) => lower_opening(world, site, item, &file[id], diags),
-            ItemKind::Statement(id) => lower_statement(world, site, item.loc, &file[id], diags),
+            ItemKind::Txn(id) => {
+                lower_txn(world, site, item, &file[id], &code_index, diags)
+            }
+            ItemKind::Opening(id) => {
+                lower_opening(world, site, item, &file[id], &code_index, diags)
+            }
+            ItemKind::Statement(id) => {
+                lower_statement(world, site, item.loc, &file[id], &code_index, diags)
+            }
             _ => unreachable!("dated index only contains journal records"),
+        }
+        if diags.len() == diagnostic_start {
+            for txn_index in txn_start..world.book.txns.len() {
+                code_index.add(world, Id::new(txn_index as u32));
+            }
         }
     }
 
@@ -146,6 +247,7 @@ fn lower_txn<'a, 's>(
     site: &Site<'a, 's>,
     item: &ast::Item<'s>,
     written: &ast::Txn<'s>,
+    code_index: &CodeIndex,
     diags: &mut Vec<Diagnostic>,
 ) {
     let (file, home) = (&site.source.file, site.home);
@@ -193,6 +295,7 @@ fn lower_txn<'a, 's>(
         written.flow.tail,
         written.date,
         &root_ids,
+        code_index,
         diags,
     );
     let txn_waive = header_tail.waive;
@@ -255,6 +358,7 @@ fn lower_txn<'a, 's>(
                             written.date,
                             header_codes,
                             &root_ids,
+                            code_index,
                             &mut flow_roots,
                             first,
                             diags,
@@ -352,7 +456,16 @@ fn lower_txn<'a, 's>(
             };
             let mut tail = header_tail.clone();
             let (leg_codes, leg_tail) =
-                lower_tail(world, home, file, leg.tail, written.date, &root_ids, diags);
+                lower_tail(
+                    world,
+                    home,
+                    file,
+                    leg.tail,
+                    written.date,
+                    &root_ids,
+                    code_index,
+                    diags,
+                );
             tail = merge_tail(tail, leg_tail);
             let unit = total.map_or(world.book.base, |total| total.amount.unit);
             let Some(quantity) = resolve_quantity(
@@ -428,6 +541,7 @@ fn lower_txn<'a, 's>(
             written.date,
             header_codes,
             &root_ids,
+            code_index,
             &mut flow_roots,
             first,
             diags,
@@ -494,6 +608,7 @@ fn lower_opening<'a, 's>(
     site: &Site<'a, 's>,
     item: &ast::Item<'s>,
     opening: &ast::Opening<'s>,
+    code_index: &CodeIndex,
     diags: &mut Vec<Diagnostic>,
 ) {
     let file = &site.source.file;
@@ -541,21 +656,45 @@ fn lower_opening<'a, 's>(
     };
     let mut flow_roots = Vec::new();
     for leg in &file[opening.lines] {
-        let Some(end) = resolve_end(world, site.home, file, leg.end, diags) else {
+        let whole_asset = if matches!(leg.amount, Quantity::Whole) {
+            world.book.asset(leg.end.name.0)
+        } else {
+            None
+        };
+        let end = if let Some(asset) = whole_asset {
+            Some(ResolvedEnd {
+                place: world.book.assets[asset].place,
+                entity: None,
+                select: Run::new(Id::new(0), 0),
+            })
+        } else {
+            resolve_end(world, site.home, file, leg.end, diags)
+        };
+        let Some(end) = end else {
+            if matches!(leg.amount, Quantity::Whole) {
+                diags.push(
+                    Diagnostic::error(
+                        "opening-whole",
+                        "a whole opening holding must name an asset",
+                    )
+                    .label(leg.loc, "write a unit amount for an account holding"),
+                );
+            }
             continue;
         };
+        let fallback = whole_asset.map_or(world.book.base, |asset| world.book.assets[asset].unit);
         let Some(quantity) = resolve_quantity(
             world,
             file,
             leg.amount,
-            world.book.base,
+            fallback,
             FlowSide::Out,
             &Map::default(),
             diags,
         ) else {
             continue;
         };
-        if !matches!(leg.amount, Quantity::Amount(ast::Amount::Literal(_))) {
+        if !matches!(leg.amount, Quantity::Amount(ast::Amount::Literal(_))) && whole_asset.is_none() {
             diags.push(
                 Diagnostic::error("opening-amount", "an opening line needs a literal amount")
                     .label(
@@ -572,6 +711,7 @@ fn lower_opening<'a, 's>(
             leg.tail,
             opening.date,
             &root_ids,
+            code_index,
             diags,
         )
         .1;
@@ -615,7 +755,9 @@ fn lower_opening<'a, 's>(
             leg.loc,
             diags,
         ) {
-            flow.owner = world.book.places[end.place].owner;
+            flow.owner = whole_asset.map_or(world.book.places[end.place].owner, |asset| {
+                world.book.assets[asset].owner
+            });
             let flow_at = (world.book.flows.len() - first) as u32;
             world.book.flows.push(flow);
             push_flow_expressions(&mut flow_roots, flow_at, None, None, basis_root);
@@ -663,6 +805,7 @@ fn lower_opening<'a, 's>(
             site,
             super::subject_loc(file, claim.subject),
             claim,
+            code_index,
             diags,
         );
     }
@@ -673,6 +816,7 @@ fn lower_statement<'a, 's>(
     site: &Site<'a, 's>,
     loc: Loc,
     statement: &ast::Statement<'s>,
+    code_index: &CodeIndex,
     diags: &mut Vec<Diagnostic>,
 ) {
     let file = &site.source.file;
@@ -687,7 +831,7 @@ fn lower_statement<'a, 's>(
                 Action::Use
             };
             lower_measure(
-                world, site.home, file, loc, statement, *amount, action, diags,
+                world, site.home, file, loc, statement, *amount, action, code_index, diags,
             );
         }
         ast::Verb::Event(state) => {
@@ -748,16 +892,143 @@ fn lower_statement<'a, 's>(
         ast::Verb::Now(ast::Change::Budget(_)) => {
             // Native budgets are lowered by the declaration/law pass.
         }
+        ast::Verb::Waived => lower_contract_change(world, site, loc, statement, diags),
+        ast::Verb::Ends => lower_end(world, site, loc, statement, diags),
         ast::Verb::Occurrence(_)
         | ast::Verb::Owes { .. }
         | ast::Verb::Now(_)
-        | ast::Verb::Waived
-        | ast::Verb::Ends
         | ast::Verb::Basis { .. } => unsupported_statement(
             loc,
             "this statement kind does not yet have a native record lowering",
             diags,
         ),
+    }
+}
+
+fn lower_contract_change<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    loc: Loc,
+    statement: &ast::Statement<'s>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    let Subject::Name(name) = statement.subject else {
+        unsupported_statement(loc, "only a contract occurrence can be waived here", diags);
+        return;
+    };
+    let sym = world.book.names.intern(name.0);
+    let Some(contract_id) = world.book.lookup.contracts.get(&sym).copied() else {
+        unsupported_statement(loc, "waiving a claim is not yet lowered natively", diags);
+        return;
+    };
+    if !statement.body.items.is_empty() || !statement.body.legs.is_empty() {
+        unsupported_statement(loc, "a contract waiver cannot carry recovery lines yet", diags);
+        return;
+    }
+
+    let mut last = statement.date;
+    let mut code = None;
+    let mut description = None;
+    for clause in &file[statement.tail] {
+        match clause.kind {
+            ClauseKind::Until(until) => last = until,
+            ClauseKind::Code(written) => {
+                code = Some(world.book.names.intern(written.name()));
+            }
+            ClauseKind::Description(text) => {
+                description = Some(world.book.quoted_text(text.0));
+            }
+            ClauseKind::Purpose(_) => {
+                unsupported_statement(loc, "a contract waiver has no claim-recovery purpose", diags);
+                return;
+            }
+            _ => {
+                unsupported_statement(loc, "this clause does not apply to a contract waiver", diags);
+                return;
+            }
+        }
+    }
+    let Some(days) = Days::new(statement.date, last) else {
+        diags.push(
+            Diagnostic::error("waiver-span", "a waiver ends before it begins")
+                .label(loc, "the `until` day must be on or after this day"),
+        );
+        return;
+    };
+    let change = BookChange {
+        days,
+        description,
+        code,
+        loc,
+    };
+    let contract = &mut world.book.contracts[contract_id];
+    let mut painted = false;
+    if let Some(terms) = contract.terms.as_mut() {
+        let mut waived = terms.at(statement.date).clone();
+        waived.state = TermsState::Waived;
+        waived.change = Some(change);
+        terms.paint(days, waived);
+        painted = true;
+    }
+    if let Some(terms) = contract.standing.as_mut() {
+        let mut waived = terms.at(statement.date).clone();
+        waived.state = TermsState::Waived;
+        waived.change = Some(change);
+        terms.paint(days, waived);
+        painted = true;
+    }
+    if !painted {
+        diags.push(
+            Diagnostic::error("waiver-without-schedule", "this contract has no schedule to waive")
+                .label(loc, "there is no regular or standing occurrence here"),
+        );
+    }
+}
+
+fn lower_end<'a, 's>(
+    world: &mut World<'s>,
+    site: &Site<'a, 's>,
+    loc: Loc,
+    statement: &ast::Statement<'s>,
+    diags: &mut Vec<Diagnostic>,
+) {
+    let file = &site.source.file;
+    let Subject::Name(name) = statement.subject else {
+        unsupported_statement(loc, "this subject cannot end here", diags);
+        return;
+    };
+    let sym = world.book.names.intern(name.0);
+    if let Some(contract_id) = world.book.lookup.contracts.get(&sym).copied() {
+        let contract = &mut world.book.contracts[contract_id];
+        if statement.date < contract.days.first() {
+            diags.push(
+                Diagnostic::error("end-before-contract", "a contract cannot end before it begins")
+                    .label(loc, "this date precedes the contract's first day"),
+            );
+            return;
+        }
+        let last = statement.date.min(contract.days.last());
+        if let Some(days) = Days::new(contract.days.first(), last) {
+            contract.days = days;
+            contract.ended = Some(loc);
+        }
+        return;
+    }
+    if let Some(asset) = world.book.asset(name.0) {
+        let place = world.book.assets[asset].place;
+        world.book.places[place].closed = Some(statement.date);
+        return;
+    }
+    match world.end(
+        site.home,
+        Word {
+            text: name.0,
+            loc: file.loc(name.0),
+        },
+    ) {
+        Ok(end) => world.book.places[end.place].closed = Some(statement.date),
+        Err(problem) => diags.push(problem),
     }
 }
 
@@ -1146,6 +1417,7 @@ fn lower_measure<'s>(
     statement: &ast::Statement<'s>,
     literal: ast::Literal<'s>,
     action: Action,
+    code_index: &CodeIndex,
     diags: &mut Vec<Diagnostic>,
 ) {
     let Some(target) = statement_target(world, home, file, statement.subject, diags) else {
@@ -1212,7 +1484,7 @@ fn lower_measure<'s>(
             }
             ClauseKind::Code(code) => codes.push(world.book.names.intern(code.name())),
             ClauseKind::Against(code) => {
-                against = prior_txn_for_code(world, code, clause.at, diags);
+                against = code_index.resolve(world, code, clause.at, diags);
             }
             _ => diags.push(
                 Diagnostic::error(
@@ -1239,47 +1511,6 @@ fn lower_measure<'s>(
         against,
         loc,
     });
-}
-
-fn prior_txn_for_code<'s>(
-    world: &mut World<'s>,
-    code: ast::Code<'s>,
-    loc: Loc,
-    diags: &mut Vec<Diagnostic>,
-) -> Option<Id<crate::journal::Txn>> {
-    let symbol = world.book.names.intern(code.name());
-    let book = &world.book;
-    let mut matched = None;
-    for (txn_id, txn) in book.txns.iter() {
-        let header = txn.codes.ids().any(|id| book.codes[id] == symbol);
-        let local = txn.flows.ids().any(|flow_id| {
-            let flow = &book.flows[flow_id];
-            flow.codes.ids().any(|id| book.codes[id] == symbol)
-        });
-        if !header && !local {
-            continue;
-        }
-        if matched.is_some() {
-            diags.push(
-                Diagnostic::error("ambiguous-against", "this code names more than one earlier transaction")
-                    .label(loc, format!("`{}` is not a unique transaction reference", code.name()))
-                    .help("give the original transaction a code used nowhere else"),
-            );
-            return None;
-        }
-        matched = Some(txn_id);
-    }
-    match matched {
-        Some(txn) => Some(txn),
-        None => {
-            diags.push(
-                Diagnostic::error("unknown-against", "this code names no earlier transaction")
-                    .label(loc, format!("`{}` has not named a transaction yet", code.name()))
-                    .help("put this code on an earlier transaction or one of its flows"),
-            );
-            None
-        }
-    }
 }
 
 fn unsupported_statement(loc: Loc, message: &str, diags: &mut Vec<Diagnostic>) {
@@ -1695,6 +1926,7 @@ fn lower_tail<'s>(
     clauses: ast::Many<ast::Clause<'s>>,
     day: Day,
     roots: &Map<ast::ExprId, NodeId>,
+    code_index: &CodeIndex,
     diags: &mut Vec<Diagnostic>,
 ) -> (Run<axiom_core::Sym>, Tail) {
     let start = world.book.codes.len();
@@ -1859,7 +2091,7 @@ fn lower_tail<'s>(
             }
             ClauseKind::Since(day) => tail.detail.since = Some(day),
             ClauseKind::Against(code) => {
-                tail.detail.against = prior_txn_for_code(world, code, clause.at, diags);
+                tail.detail.against = code_index.resolve(world, code, clause.at, diags);
                 tail.valid &= tail.detail.against.is_some();
             }
             ClauseKind::Until(_) => {
@@ -1985,6 +2217,7 @@ fn lower_items<'s>(
     day: Day,
     header_codes: Run<axiom_core::Sym>,
     roots: &Map<ast::ExprId, NodeId>,
+    code_index: &CodeIndex,
     flow_roots: &mut Vec<FlowExpressions>,
     first_flow: usize,
     diags: &mut Vec<Diagnostic>,
@@ -1995,7 +2228,8 @@ fn lower_items<'s>(
         else {
             continue;
         };
-        let (local_codes, tail) = lower_tail(world, home, file, item.tail, day, roots, diags);
+        let (local_codes, tail) =
+            lower_tail(world, home, file, item.tail, day, roots, code_index, diags);
         let has_own_metadata = tail.purpose.is_some()
             || tail.description.is_some()
             || tail.detail != Detail::NONE
