@@ -594,7 +594,7 @@ impl<'s> Compiler<'_, '_, 's> {
     }
 
     fn check(&mut self, at: usize, expr: &ast::Expr<'s>) -> Check<(Op, Ty)> {
-        if let Some((value, ty)) = self.world.literal(self.file, expr)? {
+        if let Some((value, ty)) = self.world.literal(self.home, self.file, expr)? {
             return Ok((Op::Const(value), ty));
         }
         let file = self.file;
