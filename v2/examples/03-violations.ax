@@ -18,6 +18,7 @@ entity trader-joes : grocer
 entity theater
 
 account checking : deposit at chase
+account education-fund : deposit at chase
 account retirement : 401k at fidelity
 account brokerage : brokerage at fidelity
 account wallet : asset
@@ -63,12 +64,14 @@ opening 2025-12-31
 2026-03-04 checking 1_000 USD -> brokerage 4 VTI @ 285.70 USD
 // expect: a price mismatch of 142.80 USD (4 shares cost 1,142.80 USD).
 
-// The scholarship's restricted money is used for a theater ticket, not tuition.
-2026-04-01 scholarship -> checking 1_200 USD
-2026-04-02 checking -> theater 300 USD #fun
+// The scholarship's money stays in its own account, so the theater payment
+// cannot use unrestricted checking parcels instead.
+2026-04-01 scholarship -> education-fund 1_200 USD
+2026-04-02 education-fund -> theater 300 USD #fun
 // expect: `purpose`, since scholarship money is restricted to education.
 
-// The scholarship ends with 900 USD of its money still tied up in checking;
-// its own deadline law reports the remainder without a balancing account.
-2026-12-31 checking = 58_815.80 USD
+// The scholarship account keeps the remaining grant money identifiable through
+// the deadline. The bank balance assertions show both positions at year end.
+2026-12-31 checking = 57_915.80 USD
+2026-12-31 education-fund = 900 USD
 // expect: `deadline`, with 900 USD of education money still unspent.
