@@ -1,5 +1,5 @@
 use axiom_core::{Day, FileId};
-use axiom_model::{Func, Implied, Limit, Period, Source, TemplateAmount, build};
+use axiom_model::{Func, Implied, Limit, Owner, Period, Source, TemplateAmount, build};
 use axiom_syntax::{Folder, parse};
 
 fn source(path: &'static str, text: &'static str, embedded: bool, id: u16) -> Source<'static> {
@@ -248,6 +248,41 @@ fn invalid_declaration_also_metadata_does_not_leave_a_partial_rule() {
 }
 
 #[test]
+fn built_in_purpose_root_can_host_a_scoped_law_without_a_duplicate_node() {
+    let std = source(
+        "std.ax",
+        "system std\ncommodity USD\n  precision 2\n",
+        true,
+        0,
+    );
+    let project = source(
+        "axiom.ax",
+        "use std\nbase USD\nkind sole-proprietorship : entity\npurpose spending\n  law business-costs\n    on flow\n    when owner.kind is sole-proprietorship\n    count amount as schedule-c-expenses\n",
+        false,
+        1,
+    );
+    let (book, diagnostics) = build(&[std, project]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+
+    let spending = book.roots.purposes.spending;
+    assert_eq!(
+        book.purposes
+            .iter()
+            .filter(|(_, purpose)| book.name(purpose.name) == "spending")
+            .count(),
+        1,
+        "the declaration extends the built-in identity"
+    );
+    let (law_id, law) = book
+        .laws
+        .iter()
+        .find(|(_, law)| book.name(law.name) == "business-costs")
+        .expect("the root purpose law was compiled");
+    assert_eq!(law.owner, Owner::Purpose(spending));
+    assert!(book.purposes[spending].laws.contains(&law_id));
+}
+
+#[test]
 fn law_overrides_resolve_to_the_nearest_visible_system() {
     let std = source(
         "std.ax",
@@ -263,7 +298,7 @@ fn law_overrides_resolve_to_the_nearest_visible_system() {
     );
     let child = source(
         "ca.ax",
-        "system us/ca\nlaw state-standard overrides standard\n  on in\n  warn value(amount, USD) > 2 USD\n",
+        "system us/ca\nlaw standard\n  on in\n  warn value(amount, USD) > 2 USD\nlaw state-standard overrides standard\n  on in\n  warn value(amount, USD) > 3 USD\n",
         true,
         2,
     );
@@ -280,7 +315,8 @@ fn law_overrides_resolve_to_the_nearest_visible_system() {
     assert_eq!(book.name(book.laws[parent].name), "standard");
     assert_eq!(
         book.name(book.systems[book.laws[parent].system.unwrap()].path),
-        "us"
+        "us/ca",
+        "when a visible child and parent law share a name, override the nearest law"
     );
 }
 

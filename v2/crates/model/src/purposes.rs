@@ -73,15 +73,10 @@ pub(crate) fn declare_sites<'a, 's>(
             let text = decl.name.0;
             written.push((file, decl, site.home));
             if root_names.contains(&text) {
-                diags.push(duplicate(
-                    "purpose",
-                    Word {
-                        text,
-                        loc: file.loc(text),
-                    },
-                    None,
-                    None,
-                ));
+                // Purpose roots are built in identities. A declaration of a
+                // root may attach laws to that identity without creating a
+                // second tree node, just as a shared system may extend the
+                // built-in root with domain rules.
                 draft_of.push(
                     root_ids[root_names.iter().position(|&name| name == text).unwrap()].index(),
                 );
