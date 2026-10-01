@@ -494,3 +494,65 @@ account savings : bank
     }
     assert_eq!(book.events.len(), 1);
 }
+
+#[test]
+fn every_lives_line_adds_its_system_and_overlapping_residences_are_kept() {
+    let std = "\
+system std
+kind person : entity
+kind currency : commodity
+commodity USD : currency
+commodity CAD : currency
+";
+    let california = "\
+system us/ca
+use std
+currency CAD
+";
+    let new_york = "\
+system us/ny
+use std
+currency USD
+";
+    let project = "\
+use std
+base USD
+entity jo : person
+  lives us/ca from 2025-01-01 until 2025-12-31
+  lives us/ny from 2025-07-01
+";
+    let sources = [
+        parsed_source(0, "std.ax", std, true),
+        parsed_source(1, "us/ca.ax", california, true),
+        parsed_source(2, "us/ny.ax", new_york, true),
+        parsed_source(3, "axiom.ax", project, false),
+    ];
+    let (book, diagnostics) = build(&sources);
+
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let residences = &book.entities[book.entity("jo").unwrap()].lives;
+    assert_eq!(residences.len(), 2);
+    assert_eq!(book.name(book.systems[residences[0].system].path), "us/ca");
+    assert_eq!(book.name(book.systems[residences[1].system].path), "us/ny");
+    assert_eq!(
+        book.systems[residences[0].system].currency,
+        book.commodity("CAD")
+    );
+    assert_eq!(
+        book.systems[residences[1].system].currency,
+        book.commodity("USD")
+    );
+    assert_eq!(
+        residences[0].days.first(),
+        Day::from_ymd(2025, 1, 1).unwrap()
+    );
+    assert_eq!(
+        residences[0].days.last(),
+        Day::from_ymd(2025, 12, 31).unwrap()
+    );
+    assert_eq!(
+        residences[1].days.first(),
+        Day::from_ymd(2025, 7, 1).unwrap()
+    );
+    assert_eq!(residences[1].days.last(), Day::MAX);
+}
