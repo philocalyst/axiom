@@ -16,7 +16,7 @@ use crate::journal::{
     Action, Assert, Detail, EndEvent, EndTarget, Event, Filed, Flow, FlowExpressions, Gap, Infer,
     JournalEnd, JournalGroup, JournalItem, JournalProgram, JournalQuantity, Measure, Mode, Object,
     OccurrenceTail, Origin, Provenance, Purposed, Quote, Reading, Select, Split, Waive,
-    WrittenOccurrence,
+    WrittenGroup, WrittenOccurrence,
 };
 use crate::law::{NodeId, Subject as ModelSubject, Ty};
 use crate::scope::Home;
@@ -57,6 +57,15 @@ struct Tail {
     basis_root: Option<NodeId>,
     price: Option<(axiom_core::Ratio, Id<crate::book::Commodity>, Loc)>,
     valid: bool,
+}
+
+struct OccurrenceGroupDraft {
+    template: u32,
+    source: JournalEnd,
+    side: FlowSide,
+    legs: Vec<u32>,
+    leg_quantities: Vec<JournalQuantity>,
+    items: Box<[JournalItem]>,
 }
 
 #[derive(Clone, Copy)]
@@ -386,6 +395,7 @@ fn lower_txn<'a, 's>(
                             side: FlowSide::Out,
                             total: None,
                             legs: Box::default(),
+                            leg_quantities: Box::default(),
                             items,
                         });
                     }
@@ -461,6 +471,7 @@ fn lower_txn<'a, 's>(
             successful = false;
         }
         let mut legs = Vec::with_capacity(written.flow.body.legs.len());
+        let mut leg_quantities = Vec::with_capacity(written.flow.body.legs.len());
         for leg in &file[written.flow.body.legs] {
             let Some(other) = resolve_end(world, home, file, leg.end, diags) else {
                 successful = false;
@@ -522,6 +533,7 @@ fn lower_txn<'a, 's>(
             ) {
                 world.book.flows.push(flow);
                 legs.push(flow_at as u32);
+                leg_quantities.push(quantity.group);
                 push_flow_expressions(
                     &mut flow_roots,
                     flow_at as u32,
@@ -576,6 +588,7 @@ fn lower_txn<'a, 's>(
             side: source_side,
             total: total.map(|total| total.group),
             legs: legs.into_boxed_slice(),
+            leg_quantities: leg_quantities.into_boxed_slice(),
             items,
         });
     }
@@ -960,9 +973,15 @@ fn lower_occurrence<'a, 's>(
     };
     let Some(contract_id) = world.book.contract(name.0) else {
         diags.push(
-            Diagnostic::error("unknown-contract-occurrence", "this occurrence names no contract")
-                .label(file.loc(name.0), format!("`{}` is not a declared contract", name.0))
-                .help("declare a contract with this name before recording an occurrence"),
+            Diagnostic::error(
+                "unknown-contract-occurrence",
+                "this occurrence names no contract",
+            )
+            .label(
+                file.loc(name.0),
+                format!("`{}` is not a declared contract", name.0),
+            )
+            .help("declare a contract with this name before recording an occurrence"),
         );
         return;
     };
@@ -971,23 +990,36 @@ fn lower_occurrence<'a, 's>(
         Ok(Some(found)) => found,
         Ok(None) => {
             diags.push(
-                Diagnostic::error("contract-occurrence-date", "this day is outside every contract schedule's grace window")
-                    .label(loc, "no active scheduled occurrence is close enough to this date"),
+                Diagnostic::error(
+                    "contract-occurrence-date",
+                    "this day is outside every contract schedule's grace window",
+                )
+                .label(
+                    loc,
+                    "no active scheduled occurrence is close enough to this date",
+                ),
             );
             return;
         }
         Err((regular, standing)) => {
             diags.push(
-                Diagnostic::error("ambiguous-contract-occurrence", "this occurrence is equally close to two contract schedules")
-                    .label(loc, "write it on a date that identifies one schedule")
-                    .note(format!("nearest regular due day: {regular}; nearest standing due day: {standing}")),
+                Diagnostic::error(
+                    "ambiguous-contract-occurrence",
+                    "this occurrence is equally close to two contract schedules",
+                )
+                .label(loc, "write it on a date that identifies one schedule")
+                .note(format!(
+                    "nearest regular due day: {regular}; nearest standing due day: {standing}"
+                )),
             );
             return;
         }
     };
     let inputs = terms.inputs.clone();
+    let templates = terms.template.clone();
     let fallback = occurrence_amount_unit(contract, terms, world.book.base);
 
+    let first_flow = world.book.flows.len();
     let code_start = world.book.codes.len();
     let selector_start = world.book.selectors.len();
     let detail_start = world.book.details.len();
@@ -998,9 +1030,20 @@ fn lower_occurrence<'a, 's>(
         push_amount_root(amount, &mut expressions);
     }
     push_tail_roots(file, statement.tail, &mut expressions);
+    for leg in &file[statement.body.legs] {
+        push_quantity_root(leg.amount, &mut expressions);
+        push_tail_roots(file, leg.tail, &mut expressions);
+    }
+    for item in &file[statement.body.items] {
+        push_amount_root(item.amount, &mut expressions);
+        push_tail_roots(file, item.tail, &mut expressions);
+    }
     let name = world.book.names.intern("journal");
     let compiled = if expressions.is_empty() {
-        Some((crate::book::TemplateProgram::default(), Box::<[NodeId]>::default()))
+        Some((
+            crate::book::TemplateProgram::default(),
+            Box::<[NodeId]>::default(),
+        ))
     } else {
         crate::laws::compile_template(
             world,
@@ -1014,17 +1057,35 @@ fn lower_occurrence<'a, 's>(
         )
     };
     let Some((program, root_ids)) = compiled else {
-        rollback(world, world.book.flows.len(), code_start, selector_start, detail_start, program_start);
+        rollback(
+            world,
+            first_flow,
+            code_start,
+            selector_start,
+            detail_start,
+            program_start,
+        );
         return;
     };
-    let roots: Map<_, _> = expressions.iter().zip(root_ids.iter()).map(|(&(expr, _), &node)| (expr, node)).collect();
+    let roots: Map<_, _> = expressions
+        .iter()
+        .zip(root_ids.iter())
+        .map(|(&(expr, _), &node)| (expr, node))
+        .collect();
     let occurrence_amount = amount.and_then(|amount| {
         resolve_amount(world, file, amount, fallback, &roots, diags).map(|(literal, root)| {
             root.map_or(TemplateAmount::Literal(literal), TemplateAmount::Computed)
         })
     });
     if amount.is_some() && occurrence_amount.is_none() {
-        rollback(world, world.book.flows.len(), code_start, selector_start, detail_start, program_start);
+        rollback(
+            world,
+            first_flow,
+            code_start,
+            selector_start,
+            detail_start,
+            program_start,
+        );
         return;
     }
 
@@ -1041,11 +1102,21 @@ fn lower_occurrence<'a, 's>(
     if !header_tail.valid || header_tail.price.is_some() {
         if header_tail.price.is_some() {
             diags.push(
-                Diagnostic::error("contract-occurrence-price", "write an occurrence price as part of its amount")
-                    .label(loc, "a detached price cannot override a contract flow"),
+                Diagnostic::error(
+                    "contract-occurrence-price",
+                    "write an occurrence price as part of its amount",
+                )
+                .label(loc, "a detached price cannot override a contract flow"),
             );
         }
-        rollback(world, world.book.flows.len(), code_start, selector_start, detail_start, program_start);
+        rollback(
+            world,
+            first_flow,
+            code_start,
+            selector_start,
+            detail_start,
+            program_start,
+        );
         return;
     }
     let occurrence_tail = OccurrenceTail {
@@ -1059,118 +1130,461 @@ fn lower_occurrence<'a, 's>(
         waive: header_tail.waive,
     };
 
+    let txn_id = Id::new(world.book.txns.len() as u32);
     let mut input_values: Vec<Option<Amount>> = vec![None; inputs.len()];
     let mut bound = vec![false; inputs.len()];
+    let mut replaced_legs = Vec::new();
+    let mut written_groups: Vec<Option<OccurrenceGroupDraft>> =
+        (0..templates.len()).map(|_| None).collect();
+    let mut flow_roots = Vec::new();
     for leg in &file[statement.body.legs] {
-        let input = inputs.iter().position(|input| world.book.name(input.name) == leg.end.name.0);
-        let Some(input_at) = input else {
-            diags.push(
-                Diagnostic::error("contract-occurrence-body", "written flow overrides are not yet lowered for this occurrence")
-                    .label(leg.loc, "this line does not bind a declared contract input"),
-            );
-            continue;
-        };
-        if bound[input_at] {
-            diags.push(
-                Diagnostic::error("contract-input-duplicate", "this contract input is supplied twice")
+        let input = inputs
+            .iter()
+            .position(|input| world.book.name(input.name) == leg.end.name.0);
+        if let Some(input_at) = input {
+            if bound[input_at] {
+                diags.push(
+                    Diagnostic::error(
+                        "contract-input-duplicate",
+                        "this contract input is supplied twice",
+                    )
                     .label(leg.loc, "remove the repeated binding")
                     .context(inputs[input_at].loc, "the input is declared here"),
-            );
-            continue;
-        }
-        if !file[leg.tail].is_empty() {
-            diags.push(
-                Diagnostic::error("contract-input-tail", "a contract input binding cannot have flow clauses")
-                    .label(leg.loc, "put clauses on the occurrence's actual flow"),
-            );
-            continue;
-        }
-        let literal = match leg.amount {
-            Quantity::Amount(ast::Amount::Literal(literal))
-            | Quantity::Target(ast::Amount::Literal(literal)) => literal,
-            _ => {
-                diags.push(
-                    Diagnostic::error("contract-input-value", "a contract input needs a literal amount")
-                        .label(leg.loc, "write `input-name = 155 USD`"),
                 );
                 continue;
             }
-        };
-        let input_unit = inputs[input_at].unit;
-        let unit = match literal.unit() {
-            Some(unit) => match world.commodity_of(Word {
-                text: unit.0,
-                loc: file.loc(unit.0),
-            }) {
-                Ok(unit) => unit,
-                Err(problem) => {
-                    diags.push(problem);
-                    continue;
-                }
-            },
-            None => match input_unit {
-                Some(unit) => unit,
-                None => {
+            if !file[leg.tail].is_empty() {
+                diags.push(
+                    Diagnostic::error(
+                        "contract-input-tail",
+                        "a contract input binding cannot have flow clauses",
+                    )
+                    .label(leg.loc, "put clauses on the occurrence's actual flow"),
+                );
+                continue;
+            }
+            let literal = match leg.amount {
+                Quantity::Amount(ast::Amount::Literal(literal))
+                | Quantity::Target(ast::Amount::Literal(literal)) => literal,
+                _ => {
                     diags.push(
-                        Diagnostic::error("contract-input-unit", "this input has no declared unit to infer")
-                            .label(leg.loc, "state the amount's commodity"),
+                        Diagnostic::error(
+                            "contract-input-value",
+                            "a contract input needs a literal amount",
+                        )
+                        .label(leg.loc, "write `input-name = 155 USD`"),
                     );
                     continue;
                 }
-            },
-        };
-        if input_unit.is_some_and(|expected| expected != unit) {
-            diags.push(
-                Diagnostic::error("contract-input-unit", "this input amount has the wrong commodity")
+            };
+            let input_unit = inputs[input_at].unit;
+            let unit = match literal.unit() {
+                Some(unit) => match world.commodity_of(Word {
+                    text: unit.0,
+                    loc: file.loc(unit.0),
+                }) {
+                    Ok(unit) => unit,
+                    Err(problem) => {
+                        diags.push(problem);
+                        continue;
+                    }
+                },
+                None => match input_unit {
+                    Some(unit) => unit,
+                    None => {
+                        diags.push(
+                            Diagnostic::error(
+                                "contract-input-unit",
+                                "this input has no declared unit to infer",
+                            )
+                            .label(leg.loc, "state the amount's commodity"),
+                        );
+                        continue;
+                    }
+                },
+            };
+            if input_unit.is_some_and(|expected| expected != unit) {
+                diags.push(
+                    Diagnostic::error(
+                        "contract-input-unit",
+                        "this input amount has the wrong commodity",
+                    )
                     .label(leg.loc, "use the unit declared by this input")
-                    .context(inputs[input_at].loc, "the input's expected unit is declared here"),
+                    .context(
+                        inputs[input_at].loc,
+                        "the input's expected unit is declared here",
+                    ),
+                );
+                continue;
+            }
+            match world.amount(literal.num(), unit, leg.loc) {
+                Ok(value) => {
+                    input_values[input_at] = Some(value);
+                    bound[input_at] = true;
+                }
+                Err(problem) => diags.push(problem),
+            }
+            continue;
+        }
+
+        let Some(endpoint) = resolve_end(world, site.home, file, leg.end, diags) else {
+            continue;
+        };
+        let mut matching = None;
+        let mut ambiguous = None;
+        for (template_at, template) in templates.iter().enumerate() {
+            for (leg_at, template_leg) in template.legs.iter().enumerate() {
+                let named_end = match template_leg.side {
+                    FlowSide::Out => template_leg.flow.from,
+                    FlowSide::Arrive => template_leg.flow.to,
+                };
+                if named_end == endpoint.place {
+                    if matching.is_some() {
+                        ambiguous = Some((template_at, leg_at));
+                        break;
+                    }
+                    matching = Some((template_at, leg_at));
+                }
+            }
+            if ambiguous.is_some() {
+                break;
+            }
+        }
+        if let Some((template_at, leg_at)) = ambiguous {
+            let other = templates[template_at].legs[leg_at].flow.loc;
+            diags.push(
+                Diagnostic::error(
+                    "contract-occurrence-leg-ambiguous",
+                    "this end matches more than one template leg",
+                )
+                .label(leg.loc, "write a more specific occurrence override")
+                .context(other, "a matching template leg is here"),
             );
             continue;
         }
-        match world.amount(literal.num(), unit, leg.loc) {
-            Ok(value) => {
-                input_values[input_at] = Some(value);
-                bound[input_at] = true;
-            }
-            Err(problem) => diags.push(problem),
+        let Some((template_at, leg_at)) = matching else {
+            diags.push(
+                Diagnostic::error(
+                    "contract-occurrence-leg",
+                    "this end does not match a contract template leg",
+                )
+                .label(
+                    leg.loc,
+                    "write an end named by one of the contract's split legs",
+                ),
+            );
+            continue;
+        };
+        if replaced_legs.contains(&(template_at, leg_at)) {
+            diags.push(
+                Diagnostic::error(
+                    "contract-occurrence-leg-duplicate",
+                    "this template leg is overridden twice",
+                )
+                .label(leg.loc, "keep one replacement for this end")
+                .context(
+                    templates[template_at].legs[leg_at].flow.loc,
+                    "the template leg is declared here",
+                ),
+            );
+            continue;
         }
+        replaced_legs.push((template_at, leg_at));
+
+        let template = &templates[template_at];
+        let template_leg = &template.legs[leg_at];
+        if template_leg.side == FlowSide::Arrive && endpoint.select.len() != 0 {
+            diags.push(
+                Diagnostic::error(
+                    "selector-target",
+                    "selectors narrow the source endpoint of a flow",
+                )
+                .label(leg.loc, "this split end only receives"),
+            );
+            continue;
+        }
+        let fallback = match template_leg.side {
+            FlowSide::Out => template_leg.flow.out.unit,
+            FlowSide::Arrive => template_leg.flow.arrive.unit,
+        };
+        let Some(quantity) = resolve_quantity(
+            world,
+            file,
+            leg.amount,
+            fallback,
+            template_leg.side,
+            &roots,
+            diags,
+        ) else {
+            continue;
+        };
+        if quantity.mode == Mode::Opening {
+            diags.push(
+                Diagnostic::error(
+                    "contract-occurrence-whole",
+                    "a written occurrence leg needs a quantity",
+                )
+                .label(leg.loc, "whole assets are only valid in an opening"),
+            );
+            continue;
+        }
+        let (local_codes, written_tail) = lower_tail(
+            world,
+            site.home,
+            file,
+            leg.tail,
+            statement.date,
+            &roots,
+            code_index,
+            diags,
+        );
+        let mut tail = merge_tail(header_tail.clone(), written_tail);
+        if !tail.valid {
+            continue;
+        }
+
+        let base_flow = template_leg.flow.clone();
+        let mut out = base_flow.out;
+        let mut arrive = base_flow.arrive;
+        match template_leg.side {
+            FlowSide::Out => out = quantity.amount,
+            FlowSide::Arrive => arrive = quantity.amount,
+        }
+        if out.unit == arrive.unit {
+            out = quantity.amount;
+            arrive = quantity.amount;
+        }
+        if let Some((rate, quote, at)) = tail.price {
+            if quantity.root.is_some() {
+                diags.push(
+                    Diagnostic::error(
+                        "price-shape",
+                        "a written price needs a literal occurrence quantity",
+                    )
+                    .label(at, "computed quantities cannot be priced here"),
+                );
+                continue;
+            }
+            let (other_unit, chosen_unit) = match template_leg.side {
+                FlowSide::Out => (arrive.unit, out.unit),
+                FlowSide::Arrive => (out.unit, arrive.unit),
+            };
+            let other = if chosen_unit == quote {
+                let Some(inverse) = rate.recip() else {
+                    diags.push(
+                        Diagnostic::error("price-zero", "a price must be greater than zero")
+                            .label(at, "the reciprocal price is not representable"),
+                    );
+                    continue;
+                };
+                if other_unit == quote {
+                    diags.push(
+                        Diagnostic::error(
+                            "price-transfer",
+                            "a price cannot change a same-commodity transfer",
+                        )
+                        .label(at, "remove the price"),
+                    );
+                    continue;
+                }
+                priced(world, quantity.amount, other_unit, inverse, at, diags)
+            } else if other_unit == quote {
+                priced(world, quantity.amount, quote, rate, at, diags)
+            } else {
+                diags.push(
+                    Diagnostic::error(
+                        "price-unit",
+                        "the stated price unit must match the other side",
+                    )
+                    .label(at, "the quote unit appears on neither counterpart side"),
+                );
+                None
+            };
+            let Some(other) = other else { continue };
+            match template_leg.side {
+                FlowSide::Out => arrive = other,
+                FlowSide::Arrive => out = other,
+            }
+            tail.price = None;
+        }
+
+        let from = ResolvedEnd {
+            place: base_flow.from,
+            entity: None,
+            select: if template_leg.side == FlowSide::Out && endpoint.select.len() != 0 {
+                endpoint.select
+            } else {
+                base_flow.select
+            },
+        };
+        let to = ResolvedEnd {
+            place: base_flow.to,
+            entity: None,
+            select: Run::new(Id::new(0), 0),
+        };
+        let local_codes = if local_codes.is_empty() {
+            base_flow.codes
+        } else {
+            local_codes
+        };
+        let Some(mut flow) = make_resolved_flow(
+            world,
+            statement.date,
+            from,
+            to,
+            out,
+            arrive,
+            quantity.infer,
+            quantity.mode,
+            tail.clone(),
+            codes,
+            local_codes,
+            txn_id,
+            leg.loc,
+            diags,
+        ) else {
+            continue;
+        };
+        flow.owner = base_flow.owner;
+        flow.payee = flow.payee.or(base_flow.payee);
+        flow.purpose = flow.purpose.or(base_flow.purpose);
+        flow.description = flow.description.or(base_flow.description);
+        flow.waive = flow.waive.or(base_flow.waive);
+        flow.header_codes = base_flow.header_codes;
+        flow.codes = local_codes;
+        flow.select = from.select;
+        flow.detail = merge_detail_pool(world, base_flow.detail, flow.detail);
+        let offset = (world.book.flows.len() - first_flow) as u32;
+        world.book.flows.push(flow);
+        push_flow_expressions(
+            &mut flow_roots,
+            offset,
+            (template_leg.side == FlowSide::Out)
+                .then_some(quantity.root)
+                .flatten(),
+            (template_leg.side == FlowSide::Arrive)
+                .then_some(quantity.root)
+                .flatten(),
+            tail.basis_root,
+        );
+        if written_groups[template_at].is_none() {
+            let side = template_side(world, template);
+            written_groups[template_at] = Some(occurrence_group_draft(template_at, template, side));
+        }
+        let draft = written_groups[template_at]
+            .as_mut()
+            .expect("inserted occurrence group");
+        draft.legs.push(offset);
+        draft.leg_quantities.push(quantity.group);
     }
     if !file[statement.body.items].is_empty() {
-        diags.push(
-            Diagnostic::error("contract-occurrence-items", "written line items are not yet lowered on an occurrence")
-                .label(loc, "move the item to the contract terms or wait for item override lowering"),
+        let Some(template) = templates.first() else {
+            diags.push(
+                Diagnostic::error(
+                    "contract-occurrence-items",
+                    "this contract schedule has no flow group for items",
+                )
+                .label(loc, "items need a scheduled flow to modify"),
+            );
+            rollback(
+                world,
+                first_flow,
+                code_start,
+                selector_start,
+                detail_start,
+                program_start,
+            );
+            return;
+        };
+        let side = template_side(world, template);
+        let (from, to, common) = occurrence_item_ends(world, template, side);
+        let items = lower_items(
+            world,
+            site.home,
+            file,
+            statement.body.items,
+            from,
+            to,
+            side,
+            txn_id,
+            statement.date,
+            codes,
+            &roots,
+            code_index,
+            Mode::Actual,
+            Some(&header_tail),
+            &mut flow_roots,
+            first_flow,
+            diags,
         );
+        let template_at = 0;
+        if written_groups[template_at].is_none() {
+            written_groups[template_at] = Some(occurrence_group_draft(template_at, template, side));
+        }
+        let draft = written_groups[template_at]
+            .as_mut()
+            .expect("inserted occurrence group");
+        draft.source = JournalEnd {
+            place: common,
+            entity: None,
+        };
+        draft.items = items;
     }
     if diags.len() != diagnostic_start {
-        rollback(world, world.book.flows.len(), code_start, selector_start, detail_start, program_start);
+        rollback(
+            world,
+            first_flow,
+            code_start,
+            selector_start,
+            detail_start,
+            program_start,
+        );
         return;
     }
 
-    let program_id = (!program.nodes.is_empty()).then(|| {
+    let groups: Box<[WrittenGroup]> = written_groups
+        .into_iter()
+        .flatten()
+        .map(|draft| WrittenGroup {
+            template: draft.template,
+            out: None,
+            arrive: None,
+            group: JournalGroup {
+                header: None,
+                source: draft.source,
+                side: draft.side,
+                total: None,
+                legs: draft.legs.into_boxed_slice(),
+                leg_quantities: draft.leg_quantities.into_boxed_slice(),
+                items: draft.items,
+            },
+        })
+        .collect();
+    let program_id = (!program.nodes.is_empty() || !flow_roots.is_empty()).then(|| {
         world.book.journal_programs.push(JournalProgram {
             program,
-            flow_roots: Box::default(),
+            flow_roots: flow_roots.into_boxed_slice(),
             groups: Box::default(),
         })
     });
-    let occurrence_id = world
-        .book
-        .written_occurrences
-        .push(WrittenOccurrence {
-            due,
-            schedule,
-            amount: occurrence_amount,
-            program: program_id,
-            groups: Box::default(),
-            tail: occurrence_tail,
-        });
+    let occurrence_id = world.book.written_occurrences.push(WrittenOccurrence {
+        due,
+        schedule,
+        amount: occurrence_amount,
+        program: program_id,
+        groups,
+        tail: occurrence_tail,
+    });
     let input_start = world.book.input_values.len();
     for value in input_values {
         world.book.input_values.push(value);
     }
     world.book.txns.push(crate::journal::Txn {
         day: statement.date,
-        flows: Run::new(Id::new(world.book.flows.len() as u32), 0),
+        flows: Run::new(
+            Id::new(first_flow as u32),
+            (world.book.flows.len() - first_flow) as u32,
+        ),
         inputs: Run::new(Id::new(input_start as u32), inputs.len() as u32),
         program: None,
         codes,
@@ -1192,29 +1606,41 @@ fn nearest_occurrence<'a>(
         return Ok(None);
     }
     let mut radius = 0i64;
-    for timeline in [contract.terms.as_ref(), contract.standing.as_ref()].into_iter().flatten() {
-        let max_grace = std::iter::once(timeline.at(Day::MIN)).chain(timeline.changes().map(|(_, terms)| terms));
-        for terms in max_grace {
-            radius = radius.max(i64::from(terms.grace.months).saturating_mul(31).saturating_add(i64::from(terms.grace.days)));
+    for timeline in [contract.terms.as_ref(), contract.standing.as_ref()]
+        .into_iter()
+        .flatten()
+    {
+        let schedules = std::iter::once(timeline.at(Day::MIN))
+            .chain(timeline.changes().map(|(_, terms)| terms));
+        for terms in schedules {
+            let cadence = match terms.every {
+                crate::book::Cadence::Every(span) => {
+                    i64::from(span.months)
+                        .saturating_mul(31)
+                        .saturating_add(i64::from(span.days))
+                }
+                crate::book::Cadence::TwiceMonthly => 31,
+            };
+            radius = radius.max(cadence);
         }
     }
     let radius = radius.clamp(0, i64::from(i32::MAX)) as i32;
-    let Some(search) = Days::new(Day(day.0.saturating_sub(radius)), Day(day.0.saturating_add(radius))) else {
+    let Some(search) = Days::new(
+        Day(day.0.saturating_sub(radius)),
+        Day(day.0.saturating_add(radius)),
+    ) else {
         return Ok(None);
     };
     let mut regular = None;
     let mut standing = None;
     for occurrence in contract.occurrences(search) {
-        let delta = if day >= occurrence.day {
-            day.since(occurrence.day)
-        } else {
-            occurrence.day.since(day)
-        };
-        if delta > occurrence.terms.grace {
-            continue;
-        }
         let distance = (i64::from(day.0) - i64::from(occurrence.day.0)).abs();
-        let candidate = (distance, occurrence.day > day, occurrence.day, occurrence.terms);
+        let candidate = (
+            distance,
+            occurrence.day > day,
+            occurrence.day,
+            occurrence.terms,
+        );
         let best = match occurrence.schedule {
             ScheduleKind::Regular => &mut regular,
             ScheduleKind::Standing => &mut standing,
@@ -1226,7 +1652,10 @@ fn nearest_occurrence<'a>(
         }
     }
     match (regular, standing) {
-        (Some((r_distance, _, r_day, regular_terms)), Some((s_distance, _, s_day, standing_terms))) => {
+        (
+            Some((r_distance, _, r_day, regular_terms)),
+            Some((s_distance, _, s_day, standing_terms)),
+        ) => {
             if r_distance == s_distance {
                 Err((r_day, s_day))
             } else if r_distance < s_distance {
@@ -1452,6 +1881,7 @@ fn lower_owes<'a, 's>(
                     side: FlowSide::Out,
                     total: None,
                     legs: Box::default(),
+                    leg_quantities: Box::default(),
                     items,
                 });
             }
@@ -1482,6 +1912,7 @@ fn lower_owes<'a, 's>(
             side: FlowSide::Out,
             total: Some(JournalQuantity::Derived),
             legs: Box::default(),
+            leg_quantities: Box::default(),
             items,
         });
     }
@@ -1771,6 +2202,105 @@ fn occurrence_amount_unit(
         base
     } else {
         template.flow.arrive.unit
+    }
+}
+
+fn template_side(world: &World<'_>, template: &crate::book::TemplateFlow) -> FlowSide {
+    if let Some(leg) = template.legs.first() {
+        return leg.side;
+    }
+    if world.book.places[template.flow.from].class != crate::book::Class::Outside {
+        FlowSide::Arrive
+    } else {
+        FlowSide::Out
+    }
+}
+
+fn occurrence_group_draft(
+    template_at: usize,
+    template: &crate::book::TemplateFlow,
+    side: FlowSide,
+) -> OccurrenceGroupDraft {
+    let common = match side {
+        FlowSide::Out => template.flow.to,
+        FlowSide::Arrive => template.flow.from,
+    };
+    OccurrenceGroupDraft {
+        template: template_at as u32,
+        source: JournalEnd {
+            place: common,
+            entity: None,
+        },
+        side,
+        legs: Vec::new(),
+        leg_quantities: Vec::new(),
+        items: Box::default(),
+    }
+}
+
+fn occurrence_item_ends(
+    world: &World<'_>,
+    template: &crate::book::TemplateFlow,
+    side: FlowSide,
+) -> (ResolvedEnd, ResolvedEnd, Id<crate::book::Place>) {
+    let common = match side {
+        FlowSide::Out => template.flow.to,
+        FlowSide::Arrive => template.flow.from,
+    };
+    let remainder = template.legs.first().map_or_else(
+        || match side {
+            FlowSide::Out => template.flow.from,
+            FlowSide::Arrive => template.flow.to,
+        },
+        |leg| match leg.side {
+            FlowSide::Out => leg.flow.from,
+            FlowSide::Arrive => leg.flow.to,
+        },
+    );
+    let end = |place| ResolvedEnd {
+        place,
+        entity: match world.book.places[place].role {
+            crate::book::Role::Outside(entity) => entity,
+            crate::book::Role::Tab(entity) => Some(entity),
+            _ => None,
+        },
+        select: Run::new(Id::new(0), 0),
+    };
+    let (from, to) = match side {
+        FlowSide::Out => (end(remainder), end(common)),
+        FlowSide::Arrive => (end(common), end(remainder)),
+    };
+    (from, to, common)
+}
+
+fn merge_detail_pool(
+    world: &mut World<'_>,
+    base: Option<Id<Detail>>,
+    override_detail: Option<Id<Detail>>,
+) -> Option<Id<Detail>> {
+    let (Some(base), Some(override_detail)) = (base, override_detail) else {
+        return base.or(override_detail);
+    };
+    let (base_value, override_value) = (
+        world.book.details[base],
+        world.book.details[override_detail],
+    );
+    let merged = Detail {
+        basis: override_value.basis.or(base_value.basis),
+        hold: override_value.hold.or(base_value.hold),
+        since: override_value.since.or(base_value.since),
+        spender: override_value.spender.or(base_value.spender),
+        cost: override_value.cost.or(base_value.cost),
+        due: override_value.due.or(base_value.due),
+        against: override_value.against.or(base_value.against),
+        reckoned: override_value.reckoned.or(base_value.reckoned),
+    };
+    if merged == base_value {
+        Some(base)
+    } else if merged == override_value {
+        Some(override_detail)
+    } else {
+        Some(world.book.details.push(merged))
     }
 }
 

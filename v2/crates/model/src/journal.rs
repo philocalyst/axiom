@@ -744,6 +744,8 @@ pub struct JournalGroup {
     /// flow exists, its own inline amount and `FlowExpressions` are canonical.
     pub total: Option<JournalQuantity>,
     pub legs: Box<[u32]>,
+    /// Typed quantities parallel to `legs`, preserving Rest/All/zero distinctions.
+    pub leg_quantities: Box<[JournalQuantity]>,
     pub items: Box<[JournalItem]>,
 }
 

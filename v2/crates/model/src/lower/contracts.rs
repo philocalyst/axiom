@@ -8,9 +8,9 @@ use axiom_syntax::{ClauseKind, Direction, ExprKind, ItemKind, Name};
 
 use super::{JournalSurvey, compile_roots, contract_roots, inputs};
 use crate::book::{
-    Amount, At, Cadence, Contract, Coverage, Deadline, Escalation, FlowSide, Input, Relative,
-    Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent, TemplateLeg,
-    TemplateProgram, TemplateQuantity, Terms, TermsState,
+    Amount, At, Cadence, Class, Contract, Coverage, Deadline, Escalation, FlowSide, Input, Loan,
+    Prepay, Relative, Share, TemplateAmount, TemplateFlow, TemplateItem, TemplateItemParent,
+    TemplateLeg, TemplateProgram, TemplateQuantity, Terms, TermsState,
 };
 use crate::declare::World;
 use crate::errors::{Word, duplicate};
@@ -211,6 +211,14 @@ fn lower_contract<'a, 's>(
         Some(schedule) => schedule_owner(world, written.site.home, file, Some(schedule), party, diags)?,
         None => world.book.roots.me,
     };
+    let loan = contract_loan(
+        world,
+        file,
+        node.props,
+        party,
+        owner,
+        diags,
+    )?;
     let mut contract = empty_contract(
         written.name,
         written.site.source.file.loc(node.name.0),
@@ -222,6 +230,7 @@ fn lower_contract<'a, 's>(
     contract.purpose = purpose;
     contract.description = description;
     contract.area = area;
+    contract.loan = loan.map(|(loan, _)| loan);
     contract.doc = node_doc(world, written.site, written.loc);
     contract.loc = written.loc;
     contract.buys = node
@@ -247,6 +256,7 @@ fn lower_contract<'a, 's>(
             purpose,
             description,
             area,
+            loan.map(|(_, rate)| rate),
             diags,
         )?;
         contract.terms = Some(Timeline::new(terms));
@@ -267,11 +277,214 @@ fn lower_contract<'a, 's>(
             purpose,
             description,
             area,
+            loan.map(|(_, rate)| rate),
             diags,
         )?;
         contract.standing = Some(Timeline::new(terms));
     }
     Some(contract)
+}
+
+fn contract_loan<'s>(
+    world: &World<'s>,
+    file: &ast::File<'s>,
+    props: ast::Many<ast::Prop<'s>>,
+    party: axiom_core::Id<crate::book::Entity>,
+    owner: axiom_core::Id<crate::book::Entity>,
+    diags: &mut Vec<Diagnostic>,
+) -> Option<Option<(Loan, Ratio)>> {
+    let mut written = file[props].iter().filter(|prop| prop.name.0 == "loan");
+    let Some(prop) = written.next() else {
+        return Some(None);
+    };
+    if let Some(duplicate) = written.next() {
+        diags.push(
+            Diagnostic::error("duplicate-contract-loan", "a contract has one loan definition")
+                .label(duplicate.loc, "a second loan cannot replace the first")
+                .context(prop.loc, "the first loan is here"),
+        );
+        return None;
+    }
+
+    let args = &file[prop.args];
+    let keyword = |index: usize, expected: &str| {
+        args.get(index).is_some_and(|&id| {
+            matches!(file.exprs[id].kind, ExprKind::Name(name) if name.0 == expected)
+        })
+    };
+    let Some(&principal_expr) = args.first() else {
+        diags.push(
+            Diagnostic::error("contract-loan", "a loan needs its principal, start date, rate, and term")
+                .label(prop.loc, "write `loan AMOUNT on DATE at RATE over SPAN`"),
+        );
+        return None;
+    };
+    let principal = match file.exprs[principal_expr].kind {
+        ExprKind::Amount(literal) => {
+            let unit = match literal.unit() {
+                Some(unit) => match world.commodity_of(Word {
+                    text: unit.0,
+                    loc: file.loc(unit.0),
+                }) {
+                    Ok(unit) => unit,
+                    Err(problem) => {
+                        diags.push(problem);
+                        return None;
+                    }
+                },
+                None => world.book.base,
+            };
+            match world.amount(literal.num(), unit, file.exprs[principal_expr].loc) {
+                Ok(amount) if amount.qty.0 > 0 => amount,
+                Ok(_) => {
+                    diags.push(
+                        Diagnostic::error("contract-loan-principal", "a loan principal must be positive")
+                            .label(file.exprs[principal_expr].loc, "this amount is not positive"),
+                    );
+                    return None;
+                }
+                Err(problem) => {
+                    diags.push(problem);
+                    return None;
+                }
+            }
+        }
+        _ => {
+            diags.push(
+                Diagnostic::error("contract-loan-principal", "a loan principal must be a literal amount")
+                    .label(file.exprs[principal_expr].loc, "write an amount such as `3_000 USD`"),
+            );
+            return None;
+        }
+    };
+    if args.len() != 7 && args.len() != 9 || !keyword(1, "on") || !keyword(3, "at") || !keyword(5, "over") {
+        diags.push(
+            Diagnostic::error("contract-loan", "the loan definition has missing or extra fields")
+                .label(prop.loc, "write `loan AMOUNT on DATE at RATE over SPAN [for ASSET]`"),
+        );
+        return None;
+    }
+    let on = match file.exprs[args[2]].kind {
+        ExprKind::Date(day) => day,
+        _ => {
+            diags.push(
+                Diagnostic::error("contract-loan-date", "a loan start needs a date")
+                    .label(file.exprs[args[2]].loc, "write the date after `on`"),
+            );
+            return None;
+        }
+    };
+    let rate = match file.exprs[args[4]].kind {
+        ExprKind::Pct(percent) => Ratio::percent(percent.mantissa as i128, percent.scale),
+        _ => None,
+    };
+    let Some(rate) = rate.filter(|rate| !rate.is_negative()) else {
+        diags.push(
+            Diagnostic::error("contract-loan-rate", "a loan rate must be a nonnegative percentage")
+                .label(file.exprs[args[4]].loc, "write a rate such as `5.875%`"),
+        );
+        return None;
+    };
+    let term = match file.exprs[args[6]].kind {
+        ExprKind::Span(span) if span.months > 0 || span.days > 0 => span,
+        _ => {
+            diags.push(
+                Diagnostic::error("contract-loan-term", "a loan term must be a positive span")
+                    .label(file.exprs[args[6]].loc, "write a term such as `30y`"),
+            );
+            return None;
+        }
+    };
+    let asset = if args.len() == 9 {
+        if !keyword(7, "for") {
+            diags.push(
+                Diagnostic::error("contract-loan-asset", "a financed asset follows `for`")
+                    .label(file.exprs[args[7]].loc, "write `for ASSET` here"),
+            );
+            return None;
+        }
+        let name = match file.exprs[args[8]].kind {
+            ExprKind::Name(name) => name.0,
+            _ => {
+                diags.push(
+                    Diagnostic::error("contract-loan-asset", "a financed asset needs a name")
+                        .label(file.exprs[args[8]].loc, "write the declared asset name"),
+                );
+                return None;
+            }
+        };
+        match world.book.asset(name) {
+            Some(asset) => Some(asset),
+            None => {
+                diags.push(
+                    Diagnostic::error("contract-loan-asset", format!("asset `{name}` is not declared"))
+                        .label(file.exprs[args[8]].loc, "declare this asset before the loan"),
+                );
+                return None;
+            }
+        }
+    } else {
+        None
+    };
+
+    let mut prepay = Prepay::Shortens;
+    let mut prepay_loc = None;
+    for nested in &file[prop.lines] {
+        let nested = &nested.0;
+        match nested.name.0 {
+            "prepay" => {
+                if let Some(first) = prepay_loc {
+                    diags.push(
+                        Diagnostic::error("duplicate-loan-prepay", "a loan has one prepayment rule")
+                            .label(nested.loc, "a second rule cannot replace the first")
+                            .context(first, "the first rule is here"),
+                    );
+                    return None;
+                }
+                prepay_loc = Some(nested.loc);
+                let value = file[nested.args].first().and_then(|&id| match file.exprs[id].kind {
+                    ExprKind::Name(name) if name.0 == "shortens" => Some(Prepay::Shortens),
+                    ExprKind::Name(name) if name.0 == "recasts" => Some(Prepay::Recasts),
+                    _ => None,
+                });
+                if file[nested.args].len() != 1 || value.is_none() {
+                    diags.push(
+                        Diagnostic::error("contract-loan-prepay", "prepay must be `shortens` or `recasts`")
+                            .label(nested.loc, "write exactly one supported prepayment rule"),
+                    );
+                    return None;
+                }
+                prepay = value.unwrap();
+            }
+            "resets" => {
+                diags.push(
+                    Diagnostic::error("contract-loan-resets", "loan resets are not yet lowered")
+                        .label(nested.loc, "this reset has no typed model value"),
+                );
+                return None;
+            }
+            _ => {
+                diags.push(
+                    Diagnostic::error("contract-loan-property", "this nested loan property is not supported")
+                        .label(nested.loc, "remove or correct this property"),
+                );
+                return None;
+            }
+        }
+    }
+    let debt = world.tab(party, owner, Class::Debt, prop.loc).map_err(|problem| diags.push(problem)).ok()?;
+    Some(Some((
+        Loan {
+            principal,
+            on,
+            term,
+            asset,
+            debt,
+            resets: None,
+            prepay,
+        },
+        rate,
+    )))
 }
 
 fn lower_terms<'a, 's>(
@@ -289,6 +502,7 @@ fn lower_terms<'a, 's>(
     purpose: Option<At<Purposed>>,
     description: Option<crate::book::Text>,
     contract_area: Option<Amount>,
+    loan_rate: Option<Ratio>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<Terms> {
     let hold = schedule.terms.holding?;
@@ -320,11 +534,7 @@ fn lower_terms<'a, 's>(
         to,
         header_amount,
         owner,
-        if hold.direction == Direction::From {
-            Some(party)
-        } else {
-            Some(owner)
-        },
+        Some(party),
         purpose.map(|at| at.value),
         description,
         schedule.at,
@@ -345,7 +555,7 @@ fn lower_terms<'a, 's>(
             leg_to,
             amount,
             owner,
-            None,
+            Some(party),
             purpose.map(|at| at.value),
             description,
             leg.loc,
@@ -411,6 +621,10 @@ fn lower_terms<'a, 's>(
         ast::Cadence::Every(span) => Cadence::Every(span),
         ast::Cadence::TwiceMonthly => Cadence::TwiceMonthly,
     };
+    let default_grace = match every {
+        Cadence::Every(span) => span.months.saturating_mul(31).saturating_add(span.days) / 2,
+        Cadence::TwiceMonthly => 7,
+    };
     Some(Terms {
         state: TermsState::Active,
         every,
@@ -421,7 +635,8 @@ fn lower_terms<'a, 's>(
         inputs: inputs.to_vec().into_boxed_slice(),
         estimate: schedule.terms.about,
         due,
-        grace: span_property(file, written.node.props, "grace", diags).unwrap_or(Span::default()),
+        grace: span_property(file, written.node.props, "grace", diags)
+            .unwrap_or_else(|| Span::days(default_grace)),
         period: relative_property(file, written.node.props, diags),
         covers: coverage_property(file, written.node.props, diags),
         prorated: has_property(file, written.node.props, "prorated"),
@@ -438,7 +653,7 @@ fn lower_terms<'a, 's>(
         )
         .into_boxed_slice(),
         also: Box::default(),
-        rate: None,
+        rate: loan_rate,
         change: None,
     })
 }
@@ -518,6 +733,28 @@ fn template_quantity<'s>(
     fallback: Id<crate::book::Commodity>,
     diags: &mut Vec<Diagnostic>,
 ) -> Option<(TemplateQuantity, Amount)> {
+    if let ast::Quantity::Amount(ast::Amount::Computed(expr)) = quantity
+        && let ExprKind::Pct(percent) = file.exprs[expr].kind
+    {
+        let Some(rate) = Ratio::percent(percent.mantissa as i128, percent.scale) else {
+            diags.push(
+                Diagnostic::error("contract-percentage", "this percentage cannot be represented")
+                    .label(file.exprs[expr].loc, "use a smaller percentage"),
+            );
+            return None;
+        };
+        if rate.is_negative() || rate > Ratio::ONE {
+            diags.push(
+                Diagnostic::error(
+                    "contract-percentage-range",
+                    "a split percentage must be between 0% and 100%",
+                )
+                .label(file.exprs[expr].loc, "this share would exceed the parent amount"),
+            );
+            return None;
+        }
+        return Some((TemplateQuantity::Percent(rate), Amount::zero(fallback)));
+    }
     Some(match quantity {
         ast::Quantity::Amount(amount) => {
             let (quantity, amount) = template_amount(world, file, amount, roots, fallback, diags)?;

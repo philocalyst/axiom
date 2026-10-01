@@ -554,7 +554,7 @@ fn measured_shares_reject_missing_and_mismatched_denominators() {
 }
 
 #[test]
-fn contract_occurrence_uses_nearest_grace_day_and_binds_inputs_in_order() {
+fn contract_occurrence_uses_nearest_schedule_after_grace_and_binds_inputs_in_order() {
     let path = "journal/2026/02.ax";
     let text = "\
 base USD
@@ -566,7 +566,7 @@ contract flat with greystar
   2_900 USD monthly on 1 from checking
   grace 3d
   input water USD
-2026-02-03 flat
+2026-02-05 flat
   water = 155 USD
 ";
     let (file, syntax) = parse(FileId(0), text, Folder::of(path));
@@ -598,6 +598,7 @@ contract flat with greystar
     let txn = book.txns.iter().map(|(id, txn)| (id, txn)).find(|(_, txn)| txn.contract.is_some()).unwrap();
     assert_eq!(txn.1.contract, Some(contract_id));
     assert_eq!(txn.1.contract_schedule, Some(axiom_model::ScheduleKind::Regular));
+    assert_eq!(txn.1.day, axiom_core::Day::from_ymd(2026, 2, 5).unwrap());
     let occurrence = &book.written_occurrences[txn.1.occurrence.expect("sparse written occurrence identity")];
     assert_eq!(occurrence.due, axiom_core::Day::from_ymd(2026, 2, 1).unwrap());
     assert_eq!(occurrence.schedule, axiom_model::ScheduleKind::Regular);
@@ -967,6 +968,136 @@ fn rejected_waiver_and_early_end_do_not_change_contract_terms() {
         assert!(contract.ended.is_none());
         assert!(book.endings.is_empty());
     }
+}
+
+#[test]
+fn a_written_occurrence_replaces_matching_legs_and_adds_typed_items() {
+    let path = "journal/2026/01.ax";
+    let text = "\
+base USD
+commodity USD
+account assets/checking
+contract flat with landlord
+  2_900 USD monthly on 1 from checking
+  water-company 100 USD
+2026-01-01 flat 3_000 USD
+  water-company 200 USD
+  + 25 USD \"usage fee\" ^fee
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let txn = &book.txns[Id::new(0)];
+    let occurrence = &book.written_occurrences[txn.occurrence.unwrap()];
+    assert_eq!(occurrence.groups.len(), 1);
+    let overlay = &occurrence.groups[0];
+    assert_eq!(overlay.template, 0);
+    assert_eq!(overlay.group.legs.len(), 1);
+    assert_eq!(overlay.group.leg_quantities.len(), 1);
+    let usd = book.commodity("USD").unwrap();
+    assert_eq!(
+        overlay.group.leg_quantities[0],
+        axiom_model::JournalQuantity::Amount(
+            axiom_model::Amount::new(axiom_core::Qty(200), usd),
+            None,
+        ),
+    );
+    assert_eq!(overlay.group.items.len(), 1);
+    assert_eq!(overlay.group.items[0].sign, axiom_model::Sign::Add);
+    assert_eq!(
+        overlay.group.items[0].amount,
+        axiom_model::TemplateAmount::Literal(axiom_model::Amount::new(axiom_core::Qty(25), usd)),
+    );
+    assert_eq!(
+        txn.flows.len(),
+        2,
+        "override offsets point into the occurrence transaction"
+    );
+    assert_eq!(book.name(book.codes[txn.codes.start()]), "fee");
+}
+
+#[test]
+fn contract_percentage_leg_is_a_relative_header_quantity() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+  precision 2
+entity lumen
+account assets/checking
+account assets/retirement
+contract job with lumen
+  4_600 USD twice monthly on 15, last into checking
+  retirement 6%
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let contract = &book.contracts[Id::new(0)];
+    let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 15).unwrap());
+    assert_eq!(terms.template[0].flow.payee, Some(contract.party));
+    let leg = &terms.template[0].legs[0];
+    assert_eq!(leg.flow.payee, Some(contract.party));
+    assert_eq!(
+        leg.quantity,
+        axiom_model::TemplateQuantity::Percent(axiom_core::Ratio::percent(6, 0).unwrap())
+    );
+    assert!(terms.program.nodes.is_empty(), "a literal percent needs no expression program");
+}
+
+#[test]
+fn contract_loan_retains_principal_asset_debt_and_initial_rate() {
+    let path = "contracts.ax";
+    let text = "\
+base USD
+commodity USD
+kind property : thing
+asset condo : property
+entity rocket
+account assets/checking
+contract mortgage with rocket
+  loan 320_000 USD on 2024-02-20 at 5.875% over 30y for condo
+    prepay recasts
+  monthly on 1 from checking
+";
+    let (file, syntax) = parse(FileId(0), text, Folder::of(path));
+    assert!(syntax.is_empty(), "{syntax:?}");
+
+    let (book, diagnostics) = build(&[Source {
+        path,
+        file,
+        embedded: false,
+    }]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let contract = &book.contracts[Id::new(0)];
+    let loan = contract.loan.expect("the loan declaration is retained");
+    assert_eq!(
+        loan.principal,
+        axiom_model::Amount::new(axiom_core::Qty(320_000), book.base)
+    );
+    assert_eq!(loan.on, Day::from_ymd(2024, 2, 20).unwrap());
+    assert_eq!(loan.term, axiom_core::Span::months(360));
+    assert_eq!(loan.asset, book.asset("condo"));
+    assert_eq!(book.places[loan.debt].class, axiom_model::Class::Debt);
+    assert_eq!(loan.prepay, axiom_model::Prepay::Recasts);
+    let terms = contract.terms.as_ref().unwrap().at(Day::from_ymd(2026, 1, 1).unwrap());
+    assert_eq!(terms.rate, Some(axiom_core::Ratio::percent(5_875, 3).unwrap()));
+    assert!(matches!(
+        terms.template[0].out,
+        axiom_model::TemplateQuantity::Derived
+    ));
 }
 
 fn assert_record_indices(book: &axiom_model::book::Book<'_>) {

@@ -488,6 +488,8 @@ fn push_body_roots<'s>(
 ) {
     for leg in &file[body.legs] {
         match leg.amount {
+            ast::Quantity::Amount(ast::Amount::Computed(expr))
+                if matches!(file.exprs[expr].kind, ast::ExprKind::Pct(_)) => {}
             ast::Quantity::Amount(amount)
             | ast::Quantity::Pending(amount)
             | ast::Quantity::Target(amount) => push_amount_root(amount, roots),

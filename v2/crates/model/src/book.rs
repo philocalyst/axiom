@@ -697,6 +697,8 @@ pub enum TemplateQuantity {
     Amount(Option<NodeId>),
     Pending(Option<NodeId>),
     Target(Option<NodeId>),
+    /// A literal percentage of the parent flow side, resolved per occurrence.
+    Percent(Ratio),
     Unknown(Id<Commodity>),
     All(Option<Id<Commodity>>),
     Rest,
