@@ -117,7 +117,7 @@ kind envelope : entity
 
 account assets/checking
 account assets/savings
-account expenses/car-repair
+account assets/car-repair
 
 entity trip-fund : envelope
   via assets/savings
@@ -171,30 +171,31 @@ fn a_payment_written_out_of_an_envelope_is_judged_by_its_laws_not_dodged() {
 base USD
 commodity USD
   precision 2
-kind car-cost : expense
 kind envelope : entity
   restricted
-  has purpose kind
+  has grant-purpose purpose
   law purpose
     on spend
-    require to is self.purpose \"envelope money spent on something else\"
+    require purpose is self.grant-purpose \"envelope money spent on something else\"
+
+purpose car-maintenance : spending
+purpose dining : spending
 
 account assets/checking
 account assets/savings
-account expenses/dining
-account expenses/car-repair : car-cost
+entity restaurant
+entity mechanic
 
 entity car-fund : envelope
   via assets/savings
-  purpose car-cost
+  grant-purpose car-maintenance
 
 opening 2025-09-01
   checking 2_000 USD
 
 2025-09-07 checking -> savings 200 USD for car-fund
-2025-09-08 checking -> savings 300 USD
-2025-10-10 car-fund -> dining 20 USD
-2025-10-20 car-fund -> car-repair 150 USD
+2025-10-10 savings -> restaurant 20 USD #dining
+2025-10-20 savings -> mechanic 150 USD #car-maintenance
 ";
     with_run(text, day(2025, 12, 31), |book, run| {
         let broken: Vec<_> =
@@ -219,8 +220,8 @@ kind ira : asset
   /// Each person has a limit of their own.
   law limit
     on in
-    count amount as contributions
-    require tally(contributions) <= 700 USD \"over the limit\"
+    count value(amount, USD) as contributions
+    require value(tally(contributions), USD) <= 700 USD \"over the limit\"
 
 law close
   each year
@@ -271,14 +272,14 @@ commodity USD
   precision 2
 
 account assets/checking
-account expenses/estimated
+account assets/estimated
   law paid
     on in
-    count amount as paid
+    count value(amount, USD) as paid
 
 law close
   each year closing 01-15
-  require tally(paid) <= 120 USD \"over the estimate\"
+  require value(tally(paid), USD) <= 120 USD \"over the estimate\"
 
 opening 2025-01-01
   checking 1_000 USD
@@ -421,10 +422,10 @@ commodity USD
   precision 2
 
 account assets/checking
-account expenses/estimated
+account assets/estimated
   law paid
     on in
-    count amount as paid
+    count value(amount, USD) as paid
 
 law look-back
   each year
@@ -451,50 +452,52 @@ fn a_tally_is_read_for_the_year_asked_and_for_this_one_without_asking() {
     });
 }
 
-// ─── A basis flow moves no quantity ─────────────────────────────────────────
+// ─── An improvement adds an asset part without adding another asset ─────────
 
-/// A place that holds shares and money, and an improvement to the shares' basis
-/// between a payment of an amount to solve and the assertion that solves it.
+/// Opening cost and a later improvement are separate basis parts; the cash paid
+/// for the improvement leaves checking but does not create another condo unit.
 const REBASED: &str = "\
 base USD
 commodity USD
   precision 2
-commodity UNH
-
-account assets/broker
+kind property : thing
+purpose improvement : capital
+  of asset
 account assets/checking
-account income/discount
+entity contractor
+asset condo : property
 
 opening 2025-01-01
-  broker 10 UNH basis 1_000 USD since 2024-01-01
   checking 5_000 USD
+  condo basis 1_000 USD since 2024-01-01
 
-2025-02-01 checking -> broker ? USD
-2025-02-15 income/discount -> broker[2024-01-01].basis 100 USD
-2025-03-01 broker = 500 USD
+2025-02-15 checking -> contractor 100 USD #improvement of condo
 ";
 
-/// The 100.00 USD went into the shares' basis and no money arrived, so the
-/// payment before it is the whole 500.00 USD the assertion says the place holds.
+/// The opening cost and improvement remain separate attributable asset parts;
+/// the improvement is also an ordinary cash payment.
 #[test]
-fn an_amount_to_solve_is_not_short_by_a_flow_that_only_changed_a_basis() {
+fn an_improvement_adds_basis_without_changing_the_asset_quantity() {
     with_run(REBASED, day(2025, 6, 1), |book, run| {
         let errors: Vec<_> = run.diagnostics.iter().filter(|d| d.is_error()).map(|d| &d.message).collect();
         assert!(errors.is_empty(), "{errors:?}");
-        assert_eq!(holding(book, run, "assets/broker", "USD").map(|h| h.qty()), Some(axiom_core::Qty(500_00)));
+        let asset = book.asset("condo").unwrap();
+        let parts = run.assets[asset.index()].parts();
+        assert_eq!(parts.len(), 2, "opening cost and improvement stay attributable");
+        assert_eq!(parts.iter().map(|part| (part.cost.0, part.basis.0)).collect::<Vec<_>>(), [(100_000, 100_000), (10_000, 10_000)]);
+        assert_eq!(holding(book, run, "assets/checking", "USD").unwrap().qty().0, 4_900_00);
     });
 }
 
-/// An assertion that fails after a basis flow does not count that flow among the flows that moved
-/// the balance it checks.
+/// The assertion trace for the cash account includes the improvement payment:
+/// unlike a retired `.basis` endpoint, an improvement is a real cash flow.
 #[test]
-fn a_failed_assertion_does_not_list_a_flow_that_only_changed_a_basis() {
-    let text = REBASED.replace("broker ? USD", "broker 300 USD");
+fn a_cash_assertion_explains_the_payment_which_funded_an_improvement() {
+    let text = format!("{REBASED}2025-03-01 assets/checking = 4_800 USD\n");
     with_run(&text, day(2025, 6, 1), |_, run| {
         let assertion = run.diagnostics.iter().find(|d| &*d.code == "assertion").expect("the assertion fails");
         let listed: Vec<_> = assertion.labels.iter().map(|label| label.text.as_str()).collect();
-        assert!(listed.iter().all(|text| !text.contains("income/discount")), "{listed:?}");
-        assert!(listed.iter().any(|text| text.contains("from assets/checking")), "{listed:?}");
+        assert!(listed.iter().any(|text| text.contains("improvement")) || listed.iter().any(|text| text.contains("contractor")), "{listed:?}");
     });
 }
 
@@ -516,14 +519,14 @@ commodity EUR : {kind}
 
 account assets/checking
 account assets/wallet
-account expenses/food
+account assets/food
 
 opening 2025-01-01
   checking 5_000 USD
 
 2025-01-05 checking 1_100 USD -> wallet 1_000 EUR
 2025-02-05 checking 1_150 USD -> wallet 1_000 EUR
-2025-03-01 EUR 1.2 USD
+2025-03-01 EUR = 1.2 USD
 2025-03-01 wallet -> food 1_500 EUR
 "
     )
@@ -553,29 +556,16 @@ fn each_leg_of_a_split_is_a_claim_on_its_own_debtor_and_falls_due_on_its_own_day
 base USD
 commodity USD
   precision 2
-kind receivable : asset
-  claim
-kind org : entity
-
+purpose rent : spending
 account assets/checking
-account assets/owed/ben : receivable
-account assets/owed/cleo : receivable
-account expenses/rent
-
-entity ben : org
-  via assets/owed/ben
-entity cleo : org
-  via assets/owed/cleo
-entity landlord : org
-  via expenses/rent
-
+entity ben
+entity cleo
+entity landlord
 opening 2025-02-01
   checking 5_000 USD
 
-2025-03-01 checking -> 3_150 USD / landlord #rent due 2025-03-08
-  rent  1_050 USD
-  ben   1_050 USD
-  cleo  1_050 USD due 2025-03-15
+2025-03-01 ben owes landlord 1_050 USD due 2025-03-08 #rent
+2025-03-01 cleo owes landlord 1_050 USD due 2025-03-15 #rent
 ";
     with_run(text, day(2025, 4, 1), |_, run| {
         let overdue: Vec<_> =
@@ -598,11 +588,10 @@ commodity USD
   precision 2
 commodity VTI
   precision 0
+purpose fees : spending
 
 account assets/broker
 account assets/checking
-account expenses/fees
-
 opening 2024-01-01
   checking 5_000 USD
   broker   10 VTI basis 1_000 USD since 2020-01-01
@@ -610,18 +599,18 @@ opening 2024-01-01
 
 #[test]
 fn a_fee_leg_of_a_sale_comes_off_its_proceeds() {
-    let text = format!("{TRADES}2025-03-01 broker 10 VTI -> 1_500 USD\n  checking 1_490 USD\n  fees 10 USD\n");
+    let text = format!("{TRADES}2025-03-01 broker 10 VTI -> checking 1_500 USD\n  - 10 USD #fees\n");
     with_run(&text, day(2025, 12, 31), |book, run| {
         let [sale] = run.gains[..] else { panic!("one disposal: {:?}", run.gains) };
         assert_eq!((sale.proceeds.0, sale.basis.0, sale.gain().0), (1_490_00, 1_000_00, 490_00));
-        let usd = |place| holding(book, run, place, "USD").unwrap().qty().0;
-        assert_eq!((usd("checking"), usd("fees")), (5_000_00 + 1_490_00, 10_00), "the fee is still an expense");
+        let usd = holding(book, run, "checking", "USD").unwrap().qty().0;
+        assert_eq!(usd, 5_000_00 + 1_490_00, "the fee is withheld from proceeds");
     });
 }
 
 #[test]
 fn a_fee_leg_of_a_purchase_is_part_of_what_the_shares_cost() {
-    let text = format!("{TRADES}2025-04-01 checking -> 2_000 USD\n  broker 7 VTI\n  fees 5 USD\n");
+    let text = format!("{TRADES}2025-04-01 checking 2_000 USD -> broker 7 VTI\n  5 USD #fees\n");
     with_run(&text, day(2025, 12, 31), |book, run| {
         let lots = &holding(book, run, "broker", "VTI").unwrap().lots;
         let bought: Vec<_> = lots.iter().map(|lot| (lot.qty.0, lot.basis.0)).collect();
@@ -631,7 +620,7 @@ fn a_fee_leg_of_a_purchase_is_part_of_what_the_shares_cost() {
 
 #[test]
 fn a_purchase_that_states_its_basis_keeps_it() {
-    let text = format!("{TRADES}2025-04-01 checking -> 2_000 USD basis 1_990 USD\n  broker 7 VTI\n  fees 5 USD\n");
+    let text = format!("{TRADES}2025-04-01 checking 2_000 USD -> broker 7 VTI basis 1_990 USD\n  5 USD #fees\n");
     with_run(&text, day(2025, 12, 31), |book, run| {
         let lots = &holding(book, run, "broker", "VTI").unwrap().lots;
         assert_eq!(lots.last().unwrap().basis.0, 1_990_00);
@@ -644,21 +633,28 @@ const INSURANCE: &str = "\
 base USD
 commodity USD
   precision 2
-
+purpose insurance : spending
+budget insurance 1_200 USD yearly
+purpose rent : spending
+budget rent 100 USD monthly
 account assets/checking
-account expenses/insurance
-  budget 1_200 USD yearly
-account expenses/rent
-  budget 100 USD monthly
+entity insurer
+entity landlord
 
 opening 2025-09-01
   checking 5_000 USD
 ";
 
-/// What the limits read in each window, as `(first day, counted)`, for one place's budget.
-fn read(book: &Book, run: &Run, place: &str) -> Vec<(String, i64)> {
-    let subject = axiom_model::Subject::Place(book.place(place).unwrap());
-    let readings = run.headroom.iter().filter(|reading| reading.subject == subject);
+/// What the limits read in each window, as `(first day, counted)`, for a purpose budget.
+fn read(book: &Book, run: &Run, purpose: &str) -> Vec<(String, i64)> {
+    let purpose = book.purpose(purpose).unwrap();
+    let budget = book
+        .budgets
+        .iter()
+        .find(|(_, budget)| budget.purpose == purpose)
+        .map(|(_, budget)| budget)
+        .expect("a budget for the purpose");
+    let readings = run.headroom.iter().filter(|reading| reading.law == budget.law);
     readings.map(|reading| (reading.days.first().to_string(), reading.counted.qty.0)).collect()
 }
 
@@ -945,7 +941,7 @@ opening 2025-01-01
 
 #[test]
 fn a_flow_recognized_for_next_year_is_in_next_years_headroom_before_anything_else_lands_there() {
-    let text = format!("{INSURANCE}2025-12-12 checking -> insurance 1_140 USD for 2026\n");
+    let text = format!("{INSURANCE}2025-12-12 checking -> insurer 1_140 USD #insurance for 2026\n");
     with_run(&text, day(2026, 2, 14), |book, run| {
         let years = read(book, run, "insurance");
         assert_eq!(years, [("2025-01-01".into(), 0), ("2026-01-01".into(), 1_140_00)]);
@@ -956,7 +952,7 @@ fn a_flow_recognized_for_next_year_is_in_next_years_headroom_before_anything_els
 #[test]
 fn an_accrual_that_alone_breaks_a_limit_is_reported_once_however_much_lands_after() {
     let text = format!(
-        "{INSURANCE}2025-12-12 checking -> insurance 1_300 USD for 2026\n2026-01-05 checking -> insurance 50 USD\n"
+        "{INSURANCE}2025-12-12 checking -> insurer 1_300 USD #insurance for 2026\n2026-01-05 checking -> insurer 50 USD #insurance\n"
     );
     with_run(&text, day(2026, 2, 14), |book, run| {
         let broken = broken(book, run);
@@ -969,7 +965,7 @@ fn an_accrual_that_alone_breaks_a_limit_is_reported_once_however_much_lands_afte
 #[test]
 fn a_range_reaches_each_month_it_covers_up_to_where_the_fold_has_got() {
     // 121 days from December to March: 31, 31, 28 and 31 of them.
-    let text = format!("{INSURANCE}2025-12-01..2026-03-31 checking -> rent 1_200 USD\n");
+    let text = format!("{INSURANCE}2025-12-01..2026-03-31 checking -> landlord 1_200 USD #rent\n");
     with_run(&text, day(2026, 1, 31), |book, run| {
         let months = read(book, run, "rent");
         assert_eq!(months, [("2025-12-01".into(), 307_44), ("2026-01-01".into(), 307_44)], "February is not here yet");
@@ -985,13 +981,13 @@ fn a_range_reaches_each_month_it_covers_up_to_where_the_fold_has_got() {
 
 #[test]
 fn a_planned_flow_reaches_the_months_ahead_as_its_ledger_advances() {
-    let text = format!("{INSURANCE}2025-12-01 checking -> rent 50 USD\n");
+    let text = format!("{INSURANCE}2025-12-01 checking -> landlord 50 USD #rent\n");
     with_book(&text, |book| {
         let plan = crate::Plan::new(book);
         let mut ledger = plan.start(Options { today: day(2025, 12, 31), relaxed: false });
         ledger.advance(day(2025, 12, 31));
         // The rent flow again, 81 days from the tenth of January: 22, 28 and 31 of them.
-        let mut prepaid = book.flows[axiom_core::Id::new(1)].clone();
+        let mut prepaid = book.flows.iter().find(|(_, flow)| flow.day == day(2025, 12, 1)).unwrap().1.clone();
         prepaid.day = day(2026, 1, 10);
         prepaid.recognized = axiom_core::Days::new(day(2026, 1, 10), day(2026, 3, 31)).unwrap();
         prepaid.out.qty = axiom_core::Qty(1_200_00);
