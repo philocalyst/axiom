@@ -152,11 +152,19 @@ impl<'s> Parser<'s> {
             Tok::Number(_) | Tok::Name("about" | "buy") => {
                 self.terms(scope, false).map(|terms| Change::Terms(self.push(terms)))
             }
+            Tok::Percent(_) | Tok::Fraction(..) | Tok::Punct(Punct::LParen) => {
+                self.terms(scope, false).map(|terms| Change::Terms(self.push(terms)))
+            }
+            Tok::Code(_) if self.cadence_follows_name() => {
+                self.terms(scope, false).map(|terms| Change::Terms(self.push(terms)))
+            }
             Tok::Name("budget") => {
                 self.bump();
                 self.allowance(scope).map(|allowance| Change::Budget(self.push(allowance)))
             }
-            Tok::Name(_) if self.at_cadence() => self.terms(scope, false).map(|terms| Change::Terms(self.push(terms))),
+            Tok::Name(_) if self.at_cadence() || self.cadence_follows_name() => {
+                self.terms(scope, false).map(|terms| Change::Terms(self.push(terms)))
+            }
             Tok::Name(_) => self.prop(scope).map(Change::Property),
             Tok::Eol | Tok::Str(_) | Tok::Code(_) => Ok(Change::Amendment),
             _ => Err(self.expected("expected-change", "what changes: terms, a property, or the items of an amendment")),

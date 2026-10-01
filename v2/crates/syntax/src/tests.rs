@@ -1015,6 +1015,20 @@ fn a_change_restates_part_of_a_declaration() {
 }
 
 #[test]
+fn computed_amounts_can_restate_contract_terms() {
+    let file = parse_clean("2026-01-01 c now 10% of ^base monthly from checking\n");
+    let said = statements(&file)[0];
+    let Verb::Now(Change::Terms(terms)) = said.verb else {
+        panic!("a computed terms change");
+    };
+    assert!(matches!(
+        file[terms].payment,
+        Some(Payment::Fixed(Amount::Computed(root)))
+            if matches!(file.exprs[root].kind, ExprKind::Of(_, _))
+    ));
+}
+
+#[test]
 fn a_verb_takes_only_the_clauses_that_mean_something_to_it() {
     let refused = |src: &str, clause: &str| {
         let error = only_error(src, "clause-not-taken");

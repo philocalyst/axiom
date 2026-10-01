@@ -153,6 +153,14 @@ impl<'s> Parser<'s> {
         matches!(self.tok(), Tok::Name(word) if is_cadence(word))
     }
 
+    /// A name followed by a cadence begins a computed terms amount, as in
+    /// `now base monthly`.
+    pub fn cadence_follows_name(&self) -> bool {
+        let mut ahead = self.lexer.clone();
+        ahead.bump();
+        matches!(ahead.peek().tok, Tok::Name(word) if is_cadence(word))
+    }
+
     /// `TERMS [#purpose [of NAME]] ["description"]` on a contract's own line.
     /// The purpose and description belong to the contract, whichever line says them.
     fn schedule(&mut self, line: &Line<'s>, found: &mut Found<'s>) -> Parse<Schedule<'s>> {
