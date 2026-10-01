@@ -1273,6 +1273,7 @@ pub(crate) fn declare<'a, 's>(
         formats: Arena::new(),
         txns: Arena::new(),
         journal_programs: Arena::new(),
+        assertion_programs: Arena::new(),
         input_values: Arena::new(),
         flows: Arena::new(),
         touching: Groups::default(),
