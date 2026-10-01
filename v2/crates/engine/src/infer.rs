@@ -219,6 +219,12 @@ impl Stretches<'_> {
     /// What one end of one flow does to the balance. `sign` is +1 for
     /// arriving here and -1 for leaving, negated on a reversal.
     fn step_of(&self, place: Id<Place>, flow: &Flow, id: Id<Flow>, end: End, sign: i64) -> Step {
+        if self.computed_amount(id, end) {
+            // A computed journal value is evaluated by the fold, not by this
+            // balance-difference pass. Its zero placeholder must never be
+            // mistaken for a known zero when solving a neighbouring `?`.
+            return Step::Opaque;
+        }
         let known = match end {
             End::From => flow.out.qty,
             End::To => flow.arrive.qty,
@@ -237,6 +243,29 @@ impl Stretches<'_> {
             }
             Infer::All | Infer::Target { .. } => Step::Opaque,
         }
+    }
+
+    fn computed_amount(&self, id: Id<Flow>, end: End) -> bool {
+        let flow = &self.book.flows[id];
+        let txn = &self.book.txns[flow.txn];
+        let Some(program_id) = txn.program else { return false };
+        let Some(program) = self.book.journal_programs.get(program_id) else { return false };
+        let Some(offset) = id
+            .index()
+            .checked_sub(txn.flows.start().index())
+            .and_then(|offset| u32::try_from(offset).ok())
+        else {
+            return false;
+        };
+        let at = program.flow_roots.partition_point(|roots| roots.flow < offset);
+        program.flow_roots.get(at).is_some_and(|roots| {
+            roots.flow == offset
+                && ((roots.out.is_some() || roots.arrive.is_some()) && !flow.is_exchange()
+                    || match end {
+                        End::From => roots.out.is_some(),
+                        End::To => roots.arrive.is_some(),
+                    })
+        })
     }
 }
 

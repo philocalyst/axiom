@@ -881,7 +881,7 @@ opening 2025-01-01
 }
 
 #[test]
-fn native_carry_setting_changes_begin_a_new_carry_run() {
+fn native_carry_setting_is_inherited_when_a_dated_change_omits_it() {
     let text = "\
 base USD
 commodity USD
@@ -912,9 +912,9 @@ opening 2025-01-01
             [
                 (day(2025, 1, 1), 12_000, 10_000),
                 (day(2025, 2, 1), 8_000, 10_000),
-                (day(2025, 3, 1), 11_000, 10_000),
+                (day(2025, 3, 1), 19_000, 20_000),
             ],
-            "turning carries on starts a fresh cumulative run and turning it off restores a window cap"
+            "a dated restatement inherits `carries` when it does not restate that property"
         );
     });
 }
@@ -1001,5 +1001,49 @@ fn a_planned_flow_reaches_the_months_ahead_as_its_ledger_advances() {
         assert_eq!(fork.recorded().violations.len(), 1, "January, where the flow lands");
         fork.advance(day(2026, 3, 31));
         assert_eq!(fork.recorded().violations.len(), 3, "and February and March as the fork gets there");
+    });
+}
+
+#[test]
+fn computed_journal_amounts_are_evaluated_before_a_flow_lands() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+account checking
+account savings
+opening 2026-01-01
+  checking 20 USD
+2026-01-02 checking -> savings 50% of 20 USD
+";
+    with_run(text, day(2026, 1, 2), |book, run| {
+        assert!(run.diagnostics.is_empty(), "computed journal amount: {:?}", run.diagnostics);
+        assert_eq!(holding(book, run, "checking", "USD").unwrap().qty().0, 1_000);
+        assert_eq!(holding(book, run, "savings", "USD").unwrap().qty().0, 1_000);
+        let posted = run.posted.last().expect("the computed transfer is posted");
+        assert_eq!((posted.out.0, posted.arrive.0), (1_000, 1_000));
+    });
+}
+
+#[test]
+fn inference_does_not_treat_a_computed_flow_placeholder_as_zero() {
+    let text = "\
+base USD
+commodity USD
+  precision 2
+account checking
+account savings
+opening 2026-01-01
+  checking 100 USD
+2026-01-02 checking -> savings 50% of 20 USD
+2026-01-03 checking -> savings ? USD
+2026-01-04 checking = 70 USD
+";
+    with_run(text, day(2026, 1, 4), |_, run| {
+        assert!(
+            run.diagnostics.iter().any(|diagnostic| diagnostic.code == "cannot-infer"),
+            "the computed 10 USD movement must make the neighboring unknown opaque to the zero-placeholder solver: {:?}",
+            run.diagnostics
+        );
     });
 }

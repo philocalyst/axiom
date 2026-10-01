@@ -144,6 +144,9 @@ pub(crate) struct Context<'a> {
     pub owner: Id<Entity>,
     /// Governing purpose for purpose-law or template expression evaluation.
     pub governing_purpose: Option<Id<axiom_model::Purpose>>,
+    /// A compiled journal or contract-template expression has `self: flow`;
+    /// ordinary law subjects remain place/entity/asset values.
+    pub flow_subject: bool,
     /// A dated budget limit is re-evaluated at each prior window's end. These
     /// reads use retained facts instead of only the current rolling window.
     pub budget_history: bool,
@@ -158,6 +161,7 @@ impl<'a> Context<'a> {
             subject,
             owner,
             governing_purpose: None,
+            flow_subject: false,
             budget_history: false,
             inputs: None,
             on,
@@ -171,6 +175,11 @@ impl<'a> Context<'a> {
 
     pub fn for_purpose(mut self, purpose: Id<axiom_model::Purpose>) -> Self {
         self.governing_purpose = Some(purpose);
+        self
+    }
+
+    pub fn for_flow(mut self) -> Self {
+        self.flow_subject = true;
         self
     }
 }
@@ -645,6 +654,7 @@ impl<'a, 's> Machine<'a, 's> {
             Var::Date => Value::Day(ctx.day),
             Var::Year => Value::Num(Ratio::int(ctx.over.first().year() as i64)),
             Var::Month => Value::Num(Ratio::int(ctx.over.first().ymd().1 as i64)),
+            Var::Subject if ctx.flow_subject => Value::Flow,
             Var::Subject => match ctx.subject {
                 Subject::Place(place) => Value::Place(place),
                 Subject::Entity(entity) => Value::Entity(entity),

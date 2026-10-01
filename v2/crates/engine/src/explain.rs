@@ -16,7 +16,7 @@
 use axiom_core::{Day, Days, Diagnostic, Disposition, Id, Loc, Qty, Severity, Sym, calendar};
 use axiom_model::{
     Amount, Assert, BinOp, Book, Class, Commodity, Dir, Effect as LawEffect, End, Fault, Flow, Law, NodeId, Op, Param, Place,
-    RuntimeTxn, StepKind, Subject, System, Trigger, Value, Waive, Window,
+    RuntimeTxn, StepKind, Subject, System, TemplateProgram, Trigger, Value, Waive, Window,
 };
 
 use crate::calc::Calc;
@@ -448,6 +448,35 @@ pub(crate) fn assertion_fault(book: &Book, assertion: &Assert, fault: Fault) -> 
         diagnostic = diagnostic.help(help);
     }
     diagnostic
+}
+
+/// A source transaction's typed amount or basis expression failed before its
+/// flow could be posted. The placeholder amount is never used as a fallback.
+pub(crate) fn journal_expression_fault(
+    book: &Book,
+    flow: &Flow,
+    program: &TemplateProgram,
+    root: NodeId,
+    fault: Fault,
+    day: Day,
+) -> Diagnostic {
+    let (what, help) = show::fault(book, fault, day);
+    let code = match fault {
+        Fault::InvalidProgram => "invalid-program",
+        Fault::MissingInput(_) => "missing-input",
+        Fault::NoPrice { .. } => "no-price",
+        Fault::UnitMismatch { .. } => "unit-mismatch",
+        Fault::Unset(_) => "unset-property",
+        Fault::NoRow(_) => "no-param-row",
+        Fault::DivideByZero | Fault::Overflow => "arithmetic",
+    };
+    let diagnostic = Diagnostic::error(code, format!("cannot post this flow: {what}"))
+        .label(flow.loc, "this flow's computed value could not be evaluated")
+        .context(program.nodes[root].loc, "the computed expression is here");
+    match help {
+        Some(help) => diagnostic.help(help),
+        None => diagnostic,
+    }
 }
 
 /// A system's table has no row for the year a law asked about: the journal

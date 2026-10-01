@@ -16,7 +16,10 @@
 //! [`fork`]: Ledger::fork
 
 use axiom_core::{Arena, Day, Diagnostic, Id, Qty, par};
-use axiom_model::{Book, Commodity, End, Flow, FlowView, Infer, Place, RuntimeDetail, RuntimeFlow};
+use axiom_model::{
+    Book, Commodity, End, Fault, Flow, FlowView, Infer, Place, RuntimeDetail, RuntimeFlow,
+    RuntimeTxn, Subject, TemplateProgram, Value,
+};
 
 use crate::checkpoint::CheckpointPhase;
 use crate::motion::{Amounts, Motion};
@@ -337,18 +340,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
                 let split = self.plan.book.splits[at as usize];
                 self.world.holdings.scale(split.unit, split.ratio);
             }
-            Fact::Flow(id) => {
-                let motion = self.journal_motion(id, moment.day);
-                self.post(&motion);
-            }
+            Fact::Flow(id) => self.post_journal(id, moment.day, false),
             // A settlement lands a pending flow; a return runs an actual one backwards.
             Fact::Settle(id) => {
-                let motion = self.journal_motion(id, moment.day);
                 let returned = matches!(
                     self.plan.events.state(id, &self.plan.book.flows[id]),
                     State::Returned(_)
                 );
-                self.post(&if returned { motion.reversed() } else { motion });
+                self.post_journal(id, moment.day, returned);
             }
             Fact::Assert(index) => self.reconcile(index as usize),
             Fact::Deadline(rule, period) => self.deadline(rule as usize, moment.day, period),
@@ -361,6 +360,141 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let flow = &book.flows[id];
         let amounts = self.amounts(flow, Some(id));
         Motion::new(book, flow, Cause::Flow(id), day, amounts)
+    }
+
+    /// Evaluate sparse computed journal roots before posting their source
+    /// flow. Literal-only flows retain the borrowed fast path above; computed
+    /// quantities never fall back to the zero placeholders stored in Book.
+    fn post_journal(&mut self, id: Id<Flow>, day: Day, reversed: bool) {
+        let book = self.plan.book;
+        let source = &book.flows[id];
+        let txn_id = source.txn;
+        let transaction = &book.txns[txn_id];
+        let local = id.index().checked_sub(transaction.flows.start().index());
+        let roots = transaction.program.and_then(|program_id| {
+            let program = book.journal_programs.get(program_id)?;
+            let offset = u32::try_from(local?).ok()?;
+            // Lowering appends these sparse roots in source-flow order.
+            let at = program.flow_roots.partition_point(|roots| roots.flow < offset);
+            program.flow_roots.get(at).filter(|roots| roots.flow == offset).copied()
+        });
+        let Some(roots) = roots.filter(|roots| roots.out.is_some() || roots.arrive.is_some() || roots.basis.is_some()) else {
+            let motion = self.journal_motion(id, day);
+            self.post(&if reversed { motion.reversed() } else { motion });
+            return;
+        };
+        let program_id = transaction.program.expect("flow roots belong to a journal program");
+        let program = &book.journal_programs[program_id].program;
+        let mut flow = source.clone();
+        flow.day = day;
+        let mut detail = *book.flow_view(source).detail();
+        let quantity_roots = roots.out.is_some() || roots.arrive.is_some();
+        let cached_amounts = quantity_roots.then(|| self.record.resolved.get(&id).copied()).flatten();
+        if let Some(amounts) = cached_amounts {
+            flow.out.qty = amounts.out;
+            flow.arrive.qty = amounts.arrive;
+        }
+        let mut computed_quantity = cached_amounts.is_some();
+
+        if cached_amounts.is_none() {
+            for (root, target) in [(roots.out, End::From), (roots.arrive, End::To)] {
+                let Some(root) = root else { continue };
+                match journal_expression(self.plan, &self.world, &mut self.scratch.values, id, txn_id, &flow, program, root) {
+                    Value::Amount(amount) => {
+                        computed_quantity = true;
+                        match target {
+                            End::From => flow.out = amount,
+                            End::To => flow.arrive = amount,
+                        }
+                    }
+                    Value::Fault(fault) => {
+                        self.record.report(explain::journal_expression_fault(book, &flow, program, root, fault, day));
+                        return;
+                    }
+                    _ => {
+                        self.record.report(explain::journal_expression_fault(
+                            book,
+                            &flow,
+                            program,
+                            root,
+                            Fault::InvalidProgram,
+                            day,
+                        ));
+                        return;
+                    }
+                }
+            }
+            // A single written quantity supplies both ends of an ordinary
+            // transfer. The model stores its root on the written side only,
+            // while the literal lowering has already mirrored the placeholder.
+            if roots.out.is_some() && roots.arrive.is_none() {
+                flow.arrive = flow.out;
+            } else if roots.arrive.is_some() && roots.out.is_none() {
+                flow.out = flow.arrive;
+            }
+        }
+        if cached_amounts.is_none() {
+            if let (Some(_), Infer::Target { end, .. }) = (roots.out.or(roots.arrive), flow.infer) {
+                let amount = if end == End::From { flow.out } else { flow.arrive };
+                flow.infer = Infer::Target { end, balance: amount.qty };
+            }
+        }
+        let mut computed_basis = None;
+        if let Some(root) = roots.basis {
+            if let Some(basis) = self.record.computed_basis.get(&id).copied() {
+                detail.basis = Some(basis);
+            } else {
+                match journal_expression(self.plan, &self.world, &mut self.scratch.values, id, txn_id, &flow, program, root) {
+                    Value::Amount(amount) if amount.unit == book.base => {
+                        detail.basis = Some(amount.qty);
+                        computed_basis = Some(amount.qty);
+                    }
+                    Value::Amount(amount) => {
+                        self.record.report(explain::journal_expression_fault(
+                            book,
+                            &flow,
+                            program,
+                            root,
+                            Fault::UnitMismatch { found: amount.unit, expected: book.base },
+                            day,
+                        ));
+                        return;
+                    }
+                    Value::Fault(fault) => {
+                        self.record.report(explain::journal_expression_fault(book, &flow, program, root, fault, day));
+                        return;
+                    }
+                    _ => {
+                        self.record.report(explain::journal_expression_fault(
+                            book,
+                            &flow,
+                            program,
+                            root,
+                            Fault::InvalidProgram,
+                            day,
+                        ));
+                        return;
+                    }
+                }
+            }
+        }
+
+        let amounts = self.amounts(&flow, Some(id));
+        if computed_quantity {
+            // `posted` and a later return use the exact amount computed on its
+            // first landing, just as they do for `all` and `=`.
+            self.record.resolved.insert(id, amounts);
+        }
+        if let Some(basis) = computed_basis {
+            self.record.computed_basis.insert(id, basis);
+        }
+        let txn = RuntimeTxn::journal(txn_id).expect("a journal flow cannot name the template sentinel");
+        let mut details = Arena::new();
+        let runtime_detail = if roots.basis.is_some() { Some(details.push(RuntimeDetail(detail))) } else { None };
+        let runtime = RuntimeFlow { flow, detail: runtime_detail, txn };
+        let view = book.runtime_flow_view(&runtime, &details);
+        let motion = Motion::from_view(book, view, txn, Cause::Flow(id), day, amounts);
+        self.post(&if reversed { motion.reversed() } else { motion });
     }
 
     /// A flow's quantities. `?` amounts were solved before the fold, and are
@@ -448,6 +582,45 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
     }
 }
 
+/// Evaluate one transaction-scoped expression with the current source flow as
+/// its `self`, `amount`, `from`, and `to`. This borrows the Book's program and
+/// code/detail pools; only the caller-owned node-value buffer is mutable.
+fn journal_expression<'b, 's>(
+    plan: &Plan<'b, 's>,
+    world: &World,
+    values: &mut Vec<axiom_model::Value>,
+    flow_id: Id<Flow>,
+    txn_id: Id<axiom_model::Txn>,
+    flow: &Flow,
+    program: &TemplateProgram,
+    root: axiom_model::NodeId,
+) -> Value {
+    let book = plan.book;
+    let runtime = RuntimeFlow::source(flow.clone());
+    let details = Arena::new();
+    let view = book.runtime_flow_view(&runtime, &details);
+    let motion = Motion::from_view(
+        book,
+        view,
+        runtime.txn,
+        Cause::Flow(flow_id),
+        flow.day,
+        Amounts::written(flow),
+    );
+    let mut occasion = crate::eval::Occasion::flow(&motion);
+    occasion.amount = Some(if flow.out.qty == Qty::ZERO { flow.arrive } else { flow.out });
+    let context = crate::eval::Context::new(Subject::Place(flow.from), flow.owner, &occasion)
+        .for_flow()
+        .with_inputs(book.txn_inputs(txn_id));
+    crate::eval::program_expression(
+        crate::eval::Env { plan, world },
+        program,
+        root,
+        &context,
+        values,
+    )
+}
+
 /// Every journal flow as solved and settled. Each depends on nothing but the
 /// plan and the record, so they are made side by side, a stretch of flows to a
 /// worker.
@@ -478,7 +651,7 @@ fn posted(plan: &Plan, record: &Record) -> Box<[Posted]> {
 /// depends on the fold, and only it is looked up in the record.
 fn settled(plan: &Plan, record: &Record, id: Id<Flow>, flow: &Flow) -> Option<Amounts> {
     match flow.infer {
-        Infer::Known => Some(Amounts::written(flow)),
+        Infer::Known => Some(record.resolved.get(&id).copied().unwrap_or_else(|| Amounts::written(flow))),
         Infer::Unknown => Some(
             plan.amounts
                 .get(&id)

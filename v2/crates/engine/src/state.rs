@@ -61,6 +61,10 @@ pub(crate) struct Record {
     /// `all` depend on the balance), remembered because a reversal must undo
     /// exactly what was done. The plan holds the `?` amounts solved before it began.
     pub resolved: Map<Id<Flow>, Amounts>,
+    /// Computed basis details reused by settlement returns and included in
+    /// checkpoint identity, keyed by the source flow rather than copied into
+    /// every Flow record.
+    pub computed_basis: Map<Id<Flow>, Qty>,
     pub gains: Vec<Gain>,
     pub effects: Vec<Effect>,
     pub violations: Vec<Violation>,
@@ -120,6 +124,7 @@ impl Record {
     pub fn forked(&self) -> Record {
         Record {
             resolved: self.resolved.clone(),
+            computed_basis: self.computed_basis.clone(),
             checks: vec![0; self.checks.len()],
             checkpoints: self.checkpoints.clone(),
             failing: self.failing.clone(),
@@ -205,6 +210,7 @@ pub(crate) fn unordered<T: Hash>(entries: impl IntoIterator<Item = T>) -> u64 {
 impl Hash for Record {
     fn hash<H: Hasher>(&self, state: &mut H) {
         unordered(&self.resolved).hash(state);
+        unordered(&self.computed_basis).hash(state);
         unordered(&self.checkpoints).hash(state);
         unordered(&self.headroom).hash(state);
         unordered(&self.waivers).hash(state);
