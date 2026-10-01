@@ -409,7 +409,7 @@ impl Ledger<'_, '_, '_> {
     /// Records a `require` or `warn` that does not hold. A lasting `always`
     /// condition is recorded when it begins, and a limit once per window.
     fn violate(&mut self, rule: &Rule, ctx: &Context, step: u32, warn: bool) {
-        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
+        let law = &self.plan.book.laws[rule.law];
         let facts = &self.plan.laws[rule.law.index()];
         let waiver = self.waiver(ctx);
         let fresh = match (law.trigger, facts.steps[step as usize].reads) {
@@ -425,14 +425,7 @@ impl Ledger<'_, '_, '_> {
         if !fresh {
             return;
         }
-        let frame = Frame {
-            book,
-            law,
-            facts,
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-        };
+        let frame = Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::broken(&frame, step as usize, warn, waiver);
         let verdict = match (waiver, warn) {
             (Some(waiver), _) => Verdict::Waived(waiver),
@@ -458,27 +451,14 @@ impl Ledger<'_, '_, '_> {
 
     /// A `require … else owe …` that does not hold costs what the law says,
     /// unless a `!` waives it.
-    fn charge(
-        &mut self,
-        rule: &Rule,
-        ctx: &Context,
-        step: u32,
-        (name, amount, owed): (Sym, Amount, Owed),
-    ) {
-        let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
+    fn charge(&mut self, rule: &Rule, ctx: &Context, step: u32, (name, amount, owed): (Sym, Amount, Owed)) {
+        let law = &self.plan.book.laws[rule.law];
         let waive = ctx.motion.and_then(|m| m.waive);
         if let Some(waive) = waive {
             self.record.waivers.insert(waive.loc, true);
         }
         let facts = &self.plan.laws[rule.law.index()];
-        let frame = Frame {
-            book,
-            law,
-            facts,
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-        };
+        let frame = Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let diagnostic = explain::priced(&frame, step as usize, (name, amount, owed), waive);
         self.violation(
             rule,
@@ -505,14 +485,7 @@ impl Ledger<'_, '_, '_> {
     fn fault(&mut self, rule: &Rule, ctx: &Context, step: usize, fault: Fault) {
         let (book, law) = (self.plan.book, &self.plan.book.laws[rule.law]);
         let facts = &self.plan.laws[rule.law.index()];
-        let frame = Frame {
-            book,
-            law,
-            facts,
-            ctx,
-            values: &self.scratch.values,
-            effects: &self.record.effects,
-        };
+        let frame = Frame { plan: self.plan, law, facts, ctx, values: &self.scratch.values, effects: &self.record.effects };
         let origin = explain::first_fault(&frame, step);
         let holder = origin.and_then(|at| frame.holder(at));
         let missing = match fault {
