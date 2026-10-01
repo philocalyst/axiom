@@ -638,6 +638,26 @@ pub enum Escalation {
     Indexed(Id<Param>),
 }
 
+/// A contract feature that changes occurrence flows but is not yet lowered by
+/// the forecast model.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ForecastFeature {
+    Deadline,
+    Shares,
+    Also,
+    Buy,
+    Deposit,
+    Matching,
+}
+
+/// Whether a contract covers a typed flow on a particular date.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ContractCoverage {
+    None,
+    Active,
+    Waived,
+}
+
 /// Why a contract's forecast amount could not be derived for a day.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ForecastError {
@@ -667,6 +687,7 @@ pub enum ForecastError {
     UnsupportedProration(Day),
     MissingTemplate(Day),
     UnsupportedLoan(Day),
+    UnsupportedFeature { feature: ForecastFeature, day: Day },
     Overflow,
 }
 
@@ -690,6 +711,52 @@ pub struct Change {
 }
 
 impl Contract {
+    /// Whether these terms cover a typed flow on `day`, independently of the
+    /// contract's own due date. This lets an explicit contract cadence replace
+    /// a learned or v3 schedule for the same movement throughout its term.
+    ///
+    /// An empty waiver borrows the nearest matching active template in this
+    /// contract's timeline (preferring the prior stretch when equally near),
+    /// so suspending a promise does not revive a fallback schedule.
+    pub fn covers(&self, template: &Flow, day: Day) -> ContractCoverage {
+        if !self.days.contains(day) {
+            return ContractCoverage::None;
+        }
+        let terms = self.terms_on(day);
+        if !terms.is_waived() {
+            return if terms.template.iter().any(|candidate| same_flow_kind(template, candidate)) {
+                ContractCoverage::Active
+            } else {
+                ContractCoverage::None
+            };
+        }
+        if terms.template.iter().any(|candidate| same_flow_kind(template, candidate)) {
+            return ContractCoverage::Waived;
+        }
+
+        let nearest = self
+            .terms
+            .within(self.days)
+            .filter(|(_, candidate)| !candidate.is_waived())
+            .filter(|(_, candidate)| candidate.template.iter().any(|flow| same_flow_kind(template, flow)))
+            .map(|(stretch, _)| {
+                let distance = if stretch.last() < day {
+                    i64::from(day.0) - i64::from(stretch.last().0)
+                } else if stretch.first() > day {
+                    i64::from(stretch.first().0) - i64::from(day.0)
+                } else {
+                    0
+                };
+                (distance, u8::from(stretch.first() > day))
+            })
+            .min();
+        if nearest.is_some() {
+            ContractCoverage::Waived
+        } else {
+            ContractCoverage::None
+        }
+    }
+
     /// The scheduled occurrences in `within`, borrowing the terms that govern
     /// each one. Terms changes split the schedule; waived stretches yield none.
     pub fn occurrences(&self, within: Days) -> impl Iterator<Item = ContractOccurrence<'_>> + '_ {
@@ -767,6 +834,9 @@ impl Contract {
         if self.terms_on(day).is_waived() {
             return Err(ForecastError::Waived(day));
         }
+        // An explicit `for` or `covers` window controls recognition even when
+        // only part of it overlaps the contract. Proration scales the amount
+        // by that overlap; it does not move recognition outside the declared window.
         if let Some(period) = self.recognition_period(day)? {
             return Ok(period);
         }
@@ -802,6 +872,9 @@ impl Contract {
                     if self.loan.is_some() {
                         return Err(ForecastError::UnsupportedLoan(occurrence.day));
                     }
+                    if let Some(feature) = self.unsupported_feature(terms) {
+                        return Err(ForecastError::UnsupportedFeature { feature, day: occurrence.day });
+                    }
                     let Some(template) = terms.template.get(index) else {
                         return Err(ForecastError::MissingTemplate(occurrence.day));
                     };
@@ -820,6 +893,24 @@ impl Contract {
                     })
                 })
         })
+    }
+
+    fn unsupported_feature(&self, terms: &Terms) -> Option<ForecastFeature> {
+        if self.buys.is_some() {
+            Some(ForecastFeature::Buy)
+        } else if self.deposit.is_some() {
+            Some(ForecastFeature::Deposit)
+        } else if self.matching.is_some() {
+            Some(ForecastFeature::Matching)
+        } else if terms.due.is_some() {
+            Some(ForecastFeature::Deadline)
+        } else if !terms.shares.is_empty() {
+            Some(ForecastFeature::Shares)
+        } else if !terms.also.is_empty() {
+            Some(ForecastFeature::Also)
+        } else {
+            None
+        }
     }
 
     fn recognition_period(&self, day: Day) -> Result<Option<Days>, ForecastError> {
@@ -842,6 +933,17 @@ impl Contract {
     pub fn terms_on(&self, day: Day) -> &Terms {
         self.terms.at(day)
     }
+}
+
+fn same_flow_kind(a: &Flow, b: &Flow) -> bool {
+    let same_purpose = match (a.purpose, b.purpose) {
+        (Some(a), Some(b)) => a.purpose == b.purpose && a.of == b.of,
+        (None, None) => true,
+        _ => false,
+    };
+    (a.from, a.to, a.out.unit, a.arrive.unit, a.owner, a.payee) ==
+        (b.from, b.to, b.out.unit, b.arrive.unit, b.owner, b.payee)
+        && same_purpose
 }
 
 fn anniversary_count(start: Day, day: Day) -> Result<u32, ForecastError> {
@@ -1003,6 +1105,11 @@ fn forecast_flow(
         .as_deref()
         .map(|detail| {
             let mut moved = detail.clone();
+            moved.basis = detail
+                .basis
+                .map(|basis| basis.scale(factor).ok_or(ForecastError::Overflow))
+                .transpose()?;
+            moved.cost = detail.cost.map(scale).transpose()?;
             moved.due = detail
                 .due
                 .map(|due| {

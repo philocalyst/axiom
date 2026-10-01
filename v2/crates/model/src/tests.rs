@@ -1531,7 +1531,7 @@ fn a_contract_falls_due_by_the_terms_in_force_over_its_days() {
 
 #[test]
 fn a_contract_forecasts_typed_flows_and_reports_bad_escalation_inputs() {
-    use crate::{Cadence, Escalation, ForecastError, On, Param, ParamRow, TermsState, Value};
+    use crate::{Amount, Cadence, Escalation, ForecastError, On, Param, ParamRow, TermsState, Value};
     use axiom_core::{Day, Days, Ratio, Span, Timeline};
     let day = |year, month, day| Day::from_ymd(year, month, day).unwrap();
     with_book("2026-01-05 checking -> food 1_000 USD\n", |book, _| {
@@ -1693,6 +1693,162 @@ fn a_contract_forecasts_typed_flows_and_reports_bad_escalation_inputs() {
                 .next(),
             Some(Err(ForecastError::UnresolvedAmount(after_one_year)))
         );
+
+        let mut detailed_template = book.flows[axiom_core::Id::new(0)].clone();
+        detailed_template.detail = Some(Box::new(crate::Detail {
+            basis: Some(axiom_core::Qty(1_000)),
+            cost: Some(Amount::new(axiom_core::Qty(200), book.base)),
+            due: Some(day(2026, 1, 20)),
+            ..crate::Detail::default()
+        }));
+        let mut detailed_terms = terms(
+            Cadence::Every(Span::months(1)),
+            &[On::MonthDay(15)],
+            first,
+            &[detailed_template],
+        );
+        detailed_terms.escalation = Some(Escalation::Rising(Ratio::percent(3, 0).unwrap()));
+        let detailed_id = book.contracts.push(contract(days, Timeline::new(detailed_terms)));
+        let detailed = book.contracts[detailed_id]
+            .forecast_flows(book, detailed_id, Days::on(after_one_year))
+            .next()
+            .unwrap()
+            .unwrap();
+        let detail = detailed.detail.as_deref().unwrap();
+        assert_eq!(detail.basis, Some(axiom_core::Qty(1_030)));
+        assert_eq!(detail.cost, Some(Amount::new(axiom_core::Qty(206), book.base)));
+        assert_eq!(detail.due, Some(day(2027, 1, 30)));
+
+        use crate::{Deadline, ForecastFeature, Match, Share};
+        let mut unsupported_terms = terms(
+            Cadence::Every(Span::months(1)),
+            &[On::MonthDay(15)],
+            first,
+            &[book.flows[axiom_core::Id::new(0)].clone()],
+        );
+        let mut cases = Vec::new();
+        unsupported_terms.due = Some(Deadline { after: Span::days(5), otherwise: None });
+        cases.push((ForecastFeature::Deadline, contract(days, Timeline::new(unsupported_terms))));
+        let mut unsupported_terms = terms(
+            Cadence::Every(Span::months(1)),
+            &[On::MonthDay(15)],
+            first,
+            &[book.flows[axiom_core::Id::new(0)].clone()],
+        );
+        unsupported_terms.shares = vec![Share {
+            rate: Ratio::new(1, 2).unwrap(),
+            entity: axiom_core::Id::new(0),
+            measure: None,
+            loc: axiom_core::Loc::default(),
+        }]
+        .into();
+        cases.push((ForecastFeature::Shares, contract(days, Timeline::new(unsupported_terms))));
+        let mut unsupported_terms = terms(
+            Cadence::Every(Span::months(1)),
+            &[On::MonthDay(15)],
+            first,
+            &[book.flows[axiom_core::Id::new(0)].clone()],
+        );
+        unsupported_terms.also = vec![axiom_core::Id::new(0)].into();
+        cases.push((ForecastFeature::Also, contract(days, Timeline::new(unsupported_terms))));
+        let mut buys = contract(
+            days,
+            Timeline::new(terms(
+                Cadence::Every(Span::months(1)),
+                &[On::MonthDay(15)],
+                first,
+                &[book.flows[axiom_core::Id::new(0)].clone()],
+            )),
+        );
+        buys.buys = Some(axiom_core::Id::new(0));
+        cases.push((ForecastFeature::Buy, buys));
+        let mut deposit = contract(
+            days,
+            Timeline::new(terms(
+                Cadence::Every(Span::months(1)),
+                &[On::MonthDay(15)],
+                first,
+                &[book.flows[axiom_core::Id::new(0)].clone()],
+            )),
+        );
+        deposit.deposit = Some(Amount::new(axiom_core::Qty(1_000), book.base));
+        cases.push((ForecastFeature::Deposit, deposit));
+        let mut matching = contract(
+            days,
+            Timeline::new(terms(
+                Cadence::Every(Span::months(1)),
+                &[On::MonthDay(15)],
+                first,
+                &[book.flows[axiom_core::Id::new(0)].clone()],
+            )),
+        );
+        matching.matching = Some(Match {
+            rate: Ratio::new(1, 2).unwrap(),
+            into: axiom_core::Id::new(0),
+            up_to: Ratio::ONE,
+        });
+        cases.push((ForecastFeature::Matching, matching));
+        for (feature, contract) in cases {
+            let id = book.contracts.push(contract);
+            assert_eq!(
+                book.contracts[id].forecast_flows(book, id, Days::on(after_one_year)).next(),
+                Some(Err(ForecastError::UnsupportedFeature { feature, day: after_one_year }))
+            );
+        }
+    });
+}
+
+#[test]
+fn contracts_cover_matching_fallback_flows_by_interval_and_typed_identity() {
+    use crate::{Cadence, ContractCoverage, TermsState};
+    use axiom_core::{Day, Days, Span, Timeline};
+    let day = |month, day| Day::from_ymd(2026, month, day).unwrap();
+    with_book("2026-01-05 checking -> food 1_000 USD\n", |book, _| {
+        let template = book.flows[axiom_core::Id::new(0)].clone();
+        let start = day(2, 15);
+        let end = day(4, 30);
+        let terms = terms(
+            Cadence::Every(Span::months(1)),
+            &[crate::On::MonthDay(15)],
+            start,
+            &[template.clone()],
+        );
+        let mut timeline = Timeline::new(terms);
+        let mut waiver = timeline.at(day(3, 1)).clone();
+        waiver.state = TermsState::Waived;
+        waiver.template = Box::default();
+        timeline.paint(Days::new(day(3, 1), day(3, 31)).unwrap(), waiver);
+        let rent = contract(Days::new(start, end).unwrap(), timeline);
+
+        assert_eq!(rent.covers(&template, day(2, 10)), ContractCoverage::None, "before it starts");
+        assert_eq!(
+            rent.covers(&template, day(2, 20)),
+            ContractCoverage::Active,
+            "coverage follows the interval, not the contract's monthly due day"
+        );
+        assert_eq!(
+            rent.covers(&template, day(3, 15)),
+            ContractCoverage::Waived,
+            "an empty waiver inherits the matching prior template"
+        );
+        assert_eq!(rent.covers(&template, day(5, 1)), ContractCoverage::None, "after it ends");
+
+        let mut other_owner = template.clone();
+        other_owner.owner = axiom_core::Id::new(99);
+        assert_eq!(rent.covers(&other_owner, day(2, 20)), ContractCoverage::None);
+        let mut other_payee = template.clone();
+        other_payee.payee = Some(axiom_core::Id::new(99));
+        assert_eq!(rent.covers(&other_payee, day(2, 20)), ContractCoverage::None);
+        let mut other_purpose = template.clone();
+        other_purpose.purpose = Some(crate::Purposed {
+            purpose: axiom_core::Id::new(99),
+            of: None,
+            source: crate::Provenance::Written,
+        });
+        assert_eq!(rent.covers(&other_purpose, day(2, 20)), ContractCoverage::None);
+        let mut other_unit = template;
+        other_unit.out.unit = axiom_core::Id::new(99);
+        assert_eq!(rent.covers(&other_unit, day(2, 20)), ContractCoverage::None);
     });
 }
 
