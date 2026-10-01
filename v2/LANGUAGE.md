@@ -1029,11 +1029,22 @@ code inv-*
 pattern ach = "ACH " ("DEBIT" / "CREDIT") space+
 ```
 
-A capture named `payee`, `code`, `amount` or `date` fills that part of the record.
-Every entity and account is known by its own name too (`ashgrove` matches
-"ASHGROVE", `trader-joes` "TRADER JOES"), so only the ones a bank spells otherwise
-need a pattern. The entity or account whose pattern matches the longest part of
-the memo is the other end; two that tie are an error naming both.
+A capture named `payee`, `code`, `amount`, `date` or `original` fills that part
+of a record. `original` captures an amount together with its unit from the memo,
+for example `original:rest` over `CHF 3,290.00`; sync may use that pair when it
+reconciles a multi-currency flow. It does not add a second flow. Every entity
+and account is known by its own name too (`ashgrove` matches "ASHGROVE",
+`trader-joes` "TRADER JOES"), so only the ones a bank spells otherwise need a
+pattern. The entity or account whose pattern matches the longest part of the
+memo is the other end; two that tie are an error naming both.
+
+A structured `code` is the canonical code as written in the book, with letter
+case ignored. Sync does not add a prefix from a `code` rule's pattern. A code
+pattern controls where that code may be used; `known-as` patterns recognize its
+memo spelling. A structured `via` value names the party the money was for. If
+the memo also identifies a party, that memo party is recorded as the
+intermediary (`via`) in the flow. The same rule applies when the structured
+field is named `party`.
 
 **Each record** of a feed then goes through:
 
@@ -1052,9 +1063,10 @@ the memo is the other end; two that tie are an error naming both.
    settlement follows §7.
 5. **Writing.** Each new line goes, in day order, into the file its day belongs to
    (§11), in the house style of `axiom fmt`. A record no pattern recognizes goes to
-   `?`, with its memo as its description. The last `balance` becomes a value. A
-   `pending` record is written in parentheses and settles when its posted record
-   arrives.
+   `?`, with its memo as its description. A `balance` belongs to its record; the
+   last balance in a feed is written as an assertion. Tagged formats have no
+   statement-level balance. A `pending` record is written in parentheses and
+   settles when its posted record arrives.
 
 **Rules.** Nothing already written is ever changed: sync only adds facts. What a
 file or param already has (the same day and subject, the same row key) is kept as
