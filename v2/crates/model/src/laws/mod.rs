@@ -20,10 +20,7 @@ use axiom_syntax::{self as ast, DeclKind, ExprId, ItemKind, Trigger as Written};
 pub(crate) use self::compile::compile_template;
 use self::compile::{Placement, compile};
 pub(crate) use self::order::rank;
-use crate::book::{
-    Also, AlsoOn, Amount, Implied, Input, Kind, Sign, Sort, System,
-    TemplateAmount,
-};
+use crate::book::{Also, AlsoOn, Amount, Implied, Input, Kind, Sign, Sort, System, TemplateAmount};
 use crate::declare::World;
 use crate::errors::{Word, suggest, unknown};
 use crate::journal::Select as LotSelect;
@@ -348,7 +345,38 @@ fn declare_alsos<'s>(
         }
     };
 
-    for also in &file[decl.alsos] {
+    let currency = fallback_currency(world, owner);
+    lower_alsos(
+        world,
+        diags,
+        file,
+        home,
+        decl.alsos,
+        owner,
+        on,
+        &[],
+        currency,
+    );
+}
+
+/// Lowers `also` clauses shared by declaration and contract lowering.
+///
+/// `inputs` are the caller's template inputs, while `currency` supplies the
+/// unit for written amounts without an explicit commodity. The caller chooses
+/// the matching `AlsoOn` owner and owns any fallback endpoint semantics.
+pub(crate) fn lower_alsos<'s>(
+    world: &mut World<'s>,
+    diags: &mut Vec<Diagnostic>,
+    file: &ast::File<'s>,
+    home: Home,
+    alsos: ast::Many<ast::Also<'s>>,
+    owner: Owner,
+    on: AlsoOn,
+    inputs: &[Input],
+    currency: Id<crate::book::Commodity>,
+) -> Box<[Id<Also>]> {
+    let mut lowered = Vec::new();
+    for also in &file[alsos] {
         let mut roots = Vec::new();
         let when_index = also.when.map(|when| {
             let index = roots.len();
@@ -370,7 +398,7 @@ fn declare_alsos<'s>(
                                     continue;
                                 }
                             },
-                            None => fallback_currency(world, owner),
+                            None => currency,
                         };
                         let Some(amount) = world
                             .amount(literal.num(), unit, file.loc(literal.0))
@@ -394,9 +422,7 @@ fn declare_alsos<'s>(
                             ast::Sign::Add => Sign::Add,
                             ast::Sign::Less => Sign::Less,
                         },
-                        amount: TemplateAmount::Literal(Amount::zero(fallback_currency(
-                            world, owner,
-                        ))),
+                        amount: TemplateAmount::Literal(Amount::zero(currency)),
                     }),
                     Some(amount),
                     item.tail,
@@ -532,7 +558,7 @@ fn declare_alsos<'s>(
                                     continue;
                                 }
                             },
-                            None => fallback_currency(world, owner),
+                            None => currency,
                         };
                         let Some(amount) = world
                             .amount(literal.num(), unit, file.loc(literal.0))
@@ -553,9 +579,7 @@ fn declare_alsos<'s>(
                     Some(Implied::Flow {
                         from,
                         to,
-                        amount: TemplateAmount::Literal(Amount::zero(fallback_currency(
-                            world, owner,
-                        ))),
+                        amount: TemplateAmount::Literal(Amount::zero(currency)),
                     }),
                     Some(amount),
                     flow.tail,
@@ -587,7 +611,7 @@ fn declare_alsos<'s>(
             owner,
             Ty::Flow,
             name,
-            &[],
+            inputs,
             &roots,
             also.loc,
         ) else {
@@ -603,7 +627,7 @@ fn declare_alsos<'s>(
             }
         }
         let when = when_index.map(|index| compiled_roots[index]);
-        world.book.also.push(Also {
+        let id = world.book.also.push(Also {
             on,
             what,
             when,
@@ -616,7 +640,9 @@ fn declare_alsos<'s>(
             waive: metadata.waive,
             loc: also.loc,
         });
+        lowered.push(id);
     }
+    Box::from(lowered)
 }
 
 fn fallback_currency(world: &World<'_>, owner: Owner) -> Id<crate::book::Commodity> {
