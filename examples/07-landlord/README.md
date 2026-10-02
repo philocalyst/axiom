@@ -3,7 +3,8 @@
 Jamie is a nurse practitioner with one rental house. She bought it on 2024-12-18 for
 $376,850 including closing costs, borrowed $279,000 at 6.75%, and sold it on 2025-12-29
 for $431,500. The source uses the v4 model: identified assets, parties, purposes,
-contracts, and dated journal statements.
+contracts, and dated journal statements. The loan contract originates the
+$279,000 draw; its name is the canonical subject of debt assertions and payoff.
 
 ## Source files
 
@@ -13,7 +14,7 @@ contracts, and dated journal statements.
 - `assets.ax` declares the house as a `rental-home`. It records $75,370 of nondepreciable
   land and a 2025-01-15 in-service date. The depreciable building basis is $301,480.
   `us/rental` treats the September roof as a separate improvement part.
-- `contracts.ax` carries the wage, lease, and mortgage terms. Lease B ends for
+- `contracts.ax` carries the wage, lease, and home-loan terms. Lease B ends for
   Jamie on the 2025-12-29 sale date; the buyer takes the remaining lease term.
   Journal contract occurrences retain dates and amounts that differed from the
   standing terms.

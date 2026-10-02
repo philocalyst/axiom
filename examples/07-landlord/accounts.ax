@@ -3,7 +3,6 @@
 account checking     : deposit at bank
 account rental-bank : deposit at bank
 account deposit-bank : deposit at bank
-account mortgage    : mortgage at lender
 account bills       : payable at summit-roofing
 account deposits    : payable
 
@@ -64,4 +63,3 @@ entity cafe : merchant
 entity home-supplies : store
 
 code inv-* on payable
-code loan on mortgage

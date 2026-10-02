@@ -1,7 +1,7 @@
 2025-12-01 rent-b
 2025-12-01 checking -> oak-street 1_950 USD #rent
 2025-12-01 home-loan
-// Historical loan split, independently checked from the contract terms: mortgage            254.07 USD   // principal
+// Historical loan split, independently checked from the contract terms: home-loan            254.07 USD   // principal
 // Historical loan split, independently checked from the contract terms: interest            1_555.52 USD   // interest
 2025-12-05 manager-fee 200.00 USD
 2025-12-08 checking -> trader-joes 169.29 USD #groceries
@@ -20,7 +20,7 @@
 /// #loan), tenant B's deposit is credited to the buyer, and the rest is Jamie's.
 2025-12-29 buyer -> rental-bank 431_500 USD #sale of house
   - 26_968.75 USD #selling-cost of house
-2025-12-29 rental-bank -> lender 276_282.05 USD ^loan
+2025-12-29 rental-bank -> home-loan 276_282.05 USD ^loan
 2025-12-29 rental-bank -> buyer 2_500 USD #deposit of house
 // Proceeds remaining after seller costs, payoff and the buyer credit are retained in rental-bank.
 
@@ -33,7 +33,7 @@
 
 /// The rest of the rental account moves to checking.
 2025-12-29 rental-bank -> checking 129_981.33 USD #transfer
-2025-12-31 mortgage = empty
+2025-12-31 home-loan = empty
 2025-12-31 bills = empty
 2025-12-31 rental-bank = 0.00 USD
 2025-12-31 checking = 173_866.60 USD

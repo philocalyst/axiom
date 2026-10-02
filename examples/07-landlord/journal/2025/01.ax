@@ -13,7 +13,7 @@
 /// Depreciation is a deduction with no cash: a flow out of the house's basis. The first month is a half month
 /// (mid-month convention); the plan says 913.58 USD, the whole month.
 // Previous hand-entered depreciation: 456.79 USD on 2025-01-31. v4 derives this from the house parts.
-2025-01-31 mortgage = 279_000 USD
+2025-01-31 home-loan = 279_000 USD
 2025-01-31 rental-bank = 4_747.70 USD
 2025-01-31 checking = 23_482.20 USD
 2025-01-31 deposit-bank = 0.00 USD

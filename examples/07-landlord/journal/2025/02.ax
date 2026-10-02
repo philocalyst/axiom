@@ -15,7 +15,7 @@
 2025-02-22 checking -> home-supplies 362.38 USD #household
 2025-02-28 paycheck
 // Previous hand-entered depreciation: 913.57 USD on 2025-02-28. v4 derives this from the house parts.
-2025-02-28 mortgage = 278_759.79 USD
+2025-02-28 home-loan = 278_759.79 USD
 2025-02-28 rental-bank = 5_338.11 USD
 2025-02-28 checking = 26_874.77 USD
 2025-02-28 deposit-bank = 2_400.00 USD

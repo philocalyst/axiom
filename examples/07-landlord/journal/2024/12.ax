@@ -2,9 +2,10 @@
 opening 2024-12-18
   checking    128_000 USD
 
-/// Closing day. The lender funds 279,000.00 USD, a claim on Jamie that falls due at maturity and is
-/// settled by every payment `for #loan`. Cash to close is the 25% down payment, 4,850.00 USD of closing
-/// costs that go into the house's basis, 3,120.00 USD of loan costs and 722.30 USD of prepaid interest.
+/// Closing day. The loan contract originates 279,000.00 USD into rental-bank;
+/// its loan-contract assertions reconcile the principal and payoff. Cash to close
+/// is the 25% down payment, 4,850.00 USD of basis costs, 3,120.00 USD of loan
+/// costs and 722.30 USD of prepaid interest.
 2024-12-18 checking -> rental-bank 108_000 USD #transfer
 2024-12-18 home-loan
 2024-12-18 rental-bank -> title-co 376_850 USD #purchase of house
@@ -15,4 +16,4 @@ opening 2024-12-18
 2024-12-18 rental-bank -> lender 722.30 USD #interest of house
 2024-12-31 rental-bank = 6_307.70 USD
 2024-12-31 checking = 20_000.00 USD
-2024-12-31 mortgage = 279_000 USD
+2024-12-31 home-loan = 279_000 USD

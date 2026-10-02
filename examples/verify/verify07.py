@@ -75,7 +75,7 @@ def read_source():
                 sale_header = None
                 occurrences.append(Occurrence(date.fromisoformat(occ.group(1)), occ.group(2), money(occ.group(3)) if occ.group(3) else None))
                 continue
-            stmt = re.match(r"^(\d{4}-\d\d-\d\d) (checking|rental-bank|deposit-bank|mortgage|bills|deposits) = (empty|[\d_,.]+ USD)$", line)
+            stmt = re.match(r"^(\d{4}-\d\d-\d\d) (checking|rental-bank|deposit-bank|home-loan|bills|deposits) = (empty|[\d_,.]+ USD)$", line)
             if stmt:
                 sale_header = None
                 value = D(0) if stmt.group(3) == "empty" else money(stmt.group(3).split()[0])
@@ -288,9 +288,9 @@ assert (wages, total_income, agi, taxable, income_tax, niit, withheld, owed) == 
 print("wages", wages, "| Schedule E", schedule_e, "| total income", total_income)
 print("AGI", agi, "taxable", taxable, "tax", total_tax, "withheld", withheld, "owed (negative = refund)", owed)
 
-# ── Reconcile every dated bank, mortgage, bill and deposit statement. ───────
+# ── Reconcile every dated bank, loan-contract, bill and deposit statement. ───────
 cash = {"checking": D(128000), "rental-bank": D(0), "deposit-bank": D(0)}
-claims = {"mortgage": D(0), "bills": D(0), "deposits": D(0)}
+claims = {"home-loan": D(0), "bills": D(0), "deposits": D(0)}
 def add(place, amount):
     cash[place] = cash.get(place, D(0)) + amount
 
@@ -319,10 +319,10 @@ for day, kind, item in events:
         elif o.name == "home-loan":
             if o.day == loan_start:
                 add("rental-bank", LOAN)
-                claims["mortgage"] += LOAN
+                claims["home-loan"] += LOAN
             else:
                 add("rental-bank", -payment)
-                claims["mortgage"] -= schedule[o.day.month][0]
+                claims["home-loan"] -= schedule[o.day.month][0]
         elif o.name == "manager-fee":
             add("rental-bank", -(o.amount if o.amount is not None else manager_default))
     elif kind == "deposit":
@@ -336,8 +336,8 @@ for day, kind, item in events:
         if f.dst in cash: add(f.dst, f.amount)
         if f.code == "inv-roof" and f.day > roof_start:
             claims["bills"] -= f.amount
-        if f.code == "loan":
-            claims["mortgage"] -= f.amount
+        if f.dst == "home-loan":
+            claims["home-loan"] -= f.amount
         if f.purpose == "deposit-return": claims["deposits"] -= f.amount
         if f.purpose == "forfeited-deposit": claims["deposits"] -= f.amount
         if f.purpose == "deposit" and f.src == "rental-bank": claims["deposits"] -= f.amount
@@ -349,7 +349,7 @@ for day, kind, item in events:
 assert cash["checking"] == D("173866.60"), cash
 assert cash["rental-bank"] == D("0.00"), cash
 assert cash["deposit-bank"] == D("0.00"), cash
-assert claims == {"mortgage": D(0), "bills": D(0), "deposits": D(0)}, claims
+assert claims == {"home-loan": D(0), "bills": D(0), "deposits": D(0)}, claims
 print("cash: checking", cash["checking"], "rental-bank", cash["rental-bank"], "deposit-bank", cash["deposit-bank"])
 print("net worth on 2026-04-16 (all of it cash)", cash["checking"] + cash["rental-bank"] + cash["deposit-bank"])
 print("paid to lender in 2025", payment * 11 + payoff + accrued)

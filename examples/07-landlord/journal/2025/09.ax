@@ -1,6 +1,6 @@
 2025-09-01 checking -> oak-street 1_950 USD #rent
 2025-09-01 home-loan
-// Historical loan split, independently checked from the contract terms: mortgage            249.83 USD   // principal
+// Historical loan split, independently checked from the contract terms: home-loan            249.83 USD   // principal
 // Historical loan split, independently checked from the contract terms: interest            1_559.76 USD   // interest
 
 /// Listing for the vacancy.
@@ -36,7 +36,7 @@
 
 /// The roof is depreciated as well, from mid-September: 14,200 USD over 27.5 years, a half month in the first.
 // Previous hand-entered depreciation: 935.09 USD on 2025-09-30. v4 derives this from the house parts.
-2025-09-30 mortgage = 277_040.01 USD
+2025-09-30 home-loan = 277_040.01 USD
 2025-09-30 bills = 14_200 USD
 2025-09-30 rental-bank = 1_601.38 USD
 2025-09-30 checking = 50_656.63 USD

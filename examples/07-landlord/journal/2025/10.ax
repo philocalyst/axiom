@@ -3,7 +3,7 @@
 2025-10-01 rent-b
 2025-10-01 checking -> oak-street 1_950 USD #rent
 2025-10-01 home-loan
-// Historical loan split, independently checked from the contract terms: mortgage            251.24 USD   // principal
+// Historical loan split, independently checked from the contract terms: home-loan            251.24 USD   // principal
 // Historical loan split, independently checked from the contract terms: interest            1_558.35 USD   // interest
 2025-10-08 checking -> trader-joes 221.65 USD #groceries
 
@@ -18,7 +18,7 @@
 /// Second half of the county tax.
 2025-10-31 rental-bank -> county 2_190 USD #property-tax of house
 // Previous hand-entered depreciation: 956.61 USD on 2025-10-31. v4 derives this from the house parts.
-2025-10-31 mortgage = 276_788.77 USD
+2025-10-31 home-loan = 276_788.77 USD
 2025-10-31 bills = empty
 2025-10-31 rental-bank = 2_401.79 USD
 2025-10-31 checking = 37_455.88 USD
