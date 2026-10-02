@@ -1066,9 +1066,6 @@ impl<'a, 's> Machine<'a, 's> {
     }
 
     fn temporal(&self, call: NodeId, func: Func, args: &[NodeId]) -> Value {
-        let Some(law) = self.law_id else {
-            return Value::Fault(Fault::InvalidProgram);
-        };
         let (Some(&root), Some(&window_arg)) = (args.first(), args.get(1)) else {
             return Value::Fault(Fault::InvalidProgram);
         };
@@ -1080,6 +1077,19 @@ impl<'a, 's> Machine<'a, 's> {
                 _ => return Value::Fault(Fault::InvalidProgram),
             },
             _ => return Value::Fault(Fault::InvalidProgram),
+        };
+        // Where an entity lives is in the book's facts, over all time: the days are counted there, not sampled.
+        if let (Func::Days, Op::Resides(entity, systems)) = (func, &self.nodes[root].op) {
+            return match self.at(*entity) {
+                Value::Entity(entity) => {
+                    Value::Num(Ratio::int(self.book().days_residing(entity, systems, days).len() as i64))
+                }
+                Value::Fault(fault) => Value::Fault(fault),
+                _ => Value::Fault(Fault::InvalidProgram),
+            };
+        }
+        let Some(law) = self.law_id else {
+            return Value::Fault(Fault::InvalidProgram);
         };
         let key =
             TemporalKey { law, subject: self.ctx.subject, owner: self.ctx.owner, call, part: self.ctx.asset_part };

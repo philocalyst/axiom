@@ -94,6 +94,9 @@ pub struct Plan<'b, 's> {
     pub(crate) occurrence_txns: Box<[Id<Txn>]>,
     /// The day of the first fact that starts a period; before it there is nothing to close.
     pub(crate) period_start: Option<Day>,
+    /// The day the laws that close periods begin: the first fact of the journal, or the first step of anything the
+    /// book says of its things, a residence beginning being one.
+    pub(crate) schedule_start: Option<Day>,
     last_fact: Option<Day>,
     /// By index in `Rules::timed`: when each falls due.
     pub(crate) timed: Box<[Schedule]>,
@@ -134,6 +137,7 @@ impl<'b, 's> Plan<'b, 's> {
             kind_places: kind_places(book),
             occurrence_txns: occurrence_txns(book),
             period_start: timeline::start(book, &events),
+            schedule_start: schedule_start(book, &events),
             last_fact: timeline::last_fact(book, &events),
             events,
             laws,
@@ -331,6 +335,10 @@ fn temporal_queries(book: &Book, ownership: &Owners) -> (Vec<Query>, bool) {
                 continue;
             };
             let Some(&root) = args.first() else { continue };
+            // The days an entity lives somewhere are counted in the facts.
+            if *func == Func::Days && matches!(law.nodes[root].op, Op::Resides(..)) {
+                continue;
+            }
             let call = axiom_model::NodeId(id.index() as u32);
             for share in owners {
                 queries.push(Query {
@@ -385,6 +393,11 @@ fn change_dates(book: &Book) -> Box<[Day]> {
     dates.sort_unstable();
     dates.dedup();
     dates.into_boxed_slice()
+}
+
+/// The first day on which the book says anything of its things: a dated residence or property, whatever the journal.
+fn schedule_start(book: &Book, events: &Events) -> Option<Day> {
+    timeline::start(book, events).into_iter().chain(book.facts.step_days().min()).min()
 }
 
 /// Whether some list of rules brings one law to one subject twice, as two

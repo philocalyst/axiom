@@ -4,7 +4,7 @@
 //! lowerers and by the engine. These tests focus on the model boundary: typed
 //! names, stable trees, ownership and once-stored property defaults.
 
-use axiom_core::{Day, Diagnostic, FileId, Id, Ratio};
+use axiom_core::{Day, Days, Diagnostic, FileId, Id, Ratio};
 use axiom_syntax::{Folder, parse};
 
 use crate::builtin::{self, Coded};
@@ -215,6 +215,42 @@ account retirement : residential
     assert!(book.is_deferred(account) && book.is_claim(account), "a place has what its kinds say");
     assert_eq!(book.basis(account), Basis::Cost, "and the nearest kind that says it");
     assert_eq!(book.select(account), Some(crate::Policy::Hifo));
+}
+
+#[test]
+fn the_days_an_entity_lives_somewhere_are_counted_from_its_residences_whole() {
+    let std = "\
+system std
+kind person : entity
+kind currency : commodity
+commodity USD : currency
+";
+    let abroad = "system abroad\nuse std\n";
+    let home = "system home\nuse std\n";
+    let project = "\
+use std
+base USD
+entity jo : person
+  lives home until 2026-02-28
+  lives abroad from 2026-02-01 until 2026-03-31
+  lives home from 2026-07-01
+";
+    let sources = [
+        parsed_source(0, "std.ax", std, true),
+        parsed_source(1, "abroad.ax", abroad, true),
+        parsed_source(2, "home.ax", home, true),
+        parsed_source(3, "axiom.ax", project, false),
+    ];
+    let (book, diagnostics) = build(&sources);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let jo = book.entity("jo").unwrap();
+    let system =
+        |path| book.systems.iter().find_map(|(id, node)| (book.name(node.path) == path).then_some(id)).unwrap();
+    let (abroad, home) = (system("abroad"), system("home"));
+    let year = Days::new(Day::from_ymd(2026, 1, 1).unwrap(), Day::from_ymd(2026, 12, 31).unwrap()).unwrap();
+    assert_eq!(book.days_residing(jo, &[abroad], year).len(), 28 + 31, "February and March, the whole of both");
+    assert_eq!(book.days_residing(jo, &[home], year).len(), 59 + 184, "overlap counts for each, and what follows");
+    assert_eq!(book.days_residing(jo, &[home, abroad], year).len(), 59 + 31 + 184, "and once for both together");
 }
 
 #[test]

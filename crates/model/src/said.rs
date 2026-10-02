@@ -6,7 +6,7 @@
 //! the store does not know, so the walk is here and the store is asked once per step of it.
 
 use axiom_core::tagless::Field;
-use axiom_core::{Day, Days, Id, Key, Loc, Many, Ratio, SlotId, Span, Sym};
+use axiom_core::{Day, DaySet, Days, Id, Key, Loc, Many, Ratio, SlotId, Span, Sym};
 use axiom_syntax::Policy;
 
 use crate::book::{Basis, Book, Commodity, Entity, Kind, Place, Purpose, Role, System};
@@ -124,6 +124,13 @@ impl Book<'_> {
     pub fn residing(&self, entity: Id<Entity>, day: Day) -> impl Iterator<Item = Id<System>> + '_ {
         let set: Option<Many<Id<System>>> = self.facts.at(builtin::LIVES, self.holders.number(entity), day);
         set.into_iter().flat_map(|set| self.facts.members(set))
+    }
+
+    /// The days of `within` on which an entity lives under one of `systems`.
+    pub fn days_residing(&self, entity: Id<Entity>, systems: &[Id<System>], within: Days) -> DaySet {
+        let holder = self.holders.number(entity);
+        let lives = |set: Many<Id<System>>| self.facts.members(set).any(|system| systems.contains(&system));
+        self.facts.days_where(builtin::LIVES, holder, within, lives)
     }
 
     /// Every system an entity lives under, and the days it does: the stretches of its residences.
