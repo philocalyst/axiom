@@ -175,19 +175,19 @@ account checking
   law owner-is-owner
     on out
     when self.owner is me
-    warn true \"an account still matches its owner\"
+    warn false \"an account still matches its owner\"
 law from-is-counterparty
   on out
   when from is market
-  warn true \"outside source matches its named party\"
+  warn false \"outside source matches its named party\"
 law from-is-owner
   on out
   when from is me
-  warn true \"an owned account matches its owner, not an outside party\"
+  warn false \"an owned account matches its owner, not an outside party\"
 law to-is-counterparty
   on in
   when to is payer
-  warn true \"outside recipient matches its named kind\"
+  warn false \"outside recipient matches its named kind\"
 2026-01-01 market -> checking 10 USD
 2026-01-02 checking -> tax-office 4 USD
 ";
