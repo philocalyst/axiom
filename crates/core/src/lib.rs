@@ -2,10 +2,14 @@
 //! and the ranges, months and schedules built on them, values that change on
 //! days, the dimensions amounts are counted in, interned names, typed ids,
 //! pre-ordered trees, grouped tables, source locations, diagnostics, and scoped
-//! parallelism.
+//! parallelism; and the primitives the kernels are made of: columns of mixed
+//! values, sets of days, range extremes in constant time, intersection of
+//! sorted lists, forced placement of words into slots, and dense state with an
+//! undo log.
 
 pub mod calendar;
 pub mod day;
+pub mod dayset;
 pub mod diag;
 pub mod glob;
 pub mod groups;
@@ -13,8 +17,15 @@ pub mod hash;
 pub mod id;
 pub mod num;
 pub mod par;
+pub mod placement;
+pub mod postings;
+pub mod sparse;
 pub mod sym;
+pub mod tagless;
+#[cfg(test)]
+mod testing;
 pub mod timeline;
+pub mod trail;
 pub mod tree;
 pub mod unit;
 
@@ -22,12 +33,16 @@ pub mod unit;
 // already in scope where a window is spoken of.
 pub use calendar::{Cadence, DateLayout, Days, On, Period, due, spread};
 pub use day::{Day, Span};
+pub use dayset::{DaySet, DaySlice};
 pub use diag::{Diagnostic, Disposition, FileId, Loc, Severity};
 pub use groups::Groups;
 pub use hash::{Map, Set};
 pub use id::{Arena, Id, Run};
 pub use num::{Dec, Qty, Ratio};
+pub use sparse::Sparse;
 pub use sym::{Interner, Sym};
+pub use tagless::{Column, Tag};
 pub use timeline::Timeline;
+pub use trail::{Fork, Trail, Trailed, Undo};
 pub use tree::Tree;
 pub use unit::Dim;
