@@ -60,13 +60,20 @@ pub trait Env {
     /// What evaluating can fail with, in the words of the phase that evaluates.
     type Failure;
 
-    /// What `expr` comes to read against the flow of `at`. `left` is what the header has left: only an item is read
-    /// against it, because only an item is a part of the header as the legs before it left it.
-    fn amount(&mut self, at: Line, left: &Remaining, expr: Expr) -> Result<Answer, Self::Failure>;
+    /// What `expr` comes to read against the flow of `at`. `left` is what the header has left, if it has an amount:
+    /// an item is read against it, because an item is a part of the header as the legs before it left it.
+    fn amount(&mut self, at: Line, left: Option<&Remaining>, expr: Expr) -> Result<Answer, Self::Failure>;
 
     /// What the contract's own rule says the header's side is: a loan's payment.
     fn payment(&mut self, _at: Line) -> Result<Answer, Self::Failure> {
         Ok(Answer::Later)
+    }
+
+    /// What a leg that is the book's to say will move, if this phase reads the book: the gap to an `=`, everything
+    /// `all` selects, the amount the assertions solved a `?` to. `None` leaves it the marker it is, with the amount a
+    /// flow carries until it lands; that is what a promise does, which is materialized before anything lands.
+    fn lands(&mut self, _at: Line, _marker: &Resolved) -> Result<Option<Amount>, Self::Failure> {
+        Ok(None)
     }
 }
 
@@ -76,7 +83,7 @@ pub struct LiteralEnv;
 impl Env for LiteralEnv {
     type Failure = Infallible;
 
-    fn amount(&mut self, _at: Line, _left: &Remaining, expr: Expr) -> Result<Answer, Infallible> {
+    fn amount(&mut self, _at: Line, _left: Option<&Remaining>, expr: Expr) -> Result<Answer, Infallible> {
         Ok(match expr {
             Expr::Literal(amount) => Answer::Amount(amount),
             Expr::Computed(_) => Answer::Later,
@@ -156,7 +163,7 @@ impl Quantity {
         self,
         env: &mut E,
         at: Line,
-        left: &Remaining,
+        left: Option<&Remaining>,
         end: End,
         unit: Id<Commodity>,
     ) -> Result<Option<Resolved>, E::Failure> {
@@ -165,18 +172,28 @@ impl Quantity {
             Answer::Later => Some((Amount::zero(unit), false)),
             Answer::Omitted => None,
         };
-        Ok(match self {
+        let marker = match self {
             Quantity::Amount(expr) => {
-                said(env.amount(at, left, expr)?).map(|(amount, exact)| Resolved::amount(amount, exact))
+                return Ok(said(env.amount(at, left, expr)?).map(|(amount, exact)| Resolved::amount(amount, exact)));
             }
-            Quantity::Pending(expr) => said(env.amount(at, left, expr)?)
-                .map(|(amount, exact)| Resolved { mode: Some(Mode::Pending), ..Resolved::amount(amount, exact) }),
+            Quantity::Pending(expr) => {
+                let pending =
+                    |(amount, exact)| Resolved { mode: Some(Mode::Pending), ..Resolved::amount(amount, exact) };
+                return Ok(said(env.amount(at, left, expr)?).map(pending));
+            }
+            Quantity::Derived => {
+                return Ok(said(env.payment(at)?).map(|(amount, exact)| Resolved::amount(amount, exact)));
+            }
             Quantity::Target(expr) => said(env.amount(at, left, expr)?)
                 .map(|(amount, _)| Resolved::marker(amount, Infer::Target { end, balance: amount.qty })),
             Quantity::Unknown(named) => Some(Resolved::marker(Amount::zero(named), Infer::Unknown)),
             Quantity::All(named) => Some(Resolved::marker(Amount::zero(named.unwrap_or(unit)), Infer::All)),
-            Quantity::Derived => said(env.payment(at)?).map(|(amount, exact)| Resolved::amount(amount, exact)),
-        })
+        };
+        let Some(marker) = marker else { return Ok(None) };
+        Ok(Some(match env.lands(at, &marker)? {
+            Some(amount) => Resolved { amount, exact: true, ..marker },
+            None => marker,
+        }))
     }
 }
 
@@ -194,6 +211,8 @@ pub struct Draw {
 pub struct Bear {
     pub amount: Expr,
     pub side: FlowSide,
+    /// What the amount is counted in until the environment can say: the zero a flow carries for it.
+    pub unit: Id<Commodity>,
     pub takes: bool,
 }
 
@@ -207,11 +226,22 @@ pub enum Drawn {
     Rest(Amount),
 }
 
+/// Where the remainder leg sits among what takes from the header.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Remainder {
+    /// It takes what the legs leave, before any item does: a promise's header is a flow of its own, and keeps what
+    /// the items leave of it.
+    BeforeItems,
+    /// It takes what the legs and the items leave: a split has no header flow, and its total is the sum of what it
+    /// pays.
+    AfterItems,
+}
+
 /// What a group came to.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Solved {
-    /// What the header has left.
-    pub header: Remaining,
+    /// What the header has left, if it had an amount.
+    pub header: Option<Remaining>,
     /// One for each leg given, in order.
     pub legs: Box<[Drawn]>,
     /// One for each item given, in order: its amount, or None if it reads an input that is not bound.
@@ -231,19 +261,65 @@ pub enum Failed<E> {
     TwoRests { at: Line },
 }
 
-/// Solves a group: every leg's quantity, then every explicit leg carved from the header, then the remainder, then
-/// each item against the header as it then stands. The order is the contract: an error is the first that order
-/// meets, and a computed item sees what the legs and the items before it left.
+/// What the header has left, and whether everything taken from it was exact, as the solver goes.
+struct Account {
+    left: Option<Remaining>,
+    exact: bool,
+}
+
+impl Account {
+    /// Takes `amount` from `side` of the header, if it has an amount: a header with none has nothing to take from.
+    fn take<E>(&mut self, at: Line, side: FlowSide, amount: Amount) -> Result<(), Failed<E>> {
+        match self.left.as_mut() {
+            Some(left) => left.take(side, amount).map_err(|fault| Failed::Fault { at, fault }),
+            None => Ok(()),
+        }
+    }
+
+    /// What the header has left on `side`, or nothing in `unit` when it has no amount.
+    fn of(&self, side: FlowSide, unit: Id<Commodity>) -> Amount {
+        self.left.map_or(Amount::zero(unit), |left| left.of(side))
+    }
+}
+
+/// Solves a group: every leg's quantity, then every explicit leg carved from the header, then the remainder and
+/// the items in the order `settles` says, each item read against the header as it then stands. The order is the
+/// contract: an error is the first that order meets, and a computed item sees what the legs and the items before it
+/// left.
 ///
-/// A leg that is a share takes it of the header as given, before any leg has carved it.
+/// A leg that is a share takes it of the header as given, before any leg has carved it. A header with no amount has
+/// nothing to carve, so a remainder is nothing and an item bears on nothing: what each leg and item says is what it is.
 pub fn solve<E: Env>(
-    header: Remaining,
+    header: Option<Remaining>,
     legs: &[Draw],
     items: &[Bear],
+    settles: Remainder,
     env: &mut E,
 ) -> Result<Solved, Failed<E::Failure>> {
-    let mut left = header;
-    let mut exact = true;
+    let mut account = Account { left: header, exact: true };
+    let mut drawn = draw(&mut account, header, legs, env)?;
+    for (index, one) in drawn.iter().enumerate() {
+        if let Drawn::Value(resolved) = one {
+            account.take(Line::Leg(index), legs[index].side, resolved.amount)?;
+        }
+    }
+    if settles == Remainder::BeforeItems {
+        settle(&mut account, legs, &mut drawn)?;
+    }
+    let amounts = bear(&mut account, items, env)?;
+    if settles == Remainder::AfterItems {
+        settle(&mut account, legs, &mut drawn)?;
+    }
+    Ok(Solved { header: account.left, legs: drawn.into(), items: amounts.into(), exact: account.exact })
+}
+
+/// What each leg says it takes: its quantity, its share of the header, or the place the remainder goes.
+fn draw<E: Env>(
+    account: &mut Account,
+    header: Option<Remaining>,
+    legs: &[Draw],
+    env: &mut E,
+) -> Result<Vec<Drawn>, Failed<E::Failure>> {
     let mut drawn = Vec::with_capacity(legs.len());
     let mut rests = [None; 2];
     for (index, leg) in legs.iter().enumerate() {
@@ -256,52 +332,58 @@ pub fn solve<E: Env>(
                 Drawn::Rest(Amount::zero(leg.unit))
             }
             Part::Share(rate) => {
-                let amount = header.of(leg.side).scaled(rate).map_err(|fault| Failed::Fault { at, fault })?;
+                let of = header.map_or(Amount::zero(leg.unit), |header| header.of(leg.side));
+                let amount = of.scaled(rate).map_err(|fault| Failed::Fault { at, fault })?;
                 Drawn::Value(Resolved { amount, infer: Infer::Known, mode: None, exact: true })
             }
             Part::Of(quantity) => {
-                match quantity.resolve(env, at, &left, leg.side.end(), leg.unit).map_err(Failed::Env)? {
+                let left = account.left.as_ref();
+                match quantity.resolve(env, at, left, leg.side.end(), leg.unit).map_err(Failed::Env)? {
                     Some(resolved) => Drawn::Value(resolved),
                     None => Drawn::Omitted,
                 }
             }
         };
-        exact &= !matches!(one, Drawn::Value(Resolved { exact: false, .. }));
+        account.exact &= !matches!(one, Drawn::Value(Resolved { exact: false, .. }));
         drawn.push(one);
     }
-    for (index, one) in drawn.iter().enumerate() {
-        if let Drawn::Value(resolved) = one {
-            left.take(legs[index].side, resolved.amount)
-                .map_err(|fault| Failed::Fault { at: Line::Leg(index), fault })?;
+    Ok(drawn)
+}
+
+/// The remainder legs take what the header has left on their side.
+fn settle<E>(account: &mut Account, legs: &[Draw], drawn: &mut [Drawn]) -> Result<(), Failed<E>> {
+    for (index, one) in drawn.iter_mut().enumerate() {
+        if let Drawn::Rest(_) = one {
+            let amount = account.of(legs[index].side, legs[index].unit);
+            account.take(Line::Leg(index), legs[index].side, amount)?;
+            *one = Drawn::Rest(amount);
         }
     }
-    for index in 0..drawn.len() {
-        if let Drawn::Rest(_) = drawn[index] {
-            let amount = left.of(legs[index].side);
-            left.take(legs[index].side, amount).map_err(|fault| Failed::Fault { at: Line::Leg(index), fault })?;
-            drawn[index] = Drawn::Rest(amount);
-        }
-    }
+    Ok(())
+}
+
+/// Each item's amount, and what it takes from the header.
+fn bear<E: Env>(account: &mut Account, items: &[Bear], env: &mut E) -> Result<Vec<Option<Amount>>, Failed<E::Failure>> {
     let mut amounts = Vec::with_capacity(items.len());
     for (index, item) in items.iter().enumerate() {
         let at = Line::Item(index);
-        let amount = match env.amount(at, &left, item.amount).map_err(Failed::Env)? {
+        let amount = match env.amount(at, account.left.as_ref(), item.amount).map_err(Failed::Env)? {
             Answer::Amount(amount) => amount,
             Answer::Omitted => {
                 amounts.push(None);
                 continue;
             }
             Answer::Later => {
-                exact = false;
-                Amount::zero(left.of(item.side).unit)
+                account.exact = false;
+                Amount::zero(item.unit)
             }
         };
         if item.takes {
-            left.take(item.side, amount).map_err(|fault| Failed::Fault { at, fault })?;
+            account.take(at, item.side, amount)?;
         }
         amounts.push(Some(amount));
     }
-    Ok(Solved { header: left, legs: drawn.into(), items: amounts.into(), exact })
+    Ok(amounts)
 }
 
 #[cfg(test)]
@@ -333,7 +415,7 @@ mod tests {
     }
 
     fn carve(amount: i64) -> Bear {
-        Bear { amount: Expr::Literal(usd(amount)), side: FlowSide::Out, takes: true }
+        Bear { amount: Expr::Literal(usd(amount)), side: FlowSide::Out, unit: USD, takes: true }
     }
 
     fn amounts(solved: &Solved) -> Vec<i64> {
@@ -349,7 +431,7 @@ mod tests {
     }
 
     fn literal(header: Remaining, legs: &[Draw], items: &[Bear]) -> Result<Solved, Failed<Infallible>> {
-        solve(header, legs, items, &mut LiteralEnv)
+        solve(Some(header), legs, items, Remainder::BeforeItems, &mut LiteralEnv)
     }
 
     /// An environment that says what a test wants a node to say, and which nodes it was asked about.
@@ -362,12 +444,14 @@ mod tests {
     impl Env for Says {
         type Failure = u32;
 
-        fn amount(&mut self, at: Line, left: &Remaining, expr: Expr) -> Result<Answer, u32> {
+        fn amount(&mut self, at: Line, left: Option<&Remaining>, expr: Expr) -> Result<Answer, u32> {
             self.asked.push((at, expr));
             Ok(match expr {
                 Expr::Literal(amount) => Answer::Amount(amount),
                 // Node 99 is a tenth of what the header has left on its out side: the item that reads `amount`.
-                Expr::Computed(NodeId(99)) => Answer::Amount(Amount::new(Qty(left.out.qty.0 / 10), USD)),
+                Expr::Computed(NodeId(99)) => {
+                    Answer::Amount(Amount::new(Qty(left.map_or(0, |left| left.out.qty.0) / 10), USD))
+                }
                 Expr::Computed(NodeId(fails)) if fails >= 100 => return Err(fails),
                 Expr::Computed(NodeId(node)) => {
                     self.nodes.iter().find(|(known, _)| *known == node).map_or(Answer::Later, |(_, said)| *said)
@@ -379,14 +463,14 @@ mod tests {
     #[test]
     fn a_header_with_nothing_under_it_is_left_whole() {
         let solved = literal(transfer(1_000), &[], &[]).unwrap();
-        assert_eq!(solved.header, transfer(1_000));
+        assert_eq!(solved.header, Some(transfer(1_000)));
         assert!(solved.legs.is_empty() && solved.items.is_empty() && solved.exact);
     }
 
     #[test]
     fn a_leg_takes_its_amount_from_both_sides_of_a_transfer() {
         let solved = literal(transfer(1_000), &[pays(of(usd(300)))], &[]).unwrap();
-        assert_eq!(solved.header, transfer(700));
+        assert_eq!(solved.header, Some(transfer(700)));
         assert_eq!(amounts(&solved), [300]);
     }
 
@@ -394,7 +478,7 @@ mod tests {
     fn a_leg_of_an_exchange_leaves_the_other_side_alone() {
         let header = Remaining { out: usd(1_000), arrive: eur(50) };
         let solved = literal(header, &[pays(of(usd(300)))], &[]).unwrap();
-        assert_eq!(solved.header, Remaining { out: usd(700), arrive: eur(50) });
+        assert_eq!(solved.header, Some(Remaining { out: usd(700), arrive: eur(50) }));
     }
 
     #[test]
@@ -403,7 +487,7 @@ mod tests {
         let legs = [pays(of(usd(500))), pays(Part::Share(tenth)), pays(Part::Share(tenth))];
         let solved = literal(transfer(1_000), &legs, &[]).unwrap();
         assert_eq!(amounts(&solved), [500, 100, 100]);
-        assert_eq!(solved.header, transfer(300));
+        assert_eq!(solved.header, Some(transfer(300)));
     }
 
     #[test]
@@ -411,7 +495,7 @@ mod tests {
         let legs = [pays(Part::Rest), pays(of(usd(300))), pays(of(usd(200)))];
         let solved = literal(transfer(1_000), &legs, &[]).unwrap();
         assert_eq!(amounts(&solved), [500, 300, 200]);
-        assert_eq!(solved.header, transfer(0));
+        assert_eq!(solved.header, Some(transfer(0)));
         assert_eq!(solved.legs[0], Drawn::Rest(usd(500)));
     }
 
@@ -425,7 +509,7 @@ mod tests {
     fn a_second_remainder_on_one_side_is_refused_where_it_is_read() {
         let mut env = Says::default();
         let legs = [pays(Part::Rest), pays(Part::Rest), pays(Part::Of(Quantity::Amount(Expr::Computed(NodeId(100)))))];
-        let failed = solve(transfer(1_000), &legs, &[], &mut env).unwrap_err();
+        let failed = solve(Some(transfer(1_000)), &legs, &[], Remainder::BeforeItems, &mut env).unwrap_err();
         assert_eq!(failed, Failed::TwoRests { at: Line::Leg(1) });
         assert!(env.asked.is_empty(), "the third leg was never asked about");
     }
@@ -459,37 +543,41 @@ mod tests {
     fn a_carve_takes_from_the_header_and_an_add_does_not() {
         let add = Bear { takes: false, ..carve(40) };
         let solved = literal(transfer(1_000), &[pays(of(usd(100)))], &[carve(30), add, carve(20)]).unwrap();
-        assert_eq!(solved.header, transfer(850));
+        assert_eq!(solved.header, Some(transfer(850)));
         assert_eq!(solved.items[..], [Some(usd(30)), Some(usd(40)), Some(usd(20))]);
     }
 
     #[test]
     fn an_item_sees_what_the_legs_and_the_items_before_it_left() {
-        let tenth = Bear { amount: Expr::Computed(NodeId(99)), side: FlowSide::Out, takes: true };
+        let tenth = Bear { amount: Expr::Computed(NodeId(99)), side: FlowSide::Out, unit: USD, takes: true };
         let mut env = Says::default();
-        let solved = solve(transfer(1_000), &[pays(of(usd(500)))], &[tenth, tenth], &mut env).unwrap();
+        let solved =
+            solve(Some(transfer(1_000)), &[pays(of(usd(500)))], &[tenth, tenth], Remainder::BeforeItems, &mut env)
+                .unwrap();
         // a tenth of 500, then a tenth of 450
         assert_eq!(solved.items[..], [Some(usd(50)), Some(usd(45))]);
-        assert_eq!(solved.header, transfer(405));
+        assert_eq!(solved.header, Some(transfer(405)));
     }
 
     #[test]
     fn an_item_that_takes_from_another_side_takes_from_that_side() {
         let header = Remaining { out: usd(1_000), arrive: eur(70) };
-        let bear = Bear { amount: Expr::Literal(eur(20)), side: FlowSide::Arrive, takes: true };
+        let bear = Bear { amount: Expr::Literal(eur(20)), side: FlowSide::Arrive, unit: EUR, takes: true };
         let solved = literal(header, &[], &[bear]).unwrap();
-        assert_eq!(solved.header, Remaining { out: usd(1_000), arrive: eur(50) });
+        assert_eq!(solved.header, Some(Remaining { out: usd(1_000), arrive: eur(50) }));
     }
 
     #[test]
     fn a_part_that_reads_an_input_not_bound_is_left_out_and_takes_nothing() {
         let mut env = Says { nodes: vec![(1, Answer::Omitted)], ..Says::default() };
         let missing = pays(Part::Of(Quantity::Amount(Expr::Computed(NodeId(1)))));
-        let item = Bear { amount: Expr::Computed(NodeId(1)), side: FlowSide::Out, takes: true };
-        let solved = solve(transfer(1_000), &[missing, pays(Part::Rest)], &[item], &mut env).unwrap();
+        let item = Bear { amount: Expr::Computed(NodeId(1)), side: FlowSide::Out, unit: USD, takes: true };
+        let solved =
+            solve(Some(transfer(1_000)), &[missing, pays(Part::Rest)], &[item], Remainder::BeforeItems, &mut env)
+                .unwrap();
         assert_eq!(solved.legs[..], [Drawn::Omitted, Drawn::Rest(usd(1_000))]);
         assert_eq!(solved.items[..], [None]);
-        assert_eq!(solved.header, transfer(0));
+        assert_eq!(solved.header, Some(transfer(0)));
     }
 
     #[test]
@@ -498,7 +586,7 @@ mod tests {
         let solved = literal(transfer(1_000), &[pays(Part::Of(computed))], &[]).unwrap();
         assert_eq!(amounts(&solved), [0]);
         assert!(!solved.exact);
-        let item = Bear { amount: Expr::Computed(NodeId(1)), side: FlowSide::Out, takes: true };
+        let item = Bear { amount: Expr::Computed(NodeId(1)), side: FlowSide::Out, unit: USD, takes: true };
         assert!(!literal(transfer(1_000), &[], &[item]).unwrap().exact);
         assert_eq!(literal(transfer(1_000), &[], &[item]).unwrap().items[..], [Some(usd(0))]);
     }
@@ -508,7 +596,10 @@ mod tests {
         let mut env = Says::default();
         let fails = pays(Part::Of(Quantity::Amount(Expr::Computed(NodeId(100)))));
         let legs = [pays(of(usd(1))), fails, pays(Part::Of(Quantity::Amount(Expr::Computed(NodeId(101)))))];
-        assert_eq!(solve(transfer(1_000), &legs, &[], &mut env).unwrap_err(), Failed::Env(100));
+        assert_eq!(
+            solve(Some(transfer(1_000)), &legs, &[], Remainder::BeforeItems, &mut env).unwrap_err(),
+            Failed::Env(100)
+        );
         assert_eq!(env.asked.len(), 2);
     }
 
@@ -516,7 +607,7 @@ mod tests {
     fn each_quantity_comes_to_what_a_flow_carries_for_it() {
         let header = transfer(1_000);
         let resolve = |quantity: Quantity| {
-            quantity.resolve(&mut LiteralEnv, Line::Leg(0), &header, End::To, USD).unwrap().unwrap()
+            quantity.resolve(&mut LiteralEnv, Line::Leg(0), Some(&header), End::To, USD).unwrap().unwrap()
         };
         let literal = Expr::Literal(usd(250));
         let amount = resolve(Quantity::Amount(literal));
@@ -542,5 +633,74 @@ mod tests {
         let solved = literal(transfer(1_000), &[pays(of(usd(200))), target, pays(Part::Rest)], &[]).unwrap();
         assert_eq!(amounts(&solved), [200, 90_000, -89_200]);
         assert!(!solved.exact);
+    }
+
+    #[test]
+    fn a_header_with_no_amount_has_nothing_to_carve_and_its_remainder_is_nothing() {
+        let legs = [pays(of(usd(30))), pays(Part::Rest), pays(of(eur(5)))];
+        let solved = solve(None, &legs, &[carve(7)], Remainder::AfterItems, &mut LiteralEnv).unwrap();
+        assert_eq!(solved.header, None);
+        assert_eq!(solved.legs[..].len(), 3);
+        assert_eq!(solved.legs[1], Drawn::Rest(usd(0)));
+        assert_eq!(solved.items[..], [Some(usd(7))]);
+        assert!(solved.exact);
+    }
+
+    #[test]
+    fn a_remainder_after_the_items_takes_what_the_items_left_too() {
+        let legs = [pays(of(usd(300))), pays(Part::Rest)];
+        let after =
+            solve(Some(transfer(1_000)), &legs, &[carve(100), carve(50)], Remainder::AfterItems, &mut LiteralEnv);
+        let solved = after.unwrap();
+        assert_eq!(solved.legs[1], Drawn::Rest(usd(550)));
+        assert_eq!(solved.header, Some(transfer(0)));
+        // before them, the remainder is 700 and the items take the header below nothing
+        let before = literal(transfer(1_000), &legs, &[carve(100), carve(50)]).unwrap();
+        assert_eq!(before.legs[1], Drawn::Rest(usd(700)));
+        assert_eq!(before.header, Some(transfer(-150)));
+    }
+
+    #[test]
+    fn an_item_after_the_legs_is_read_against_what_they_left_before_the_remainder_is_settled() {
+        let tenth = Bear { amount: Expr::Computed(NodeId(99)), side: FlowSide::Out, unit: USD, takes: true };
+        let legs = [pays(of(usd(500))), pays(Part::Rest)];
+        let mut env = Says::default();
+        let solved = solve(Some(transfer(1_000)), &legs, &[tenth], Remainder::AfterItems, &mut env).unwrap();
+        assert_eq!(solved.items[..], [Some(usd(50))]);
+        assert_eq!(solved.legs[1], Drawn::Rest(usd(450)));
+    }
+
+    /// An environment that reads the book: `=` is the gap to its balance, `all` is what is held, `?` is solved.
+    struct Books;
+
+    impl Env for Books {
+        type Failure = Infallible;
+
+        fn amount(&mut self, _: Line, _: Option<&Remaining>, expr: Expr) -> Result<Answer, Infallible> {
+            LiteralEnv.amount(Line::Leg(0), None, expr)
+        }
+
+        fn lands(&mut self, _: Line, marker: &Resolved) -> Result<Option<Amount>, Infallible> {
+            Ok(Some(match marker.infer {
+                Infer::Target { balance, .. } => usd(balance.0 - 500),
+                Infer::All => usd(120),
+                _ => usd(7),
+            }))
+        }
+    }
+
+    #[test]
+    fn a_marker_the_environment_reads_is_exact_and_the_remainder_follows_it() {
+        let legs = [
+            pays(Part::Of(Quantity::Target(Expr::Literal(usd(800))))),
+            pays(Part::Of(Quantity::All(None))),
+            pays(Part::Of(Quantity::Unknown(USD))),
+            pays(Part::Rest),
+        ];
+        let solved = solve(Some(transfer(1_000)), &legs, &[], Remainder::BeforeItems, &mut Books).unwrap();
+        assert_eq!(amounts(&solved), [300, 120, 7, 573]);
+        assert!(solved.exact);
+        let Drawn::Value(target) = solved.legs[0] else { panic!("a value") };
+        assert_eq!(target.infer, Infer::Target { end: End::From, balance: Qty(800) }, "it stays the marker it is");
     }
 }

@@ -27,6 +27,7 @@ pub mod solve;
 pub mod split;
 pub mod sync;
 
+mod balance;
 pub mod builtin;
 mod collect;
 mod declare;

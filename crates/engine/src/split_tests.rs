@@ -92,7 +92,6 @@ fn cents(book: &Book, run: &Run, place: &str) -> i64 {
 // ─── Items: LANGUAGE §3, "Line items" ───────────────────────────────────────
 
 #[test]
-#[ignore = "fails before the statement path is solved: the header posts whole beside its items"]
 fn the_language_example_an_item_is_carved_out_of_the_header_and_what_is_left_keeps_its_purpose() {
     // The worked example of §3 (there a visa and a target, here a bank account and a shop):
     // `14 visa -> target 120.00 USD #household`, 32.10 USD #groceries, 12.00 USD #gifts: "75.90 stays #household".
@@ -115,7 +114,6 @@ fn the_language_example_an_item_is_carved_out_of_the_header_and_what_is_left_kee
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: a discount that says nothing bears on nothing"]
 fn a_discount_that_says_nothing_is_taken_off_the_header() {
     let lines = "\
 2026-03-14 checking -> shop 100 USD #household
@@ -141,7 +139,7 @@ fn an_item_that_comes_on_top_is_paid_as_well() {
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: `amount` in an item is the item's own zero"]
+#[ignore = "waits for the fold to solve a group that has a computed amount"]
 fn a_share_of_amount_in_an_item_is_a_share_of_the_header() {
     let lines = "\
 2026-03-14 checking -> shop 200 USD #household
@@ -170,7 +168,6 @@ fn the_language_example_a_cost_withheld_from_proceeds_is_a_share_of_the_header()
 // ─── Splits: LANGUAGE §3, "Split flows" ─────────────────────────────────────
 
 #[test]
-#[ignore = "fails before the statement path is solved: a split never debits its source"]
 fn a_split_takes_every_leg_from_its_source() {
     let split = "\
 2026-03-14 checking 300 USD ->
@@ -198,7 +195,6 @@ fn a_split_takes_every_leg_from_its_source() {
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: the remainder posts zero"]
 fn the_remainder_leg_is_what_the_other_legs_leave_of_the_total() {
     let lines = "\
 2026-03-14 checking 300 USD ->
@@ -213,7 +209,6 @@ fn the_remainder_leg_is_what_the_other_legs_leave_of_the_total() {
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: a total written after the arrow is dropped"]
 fn a_total_written_after_the_arrow_is_the_total() {
     let lines = "\
 2026-03-14 checking -> 300 USD
@@ -227,7 +222,6 @@ fn a_total_written_after_the_arrow_is_the_total() {
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: a split to one end credits it nothing"]
 fn a_split_into_one_end_pays_it_by_its_legs() {
     let lines = "\
 2026-03-14 -> checking 300 USD
@@ -241,7 +235,6 @@ fn a_split_into_one_end_pays_it_by_its_legs() {
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: a split never debits its source"]
 fn a_split_with_no_total_is_the_sum_of_its_legs() {
     let lines = "\
 2026-03-14 checking ->
@@ -255,7 +248,7 @@ fn a_split_with_no_total_is_the_sum_of_its_legs() {
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: computed legs and the remainder are not solved together"]
+#[ignore = "waits for the fold to solve a group that has a computed amount"]
 fn a_computed_leg_is_solved_when_the_split_lands_and_the_remainder_follows() {
     let lines = "\
 2026-03-14 checking 300 USD ->
@@ -269,7 +262,7 @@ fn a_computed_leg_is_solved_when_the_split_lands_and_the_remainder_follows() {
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: `=` and the remainder are not solved together"]
+#[ignore = "waits for the fold to solve a group that has an `=` leg"]
 fn a_target_leg_is_the_gap_to_its_balance_and_the_remainder_is_what_is_left() {
     // savings holds 500.00; `= 800 USD` is a leg of 300.00.
     let lines = "\
@@ -285,7 +278,6 @@ fn a_target_leg_is_the_gap_to_its_balance_and_the_remainder_is_what_is_left() {
 }
 
 #[test]
-#[ignore = "fails before the statement path is solved: items sit beside the first leg, and take from nothing"]
 fn items_under_a_split_sit_between_the_source_and_the_remainder_leg() {
     let lines = "\
 2026-03-14 checking 100 USD ->
@@ -309,7 +301,6 @@ fn imbalances(lines: &str) -> Vec<axiom_core::Diagnostic> {
 }
 
 #[test]
-#[ignore = "fails before the static check: the book builds, and posts 70.00 of a 100.00 total"]
 fn legs_that_are_short_of_the_total_are_an_error_at_the_legs() {
     let lines = "\
 2026-03-14 checking 100 USD ->
@@ -324,7 +315,6 @@ fn legs_that_are_short_of_the_total_are_an_error_at_the_legs() {
 }
 
 #[test]
-#[ignore = "fails before the static check: the remainder would be negative and posts as zero"]
 fn legs_that_take_more_than_the_total_leave_a_negative_remainder_and_are_an_error() {
     let lines = "\
 2026-03-14 checking 100 USD ->
@@ -336,7 +326,6 @@ fn legs_that_take_more_than_the_total_leave_a_negative_remainder_and_are_an_erro
 }
 
 #[test]
-#[ignore = "fails before the static check: a leg in another commodity than its total cannot add to it"]
 fn a_leg_in_another_commodity_than_the_total_cannot_add_to_it() {
     let lines = "\
 2026-03-14 checking 100 USD ->
@@ -348,7 +337,6 @@ fn a_leg_in_another_commodity_than_the_total_cannot_add_to_it() {
 }
 
 #[test]
-#[ignore = "fails before the static check: items that take more than their header have nowhere to come from"]
 fn items_that_take_more_than_their_header_are_an_error() {
     let lines = "\
 2026-03-14 checking -> shop 100 USD #household

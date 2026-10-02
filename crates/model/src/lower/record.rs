@@ -16,6 +16,7 @@ use super::statements::{
     Stated, Within, lower_basis, lower_claim_change, lower_contract_change, lower_end, lower_event, lower_filed,
     lower_measure, lower_split, lower_value, unsupported_statement,
 };
+use crate::balance::{self, Settled, Statement, Total};
 use crate::book::{Amount, Place, ScheduleKind};
 use crate::collect::{Collected, Order, Written};
 use crate::declare::World;
@@ -27,8 +28,9 @@ use crate::journal::{
 use crate::law::{NodeId, Ty};
 use crate::problem::{self, CodeUse};
 use crate::scope::Home;
+use crate::solve::Remaining;
 use crate::sources::Site;
-use crate::split::{Endpoint, FlowSide, Heading, Item, Leg, Made, Part, Promised, Quantity};
+use crate::split::{Endpoint, Expr, FlowSide, Heading, Item, Leg, Made, Part, Promised, Quantity};
 
 /// A dated record of the journal, whichever kind of item wrote it.
 #[derive(Clone, Copy)]
@@ -197,8 +199,8 @@ pub(crate) fn record<'a, 's>(world: &mut World<'s>, collected: &Collected<'a, 's
 /// What the lowering of one transaction has made so far.
 struct Built {
     flow_roots: Vec<FlowExpressions>,
-    /// The split, or the header with items, the transaction is: at most one.
-    group: Option<Made>,
+    /// The split, or the header with items, the transaction is: at most one, and whether the fold has it left to solve.
+    group: Option<(Made, Settled)>,
     /// Whether anything said so far makes the transaction wrong.
     successful: bool,
 }
@@ -208,6 +210,14 @@ impl Built {
     fn reject(&mut self, problem: Diagnostic, diags: &mut Vec<Diagnostic>) {
         diags.push(problem);
         self.successful = false;
+    }
+
+    /// Keeps the group the transaction is, solved as far as what is written allows; or says why it cannot add up.
+    fn keep(&mut self, group: Made, settled: Result<Settled, Diagnostic>, diags: &mut Vec<Diagnostic>) {
+        match settled {
+            Ok(settled) => self.group = Some((group, settled)),
+            Err(problem) => self.reject(problem, diags),
+        }
     }
 }
 
@@ -301,11 +311,14 @@ fn lower_named_flow<'s>(
     diags: &mut Vec<Diagnostic>,
 ) {
     let (cx, written, codes) = (txn.cx, txn.flow, txn.codes);
-    let flow_at = staged.flows().len();
+    let (first, flow_at) = (staged.flows().start(), staged.flows().len());
     let Some((flow, exprs)) = make_flow(staged, txn, ends, diags) else {
         built.successful = false;
         return;
     };
+    let says_amount =
+        flow.infer == Infer::Known && exprs.is_none_or(|exprs| exprs.out.is_none() && exprs.arrive.is_none());
+    let header = Remaining { out: flow.out, arrive: flow.arrive };
     staged.book.flows.push(flow);
     if let Some(exprs) = exprs {
         built.flow_roots.push(FlowExpressions { flow: flow_at, ..exprs });
@@ -315,7 +328,11 @@ fn lower_named_flow<'s>(
     }
     let parent = Parent { ends, mode: Mode::Actual, header_codes: codes, tail: None };
     let items = lower_items(staged, &cx, written.body.items, parent, &mut built.flow_roots, diags);
-    built.group = Some(Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items });
+    let group = Made { header: Heading::Flow(flow_at), side: FlowSide::Out, legs: Box::default(), items };
+    let total = if says_amount { Total::Is(header) } else { Total::Later };
+    let settled =
+        balance::settle(&mut staged.book, Statement { group: &group, first, total, side: FlowSide::Out, loc: cx.loc });
+    built.keep(group, settled, diags);
 }
 
 /// The end a header names when it is the source of the legs under it, and which side of their flows it is on.
@@ -337,6 +354,27 @@ struct SplitLegs {
     legs: Vec<Leg<u32>>,
 }
 
+/// What a split's header says it moves, if it says: the amount on the source's own side of the arrow, or else the one
+/// on the other. Either is the total the legs and the items add up to.
+fn stated_total<'s>(source: SplitEnd, written: &ast::Flow<'s>) -> Option<(ast::Quantity<'s>, FlowSide)> {
+    let (own, over) = match source.side {
+        FlowSide::Out => (written.from.amount, written.to.amount),
+        FlowSide::Arrive => (written.to.amount, written.from.amount),
+    };
+    own.map(|quantity| (quantity, source.side)).or(over.map(|quantity| (quantity, source.side.other())))
+}
+
+/// What the header's total gives the solver to take from: an amount that is written, one the fold computes, or none.
+fn total_of(total: Option<ResolvedQuantity>) -> Total {
+    match total.map(|total| total.quantity()) {
+        Some(Quantity::Amount(Expr::Literal(amount)) | Quantity::Pending(Expr::Literal(amount))) => {
+            Total::Is(Remaining { out: amount, arrive: amount })
+        }
+        Some(Quantity::Amount(Expr::Computed(_)) | Quantity::Pending(Expr::Computed(_))) => Total::Later,
+        _ => Total::Nothing,
+    }
+}
+
 /// A header that names one end is the source of its legs, which name the others, and of the items under it.
 fn lower_split_flow<'s>(
     staged: &mut Staged<'_, 's>,
@@ -346,13 +384,11 @@ fn lower_split_flow<'s>(
     diags: &mut Vec<Diagnostic>,
 ) {
     let (cx, written) = (&txn.cx, txn.flow);
-    let source_qty = match source.side {
-        FlowSide::Out => written.from.amount,
-        FlowSide::Arrive => written.to.amount,
-    };
+    let first = staged.flows().start();
+    let stated = stated_total(source, written);
     let base = staged.book.base;
-    let total = source_qty.and_then(|qty| resolve_quantity(staged, cx, qty, base, source.side, diags));
-    if source_qty.is_some() && total.is_none() {
+    let total = stated.and_then(|(quantity, side)| resolve_quantity(staged, cx, quantity, base, side, diags));
+    if stated.is_some() && total.is_none() {
         built.successful = false;
     }
     let split = Split { txn, source, total };
@@ -369,12 +405,11 @@ fn lower_split_flow<'s>(
     if !written.body.items.is_empty() && items.iter().any(|item| item.flow.is_some()) && made.legs.is_empty() {
         built.successful = false;
     }
-    built.group = Some(Made {
-        header: Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) },
-        side: source.side,
-        legs: made.legs.into_boxed_slice(),
-        items,
-    });
+    let header = Heading::Source { end: endpoint(source.end), total: total.map(|total| total.quantity()) };
+    let group = Made { header, side: source.side, legs: made.legs.into_boxed_slice(), items };
+    let statement = Statement { group: &group, first, total: total_of(total), side: source.side.other(), loc: cx.loc };
+    let settled = balance::settle(&mut staged.book, statement);
+    built.keep(group, settled, diags);
 }
 
 /// One leg of a split once its flow is made: where the flow is, what the leg said it moved, and the expressions
@@ -403,10 +438,9 @@ impl<'s> Split<'_, 's> {
         let tail = self.txn.tail.clone().merge(leg_tail);
         let unit = self.total.map_or(staged.book.base, |total| total.amount.unit);
         let quantity = resolve_quantity(staged, cx, leg.amount, unit, side.other(), diags)?;
-        let zero = Amount::zero(unit);
-        let (out, arrive) = if source_is_from { (zero, quantity.amount) } else { (quantity.amount, zero) };
         let at = staged.flows().len();
         let basis = tail.basis_root;
+        let (out, arrive) = (quantity.amount, quantity.amount);
         let shape = Shape { ends: Ends { from, to }, out, arrive, infer: quantity.infer, mode: quantity.mode };
         let codes = Codes { header: self.txn.codes, local: leg_codes };
         let flow = make_resolved_flow(staged, cx, shape, codes, tail, leg.loc, diags)?;
@@ -415,8 +449,8 @@ impl<'s> Split<'_, 's> {
         Some(MadeLeg { at, quantity: quantity.part, out, arrive, basis })
     }
 
-    /// The items under the header: expenses of the legs, or what the source's own flow is, which each leg's end
-    /// stands in for.
+    /// The items under the header: between the source and the remainder leg's end, or the first leg's when none is the
+    /// remainder, which is what an item of the source's own flow is.
     fn items(
         &self,
         staged: &mut Staged<'_, 's>,
@@ -425,7 +459,8 @@ impl<'s> Split<'_, 's> {
         diags: &mut Vec<Diagnostic>,
     ) -> Box<[Item<Option<u32>>]> {
         let (cx, SplitEnd { end: source, side }) = (&self.txn.cx, self.source);
-        let leg_end = made.legs.first().map(|leg| {
+        let remainder = made.legs.iter().find(|leg| matches!(leg.part, Part::Rest));
+        let leg_end = remainder.or(made.legs.first()).map(|leg| {
             let leg = staged.flow(leg.flow);
             let place = if side == FlowSide::Out { leg.to } else { leg.from };
             ResolvedEnd { place, entity: None, select: Run::new(Id::new(0), 0) }
@@ -1347,6 +1382,14 @@ fn lower_owes<'a, 's>(
     let mode = if opening { Mode::Opening } else { Mode::Actual };
     let mut flow_roots = Vec::new();
     let mut group = None;
+    let first = staged.flows().start();
+    let mut keep = |staged: &mut Staged<'_, 's>, made: Made, total: Total, diags: &mut Vec<Diagnostic>| {
+        let statement = Statement { group: &made, first, total, side: FlowSide::Out, loc };
+        match balance::settle(&mut staged.book, statement) {
+            Ok(settled) => group = Some((made, settled)),
+            Err(problem) => diags.push(problem),
+        }
+    };
     if let Some(written_amount) = amount {
         let base = staged.book.base;
         let Some(expr) = resolve_amount(&staged, &cx, written_amount, base, diags) else {
@@ -1362,14 +1405,19 @@ fn lower_owes<'a, 's>(
             if !statement.body.items.is_empty() {
                 let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: None };
                 let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
-                group = Some(Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items });
+                let made = Made { header: Heading::Flow(0), side: FlowSide::Out, legs: Box::default(), items };
+                let total = match expr {
+                    Expr::Literal(_) => Total::Is(Remaining { out: amount, arrive: amount }),
+                    Expr::Computed(_) => Total::Later,
+                };
+                keep(&mut staged, made, total, diags);
             }
         }
     } else {
         let parent = Parent { ends: Ends { from, to }, mode, header_codes, tail: Some(&header_tail) };
         let items = lower_items(&mut staged, &cx, statement.body.items, parent, &mut flow_roots, diags);
         let header = Heading::Source { end: endpoint(from), total: Some(Quantity::Derived) };
-        group = Some(Made { header, side: FlowSide::Out, legs: Box::default(), items });
+        keep(&mut staged, Made { header, side: FlowSide::Out, legs: Box::default(), items }, Total::Nothing, diags);
     }
     if diags.len() != diagnostic_start {
         return;

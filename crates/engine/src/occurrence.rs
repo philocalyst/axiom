@@ -16,8 +16,8 @@ use std::borrow::Cow;
 use axiom_core::{Arena, Cadence, Day, Days, Id, Loc, Ratio, Span};
 use axiom_model::{
     Amount, Answer, Bear, Book, Commodity, Contract, Detail, Draw, Drawn, End, Env, Expr, Failed, Fault, Flow,
-    FlowSide, Infer, Item, Line, Made, Mode, OccurrenceTail, Origin, Part, Program, Promised, Remaining, Resolved,
-    RuntimeDetail, RuntimeFlow, RuntimeTxn, Says, ScheduleKind, Sign, Terms, Value, WrittenOccurrence, solve,
+    FlowSide, Infer, Item, Line, Made, Mode, OccurrenceTail, Origin, Part, Program, Promised, Remainder, Remaining,
+    Resolved, RuntimeDetail, RuntimeFlow, RuntimeTxn, Says, ScheduleKind, Sign, Terms, Value, WrittenOccurrence, solve,
 };
 
 use crate::evaluate::{Binds, Evaluating, Lent};
@@ -333,10 +333,10 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
         let remaining = Remaining { out: header.out, arrive: header.arrive };
         let mut env =
             Reads { lent: self.lent(), missing: pools.missing, cx: &cx, header: &header, legs: &legs, items: &items };
-        let solved =
-            solve(remaining, &draws, &bears, &mut env).map_err(|failed| failure(failed, &header, &legs, &items))?;
-        header.out = solved.header.out;
-        header.arrive = solved.header.arrive;
+        let solved = solve(Some(remaining), &draws, &bears, Remainder::BeforeItems, &mut env)
+            .map_err(|failed| failure(failed, &header, &legs, &items))?;
+        let left = solved.header.expect("a promise's header has an amount");
+        (header.out, header.arrive) = (left.out, left.arrive);
         self.push_occurrence_flow(header.clone(), making, group.base, detail, pools)?;
         for (leg, drawn) in legs.into_iter().zip(solved.legs.iter()) {
             self.push_leg(&cx, leg, *drawn, pools)?;
@@ -365,14 +365,14 @@ impl<'p, 'b, 's> Ledger<'p, 'b, 's> {
             let out = template.header.out.resolve(
                 &mut env,
                 Line::Header(FlowSide::Out),
-                &left,
+                Some(&left),
                 End::From,
                 header.out.unit,
             )?;
             let arrive = template.header.arrive.resolve(
                 &mut env,
                 Line::Header(FlowSide::Arrive),
-                &left,
+                Some(&left),
                 End::To,
                 header.arrive.unit,
             )?;
@@ -608,12 +608,14 @@ fn legs_at(cx: &Cx<'_>) -> Result<Vec<LegAt>, TemplateError> {
 fn items_at<'a>(cx: &Cx<'a>) -> Result<(Vec<Bear>, Vec<ItemAt<'a>>), TemplateError> {
     let (template, written, source_flows) = (cx.group.template, cx.group.written, cx.making.source_flows);
     let after_legs = 1 + template.legs.len() + written.map_or(0, |group| group.legs.len());
+    let header = &template.header.flow;
+    let side_unit = |side: FlowSide| header.amount_at(side.end()).unit;
     let mut bears = Vec::with_capacity(template.items.len() + written.map_or(0, |group| group.items.len()));
     let mut items = Vec::with_capacity(bears.capacity());
     for (index, item) in template.items.iter().enumerate() {
         let ordinal = ordinal(cx.group.base, after_legs + index, item.loc)?;
         let takes = item.sign == Sign::Carve || (item.sign == Sign::Less && item.flow.purpose.is_none());
-        bears.push(Bear { amount: item.amount, side: template.side, takes });
+        bears.push(Bear { amount: item.amount, side: template.side, unit: side_unit(template.side), takes });
         items.push(ItemAt { kind: ItemKind::Template(item), ordinal, loc: item.loc });
     }
     let written_items = written.into_iter().flat_map(|group| group.items.iter().map(move |item| (group.side, item)));
@@ -622,7 +624,7 @@ fn items_at<'a>(cx: &Cx<'a>) -> Result<(Vec<Bear>, Vec<ItemAt<'a>>), TemplateErr
         let ordinal = ordinal(cx.group.base, after_legs + template.items.len() + index, item.loc)?;
         let purposed = flow.is_some_and(|flow| flow.purpose.is_some());
         let takes = item.sign == Sign::Carve || (item.sign == Sign::Less && !purposed);
-        bears.push(Bear { amount: item.amount, side, takes });
+        bears.push(Bear { amount: item.amount, side, unit: side_unit(side), takes });
         items.push(ItemAt { kind: ItemKind::Written { flow }, ordinal, loc: item.loc });
     }
     Ok((bears, items))
@@ -677,14 +679,17 @@ impl<'a> Reads<'a, '_, '_, '_> {
 
     /// The flow the line is read against. An item's is the one it was written as, or else the header as the legs and
     /// the items before it left it.
-    fn flow(&self, at: Line, left: &Remaining) -> Cow<'a, Flow> {
+    fn flow(&self, at: Line, left: Option<&Remaining>) -> Cow<'a, Flow> {
         let (header, legs, items) = (self.header, self.legs, self.items);
         match at {
             Line::Header(_) => Cow::Borrowed(header),
             Line::Leg(index) => Cow::Borrowed(&legs[index].flow),
             Line::Item(index) => match items[index].kind {
                 ItemKind::Written { flow: Some(flow) } => Cow::Borrowed(flow),
-                _ => Cow::Owned(Flow { out: left.out, arrive: left.arrive, ..header.clone() }),
+                _ => Cow::Owned(left.map_or_else(
+                    || header.clone(),
+                    |left| Flow { out: left.out, arrive: left.arrive, ..header.clone() },
+                )),
             },
         }
     }
@@ -693,7 +698,7 @@ impl<'a> Reads<'a, '_, '_, '_> {
 impl Env for Reads<'_, '_, '_, '_> {
     type Failure = TemplateError;
 
-    fn amount(&mut self, at: Line, left: &Remaining, expr: Expr) -> Result<Answer, TemplateError> {
+    fn amount(&mut self, at: Line, left: Option<&Remaining>, expr: Expr) -> Result<Answer, TemplateError> {
         let (reading, ordinal, loc) = self.site(at);
         match expr {
             Expr::Literal(amount) => scale(amount, reading.scale)

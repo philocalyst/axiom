@@ -703,6 +703,10 @@ pub struct Program {
     pub roots: Box<[FlowExpressions]>,
     /// The split, or the header with items, that the flows are. A transaction has at most one.
     pub group: Option<Box<Made>>,
+    /// Whether the fold has the group left to solve: some amount of it is computed, or is `=`, `all` or `?`, and
+    /// the flows carry the zero they carry until it lands. A group with every amount written is solved by the
+    /// model, and its flows say what they come to.
+    pub open: bool,
 }
 
 impl Program {

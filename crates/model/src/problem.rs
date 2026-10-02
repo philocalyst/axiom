@@ -481,3 +481,55 @@ mod tests {
         assert_eq!(waiver.help[0].text, "use a code that appears on only one earlier transaction");
     }
 }
+
+/// What a split cannot do with its total.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Unbalanced {
+    /// The parts add to less than the total, and none of them is the remainder.
+    Short,
+    /// The parts take more than there is.
+    Over,
+}
+
+/// A split whose parts cannot add up to what it says it moves: `parts` are what takes from it, each where it is
+/// written and what it takes. A split that cannot conserve is an error in the book, not money that appears.
+pub(crate) fn split_imbalance(
+    how: Unbalanced,
+    what: &str,
+    header: (Loc, &str),
+    taken: &str,
+    parts: &[(Loc, String)],
+) -> Diagnostic {
+    let (loc, total) = header;
+    let (message, help) = match how {
+        Unbalanced::Short => (
+            format!("the {what} of this split come to {taken}, and its total is {total}"),
+            "write `...` on the leg that takes what remains, or add the missing leg",
+        ),
+        Unbalanced::Over => (
+            format!("the {what} of this split take {taken}, and its total is only {total}"),
+            "take less, or raise the total",
+        ),
+    };
+    let mut diagnostic =
+        Diagnostic::error("split-imbalance", message).label(loc, format!("the total is {total}")).help(help);
+    for (at, amount) in parts {
+        diagnostic = diagnostic.context(*at, format!("takes {amount}"));
+    }
+    diagnostic
+}
+
+/// A leg in another commodity than the total it takes from: nothing in the split balances it.
+pub(crate) fn split_unit(leg: Loc, found: &str, header: (Loc, &str)) -> Diagnostic {
+    let (loc, total) = header;
+    Diagnostic::error("split-imbalance", format!("this leg is in {found}, and the total it takes from is {total}"))
+        .label(leg, "a leg takes from the total in the total's commodity")
+        .context(loc, format!("the total is {total}"))
+        .help("write the leg in the commodity of the total, or leave the total out")
+}
+
+/// Amounts of a split too large to be added: no total can be said of them.
+pub(crate) fn split_overflow(loc: Loc) -> Diagnostic {
+    Diagnostic::error("split-imbalance", "the amounts of this split are too large to add up")
+        .label(loc, "this split's legs and items cannot be summed")
+}

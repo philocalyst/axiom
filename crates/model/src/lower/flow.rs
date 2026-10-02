@@ -9,6 +9,7 @@ use super::push_amount_root;
 use super::record::CodeIndex;
 use super::staged::Staged;
 use super::tail::Tail;
+use crate::balance::Settled;
 use crate::book::{Amount, Commodity, Place};
 use crate::declare::World;
 use crate::errors::{Reported, Word};
@@ -517,9 +518,11 @@ pub(super) fn keep_program(
     staged: &mut Staged<'_, '_>,
     nodes: Program,
     roots: Vec<FlowExpressions>,
-    group: Option<Made>,
+    group: Option<(Made, Settled)>,
 ) -> Option<Id<Program>> {
-    let program = Program { roots: roots.into_boxed_slice(), group: group.map(Box::new), ..nodes };
+    let open = matches!(group, Some((_, Settled::Open)));
+    let program =
+        Program { roots: roots.into_boxed_slice(), group: group.map(|(made, _)| Box::new(made)), open, ..nodes };
     let says = !program.nodes.is_empty() || !program.roots.is_empty() || program.group.is_some();
     says.then(|| staged.book.journal_programs.push(program))
 }
